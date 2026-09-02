@@ -129,23 +129,47 @@ public class SeedPlanter : InputOutputModule
             PlantDurationSeconds,
             plantElapsedSeconds + requestedOperationSeconds * OperationalAnimationSpeedRatio);
 
-        if (plantElapsedSeconds + ProgressEpsilon >= PlantDurationSeconds
-            && terrain.TryPlantSeedAt(targetCoordinate, seedDefinition))
+        if (plantElapsedSeconds + ProgressEpsilon >= PlantDurationSeconds)
         {
+            int seedItemId = currentSeedItemId;
+            Vector2Int inputCoordinate = currentInputCoordinate;
+            Vector3 consumeTargetWorldPosition = ResolveConsumeTargetWorldPosition();
             int consumed = ConsumeRuntimeInputAreaCenterObjects(
-                currentInputCoordinate,
-                currentSeedItemId,
+                inputCoordinate,
+                seedItemId,
                 1,
-                ResolveConsumeTargetWorldPosition(),
+                consumeTargetWorldPosition,
                 InputConsumeMoveInterval,
                 true);
+            plantElapsedSeconds = 0f;
+            isOperating = false;
+            requestingPower = false;
             if (consumed == 1)
             {
                 currentSeedCount = Mathf.Max(0, currentSeedCount - 1);
-                plantElapsedSeconds = 0f;
-                isOperating = false;
-                requestingPower = false;
+                if (!terrain.TryPlantSeedAt(targetCoordinate, seedDefinition))
+                {
+                    if (TryRestoreRuntimeInputAreaCenterObject(
+                            inputCoordinate,
+                            seedItemId,
+                            consumeTargetWorldPosition))
+                    {
+                        currentSeedCount++;
+                    }
+                    else
+                    {
+                        Debug.LogError($"{nameof(SeedPlanter)} failed to restore seed item {seedItemId} after planting failed.", this);
+                    }
+                }
+
                 SetOperatingState(OperatingState.TargetOccupied);
+            }
+            else
+            {
+                RefreshSeedInput();
+                SetOperatingState(currentSeedCount > 0
+                    ? OperatingState.Ready
+                    : OperatingState.NoSeeds);
             }
         }
 
@@ -156,9 +180,6 @@ public class SeedPlanter : InputOutputModule
     {
         PersistentState state = base.CapturePersistentState();
         state.seedPlanterPlantElapsedSeconds = Mathf.Clamp(plantElapsedSeconds, 0f, PlantDurationSeconds);
-        ItemDefinition installedDefinition = ResolveInstalledDefinition();
-        state.seedPlanterHadOperationalPower = !RequiresElectricOperationalEnergy(installedDefinition)
-                                               || HasOperationalEnergyAvailable(installedDefinition);
         return state;
     }
 

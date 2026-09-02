@@ -163,6 +163,10 @@ public sealed class AnimalDefinition : ScriptableObject
     [SerializeField, Range(MinStrength, MaxStrength)]
     [Tooltip("수레 견인 시 Mass 감속 효과를 줄이는 비율입니다. 음수이면 감속 효과가 증가합니다.")]
     private float strength = DefaultStrength;
+    [SerializeField]
+    [Tooltip("동물이 배변할 때 사용하는 기존 비료 아이템입니다.")]
+    private ItemDefinition defecationItem;
+    [SerializeField] private AnimalNeedsSettings needsSettings = new AnimalNeedsSettings();
     [SerializeField] private List<AnimalDropEntry> dropItems = new List<AnimalDropEntry>();
     [SerializeField] private GameObject animalPrefab;
     [SerializeField] private Sprite adultIcon;
@@ -179,6 +183,9 @@ public sealed class AnimalDefinition : ScriptableObject
     public bool CanBeRidden => canRiding;
     public float RiderHeight => Mathf.Max(0f, riderHeight);
     public float Strength => Mathf.Clamp(strength, MinStrength, MaxStrength);
+    public ItemDefinition DefecationItem => defecationItem;
+    public AnimalNeedsSettings NeedsSettings =>
+        needsSettings ??= new AnimalNeedsSettings();
     public IReadOnlyList<AnimalDropEntry> DropItems =>
         dropItems ??= new List<AnimalDropEntry>();
     public GameObject AnimalPrefab => animalPrefab;
@@ -278,6 +285,8 @@ public sealed class AnimalDefinition : ScriptableObject
         maxHealth = Mathf.Max(1f, maxHealth);
         riderHeight = Mathf.Max(0f, riderHeight);
         strength = Mathf.Clamp(strength, MinStrength, MaxStrength);
+        needsSettings ??= new AnimalNeedsSettings();
+        needsSettings.Normalize();
         dropItems ??= new List<AnimalDropEntry>();
         for (int i = 0; i < dropItems.Count; i++)
         {

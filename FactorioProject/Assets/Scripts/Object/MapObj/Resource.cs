@@ -56,10 +56,6 @@ public class Resource : MapObject
         public float growthWaterLiters;
         public float growthFertilizerAmount;
         public float growthElapsedSeconds;
-        [NonSerialized]
-        public bool hasBackgroundGrowthTimestamp;
-        [NonSerialized]
-        public double backgroundGrowthDaylightSeconds;
     }
 
     private static readonly List<Resource> ActiveResourcesInternal = new List<Resource>();
@@ -2028,6 +2024,7 @@ public class ResourceBatchRenderer : MonoBehaviour
     private readonly List<BatchKey> activeBatchKeys = new List<BatchKey>();
     private readonly List<Resource> cleanupBuffer = new List<Resource>();
     private bool batchesDirty = true;
+    private TerrainGenerator terrainGenerator;
 
     public void Register(Resource resource)
     {
@@ -2122,6 +2119,13 @@ public class ResourceBatchRenderer : MonoBehaviour
                         out ShadowCastingMode shadowCastingMode,
                         out bool receiveShadows,
                         out bool useGlobalBatch))
+                {
+                    continue;
+                }
+
+                terrainGenerator ??= GetComponent<TerrainGenerator>();
+                if (terrainGenerator != null
+                    && !terrainGenerator.IsWorldPositionWithinPlayerRenderRange(worldPosition))
                 {
                     continue;
                 }

@@ -113,7 +113,7 @@ SpriteAtlas:
   - WoodBox_Circle
   - JoyStick_BG
   - WoodBox_Circle_Dark
-  - CanaNot
+  - CanNot
   - WoodBox_Fill
   - Rotation
   - GrowthSliderHandle

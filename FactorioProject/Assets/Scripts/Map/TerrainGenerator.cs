@@ -17,14 +17,6 @@ public partial class TerrainGenerator : MonoBehaviour
     private const float IslandCoastNoiseScale = 0.024f;
     private const float IslandCoastDetailNoiseScale = 0.067f;
     private const float IslandCoastIrregularity = 0.09f;
-    private const float BackgroundConveyorSimulationInterval = 0.05f;
-    private const float BackgroundConveyorBudgetContinuationInterval = 0.02f;
-    private const int BackgroundConveyorSimulationPassesPerTick = 1;
-    private const float BackgroundInstallationSimulationInterval = 0.05f;
-    private const int BackgroundInstallationSimulationMaxPerTick = 64;
-    private const int BackgroundInstallationSimulationIterationsPerTick = 32;
-    private const float SavedWorldSimulationInterval = 1f;
-    private const int SavedWorldSimulationIterationsPerTick = 64;
     private const float GeneratedSurfaceBaseInset = 0.0035f;
     private const float GeneratedSurfaceBiomeLayerStep = 0.004f;
     public const float GeneratedOilSurfaceLocalY = -0.15f;
@@ -41,31 +33,19 @@ public partial class TerrainGenerator : MonoBehaviour
 
     private static readonly ProfilerMarker TickConveyorDataMotionsMarker = new ProfilerMarker("TerrainGenerator.TickConveyorDataMotions");
     private static readonly ProfilerMarker TickConveyorsMarker = new ProfilerMarker("TerrainGenerator.TickConveyors");
-    private static readonly ProfilerMarker TickBackgroundConveyorsMarker = new ProfilerMarker("TerrainGenerator.TickBackgroundConveyors");
     private static readonly ProfilerMarker TickConveyorDotsMarker = new ProfilerMarker("TerrainGenerator.TickConveyorDots");
     private static readonly ProfilerMarker RefreshChunksMarker = new ProfilerMarker("TerrainGenerator.RefreshTrackedChunks");
     private static readonly ProfilerMarker RefreshChunkLoadScanMarker = new ProfilerMarker("TerrainGenerator.RefreshChunkLoadScan");
     private static readonly ProfilerMarker RefreshChunkLoadSortMarker = new ProfilerMarker("TerrainGenerator.RefreshChunkLoadSort");
     private static readonly ProfilerMarker RefreshChunkGenerationQueueMarker = new ProfilerMarker("TerrainGenerator.RefreshChunkGenerationQueue");
-    private static readonly ProfilerMarker RefreshChunkUnloadScanMarker = new ProfilerMarker("TerrainGenerator.RefreshChunkUnloadScan");
-    private static readonly ProfilerMarker FloorObjectVirtualizationMarker = new ProfilerMarker("TerrainGenerator.FloorObjectVirtualization");
-    private static readonly ProfilerMarker FloorObjectVirtualizationScanMarker = new ProfilerMarker("TerrainGenerator.FloorObjectVirtualization.Scan");
-    private static readonly ProfilerMarker ConveyorItemResidencyScanMarker = new ProfilerMarker("TerrainGenerator.ConveyorItemResidency.Scan");
+    private static readonly ProfilerMarker SaveChunkStatesMarker = new ProfilerMarker("TerrainGenerator.SaveChunkStates");
+    private static readonly ProfilerMarker RemoveChunkLookupMarker = new ProfilerMarker("TerrainGenerator.RemoveChunkLookup");
+    private static readonly ProfilerMarker ReleaseChunkBlocksMarker = new ProfilerMarker("TerrainGenerator.ReleaseChunkBlocks");
+    private static readonly ProfilerMarker CleanupInstallationsMarker = new ProfilerMarker("TerrainGenerator.CleanupInstallations");
     private static readonly ProfilerMarker GenerateChunkCoroutineStepMarker = new ProfilerMarker("TerrainGenerator.GenerateChunkCoroutineStep");
-    private static readonly ProfilerMarker UnloadChunkCoroutineStepMarker = new ProfilerMarker("TerrainGenerator.UnloadChunkCoroutineStep");
     private static readonly ProfilerMarker RestoreSavedInstallationMarker = new ProfilerMarker("TerrainGenerator.RestoreSavedInstallation");
-    private static readonly ProfilerMarker SimulateSavedInstallationMarker = new ProfilerMarker("TerrainGenerator.SimulateSavedInstallation");
     private static readonly ProfilerMarker InstantiateSavedInstallationMarker = new ProfilerMarker("TerrainGenerator.InstantiateSavedInstallation");
     private static readonly ProfilerMarker BindLoadedInstallationBlocksMarker = new ProfilerMarker("TerrainGenerator.BindLoadedInstallationBlocks");
-    private static readonly ProfilerMarker UnloadChunkCollectBlocksMarker = new ProfilerMarker("TerrainGenerator.UnloadChunk.CollectBlocks");
-    private static readonly ProfilerMarker UnloadChunkSaveStatesMarker = new ProfilerMarker("TerrainGenerator.UnloadChunk.SaveStates");
-    private static readonly ProfilerMarker UnloadChunkCollectAnchorsMarker = new ProfilerMarker("TerrainGenerator.UnloadChunk.CollectAnchors");
-    private static readonly ProfilerMarker UnloadChunkRemoveLookupMarker = new ProfilerMarker("TerrainGenerator.UnloadChunk.RemoveLookup");
-    private static readonly ProfilerMarker UnloadChunkReleaseBlocksMarker = new ProfilerMarker("TerrainGenerator.UnloadChunk.ReleaseBlocks");
-    private static readonly ProfilerMarker UnloadChunkCleanupInstallationsMarker = new ProfilerMarker("TerrainGenerator.UnloadChunk.CleanupInstallations");
-    private static readonly ProfilerMarker UnloadChunkSleepBlocksMarker = new ProfilerMarker("TerrainGenerator.UnloadChunk.SleepBlocks");
-    private static readonly ProfilerMarker UnloadChunkSleepInstallationsMarker = new ProfilerMarker("TerrainGenerator.UnloadChunk.SleepInstallations");
-    private static readonly ProfilerMarker WakeChunkViewMarker = new ProfilerMarker("TerrainGenerator.WakeChunkView");
     private static readonly ProfilerMarker ApplyChunkSurfaceMarker = new ProfilerMarker("TerrainGenerator.ApplyChunkBiomeSurface");
 
     public static TerrainGenerator Active { get; private set; }
@@ -356,8 +336,9 @@ public partial class TerrainGenerator : MonoBehaviour
     [SerializeField, Min(0)]
     private int loadRadius = 2;
 
-    [SerializeField, Min(1)]
-    private int unloadRadius = 3;
+    [Header("Runtime Rendering")]
+    [SerializeField, Min(0), Tooltip("플레이어를 중심으로 전체 렌더링을 유지할 블록 반경입니다. 범위 밖 오브젝트는 계속 동작하지만 렌더링만 꺼집니다.")]
+    private int playerRenderRadius = 64;
 
     [Header("Editor Preview")]
     [SerializeField]
@@ -373,40 +354,7 @@ public partial class TerrainGenerator : MonoBehaviour
     [SerializeField, Min(1)]
     private int chunkInstallationRestoresPerFrame = 1;
 
-    [SerializeField, Min(1)]
-    private int chunkRestoreBackgroundSimulationIterations = 4;
-
-    [SerializeField, Min(1)]
-    private int chunkUnloadsPerFrame = 1;
-
-    [Header("Object Virtualization")]
-    [SerializeField]
-    private bool virtualizeDistantFloorObjects = true;
-
-    [SerializeField, Min(0)]
-    private int floorObjectLiveRadius = 10;
-
-    [SerializeField, Min(0.02f)]
-    private float floorObjectVirtualizationInterval = 0.2f;
-
-    [SerializeField, Min(1)]
-    private int floorObjectVirtualizationConversionsPerTick = 256;
-
-    [SerializeField]
-    private bool virtualizeConveyorItems = true;
-
-    [SerializeField, Min(1)]
-    private int conveyorItemLiveAreaSize = 30;
-
-    [SerializeField, Min(0.02f)]
-    private float conveyorItemResidencyScanInterval = 0.2f;
-
-    [SerializeField, Min(1)]
-    private int conveyorItemResidencyScanBudget = 512;
-
-    [SerializeField]
-    private bool virtualizeConveyorBelts = true;
-
+    [Header("Conveyor Runtime")]
     [SerializeField, Min(16)]
     private int conveyorWakeQueueProcessLimit = 4096;
 
@@ -707,8 +655,10 @@ public partial class TerrainGenerator : MonoBehaviour
 
     private readonly Dictionary<Vector2Int, Transform> loadedChunks = new Dictionary<Vector2Int, Transform>();
     private readonly Dictionary<Vector2Int, Block> loadedBlocks = new Dictionary<Vector2Int, Block>();
-    private readonly Dictionary<Vector2Int, Transform> sleepingChunkViews = new Dictionary<Vector2Int, Transform>();
-    private readonly Dictionary<Vector2Int, InstallationObject> sleepingInstallationViews = new Dictionary<Vector2Int, InstallationObject>();
+    private readonly Dictionary<Renderer, bool> renderersHiddenByPlayerRange = new Dictionary<Renderer, bool>();
+    private readonly List<Renderer> terrainRendererScratch = new List<Renderer>(256);
+    private readonly HashSet<Renderer> terrainRendererScanSet = new HashSet<Renderer>();
+    private readonly List<Renderer> terrainRendererCleanupScratch = new List<Renderer>();
     private readonly List<Vector2Int> chunksToGenerateScratch = new List<Vector2Int>();
     private readonly ChunkDistanceComparer chunkDistanceComparer = new ChunkDistanceComparer();
     private readonly HashSet<Block> activeConveyors = new HashSet<Block>();
@@ -771,11 +721,9 @@ public partial class TerrainGenerator : MonoBehaviour
     private int lastConveyorItemLoadFallbackBlocks;
     private int lastConveyorItemLoadActualFailedBlocks;
     private int lastConveyorItemLoadActualFailedLanes;
-    private int conveyorUnloadSaveConveyorBlocks;
-    private int conveyorUnloadSaveConveyorItems;
-    private int conveyorUnloadSaveSkippedVirtualizedBlocks;
-    private int conveyorUnloadSaveSkippedVirtualizedItems;
-    private int conveyorUnloadSaveClearedNonConveyorBlocks;
+    private int conveyorStateSaveConveyorBlocks;
+    private int conveyorStateSaveConveyorItems;
+    private int conveyorStateSaveClearedNonConveyorBlocks;
     private readonly Dictionary<Block, int> conveyorNetworkIds = new Dictionary<Block, int>();
     private readonly Dictionary<int, List<Block>> conveyorNetworkBlocksById = new Dictionary<int, List<Block>>();
     private readonly Dictionary<int, float> conveyorNetworkRetryTimes = new Dictionary<int, float>();
@@ -821,19 +769,7 @@ public partial class TerrainGenerator : MonoBehaviour
     private readonly HashSet<Block> deferredConveyorNetworkWakeBlocks = new HashSet<Block>();
     private readonly HashSet<Block> deferredConveyorMoveAttemptWakeAroundBlocks = new HashSet<Block>();
     private readonly HashSet<Block> deferredConveyorMoveAttemptWakeFlowBlocks = new HashSet<Block>();
-    private readonly HashSet<Vector2Int> virtualizedFloorObjectCoordinates = new HashSet<Vector2Int>();
-    private readonly Queue<Vector2Int> floorObjectVirtualizationWorkQueue = new Queue<Vector2Int>();
-    private readonly HashSet<Vector2Int> floorObjectVirtualizationQueuedCoordinates = new HashSet<Vector2Int>();
-    private readonly HashSet<Vector2Int> virtualizedConveyorItemCoordinates = new HashSet<Vector2Int>();
-    private readonly Queue<Vector2Int> conveyorItemResidencyWorkQueue = new Queue<Vector2Int>();
-    private readonly HashSet<Vector2Int> conveyorItemResidencyQueuedCoordinates = new HashSet<Vector2Int>();
-    private readonly List<ConveyorItemLaneSaveState> conveyorItemResidencyLaneScratch = new List<ConveyorItemLaneSaveState>();
-    private readonly List<int> conveyorItemResidencyAppliedLaneScratch = new List<int>();
-    private readonly List<int> conveyorItemResidencyOwnershipLaneScratch = new List<int>();
-    private readonly List<int> conveyorItemResidencyStaleLaneScratch = new List<int>();
-    private readonly List<Vector2Int> backgroundConveyorDirtyCoordinates = new List<Vector2Int>();
-    private readonly List<Vector2Int> backgroundConveyorOccupancyChangedCoordinates = new List<Vector2Int>();
-    private readonly HashSet<Vector2Int> backgroundConveyorWakeCoordinates = new HashSet<Vector2Int>();
+    private readonly List<ConveyorItemLaneSaveState> conveyorItemCountLaneScratch = new List<ConveyorItemLaneSaveState>();
     private readonly Dictionary<Vector2Int, TerrainBiome> tileBiomeCache = new Dictionary<Vector2Int, TerrainBiome>();
     private readonly Dictionary<Vector2Int, bool> rawWaterCache = new Dictionary<Vector2Int, bool>();
     private readonly Dictionary<Vector2Int, bool> directWaterBlockCache = new Dictionary<Vector2Int, bool>();
@@ -843,7 +779,6 @@ public partial class TerrainGenerator : MonoBehaviour
     private bool hasGeneratedChunks;
     private bool hasSeedInitialized;
     private int terrainGenerationVersion;
-    private bool isMaterializingVirtualFloorObjects;
     private bool activeConveyorOrderDirty = true;
     private bool conveyorNetworkCacheDirty = true;
     private bool conveyorLineCacheDirty = true;
@@ -886,67 +821,18 @@ public partial class TerrainGenerator : MonoBehaviour
     private float nextConveyorLineRetryTime = float.PositiveInfinity;
     private float nextConveyorActiveFullScanTime;
     private int activeConveyorSafetyScanIndex;
-    private float nextBackgroundConveyorSimulationTime;
-    private float nextBackgroundInstallationSimulationTime = float.PositiveInfinity;
-    private float nextSavedWorldSimulationTime;
-    private readonly Queue<Vector2Int> backgroundInstallationSimulationQueue = new Queue<Vector2Int>(64);
-    private readonly HashSet<Vector2Int> queuedBackgroundInstallationAnchors = new HashSet<Vector2Int>();
-    private readonly List<Vector2Int> backgroundInstallationWakeScratch = new List<Vector2Int>(16);
     private Vector2Int currentCenterChunk;
-    private float nextFloorObjectVirtualizationTime;
-    private Vector2Int floorObjectVirtualizationLiveCenterCoordinate;
-    private int floorObjectVirtualizationLiveRadius = -1;
-    private bool floorObjectVirtualizationLiveAreaInitialized;
-    private float nextConveyorItemResidencyScanTime;
-    private Vector2Int conveyorItemLiveMinCoordinate;
-    private Vector2Int conveyorItemLiveMaxExclusiveCoordinate;
-    private bool conveyorItemLiveAreaInitialized;
-    private bool isMaterializingConveyorItemsForLiveArea;
-    private int lastConveyorItemResidencyProcessed;
-    private int lastConveyorItemResidencyLiveCandidates;
-    private int lastConveyorItemResidencyBackgroundCandidates;
-    private int lastConveyorItemResidencySkippedNotLoaded;
-    private int lastConveyorItemResidencySkippedNotConveyor;
-    private int lastConveyorItemResidencySkippedEmpty;
-    private int lastConveyorItemResidencyVirtualized;
-    private int lastConveyorItemResidencyVirtualizedItems;
-    private int lastConveyorItemResidencyVirtualizeFailed;
-    private int lastConveyorItemResidencyMaterialized;
-    private int lastConveyorItemResidencyMaterializedItems;
-    private int lastConveyorItemResidencyMaterializeFailed;
-    private int lastConveyorItemMaterializeTraceSamples;
-    private int lastConveyorItemMaterializeTraceLanes;
-    private int lastConveyorItemMaterializeTraceMotionLanes;
-    private int lastConveyorItemMaterializeTraceMissingRuntimeLanes;
-    private int lastConveyorItemMaterializeTraceMotionLost;
-    private int lastConveyorItemMaterializeTraceMotionModeMismatches;
-    private int lastConveyorItemMaterializeTraceLaneMismatches;
-    private int lastConveyorItemMaterializeTraceProgressMismatches;
-    private int lastConveyorItemMaterializeTraceVisualMismatches;
-    private float lastConveyorItemMaterializeTraceMaxProgressDelta;
-    private float lastConveyorItemMaterializeTraceMaxVisualDistance;
-    private string lastConveyorItemMaterializeTraceLastSample = string.Empty;
-    private int lastConveyorItemMaterializeCarryLanes;
-    private int lastConveyorItemMaterializeCarryAdvanced;
-    private int lastConveyorItemMaterializeCarryFailed;
-    private float lastConveyorItemMaterializeCarryDistance;
-    private float lastConveyorItemMaterializeCarryMaxDistance;
-    private int lastConveyorItemMaterializeOwnershipRemovedLanes;
-    private int lastConveyorItemMaterializeOwnershipRollbackLanes;
-    private int lastConveyorItemMaterializeOwnershipFailures;
-    private int lastConveyorItemMaterializeOwnershipStaleSavedLanes;
-    private int lastConveyorItemMaterializeImmediateWakeCalls;
-    private int lastConveyorItemMaterializeImmediateWakeBlocks;
+    private Vector2Int currentPlayerRenderCenter;
+    private bool hasPlayerRenderCenter;
+    private int appliedPlayerRenderRadius = -1;
     private BlockStateStore resourceStateStore;
     private InstallationPlacementController installationRestoreController;
-    private InstallationBackgroundSimulator installationBackgroundSimulator;
     private BlockPool blockPool;
     private InstallationObjectPool installationObjectPool;
     private PortableItemRenderer portableItemRenderer;
+    private ResourceBatchRenderer resourceBatchRenderer;
     private VirtualConveyorBeltRenderer virtualConveyorBeltRenderer;
     private TerrainChunkStreamingScheduler chunkStreamingScheduler;
-    private Transform sleepingChunkViewRoot;
-    private Transform sleepingInstallationViewRoot;
 
     private readonly List<ResourceEntry> starterTreeCacheEntries = new List<ResourceEntry>();
     private readonly List<Vector2Int> starterTreeCacheCandidates = new List<Vector2Int>();
@@ -961,6 +847,7 @@ public partial class TerrainGenerator : MonoBehaviour
     private void OnValidate()
     {
         NormalizeTerrainBoundsSettings();
+        playerRenderRadius = Mathf.Max(0, playerRenderRadius);
         starterOreMaxResourceCount = Mathf.Max(starterOreMinResourceCount, starterOreMaxResourceCount);
         normalOreMaxResourceCount = Mathf.Max(normalOreMinResourceCount, normalOreMaxResourceCount);
         starterTreeMaxCount = Mathf.Max(starterTreeMinCount, starterTreeMaxCount);
@@ -1054,50 +941,11 @@ public partial class TerrainGenerator : MonoBehaviour
             return;
         }
 
+        RefreshTrackedRenderVisibilityIfNeeded();
+
         bool profileBeltTicks = RefreshBeltTickProfilerFrameState();
 
-        if (ShouldTickConveyorItemResidencyScan())
-        {
-            using (ConveyorItemResidencyScanMarker.Auto())
-            {
-                TickConveyorItemResidencyScan();
-            }
-        }
-
-        if (ShouldTickBackgroundConveyors())
-        {
-            using (TickBackgroundConveyorsMarker.Auto())
-            {
-                long startTimestamp = profileBeltTicks ? MapObjectTickProfiler.BeginSample() : 0L;
-                TickBackgroundConveyors();
-                if (profileBeltTicks)
-                {
-                    MapObjectTickProfiler.EndNamedSample(
-                        "Belt",
-                        "BackgroundConveyor",
-                        "Background Belt Tick",
-                        startTimestamp);
-                }
-            }
-        }
-
-        if (ShouldTickBackgroundInstallations())
-        {
-            using (SimulateSavedInstallationMarker.Auto())
-            {
-                TickBackgroundInstallations();
-            }
-        }
-
         TickFarmlandFertilizerAbsorption();
-
-        if (Time.time >= nextSavedWorldSimulationTime)
-        {
-            using (SimulateSavedInstallationMarker.Auto())
-            {
-                TickSavedWorldSimulation();
-            }
-        }
 
         profileBeltTicks = RefreshBeltTickProfilerFrameState();
 
@@ -1166,13 +1014,6 @@ public partial class TerrainGenerator : MonoBehaviour
             }
         }
 
-        if (ShouldTickFloorObjectVirtualization())
-        {
-            using (FloorObjectVirtualizationMarker.Auto())
-            {
-                TickFloorObjectVirtualization();
-            }
-        }
     }
 
     private bool RefreshBeltTickProfilerFrameState()
@@ -1210,17 +1051,6 @@ public partial class TerrainGenerator : MonoBehaviour
                    || conveyorNetworkSleepCheckQueuedIds.Count > 0);
     }
 
-    private bool ShouldTickBackgroundConveyors()
-    {
-        return Time.time >= nextBackgroundConveyorSimulationTime;
-    }
-
-    private bool ShouldTickBackgroundInstallations()
-    {
-        return backgroundInstallationSimulationQueue.Count > 0
-               && Time.time >= nextBackgroundInstallationSimulationTime;
-    }
-
     private bool ShouldTickConveyorVisualRuntime()
     {
         return !conveyorSlotDotVisibilityInitialized
@@ -1242,259 +1072,190 @@ public partial class TerrainGenerator : MonoBehaviour
         return GetCenterChunkCoordinate() != currentCenterChunk;
     }
 
-    private bool ShouldTickFloorObjectVirtualization()
-    {
-        return virtualizeDistantFloorObjects
-               && loadedBlocks.Count > 0
-               && Time.time >= nextFloorObjectVirtualizationTime;
-    }
+    public int PlayerRenderRadius => Mathf.Max(0, playerRenderRadius);
 
-    private bool ShouldTickConveyorItemResidencyScan()
-    {
-        return virtualizeConveyorItems
-               && loadedBlocks.Count > 0
-               && Time.time >= nextConveyorItemResidencyScanTime;
-    }
-
-    private void TickBackgroundConveyors()
-    {
-        if (Time.time < nextBackgroundConveyorSimulationTime)
-        {
-            return;
-        }
-
-        EnsureResourceStateStore();
-        if (resourceStateStore == null)
-        {
-            nextBackgroundConveyorSimulationTime = Time.time + BackgroundConveyorSimulationInterval;
-            return;
-        }
-
-        backgroundConveyorDirtyCoordinates.Clear();
-        backgroundConveyorOccupancyChangedCoordinates.Clear();
-        bool profileBackgroundConveyor = MapObjectTickProfiler.IsEnabled;
-        long phaseStartTimestamp = profileBackgroundConveyor ? MapObjectTickProfiler.BeginSample() : 0L;
-        resourceStateStore.SimulateSavedConveyorItems(
-            BackgroundConveyorSimulationPassesPerTick,
-            backgroundConveyorDirtyCoordinates,
-            occupancyChangedCoordinates: backgroundConveyorOccupancyChangedCoordinates);
-        EndBackgroundConveyorProfilePhase(profileBackgroundConveyor, "Background Belt Simulate", phaseStartTimestamp);
-
-        phaseStartTimestamp = profileBackgroundConveyor ? MapObjectTickProfiler.BeginSample() : 0L;
-        QueueSavedInstallationsNearBackgroundConveyorChanges();
-        EndBackgroundConveyorProfilePhase(profileBackgroundConveyor, "Background Belt Wake Installations", phaseStartTimestamp);
-
-        phaseStartTimestamp = profileBackgroundConveyor ? MapObjectTickProfiler.BeginSample() : 0L;
-        RefreshConveyorItemResidencyAfterBackgroundConveyorChanges();
-        EndBackgroundConveyorProfilePhase(profileBackgroundConveyor, "Background Belt Refresh Residency", phaseStartTimestamp);
-
-        phaseStartTimestamp = profileBackgroundConveyor ? MapObjectTickProfiler.BeginSample() : 0L;
-        WakeLoadedConveyorsNearBackgroundConveyorChanges();
-        EndBackgroundConveyorProfilePhase(profileBackgroundConveyor, "Background Belt Wake Loaded", phaseStartTimestamp);
-        if (resourceStateStore.LastBackgroundConveyorBudgetHit > 0)
-        {
-            nextBackgroundConveyorSimulationTime = Time.time + BackgroundConveyorBudgetContinuationInterval;
-            return;
-        }
-
-        ScheduleNextBackgroundConveyorSimulation();
-    }
-
-    private static void EndBackgroundConveyorProfilePhase(
-        bool profile,
-        string itemName,
-        long startTimestamp)
-    {
-        if (!profile)
-        {
-            return;
-        }
-
-        MapObjectTickProfiler.EndNamedSample(
-            "Runtime",
-            "BackgroundConveyor",
-            itemName,
-            startTimestamp);
-    }
-
-    private void TickBackgroundInstallations()
-    {
-        if (backgroundInstallationSimulationQueue.Count <= 0)
-        {
-            nextBackgroundInstallationSimulationTime = float.PositiveInfinity;
-            return;
-        }
-
-        InstallationBackgroundSimulator backgroundSimulator = ResolveInstallationBackgroundSimulator();
-        int processed = 0;
-        while (backgroundInstallationSimulationQueue.Count > 0
-               && processed < BackgroundInstallationSimulationMaxPerTick)
-        {
-            Vector2Int anchorCoordinate = backgroundInstallationSimulationQueue.Dequeue();
-            queuedBackgroundInstallationAnchors.Remove(anchorCoordinate);
-            backgroundSimulator.SimulateSavedInstallation(
-                anchorCoordinate,
-                BackgroundInstallationSimulationIterationsPerTick);
-            processed++;
-        }
-
-        nextBackgroundInstallationSimulationTime = backgroundInstallationSimulationQueue.Count > 0
-            ? Time.time + BackgroundInstallationSimulationInterval
-            : float.PositiveInfinity;
-    }
-
-    private void TickSavedWorldSimulation()
-    {
-        nextSavedWorldSimulationTime = Time.time + SavedWorldSimulationInterval;
-        ResolveInstallationBackgroundSimulator().SimulateSavedWorld(
-            SavedWorldSimulationIterationsPerTick);
-    }
-
-    private void QueueSavedInstallationsNearBackgroundConveyorChanges()
-    {
-        QueueSavedInstallationsNearCoordinates(backgroundConveyorOccupancyChangedCoordinates);
-        QueueSavedInstallationsNearCoordinates(backgroundConveyorDirtyCoordinates);
-    }
-
-    private void QueueSavedInstallationsNearCoordinates(IReadOnlyList<Vector2Int> coordinates)
-    {
-        if (coordinates == null || coordinates.Count <= 0)
-        {
-            return;
-        }
-
-        for (int i = 0; i < coordinates.Count; i++)
-        {
-            WakeSavedInstallationsNearCoordinate(coordinates[i]);
-        }
-    }
-
-    public void WakeSavedInstallationsNearCoordinate(Vector2Int coordinate)
+    public bool IsWorldPositionWithinPlayerRenderRange(Vector3 worldPosition)
     {
         if (!Application.isPlaying)
         {
-            return;
+            return true;
         }
 
-        EnsureResourceStateStore();
-        if (resourceStateStore == null)
+        EnsurePlayerRenderCenter();
+        int radius = PlayerRenderRadius;
+        return Mathf.Abs(Mathf.RoundToInt(worldPosition.x) - currentPlayerRenderCenter.x) <= radius
+               && Mathf.Abs(Mathf.RoundToInt(worldPosition.z) - currentPlayerRenderCenter.y) <= radius;
+    }
+
+    private void RefreshTrackedRenderVisibilityIfNeeded()
+    {
+        Vector2Int renderCenter = GetTrackingBlockCoordinate();
+        int renderRadius = PlayerRenderRadius;
+        if (hasPlayerRenderCenter
+            && renderCenter == currentPlayerRenderCenter
+            && appliedPlayerRenderRadius == renderRadius)
         {
             return;
         }
 
-        backgroundInstallationWakeScratch.Clear();
-        resourceStateStore.CollectBackgroundInstallationAnchorsNearCoordinate(
-            coordinate,
-            backgroundInstallationWakeScratch);
+        currentPlayerRenderCenter = renderCenter;
+        hasPlayerRenderCenter = true;
+        appliedPlayerRenderRadius = renderRadius;
+        RefreshAllTerrainRendererVisibility();
+        portableItemRenderer?.MarkDirty();
+        resourceBatchRenderer ??= GetComponent<ResourceBatchRenderer>();
+        resourceBatchRenderer?.MarkDirty();
+    }
 
-        for (int i = 0; i < backgroundInstallationWakeScratch.Count; i++)
+    private void EnsurePlayerRenderCenter()
+    {
+        if (hasPlayerRenderCenter)
         {
-            Vector2Int anchorCoordinate = backgroundInstallationWakeScratch[i];
-            if (!queuedBackgroundInstallationAnchors.Add(anchorCoordinate))
+            return;
+        }
+
+        currentPlayerRenderCenter = GetTrackingBlockCoordinate();
+        hasPlayerRenderCenter = true;
+    }
+
+    private Vector2Int GetTrackingBlockCoordinate()
+    {
+        ResolveTrackingTarget();
+        Vector3 sourcePosition = trackingTarget != null ? trackingTarget.position : transform.position;
+        return new Vector2Int(Mathf.RoundToInt(sourcePosition.x), Mathf.RoundToInt(sourcePosition.z));
+    }
+
+    private void RefreshAllTerrainRendererVisibility()
+    {
+        EnsurePlayerRenderCenter();
+        terrainRendererScratch.Clear();
+        terrainRendererScanSet.Clear();
+        transform.GetComponentsInChildren(true, terrainRendererScratch);
+
+        for (int i = 0; i < terrainRendererScratch.Count; i++)
+        {
+            Renderer targetRenderer = terrainRendererScratch[i];
+            if (targetRenderer == null || !targetRenderer.gameObject.activeInHierarchy)
             {
                 continue;
             }
 
-            backgroundInstallationSimulationQueue.Enqueue(anchorCoordinate);
+            terrainRendererScanSet.Add(targetRenderer);
+            ApplyPlayerRangeVisibility(targetRenderer);
         }
 
-        backgroundInstallationWakeScratch.Clear();
-        if (backgroundInstallationSimulationQueue.Count > 0)
+        terrainRendererCleanupScratch.Clear();
+        foreach (KeyValuePair<Renderer, bool> pair in renderersHiddenByPlayerRange)
         {
-            nextBackgroundInstallationSimulationTime = Mathf.Min(
-                nextBackgroundInstallationSimulationTime,
-                Time.time);
-        }
-    }
-
-    private void ScheduleNextBackgroundConveyorSimulation()
-    {
-        if (resourceStateStore == null)
-        {
-            nextBackgroundConveyorSimulationTime = Time.time + BackgroundConveyorSimulationInterval;
-            return;
-        }
-
-        float secondsUntilNextSimulation = resourceStateStore.GetSecondsUntilNextSavedConveyorSimulation();
-        if (float.IsPositiveInfinity(secondsUntilNextSimulation))
-        {
-            nextBackgroundConveyorSimulationTime = float.PositiveInfinity;
-            return;
-        }
-
-        nextBackgroundConveyorSimulationTime = Time.time + Mathf.Max(0f, secondsUntilNextSimulation);
-    }
-
-    public void WakeBackgroundConveyorSimulation()
-    {
-        if (!Application.isPlaying)
-        {
-            return;
-        }
-
-        nextBackgroundConveyorSimulationTime = Mathf.Min(nextBackgroundConveyorSimulationTime, Time.time);
-    }
-
-    private void WakeLoadedConveyorsNearBackgroundConveyorChanges()
-    {
-        if (backgroundConveyorDirtyCoordinates.Count <= 0
-            && backgroundConveyorOccupancyChangedCoordinates.Count <= 0)
-        {
-            return;
-        }
-
-        backgroundConveyorWakeCoordinates.Clear();
-        for (int i = 0; i < backgroundConveyorOccupancyChangedCoordinates.Count; i++)
-        {
-            WakeConveyorBlockedLaneWaitersForPotentialVacatedCoordinate(backgroundConveyorOccupancyChangedCoordinates[i]);
-        }
-
-        QueueBackgroundConveyorWakeCoordinates(backgroundConveyorOccupancyChangedCoordinates);
-        QueueBackgroundConveyorWakeCoordinates(backgroundConveyorDirtyCoordinates);
-
-        foreach (Vector2Int coordinate in backgroundConveyorWakeCoordinates)
-        {
-            if (!TryGetLoadedBlock(coordinate, out Block block)
-                || block == null
-                || !block.IsRuntimeConveyor
-                || ShouldRouteLoadedConveyorDestinationToBackground(coordinate, block))
+            Renderer targetRenderer = pair.Key;
+            if (targetRenderer != null && terrainRendererScanSet.Contains(targetRenderer))
             {
                 continue;
             }
 
-            block.WakeConveyorMoveAttemptsAlongRuntimeFlow();
-            block.RefreshConveyorActivityRegistration();
+            if (targetRenderer != null)
+            {
+                targetRenderer.forceRenderingOff = pair.Value;
+            }
+
+            terrainRendererCleanupScratch.Add(targetRenderer);
         }
 
-        backgroundConveyorWakeCoordinates.Clear();
+        for (int i = 0; i < terrainRendererCleanupScratch.Count; i++)
+        {
+            renderersHiddenByPlayerRange.Remove(terrainRendererCleanupScratch[i]);
+        }
     }
 
-    private void QueueBackgroundConveyorWakeCoordinates(IReadOnlyList<Vector2Int> coordinates)
+    private void RefreshTerrainRendererVisibility(Transform hierarchyRoot)
     {
-        if (coordinates == null || coordinates.Count <= 0)
+        if (!Application.isPlaying || hierarchyRoot == null)
         {
             return;
         }
 
-        for (int i = 0; i < coordinates.Count; i++)
+        EnsurePlayerRenderCenter();
+        terrainRendererScratch.Clear();
+        hierarchyRoot.GetComponentsInChildren(true, terrainRendererScratch);
+        for (int i = 0; i < terrainRendererScratch.Count; i++)
         {
-            Vector2Int coordinate = coordinates[i];
-            backgroundConveyorWakeCoordinates.Add(coordinate);
-            backgroundConveyorWakeCoordinates.Add(coordinate + Vector2Int.up);
-            backgroundConveyorWakeCoordinates.Add(coordinate + Vector2Int.down);
-            backgroundConveyorWakeCoordinates.Add(coordinate + Vector2Int.left);
-            backgroundConveyorWakeCoordinates.Add(coordinate + Vector2Int.right);
+            Renderer targetRenderer = terrainRendererScratch[i];
+            if (targetRenderer != null && targetRenderer.gameObject.activeInHierarchy)
+            {
+                ApplyPlayerRangeVisibility(targetRenderer);
+            }
         }
     }
 
-    public void WakeLoadedConveyorsNearBackgroundConveyorChange(Vector2Int coordinate)
+    private void ApplyPlayerRangeVisibility(Renderer targetRenderer)
     {
-        WakeBackgroundConveyorSimulation();
-        backgroundConveyorDirtyCoordinates.Clear();
-        backgroundConveyorOccupancyChangedCoordinates.Clear();
-        backgroundConveyorDirtyCoordinates.Add(coordinate);
-        RefreshConveyorItemResidencyAfterBackgroundConveyorChange(coordinate);
-        WakeLoadedConveyorsNearBackgroundConveyorChanges();
+        bool shouldRender = DoesRendererIntersectPlayerRenderRange(targetRenderer);
+        if (shouldRender)
+        {
+            if (renderersHiddenByPlayerRange.TryGetValue(targetRenderer, out bool previousForceRenderingOff))
+            {
+                targetRenderer.forceRenderingOff = previousForceRenderingOff;
+                renderersHiddenByPlayerRange.Remove(targetRenderer);
+            }
+
+            return;
+        }
+
+        if (!renderersHiddenByPlayerRange.ContainsKey(targetRenderer))
+        {
+            renderersHiddenByPlayerRange.Add(targetRenderer, targetRenderer.forceRenderingOff);
+        }
+
+        targetRenderer.forceRenderingOff = true;
+    }
+
+    private bool DoesRendererIntersectPlayerRenderRange(Renderer targetRenderer)
+    {
+        Bounds bounds = targetRenderer.bounds;
+        float range = PlayerRenderRadius + 0.5f;
+        float minX = currentPlayerRenderCenter.x - range;
+        float maxX = currentPlayerRenderCenter.x + range;
+        float minZ = currentPlayerRenderCenter.y - range;
+        float maxZ = currentPlayerRenderCenter.y + range;
+        return bounds.max.x >= minX
+               && bounds.min.x <= maxX
+               && bounds.max.z >= minZ
+               && bounds.min.z <= maxZ;
+    }
+
+    private void RestorePlayerRangeRendererVisibility(Transform hierarchyRoot = null)
+    {
+        if (hierarchyRoot == null)
+        {
+            foreach (KeyValuePair<Renderer, bool> pair in renderersHiddenByPlayerRange)
+            {
+                if (pair.Key != null)
+                {
+                    pair.Key.forceRenderingOff = pair.Value;
+                }
+            }
+
+            renderersHiddenByPlayerRange.Clear();
+            terrainRendererScratch.Clear();
+            terrainRendererScanSet.Clear();
+            terrainRendererCleanupScratch.Clear();
+            hasPlayerRenderCenter = false;
+            appliedPlayerRenderRadius = -1;
+            return;
+        }
+
+        terrainRendererScratch.Clear();
+        hierarchyRoot.GetComponentsInChildren(true, terrainRendererScratch);
+        for (int i = 0; i < terrainRendererScratch.Count; i++)
+        {
+            Renderer targetRenderer = terrainRendererScratch[i];
+            if (targetRenderer != null
+                && renderersHiddenByPlayerRange.TryGetValue(targetRenderer, out bool previousForceRenderingOff))
+            {
+                targetRenderer.forceRenderingOff = previousForceRenderingOff;
+                renderersHiddenByPlayerRange.Remove(targetRenderer);
+            }
+        }
     }
 
     private void OnDisable()
@@ -1504,22 +1265,14 @@ public partial class TerrainGenerator : MonoBehaviour
             Active = null;
         }
 
+        RestorePlayerRangeRendererVisibility();
         ClearConveyorRuntimeState();
-        backgroundInstallationSimulationQueue.Clear();
-        queuedBackgroundInstallationAnchors.Clear();
-        backgroundInstallationWakeScratch.Clear();
-        nextBackgroundInstallationSimulationTime = float.PositiveInfinity;
-        nextSavedWorldSimulationTime = 0f;
-        virtualizedFloorObjectCoordinates.Clear();
-        virtualizedConveyorItemCoordinates.Clear();
         ResetAuthoritativeConveyorItemTotal();
-        ClearFloorObjectVirtualizationScan();
-        ClearConveyorItemResidencyScan();
         ClearPendingChunkGenerations();
     }
 
-    public bool VirtualizeConveyorItems => virtualizeConveyorItems;
-    public bool VirtualizeConveyorBelts => virtualizeConveyorBelts;
+    public bool VirtualizeConveyorItems => false;
+    public bool VirtualizeConveyorBelts => false;
     public int ConveyorItemVisualBlockSetVersion => conveyorItemVisualBlockSetVersion;
     public int DynamicConveyorItemVisualBlockSetVersion => dynamicConveyorItemVisualBlockSetVersion;
     public int ConveyorItemVisualDirtyBlockCount => conveyorItemVisualDirtyBlocks.Count;
@@ -1654,27 +1407,22 @@ public partial class TerrainGenerator : MonoBehaviour
             return block.GetRuntimeConveyorItemCount();
         }
 
-        if (virtualizeConveyorItems && !IsWithinConveyorItemLiveArea(coordinate))
-        {
-            return 0;
-        }
-
-        conveyorItemResidencyLaneScratch.Clear();
+        conveyorItemCountLaneScratch.Clear();
         try
         {
-            block.CaptureConveyorItemSaveStates(conveyorItemResidencyLaneScratch);
-            int liveCount = CountConveyorItemSaveLanes(conveyorItemResidencyLaneScratch);
+            block.CaptureConveyorItemSaveStates(conveyorItemCountLaneScratch);
+            int liveCount = CountConveyorItemSaveLanes(conveyorItemCountLaneScratch);
             if (liveCount <= 0)
             {
                 return 0;
             }
 
-            int overlapCount = CountConveyorItemLaneOverlap(savedLanes, conveyorItemResidencyLaneScratch);
+            int overlapCount = CountConveyorItemLaneOverlap(savedLanes, conveyorItemCountLaneScratch);
             return liveCount - overlapCount;
         }
         finally
         {
-            conveyorItemResidencyLaneScratch.Clear();
+            conveyorItemCountLaneScratch.Clear();
         }
     }
 
@@ -1765,11 +1513,28 @@ public partial class TerrainGenerator : MonoBehaviour
 
     public TerrainSaveData CaptureTerrainSaveState()
     {
+        List<Vector2Int> activeChunkCoordinates = new List<Vector2Int>(loadedChunks.Count);
+        foreach (KeyValuePair<Vector2Int, Transform> pair in loadedChunks)
+        {
+            if (pair.Value != null)
+            {
+                activeChunkCoordinates.Add(pair.Key);
+            }
+        }
+
+        activeChunkCoordinates.Sort(CompareChunkCoordinates);
         return new TerrainSaveData
         {
             seed = seed,
-            mapSize = GetNormalizedMapSize()
+            mapSize = GetNormalizedMapSize(),
+            activeChunkCoordinates = activeChunkCoordinates
         };
+    }
+
+    private static int CompareChunkCoordinates(Vector2Int left, Vector2Int right)
+    {
+        int yComparison = left.y.CompareTo(right.y);
+        return yComparison != 0 ? yComparison : left.x.CompareTo(right.x);
     }
 
     public MapSaveData CaptureMapSaveState()
@@ -1808,7 +1573,6 @@ public partial class TerrainGenerator : MonoBehaviour
 
             NormalizeTerrainBoundsSettings();
             loadRadius = Mathf.Max(0, loadRadius);
-            unloadRadius = Mathf.Max(loadRadius + 1, unloadRadius);
             hasSeedInitialized = true;
         }
 
@@ -1822,12 +1586,41 @@ public partial class TerrainGenerator : MonoBehaviour
 
         currentCenterChunk = GetCenterChunkCoordinate();
         hasGeneratedChunks = true;
-        RefreshChunks(currentCenterChunk, true);
+        if (!QueueSavedActiveChunks(terrainSaveData?.activeChunkCoordinates))
+        {
+            RefreshChunks(currentCenterChunk, true);
+        }
         ProcessQueuedChunkGenerationsImmediate();
         RefreshLoadedConveyorBeltRuntimeViews();
         ApplyLoadedConveyorItemSaveStates(mapSaveData);
         RefreshLoadedRuntimeRegistrations();
         RefreshLoadedRuntimeVisibility();
+        RefreshTrackedRenderVisibilityIfNeeded();
+        RefreshAllTerrainRendererVisibility();
+    }
+
+    private bool QueueSavedActiveChunks(IReadOnlyList<Vector2Int> activeChunkCoordinates)
+    {
+        if (activeChunkCoordinates == null || activeChunkCoordinates.Count <= 0)
+        {
+            return false;
+        }
+
+        int normalizedChunkSize = Mathf.Max(4, chunkSize);
+        bool queuedAny = false;
+        for (int i = 0; i < activeChunkCoordinates.Count; i++)
+        {
+            Vector2Int chunkCoordinate = activeChunkCoordinates[i];
+            if (!DoesChunkIntersectMapBounds(chunkCoordinate, normalizedChunkSize))
+            {
+                continue;
+            }
+
+            QueueChunkGeneration(chunkCoordinate, normalizedChunkSize);
+            queuedAny = true;
+        }
+
+        return queuedAny;
     }
 
     public void StartNewGeneratedMap(bool randomizeSeed)
@@ -1862,7 +1655,7 @@ public partial class TerrainGenerator : MonoBehaviour
                 continue;
             }
 
-            SaveLoadedBlockFloorObjects(block, VirtualObjectResidency.Live);
+            SaveLoadedBlockFloorObjects(block);
 
             if (block.MapObject is InstallationObject installationObject
                 && !installationObject.ExcludeFromTerrainPersistence
@@ -2202,79 +1995,6 @@ public partial class TerrainGenerator : MonoBehaviour
         return count;
     }
 
-    private static int CollectConveyorItemLaneOverlap(
-        IReadOnlyList<ConveyorItemLaneSaveState> savedLanes,
-        IReadOnlyList<ConveyorItemLaneSaveState> runtimeLanes,
-        List<int> results)
-    {
-        results?.Clear();
-        if (savedLanes == null || runtimeLanes == null || results == null)
-        {
-            return 0;
-        }
-
-        for (int i = 0; i < savedLanes.Count; i++)
-        {
-            ConveyorItemLaneSaveState lane = savedLanes[i];
-            if (lane != null
-                && lane.itemId >= 0
-                && lane.laneIndex >= 0
-                && ContainsConveyorItemSaveLane(runtimeLanes, lane.laneIndex))
-            {
-                AddUniqueConveyorLaneIndex(results, lane.laneIndex);
-            }
-        }
-
-        return results.Count;
-    }
-
-    private static void AddUniqueConveyorLaneIndices(List<int> target, IReadOnlyList<int> source)
-    {
-        if (target == null || source == null)
-        {
-            return;
-        }
-
-        for (int i = 0; i < source.Count; i++)
-        {
-            AddUniqueConveyorLaneIndex(target, source[i]);
-        }
-    }
-
-    private static void AddUniqueConveyorLaneIndex(List<int> target, int laneIndex)
-    {
-        if (target == null || laneIndex < 0 || target.Contains(laneIndex))
-        {
-            return;
-        }
-
-        target.Add(laneIndex);
-    }
-
-    private static void AppendNonOverlappingConveyorItemSaveLanes(
-        List<ConveyorItemLaneSaveState> target,
-        IReadOnlyList<ConveyorItemLaneSaveState> source)
-    {
-        if (target == null || source == null || source.Count <= 0)
-        {
-            return;
-        }
-
-        for (int i = 0; i < source.Count; i++)
-        {
-            ConveyorItemLaneSaveState lane = source[i];
-            if (lane == null
-                || lane.itemId < 0
-                || lane.laneIndex < 0
-                || ContainsConveyorItemSaveLane(target, lane.laneIndex))
-            {
-                continue;
-            }
-
-            target.Add(lane);
-        }
-    }
-
     private static bool ContainsConveyorItemSaveLane(
         IReadOnlyList<ConveyorItemLaneSaveState> lanes,
         int laneIndex)
@@ -2296,47 +2016,10 @@ public partial class TerrainGenerator : MonoBehaviour
         return false;
     }
 
-    private static bool TryFindConveyorItemSaveLane(
-        IReadOnlyList<ConveyorItemLaneSaveState> lanes,
-        int laneIndex,
-        out ConveyorItemLaneSaveState result)
-    {
-        result = null;
-        if (lanes == null || laneIndex < 0)
-        {
-            return false;
-        }
-
-        for (int i = 0; i < lanes.Count; i++)
-        {
-            ConveyorItemLaneSaveState lane = lanes[i];
-            if (lane != null && lane.laneIndex == laneIndex && lane.itemId >= 0)
-            {
-                result = lane;
-                return true;
-            }
-        }
-
-        return false;
-    }
-
     private void MarkLoadedConveyorItemBlockLive(Vector2Int coordinate)
     {
         resourceStateStore?.SetFloorObjectsResidency(coordinate, VirtualObjectResidency.Live);
-        virtualizedConveyorItemCoordinates.Remove(coordinate);
-        virtualizedFloorObjectCoordinates.Remove(coordinate);
         RobotArm.WakeAroundCoordinate(coordinate);
-    }
-
-    private void MarkLoadedConveyorItemBlockVirtual(Vector2Int coordinate)
-    {
-        if (!virtualizeConveyorItems)
-        {
-            return;
-        }
-
-        virtualizedConveyorItemCoordinates.Add(coordinate);
-        resourceStateStore?.SetFloorObjectsResidency(coordinate, VirtualObjectResidency.Virtual);
     }
 
     private bool TryGetLoadedConveyorItemFloorObjectFallback(
@@ -2671,7 +2354,6 @@ public partial class TerrainGenerator : MonoBehaviour
     {
         int normalizedChunkSize = Mathf.Max(4, chunkSize);
         int normalizedLoadRadius = GetEffectiveLoadRadius();
-        int normalizedUnloadRadius = GetEffectiveUnloadRadius();
         List<Vector2Int> chunksToGenerate = chunksToGenerateScratch;
         chunksToGenerate.Clear();
 
@@ -2715,23 +2397,6 @@ public partial class TerrainGenerator : MonoBehaviour
             EnsureChunkGenerationProcessing();
         }
 
-        using (RefreshChunkUnloadScanMarker.Auto())
-        {
-            foreach (KeyValuePair<Vector2Int, Transform> loadedChunk in loadedChunks)
-            {
-                int distanceX = Mathf.Abs(loadedChunk.Key.x - centerChunk.x);
-                int distanceY = Mathf.Abs(loadedChunk.Key.y - centerChunk.y);
-
-                if (!DoesChunkIntersectMapBounds(loadedChunk.Key, normalizedChunkSize)
-                    || distanceX > normalizedUnloadRadius
-                    || distanceY > normalizedUnloadRadius)
-                {
-                    QueueChunkUnload(loadedChunk.Key);
-                }
-            }
-
-            EnsureChunkUnloadProcessing();
-        }
     }
 
     private sealed class ChunkDistanceComparer : IComparer<Vector2Int>
@@ -2777,28 +2442,6 @@ public partial class TerrainGenerator : MonoBehaviour
         }
 
         Vector2Int origin = new Vector2Int(chunkCoordinate.x * normalizedChunkSize, chunkCoordinate.y * normalizedChunkSize);
-        if (TryTakeSleepingChunkView(chunkCoordinate, normalizedChunkSize, out Transform sleepingChunk))
-        {
-            IEnumerator wakeRoutine = WakeSleepingChunkViewRoutine(chunkCoordinate, sleepingChunk, origin, allowYield);
-            while (wakeRoutine.MoveNext())
-            {
-                if (allowYield && wakeRoutine.Current != null)
-                {
-                    yield return wakeRoutine.Current;
-                }
-            }
-
-            MarkChunkGenerationComplete(chunkCoordinate);
-
-            if (!IsChunkWithinRadius(chunkCoordinate, currentCenterChunk, GetEffectiveUnloadRadius()))
-            {
-                QueueChunkUnload(chunkCoordinate);
-                EnsureChunkUnloadProcessing();
-            }
-
-            yield break;
-        }
-
         GameObject chunkObject = new GameObject($"Chunk ({chunkCoordinate.x}, {chunkCoordinate.y})");
         chunkObject.transform.SetParent(transform, false);
         chunkObject.transform.position = new Vector3(origin.x, 0f, origin.y);
@@ -2920,111 +2563,23 @@ public partial class TerrainGenerator : MonoBehaviour
         ApplyChunkBiomeSurface(chunkObject.transform, chunkSurface);
         MarkEditorPreviewHierarchyTransient(chunkObject.transform);
 
+        if (Application.isPlaying)
+        {
+            RefreshTerrainRendererVisibility(chunkObject.transform);
+        }
+
         if (allowYield)
         {
             yield return null;
         }
 
         MarkChunkGenerationComplete(chunkCoordinate);
-
-        if (!IsChunkWithinRadius(chunkCoordinate, currentCenterChunk, GetEffectiveUnloadRadius()))
-        {
-            QueueChunkUnload(chunkCoordinate);
-            EnsureChunkUnloadProcessing();
-        }
-    }
-
-    private void UnloadChunk(Vector2Int chunkCoordinate)
-    {
-        IEnumerator routine = UnloadChunkRoutine(chunkCoordinate, false);
-        while (routine.MoveNext())
-        {
-        }
-    }
-
-    private IEnumerator UnloadChunkRoutine(Vector2Int chunkCoordinate, bool allowYield)
-    {
-        if (IsChunkGenerationActive(chunkCoordinate))
-        {
-            yield break;
-        }
-
-        if (!loadedChunks.TryGetValue(chunkCoordinate, out Transform chunkTransform))
-        {
-            yield break;
-        }
-
-        Block[] chunkBlocks;
-        using (UnloadChunkCollectBlocksMarker.Auto())
-        {
-            chunkBlocks = GetLoadedChunkBlockSnapshot(chunkCoordinate, chunkTransform);
-        }
-
-        if (allowYield)
-        {
-            yield return null;
-        }
-
-        IEnumerator saveRoutine = SaveChunkResourceStatesRoutine(chunkBlocks, allowYield);
-        while (saveRoutine.MoveNext())
-        {
-            yield return saveRoutine.Current;
-        }
-
-        List<Vector2Int> affectedInstallationAnchors = new List<Vector2Int>();
-        IEnumerator collectAnchorsRoutine = CollectChunkInstallationAnchorsRoutine(chunkBlocks, affectedInstallationAnchors, allowYield);
-        while (collectAnchorsRoutine.MoveNext())
-        {
-            yield return collectAnchorsRoutine.Current;
-        }
-
-        IEnumerator removeLookupRoutine = RemoveChunkBlocksFromLookupRoutine(chunkBlocks, allowYield);
-        while (removeLookupRoutine.MoveNext())
-        {
-            yield return removeLookupRoutine.Current;
-        }
-
-        if (Application.isPlaying)
-        {
-            IEnumerator sleepBlocksRoutine = SleepChunkBlocksForStreamingRoutine(chunkBlocks, allowYield);
-            while (sleepBlocksRoutine.MoveNext())
-            {
-                yield return sleepBlocksRoutine.Current;
-            }
-        }
-        else
-        {
-            IEnumerator releaseRoutine = ReleaseChunkBlocksToPoolRoutine(chunkBlocks, allowYield);
-            while (releaseRoutine.MoveNext())
-            {
-                yield return releaseRoutine.Current;
-            }
-        }
-
-        loadedChunks.Remove(chunkCoordinate);
-        if (allowYield)
-        {
-            yield return null;
-        }
-
-        IEnumerator cleanupRoutine = CleanupOrphanedLiveInstallationsRoutine(affectedInstallationAnchors, allowYield);
-        while (cleanupRoutine.MoveNext())
-        {
-            yield return cleanupRoutine.Current;
-        }
-
-        if (Application.isPlaying)
-        {
-            SleepChunkView(chunkCoordinate, chunkTransform);
-        }
-        else
-        {
-            DestroyChunkObject(chunkTransform.gameObject);
-        }
     }
 
     private void ClearLoadedChunks(bool preserveRuntimeState = true, bool releaseLiveInstallations = false)
     {
+        RestorePlayerRangeRendererVisibility();
+
         if (preserveRuntimeState)
         {
             RefreshAnimalOverridesFromRuntime();
@@ -3063,22 +2618,11 @@ public partial class TerrainGenerator : MonoBehaviour
             }
         }
 
-        DestroySleepingViewCaches();
-
         loadedChunks.Clear();
         loadedBlocks.Clear();
         ClearAnimalRuntimeTracking();
         ClearConveyorRuntimeState();
-        backgroundInstallationSimulationQueue.Clear();
-        queuedBackgroundInstallationAnchors.Clear();
-        backgroundInstallationWakeScratch.Clear();
-        nextBackgroundInstallationSimulationTime = float.PositiveInfinity;
-        nextSavedWorldSimulationTime = 0f;
-        virtualizedFloorObjectCoordinates.Clear();
-        virtualizedConveyorItemCoordinates.Clear();
         ResetAuthoritativeConveyorItemTotal();
-        ClearFloorObjectVirtualizationScan();
-        ClearConveyorItemResidencyScan();
         if (!releaseLiveInstallations && preserveRuntimeState)
         {
             CleanupOrphanedLiveInstallations();
@@ -3238,8 +2782,6 @@ public partial class TerrainGenerator : MonoBehaviour
 
         block.Initialize(coordinate, blockType);
         loadedBlocks[coordinate] = block;
-        EnqueueFloorObjectVirtualizationCoordinate(coordinate);
-        EnqueueConveyorItemResidencyCoordinate(coordinate);
         return block;
     }
 

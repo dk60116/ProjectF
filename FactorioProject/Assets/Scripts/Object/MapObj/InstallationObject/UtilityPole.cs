@@ -355,7 +355,9 @@ public class UtilityPole : InstallationObject
 
         EnsureNetworksEvaluated();
         ElectricNetwork network = ResolveBestNetworkForConsumer(consumer);
-        return network != null && network.HasPowerSource && network.ProductionWatts > EnergyEpsilon;
+        return network != null
+               && network.HasPowerSource
+               && network.ProductionWatts > EnergyEpsilon;
     }
 
     public static bool TryGetElectricPowerInfo(
@@ -501,7 +503,46 @@ public class UtilityPole : InstallationObject
             return true;
         }
 
+        return false;
+    }
+
+    public bool CaptureConnectedPoleAnchorCoordinates(List<Vector2Int> destination)
+    {
+        if (destination == null)
+        {
+            return false;
+        }
+
+        destination.Clear();
+        if (!IsValidPlacedPole(this))
+        {
+            return false;
+        }
+
+        EnsurePoleConnectionsEvaluated();
+        for (int i = 0; i < poleConnections.Count; i++)
+        {
+            UtilityPole connectedPole = GetConnectedPole(poleConnections[i], this);
+            if (connectedPole == null
+                || !connectedPole.TryGetPlacementRuntime(
+                    out Vector2Int connectedAnchor,
+                    out _)
+                || destination.Contains(connectedAnchor))
+            {
+                continue;
+            }
+
+            destination.Add(connectedAnchor);
+        }
+
+        destination.Sort(ComparePoleAnchorCoordinates);
         return true;
+    }
+
+    private static int ComparePoleAnchorCoordinates(Vector2Int left, Vector2Int right)
+    {
+        int xComparison = left.x.CompareTo(right.x);
+        return xComparison != 0 ? xComparison : left.y.CompareTo(right.y);
     }
 
     protected override void OnEnable()
@@ -585,6 +626,12 @@ public class UtilityPole : InstallationObject
         networksDirty = true;
         networkRuntimeEvaluatedFrame = -1;
         connectionLineVisualsDirty = true;
+        InputOutputModule.WakeElectricRuntimeModules();
+    }
+
+    public static void NotifyElectricPowerSourceStateChanged()
+    {
+        MarkElectricNetworkDirty();
     }
 
     public static void NotifyFreeElectroEnergyChanged()

@@ -25,11 +25,35 @@ public class SteamGenerator : InputOutputModule
         UpdateGenerationVisuals(isGenerating, deltaTime);
     }
 
+    public override PersistentState CapturePersistentState()
+    {
+        PersistentState state = base.CapturePersistentState();
+        state.steamGeneratorHasGenerationReserve = hasSteamGenerationReserve;
+        return state;
+    }
+
+    public override void ApplyPersistentState(PersistentState state)
+    {
+        base.ApplyPersistentState(state);
+        hasSteamGenerationReserve = state != null && state.steamGeneratorHasGenerationReserve;
+        if (isActiveAndEnabled)
+        {
+            UtilityPole.NotifyElectricPowerSourceStateChanged();
+        }
+    }
+
+    protected override void OnEnable()
+    {
+        base.OnEnable();
+        UtilityPole.NotifyElectricPowerSourceStateChanged();
+    }
+
     protected override void OnDisable()
     {
         hasSteamGenerationReserve = false;
         StopGenerationVisuals(true);
         base.OnDisable();
+        UtilityPole.NotifyElectricPowerSourceStateChanged();
     }
 
     protected override bool ShouldAutoPullFluidFromConnectedStorage()
@@ -172,6 +196,57 @@ public class SteamGenerator : InputOutputModule
         }
 
         return false;
+    }
+
+    public bool TryGetRuntimePipePassCoordinates(
+        out Vector2Int inputCoordinate,
+        out Vector2Int tailCoordinate)
+    {
+        inputCoordinate = Vector2Int.zero;
+        tailCoordinate = Vector2Int.zero;
+        if (!TryGetPlacementRuntime(out Vector2Int anchorCoordinate, out int quarterTurns))
+        {
+            return false;
+        }
+
+        bool foundInput = false;
+        bool foundTail = false;
+        IReadOnlyList<RectGridBlockPlacement> placements = RectGridPlacements;
+        for (int i = 0; i < placements.Count; i++)
+        {
+            RectGridBlockPlacement placement = placements[i];
+            bool isPipeInput = IsInputItemBlockType(placement.blockType)
+                               && AllowsPipeAreaInteraction(placement.blockType);
+            bool isPipePass = placement.blockType == RectGridBlockType.PipeInput;
+            if ((!isPipeInput && !isPipePass)
+                || !TryGetRectGridPlacementCoordinate(
+                    this,
+                    anchorCoordinate,
+                    quarterTurns,
+                    placement,
+                    out Vector2Int coordinate))
+            {
+                continue;
+            }
+
+            if (isPipeInput && !foundInput)
+            {
+                inputCoordinate = coordinate;
+                foundInput = true;
+            }
+            else if (isPipePass && !foundTail)
+            {
+                tailCoordinate = coordinate;
+                foundTail = true;
+            }
+
+            if (foundInput && foundTail)
+            {
+                break;
+            }
+        }
+
+        return foundInput && foundTail && inputCoordinate != tailCoordinate;
     }
 
     public bool TryGetPipePassTailDirectionAtCoordinate(
@@ -411,7 +486,7 @@ public class SteamGenerator : InputOutputModule
         }
 
         hasSteamGenerationReserve = hasReserve;
-        InputOutputModule.WakeElectricRuntimeModules();
+        UtilityPole.NotifyElectricPowerSourceStateChanged();
     }
 
     private bool TryGetSteamInputRecipe(out int inputItemId, out int inputLitersPerSecond)

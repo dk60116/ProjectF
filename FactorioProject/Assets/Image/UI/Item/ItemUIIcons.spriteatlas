@@ -103,11 +103,13 @@ SpriteAtlas:
     - {fileID: 21300000, guid: d40fb2c037391a04d8fad876475e8a46, type: 3}
     - {fileID: 21300000, guid: a628ddd2a38b95940813b0bb46eec89f, type: 3}
     - {fileID: 21300000, guid: c8e209659c2ed834280db61e53da32f2, type: 3}
+    - {fileID: 21300000, guid: f36b58589d0334b44874801ca6585c94, type: 3}
     - {fileID: 21300000, guid: b65ab7f53b1d4e4419213ef5b2ebc86b, type: 3}
     - {fileID: 21300000, guid: 4e7fe2baa4be7da4498807c70d5fbc6f, type: 3}
     - {fileID: 21300000, guid: 1c5af457d79a02240a489621d09a6284, type: 3}
     - {fileID: 21300000, guid: 74480ccda121853489572ab7f4fc8dc9, type: 3}
     - {fileID: 21300000, guid: a9f2f7c458e1fe14490ad9890f98ef72, type: 3}
+    - {fileID: 21300000, guid: c22eb1f85ede8fe4092015a5b5ddb071, type: 3}
     - {fileID: 21300000, guid: dac4f30093e209d408e04e1efeec296b, type: 3}
     - {fileID: 21300000, guid: 6c26e8bc5e9f0f94eb74fb1de8d78aef, type: 3}
     - {fileID: 21300000, guid: f5fe2b95085abff4da2c9efcad11d11b, type: 3}
@@ -226,8 +228,10 @@ SpriteAtlas:
     - f841d00897e24e5cb051871a6cd0abe6: 21300000
     - 86de92086ee6a144a9c254e64f42b8f6: 21300000
     - 4952d73823cf76741906d0026fbdfc18: 21300000
+    - f36b58589d0334b44874801ca6585c94: 21300000
     - 1da36498ee7fac34a8521b951d783d5f: 21300000
     - 661bcaa80e934c8db7040cb2377434db: 21300000
+    - c22eb1f85ede8fe4092015a5b5ddb071: 21300000
     - 9892bdf878eea1a43b216b9bee80a13e: 21300000
     - 810b2719d36648a3bfbf75ea0ce414a7: 21300000
     - 3ca59f1903fc4caf8d2d251ad2f1d7a1: 21300000
@@ -361,8 +365,10 @@ SpriteAtlas:
   - {fileID: 21300000, guid: f841d00897e24e5cb051871a6cd0abe6, type: 3}
   - {fileID: 21300000, guid: 86de92086ee6a144a9c254e64f42b8f6, type: 3}
   - {fileID: 21300000, guid: 4952d73823cf76741906d0026fbdfc18, type: 3}
+  - {fileID: 21300000, guid: f36b58589d0334b44874801ca6585c94, type: 3}
   - {fileID: 21300000, guid: 1da36498ee7fac34a8521b951d783d5f, type: 3}
   - {fileID: 21300000, guid: 661bcaa80e934c8db7040cb2377434db, type: 3}
+  - {fileID: 21300000, guid: c22eb1f85ede8fe4092015a5b5ddb071, type: 3}
   - {fileID: 21300000, guid: 9892bdf878eea1a43b216b9bee80a13e, type: 3}
   - {fileID: 21300000, guid: 810b2719d36648a3bfbf75ea0ce414a7, type: 3}
   - {fileID: 21300000, guid: 3ca59f1903fc4caf8d2d251ad2f1d7a1, type: 3}
@@ -495,8 +501,10 @@ SpriteAtlas:
   - Handcart_Icon
   - Iron wheel_Icon
   - Sturdy wooden box_Icon
+  - Sprinkler_Icon
   - Circular Saw_Icon
   - Poop
+  - Seed Planter_Icon
   - Drill_Icon
   - Horse steak_Icon
   - Oil drilling machine_Icon

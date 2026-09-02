@@ -1,6 +1,6 @@
 {
     "format": "ProjectF.AnimalData",
-    "version": 14,
+    "version": 15,
     "animals": [
         {
             "id": 0,
@@ -13,6 +13,19 @@
             "canRiding": true,
             "riderHeight": 0.47999998927116396,
             "strength": 45.0,
+            "needsSettings": {
+                "maxHunger": 100.0,
+                "hungerDrainPerSecond": 0.05,
+                "hungryThresholdRatio": 0.5,
+                "foodEnergyPerItem": 25.0,
+                "foodSearchRadius": 8.0,
+                "defecationIntervalSeconds": 300.0,
+                "defecationAmount": 1,
+                "unattendedDroppingLifetimeSeconds": 300.0
+            },
+            "defecationItemId": 93,
+            "defecationItemName": "Poop",
+            "defecationItemAssetPath": "Assets/Data/Items/Item_97_Poop.asset",
             "aiSettings": {
                 "herdAreaRadius": 15.0,
                 "separationRadius": 1.0,
@@ -123,6 +136,19 @@
             "canRiding": true,
             "riderHeight": 0.5,
             "strength": 37.0,
+            "needsSettings": {
+                "maxHunger": 100.0,
+                "hungerDrainPerSecond": 0.05,
+                "hungryThresholdRatio": 0.5,
+                "foodEnergyPerItem": 25.0,
+                "foodSearchRadius": 8.0,
+                "defecationIntervalSeconds": 300.0,
+                "defecationAmount": 1,
+                "unattendedDroppingLifetimeSeconds": 300.0
+            },
+            "defecationItemId": 93,
+            "defecationItemName": "Poop",
+            "defecationItemAssetPath": "Assets/Data/Items/Item_97_Poop.asset",
             "aiSettings": {
                 "herdAreaRadius": 15.0,
                 "separationRadius": 1.0,
@@ -233,6 +259,19 @@
             "canRiding": true,
             "riderHeight": 0.5,
             "strength": 30.0,
+            "needsSettings": {
+                "maxHunger": 120.0,
+                "hungerDrainPerSecond": 0.05,
+                "hungryThresholdRatio": 0.5,
+                "foodEnergyPerItem": 25.0,
+                "foodSearchRadius": 8.0,
+                "defecationIntervalSeconds": 360.0,
+                "defecationAmount": 1,
+                "unattendedDroppingLifetimeSeconds": 300.0
+            },
+            "defecationItemId": 93,
+            "defecationItemName": "Poop",
+            "defecationItemAssetPath": "Assets/Data/Items/Item_97_Poop.asset",
             "aiSettings": {
                 "herdAreaRadius": 30.0,
                 "separationRadius": 1.25,
@@ -343,6 +382,19 @@
             "canRiding": true,
             "riderHeight": 0.5,
             "strength": 35.0,
+            "needsSettings": {
+                "maxHunger": 120.0,
+                "hungerDrainPerSecond": 0.05,
+                "hungryThresholdRatio": 0.5,
+                "foodEnergyPerItem": 25.0,
+                "foodSearchRadius": 8.0,
+                "defecationIntervalSeconds": 360.0,
+                "defecationAmount": 1,
+                "unattendedDroppingLifetimeSeconds": 300.0
+            },
+            "defecationItemId": 93,
+            "defecationItemName": "Poop",
+            "defecationItemAssetPath": "Assets/Data/Items/Item_97_Poop.asset",
             "aiSettings": {
                 "herdAreaRadius": 30.0,
                 "separationRadius": 1.25,
@@ -453,6 +505,19 @@
             "canRiding": true,
             "riderHeight": 0.4000000059604645,
             "strength": 22.0,
+            "needsSettings": {
+                "maxHunger": 100.0,
+                "hungerDrainPerSecond": 0.06,
+                "hungryThresholdRatio": 0.5,
+                "foodEnergyPerItem": 25.0,
+                "foodSearchRadius": 8.0,
+                "defecationIntervalSeconds": 240.0,
+                "defecationAmount": 1,
+                "unattendedDroppingLifetimeSeconds": 300.0
+            },
+            "defecationItemId": 93,
+            "defecationItemName": "Poop",
+            "defecationItemAssetPath": "Assets/Data/Items/Item_97_Poop.asset",
             "aiSettings": {
                 "herdAreaRadius": 15.0,
                 "separationRadius": 1.25,
@@ -563,6 +628,19 @@
             "canRiding": true,
             "riderHeight": 0.30000001192092898,
             "strength": 28.0,
+            "needsSettings": {
+                "maxHunger": 100.0,
+                "hungerDrainPerSecond": 0.06,
+                "hungryThresholdRatio": 0.5,
+                "foodEnergyPerItem": 25.0,
+                "foodSearchRadius": 8.0,
+                "defecationIntervalSeconds": 240.0,
+                "defecationAmount": 1,
+                "unattendedDroppingLifetimeSeconds": 300.0
+            },
+            "defecationItemId": 93,
+            "defecationItemName": "Poop",
+            "defecationItemAssetPath": "Assets/Data/Items/Item_97_Poop.asset",
             "aiSettings": {
                 "herdAreaRadius": 15.0,
                 "separationRadius": 1.25,

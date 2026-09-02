@@ -170,7 +170,7 @@ namespace ProjectF.MapObjects
             }
 
             WorldTimeService worldTime = WorldTimeService.Active;
-            if (worldTime == null || !worldTime.IsDay)
+            if (worldTime == null || worldTime.Paused || !worldTime.IsDay)
             {
                 return;
             }
@@ -468,10 +468,6 @@ namespace ProjectF.MapObjects
             state.growthWaterLiters = StoredGrowthWaterLiters;
             state.growthFertilizerAmount = StoredGrowthFertilizerAmount;
             state.growthElapsedSeconds = GrowthElapsedSeconds;
-            state.hasBackgroundGrowthTimestamp = true;
-            state.backgroundGrowthDaylightSeconds = WorldTimeService.Active != null
-                ? WorldTimeService.Active.PlantGrowthDaylightSeconds
-                : 0d;
         }
 
         protected override void ApplyAdditionalSavedState(ResourceSaveState state)

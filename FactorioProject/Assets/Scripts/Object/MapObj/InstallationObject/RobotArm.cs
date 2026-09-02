@@ -164,7 +164,7 @@ public class RobotArm : InstallationObject, IMapObjectUpdateTick, IItemLightWork
     public float PickupIntervalSeconds => Mathf.Max(0.01f, pickupInterval);
     public float DropRetryIntervalSeconds => Mathf.Max(0.01f, dropRetryInterval);
     public float ActionTurnDelaySeconds => Mathf.Max(0f, actionTurnDelay);
-    public float BackgroundTurnDurationSeconds => 180f / Mathf.Max(1f, bodyTurnSpeedDegreesPerSecond);
+    private float TurnDurationSeconds => 180f / Mathf.Max(1f, bodyTurnSpeedDegreesPerSecond);
     public bool IsWorkingForItemLight
     {
         get
@@ -259,6 +259,12 @@ public class RobotArm : InstallationObject, IMapObjectUpdateTick, IItemLightWork
 
         if (heldItemId >= 0)
         {
+            if (IsDropSuppressedByPlacementMode())
+            {
+                statusLevel = ObjectInfoStatusLevel.Warning;
+                return "Placement mode";
+            }
+
             if (!TryResolveDropCoordinate(out _))
             {
                 return "No output area";
@@ -372,7 +378,7 @@ public class RobotArm : InstallationObject, IMapObjectUpdateTick, IItemLightWork
             pickupTimer = Mathf.Max(0f, pickupTimer),
             dropRetryTimer = Mathf.Max(0f, dropRetryTimer),
             actionTurnTimer = Mathf.Max(0f, actionTurnTimer),
-            turnTimer = IsTurningState(state) ? BackgroundTurnDurationSeconds : 0f,
+            turnTimer = IsTurningState(state) ? TurnDurationSeconds : 0f,
             waitingForDropRetry = waitingForDropRetry
         };
     }
@@ -500,6 +506,24 @@ public class RobotArm : InstallationObject, IMapObjectUpdateTick, IItemLightWork
             }
 
             robotArm.RefreshSleepAwakeVisual(true);
+        }
+    }
+
+    public static void WakeAllHeldItemTransfers()
+    {
+        for (int i = ActiveRobotArms.Count - 1; i >= 0; i--)
+        {
+            RobotArm robotArm = ActiveRobotArms[i];
+            if (robotArm == null)
+            {
+                ActiveRobotArms.RemoveAt(i);
+                continue;
+            }
+
+            if (robotArm.isActiveAndEnabled && robotArm.heldItemId >= 0)
+            {
+                robotArm.WakeRuntimeSleep();
+            }
         }
     }
 
@@ -1719,7 +1743,9 @@ public class RobotArm : InstallationObject, IMapObjectUpdateTick, IItemLightWork
 
     private bool TryPlaceHeldItem()
     {
-        if (heldItemId < 0 || !TryResolveDropCoordinate(out Vector2Int dropCoordinate))
+        if (heldItemId < 0
+            || IsDropSuppressedByPlacementMode()
+            || !TryResolveDropCoordinate(out Vector2Int dropCoordinate))
         {
             return false;
         }
@@ -1805,7 +1831,9 @@ public class RobotArm : InstallationObject, IMapObjectUpdateTick, IItemLightWork
 
     private bool CanPlaceHeldItem()
     {
-        if (heldItemId < 0 || !TryResolveDropCoordinate(out Vector2Int dropCoordinate))
+        if (heldItemId < 0
+            || IsDropSuppressedByPlacementMode()
+            || !TryResolveDropCoordinate(out Vector2Int dropCoordinate))
         {
             return false;
         }
@@ -1826,6 +1854,12 @@ public class RobotArm : InstallationObject, IMapObjectUpdateTick, IItemLightWork
         }
 
         return CanPlaceHeldItem(dropBlock, dropCoordinate);
+    }
+
+    private static bool IsDropSuppressedByPlacementMode()
+    {
+        GameManager gameManager = GameManager.Instance;
+        return gameManager != null && gameManager.PlayerInteractionLocked;
     }
 
     private bool CanPlaceHeldItem(Block dropBlock, Vector2Int dropCoordinate)

@@ -23,6 +23,7 @@ public class ItemInfoDescription : MonoBehaviour
     private static readonly Color ElectricGaugeFillColor = new Color(1f, 0.72f, 0.08f, 1f);
     private static readonly Color BurnEnergyGaugeFillColor = new Color(1f, 0.42f, 0.08f, 1f);
     private static readonly Color HealthGaugeFillColor = new Color(0.78f, 0.12f, 0.1f, 1f);
+    private static readonly Color HungerGaugeFillColor = new Color(0.95f, 0.62f, 0.12f, 1f);
     private static readonly Color ProducingSignColor = new Color(0.1f, 0.8f, 0.1f, 1f);
     private static readonly Color WarningSignColor = new Color(1f, 0.72f, 0.08f, 1f);
     private static readonly Color StoppedSignColor = new Color(0.9f, 0.05f, 0.03f, 1f);
@@ -182,6 +183,22 @@ public class ItemInfoDescription : MonoBehaviour
             false,
             $"HP: {currentHealth.ToString("0.#", CultureInfo.InvariantCulture)}"
             + $"/{maxHealth.ToString("0.#", CultureInfo.InvariantCulture)}");
+
+        float remainingSatiety = animal.CurrentHunger;
+        float maxHunger = animal.MaxHunger;
+        float currentHunger = Mathf.Max(0f, maxHunger - remainingSatiety);
+        SetGauge(
+            energyGauge,
+            energyFill,
+            energyText,
+            true,
+            maxHunger > 0f ? currentHunger / maxHunger : 0f,
+            HungerGaugeFillColor,
+            currentHunger,
+            maxHunger,
+            false,
+            $"Hunger: {currentHunger.ToString("0.#", CultureInfo.InvariantCulture)}"
+            + $"/{maxHunger.ToString("0.#", CultureInfo.InvariantCulture)}");
     }
 
     public void ShowConveyorBelt(ConveyorBelt conveyorBelt, Resource underlyingResource = null)
@@ -1011,6 +1028,9 @@ public class ItemInfoDescription : MonoBehaviour
         Boiler boiler = module as Boiler;
         if (steamGenerator != null && module.CanStoreFluid)
         {
+            steamGenerator.GetObjectInfoStatus(out string statusText, out bool isProducing);
+            SetDefaultStatus(statusText, isProducing);
+            SetFluidStorageInputItemSlot(steamGenerator);
             if (showElectricPowerGauge)
             {
                 SetFluidStorageGauge(workGauge, workFill, workText, module);
@@ -1415,8 +1435,7 @@ public class ItemInfoDescription : MonoBehaviour
             return;
         }
 
-        if ((installationObject is SteamGenerator
-             || installationObject is Fluidtank
+        if ((installationObject is Fluidtank
              || installationObject is Bucket)
             && installationObject.StoredFluidItemId < 0)
         {
@@ -1426,7 +1445,7 @@ public class ItemInfoDescription : MonoBehaviour
 
         float storedLiters = installationObject.StoredFluidLiters;
         float capacityLiters = installationObject.FluidStorageCapacityLiters;
-        int fluidItemId = installationObject.StoredFluidItemId;
+        int fluidItemId = ResolveFluidGaugeItemId(installationObject);
         if (fluidItemId < 0 && installationObject is SteamTrain steamTrain)
         {
             fluidItemId = steamTrain.ObjectInfoWaterItemId;

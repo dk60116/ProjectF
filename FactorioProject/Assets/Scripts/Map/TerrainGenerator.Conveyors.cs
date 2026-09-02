@@ -635,6 +635,12 @@ public partial class TerrainGenerator : MonoBehaviour
             return;
         }
 
+        if (!VirtualizeConveyorItems)
+        {
+            QueueConveyorDirectWake(block);
+            return;
+        }
+
         if (TryGetCachedNonCycleConveyorLineSlot(
                 block,
                 out int queuedLineId,
@@ -663,6 +669,12 @@ public partial class TerrainGenerator : MonoBehaviour
     {
         if (!Application.isPlaying || block == null)
         {
+            return;
+        }
+
+        if (!VirtualizeConveyorItems)
+        {
+            QueueConveyorDirectWake(block);
             return;
         }
 
@@ -3932,6 +3944,13 @@ public partial class TerrainGenerator : MonoBehaviour
 
     private void AddBeltDirectionArrowInstance(Matrix4x4 matrix)
     {
+        Vector4 translation = matrix.GetColumn(3);
+        if (!IsWorldPositionWithinPlayerRenderRange(
+                new Vector3(translation.x, translation.y, translation.z)))
+        {
+            return;
+        }
+
         if (beltDirectionArrowInstanceMatrixCount >= MaxBeltDirectionArrowInstancesPerBatch)
         {
             FlushBeltDirectionArrowInstances();
@@ -4076,6 +4095,11 @@ public partial class TerrainGenerator : MonoBehaviour
 
     public void AddConveyorSlotDotInstance(Vector3 worldPosition)
     {
+        if (!IsWorldPositionWithinPlayerRenderRange(worldPosition))
+        {
+            return;
+        }
+
         if (conveyorSlotDotInstanceMatrixCount >= MaxConveyorSlotDotInstancesPerBatch)
         {
             FlushConveyorSlotDotInstances();
@@ -4355,8 +4379,6 @@ public partial class TerrainGenerator : MonoBehaviour
         MapObjectTickProfiler.AddRuntimeCounter("World", "LoadedMapObjects", loadedMapObjectCount);
         MapObjectTickProfiler.AddRuntimeCounter("World", "LoadedInstallations", loadedInstallationCount);
         MapObjectTickProfiler.AddRuntimeCounter("World", "LoadedConveyorBelts", loadedConveyorBeltCount);
-        MapObjectTickProfiler.AddRuntimeCounter("World", "SleepingChunks", sleepingChunkViews.Count);
-        MapObjectTickProfiler.AddRuntimeCounter("World", "SleepingInstallationViews", sleepingInstallationViews.Count);
 
         MapObjectTickProfiler.AddRuntimeCounter("View", "ActiveBlockRoots", activeBlockRootCount);
         MapObjectTickProfiler.AddRuntimeCounter("View", "InactiveBlockRoots", inactiveBlockRootCount);
@@ -4436,35 +4458,6 @@ public partial class TerrainGenerator : MonoBehaviour
         MapObjectTickProfiler.AddRuntimeCounter("ConveyorItemRender", "DynamicCullBoundsSize", itemRenderer != null ? itemRenderer.DynamicVirtualConveyorCullBoundsSize : 0f);
         MapObjectTickProfiler.AddRuntimeCounter("ConveyorItemRender", "DynamicCullBoundsHeight", itemRenderer != null ? itemRenderer.DynamicVirtualConveyorCullBoundsHeight : 0f);
 
-        MapObjectTickProfiler.AddRuntimeCounter(
-            "BackgroundConveyorBudget",
-            "ProcessedLanes",
-            resourceStateStore != null ? resourceStateStore.LastBackgroundConveyorProcessedLanes : 0);
-        MapObjectTickProfiler.AddRuntimeCounter(
-            "BackgroundConveyorBudget",
-            "DeferredLanes",
-            resourceStateStore != null ? resourceStateStore.LastBackgroundConveyorDeferredLanes : 0);
-        MapObjectTickProfiler.AddRuntimeCounter(
-            "BackgroundConveyorBudget",
-            "BudgetHit",
-            resourceStateStore != null ? resourceStateStore.LastBackgroundConveyorBudgetHit : 0);
-        MapObjectTickProfiler.AddRuntimeCounter(
-            "BackgroundConveyorBudget",
-            "FloorSyncProcessed",
-            resourceStateStore != null ? resourceStateStore.LastBackgroundConveyorFloorSyncProcessed : 0);
-        MapObjectTickProfiler.AddRuntimeCounter(
-            "BackgroundConveyorBudget",
-            "FloorSyncDeferred",
-            resourceStateStore != null ? resourceStateStore.LastBackgroundConveyorFloorSyncDeferred : 0);
-        MapObjectTickProfiler.AddRuntimeCounter(
-            "BackgroundConveyorBudget",
-            "FloorSyncQueue",
-            resourceStateStore != null ? resourceStateStore.LastBackgroundConveyorFloorSyncQueue : 0);
-        MapObjectTickProfiler.AddRuntimeCounter(
-            "BackgroundConveyorBudget",
-            "DueCandidatesProcessed",
-            resourceStateStore != null ? resourceStateStore.LastBackgroundConveyorDueCandidatesProcessed : 0);
-
         MapObjectTickProfiler.AddRuntimeCounter("ConveyorLoad", "SavedBlocks", lastConveyorItemLoadSavedBlocks);
         MapObjectTickProfiler.AddRuntimeCounter("ConveyorLoad", "SavedLanes", lastConveyorItemLoadSavedLanes);
         MapObjectTickProfiler.AddRuntimeCounter("ConveyorLoad", "LoadedBlocks", lastConveyorItemLoadLoadedBlocks);
@@ -4476,20 +4469,12 @@ public partial class TerrainGenerator : MonoBehaviour
         MapObjectTickProfiler.AddRuntimeCounter("ConveyorLoad", "FallbackBlocks", lastConveyorItemLoadFallbackBlocks);
         MapObjectTickProfiler.AddRuntimeCounter("ConveyorLoad", "ActualFailedBlocks", lastConveyorItemLoadActualFailedBlocks);
         MapObjectTickProfiler.AddRuntimeCounter("ConveyorLoad", "ActualFailedLanes", lastConveyorItemLoadActualFailedLanes);
-        MapObjectTickProfiler.AddRuntimeCounter("ConveyorUnloadSave", "SaveConveyorItemsCalls", conveyorUnloadSaveConveyorBlocks);
-        MapObjectTickProfiler.AddRuntimeCounter("ConveyorUnloadSave", "SavedItems", conveyorUnloadSaveConveyorItems);
+        MapObjectTickProfiler.AddRuntimeCounter("ConveyorStateSave", "SaveConveyorItemsCalls", conveyorStateSaveConveyorBlocks);
+        MapObjectTickProfiler.AddRuntimeCounter("ConveyorStateSave", "SavedItems", conveyorStateSaveConveyorItems);
         MapObjectTickProfiler.AddRuntimeCounter(
-            "ConveyorUnloadSave",
-            "SkippedVirtualizedBlocks",
-            conveyorUnloadSaveSkippedVirtualizedBlocks);
-        MapObjectTickProfiler.AddRuntimeCounter(
-            "ConveyorUnloadSave",
-            "SkippedVirtualizedItems",
-            conveyorUnloadSaveSkippedVirtualizedItems);
-        MapObjectTickProfiler.AddRuntimeCounter(
-            "ConveyorUnloadSave",
+            "ConveyorStateSave",
             "ClearedNonConveyorBlocks",
-            conveyorUnloadSaveClearedNonConveyorBlocks);
+            conveyorStateSaveClearedNonConveyorBlocks);
 
         MapObjectTickProfiler.AddRuntimeCounter("ConveyorQueue", "WakeQueue", conveyorWakeQueue.Count);
         MapObjectTickProfiler.AddRuntimeCounter("ConveyorQueue", "WakeQueuedSet", conveyorWakeQueued.Count);
@@ -4560,50 +4545,6 @@ public partial class TerrainGenerator : MonoBehaviour
         MapObjectTickProfiler.AddRuntimeCounter("ConveyorCache", "NetworkRetries", conveyorNetworkRetryTimes.Count);
         MapObjectTickProfiler.AddRuntimeCounter("ConveyorCache", "NextLineRetryMs", FormatRuntimeRetryMs());
 
-        MapObjectTickProfiler.AddRuntimeCounter("Virtualization", "VirtualizedFloorObjects", virtualizedFloorObjectCoordinates.Count);
-        MapObjectTickProfiler.AddRuntimeCounter("Virtualization", "FloorVirtualizationWorkQueue", floorObjectVirtualizationWorkQueue.Count);
-        MapObjectTickProfiler.AddRuntimeCounter("Virtualization", "FloorVirtualizationQueued", floorObjectVirtualizationQueuedCoordinates.Count);
-        MapObjectTickProfiler.AddRuntimeCounter("Virtualization", "ConveyorItemLiveAreaSize", conveyorItemLiveAreaSize);
-        MapObjectTickProfiler.AddRuntimeCounter("Virtualization", "VirtualizedConveyorItemBlocks", virtualizedConveyorItemCoordinates.Count);
-        MapObjectTickProfiler.AddRuntimeCounter("Virtualization", "ConveyorItemResidencyWorkQueue", conveyorItemResidencyWorkQueue.Count);
-        MapObjectTickProfiler.AddRuntimeCounter("Virtualization", "ConveyorItemResidencyQueued", conveyorItemResidencyQueuedCoordinates.Count);
-        MapObjectTickProfiler.AddRuntimeCounter("Virtualization", "ConveyorItemResidencyProcessed", lastConveyorItemResidencyProcessed);
-        MapObjectTickProfiler.AddRuntimeCounter("Virtualization", "ConveyorItemLiveCandidates", lastConveyorItemResidencyLiveCandidates);
-        MapObjectTickProfiler.AddRuntimeCounter("Virtualization", "ConveyorItemBackgroundCandidates", lastConveyorItemResidencyBackgroundCandidates);
-        MapObjectTickProfiler.AddRuntimeCounter("Virtualization", "ConveyorItemResidencyVirtualized", lastConveyorItemResidencyVirtualized);
-        MapObjectTickProfiler.AddRuntimeCounter("Virtualization", "ConveyorItemResidencyVirtualizedItems", lastConveyorItemResidencyVirtualizedItems);
-        MapObjectTickProfiler.AddRuntimeCounter("Virtualization", "ConveyorItemResidencyVirtualizeFailed", lastConveyorItemResidencyVirtualizeFailed);
-        MapObjectTickProfiler.AddRuntimeCounter("Virtualization", "ConveyorItemResidencyMaterialized", lastConveyorItemResidencyMaterialized);
-        MapObjectTickProfiler.AddRuntimeCounter("Virtualization", "ConveyorItemResidencyMaterializedItems", lastConveyorItemResidencyMaterializedItems);
-        MapObjectTickProfiler.AddRuntimeCounter("Virtualization", "ConveyorItemResidencyMaterializeFailed", lastConveyorItemResidencyMaterializeFailed);
-        MapObjectTickProfiler.AddRuntimeCounter("Virtualization", "ConveyorItemMaterializeTraceSamples", lastConveyorItemMaterializeTraceSamples);
-        MapObjectTickProfiler.AddRuntimeCounter("Virtualization", "ConveyorItemMaterializeTraceLanes", lastConveyorItemMaterializeTraceLanes);
-        MapObjectTickProfiler.AddRuntimeCounter("Virtualization", "ConveyorItemMaterializeTraceMotionLanes", lastConveyorItemMaterializeTraceMotionLanes);
-        MapObjectTickProfiler.AddRuntimeCounter("Virtualization", "ConveyorItemMaterializeTraceMissingRuntimeLanes", lastConveyorItemMaterializeTraceMissingRuntimeLanes);
-        MapObjectTickProfiler.AddRuntimeCounter("Virtualization", "ConveyorItemMaterializeTraceMotionLost", lastConveyorItemMaterializeTraceMotionLost);
-        MapObjectTickProfiler.AddRuntimeCounter("Virtualization", "ConveyorItemMaterializeTraceMotionModeMismatches", lastConveyorItemMaterializeTraceMotionModeMismatches);
-        MapObjectTickProfiler.AddRuntimeCounter("Virtualization", "ConveyorItemMaterializeTraceLaneMismatches", lastConveyorItemMaterializeTraceLaneMismatches);
-        MapObjectTickProfiler.AddRuntimeCounter("Virtualization", "ConveyorItemMaterializeTraceProgressMismatches", lastConveyorItemMaterializeTraceProgressMismatches);
-        MapObjectTickProfiler.AddRuntimeCounter("Virtualization", "ConveyorItemMaterializeTraceVisualMismatches", lastConveyorItemMaterializeTraceVisualMismatches);
-        MapObjectTickProfiler.AddRuntimeCounter("Virtualization", "ConveyorItemMaterializeTraceMaxProgressDelta", lastConveyorItemMaterializeTraceMaxProgressDelta);
-        MapObjectTickProfiler.AddRuntimeCounter("Virtualization", "ConveyorItemMaterializeTraceMaxVisualDistance", lastConveyorItemMaterializeTraceMaxVisualDistance);
-        MapObjectTickProfiler.AddRuntimeCounter("Virtualization", "ConveyorItemMaterializeTraceLastSample", lastConveyorItemMaterializeTraceLastSample);
-        MapObjectTickProfiler.AddRuntimeCounter("Virtualization", "ConveyorItemMaterializeCarryLanes", lastConveyorItemMaterializeCarryLanes);
-        MapObjectTickProfiler.AddRuntimeCounter("Virtualization", "ConveyorItemMaterializeCarryAdvanced", lastConveyorItemMaterializeCarryAdvanced);
-        MapObjectTickProfiler.AddRuntimeCounter("Virtualization", "ConveyorItemMaterializeCarryFailed", lastConveyorItemMaterializeCarryFailed);
-        MapObjectTickProfiler.AddRuntimeCounter("Virtualization", "ConveyorItemMaterializeCarryDistance", lastConveyorItemMaterializeCarryDistance);
-        MapObjectTickProfiler.AddRuntimeCounter("Virtualization", "ConveyorItemMaterializeCarryMaxDistance", lastConveyorItemMaterializeCarryMaxDistance);
-        MapObjectTickProfiler.AddRuntimeCounter("Virtualization", "ConveyorItemMaterializeOwnershipRemovedLanes", lastConveyorItemMaterializeOwnershipRemovedLanes);
-        MapObjectTickProfiler.AddRuntimeCounter("Virtualization", "ConveyorItemMaterializeOwnershipRollbackLanes", lastConveyorItemMaterializeOwnershipRollbackLanes);
-        MapObjectTickProfiler.AddRuntimeCounter("Virtualization", "ConveyorItemMaterializeOwnershipFailures", lastConveyorItemMaterializeOwnershipFailures);
-        MapObjectTickProfiler.AddRuntimeCounter("Virtualization", "ConveyorItemMaterializeOwnershipStaleSavedLanes", lastConveyorItemMaterializeOwnershipStaleSavedLanes);
-        MapObjectTickProfiler.AddRuntimeCounter("Virtualization", "ConveyorItemMaterializeImmediateWakeCalls", lastConveyorItemMaterializeImmediateWakeCalls);
-        MapObjectTickProfiler.AddRuntimeCounter("Virtualization", "ConveyorItemMaterializeImmediateWakeBlocks", lastConveyorItemMaterializeImmediateWakeBlocks);
-        MapObjectTickProfiler.AddRuntimeCounter("Virtualization", "ConveyorItemResidencySkippedNotLoaded", lastConveyorItemResidencySkippedNotLoaded);
-        MapObjectTickProfiler.AddRuntimeCounter("Virtualization", "ConveyorItemResidencySkippedNotConveyor", lastConveyorItemResidencySkippedNotConveyor);
-        MapObjectTickProfiler.AddRuntimeCounter("Virtualization", "ConveyorItemResidencySkippedEmpty", lastConveyorItemResidencySkippedEmpty);
-        MapObjectTickProfiler.AddRuntimeCounter("Virtualization", "BackgroundConveyorDirtyCoordinates", backgroundConveyorDirtyCoordinates.Count);
-        MapObjectTickProfiler.AddRuntimeCounter("Virtualization", "BackgroundConveyorWakeCoordinates", backgroundConveyorWakeCoordinates.Count);
         MapObjectTickProfiler.AddRuntimeCounter("Virtualization", "VirtualBeltRegistered", virtualConveyorBeltRenderer != null ? virtualConveyorBeltRenderer.RegisteredBeltCount : 0);
         MapObjectTickProfiler.AddRuntimeCounter("Virtualization", "VirtualBeltCorners", virtualConveyorBeltRenderer != null ? virtualConveyorBeltRenderer.RegisteredCornerBeltCount : 0);
         MapObjectTickProfiler.AddRuntimeCounter("Virtualization", "VirtualBeltSourceHidden", virtualConveyorBeltRenderer != null ? virtualConveyorBeltRenderer.HiddenSourceViewBeltCount : 0);
@@ -4625,16 +4566,14 @@ public partial class TerrainGenerator : MonoBehaviour
         MapObjectTickProfiler.AddRuntimeCounter("VirtualBelt", "SourceViewHiddenBelts", virtualConveyorBeltRenderer != null ? virtualConveyorBeltRenderer.HiddenSourceViewBeltCount : 0);
         MapObjectTickProfiler.AddRuntimeCounter("VirtualBelt", "SourceViewHiddenObjects", virtualConveyorBeltRenderer != null ? virtualConveyorBeltRenderer.HiddenSourceViewObjectCount : 0);
         MapObjectTickProfiler.AddRuntimeCounter("VirtualBelt", "FullySuppressedBelts", virtualConveyorBeltRenderer != null ? virtualConveyorBeltRenderer.FullySuppressedBeltCount : 0);
-        ResetConveyorUnloadSaveCounters();
+        ResetConveyorStateSaveCounters();
     }
 
-    private void ResetConveyorUnloadSaveCounters()
+    private void ResetConveyorStateSaveCounters()
     {
-        conveyorUnloadSaveConveyorBlocks = 0;
-        conveyorUnloadSaveConveyorItems = 0;
-        conveyorUnloadSaveSkippedVirtualizedBlocks = 0;
-        conveyorUnloadSaveSkippedVirtualizedItems = 0;
-        conveyorUnloadSaveClearedNonConveyorBlocks = 0;
+        conveyorStateSaveConveyorBlocks = 0;
+        conveyorStateSaveConveyorItems = 0;
+        conveyorStateSaveClearedNonConveyorBlocks = 0;
     }
 
     private void CountRuntimeComponents(

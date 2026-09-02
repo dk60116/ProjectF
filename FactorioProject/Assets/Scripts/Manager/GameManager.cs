@@ -257,11 +257,7 @@ public class GameManager : MonoBehaviour
         }
 
         InstallationPlacementActive = isActive;
-        if (!InstallationPlacementActive && !MapEditActive)
-        {
-            WorkableObject.SetInstallOrEditWorkableSelectionRangeVisualsRequested(false);
-        }
-
+        HandlePlayerInteractionModeChanged();
         WorkableObject.RefreshAllRangeVisuals();
     }
 
@@ -273,12 +269,19 @@ public class GameManager : MonoBehaviour
         }
 
         MapEditActive = isActive;
-        if (!InstallationPlacementActive && !MapEditActive)
+        HandlePlayerInteractionModeChanged();
+        WorkableObject.RefreshAllRangeVisuals();
+    }
+
+    private void HandlePlayerInteractionModeChanged()
+    {
+        if (PlayerInteractionLocked)
         {
-            WorkableObject.SetInstallOrEditWorkableSelectionRangeVisualsRequested(false);
+            return;
         }
 
-        WorkableObject.RefreshAllRangeVisuals();
+        WorkableObject.SetInstallOrEditWorkableSelectionRangeVisualsRequested(false);
+        RobotArm.WakeAllHeldItemTransfers();
     }
 
     public void SetShowConveyorSlotDots(bool show)

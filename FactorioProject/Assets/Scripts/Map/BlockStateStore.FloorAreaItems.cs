@@ -4,6 +4,15 @@ using UnityEngine;
 
 public partial class BlockStateStore
 {
+    private static readonly Vector2Int[] SavedFloorAreaWakeOffsets =
+    {
+        Vector2Int.zero,
+        Vector2Int.up,
+        Vector2Int.right,
+        Vector2Int.down,
+        Vector2Int.left
+    };
+
     private sealed class SavedFloorAreaInventory
     {
         public readonly List<int> floorItems = new List<int>();
@@ -383,11 +392,9 @@ public partial class BlockStateStore
 
     private static void NotifySavedFloorAreaStackChanged(Vector2Int coordinate)
     {
-        TerrainGenerator.ResolveActive()?.WakeSavedInstallationsNearCoordinate(coordinate);
-
-        for (int i = 0; i < SavedConveyorExternalWakeOffsets.Length; i++)
+        for (int i = 0; i < SavedFloorAreaWakeOffsets.Length; i++)
         {
-            Vector2Int wakeCoordinate = coordinate + SavedConveyorExternalWakeOffsets[i];
+            Vector2Int wakeCoordinate = coordinate + SavedFloorAreaWakeOffsets[i];
             RobotArm.WakeAroundCoordinate(wakeCoordinate);
             InputOutputModule.WakeRuntimeModulesAtCoordinate(wakeCoordinate);
         }

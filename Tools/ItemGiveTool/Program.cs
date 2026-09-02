@@ -60,6 +60,7 @@ internal sealed class EditorToolForm : Form
     private readonly CheckBox showRailLineCheckBox = new CheckBox();
     private readonly CheckBox showDirectionsCheckBox = new CheckBox();
     private readonly CheckBox freeCameraCheckBox = new CheckBox();
+    private readonly CheckBox freeTrainCheckBox = new CheckBox();
     private readonly CheckBox freeElectroEnergyCheckBox = new CheckBox();
     private readonly CheckBox freeBucketCheckBox = new CheckBox();
     private readonly CheckBox showAnimalHerdAreasCheckBox = new CheckBox();
@@ -527,6 +528,13 @@ internal sealed class EditorToolForm : Form
                 freeCameraCheckBox.Checked,
                 "FreeCamera");
 
+        StyleDebugCheckBox(freeTrainCheckBox, "Free Train");
+        freeTrainCheckBox.CheckedChanged += async (_, _) =>
+            await SendDebugToggleAsync(
+                "freeTrain",
+                freeTrainCheckBox.Checked,
+                "Free Train");
+
         StyleDebugCheckBox(freeElectroEnergyCheckBox, "Free Electro Energy");
         freeElectroEnergyCheckBox.CheckedChanged += async (_, _) =>
             await SendDebugToggleAsync(
@@ -563,6 +571,7 @@ internal sealed class EditorToolForm : Form
         debugTogglePanel.Controls.Add(showRailLineCheckBox);
         debugTogglePanel.Controls.Add(showDirectionsCheckBox);
         debugTogglePanel.Controls.Add(freeCameraCheckBox);
+        debugTogglePanel.Controls.Add(freeTrainCheckBox);
         debugTogglePanel.Controls.Add(freeElectroEnergyCheckBox);
         debugTogglePanel.Controls.Add(freeBucketCheckBox);
         debugTogglePanel.Controls.Add(showAnimalHerdAreasCheckBox);
@@ -1281,6 +1290,11 @@ internal sealed class EditorToolForm : Form
             ApplyRuntimeCheckBoxState(freeCameraCheckBox, freeCamera);
         }
 
+        if (TryReadProtocolBool(response, "freeTrain", out bool freeTrain))
+        {
+            ApplyRuntimeCheckBoxState(freeTrainCheckBox, freeTrain);
+        }
+
         if (TryReadProtocolBool(response, "freeElectroEnergy", out bool freeElectroEnergy))
         {
             ApplyRuntimeCheckBoxState(freeElectroEnergyCheckBox, freeElectroEnergy);
@@ -1689,6 +1703,7 @@ internal sealed class EditorToolForm : Form
         showRailLineCheckBox.Enabled = !busy;
         showDirectionsCheckBox.Enabled = !busy;
         freeCameraCheckBox.Enabled = !busy;
+        freeTrainCheckBox.Enabled = !busy;
         freeElectroEnergyCheckBox.Enabled = !busy;
         freeBucketCheckBox.Enabled = !busy;
         showAnimalHerdAreasCheckBox.Enabled = !busy;

@@ -36,8 +36,8 @@ MonoBehaviour:
   fluidOutputLitersPerSecond: 1
   bucketFillDurationSeconds: 10
   undergroundPipeMaxDistance: 5
-  energyType: 5
-  energyAmount: 100
+  energyType: 0
+  energyAmount: 0
   eatRewardItem: {fileID: 0}
   eatRewardChancePercent: 0
   isSeed: 1

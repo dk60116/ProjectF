@@ -8,6 +8,8 @@ public class ItemFilterSlot : ItemSlot
 {
     [SerializeField]
     private Toggle toggle;
+    [SerializeField]
+    private Image canNotImage;
     private UnityAction<bool> currentToggleCallback;
 
     public void SetFilterItem(int itemId)
@@ -17,9 +19,19 @@ public class ItemFilterSlot : ItemSlot
 
     public void SetFilterItem(int itemId, bool isChecked, UnityAction<bool> onToggleChanged)
     {
+        SetFilterItem(itemId, isChecked, true, onToggleChanged);
+    }
+
+    public void SetFilterItem(
+        int itemId,
+        bool isChecked,
+        bool isInteractable,
+        UnityAction<bool> onToggleChanged)
+    {
         SetItemDisplay(itemId, 0, 0, true);
         HideCountLabel();
-        BindToggle(isChecked, onToggleChanged);
+        SetCanNotVisible(!isInteractable);
+        BindToggle(isChecked, isInteractable, onToggleChanged);
     }
 
     public void SetCustomFilterItem(
@@ -30,13 +42,15 @@ public class ItemFilterSlot : ItemSlot
     {
         SetCustomDisplay(displayIcon, displayName, string.Empty);
         HideCountLabel();
-        BindToggle(isChecked, onToggleChanged);
+        SetCanNotVisible(false);
+        BindToggle(isChecked, true, onToggleChanged);
     }
 
     public void ClearFilterItem()
     {
         Clear();
         HideCountLabel();
+        SetCanNotVisible(false);
         UnbindToggle();
     }
 
@@ -54,7 +68,18 @@ public class ItemFilterSlot : ItemSlot
         }
     }
 
-    private void BindToggle(bool isChecked, UnityAction<bool> onToggleChanged)
+    private void SetCanNotVisible(bool isVisible)
+    {
+        if (canNotImage != null && canNotImage.gameObject.activeSelf != isVisible)
+        {
+            canNotImage.gameObject.SetActive(isVisible);
+        }
+    }
+
+    private void BindToggle(
+        bool isChecked,
+        bool isInteractable,
+        UnityAction<bool> onToggleChanged)
     {
         if (toggle == null)
         {
@@ -63,7 +88,8 @@ public class ItemFilterSlot : ItemSlot
 
         UnbindToggle();
         toggle.SetIsOnWithoutNotify(isChecked);
-        currentToggleCallback = onToggleChanged;
+        toggle.interactable = isInteractable;
+        currentToggleCallback = isInteractable ? onToggleChanged : null;
         if (currentToggleCallback != null)
         {
             toggle.onValueChanged.AddListener(currentToggleCallback);
@@ -84,5 +110,6 @@ public class ItemFilterSlot : ItemSlot
         }
 
         toggle.SetIsOnWithoutNotify(false);
+        toggle.interactable = true;
     }
 }

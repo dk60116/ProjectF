@@ -286,10 +286,6 @@ public partial class TerrainGenerator : MonoBehaviour
             state.growthWaterLiters = 0f;
             state.growthFertilizerAmount = 0f;
             state.growthElapsedSeconds = 0f;
-            state.hasBackgroundGrowthTimestamp = true;
-            state.backgroundGrowthDaylightSeconds = WorldTimeService.Active != null
-                ? WorldTimeService.Active.PlantGrowthDaylightSeconds
-                : 0d;
         }
 
         plantedSeedItemIds[coordinate] = seedDefinition.id;

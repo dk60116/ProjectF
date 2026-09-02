@@ -22,6 +22,16 @@ MonoBehaviour:
   canRiding: 1
   riderHeight: 0.5
   strength: 35
+  defecationItem: {fileID: 11400000, guid: a2d64ede116b3754d97a23cc6bf0cfa1, type: 2}
+  needsSettings:
+    maxHunger: 120
+    hungerDrainPerSecond: 0.05
+    hungryThresholdRatio: 0.5
+    foodEnergyPerItem: 25
+    foodSearchRadius: 8
+    defecationIntervalSeconds: 360
+    defecationAmount: 1
+    unattendedDroppingLifetimeSeconds: 300
   dropItems:
   - itemDefinition: {fileID: 11400000, guid: e18b544fca5809747ba18ab854492b79, type: 2}
     amount: 1

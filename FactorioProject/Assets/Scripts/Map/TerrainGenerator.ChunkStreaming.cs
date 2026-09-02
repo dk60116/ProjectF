@@ -9,29 +9,14 @@ public partial class TerrainGenerator : MonoBehaviour
         EnsureChunkStreamingScheduler().QueueGeneration(chunkCoordinate, normalizedChunkSize);
     }
 
-    private void QueueChunkUnload(Vector2Int chunkCoordinate)
-    {
-        EnsureChunkStreamingScheduler().QueueUnload(chunkCoordinate);
-    }
-
     private void EnsureChunkGenerationProcessing()
     {
         EnsureChunkStreamingScheduler().EnsureGenerationProcessing();
     }
 
-    private void EnsureChunkUnloadProcessing()
-    {
-        EnsureChunkStreamingScheduler().EnsureUnloadProcessing();
-    }
-
     private void ProcessQueuedChunkGenerationsImmediate()
     {
         EnsureChunkStreamingScheduler().ProcessQueuedGenerationsImmediate();
-    }
-
-    private void ProcessQueuedChunkUnloadsImmediate()
-    {
-        EnsureChunkStreamingScheduler().ProcessQueuedUnloadsImmediate();
     }
 
     private void ClearPendingChunkGenerations()
@@ -60,28 +45,16 @@ public partial class TerrainGenerator : MonoBehaviour
             this,
             coordinate => loadedChunks.ContainsKey(coordinate),
             ShouldGenerateChunk,
-            ShouldUnloadChunk,
             GenerateChunk,
             GenerateChunkRoutine,
-            UnloadChunk,
-            UnloadChunkRoutine,
-            () => chunkUnloadsPerFrame,
-            GenerateChunkCoroutineStepMarker,
-            UnloadChunkCoroutineStepMarker);
+            GenerateChunkCoroutineStepMarker);
 
         return chunkStreamingScheduler;
     }
 
     private bool ShouldGenerateChunk(Vector2Int chunkCoordinate)
     {
-        return DoesChunkIntersectMapBounds(chunkCoordinate, Mathf.Max(4, chunkSize))
-               && IsChunkWithinRadius(chunkCoordinate, currentCenterChunk, GetEffectiveLoadRadius());
-    }
-
-    private bool ShouldUnloadChunk(Vector2Int chunkCoordinate)
-    {
-        return !DoesChunkIntersectMapBounds(chunkCoordinate, Mathf.Max(4, chunkSize))
-               || !IsChunkWithinRadius(chunkCoordinate, currentCenterChunk, GetEffectiveUnloadRadius());
+        return DoesChunkIntersectMapBounds(chunkCoordinate, Mathf.Max(4, chunkSize));
     }
 
     private int GetEffectiveLoadRadius()
@@ -96,21 +69,6 @@ public partial class TerrainGenerator : MonoBehaviour
 #endif
 
         return normalizedLoadRadius;
-    }
-
-    private int GetEffectiveUnloadRadius()
-    {
-        int effectiveLoadRadius = GetEffectiveLoadRadius();
-        int normalizedUnloadRadius = Mathf.Max(effectiveLoadRadius + 1, unloadRadius);
-
-#if UNITY_EDITOR
-        if (!Application.isPlaying && expandEditorPreviewRange)
-        {
-            normalizedUnloadRadius = Mathf.Max(normalizedUnloadRadius, Mathf.Max(1, unloadRadius) * 8);
-        }
-#endif
-
-        return normalizedUnloadRadius;
     }
 
     private static bool IsChunkWithinRadius(Vector2Int chunkCoordinate, Vector2Int centerChunk, int radius)

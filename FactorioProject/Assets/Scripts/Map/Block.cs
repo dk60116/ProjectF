@@ -148,6 +148,7 @@ public class Block : BaseObject
     private readonly List<Block> conveyorTouchedBlocks = new List<Block>(4);
     private readonly HashSet<Block> conveyorTouchedBlockSet = new HashSet<Block>();
     private readonly Dictionary<object, bool> inputAreaCenterVisibilityRequests = new Dictionary<object, bool>();
+    private readonly List<InstallationObject> belt2FBridgeCenterInstallationBuffer = new List<InstallationObject>(4);
     private MaterialPropertyBlock conveyorSlotDotPropertyBlock;
     private static Material conveyorSlotDotMaterial;
     private static Mesh beltDirectionArrowMesh;
@@ -1590,6 +1591,13 @@ public class Block : BaseObject
             return true;
         }
 
+        if (mapObject is ConvayorBelt2F mappedBelt2F
+            && TryGetOverlappingBelt2FBridgeCenterPassthrough(mappedBelt2F, out ConveyorBelt passthroughBelt))
+        {
+            conveyorBelt = passthroughBelt;
+            return true;
+        }
+
         if (mapObject is ConveyorBelt mappedConveyor && IsActiveRuntimeConveyor(mappedConveyor))
         {
             conveyorBelt = mappedConveyor;
@@ -1640,11 +1648,57 @@ public class Block : BaseObject
     private bool TryGetBelt2FBridgeCenterBelt(out ConvayorBelt2F belt2F)
     {
         belt2F = null;
-        return mapObject is ConveyorBelt mappedConveyor
-               && !(mappedConveyor is ConvayorBelt2F)
-               && ConvayorBelt2F.TryFindCoveringBelt(coordinate, out belt2F)
-               && IsActiveRuntimeConveyor(belt2F)
-               && belt2F.IsBridgeCenterCoordinate(coordinate);
+        if (mapObject is ConveyorBelt mappedConveyor
+            && !(mappedConveyor is ConvayorBelt2F)
+            && ConvayorBelt2F.TryFindCoveringBelt(coordinate, out belt2F)
+            && IsActiveRuntimeConveyor(belt2F)
+            && belt2F.IsBridgeCenterCoordinate(coordinate))
+        {
+            return true;
+        }
+
+        if (mapObject is ConvayorBelt2F mappedBelt2F
+            && TryGetOverlappingBelt2FBridgeCenterPassthrough(mappedBelt2F, out _))
+        {
+            belt2F = mappedBelt2F;
+            return true;
+        }
+
+        belt2F = null;
+        return false;
+    }
+
+    private bool TryGetOverlappingBelt2FBridgeCenterPassthrough(
+        ConvayorBelt2F belt2F,
+        out ConveyorBelt passthroughBelt)
+    {
+        passthroughBelt = null;
+        if (belt2F == null
+            || !belt2F.IsBridgeCenterCoordinate(coordinate))
+        {
+            return false;
+        }
+
+        belt2FBridgeCenterInstallationBuffer.Clear();
+        if (!InstallationObject.CollectActiveInstallationsAtRuntimeGridCoordinate(
+                coordinate,
+                belt2FBridgeCenterInstallationBuffer))
+        {
+            return false;
+        }
+
+        for (int i = 0; i < belt2FBridgeCenterInstallationBuffer.Count; i++)
+        {
+            if (belt2FBridgeCenterInstallationBuffer[i] is ConveyorBelt candidate
+                && !(candidate is ConvayorBelt2F)
+                && IsActiveRuntimeConveyor(candidate))
+            {
+                passthroughBelt = candidate;
+                return true;
+            }
+        }
+
+        return false;
     }
 
     private bool IsBelt2FBridgeCenterFor(ConvayorBelt2F belt2F)
@@ -2669,7 +2723,7 @@ public class Block : BaseObject
             for (int objectIndex = 0; objectIndex < stack.Count; objectIndex++)
             {
                 PortableObject portableObject = stack[objectIndex];
-                if (portableObject != null)
+                if (ShouldPersistFloorObject(portableObject))
                 {
                     floorStackItemCount++;
                 }
@@ -2687,7 +2741,7 @@ public class Block : BaseObject
                 int stackItemCount = 0;
                 for (int objectIndex = 0; objectIndex < stack.Count; objectIndex++)
                 {
-                    if (stack[objectIndex] != null)
+                    if (ShouldPersistFloorObject(stack[objectIndex]))
                     {
                         stackItemCount++;
                     }
@@ -2697,7 +2751,7 @@ public class Block : BaseObject
                 for (int objectIndex = 0; objectIndex < stack.Count; objectIndex++)
                 {
                     PortableObject portableObject = stack[objectIndex];
-                    if (portableObject != null)
+                    if (ShouldPersistFloorObject(portableObject))
                     {
                         itemIds.Add(portableObject.ItemId);
                     }
@@ -2751,6 +2805,14 @@ public class Block : BaseObject
         }
 
         return itemIds;
+    }
+
+    private static bool ShouldPersistFloorObject(PortableObject portableObject)
+    {
+        return portableObject != null
+               && (!portableObject.TryGetComponent(
+                       out AnimalTemporaryDropping temporaryDropping)
+                   || !temporaryDropping.IsTemporary);
     }
 
     public List<int> CaptureFloorObjectStateWithDroppedConveyorObjects()
@@ -3926,23 +3988,13 @@ public class Block : BaseObject
         EnsureFloorObjectsInitialized();
         CleanupConveyorStack();
         return IsValidConveyorLaneIndex(laneIndex)
-               && !HasConveyorItemAtLane(laneIndex)
-               && !HasSavedConveyorItemAtLane(laneIndex);
-    }
-
-    private bool HasSavedConveyorItemAtLane(int laneIndex)
-    {
-        return laneIndex >= 0
-               && TryResolveOwningTerrainGenerator(out TerrainGenerator terrainGenerator)
-               && terrainGenerator != null
-               && terrainGenerator.HasSavedConveyorItemAtLane(coordinate, laneIndex);
+               && !HasConveyorItemAtLane(laneIndex);
     }
 
     private static bool IsConveyorDestinationLaneOccupied(Block destinationBlock, int destinationLaneIndex)
     {
         return destinationBlock != null
-               && (destinationBlock.HasConveyorItemAtLane(destinationLaneIndex)
-                   || destinationBlock.HasSavedConveyorItemAtLane(destinationLaneIndex));
+               && destinationBlock.HasConveyorItemAtLane(destinationLaneIndex);
     }
 
     private static bool HasConveyorDestinationBlockerForPlanFailure(Block destinationBlock, int destinationLaneIndex)
@@ -4163,7 +4215,6 @@ public class Block : BaseObject
             || !IsValidConveyorLaneIndex(sourceLaneIndex)
             || !destinationBlock.IsValidConveyorLaneIndex(destinationLaneIndex)
             || IsConveyorDestinationLaneOccupied(destinationBlock, destinationLaneIndex)
-            || ShouldRouteConveyorDestinationToBackground(destinationBlock)
             || !HasConveyorItemAtLane(sourceLaneIndex)
             || GetConveyorPortableObjectAtLane(sourceLaneIndex) != null
             || WasConveyorItemMovedThisFrame(sourceLaneIndex)
@@ -4226,7 +4277,6 @@ public class Block : BaseObject
             && IsValidConveyorLaneIndex(sourceLaneIndex)
             && destinationBlock.IsValidConveyorLaneIndex(destinationLaneIndex)
             && !IsConveyorDestinationLaneOccupied(destinationBlock, destinationLaneIndex)
-            && !ShouldRouteConveyorDestinationToBackground(destinationBlock)
             && HasStraightConveyorDataItemAtLane(sourceLaneIndex)
             && !WasConveyorItemMovedThisFrame(sourceLaneIndex)
             && IsConveyorItemReadyToMoveAtLane(sourceLaneIndex);
@@ -8534,7 +8584,6 @@ public class Block : BaseObject
             && !WasConveyorItemMovedThisFrame(laneIndex)
             && IsConveyorItemReadyToMoveAtLane(laneIndex)
             && (CanMoveConveyorLaneDirect(laneIndex)
-                || CanMoveConveyorLaneToUnloadedSuccessor(laneIndex)
                 || ShouldKeepSoloConveyorLaneAwake(laneIndex));
     }
 
@@ -9853,14 +9902,6 @@ public class Block : BaseObject
             return true;
         }
 
-        if (TryMoveConveyorLaneToUnloadedSuccessor(
-                sourceLaneIndex,
-                out movedDestinationBlock,
-                out movedDestinationLaneIndex))
-        {
-            return true;
-        }
-
         if (TryGetCachedConveyorPlanFailure(sourceLaneIndex, ignoreMoveAttemptThrottle, out float cachedFailureRetryDelay))
         {
             DelayConveyorLaneMoveAttempt(sourceLaneIndex, cachedFailureRetryDelay);
@@ -9936,11 +9977,6 @@ public class Block : BaseObject
         }
 
         if (CanMoveConveyorLaneDirect(sourceLaneIndex))
-        {
-            return true;
-        }
-
-        if (CanMoveConveyorLaneToUnloadedSuccessor(sourceLaneIndex))
         {
             return true;
         }
@@ -10202,90 +10238,7 @@ public class Block : BaseObject
             && destinationBlock.IsValidConveyorLaneIndex(destinationLaneIndex)
             && !(destinationBlock == this && destinationLaneIndex == sourceLaneIndex)
             && !IsConveyorDestinationLaneOccupied(destinationBlock, destinationLaneIndex)
-            && !ShouldRouteConveyorDestinationToBackground(destinationBlock)
             && GetConveyorItemIdAtLane(sourceLaneIndex) >= 0;
-    }
-
-    private bool ShouldRouteConveyorDestinationToBackground(Block destinationBlock)
-    {
-        if (destinationBlock == null || destinationBlock == this)
-        {
-            return false;
-        }
-
-        return TryResolveOwningTerrainGenerator(out TerrainGenerator terrainGenerator)
-               && terrainGenerator != null
-               && terrainGenerator.ShouldRouteLoadedConveyorDestinationToBackground(
-                   destinationBlock.Coordinate,
-                   destinationBlock);
-    }
-
-    private bool CanMoveConveyorLaneToUnloadedSuccessor(int sourceLaneIndex)
-    {
-        if (!TryGetUnloadedConveyorHandoffContext(
-                sourceLaneIndex,
-                out TerrainGenerator terrainGenerator,
-                out Vector2Int flowDirection,
-                out int sourceColumnOrdinal)
-            || terrainGenerator == null)
-        {
-            return false;
-        }
-
-        return terrainGenerator.CanHandoffConveyorItemToVirtualConveyor(
-            coordinate,
-            flowDirection,
-            sourceColumnOrdinal);
-    }
-
-    private bool TryMoveConveyorLaneToUnloadedSuccessor(
-        int sourceLaneIndex,
-        out Block movedDestinationBlock,
-        out int movedDestinationLaneIndex)
-    {
-        movedDestinationBlock = null;
-        movedDestinationLaneIndex = -1;
-
-        if (!TryGetUnloadedConveyorHandoffContext(
-                sourceLaneIndex,
-                out TerrainGenerator terrainGenerator,
-                out Vector2Int flowDirection,
-                out int sourceColumnOrdinal)
-            || terrainGenerator == null)
-        {
-            return false;
-        }
-
-        int itemId = GetConveyorItemIdAtLane(sourceLaneIndex);
-        if (itemId < 0)
-        {
-            return false;
-        }
-
-        ConveyorItemLaneSaveState laneState = new ConveyorItemLaneSaveState
-        {
-            laneIndex = sourceLaneIndex,
-            itemId = itemId,
-            visualWorldPosition = GetConveyorItemVisualWorldPosition(sourceLaneIndex)
-        };
-
-        if (!terrainGenerator.TryHandoffConveyorItemToVirtualConveyor(
-                coordinate,
-                flowDirection,
-                sourceColumnOrdinal,
-                laneState,
-                out _,
-                out movedDestinationLaneIndex))
-        {
-            return false;
-        }
-
-        PortableObject portableObject = GetConveyorPortableObjectAtLane(sourceLaneIndex);
-        ClearConveyorItemAtLane(sourceLaneIndex);
-        ReleaseFloorObject(portableObject);
-        WakeConveyorMoveAttemptsAround();
-        RefreshConveyorActivityRegistration();
-        return true;
     }
 
     private bool TrySetConveyorObjectAtLaneOrSingleLineFallback(int laneIndex, int objectId, out PortableObject targetPortableObject)
@@ -10309,63 +10262,6 @@ public class Block : BaseObject
         return TrySetConveyorObjectAtLane(ConveyorSingleLineFrontLaneIndex, objectId, out targetPortableObject);
     }
 
-    private bool TryGetUnloadedConveyorHandoffContext(
-        int sourceLaneIndex,
-        out TerrainGenerator terrainGenerator,
-        out Vector2Int flowDirection,
-        out int sourceColumnOrdinal)
-    {
-        terrainGenerator = null;
-        flowDirection = Vector2Int.zero;
-        sourceColumnOrdinal = -1;
-
-        if (!IsValidConveyorLaneIndex(sourceLaneIndex)
-            || GetConveyorItemIdAtLane(sourceLaneIndex) < 0
-            || !TryGetConveyorExitLaneColumnOrdinal(sourceLaneIndex, out sourceColumnOrdinal)
-            || !TryGetConveyorFlowDirection(out flowDirection)
-            || flowDirection == Vector2Int.zero
-            || !TryResolveOwningTerrainGenerator(out terrainGenerator)
-            || terrainGenerator == null)
-        {
-            return false;
-        }
-
-        Vector2Int destinationCoordinate = coordinate + flowDirection;
-        return !terrainGenerator.TryGetLoadedBlock(destinationCoordinate, out Block loadedDestinationBlock)
-            || loadedDestinationBlock == null
-            || terrainGenerator.CanUseVirtualConveyorItemHandoffDestination(
-                destinationCoordinate,
-                loadedDestinationBlock);
-    }
-
-    private bool TryGetConveyorExitLaneColumnOrdinal(int sourceLaneIndex, out int columnOrdinal)
-    {
-        columnOrdinal = -1;
-        if (IsCornerConveyor())
-        {
-            if (sourceLaneIndex != ConveyorSingleLineFrontLaneIndex)
-            {
-                return false;
-            }
-
-            columnOrdinal = 0;
-            return true;
-        }
-
-        if (!TryGetConveyorLaneLayout(out int frontLaneIndex, out _))
-        {
-            return false;
-        }
-
-        if (sourceLaneIndex == frontLaneIndex)
-        {
-            columnOrdinal = 0;
-            return true;
-        }
-
-        return false;
-    }
-
     private bool TryMoveConveyorLaneRunToOpenDestination(
         int sourceLaneIndex,
         bool ignoreMoveAttemptThrottle,
@@ -10383,8 +10279,7 @@ public class Block : BaseObject
             || destinationBlock == null
             || !destinationBlock.IsValidConveyorLaneIndex(destinationLaneIndex)
             || (destinationBlock == this && destinationLaneIndex == sourceLaneIndex)
-            || IsConveyorDestinationLaneOccupied(destinationBlock, destinationLaneIndex)
-            || ShouldRouteConveyorDestinationToBackground(destinationBlock))
+            || IsConveyorDestinationLaneOccupied(destinationBlock, destinationLaneIndex))
         {
             return false;
         }
@@ -10651,17 +10546,6 @@ public class Block : BaseObject
                 cacheFailures);
         }
 
-        if (currentBlock.ShouldRouteConveyorDestinationToBackground(destinationBlock))
-        {
-            return CacheConveyorPlanFailureAndReturnFalse(
-                currentBlock,
-                currentLane.LaneIndex,
-                ignoreMoveAttemptThrottle,
-                cacheFailures,
-                destinationBlock,
-                destinationLaneIndex);
-        }
-
         if (destinationLane.Equals(rootLane))
         {
             return !recordPlannedMoves
@@ -10672,17 +10556,6 @@ public class Block : BaseObject
                     destinationBlock,
                     destinationLaneIndex,
                     useCornerMotion);
-        }
-
-        if (destinationBlock.HasSavedConveyorItemAtLane(destinationLaneIndex))
-        {
-            return CacheConveyorPlanFailureAndReturnFalse(
-                currentBlock,
-                currentLane.LaneIndex,
-                ignoreMoveAttemptThrottle,
-                cacheFailures,
-                destinationBlock,
-                destinationLaneIndex);
         }
 
         if (destinationBlock.HasConveyorItemAtLane(destinationLaneIndex))
@@ -11526,7 +11399,7 @@ public class Block : BaseObject
         return previousFlowDirection == -inputDirection;
     }
 
-    private static bool CanReceiveConveyorHandoff(
+    private bool CanReceiveConveyorHandoff(
         Block receiverBlock,
         Vector2Int receiverInputDirection,
         Vector2Int incomingFlowDirection)
@@ -11539,6 +11412,14 @@ public class Block : BaseObject
         if (receiverInputDirection == -incomingFlowDirection)
         {
             return true;
+        }
+
+        // 일반 직선 벨트는 측면 투입을 허용하지만, 2F 벨트와 직각으로 만난 1F 벨트는
+        // 물리적으로 교차할 뿐 연결된 것이 아니다. 같은 방향의 1F/2F 끝점 연결은 위에서 유지한다.
+        if (TryGetRuntimeBelt2F(out _)
+            || (receiverBlock != null && receiverBlock.TryGetRuntimeBelt2F(out _)))
+        {
+            return false;
         }
 
         return receiverBlock != null
@@ -11848,6 +11729,8 @@ public class Block : BaseObject
                 }
 
                 return TryGetConveyorHandoffReceiveLaneIndex(
+                    this,
+                    sourceLaneIndex,
                     destinationBlock,
                     handoffWorldPosition,
                     out destinationLaneIndex);
@@ -11895,6 +11778,8 @@ public class Block : BaseObject
 
             Vector3 handoffWorldPosition = GetConveyorLaneWorldPosition(sourceLaneIndex);
             return TryGetConveyorHandoffReceiveLaneIndex(
+                this,
+                sourceLaneIndex,
                 destinationBlock,
                 handoffWorldPosition,
                 out destinationLaneIndex);
@@ -11951,6 +11836,8 @@ public class Block : BaseObject
 
         Vector3 handoffWorldPosition = GetConveyorLaneWorldPosition(sourceLaneIndex);
         return TryGetConveyorHandoffReceiveLaneIndex(
+            this,
+            sourceLaneIndex,
             destinationBlock,
             handoffWorldPosition,
             out destinationLaneIndex);
@@ -12071,6 +11958,8 @@ public class Block : BaseObject
     }
 
     private static bool TryGetConveyorHandoffReceiveLaneIndex(
+        Block sourceBlock,
+        int sourceLaneIndex,
         Block destinationBlock,
         Vector3 handoffWorldPosition,
         out int destinationLaneIndex)
@@ -12078,18 +11967,27 @@ public class Block : BaseObject
         destinationLaneIndex = -1;
         return destinationBlock != null
             && destinationBlock.TryGetConveyorReceiveLaneIndexForHandoffPosition(
+                sourceBlock,
+                sourceLaneIndex,
                 handoffWorldPosition,
                 out destinationLaneIndex);
     }
 
     private bool TryGetConveyorReceiveLaneIndexForHandoffPosition(
+        Block sourceBlock,
+        int sourceLaneIndex,
         Vector3 handoffWorldPosition,
         out int laneIndex)
     {
         laneIndex = -1;
-        if (TryGetBelt2FBridgeReceiveLaneIndex(handoffWorldPosition, false, out laneIndex))
+        if (TryGetBelt2FBridgeCenterBelt(out ConvayorBelt2F bridgeBelt2F)
+            && sourceBlock != null
+            && sourceBlock.TryGetConveyorItemBelt2F(sourceLaneIndex, out ConvayorBelt2F sourceBelt2F)
+            && ReferenceEquals(sourceBelt2F, bridgeBelt2F))
         {
-            return true;
+            const int bridgeBackLaneIndex = 3;
+            laneIndex = bridgeBackLaneIndex;
+            return IsValidConveyorLaneIndex(bridgeBackLaneIndex);
         }
 
         if (IsCornerConveyor())
@@ -12235,12 +12133,18 @@ public class Block : BaseObject
 
     private Vector3 ResolveConveyorLaneWorldPosition(int laneIndex, Vector3 worldPosition)
     {
-        if (IsBelt2FBridgeLaneIndex(laneIndex)
-            && TryGetBelt2FBridgeCenterBelt(out ConvayorBelt2F centerBelt2F))
+        if (TryGetBelt2FBridgeCenterBelt(out ConvayorBelt2F centerBelt2F))
         {
-            return centerBelt2F.TryGetLaneWorldPosition(coordinate, laneIndex, worldPosition, out Vector3 bridgeLaneWorldPosition)
-                ? bridgeLaneWorldPosition
-                : centerBelt2F.ApplyPathHeight(worldPosition);
+            if (IsBelt2FBridgeLaneIndex(laneIndex))
+            {
+                return centerBelt2F.TryGetLaneWorldPosition(coordinate, laneIndex, worldPosition, out Vector3 bridgeLaneWorldPosition)
+                    ? bridgeLaneWorldPosition
+                    : centerBelt2F.ApplyPathHeight(worldPosition);
+            }
+
+            // 교차 중심의 기본 레인(0/2)은 아래쪽 1F 벨트 소유다.
+            // runtimeConveyorOverride나 커버리지 조회 결과와 무관하게 2F 높이를 적용하지 않는다.
+            return worldPosition;
         }
 
         if (TryGetRuntimeConveyorBelt(out ConveyorBelt conveyorBelt)

@@ -397,6 +397,12 @@ public sealed class PortableItemRenderer : MonoBehaviour
                 continue;
             }
 
+            if (terrainGenerator != null
+                && !terrainGenerator.IsWorldPositionWithinPlayerRenderRange(worldPosition))
+            {
+                continue;
+            }
+
             if (material != null && !material.enableInstancing)
             {
                 material.enableInstancing = true;

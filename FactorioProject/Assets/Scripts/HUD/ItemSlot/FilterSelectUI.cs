@@ -242,7 +242,13 @@ public class FilterSelectUI : MonoBehaviour
                     ? productionMachine.IsProductionTargetSelected(definition.id)
                     : boundTarget == null || boundTarget.IsItemFilterEnabled(definition.id, filterBitCount);
                 int itemId = definition.id;
-                slot.SetFilterItem(itemId, isChecked, isOn => HandleSlotToggleChanged(itemId, isOn));
+                bool isInteractable = !isProductionTargetFilter
+                    || productionMachine.CanSelectProductionTarget(itemId);
+                slot.SetFilterItem(
+                    itemId,
+                    isChecked,
+                    isInteractable,
+                    isOn => HandleSlotToggleChanged(itemId, isOn));
             }
             else
             {
@@ -379,7 +385,7 @@ public class FilterSelectUI : MonoBehaviour
         }
 
         List<int> targetItemIds = new List<int>();
-        productionMachine.TryCollectProductionTargetItemIds(targetItemIds);
+        productionMachine.TryCollectAllProductionTargetItemIds(targetItemIds);
         for (int i = 0; i < targetItemIds.Count; i++)
         {
             if (definitionsById.TryGetValue(targetItemIds[i], out ItemDefinition definition))
@@ -613,7 +619,10 @@ public class FilterSelectUI : MonoBehaviour
 
         if (changedState)
         {
-            productionMachine.SetExclusiveProductionTarget(changedItemId);
+            if (productionMachine.CanSelectProductionTarget(changedItemId))
+            {
+                productionMachine.SetExclusiveProductionTarget(changedItemId);
+            }
         }
         else if (productionMachine.IsProductionTargetSelected(changedItemId))
         {
@@ -636,15 +645,17 @@ public class FilterSelectUI : MonoBehaviour
             return true;
         }
 
-        if (visibleDefinitions.Count > 0 && visibleDefinitions[0] != null)
+        for (int i = 0; i < visibleDefinitions.Count; i++)
         {
-            productionMachine.SetExclusiveProductionTarget(visibleDefinitions[0].id);
-        }
-        else
-        {
-            productionMachine.ClearProductionTargetSelection();
+            ItemDefinition definition = visibleDefinitions[i];
+            if (definition != null && productionMachine.CanSelectProductionTarget(definition.id))
+            {
+                productionMachine.SetExclusiveProductionTarget(definition.id);
+                return true;
+            }
         }
 
+        productionMachine.ClearProductionTargetSelection();
         return true;
     }
 

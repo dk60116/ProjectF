@@ -104,7 +104,7 @@ public partial class TerrainGenerator : MonoBehaviour
 
     private IEnumerator SaveChunkResourceStatesRoutine(Block[] chunkBlocks, bool allowYield)
     {
-        using (UnloadChunkSaveStatesMarker.Auto())
+        using (SaveChunkStatesMarker.Auto())
         {
             if (chunkBlocks == null || chunkBlocks.Length <= 0)
             {
@@ -119,18 +119,19 @@ public partial class TerrainGenerator : MonoBehaviour
         }
 
         int blocksSinceYield = 0;
-        int blockBudget = GetChunkUnloadBlockStepBudget();
+        int blockBudget = GetChunkProcessingStepBudget();
+        resourceStateStore.CaptureLiveUtilityPoleTopologyIfComplete();
         HashSet<InstallationObject> savedInstallations = new HashSet<InstallationObject>();
         HashSet<Vector2Int> chunkCoordinates = new HashSet<Vector2Int>();
         for (int i = 0; i < chunkBlocks.Length; i++)
         {
-            using (UnloadChunkSaveStatesMarker.Auto())
+            using (SaveChunkStatesMarker.Auto())
             {
                 Block block = chunkBlocks[i];
                 if (block != null)
                 {
                     chunkCoordinates.Add(block.Coordinate);
-                    SaveLoadedBlockFloorObjects(block, VirtualObjectResidency.Virtual);
+                    SaveLoadedBlockFloorObjects(block);
 
                     if (block.MapObject is InstallationObject installationObject
                         && !installationObject.ExcludeFromTerrainPersistence
@@ -156,78 +157,6 @@ public partial class TerrainGenerator : MonoBehaviour
         }
 
         SaveActiveRuntimeInstallations(savedInstallations, chunkCoordinates);
-    }
-
-    private List<Vector2Int> CollectChunkInstallationAnchors(Transform chunkTransform)
-    {
-        if (chunkTransform == null)
-        {
-            return new List<Vector2Int>();
-        }
-
-        return CollectChunkInstallationAnchors(GetDirectChunkBlocks(chunkTransform));
-    }
-
-    private List<Vector2Int> CollectChunkInstallationAnchors(Block[] chunkBlocks)
-    {
-        List<Vector2Int> installationAnchors = new List<Vector2Int>();
-        IEnumerator routine = CollectChunkInstallationAnchorsRoutine(chunkBlocks, installationAnchors, false);
-        while (routine.MoveNext())
-        {
-        }
-
-        return installationAnchors;
-    }
-
-    private IEnumerator CollectChunkInstallationAnchorsRoutine(
-        Block[] chunkBlocks,
-        List<Vector2Int> installationAnchors,
-        bool allowYield)
-    {
-        using (UnloadChunkCollectAnchorsMarker.Auto())
-        {
-            if (installationAnchors == null
-                || chunkBlocks == null
-                || chunkBlocks.Length <= 0)
-            {
-                yield break;
-            }
-
-            EnsureResourceStateStore();
-            if (resourceStateStore == null)
-            {
-                yield break;
-            }
-        }
-
-        int blocksSinceYield = 0;
-        int blockBudget = GetChunkUnloadBlockStepBudget();
-        HashSet<Vector2Int> uniqueAnchors = new HashSet<Vector2Int>();
-        HashSet<Vector2Int> chunkCoordinates = new HashSet<Vector2Int>();
-        for (int i = 0; i < chunkBlocks.Length; i++)
-        {
-            using (UnloadChunkCollectAnchorsMarker.Auto())
-            {
-                Block block = chunkBlocks[i];
-                if (block != null)
-                {
-                    chunkCoordinates.Add(block.Coordinate);
-                    if (resourceStateStore.TryGetInstallationAnchorAtCoordinate(block.Coordinate, out Vector2Int anchorCoordinate)
-                        && uniqueAnchors.Add(anchorCoordinate))
-                    {
-                        installationAnchors.Add(anchorCoordinate);
-                    }
-                }
-            }
-
-            if (allowYield && ++blocksSinceYield >= blockBudget)
-            {
-                blocksSinceYield = 0;
-                yield return null;
-            }
-        }
-
-        AddSavedInstallationAnchorsIntersectingCoordinates(chunkCoordinates, uniqueAnchors, installationAnchors);
     }
 
     private void AddSavedInstallationAnchorsIntersectingCoordinates(
@@ -317,7 +246,7 @@ public partial class TerrainGenerator : MonoBehaviour
     private IEnumerator RemoveChunkBlocksFromLookupRoutine(Block[] chunkBlocks, bool allowYield)
     {
         bool removedAnyConveyorBlock = false;
-        using (UnloadChunkRemoveLookupMarker.Auto())
+        using (RemoveChunkLookupMarker.Auto())
         {
             if (chunkBlocks == null || chunkBlocks.Length <= 0)
             {
@@ -326,10 +255,10 @@ public partial class TerrainGenerator : MonoBehaviour
         }
 
         int blocksSinceYield = 0;
-        int blockBudget = GetChunkUnloadBlockStepBudget();
+        int blockBudget = GetChunkProcessingStepBudget();
         for (int i = 0; i < chunkBlocks.Length; i++)
         {
-            using (UnloadChunkRemoveLookupMarker.Auto())
+            using (RemoveChunkLookupMarker.Auto())
             {
                 Block block = chunkBlocks[i];
                 if (block != null)
@@ -340,8 +269,6 @@ public partial class TerrainGenerator : MonoBehaviour
                         loadedBlocks.Remove(block.Coordinate);
                     }
 
-                    virtualizedFloorObjectCoordinates.Remove(block.Coordinate);
-                    virtualizedConveyorItemCoordinates.Remove(block.Coordinate);
                 }
             }
 
@@ -898,15 +825,6 @@ public partial class TerrainGenerator : MonoBehaviour
                 return;
             }
 
-            InstallationBackgroundSimulator backgroundSimulator = ResolveInstallationBackgroundSimulator();
-            if (backgroundSimulator != null)
-            {
-                using (SimulateSavedInstallationMarker.Auto())
-                {
-                    backgroundSimulator.SimulateSavedInstallation(anchorCoordinate, chunkRestoreBackgroundSimulationIterations);
-                }
-            }
-
             if (!resourceStateStore.TryGetInstallationState(anchorCoordinate, out BlockStateStore.InstallationSaveState savedState))
             {
                 return;
@@ -1108,16 +1026,7 @@ public partial class TerrainGenerator : MonoBehaviour
             rotation = savedState.worldRotation;
         }
 
-        bool reusedSleepingView = TryTakeSleepingInstallationView(savedState, out InstallationObject restoredInstallation);
-        if (reusedSleepingView)
-        {
-            restoredInstallation.transform.SetParent(transform, true);
-            restoredInstallation.gameObject.SetActive(false);
-        }
-        else
-        {
-            restoredInstallation = CreateInstallationObject(sourcePrefab, transform);
-        }
+        InstallationObject restoredInstallation = CreateInstallationObject(sourcePrefab, transform);
 
         if (restoredInstallation == null)
         {
@@ -1132,6 +1041,10 @@ public partial class TerrainGenerator : MonoBehaviour
             : placementController != null
                 ? placementController.GetInstalledObjectFootprintCoordinates(savedState.anchorCoordinate, sourcePrefab, restoreQuarterTurns)
                 : new List<Vector2Int> { savedState.anchorCoordinate };
+        RemoveRestoredBelt2FBridgeCenterPassthroughCoordinate(
+            restoredInstallation,
+            savedState.anchorCoordinate,
+            occupiedCoordinates);
         if (restoredInstallation is Railload)
         {
             List<Vector2Int> rebuiltRailOccupiedCoordinates = new List<Vector2Int>(occupiedCoordinates.Count);
@@ -1307,6 +1220,11 @@ public partial class TerrainGenerator : MonoBehaviour
         {
             if (loadedBlocks.TryGetValue(bindingCoordinates[i], out Block block) && block != null)
             {
+                if (ShouldPreserveBelt2FBridgeCenterPassthrough(block, installedObject))
+                {
+                    continue;
+                }
+
                 block.SetMapObject(installedObject);
             }
         }
@@ -1319,6 +1237,41 @@ public partial class TerrainGenerator : MonoBehaviour
 
         RegisterVirtualConveyorBelt(installedObject as ConveyorBelt);
         }
+    }
+
+    private void RemoveRestoredBelt2FBridgeCenterPassthroughCoordinate(
+        InstallationObject restoredInstallation,
+        Vector2Int bridgeCenterCoordinate,
+        List<Vector2Int> occupiedCoordinates)
+    {
+        if (!(restoredInstallation is ConvayorBelt2F)
+            || occupiedCoordinates == null
+            || !occupiedCoordinates.Contains(bridgeCenterCoordinate)
+            || !loadedBlocks.TryGetValue(bridgeCenterCoordinate, out Block bridgeCenterBlock)
+            || bridgeCenterBlock == null
+            || !IsBelt2FBridgeCenterPassthrough(bridgeCenterBlock.MapObject))
+        {
+            return;
+        }
+
+        occupiedCoordinates.Remove(bridgeCenterCoordinate);
+    }
+
+    private static bool ShouldPreserveBelt2FBridgeCenterPassthrough(
+        Block block,
+        MapObject installedObject)
+    {
+        return block != null
+               && installedObject is ConvayorBelt2F belt2F
+               && belt2F.IsBridgeCenterCoordinate(block.Coordinate)
+               && IsBelt2FBridgeCenterPassthrough(block.MapObject);
+    }
+
+    private static bool IsBelt2FBridgeCenterPassthrough(MapObject mapObject)
+    {
+        return mapObject is Pipe
+               || (mapObject is ConveyorBelt conveyorBelt
+                   && !(conveyorBelt is ConvayorBelt2F));
     }
 
     public bool TryGetInstallationStateAtCoordinate(Vector2Int worldCoordinate, out BlockStateStore.InstallationSaveState state)
@@ -1398,48 +1351,6 @@ public partial class TerrainGenerator : MonoBehaviour
         public int seed;
     }
 
-    private Block[] GetLoadedChunkBlockSnapshot(Vector2Int chunkCoordinate, Transform chunkTransform)
-    {
-        int normalizedChunkSize = Mathf.Max(4, chunkSize);
-        int expectedCount = normalizedChunkSize * normalizedChunkSize;
-        List<Block> chunkBlocks = new List<Block>(expectedCount);
-        Vector2Int origin = new Vector2Int(chunkCoordinate.x * normalizedChunkSize, chunkCoordinate.y * normalizedChunkSize);
-
-        for (int localY = 0; localY < normalizedChunkSize; localY++)
-        {
-            for (int localX = 0; localX < normalizedChunkSize; localX++)
-            {
-                Vector2Int coordinate = new Vector2Int(origin.x + localX, origin.y + localY);
-                if (loadedBlocks.TryGetValue(coordinate, out Block block) && block != null)
-                {
-                    chunkBlocks.Add(block);
-                }
-            }
-        }
-
-        if (chunkTransform != null && chunkBlocks.Count < expectedCount)
-        {
-            for (int i = 0; i < chunkTransform.childCount; i++)
-            {
-                Transform child = chunkTransform.GetChild(i);
-                if (child != null
-                    && child.TryGetComponent(out Block directBlock)
-                    && directBlock != null
-                    && !chunkBlocks.Contains(directBlock))
-                {
-                    chunkBlocks.Add(directBlock);
-                }
-            }
-        }
-
-        if (chunkBlocks.Count > 0 || chunkTransform == null)
-        {
-            return chunkBlocks.ToArray();
-        }
-
-        return GetDirectChunkBlocks(chunkTransform);
-    }
-
     private static Block[] GetDirectChunkBlocks(Transform chunkTransform)
     {
         if (chunkTransform == null)
@@ -1458,141 +1369,6 @@ public partial class TerrainGenerator : MonoBehaviour
         }
 
         return chunkBlocks.ToArray();
-    }
-
-    private bool TryTakeSleepingChunkView(Vector2Int chunkCoordinate, int normalizedChunkSize, out Transform chunkTransform)
-    {
-        chunkTransform = null;
-        if (!Application.isPlaying
-            || !sleepingChunkViews.TryGetValue(chunkCoordinate, out Transform cachedChunk)
-            || cachedChunk == null)
-        {
-            sleepingChunkViews.Remove(chunkCoordinate);
-            return false;
-        }
-
-        int expectedCount = Mathf.Max(4, normalizedChunkSize) * Mathf.Max(4, normalizedChunkSize);
-        if (GetDirectChunkBlocks(cachedChunk).Length < expectedCount)
-        {
-            sleepingChunkViews.Remove(chunkCoordinate);
-            DestroyChunkObject(cachedChunk.gameObject);
-            return false;
-        }
-
-        sleepingChunkViews.Remove(chunkCoordinate);
-        chunkTransform = cachedChunk;
-        return true;
-    }
-
-    private IEnumerator WakeSleepingChunkViewRoutine(
-        Vector2Int chunkCoordinate,
-        Transform chunkTransform,
-        Vector2Int origin,
-        bool allowYield)
-    {
-        using (WakeChunkViewMarker.Auto())
-        {
-            if (chunkTransform == null)
-            {
-                yield break;
-            }
-
-            chunkTransform.gameObject.SetActive(false);
-            chunkTransform.SetParent(transform, false);
-            chunkTransform.position = new Vector3(origin.x, 0f, origin.y);
-            chunkTransform.gameObject.name = $"Chunk ({chunkCoordinate.x}, {chunkCoordinate.y})";
-            loadedChunks[chunkCoordinate] = chunkTransform;
-        }
-
-        Block[] chunkBlocks = GetDirectChunkBlocks(chunkTransform);
-        int blocksSinceYield = 0;
-        int blockBudget = GetChunkUnloadBlockStepBudget();
-        for (int i = 0; i < chunkBlocks.Length; i++)
-        {
-            using (WakeChunkViewMarker.Auto())
-            {
-                Block block = chunkBlocks[i];
-                if (block != null)
-                {
-                    loadedBlocks[block.Coordinate] = block;
-                    EnqueueFloorObjectVirtualizationCoordinate(block.Coordinate);
-                    EnqueueConveyorItemResidencyCoordinate(block.Coordinate);
-                }
-            }
-
-            if (allowYield && ++blocksSinceYield >= blockBudget)
-            {
-                blocksSinceYield = 0;
-                yield return null;
-            }
-        }
-
-        if (allowYield)
-        {
-            yield return null;
-        }
-
-        IEnumerator installationRestoreRoutine = RestoreChunkInstallationsRoutine(chunkTransform, allowYield);
-        while (installationRestoreRoutine.MoveNext())
-        {
-            yield return installationRestoreRoutine.Current;
-        }
-
-        IEnumerator blockStateRestoreRoutine = RestoreChunkBlockStatesRoutine(chunkTransform, allowYield);
-        while (blockStateRestoreRoutine.MoveNext())
-        {
-            yield return blockStateRestoreRoutine.Current;
-        }
-
-        using (WakeChunkViewMarker.Auto())
-        {
-            chunkTransform.gameObject.SetActive(true);
-            RefreshChunkBlockRuntimeViews(chunkBlocks);
-            ApplyStoredConveyorItemSaveStates(chunkBlocks);
-        }
-    }
-
-    private IEnumerator SleepChunkBlocksForStreamingRoutine(Block[] chunkBlocks, bool allowYield)
-    {
-        using (UnloadChunkSleepBlocksMarker.Auto())
-        {
-            if (!Application.isPlaying || chunkBlocks == null || chunkBlocks.Length <= 0)
-            {
-                yield break;
-            }
-        }
-
-        int blocksSinceYield = 0;
-        int blockBudget = GetChunkUnloadBlockStepBudget();
-        for (int i = 0; i < chunkBlocks.Length; i++)
-        {
-            using (UnloadChunkSleepBlocksMarker.Auto())
-            {
-                DetachChunkBlockRuntimeView(chunkBlocks[i]);
-            }
-
-            if (allowYield && ++blocksSinceYield >= blockBudget)
-            {
-                blocksSinceYield = 0;
-                yield return null;
-            }
-        }
-
-    }
-
-    private void DetachChunkBlockRuntimeView(Block block)
-    {
-        if (block == null)
-        {
-            return;
-        }
-
-        SetConveyorActive(block, false, false);
-        SetConveyorDataMotionActive(block, false);
-        SetConveyorDotVisualActive(block, false);
-        SetBeltDirectionVisualActive(block, false);
-        SetConveyorItemVisualActive(block, false);
-        conveyorWakeQueued.Remove(block);
     }
 
     private void RefreshChunkBlockRuntimeViews(Block[] chunkBlocks)
@@ -1631,196 +1407,6 @@ public partial class TerrainGenerator : MonoBehaviour
         }
     }
 
-    private void SleepChunkView(Vector2Int chunkCoordinate, Transform chunkTransform)
-    {
-        if (!Application.isPlaying || chunkTransform == null)
-        {
-            return;
-        }
-
-        Transform cacheRoot = EnsureSleepingChunkViewRoot();
-        chunkTransform.SetParent(cacheRoot, true);
-        chunkTransform.gameObject.SetActive(false);
-        sleepingChunkViews[chunkCoordinate] = chunkTransform;
-    }
-
-    private void SleepInstallationView(Vector2Int storageKey, InstallationObject installationObject)
-    {
-        using (UnloadChunkSleepInstallationsMarker.Auto())
-        {
-            if (!Application.isPlaying || installationObject == null)
-            {
-                return;
-            }
-
-            if (sleepingInstallationViews.TryGetValue(storageKey, out InstallationObject existingView)
-                && existingView != null
-                && existingView != installationObject)
-            {
-                ReleaseInstallationObject(existingView);
-            }
-
-            UnregisterVirtualConveyorBelt(installationObject as ConveyorBelt, false);
-            Transform cacheRoot = EnsureSleepingInstallationViewRoot();
-            installationObject.transform.SetParent(cacheRoot, true);
-            installationObject.gameObject.SetActive(false);
-            sleepingInstallationViews[storageKey] = installationObject;
-        }
-    }
-
-    private bool TryTakeSleepingInstallationView(
-        BlockStateStore.InstallationSaveState savedState,
-        out InstallationObject installationObject)
-    {
-        installationObject = null;
-        Vector2Int storageKey = BlockStateStore.GetInstallationStorageKey(savedState);
-        if (!Application.isPlaying
-            || savedState == null
-            || !sleepingInstallationViews.TryGetValue(storageKey, out InstallationObject cachedInstallation)
-            || cachedInstallation == null)
-        {
-            if (savedState != null)
-            {
-                sleepingInstallationViews.Remove(storageKey);
-            }
-
-            return false;
-        }
-
-        ItemDefinition definition = ResolveInstallationDefinition(savedState);
-        int expectedItemId = definition != null ? definition.id : savedState.itemId;
-        if (cachedInstallation.ResolveItemId() != expectedItemId)
-        {
-            sleepingInstallationViews.Remove(storageKey);
-            ReleaseInstallationObject(cachedInstallation, ResolveInstallationSourcePrefab(savedState));
-            return false;
-        }
-
-        if (!SleepingInstallationMatchesSavedVariant(cachedInstallation, savedState, definition))
-        {
-            sleepingInstallationViews.Remove(storageKey);
-            ReleaseInstallationObject(cachedInstallation);
-            return false;
-        }
-
-        sleepingInstallationViews.Remove(storageKey);
-        installationObject = cachedInstallation;
-        return true;
-    }
-
-    private static bool SleepingInstallationMatchesSavedVariant(
-        InstallationObject cachedInstallation,
-        BlockStateStore.InstallationSaveState savedState,
-        ItemDefinition definition)
-    {
-        if (cachedInstallation == null || savedState == null || savedState.conveyorVariantKind < 0)
-        {
-            return true;
-        }
-
-        MapObject sourcePrefab = definition != null ? definition.mapObject : null;
-        if (sourcePrefab is Pipe)
-        {
-            return cachedInstallation is Pipe pipe && pipe.VariantKindId == savedState.conveyorVariantKind;
-        }
-
-        if (sourcePrefab is Wall)
-        {
-            return cachedInstallation is Wall wall && wall.VariantKindId == savedState.conveyorVariantKind;
-        }
-
-        if (sourcePrefab is ConveyorBelt && !ItemDefinitionLookup.IsConveyorBelt2FDefinition(definition))
-        {
-            if (!(cachedInstallation is ConveyorBelt conveyorBelt))
-            {
-                return false;
-            }
-
-            int cachedVariantKind = conveyorBelt.IsReverseCornerVariant
-                ? 2
-                : (conveyorBelt.IsCornerVariant ? 1 : 0);
-            return cachedVariantKind == savedState.conveyorVariantKind;
-        }
-
-        return true;
-    }
-
-    private Transform EnsureSleepingChunkViewRoot()
-    {
-        if (sleepingChunkViewRoot != null)
-        {
-            return sleepingChunkViewRoot;
-        }
-
-        GameObject rootObject = new GameObject("__SleepingChunkViews");
-        if (Application.isPlaying)
-        {
-            rootObject.hideFlags = HideFlags.HideInHierarchy;
-        }
-
-        sleepingChunkViewRoot = rootObject.transform;
-        sleepingChunkViewRoot.SetPositionAndRotation(Vector3.zero, Quaternion.identity);
-        return sleepingChunkViewRoot;
-    }
-
-    private Transform EnsureSleepingInstallationViewRoot()
-    {
-        if (sleepingInstallationViewRoot != null)
-        {
-            return sleepingInstallationViewRoot;
-        }
-
-        GameObject rootObject = new GameObject("__SleepingInstallationViews");
-        if (Application.isPlaying)
-        {
-            rootObject.hideFlags = HideFlags.HideInHierarchy;
-        }
-
-        sleepingInstallationViewRoot = rootObject.transform;
-        sleepingInstallationViewRoot.SetPositionAndRotation(Vector3.zero, Quaternion.identity);
-        return sleepingInstallationViewRoot;
-    }
-
-    private void DestroySleepingViewCaches()
-    {
-        foreach (KeyValuePair<Vector2Int, Transform> pair in sleepingChunkViews)
-        {
-            if (pair.Value != null)
-            {
-                DestroyChunkObject(pair.Value.gameObject);
-            }
-        }
-
-        sleepingChunkViews.Clear();
-
-        foreach (KeyValuePair<Vector2Int, InstallationObject> pair in sleepingInstallationViews)
-        {
-            if (pair.Value != null)
-            {
-                ReleaseInstallationObject(pair.Value);
-            }
-        }
-
-        sleepingInstallationViews.Clear();
-
-        if (sleepingChunkViewRoot != null)
-        {
-            DestroyChunkObject(sleepingChunkViewRoot.gameObject);
-            sleepingChunkViewRoot = null;
-        }
-
-        if (sleepingInstallationViewRoot != null)
-        {
-            DestroyChunkObject(sleepingInstallationViewRoot.gameObject);
-            sleepingInstallationViewRoot = null;
-        }
-    }
-
-    private int GetChunkUnloadBlockStepBudget()
-    {
-        return Mathf.Max(1, chunkGenerationBlocksPerFrame);
-    }
-
     private void ReleaseChunkBlocksToPool(Transform chunkTransform)
     {
         if (!Application.isPlaying || chunkTransform == null)
@@ -1829,6 +1415,11 @@ public partial class TerrainGenerator : MonoBehaviour
         }
 
         ReleaseChunkBlocksToPool(GetDirectChunkBlocks(chunkTransform));
+    }
+
+    private int GetChunkProcessingStepBudget()
+    {
+        return Mathf.Max(1, chunkGenerationBlocksPerFrame);
     }
 
     private void ReleaseChunkBlocksToPool(Block[] chunkBlocks)
@@ -1841,7 +1432,7 @@ public partial class TerrainGenerator : MonoBehaviour
 
     private IEnumerator ReleaseChunkBlocksToPoolRoutine(Block[] chunkBlocks, bool allowYield)
     {
-        using (UnloadChunkReleaseBlocksMarker.Auto())
+        using (ReleaseChunkBlocksMarker.Auto())
         {
             if (!Application.isPlaying || chunkBlocks == null || chunkBlocks.Length <= 0)
             {
@@ -1850,7 +1441,7 @@ public partial class TerrainGenerator : MonoBehaviour
         }
 
         BlockPool resolvedBlockPool;
-        using (UnloadChunkReleaseBlocksMarker.Auto())
+        using (ReleaseChunkBlocksMarker.Auto())
         {
             resolvedBlockPool = ResolveBlockPool();
             if (resolvedBlockPool == null)
@@ -1860,10 +1451,10 @@ public partial class TerrainGenerator : MonoBehaviour
         }
 
         int blocksSinceYield = 0;
-        int blockBudget = GetChunkUnloadBlockStepBudget();
+        int blockBudget = GetChunkProcessingStepBudget();
         for (int i = 0; i < chunkBlocks.Length; i++)
         {
-            using (UnloadChunkReleaseBlocksMarker.Auto())
+            using (ReleaseChunkBlocksMarker.Auto())
             {
                 Block block = chunkBlocks[i];
                 if (block != null)
@@ -1985,10 +1576,10 @@ public partial class TerrainGenerator : MonoBehaviour
         }
 
         int anchorsSinceYield = 0;
-        int anchorBudget = GetChunkUnloadBlockStepBudget();
+        int anchorBudget = GetChunkProcessingStepBudget();
         for (int i = 0; i < liveAnchors.Count; i++)
         {
-            using (UnloadChunkCleanupInstallationsMarker.Auto())
+            using (CleanupInstallationsMarker.Auto())
             {
                 Vector2Int anchorCoordinate = liveAnchors[i];
                 if (!resourceStateStore.TryGetLiveInstallation(anchorCoordinate, out InstallationObject installationObject, out BlockStateStore.InstallationSaveState state))
@@ -2024,20 +1615,12 @@ public partial class TerrainGenerator : MonoBehaviour
                     continue;
                 }
 
-                if (Application.isPlaying)
+                if (resourceStateStore.TryDetachLiveInstallation(
+                        anchorCoordinate,
+                        out InstallationObject detachedInstallation,
+                        out _))
                 {
-                    if (resourceStateStore.TryDetachLiveInstallation(anchorCoordinate, out InstallationObject detachedInstallation, out _))
-                    {
-                        SleepInstallationView(anchorCoordinate, detachedInstallation);
-                    }
-                }
-                else
-                {
-                    resourceStateStore.UnregisterLiveInstallation(anchorCoordinate);
-                    if (installationObject != null)
-                    {
-                        ReleaseInstallationObject(installationObject, ResolveInstallationSourcePrefab(state));
-                    }
+                    ReleaseInstallationObject(detachedInstallation, ResolveInstallationSourcePrefab(state));
                 }
             }
 
@@ -2082,22 +1665,6 @@ public partial class TerrainGenerator : MonoBehaviour
         }
 
         return null;
-    }
-
-    private InstallationBackgroundSimulator ResolveInstallationBackgroundSimulator()
-    {
-        if (installationBackgroundSimulator != null)
-        {
-            return installationBackgroundSimulator;
-        }
-
-        installationBackgroundSimulator = GetComponent<InstallationBackgroundSimulator>();
-        if (installationBackgroundSimulator == null)
-        {
-            installationBackgroundSimulator = gameObject.AddComponent<InstallationBackgroundSimulator>();
-        }
-
-        return installationBackgroundSimulator;
     }
 
     private BlockPool ResolveBlockPool()

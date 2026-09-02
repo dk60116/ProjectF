@@ -8,7 +8,8 @@ public enum AnimalAIState
     Drink,
     Rest,
     LookAround,
-    Flee
+    Flee,
+    Eat
 }
 
 [DisallowMultipleComponent]
@@ -161,6 +162,8 @@ public sealed class AnimalAIController : MonoBehaviour
     private int herdReturnSuppressionCount;
     private Vector3 saddledFreeRoamCenter;
     private bool saddledFreeRoamCenterInitialized;
+    private Vector2Int foodTargetCoordinate;
+    private float foodSearchCooldown;
 
     private static bool obstacleLayerMaskInitialized;
     private static int cachedObstacleLayerMask = Physics.AllLayers;
@@ -322,6 +325,8 @@ public sealed class AnimalAIController : MonoBehaviour
         waitingForStandUp = false;
         hasFleeThreat = false;
         postAggroHealthRecoveryDelayRemaining = -1f;
+        foodSearchCooldown = 0f;
+        foodTargetCoordinate = default;
         herdReturnRetryCooldown = 0f;
         herdReturnTargetActive = false;
         preferReachableFallbackTarget = false;
@@ -786,6 +791,11 @@ public sealed class AnimalAIController : MonoBehaviour
         return true;
     }
 
+    public void TickNeeds(float deltaTime)
+    {
+        animal?.TickNeeds(deltaTime);
+    }
+
     private void ResetMountedMovement()
     {
         mountedCurrentSpeed = 0f;
@@ -1211,16 +1221,17 @@ public sealed class AnimalAIController : MonoBehaviour
         entry.herdId = HerdId;
         entry.herdCenter = HerdAreaCenter;
         entry.herdRadius = HerdAreaRadius;
-        bool hasTransientFleeState = currentState == AnimalAIState.Flee;
-        entry.behaviorState = hasTransientFleeState
+        bool hasTransientState = currentState == AnimalAIState.Flee
+                                 || currentState == AnimalAIState.Eat;
+        entry.behaviorState = hasTransientState
             ? (int)AnimalAIState.Idle
             : (int)currentState;
-        entry.behaviorTimeRemaining = hasTransientFleeState
+        entry.behaviorTimeRemaining = hasTransientState
             ? 0f
             : Mathf.Max(0f, stateTimeRemaining);
-        entry.targetPosition = hasTransientFleeState ? SimulationPosition : targetPosition;
-        entry.hasTarget = !hasTransientFleeState && hasTarget;
-        entry.movingToActivity = !hasTransientFleeState && movingToActivity;
+        entry.targetPosition = hasTransientState ? SimulationPosition : targetPosition;
+        entry.hasTarget = !hasTransientState && hasTarget;
+        entry.movingToActivity = !hasTransientState && movingToActivity;
         entry.randomState = unchecked((int)randomState);
     }
 
@@ -1237,6 +1248,7 @@ public sealed class AnimalAIController : MonoBehaviour
 
         navigationRepathCooldown = Mathf.Max(0f, navigationRepathCooldown - deltaTime);
         herdReturnRetryCooldown = Mathf.Max(0f, herdReturnRetryCooldown - deltaTime);
+        foodSearchCooldown = Mathf.Max(0f, foodSearchCooldown - deltaTime);
         if (currentState == AnimalAIState.Rest && !IsNightTime())
         {
             stateTimeRemaining = 0f;
@@ -1250,6 +1262,13 @@ public sealed class AnimalAIController : MonoBehaviour
             }
 
             TickFlee(deltaTime, useLiveCollision);
+            return;
+        }
+
+        if (TryTickFeeding(deltaTime, useLiveCollision, out bool feedingMoved))
+        {
+            RecoverHealthWhenCalm(elapsedTime);
+            ApplyAnimation(feedingMoved ? GetEffectiveMoveSpeed() : 0f);
             return;
         }
 
@@ -1287,7 +1306,117 @@ public sealed class AnimalAIController : MonoBehaviour
             stateTimeRemaining -= deltaTime;
         }
 
+
+        if (!moved)
+        {
+            TryDefecateWhileIdle();
+        }
+
         ApplyAnimation(moved ? GetEffectiveMoveSpeed() : 0f);
+    }
+
+    private bool TryTickFeeding(
+        float deltaTime,
+        bool requireLoadedGround,
+        out bool moved)
+    {
+        moved = false;
+        if (animal == null
+            || !IsInteracted
+            || !animal.IsHungry
+            || currentState == AnimalAIState.Rest
+            || waitingForStandUp)
+        {
+            if (currentState == AnimalAIState.Eat)
+            {
+                ResetToIdleBehavior();
+            }
+
+            return false;
+        }
+
+        TerrainGenerator terrain = TerrainGenerator.Active;
+        if (terrain == null)
+        {
+            return false;
+        }
+
+        if (currentState != AnimalAIState.Eat)
+        {
+            if (foodSearchCooldown > 0f
+                || !terrain.TryFindNearestDroppedAnimalFood(
+                    transform.position,
+                    definition != null
+                        ? definition.NeedsSettings.FoodSearchRadius
+                        : AnimalNeedsSettings.DefaultFoodSearchRadius,
+                    out foodTargetCoordinate,
+                    out targetPosition))
+            {
+                foodSearchCooldown = 1f;
+                return false;
+            }
+
+            currentState = AnimalAIState.Eat;
+            stateTimeRemaining = 0f;
+            hasTarget = true;
+            movingToActivity = true;
+            ResetNavigation();
+        }
+
+        if (hasTarget)
+        {
+            moved = MoveTowardTarget(deltaTime, requireLoadedGround);
+            if (hasTarget)
+            {
+                return true;
+            }
+        }
+
+        bool consumed = terrain.TryConsumeDroppedAnimalFood(
+            foodTargetCoordinate,
+            out ItemDefinition consumedFood)
+            && animal.ConsumeDroppedFood(consumedFood);
+        ResetToIdleBehavior();
+        foodSearchCooldown = consumed ? 0f : 1f;
+        return true;
+    }
+
+    private void TryDefecateWhileIdle()
+    {
+        if (animal == null
+            || definition == null
+            || !animal.IsDefecationDue
+            || currentState != AnimalAIState.Idle
+            || hasTarget
+            || movingToActivity
+            || waitingForStandUp
+            || IsExternallyControlled)
+        {
+            return;
+        }
+
+        ItemDefinition dropping = definition.DefecationItem;
+        if (!ItemDefinition.IsFertilizerEnergyItemDefinition(dropping))
+        {
+            return;
+        }
+
+        TerrainGenerator terrain = TerrainGenerator.Active;
+        int amount = definition.NeedsSettings.DefecationAmount;
+        if (terrain == null
+            || terrain.DropAnimalDefecation(
+                transform.position,
+                dropping.id,
+                amount,
+                IsInteracted,
+                definition.NeedsSettings.UnattendedDroppingLifetimeSeconds)
+            <= 0)
+        {
+            return;
+        }
+
+        animal.CompleteDefecation(Next01());
+        ApplyAnimation(0f);
     }
 
     private void RecoverHealthWhenCalm(float elapsedTime)
@@ -2473,6 +2602,7 @@ public sealed class AnimalAIController : MonoBehaviour
         Vector3 roamingAreaCenter = GetRoamingAreaCenter();
         float areaRadius = GetRoamingAreaRadius();
         bool restrictToRoamingArea = currentState != AnimalAIState.Drink
+                                     && currentState != AnimalAIState.Eat
                                      || IsSaddledFreeRoaming;
         bool startedOutsideRoamingArea = false;
         if (!escapingTerrain && restrictToRoamingArea)
@@ -3210,7 +3340,9 @@ public sealed class AnimalAIController : MonoBehaviour
         bool performingActivity = !movingToActivity && !hasTarget;
         animal.SetAIAnimation(
             resolvedSpeed,
-            performingActivity && currentState == AnimalAIState.Graze,
+            performingActivity
+            && (currentState == AnimalAIState.Graze
+                || currentState == AnimalAIState.Eat),
             performingActivity && currentState == AnimalAIState.Drink,
             performingActivity && currentState == AnimalAIState.Rest && IsNightTime(),
             performingActivity && currentState == AnimalAIState.LookAround,
@@ -3257,7 +3389,7 @@ public sealed class AnimalAIController : MonoBehaviour
 
     private static AnimalAIState ClampState(int value)
     {
-        return value >= (int)AnimalAIState.Idle && value <= (int)AnimalAIState.Flee
+        return value >= (int)AnimalAIState.Idle && value <= (int)AnimalAIState.Eat
             ? (AnimalAIState)value
             : AnimalAIState.Idle;
     }

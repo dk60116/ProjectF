@@ -200,6 +200,8 @@ internal static class AnimalDataEditorUtility
         float riderHeight,
         float strength,
         AnimalAISettings aiSettings,
+        ItemDefinition defecationItem,
+        AnimalNeedsSettings needsSettings,
         IReadOnlyList<AnimalDropEntry> dropItems,
         string undoName)
     {
@@ -235,6 +237,8 @@ internal static class AnimalDataEditorUtility
             strength,
             AnimalDefinition.MinStrength,
             AnimalDefinition.MaxStrength);
+        serializedDefinition.FindProperty("defecationItem").objectReferenceValue =
+            defecationItem;
         SerializedProperty dropItemsProperty = serializedDefinition.FindProperty("dropItems");
         if (dropItemsProperty != null)
         {
@@ -264,6 +268,12 @@ internal static class AnimalDataEditorUtility
         JsonUtility.FromJsonOverwrite(
             JsonUtility.ToJson(normalizedAISettings),
             definition.AISettings);
+        AnimalNeedsSettings normalizedNeedsSettings =
+            (needsSettings ?? new AnimalNeedsSettings()).Clone();
+        normalizedNeedsSettings.Normalize();
+        JsonUtility.FromJsonOverwrite(
+            JsonUtility.ToJson(normalizedNeedsSettings),
+            definition.NeedsSettings);
         EditorUtility.SetDirty(definition);
         EnsureDefinitionLink(definition);
     }
@@ -331,6 +341,22 @@ internal static class AnimalDataEditorUtility
                 AnimalValidationSeverity.Error,
                 "동물 이름이 비어 있습니다.",
                 definition));
+        }
+
+        if (definition.DefecationItem == null)
+        {
+            issues.Add(new AnimalValidationIssue(
+                AnimalValidationSeverity.Error,
+                "배변 아이템이 지정되지 않았습니다.",
+                definition));
+        }
+        else if (!ItemDefinition.IsFertilizerEnergyItemDefinition(
+                     definition.DefecationItem))
+        {
+            issues.Add(new AnimalValidationIssue(
+                AnimalValidationSeverity.Error,
+                "배변 아이템은 에너지가 있는 Fertilizer 아이템이어야 합니다.",
+                definition.DefecationItem));
         }
 
         ValidateAssetReference(definition.AnimalPrefab, "동물 프리팹", PrefabRoot, definition, issues);

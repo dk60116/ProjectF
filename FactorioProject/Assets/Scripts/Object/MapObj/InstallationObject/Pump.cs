@@ -5,7 +5,9 @@ public class Pump : InputOutputModule
 {
     private const string DefaultWaterItemName = "Water";
     private const int DefaultWaterItemId = 1;
+    private const float FluidEpsilon = 0.0001f;
     private const int MaxWaterEmitAttemptsPerTick = 32;
+    private const float WaterOutputBudgetSeconds = 1f;
     private static readonly Vector2Int[] CardinalDirections =
     {
         Vector2Int.up,
@@ -22,6 +24,8 @@ public class Pump : InputOutputModule
     private int fallbackWaterItemId = DefaultWaterItemId;
 
     private float waterLiterAccumulator;
+    private float availableWaterOutputLiters;
+    private float waterOutputBudgetUpdatedAt = float.NegativeInfinity;
     private readonly Queue<Vector2Int> fluidSearchQueue = new Queue<Vector2Int>(32);
     private readonly HashSet<Vector2Int> fluidSearchVisited = new HashSet<Vector2Int>();
     private readonly HashSet<InstallationObject> fluidSearchStorageCandidates = new HashSet<InstallationObject>();
@@ -73,6 +77,14 @@ public class Pump : InputOutputModule
         }
 
         ProduceWater(deltaTime);
+    }
+
+    public override void PrepareForPool()
+    {
+        base.PrepareForPool();
+        waterLiterAccumulator = 0f;
+        availableWaterOutputLiters = 0f;
+        waterOutputBudgetUpdatedAt = float.NegativeInfinity;
     }
 
     protected override bool ShouldKeepRuntimeUpdateTickActive()
@@ -138,15 +150,41 @@ public class Pump : InputOutputModule
         if (waterItemId < 0 || litersPerSecond <= 0f || !HasRuntimeOutputCoordinates)
         {
             waterLiterAccumulator = 0f;
+            availableWaterOutputLiters = 0f;
+            waterOutputBudgetUpdatedAt = float.NegativeInfinity;
             return;
         }
 
-        waterLiterAccumulator += litersPerSecond * deltaTime;
-
-        if (TryRouteWaterToFluidStorage(waterLiterAccumulator, true, out float acceptedLiters))
+        RefreshWaterOutputBudget(litersPerSecond, deltaTime);
+        float availableThisTick = Mathf.Min(
+            litersPerSecond * deltaTime,
+            availableWaterOutputLiters);
+        float requestedForLiveStorage = waterLiterAccumulator + availableThisTick;
+        if (TryRouteWaterToFluidStorage(
+                requestedForLiveStorage,
+                true,
+                out float acceptedLiters))
         {
-            waterLiterAccumulator = Mathf.Max(0f, waterLiterAccumulator - acceptedLiters);
+            float accumulatedLitersUsed = Mathf.Min(
+                waterLiterAccumulator,
+                acceptedLiters);
+            waterLiterAccumulator = Mathf.Max(
+                0f,
+                waterLiterAccumulator - accumulatedLitersUsed);
+
+            float budgetLitersUsed = Mathf.Min(
+                availableThisTick,
+                Mathf.Max(0f, acceptedLiters - accumulatedLitersUsed));
+            availableThisTick -= budgetLitersUsed;
+            availableWaterOutputLiters = Mathf.Max(
+                0f,
+                availableWaterOutputLiters - budgetLitersUsed);
         }
+
+        availableWaterOutputLiters = Mathf.Max(
+            0f,
+            availableWaterOutputLiters - availableThisTick);
+        waterLiterAccumulator += availableThisTick;
 
         if (waterLiterAccumulator < 1f)
         {
@@ -168,6 +206,32 @@ public class Pump : InputOutputModule
 
             waterLiterAccumulator = Mathf.Max(0f, waterLiterAccumulator - 1f);
         }
+    }
+
+    private void RefreshWaterOutputBudget(
+        float outputLitersPerSecond,
+        float initialAvailableSeconds)
+    {
+        float outputRate = Mathf.Max(0f, outputLitersPerSecond);
+        float now = Time.time;
+        float maximumBudget = Mathf.Max(
+            0f,
+            outputRate * WaterOutputBudgetSeconds - waterLiterAccumulator);
+        if (float.IsNegativeInfinity(waterOutputBudgetUpdatedAt)
+            || now < waterOutputBudgetUpdatedAt)
+        {
+            availableWaterOutputLiters = Mathf.Min(
+                maximumBudget,
+                outputRate * Mathf.Max(0f, initialAvailableSeconds));
+            waterOutputBudgetUpdatedAt = now;
+            return;
+        }
+
+        float elapsedSeconds = Mathf.Max(0f, now - waterOutputBudgetUpdatedAt);
+        availableWaterOutputLiters = Mathf.Min(
+            maximumBudget,
+            availableWaterOutputLiters + outputRate * elapsedSeconds);
+        waterOutputBudgetUpdatedAt = now;
     }
 
     private bool HasConnectedFluidStorageSpace()
@@ -354,14 +418,14 @@ public class Pump : InputOutputModule
     {
         if (storage == null
             || storage == this
-            || !storage.CanAcceptFluidItem(fluidItemId, 0.0001f)
+            || !storage.CanAcceptFluidItem(fluidItemId, FluidEpsilon)
             || !fluidSearchStorageCandidates.Add(storage))
         {
             return;
         }
 
         float capacity = Mathf.Max(0f, storage.FluidStorageCapacityLiters);
-        if (capacity <= 0.0001f)
+        if (capacity <= FluidEpsilon)
         {
             return;
         }
@@ -391,7 +455,7 @@ public class Pump : InputOutputModule
         if (!commit)
         {
             acceptedLiters = storage.AvailableFluidStorageLiters;
-            return acceptedLiters > 0.0001f;
+            return acceptedLiters > FluidEpsilon;
         }
 
         return storage.TryAddFluidLiters(
@@ -457,7 +521,7 @@ public class Pump : InputOutputModule
     {
         return storage != null
                && storage.CanStoreFluid
-               && storage.CanAcceptFluidItem(fluidItemId, requireStorageSpace ? 0.0001f : 0f);
+               && storage.CanAcceptFluidItem(fluidItemId, requireStorageSpace ? FluidEpsilon : 0f);
     }
 
     private bool TryResolveFluidStorageBodyAtCoordinate(

@@ -7,6 +7,7 @@ public class Boiler : InputOutputModule
     private const float MinWaterTemperatureCelsius = 0f;
     private const float MaxWaterTemperatureCelsiusValue = 100f;
     private const float PassiveCoolingRateScale = 0.2f;
+    private const float SteamOutputBudgetSeconds = 1f;
 
     [SerializeField]
     private List<InstallationFacingDirection> localPipeConnectionDirections =
@@ -15,6 +16,8 @@ public class Boiler : InputOutputModule
     private float waterTemperatureCelsius;
     private float steamLiterAccumulator;
     private bool preserveSteamReadyTemperatureForMakeupWater;
+    private float availableSteamOutputLiters;
+    private float steamOutputBudgetUpdatedAt = float.NegativeInfinity;
 
     public IReadOnlyList<InstallationFacingDirection> LocalPipeConnectionDirections => localPipeConnectionDirections;
     public float WaterTemperatureCelsius => Mathf.Clamp(waterTemperatureCelsius, MinWaterTemperatureCelsius, MaxWaterTemperatureCelsiusValue);
@@ -91,6 +94,8 @@ public class Boiler : InputOutputModule
             MaxWaterTemperatureCelsiusValue);
         steamLiterAccumulator = 0f;
         preserveSteamReadyTemperatureForMakeupWater = false;
+        availableSteamOutputLiters = 0f;
+        steamOutputBudgetUpdatedAt = float.NegativeInfinity;
     }
 
     public override void PrepareForPool()
@@ -99,6 +104,8 @@ public class Boiler : InputOutputModule
         waterTemperatureCelsius = MinWaterTemperatureCelsius;
         steamLiterAccumulator = 0f;
         preserveSteamReadyTemperatureForMakeupWater = false;
+        availableSteamOutputLiters = 0f;
+        steamOutputBudgetUpdatedAt = float.NegativeInfinity;
     }
 
     protected override void TryStartNextCraft()
@@ -596,7 +603,10 @@ public class Boiler : InputOutputModule
         float requestedLiters = outputLitersPerSecond * Mathf.Max(0f, deltaTime);
         float waterLitersPerSteamLiter = (float)inputLitersPerSecond / outputLitersPerSecond;
         float maxSteamLitersFromWater = StoredFluidLiters / waterLitersPerSteamLiter;
-        float maxLitersToEmit = Mathf.Min(requestedLiters, maxSteamLitersFromWater);
+        RefreshSteamOutputBudget(outputLitersPerSecond, deltaTime);
+        float maxLitersToEmit = Mathf.Min(
+            requestedLiters,
+            Mathf.Min(maxSteamLitersFromWater, availableSteamOutputLiters));
         if (maxLitersToEmit <= FluidEpsilon)
         {
             return true;
@@ -639,9 +649,36 @@ public class Boiler : InputOutputModule
             SetStoredFluidTemperatureCelsius(waterTemperatureCelsius);
         }
 
+        availableSteamOutputLiters = Mathf.Max(
+            0f,
+            availableSteamOutputLiters - Mathf.Max(0f, acceptedLiters));
         steamLiterAccumulator = 0f;
         preserveSteamReadyTemperatureForMakeupWater = true;
         return true;
+    }
+
+    private void RefreshSteamOutputBudget(
+        int outputLitersPerSecond,
+        float initialAvailableSeconds)
+    {
+        float outputRate = Mathf.Max(0f, outputLitersPerSecond);
+        float now = Time.time;
+        float maximumBudget = outputRate * SteamOutputBudgetSeconds;
+        if (float.IsNegativeInfinity(steamOutputBudgetUpdatedAt)
+            || now < steamOutputBudgetUpdatedAt)
+        {
+            availableSteamOutputLiters = Mathf.Min(
+                maximumBudget,
+                outputRate * Mathf.Max(0f, initialAvailableSeconds));
+            steamOutputBudgetUpdatedAt = now;
+            return;
+        }
+
+        float elapsedSeconds = Mathf.Max(0f, now - steamOutputBudgetUpdatedAt);
+        availableSteamOutputLiters = Mathf.Min(
+            maximumBudget,
+            availableSteamOutputLiters + outputRate * elapsedSeconds);
+        steamOutputBudgetUpdatedAt = now;
     }
 
     private bool TryConsumeBoilerOperatingEnergy(

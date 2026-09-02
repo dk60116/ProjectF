@@ -175,7 +175,7 @@ public class InputOutputModule : InstallationObject,
         public float oilDrillingProgressLiters;
         public float sprinklerSprayElapsedSeconds;
         public float seedPlanterPlantElapsedSeconds;
-        public bool seedPlanterHadOperationalPower;
+        public bool steamGeneratorHasGenerationReserve;
 
         public PersistentState Clone()
         {
@@ -201,7 +201,7 @@ public class InputOutputModule : InstallationObject,
                 oilDrillingProgressLiters = oilDrillingProgressLiters,
                 sprinklerSprayElapsedSeconds = sprinklerSprayElapsedSeconds,
                 seedPlanterPlantElapsedSeconds = seedPlanterPlantElapsedSeconds,
-                seedPlanterHadOperationalPower = seedPlanterHadOperationalPower
+                steamGeneratorHasGenerationReserve = steamGeneratorHasGenerationReserve
             };
         }
     }
@@ -1880,6 +1880,7 @@ public class InputOutputModule : InstallationObject,
         while (connectedFluidSearchQueue.Count > 0)
         {
             Vector2Int coordinate = connectedFluidSearchQueue.Dequeue();
+            EnqueueSteamGeneratorPipePassCoordinatesAt(coordinate);
             bool isSeedCoordinate = ContainsCoordinate(connectedFluidSeedCoordinates, coordinate);
             bool hasPipe = TryGetConnectedPipeAtCoordinate(coordinate, out Pipe pipe, out Quaternion pipeRotation);
             TryResolveConnectedFluidSearchStorageAtCoordinate(
@@ -1944,6 +1945,75 @@ public class InputOutputModule : InstallationObject,
 
         cachedConnectedFluidSourceStoragesTopologyVersion = fluidTopologyVersion;
         return cachedConnectedFluidSourceStorages.Count > 0;
+    }
+
+    private void EnqueueSteamGeneratorPipePassCoordinatesAt(Vector2Int coordinate)
+    {
+        bool hasSteamGeneratorPipeArea = EnqueueSteamGeneratorPipePassCoordinatesAt(
+            registeredRuntimeAreaCoordinates.TryGetValue(
+                coordinate,
+                out HashSet<InputOutputModule> areaModules)
+                ? areaModules
+                : null,
+            coordinate);
+        hasSteamGeneratorPipeArea |= EnqueueSteamGeneratorPipePassCoordinatesAt(
+            registeredRuntimeGridCoordinates.TryGetValue(
+                coordinate,
+                out HashSet<InputOutputModule> gridModules)
+                ? gridModules
+                : null,
+            coordinate);
+
+        if (!hasSteamGeneratorPipeArea
+            || !TryResolveConnectedFluidStorageBodyAtCoordinate(
+                coordinate,
+                out InstallationObject bodyStorage)
+            || !(bodyStorage is SteamGenerator bodyGenerator))
+        {
+            return;
+        }
+
+        EnqueueSteamGeneratorPipePassCoordinates(bodyGenerator);
+    }
+
+    private bool EnqueueSteamGeneratorPipePassCoordinatesAt(
+        IEnumerable<InputOutputModule> modules,
+        Vector2Int coordinate)
+    {
+        if (modules == null)
+        {
+            return false;
+        }
+
+        bool foundPipeArea = false;
+        foreach (InputOutputModule module in modules)
+        {
+            if (!(module is SteamGenerator steamGenerator)
+                || !steamGenerator.gameObject.activeInHierarchy
+                || !steamGenerator.ContainsRuntimePipeAreaBlockCoordinate(coordinate))
+            {
+                continue;
+            }
+
+            foundPipeArea = true;
+            EnqueueSteamGeneratorPipePassCoordinates(steamGenerator);
+        }
+
+        return foundPipeArea;
+    }
+
+    private void EnqueueSteamGeneratorPipePassCoordinates(SteamGenerator steamGenerator)
+    {
+        if (steamGenerator == null
+            || !steamGenerator.TryGetRuntimePipePassCoordinates(
+                out Vector2Int inputCoordinate,
+                out Vector2Int tailCoordinate))
+        {
+            return;
+        }
+
+        EnqueueConnectedFluidSearchCoordinate(inputCoordinate);
+        EnqueueConnectedFluidSearchCoordinate(tailCoordinate);
     }
 
     private bool TrySelectConnectedFluidSourceFromCache(
@@ -5096,6 +5166,36 @@ public class InputOutputModule : InstallationObject,
             : 0;
     }
 
+    protected bool TryRestoreRuntimeInputAreaCenterObject(
+        Vector2Int coordinate,
+        int itemId,
+        Vector3 restoreStartWorldPosition)
+    {
+        if (itemId < 0
+            || !TryResolveRuntimeAreaBlock(coordinate, out Block block, out bool useSavedCenterStack))
+        {
+            return false;
+        }
+
+        if (useSavedCenterStack)
+        {
+            BlockStateStore stateStore = ResolveBlockStateStore();
+            int capacity = ResolveRuntimeBlockCenterCapacity(
+                coordinate,
+                itemId,
+                RuntimeAreaMaxObjects);
+            return stateStore != null
+                   && stateStore.TryAddSavedCenterItems(coordinate, itemId, 1, capacity);
+        }
+
+        return block != null
+               && block.TryAddInputAreaCenterObjectAnimated(
+                   itemId,
+                   restoreStartWorldPosition,
+                   0f,
+                   out _);
+    }
+
     private TerrainGenerator ResolveTerrain()
     {
         if (cachedTerrain != null)
@@ -5423,6 +5523,7 @@ public class InputOutputModule : InstallationObject,
         while (connectedFluidSearchQueue.Count > 0)
         {
             Vector2Int coordinate = connectedFluidSearchQueue.Dequeue();
+            EnqueueSteamGeneratorPipePassCoordinatesAt(coordinate);
             AddFluidOutputStorageCacheCandidatesAtCoordinate(coordinate);
 
             bool isOutputSeed = ContainsCoordinate(runtimeOutputCoordinates, coordinate);

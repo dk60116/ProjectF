@@ -220,6 +220,7 @@ public static class SaveGameBinarySerializer
         terrain ??= new TerrainSaveData();
         writer.Write(terrain.seed);
         writer.Write(terrain.mapSize);
+        WriteVector2IntList(writer, terrain.activeChunkCoordinates);
     }
 
     private static TerrainSaveData ReadTerrain(BinaryReader reader, int version)
@@ -232,6 +233,11 @@ public static class SaveGameBinarySerializer
         if (version >= 9)
         {
             terrain.mapSize = reader.ReadInt32();
+        }
+
+        if (version >= 49)
+        {
+            terrain.activeChunkCoordinates = ReadVector2IntList(reader);
         }
 
         if (version <= 1)
@@ -414,6 +420,10 @@ public static class SaveGameBinarySerializer
         writer.Write(entry.draftHandcartAnchorCoordinate.x);
         writer.Write(entry.draftHandcartAnchorCoordinate.y);
         writer.Write(entry.draftHandcartPlacementSequence);
+        writer.Write(entry.hasNeedsState);
+        writer.Write(entry.currentHunger);
+        writer.Write(entry.defecationTimeRemaining);
+        writer.Write(entry.digestedMealCount);
     }
 
     private static AnimalSaveEntry ReadAnimalEntry(BinaryReader reader, int version)
@@ -472,6 +482,14 @@ public static class SaveGameBinarySerializer
                 reader.ReadInt32(),
                 reader.ReadInt32());
             entry.draftHandcartPlacementSequence = reader.ReadInt64();
+        }
+
+        if (version >= 45)
+        {
+            entry.hasNeedsState = reader.ReadBoolean();
+            entry.currentHunger = reader.ReadSingle();
+            entry.defecationTimeRemaining = reader.ReadSingle();
+            entry.digestedMealCount = reader.ReadInt32();
         }
 
         return entry;
@@ -583,7 +601,7 @@ public static class SaveGameBinarySerializer
         writer.Write(state.railRequiredItemCount);
         WriteInputOutputState(writer, state.inputOutputState);
         WriteRobotArmState(writer, state.robotArmState);
-        writer.Write(state.lastBackgroundSimulationTicks);
+        writer.Write(0L); // Legacy background-simulation slot retained for binary layout.
         writer.Write(state.boxIsOpen.HasValue);
         if (state.boxIsOpen.HasValue)
         {
@@ -636,6 +654,8 @@ public static class SaveGameBinarySerializer
         writer.Write(state.loggingTreeFilterInitialized);
         WriteStringList(writer, state.loggingEnabledTreeDefinitionKeys);
         writer.Write(state.loggingMinimumGrowth);
+        writer.Write(state.utilityPoleConnectionsInitialized);
+        WriteVector2IntList(writer, state.utilityPoleConnectedAnchors);
     }
 
     private static BlockStateStore.InstallationSaveState ReadInstallationState(
@@ -662,9 +682,9 @@ public static class SaveGameBinarySerializer
             railVisualPathExtendsEnd = version >= 11 ? reader.ReadBoolean() : true,
             railRequiredItemCount = version >= 21 ? reader.ReadInt32() : 0,
             inputOutputState = ReadInputOutputState(reader, version),
-            robotArmState = version >= 3 ? ReadRobotArmState(reader) : null,
-            lastBackgroundSimulationTicks = reader.ReadInt64()
+            robotArmState = version >= 3 ? ReadRobotArmState(reader) : null
         };
+        _ = reader.ReadInt64(); // Discard the legacy background-simulation slot.
 
         if (reader.ReadBoolean())
         {
@@ -770,6 +790,11 @@ public static class SaveGameBinarySerializer
             state.loggingEnabledTreeDefinitionKeys = ReadStringList(reader);
             state.loggingMinimumGrowth = reader.ReadInt32();
         }
+        if (version >= 48)
+        {
+            state.utilityPoleConnectionsInitialized = reader.ReadBoolean();
+            state.utilityPoleConnectedAnchors = ReadVector2IntList(reader);
+        }
 
         return state;
     }
@@ -802,7 +827,7 @@ public static class SaveGameBinarySerializer
         WriteVector2IntList(writer, state.pipeInputCoordinates);
         writer.Write(state.sprinklerSprayElapsedSeconds);
         writer.Write(state.seedPlanterPlantElapsedSeconds);
-        writer.Write(state.seedPlanterHadOperationalPower);
+        writer.Write(state.steamGeneratorHasGenerationReserve);
     }
 
     private static InputOutputModule.PersistentState ReadInputOutputState(BinaryReader reader, int version)
@@ -846,7 +871,17 @@ public static class SaveGameBinarySerializer
             state.pipeInputCoordinates = ReadVector2IntList(reader);
             state.sprinklerSprayElapsedSeconds = reader.ReadSingle();
             state.seedPlanterPlantElapsedSeconds = reader.ReadSingle();
-            state.seedPlanterHadOperationalPower = reader.ReadBoolean();
+            if (version < 46)
+            {
+                // Versions 44-45 stored a Seed Planter power snapshot that is no
+                // longer used because background power is evaluated per network.
+                reader.ReadBoolean();
+            }
+
+            if (version >= 47)
+            {
+                state.steamGeneratorHasGenerationReserve = reader.ReadBoolean();
+            }
         }
 
         return state;

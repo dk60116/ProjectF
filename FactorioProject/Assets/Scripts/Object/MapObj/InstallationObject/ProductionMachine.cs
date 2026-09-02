@@ -26,6 +26,41 @@ public class ProductionMachine : InputOutputModule
 
     public bool TryCollectProductionTargetItemIds(ICollection<int> itemIds)
     {
+        return TryCollectProductionTargetItemIds(itemIds, true);
+    }
+
+    public bool TryCollectAllProductionTargetItemIds(ICollection<int> itemIds)
+    {
+        return TryCollectProductionTargetItemIds(itemIds, false);
+    }
+
+    public bool CanSelectProductionTarget(int itemId)
+    {
+        if (itemId < 0 || !HasRequiredCraftingManual(itemId))
+        {
+            return false;
+        }
+
+        IReadOnlyList<ItemIoEntry> outputs = OutputList;
+        if (outputs == null)
+        {
+            return false;
+        }
+
+        for (int i = 0; i < outputs.Count; i++)
+        {
+            ItemDefinition outputDefinition = outputs[i].itemDefinition;
+            if (outputDefinition != null && outputDefinition.id == itemId)
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private bool TryCollectProductionTargetItemIds(ICollection<int> itemIds, bool requireCraftingManual)
+    {
         if (itemIds == null)
         {
             return false;
@@ -44,7 +79,7 @@ public class ProductionMachine : InputOutputModule
             ItemDefinition outputDefinition = outputs[i].itemDefinition;
             int outputItemId = outputDefinition != null ? outputDefinition.id : -1;
             if (outputItemId < 0
-                || !HasRequiredCraftingManual(outputItemId)
+                || (requireCraftingManual && !HasRequiredCraftingManual(outputItemId))
                 || !seenItemIds.Add(outputItemId))
             {
                 continue;

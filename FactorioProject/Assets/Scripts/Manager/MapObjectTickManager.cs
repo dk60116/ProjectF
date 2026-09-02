@@ -618,21 +618,6 @@ public static class MapObjectTickProfiler
     private static long beltTouchedBlockRefreshes;
     private static long beltWakeAroundCalls;
     private static long beltActivityRefreshCalls;
-    private static long backgroundConveyorProfileSamples;
-    private static long backgroundConveyorSavedBlocks;
-    private static long backgroundConveyorSavedItems;
-    private static long backgroundConveyorCandidates;
-    private static long backgroundConveyorPasses;
-    private static long backgroundConveyorMoveAttempts;
-    private static long backgroundConveyorMoveSuccesses;
-    private static long backgroundConveyorDirtyCoordinates;
-    private static long backgroundConveyorMotionDirtyCoordinates;
-    private static long backgroundConveyorReadyHeapSize;
-    private static long backgroundConveyorDueCandidates;
-    private static long backgroundConveyorSkippedNotReady;
-    private static long backgroundConveyorBlockedWaiters;
-    private static long backgroundConveyorStaleScheduleDrops;
-    private static long backgroundConveyorSlowRetryCandidates;
     private static int beltLoopProfileFrameCount;
     private static int beltLoopProfileLastFrame = -1;
     private static bool beltFrameProfilingEnabled;
@@ -801,44 +786,6 @@ public static class MapObjectTickProfiler
         beltActivityRefreshCalls++;
     }
 
-    public static void AddBackgroundConveyorSimulation(
-        int savedBlockCount,
-        int savedItemCount,
-        int candidateCount,
-        int passCount,
-        int moveAttemptCount,
-        int moveSuccessCount,
-        int dirtyCoordinateCount,
-        int motionDirtyCoordinateCount,
-        int readyHeapSize,
-        int dueCandidateCount,
-        int skippedNotReadyCount,
-        int blockedWaiterCount,
-        int staleScheduleDropCount,
-        int slowRetryCandidateCount)
-    {
-        if (!IsEnabled)
-        {
-            return;
-        }
-
-        backgroundConveyorProfileSamples++;
-        backgroundConveyorSavedBlocks += Mathf.Max(0, savedBlockCount);
-        backgroundConveyorSavedItems += Mathf.Max(0, savedItemCount);
-        backgroundConveyorCandidates += Mathf.Max(0, candidateCount);
-        backgroundConveyorPasses += Mathf.Max(0, passCount);
-        backgroundConveyorMoveAttempts += Mathf.Max(0, moveAttemptCount);
-        backgroundConveyorMoveSuccesses += Mathf.Max(0, moveSuccessCount);
-        backgroundConveyorDirtyCoordinates += Mathf.Max(0, dirtyCoordinateCount);
-        backgroundConveyorMotionDirtyCoordinates += Mathf.Max(0, motionDirtyCoordinateCount);
-        backgroundConveyorReadyHeapSize += Mathf.Max(0, readyHeapSize);
-        backgroundConveyorDueCandidates += Mathf.Max(0, dueCandidateCount);
-        backgroundConveyorSkippedNotReady += Mathf.Max(0, skippedNotReadyCount);
-        backgroundConveyorBlockedWaiters += Mathf.Max(0, blockedWaiterCount);
-        backgroundConveyorStaleScheduleDrops += Mathf.Max(0, staleScheduleDropCount);
-        backgroundConveyorSlowRetryCandidates += Mathf.Max(0, slowRetryCandidateCount);
-    }
-
     public static void ClearRuntimeCounters()
     {
         runtimeCounters.Clear();
@@ -894,21 +841,6 @@ public static class MapObjectTickProfiler
         beltTouchedBlockRefreshes = 0L;
         beltWakeAroundCalls = 0L;
         beltActivityRefreshCalls = 0L;
-        backgroundConveyorProfileSamples = 0L;
-        backgroundConveyorSavedBlocks = 0L;
-        backgroundConveyorSavedItems = 0L;
-        backgroundConveyorCandidates = 0L;
-        backgroundConveyorPasses = 0L;
-        backgroundConveyorMoveAttempts = 0L;
-        backgroundConveyorMoveSuccesses = 0L;
-        backgroundConveyorDirtyCoordinates = 0L;
-        backgroundConveyorMotionDirtyCoordinates = 0L;
-        backgroundConveyorReadyHeapSize = 0L;
-        backgroundConveyorDueCandidates = 0L;
-        backgroundConveyorSkippedNotReady = 0L;
-        backgroundConveyorBlockedWaiters = 0L;
-        backgroundConveyorStaleScheduleDrops = 0L;
-        backgroundConveyorSlowRetryCandidates = 0L;
         beltLoopProfileFrameCount = 0;
         beltLoopProfileLastFrame = -1;
         beltFrameProfilingEnabled = false;
@@ -977,21 +909,6 @@ public static class MapObjectTickProfiler
         AppendJsonProperty("beltTouchedBlockRefreshes", FormatBeltLoopsPerFrame(beltTouchedBlockRefreshes, beltLoopFrameCount), true);
         AppendJsonProperty("beltWakeAroundCalls", FormatBeltLoopsPerFrame(beltWakeAroundCalls, beltLoopFrameCount), true);
         AppendJsonProperty("beltActivityRefreshCalls", FormatBeltLoopsPerFrame(beltActivityRefreshCalls, beltLoopFrameCount), true);
-        AppendJsonProperty("backgroundConveyorProfileSamples", backgroundConveyorProfileSamples.ToString(CultureInfo.InvariantCulture), true);
-        AppendJsonProperty("backgroundConveyorSavedBlocks", FormatBackgroundConveyorAverage(backgroundConveyorSavedBlocks), true);
-        AppendJsonProperty("backgroundConveyorSavedItems", FormatBackgroundConveyorAverage(backgroundConveyorSavedItems), true);
-        AppendJsonProperty("backgroundConveyorCandidates", FormatBackgroundConveyorAverage(backgroundConveyorCandidates), true);
-        AppendJsonProperty("backgroundConveyorPasses", FormatBackgroundConveyorAverage(backgroundConveyorPasses), true);
-        AppendJsonProperty("backgroundConveyorMoveAttempts", FormatBackgroundConveyorAverage(backgroundConveyorMoveAttempts), true);
-        AppendJsonProperty("backgroundConveyorMoveSuccesses", FormatBackgroundConveyorAverage(backgroundConveyorMoveSuccesses), true);
-        AppendJsonProperty("backgroundConveyorDirtyCoordinates", FormatBackgroundConveyorAverage(backgroundConveyorDirtyCoordinates), true);
-        AppendJsonProperty("backgroundConveyorMotionDirtyCoordinates", FormatBackgroundConveyorAverage(backgroundConveyorMotionDirtyCoordinates), true);
-        AppendJsonProperty("backgroundConveyorReadyHeapSize", FormatBackgroundConveyorAverage(backgroundConveyorReadyHeapSize), true);
-        AppendJsonProperty("backgroundConveyorDueCandidates", FormatBackgroundConveyorAverage(backgroundConveyorDueCandidates), true);
-        AppendJsonProperty("backgroundConveyorSkippedNotReady", FormatBackgroundConveyorAverage(backgroundConveyorSkippedNotReady), true);
-        AppendJsonProperty("backgroundConveyorBlockedWaiters", FormatBackgroundConveyorAverage(backgroundConveyorBlockedWaiters), true);
-        AppendJsonProperty("backgroundConveyorStaleScheduleDrops", FormatBackgroundConveyorAverage(backgroundConveyorStaleScheduleDrops), true);
-        AppendJsonProperty("backgroundConveyorSlowRetryCandidates", FormatBackgroundConveyorAverage(backgroundConveyorSlowRetryCandidates), true);
         AppendJsonProperty("runtimeCounterCount", runtimeCounters.Count.ToString(CultureInfo.InvariantCulture), true);
         jsonBuilder.Append(",\"runtimeCounters\":[");
         for (int i = 0; i < runtimeCounters.Count; i++)
@@ -1060,21 +977,6 @@ public static class MapObjectTickProfiler
         beltTouchedBlockRefreshes = 0L;
         beltWakeAroundCalls = 0L;
         beltActivityRefreshCalls = 0L;
-        backgroundConveyorProfileSamples = 0L;
-        backgroundConveyorSavedBlocks = 0L;
-        backgroundConveyorSavedItems = 0L;
-        backgroundConveyorCandidates = 0L;
-        backgroundConveyorPasses = 0L;
-        backgroundConveyorMoveAttempts = 0L;
-        backgroundConveyorMoveSuccesses = 0L;
-        backgroundConveyorDirtyCoordinates = 0L;
-        backgroundConveyorMotionDirtyCoordinates = 0L;
-        backgroundConveyorReadyHeapSize = 0L;
-        backgroundConveyorDueCandidates = 0L;
-        backgroundConveyorSkippedNotReady = 0L;
-        backgroundConveyorBlockedWaiters = 0L;
-        backgroundConveyorStaleScheduleDrops = 0L;
-        backgroundConveyorSlowRetryCandidates = 0L;
         beltLoopProfileFrameCount = 0;
         beltLoopProfileLastFrame = -1;
         beltFrameProfilingEnabled = false;
@@ -1092,17 +994,6 @@ public static class MapObjectTickProfiler
     {
         double loopsPerFrame = loopIterations / (double)Mathf.Max(1, frameCount);
         return loopsPerFrame.ToString("0.###", CultureInfo.InvariantCulture);
-    }
-
-    private static string FormatBackgroundConveyorAverage(long value)
-    {
-        if (backgroundConveyorProfileSamples <= 0)
-        {
-            return "0";
-        }
-
-        double average = value / (double)backgroundConveyorProfileSamples;
-        return average.ToString("0.###", CultureInfo.InvariantCulture);
     }
 
     private static void RecordSample(string kind, object target, long startTimestamp)

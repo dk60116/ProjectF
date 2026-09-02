@@ -622,14 +622,6 @@ public partial class TerrainGenerator : MonoBehaviour
                 return false;
             }
 
-            if (!isMaterializingVirtualFloorObjects
-                && virtualizedFloorObjectCoordinates.Contains(coordinate)
-                && IsWithinFloorObjectLiveRadius(coordinate))
-            {
-                EnsureResourceStateStore();
-                TryMaterializeVirtualFloorObjects(block);
-            }
-
             return true;
         }
 
@@ -638,12 +630,12 @@ public partial class TerrainGenerator : MonoBehaviour
 
     public bool IsConveyorItemCoordinateVirtualized(Vector2Int coordinate)
     {
-        return virtualizeConveyorItems && virtualizedConveyorItemCoordinates.Contains(coordinate);
+        return false;
     }
 
     public bool IsFloorObjectCoordinateVirtualized(Vector2Int coordinate)
     {
-        return virtualizedFloorObjectCoordinates.Contains(coordinate);
+        return false;
     }
 
     public bool HasDroppedFloorObjectsAt(Vector2Int coordinate)
@@ -655,162 +647,7 @@ public partial class TerrainGenerator : MonoBehaviour
             return true;
         }
 
-        if (!virtualizedFloorObjectCoordinates.Contains(coordinate))
-        {
-            return false;
-        }
-
-        EnsureResourceStateStore();
-        return resourceStateStore != null
-               && resourceStateStore.HasSavedDroppedFloorObjects(coordinate);
-    }
-
-    public bool HasSavedConveyorItemAtLane(Vector2Int coordinate, int laneIndex)
-    {
-        if (!virtualizeConveyorItems
-            || laneIndex < 0
-            || resourceStateStore == null
-            || !resourceStateStore.HasSavedConveyorItemAtLane(coordinate, laneIndex))
-        {
-            return false;
-        }
-
-        TryRefreshLiveConveyorItemsForSavedChange(coordinate);
-        return resourceStateStore != null
-               && resourceStateStore.HasSavedConveyorItemAtLane(coordinate, laneIndex);
-    }
-
-    public bool ShouldRouteLoadedConveyorDestinationToBackground(Vector2Int coordinate, Block block)
-    {
-        return virtualizeConveyorItems
-               && block != null
-               && block.IsRuntimeConveyor
-               && !IsWithinConveyorItemLiveArea(coordinate);
-    }
-
-    public bool CanUseVirtualConveyorItemHandoffDestination(Vector2Int coordinate, Block block)
-    {
-        if (block == null)
-        {
-            return true;
-        }
-
-        return ShouldRouteLoadedConveyorDestinationToBackground(coordinate, block);
-    }
-
-    public bool CanBackgroundConveyorMoveIntoCoordinate(Vector2Int coordinate, int laneIndex)
-    {
-        if (!virtualizeConveyorItems
-            || !loadedBlocks.TryGetValue(coordinate, out Block block)
-            || block == null)
-        {
-            return true;
-        }
-
-        if (!block.IsRuntimeConveyor)
-        {
-            return false;
-        }
-
-        if (IsWithinConveyorItemLiveArea(coordinate))
-        {
-            return block.CanAcceptRuntimeConveyorItemAtLane(laneIndex);
-        }
-
-        return block.GetRuntimeConveyorItemCount() <= 0
-               || block.CanAcceptRuntimeConveyorItemAtLane(laneIndex);
-    }
-
-    public bool CanHandoffConveyorItemToVirtualConveyor(
-        Vector2Int sourceCoordinate,
-        Vector2Int flowDirection,
-        int sourceColumnOrdinal)
-    {
-        if (flowDirection == Vector2Int.zero)
-        {
-            return false;
-        }
-
-        Vector2Int destinationCoordinate = sourceCoordinate + flowDirection;
-        bool hasLoadedDestination = TryGetLoadedBlock(destinationCoordinate, out Block loadedDestinationBlock)
-            && loadedDestinationBlock != null;
-        if (hasLoadedDestination
-            && !CanUseVirtualConveyorItemHandoffDestination(destinationCoordinate, loadedDestinationBlock))
-        {
-            return false;
-        }
-
-        EnsureResourceStateStore();
-        if (resourceStateStore == null
-            || !resourceStateStore.CanAcceptVirtualConveyorItemHandoff(
-                sourceCoordinate,
-                flowDirection,
-                sourceColumnOrdinal,
-                out int destinationLaneIndex))
-        {
-            return false;
-        }
-
-        return !hasLoadedDestination
-               || loadedDestinationBlock.CanAcceptRuntimeConveyorItemAtLane(destinationLaneIndex);
-    }
-
-    public bool TryHandoffConveyorItemToVirtualConveyor(
-        Vector2Int sourceCoordinate,
-        Vector2Int flowDirection,
-        int sourceColumnOrdinal,
-        ConveyorItemLaneSaveState laneState,
-        out Vector2Int destinationCoordinate,
-        out int destinationLaneIndex)
-    {
-        destinationCoordinate = sourceCoordinate + flowDirection;
-        destinationLaneIndex = -1;
-        if (flowDirection == Vector2Int.zero)
-        {
-            return false;
-        }
-
-        bool hasLoadedDestination = TryGetLoadedBlock(destinationCoordinate, out Block loadedDestinationBlock)
-            && loadedDestinationBlock != null;
-        if (hasLoadedDestination
-            && !CanUseVirtualConveyorItemHandoffDestination(destinationCoordinate, loadedDestinationBlock))
-        {
-            return false;
-        }
-
-        EnsureResourceStateStore();
-        if (resourceStateStore == null
-            || !resourceStateStore.CanAcceptVirtualConveyorItemHandoff(
-                sourceCoordinate,
-                flowDirection,
-                sourceColumnOrdinal,
-                out int resolvedDestinationLaneIndex)
-            || (hasLoadedDestination
-                && !loadedDestinationBlock.CanAcceptRuntimeConveyorItemAtLane(resolvedDestinationLaneIndex)))
-        {
-            return false;
-        }
-
-        if (hasLoadedDestination
-            && loadedDestinationBlock.GetRuntimeConveyorItemCount() > 0
-            && !TryVirtualizeLoadedConveyorItems(loadedDestinationBlock))
-        {
-            return false;
-        }
-
-        bool handedOff = resourceStateStore.TryHandoffConveyorItemToVirtualConveyor(
-            sourceCoordinate,
-            flowDirection,
-            sourceColumnOrdinal,
-            laneState,
-            out destinationCoordinate,
-            out destinationLaneIndex);
-        if (handedOff && hasLoadedDestination)
-        {
-            MarkLoadedConveyorItemBlockVirtual(destinationCoordinate);
-        }
-
-        return handedOff;
+        return false;
     }
 
     public void RegisterLiveInstallationObject(InstallationObject installationObject)
@@ -828,6 +665,7 @@ public partial class TerrainGenerator : MonoBehaviour
 
         resourceStateStore?.RegisterLiveInstallation(installationObject);
         RegisterVirtualConveyorBelt(installationObject as ConveyorBelt);
+        RefreshTerrainRendererVisibility(installationObject.transform);
         WakeRobotArmsAroundInstallation(installationObject);
         if (installationObject is Trainstation || installationObject is Railload)
         {
@@ -858,6 +696,7 @@ public partial class TerrainGenerator : MonoBehaviour
             return;
         }
 
+        RestorePlayerRangeRendererVisibility(installationObject.transform);
         UnregisterVirtualConveyorBelt(installationObject as ConveyorBelt);
         if (Application.isPlaying)
         {
@@ -892,6 +731,7 @@ public partial class TerrainGenerator : MonoBehaviour
 
         resourceStateStore?.RegisterLiveInstallation(installationObject);
         RegisterVirtualConveyorBelt(installationObject as ConveyorBelt);
+        RefreshTerrainRendererVisibility(installationObject.transform);
         WakeRobotArmsAroundInstallation(installationObject);
         if (installationObject is Trainstation || installationObject is Railload)
         {
@@ -938,7 +778,7 @@ public partial class TerrainGenerator : MonoBehaviour
             return;
         }
 
-        if (!virtualizeConveyorBelts)
+        if (!VirtualizeConveyorBelts)
         {
             UnregisterVirtualConveyorBelt(conveyorBelt);
             return;

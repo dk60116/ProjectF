@@ -9,54 +9,34 @@ internal sealed class TerrainChunkStreamingScheduler
     private readonly MonoBehaviour owner;
     private readonly Func<Vector2Int, bool> isChunkLoaded;
     private readonly Func<Vector2Int, bool> shouldGenerateChunk;
-    private readonly Func<Vector2Int, bool> shouldUnloadChunk;
     private readonly Action<Vector2Int, int> generateChunkImmediate;
     private readonly Func<Vector2Int, int, bool, IEnumerator> createGenerateChunkRoutine;
-    private readonly Action<Vector2Int> unloadChunkImmediate;
-    private readonly Func<Vector2Int, bool, IEnumerator> createUnloadChunkRoutine;
-    private readonly Func<int> getChunkUnloadBudget;
     private readonly ProfilerMarker generateStepMarker;
-    private readonly ProfilerMarker unloadStepMarker;
     private readonly Queue<ChunkGenerationRequest> pendingChunkGenerations = new Queue<ChunkGenerationRequest>();
     private readonly HashSet<Vector2Int> pendingChunkGenerationCoordinates = new HashSet<Vector2Int>();
     private readonly HashSet<Vector2Int> activeChunkGenerationCoordinates = new HashSet<Vector2Int>();
-    private readonly Queue<Vector2Int> pendingChunkUnloads = new Queue<Vector2Int>();
-    private readonly HashSet<Vector2Int> pendingChunkUnloadCoordinates = new HashSet<Vector2Int>();
 
     private Coroutine chunkGenerationCoroutine;
-    private Coroutine chunkUnloadCoroutine;
 
     public bool IsBusy =>
         pendingChunkGenerations.Count > 0
         || activeChunkGenerationCoordinates.Count > 0
-        || pendingChunkUnloads.Count > 0
-        || chunkGenerationCoroutine != null
-        || chunkUnloadCoroutine != null;
+        || chunkGenerationCoroutine != null;
 
     public TerrainChunkStreamingScheduler(
         MonoBehaviour owner,
         Func<Vector2Int, bool> isChunkLoaded,
         Func<Vector2Int, bool> shouldGenerateChunk,
-        Func<Vector2Int, bool> shouldUnloadChunk,
         Action<Vector2Int, int> generateChunkImmediate,
         Func<Vector2Int, int, bool, IEnumerator> createGenerateChunkRoutine,
-        Action<Vector2Int> unloadChunkImmediate,
-        Func<Vector2Int, bool, IEnumerator> createUnloadChunkRoutine,
-        Func<int> getChunkUnloadBudget,
-        ProfilerMarker generateStepMarker,
-        ProfilerMarker unloadStepMarker)
+        ProfilerMarker generateStepMarker)
     {
         this.owner = owner;
         this.isChunkLoaded = isChunkLoaded;
         this.shouldGenerateChunk = shouldGenerateChunk;
-        this.shouldUnloadChunk = shouldUnloadChunk;
         this.generateChunkImmediate = generateChunkImmediate;
         this.createGenerateChunkRoutine = createGenerateChunkRoutine;
-        this.unloadChunkImmediate = unloadChunkImmediate;
-        this.createUnloadChunkRoutine = createUnloadChunkRoutine;
-        this.getChunkUnloadBudget = getChunkUnloadBudget;
         this.generateStepMarker = generateStepMarker;
-        this.unloadStepMarker = unloadStepMarker;
     }
 
     public bool IsGenerationActive(Vector2Int chunkCoordinate)
@@ -77,19 +57,6 @@ internal sealed class TerrainChunkStreamingScheduler
         pendingChunkGenerationCoordinates.Add(chunkCoordinate);
     }
 
-    public void QueueUnload(Vector2Int chunkCoordinate)
-    {
-        if (pendingChunkUnloadCoordinates.Contains(chunkCoordinate)
-            || activeChunkGenerationCoordinates.Contains(chunkCoordinate)
-            || !isChunkLoaded(chunkCoordinate))
-        {
-            return;
-        }
-
-        pendingChunkUnloads.Enqueue(chunkCoordinate);
-        pendingChunkUnloadCoordinates.Add(chunkCoordinate);
-    }
-
     public void EnsureGenerationProcessing()
     {
         if (pendingChunkGenerations.Count <= 0)
@@ -106,25 +73,6 @@ internal sealed class TerrainChunkStreamingScheduler
         if (chunkGenerationCoroutine == null)
         {
             chunkGenerationCoroutine = owner.StartCoroutine(ProcessGenerationQueue());
-        }
-    }
-
-    public void EnsureUnloadProcessing()
-    {
-        if (pendingChunkUnloads.Count <= 0)
-        {
-            return;
-        }
-
-        if (!Application.isPlaying)
-        {
-            ProcessQueuedUnloadsImmediate();
-            return;
-        }
-
-        if (chunkUnloadCoroutine == null)
-        {
-            chunkUnloadCoroutine = owner.StartCoroutine(ProcessUnloadQueue());
         }
     }
 
@@ -151,21 +99,6 @@ internal sealed class TerrainChunkStreamingScheduler
         }
     }
 
-    public void ProcessQueuedUnloadsImmediate()
-    {
-        while (pendingChunkUnloads.Count > 0)
-        {
-            Vector2Int chunkCoordinate = pendingChunkUnloads.Dequeue();
-            pendingChunkUnloadCoordinates.Remove(chunkCoordinate);
-            if (!shouldUnloadChunk(chunkCoordinate))
-            {
-                continue;
-            }
-
-            unloadChunkImmediate(chunkCoordinate);
-        }
-    }
-
     public void MarkGenerationComplete(Vector2Int chunkCoordinate)
     {
         activeChunkGenerationCoordinates.Remove(chunkCoordinate);
@@ -183,14 +116,6 @@ internal sealed class TerrainChunkStreamingScheduler
             chunkGenerationCoroutine = null;
         }
 
-        pendingChunkUnloads.Clear();
-        pendingChunkUnloadCoordinates.Clear();
-
-        if (chunkUnloadCoroutine != null)
-        {
-            owner.StopCoroutine(chunkUnloadCoroutine);
-            chunkUnloadCoroutine = null;
-        }
     }
 
     private IEnumerator ProcessGenerationQueue()
@@ -233,54 +158,6 @@ internal sealed class TerrainChunkStreamingScheduler
         }
 
         chunkGenerationCoroutine = null;
-    }
-
-    private IEnumerator ProcessUnloadQueue()
-    {
-        yield return null;
-
-        int unloadsThisFrame = 0;
-        int unloadBudget = Mathf.Max(1, getChunkUnloadBudget());
-        while (pendingChunkUnloads.Count > 0)
-        {
-            Vector2Int chunkCoordinate = pendingChunkUnloads.Dequeue();
-            pendingChunkUnloadCoordinates.Remove(chunkCoordinate);
-            if (!shouldUnloadChunk(chunkCoordinate))
-            {
-                continue;
-            }
-
-            IEnumerator unloadRoutine = createUnloadChunkRoutine(chunkCoordinate, true);
-            while (true)
-            {
-                bool hasNext;
-                object current = null;
-                using (unloadStepMarker.Auto())
-                {
-                    hasNext = unloadRoutine.MoveNext();
-                    if (hasNext)
-                    {
-                        current = unloadRoutine.Current;
-                    }
-                }
-
-                if (!hasNext)
-                {
-                    break;
-                }
-
-                yield return current;
-            }
-
-            unloadsThisFrame++;
-            if (unloadsThisFrame >= unloadBudget)
-            {
-                unloadsThisFrame = 0;
-                yield return null;
-            }
-        }
-
-        chunkUnloadCoroutine = null;
     }
 
     private readonly struct ChunkGenerationRequest

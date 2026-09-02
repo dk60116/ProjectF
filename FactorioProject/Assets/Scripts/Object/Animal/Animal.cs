@@ -86,10 +86,15 @@ public class Animal : MonoBehaviour
     private Vector3 riderMountRootLocalPosition;
     private bool riderMountRootLocalPositionCached;
     private AnimalAIController cachedAIController;
+    private TerrainAnimalInstance cachedTerrainInstance;
     private Handcart attachedDraftHandcart;
     private bool hasPendingDraftHandcartRestore;
     private Vector2Int pendingDraftHandcartAnchorCoordinate;
     private long pendingDraftHandcartPlacementSequence;
+    private float currentHunger;
+    private float defecationTimeRemaining;
+    private int digestedMealCount;
+    private bool needsInitialized;
 
     public GameObject Eye;
     private GameObject eyeLeftGO;
@@ -135,6 +140,30 @@ public class Animal : MonoBehaviour
         }
     }
     public float NormalizedHealth => MaxHealth > 0f ? CurrentHealth / MaxHealth : 0f;
+    public float MaxHunger => animalDefinition != null
+        ? animalDefinition.NeedsSettings.MaxHunger
+        : AnimalNeedsSettings.DefaultMaxHunger;
+    public float CurrentHunger
+    {
+        get
+        {
+            EnsureNeedsInitialized();
+            return currentHunger;
+        }
+    }
+    public float NormalizedHunger => MaxHunger > 0f ? CurrentHunger / MaxHunger : 0f;
+    public bool IsHungry => NormalizedHunger <= (animalDefinition != null
+        ? animalDefinition.NeedsSettings.HungryThresholdRatio
+        : AnimalNeedsSettings.DefaultHungryThresholdRatio);
+    internal bool IsDefecationDue
+    {
+        get
+        {
+            EnsureNeedsInitialized();
+            return defecationTimeRemaining <= 0f
+                   && (!HasTerrainInteraction || digestedMealCount > 0);
+        }
+    }
     internal float MovementAccelerationPerSecond => animalDefinition?.AISettings != null
         ? animalDefinition.AISettings.AccelerationPerSecond
         : AnimalAISettings.DefaultAccelerationPerSecond;
@@ -241,14 +270,14 @@ public class Animal : MonoBehaviour
     {
         get
         {
-            TerrainAnimalInstance instance = GetComponentInParent<TerrainAnimalInstance>();
+            TerrainAnimalInstance instance = ResolveTerrainInstance();
             return instance != null && instance.HasInteracted;
         }
     }
 
     public void MarkTerrainInteraction()
     {
-        TerrainAnimalInstance instance = GetComponentInParent<TerrainAnimalInstance>();
+        TerrainAnimalInstance instance = ResolveTerrainInstance();
         if (instance != null)
         {
             instance.MarkInteracted();
@@ -271,6 +300,7 @@ public class Animal : MonoBehaviour
             ? Mathf.Clamp(restoredState.currentHealth, 0f, MaxHealth)
             : MaxHealth;
         healthInitialized = true;
+        RestoreNeedsState(restoredState);
         deathHandled = false;
         wakeFromRestRequested = false;
         SetSaddleEquipped(restoredState != null && restoredState.hasSaddle);
@@ -375,6 +405,11 @@ public class Animal : MonoBehaviour
         EnsureHealthInitialized();
         entry.hasHealth = true;
         entry.currentHealth = currentHealth;
+        EnsureNeedsInitialized();
+        entry.hasNeedsState = true;
+        entry.currentHunger = currentHunger;
+        entry.defecationTimeRemaining = defecationTimeRemaining;
+        entry.digestedMealCount = digestedMealCount;
         entry.hasSaddle = saddleEquipped;
         Handcart handcart = AttachedDraftHandcart;
         if (handcart != null && handcart.TryGetPlacementRuntime(out Vector2Int anchorCoordinate, out _))
@@ -570,6 +605,16 @@ public class Animal : MonoBehaviour
         }
 
         return cachedAIController;
+    }
+
+    private TerrainAnimalInstance ResolveTerrainInstance()
+    {
+        if (cachedTerrainInstance == null)
+        {
+            cachedTerrainInstance = GetComponentInParent<TerrainAnimalInstance>();
+        }
+
+        return cachedTerrainInstance;
     }
 
     private void SetSaddleEquipped(bool equipped)
@@ -871,7 +916,7 @@ public class Animal : MonoBehaviour
 
     private int BuildCorpseLootSeed()
     {
-        TerrainAnimalInstance instance = GetComponentInParent<TerrainAnimalInstance>();
+        TerrainAnimalInstance instance = ResolveTerrainInstance();
         long deterministicId = instance != null ? instance.DeterministicId : GetInstanceID();
         unchecked
         {
@@ -1040,6 +1085,109 @@ public class Animal : MonoBehaviour
     private void OnDestroy()
     {
         DetachFromDraftHandcart();
+    }
+
+    internal void TickNeeds(float deltaTime)
+    {
+        if (deltaTime <= 0f || !IsAlive)
+        {
+            return;
+        }
+
+        EnsureNeedsInitialized();
+        AnimalNeedsSettings needs = animalDefinition != null
+            ? animalDefinition.NeedsSettings
+            : null;
+        float hungerDrain = needs != null
+            ? needs.HungerDrainPerSecond
+            : AnimalNeedsSettings.DefaultHungerDrainPerSecond;
+        currentHunger = Mathf.Max(0f, currentHunger - hungerDrain * deltaTime);
+        defecationTimeRemaining -= deltaTime;
+    }
+
+    internal bool ConsumeDroppedFood(ItemDefinition foodDefinition)
+    {
+        if (!IsAlive || !ItemDefinition.IsFoodEnergyItemDefinition(foodDefinition))
+        {
+            return false;
+        }
+
+        EnsureNeedsInitialized();
+        AnimalNeedsSettings needs = animalDefinition != null
+            ? animalDefinition.NeedsSettings
+            : null;
+        float configuredFoodEnergy = needs != null
+            ? needs.FoodEnergyPerItem
+            : AnimalNeedsSettings.DefaultFoodEnergyPerItem;
+        float restoredHunger = Mathf.Max(configuredFoodEnergy, foodDefinition.energyAmount);
+        currentHunger = Mathf.Min(MaxHunger, currentHunger + restoredHunger);
+        digestedMealCount = Mathf.Min(digestedMealCount + 1, 32);
+        MarkTerrainInteraction();
+        return true;
+    }
+
+    internal bool CompleteDefecation(float random01)
+    {
+        if (!IsDefecationDue)
+        {
+            return false;
+        }
+
+        if (HasTerrainInteraction)
+        {
+            digestedMealCount = Mathf.Max(0, digestedMealCount - 1);
+        }
+
+        defecationTimeRemaining = ResolveDefecationInterval(random01);
+        return true;
+    }
+
+    private void RestoreNeedsState(AnimalSaveEntry restoredState)
+    {
+        needsInitialized = true;
+        if (restoredState != null && restoredState.hasNeedsState)
+        {
+            currentHunger = Mathf.Clamp(restoredState.currentHunger, 0f, MaxHunger);
+            defecationTimeRemaining = restoredState.defecationTimeRemaining;
+            digestedMealCount = Mathf.Max(0, restoredState.digestedMealCount);
+            return;
+        }
+
+        currentHunger = MaxHunger;
+        digestedMealCount = 0;
+        defecationTimeRemaining = ResolveDefecationInterval(
+            ResolveInitialNeedsRandom01());
+    }
+
+    private void EnsureNeedsInitialized()
+    {
+        if (!needsInitialized)
+        {
+            RestoreNeedsState(null);
+        }
+    }
+
+    private float ResolveDefecationInterval(float random01)
+    {
+        float interval = animalDefinition != null
+            ? animalDefinition.NeedsSettings.DefecationIntervalSeconds
+            : AnimalNeedsSettings.DefaultDefecationIntervalSeconds;
+        return interval * Mathf.Lerp(0.8f, 1.2f, Mathf.Clamp01(random01));
+    }
+
+    private float ResolveInitialNeedsRandom01()
+    {
+        TerrainAnimalInstance instance = ResolveTerrainInstance();
+        unchecked
+        {
+            ulong value = (ulong)(instance != null
+                ? instance.DeterministicId
+                : GetInstanceID());
+            value ^= value >> 33;
+            value *= 0xff51afd7ed558ccdUL;
+            value ^= value >> 33;
+            return (value & 0x00FFFFFFUL) / 16777216f;
+        }
     }
 
     private void ClearFocusVisuals()

@@ -158,6 +158,11 @@ public sealed class AnimalAIWorld : MonoBehaviour
                 continue;
             }
 
+            if (!paused)
+            {
+                controller.TickNeeds(deltaTime);
+            }
+
             float playerDistanceSqr = playerTransform != null
                 ? HorizontalSqrDistance(
                     controller.SimulationPosition,

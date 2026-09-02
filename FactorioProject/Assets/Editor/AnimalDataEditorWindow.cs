@@ -29,7 +29,7 @@ public sealed class AnimalDataEditorWindow : EditorWindow
     private sealed class AnimalJsonFile
     {
         public string format = "ProjectF.AnimalData";
-        public int version = 14;
+        public int version = 15;
         public List<AnimalJsonEntry> animals = new List<AnimalJsonEntry>();
     }
 
@@ -61,6 +61,10 @@ public sealed class AnimalDataEditorWindow : EditorWindow
         public float riderHeight = AnimalDefinition.DefaultRiderHeight;
         public float strength = AnimalDefinition.DefaultStrength;
         public AnimalAISettings aiSettings = new AnimalAISettings();
+        public AnimalNeedsSettings needsSettings = new AnimalNeedsSettings();
+        public int defecationItemId = -1;
+        public string defecationItemName = string.Empty;
+        public string defecationItemAssetPath = string.Empty;
         public List<AnimalDropJsonEntry> dropItems = new List<AnimalDropJsonEntry>();
         public string hierarchyPath = string.Empty;
         public string definitionAssetPath = string.Empty;
@@ -83,6 +87,8 @@ public sealed class AnimalDataEditorWindow : EditorWindow
         public float riderHeight;
         public float strength;
         public AnimalAISettings aiSettings;
+        public AnimalNeedsSettings needsSettings;
+        public ItemDefinition defecationItem;
         public List<AnimalDropEntry> dropItems;
         public GameObject prefab;
         public Sprite adultIcon;
@@ -110,6 +116,10 @@ public sealed class AnimalDataEditorWindow : EditorWindow
             aiSettings = definition != null && definition.AISettings != null
                 ? definition.AISettings.Clone()
                 : new AnimalAISettings();
+            needsSettings = definition != null && definition.NeedsSettings != null
+                ? definition.NeedsSettings.Clone()
+                : new AnimalNeedsSettings();
+            defecationItem = definition != null ? definition.DefecationItem : null;
             dropItems = definition != null
                 ? AnimalDropEntry.CloneList(definition.DropItems)
                 : new List<AnimalDropEntry>();
@@ -644,6 +654,8 @@ public sealed class AnimalDataEditorWindow : EditorWindow
         GUILayout.Space(8f);
         DrawObjectAISettings();
         GUILayout.Space(8f);
+        DrawObjectNeedsSettings();
+        GUILayout.Space(8f);
         DrawObjectDropItems();
         GUILayout.Space(8f);
         DrawObjectRidingSettings();
@@ -1126,6 +1138,149 @@ public sealed class AnimalDataEditorWindow : EditorWindow
         EditorGUILayout.EndHorizontal();
         EditorGUILayout.EndVertical();
         EditorGUILayout.EndHorizontal();
+    }
+
+    private void DrawObjectNeedsSettings()
+    {
+        if (selectedObjectDefinitions.Count == 0)
+        {
+            return;
+        }
+
+        AnimalDraft firstDraft = GetDraft(selectedObjectDefinitions[0]);
+        firstDraft.needsSettings ??= new AnimalNeedsSettings();
+        AnimalNeedsSettings current = firstDraft.needsSettings;
+        bool hasMixedSettings = false;
+        for (int i = 1; i < selectedObjectDefinitions.Count; i++)
+        {
+            AnimalDraft other = GetDraft(selectedObjectDefinitions[i]);
+            if (other.defecationItem != firstDraft.defecationItem
+                || !AreNeedsSettingsEqual(current, other.needsSettings))
+            {
+                hasMixedSettings = true;
+                break;
+            }
+        }
+
+        EditorGUILayout.BeginVertical("box");
+        EditorGUILayout.LabelField("Hunger / Defecation", EditorStyles.boldLabel);
+        EditorGUILayout.LabelField(
+            "Female/Male 변형에 함께 저장되는 종별 설정입니다.",
+            EditorStyles.miniLabel);
+        EditorGUI.showMixedValue = hasMixedSettings;
+
+        dropItemDropdown.Draw(
+            "Defecation Item",
+            firstDraft.defecationItem,
+            ApplyDefecationItemSelection);
+
+        EditorGUI.BeginChangeCheck();
+        float maxHunger = Mathf.Max(
+            1f,
+            EditorGUILayout.FloatField("Max Hunger", current.MaxHunger));
+        float hungerDrainPerSecond = Mathf.Max(
+            0f,
+            EditorGUILayout.FloatField(
+                new GUIContent("Hunger / Second", "초당 증가하는 배고픔입니다."),
+                current.HungerDrainPerSecond));
+        float hungryThresholdRatio = EditorGUILayout.Slider(
+            new GUIContent("Seek Food Below", "포만도가 이 비율 이하일 때 바닥 음식을 찾습니다."),
+            current.HungryThresholdRatio,
+            0f,
+            1f);
+        float foodEnergyPerItem = Mathf.Max(
+            0.01f,
+            EditorGUILayout.FloatField(
+                new GUIContent("Minimum Food Energy", "ItemData 에너지가 이 값보다 작으면 이 값을 회복합니다."),
+                current.FoodEnergyPerItem));
+        float foodSearchRadius = Mathf.Max(
+            0.5f,
+            EditorGUILayout.FloatField("Food Search Radius", current.FoodSearchRadius));
+
+        EditorGUILayout.Space(3f);
+        float defecationInterval = Mathf.Max(
+            1f,
+            EditorGUILayout.FloatField(
+                new GUIContent("Defecation Interval", "실제 주기는 매회 ±20%로 무작위화됩니다."),
+                current.DefecationIntervalSeconds));
+        int defecationAmount = Mathf.Max(
+            1,
+            EditorGUILayout.IntField("Defecation Amount", current.DefecationAmount));
+        float unattendedLifetime = Mathf.Max(
+            0f,
+            EditorGUILayout.FloatField(
+                new GUIContent("Wild Drop Lifetime", "플레이어와 상호작용하지 않은 동물의 배설물 유지 시간입니다. 0이면 유지됩니다."),
+                current.UnattendedDroppingLifetimeSeconds));
+
+        bool settingsChanged = EditorGUI.EndChangeCheck();
+        EditorGUI.showMixedValue = false;
+        if (settingsChanged)
+        {
+            AnimalNeedsSettings next = current.Clone();
+            next.MaxHunger = maxHunger;
+            next.HungerDrainPerSecond = hungerDrainPerSecond;
+            next.HungryThresholdRatio = hungryThresholdRatio;
+            next.FoodEnergyPerItem = foodEnergyPerItem;
+            next.FoodSearchRadius = foodSearchRadius;
+            next.DefecationIntervalSeconds = defecationInterval;
+            next.DefecationAmount = defecationAmount;
+            next.UnattendedDroppingLifetimeSeconds = unattendedLifetime;
+            next.Normalize();
+            for (int i = 0; i < selectedObjectDefinitions.Count; i++)
+            {
+                AnimalDraft draft = GetDraft(selectedObjectDefinitions[i]);
+                draft.needsSettings = next.Clone();
+                draft.dirty = true;
+            }
+        }
+
+        if (firstDraft.defecationItem != null
+            && !ItemDefinition.IsFertilizerEnergyItemDefinition(
+                firstDraft.defecationItem))
+        {
+            EditorGUILayout.HelpBox(
+                "Defecation Item은 에너지가 있는 Fertilizer 아이템이어야 합니다.",
+                MessageType.Error);
+        }
+
+        EditorGUILayout.HelpBox(
+            "관리 동물은 실제 바닥 음식 아이템을 먹은 횟수만큼만 배변하며, 야생 동물은 주기마다 무작위로 배변합니다.",
+            MessageType.Info);
+        EditorGUILayout.EndVertical();
+    }
+
+    private void ApplyDefecationItemSelection(ItemDefinition selectedDefinition)
+    {
+        for (int i = 0; i < selectedObjectDefinitions.Count; i++)
+        {
+            AnimalDraft draft = GetDraft(selectedObjectDefinitions[i]);
+            if (draft.defecationItem == selectedDefinition)
+            {
+                continue;
+            }
+
+            draft.defecationItem = selectedDefinition;
+            draft.dirty = true;
+        }
+
+        Repaint();
+    }
+
+    private static bool AreNeedsSettingsEqual(
+        AnimalNeedsSettings left,
+        AnimalNeedsSettings right)
+    {
+        if (ReferenceEquals(left, right))
+        {
+            return true;
+        }
+
+        return left != null
+               && right != null
+               && string.Equals(
+                   JsonUtility.ToJson(left),
+                   JsonUtility.ToJson(right),
+                   StringComparison.Ordinal);
     }
 
     private static void DrawSpawnNearPlayerButton(
@@ -1799,6 +1954,8 @@ public sealed class AnimalDataEditorWindow : EditorWindow
                 draft.riderHeight,
                 draft.strength,
                 draft.aiSettings,
+                draft.defecationItem,
+                draft.needsSettings,
                 draft.dropItems,
                 "Save Animal Data");
             draft.dirty = false;
@@ -1942,6 +2099,8 @@ public sealed class AnimalDataEditorWindow : EditorWindow
                         AnimalDefinition.DefaultRiderHeight,
                         AnimalDefinition.DefaultStrength,
                         new AnimalAISettings(),
+                        ResolveDefaultDefecationItem(),
+                        new AnimalNeedsSettings(),
                         new List<AnimalDropEntry>(),
                         "Create Animal Definition");
                     currentDefinitions.Add(definition);
@@ -1978,6 +2137,8 @@ public sealed class AnimalDataEditorWindow : EditorWindow
                     definition.RiderHeight,
                     definition.Strength,
                     definition.AISettings,
+                    definition.DefecationItem,
+                    definition.NeedsSettings,
                     definition.DropItems,
                     "Rebuild Animal Definition");
                 filledCount++;
@@ -2122,6 +2283,24 @@ public sealed class AnimalDataEditorWindow : EditorWindow
                     file.version);
             }
 
+            if (file.version >= 15)
+            {
+                draft.needsSettings = entry.needsSettings != null
+                    ? entry.needsSettings.Clone()
+                    : new AnimalNeedsSettings();
+                draft.needsSettings.Normalize();
+                draft.defecationItem =
+                    AssetDatabase.LoadAssetAtPath<ItemDefinition>(
+                        entry.defecationItemAssetPath);
+                if (draft.defecationItem == null)
+                {
+                    draft.defecationItem = ResolveDropItemDefinition(
+                        itemDefinitions,
+                        entry.defecationItemId,
+                        entry.defecationItemName);
+                }
+            }
+
             draft.prefab = AssetDatabase.LoadAssetAtPath<GameObject>(entry.prefabAssetPath);
             draft.adultIcon = AssetDatabase.LoadAssetAtPath<Sprite>(entry.adultIconAssetPath);
             draft.childIcon = AssetDatabase.LoadAssetAtPath<Sprite>(entry.childIconAssetPath);
@@ -2160,6 +2339,17 @@ public sealed class AnimalDataEditorWindow : EditorWindow
                 aiSettings = definition.AISettings != null
                     ? definition.AISettings.Clone()
                     : new AnimalAISettings(),
+                needsSettings = definition.NeedsSettings != null
+                    ? definition.NeedsSettings.Clone()
+                    : new AnimalNeedsSettings(),
+                defecationItemId = definition.DefecationItem != null
+                    ? definition.DefecationItem.id
+                    : -1,
+                defecationItemName = definition.DefecationItem != null
+                    ? definition.DefecationItem.itemName ?? string.Empty
+                    : string.Empty,
+                defecationItemAssetPath =
+                    AssetDatabase.GetAssetPath(definition.DefecationItem),
                 dropItems = ExportDropItems(definition.DropItems),
                 hierarchyPath = AnimalDataEditorUtility.GetHierarchyPath(definition),
                 definitionAssetPath = AssetDatabase.GetAssetPath(definition),
@@ -2291,6 +2481,25 @@ public sealed class AnimalDataEditorWindow : EditorWindow
         return ItemDefinitionLookup.ResolveByStableName(
             definitions,
             itemName);
+    }
+
+    private static ItemDefinition ResolveDefaultDefecationItem()
+    {
+        List<ItemDefinition> definitions = LoadAllItemDefinitions();
+        for (int i = 0; i < definitions.Count; i++)
+        {
+            ItemDefinition definition = definitions[i];
+            if (ItemDefinition.IsFertilizerEnergyItemDefinition(definition)
+                && string.Equals(
+                    definition.itemName,
+                    "Poop",
+                    StringComparison.OrdinalIgnoreCase))
+            {
+                return definition;
+            }
+        }
+
+        return null;
     }
 
     private AnimalDefinition ResolveJsonDefinition(AnimalJsonEntry entry)

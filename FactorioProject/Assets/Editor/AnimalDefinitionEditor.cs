@@ -87,6 +87,8 @@ public sealed class AnimalDefinitionEditor : Editor
                 draftRiderHeight,
                 draftStrength,
                 definition.AISettings,
+                definition.DefecationItem,
+                definition.NeedsSettings,
                 definition.DropItems,
                 "Save Animal Definition");
             AssetDatabase.SaveAssets();

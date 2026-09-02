@@ -5,7 +5,7 @@ using UnityEngine;
 [Serializable]
 public sealed class SaveGameData
 {
-    public const int CurrentVersion = 44;
+    public const int CurrentVersion = 49;
 
     public int version = CurrentVersion;
     public long savedAtUtcTicks;
@@ -28,6 +28,7 @@ public sealed class TerrainSaveData
 {
     public int seed;
     public int mapSize;
+    public List<Vector2Int> activeChunkCoordinates = new List<Vector2Int>();
 }
 
 [Serializable]
@@ -88,6 +89,10 @@ public sealed class AnimalSaveEntry
     public int randomState;
     public bool hasHealth;
     public float currentHealth;
+    public bool hasNeedsState;
+    public float currentHunger;
+    public float defecationTimeRemaining;
+    public int digestedMealCount;
     public bool hasSaddle;
     public bool hasDraftHandcart;
     public Vector2Int draftHandcartAnchorCoordinate;
