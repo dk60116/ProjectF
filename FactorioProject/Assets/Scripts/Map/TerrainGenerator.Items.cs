@@ -133,7 +133,7 @@ public partial class TerrainGenerator : MonoBehaviour
 
     private bool TryResolveFocusedConveyorDropBlock(
         Block focusedConveyorBlock,
-        HashSet<Block> excludedBlocks,
+        HashSet<BlockHandle> excludedHandles,
         out Block targetConveyorBlock)
     {
         targetConveyorBlock = null;
@@ -142,7 +142,8 @@ public partial class TerrainGenerator : MonoBehaviour
             return false;
         }
 
-        if ((excludedBlocks == null || !excludedBlocks.Contains(focusedConveyorBlock))
+        BlockHandle focusedHandle = focusedConveyorBlock.RuntimeHandle;
+        if ((excludedHandles == null || !excludedHandles.Contains(focusedHandle))
             && focusedConveyorBlock.GetAvailableConveyorCapacity() > 0)
         {
             targetConveyorBlock = focusedConveyorBlock;
@@ -151,7 +152,7 @@ public partial class TerrainGenerator : MonoBehaviour
 
         return TryFindDirectlyConnectedConveyorDropBlock(
             focusedConveyorBlock,
-            excludedBlocks,
+            excludedHandles,
             out targetConveyorBlock);
     }
 
@@ -163,40 +164,46 @@ public partial class TerrainGenerator : MonoBehaviour
         }
 
         int totalCapacity = 0;
-        HashSet<Block> countedBlocks = null;
+        conveyorDropBlockScratch.Clear();
 
         if (TryGetDirectlyConnectedConveyorDropCandidate(
                 focusedConveyorBlock,
                 true,
-                countedBlocks,
+                conveyorDropBlockScratch,
                 out Block downstreamBlock,
                 out int downstreamCapacity))
         {
             totalCapacity += downstreamCapacity;
             if (totalCapacity >= maxCapacity)
             {
+                conveyorDropBlockScratch.Clear();
                 return maxCapacity;
             }
 
-            countedBlocks = new HashSet<Block> { downstreamBlock };
+            BlockHandle downstreamHandle = downstreamBlock.RuntimeHandle;
+            if (downstreamHandle.IsValid)
+            {
+                conveyorDropBlockScratch.Add(downstreamHandle);
+            }
         }
 
         if (TryGetDirectlyConnectedConveyorDropCandidate(
                 focusedConveyorBlock,
                 false,
-                countedBlocks,
+                conveyorDropBlockScratch,
                 out _,
                 out int upstreamCapacity))
         {
             totalCapacity += upstreamCapacity;
         }
 
+        conveyorDropBlockScratch.Clear();
         return Mathf.Min(totalCapacity, maxCapacity);
     }
 
     private bool TryFindDirectlyConnectedConveyorDropBlock(
         Block focusedConveyorBlock,
-        HashSet<Block> excludedBlocks,
+        HashSet<BlockHandle> excludedHandles,
         out Block targetConveyorBlock)
     {
         targetConveyorBlock = null;
@@ -204,7 +211,7 @@ public partial class TerrainGenerator : MonoBehaviour
         if (TryGetDirectlyConnectedConveyorDropCandidate(
                 focusedConveyorBlock,
                 true,
-                excludedBlocks,
+                excludedHandles,
                 out targetConveyorBlock,
                 out _))
         {
@@ -214,7 +221,7 @@ public partial class TerrainGenerator : MonoBehaviour
         return TryGetDirectlyConnectedConveyorDropCandidate(
             focusedConveyorBlock,
             false,
-            excludedBlocks,
+            excludedHandles,
             out targetConveyorBlock,
             out _);
     }
@@ -222,7 +229,7 @@ public partial class TerrainGenerator : MonoBehaviour
     private static bool TryGetDirectlyConnectedConveyorDropCandidate(
         Block focusedConveyorBlock,
         bool downstream,
-        HashSet<Block> excludedBlocks,
+        HashSet<BlockHandle> excludedHandles,
         out Block candidateBlock,
         out int capacity)
     {
@@ -240,7 +247,7 @@ public partial class TerrainGenerator : MonoBehaviour
             || candidateBlock == null
             || candidateBlock == focusedConveyorBlock
             || !candidateBlock.IsRuntimeConveyor
-            || (excludedBlocks != null && excludedBlocks.Contains(candidateBlock)))
+            || (excludedHandles != null && excludedHandles.Contains(candidateBlock.RuntimeHandle)))
         {
             candidateBlock = null;
             return false;
@@ -270,10 +277,10 @@ public partial class TerrainGenerator : MonoBehaviour
     {
         targetPortableObject = null;
         targetConveyorBlock = null;
-        HashSet<Block> rejectedConveyorDropBlocks = null;
+        conveyorDropBlockScratch.Clear();
         while (TryResolveFocusedConveyorDropBlock(
                    focusedConveyorBlock,
-                   rejectedConveyorDropBlocks,
+                   conveyorDropBlockScratch,
                    out Block candidateBlock))
         {
             if (candidateBlock.TryAddConveyorObjectAnimatedAtPlacement(
@@ -287,13 +294,18 @@ public partial class TerrainGenerator : MonoBehaviour
                     movementReleaseDelay))
             {
                 targetConveyorBlock = candidateBlock;
+                conveyorDropBlockScratch.Clear();
                 return true;
             }
 
-            rejectedConveyorDropBlocks ??= new HashSet<Block>();
-            rejectedConveyorDropBlocks.Add(candidateBlock);
+            BlockHandle candidateHandle = candidateBlock.RuntimeHandle;
+            if (!candidateHandle.IsValid || !conveyorDropBlockScratch.Add(candidateHandle))
+            {
+                break;
+            }
         }
 
+        conveyorDropBlockScratch.Clear();
         return false;
     }
 
@@ -637,6 +649,15 @@ public partial class TerrainGenerator : MonoBehaviour
     public int LoadedBlockDataCellCount => loadedBlocks.RegisteredCellCount;
 
     public int LoadedBlockRuntimeProxyCount => loadedBlocks.Count;
+
+    public int LoadedBlockSimulationStateCount => loadedBlocks.RuntimeSimulationStateCount;
+
+    internal bool TryGetOrCreateBlockRuntimeSimulationState(
+        BlockHandle handle,
+        out BlockRuntimeSimulationState state)
+    {
+        return loadedBlocks.TryGetOrCreateRuntimeSimulationState(handle, out state);
+    }
 
     public int LoadedDedicatedBlockGameObjectCount => 0;
 

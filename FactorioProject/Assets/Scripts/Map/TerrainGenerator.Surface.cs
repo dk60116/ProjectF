@@ -102,67 +102,112 @@ public partial class TerrainGenerator : MonoBehaviour
             ? GetGeneratedSurfaceGlintMaterial()
             : null;
 
+        if (Application.isPlaying)
+        {
+            RenderVisibleChunkSurfaces(surfaceMaterials, foamMaterial, glintMaterial, renderCamera);
+            return;
+        }
+
         foreach (KeyValuePair<Vector2Int, ChunkRuntimeData> pair in loadedChunks)
         {
-            ChunkRuntimeData chunk = pair.Value;
-            if (chunk == null || chunk.surfaceMesh == null)
-            {
-                continue;
-            }
+            RenderChunkSurface(pair.Value, surfaceMaterials, foamMaterial, glintMaterial, renderCamera);
+        }
+    }
 
-            Matrix4x4 surfaceMatrix = Matrix4x4.Translate(
-                new Vector3(chunk.origin.x, 0f, chunk.origin.y));
-            Bounds surfaceBounds = TransformMeshBounds(chunk.surfaceMesh.bounds, surfaceMatrix);
-            if (Application.isPlaying
-                && !DoesWorldBoundsIntersectPlayerRenderRange(surfaceBounds))
-            {
-                continue;
-            }
+    private void RenderVisibleChunkSurfaces(
+        Material[] surfaceMaterials,
+        Material foamMaterial,
+        Material glintMaterial,
+        Camera renderCamera)
+    {
+        GetPlayerRenderCoordinateBounds(out Vector2Int minCoordinate, out Vector2Int maxCoordinate);
+        int normalizedChunkSize = Mathf.Max(4, chunkSize);
 
-            int subMeshCount = Mathf.Min(chunk.surfaceMesh.subMeshCount, surfaceMaterials.Length);
-            for (int subMeshIndex = 0; subMeshIndex < subMeshCount; subMeshIndex++)
+        // One padding chunk covers the half-cell mesh bounds and curved edge
+        // vertices. The exact world-bounds test below removes any false positives.
+        int minChunkX = Mathf.FloorToInt(minCoordinate.x / (float)normalizedChunkSize) - 1;
+        int maxChunkX = Mathf.FloorToInt(maxCoordinate.x / (float)normalizedChunkSize) + 1;
+        int minChunkY = Mathf.FloorToInt(minCoordinate.y / (float)normalizedChunkSize) - 1;
+        int maxChunkY = Mathf.FloorToInt(maxCoordinate.y / (float)normalizedChunkSize) + 1;
+
+        for (int chunkY = minChunkY; chunkY <= maxChunkY; chunkY++)
+        {
+            for (int chunkX = minChunkX; chunkX <= maxChunkX; chunkX++)
             {
-                Material material = surfaceMaterials[subMeshIndex];
-                if (material == null || chunk.surfaceMesh.GetIndexCount(subMeshIndex) == 0)
+                if (loadedChunks.TryGetValue(
+                        new Vector2Int(chunkX, chunkY),
+                        out ChunkRuntimeData chunk))
                 {
-                    continue;
+                    RenderChunkSurface(chunk, surfaceMaterials, foamMaterial, glintMaterial, renderCamera);
                 }
-
-                RenderChunkMesh(
-                    chunk.surfaceMesh,
-                    subMeshIndex,
-                    material,
-                    surfaceMatrix,
-                    surfaceBounds,
-                    true,
-                    renderCamera);
             }
+        }
+    }
 
-            if (chunk.foamMesh != null && foamMaterial != null)
+    private void RenderChunkSurface(
+        ChunkRuntimeData chunk,
+        Material[] surfaceMaterials,
+        Material foamMaterial,
+        Material glintMaterial,
+        Camera renderCamera)
+    {
+        if (chunk == null || chunk.surfaceMesh == null)
+        {
+            return;
+        }
+
+        Matrix4x4 surfaceMatrix = Matrix4x4.Translate(
+            new Vector3(chunk.origin.x, 0f, chunk.origin.y));
+        Bounds surfaceBounds = TransformMeshBounds(chunk.surfaceMesh.bounds, surfaceMatrix);
+        if (Application.isPlaying
+            && !DoesWorldBoundsIntersectPlayerRenderRange(surfaceBounds))
+        {
+            return;
+        }
+
+        int subMeshCount = Mathf.Min(chunk.surfaceMesh.subMeshCount, surfaceMaterials.Length);
+        for (int subMeshIndex = 0; subMeshIndex < subMeshCount; subMeshIndex++)
+        {
+            Material material = surfaceMaterials[subMeshIndex];
+            if (material == null || chunk.surfaceMesh.GetIndexCount(subMeshIndex) == 0)
             {
-                RenderChunkMesh(
-                    chunk.foamMesh,
-                    0,
-                    foamMaterial,
-                    surfaceMatrix,
-                    TransformMeshBounds(chunk.foamMesh.bounds, surfaceMatrix),
-                    false,
-                    renderCamera);
+                continue;
             }
 
-            if (chunk.glintMesh != null && glintMaterial != null)
-            {
-                Matrix4x4 glintMatrix = Matrix4x4.Translate(
-                    new Vector3(chunk.origin.x, waterSurfaceGlintOffset, chunk.origin.y));
-                RenderChunkMesh(
-                    chunk.glintMesh,
-                    0,
-                    glintMaterial,
-                    glintMatrix,
-                    TransformMeshBounds(chunk.glintMesh.bounds, glintMatrix),
-                    false,
-                    renderCamera);
-            }
+            RenderChunkMesh(
+                chunk.surfaceMesh,
+                subMeshIndex,
+                material,
+                surfaceMatrix,
+                surfaceBounds,
+                true,
+                renderCamera);
+        }
+
+        if (chunk.foamMesh != null && foamMaterial != null)
+        {
+            RenderChunkMesh(
+                chunk.foamMesh,
+                0,
+                foamMaterial,
+                surfaceMatrix,
+                TransformMeshBounds(chunk.foamMesh.bounds, surfaceMatrix),
+                false,
+                renderCamera);
+        }
+
+        if (chunk.glintMesh != null && glintMaterial != null)
+        {
+            Matrix4x4 glintMatrix = Matrix4x4.Translate(
+                new Vector3(chunk.origin.x, waterSurfaceGlintOffset, chunk.origin.y));
+            RenderChunkMesh(
+                chunk.glintMesh,
+                0,
+                glintMaterial,
+                glintMatrix,
+                TransformMeshBounds(chunk.glintMesh.bounds, glintMatrix),
+                false,
+                renderCamera);
         }
     }
 
@@ -243,6 +288,7 @@ public partial class TerrainGenerator : MonoBehaviour
         mesh.indexFormat = UnityEngine.Rendering.IndexFormat.UInt32;
 
         mesh.SetVertices(chunkSurface.vertices);
+        mesh.SetNormals(chunkSurface.normals);
         mesh.SetUVs(0, chunkSurface.uvs);
         if (chunkSurface.colors.Count == chunkSurface.vertices.Count)
         {
@@ -252,10 +298,9 @@ public partial class TerrainGenerator : MonoBehaviour
         mesh.subMeshCount = subMeshCount;
         for (int i = 0; i < subMeshCount; i++)
         {
-            mesh.SetTriangles(chunkSurface.trianglesByBiome[i], i, true);
+            mesh.SetTriangles(chunkSurface.trianglesByBiome[i], i, false);
         }
 
-        mesh.RecalculateNormals();
         mesh.RecalculateBounds();
         mesh.UploadMeshData(false);
         return mesh;
@@ -267,6 +312,7 @@ public partial class TerrainGenerator : MonoBehaviour
         mesh.indexFormat = UnityEngine.Rendering.IndexFormat.UInt32;
 
         mesh.SetVertices(chunkSurface.vertices);
+        mesh.SetNormals(chunkSurface.normals);
         mesh.SetUVs(0, chunkSurface.uvs);
         if (chunkSurface.colors.Count == chunkSurface.vertices.Count)
         {
@@ -274,8 +320,7 @@ public partial class TerrainGenerator : MonoBehaviour
         }
 
         mesh.subMeshCount = 1;
-        mesh.SetTriangles(chunkSurface.trianglesByBiome[GetBiomeMaterialIndex(TerrainBiome.Water)], 0, true);
-        mesh.RecalculateNormals();
+        mesh.SetTriangles(chunkSurface.trianglesByBiome[GetBiomeMaterialIndex(TerrainBiome.Water)], 0, false);
         mesh.RecalculateBounds();
         mesh.UploadMeshData(false);
         return mesh;
@@ -287,6 +332,7 @@ public partial class TerrainGenerator : MonoBehaviour
         mesh.indexFormat = UnityEngine.Rendering.IndexFormat.UInt32;
 
         mesh.SetVertices(chunkSurface.vertices);
+        mesh.SetNormals(chunkSurface.normals);
         mesh.SetUVs(0, chunkSurface.uvs);
         if (chunkSurface.colors.Count == chunkSurface.vertices.Count)
         {
@@ -294,8 +340,7 @@ public partial class TerrainGenerator : MonoBehaviour
         }
 
         mesh.subMeshCount = 1;
-        mesh.SetTriangles(chunkSurface.trianglesByBiome[GeneratedSurfaceFoamMaterialIndex], 0, true);
-        mesh.RecalculateNormals();
+        mesh.SetTriangles(chunkSurface.trianglesByBiome[GeneratedSurfaceFoamMaterialIndex], 0, false);
         mesh.RecalculateBounds();
         mesh.UploadMeshData(false);
         return mesh;
@@ -396,7 +441,69 @@ public partial class TerrainGenerator : MonoBehaviour
         }
 
         AppendContourSafetyPatchesFromSnapshot(chunkSurface, input);
+        BuildChunkSurfaceNormals(chunkSurface);
         return chunkSurface;
+    }
+
+    private static void BuildChunkSurfaceNormals(ChunkSurfaceBuildData chunkSurface)
+    {
+        int vertexCount = chunkSurface != null ? chunkSurface.vertices.Count : 0;
+        if (vertexCount <= 0)
+        {
+            return;
+        }
+
+        List<Vector3> normals = chunkSurface.normals;
+        normals.Clear();
+        if (normals.Capacity < vertexCount)
+        {
+            normals.Capacity = vertexCount;
+        }
+
+        for (int i = 0; i < vertexCount; i++)
+        {
+            normals.Add(Vector3.zero);
+        }
+
+        int surfaceSubMeshCount = Mathf.Min(
+            GeneratedSurfaceBiomeMaterialCount,
+            chunkSurface.trianglesByBiome.Length);
+        for (int subMeshIndex = 0; subMeshIndex < surfaceSubMeshCount; subMeshIndex++)
+        {
+            List<int> triangles = chunkSurface.trianglesByBiome[subMeshIndex];
+            for (int triangleIndex = 0; triangleIndex + 2 < triangles.Count; triangleIndex += 3)
+            {
+                int index0 = triangles[triangleIndex];
+                int index1 = triangles[triangleIndex + 1];
+                int index2 = triangles[triangleIndex + 2];
+                if ((uint)index0 >= (uint)vertexCount
+                    || (uint)index1 >= (uint)vertexCount
+                    || (uint)index2 >= (uint)vertexCount)
+                {
+                    continue;
+                }
+
+                Vector3 edge1 = chunkSurface.vertices[index1] - chunkSurface.vertices[index0];
+                Vector3 edge2 = chunkSurface.vertices[index2] - chunkSurface.vertices[index0];
+                Vector3 faceNormal = Vector3.Cross(edge1, edge2);
+                if (faceNormal.sqrMagnitude <= 0.0000001f)
+                {
+                    continue;
+                }
+
+                normals[index0] += faceNormal;
+                normals[index1] += faceNormal;
+                normals[index2] += faceNormal;
+            }
+        }
+
+        for (int i = 0; i < vertexCount; i++)
+        {
+            Vector3 normal = normals[i];
+            normals[i] = normal.sqrMagnitude > 0.0000001f
+                ? normal.normalized
+                : Vector3.up;
+        }
     }
 
     private static void AppendDominantBiomeBaseSurfaceFromSnapshot(ChunkSurfaceBuildData chunkSurface, ChunkSurfaceWorkerInput input)
@@ -1116,6 +1223,8 @@ public partial class TerrainGenerator : MonoBehaviour
                 yield return safetyRoutine.Current;
             }
         }
+
+        BuildChunkSurfaceNormals(chunkSurface);
     }
 
     private IEnumerator AppendDominantBiomeBaseSurfaceRoutine(

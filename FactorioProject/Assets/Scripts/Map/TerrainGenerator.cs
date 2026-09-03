@@ -86,6 +86,7 @@ public partial class TerrainGenerator : MonoBehaviour
         public Vector2Int origin;
         public ChunkSurfaceWorkerInput surfaceInput;
         public readonly List<Vector3> vertices = new List<Vector3>();
+        public readonly List<Vector3> normals = new List<Vector3>();
         public readonly List<Vector2> uvs = new List<Vector2>();
         public readonly List<Color> colors = new List<Color>();
         public readonly float[] blendWeightBuffer = new float[GeneratedSurfaceBiomeMaterialCount];
@@ -121,7 +122,7 @@ public partial class TerrainGenerator : MonoBehaviour
         public int id;
         public bool isCycle;
         public bool simulationCacheValid;
-        public readonly List<Block> blocks = new List<Block>();
+        public readonly List<BlockHandle> blockHandles = new List<BlockHandle>();
         public int[] frontLaneIndices = Array.Empty<int>();
         public int[] backLaneIndices = Array.Empty<int>();
         public float[] withinPathLengths = Array.Empty<float>();
@@ -158,7 +159,7 @@ public partial class TerrainGenerator : MonoBehaviour
     {
         public int id;
         public bool isCycle;
-        public readonly List<Block> blocks = new List<Block>();
+        public readonly List<BlockHandle> blockHandles = new List<BlockHandle>();
 
         public ConveyorCornerGroup(int id)
         {
@@ -244,18 +245,18 @@ public partial class TerrainGenerator : MonoBehaviour
 
     private readonly struct BeltItemLineLaneKey : IEquatable<BeltItemLineLaneKey>
     {
-        public BeltItemLineLaneKey(Block block, int laneIndex)
+        public BeltItemLineLaneKey(BlockHandle blockHandle, int laneIndex)
         {
-            Block = block;
+            BlockHandle = blockHandle;
             LaneIndex = laneIndex;
         }
 
-        public readonly Block Block;
+        public readonly BlockHandle BlockHandle;
         public readonly int LaneIndex;
 
         public bool Equals(BeltItemLineLaneKey other)
         {
-            return Block == other.Block && LaneIndex == other.LaneIndex;
+            return BlockHandle == other.BlockHandle && LaneIndex == other.LaneIndex;
         }
 
         public override bool Equals(object obj)
@@ -267,7 +268,7 @@ public partial class TerrainGenerator : MonoBehaviour
         {
             unchecked
             {
-                return ((Block != null ? Block.GetInstanceID() : 0) * 397) ^ LaneIndex;
+                return (BlockHandle.GetHashCode() * 397) ^ LaneIndex;
             }
         }
     }
@@ -355,7 +356,7 @@ public partial class TerrainGenerator : MonoBehaviour
 
     [Header("Chunk Streaming")]
     [SerializeField, Min(1)]
-    private int chunkGenerationBlocksPerFrame = 48;
+    private int chunkGenerationBlocksPerFrame = 16;
 
     [SerializeField, Min(1)]
     private int chunkSurfaceRowsPerFrame = 12;
@@ -673,19 +674,19 @@ public partial class TerrainGenerator : MonoBehaviour
     private readonly List<Vector2Int> chunksToGenerateScratch = new List<Vector2Int>();
     private readonly List<Block> chunkRuntimeBlockScratch = new List<Block>();
     private readonly ChunkDistanceComparer chunkDistanceComparer = new ChunkDistanceComparer();
-    private readonly HashSet<Block> activeConveyors = new HashSet<Block>();
-    private readonly List<Block> conveyorTickBuffer = new List<Block>();
-    private readonly List<Block> activeConveyorDataMotionBlocks = new List<Block>();
-    private readonly Dictionary<Block, int> activeConveyorDataMotionIndices = new Dictionary<Block, int>();
-    private readonly Dictionary<Block, float> activeConveyorDataMotionDueTimes = new Dictionary<Block, float>();
-    private readonly List<Block> sortedActiveConveyors = new List<Block>();
-    private readonly HashSet<Block> activeConveyorDotVisuals = new HashSet<Block>();
-    private readonly List<Block> activeConveyorDotVisualList = new List<Block>();
-    private readonly List<Block> conveyorDotVisualTickBuffer = new List<Block>();
-    private readonly HashSet<Block> activeBeltDirectionVisuals = new HashSet<Block>();
-    private readonly List<Block> activeBeltDirectionVisualList = new List<Block>();
+    private readonly HashSet<BlockHandle> activeConveyors = new HashSet<BlockHandle>();
+    private readonly List<BlockHandle> conveyorTickBuffer = new List<BlockHandle>();
+    private readonly List<BlockHandle> activeConveyorDataMotionBlocks = new List<BlockHandle>();
+    private readonly Dictionary<BlockHandle, int> activeConveyorDataMotionIndices = new Dictionary<BlockHandle, int>();
+    private readonly Dictionary<BlockHandle, float> activeConveyorDataMotionDueTimes = new Dictionary<BlockHandle, float>();
+    private readonly List<BlockHandle> sortedActiveConveyors = new List<BlockHandle>();
+    private readonly HashSet<BlockHandle> activeConveyorDotVisuals = new HashSet<BlockHandle>();
+    private readonly List<BlockHandle> activeConveyorDotVisualList = new List<BlockHandle>();
+    private readonly List<BlockHandle> conveyorDotVisualTickBuffer = new List<BlockHandle>();
+    private readonly HashSet<BlockHandle> activeBeltDirectionVisuals = new HashSet<BlockHandle>();
+    private readonly List<BlockHandle> activeBeltDirectionVisualList = new List<BlockHandle>();
     private readonly List<Matrix4x4> directionArrowMatrixScratch = new List<Matrix4x4>(4);
-    private readonly List<Block> pendingConveyorSlotDotRefreshBlocks = new List<Block>();
+    private readonly List<BlockHandle> pendingConveyorSlotDotRefreshBlocks = new List<BlockHandle>();
     private readonly Matrix4x4[] conveyorSlotDotInstanceMatrices = new Matrix4x4[MaxConveyorSlotDotInstancesPerBatch];
     private readonly Matrix4x4[] beltDirectionArrowInstanceMatrices = new Matrix4x4[MaxBeltDirectionArrowInstancesPerBatch];
     private int conveyorSlotDotInstanceMatrixCount;
@@ -709,13 +710,14 @@ public partial class TerrainGenerator : MonoBehaviour
     private readonly HashSet<BeltItemLineLaneKey> beltItemLineDebugOccupiedLaneSet = new HashSet<BeltItemLineLaneKey>();
     private readonly HashSet<BeltItemLineLaneKey> beltItemLineDebugIncomingLanes = new HashSet<BeltItemLineLaneKey>();
     private readonly HashSet<BeltItemLineLaneKey> beltItemLineDebugVisitedLanes = new HashSet<BeltItemLineLaneKey>();
-    private readonly List<Block> pendingBeltItemLineDebugRefreshBlocks = new List<Block>(512);
-    private readonly HashSet<Block> pendingBeltItemLineDebugRefreshSet = new HashSet<Block>();
-    private readonly HashSet<Block> conveyorItemVisualBlocks = new HashSet<Block>();
-    private readonly HashSet<Block> conveyorItemVisualDirtyBlocks = new HashSet<Block>();
-    private readonly List<Block> dynamicConveyorItemVisualBlocks = new List<Block>(256);
-    private readonly Dictionary<Block, int> dynamicConveyorItemVisualBlockIndices = new Dictionary<Block, int>();
-    private readonly Dictionary<Block, int> conveyorItemCountsByBlock = new Dictionary<Block, int>();
+    private readonly List<BlockHandle> pendingBeltItemLineDebugRefreshBlocks = new List<BlockHandle>(512);
+    private readonly HashSet<BlockHandle> pendingBeltItemLineDebugRefreshSet = new HashSet<BlockHandle>();
+    private readonly HashSet<BlockHandle> conveyorItemVisualBlocks = new HashSet<BlockHandle>();
+    private readonly HashSet<BlockHandle> conveyorItemVisualDirtyBlocks = new HashSet<BlockHandle>();
+    private readonly List<BlockHandle> dynamicConveyorItemVisualBlocks = new List<BlockHandle>(256);
+    private readonly Dictionary<BlockHandle, int> dynamicConveyorItemVisualBlockIndices = new Dictionary<BlockHandle, int>();
+    private readonly Dictionary<BlockHandle, int> conveyorItemCountsByBlock = new Dictionary<BlockHandle, int>();
+    private readonly HashSet<BlockHandle> conveyorDropBlockScratch = new HashSet<BlockHandle>();
     private int pendingBeltItemLineDebugRefreshIndex;
     private int conveyorItemVisualBlockSetVersion;
     private int dynamicConveyorItemVisualBlockSetVersion;
@@ -736,18 +738,18 @@ public partial class TerrainGenerator : MonoBehaviour
     private int conveyorStateSaveConveyorBlocks;
     private int conveyorStateSaveConveyorItems;
     private int conveyorStateSaveClearedNonConveyorBlocks;
-    private readonly Dictionary<Block, int> conveyorNetworkIds = new Dictionary<Block, int>();
-    private readonly Dictionary<int, List<Block>> conveyorNetworkBlocksById = new Dictionary<int, List<Block>>();
+    private readonly Dictionary<BlockHandle, int> conveyorNetworkIds = new Dictionary<BlockHandle, int>();
+    private readonly Dictionary<int, List<BlockHandle>> conveyorNetworkBlocksById = new Dictionary<int, List<BlockHandle>>();
     private readonly Dictionary<int, float> conveyorNetworkRetryTimes = new Dictionary<int, float>();
     private readonly HashSet<int> conveyorNetworkSleepingIds = new HashSet<int>();
     private readonly HashSet<int> conveyorNetworkActiveIds = new HashSet<int>();
     private readonly HashSet<int> conveyorNetworkSleepCheckQueuedIds = new HashSet<int>();
     private readonly List<int> conveyorNetworkSleepCheckBuffer = new List<int>();
-    private readonly Queue<Block> conveyorNetworkBuildQueue = new Queue<Block>();
-    private readonly Queue<Block> conveyorWakeQueue = new Queue<Block>();
+    private readonly Queue<BlockHandle> conveyorNetworkBuildQueue = new Queue<BlockHandle>();
+    private readonly Queue<BlockHandle> conveyorWakeQueue = new Queue<BlockHandle>();
     private readonly Queue<int> conveyorLineWakeQueue = new Queue<int>();
-    private readonly HashSet<Block> conveyorWakeQueued = new HashSet<Block>();
-    private readonly HashSet<Block> conveyorDirectWakeBlocks = new HashSet<Block>();
+    private readonly HashSet<BlockHandle> conveyorWakeQueued = new HashSet<BlockHandle>();
+    private readonly HashSet<BlockHandle> conveyorDirectWakeBlocks = new HashSet<BlockHandle>();
     private readonly Dictionary<int, ConveyorLineWakeRange> conveyorLineWakeRangesById = new Dictionary<int, ConveyorLineWakeRange>();
     private readonly Queue<int> deferredConveyorLineWakeQueue = new Queue<int>();
     private readonly Dictionary<int, ConveyorLineWakeRange> deferredConveyorLineWakeRangesById = new Dictionary<int, ConveyorLineWakeRange>();
@@ -761,26 +763,26 @@ public partial class TerrainGenerator : MonoBehaviour
     private readonly List<ConveyorLaneCoordinateKey> conveyorBlockedWaiterWakeBuffer = new List<ConveyorLaneCoordinateKey>(4);
     private readonly List<ConveyorLine> conveyorLines = new List<ConveyorLine>();
     private readonly Dictionary<int, ConveyorLine> conveyorLinesById = new Dictionary<int, ConveyorLine>();
-    private readonly Dictionary<Block, ConveyorLineSlot> conveyorLineSlots = new Dictionary<Block, ConveyorLineSlot>();
-    private readonly HashSet<Block> conveyorLineVisited = new HashSet<Block>();
-    private readonly Dictionary<Block, int> conveyorLineBuildIndices = new Dictionary<Block, int>();
+    private readonly Dictionary<BlockHandle, ConveyorLineSlot> conveyorLineSlots = new Dictionary<BlockHandle, ConveyorLineSlot>();
+    private readonly HashSet<BlockHandle> conveyorLineVisited = new HashSet<BlockHandle>();
+    private readonly Dictionary<BlockHandle, int> conveyorLineBuildIndices = new Dictionary<BlockHandle, int>();
     private readonly HashSet<int> conveyorLinesTickedThisFrame = new HashSet<int>();
-    private readonly List<Block> conveyorLineTouchedBlocks = new List<Block>();
-    private readonly HashSet<Block> conveyorLineTouchedSet = new HashSet<Block>();
+    private readonly List<BlockHandle> conveyorLineTouchedBlocks = new List<BlockHandle>();
+    private readonly HashSet<BlockHandle> conveyorLineTouchedSet = new HashSet<BlockHandle>();
     private readonly Queue<int> conveyorCornerGroupWakeQueue = new Queue<int>();
     private readonly HashSet<int> conveyorCornerGroupWakeQueued = new HashSet<int>();
-    private readonly Dictionary<int, List<Block>> conveyorCornerGroupWakeBlocksById = new Dictionary<int, List<Block>>();
-    private readonly HashSet<Block> conveyorCornerGroupWakeQueuedBlocks = new HashSet<Block>();
+    private readonly Dictionary<int, List<BlockHandle>> conveyorCornerGroupWakeBlocksById = new Dictionary<int, List<BlockHandle>>();
+    private readonly HashSet<BlockHandle> conveyorCornerGroupWakeQueuedBlocks = new HashSet<BlockHandle>();
     private readonly List<ConveyorCornerGroup> conveyorCornerGroups = new List<ConveyorCornerGroup>();
     private readonly Dictionary<int, ConveyorCornerGroup> conveyorCornerGroupsById = new Dictionary<int, ConveyorCornerGroup>();
-    private readonly Dictionary<Block, ConveyorCornerGroupSlot> conveyorCornerGroupSlots = new Dictionary<Block, ConveyorCornerGroupSlot>();
-    private readonly HashSet<Block> conveyorCornerGroupVisited = new HashSet<Block>();
-    private readonly Dictionary<Block, int> conveyorCornerGroupBuildIndices = new Dictionary<Block, int>();
-    private readonly List<Block> conveyorCornerGroupTickBlocks = new List<Block>();
-    private readonly HashSet<Block> deferredConveyorRuntimeRefreshBlocks = new HashSet<Block>();
-    private readonly HashSet<Block> deferredConveyorNetworkWakeBlocks = new HashSet<Block>();
-    private readonly HashSet<Block> deferredConveyorMoveAttemptWakeAroundBlocks = new HashSet<Block>();
-    private readonly HashSet<Block> deferredConveyorMoveAttemptWakeFlowBlocks = new HashSet<Block>();
+    private readonly Dictionary<BlockHandle, ConveyorCornerGroupSlot> conveyorCornerGroupSlots = new Dictionary<BlockHandle, ConveyorCornerGroupSlot>();
+    private readonly HashSet<BlockHandle> conveyorCornerGroupVisited = new HashSet<BlockHandle>();
+    private readonly Dictionary<BlockHandle, int> conveyorCornerGroupBuildIndices = new Dictionary<BlockHandle, int>();
+    private readonly List<BlockHandle> conveyorCornerGroupTickBlocks = new List<BlockHandle>();
+    private readonly HashSet<BlockHandle> deferredConveyorRuntimeRefreshBlocks = new HashSet<BlockHandle>();
+    private readonly HashSet<BlockHandle> deferredConveyorNetworkWakeBlocks = new HashSet<BlockHandle>();
+    private readonly HashSet<BlockHandle> deferredConveyorMoveAttemptWakeAroundBlocks = new HashSet<BlockHandle>();
+    private readonly HashSet<BlockHandle> deferredConveyorMoveAttemptWakeFlowBlocks = new HashSet<BlockHandle>();
     private readonly List<ConveyorItemLaneSaveState> conveyorItemCountLaneScratch = new List<ConveyorItemLaneSaveState>();
     private readonly Dictionary<Vector2Int, TerrainBiome> tileBiomeCache = new Dictionary<Vector2Int, TerrainBiome>();
     private readonly Dictionary<Vector2Int, bool> rawWaterCache = new Dictionary<Vector2Int, bool>();
@@ -2156,7 +2158,7 @@ public partial class TerrainGenerator : MonoBehaviour
         RefreshBeltDirectionRuntimeVisibility();
     }
 
-    public void CopyConveyorItemVisualBlocks(List<Block> results)
+    public void CopyConveyorItemVisualBlocks(List<BlockHandle> results)
     {
         if (results == null)
         {
@@ -2164,16 +2166,10 @@ public partial class TerrainGenerator : MonoBehaviour
         }
 
         results.Clear();
-        foreach (Block block in conveyorItemVisualBlocks)
-        {
-            if (block != null)
-            {
-                results.Add(block);
-            }
-        }
+        results.AddRange(conveyorItemVisualBlocks);
     }
 
-    public void CopyDynamicConveyorItemVisualBlocks(List<Block> results)
+    public void CopyDynamicConveyorItemVisualBlocks(List<BlockHandle> results)
     {
         if (results == null)
         {
@@ -2181,17 +2177,10 @@ public partial class TerrainGenerator : MonoBehaviour
         }
 
         results.Clear();
-        for (int i = 0; i < dynamicConveyorItemVisualBlocks.Count; i++)
-        {
-            Block block = dynamicConveyorItemVisualBlocks[i];
-            if (block != null)
-            {
-                results.Add(block);
-            }
-        }
+        results.AddRange(dynamicConveyorItemVisualBlocks);
     }
 
-    public void CopyConveyorItemVisualDirtyBlocks(List<Block> results)
+    public void CopyConveyorItemVisualDirtyBlocks(List<BlockHandle> results)
     {
         if (results == null)
         {
@@ -2199,13 +2188,7 @@ public partial class TerrainGenerator : MonoBehaviour
         }
 
         results.Clear();
-        foreach (Block block in conveyorItemVisualDirtyBlocks)
-        {
-            if (block != null)
-            {
-                results.Add(block);
-            }
-        }
+        results.AddRange(conveyorItemVisualDirtyBlocks);
 
         conveyorItemVisualDirtyBlocks.Clear();
     }
@@ -2712,14 +2695,19 @@ public partial class TerrainGenerator : MonoBehaviour
             return null;
         }
 
+        // Register the cell before creating the compatibility component so any
+        // later simulation-state access resolves through a generation-checked
+        // handle. Empty cells never allocate a simulation-state object.
+        loadedBlocks.RegisterCell(coordinate, blockType, out BlockHandle handle);
+
         Block block = gameObject.AddComponent<Block>();
         block.hideFlags = HideFlags.HideInInspector | HideFlags.DontSave;
         block.ConfigureRuntimeTemplate(template);
-
+        block.BindRuntimeHandle(handle);
         block.Initialize(coordinate, blockType);
-        if (loadedBlocks.BindRuntimeProxy(coordinate, block, out BlockHandle handle))
+        if (loadedBlocks.BindRuntimeProxy(coordinate, block, out BlockHandle boundHandle))
         {
-            block.BindRuntimeHandle(handle);
+            block.BindRuntimeHandle(boundHandle);
         }
         return block;
     }
@@ -2772,16 +2760,22 @@ public partial class TerrainGenerator : MonoBehaviour
                 continue;
             }
 
+            BlockHandle handle = block.RuntimeHandle;
             loadedBlocks.Remove(block.Coordinate);
             ReleaseFarmlandVisual(block.Coordinate);
+            block.PrepareForRuntimeRelease();
+            if (block.HasRuntimeSimulationState)
+            {
+                loadedBlocks.RemoveRuntimeSimulationState(handle);
+            }
+
+            block.DetachRuntimeSimulationState();
             if (Application.isPlaying)
             {
-                block.PrepareForRuntimeRelease();
                 Destroy(block);
             }
             else
             {
-                block.PrepareForRuntimeRelease();
                 DestroyImmediate(block);
             }
         }

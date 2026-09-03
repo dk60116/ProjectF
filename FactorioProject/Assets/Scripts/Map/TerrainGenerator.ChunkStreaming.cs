@@ -68,7 +68,18 @@ public partial class TerrainGenerator : MonoBehaviour
         }
 #endif
 
-        return normalizedLoadRadius;
+        if (!Application.isPlaying || normalizedLoadRadius == 0)
+        {
+            return normalizedLoadRadius;
+        }
+
+        // Generated chunks are retained permanently. Loading farther than the
+        // visible range therefore adds an increasingly expensive strip on every
+        // chunk-boundary crossing without providing a visible result.
+        int normalizedChunkSize = Mathf.Max(4, chunkSize);
+        int visibleChunkRadius = Mathf.CeilToInt(
+            (PlayerRenderRadius + 0.5f) / normalizedChunkSize);
+        return Mathf.Min(normalizedLoadRadius, Mathf.Max(1, visibleChunkRadius));
     }
 
     private static bool IsChunkWithinRadius(Vector2Int chunkCoordinate, Vector2Int centerChunk, int radius)

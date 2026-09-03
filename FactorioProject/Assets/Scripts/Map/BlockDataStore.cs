@@ -79,6 +79,10 @@ public sealed class BlockDataStore : IEnumerable<KeyValuePair<Vector2Int, Block>
         public readonly Vector2Int Origin;
         public readonly uint Generation;
         public readonly CellRecord[] Cells;
+        // Simulation state is sparse: empty terrain cells must not pay one managed
+        // reference per cell. Stateful cells are keyed by their chunk-local index.
+        public readonly Dictionary<int, BlockRuntimeSimulationState> RuntimeSimulationStates =
+            new Dictionary<int, BlockRuntimeSimulationState>();
         public readonly Dictionary<int, Block> RuntimeProxies = new Dictionary<int, Block>();
         public int RegisteredCellCount;
         public int RuntimeProxyCount;
@@ -104,6 +108,7 @@ public sealed class BlockDataStore : IEnumerable<KeyValuePair<Vector2Int, Block>
     private int chunkSize;
     private int registeredCellCount;
     private int runtimeProxyCount;
+    private int runtimeSimulationStateCount;
     private uint nextChunkGeneration = 1;
     private bool hasRegisteredBounds;
     private bool registeredBoundsDirty;
@@ -114,6 +119,7 @@ public sealed class BlockDataStore : IEnumerable<KeyValuePair<Vector2Int, Block>
     public int ChunkCount => chunks.Count;
     public int RegisteredCellCount => registeredCellCount;
     public int Count => runtimeProxyCount;
+    public int RuntimeSimulationStateCount => runtimeSimulationStateCount;
 
     public void ConfigureChunkSize(int value)
     {
@@ -151,6 +157,7 @@ public sealed class BlockDataStore : IEnumerable<KeyValuePair<Vector2Int, Block>
 
         registeredCellCount -= chunk.RegisteredCellCount;
         runtimeProxyCount -= chunk.RuntimeProxyCount;
+        runtimeSimulationStateCount -= chunk.RuntimeSimulationStates.Count;
         chunks.Remove(chunkCoordinate);
         if (chunk.RegisteredCellCount > 0)
         {
@@ -339,6 +346,43 @@ public sealed class BlockDataStore : IEnumerable<KeyValuePair<Vector2Int, Block>
         return true;
     }
 
+    /// <summary>
+    /// Gets or creates the simulation state owned by the cell storage. Its lifetime
+    /// follows the chunk/cell rather than the temporary Block component facade.
+    /// </summary>
+    internal bool TryGetOrCreateRuntimeSimulationState(
+        BlockHandle handle,
+        out BlockRuntimeSimulationState state)
+    {
+        state = null;
+        if (!TryResolveHandle(handle, out ChunkData chunk))
+        {
+            return false;
+        }
+
+        if (chunk.RuntimeSimulationStates.TryGetValue(handle.LocalIndex, out state))
+        {
+            return true;
+        }
+
+        state = new BlockRuntimeSimulationState();
+        chunk.RuntimeSimulationStates.Add(handle.LocalIndex, state);
+        runtimeSimulationStateCount++;
+        return true;
+    }
+
+    internal bool RemoveRuntimeSimulationState(BlockHandle handle)
+    {
+        if (!TryResolveHandle(handle, out ChunkData chunk)
+            || !chunk.RuntimeSimulationStates.Remove(handle.LocalIndex))
+        {
+            return false;
+        }
+
+        runtimeSimulationStateCount--;
+        return true;
+    }
+
     public bool TryGetValue(Vector2Int coordinate, out Block block)
     {
         block = null;
@@ -452,6 +496,7 @@ public sealed class BlockDataStore : IEnumerable<KeyValuePair<Vector2Int, Block>
         chunks.Clear();
         registeredCellCount = 0;
         runtimeProxyCount = 0;
+        runtimeSimulationStateCount = 0;
         hasRegisteredBounds = false;
         registeredBoundsDirty = false;
         registeredMinCoordinate = default;

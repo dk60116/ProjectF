@@ -155,6 +155,14 @@ internal sealed class TerrainChunkStreamingScheduler
             }
 
             MarkGenerationComplete(request.coordinate);
+
+            // Do not start the next chunk in the same frame that just finished
+            // restoration and mesh upload for the previous one. Those phases are
+            // intentionally isolated so their costs cannot stack in one frame.
+            if (pendingChunkGenerations.Count > 0)
+            {
+                yield return null;
+            }
         }
 
         chunkGenerationCoroutine = null;
