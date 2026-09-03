@@ -2127,7 +2127,7 @@ public class RobotArm : InstallationObject, IMapObjectUpdateTick, IItemLightWork
     {
         if (pickupBlock != null)
         {
-            return pickupBlock.transform.position;
+            return pickupBlock.WorldPosition;
         }
 
         return new Vector3(pickupCoordinate.x, 0f, pickupCoordinate.y);

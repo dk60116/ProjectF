@@ -11,6 +11,7 @@ public class Block : BaseObject
     public const int ConveyorStackStateSentinel = -1000000002;
     public const int FloorStackStateSentinel = -1000000003;
     private const float InputAreaCenterVerticalSpacing = 0.05f;
+    private const float FloorObjectBaseHeight = 0.05f;
     private const int ConveyorStackLaneLimit = ConveyorCellItemUnit;
     private const int ConveyorSingleLineFrontLaneIndex = 0;
     private const int ConveyorSingleLineBackLaneIndex = 2;
@@ -57,22 +58,27 @@ public class Block : BaseObject
         Vector2Int.down,
         Vector2Int.left
     };
+    private static readonly Vector2[] ConveyorEdgeSampleOffsets =
+    {
+        new Vector2(0f, -0.35000002f),
+        new Vector2(0.3f, 0f),
+        new Vector2(0f, 0.35f),
+        new Vector2(-0.35000002f, 0f)
+    };
 
     [SerializeField, ReadOnly]
     private Vector2Int coordinate;
+    private BlockHandle runtimeHandle;
 
     [SerializeField]
     private BlockType type;
 
-    [SerializeField]
-    private Transform body;
-
     [SerializeField, ReadOnly]
     private MapObject mapObject;
+    // A harvestable resource can remain under an installation occupying the same cell.
+    [SerializeField, ReadOnly]
+    private Resource resource;
     private ConveyorBelt runtimeConveyorOverride;
-
-    [SerializeField]
-    private List<Transform> floorObjects;
 
     [SerializeField]
     private Transform floorObjectDropAnchor;
@@ -90,6 +96,8 @@ public class Block : BaseObject
     private int inputAreaCenterMaxObjects = 10;
 
     [SerializeField]
+    private MapFocus focusPrefab;
+
     private MapFocus focus;
 
     private bool interactionFocusVisible;
@@ -148,7 +156,6 @@ public class Block : BaseObject
     private TerrainGenerator cachedTerrainGenerator;
     private Transform inputAreaCenterAnchor;
     private Transform conveyorSlotDotRoot;
-    private MeshRenderer[] cachedBodyRenderers = Array.Empty<MeshRenderer>();
     private float cachedInputAreaCenterHeight;
     private float nextConveyorMoveAttemptTime;
     private Block cachedNextConveyorBlock;
@@ -164,6 +171,49 @@ public class Block : BaseObject
     private int conveyorItemVisualVersion;
     private bool childReferencesCached;
     private bool inputAreaCenterObjectsVisible = true;
+
+    /// <summary>
+    /// Runtime blocks are lightweight components hosted by TerrainGenerator. Their
+    /// shared Transform is not a cell position; spatial code must use this value.
+    /// </summary>
+    public Vector3 WorldPosition => new Vector3(coordinate.x, 0f, coordinate.y);
+    public Transform RuntimeObjectRoot
+    {
+        get
+        {
+            if (cachedTerrainGenerator == null)
+            {
+                cachedTerrainGenerator = GetComponent<TerrainGenerator>();
+            }
+
+            return cachedTerrainGenerator != null ? cachedTerrainGenerator.transform : transform;
+        }
+    }
+
+    private Vector3 BlockLocalToWorld(Vector3 localPosition)
+    {
+        return WorldPosition + localPosition;
+    }
+
+    private Vector3 WorldToBlockLocal(Vector3 worldPosition)
+    {
+        return worldPosition - WorldPosition;
+    }
+
+    internal void ConfigureRuntimeTemplate(Block template)
+    {
+        if (template == null)
+        {
+            return;
+        }
+
+        floorObjectDropAnchor = null;
+        floorObjectPrefab = template.floorObjectPrefab;
+        maxFloorObjectsPerStack = template.maxFloorObjectsPerStack;
+        floorObjectVerticalSpacing = template.floorObjectVerticalSpacing;
+        inputAreaCenterMaxObjects = template.inputAreaCenterMaxObjects;
+        focusPrefab = template.focusPrefab;
+    }
 
     private struct ConveyorCornerMotionState
     {
@@ -468,25 +518,18 @@ public class Block : BaseObject
 
     private void Awake()
     {
-        CacheChildReferences();
-        RefreshSerializedResourceOwnership();
-        EnsureFloorObjectsInitialized();
-        RefreshConveyorSlotDotVisuals();
+        // Runtime proxy components are configured after AddComponent returns.
+        // Initialization is therefore intentionally deferred to Initialize.
     }
 
     private void RefreshSerializedResourceOwnership()
     {
         if (mapObject is Resource mapResource)
         {
-            mapResource.SetOwningBlock(this);
-            return;
+            resource = mapResource;
         }
 
-        Resource childResource = mapObject == null ? GetComponentInChildren<Resource>(true) : null;
-        if (childResource != null && childResource.transform.IsChildOf(transform))
-        {
-            childResource.SetOwningBlock(this);
-        }
+        resource?.SetOwningBlock(this);
     }
 
     private void OnDestroy()
@@ -508,11 +551,12 @@ public class Block : BaseObject
 
     public void Initialize(Vector2Int blockCoordinate, BlockType blockType)
     {
+        childReferencesCached = false;
+        cachedTerrainGenerator = GetComponent<TerrainGenerator>();
         CacheChildReferences();
         coordinate = blockCoordinate;
         type = blockType;
         objectName = $"{blockType}_{blockCoordinate.x}_{blockCoordinate.y}";
-        gameObject.name = $"Block ({blockCoordinate.x}, {blockCoordinate.y})";
         inputAreaCenterVisibilityRequests.Clear();
         inputAreaCenterObjectsVisible = true;
         InvalidateConveyorRuntimeCaches();
@@ -522,26 +566,42 @@ public class Block : BaseObject
         SetTemporaryDropFocusVisible(false);
     }
 
+    internal void BindRuntimeHandle(BlockHandle handle)
+    {
+        runtimeHandle = handle;
+    }
+
     public void SetMapObject(MapObject value)
     {
         ConveyorBelt previousConveyorBelt = mapObject as ConveyorBelt;
         bool wasConveyor = IsConveyorStackingEnabled();
         bool wasFluidDirectionObject = IsFluidDirectionMapObject(mapObject);
 
-        if (mapObject is Resource existingResource && existingResource != value)
+        Resource existingResource = resource != null ? resource : mapObject as Resource;
+        if (value is Resource nextResource)
         {
-            existingResource.SetOwningBlock(null);
+            if (existingResource != null && existingResource != nextResource)
+            {
+                existingResource.SetOwningBlock(null);
+            }
+
+            resource = nextResource;
+            mapObject = nextResource;
+            nextResource.SetOwningBlock(this);
         }
-
-        mapObject = value;
-
-        if (mapObject is Resource resource)
+        else
         {
-            resource.SetOwningBlock(this);
+            resource = existingResource;
+            mapObject = value != null ? value : resource;
         }
 
         bool isConveyor = IsConveyorStackingEnabled();
         bool isFluidDirectionObject = IsFluidDirectionMapObject(mapObject);
+        if (isConveyor)
+        {
+            EnsureFloorObjectsInitialized();
+        }
+
         if (wasConveyor || isConveyor)
         {
             InvalidateConveyorRuntimeCachesAround();
@@ -651,7 +711,7 @@ public class Block : BaseObject
         }
     }
 
-    public void PrepareForPool()
+    public void PrepareForRuntimeRelease()
     {
         SetFocusVisible(false);
         SetMouseFocusVisible(false);
@@ -660,85 +720,76 @@ public class Block : BaseObject
         inputAreaCenterVisibilityRequests.Clear();
         inputAreaCenterObjectsVisible = true;
         ResetFloorObjects();
+        DestroyRuntimeAnchor(ref inputAreaCenterAnchor);
+        DestroyRuntimeAnchor(ref conveyorSlotDotRoot);
+        conveyorSlotDots.Clear();
+        conveyorSlotDotRenderers.Clear();
 
-        MapObject childMapObject = mapObject;
-        if (childMapObject != null && childMapObject.transform != null && childMapObject.transform.parent == transform)
+        // Installations are owned by TerrainGenerator's live-installation registry
+        // and can span chunk boundaries. Only a cell-owned resource is released
+        // with its proxy; installation lifetime is handled separately.
+        Resource cellResource = Resource;
+        if (cellResource != null && cellResource.transform != null)
         {
-            childMapObject.transform.SetParent(null, true);
+            ClearResource(cellResource);
+            cellResource.transform.SetParent(null, true);
             if (Application.isPlaying)
             {
-                Destroy(childMapObject.gameObject);
+                Destroy(cellResource.gameObject);
             }
             else
             {
-                DestroyImmediate(childMapObject.gameObject);
+                DestroyImmediate(cellResource.gameObject);
             }
         }
 
-        DestroyChildMapObjectsForPool(childMapObject);
         SetMapObject(null);
         coordinate = default;
+        runtimeHandle = default;
         type = default;
         objectName = string.Empty;
-        gameObject.name = "Pooled Block";
+        floorObjectDropAnchor = null;
+        childReferencesCached = false;
     }
 
-    private void DestroyChildMapObjectsForPool(MapObject skippedObject)
+    private static void DestroyRuntimeAnchor(ref Transform runtimeAnchor)
     {
-        MapObject[] childMapObjects = GetComponentsInChildren<MapObject>(true);
-        for (int i = 0; i < childMapObjects.Length; i++)
-        {
-            MapObject childMapObject = childMapObjects[i];
-            if (childMapObject == null
-                || childMapObject == skippedObject
-                || childMapObject.transform == null
-                || !childMapObject.transform.IsChildOf(transform))
-            {
-                continue;
-            }
-
-            childMapObject.transform.SetParent(null, true);
-            if (Application.isPlaying)
-            {
-                Destroy(childMapObject.gameObject);
-            }
-            else
-            {
-                DestroyImmediate(childMapObject.gameObject);
-            }
-        }
-    }
-
-    public void SetBodyRotation(float yRotation)
-    {
-        CacheChildReferences();
-        if (body == null)
+        Transform target = runtimeAnchor;
+        runtimeAnchor = null;
+        if (target == null)
         {
             return;
         }
 
-        body.localRotation = Quaternion.Euler(0f, yRotation, 0f);
-        RefreshConveyorSlotDotVisuals();
+        if (Application.isPlaying)
+        {
+            Destroy(target.gameObject);
+        }
+        else
+        {
+            DestroyImmediate(target.gameObject);
+        }
     }
 
-    public void SetBaseBodyVisible(bool visible)
+    internal void ClearResource(Resource expectedResource)
     {
-        CacheChildReferences();
-        if (cachedBodyRenderers == null || cachedBodyRenderers.Length == 0)
+        if (expectedResource == null
+            || (resource != expectedResource && mapObject != expectedResource))
         {
             return;
         }
 
-        for (int i = 0; i < cachedBodyRenderers.Length; i++)
+        if (resource == expectedResource)
         {
-            MeshRenderer renderer = cachedBodyRenderers[i];
-            if (renderer == null)
-            {
-                continue;
-            }
-
-            renderer.enabled = visible;
+            resource = null;
         }
+
+        if (mapObject == expectedResource)
+        {
+            mapObject = null;
+        }
+
+        expectedResource.SetOwningBlock(null);
     }
 
     public bool TryAddFloorObject(int objectId, out PortableObject targetPortableObject)
@@ -936,7 +987,7 @@ public class Block : BaseObject
     {
         CleanupPortableStack(inputAreaCenterStack);
         EnsureInputAreaCenterAnchorInitialized();
-        worldPosition = inputAreaCenterAnchor != null ? inputAreaCenterAnchor.position : transform.position;
+        worldPosition = inputAreaCenterAnchor != null ? inputAreaCenterAnchor.position : WorldPosition;
 
         if (inputAreaCenterStack.Count <= 0)
         {
@@ -1456,13 +1507,12 @@ public class Block : BaseObject
         portableObject.gameObject.SetActive(true);
 
         int objectIndex = stack.Count;
-        Vector3 finalLocalPosition = new Vector3(0f, objectIndex * floorObjectVerticalSpacing, 0f);
-        Vector3 finalWorldPosition = anchor.TransformPoint(finalLocalPosition);
+        Vector3 finalWorldPosition = GetFloorObjectWorldPosition(anchor, objectIndex);
         stack.Add(portableObject);
         NotifyRuntimeItemStackChanged();
         DroppedItemPickupGate gate = portableObject.GetOrAddPickupGate();
 
-        portableObject.MoveTo(() => anchor != null ? anchor.TransformPoint(finalLocalPosition) : finalWorldPosition, delay, startWorldPositionProvider, () =>
+        portableObject.MoveTo(() => anchor != null ? GetFloorObjectWorldPosition(anchor, objectIndex) : finalWorldPosition, delay, startWorldPositionProvider, () =>
         {
             if (portableObject == null || anchor == null)
             {
@@ -1470,8 +1520,8 @@ public class Block : BaseObject
                 return;
             }
 
-            portableObject.transform.SetParent(anchor, false);
-            portableObject.transform.localPosition = finalLocalPosition;
+            portableObject.transform.SetParent(anchor, true);
+            portableObject.transform.position = GetFloorObjectWorldPosition(anchor, objectIndex);
             portableObject.transform.localRotation = Quaternion.identity;
             portableObject.transform.localScale = Vector3.one;
             portableObject.gameObject.SetActive(true);
@@ -1575,9 +1625,9 @@ public class Block : BaseObject
         portableObject.transform.rotation = Quaternion.identity;
         portableObject.transform.localScale = Vector3.one;
         portableObject.gameObject.SetActive(true);
-        Vector3 finalWorldPosition = anchor.position;
+        Vector3 finalWorldPosition = GetFloorObjectWorldPosition(anchor, 0);
         portableObject.MoveTo(
-            () => anchor != null ? anchor.position : finalWorldPosition,
+            () => anchor != null ? GetFloorObjectWorldPosition(anchor, 0) : finalWorldPosition,
             delay,
             startWorldPositionProvider,
             () =>
@@ -1766,7 +1816,7 @@ public class Block : BaseObject
                 return TryGetCornerConveyorStandingDistanceSqr(worldPosition, out distanceSqr);
             }
 
-            Vector3 localPosition3 = transform.InverseTransformPoint(worldPosition);
+            Vector3 localPosition3 = WorldToBlockLocal(worldPosition);
             Vector2 flatLocalPosition = new Vector2(localPosition3.x, localPosition3.z);
             if (!TryGetConveyorLocalAxes(out Vector2 localFlowAxis, out Vector2 localRightAxis))
             {
@@ -1893,7 +1943,7 @@ public class Block : BaseObject
                 return true;
             }
 
-            worldHeight = transform.position.y + ConveyorLaneHeight;
+            worldHeight = WorldPosition.y + ConveyorLaneHeight;
             return true;
         }
         finally
@@ -2212,12 +2262,6 @@ public class Block : BaseObject
             return false;
         }
 
-        Transform anchor = floorObjects != null && laneIndex < floorObjects.Count ? floorObjects[laneIndex] : null;
-        if (anchor == null)
-        {
-            return false;
-        }
-
         if (useVirtualDataSlot)
         {
             SetConveyorItemAtLane(laneIndex, objectId, null, ConveyorPickupGateState.Settled());
@@ -2242,7 +2286,7 @@ public class Block : BaseObject
         }
 
         portableObject.SetBatchedRendering(false);
-        portableObject.transform.SetParent(transform, true);
+        portableObject.transform.SetParent(RuntimeObjectRoot, true);
         portableObject.transform.position = startWorldPositionProvider != null ? startWorldPositionProvider() : startWorldPosition;
         portableObject.transform.rotation = Quaternion.identity;
         portableObject.transform.localScale = Vector3.one;
@@ -2258,7 +2302,7 @@ public class Block : BaseObject
 
         if (ShouldSnapConveyorPlacementImmediately(delay, startWorldPositionProvider))
         {
-            ConfigureConveyorObjectTransform(portableObject, laneIndex, anchor);
+            ConfigureConveyorObjectTransform(portableObject, laneIndex);
             ApplyConveyorObjectRenderingMode(portableObject);
             gate?.MarkSettled();
             TryVirtualizeSettledConveyorPortableObject(laneIndex, portableObject);
@@ -2270,8 +2314,7 @@ public class Block : BaseObject
             return true;
         }
 
-        Vector3 finalWorldPosition = GetConveyorLaneWorldPosition(laneIndex, anchor);
-        portableObject.MoveTo(() => anchor != null ? GetConveyorLaneWorldPosition(laneIndex, anchor) : finalWorldPosition, delay, startWorldPositionProvider, () =>
+        portableObject.MoveTo(() => GetConveyorLaneWorldPosition(laneIndex), delay, startWorldPositionProvider, () =>
         {
             if (portableObject == null)
             {
@@ -2279,10 +2322,7 @@ public class Block : BaseObject
                 return;
             }
 
-            if (anchor != null)
-            {
-                ConfigureConveyorObjectTransform(portableObject, laneIndex, anchor);
-            }
+            ConfigureConveyorObjectTransform(portableObject, laneIndex);
 
             ApplyConveyorObjectRenderingMode(portableObject);
             gate?.MarkSettled();
@@ -2650,7 +2690,7 @@ public class Block : BaseObject
         float maxDistance,
         out Vector3 worldPosition)
     {
-        worldPosition = transform.position;
+        worldPosition = WorldPosition;
         EnsureFloorObjectsInitialized();
         CleanupConveyorStack();
 
@@ -2710,12 +2750,6 @@ public class Block : BaseObject
             return false;
         }
 
-        Transform anchor = floorObjects != null && laneIndex < floorObjects.Count ? floorObjects[laneIndex] : null;
-        if (anchor == null)
-        {
-            return false;
-        }
-
         if (ShouldUseVirtualConveyorItemRendering())
         {
             SetConveyorItemAtLane(laneIndex, objectId, null, ConveyorPickupGateState.Settled());
@@ -2741,7 +2775,7 @@ public class Block : BaseObject
             return false;
         }
 
-        ConfigureConveyorObjectTransform(portableObject, laneIndex, anchor);
+        ConfigureConveyorObjectTransform(portableObject, laneIndex);
         ApplyConveyorObjectRenderingMode(portableObject);
         SetConveyorItemAtLane(laneIndex, objectId, portableObject, ConveyorPickupGateState.Settled());
         WakeConveyorMoveAttempts();
@@ -3049,10 +3083,7 @@ public class Block : BaseObject
             return;
         }
 
-        if (floorObjects == null || floorObjects.Count == 0)
-        {
-            EnsureFloorObjectsInitialized();
-        }
+        EnsureFloorObjectsInitialized();
 
         if (!IsConveyorStackingEnabled()
             || !HasConveyorMotionStates())
@@ -3880,9 +3911,27 @@ public class Block : BaseObject
 
     private void RefreshFocusMarker()
     {
+        bool isVisible = interactionFocusVisible
+                         || mouseFocusVisible
+                         || selectionFocusVisible
+                         || temporaryDropFocusVisible;
+        if (!isVisible)
+        {
+            ReleaseFocusMarker();
+            return;
+        }
+
         if (focus == null)
         {
-            focus = GetComponentInChildren<MapFocus>(true);
+            focus = MapFocusPool.Get(focusPrefab, RuntimeObjectRoot);
+            if (focus != null)
+            {
+                Vector3 prefabOffset = focusPrefab != null
+                    ? focusPrefab.transform.localPosition
+                    : Vector3.zero;
+                focus.transform.rotation = Quaternion.identity;
+                focus.SetWorldAnchor(WorldPosition + prefabOffset);
+            }
         }
 
         if (focus == null)
@@ -3890,10 +3939,6 @@ public class Block : BaseObject
             return;
         }
 
-        bool isVisible = interactionFocusVisible
-                         || mouseFocusVisible
-                         || selectionFocusVisible
-                         || temporaryDropFocusVisible;
         Color focusColor = selectionFocusVisible
             ? MapFocus.SelectionFocusColor
             : (mouseFocusVisible ? MapFocus.MouseFocusColor : MapFocus.DefaultFocusColor);
@@ -3956,23 +4001,69 @@ public class Block : BaseObject
         }
     }
 
+    private void ReleaseFocusMarker()
+    {
+        if (focus == null)
+        {
+            return;
+        }
+
+        MapFocus marker = focus;
+        focus = null;
+        MapFocusPool.Release(marker);
+    }
+
     public Vector2Int Coordinate => coordinate;
+    public BlockHandle RuntimeHandle => runtimeHandle;
     public BlockType Type => type;
     public MapObject MapObject => mapObject;
+    public bool CanReleaseEmptyRuntimeProxy
+    {
+        get
+        {
+            if (mapObject != null
+                || Resource != null
+                || runtimeConveyorOverride != null
+                || focus != null
+                || inputAreaCenterAnchor != null
+                || conveyorSlotDotRoot != null
+                || inputAreaCenterStack.Count > 0)
+            {
+                return false;
+            }
+
+            for (int i = 0; i < floorStacks.Count; i++)
+            {
+                if (floorStacks[i] != null && floorStacks[i].Count > 0)
+                {
+                    return false;
+                }
+            }
+
+            for (int i = 0; i < conveyorItemIds.Count; i++)
+            {
+                if (conveyorItemIds[i] >= 0)
+                {
+                    return false;
+                }
+            }
+
+            return conveyorCornerMotionStates.Count == 0
+                   && conveyorLinearMotionStates.Count == 0;
+        }
+    }
     public Resource Resource
     {
         get
         {
-            if (mapObject is Resource resource)
+            if (resource != null)
             {
                 return resource;
             }
 
-            return GetComponentInChildren<Resource>(true);
+            return mapObject as Resource;
         }
     }
-    public Transform Body => body;
-
     public bool IsRuntimeConveyor => IsConveyorStackingEnabled();
     public float RuntimeConveyorSpeed => IsConveyorStackingEnabled() ? GetConveyorSpeed() : 0f;
 
@@ -5187,6 +5278,7 @@ public class Block : BaseObject
         previewItemId = itemId;
         previewPickupCount = stackPickupCount;
         previewPortableObject = topObject;
+        previewPortableObject.SetFocusStack(stack);
         return true;
     }
 
@@ -5374,7 +5466,7 @@ public class Block : BaseObject
             }
 
             PortableObject candidateTopObject = candidateStack[candidateStack.Count - 1];
-            Vector3 offset = anchor.position - playerPosition;
+            Vector3 offset = GetFloorObjectWorldPosition(anchor, 0) - playerPosition;
             offset.y = 0f;
             float candidateDistanceSqr = offset.sqrMagnitude;
             UpdatePickupGates(candidateStack, gateOriginPosition);
@@ -5531,7 +5623,7 @@ public class Block : BaseObject
 
     public bool TryGetClosestFloorObjectWorldPosition(Vector3 referenceWorldPosition, Predicate<int> itemFilter, out Vector3 worldPosition)
     {
-        worldPosition = transform.position;
+        worldPosition = WorldPosition;
         return TryFindClosestFloorObject(referenceWorldPosition, itemFilter, out _, out _, out worldPosition);
     }
 
@@ -5675,7 +5767,7 @@ public class Block : BaseObject
     {
         bestStackIndex = -1;
         bestPortableObject = null;
-        bestWorldPosition = transform.position;
+        bestWorldPosition = WorldPosition;
         EnsureFloorObjectsInitialized();
 
         if (floorStacks.Count == 0)
@@ -5821,11 +5913,6 @@ public class Block : BaseObject
 
     private void EnsureFloorObjectsInitialized()
     {
-        if (floorObjects == null)
-        {
-            floorObjects = new List<Transform>();
-        }
-
         int floorStackCount = ResolveFloorObjectDropAnchor() != null ? 1 : 0;
         while (floorStacks.Count < floorStackCount)
         {
@@ -6159,11 +6246,11 @@ public class Block : BaseObject
 
     private Vector3 GetFluidDirectionArrowWorldPosition(Vector3 flowWorldDirection, int arrowIndex, int arrowCount)
     {
-        Vector3 center = transform.position;
+        Vector3 center = WorldPosition;
         float verticalOffset = mapObject is Pump ? 0.42f : 0.28f;
         center.y = Mathf.Max(
             center.y + verticalOffset,
-            transform.position.y + BeltDirectionArrowMinimumWorldHeight);
+            WorldPosition.y + BeltDirectionArrowMinimumWorldHeight);
 
         if (arrowCount > 1)
         {
@@ -6386,7 +6473,7 @@ public class Block : BaseObject
 
     private Vector3 GetBeltDirectionArrowWorldPosition()
     {
-        Vector3 center = transform.position;
+        Vector3 center = WorldPosition;
         int laneCount = GetConveyorLaneCount();
         if (laneCount > 0)
         {
@@ -6411,7 +6498,7 @@ public class Block : BaseObject
 
         center.y = Mathf.Max(
             center.y + BeltDirectionArrowVerticalOffset,
-            transform.position.y + BeltDirectionArrowMinimumWorldHeight);
+            WorldPosition.y + BeltDirectionArrowMinimumWorldHeight);
         return center;
     }
 
@@ -6518,8 +6605,8 @@ public class Block : BaseObject
         }
 
         GameObject rootObject = new GameObject(ConveyorSlotDotRootName);
-        rootObject.transform.SetParent(transform, false);
-        rootObject.transform.localPosition = Vector3.zero;
+        rootObject.transform.SetParent(RuntimeObjectRoot, true);
+        rootObject.transform.position = WorldPosition;
         rootObject.transform.localRotation = Quaternion.identity;
         rootObject.transform.localScale = Vector3.one;
         conveyorSlotDotRoot = rootObject.transform;
@@ -7051,7 +7138,7 @@ public class Block : BaseObject
 
         Vector3 sourceWorldPosition = sourceBlock != null
             ? sourceBlock.GetConveyorLaneWorldPosition(sourceLaneIndex)
-            : transform.position;
+            : WorldPosition;
         Vector3 destinationWorldPosition = destinationBlock != null
             ? destinationBlock.GetConveyorLaneWorldPosition(destinationLaneIndex)
             : sourceWorldPosition;
@@ -7307,24 +7394,8 @@ public class Block : BaseObject
             return floorObjectDropAnchor;
         }
 
-        if (floorObjects == null)
-        {
-            return null;
-        }
-
-        for (int i = 0; i < floorObjects.Count; i++)
-        {
-            Transform laneAnchor = floorObjects[i];
-            if (laneAnchor == null)
-            {
-                continue;
-            }
-
-            floorObjectDropAnchor = laneAnchor.parent != null ? laneAnchor.parent : laneAnchor;
-            return floorObjectDropAnchor;
-        }
-
-        return null;
+        floorObjectDropAnchor = RuntimeObjectRoot;
+        return floorObjectDropAnchor;
     }
 
     private bool BlocksFloorObjectStacking(int itemId = -1)
@@ -7467,7 +7538,7 @@ public class Block : BaseObject
         DroppedItemPickupGate gate = portableObject.PickupGate;
         gate?.SetPreserveStateOnDisable(false);
         portableObject.SetBatchedRendering(false);
-        portableObject.SetCachedParent(transform, true);
+        portableObject.SetCachedParent(RuntimeObjectRoot, true);
         SetConveyorPortableObjectWorldPose(portableObject, laneIndex, worldPosition);
         portableObject.CachedTransform.localScale = Vector3.one;
         return portableObject;
@@ -7529,23 +7600,38 @@ public class Block : BaseObject
 
     private void ConfigureFloorObjectTransform(PortableObject portableObject, Transform anchor, int stackIndex)
     {
-        portableObject.transform.SetParent(anchor, false);
-        portableObject.transform.localPosition = new Vector3(0f, stackIndex * floorObjectVerticalSpacing, 0f);
+        portableObject.transform.SetParent(anchor, true);
+        portableObject.transform.position = GetFloorObjectWorldPosition(anchor, stackIndex);
         portableObject.transform.localRotation = Quaternion.identity;
         portableObject.transform.localScale = Vector3.one;
         portableObject.gameObject.SetActive(true);
     }
 
-    private void ConfigureConveyorObjectTransform(PortableObject portableObject, int laneIndex, Transform anchor)
+    private Vector3 GetFloorObjectLocalPosition(Transform anchor, int stackIndex)
     {
-        if (portableObject == null || anchor == null)
+        float baseHeight = anchor == RuntimeObjectRoot ? FloorObjectBaseHeight : 0f;
+        return new Vector3(0f, baseHeight + stackIndex * floorObjectVerticalSpacing, 0f);
+    }
+
+    private Vector3 GetFloorObjectWorldPosition(Transform anchor, int stackIndex)
+    {
+        return anchor != null
+            ? (anchor == RuntimeObjectRoot
+                ? BlockLocalToWorld(GetFloorObjectLocalPosition(anchor, stackIndex))
+                : anchor.TransformPoint(GetFloorObjectLocalPosition(anchor, stackIndex)))
+            : BlockLocalToWorld(new Vector3(0f, FloorObjectBaseHeight, 0f));
+    }
+
+    private void ConfigureConveyorObjectTransform(PortableObject portableObject, int laneIndex)
+    {
+        if (portableObject == null || !IsValidConveyorLaneIndex(laneIndex))
         {
             return;
         }
 
         Transform portableTransform = portableObject.CachedTransform;
-        portableObject.SetCachedParent(transform, true);
-        SetConveyorPortableObjectWorldPose(portableObject, laneIndex, GetConveyorLaneWorldPosition(laneIndex, anchor));
+        portableObject.SetCachedParent(RuntimeObjectRoot, true);
+        SetConveyorPortableObjectWorldPose(portableObject, laneIndex, GetConveyorLaneWorldPosition(laneIndex));
         portableTransform.localScale = Vector3.one;
         portableObject.SetCachedActive(true);
     }
@@ -7633,7 +7719,7 @@ public class Block : BaseObject
 
     private int GetConveyorLaneCount()
     {
-        return Mathf.Min(ConveyorStackLaneLimit, floorObjects != null ? floorObjects.Count : 0);
+        return IsConveyorStackingEnabled() ? ConveyorStackLaneLimit : 0;
     }
 
     private static bool IsActiveConveyorLaneIndex(int laneIndex)
@@ -8413,8 +8499,7 @@ public class Block : BaseObject
 
         PortableObject portableObject = GetConveyorPortableObjectAtLane(laneIndex);
         itemId = GetConveyorItemIdAtLane(laneIndex);
-        Transform anchor = floorObjects != null && laneIndex < floorObjects.Count ? floorObjects[laneIndex] : null;
-        if (itemId < 0 || anchor == null)
+        if (itemId < 0 || !IsValidConveyorLaneIndex(laneIndex))
         {
             return false;
         }
@@ -9338,9 +9423,9 @@ public class Block : BaseObject
             }
 
             Transform portableTransform = portableObject.CachedTransform;
-            if (portableTransform.parent != transform)
+            if (portableTransform.parent != RuntimeObjectRoot)
             {
-                portableObject.SetCachedParent(transform, true);
+                portableObject.SetCachedParent(RuntimeObjectRoot, true);
             }
 
             if (portableObject.IsMovingToTarget)
@@ -10853,7 +10938,7 @@ public class Block : BaseObject
 
             if (portableObject != null)
             {
-                portableObject.SetCachedParent(move.destinationBlock.transform, true);
+                portableObject.SetCachedParent(move.destinationBlock.RuntimeObjectRoot, true);
                 if (!move.destinationBlock.ShouldUseVirtualConveyorItemRendering())
                 {
                     portableObject.SetCachedActive(true);
@@ -12063,7 +12148,7 @@ public class Block : BaseObject
             return false;
         }
 
-        portableObject.SetCachedParent(transform, true);
+        portableObject.SetCachedParent(RuntimeObjectRoot, true);
         if (!ShouldUseVirtualConveyorItemRendering())
         {
             portableObject.SetCachedActive(true);
@@ -12238,7 +12323,7 @@ public class Block : BaseObject
             return false;
         }
 
-        Vector3 localFlowDirection3 = transform.InverseTransformDirection(new Vector3(flowDirection.x, 0f, flowDirection.y));
+        Vector3 localFlowDirection3 = new Vector3(flowDirection.x, 0f, flowDirection.y);
         Vector2 localFlowDirection = new Vector2(localFlowDirection3.x, localFlowDirection3.z);
         if (localFlowDirection.sqrMagnitude <= 0.0001f)
         {
@@ -12288,18 +12373,18 @@ public class Block : BaseObject
                && conveyorBelt.IsCornerVariant;
     }
 
-    private Vector3 GetConveyorLaneWorldPosition(int laneIndex, Transform anchor = null)
+    private Vector3 GetConveyorLaneWorldPosition(int laneIndex)
     {
         if (TryGetConveyorCornerLaneLocalPosition(laneIndex, out Vector3 cornerLocalPosition))
         {
             cornerLocalPosition.y = GetConveyorLaneHeight();
-            return ResolveConveyorLaneWorldPosition(laneIndex, transform.TransformPoint(cornerLocalPosition));
+            return ResolveConveyorLaneWorldPosition(laneIndex, BlockLocalToWorld(cornerLocalPosition));
         }
 
         Vector3 localPosition = GetConveyorLaneLocalOffset(laneIndex);
         localPosition.y = GetConveyorLaneHeight();
 
-        return ResolveConveyorLaneWorldPosition(laneIndex, transform.TransformPoint(localPosition));
+        return ResolveConveyorLaneWorldPosition(laneIndex, BlockLocalToWorld(localPosition));
     }
 
     private Vector3 ResolveConveyorLaneWorldPosition(int laneIndex, Vector3 worldPosition)
@@ -12367,7 +12452,7 @@ public class Block : BaseObject
         }
 
         Vector3 worldPosition = EvaluateConveyorCornerPathWorldPosition(sourceLaneIndex, destinationLaneIndex, progress);
-        localPosition = transform.InverseTransformPoint(worldPosition);
+        localPosition = WorldToBlockLocal(worldPosition);
         localPosition.y = 0f;
         return true;
     }
@@ -12437,8 +12522,8 @@ public class Block : BaseObject
             return false;
         }
 
-        Vector3 localInputDirection3 = transform.InverseTransformDirection(new Vector3(inputDirection.x, 0f, inputDirection.y));
-        Vector3 localOutputDirection3 = transform.InverseTransformDirection(new Vector3(outputDirection.x, 0f, outputDirection.y));
+        Vector3 localInputDirection3 = new Vector3(inputDirection.x, 0f, inputDirection.y);
+        Vector3 localOutputDirection3 = new Vector3(outputDirection.x, 0f, outputDirection.y);
         localInputDirection = new Vector2(Mathf.Round(localInputDirection3.x), Mathf.Round(localInputDirection3.z));
         localOutputDirection = new Vector2(Mathf.Round(localOutputDirection3.x), Mathf.Round(localOutputDirection3.z));
         return localInputDirection.sqrMagnitude > 0.5f && localOutputDirection.sqrMagnitude > 0.5f;
@@ -12452,7 +12537,7 @@ public class Block : BaseObject
             return false;
         }
 
-        Vector3 localPosition3 = transform.InverseTransformPoint(worldPosition);
+        Vector3 localPosition3 = WorldToBlockLocal(worldPosition);
         Vector2 radial = new Vector2(localPosition3.x, localPosition3.z) - center;
         if (radial.sqrMagnitude <= 0.0001f)
         {
@@ -12479,7 +12564,7 @@ public class Block : BaseObject
             ? new Vector2(-Mathf.Sin(clampedAngleRadians), Mathf.Cos(clampedAngleRadians))
             : new Vector2(Mathf.Sin(clampedAngleRadians), -Mathf.Cos(clampedAngleRadians));
 
-        Vector3 worldDirection = transform.TransformDirection(new Vector3(localTangent.x, 0f, localTangent.y));
+        Vector3 worldDirection = new Vector3(localTangent.x, 0f, localTangent.y);
         worldDirection.y = 0f;
         if (worldDirection.sqrMagnitude <= 0.0001f)
         {
@@ -12607,7 +12692,7 @@ public class Block : BaseObject
             return false;
         }
 
-        Vector3 localPosition3 = transform.InverseTransformPoint(worldPosition);
+        Vector3 localPosition3 = WorldToBlockLocal(worldPosition);
         Vector2 localPosition = new Vector2(localPosition3.x, localPosition3.z);
 
         float centerOffset = GetConveyorCornerCenterOffset(localInputDirection, localOutputDirection);
@@ -12802,7 +12887,7 @@ public class Block : BaseObject
             return false;
         }
 
-        Vector3 localPosition3 = transform.InverseTransformPoint(worldPosition);
+        Vector3 localPosition3 = WorldToBlockLocal(worldPosition);
         Vector2 radial = new Vector2(localPosition3.x, localPosition3.z) - center;
         if (radial.sqrMagnitude <= 0.0001f)
         {
@@ -12852,7 +12937,7 @@ public class Block : BaseObject
             return false;
         }
 
-        Vector3 localPosition3 = transform.InverseTransformPoint(worldPosition);
+        Vector3 localPosition3 = WorldToBlockLocal(worldPosition);
         Vector2 radial = new Vector2(localPosition3.x, localPosition3.z) - center;
         if (radial.sqrMagnitude <= 0.0001f)
         {
@@ -13042,7 +13127,7 @@ public class Block : BaseObject
         float angleRadians = startAngleRadians + (deltaAngleRadians * Mathf.Clamp01(t));
         Vector2 point2D = center + new Vector2(Mathf.Cos(angleRadians), Mathf.Sin(angleRadians)) * radius;
         Vector3 localPosition = new Vector3(point2D.x, GetConveyorLaneHeight(), point2D.y);
-        return transform.TransformPoint(localPosition);
+        return BlockLocalToWorld(localPosition);
     }
 
     private Vector3 EvaluateConveyorCornerMotionWorldPosition(
@@ -13097,14 +13182,14 @@ public class Block : BaseObject
         float angleRadians = startAngleRadians + (deltaAngleRadians * Mathf.Clamp01(t));
         Vector2 point2D = center + new Vector2(Mathf.Cos(angleRadians), Mathf.Sin(angleRadians)) * radius;
         Vector3 localPosition = new Vector3(point2D.x, GetConveyorLaneHeight(), point2D.y);
-        return transform.TransformPoint(localPosition);
+        return BlockLocalToWorld(localPosition);
     }
 
     private Vector3 GetDefaultConveyorLaneWorldPosition(int laneIndex)
     {
         Vector3 localPosition = GetConveyorLaneLocalOffset(laneIndex);
         localPosition.y = GetConveyorLaneHeight();
-        return transform.TransformPoint(localPosition);
+        return BlockLocalToWorld(localPosition);
     }
 
     private bool TryGetConveyorCornerCenterlineArcParameters(out Vector2 center, out float startAngleRadians, out float deltaAngleRadians, out float radius)
@@ -13272,28 +13357,18 @@ public class Block : BaseObject
 
     private float GetConveyorEdgeOffsetForDirection(Vector2 localDirection)
     {
-        if (localDirection.sqrMagnitude <= 0.5f || floorObjects == null || floorObjects.Count == 0)
+        if (localDirection.sqrMagnitude <= 0.5f)
         {
             return ConveyorCornerCenterRadius;
         }
 
         Vector2 direction = localDirection.normalized;
         float bestProjection = 0f;
-        for (int i = 0; i < floorObjects.Count; i++)
+        for (int i = 0; i < ConveyorEdgeSampleOffsets.Length; i++)
         {
-            Transform laneAnchor = floorObjects[i];
-            if (laneAnchor == null)
-            {
-                continue;
-            }
-
-            Vector3 localPosition3 = transform.InverseTransformPoint(laneAnchor.position);
-            Vector2 localPosition = new Vector2(localPosition3.x, localPosition3.z);
-            float projection = Vector2.Dot(localPosition, direction);
-            if (projection > bestProjection)
-            {
-                bestProjection = projection;
-            }
+            bestProjection = Mathf.Max(
+                bestProjection,
+                Vector2.Dot(ConveyorEdgeSampleOffsets[i], direction));
         }
 
         return bestProjection > 0.0001f ? bestProjection : ConveyorCornerCenterRadius;
@@ -13541,6 +13616,7 @@ public class Block : BaseObject
         previewItemId = itemId;
         previewPickupCount = CountManualPickupStackObjectsFromTop(inputAreaCenterStack, itemId, distanceSqr, pickupRadiusSqr);
         previewPortableObject = topObject;
+        previewPortableObject.SetFocusStack(inputAreaCenterStack);
         return previewPickupCount > 0;
     }
 
@@ -13617,23 +13693,10 @@ public class Block : BaseObject
             return;
         }
 
-        Transform existingAnchor = transform.Find("InputAreaCenterAnchor");
-        if (existingAnchor != null)
-        {
-            inputAreaCenterAnchor = existingAnchor;
-        }
-        else
-        {
-            GameObject anchorObject = new GameObject("InputAreaCenterAnchor");
-            inputAreaCenterAnchor = anchorObject.transform;
-            inputAreaCenterAnchor.SetParent(transform, false);
-        }
-
-        Vector3 localPosition = inputAreaCenterAnchor.localPosition;
-        localPosition.x = 0f;
-        localPosition.z = 0f;
-        localPosition.y = ResolveInputAreaCenterHeight();
-        inputAreaCenterAnchor.localPosition = localPosition;
+        GameObject anchorObject = new GameObject($"InputAreaCenterAnchor ({coordinate.x}, {coordinate.y})");
+        inputAreaCenterAnchor = anchorObject.transform;
+        inputAreaCenterAnchor.SetParent(RuntimeObjectRoot, true);
+        inputAreaCenterAnchor.position = WorldPosition + Vector3.up * ResolveInputAreaCenterHeight();
         inputAreaCenterAnchor.localRotation = Quaternion.identity;
         inputAreaCenterAnchor.localScale = Vector3.one;
     }
@@ -13788,43 +13851,10 @@ public class Block : BaseObject
             return;
         }
 
-        if (body == null)
-        {
-            Transform bodyTransform = transform.Find("Body");
-            if (bodyTransform != null)
-            {
-                body = bodyTransform;
-            }
-        }
-
-        cachedBodyRenderers = body != null
-            ? body.GetComponentsInChildren<MeshRenderer>(true)
-            : Array.Empty<MeshRenderer>();
-
-        if (inputAreaCenterAnchor == null)
-        {
-            Transform existingAnchor = transform.Find("InputAreaCenterAnchor");
-            if (existingAnchor != null)
-            {
-                inputAreaCenterAnchor = existingAnchor;
-            }
-        }
-
-        cachedInputAreaCenterHeight = 0f;
-        if (floorObjects != null)
-        {
-            for (int i = 0; i < floorObjects.Count; i++)
-            {
-                Transform anchor = floorObjects[i];
-                if (anchor == null)
-                {
-                    continue;
-                }
-
-                cachedInputAreaCenterHeight = transform.InverseTransformPoint(anchor.position).y;
-                break;
-            }
-        }
+        Transform floorAnchor = ResolveFloorObjectDropAnchor();
+        cachedInputAreaCenterHeight = floorAnchor != null
+            ? WorldToBlockLocal(GetFloorObjectWorldPosition(floorAnchor, 0)).y
+            : FloorObjectBaseHeight;
 
         childReferencesCached = true;
     }

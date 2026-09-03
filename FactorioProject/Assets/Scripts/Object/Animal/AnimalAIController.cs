@@ -3246,15 +3246,7 @@ public sealed class AnimalAIController : MonoBehaviour
             return colliderMapObject.AllowsAnimalTraversal;
         }
 
-        Block block = hit.GetComponentInParent<Block>();
-        if (block == null)
-        {
-            return false;
-        }
-
-        MapObject mapObject = block.MapObject;
-        return mapObject == null
-               || mapObject.AllowsAnimalTraversal;
+        return false;
     }
 
     private static bool IsMovingOutOfOverlap(

@@ -10,161 +10,231 @@ using UnityEditor;
 
 public partial class TerrainGenerator : MonoBehaviour
 {
-    private BlockBiomeVisualData BuildBlockBiomeVisualData(Vector2Int worldCoordinate)
-    {
-        TerrainBiome primaryBiome = GetTileBiome(worldCoordinate);
-        return new BlockBiomeVisualData
-        {
-            primaryBiome = primaryBiome,
-            surfaceBiomes = null
-        };
-    }
-
-    private void ApplyBlockBiomeVisuals(Block block, BlockBiomeVisualData visualData)
-    {
-        if (block == null || block.Body == null)
-        {
-            return;
-        }
-
-        ApplyPrimaryBiomeToBaseBody(block);
-        RefreshFarmlandVisual(block);
-    }
-
-    private void ApplyPrimaryBiomeToBaseBody(Block block)
-    {
-        if (block == null || block.Body == null)
-        {
-            return;
-        }
-
-        block.SetBaseBodyVisible(false);
-    }
-
-    private void ApplyChunkBiomeSurface(Transform chunkRoot, ChunkSurfaceBuildData chunkSurface)
+    private void ApplyChunkBiomeSurface(ChunkRuntimeData chunk, ChunkSurfaceBuildData chunkSurface)
     {
         using (ApplyChunkSurfaceMarker.Auto())
         {
-            if (chunkRoot == null || chunkSurface == null || chunkSurface.vertices.Count == 0)
+            if (chunk == null || chunkSurface == null || chunkSurface.vertices.Count == 0)
             {
                 return;
             }
 
-            Transform generatedSurface = chunkRoot.Find("GeneratedSurface");
-            if (generatedSurface == null)
-            {
-                GameObject surfaceObject = new GameObject("GeneratedSurface");
-                generatedSurface = surfaceObject.transform;
-                generatedSurface.SetParent(chunkRoot, false);
-                surfaceObject.AddComponent<MeshFilter>();
-                surfaceObject.AddComponent<MeshRenderer>();
-            }
-
-            MeshFilter meshFilter = generatedSurface.GetComponent<MeshFilter>();
-            MeshRenderer meshRenderer = generatedSurface.GetComponent<MeshRenderer>();
-            if (meshFilter == null || meshRenderer == null)
-            {
-                return;
-            }
-
+            DestroyGeneratedSurfaceMesh(chunk.surfaceMesh);
             Mesh generatedMesh = BuildGeneratedSurfaceMesh(chunkSurface);
-            generatedMesh.name = $"GeneratedSurface_{chunkRoot.name}";
-            meshFilter.sharedMesh = generatedMesh;
-            meshRenderer.sharedMaterials = GetGeneratedSurfaceMaterials();
-            meshRenderer.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
-            meshRenderer.receiveShadows = true;
-            meshRenderer.motionVectorGenerationMode = MotionVectorGenerationMode.ForceNoMotion;
-            meshRenderer.lightProbeUsage = UnityEngine.Rendering.LightProbeUsage.Off;
-            meshRenderer.reflectionProbeUsage = UnityEngine.Rendering.ReflectionProbeUsage.Off;
+            generatedMesh.name = $"GeneratedSurface_{chunk.coordinate.x}_{chunk.coordinate.y}";
+            chunk.surfaceMesh = generatedMesh;
 
-            ApplyChunkWaterFoamSurface(chunkRoot, chunkSurface);
-            ApplyChunkWaterGlintSurface(chunkRoot, chunkSurface);
+            ApplyChunkWaterFoamSurface(chunk, chunkSurface);
+            ApplyChunkWaterGlintSurface(chunk, chunkSurface);
         }
     }
 
-    private void ApplyChunkWaterFoamSurface(Transform chunkRoot, ChunkSurfaceBuildData chunkSurface)
+    private void ApplyChunkWaterFoamSurface(ChunkRuntimeData chunk, ChunkSurfaceBuildData chunkSurface)
     {
-        Transform generatedFoam = chunkRoot.Find("GeneratedWaterFoam");
+        DestroyGeneratedSurfaceMesh(chunk.foamMesh);
+        chunk.foamMesh = null;
         if (!HasGeneratedWaterFoam(chunkSurface))
-        {
-            if (generatedFoam != null)
-            {
-                generatedFoam.gameObject.SetActive(false);
-            }
-
-            return;
-        }
-
-        if (generatedFoam == null)
-        {
-            GameObject foamObject = new GameObject("GeneratedWaterFoam");
-            generatedFoam = foamObject.transform;
-            generatedFoam.SetParent(chunkRoot, false);
-            foamObject.AddComponent<MeshFilter>();
-            foamObject.AddComponent<MeshRenderer>();
-        }
-
-        generatedFoam.gameObject.SetActive(true);
-
-        MeshFilter meshFilter = generatedFoam.GetComponent<MeshFilter>();
-        MeshRenderer meshRenderer = generatedFoam.GetComponent<MeshRenderer>();
-        if (meshFilter == null || meshRenderer == null)
         {
             return;
         }
 
         Mesh foamMesh = BuildGeneratedWaterFoamMesh(chunkSurface);
-        foamMesh.name = $"GeneratedWaterFoam_{chunkRoot.name}";
-        meshFilter.sharedMesh = foamMesh;
-        meshRenderer.sharedMaterial = GetGeneratedSurfaceFoamMaterial();
-        meshRenderer.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
-        meshRenderer.receiveShadows = false;
-        meshRenderer.motionVectorGenerationMode = MotionVectorGenerationMode.ForceNoMotion;
-        meshRenderer.lightProbeUsage = UnityEngine.Rendering.LightProbeUsage.Off;
-        meshRenderer.reflectionProbeUsage = UnityEngine.Rendering.ReflectionProbeUsage.Off;
+        foamMesh.name = $"GeneratedWaterFoam_{chunk.coordinate.x}_{chunk.coordinate.y}";
+        chunk.foamMesh = foamMesh;
     }
 
-    private void ApplyChunkWaterGlintSurface(Transform chunkRoot, ChunkSurfaceBuildData chunkSurface)
+    private void ApplyChunkWaterGlintSurface(ChunkRuntimeData chunk, ChunkSurfaceBuildData chunkSurface)
     {
-        Transform generatedGlint = chunkRoot.Find("GeneratedWaterGlint");
+        DestroyGeneratedSurfaceMesh(chunk.glintMesh);
+        chunk.glintMesh = null;
         if (!generateWaterSurfaceGlints || !HasGeneratedWaterSurface(chunkSurface))
-        {
-            if (generatedGlint != null)
-            {
-                generatedGlint.gameObject.SetActive(false);
-            }
-
-            return;
-        }
-
-        if (generatedGlint == null)
-        {
-            GameObject glintObject = new GameObject("GeneratedWaterGlint");
-            generatedGlint = glintObject.transform;
-            generatedGlint.SetParent(chunkRoot, false);
-            glintObject.AddComponent<MeshFilter>();
-            glintObject.AddComponent<MeshRenderer>();
-        }
-
-        generatedGlint.gameObject.SetActive(true);
-        generatedGlint.localPosition = Vector3.up * waterSurfaceGlintOffset;
-
-        MeshFilter meshFilter = generatedGlint.GetComponent<MeshFilter>();
-        MeshRenderer meshRenderer = generatedGlint.GetComponent<MeshRenderer>();
-        if (meshFilter == null || meshRenderer == null)
         {
             return;
         }
 
         Mesh glintMesh = BuildGeneratedWaterGlintMesh(chunkSurface);
-        glintMesh.name = $"GeneratedWaterGlint_{chunkRoot.name}";
-        meshFilter.sharedMesh = glintMesh;
-        meshRenderer.sharedMaterial = GetGeneratedSurfaceGlintMaterial();
-        meshRenderer.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
-        meshRenderer.receiveShadows = false;
-        meshRenderer.motionVectorGenerationMode = MotionVectorGenerationMode.ForceNoMotion;
-        meshRenderer.lightProbeUsage = UnityEngine.Rendering.LightProbeUsage.Off;
-        meshRenderer.reflectionProbeUsage = UnityEngine.Rendering.ReflectionProbeUsage.Off;
+        glintMesh.name = $"GeneratedWaterGlint_{chunk.coordinate.x}_{chunk.coordinate.y}";
+        chunk.glintMesh = glintMesh;
+    }
+
+    private void ReleaseChunkSurfaceMeshes(ChunkRuntimeData chunk)
+    {
+        if (chunk == null)
+        {
+            return;
+        }
+
+        DestroyGeneratedSurfaceMesh(chunk.surfaceMesh);
+        DestroyGeneratedSurfaceMesh(chunk.foamMesh);
+        DestroyGeneratedSurfaceMesh(chunk.glintMesh);
+        chunk.surfaceMesh = null;
+        chunk.foamMesh = null;
+        chunk.glintMesh = null;
+    }
+
+    private static void DestroyGeneratedSurfaceMesh(Mesh mesh)
+    {
+        if (mesh == null)
+        {
+            return;
+        }
+
+        if (Application.isPlaying)
+        {
+            UnityEngine.Object.Destroy(mesh);
+        }
+        else
+        {
+            UnityEngine.Object.DestroyImmediate(mesh);
+        }
+    }
+
+    private void RenderLoadedChunkSurfaces(Camera renderCamera = null)
+    {
+        if (loadedChunks.Count == 0)
+        {
+            return;
+        }
+
+        Material[] surfaceMaterials = GetGeneratedSurfaceMaterials();
+        Material foamMaterial = GetGeneratedSurfaceFoamMaterial();
+        Material glintMaterial = generateWaterSurfaceGlints
+            ? GetGeneratedSurfaceGlintMaterial()
+            : null;
+
+        foreach (KeyValuePair<Vector2Int, ChunkRuntimeData> pair in loadedChunks)
+        {
+            ChunkRuntimeData chunk = pair.Value;
+            if (chunk == null || chunk.surfaceMesh == null)
+            {
+                continue;
+            }
+
+            Matrix4x4 surfaceMatrix = Matrix4x4.Translate(
+                new Vector3(chunk.origin.x, 0f, chunk.origin.y));
+            Bounds surfaceBounds = TransformMeshBounds(chunk.surfaceMesh.bounds, surfaceMatrix);
+            if (Application.isPlaying
+                && !DoesWorldBoundsIntersectPlayerRenderRange(surfaceBounds))
+            {
+                continue;
+            }
+
+            int subMeshCount = Mathf.Min(chunk.surfaceMesh.subMeshCount, surfaceMaterials.Length);
+            for (int subMeshIndex = 0; subMeshIndex < subMeshCount; subMeshIndex++)
+            {
+                Material material = surfaceMaterials[subMeshIndex];
+                if (material == null || chunk.surfaceMesh.GetIndexCount(subMeshIndex) == 0)
+                {
+                    continue;
+                }
+
+                RenderChunkMesh(
+                    chunk.surfaceMesh,
+                    subMeshIndex,
+                    material,
+                    surfaceMatrix,
+                    surfaceBounds,
+                    true,
+                    renderCamera);
+            }
+
+            if (chunk.foamMesh != null && foamMaterial != null)
+            {
+                RenderChunkMesh(
+                    chunk.foamMesh,
+                    0,
+                    foamMaterial,
+                    surfaceMatrix,
+                    TransformMeshBounds(chunk.foamMesh.bounds, surfaceMatrix),
+                    false,
+                    renderCamera);
+            }
+
+            if (chunk.glintMesh != null && glintMaterial != null)
+            {
+                Matrix4x4 glintMatrix = Matrix4x4.Translate(
+                    new Vector3(chunk.origin.x, waterSurfaceGlintOffset, chunk.origin.y));
+                RenderChunkMesh(
+                    chunk.glintMesh,
+                    0,
+                    glintMaterial,
+                    glintMatrix,
+                    TransformMeshBounds(chunk.glintMesh.bounds, glintMatrix),
+                    false,
+                    renderCamera);
+            }
+        }
+    }
+
+    private int GetLoadedChunkSurfaceMeshCount()
+    {
+        int count = 0;
+        foreach (KeyValuePair<Vector2Int, ChunkRuntimeData> pair in loadedChunks)
+        {
+            ChunkRuntimeData chunk = pair.Value;
+            if (chunk == null)
+            {
+                continue;
+            }
+
+            count += chunk.surfaceMesh != null ? 1 : 0;
+            count += chunk.foamMesh != null ? 1 : 0;
+            count += chunk.glintMesh != null ? 1 : 0;
+        }
+
+        return count;
+    }
+
+    private void RenderChunkMesh(
+        Mesh mesh,
+        int subMeshIndex,
+        Material material,
+        Matrix4x4 matrix,
+        Bounds worldBounds,
+        bool receiveShadows,
+        Camera renderCamera)
+    {
+        RenderParams renderParams = new RenderParams(material)
+        {
+            layer = gameObject.layer,
+            shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off,
+            receiveShadows = receiveShadows,
+            motionVectorMode = MotionVectorGenerationMode.ForceNoMotion,
+            lightProbeUsage = UnityEngine.Rendering.LightProbeUsage.Off,
+            reflectionProbeUsage = UnityEngine.Rendering.ReflectionProbeUsage.Off,
+            camera = renderCamera,
+            worldBounds = worldBounds
+        };
+        Graphics.RenderMesh(renderParams, mesh, subMeshIndex, matrix);
+    }
+
+#if UNITY_EDITOR
+    private void RenderEditorChunkSurfaces(SceneView sceneView)
+    {
+        if (Application.isPlaying
+            || sceneView == null
+            || sceneView.camera == null
+            || (Event.current != null && Event.current.type != EventType.Repaint))
+        {
+            return;
+        }
+
+        RenderLoadedChunkSurfaces(sceneView.camera);
+    }
+#endif
+
+    private static Bounds TransformMeshBounds(Bounds localBounds, Matrix4x4 matrix)
+    {
+        Vector3 center = matrix.MultiplyPoint3x4(localBounds.center);
+        Vector3 extents = localBounds.extents;
+        Vector3 axisX = matrix.MultiplyVector(new Vector3(extents.x, 0f, 0f));
+        Vector3 axisY = matrix.MultiplyVector(new Vector3(0f, extents.y, 0f));
+        Vector3 axisZ = matrix.MultiplyVector(new Vector3(0f, 0f, extents.z));
+        extents = new Vector3(
+            Mathf.Abs(axisX.x) + Mathf.Abs(axisY.x) + Mathf.Abs(axisZ.x),
+            Mathf.Abs(axisX.y) + Mathf.Abs(axisY.y) + Mathf.Abs(axisZ.y),
+            Mathf.Abs(axisX.z) + Mathf.Abs(axisY.z) + Mathf.Abs(axisZ.z));
+        return new Bounds(center, extents * 2f);
     }
 
     private Mesh BuildGeneratedSurfaceMesh(ChunkSurfaceBuildData chunkSurface)
@@ -2003,8 +2073,14 @@ public partial class TerrainGenerator : MonoBehaviour
 
     private Material[] GetGeneratedSurfaceMaterials()
     {
+        if (generatedSurfaceMaterials != null
+            && generatedSurfaceMaterials.Length == GeneratedSurfaceBiomeMaterialCount)
+        {
+            return generatedSurfaceMaterials;
+        }
+
         Material blendMaterial = GetGeneratedSurfaceBlendMaterial();
-        return new[]
+        generatedSurfaceMaterials = new[]
         {
             GetBiomeMaterial(TerrainBiome.Water),
             blendMaterial ?? GetBiomeMaterial(TerrainBiome.Sand),
@@ -2013,6 +2089,7 @@ public partial class TerrainGenerator : MonoBehaviour
             blendMaterial ?? GetBiomeMaterial(TerrainBiome.Forest),
             GetBiomeMaterial(TerrainBiome.Rock)
         };
+        return generatedSurfaceMaterials;
     }
 
     private static bool HasGeneratedWaterFoam(ChunkSurfaceBuildData chunkSurface)
@@ -2301,7 +2378,7 @@ public partial class TerrainGenerator : MonoBehaviour
 
     private static Material GetBlockSetMaterial(BlockSet blockSet)
     {
-        GameObject prefab = SelectBlockPrefab(blockSet, false);
+        GameObject prefab = SelectBlockPrefab(blockSet);
         if (prefab == null)
         {
             return null;

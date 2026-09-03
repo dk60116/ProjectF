@@ -585,6 +585,7 @@ public class FreightCar : Train, IPlayerItemStorage, IPlayerItemStoragePortableP
         previewItemId = itemId;
         previewPickupCount = pickupCount;
         previewPortableObject = portableObject;
+        previewPortableObject.SetFocusStack(stack);
         return true;
     }
 

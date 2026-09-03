@@ -64,6 +64,18 @@ public class MapFocus : MonoBehaviour
         ApplyOverlayRendering();
     }
 
+    /// <summary>
+    /// Rebinds the marker's cached default position after it is attached to the
+    /// shared terrain host. Visibility changes reset to this anchor, not to the
+    /// prefab's original local position at the TerrainGenerator origin.
+    /// </summary>
+    public void SetWorldAnchor(Vector3 worldPosition)
+    {
+        CacheDefaultTransform();
+        transform.position = worldPosition;
+        defaultLocalPosition = transform.localPosition;
+    }
+
     public void SetVisible(bool isVisible)
     {
         SetVisible(isVisible, focusColor);

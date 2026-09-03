@@ -1252,7 +1252,7 @@ public sealed class PortableItemRenderer : MonoBehaviour
         float horizontalSize = Mathf.Max(0.25f, dynamicVirtualConveyorItemCullBoundsSize);
         float verticalSize = Mathf.Max(0.5f, dynamicVirtualConveyorItemCullBoundsHeight);
         return new Bounds(
-            block.transform.position + Vector3.up * (verticalSize * 0.5f),
+            block.WorldPosition + Vector3.up * (verticalSize * 0.5f),
             new Vector3(horizontalSize, verticalSize, horizontalSize));
     }
 

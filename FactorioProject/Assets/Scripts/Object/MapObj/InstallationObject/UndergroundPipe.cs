@@ -777,7 +777,7 @@ public class UndergroundPipe : Pipe
             && terrain.TryGetLoadedBlock(coordinate, out Block block)
             && block != null)
         {
-            return block.transform.position;
+            return block.WorldPosition;
         }
 
         return new Vector3(coordinate.x, fallbackY, coordinate.y);

@@ -94,12 +94,15 @@ public partial class TerrainGenerator : MonoBehaviour
     }
 
     private readonly List<AnimalSpeciesPair> animalSpeciesCache = new List<AnimalSpeciesPair>();
-    private readonly List<Block> animalEligibleBlocksScratch = new List<Block>();
+    private readonly List<Vector2Int> animalEligibleCoordinatesScratch = new List<Vector2Int>();
     private readonly List<AnimalHerdPlan> animalHerdPlansScratch = new List<AnimalHerdPlan>();
-    private readonly Dictionary<Vector2Int, Block> animalEligibleBlockLookup = new Dictionary<Vector2Int, Block>();
+    private readonly HashSet<Vector2Int> animalEligibleCoordinateLookup = new HashSet<Vector2Int>();
+    private readonly List<Vector2Int> animalChunkCoordinatesScratch = new List<Vector2Int>();
     private readonly HashSet<Vector2Int> animalUsedCoordinatesScratch = new HashSet<Vector2Int>();
     private readonly Dictionary<long, AnimalSaveEntry> animalSaveOverrides = new Dictionary<long, AnimalSaveEntry>();
     private readonly HashSet<long> loadedAnimalIds = new HashSet<long>();
+    private readonly HashSet<TerrainAnimalInstance> pinnedAnimalInstances =
+        new HashSet<TerrainAnimalInstance>();
     private int animalDefinitionCacheHash = int.MinValue;
 
     public float AnimalDensity => animalDensity;
@@ -161,9 +164,9 @@ public partial class TerrainGenerator : MonoBehaviour
     }
 #endif
 
-    private void SpawnAnimalsForChunk(Vector2Int chunkCoordinate, Transform chunkTransform, Block[] chunkBlocks)
+    private void SpawnAnimalsForChunk(Vector2Int chunkCoordinate)
     {
-        if (!generateAnimals || animalDensity <= 0f || chunkTransform == null || chunkBlocks == null)
+        if (!generateAnimals || animalDensity <= 0f)
         {
             return;
         }
@@ -174,29 +177,29 @@ public partial class TerrainGenerator : MonoBehaviour
             return;
         }
 
-        Transform animalRoot = GetOrCreateAnimalRoot(chunkTransform);
         animalUsedCoordinatesScratch.Clear();
-        CacheExistingAnimalCoordinates(animalRoot, animalUsedCoordinatesScratch);
-        SpawnSavedAnimalsForChunk(chunkCoordinate, animalRoot, animalUsedCoordinatesScratch);
+        CacheExistingAnimalCoordinates(transform, animalUsedCoordinatesScratch);
+        SpawnSavedAnimalsForChunk(chunkCoordinate, transform, animalUsedCoordinatesScratch);
 
-        animalEligibleBlocksScratch.Clear();
-        animalEligibleBlockLookup.Clear();
-        for (int i = 0; i < chunkBlocks.Length; i++)
+        animalEligibleCoordinatesScratch.Clear();
+        animalEligibleCoordinateLookup.Clear();
+        loadedBlocks.CopyRegisteredCoordinates(chunkCoordinate, animalChunkCoordinatesScratch);
+        for (int i = 0; i < animalChunkCoordinatesScratch.Count; i++)
         {
-            Block block = chunkBlocks[i];
-            if (!CanSpawnAnimalOnBlock(block)
-                || animalUsedCoordinatesScratch.Contains(block.Coordinate))
+            Vector2Int coordinate = animalChunkCoordinatesScratch[i];
+            if (!CanSpawnAnimalAtCoordinate(coordinate)
+                || animalUsedCoordinatesScratch.Contains(coordinate))
             {
                 continue;
             }
 
-            animalEligibleBlocksScratch.Add(block);
-            animalEligibleBlockLookup[block.Coordinate] = block;
+            animalEligibleCoordinatesScratch.Add(coordinate);
+            animalEligibleCoordinateLookup.Add(coordinate);
         }
 
         DeterministicAnimalRandom random = new DeterministicAnimalRandom(seed, chunkCoordinate);
-        float expectedAnimalCount = animalEligibleBlocksScratch.Count * EffectiveAnimalDensity;
-        BuildAnimalHerdPlans(expectedAnimalCount, animalEligibleBlocksScratch.Count, ref random);
+        float expectedAnimalCount = animalEligibleCoordinatesScratch.Count * EffectiveAnimalDensity;
+        BuildAnimalHerdPlans(expectedAnimalCount, animalEligibleCoordinatesScratch.Count, ref random);
         if (animalHerdPlansScratch.Count == 0)
         {
             ClearAnimalSpawnScratch();
@@ -204,17 +207,18 @@ public partial class TerrainGenerator : MonoBehaviour
         }
 
         for (int herdIndex = 0;
-             herdIndex < animalHerdPlansScratch.Count && animalEligibleBlockLookup.Count > 0;
+             herdIndex < animalHerdPlansScratch.Count && animalEligibleCoordinateLookup.Count > 0;
              herdIndex++)
         {
             AnimalHerdPlan herdPlan = animalHerdPlansScratch[herdIndex];
             AnimalSpeciesPair species = herdPlan.species;
             int herdSize = herdPlan.size;
-            Block centerBlock = animalEligibleBlocksScratch[random.Range(0, animalEligibleBlocksScratch.Count)];
-            Vector3 herdCenter = centerBlock.transform.position;
+            Vector2Int centerCoordinate = animalEligibleCoordinatesScratch[
+                random.Range(0, animalEligibleCoordinatesScratch.Count)];
+            Vector3 herdCenter = new Vector3(centerCoordinate.x, 0f, centerCoordinate.y);
             long herdId = BuildAnimalHerdId(
                 chunkCoordinate,
-                centerBlock.Coordinate,
+                centerCoordinate,
                 species.Settings != null ? species.Settings.Id : -1,
                 herdIndex);
             float herdRadius = species.Settings != null && species.Settings.AISettings != null
@@ -223,12 +227,11 @@ public partial class TerrainGenerator : MonoBehaviour
 
             for (int memberIndex = 0; memberIndex < herdSize; memberIndex++)
             {
-                if (!TryTakeAnimalSpawnBlock(centerBlock.Coordinate, ref random, out Block spawnBlock))
+                if (!TryTakeAnimalSpawnCoordinate(centerCoordinate, ref random, out Vector2Int coordinate))
                 {
                     break;
                 }
 
-                Vector2Int coordinate = spawnBlock.Coordinate;
                 long deterministicId = BuildAnimalDeterministicId(coordinate);
                 if (animalSaveOverrides.ContainsKey(deterministicId))
                 {
@@ -241,13 +244,11 @@ public partial class TerrainGenerator : MonoBehaviour
                     continue;
                 }
 
-                Vector3 position = spawnBlock.transform.position;
-                Quaternion rotation = Quaternion.Euler(0f, random.Value() * 360f, 0f);
                 SpawnAnimalInstance(
                     definition,
                     deterministicId,
-                    position,
-                    rotation,
+                    new Vector3(coordinate.x, 0f, coordinate.y),
+                    Quaternion.Euler(0f, random.Value() * 360f, 0f),
                     ChooseAnimalSpawnAge(definition, ref random),
                     -1f,
                     false,
@@ -255,7 +256,7 @@ public partial class TerrainGenerator : MonoBehaviour
                     herdCenter,
                     herdRadius,
                     null,
-                    animalRoot);
+                    transform);
             }
         }
 
@@ -270,43 +271,52 @@ public partial class TerrainGenerator : MonoBehaviour
                && GetTileBiome(block.Coordinate) != TerrainBiome.Water;
     }
 
-    private bool TryTakeAnimalSpawnBlock(
+    private bool CanSpawnAnimalAtCoordinate(Vector2Int coordinate)
+    {
+        if (GetTileBiome(coordinate) == TerrainBiome.Water)
+        {
+            return false;
+        }
+
+        return !loadedBlocks.TryGetValue(coordinate, out Block block)
+               || (block != null && block.gameObject.activeInHierarchy && block.MapObject == null);
+    }
+
+    private bool TryTakeAnimalSpawnCoordinate(
         Vector2Int herdCenter,
         ref DeterministicAnimalRandom random,
-        out Block block)
+        out Vector2Int coordinate)
     {
         for (int attempt = 0; attempt < 16; attempt++)
         {
-            Vector2Int coordinate = herdCenter + new Vector2Int(
+            coordinate = herdCenter + new Vector2Int(
                 random.Range(-animalHerdSpreadRadius, animalHerdSpreadRadius + 1),
                 random.Range(-animalHerdSpreadRadius, animalHerdSpreadRadius + 1));
-            if (!animalEligibleBlockLookup.TryGetValue(coordinate, out block))
+            if (!animalEligibleCoordinateLookup.Remove(coordinate))
             {
                 continue;
             }
 
-            animalEligibleBlockLookup.Remove(coordinate);
             animalUsedCoordinatesScratch.Add(coordinate);
             return true;
         }
 
-        int count = animalEligibleBlocksScratch.Count;
+        int count = animalEligibleCoordinatesScratch.Count;
         int start = count > 0 ? random.Range(0, count) : 0;
         for (int i = 0; i < count; i++)
         {
-            Block candidate = animalEligibleBlocksScratch[(start + i) % count];
-            if (candidate == null
-                || !animalEligibleBlockLookup.Remove(candidate.Coordinate))
+            Vector2Int candidate = animalEligibleCoordinatesScratch[(start + i) % count];
+            if (!animalEligibleCoordinateLookup.Remove(candidate))
             {
                 continue;
             }
 
-            animalUsedCoordinatesScratch.Add(candidate.Coordinate);
-            block = candidate;
+            animalUsedCoordinatesScratch.Add(candidate);
+            coordinate = candidate;
             return true;
         }
 
-        block = null;
+        coordinate = default;
         return false;
     }
 
@@ -661,11 +671,8 @@ public partial class TerrainGenerator : MonoBehaviour
         }
 
         instance.MarkInteracted();
-        if (instance.transform.parent != transform)
-        {
-            instance.transform.SetParent(transform, true);
-        }
-
+        pinnedAnimalInstances.Add(instance);
+        instance.transform.SetParent(transform, true);
         return true;
     }
 
@@ -674,16 +681,15 @@ public partial class TerrainGenerator : MonoBehaviour
         TerrainAnimalInstance instance = animal != null
             ? animal.GetComponentInParent<TerrainAnimalInstance>()
             : null;
-        if (instance == null || instance.transform.parent != transform)
+        if (instance == null || !pinnedAnimalInstances.Remove(instance))
         {
             return;
         }
 
         Vector2Int chunkCoordinate = GetAnimalChunkCoordinate(instance.transform.position);
-        if (loadedChunks.TryGetValue(chunkCoordinate, out Transform chunkTransform)
-            && chunkTransform != null)
+        if (loadedChunks.ContainsKey(chunkCoordinate))
         {
-            instance.transform.SetParent(GetOrCreateAnimalRoot(chunkTransform), true);
+            instance.transform.SetParent(transform, true);
         }
     }
 
@@ -704,6 +710,7 @@ public partial class TerrainGenerator : MonoBehaviour
         }
 
         loadedAnimalIds.Remove(instance.DeterministicId);
+        pinnedAnimalInstances.Remove(instance);
         DestroyAnimalObject(instance.gameObject);
         return true;
     }
@@ -717,9 +724,9 @@ public partial class TerrainGenerator : MonoBehaviour
     {
         RemoveNonInteractedAnimalsFromLoadedChunks();
         RebuildLoadedAnimalIdCache();
-        foreach (KeyValuePair<Vector2Int, Transform> pair in loadedChunks)
+        foreach (KeyValuePair<Vector2Int, ChunkRuntimeData> pair in loadedChunks)
         {
-            SpawnAnimalsForChunk(pair.Key, pair.Value, GetDirectChunkBlocks(pair.Value));
+            SpawnAnimalsForChunk(pair.Key);
         }
     }
 
@@ -737,25 +744,21 @@ public partial class TerrainGenerator : MonoBehaviour
     private int RemoveLoadedAnimalViews(bool includeInteracted)
     {
         int removedCount = 0;
-        foreach (KeyValuePair<Vector2Int, Transform> pair in loadedChunks)
+        TerrainAnimalInstance[] instances = GetComponentsInChildren<TerrainAnimalInstance>(true);
+        for (int i = 0; i < instances.Length; i++)
         {
-            TerrainAnimalInstance[] instances = pair.Value != null
-                ? pair.Value.GetComponentsInChildren<TerrainAnimalInstance>(true)
-                : Array.Empty<TerrainAnimalInstance>();
-            for (int i = 0; i < instances.Length; i++)
+            TerrainAnimalInstance instance = instances[i];
+            if (instance == null
+                || !instance.gameObject.activeSelf
+                || pinnedAnimalInstances.Contains(instance)
+                || (!includeInteracted && instance.HasInteracted))
             {
-                TerrainAnimalInstance instance = instances[i];
-                if (instance == null
-                    || !instance.gameObject.activeSelf
-                    || (!includeInteracted && instance.HasInteracted))
-                {
-                    continue;
-                }
-
-                loadedAnimalIds.Remove(instance.DeterministicId);
-                DestroyAnimalObject(instance.gameObject);
-                removedCount++;
+                continue;
             }
+
+            loadedAnimalIds.Remove(instance.DeterministicId);
+            DestroyAnimalObject(instance.gameObject);
+            removedCount++;
         }
 
         return removedCount;
@@ -804,19 +807,48 @@ public partial class TerrainGenerator : MonoBehaviour
         }
     }
 
-    private void ForgetAnimalRuntimeIds(Transform root)
+    private void ForgetAnimalRuntimeIds(Vector2Int chunkCoordinate)
     {
-        if (root == null)
+        TerrainAnimalInstance[] instances = GetComponentsInChildren<TerrainAnimalInstance>(true);
+        for (int i = 0; i < instances.Length; i++)
         {
-            return;
+            if (instances[i] != null
+                && !pinnedAnimalInstances.Contains(instances[i])
+                && GetAnimalChunkCoordinate(instances[i].transform.position) == chunkCoordinate)
+            {
+                loadedAnimalIds.Remove(instances[i].DeterministicId);
+            }
         }
+    }
 
-        TerrainAnimalInstance[] instances = root.GetComponentsInChildren<TerrainAnimalInstance>(true);
+    private void DestroyAnimalViewsInChunk(Vector2Int chunkCoordinate)
+    {
+        TerrainAnimalInstance[] instances = GetComponentsInChildren<TerrainAnimalInstance>(true);
+        for (int i = 0; i < instances.Length; i++)
+        {
+            TerrainAnimalInstance instance = instances[i];
+            if (instance != null
+                && !pinnedAnimalInstances.Contains(instance)
+                && GetAnimalChunkCoordinate(instance.transform.position) == chunkCoordinate)
+            {
+                DestroyAnimalObject(instance.gameObject);
+            }
+        }
+    }
+
+    private void DestroyAllTerrainAnimalViews()
+    {
+        TerrainAnimalInstance[] instances = GetComponentsInChildren<TerrainAnimalInstance>(true);
         for (int i = 0; i < instances.Length; i++)
         {
             if (instances[i] != null)
             {
-                loadedAnimalIds.Remove(instances[i].DeterministicId);
+                if (pinnedAnimalInstances.Contains(instances[i]))
+                {
+                    continue;
+                }
+
+                DestroyAnimalObject(instances[i].gameObject);
             }
         }
     }
@@ -824,12 +856,14 @@ public partial class TerrainGenerator : MonoBehaviour
     private void ClearAnimalRuntimeTracking()
     {
         loadedAnimalIds.Clear();
+        pinnedAnimalInstances.RemoveWhere(instance => instance == null);
     }
 
     private void ClearAnimalPersistentState()
     {
         animalSaveOverrides.Clear();
         loadedAnimalIds.Clear();
+        pinnedAnimalInstances.Clear();
     }
 
     private void EnsureAnimalSpeciesCache()
@@ -894,19 +928,6 @@ public partial class TerrainGenerator : MonoBehaviour
         }
 
         return null;
-    }
-
-    private static Transform GetOrCreateAnimalRoot(Transform chunkTransform)
-    {
-        Transform existing = chunkTransform.Find("Animals");
-        if (existing != null)
-        {
-            return existing;
-        }
-
-        GameObject rootObject = new GameObject("Animals");
-        rootObject.transform.SetParent(chunkTransform, false);
-        return rootObject.transform;
     }
 
     private static void CacheExistingAnimalCoordinates(Transform root, HashSet<Vector2Int> coordinates)
@@ -1124,18 +1145,16 @@ public partial class TerrainGenerator : MonoBehaviour
 
                         herdSize = Mathf.Max(1, species.PreferredHerdSize);
                         herdMemberIndex = 0;
-                        herdCenter = block.transform.position;
+                        herdCenter = block.WorldPosition;
                         herdId = BuildAnimalHarnessHerdId(stressSequence, created);
                     }
 
                     AnimalDefinition definition = ChooseGenderDefinition(species, ref random);
-                    Transform chunkTransform = block.transform.parent;
-                    Transform parent = GetOrCreateAnimalRoot(chunkTransform);
                     long deterministicId = BuildAnimalHarnessId(stressSequence, created);
                     Animal animal = SpawnAnimalInstance(
                         definition,
                         deterministicId,
-                        block.transform.position,
+                        block.WorldPosition,
                         Quaternion.Euler(0f, random.Value() * 360f, 0f),
                         ChooseAnimalSpawnAge(definition, ref random),
                         -1f,
@@ -1146,7 +1165,7 @@ public partial class TerrainGenerator : MonoBehaviour
                             ? definition.AISettings.HerdAreaRadius
                             : AnimalAISettings.DefaultHerdAreaRadius,
                         null,
-                        parent);
+                        transform);
                     if (animal == null)
                     {
                         continue;
@@ -1178,13 +1197,7 @@ public partial class TerrainGenerator : MonoBehaviour
 
         Vector2Int playerCoordinate = GetWorldBlockCoordinate(player.transform.position);
         animalUsedCoordinatesScratch.Clear();
-        foreach (KeyValuePair<Vector2Int, Transform> pair in loadedChunks)
-        {
-            if (pair.Value != null)
-            {
-                CacheExistingAnimalCoordinates(pair.Value, animalUsedCoordinatesScratch);
-            }
-        }
+        CacheExistingAnimalCoordinates(transform, animalUsedCoordinatesScratch);
 
         int spawnSequence = ++animalHarnessSpawnSequence;
         DeterministicAnimalRandom random = new DeterministicAnimalRandom(
@@ -1213,24 +1226,22 @@ public partial class TerrainGenerator : MonoBehaviour
                             continue;
                         }
 
-                        Transform chunkTransform = block.transform.parent;
-                        Transform parent = GetOrCreateAnimalRoot(chunkTransform);
                         long herdId = BuildAnimalHarnessHerdId(spawnSequence, 0);
                         spawnedAnimal = SpawnAnimalInstance(
                             definition,
                             BuildAnimalHarnessId(spawnSequence, 0),
-                            block.transform.position,
+                            block.WorldPosition,
                             Quaternion.Euler(0f, random.Value() * 360f, 0f),
                             ChooseAnimalSpawnAge(definition, ref random),
                             -1f,
                             false,
                             herdId,
-                            block.transform.position,
+                            block.WorldPosition,
                             definition.AISettings != null
                                 ? definition.AISettings.HerdAreaRadius
                                 : AnimalAISettings.DefaultHerdAreaRadius,
                             null,
-                            parent);
+                            transform);
                         return spawnedAnimal != null;
                     }
                 }
@@ -1361,9 +1372,10 @@ public partial class TerrainGenerator : MonoBehaviour
 
     private void ClearAnimalSpawnScratch()
     {
-        animalEligibleBlocksScratch.Clear();
+        animalEligibleCoordinatesScratch.Clear();
         animalHerdPlansScratch.Clear();
-        animalEligibleBlockLookup.Clear();
+        animalEligibleCoordinateLookup.Clear();
+        animalChunkCoordinatesScratch.Clear();
         animalUsedCoordinatesScratch.Clear();
     }
 

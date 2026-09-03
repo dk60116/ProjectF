@@ -4158,7 +4158,7 @@ public class BagSlot : ItemSlot, IBeginDragHandler, IDragHandler, IEndDragHandle
                 continue;
             }
 
-            Vector3 offset = candidateBlock.transform.position - origin;
+            Vector3 offset = candidateBlock.WorldPosition - origin;
             offset.y = 0f;
             float distanceSqr = offset.sqrMagnitude;
             if (distanceSqr >= nearestDistanceSqr)

@@ -405,10 +405,11 @@ public class Pipe : InstallationObject
             return true;
         }
 
-        Block block = GetComponentInParent<Block>();
-        if (block != null)
+        TerrainGenerator terrain = TerrainGenerator.Active;
+        Vector3 position = transform.position;
+        coordinate = new Vector2Int(Mathf.RoundToInt(position.x), Mathf.RoundToInt(position.z));
+        if (terrain != null && terrain.TryGetLoadedBlock(coordinate, out _))
         {
-            coordinate = block.Coordinate;
             return true;
         }
 

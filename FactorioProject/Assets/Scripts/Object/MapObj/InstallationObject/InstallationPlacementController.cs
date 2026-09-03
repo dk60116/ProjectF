@@ -30,7 +30,7 @@ public class InstallationPlacementController : MonoBehaviour
     private const float ConveyorDebugArrowWorldLift = 0.55f;
     private const float PackedPortableMoveInterval = 0.1f;
     private const int InstallGridViewportPaddingCells = 3;
-    private const int InstallGridMaxVisibleCellsPerAxis = 96;
+    private const int InstallGridInitialCellCapacity = 65 * 65;
     private const float PlacementRotationExactDotThreshold = 0.9999f;
     private const float PlacementRotationNearestDotThreshold = 0.7f;
     private const float InstallPreviewVisualSyncPositionEpsilonSqr = 0.0001f;
@@ -132,13 +132,14 @@ public class InstallationPlacementController : MonoBehaviour
     private MapObject installGridLastPreview;
     private bool installGridMeshBuildInitialized;
     private readonly List<Vector2Int> installGridBlockedCoordinates =
-        new List<Vector2Int>(InstallGridMaxVisibleCellsPerAxis * InstallGridMaxVisibleCellsPerAxis);
+        new List<Vector2Int>(InstallGridInitialCellCapacity);
     private readonly Dictionary<Vector2Int, bool> installGridPlacementValidityCache =
-        new Dictionary<Vector2Int, bool>(InstallGridMaxVisibleCellsPerAxis * InstallGridMaxVisibleCellsPerAxis);
+        new Dictionary<Vector2Int, bool>(InstallGridInitialCellCapacity);
     private readonly Dictionary<Vector3Int, bool> installGridRectAnchorValidityCache =
-        new Dictionary<Vector3Int, bool>(InstallGridMaxVisibleCellsPerAxis * InstallGridMaxVisibleCellsPerAxis * 4);
+        new Dictionary<Vector3Int, bool>(InstallGridInitialCellCapacity * 4);
     private readonly Dictionary<Vector2Int, bool> installGridSimpleClearCellCache =
-        new Dictionary<Vector2Int, bool>(InstallGridMaxVisibleCellsPerAxis * InstallGridMaxVisibleCellsPerAxis);
+        new Dictionary<Vector2Int, bool>(InstallGridInitialCellCapacity);
+    private bool[] installGridSimpleValidTargets = new bool[InstallGridInitialCellCapacity];
     private bool installGridValidationInProgress;
     private bool installGridValidationUsesSimpleRectGridFastPath;
     private InstallationMapFilter installGridSimpleAllowedFilter;
@@ -2854,8 +2855,8 @@ public class InstallationPlacementController : MonoBehaviour
             && terrain.TryGetLoadedBlock(anchorCoordinate, out Block anchorBlock)
             && anchorBlock != null)
         {
-            center.x = anchorBlock.transform.position.x;
-            center.z = anchorBlock.transform.position.z;
+            center.x = anchorBlock.WorldPosition.x;
+            center.z = anchorBlock.WorldPosition.z;
         }
 
         sprinkler.SetPreviewRangeCenter(center);
@@ -4110,7 +4111,7 @@ public class InstallationPlacementController : MonoBehaviour
         TerrainGenerator terrain = ResolveInstallPreviewTerrain();
         if (terrain != null && terrain.TryGetLoadedBlock(coordinate, out Block block) && block != null)
         {
-            return block.transform.position + Vector3.up * 0.35f;
+            return block.WorldPosition + Vector3.up * 0.35f;
         }
 
         if (packedSession?.editSession?.originalInstallation != null)
@@ -5498,8 +5499,6 @@ public class InstallationPlacementController : MonoBehaviour
         }
 
         RefreshInstallOrEditWorkableRangeVisualRequest();
-        UtilityPole.RefreshAllRangeVisuals();
-        Sprinkler.RefreshAllRangeVisuals();
 
         if (IsInstallGridModeActive())
         {
@@ -6862,7 +6861,7 @@ public class InstallationPlacementController : MonoBehaviour
         return terrain != null
             ? terrain.transform
             : placementPlan.anchorBlock != null
-                ? placementPlan.anchorBlock.transform
+                ? placementPlan.anchorBlock.RuntimeObjectRoot
                 : null;
     }
 
@@ -6943,7 +6942,7 @@ public class InstallationPlacementController : MonoBehaviour
             footprintBlocks = new List<Block>(2) { firstBlock, secondBlock },
             hasRuntimeAnchorCoordinate = true,
             runtimeAnchorCoordinate = firstCoordinate,
-            position = firstBlock.transform.position,
+            position = firstBlock.WorldPosition,
             rotation = preview.transform.rotation
         };
         return true;
@@ -13846,7 +13845,7 @@ public class InstallationPlacementController : MonoBehaviour
         snapshot = null;
         TerrainGenerator terrain = ResolveInstallPreviewTerrain();
         if (terrain == null
-            || !terrain.TryGetLoadedBlock(coordinate, out Block block)
+            || !terrain.TryGetLoadedBlockRuntimeProxy(coordinate, out Block block)
             || block == null
             || block.MapObject == null
             || !block.MapObject.gameObject.activeInHierarchy
@@ -20703,7 +20702,7 @@ public class InstallationPlacementController : MonoBehaviour
     {
         if (terrain != null && terrain.TryGetLoadedBlock(coordinate, out Block block) && block != null)
         {
-            Vector3 markerPosition = block.transform.position;
+            Vector3 markerPosition = block.WorldPosition;
             if (TryGetMiningResourceMarkerSurfaceY(block, out float markerSurfaceY))
             {
                 markerPosition.y = Mathf.Max(markerPosition.y, markerSurfaceY);
@@ -20756,7 +20755,7 @@ public class InstallationPlacementController : MonoBehaviour
 
         surfaceY = foundRenderer
             ? bounds.max.y
-            : Mathf.Max(block.transform.position.y, resource.transform.position.y);
+            : Mathf.Max(block.WorldPosition.y, resource.transform.position.y);
         ResourceMarkerSurfaceYCache[resourceInstanceId] = surfaceY;
         return true;
     }
@@ -21873,7 +21872,7 @@ public class InstallationPlacementController : MonoBehaviour
             return false;
         }
 
-        Vector3 referencePosition = railReferenceWorldPosition ?? block.transform.position;
+        Vector3 referencePosition = railReferenceWorldPosition ?? block.WorldPosition;
         return TryResolveTrainPlacementPose(
             block,
             footprintSource,
@@ -21965,7 +21964,17 @@ public class InstallationPlacementController : MonoBehaviour
             for (int i = 0; i < hitCount; i++)
             {
                 RaycastHit hit = pointerRaycastHits[i];
-                Block hitBlock = hit.collider != null ? hit.collider.GetComponentInParent<Block>() : null;
+                Block hitBlock = null;
+                if (hit.collider != null)
+                {
+                    TerrainGenerator terrain = ResolveInstallPreviewTerrain();
+                    Vector3 hitPosition = hit.point;
+                    terrain?.TryGetLoadedBlock(
+                        new Vector2Int(
+                            Mathf.RoundToInt(hitPosition.x),
+                            Mathf.RoundToInt(hitPosition.z)),
+                        out hitBlock);
+                }
                 if (hitBlock != null && hit.distance < nearestDistance)
                 {
                     nearestBlock = hitBlock;
@@ -22094,7 +22103,8 @@ public class InstallationPlacementController : MonoBehaviour
 
         if (installGridDirty)
         {
-            installGridDirty = !RebuildInstallGridMesh();
+            RebuildInstallGridMesh();
+            installGridDirty = false;
         }
 
         if (installGridPreviewDirty)
@@ -22172,124 +22182,40 @@ public class InstallationPlacementController : MonoBehaviour
             return false;
         }
 
-        minCoordinate = loadedMin;
-        maxCoordinate = loadedMax;
+        terrain.GetPlayerRenderCoordinateBounds(
+            out Vector2Int renderRangeMin,
+            out Vector2Int renderRangeMax);
+        Vector2Int visibleTerrainMin = new Vector2Int(
+            Mathf.Max(loadedMin.x, renderRangeMin.x),
+            Mathf.Max(loadedMin.y, renderRangeMin.y));
+        Vector2Int visibleTerrainMax = new Vector2Int(
+            Mathf.Min(loadedMax.x, renderRangeMax.x),
+            Mathf.Min(loadedMax.y, renderRangeMax.y));
+        if (visibleTerrainMin.x > visibleTerrainMax.x
+            || visibleTerrainMin.y > visibleTerrainMax.y)
+        {
+            return false;
+        }
+
+        minCoordinate = visibleTerrainMin;
+        maxCoordinate = visibleTerrainMax;
         if (!TryGetInstallGridViewportBounds(terrain, out Vector2Int viewportMin, out Vector2Int viewportMax))
         {
-            ClampInstallGridEffectiveBounds(
-                loadedMin,
-                loadedMax,
-                ResolveInstallGridFocusCoordinate(minCoordinate, maxCoordinate, true),
-                ref minCoordinate,
-                ref maxCoordinate);
             return true;
         }
 
         minCoordinate = new Vector2Int(
-            Mathf.Max(loadedMin.x, viewportMin.x),
-            Mathf.Max(loadedMin.y, viewportMin.y));
+            Mathf.Max(visibleTerrainMin.x, viewportMin.x),
+            Mathf.Max(visibleTerrainMin.y, viewportMin.y));
         maxCoordinate = new Vector2Int(
-            Mathf.Min(loadedMax.x, viewportMax.x),
-            Mathf.Min(loadedMax.y, viewportMax.y));
+            Mathf.Min(visibleTerrainMax.x, viewportMax.x),
+            Mathf.Min(visibleTerrainMax.y, viewportMax.y));
         if (minCoordinate.x > maxCoordinate.x || minCoordinate.y > maxCoordinate.y)
         {
             return false;
         }
 
-        ClampInstallGridEffectiveBounds(
-            loadedMin,
-            loadedMax,
-            ResolveInstallGridFocusCoordinate(minCoordinate, maxCoordinate, false),
-            ref minCoordinate,
-            ref maxCoordinate);
         return true;
-    }
-
-    private void ClampInstallGridEffectiveBounds(
-        Vector2Int loadedMin,
-        Vector2Int loadedMax,
-        Vector2Int focusCoordinate,
-        ref Vector2Int minCoordinate,
-        ref Vector2Int maxCoordinate)
-    {
-        if (minCoordinate.x > maxCoordinate.x || minCoordinate.y > maxCoordinate.y)
-        {
-            return;
-        }
-
-        ClampInstallGridAxis(
-            minCoordinate.x,
-            maxCoordinate.x,
-            focusCoordinate.x,
-            out int clampedMinX,
-            out int clampedMaxX);
-        ClampInstallGridAxis(
-            minCoordinate.y,
-            maxCoordinate.y,
-            focusCoordinate.y,
-            out int clampedMinY,
-            out int clampedMaxY);
-
-        minCoordinate = new Vector2Int(
-            Mathf.Max(loadedMin.x, clampedMinX),
-            Mathf.Max(loadedMin.y, clampedMinY));
-        maxCoordinate = new Vector2Int(
-            Mathf.Min(loadedMax.x, clampedMaxX),
-            Mathf.Min(loadedMax.y, clampedMaxY));
-    }
-
-    private Vector2Int ResolveInstallGridFocusCoordinate(
-        Vector2Int minCoordinate,
-        Vector2Int maxCoordinate,
-        bool allowPreviewFocus)
-    {
-        if (allowPreviewFocus
-            && activeInstallPreview != null
-            && TryGetPreviewAnchorCoordinate(activeInstallPreview, out Vector2Int anchorCoordinate))
-        {
-            return anchorCoordinate;
-        }
-
-        if (allowPreviewFocus && selectedEditableInstallation != null)
-        {
-            return selectedEditableAnchorCoordinate;
-        }
-
-        return new Vector2Int(
-            (minCoordinate.x + maxCoordinate.x) / 2,
-            (minCoordinate.y + maxCoordinate.y) / 2);
-    }
-
-    private static void ClampInstallGridAxis(
-        int currentMin,
-        int currentMax,
-        int focus,
-        out int clampedMin,
-        out int clampedMax)
-    {
-        int size = currentMax - currentMin + 1;
-        if (size <= InstallGridMaxVisibleCellsPerAxis)
-        {
-            clampedMin = currentMin;
-            clampedMax = currentMax;
-            return;
-        }
-
-        int clampedSize = Mathf.Min(size, InstallGridMaxVisibleCellsPerAxis);
-        int clampedFocus = Mathf.Clamp(focus, currentMin, currentMax);
-        clampedMin = clampedFocus - clampedSize / 2;
-        clampedMax = clampedMin + clampedSize - 1;
-        if (clampedMin < currentMin)
-        {
-            clampedMax += currentMin - clampedMin;
-            clampedMin = currentMin;
-        }
-
-        if (clampedMax > currentMax)
-        {
-            clampedMin -= clampedMax - currentMax;
-            clampedMax = currentMax;
-        }
     }
 
     private bool TryGetInstallGridViewportBounds(
@@ -22458,13 +22384,13 @@ public class InstallationPlacementController : MonoBehaviour
         }
     }
 
-    private bool RebuildInstallGridMesh()
+    private void RebuildInstallGridMesh()
     {
         EnsureInstallGridResources();
 
         if (installGridMesh == null)
         {
-            return true;
+            return;
         }
 
         TerrainGenerator terrain = ResolveInstallPreviewTerrain();
@@ -22473,7 +22399,7 @@ public class InstallationPlacementController : MonoBehaviour
             installGridMesh.Clear();
             installGridBoundsInitialized = false;
             ResetInstallGridMeshBuild();
-            return true;
+            return;
         }
 
         bool showFullGrid = IsInstallGridModeActive();
@@ -22498,7 +22424,10 @@ public class InstallationPlacementController : MonoBehaviour
                                           && activeInstallDefinition.mapObject != null;
         if (shouldValidateBlockedCells)
         {
-            ValidateInstallGridBlockedCells(terrain, minCoordinate, maxCoordinate);
+            ValidateInstallGridBlockedCells(
+                terrain,
+                minCoordinate,
+                maxCoordinate);
         }
 
         float lineY = terrain.transform.position.y + installGridVerticalOffset;
@@ -22567,7 +22496,6 @@ public class InstallationPlacementController : MonoBehaviour
         installGridMesh.SetTriangles(triangles, 0, true);
         installGridMesh.SetColors(colors);
         installGridMesh.RecalculateBounds();
-        return true;
     }
 
     private void ValidateInstallGridBlockedCells(
@@ -22594,22 +22522,59 @@ public class InstallationPlacementController : MonoBehaviour
             : InstallationMapFilter.Ground;
         try
         {
-            for (int z = minCoordinate.y; z <= maxCoordinate.y; z++)
+            if (installGridValidationUsesSimpleRectGridFastPath
+                && !IsTrainStationSource(activeGridSource)
+                && ValidateSimpleRectGridBlockedCells(
+                    terrain,
+                    minCoordinate,
+                    maxCoordinate,
+                    activeGridSource))
+            {
+                return;
+            }
+
+            for (int y = minCoordinate.y; y <= maxCoordinate.y; y++)
             {
                 for (int x = minCoordinate.x; x <= maxCoordinate.x; x++)
                 {
-                    Vector2Int coordinate = new Vector2Int(x, z);
+                    Vector2Int coordinate = new Vector2Int(x, y);
                     if (installGridPlacementValidityCache.ContainsKey(coordinate))
                     {
                         continue;
                     }
 
-                    bool canPlace = !terrain.TryGetLoadedBlock(coordinate, out Block block)
-                                    || block == null
-                                    || CanPlaceActiveDefinitionFromGridCoordinate(
-                                        block,
-                                        useFastBoilerGridCheck,
-                                        useFastSteamGeneratorGridCheck);
+                    bool canPlace;
+                    if (!terrain.TryGetLoadedBlockCellData(coordinate, out BlockCellData cellData))
+                    {
+                        canPlace = true;
+                    }
+                    else if (terrain.TryGetLoadedBlockRuntimeProxy(coordinate, out Block block)
+                             && block != null)
+                    {
+                        canPlace = CanPlaceActiveDefinitionFromGridCoordinate(
+                            block,
+                            useFastBoilerGridCheck,
+                            useFastSteamGeneratorGridCheck);
+                    }
+                    else if (TryEvaluateActiveDefinitionOnDataOnlyGridCell(
+                                 terrain,
+                                 coordinate,
+                                 cellData,
+                                 useFastBoilerGridCheck,
+                                 useFastSteamGeneratorGridCheck,
+                                 out bool dataOnlyCanPlace))
+                    {
+                        canPlace = dataOnlyCanPlace;
+                    }
+                    else
+                    {
+                        canPlace = !terrain.TryGetLoadedBlock(coordinate, out block)
+                                   || block == null
+                                   || CanPlaceActiveDefinitionFromGridCoordinate(
+                                       block,
+                                       useFastBoilerGridCheck,
+                                       useFastSteamGeneratorGridCheck);
+                    }
                     installGridPlacementValidityCache[coordinate] = canPlace;
                     if (!canPlace)
                     {
@@ -22624,6 +22589,175 @@ public class InstallationPlacementController : MonoBehaviour
             installGridValidationUsesSimpleRectGridFastPath = false;
             installGridValidationInProgress = false;
         }
+    }
+
+    private bool ValidateSimpleRectGridBlockedCells(
+        TerrainGenerator terrain,
+        Vector2Int minCoordinate,
+        Vector2Int maxCoordinate,
+        MapObject footprintSource)
+    {
+        if (terrain == null
+            || footprintSource == null
+            || !TryGetInputOutputModule(footprintSource, out InputOutputModule inputOutputModule)
+            || !TryGetRectGridFootprintSettings(
+                footprintSource,
+                out int rectGridWidth,
+                out int rectGridHeight,
+                out Vector2Int objectAnchorCell))
+        {
+            return false;
+        }
+
+        IReadOnlyList<InputOutputModule.RectGridBlockPlacement> placements =
+            inputOutputModule.RectGridPlacements;
+        if (placements == null || placements.Count <= 0)
+        {
+            return false;
+        }
+
+        installGridBlockedCoordinates.Clear();
+        int gridWidth = maxCoordinate.x - minCoordinate.x + 1;
+        int gridHeight = maxCoordinate.y - minCoordinate.y + 1;
+        int gridCellCount = gridWidth * gridHeight;
+        if (installGridSimpleValidTargets.Length < gridCellCount)
+        {
+            installGridSimpleValidTargets = new bool[gridCellCount];
+        }
+        else
+        {
+            for (int index = 0; index < gridCellCount; index++)
+            {
+                installGridSimpleValidTargets[index] = false;
+            }
+        }
+        int preferredQuarterTurns = activeInstallPreview != null
+            ? GetPreviewQuarterTurns(activeInstallPreview)
+            : GetPreferredInstallPreviewQuarterTurns(activeInstallDefinition, null);
+        int candidateCount = GetPlacementRotationCandidateCount(footprintSource);
+        int baseQuarterTurns = NormalizeInstallPreviewQuarterTurns(
+            activeInstallPreview,
+            preferredQuarterTurns);
+
+        for (int rotationOffset = 0; rotationOffset < candidateCount; rotationOffset++)
+        {
+            int quarterTurns = NormalizeInstallPreviewQuarterTurns(
+                activeInstallPreview,
+                baseQuarterTurns + rotationOffset);
+            bool foundPlacement = false;
+            Vector2Int minOffset = Vector2Int.zero;
+            Vector2Int maxOffset = Vector2Int.zero;
+            for (int placementIndex = 0; placementIndex < placements.Count; placementIndex++)
+            {
+                InputOutputModule.RectGridBlockPlacement placement = placements[placementIndex];
+                if (placement.blockType == InputOutputModule.RectGridBlockType.None
+                    || placement.x < 0
+                    || placement.x >= rectGridWidth
+                    || placement.y < 0
+                    || placement.y >= rectGridHeight)
+                {
+                    continue;
+                }
+
+                Vector2Int localOffset = new Vector2Int(
+                    placement.x - objectAnchorCell.x,
+                    placement.y - objectAnchorCell.y);
+                Vector2Int rotatedOffset = RotateFootprintOffset(localOffset, quarterTurns);
+                if (!foundPlacement)
+                {
+                    minOffset = rotatedOffset;
+                    maxOffset = rotatedOffset;
+                    foundPlacement = true;
+                }
+                else
+                {
+                    minOffset = Vector2Int.Min(minOffset, rotatedOffset);
+                    maxOffset = Vector2Int.Max(maxOffset, rotatedOffset);
+                }
+            }
+
+            if (!foundPlacement)
+            {
+                continue;
+            }
+
+            int minAnchorX = minCoordinate.x - maxOffset.x;
+            int maxAnchorX = maxCoordinate.x - minOffset.x;
+            int minAnchorY = minCoordinate.y - maxOffset.y;
+            int maxAnchorY = maxCoordinate.y - minOffset.y;
+            for (int anchorY = minAnchorY; anchorY <= maxAnchorY; anchorY++)
+            {
+                for (int anchorX = minAnchorX; anchorX <= maxAnchorX; anchorX++)
+                {
+                    Vector2Int anchorCoordinate = new Vector2Int(anchorX, anchorY);
+                    Vector3Int cacheKey = new Vector3Int(anchorX, anchorY, quarterTurns);
+                    if (!installGridRectAnchorValidityCache.TryGetValue(cacheKey, out bool canPlaceAtAnchor))
+                    {
+                        canPlaceAtAnchor = CanPlaceSimpleRectGridAtAnchorFast(
+                            terrain,
+                            anchorCoordinate,
+                            footprintSource,
+                            quarterTurns,
+                            activeInstallPreview,
+                            placements,
+                            rectGridWidth,
+                            rectGridHeight,
+                            objectAnchorCell);
+                        installGridRectAnchorValidityCache[cacheKey] = canPlaceAtAnchor;
+                    }
+
+                    if (!canPlaceAtAnchor)
+                    {
+                        continue;
+                    }
+
+                    for (int placementIndex = 0; placementIndex < placements.Count; placementIndex++)
+                    {
+                        InputOutputModule.RectGridBlockPlacement placement = placements[placementIndex];
+                        if (placement.blockType == InputOutputModule.RectGridBlockType.None
+                            || placement.x < 0
+                            || placement.x >= rectGridWidth
+                            || placement.y < 0
+                            || placement.y >= rectGridHeight)
+                        {
+                            continue;
+                        }
+
+                        Vector2Int localOffset = new Vector2Int(
+                            placement.x - objectAnchorCell.x,
+                            placement.y - objectAnchorCell.y);
+                        Vector2Int targetCoordinate = anchorCoordinate
+                                                      + RotateFootprintOffset(localOffset, quarterTurns);
+                        if (targetCoordinate.x >= minCoordinate.x
+                            && targetCoordinate.x <= maxCoordinate.x
+                            && targetCoordinate.y >= minCoordinate.y
+                            && targetCoordinate.y <= maxCoordinate.y)
+                        {
+                            int targetIndex = (targetCoordinate.y - minCoordinate.y) * gridWidth
+                                              + targetCoordinate.x - minCoordinate.x;
+                            installGridSimpleValidTargets[targetIndex] = true;
+                        }
+                    }
+                }
+            }
+        }
+
+        for (int y = minCoordinate.y; y <= maxCoordinate.y; y++)
+        {
+            for (int x = minCoordinate.x; x <= maxCoordinate.x; x++)
+            {
+                Vector2Int coordinate = new Vector2Int(x, y);
+                int targetIndex = (y - minCoordinate.y) * gridWidth + x - minCoordinate.x;
+                bool canPlace = installGridSimpleValidTargets[targetIndex];
+                installGridPlacementValidityCache[coordinate] = canPlace;
+                if (!canPlace)
+                {
+                    installGridBlockedCoordinates.Add(coordinate);
+                }
+            }
+        }
+
+        return true;
     }
 
     private void RestoreCachedInstallGridBlockedCoordinates(
@@ -22758,15 +22892,6 @@ public class InstallationPlacementController : MonoBehaviour
                 int preferredQuarterTurns = activeInstallPreview != null
                     ? GetPreviewQuarterTurns(activeInstallPreview)
                     : GetPreferredInstallPreviewQuarterTurns(activeInstallDefinition, null);
-                if (CanUseSimpleRectGridInstallGridCheck(footprintSource))
-                {
-                    return CanPlaceSimpleRectGridFromGridCoordinateFast(
-                        block,
-                        footprintSource,
-                        preferredQuarterTurns,
-                        activeInstallPreview);
-                }
-
                 return TryResolvePlaceableInstallPreviewTarget(
                     block,
                     activeInstallPreview,
@@ -22780,6 +22905,101 @@ public class InstallationPlacementController : MonoBehaviour
         }
 
         return CanPlaceBelt2FGridTargetBlock(block, footprintSource);
+    }
+
+    private bool TryEvaluateActiveDefinitionOnDataOnlyGridCell(
+        TerrainGenerator terrain,
+        Vector2Int coordinate,
+        BlockCellData cellData,
+        bool useFastBoilerGridCheck,
+        bool useFastSteamGeneratorGridCheck,
+        out bool canPlace)
+    {
+        canPlace = false;
+        MapObject footprintSource = activeInstallDefinition != null
+            ? activeInstallDefinition.mapObject
+            : null;
+        if (terrain == null || footprintSource == null)
+        {
+            return true;
+        }
+
+        if (useFastBoilerGridCheck || useFastSteamGeneratorGridCheck)
+        {
+            if (!TryResolveInstallationObject(footprintSource, out InstallationObject installationObject))
+            {
+                return true;
+            }
+
+            InstallationMapFilter allowedFilter = ResolvePlacementMapFilter(
+                footprintSource,
+                installationObject);
+            canPlace = CanPlaceOnTerrainBiome(terrain, coordinate, cellData.Type, allowedFilter);
+            return true;
+        }
+
+        if (IsWaterPumpSource(footprintSource))
+        {
+            if (IsWaterPumpCardinalShoreCoordinate(coordinate))
+            {
+                return false;
+            }
+
+            canPlace = false;
+            return true;
+        }
+
+        if (IsTrainStationSource(footprintSource) || IsTrainSource(footprintSource))
+        {
+            canPlace = false;
+            return true;
+        }
+
+        if (IsBelt2F(footprintSource))
+        {
+            if (!TryResolveInstallationObject(
+                    footprintSource,
+                    out InstallationObject belt2FInstallation)
+                || HasInstallGridPlacementContextAtCoordinate(coordinate, activeInstallPreview))
+            {
+                return false;
+            }
+
+            InstallationMapFilter belt2FAllowedFilter = ResolvePlacementMapFilter(
+                footprintSource,
+                belt2FInstallation);
+            canPlace = CanPlaceOnTerrainBiome(
+                terrain,
+                coordinate,
+                cellData.Type,
+                belt2FAllowedFilter);
+            return true;
+        }
+
+        if (HasMultiCellMapSize(footprintSource))
+        {
+            return false;
+        }
+
+        if (!TryResolveInstallationObject(footprintSource, out InstallationObject sourceInstallation))
+        {
+            return false;
+        }
+
+        InstallationMapFilter sourceAllowedFilter = ResolvePlacementMapFilter(
+            footprintSource,
+            sourceInstallation);
+        if (HasInstallGridPlacementContextAtCoordinate(coordinate, activeInstallPreview))
+        {
+            return false;
+        }
+
+        canPlace = CanPlaceOnTerrainBiome(
+            terrain,
+            coordinate,
+            cellData.Type,
+            sourceAllowedFilter);
+        return true;
     }
 
     private bool CanUseSimpleRectGridInstallGridCheck(MapObject footprintSource)
@@ -22806,97 +23026,6 @@ public class InstallationPlacementController : MonoBehaviour
                && inputOutputModule.LayoutType == InputOutputModule.SlotLayoutType.RectGrid
                && inputOutputModule.RectGridPlacements != null
                && inputOutputModule.RectGridPlacements.Count > 0;
-    }
-
-    private bool CanPlaceSimpleRectGridFromGridCoordinateFast(
-        Block clickedBlock,
-        MapObject footprintSource,
-        int preferredQuarterTurns,
-        MapObject previewToIgnore)
-    {
-        if (clickedBlock == null
-            || footprintSource == null
-            || !TryGetInputOutputModule(footprintSource, out InputOutputModule inputOutputModule)
-            || !TryGetRectGridFootprintSettings(
-                footprintSource,
-                out int rectGridWidth,
-                out int rectGridHeight,
-                out Vector2Int objectAnchorCell))
-        {
-            return false;
-        }
-
-        TerrainGenerator terrain = ResolveInstallPreviewTerrain();
-        IReadOnlyList<InputOutputModule.RectGridBlockPlacement> placements = inputOutputModule.RectGridPlacements;
-        if (terrain == null || placements == null || placements.Count <= 0)
-        {
-            return false;
-        }
-
-        int candidateCount = GetPlacementRotationCandidateCount(footprintSource);
-        int baseQuarterTurns = NormalizeInstallPreviewQuarterTurns(previewToIgnore, preferredQuarterTurns);
-        if (rectGridWidth == 1
-            && rectGridHeight == 1
-            && TryResolveTrainStationFacingQuarterTurns(
-                clickedBlock.Coordinate,
-                footprintSource,
-                previewToIgnore,
-                baseQuarterTurns,
-                out int trainStationQuarterTurns))
-        {
-            baseQuarterTurns = trainStationQuarterTurns;
-            candidateCount = 1;
-        }
-
-        for (int offset = 0; offset < candidateCount; offset++)
-        {
-            int candidateQuarterTurns = NormalizeInstallPreviewQuarterTurns(
-                previewToIgnore,
-                baseQuarterTurns + offset);
-            for (int i = 0; i < placements.Count; i++)
-            {
-                InputOutputModule.RectGridBlockPlacement placement = placements[i];
-                if (placement.blockType == InputOutputModule.RectGridBlockType.None
-                    || placement.x < 0
-                    || placement.x >= rectGridWidth
-                    || placement.y < 0
-                    || placement.y >= rectGridHeight)
-                {
-                    continue;
-                }
-
-                Vector2Int localOffset = new Vector2Int(
-                    placement.x - objectAnchorCell.x,
-                    placement.y - objectAnchorCell.y);
-                Vector2Int candidateAnchorCoordinate =
-                    clickedBlock.Coordinate - RotateFootprintOffset(localOffset, candidateQuarterTurns);
-                Vector3Int cacheKey = new Vector3Int(
-                    candidateAnchorCoordinate.x,
-                    candidateAnchorCoordinate.y,
-                    candidateQuarterTurns);
-                if (!installGridRectAnchorValidityCache.TryGetValue(cacheKey, out bool canPlaceAtAnchor))
-                {
-                    canPlaceAtAnchor = CanPlaceSimpleRectGridAtAnchorFast(
-                        terrain,
-                        candidateAnchorCoordinate,
-                        footprintSource,
-                        candidateQuarterTurns,
-                        previewToIgnore,
-                        placements,
-                        rectGridWidth,
-                        rectGridHeight,
-                        objectAnchorCell);
-                    installGridRectAnchorValidityCache[cacheKey] = canPlaceAtAnchor;
-                }
-
-                if (canPlaceAtAnchor)
-                {
-                    return true;
-                }
-            }
-        }
-
-        return false;
     }
 
     private bool TryResolveSimpleRectGridInstallPreviewTargetFast(
@@ -23068,24 +23197,76 @@ public class InstallationPlacementController : MonoBehaviour
                 placement.x - objectAnchorCell.x,
                 placement.y - objectAnchorCell.y);
             Vector2Int coordinate = anchorCoordinate + RotateFootprintOffset(localOffset, quarterTurns);
-            if (!terrain.TryGetLoadedBlock(coordinate, out Block footprintBlock)
-                || footprintBlock == null
+            if (!terrain.TryGetLoadedBlockCellData(coordinate, out BlockCellData cellData)
                 || (blocksDroppedFloorObjects && terrain.HasDroppedFloorObjectsAt(coordinate)))
             {
                 return false;
             }
 
-            if (!IsInstallGridSimpleClearCell(
-                    footprintBlock,
-                    footprintSource,
-                    previewToIgnore)
-                && !CanPlacePreviewOnTargetBlockType(
-                    footprintBlock,
-                    footprintSource,
-                    placement.blockType,
-                    anchorCoordinate,
-                    quarterTurns,
-                    previewToIgnore))
+            bool cellCanPlace;
+            if (terrain.TryGetLoadedBlockRuntimeProxy(coordinate, out Block footprintBlock)
+                && footprintBlock != null)
+            {
+                cellCanPlace = IsInstallGridSimpleClearCell(
+                                   footprintBlock,
+                                   footprintSource,
+                                   previewToIgnore)
+                               || CanPlacePreviewOnTargetBlockType(
+                                   footprintBlock,
+                                   footprintSource,
+                                   placement.blockType,
+                                   anchorCoordinate,
+                                   quarterTurns,
+                                   previewToIgnore);
+            }
+            else if (installGridSimpleClearCellCache.TryGetValue(coordinate, out bool cachedIsClear)
+                     && cachedIsClear)
+            {
+                cellCanPlace = true;
+            }
+            else if (!HasInstallGridPlacementContextAtCoordinate(coordinate, previewToIgnore))
+            {
+                bool isSimpleClear = CanPlaceOnTerrainBiome(
+                    terrain,
+                    coordinate,
+                    cellData.Type,
+                    installGridSimpleAllowedFilter);
+                if (isSimpleClear)
+                {
+                    installGridSimpleClearCellCache[coordinate] = true;
+                    cellCanPlace = true;
+                }
+                else
+                {
+                    InstallationMapFilter terrainFilter = ResolveRectGridTerrainFilter(
+                        footprintSource,
+                        placement.blockType,
+                        installGridSimpleAllowedFilter);
+                    cellCanPlace = CanPlaceOnTerrainBiome(
+                        terrain,
+                        coordinate,
+                        cellData.Type,
+                        terrainFilter);
+                }
+            }
+            else
+            {
+                cellCanPlace = terrain.TryGetLoadedBlock(coordinate, out footprintBlock)
+                               && footprintBlock != null
+                               && (IsInstallGridSimpleClearCell(
+                                       footprintBlock,
+                                       footprintSource,
+                                       previewToIgnore)
+                                   || CanPlacePreviewOnTargetBlockType(
+                                       footprintBlock,
+                                       footprintSource,
+                                       placement.blockType,
+                                       anchorCoordinate,
+                                       quarterTurns,
+                                       previewToIgnore));
+            }
+
+            if (!cellCanPlace)
             {
                 return false;
             }
@@ -23147,6 +23328,24 @@ public class InstallationPlacementController : MonoBehaviour
                   && !IsPumpOutputCoordinateForPlacement(coordinate);
         installGridSimpleClearCellCache[coordinate] = isClear;
         return isClear;
+    }
+
+    private bool HasInstallGridPlacementContextAtCoordinate(
+        Vector2Int coordinate,
+        MapObject previewToIgnore)
+    {
+        if (TryGetInstallPreviewAtCoordinate(coordinate, out MapObject existingPreview)
+            && existingPreview != null
+            && existingPreview != previewToIgnore)
+        {
+            return true;
+        }
+
+        return CoordinateHasNormalInputOutputAreaBlockForPlacement(coordinate, previewToIgnore)
+               || InputOutputModule.CoordinateIsRuntimeInputOutputAreaBlock(coordinate)
+               || HasPipeAreaFluidStorageAtCoordinate(coordinate)
+               || IsPumpRuntimeOutputCoordinate(coordinate)
+               || TryGetSavedPlacementSnapshot(coordinate, out _);
     }
 
     private bool CanPlaceBoilerFromGridCoordinateFast(Block block, MapObject footprintSource)
@@ -26895,7 +27094,7 @@ public class InstallationPlacementController : MonoBehaviour
         {
             createdPreview.ClearPreviewPair();
             installPreviewAnchorCoordinates[createdPreview] = clickedBlock.Coordinate;
-            createdPreview.transform.position = clickedBlock.transform.position;
+            createdPreview.transform.position = clickedBlock.WorldPosition;
             InvalidateInstallGrid();
         }
     }
@@ -27004,10 +27203,10 @@ public class InstallationPlacementController : MonoBehaviour
 
         float fallbackY = preview.transform.position.y;
         Vector3 firstWorldPosition = firstBlock != null
-            ? firstBlock.transform.position
+            ? firstBlock.WorldPosition
             : new Vector3(firstCoordinate.x, fallbackY, firstCoordinate.y);
         Vector3 secondWorldPosition = secondBlock != null
-            ? secondBlock.transform.position
+            ? secondBlock.WorldPosition
             : new Vector3(secondCoordinate.x, fallbackY, secondCoordinate.y);
         preview.ConfigurePreviewPair(
             firstCoordinate,
@@ -28518,7 +28717,7 @@ public class InstallationPlacementController : MonoBehaviour
         {
             Vector3 referencePosition = previewToIgnore != null
                 ? previewToIgnore.transform.position
-                : block.transform.position;
+                : block.WorldPosition;
             if (previewToIgnore != null
                 && installPreviewRailReferenceWorldPositions.TryGetValue(previewToIgnore, out Vector3 storedRailReferencePosition))
             {
@@ -31289,9 +31488,18 @@ public class InstallationPlacementController : MonoBehaviour
                 placement.x - objectAnchorCell.x,
                 placement.y - objectAnchorCell.y);
             Vector2Int coordinate = anchorCoordinate + RotateFootprintOffset(localOffset, quarterTurns);
-            if (!terrain.TryGetLoadedBlock(coordinate, out Block block) || block == null)
+            if (!terrain.TryGetLoadedBlockRuntimeProxy(coordinate, out Block block)
+                || block == null)
             {
-                continue;
+                if (!HasInstallGridPlacementContextAtCoordinate(coordinate, previewToIgnore))
+                {
+                    continue;
+                }
+
+                if (!terrain.TryGetLoadedBlock(coordinate, out block) || block == null)
+                {
+                    continue;
+                }
             }
 
             if (IsInstallGridSimpleClearCell(block, footprintSource, previewToIgnore))
@@ -35596,6 +35804,37 @@ public class InstallationPlacementController : MonoBehaviour
         return (allowedFilter & InstallationMapFilter.Ground) != 0;
     }
 
+    private bool CanPlaceOnTerrainBiome(
+        TerrainGenerator terrain,
+        Vector2Int coordinate,
+        Block.BlockType blockType,
+        InstallationMapFilter allowedFilter)
+    {
+        if (terrain == null || blockType != Block.BlockType.Ground)
+        {
+            return false;
+        }
+
+        if (terrain.IsWaterBiomeAt(coordinate))
+        {
+            return (allowedFilter & InstallationMapFilter.Water) != 0;
+        }
+
+        for (int y = -1; y <= 1; y++)
+        {
+            for (int x = -1; x <= 1; x++)
+            {
+                if ((x != 0 || y != 0)
+                    && terrain.IsWaterBiomeAt(coordinate + new Vector2Int(x, y)))
+                {
+                    return (allowedFilter & InstallationMapFilter.WaterOutline) != 0;
+                }
+            }
+        }
+
+        return (allowedFilter & InstallationMapFilter.Ground) != 0;
+    }
+
     private bool IsWaterBiomeBlock(Block block)
     {
         TerrainGenerator terrain = ResolveInstallPreviewTerrain();
@@ -37890,13 +38129,12 @@ public class InstallationPlacementController : MonoBehaviour
             for (int y = -2; y <= 2; y++)
             {
                 Vector2Int pumpCoordinate = coordinate + new Vector2Int(x, y);
-                if (!terrain.TryGetLoadedBlock(pumpCoordinate, out Block pumpBlock)
-                    || pumpBlock == null)
-                {
-                    continue;
-                }
-
-                MapObject pumpObject = GetBlockingMapObject(pumpBlock);
+                MapObject pumpObject = terrain.TryGetLoadedBlockRuntimeProxy(
+                                           pumpCoordinate,
+                                           out Block pumpBlock)
+                                       && pumpBlock != null
+                    ? GetBlockingMapObject(pumpBlock)
+                    : null;
                 bool hasSavedPumpPlacement = false;
                 Vector2Int savedPumpAnchorCoordinate = Vector2Int.zero;
                 int savedPumpQuarterTurns = 0;
@@ -37963,13 +38201,12 @@ public class InstallationPlacementController : MonoBehaviour
             for (int y = -2; y <= 2; y++)
             {
                 Vector2Int pumpCoordinate = coordinate + new Vector2Int(x, y);
-                if (!terrain.TryGetLoadedBlock(pumpCoordinate, out Block pumpBlock)
-                    || pumpBlock == null)
-                {
-                    continue;
-                }
-
-                MapObject pumpObject = GetBlockingMapObject(pumpBlock);
+                MapObject pumpObject = terrain.TryGetLoadedBlockRuntimeProxy(
+                                           pumpCoordinate,
+                                           out Block pumpBlock)
+                                       && pumpBlock != null
+                    ? GetBlockingMapObject(pumpBlock)
+                    : null;
                 Quaternion pumpRotation = pumpObject != null ? pumpObject.transform.rotation : Quaternion.identity;
                 bool hasSavedPumpPlacement = false;
                 Vector2Int savedPumpAnchorCoordinate = Vector2Int.zero;
@@ -38056,13 +38293,12 @@ public class InstallationPlacementController : MonoBehaviour
         {
             Vector2Int directionFromPump = PipeCardinalDirections[i];
             Vector2Int pumpCoordinate = coordinate - directionFromPump;
-            if (!terrain.TryGetLoadedBlock(pumpCoordinate, out Block pumpBlock)
-                || pumpBlock == null)
-            {
-                continue;
-            }
-
-            MapObject pumpObject = GetBlockingMapObject(pumpBlock);
+            MapObject pumpObject = terrain.TryGetLoadedBlockRuntimeProxy(
+                                       pumpCoordinate,
+                                       out Block pumpBlock)
+                                   && pumpBlock != null
+                ? GetBlockingMapObject(pumpBlock)
+                : null;
             Quaternion pumpRotation = pumpObject != null ? pumpObject.transform.rotation : Quaternion.identity;
             if (pumpObject == null
                 && !TryGetSavedInstallationPlacementAtCoordinate(
@@ -38817,7 +39053,14 @@ public class InstallationPlacementController : MonoBehaviour
 
         if (!occupyingObject.gameObject.activeInHierarchy)
         {
-            block.SetMapObject(null);
+            if (occupyingObject is Resource inactiveResource)
+            {
+                block.ClearResource(inactiveResource);
+            }
+            else
+            {
+                block.SetMapObject(null);
+            }
             return null;
         }
 
@@ -38825,7 +39068,7 @@ public class InstallationPlacementController : MonoBehaviour
         // any harvest output. Only depleted resources stop occupying their map block.
         if (occupyingObject is Resource resource && resource.ResourceCount <= 0)
         {
-            block.SetMapObject(null);
+            block.ClearResource(resource);
             return null;
         }
 
@@ -38834,7 +39077,7 @@ public class InstallationPlacementController : MonoBehaviour
 
     private Vector3 GetPreviewWorldPosition(Block anchorBlock, MapObject footprintSource, int quarterTurns)
     {
-        Vector3 position = anchorBlock.transform.position;
+        Vector3 position = anchorBlock.WorldPosition;
         Vector2 positionOffset = GetPlacementWorldPositionOffset(footprintSource, quarterTurns);
         position.x += positionOffset.x;
         position.z += positionOffset.y;
@@ -39005,7 +39248,7 @@ public class InstallationPlacementController : MonoBehaviour
         Vector3 position = new Vector3(anchorCoordinate.x, baseHeight, anchorCoordinate.y);
         if (terrain != null && terrain.TryGetLoadedBlock(anchorCoordinate, out Block anchorBlock) && anchorBlock != null)
         {
-            position = anchorBlock.transform.position;
+            position = anchorBlock.WorldPosition;
         }
 
         Vector2 positionOffset = GetPlacementWorldPositionOffset(footprintSource, quarterTurns);

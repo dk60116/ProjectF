@@ -619,13 +619,54 @@ public partial class TerrainGenerator : MonoBehaviour
             if (block == null)
             {
                 loadedBlocks.Remove(coordinate);
-                return false;
             }
-
-            return true;
+            else
+            {
+                return true;
+            }
         }
 
-        return false;
+        return TryMaterializeBlockRuntimeProxy(coordinate, out block);
+    }
+
+    public bool TryGetLoadedBlockRuntimeProxy(Vector2Int coordinate, out Block block)
+    {
+        return loadedBlocks.TryGetValue(coordinate, out block);
+    }
+
+    public int LoadedBlockDataCellCount => loadedBlocks.RegisteredCellCount;
+
+    public int LoadedBlockRuntimeProxyCount => loadedBlocks.Count;
+
+    public int LoadedDedicatedBlockGameObjectCount => 0;
+
+    public int LoadedBlockHostGameObjectCount => loadedBlocks.Count > 0 ? 1 : 0;
+
+    public int LoadedBlockDataOnlyCellCount =>
+        Mathf.Max(0, loadedBlocks.RegisteredCellCount - loadedBlocks.Count);
+
+    public int LoadedChunkGameObjectCount => 0;
+
+    public int LoadedChunkSurfaceMeshCount => GetLoadedChunkSurfaceMeshCount();
+
+    public bool TryGetLoadedBlockHandle(Vector2Int coordinate, out BlockHandle handle)
+    {
+        return loadedBlocks.TryGetHandle(coordinate, out handle);
+    }
+
+    public bool TryGetLoadedBlockCellData(Vector2Int coordinate, out BlockCellData cellData)
+    {
+        return loadedBlocks.TryGetCell(coordinate, out cellData);
+    }
+
+    public bool TryGetLoadedBlockCellData(BlockHandle handle, out BlockCellData cellData)
+    {
+        return loadedBlocks.TryGetCell(handle, out cellData);
+    }
+
+    public bool TryResolveLoadedBlock(BlockHandle handle, out Block block)
+    {
+        return loadedBlocks.TryGetValue(handle, out block);
     }
 
     public bool IsConveyorItemCoordinateVirtualized(Vector2Int coordinate)
@@ -842,32 +883,7 @@ public partial class TerrainGenerator : MonoBehaviour
 
     public bool TryGetLoadedBlockBounds(out Vector2Int minCoordinate, out Vector2Int maxCoordinate)
     {
-        minCoordinate = Vector2Int.zero;
-        maxCoordinate = Vector2Int.zero;
-
-        bool hasValidBlock = false;
-        foreach (KeyValuePair<Vector2Int, Block> pair in loadedBlocks)
-        {
-            if (pair.Value == null)
-            {
-                continue;
-            }
-
-            if (!hasValidBlock)
-            {
-                minCoordinate = pair.Key;
-                maxCoordinate = pair.Key;
-                hasValidBlock = true;
-                continue;
-            }
-
-            minCoordinate.x = Mathf.Min(minCoordinate.x, pair.Key.x);
-            minCoordinate.y = Mathf.Min(minCoordinate.y, pair.Key.y);
-            maxCoordinate.x = Mathf.Max(maxCoordinate.x, pair.Key.x);
-            maxCoordinate.y = Mathf.Max(maxCoordinate.y, pair.Key.y);
-        }
-
-        return hasValidBlock;
+        return loadedBlocks.TryGetRegisteredBounds(out minCoordinate, out maxCoordinate);
     }
 
     public bool TryAddDroppedItemNear(Vector3 worldPosition, int itemId, out PortableObject targetPortableObject)
@@ -921,9 +937,8 @@ public partial class TerrainGenerator : MonoBehaviour
                     }
 
                     Vector2Int coordinate = centerCoordinate + new Vector2Int(offsetX, offsetY);
-                    if (!loadedBlocks.TryGetValue(coordinate, out Block block) || block == null)
+                    if (!TryGetLoadedBlock(coordinate, out Block block) || block == null)
                     {
-                        loadedBlocks.Remove(coordinate);
                         continue;
                     }
 

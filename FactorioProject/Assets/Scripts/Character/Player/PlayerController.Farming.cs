@@ -52,7 +52,7 @@ public partial class PlayerController
                 continue;
             }
 
-            Vector3 offset = block.transform.position - origin;
+            Vector3 offset = block.WorldPosition - origin;
             offset.y = 0f;
             float distanceSqr = offset.sqrMagnitude;
             if (distanceSqr >= nearestDistanceSqr)
@@ -168,7 +168,7 @@ public partial class PlayerController
                     continue;
                 }
 
-                Vector3 offset = block.transform.position - origin;
+                Vector3 offset = block.WorldPosition - origin;
                 offset.y = 0f;
                 float distanceSqr = offset.sqrMagnitude;
                 if (distanceSqr > rangeSqr || distanceSqr >= nearestDistanceSqr)
@@ -390,7 +390,7 @@ public partial class PlayerController
             return false;
         }
 
-        Vector3 targetPosition = seedPlantTargetBlock.transform.position;
+        Vector3 targetPosition = seedPlantTargetBlock.WorldPosition;
         Vector3 offset = targetPosition - transform.position;
         offset.y = 0f;
         float distance = offset.magnitude;

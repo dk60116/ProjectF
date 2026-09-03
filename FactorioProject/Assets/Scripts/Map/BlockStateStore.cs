@@ -401,6 +401,12 @@ public partial class BlockStateStore : MonoBehaviour
                && savedState.HasDroppedFloorObjects;
     }
 
+    public bool HasFloorObjectState(Vector2Int worldCoordinate)
+    {
+        return savedFloorObjectStates.TryGetValue(worldCoordinate, out FloorObjectSaveState savedState)
+               && savedState != null;
+    }
+
     public bool TryGetFloorObjectsCopy(Vector2Int worldCoordinate, out List<int> itemIds)
     {
         if (savedFloorObjectStates.TryGetValue(worldCoordinate, out FloorObjectSaveState savedState) && savedState != null)

@@ -156,7 +156,7 @@ public sealed class AnimalScreenSpaceOutlineRendererFeature : ScriptableRenderer
 
         private readonly Material maskMaterial;
         private readonly Material compositeMaterial;
-        private readonly Renderer[] maskRenderers = new Renderer[32];
+        private Renderer[] maskRenderers = new Renderer[32];
         private readonly MaterialPropertyBlock compositeProperties = new MaterialPropertyBlock();
         private Renderer targetRenderer;
         private float widthPixels;
@@ -167,7 +167,6 @@ public sealed class AnimalScreenSpaceOutlineRendererFeature : ScriptableRenderer
             public Material material;
             public Renderer[] renderers;
             public int rendererCount;
-            public bool distinguishRenderers;
         }
 
         private sealed class CompositePassData
@@ -207,14 +206,12 @@ public sealed class AnimalScreenSpaceOutlineRendererFeature : ScriptableRenderer
                 return;
             }
 
+            EnsureMaskRendererCapacity(targetRenderer);
             int maskRendererCount = CollectMaskRenderers(targetRenderer, maskRenderers);
             if (maskRendererCount == 0)
             {
                 return;
             }
-
-            bool distinguishMaskRenderers = maskRendererCount > 1
-                                            && targetRenderer.GetComponentInParent<PortableObject>() != null;
 
             Bounds maskBounds = maskRenderers[0].bounds;
             for (int rendererIndex = 1; rendererIndex < maskRendererCount; rendererIndex++)
@@ -243,7 +240,6 @@ public sealed class AnimalScreenSpaceOutlineRendererFeature : ScriptableRenderer
                 passData.material = maskMaterial;
                 passData.renderers = maskRenderers;
                 passData.rendererCount = maskRendererCount;
-                passData.distinguishRenderers = distinguishMaskRenderers;
 
                 // Only the animal pixels are written. Declaring WriteAll lets RenderGraph
                 // discard the clear and can leave the previous frame's mask behind.
@@ -253,14 +249,12 @@ public sealed class AnimalScreenSpaceOutlineRendererFeature : ScriptableRenderer
                 builder.AllowGlobalStateModification(true);
                 builder.SetRenderFunc(static (MaskPassData data, RasterGraphContext context) =>
                 {
+                    // Every renderer in a portable stack writes the same binary value so the
+                    // composite pass sees one silhouette and only draws its outside boundary.
+                    context.cmd.SetGlobalFloat(MaskObjectValueId, 1f);
                     for (int rendererIndex = 0; rendererIndex < data.rendererCount; rendererIndex++)
                     {
                         Renderer maskRenderer = data.renderers[rendererIndex];
-                        // A binary union only outlines the outside of a stack. Alternating mask
-                        // values keep touching portable objects distinguishable in the composite.
-                        context.cmd.SetGlobalFloat(
-                            MaskObjectValueId,
-                            data.distinguishRenderers && (rendererIndex & 1) == 0 ? 0.35f : 1f);
                         int subMeshCount = ResolveSubMeshCount(maskRenderer);
                         for (int subMeshIndex = 0; subMeshIndex < subMeshCount; subMeshIndex++)
                         {
@@ -320,6 +314,23 @@ public sealed class AnimalScreenSpaceOutlineRendererFeature : ScriptableRenderer
                     }
                 });
             }
+        }
+
+        private void EnsureMaskRendererCapacity(Renderer renderer)
+        {
+            PortableObject portableObject = renderer != null
+                ? renderer.GetComponentInParent<PortableObject>()
+                : null;
+            int requiredCapacity = portableObject != null
+                ? portableObject.FocusStackCount
+                : 1;
+            if (requiredCapacity <= maskRenderers.Length)
+            {
+                return;
+            }
+
+            int nextCapacity = Mathf.NextPowerOfTwo(requiredCapacity);
+            System.Array.Resize(ref maskRenderers, nextCapacity);
         }
 
         private static int ResolveSubMeshCount(Renderer renderer)

@@ -264,11 +264,8 @@ namespace ProjectF.MapObjects
             Block owningBlock = OwningBlock;
             if (owningBlock != null)
             {
-                Transform farmlandVisual = owningBlock.transform.Find(
-                    TerrainGenerator.FarmlandVisualName);
-                traceWorldY = farmlandVisual != null
-                    ? farmlandVisual.position.y + GrowthZeroTraceAboveFarmlandOffset
-                    : owningBlock.transform.position.y + GrowthZeroTraceFallbackSurfaceOffset;
+                traceWorldY = owningBlock.WorldPosition.y
+                              + GrowthZeroTraceFallbackSurfaceOffset;
             }
 
             traceTransform.position = new Vector3(

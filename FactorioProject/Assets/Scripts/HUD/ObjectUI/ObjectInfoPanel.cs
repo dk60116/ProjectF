@@ -815,9 +815,17 @@ public class ObjectInfoPanel : MonoBehaviour
             }
         }
 
-        Block parentBlock = mapObject.GetComponentInParent<Block>();
-        return TryGetUnderlyingResource(parentBlock, mapObject, out Resource parentResource)
-            ? parentResource
+        if (terrain == null)
+        {
+            return null;
+        }
+
+        Vector3 position = mapObject.transform.position;
+        return terrain.TryGetLoadedBlock(
+                   new Vector2Int(Mathf.RoundToInt(position.x), Mathf.RoundToInt(position.z)),
+                   out Block positionBlock)
+               && TryGetUnderlyingResource(positionBlock, mapObject, out Resource positionResource)
+            ? positionResource
             : null;
     }
 

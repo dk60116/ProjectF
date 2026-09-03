@@ -1663,7 +1663,7 @@ public partial class TerrainGenerator : MonoBehaviour
         return ((value + 1) / divisor) - 1;
     }
 
-    private static GameObject SelectBlockPrefab(BlockSet blockSet, bool isCorner)
+    private static GameObject SelectBlockPrefab(BlockSet blockSet)
     {
         if (blockSet.normal != null)
         {

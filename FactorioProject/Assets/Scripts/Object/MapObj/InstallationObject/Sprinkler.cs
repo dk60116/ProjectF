@@ -617,7 +617,7 @@ public class Sprinkler : InputOutputModule
 
             inputBlock.TryAddInputAreaCenterObjectAnimated(
                 consumedItemId,
-                inputBlock.transform.position,
+                inputBlock.WorldPosition,
                 0f,
                 out _);
             return;

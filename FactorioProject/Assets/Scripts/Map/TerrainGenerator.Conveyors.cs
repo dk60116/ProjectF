@@ -4248,8 +4248,8 @@ public partial class TerrainGenerator : MonoBehaviour
         int loadedMapObjectCount = 0;
         int loadedInstallationCount = 0;
         int loadedConveyorBeltCount = 0;
-        int activeBlockRootCount = 0;
-        int inactiveBlockRootCount = 0;
+        int activeBlockRootCount = loadedBlocks.Count > 0 && gameObject.activeInHierarchy ? 1 : 0;
+        int inactiveBlockRootCount = loadedBlocks.Count > 0 && !gameObject.activeInHierarchy ? 1 : 0;
         int activeMapObjectRootCount = 0;
         int inactiveMapObjectRootCount = 0;
         int activeBeltRootCount = 0;
@@ -4276,15 +4276,6 @@ public partial class TerrainGenerator : MonoBehaviour
             if (block == null)
             {
                 continue;
-            }
-
-            if (block.gameObject.activeInHierarchy)
-            {
-                activeBlockRootCount++;
-            }
-            else
-            {
-                inactiveBlockRootCount++;
             }
 
             if (block.MapObject == null)
@@ -4375,7 +4366,24 @@ public partial class TerrainGenerator : MonoBehaviour
             : 0f;
 
         MapObjectTickProfiler.AddRuntimeCounter("World", "LoadedChunks", loadedChunks.Count);
+        MapObjectTickProfiler.AddRuntimeCounter("World", "ChunkGameObjects", 0);
+        MapObjectTickProfiler.AddRuntimeCounter("World", "DedicatedBlockGameObjects", 0);
+        MapObjectTickProfiler.AddRuntimeCounter(
+            "World",
+            "BlockHostGameObjects",
+            loadedBlocks.Count > 0 ? 1 : 0);
+        MapObjectTickProfiler.AddRuntimeCounter("World", "BlockComponents", loadedBlocks.Count);
+        MapObjectTickProfiler.AddRuntimeCounter(
+            "World",
+            "ChunkSurfaceMeshes",
+            GetLoadedChunkSurfaceMeshCount());
         MapObjectTickProfiler.AddRuntimeCounter("World", "LoadedBlocks", loadedBlocks.Count);
+        MapObjectTickProfiler.AddRuntimeCounter("World", "RegisteredBlockCells", loadedBlocks.RegisteredCellCount);
+        MapObjectTickProfiler.AddRuntimeCounter(
+            "World",
+            "DataOnlyBlockCells",
+            Mathf.Max(0, loadedBlocks.RegisteredCellCount - loadedBlocks.Count));
+        MapObjectTickProfiler.AddRuntimeCounter("World", "BlockDataChunks", loadedBlocks.ChunkCount);
         MapObjectTickProfiler.AddRuntimeCounter("World", "LoadedMapObjects", loadedMapObjectCount);
         MapObjectTickProfiler.AddRuntimeCounter("World", "LoadedInstallations", loadedInstallationCount);
         MapObjectTickProfiler.AddRuntimeCounter("World", "LoadedConveyorBelts", loadedConveyorBeltCount);

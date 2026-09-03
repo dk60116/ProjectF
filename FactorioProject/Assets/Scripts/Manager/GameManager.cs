@@ -3550,7 +3550,7 @@ public sealed class RuntimeItemGiveReceiver : MonoBehaviour
                 continue;
             }
 
-            Vector3 offset = block.transform.position - playerPosition;
+            Vector3 offset = block.WorldPosition - playerPosition;
             offset.y = 0f;
             if (offset.sqrMagnitude > radiusSqr)
             {
@@ -3606,7 +3606,7 @@ public sealed class RuntimeItemGiveReceiver : MonoBehaviour
 
     private static Vector3 BuildRandomConveyorItemPlacementReference(Block block)
     {
-        Vector3 position = block != null ? block.transform.position : Vector3.zero;
+        Vector3 position = block != null ? block.WorldPosition : Vector3.zero;
         return position + new Vector3(
             UnityEngine.Random.Range(-0.35f, 0.35f),
             0f,

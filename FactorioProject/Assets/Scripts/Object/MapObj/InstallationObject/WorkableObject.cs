@@ -7,6 +7,10 @@ public class WorkableObject : InstallationObject
 {
     private static readonly HashSet<WorkableObject> ActiveInstances = new HashSet<WorkableObject>();
     private static readonly HashSet<WorkableObject> SelectedRangeVisualInstances = new HashSet<WorkableObject>();
+    private static readonly List<WorkableObjectRangeVisualRequest> RangeVisualRequestScratch =
+        new List<WorkableObjectRangeVisualRequest>();
+    private static readonly HashSet<WorkableObject> RangeVisualObjectScratch =
+        new HashSet<WorkableObject>();
     private static float cachedGlobalMaxFocusActivationRadius;
     private static bool globalMaxFocusActivationRadiusDirty = true;
     private static BagSlot craftingSlotRangeVisualRequestSource;
@@ -21,6 +25,7 @@ public class WorkableObject : InstallationObject
     private float rangeVisualYOffset = 0.04f;
     private bool selectedRangeVisualRequested;
     private bool globalRangeVisualSuppressed;
+    private bool legacyRangeVisualsScanned;
 
     public uint WorkableRangeCells => workableRangeCells;
     public override float FocusActivationRadius => ResolveRangeRadius(workableRangeCells);
@@ -248,12 +253,22 @@ public class WorkableObject : InstallationObject
             return;
         }
 
-        List<WorkableObjectRangeVisualRequest> requests = new List<WorkableObjectRangeVisualRequest>();
-        HashSet<WorkableObject> appendedObjects = new HashSet<WorkableObject>();
-        AppendRangeVisualRequests(ActiveInstances, requests, appendedObjects);
-        AppendRangeVisualRequests(SelectedRangeVisualInstances, requests, appendedObjects);
+        RangeVisualRequestScratch.Clear();
+        RangeVisualObjectScratch.Clear();
+        if (ShouldShowWorkableRangeVisuals())
+        {
+            AppendRangeVisualRequests(
+                ActiveInstances,
+                RangeVisualRequestScratch,
+                RangeVisualObjectScratch);
+        }
 
-        if (requests.Count <= 0)
+        AppendRangeVisualRequests(
+            SelectedRangeVisualInstances,
+            RangeVisualRequestScratch,
+            RangeVisualObjectScratch);
+
+        if (RangeVisualRequestScratch.Count <= 0)
         {
             SetSharedRangeVisualActive(false);
             return;
@@ -265,7 +280,7 @@ public class WorkableObject : InstallationObject
             return;
         }
 
-        visual.Configure(requests);
+        visual.Configure(RangeVisualRequestScratch);
         if (!visual.gameObject.activeSelf)
         {
             visual.gameObject.SetActive(true);
@@ -337,6 +352,12 @@ public class WorkableObject : InstallationObject
 
     private void DisableLegacyRangeVisual()
     {
+        if (legacyRangeVisualsScanned)
+        {
+            return;
+        }
+
+        legacyRangeVisualsScanned = true;
         WorkableObjectRangeVisual[] visuals = GetComponentsInChildren<WorkableObjectRangeVisual>(true);
         for (int i = 0; i < visuals.Length; i++)
         {

@@ -36,6 +36,8 @@ public partial class TerrainGenerator : MonoBehaviour
         new Dictionary<Vector2Int, float>();
     private readonly Dictionary<Vector2Int, int> plantedSeedItemIds =
         new Dictionary<Vector2Int, int>();
+    private readonly Dictionary<Vector2Int, Transform> farmlandVisuals =
+        new Dictionary<Vector2Int, Transform>();
     private readonly Queue<Vector2Int> farmlandNetworkQueue = new Queue<Vector2Int>(32);
     private readonly HashSet<Vector2Int> farmlandNetworkVisited = new HashSet<Vector2Int>();
     private readonly HashSet<Vector2Int> farmlandAbsorptionVisited = new HashSet<Vector2Int>();
@@ -649,15 +651,12 @@ public partial class TerrainGenerator : MonoBehaviour
             return;
         }
 
-        Transform visual = block.transform.Find(FarmlandVisualName);
+        Vector2Int coordinate = block.Coordinate;
+        farmlandVisuals.TryGetValue(coordinate, out Transform visual);
         bool visible = farmlandCoordinates.Contains(block.Coordinate);
         if (!visible)
         {
-            if (visual != null)
-            {
-                visual.gameObject.SetActive(false);
-            }
-
+            ReleaseFarmlandVisual(coordinate);
             return;
         }
 
@@ -665,9 +664,10 @@ public partial class TerrainGenerator : MonoBehaviour
         {
             GameObject visualObject = new GameObject(FarmlandVisualName);
             visual = visualObject.transform;
-            visual.SetParent(block.transform, false);
+            visual.SetParent(transform, true);
             visualObject.AddComponent<MeshFilter>();
             visualObject.AddComponent<MeshRenderer>();
+            farmlandVisuals[coordinate] = visual;
         }
 
         MeshFilter meshFilter = visual.GetComponent<MeshFilter>();
@@ -687,9 +687,9 @@ public partial class TerrainGenerator : MonoBehaviour
 
         float surfaceY = GetBiomeSurfaceY(GetTileBiome(block.Coordinate));
         visual.position = new Vector3(
-            block.transform.position.x,
+            block.WorldPosition.x,
             surfaceY + FarmlandSurfaceOffset,
-            block.transform.position.z);
+            block.WorldPosition.z);
         visual.rotation = Quaternion.identity;
         visual.localScale = Vector3.one;
         visual.gameObject.SetActive(true);
@@ -935,8 +935,49 @@ public partial class TerrainGenerator : MonoBehaviour
         }
     }
 
+    private void ReleaseFarmlandVisual(Vector2Int coordinate)
+    {
+        if (!farmlandVisuals.TryGetValue(coordinate, out Transform visual))
+        {
+            return;
+        }
+
+        farmlandVisuals.Remove(coordinate);
+        if (visual == null)
+        {
+            return;
+        }
+
+        if (Application.isPlaying)
+        {
+            Destroy(visual.gameObject);
+        }
+        else
+        {
+            DestroyImmediate(visual.gameObject);
+        }
+    }
+
     private void ClearFarmlandPersistentState()
     {
+        foreach (KeyValuePair<Vector2Int, Transform> pair in farmlandVisuals)
+        {
+            if (pair.Value == null)
+            {
+                continue;
+            }
+
+            if (Application.isPlaying)
+            {
+                Destroy(pair.Value.gameObject);
+            }
+            else
+            {
+                DestroyImmediate(pair.Value.gameObject);
+            }
+        }
+
+        farmlandVisuals.Clear();
         farmlandCoordinates.Clear();
         farmlandFertilizerEnergyByCoordinate.Clear();
         plantedSeedItemIds.Clear();

@@ -5051,7 +5051,7 @@ public class InputOutputModule : InstallationObject,
 
             if (!block.TryGetInputAreaCenterTopWorldPosition(itemId, out startWorldPosition))
             {
-                startWorldPosition = block.transform.position;
+                startWorldPosition = block.WorldPosition;
             }
 
             sourceBlock = block;

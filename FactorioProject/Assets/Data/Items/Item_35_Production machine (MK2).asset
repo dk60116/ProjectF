@@ -44,7 +44,7 @@ MonoBehaviour:
   seedTargetResource: {fileID: 0}
   useEnergyType: 2
   useEnergyAmount: 50
-  completeEnergy: 500
+  completeEnergy: 1000
   utilityPoleConnectionRadius: 6
   utilityPoleSupplyRadius: 3
   sprinklerRangeRadius: 3
@@ -52,4 +52,4 @@ MonoBehaviour:
   sprinklerSprayIntervalSeconds: 2
   sprinklerNozzleRotationDegreesPerSecond: 180
   seedPlanterPlantDurationSeconds: 2
-  craftingDurationSeconds: 10
+  craftingDurationSeconds: 15

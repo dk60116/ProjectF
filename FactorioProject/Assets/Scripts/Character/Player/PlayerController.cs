@@ -192,7 +192,7 @@ public partial class PlayerController : MonoBehaviour
 
         public Vector3 Center => new Vector3(
             (minWorldPosition.x + maxWorldPosition.x) * 0.5f,
-            markerBlock != null ? markerBlock.transform.position.y : (minWorldPosition.y + maxWorldPosition.y) * 0.5f,
+            markerBlock != null ? markerBlock.WorldPosition.y : (minWorldPosition.y + maxWorldPosition.y) * 0.5f,
             (minWorldPosition.z + maxWorldPosition.z) * 0.5f);
 
         public Vector2 Size => new Vector2(
@@ -209,7 +209,7 @@ public partial class PlayerController : MonoBehaviour
             markerCoordinate = block != null ? block.Coordinate : Vector2Int.zero;
             if (block != null)
             {
-                Vector3 position = block.transform.position;
+                Vector3 position = block.WorldPosition;
                 minWorldPosition = position;
                 maxWorldPosition = position;
                 Add(block);
@@ -240,7 +240,7 @@ public partial class PlayerController : MonoBehaviour
                 markerCoordinate = coordinate;
             }
 
-            Vector3 position = block.transform.position;
+            Vector3 position = block.WorldPosition;
             minWorldPosition = Vector3.Min(minWorldPosition, position);
             maxWorldPosition = Vector3.Max(maxWorldPosition, position);
         }
@@ -1034,7 +1034,7 @@ public partial class PlayerController : MonoBehaviour
                 }
 
                 Vector3 candidatePosition = ClampRootPositionToGroundY(
-                    block.transform.position);
+                    block.WorldPosition);
                 float trainDeltaX = candidatePosition.x - trainPosition.x;
                 float trainDeltaZ = candidatePosition.z - trainPosition.z;
                 if (trainDeltaX * trainDeltaX + trainDeltaZ * trainDeltaZ
@@ -2684,8 +2684,8 @@ public partial class PlayerController : MonoBehaviour
                     continue;
                 }
 
-                float deltaX = block.transform.position.x - center.x;
-                float deltaZ = block.transform.position.z - center.y;
+                float deltaX = block.WorldPosition.x - center.x;
+                float deltaZ = block.WorldPosition.z - center.y;
                 float distanceSqr = deltaX * deltaX + deltaZ * deltaZ;
                 if (distanceSqr >= nearestDistanceSqr)
                 {
@@ -2790,9 +2790,15 @@ public partial class PlayerController : MonoBehaviour
             return null;
         }
 
-        Block owningBlock = resource.OwningBlock != null
-            ? resource.OwningBlock
-            : resource.GetComponentInParent<Block>();
+        Block owningBlock = resource.OwningBlock;
+        if (owningBlock == null)
+        {
+            TerrainGenerator terrain = TerrainGenerator.Active;
+            Vector3 position = resource.transform.position;
+            terrain?.TryGetLoadedBlock(
+                new Vector2Int(Mathf.RoundToInt(position.x), Mathf.RoundToInt(position.z)),
+                out owningBlock);
+        }
         if (owningBlock != null && owningBlock.MapObject != null && owningBlock.MapObject != resource)
         {
             return null;
@@ -4937,7 +4943,7 @@ public partial class PlayerController : MonoBehaviour
         }
         else if (block != null)
         {
-            focusPoint = block.transform.position;
+            focusPoint = block.WorldPosition;
         }
         else
         {
@@ -5022,7 +5028,7 @@ public partial class PlayerController : MonoBehaviour
     private static Bounds CreateMapObjectStatusFocusBounds(MapObject mapObject, Block block, float focusPadding)
     {
         Vector3 center = block != null
-            ? block.transform.position
+            ? block.WorldPosition
             : mapObject != null
                 ? mapObject.transform.position
                 : Vector3.zero;
@@ -5327,7 +5333,7 @@ public partial class PlayerController : MonoBehaviour
             return false;
         }
 
-        Vector3 targetPosition = pitchforkDigTargetBlock.transform.position;
+        Vector3 targetPosition = pitchforkDigTargetBlock.WorldPosition;
         Vector3 offset = targetPosition - transform.position;
         offset.y = 0f;
         float distance = offset.magnitude;
@@ -5723,12 +5729,6 @@ public partial class PlayerController : MonoBehaviour
             }
         }
 
-        fallbackBlock = mapObject.GetComponentInParent<Block>();
-        if (fallbackBlock != null)
-        {
-            return true;
-        }
-
         return TryGetPointerBlockFromGroundPlane(ray, out fallbackBlock);
     }
 
@@ -5993,7 +5993,7 @@ public partial class PlayerController : MonoBehaviour
             return float.MaxValue;
         }
 
-        Vector3 offset = block.transform.position - origin;
+        Vector3 offset = block.WorldPosition - origin;
         offset.y = 0f;
         return offset.sqrMagnitude;
     }

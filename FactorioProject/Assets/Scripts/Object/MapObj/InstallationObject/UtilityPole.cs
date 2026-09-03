@@ -33,6 +33,9 @@ public class UtilityPole : InstallationObject
     private static readonly List<UtilityPole> visualPoleScratch = new List<UtilityPole>();
     private static readonly HashSet<UtilityPole> screenRangePoles = new HashSet<UtilityPole>();
     private static readonly HashSet<UtilityPole> screenRangePoleScratch = new HashSet<UtilityPole>();
+    private static readonly List<WorkableObjectRangeVisualRequest> rangeVisualRequestScratch =
+        new List<WorkableObjectRangeVisualRequest>();
+    private static readonly HashSet<UtilityPole> rangeVisualPoleScratch = new HashSet<UtilityPole>();
     private static readonly Plane[] rangeVisualFrustumPlanes = new Plane[6];
     private static readonly List<LineRenderer> previewConsumerLineRenderers = new List<LineRenderer>();
     private static readonly Dictionary<UtilityPole, PreviewPoleRuntime> previewPoleRuntimes =
@@ -41,6 +44,13 @@ public class UtilityPole : InstallationObject
         new Dictionary<InstallationObject, PreviewConsumerRuntime>();
     private static readonly Dictionary<InstallationObject, ElectricNetwork> suppliedConsumerNetworks =
         new Dictionary<InstallationObject, ElectricNetwork>();
+    private static readonly Dictionary<UtilityPole, ElectricNetwork> electricNetworkByPole =
+        new Dictionary<UtilityPole, ElectricNetwork>();
+    private static readonly Dictionary<Vector2Int, List<UtilityPole>> supplyPolesByCoordinate =
+        new Dictionary<Vector2Int, List<UtilityPole>>();
+    private static readonly Stack<List<UtilityPole>> supplyPoleListPool = new Stack<List<UtilityPole>>();
+    private static readonly HashSet<ElectricNetwork> supplyingNetworkScratch = new HashSet<ElectricNetwork>();
+    private static readonly HashSet<UtilityPole> consumerPoleScratch = new HashSet<UtilityPole>();
     private static readonly HashSet<InstallationObject> renderedConsumerLineScratch =
         new HashSet<InstallationObject>();
 
@@ -682,7 +692,8 @@ public class UtilityPole : InstallationObject
 
     public static void NotifyElectricPowerSourceStateChanged()
     {
-        MarkElectricNetworkDirty();
+        networkRuntimeEvaluatedFrame = -1;
+        InputOutputModule.WakeElectricRuntimeModules();
     }
 
     public static void NotifyFreeElectroEnergyChanged()
@@ -745,6 +756,12 @@ public class UtilityPole : InstallationObject
             return;
         }
 
+        supplyingNetworkScratch.Clear();
+        if (!placementCleared)
+        {
+            CollectSupplyingNetworks(installationObject, supplyingNetworkScratch);
+        }
+
         bool membershipChanged = false;
         for (int networkIndex = 0; networkIndex < networks.Count; networkIndex++)
         {
@@ -754,8 +771,7 @@ public class UtilityPole : InstallationObject
                 continue;
             }
 
-            bool shouldBelong = !placementCleared
-                                && IsInstallationSuppliedByNetwork(network, installationObject);
+            bool shouldBelong = supplyingNetworkScratch.Contains(network);
             bool belongs = network.SuppliedInstallations.Contains(installationObject);
             if (shouldBelong == belongs)
             {
@@ -783,28 +799,43 @@ public class UtilityPole : InstallationObject
             InputOutputModule.WakeElectricRuntimeModules();
         }
 
+        supplyingNetworkScratch.Clear();
+
         connectionLineVisualsDirty = true;
         RequestDeferredConnectionLineVisualRefresh();
     }
 
-    private static bool IsInstallationSuppliedByNetwork(
-        ElectricNetwork network,
-        InstallationObject installationObject)
+    private static void CollectSupplyingNetworks(
+        InstallationObject installationObject,
+        HashSet<ElectricNetwork> destination)
     {
-        if (network == null || installationObject == null)
+        if (installationObject == null
+            || destination == null
+            || installationObject.RuntimeOccupiedCoordinates == null)
         {
-            return false;
+            return;
         }
 
-        for (int poleIndex = 0; poleIndex < network.Poles.Count; poleIndex++)
+        for (int coordinateIndex = 0;
+             coordinateIndex < installationObject.RuntimeOccupiedCoordinates.Count;
+             coordinateIndex++)
         {
-            if (PoleSuppliesInstallation(network.Poles[poleIndex], installationObject))
+            Vector2Int coordinate = installationObject.RuntimeOccupiedCoordinates[coordinateIndex];
+            if (!supplyPolesByCoordinate.TryGetValue(coordinate, out List<UtilityPole> poles))
             {
-                return true;
+                continue;
+            }
+
+            for (int poleIndex = 0; poleIndex < poles.Count; poleIndex++)
+            {
+                UtilityPole pole = poles[poleIndex];
+                if (pole != null
+                    && electricNetworkByPole.TryGetValue(pole, out ElectricNetwork network))
+                {
+                    destination.Add(network);
+                }
             }
         }
-
-        return false;
     }
 
     private ItemDefinition ResolvePoleDefinition()
@@ -1199,7 +1230,6 @@ public class UtilityPole : InstallationObject
             return;
         }
 
-        BuildVisualPoleScratch();
         foreach (KeyValuePair<InstallationObject, PreviewConsumerRuntime> entry in previewConsumerRuntimes)
         {
             InstallationObject consumer = entry.Key;
@@ -1213,7 +1243,6 @@ public class UtilityPole : InstallationObject
         }
 
         HideUnusedPreviewConsumerLineRenderers();
-        visualPoleScratch.Clear();
         previewConsumerLineVisualsDirty = false;
     }
 
@@ -1274,34 +1303,58 @@ public class UtilityPole : InstallationObject
         }
 
         float bestDistanceSqr = float.MaxValue;
-        for (int i = 0; i < visualPoleScratch.Count; i++)
+        consumerPoleScratch.Clear();
+        int sizeX = Mathf.Max(1, consumer.Status.mapSizeX);
+        int sizeY = Mathf.Max(1, consumer.Status.mapSizeY);
+        Vector2Int centerCell = consumer.PlacementCenterCell;
+        for (int y = 0; y < sizeY; y++)
         {
-            UtilityPole pole = visualPoleScratch[i];
-            if (pole == null
-                || (!IsValidPlacedPole(pole) && !IsValidPreviewPole(pole))
+            for (int x = 0; x < sizeX; x++)
+            {
+                Vector2Int localOffset = new Vector2Int(x - centerCell.x, y - centerCell.y);
+                Vector2Int coordinate = previewRuntime.AnchorCoordinate
+                                        + InputOutputModule.RotateRectGridOffset(
+                                            localOffset,
+                                            previewRuntime.QuarterTurns);
+                if (!supplyPolesByCoordinate.TryGetValue(coordinate, out List<UtilityPole> poles))
+                {
+                    continue;
+                }
+
+                for (int poleIndex = 0; poleIndex < poles.Count; poleIndex++)
+                {
+                    UtilityPole pole = poles[poleIndex];
+                    if (pole != null
+                        && consumerPoleScratch.Add(pole))
+                    {
+                        TrySelectConsumerPowerLinePole(
+                            pole,
+                            consumerPoint,
+                            ref supplyingPole,
+                            ref bestDistanceSqr);
+                    }
+                }
+            }
+        }
+
+        foreach (KeyValuePair<UtilityPole, PreviewPoleRuntime> entry in previewPoleRuntimes)
+        {
+            UtilityPole pole = entry.Key;
+            if (!IsValidPreviewPole(pole)
+                || !consumerPoleScratch.Add(pole)
                 || !PoleSuppliesPreviewConsumer(pole, consumer, previewRuntime))
             {
                 continue;
             }
 
-            pole.ResolveLinePointReferences();
-            if (pole.linePointCenter == null)
-            {
-                continue;
-            }
-
-            float distanceSqr = (
-                ResolveLinePointWorldPosition(pole.linePointCenter)
-                - ResolveLinePointWorldPosition(consumerPoint)).sqrMagnitude;
-            if (!IsBetterConsumerPowerLinePole(pole, supplyingPole, distanceSqr, bestDistanceSqr))
-            {
-                continue;
-            }
-
-            supplyingPole = pole;
-            bestDistanceSqr = distanceSqr;
+            TrySelectConsumerPowerLinePole(
+                pole,
+                consumerPoint,
+                ref supplyingPole,
+                ref bestDistanceSqr);
         }
 
+        consumerPoleScratch.Clear();
         return supplyingPole != null;
     }
 
@@ -1312,36 +1365,74 @@ public class UtilityPole : InstallationObject
         ref UtilityPole supplyingPole,
         ref float bestDistanceSqr)
     {
-        if (network == null || network.Poles == null || consumer == null || consumerPoint == null)
+        if (network == null
+            || consumer == null
+            || consumerPoint == null
+            || consumer.RuntimeOccupiedCoordinates == null)
         {
             return;
         }
 
-        for (int i = 0; i < network.Poles.Count; i++)
+        consumerPoleScratch.Clear();
+        for (int coordinateIndex = 0;
+             coordinateIndex < consumer.RuntimeOccupiedCoordinates.Count;
+             coordinateIndex++)
         {
-            UtilityPole pole = network.Poles[i];
-            if (!IsValidPlacedPole(pole) || !PoleSuppliesInstallation(pole, consumer))
+            Vector2Int coordinate = consumer.RuntimeOccupiedCoordinates[coordinateIndex];
+            if (!supplyPolesByCoordinate.TryGetValue(coordinate, out List<UtilityPole> poles))
             {
                 continue;
             }
 
-            pole.ResolveLinePointReferences();
-            if (pole.linePointCenter == null)
+            for (int poleIndex = 0; poleIndex < poles.Count; poleIndex++)
             {
-                continue;
-            }
+                UtilityPole pole = poles[poleIndex];
+                if (pole == null
+                    || !consumerPoleScratch.Add(pole)
+                    || !electricNetworkByPole.TryGetValue(pole, out ElectricNetwork poleNetwork)
+                    || poleNetwork != network)
+                {
+                    continue;
+                }
 
-            float distanceSqr = (
-                ResolveLinePointWorldPosition(pole.linePointCenter)
-                - ResolveLinePointWorldPosition(consumerPoint)).sqrMagnitude;
-            if (!IsBetterConsumerPowerLinePole(pole, supplyingPole, distanceSqr, bestDistanceSqr))
-            {
-                continue;
+                TrySelectConsumerPowerLinePole(
+                    pole,
+                    consumerPoint,
+                    ref supplyingPole,
+                    ref bestDistanceSqr);
             }
-
-            supplyingPole = pole;
-            bestDistanceSqr = distanceSqr;
         }
+
+        consumerPoleScratch.Clear();
+    }
+
+    private static void TrySelectConsumerPowerLinePole(
+        UtilityPole pole,
+        Transform consumerPoint,
+        ref UtilityPole supplyingPole,
+        ref float bestDistanceSqr)
+    {
+        if (!IsValidPlacedPole(pole) && !IsValidPreviewPole(pole))
+        {
+            return;
+        }
+
+        pole.ResolveLinePointReferences();
+        if (pole.linePointCenter == null)
+        {
+            return;
+        }
+
+        float distanceSqr = (
+            ResolveLinePointWorldPosition(pole.linePointCenter)
+            - ResolveLinePointWorldPosition(consumerPoint)).sqrMagnitude;
+        if (!IsBetterConsumerPowerLinePole(pole, supplyingPole, distanceSqr, bestDistanceSqr))
+        {
+            return;
+        }
+
+        supplyingPole = pole;
+        bestDistanceSqr = distanceSqr;
     }
 
     private static bool IsBetterConsumerPowerLinePole(
@@ -1367,29 +1458,6 @@ public class UtilityPole : InstallationObject
         }
 
         return candidate.GetInstanceID() < current.GetInstanceID();
-    }
-
-    private static bool PoleSuppliesInstallation(UtilityPole pole, InstallationObject consumer)
-    {
-        if (pole == null
-            || consumer == null
-            || !pole.TryGetPlacementRuntime(out Vector2Int poleAnchor, out _)
-            || consumer.RuntimeOccupiedCoordinates == null
-            || consumer.RuntimeOccupiedCoordinates.Count <= 0)
-        {
-            return false;
-        }
-
-        int radius = pole.SupplyRadiusCells;
-        for (int i = 0; i < consumer.RuntimeOccupiedCoordinates.Count; i++)
-        {
-            if (ChebyshevDistance(poleAnchor, consumer.RuntimeOccupiedCoordinates[i]) <= radius)
-            {
-                return true;
-            }
-        }
-
-        return false;
     }
 
     private static bool PoleSuppliesPreviewConsumer(
@@ -1852,16 +1920,24 @@ public class UtilityPole : InstallationObject
             return;
         }
 
-        List<WorkableObjectRangeVisualRequest> requests = new List<WorkableObjectRangeVisualRequest>();
-        HashSet<UtilityPole> appendedPoles = new HashSet<UtilityPole>();
+        rangeVisualRequestScratch.Clear();
+        rangeVisualPoleScratch.Clear();
         if (ShouldShowInstallOrEditSupplyRangeVisuals())
         {
-            AppendSupplyRangeVisualRequests(activePoles, false, requests, appendedPoles);
+            AppendSupplyRangeVisualRequests(
+                activePoles,
+                false,
+                rangeVisualRequestScratch,
+                rangeVisualPoleScratch);
         }
 
-        AppendSupplyRangeVisualRequests(SelectedSupplyRangeVisualInstances, true, requests, appendedPoles);
+        AppendSupplyRangeVisualRequests(
+            SelectedSupplyRangeVisualInstances,
+            true,
+            rangeVisualRequestScratch,
+            rangeVisualPoleScratch);
 
-        if (requests.Count <= 0)
+        if (rangeVisualRequestScratch.Count <= 0)
         {
             SetSharedSupplyRangeVisualActive(false);
             return;
@@ -1873,7 +1949,7 @@ public class UtilityPole : InstallationObject
             return;
         }
 
-        visual.Configure(requests, SupplyRangeFillColor);
+        visual.Configure(rangeVisualRequestScratch, SupplyRangeFillColor);
         if (!visual.gameObject.activeSelf)
         {
             visual.gameObject.SetActive(true);
@@ -1887,16 +1963,24 @@ public class UtilityPole : InstallationObject
             return;
         }
 
-        List<WorkableObjectRangeVisualRequest> requests = new List<WorkableObjectRangeVisualRequest>();
-        HashSet<UtilityPole> appendedPoles = new HashSet<UtilityPole>();
+        rangeVisualRequestScratch.Clear();
+        rangeVisualPoleScratch.Clear();
         if (ShouldShowInstallOrEditConnectionRangeVisuals())
         {
-            AppendConnectionRangeVisualRequests(activePoles, false, requests, appendedPoles);
+            AppendConnectionRangeVisualRequests(
+                activePoles,
+                false,
+                rangeVisualRequestScratch,
+                rangeVisualPoleScratch);
         }
 
-        AppendConnectionRangeVisualRequests(SelectedSupplyRangeVisualInstances, true, requests, appendedPoles);
+        AppendConnectionRangeVisualRequests(
+            SelectedSupplyRangeVisualInstances,
+            true,
+            rangeVisualRequestScratch,
+            rangeVisualPoleScratch);
 
-        if (requests.Count <= 0)
+        if (rangeVisualRequestScratch.Count <= 0)
         {
             SetSharedConnectionRangeVisualActive(false);
             return;
@@ -1908,7 +1992,7 @@ public class UtilityPole : InstallationObject
             return;
         }
 
-        visual.Configure(requests);
+        visual.Configure(rangeVisualRequestScratch);
         if (!visual.gameObject.activeSelf)
         {
             visual.gameObject.SetActive(true);
@@ -2665,6 +2749,7 @@ public class UtilityPole : InstallationObject
     private static void RebuildNetworks()
     {
         EnsurePoleConnectionsEvaluated();
+        ClearPoleSupplyCoordinateCache();
         networks.Clear();
         suppliedConsumerNetworks.Clear();
         activePoleScratch.Clear();
@@ -2710,9 +2795,11 @@ public class UtilityPole : InstallationObject
                 }
             }
 
-            BuildNetworkSupplyArea(network);
             networks.Add(network);
         }
+
+        RebuildPoleSupplyCoordinateCache();
+        RebuildNetworkSupplyAreasFromCache();
 
         RefreshNetworkRuntimeValues(true);
         InputOutputModule.WakeElectricRuntimeModules();
@@ -2779,20 +2866,106 @@ public class UtilityPole : InstallationObject
         return ChebyshevDistance(firstAnchor, secondAnchor) <= reach;
     }
 
-    private static void BuildNetworkSupplyArea(ElectricNetwork network)
+    private static void ClearPoleSupplyCoordinateCache()
     {
-        if (network == null)
+        foreach (KeyValuePair<Vector2Int, List<UtilityPole>> entry in supplyPolesByCoordinate)
         {
-            return;
+            List<UtilityPole> poles = entry.Value;
+            if (poles == null)
+            {
+                continue;
+            }
+
+            poles.Clear();
+            supplyPoleListPool.Push(poles);
         }
 
-        network.ClearTopologyRuntime();
-        for (int i = 0; i < network.Poles.Count; i++)
+        supplyPolesByCoordinate.Clear();
+        electricNetworkByPole.Clear();
+    }
+
+    private static void RebuildPoleSupplyCoordinateCache()
+    {
+        for (int networkIndex = 0; networkIndex < networks.Count; networkIndex++)
         {
-            ScanPoleSupplyArea(network.Poles[i], network.SuppliedInstallations);
+            ElectricNetwork network = networks[networkIndex];
+            if (network == null)
+            {
+                continue;
+            }
+
+            for (int poleIndex = 0; poleIndex < network.Poles.Count; poleIndex++)
+            {
+                UtilityPole pole = network.Poles[poleIndex];
+                if (pole == null
+                    || !pole.TryGetPlacementRuntime(out Vector2Int anchorCoordinate, out _))
+                {
+                    continue;
+                }
+
+                electricNetworkByPole[pole] = network;
+                int radius = pole.SupplyRadiusCells;
+                for (int y = anchorCoordinate.y - radius; y <= anchorCoordinate.y + radius; y++)
+                {
+                    for (int x = anchorCoordinate.x - radius; x <= anchorCoordinate.x + radius; x++)
+                    {
+                        Vector2Int coordinate = new Vector2Int(x, y);
+                        if (!supplyPolesByCoordinate.TryGetValue(coordinate, out List<UtilityPole> poles))
+                        {
+                            poles = supplyPoleListPool.Count > 0
+                                ? supplyPoleListPool.Pop()
+                                : new List<UtilityPole>(2);
+                            supplyPolesByCoordinate.Add(coordinate, poles);
+                        }
+
+                        poles.Add(pole);
+                    }
+                }
+            }
+        }
+    }
+
+    private static void RebuildNetworkSupplyAreasFromCache()
+    {
+        for (int networkIndex = 0; networkIndex < networks.Count; networkIndex++)
+        {
+            networks[networkIndex]?.ClearTopologyRuntime();
         }
 
-        RefreshNetworkTopologyRuntimeValues(network);
+        foreach (KeyValuePair<Vector2Int, List<UtilityPole>> entry in supplyPolesByCoordinate)
+        {
+            installationScratch.Clear();
+            InstallationObject.CollectActiveInstallationsAtRuntimeGridCoordinate(
+                entry.Key,
+                installationScratch);
+            for (int installationIndex = 0;
+                 installationIndex < installationScratch.Count;
+                 installationIndex++)
+            {
+                InstallationObject installationObject = installationScratch[installationIndex];
+                if (!IsElectricNetworkParticipant(installationObject))
+                {
+                    continue;
+                }
+
+                List<UtilityPole> poles = entry.Value;
+                for (int poleIndex = 0; poleIndex < poles.Count; poleIndex++)
+                {
+                    if (electricNetworkByPole.TryGetValue(
+                            poles[poleIndex],
+                            out ElectricNetwork network))
+                    {
+                        network.SuppliedInstallations.Add(installationObject);
+                    }
+                }
+            }
+        }
+
+        installationScratch.Clear();
+        for (int networkIndex = 0; networkIndex < networks.Count; networkIndex++)
+        {
+            RefreshNetworkTopologyRuntimeValues(networks[networkIndex]);
+        }
     }
 
     private static void RefreshNetworkTopologyRuntimeValues(ElectricNetwork network)
@@ -2896,40 +3069,6 @@ public class UtilityPole : InstallationObject
         network.SupplyRatio = network.RequiredWatts > EnergyEpsilon
             ? Mathf.Clamp01(network.ProductionWatts / network.RequiredWatts)
             : (network.ProductionWatts > EnergyEpsilon ? 1f : 0f);
-    }
-
-    private static void ScanPoleSupplyArea(
-        UtilityPole pole,
-        HashSet<InstallationObject> suppliedInstallations)
-    {
-        if (pole == null
-            || suppliedInstallations == null
-            || !pole.TryGetPlacementRuntime(out Vector2Int anchorCoordinate, out _))
-        {
-            return;
-        }
-
-        int radius = pole.SupplyRadiusCells;
-        for (int y = anchorCoordinate.y - radius; y <= anchorCoordinate.y + radius; y++)
-        {
-            for (int x = anchorCoordinate.x - radius; x <= anchorCoordinate.x + radius; x++)
-            {
-                installationScratch.Clear();
-                InstallationObject.CollectActiveInstallationsAtRuntimeGridCoordinate(
-                    new Vector2Int(x, y),
-                    installationScratch);
-                for (int i = 0; i < installationScratch.Count; i++)
-                {
-                    InstallationObject installationObject = installationScratch[i];
-                    if (IsElectricNetworkParticipant(installationObject))
-                    {
-                        suppliedInstallations.Add(installationObject);
-                    }
-                }
-            }
-        }
-
-        installationScratch.Clear();
     }
 
     private static bool IsElectricNetworkParticipant(InstallationObject installationObject)

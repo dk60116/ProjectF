@@ -232,12 +232,12 @@ public class Resource : MapObject
         UnregisterActiveResourceCoordinate();
         ActiveResourcesInternal.Remove(this);
 
-        if (!Application.isPlaying || owningBlock == null || owningBlock.MapObject != this)
+        if (!Application.isPlaying || owningBlock == null)
         {
             return;
         }
 
-        owningBlock.SetMapObject(null);
+        owningBlock.ClearResource(this);
     }
 
     protected void OnValidate()

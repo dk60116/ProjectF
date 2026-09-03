@@ -4,22 +4,13 @@ using UnityEngine;
 
 public partial class TerrainGenerator
 {
-    private void RestoreChunkBlockStates(Transform chunkTransform)
+    private IEnumerator RestoreChunkBlockStatesRoutine(Block[] chunkBlocks, bool allowYield)
     {
-        IEnumerator routine = RestoreChunkBlockStatesRoutine(chunkTransform, false);
-        while (routine.MoveNext())
-        {
-        }
-    }
-
-    private IEnumerator RestoreChunkBlockStatesRoutine(Transform chunkTransform, bool allowYield)
-    {
-        if (chunkTransform == null)
+        if (chunkBlocks == null)
         {
             yield break;
         }
 
-        Block[] chunkBlocks = chunkTransform.GetComponentsInChildren<Block>(true);
         EnsureResourceStateStore();
 
         int blocksSinceYield = 0;
