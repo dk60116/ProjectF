@@ -11,6 +11,7 @@ Shader "Custom/ConveyorBeltCornerFlow"
         _ShadeThreshold("Shade Threshold", Range(0,1)) = 0.5
         _ShadeSmoothness("Shade Smoothness", Range(0.001,0.5)) = 0.05
         _UVScrollY("UV Scroll Y", Float) = -0.5
+        [HideInInspector] _ConveyorUvData("Conveyor UV Data", Vector) = (0,-0.5,1,0)
         _CornerRotationSteps("Corner Rotation Steps", Float) = 3
         _FlowRepeat("Flow Repeat", Float) = 1
         _PathWidthRange("Path Width Range", Vector) = (0,1,0,0)
@@ -155,6 +156,10 @@ Shader "Custom/ConveyorBeltCornerFlow"
                 half _BlueprintRimStrength;
                 half _BlueprintRimPower;
             CBUFFER_END
+
+            UNITY_INSTANCING_BUFFER_START(ConveyorPerInstance)
+                UNITY_DEFINE_INSTANCED_PROP(float4, _ConveyorUvData)
+            UNITY_INSTANCING_BUFFER_END(ConveyorPerInstance)
 
             half4 ApplyBlueprintPreview(half4 baseSample)
             {
@@ -302,7 +307,12 @@ Shader "Custom/ConveyorBeltCornerFlow"
                 float normalizedWidth = saturate((widthCoord - _PathWidthRange.x) / pathWidthSpan);
                 // PathUV's G channel already follows the conveyor's input-to-output direction.
                 float pathProgress = alongCoord;
-                float alongFlow = frac(pathProgress * max(_FlowRepeat, 0.001) + _UVScrollY * _Time.y);
+                float4 conveyorUvData = UNITY_ACCESS_INSTANCED_PROP(
+                    ConveyorPerInstance,
+                    _ConveyorUvData);
+                float alongFlow = frac(
+                    pathProgress * max(_FlowRepeat, 0.001)
+                    + conveyorUvData.y * _Time.y);
                 float2 flowUv = float2(normalizedWidth, alongFlow);
                 half4 flowSample = SAMPLE_TEXTURE2D(_StraightBeltMap, sampler_StraightBeltMap, flowUv) * _BaseColor;
                 half3 pathColor = flowSample.rgb;

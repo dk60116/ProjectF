@@ -11,12 +11,23 @@ public class HandSlot : BagSlot
             return false;
         }
 
-        if (!TryGetGroundPickupBlock(terrain, coordinate, out Block block))
+        PortableObject requiredPortableObject = null;
+        Block block;
+        if (TryGetPickupPreviewSource(out PortableObject previewPortableObject, out Block previewBlock))
+        {
+            requiredPortableObject = previewPortableObject;
+            block = previewBlock;
+        }
+        else if (!TryGetGroundPickupBlock(terrain, player, coordinate, out block))
         {
             return false;
         }
 
-        return block.TryPickupOneFloorObjectToHand(player, pickupOrigin, pickupRange);
+        return block.TryPickupOneFloorObjectToHand(
+            player,
+            pickupOrigin,
+            pickupRange,
+            requiredPortableObject);
     }
 
     protected override bool TryPickupFromFocusedBox(

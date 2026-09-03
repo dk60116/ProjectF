@@ -667,10 +667,12 @@ public partial class TerrainGenerator : MonoBehaviour
         new Dictionary<Vector2Int, ChunkRuntimeData>();
     private readonly BlockDataStore loadedBlocks = new BlockDataStore();
     private int suppressedBlockProxyMaterializationDepth;
-    private readonly PlayerRangeRendererCullingIndex playerRangeRendererIndex =
-        new PlayerRangeRendererCullingIndex();
+    private readonly PlayerRangeCullingIndex playerRangeCullingIndex =
+        new PlayerRangeCullingIndex();
     private readonly List<Renderer> terrainRendererScratch = new List<Renderer>(256);
     private readonly HashSet<Renderer> terrainRendererScanSet = new HashSet<Renderer>();
+    private readonly List<Collider> terrainColliderScratch = new List<Collider>(256);
+    private readonly HashSet<Collider> terrainColliderScanSet = new HashSet<Collider>();
     private readonly List<Vector2Int> chunksToGenerateScratch = new List<Vector2Int>();
     private readonly List<Block> chunkRuntimeBlockScratch = new List<Block>();
     private readonly ChunkDistanceComparer chunkDistanceComparer = new ChunkDistanceComparer();
@@ -953,7 +955,10 @@ public partial class TerrainGenerator : MonoBehaviour
         EnsurePortableItemRenderer();
         EnsureVirtualConveyorBeltRenderer();
 
-        if (generateOnStart)
+        SaveManager saveManager = FindFirstObjectByType<SaveManager>();
+        bool terrainInitializationIsDeferred =
+            saveManager != null && saveManager.WillInitializeTerrainOnStart;
+        if (generateOnStart && !terrainInitializationIsDeferred)
         {
             Generate();
         }
@@ -966,7 +971,8 @@ public partial class TerrainGenerator : MonoBehaviour
             return;
         }
 
-        RefreshTrackedRenderVisibilityIfNeeded();
+        RefreshTrackedPlayerRangeCullingIfNeeded();
+        playerRangeCullingIndex.RefreshDynamicColliders();
 
         bool profileBeltTicks = RefreshBeltTickProfilerFrameState();
 
@@ -1125,7 +1131,7 @@ public partial class TerrainGenerator : MonoBehaviour
                && Mathf.Abs(Mathf.RoundToInt(worldPosition.z) - currentPlayerRenderCenter.y) <= radius;
     }
 
-    private void RefreshTrackedRenderVisibilityIfNeeded()
+    private void RefreshTrackedPlayerRangeCullingIfNeeded()
     {
         Vector2Int renderCenter = GetTrackingBlockCoordinate();
         int renderRadius = PlayerRenderRadius;
@@ -1139,7 +1145,7 @@ public partial class TerrainGenerator : MonoBehaviour
         currentPlayerRenderCenter = renderCenter;
         hasPlayerRenderCenter = true;
         appliedPlayerRenderRadius = renderRadius;
-        playerRangeRendererIndex.SetRange(renderCenter, renderRadius);
+        playerRangeCullingIndex.SetRange(renderCenter, renderRadius);
     }
 
     private void EnsurePlayerRenderCenter()
@@ -1152,7 +1158,7 @@ public partial class TerrainGenerator : MonoBehaviour
         currentPlayerRenderCenter = GetTrackingBlockCoordinate();
         hasPlayerRenderCenter = true;
         appliedPlayerRenderRadius = PlayerRenderRadius;
-        playerRangeRendererIndex.SetRange(currentPlayerRenderCenter, appliedPlayerRenderRadius);
+        playerRangeCullingIndex.SetRange(currentPlayerRenderCenter, appliedPlayerRenderRadius);
     }
 
     private Vector2Int GetTrackingBlockCoordinate()
@@ -1162,7 +1168,7 @@ public partial class TerrainGenerator : MonoBehaviour
         return new Vector2Int(Mathf.RoundToInt(sourcePosition.x), Mathf.RoundToInt(sourcePosition.z));
     }
 
-    private void RefreshAllTerrainRendererVisibility()
+    private void RefreshAllTerrainRangeCulling()
     {
         EnsurePlayerRenderCenter();
         terrainRendererScratch.Clear();
@@ -1178,13 +1184,30 @@ public partial class TerrainGenerator : MonoBehaviour
             }
 
             terrainRendererScanSet.Add(targetRenderer);
-            playerRangeRendererIndex.Register(targetRenderer);
+            playerRangeCullingIndex.Register(targetRenderer);
         }
 
-        playerRangeRendererIndex.RemoveMissing(terrainRendererScanSet);
+        playerRangeCullingIndex.RemoveMissing(terrainRendererScanSet);
+
+        terrainColliderScratch.Clear();
+        terrainColliderScanSet.Clear();
+        transform.GetComponentsInChildren(true, terrainColliderScratch);
+        for (int i = 0; i < terrainColliderScratch.Count; i++)
+        {
+            Collider targetCollider = terrainColliderScratch[i];
+            if (targetCollider == null || !targetCollider.gameObject.activeInHierarchy)
+            {
+                continue;
+            }
+
+            terrainColliderScanSet.Add(targetCollider);
+            playerRangeCullingIndex.Register(targetCollider);
+        }
+
+        playerRangeCullingIndex.RemoveMissing(terrainColliderScanSet);
     }
 
-    private void RefreshTerrainRendererVisibility(Transform hierarchyRoot)
+    private void RefreshTerrainRangeCulling(Transform hierarchyRoot)
     {
         if (!Application.isPlaying || hierarchyRoot == null)
         {
@@ -1199,12 +1222,23 @@ public partial class TerrainGenerator : MonoBehaviour
             Renderer targetRenderer = terrainRendererScratch[i];
             if (targetRenderer != null && targetRenderer.gameObject.activeInHierarchy)
             {
-                playerRangeRendererIndex.Register(targetRenderer);
+                playerRangeCullingIndex.Register(targetRenderer);
+            }
+        }
+
+        terrainColliderScratch.Clear();
+        hierarchyRoot.GetComponentsInChildren(true, terrainColliderScratch);
+        for (int i = 0; i < terrainColliderScratch.Count; i++)
+        {
+            Collider targetCollider = terrainColliderScratch[i];
+            if (targetCollider != null && targetCollider.gameObject.activeInHierarchy)
+            {
+                playerRangeCullingIndex.Register(targetCollider);
             }
         }
     }
 
-    private void RefreshTerrainRendererVisibility(Block[] blocksToRegister)
+    private void RefreshTerrainRangeCulling(Block[] blocksToRegister)
     {
         if (!Application.isPlaying || blocksToRegister == null)
         {
@@ -1218,7 +1252,7 @@ public partial class TerrainGenerator : MonoBehaviour
             {
                 if (block.MapObject != null)
                 {
-                    RefreshTerrainRendererVisibility(block.MapObject.transform);
+                    RefreshTerrainRangeCulling(block.MapObject.transform);
                 }
             }
         }
@@ -1227,16 +1261,18 @@ public partial class TerrainGenerator : MonoBehaviour
     public bool DoesWorldBoundsIntersectPlayerRenderRange(Bounds bounds)
     {
         EnsurePlayerRenderCenter();
-        return playerRangeRendererIndex.Intersects(bounds);
+        return playerRangeCullingIndex.Intersects(bounds);
     }
 
-    private void RestorePlayerRangeRendererVisibility(Transform hierarchyRoot = null)
+    private void RestorePlayerRangeCulling(Transform hierarchyRoot = null)
     {
         if (hierarchyRoot == null)
         {
-            playerRangeRendererIndex.Clear(true);
+            playerRangeCullingIndex.Clear(true);
             terrainRendererScratch.Clear();
             terrainRendererScanSet.Clear();
+            terrainColliderScratch.Clear();
+            terrainColliderScanSet.Clear();
             hasPlayerRenderCenter = false;
             appliedPlayerRenderRadius = -1;
             return;
@@ -1247,11 +1283,19 @@ public partial class TerrainGenerator : MonoBehaviour
         for (int i = 0; i < terrainRendererScratch.Count; i++)
         {
             Renderer targetRenderer = terrainRendererScratch[i];
-            playerRangeRendererIndex.Unregister(targetRenderer, true);
+            playerRangeCullingIndex.Unregister(targetRenderer, true);
+        }
+
+        terrainColliderScratch.Clear();
+        hierarchyRoot.GetComponentsInChildren(true, terrainColliderScratch);
+        for (int i = 0; i < terrainColliderScratch.Count; i++)
+        {
+            Collider targetCollider = terrainColliderScratch[i];
+            playerRangeCullingIndex.Unregister(targetCollider, true);
         }
     }
 
-    private void RestorePlayerRangeRendererVisibility(Block[] blocksToUnregister)
+    private void RestorePlayerRangeCulling(Block[] blocksToUnregister)
     {
         if (blocksToUnregister == null)
         {
@@ -1265,7 +1309,7 @@ public partial class TerrainGenerator : MonoBehaviour
             {
                 if (block.MapObject != null)
                 {
-                    RestorePlayerRangeRendererVisibility(block.MapObject.transform);
+                    RestorePlayerRangeCulling(block.MapObject.transform);
                 }
             }
         }
@@ -1281,7 +1325,7 @@ public partial class TerrainGenerator : MonoBehaviour
             Active = null;
         }
 
-        RestorePlayerRangeRendererVisibility();
+        RestorePlayerRangeCulling();
         ClearConveyorRuntimeState();
         ResetAuthoritativeConveyorItemTotal();
         ClearPendingChunkGenerations();
@@ -1298,7 +1342,7 @@ public partial class TerrainGenerator : MonoBehaviour
     }
 
     public bool VirtualizeConveyorItems => false;
-    public bool VirtualizeConveyorBelts => false;
+    public bool VirtualizeConveyorBelts => true;
     public int ConveyorItemVisualBlockSetVersion => conveyorItemVisualBlockSetVersion;
     public int DynamicConveyorItemVisualBlockSetVersion => dynamicConveyorItemVisualBlockSetVersion;
     public int ConveyorItemVisualDirtyBlockCount => conveyorItemVisualDirtyBlocks.Count;
@@ -1621,7 +1665,7 @@ public partial class TerrainGenerator : MonoBehaviour
         ApplyLoadedConveyorItemSaveStates(mapSaveData);
         RefreshLoadedRuntimeRegistrations();
         RefreshLoadedRuntimeVisibility();
-        RefreshAllTerrainRendererVisibility();
+        RefreshAllTerrainRangeCulling();
     }
 
     private bool QueueSavedActiveChunks(IReadOnlyList<Vector2Int> activeChunkCoordinates)
@@ -2436,7 +2480,7 @@ public partial class TerrainGenerator : MonoBehaviour
             SaveChunkResourceStates(existingBlocks);
             ForgetAnimalRuntimeIds(chunkCoordinate);
             DestroyAnimalViewsInChunk(chunkCoordinate);
-            RestorePlayerRangeRendererVisibility(existingBlocks);
+            RestorePlayerRangeCulling(existingBlocks);
             RemoveChunkBlocksFromLookup(existingBlocks);
             ReleaseChunkBlockRuntimeProxies(existingBlocks);
             ReleaseChunkSurfaceMeshes(existingChunk);
@@ -2584,7 +2628,7 @@ public partial class TerrainGenerator : MonoBehaviour
 
         if (Application.isPlaying)
         {
-            RefreshTerrainRendererVisibility(chunkBlocks);
+            RefreshTerrainRangeCulling(chunkBlocks);
         }
 
         if (allowYield)
@@ -2597,7 +2641,7 @@ public partial class TerrainGenerator : MonoBehaviour
 
     private void ClearLoadedChunks(bool preserveRuntimeState = true, bool releaseLiveInstallations = false)
     {
-        RestorePlayerRangeRendererVisibility();
+        RestorePlayerRangeCulling();
 
         if (preserveRuntimeState)
         {

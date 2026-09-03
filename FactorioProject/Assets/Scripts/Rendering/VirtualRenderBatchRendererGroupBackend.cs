@@ -26,10 +26,7 @@ internal sealed class VirtualRenderBatchRendererGroupBackend : IDisposable
 
     private static readonly int ObjectToWorldShaderId = Shader.PropertyToID("unity_ObjectToWorld");
     private static readonly int WorldToObjectShaderId = Shader.PropertyToID("unity_WorldToObject");
-    private static readonly int UvScrollXShaderId = Shader.PropertyToID("_UVScrollX");
-    private static readonly int UvScrollYShaderId = Shader.PropertyToID("_UVScrollY");
-    private static readonly int UvLengthScaleShaderId = Shader.PropertyToID("_UvLengthScale");
-    private static readonly int UvLengthOffsetShaderId = Shader.PropertyToID("_UvLengthOffset");
+    private static readonly int ConveyorUvDataShaderId = Shader.PropertyToID("_ConveyorUvData");
     private static readonly int BaseColorShaderId = Shader.PropertyToID("_BaseColor");
     private static readonly int ColorShaderId = Shader.PropertyToID("_Color");
     private static readonly int AlphaClipShaderId = Shader.PropertyToID("_AlphaClip");
@@ -140,6 +137,7 @@ internal sealed class VirtualRenderBatchRendererGroupBackend : IDisposable
     public bool TrySyncBatch(
         VirtualRenderBatchKey key,
         List<Matrix4x4> matrices,
+        List<Vector4> instanceUvData,
         Bounds worldBounds,
         int dataVersion)
     {
@@ -159,7 +157,7 @@ internal sealed class VirtualRenderBatchRendererGroupBackend : IDisposable
             if (state.UploadedDataVersion != dataVersion
                 || state.InstanceCount != matrices.Count)
             {
-                UploadInstanceData(state, key, matrices);
+                UploadInstanceData(state, key, matrices, instanceUvData);
                 state.UploadedDataVersion = dataVersion;
             }
 
@@ -353,7 +351,8 @@ internal sealed class VirtualRenderBatchRendererGroupBackend : IDisposable
         state.UvPropertiesByteOffset =
             state.WorldToObjectByteOffset + (PackedMatrixSize * capacity);
         state.ColorPropertyByteOffset =
-            state.UvPropertiesByteOffset + UvPropertySize;
+            state.UvPropertiesByteOffset
+            + (state.Key.HasUvScroll ? UvPropertySize * capacity : UvPropertySize);
 
         int totalBytes = state.ColorPropertyByteOffset + ColorPropertySize;
         int bufferCount = (totalBytes + sizeof(int) - 1) / sizeof(int);
@@ -366,7 +365,7 @@ internal sealed class VirtualRenderBatchRendererGroupBackend : IDisposable
         int metadataCount = 2;
         if (state.Key.HasUvScroll)
         {
-            metadataCount += 4;
+            metadataCount++;
         }
 
         if (state.Key.UseSleepAwakeDarkTint)
@@ -390,18 +389,9 @@ internal sealed class VirtualRenderBatchRendererGroupBackend : IDisposable
 
             if (state.Key.HasUvScroll)
             {
-                metadata[metadataIndex++] = CreateConstantMetadata(
-                    UvScrollXShaderId,
+                metadata[metadataIndex++] = CreatePerInstanceMetadata(
+                    ConveyorUvDataShaderId,
                     state.UvPropertiesByteOffset);
-                metadata[metadataIndex++] = CreateConstantMetadata(
-                    UvScrollYShaderId,
-                    state.UvPropertiesByteOffset + sizeof(float));
-                metadata[metadataIndex++] = CreateConstantMetadata(
-                    UvLengthScaleShaderId,
-                    state.UvPropertiesByteOffset + (sizeof(float) * 2));
-                metadata[metadataIndex++] = CreateConstantMetadata(
-                    UvLengthOffsetShaderId,
-                    state.UvPropertiesByteOffset + (sizeof(float) * 3));
             }
 
             if (state.Key.UseSleepAwakeDarkTint)
@@ -429,7 +419,8 @@ internal sealed class VirtualRenderBatchRendererGroupBackend : IDisposable
     private static void UploadInstanceData(
         BrgBatchState state,
         VirtualRenderBatchKey key,
-        List<Matrix4x4> matrices)
+        List<Matrix4x4> matrices,
+        List<Vector4> instanceUvData)
     {
         int instanceCount = matrices.Count;
         state.EnsureUploadArrayCapacity(instanceCount);
@@ -453,18 +444,19 @@ internal sealed class VirtualRenderBatchRendererGroupBackend : IDisposable
 
         if (key.HasUvScroll)
         {
-            state.UvProperties[0] = 0f;
-            state.UvProperties[1] =
-                key.UvScrollYTicks / (float)VirtualRenderBatchKey.UvScrollQuantize;
-            state.UvProperties[2] =
-                key.UvLengthScaleTicks / (float)VirtualRenderBatchKey.UvLengthQuantize;
-            state.UvProperties[3] =
-                key.UvLengthOffsetTicks / (float)VirtualRenderBatchKey.UvLengthQuantize;
+            Vector4 defaultUvData = new Vector4(0f, -0.5f, 1f, 0f);
+            for (int i = 0; i < instanceCount; i++)
+            {
+                state.UvProperties[i] = instanceUvData != null && i < instanceUvData.Count
+                    ? instanceUvData[i]
+                    : defaultUvData;
+            }
+
             state.InstanceDataBuffer.SetData(
                 state.UvProperties,
                 0,
-                state.UvPropertiesByteOffset / sizeof(float),
-                state.UvProperties.Length);
+                state.UvPropertiesByteOffset / UvPropertySize,
+                instanceCount);
         }
 
         if (key.UseSleepAwakeDarkTint)
@@ -770,7 +762,6 @@ internal sealed class VirtualRenderBatchRendererGroupBackend : IDisposable
 
     private sealed class BrgBatchState
     {
-        public readonly float[] UvProperties = new float[4];
         public readonly Vector4[] ColorProperty = new Vector4[1];
         public VirtualRenderBatchKey Key;
         public BatchID BatchId;
@@ -779,6 +770,7 @@ internal sealed class VirtualRenderBatchRendererGroupBackend : IDisposable
         public GraphicsBuffer InstanceDataBuffer;
         public PackedMatrix[] ObjectToWorldMatrices;
         public PackedMatrix[] WorldToObjectMatrices;
+        public Vector4[] UvProperties;
         public Bounds WorldBounds;
         public int Capacity;
         public int InstanceCount;
@@ -797,6 +789,12 @@ internal sealed class VirtualRenderBatchRendererGroupBackend : IDisposable
             {
                 ObjectToWorldMatrices = new PackedMatrix[Capacity];
                 WorldToObjectMatrices = new PackedMatrix[Capacity];
+            }
+
+            if (Key.HasUvScroll
+                && (UvProperties == null || UvProperties.Length < requiredCapacity))
+            {
+                UvProperties = new Vector4[Capacity];
             }
         }
     }

@@ -4415,7 +4415,8 @@ public partial class Block : BaseObject
             return false;
         }
 
-        return UpdateConveyorObjects(deltaTime);
+        float elapsedTickTime = ConsumeConveyorTickDeltaTime(deltaTime);
+        return elapsedTickTime > 0f && UpdateConveyorObjects(elapsedTickTime);
     }
 
     public bool NotifyStraightConveyorLineTickCompleted(out bool hasRetryWork, out bool skippedNoMoveWork)
@@ -4916,6 +4917,23 @@ public partial class Block : BaseObject
 
     public bool TryPickupOneFloorObjectToBag(Player player, Vector3 playerPosition, float pickupRadius, int preferredSlotIndex, int preferredItemId = -1)
     {
+        return TryPickupOneFloorObjectToBag(
+            player,
+            playerPosition,
+            pickupRadius,
+            preferredSlotIndex,
+            preferredItemId,
+            null);
+    }
+
+    public bool TryPickupOneFloorObjectToBag(
+        Player player,
+        Vector3 playerPosition,
+        float pickupRadius,
+        int preferredSlotIndex,
+        int preferredItemId,
+        PortableObject requiredPortableObject)
+    {
         if (player == null || pickupRadius <= 0f)
         {
             return false;
@@ -4935,6 +4953,7 @@ public partial class Block : BaseObject
                    playerPosition,
                    pickupRadius,
                    preferredItemId,
+                   requiredPortableObject,
                    skippedFloorStackIndexes,
                    skipInputAreaCenter,
                    out bool useInputAreaCenter,
@@ -5052,6 +5071,7 @@ public partial class Block : BaseObject
                 pickupRadius,
                 preferredItemId,
                 null,
+                null,
                 false,
                 out _,
                 out _,
@@ -5072,11 +5092,21 @@ public partial class Block : BaseObject
         previewItemId = itemId;
         previewPickupCount = stackPickupCount;
         previewPortableObject = topObject;
+        previewPortableObject.SetPickupSourceBlock(this);
         previewPortableObject.SetFocusStack(stack);
         return true;
     }
 
     public bool TryPickupOneFloorObjectToHand(Player player, Vector3 playerPosition, float pickupRadius)
+    {
+        return TryPickupOneFloorObjectToHand(player, playerPosition, pickupRadius, null);
+    }
+
+    public bool TryPickupOneFloorObjectToHand(
+        Player player,
+        Vector3 playerPosition,
+        float pickupRadius,
+        PortableObject requiredPortableObject)
     {
         if (player == null || pickupRadius <= 0f)
         {
@@ -5097,6 +5127,7 @@ public partial class Block : BaseObject
                    playerPosition,
                    pickupRadius,
                    -1,
+                   requiredPortableObject,
                    skippedFloorStackIndexes,
                    skipInputAreaCenter,
                    out bool useInputAreaCenter,
@@ -5142,6 +5173,7 @@ public partial class Block : BaseObject
         Vector3 playerPosition,
         float pickupRadius,
         int preferredItemId,
+        PortableObject requiredPortableObject,
         ISet<int> skippedFloorStackIndexes,
         bool skipInputAreaCenter,
         out bool useInputAreaCenter,
@@ -5163,6 +5195,7 @@ public partial class Block : BaseObject
             playerPosition,
             pickupRadius,
             preferredItemId,
+            requiredPortableObject,
             skippedFloorStackIndexes,
             out int floorStackIndex,
             out List<PortableObject> floorStack,
@@ -5181,6 +5214,7 @@ public partial class Block : BaseObject
                 playerPosition,
                 pickupRadius,
                 preferredItemId,
+                requiredPortableObject,
                 out inputAreaStack,
                 out inputAreaTopObject,
                 out inputAreaItemId,
@@ -5216,6 +5250,7 @@ public partial class Block : BaseObject
         Vector3 playerPosition,
         float pickupRadius,
         int preferredItemId,
+        PortableObject requiredPortableObject,
         ISet<int> skippedStackIndexes,
         out int bestStackIndex,
         out List<PortableObject> bestStack,
@@ -5246,12 +5281,6 @@ public partial class Block : BaseObject
                 continue;
             }
 
-            Transform anchor = ResolveFloorObjectDropAnchor();
-            if (anchor == null)
-            {
-                continue;
-            }
-
             List<PortableObject> candidateStack = floorStacks[candidateStackIndex];
             CleanupPortableStack(candidateStack);
             if (candidateStack == null || candidateStack.Count == 0)
@@ -5260,7 +5289,12 @@ public partial class Block : BaseObject
             }
 
             PortableObject candidateTopObject = candidateStack[candidateStack.Count - 1];
-            Vector3 offset = GetFloorObjectWorldPosition(anchor, 0) - playerPosition;
+            if (requiredPortableObject != null && candidateTopObject != requiredPortableObject)
+            {
+                continue;
+            }
+
+            Vector3 offset = candidateTopObject.transform.position - playerPosition;
             offset.y = 0f;
             float candidateDistanceSqr = offset.sqrMagnitude;
             UpdatePickupGates(candidateStack, gateOriginPosition);
@@ -5296,6 +5330,7 @@ public partial class Block : BaseObject
         Vector3 playerPosition,
         float pickupRadius,
         int preferredItemId,
+        PortableObject requiredPortableObject,
         out List<PortableObject> stack,
         out PortableObject topObject,
         out int itemId,
@@ -5325,12 +5360,18 @@ public partial class Block : BaseObject
             return false;
         }
 
-        Vector3 offset = inputAreaCenterAnchor.position - playerPosition;
+        topObject = GetTopPortableObject(inputAreaCenterStack);
+        if (topObject == null
+            || (requiredPortableObject != null && topObject != requiredPortableObject))
+        {
+            return false;
+        }
+
+        Vector3 offset = topObject.transform.position - playerPosition;
         offset.y = 0f;
         distanceSqr = offset.sqrMagnitude;
         float pickupRadiusSqr = pickupRadius * pickupRadius;
         UpdatePickupGates(inputAreaCenterStack, player.transform.position);
-        topObject = GetTopPortableObject(inputAreaCenterStack);
         if (!IsManualPickupStackCandidate(
                 topObject,
                 distanceSqr,
@@ -5489,32 +5530,22 @@ public partial class Block : BaseObject
             return false;
         }
 
-        Bounds stackBounds = default;
-        bool hasStackBounds = false;
         for (int objectIndex = 0; objectIndex < stack.Count; objectIndex++)
         {
             PortableObject candidate = stack[objectIndex];
             if (candidate == null
-                || !candidate.TryGetWorldFocusBounds(out Bounds candidateBounds))
+                || !candidate.TryGetWorldFocusBounds(out Bounds candidateBounds)
+                || !candidateBounds.IntersectRay(ray, out float candidateHitDistance)
+                || candidateHitDistance >= hitDistance)
             {
                 continue;
             }
 
-            representative ??= candidate;
-            if (hasStackBounds)
-            {
-                stackBounds.Encapsulate(candidateBounds);
-            }
-            else
-            {
-                stackBounds = candidateBounds;
-                hasStackBounds = true;
-            }
+            representative = candidate;
+            hitDistance = candidateHitDistance;
         }
 
-        return representative != null
-               && hasStackBounds
-               && stackBounds.IntersectRay(ray, out hitDistance);
+        return representative != null;
     }
 
     public bool TryTakeClosestFloorObject(Vector3 referenceWorldPosition, out int takenItemId)
@@ -7125,6 +7156,7 @@ public partial class Block : BaseObject
         PortableObject floorObject,
         PlayerItemStorageReservation reservation)
     {
+        floorObject?.SetPickupSourceBlock(null);
         PlayerItemStorageUtility.MoveVisualToPlayerStorage(
             floorObject,
             reservation,
@@ -11306,17 +11338,45 @@ public partial class Block : BaseObject
             return true;
         }
 
-        // 일반 직선 벨트는 측면 투입을 허용하지만, 2F 벨트와 직각으로 만난 1F 벨트는
-        // 물리적으로 교차할 뿐 연결된 것이 아니다. 같은 방향의 1F/2F 끝점 연결은 위에서 유지한다.
+        // 2F가 덮는 내부/중앙에서 직각으로 만난 1F 벨트는 물리적으로 교차할 뿐이다.
+        // 단, 2F의 실제 입력/출력 가장자리에서 풋프린트 밖의 벨트와 만난 경우는
+        // 일반 벨트의 측면 투입과 같은 T자 연결로 취급한다.
         if (TryGetRuntimeBelt2F(out _)
             || (receiverBlock != null && receiverBlock.TryGetRuntimeBelt2F(out _)))
         {
-            return false;
+            return CanUseBelt2FTerminalSideHandoff(
+                receiverBlock,
+                receiverInputDirection,
+                incomingFlowDirection);
         }
 
         return receiverBlock != null
             && !receiverBlock.IsCornerConveyorBlock()
             && IsPerpendicularCardinal(receiverInputDirection, incomingFlowDirection);
+    }
+
+    private bool CanUseBelt2FTerminalSideHandoff(
+        Block receiverBlock,
+        Vector2Int receiverInputDirection,
+        Vector2Int incomingFlowDirection)
+    {
+        if (receiverBlock == null
+            || incomingFlowDirection == Vector2Int.zero
+            || !IsPerpendicularCardinal(receiverInputDirection, incomingFlowDirection))
+        {
+            return false;
+        }
+
+        if (TryGetRuntimeBelt2F(out ConvayorBelt2F sourceBelt2F))
+        {
+            return sourceBelt2F.IsOutputEdgeCoordinate(coordinate)
+                   && !sourceBelt2F.CoversCoordinate(receiverBlock.coordinate)
+                   && !receiverBlock.TryGetRuntimeBelt2F(out _);
+        }
+
+        return receiverBlock.TryGetRuntimeBelt2F(out ConvayorBelt2F receiverBelt2F)
+               && receiverBelt2F.IsInputEdgeCoordinate(receiverBlock.coordinate)
+               && !receiverBelt2F.CoversCoordinate(coordinate);
     }
 
     private static bool IsPerpendicularCardinal(Vector2Int left, Vector2Int right)
@@ -13127,7 +13187,7 @@ public partial class Block : BaseObject
             return false;
         }
 
-        Vector3 offset = inputAreaCenterAnchor.position - playerPosition;
+        Vector3 offset = topObject.transform.position - playerPosition;
         offset.y = 0f;
         float distanceSqr = offset.sqrMagnitude;
         if (distanceSqr > pickupRadiusSqr)
@@ -13232,7 +13292,7 @@ public partial class Block : BaseObject
             return false;
         }
 
-        Vector3 offset = inputAreaCenterAnchor.position - playerPosition;
+        Vector3 offset = topObject.transform.position - playerPosition;
         offset.y = 0f;
         float distanceSqr = offset.sqrMagnitude;
         if (distanceSqr > pickupRadiusSqr)
@@ -13260,6 +13320,7 @@ public partial class Block : BaseObject
         previewItemId = itemId;
         previewPickupCount = CountManualPickupStackObjectsFromTop(inputAreaCenterStack, itemId, distanceSqr, pickupRadiusSqr);
         previewPortableObject = topObject;
+        previewPortableObject.SetPickupSourceBlock(this);
         previewPortableObject.SetFocusStack(inputAreaCenterStack);
         return previewPickupCount > 0;
     }
@@ -13287,7 +13348,7 @@ public partial class Block : BaseObject
             return false;
         }
 
-        Vector3 offset = inputAreaCenterAnchor.position - playerPosition;
+        Vector3 offset = topObject.transform.position - playerPosition;
         offset.y = 0f;
         float distanceSqr = offset.sqrMagnitude;
         if (distanceSqr > pickupRadiusSqr)

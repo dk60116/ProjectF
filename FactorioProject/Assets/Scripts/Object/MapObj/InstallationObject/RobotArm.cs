@@ -994,7 +994,6 @@ public class RobotArm : InstallationObject, IMapObjectUpdateTick, IItemLightWork
                     part.ShadowCastingMode,
                     part.ReceiveShadows,
                     false,
-                    0,
                     useSleepTint,
                     false,
                     default,

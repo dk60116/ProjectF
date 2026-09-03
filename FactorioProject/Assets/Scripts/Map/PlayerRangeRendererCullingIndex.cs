@@ -1,9 +1,9 @@
 using System.Collections.Generic;
 using UnityEngine;
 
-internal sealed class PlayerRangeRendererCullingIndex
+internal sealed class PlayerRangeCullingIndex
 {
-    private const int MaxBucketCellsPerRenderer = 256;
+    private const int MaxBucketCellsPerComponent = 256;
 
     private readonly struct Registration
     {
@@ -22,6 +22,16 @@ internal sealed class PlayerRangeRendererCullingIndex
         }
     }
 
+    private struct ColliderRegistration
+    {
+        public Vector2Int minCoordinate;
+        public Vector2Int maxCoordinate;
+        public bool usesSpatialBuckets;
+        public bool isDynamic;
+        public Bounds bounds;
+        public Vector3 trackedPosition;
+    }
+
     private readonly Dictionary<Renderer, Registration> registrations =
         new Dictionary<Renderer, Registration>();
     private readonly Dictionary<Renderer, bool> hiddenRendererPreviousStates =
@@ -31,6 +41,16 @@ internal sealed class PlayerRangeRendererCullingIndex
     private readonly List<Renderer> unbucketedRenderers = new List<Renderer>();
     private readonly HashSet<Renderer> refreshSet = new HashSet<Renderer>();
     private readonly List<Renderer> cleanupBuffer = new List<Renderer>();
+    private readonly Dictionary<Collider, ColliderRegistration> colliderRegistrations =
+        new Dictionary<Collider, ColliderRegistration>();
+    private readonly Dictionary<Collider, bool> disabledColliderPreviousStates =
+        new Dictionary<Collider, bool>();
+    private readonly Dictionary<Vector2Int, List<Collider>> collidersByCoordinate =
+        new Dictionary<Vector2Int, List<Collider>>();
+    private readonly List<Collider> unbucketedColliders = new List<Collider>();
+    private readonly List<Collider> dynamicColliders = new List<Collider>();
+    private readonly HashSet<Collider> colliderRefreshSet = new HashSet<Collider>();
+    private readonly List<Collider> colliderCleanupBuffer = new List<Collider>();
 
     private Vector2Int center;
     private int radius;
@@ -45,6 +65,7 @@ internal sealed class PlayerRangeRendererCullingIndex
             radius = nextRadius;
             hasRange = true;
             RefreshAllRegisteredRenderers();
+            RefreshAllRegisteredColliders();
             return;
         }
 
@@ -89,19 +110,9 @@ internal sealed class PlayerRangeRendererCullingIndex
         }
 
         Bounds bounds = targetRenderer.bounds;
-        Vector2Int minCoordinate = new Vector2Int(
-            Mathf.CeilToInt(bounds.min.x - 0.5f),
-            Mathf.CeilToInt(bounds.min.z - 0.5f));
-        Vector2Int maxCoordinate = new Vector2Int(
-            Mathf.FloorToInt(bounds.max.x + 0.5f),
-            Mathf.FloorToInt(bounds.max.z + 0.5f));
-        long width = (long)maxCoordinate.x - minCoordinate.x + 1L;
-        long height = (long)maxCoordinate.y - minCoordinate.y + 1L;
-        bool usesSpatialBuckets = width > 0L
-                                  && height > 0L
-                                  && width <= MaxBucketCellsPerRenderer
-                                  && height <= MaxBucketCellsPerRenderer
-                                  && width * height <= MaxBucketCellsPerRenderer
+        Vector2Int minCoordinate = GetMinimumCoordinate(bounds);
+        Vector2Int maxCoordinate = GetMaximumCoordinate(bounds);
+        bool usesSpatialBuckets = CanUseSpatialBuckets(minCoordinate, maxCoordinate)
                                   && !IsDynamicRenderer(targetRenderer);
 
         registrations[targetRenderer] = new Registration(
@@ -110,7 +121,11 @@ internal sealed class PlayerRangeRendererCullingIndex
             usesSpatialBuckets);
         if (usesSpatialBuckets)
         {
-            AddToSpatialBuckets(targetRenderer, minCoordinate, maxCoordinate);
+            AddToSpatialBuckets(
+                targetRenderer,
+                minCoordinate,
+                maxCoordinate,
+                renderersByCoordinate);
         }
         else
         {
@@ -118,6 +133,56 @@ internal sealed class PlayerRangeRendererCullingIndex
         }
 
         ApplyVisibility(targetRenderer);
+    }
+
+    public void Register(Collider targetCollider)
+    {
+        if (targetCollider == null)
+        {
+            return;
+        }
+
+        if (colliderRegistrations.ContainsKey(targetCollider))
+        {
+            Unregister(targetCollider, true);
+        }
+
+        Bounds bounds = targetCollider.bounds;
+        Vector2Int minCoordinate = GetMinimumCoordinate(bounds);
+        Vector2Int maxCoordinate = GetMaximumCoordinate(bounds);
+        bool isDynamic = IsDynamicCollider(targetCollider);
+        bool usesSpatialBuckets = CanUseSpatialBuckets(minCoordinate, maxCoordinate)
+                                  && !isDynamic;
+        ColliderRegistration registration = new ColliderRegistration
+        {
+            minCoordinate = minCoordinate,
+            maxCoordinate = maxCoordinate,
+            usesSpatialBuckets = usesSpatialBuckets,
+            isDynamic = isDynamic,
+            bounds = bounds,
+            trackedPosition = targetCollider.transform.position
+        };
+        colliderRegistrations[targetCollider] = registration;
+
+        if (usesSpatialBuckets)
+        {
+            AddToSpatialBuckets(
+                targetCollider,
+                minCoordinate,
+                maxCoordinate,
+                collidersByCoordinate);
+        }
+        else
+        {
+            unbucketedColliders.Add(targetCollider);
+        }
+
+        if (isDynamic)
+        {
+            dynamicColliders.Add(targetCollider);
+        }
+
+        ApplyColliderVisibility(targetCollider);
     }
 
     public void RemoveMissing(HashSet<Renderer> retainedRenderers)
@@ -142,6 +207,28 @@ internal sealed class PlayerRangeRendererCullingIndex
         cleanupBuffer.Clear();
     }
 
+    public void RemoveMissing(HashSet<Collider> retainedColliders)
+    {
+        colliderCleanupBuffer.Clear();
+        foreach (KeyValuePair<Collider, ColliderRegistration> pair in colliderRegistrations)
+        {
+            Collider targetCollider = pair.Key;
+            if (targetCollider == null
+                || retainedColliders == null
+                || !retainedColliders.Contains(targetCollider))
+            {
+                colliderCleanupBuffer.Add(targetCollider);
+            }
+        }
+
+        for (int i = 0; i < colliderCleanupBuffer.Count; i++)
+        {
+            Unregister(colliderCleanupBuffer[i], true);
+        }
+
+        colliderCleanupBuffer.Clear();
+    }
+
     public void Unregister(Renderer targetRenderer, bool restoreVisibility)
     {
         if (!registrations.TryGetValue(targetRenderer, out Registration registration))
@@ -152,7 +239,11 @@ internal sealed class PlayerRangeRendererCullingIndex
 
         if (registration.usesSpatialBuckets)
         {
-            RemoveFromSpatialBuckets(targetRenderer, registration);
+            RemoveFromSpatialBuckets(
+                targetRenderer,
+                registration.minCoordinate,
+                registration.maxCoordinate,
+                renderersByCoordinate);
         }
         else
         {
@@ -161,6 +252,38 @@ internal sealed class PlayerRangeRendererCullingIndex
 
         registrations.Remove(targetRenderer);
         RestoreHiddenState(targetRenderer, restoreVisibility);
+    }
+
+    public void Unregister(Collider targetCollider, bool restoreEnabledState)
+    {
+        if (!colliderRegistrations.TryGetValue(
+                targetCollider,
+                out ColliderRegistration registration))
+        {
+            RestoreDisabledState(targetCollider, restoreEnabledState);
+            return;
+        }
+
+        if (registration.usesSpatialBuckets)
+        {
+            RemoveFromSpatialBuckets(
+                targetCollider,
+                registration.minCoordinate,
+                registration.maxCoordinate,
+                collidersByCoordinate);
+        }
+        else
+        {
+            unbucketedColliders.Remove(targetCollider);
+        }
+
+        if (registration.isDynamic)
+        {
+            dynamicColliders.Remove(targetCollider);
+        }
+
+        colliderRegistrations.Remove(targetCollider);
+        RestoreDisabledState(targetCollider, restoreEnabledState);
     }
 
     public void Clear(bool restoreVisibility)
@@ -182,7 +305,41 @@ internal sealed class PlayerRangeRendererCullingIndex
         unbucketedRenderers.Clear();
         refreshSet.Clear();
         cleanupBuffer.Clear();
+
+        if (restoreVisibility)
+        {
+            foreach (KeyValuePair<Collider, bool> pair in disabledColliderPreviousStates)
+            {
+                if (pair.Key != null)
+                {
+                    pair.Key.enabled = pair.Value;
+                }
+            }
+        }
+
+        colliderRegistrations.Clear();
+        disabledColliderPreviousStates.Clear();
+        collidersByCoordinate.Clear();
+        unbucketedColliders.Clear();
+        dynamicColliders.Clear();
+        colliderRefreshSet.Clear();
+        colliderCleanupBuffer.Clear();
         hasRange = false;
+    }
+
+    public void RefreshDynamicColliders()
+    {
+        for (int i = dynamicColliders.Count - 1; i >= 0; i--)
+        {
+            Collider targetCollider = dynamicColliders[i];
+            if (targetCollider == null)
+            {
+                Unregister(targetCollider, false);
+                continue;
+            }
+
+            ApplyColliderVisibility(targetCollider);
+        }
     }
 
     private void RefreshAllRegisteredRenderers()
@@ -208,15 +365,50 @@ internal sealed class PlayerRangeRendererCullingIndex
         cleanupBuffer.Clear();
     }
 
+    private void RefreshAllRegisteredColliders()
+    {
+        colliderRefreshSet.Clear();
+        foreach (KeyValuePair<Collider, ColliderRegistration> pair in colliderRegistrations)
+        {
+            colliderRefreshSet.Add(pair.Key);
+        }
+
+        colliderCleanupBuffer.Clear();
+        foreach (Collider targetCollider in colliderRefreshSet)
+        {
+            if (targetCollider == null)
+            {
+                colliderCleanupBuffer.Add(targetCollider);
+                continue;
+            }
+
+            ApplyColliderVisibility(targetCollider);
+        }
+
+        for (int i = 0; i < colliderCleanupBuffer.Count; i++)
+        {
+            Unregister(colliderCleanupBuffer[i], false);
+        }
+
+        colliderCleanupBuffer.Clear();
+        colliderRefreshSet.Clear();
+    }
+
     private void RefreshMovedRangeBoundary(Vector2Int previousCenter, Vector2Int nextCenter)
     {
         refreshSet.Clear();
+        colliderRefreshSet.Clear();
         CollectRangeDifference(previousCenter, nextCenter);
         CollectRangeDifference(nextCenter, previousCenter);
 
         for (int i = 0; i < unbucketedRenderers.Count; i++)
         {
             refreshSet.Add(unbucketedRenderers[i]);
+        }
+
+        for (int i = 0; i < unbucketedColliders.Count; i++)
+        {
+            colliderRefreshSet.Add(unbucketedColliders[i]);
         }
 
         cleanupBuffer.Clear();
@@ -238,6 +430,26 @@ internal sealed class PlayerRangeRendererCullingIndex
 
         cleanupBuffer.Clear();
         refreshSet.Clear();
+
+        colliderCleanupBuffer.Clear();
+        foreach (Collider targetCollider in colliderRefreshSet)
+        {
+            if (targetCollider == null)
+            {
+                colliderCleanupBuffer.Add(targetCollider);
+                continue;
+            }
+
+            ApplyColliderVisibility(targetCollider);
+        }
+
+        for (int i = 0; i < colliderCleanupBuffer.Count; i++)
+        {
+            Unregister(colliderCleanupBuffer[i], false);
+        }
+
+        colliderCleanupBuffer.Clear();
+        colliderRefreshSet.Clear();
     }
 
     private void CollectRangeDifference(Vector2Int sourceCenter, Vector2Int excludedCenter)
@@ -268,55 +480,69 @@ internal sealed class PlayerRangeRendererCullingIndex
     {
         for (int x = minX; x <= maxX; x++)
         {
-            if (!renderersByCoordinate.TryGetValue(new Vector2Int(x, y), out List<Renderer> renderers))
+            Vector2Int coordinate = new Vector2Int(x, y);
+            if (renderersByCoordinate.TryGetValue(coordinate, out List<Renderer> renderers))
             {
-                continue;
+                for (int i = 0; i < renderers.Count; i++)
+                {
+                    refreshSet.Add(renderers[i]);
+                }
             }
 
-            for (int i = 0; i < renderers.Count; i++)
+            if (collidersByCoordinate.TryGetValue(coordinate, out List<Collider> colliders))
             {
-                refreshSet.Add(renderers[i]);
+                for (int i = 0; i < colliders.Count; i++)
+                {
+                    colliderRefreshSet.Add(colliders[i]);
+                }
             }
         }
     }
 
-    private void AddToSpatialBuckets(
-        Renderer targetRenderer,
+    private static void AddToSpatialBuckets<T>(
+        T component,
         Vector2Int minCoordinate,
-        Vector2Int maxCoordinate)
+        Vector2Int maxCoordinate,
+        Dictionary<Vector2Int, List<T>> componentsByCoordinate)
+        where T : Component
     {
         for (int y = minCoordinate.y; y <= maxCoordinate.y; y++)
         {
             for (int x = minCoordinate.x; x <= maxCoordinate.x; x++)
             {
                 Vector2Int coordinate = new Vector2Int(x, y);
-                if (!renderersByCoordinate.TryGetValue(coordinate, out List<Renderer> renderers))
+                if (!componentsByCoordinate.TryGetValue(coordinate, out List<T> components))
                 {
-                    renderers = new List<Renderer>(4);
-                    renderersByCoordinate.Add(coordinate, renderers);
+                    components = new List<T>(4);
+                    componentsByCoordinate.Add(coordinate, components);
                 }
 
-                renderers.Add(targetRenderer);
+                components.Add(component);
             }
         }
     }
 
-    private void RemoveFromSpatialBuckets(Renderer targetRenderer, Registration registration)
+    private static void RemoveFromSpatialBuckets<T>(
+        T component,
+        Vector2Int minCoordinate,
+        Vector2Int maxCoordinate,
+        Dictionary<Vector2Int, List<T>> componentsByCoordinate)
+        where T : Component
     {
-        for (int y = registration.minCoordinate.y; y <= registration.maxCoordinate.y; y++)
+        for (int y = minCoordinate.y; y <= maxCoordinate.y; y++)
         {
-            for (int x = registration.minCoordinate.x; x <= registration.maxCoordinate.x; x++)
+            for (int x = minCoordinate.x; x <= maxCoordinate.x; x++)
             {
                 Vector2Int coordinate = new Vector2Int(x, y);
-                if (!renderersByCoordinate.TryGetValue(coordinate, out List<Renderer> renderers))
+                if (!componentsByCoordinate.TryGetValue(coordinate, out List<T> components))
                 {
                     continue;
                 }
 
-                renderers.Remove(targetRenderer);
-                if (renderers.Count == 0)
+                components.Remove(component);
+                if (components.Count == 0)
                 {
-                    renderersByCoordinate.Remove(coordinate);
+                    componentsByCoordinate.Remove(coordinate);
                 }
             }
         }
@@ -353,11 +579,105 @@ internal sealed class PlayerRangeRendererCullingIndex
         hiddenRendererPreviousStates.Remove(targetRenderer);
     }
 
+    private void ApplyColliderVisibility(Collider targetCollider)
+    {
+        if (!colliderRegistrations.TryGetValue(
+                targetCollider,
+                out ColliderRegistration registration))
+        {
+            return;
+        }
+
+        Bounds bounds = ResolveColliderBounds(targetCollider, ref registration);
+        colliderRegistrations[targetCollider] = registration;
+        if (Intersects(bounds))
+        {
+            RestoreDisabledState(targetCollider, true);
+            return;
+        }
+
+        if (!disabledColliderPreviousStates.ContainsKey(targetCollider))
+        {
+            disabledColliderPreviousStates.Add(targetCollider, targetCollider.enabled);
+        }
+
+        targetCollider.enabled = false;
+    }
+
+    private Bounds ResolveColliderBounds(
+        Collider targetCollider,
+        ref ColliderRegistration registration)
+    {
+        Vector3 currentPosition = targetCollider.transform.position;
+        if (targetCollider.enabled && targetCollider.gameObject.activeInHierarchy)
+        {
+            registration.bounds = targetCollider.bounds;
+        }
+        else if (registration.isDynamic)
+        {
+            registration.bounds.center += currentPosition - registration.trackedPosition;
+        }
+
+        registration.trackedPosition = currentPosition;
+        return registration.bounds;
+    }
+
+    private void RestoreDisabledState(Collider targetCollider, bool restoreEnabledState)
+    {
+        if (!disabledColliderPreviousStates.TryGetValue(
+                targetCollider,
+                out bool previousState))
+        {
+            return;
+        }
+
+        if (restoreEnabledState && targetCollider != null)
+        {
+            targetCollider.enabled = previousState;
+        }
+
+        disabledColliderPreviousStates.Remove(targetCollider);
+    }
+
+    private static Vector2Int GetMinimumCoordinate(Bounds bounds)
+    {
+        return new Vector2Int(
+            Mathf.CeilToInt(bounds.min.x - 0.5f),
+            Mathf.CeilToInt(bounds.min.z - 0.5f));
+    }
+
+    private static Vector2Int GetMaximumCoordinate(Bounds bounds)
+    {
+        return new Vector2Int(
+            Mathf.FloorToInt(bounds.max.x + 0.5f),
+            Mathf.FloorToInt(bounds.max.z + 0.5f));
+    }
+
+    private static bool CanUseSpatialBuckets(
+        Vector2Int minCoordinate,
+        Vector2Int maxCoordinate)
+    {
+        long width = (long)maxCoordinate.x - minCoordinate.x + 1L;
+        long height = (long)maxCoordinate.y - minCoordinate.y + 1L;
+        return width > 0L
+               && height > 0L
+               && width <= MaxBucketCellsPerComponent
+               && height <= MaxBucketCellsPerComponent
+               && width * height <= MaxBucketCellsPerComponent;
+    }
+
     private static bool IsDynamicRenderer(Renderer targetRenderer)
     {
         return targetRenderer is SkinnedMeshRenderer
                || targetRenderer.GetComponentInParent<Rigidbody>() != null
                || targetRenderer.GetComponentInParent<AnimalAIController>() != null
                || targetRenderer.GetComponentInParent<Vehicle>() != null;
+    }
+
+    private static bool IsDynamicCollider(Collider targetCollider)
+    {
+        return targetCollider.GetComponentInParent<Rigidbody>() != null
+               || targetCollider.GetComponentInParent<AnimalAIController>() != null
+               || targetCollider.GetComponentInParent<Vehicle>() != null;
     }
 }

@@ -55,13 +55,12 @@ public sealed class VirtualConveyorBeltRenderer : MonoBehaviour
     private bool suppressNativeSourceRenderers = true;
     [SerializeField]
     private bool hideNativeSourceObjects = true;
-    [SerializeField]
-    private bool virtualizeCornerBeltsTopOnly = true;
 
     private readonly Dictionary<ConveyorBelt, BeltRenderCache> beltRenderCaches = new Dictionary<ConveyorBelt, BeltRenderCache>();
     private readonly VirtualRenderBatchCollection batches = new VirtualRenderBatchCollection();
     private readonly List<VirtualConveyorBeltRenderData> scratchRenderData = new List<VirtualConveyorBeltRenderData>(8);
     private Camera mainCamera;
+    private TerrainGenerator terrainGenerator;
 
     public int RegisteredBeltCount => beltRenderCaches.Count;
     public int ActiveBatchCount => batches.ActiveBatchCount;
@@ -123,7 +122,7 @@ public sealed class VirtualConveyorBeltRenderer : MonoBehaviour
         }
     }
 
-    public int FullySuppressedBeltCount
+    public int VirtualizedBeltCount
     {
         get
         {
@@ -245,6 +244,7 @@ public sealed class VirtualConveyorBeltRenderer : MonoBehaviour
 
     private void Awake()
     {
+        terrainGenerator = GetComponent<TerrainGenerator>();
         if (!Application.isPlaying)
         {
             return;
@@ -274,18 +274,17 @@ public sealed class VirtualConveyorBeltRenderer : MonoBehaviour
 
         BeltRenderCache cache = GetOrCreateBeltRenderCache(conveyorBelt);
         cache.IsCornerVariant = conveyorBelt.IsCornerVariant;
-        bool beltTopOnly = ShouldVirtualizeBeltTopOnly(conveyorBelt);
         conveyorBelt.SetVirtualizedSourceViewHidden(false);
         bool hasVirtualRenderData = suppressNativeSourceRenderers
-            && RefreshBeltRenderCache(conveyorBelt, cache, beltTopOnly);
+            && RefreshBeltRenderCache(conveyorBelt, cache);
         if (!suppressNativeSourceRenderers)
         {
             ClearBeltRenderCache(cache);
         }
 
-        conveyorBelt.SetVirtualRenderingSuppressed(hasVirtualRenderData, beltTopOnly);
+        conveyorBelt.SetVirtualRenderingSuppressed(hasVirtualRenderData);
         conveyorBelt.SetRuntimeRenderingHidden(IsBeltRenderingHidden());
-        conveyorBelt.SetVirtualizedSourceViewHidden(hasVirtualRenderData && hideNativeSourceObjects && !beltTopOnly);
+        conveyorBelt.SetVirtualizedSourceViewHidden(hasVirtualRenderData && hideNativeSourceObjects);
     }
 
     public void Unregister(ConveyorBelt conveyorBelt, bool restoreNativeRenderers = true)
@@ -397,11 +396,11 @@ public sealed class VirtualConveyorBeltRenderer : MonoBehaviour
         return cache;
     }
 
-    private bool RefreshBeltRenderCache(ConveyorBelt conveyorBelt, BeltRenderCache cache, bool beltTopOnly)
+    private bool RefreshBeltRenderCache(ConveyorBelt conveyorBelt, BeltRenderCache cache)
     {
         ClearBeltRenderCache(cache);
         scratchRenderData.Clear();
-        bool hasCompleteCoverage = conveyorBelt.AppendVirtualRenderData(scratchRenderData, beltTopOnly);
+        bool hasCompleteCoverage = conveyorBelt.AppendVirtualRenderData(scratchRenderData);
         if (!hasCompleteCoverage)
         {
             scratchRenderData.Clear();
@@ -429,18 +428,17 @@ public sealed class VirtualConveyorBeltRenderer : MonoBehaviour
             }
 
             cache.IsCornerVariant = conveyorBelt.IsCornerVariant;
-            bool beltTopOnly = ShouldVirtualizeBeltTopOnly(conveyorBelt);
             conveyorBelt.SetVirtualizedSourceViewHidden(false);
             bool hasVirtualRenderData = suppressNativeSourceRenderers
-                && RefreshBeltRenderCache(conveyorBelt, cache, beltTopOnly);
+                && RefreshBeltRenderCache(conveyorBelt, cache);
             if (!suppressNativeSourceRenderers)
             {
                 ClearBeltRenderCache(cache);
             }
 
-            conveyorBelt.SetVirtualRenderingSuppressed(hasVirtualRenderData, beltTopOnly);
+            conveyorBelt.SetVirtualRenderingSuppressed(hasVirtualRenderData);
             conveyorBelt.SetRuntimeRenderingHidden(IsBeltRenderingHidden());
-            conveyorBelt.SetVirtualizedSourceViewHidden(hasVirtualRenderData && hideNativeSourceObjects && !beltTopOnly);
+            conveyorBelt.SetVirtualizedSourceViewHidden(hasVirtualRenderData && hideNativeSourceObjects);
         }
     }
 
@@ -497,14 +495,20 @@ public sealed class VirtualConveyorBeltRenderer : MonoBehaviour
             ShadowCastingMode.Off,
             false,
             renderData.HasUvScroll,
-            VirtualRenderBatchKey.QuantizeUvScroll(renderData.UvScrollY),
             batchCellX: cellX,
             batchCellZ: cellZ,
-            invertCulling: HasOddNegativeScale(renderData.Matrix),
-            uvLengthScaleTicks: VirtualRenderBatchKey.QuantizeUvLength(renderData.UvLengthScale),
-            uvLengthOffsetTicks: VirtualRenderBatchKey.QuantizeUvLength(renderData.UvLengthOffset));
+            invertCulling: HasOddNegativeScale(renderData.Matrix));
 
-        batches.AddOwnedMatrix(beltCache, beltCache.batchEntries, key, renderData.Matrix);
+        batches.AddOwnedMatrix(
+            beltCache,
+            beltCache.batchEntries,
+            key,
+            renderData.Matrix,
+            new Vector4(
+                0f,
+                renderData.UvScrollY,
+                renderData.UvLengthScale,
+                renderData.UvLengthOffset));
         if (renderData.UsesDedicatedBeltTopMesh)
         {
             beltCache.DedicatedBeltTopEntryCount++;
@@ -513,7 +517,12 @@ public sealed class VirtualConveyorBeltRenderer : MonoBehaviour
 
     private void RenderBatches()
     {
-        batches.RenderBatches(mainCamera);
+        if (terrainGenerator == null)
+        {
+            terrainGenerator = TerrainGenerator.Active;
+        }
+
+        batches.RenderBatches(mainCamera, terrainGenerator);
     }
 
     private static bool IsBeltRenderingHidden()
@@ -537,13 +546,6 @@ public sealed class VirtualConveyorBeltRenderer : MonoBehaviour
     private static int GetBatchCell(float worldCoordinate, float cellSize)
     {
         return Mathf.FloorToInt(worldCoordinate / Mathf.Max(1f, cellSize));
-    }
-
-    private bool ShouldVirtualizeBeltTopOnly(ConveyorBelt conveyorBelt)
-    {
-        return virtualizeCornerBeltsTopOnly
-            && conveyorBelt != null
-            && conveyorBelt.IsCornerVariant;
     }
 
     private float ResolveMinimumMergedBatchCellSize()

@@ -33,6 +33,8 @@ public class SaveManager : MonoBehaviour
         set => selectedSlotIndex = NormalizeSlotIndex(value);
     }
 
+    public bool WillInitializeTerrainOnStart => isActiveAndEnabled && loadRecentSlotOnStart;
+
     private IEnumerator Start()
     {
         CaptureDefaultPlayerState();

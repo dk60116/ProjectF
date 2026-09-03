@@ -211,6 +211,9 @@ internal sealed class BlockRuntimeSimulationState
     internal int cachedFrontLaneIndex = -1;
     internal int cachedBackLaneIndex = -1;
     internal int conveyorItemVisualVersion;
+    internal bool conveyorTickClockInitialized;
+    internal float lastConveyorTickTime;
+    internal int lastConveyorTickFrame = -1;
 }
 
 /// <summary>
@@ -249,6 +252,39 @@ public partial class Block
             runtimeSimulationState = new BlockRuntimeSimulationState();
             return runtimeSimulationState;
         }
+    }
+
+    internal void ResetConveyorTickClock()
+    {
+        BlockRuntimeSimulationState state = SimulationState;
+        state.conveyorTickClockInitialized = true;
+        // Treat activation as beginning at the current frame boundary. If the
+        // wake queue reaches this block later, the entire skipped interval is
+        // consumed instead of only the final frame's deltaTime.
+        state.lastConveyorTickTime = Mathf.Max(0f, Time.time - Time.deltaTime);
+    }
+
+    private float ConsumeConveyorTickDeltaTime(float fallbackDeltaTime)
+    {
+        BlockRuntimeSimulationState state = SimulationState;
+        int currentFrame = Time.frameCount;
+        if (state.lastConveyorTickFrame == currentFrame)
+        {
+            return 0f;
+        }
+
+        state.lastConveyorTickFrame = currentFrame;
+        float now = Time.time;
+        if (!state.conveyorTickClockInitialized)
+        {
+            state.conveyorTickClockInitialized = true;
+            state.lastConveyorTickTime = now;
+            return Mathf.Max(0f, fallbackDeltaTime);
+        }
+
+        float elapsedTime = Mathf.Max(0f, now - state.lastConveyorTickTime);
+        state.lastConveyorTickTime = now;
+        return elapsedTime;
     }
 
     // These forwarding properties deliberately preserve the existing conveyor

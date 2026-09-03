@@ -59,6 +59,7 @@ public class PortableObject : MonoBehaviour
     public bool IsMovingToTarget => isMovingToTarget;
     public bool IsUsingBatchedRendering => useBatchedRendering;
     public bool IsVisualRenderingSuppressed => suppressVisualRendering;
+    public Block PickupSourceBlock { get; private set; }
     public int FocusStackCount
     {
         get
@@ -126,6 +127,11 @@ public class PortableObject : MonoBehaviour
         }
 
         return gate;
+    }
+
+    public void SetPickupSourceBlock(Block sourceBlock)
+    {
+        PickupSourceBlock = sourceBlock;
     }
 
     public void SetSleepAwakeSleeping(bool sleeping)
@@ -1003,6 +1009,7 @@ public class PortableObject : MonoBehaviour
     private void OnDisable()
     {
         liveObjects.Remove(this);
+        PickupSourceBlock = null;
         isMovingToTarget = false;
         bodyRendererTemporarilyHidden = false;
         ClearFocusOutlines(false);

@@ -101,6 +101,7 @@ public partial class TerrainGenerator : MonoBehaviour
             if (activeConveyors.Add(handle))
             {
                 activeConveyorOrderDirty = true;
+                block.ResetConveyorTickClock();
             }
 
             if (queueWake)
@@ -4702,7 +4703,7 @@ public partial class TerrainGenerator : MonoBehaviour
         MapObjectTickProfiler.AddRuntimeCounter("VirtualBelt", "NativeSourceObjectHidingEnabled", virtualConveyorBeltRenderer != null && virtualConveyorBeltRenderer.NativeSourceObjectHidingEnabled);
         MapObjectTickProfiler.AddRuntimeCounter("VirtualBelt", "SourceViewHiddenBelts", virtualConveyorBeltRenderer != null ? virtualConveyorBeltRenderer.HiddenSourceViewBeltCount : 0);
         MapObjectTickProfiler.AddRuntimeCounter("VirtualBelt", "SourceViewHiddenObjects", virtualConveyorBeltRenderer != null ? virtualConveyorBeltRenderer.HiddenSourceViewObjectCount : 0);
-        MapObjectTickProfiler.AddRuntimeCounter("VirtualBelt", "FullySuppressedBelts", virtualConveyorBeltRenderer != null ? virtualConveyorBeltRenderer.FullySuppressedBeltCount : 0);
+        MapObjectTickProfiler.AddRuntimeCounter("VirtualBelt", "VirtualizedBelts", virtualConveyorBeltRenderer != null ? virtualConveyorBeltRenderer.VirtualizedBeltCount : 0);
         ResetConveyorStateSaveCounters();
     }
 

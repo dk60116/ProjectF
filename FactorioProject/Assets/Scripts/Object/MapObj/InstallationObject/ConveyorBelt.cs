@@ -31,6 +31,7 @@ public class ConveyorBelt : InstallationObject
     private static readonly int UvScrollYShaderId = Shader.PropertyToID("_UVScrollY");
     private static readonly int UvLengthScaleShaderId = Shader.PropertyToID("_UvLengthScale");
     private static readonly int UvLengthOffsetShaderId = Shader.PropertyToID("_UvLengthOffset");
+    private static readonly int ConveyorUvDataShaderId = Shader.PropertyToID("_ConveyorUvData");
     private static Mesh virtualBeltTopMesh;
 
     [SerializeField]
@@ -69,7 +70,6 @@ public class ConveyorBelt : InstallationObject
     private EndpointRuntimeState lastEndpointRuntimeState;
     private bool beltTopTransformStateCached;
     private bool virtualRenderingSuppressed;
-    private bool virtualRenderingSuppressBeltTopOnly;
     private bool runtimeRenderingHidden;
     private bool runtimeRootSuspended;
     private readonly List<GameObject> virtualSourceViewObjects = new List<GameObject>(8);
@@ -341,7 +341,6 @@ public class ConveyorBelt : InstallationObject
         TerrainGenerator.Active?.UnregisterVirtualConveyorBelt(this, false);
         SetVirtualizedSourceViewHidden(false);
         virtualRenderingSuppressed = false;
-        virtualRenderingSuppressBeltTopOnly = false;
         if (!isSuspendingRoot)
         {
             runtimeRenderingHidden = false;
@@ -386,7 +385,7 @@ public class ConveyorBelt : InstallationObject
         }
     }
 
-    public bool AppendVirtualRenderData(List<VirtualConveyorBeltRenderData> results, bool beltTopOnly = false)
+    public bool AppendVirtualRenderData(List<VirtualConveyorBeltRenderData> results)
     {
         if (results == null)
         {
@@ -404,11 +403,12 @@ public class ConveyorBelt : InstallationObject
                 continue;
             }
 
-            bool hasUvScroll = TryGetBeltTopRenderInfo(renderer, out BeltTopRenderInfo beltTopInfo);
-            if (beltTopOnly && !hasUvScroll)
+            if (RequiresNativeRendering(renderer))
             {
                 continue;
             }
+
+            bool hasUvScroll = TryGetBeltTopRenderInfo(renderer, out BeltTopRenderInfo beltTopInfo);
 
             MeshFilter meshFilter = i < cachedRendererMeshFilters.Length ? cachedRendererMeshFilters[i] : null;
             Mesh mesh = meshFilter != null ? meshFilter.sharedMesh : null;
@@ -487,10 +487,9 @@ public class ConveyorBelt : InstallationObject
         return hasCompleteCoverage;
     }
 
-    public void SetVirtualRenderingSuppressed(bool isSuppressed, bool beltTopOnly = false)
+    public void SetVirtualRenderingSuppressed(bool isSuppressed)
     {
         virtualRenderingSuppressed = isSuppressed;
-        virtualRenderingSuppressBeltTopOnly = isSuppressed && beltTopOnly;
         if (!isSuppressed && !runtimeRenderingHidden)
         {
             RestoreNativeRuntimeRenderersAfterVirtualization();
@@ -617,8 +616,8 @@ public class ConveyorBelt : InstallationObject
             return;
         }
 
-        bool startSeam = HasStraightCrossingBeltAtEndpoint(state.StartCoordinate, state.StartDirection);
-        bool endSeam = HasStraightCrossingBeltAtEndpoint(state.EndCoordinate, state.EndDirection);
+        bool startSeam = HasPerpendicularBeltAtEndpoint(state.StartCoordinate, state.StartDirection);
+        bool endSeam = HasPerpendicularBeltAtEndpoint(state.EndCoordinate, state.EndDirection);
         bool startEnd = !startSeam
                         && !HasConnectedBeltAtEndpoint(true, state.StartCoordinate, state.StartDirection);
         bool endEnd = !endSeam
@@ -648,11 +647,11 @@ public class ConveyorBelt : InstallationObject
             return;
         }
 
-        bool startSeam = HasStraightCrossingBeltAtEndpoint(
+        bool startSeam = HasPerpendicularBeltAtEndpoint(
             state.StartCoordinate,
             state.StartDirection,
             lookup);
-        bool endSeam = HasStraightCrossingBeltAtEndpoint(
+        bool endSeam = HasPerpendicularBeltAtEndpoint(
             state.EndCoordinate,
             state.EndDirection,
             lookup);
@@ -847,10 +846,10 @@ public class ConveyorBelt : InstallationObject
                && neighborInputDirection == -endpointDirection;
     }
 
-    private bool HasStraightCrossingBeltAtEndpoint(Vector2Int endpointCoordinate, Vector2Int flowDirection)
+    private bool HasPerpendicularBeltAtEndpoint(Vector2Int endpointCoordinate, Vector2Int flowDirection)
     {
         if (!TryGetConveyorBlockAtCoordinate(endpointCoordinate, out _, out ConveyorBelt endpointBelt)
-            || !IsStraightEndpointVisualBelt(endpointBelt)
+            || !CanShowPerpendicularEndpointJoin(this, endpointBelt, endpointCoordinate)
             || !endpointBelt.TryGetOutputDirection(endpointBelt.transform.rotation, out Vector2Int neighborFlowDirection))
         {
             return false;
@@ -882,20 +881,43 @@ public class ConveyorBelt : InstallationObject
                && neighborInputDirection == -endpointDirection;
     }
 
-    private bool HasStraightCrossingBeltAtEndpoint(
+    private bool HasPerpendicularBeltAtEndpoint(
         Vector2Int endpointCoordinate,
         Vector2Int flowDirection,
         EndpointConveyorLookup lookup)
     {
         if (lookup == null
             || !lookup(endpointCoordinate, this, out ConveyorBelt endpointBelt, out Quaternion endpointRotation)
-            || !IsStraightEndpointVisualBelt(endpointBelt)
+            || !CanShowPerpendicularEndpointJoin(this, endpointBelt, endpointCoordinate)
             || !endpointBelt.TryGetOutputDirection(endpointRotation, out Vector2Int neighborFlowDirection))
         {
             return false;
         }
 
         return IsPerpendicular(flowDirection, neighborFlowDirection);
+    }
+
+    private static bool CanShowPerpendicularEndpointJoin(
+        ConveyorBelt currentBelt,
+        ConveyorBelt endpointBelt,
+        Vector2Int endpointCoordinate)
+    {
+        if (!SupportsEndpointVisuals(endpointBelt))
+        {
+            return false;
+        }
+
+        if (currentBelt is ConvayorBelt2F)
+        {
+            return !(endpointBelt is ConvayorBelt2F);
+        }
+
+        if (endpointBelt is ConvayorBelt2F endpointBelt2F)
+        {
+            return endpointBelt2F.IsInputEdgeCoordinate(endpointCoordinate);
+        }
+
+        return IsStraightEndpointVisualBelt(endpointBelt);
     }
 
     private bool TryGetCurrentRuntimeBlock(out Block currentBlock)
@@ -1418,6 +1440,9 @@ public class ConveyorBelt : InstallationObject
             beltTopPropertyBlock.SetFloat(UvScrollYShaderId, targetUvScrollY);
             beltTopPropertyBlock.SetFloat(UvLengthScaleShaderId, info.UvLengthScale);
             beltTopPropertyBlock.SetFloat(UvLengthOffsetShaderId, info.UvLengthOffset);
+            beltTopPropertyBlock.SetVector(
+                ConveyorUvDataShaderId,
+                new Vector4(0f, targetUvScrollY, info.UvLengthScale, info.UvLengthOffset));
             renderer.SetPropertyBlock(beltTopPropertyBlock);
         }
     }
@@ -1693,7 +1718,8 @@ public class ConveyorBelt : InstallationObject
         if (rendererObject == null
             || rendererObject == gameObject
             || IsBodyVisualObject(rendererObject)
-            || IsEndpointVisualObject(rendererObject))
+            || IsEndpointVisualObject(rendererObject)
+            || RequiresNativeRendering(renderer))
         {
             return false;
         }
@@ -1842,11 +1868,6 @@ public class ConveyorBelt : InstallationObject
             return;
         }
 
-        if (virtualRenderingSuppressBeltTopOnly && beltTopRenderInfos.Count == 0)
-        {
-            RefreshBeltTopRenderInfo();
-        }
-
         EnsureRendererCache();
         for (int i = 0; i < cachedRenderers.Length; i++)
         {
@@ -1856,9 +1877,7 @@ public class ConveyorBelt : InstallationObject
                 continue;
             }
 
-            renderer.enabled = virtualRenderingSuppressBeltTopOnly
-                ? !TryGetBeltTopRenderInfo(renderer, out _)
-                : false;
+            renderer.enabled = RequiresNativeRendering(renderer);
         }
     }
 
@@ -1921,6 +1940,35 @@ public class ConveyorBelt : InstallationObject
         string objectName = candidate.name;
         return objectName == "Body"
                || objectName.StartsWith("Body_", System.StringComparison.Ordinal);
+    }
+
+    private bool IsReservedNativeAnimatedRenderer(MeshRenderer renderer)
+    {
+        Transform current = renderer != null ? renderer.transform : null;
+        while (current != null && current != transform)
+        {
+            string objectName = current.name;
+            if (objectName == "Gears"
+                || objectName.StartsWith("Gear", System.StringComparison.Ordinal))
+            {
+                return true;
+            }
+
+            current = current.parent;
+        }
+
+        return false;
+    }
+
+    private bool RequiresNativeRendering(MeshRenderer renderer)
+    {
+        // Gears keep their GameObject renderer because their transforms will be animated.
+        // Corner bodies use a prefab-specific mesh/material variant that is not yet safe on
+        // the shared instanced path, so keep only that renderer native as a targeted fallback.
+        return IsReservedNativeAnimatedRenderer(renderer)
+               || (IsCornerVariant
+                   && renderer != null
+                   && IsBodyVisualObject(renderer.gameObject));
     }
 
 #if UNITY_EDITOR

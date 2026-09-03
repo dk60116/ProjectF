@@ -10,9 +10,6 @@ public interface IVirtualRenderBatchOwner
 
 public readonly struct VirtualRenderBatchKey : System.IEquatable<VirtualRenderBatchKey>
 {
-    public const int UvScrollQuantize = 10000;
-    public const int UvLengthQuantize = 10000;
-
     public readonly Mesh Mesh;
     public readonly Material Material;
     public readonly int Layer;
@@ -20,9 +17,6 @@ public readonly struct VirtualRenderBatchKey : System.IEquatable<VirtualRenderBa
     public readonly ShadowCastingMode ShadowCastingMode;
     public readonly bool ReceiveShadows;
     public readonly bool HasUvScroll;
-    public readonly int UvScrollYTicks;
-    public readonly int UvLengthScaleTicks;
-    public readonly int UvLengthOffsetTicks;
     public readonly bool UseSleepAwakeDarkTint;
     public readonly bool UseBeltItemLineDebugColor;
     public readonly Color32 BeltItemLineDebugColor;
@@ -39,16 +33,13 @@ public readonly struct VirtualRenderBatchKey : System.IEquatable<VirtualRenderBa
         ShadowCastingMode shadowCastingMode,
         bool receiveShadows,
         bool hasUvScroll,
-        int uvScrollYTicks,
         bool useSleepAwakeDarkTint = false,
         bool useBeltItemLineDebugColor = false,
         Color32 beltItemLineDebugColor = default,
         int batchGroupId = 0,
         int batchCellX = 0,
         int batchCellZ = 0,
-        bool invertCulling = false,
-        int uvLengthScaleTicks = UvLengthQuantize,
-        int uvLengthOffsetTicks = 0)
+        bool invertCulling = false)
     {
         Mesh = mesh;
         Material = material;
@@ -57,9 +48,6 @@ public readonly struct VirtualRenderBatchKey : System.IEquatable<VirtualRenderBa
         ShadowCastingMode = shadowCastingMode;
         ReceiveShadows = receiveShadows;
         HasUvScroll = hasUvScroll;
-        UvScrollYTicks = hasUvScroll ? uvScrollYTicks : 0;
-        UvLengthScaleTicks = hasUvScroll ? uvLengthScaleTicks : UvLengthQuantize;
-        UvLengthOffsetTicks = hasUvScroll ? uvLengthOffsetTicks : 0;
         UseSleepAwakeDarkTint = useSleepAwakeDarkTint;
         UseBeltItemLineDebugColor = useBeltItemLineDebugColor;
         BeltItemLineDebugColor = useBeltItemLineDebugColor ? beltItemLineDebugColor : (Color32)Color.white;
@@ -67,16 +55,6 @@ public readonly struct VirtualRenderBatchKey : System.IEquatable<VirtualRenderBa
         BatchCellX = batchCellX;
         BatchCellZ = batchCellZ;
         InvertCulling = invertCulling;
-    }
-
-    public static int QuantizeUvScroll(float uvScrollY)
-    {
-        return Mathf.RoundToInt(uvScrollY * UvScrollQuantize);
-    }
-
-    public static int QuantizeUvLength(float uvLengthValue)
-    {
-        return Mathf.RoundToInt(uvLengthValue * UvLengthQuantize);
     }
 
     public bool Equals(VirtualRenderBatchKey other)
@@ -88,9 +66,6 @@ public readonly struct VirtualRenderBatchKey : System.IEquatable<VirtualRenderBa
             && ShadowCastingMode == other.ShadowCastingMode
             && ReceiveShadows == other.ReceiveShadows
             && HasUvScroll == other.HasUvScroll
-            && UvScrollYTicks == other.UvScrollYTicks
-            && UvLengthScaleTicks == other.UvLengthScaleTicks
-            && UvLengthOffsetTicks == other.UvLengthOffsetTicks
             && UseSleepAwakeDarkTint == other.UseSleepAwakeDarkTint
             && UseBeltItemLineDebugColor == other.UseBeltItemLineDebugColor
             && BeltItemLineDebugColor.Equals(other.BeltItemLineDebugColor)
@@ -116,9 +91,6 @@ public readonly struct VirtualRenderBatchKey : System.IEquatable<VirtualRenderBa
             hash = (hash * 397) ^ (int)ShadowCastingMode;
             hash = (hash * 397) ^ (ReceiveShadows ? 1 : 0);
             hash = (hash * 397) ^ (HasUvScroll ? 1 : 0);
-            hash = (hash * 397) ^ UvScrollYTicks;
-            hash = (hash * 397) ^ UvLengthScaleTicks;
-            hash = (hash * 397) ^ UvLengthOffsetTicks;
             hash = (hash * 397) ^ (UseSleepAwakeDarkTint ? 1 : 0);
             hash = (hash * 397) ^ (UseBeltItemLineDebugColor ? 1 : 0);
             hash = (hash * 397) ^ BeltItemLineDebugColor.GetHashCode();
@@ -148,13 +120,11 @@ public sealed class VirtualRenderBatchCollection
     private const int MaxInstancesPerDraw = 1023;
     private const float MinimumWorldBoundsSize = 0.25f;
 
-    private static readonly int UvScrollXShaderId = Shader.PropertyToID("_UVScrollX");
-    private static readonly int UvScrollYShaderId = Shader.PropertyToID("_UVScrollY");
-    private static readonly int UvLengthScaleShaderId = Shader.PropertyToID("_UvLengthScale");
-    private static readonly int UvLengthOffsetShaderId = Shader.PropertyToID("_UvLengthOffset");
+    private static readonly int ConveyorUvDataShaderId = Shader.PropertyToID("_ConveyorUvData");
 
     private readonly Dictionary<VirtualRenderBatchKey, BatchRenderCache> batchesByKey = new Dictionary<VirtualRenderBatchKey, BatchRenderCache>();
     private readonly List<VirtualRenderBatchKey> activeBatchKeys = new List<VirtualRenderBatchKey>();
+    private readonly List<Vector4> uvDrawScratch = new List<Vector4>(MaxInstancesPerDraw);
     private readonly Plane[] renderFrustumPlanes = new Plane[6];
     private VirtualRenderBatchRendererGroupBackend batchRendererGroupBackend;
 
@@ -213,6 +183,7 @@ public sealed class VirtualRenderBatchCollection
         DisposeBatchRendererGroupBackend();
         batchesByKey.Clear();
         activeBatchKeys.Clear();
+        uvDrawScratch.Clear();
     }
 
     public void ClearActiveMatrices()
@@ -223,6 +194,7 @@ public sealed class VirtualRenderBatchCollection
             if (batchesByKey.TryGetValue(key, out BatchRenderCache batchCache))
             {
                 batchCache.Matrices.Clear();
+                batchCache.InstanceUvData?.Clear();
                 batchCache.Owners.Clear();
                 batchCache.ClearBounds();
                 batchCache.MarkDataDirty();
@@ -242,6 +214,7 @@ public sealed class VirtualRenderBatchCollection
         }
 
         batchCache.Matrices.Add(matrix);
+        AddInstanceUvData(batchCache, key, ResolveDefaultUvData());
         AddMatrixBounds(key, batchCache, matrix);
         batchCache.MarkDataDirty();
     }
@@ -251,6 +224,21 @@ public sealed class VirtualRenderBatchCollection
         List<VirtualRenderBatchEntry> ownerEntries,
         VirtualRenderBatchKey key,
         Matrix4x4 matrix)
+    {
+        AddOwnedMatrix(
+            owner,
+            ownerEntries,
+            key,
+            matrix,
+            ResolveDefaultUvData());
+    }
+
+    public void AddOwnedMatrix(
+        IVirtualRenderBatchOwner owner,
+        List<VirtualRenderBatchEntry> ownerEntries,
+        VirtualRenderBatchKey key,
+        Matrix4x4 matrix,
+        Vector4 instanceUvData)
     {
         if (owner == null || ownerEntries == null)
         {
@@ -267,6 +255,7 @@ public sealed class VirtualRenderBatchCollection
         int matrixIndex = batchCache.Matrices.Count;
         ownerEntries.Add(new VirtualRenderBatchEntry(key, matrixIndex));
         batchCache.Matrices.Add(matrix);
+        AddInstanceUvData(batchCache, key, instanceUvData);
         batchCache.Owners.Add(new MatrixOwner(owner, entryIndex));
         AddMatrixBounds(key, batchCache, matrix);
         batchCache.MarkDataDirty();
@@ -346,6 +335,7 @@ public sealed class VirtualRenderBatchCollection
                 || !backend.TrySyncBatch(
                     key,
                     batchCache.Matrices,
+                    batchCache.InstanceUvData,
                     worldBounds,
                     batchCache.DataVersion))
             {
@@ -392,15 +382,6 @@ public sealed class VirtualRenderBatchCollection
                 continue;
             }
 
-            RenderParams renderParams = new RenderParams(key.Material)
-            {
-                layer = key.Layer,
-                shadowCastingMode = key.ShadowCastingMode,
-                receiveShadows = key.ReceiveShadows,
-                worldBounds = worldBounds,
-                matProps = ResolveBatchPropertyBlock(key, batchCache)
-            };
-
             bool previousInvertCulling = GL.invertCulling;
             if (previousInvertCulling != key.InvertCulling)
             {
@@ -415,6 +396,18 @@ public sealed class VirtualRenderBatchCollection
                 while (remaining > 0)
                 {
                     int drawCount = Mathf.Min(MaxInstancesPerDraw, remaining);
+                    RenderParams renderParams = new RenderParams(key.Material)
+                    {
+                        layer = key.Layer,
+                        shadowCastingMode = key.ShadowCastingMode,
+                        receiveShadows = key.ReceiveShadows,
+                        worldBounds = worldBounds,
+                        matProps = ResolveBatchPropertyBlock(
+                            key,
+                            batchCache,
+                            startIndex,
+                            drawCount)
+                    };
                     Graphics.RenderMeshInstanced(renderParams, key.Mesh, key.SubmeshIndex, matrices, drawCount, startIndex);
                     startIndex += drawCount;
                     remaining -= drawCount;
@@ -468,6 +461,10 @@ public sealed class VirtualRenderBatchCollection
         if (matrixIndex != lastIndex)
         {
             batchCache.Matrices[matrixIndex] = batchCache.Matrices[lastIndex];
+            if (entry.BatchKey.HasUvScroll)
+            {
+                batchCache.InstanceUvData[matrixIndex] = batchCache.InstanceUvData[lastIndex];
+            }
             MatrixOwner movedOwner = batchCache.Owners[lastIndex];
             batchCache.Owners[matrixIndex] = movedOwner;
             if (movedOwner.Owner != null
@@ -479,6 +476,10 @@ public sealed class VirtualRenderBatchCollection
         }
 
         batchCache.Matrices.RemoveAt(lastIndex);
+        if (entry.BatchKey.HasUvScroll)
+        {
+            batchCache.InstanceUvData.RemoveAt(lastIndex);
+        }
         batchCache.Owners.RemoveAt(lastIndex);
         batchCache.MarkDataDirty();
         if (batchCache.Matrices.Count == 0)
@@ -527,7 +528,11 @@ public sealed class VirtualRenderBatchCollection
         batchRendererGroupBackend = null;
     }
 
-    private MaterialPropertyBlock ResolveBatchPropertyBlock(VirtualRenderBatchKey key, BatchRenderCache batchCache)
+    private MaterialPropertyBlock ResolveBatchPropertyBlock(
+        VirtualRenderBatchKey key,
+        BatchRenderCache batchCache,
+        int startIndex,
+        int instanceCount)
     {
         if (!key.HasUvScroll && !key.UseSleepAwakeDarkTint && !key.UseBeltItemLineDebugColor)
         {
@@ -542,10 +547,18 @@ public sealed class VirtualRenderBatchCollection
         batchCache.PropertyBlock.Clear();
         if (key.HasUvScroll)
         {
-            batchCache.PropertyBlock.SetFloat(UvScrollXShaderId, 0f);
-            batchCache.PropertyBlock.SetFloat(UvScrollYShaderId, key.UvScrollYTicks / (float)VirtualRenderBatchKey.UvScrollQuantize);
-            batchCache.PropertyBlock.SetFloat(UvLengthScaleShaderId, key.UvLengthScaleTicks / (float)VirtualRenderBatchKey.UvLengthQuantize);
-            batchCache.PropertyBlock.SetFloat(UvLengthOffsetShaderId, key.UvLengthOffsetTicks / (float)VirtualRenderBatchKey.UvLengthQuantize);
+            uvDrawScratch.Clear();
+            int endIndex = Mathf.Min(
+                batchCache.InstanceUvData != null ? batchCache.InstanceUvData.Count : 0,
+                startIndex + instanceCount);
+            for (int i = Mathf.Max(0, startIndex); i < endIndex; i++)
+            {
+                uvDrawScratch.Add(batchCache.InstanceUvData[i]);
+            }
+
+            batchCache.PropertyBlock.SetVectorArray(
+                ConveyorUvDataShaderId,
+                uvDrawScratch);
         }
 
         if (key.UseBeltItemLineDebugColor)
@@ -564,6 +577,23 @@ public sealed class VirtualRenderBatchCollection
         }
 
         return batchCache.PropertyBlock;
+    }
+
+    private static void AddInstanceUvData(
+        BatchRenderCache batchCache,
+        VirtualRenderBatchKey key,
+        Vector4 instanceUvData)
+    {
+        if (key.HasUvScroll)
+        {
+            batchCache.InstanceUvData ??= new List<Vector4>(64);
+            batchCache.InstanceUvData.Add(instanceUvData);
+        }
+    }
+
+    private static Vector4 ResolveDefaultUvData()
+    {
+        return new Vector4(0f, -0.5f, 1f, 0f);
     }
 
     private Bounds ResolveWorldBounds(VirtualRenderBatchKey key, BatchRenderCache batchCache)
@@ -635,6 +665,7 @@ public sealed class VirtualRenderBatchCollection
     private sealed class BatchRenderCache
     {
         public readonly List<Matrix4x4> Matrices = new List<Matrix4x4>(64);
+        public List<Vector4> InstanceUvData;
         public readonly List<MatrixOwner> Owners = new List<MatrixOwner>(64);
         public MaterialPropertyBlock PropertyBlock;
         public Bounds WorldBounds;

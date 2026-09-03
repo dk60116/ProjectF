@@ -206,6 +206,25 @@ public class ConvayorBelt2F : ConveyorBelt
                && anchorCoordinate == coordinate;
     }
 
+    public bool IsInputEdgeCoordinate(Vector2Int coordinate)
+    {
+        return TryGetInputDirection(transform.rotation, out Vector2Int inputDirection)
+               && IsFootprintEdgeCoordinate(coordinate, inputDirection);
+    }
+
+    public bool IsOutputEdgeCoordinate(Vector2Int coordinate)
+    {
+        return TryGetOutputDirection(transform.rotation, out Vector2Int outputDirection)
+               && IsFootprintEdgeCoordinate(coordinate, outputDirection);
+    }
+
+    private bool IsFootprintEdgeCoordinate(Vector2Int coordinate, Vector2Int outwardDirection)
+    {
+        return outwardDirection != Vector2Int.zero
+               && CoversCoordinate(coordinate)
+               && !CoversCoordinate(coordinate + outwardDirection);
+    }
+
     public Vector3 ApplyPathHeight(Vector3 worldPosition)
     {
         RefreshPathMetrics();

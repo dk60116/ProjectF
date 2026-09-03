@@ -235,6 +235,7 @@ public partial class TerrainGenerator : MonoBehaviour
 
         InitializePlantedResourceGrowth(spawnedResource, true);
         resourceStateStore?.Save(block.Coordinate, spawnedResource);
+        RefreshTerrainRangeCulling(spawnedResource.transform);
         return true;
     }
 

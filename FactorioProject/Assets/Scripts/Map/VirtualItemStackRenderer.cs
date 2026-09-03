@@ -297,7 +297,6 @@ public sealed class VirtualItemStackRenderer : MonoBehaviour
             ShadowCastingMode.On,
             true,
             false,
-            0,
             false,
             false,
             default,

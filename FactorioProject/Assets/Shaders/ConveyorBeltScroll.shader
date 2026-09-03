@@ -22,6 +22,7 @@ Shader "Custom/ConveyorBeltScroll"
         _FlowAcrossTiling("Flow Across Tiling", Float) = 1
         _UvLengthScale("UV Length Scale", Float) = 1
         _UvLengthOffset("UV Length Offset", Float) = 0
+        [HideInInspector] _ConveyorUvData("Conveyor UV Data", Vector) = (0,-0.5,1,0)
 
         _Surface("__surface", Float) = 0.0
         _Blend("__blend", Float) = 0.0
@@ -168,6 +169,10 @@ Shader "Custom/ConveyorBeltScroll"
                 half _BlueprintRimPower;
             CBUFFER_END
 
+            UNITY_INSTANCING_BUFFER_START(ConveyorPerInstance)
+                UNITY_DEFINE_INSTANCED_PROP(float4, _ConveyorUvData)
+            UNITY_INSTANCING_BUFFER_END(ConveyorPerInstance)
+
             half4 ApplyBlueprintPreview(half4 baseSample)
             {
                 half preview = saturate(_BlueprintPreview);
@@ -288,7 +293,10 @@ Shader "Custom/ConveyorBeltScroll"
                 InputData inputData;
                 InitializeInputDataCustom(input, inputData);
 
-                float2 scrollOffset = frac(float2(_UVScrollX, _UVScrollY) * _Time.y);
+                float4 conveyorUvData = UNITY_ACCESS_INSTANCED_PROP(
+                    ConveyorPerInstance,
+                    _ConveyorUvData);
+                float2 scrollOffset = frac(conveyorUvData.xy * _Time.y);
                 half4 baseSample;
 
                 if (_CornerFlowMode > 0.5h)
@@ -327,7 +335,7 @@ Shader "Custom/ConveyorBeltScroll"
                     }
                     float2 flowUv = float2(
                         widthCoord * max(_FlowAcrossTiling, 0.0001),
-                        frac(alongCoord * max(_FlowAlongScale, 0.0001) + _UVScrollY * _Time.y));
+                        frac(alongCoord * max(_FlowAlongScale, 0.0001) + conveyorUvData.y * _Time.y));
 
                     half4 flowSample = SAMPLE_TEXTURE2D(_FlowMap, sampler_FlowMap, flowUv) * _BaseColor;
                     half4 sanitizedBase = baseStatic;
@@ -337,7 +345,7 @@ Shader "Custom/ConveyorBeltScroll"
                 else
                 {
                     float2 scaledUv = input.uv;
-                    scaledUv.y = scaledUv.y * max(_UvLengthScale, 0.0001) + _UvLengthOffset;
+                    scaledUv.y = scaledUv.y * max(conveyorUvData.z, 0.0001) + conveyorUvData.w;
                     baseSample = SAMPLE_TEXTURE2D(_BaseMap, sampler_BaseMap, scaledUv + scrollOffset) * _BaseColor;
                 }
 

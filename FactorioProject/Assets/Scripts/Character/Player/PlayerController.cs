@@ -4371,6 +4371,11 @@ public partial class PlayerController : MonoBehaviour
         return true;
     }
 
+    public bool TryGetStandingInputOutputAreaBlock(out Block areaBlock)
+    {
+        return TryGetStandingInputOutputAreaFocusBlock(out areaBlock, out _);
+    }
+
     private void BuildStandingAreaAndObjectFocusBlocks(
         Block areaBlock,
         InputOutputModule ownerModule,
