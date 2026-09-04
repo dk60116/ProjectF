@@ -491,19 +491,6 @@ public partial class TerrainGenerator : MonoBehaviour
             generatedSurfaceFoamMaterial = null;
         }
 
-        if (generatedSurfaceGlintMaterial != null)
-        {
-            if (Application.isPlaying)
-            {
-                Destroy(generatedSurfaceGlintMaterial);
-            }
-            else
-            {
-                DestroyImmediate(generatedSurfaceGlintMaterial);
-            }
-
-            generatedSurfaceGlintMaterial = null;
-        }
     }
 
 #if UNITY_EDITOR
@@ -522,11 +509,6 @@ public partial class TerrainGenerator : MonoBehaviour
         if (generatedSurfaceFoamShader == null)
         {
             generatedSurfaceFoamShader = AssetDatabase.LoadAssetAtPath<Shader>("Assets/Shaders/TerrainWaterFoamOverlay.shader");
-        }
-
-        if (generatedSurfaceGlintShader == null)
-        {
-            generatedSurfaceGlintShader = AssetDatabase.LoadAssetAtPath<Shader>("Assets/Shaders/TerrainWaterSurfaceGlint.shader");
         }
 
         if (generatedSurfaceWaterMaterial == null)

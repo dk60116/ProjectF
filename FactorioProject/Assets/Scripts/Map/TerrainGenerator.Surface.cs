@@ -23,38 +23,11 @@ public partial class TerrainGenerator : MonoBehaviour
             Mesh generatedMesh = BuildGeneratedSurfaceMesh(chunkSurface);
             generatedMesh.name = $"GeneratedSurface_{chunk.coordinate.x}_{chunk.coordinate.y}";
             chunk.surfaceMesh = generatedMesh;
-
-            ApplyChunkWaterFoamSurface(chunk, chunkSurface);
-            ApplyChunkWaterGlintSurface(chunk, chunkSurface);
+            chunk.surfaceMatrix = Matrix4x4.Translate(
+                new Vector3(chunk.origin.x, 0f, chunk.origin.y));
+            chunk.surfaceWorldBounds = TransformMeshBounds(generatedMesh.bounds, chunk.surfaceMatrix);
+            chunk.surfaceSubMeshMask = GetGeneratedSurfaceRenderSubMeshMask(chunkSurface);
         }
-    }
-
-    private void ApplyChunkWaterFoamSurface(ChunkRuntimeData chunk, ChunkSurfaceBuildData chunkSurface)
-    {
-        DestroyGeneratedSurfaceMesh(chunk.foamMesh);
-        chunk.foamMesh = null;
-        if (!HasGeneratedWaterFoam(chunkSurface))
-        {
-            return;
-        }
-
-        Mesh foamMesh = BuildGeneratedWaterFoamMesh(chunkSurface);
-        foamMesh.name = $"GeneratedWaterFoam_{chunk.coordinate.x}_{chunk.coordinate.y}";
-        chunk.foamMesh = foamMesh;
-    }
-
-    private void ApplyChunkWaterGlintSurface(ChunkRuntimeData chunk, ChunkSurfaceBuildData chunkSurface)
-    {
-        DestroyGeneratedSurfaceMesh(chunk.glintMesh);
-        chunk.glintMesh = null;
-        if (!generateWaterSurfaceGlints || !HasGeneratedWaterSurface(chunkSurface))
-        {
-            return;
-        }
-
-        Mesh glintMesh = BuildGeneratedWaterGlintMesh(chunkSurface);
-        glintMesh.name = $"GeneratedWaterGlint_{chunk.coordinate.x}_{chunk.coordinate.y}";
-        chunk.glintMesh = glintMesh;
     }
 
     private void ReleaseChunkSurfaceMeshes(ChunkRuntimeData chunk)
@@ -65,11 +38,8 @@ public partial class TerrainGenerator : MonoBehaviour
         }
 
         DestroyGeneratedSurfaceMesh(chunk.surfaceMesh);
-        DestroyGeneratedSurfaceMesh(chunk.foamMesh);
-        DestroyGeneratedSurfaceMesh(chunk.glintMesh);
         chunk.surfaceMesh = null;
-        chunk.foamMesh = null;
-        chunk.glintMesh = null;
+        chunk.surfaceSubMeshMask = 0;
     }
 
     private static void DestroyGeneratedSurfaceMesh(Mesh mesh)
@@ -98,26 +68,22 @@ public partial class TerrainGenerator : MonoBehaviour
 
         Material[] surfaceMaterials = GetGeneratedSurfaceMaterials();
         Material foamMaterial = GetGeneratedSurfaceFoamMaterial();
-        Material glintMaterial = generateWaterSurfaceGlints
-            ? GetGeneratedSurfaceGlintMaterial()
-            : null;
 
         if (Application.isPlaying)
         {
-            RenderVisibleChunkSurfaces(surfaceMaterials, foamMaterial, glintMaterial, renderCamera);
+            RenderVisibleChunkSurfaces(surfaceMaterials, foamMaterial, renderCamera);
             return;
         }
 
         foreach (KeyValuePair<Vector2Int, ChunkRuntimeData> pair in loadedChunks)
         {
-            RenderChunkSurface(pair.Value, surfaceMaterials, foamMaterial, glintMaterial, renderCamera);
+            RenderChunkSurface(pair.Value, surfaceMaterials, foamMaterial, renderCamera);
         }
     }
 
     private void RenderVisibleChunkSurfaces(
         Material[] surfaceMaterials,
         Material foamMaterial,
-        Material glintMaterial,
         Camera renderCamera)
     {
         GetPlayerRenderCoordinateBounds(out Vector2Int minCoordinate, out Vector2Int maxCoordinate);
@@ -138,7 +104,7 @@ public partial class TerrainGenerator : MonoBehaviour
                         new Vector2Int(chunkX, chunkY),
                         out ChunkRuntimeData chunk))
                 {
-                    RenderChunkSurface(chunk, surfaceMaterials, foamMaterial, glintMaterial, renderCamera);
+                    RenderChunkSurface(chunk, surfaceMaterials, foamMaterial, renderCamera);
                 }
             }
         }
@@ -148,7 +114,6 @@ public partial class TerrainGenerator : MonoBehaviour
         ChunkRuntimeData chunk,
         Material[] surfaceMaterials,
         Material foamMaterial,
-        Material glintMaterial,
         Camera renderCamera)
     {
         if (chunk == null || chunk.surfaceMesh == null)
@@ -156,11 +121,8 @@ public partial class TerrainGenerator : MonoBehaviour
             return;
         }
 
-        Matrix4x4 surfaceMatrix = Matrix4x4.Translate(
-            new Vector3(chunk.origin.x, 0f, chunk.origin.y));
-        Bounds surfaceBounds = TransformMeshBounds(chunk.surfaceMesh.bounds, surfaceMatrix);
         if (Application.isPlaying
-            && !DoesWorldBoundsIntersectPlayerRenderRange(surfaceBounds))
+            && !DoesWorldBoundsIntersectPlayerRenderRange(chunk.surfaceWorldBounds))
         {
             return;
         }
@@ -169,7 +131,7 @@ public partial class TerrainGenerator : MonoBehaviour
         for (int subMeshIndex = 0; subMeshIndex < subMeshCount; subMeshIndex++)
         {
             Material material = surfaceMaterials[subMeshIndex];
-            if (material == null || chunk.surfaceMesh.GetIndexCount(subMeshIndex) == 0)
+            if (material == null || !HasGeneratedSurfaceRenderSubMesh(chunk, subMeshIndex))
             {
                 continue;
             }
@@ -178,34 +140,21 @@ public partial class TerrainGenerator : MonoBehaviour
                 chunk.surfaceMesh,
                 subMeshIndex,
                 material,
-                surfaceMatrix,
-                surfaceBounds,
+                chunk.surfaceMatrix,
+                chunk.surfaceWorldBounds,
                 true,
                 renderCamera);
         }
 
-        if (chunk.foamMesh != null && foamMaterial != null)
+        if (foamMaterial != null
+            && HasGeneratedSurfaceRenderSubMesh(chunk, GeneratedSurfaceFoamRenderSubMeshIndex))
         {
             RenderChunkMesh(
-                chunk.foamMesh,
-                0,
+                chunk.surfaceMesh,
+                GeneratedSurfaceFoamRenderSubMeshIndex,
                 foamMaterial,
-                surfaceMatrix,
-                TransformMeshBounds(chunk.foamMesh.bounds, surfaceMatrix),
-                false,
-                renderCamera);
-        }
-
-        if (chunk.glintMesh != null && glintMaterial != null)
-        {
-            Matrix4x4 glintMatrix = Matrix4x4.Translate(
-                new Vector3(chunk.origin.x, waterSurfaceGlintOffset, chunk.origin.y));
-            RenderChunkMesh(
-                chunk.glintMesh,
-                0,
-                glintMaterial,
-                glintMatrix,
-                TransformMeshBounds(chunk.glintMesh.bounds, glintMatrix),
+                chunk.surfaceMatrix,
+                chunk.surfaceWorldBounds,
                 false,
                 renderCamera);
         }
@@ -223,8 +172,6 @@ public partial class TerrainGenerator : MonoBehaviour
             }
 
             count += chunk.surfaceMesh != null ? 1 : 0;
-            count += chunk.foamMesh != null ? 1 : 0;
-            count += chunk.glintMesh != null ? 1 : 0;
         }
 
         return count;
@@ -268,6 +215,61 @@ public partial class TerrainGenerator : MonoBehaviour
     }
 #endif
 
+    private static int GetGeneratedSurfaceRenderSubMeshMask(ChunkSurfaceBuildData chunkSurface)
+    {
+        if (chunkSurface == null || chunkSurface.trianglesByBiome == null)
+        {
+            return 0;
+        }
+
+        int mask = 0;
+        SetGeneratedSurfaceRenderSubMeshMaskBit(
+            chunkSurface,
+            GetBiomeMaterialIndex(TerrainBiome.Water),
+            GeneratedSurfaceWaterRenderSubMeshIndex,
+            ref mask);
+        SetGeneratedSurfaceRenderSubMeshMaskBit(
+            chunkSurface,
+            GetGeneratedSurfaceTriangleBucket(TerrainBiome.Sand),
+            GeneratedSurfaceBlendRenderSubMeshIndex,
+            ref mask);
+        SetGeneratedSurfaceRenderSubMeshMaskBit(
+            chunkSurface,
+            GetBiomeMaterialIndex(TerrainBiome.Rock),
+            GeneratedSurfaceRockRenderSubMeshIndex,
+            ref mask);
+        SetGeneratedSurfaceRenderSubMeshMaskBit(
+            chunkSurface,
+            GeneratedSurfaceFoamMaterialIndex,
+            GeneratedSurfaceFoamRenderSubMeshIndex,
+            ref mask);
+        return mask;
+    }
+
+    private static void SetGeneratedSurfaceRenderSubMeshMaskBit(
+        ChunkSurfaceBuildData chunkSurface,
+        int triangleBucketIndex,
+        int renderSubMeshIndex,
+        ref int mask)
+    {
+        if ((uint)triangleBucketIndex >= (uint)chunkSurface.trianglesByBiome.Length
+            || chunkSurface.trianglesByBiome[triangleBucketIndex] == null
+            || chunkSurface.trianglesByBiome[triangleBucketIndex].Count == 0)
+        {
+            return;
+        }
+
+        mask |= 1 << renderSubMeshIndex;
+    }
+
+    private static bool HasGeneratedSurfaceRenderSubMesh(ChunkRuntimeData chunk, int renderSubMeshIndex)
+    {
+        return chunk != null
+               && renderSubMeshIndex >= 0
+               && renderSubMeshIndex < GeneratedSurfaceRenderSubMeshCount
+               && (chunk.surfaceSubMeshMask & (1 << renderSubMeshIndex)) != 0;
+    }
+
     private static Bounds TransformMeshBounds(Bounds localBounds, Matrix4x4 matrix)
     {
         Vector3 center = matrix.MultiplyPoint3x4(localBounds.center);
@@ -285,7 +287,9 @@ public partial class TerrainGenerator : MonoBehaviour
     private Mesh BuildGeneratedSurfaceMesh(ChunkSurfaceBuildData chunkSurface)
     {
         Mesh mesh = new Mesh();
-        mesh.indexFormat = UnityEngine.Rendering.IndexFormat.UInt32;
+        mesh.indexFormat = chunkSurface.vertices.Count > ushort.MaxValue
+            ? UnityEngine.Rendering.IndexFormat.UInt32
+            : UnityEngine.Rendering.IndexFormat.UInt16;
 
         mesh.SetVertices(chunkSurface.vertices);
         mesh.SetNormals(chunkSurface.normals);
@@ -294,55 +298,26 @@ public partial class TerrainGenerator : MonoBehaviour
         {
             mesh.SetColors(chunkSurface.colors);
         }
-        int subMeshCount = Mathf.Min(chunkSurface.trianglesByBiome.Length, GeneratedSurfaceBiomeMaterialCount);
-        mesh.subMeshCount = subMeshCount;
-        for (int i = 0; i < subMeshCount; i++)
-        {
-            mesh.SetTriangles(chunkSurface.trianglesByBiome[i], i, false);
-        }
+        mesh.subMeshCount = GeneratedSurfaceRenderSubMeshCount;
+        mesh.SetTriangles(
+            chunkSurface.trianglesByBiome[GetBiomeMaterialIndex(TerrainBiome.Water)],
+            GeneratedSurfaceWaterRenderSubMeshIndex,
+            false);
+        mesh.SetTriangles(
+            chunkSurface.trianglesByBiome[GetGeneratedSurfaceTriangleBucket(TerrainBiome.Sand)],
+            GeneratedSurfaceBlendRenderSubMeshIndex,
+            false);
+        mesh.SetTriangles(
+            chunkSurface.trianglesByBiome[GetBiomeMaterialIndex(TerrainBiome.Rock)],
+            GeneratedSurfaceRockRenderSubMeshIndex,
+            false);
+        mesh.SetTriangles(
+            chunkSurface.trianglesByBiome[GeneratedSurfaceFoamMaterialIndex],
+            GeneratedSurfaceFoamRenderSubMeshIndex,
+            false);
 
         mesh.RecalculateBounds();
-        mesh.UploadMeshData(false);
-        return mesh;
-    }
-
-    private Mesh BuildGeneratedWaterGlintMesh(ChunkSurfaceBuildData chunkSurface)
-    {
-        Mesh mesh = new Mesh();
-        mesh.indexFormat = UnityEngine.Rendering.IndexFormat.UInt32;
-
-        mesh.SetVertices(chunkSurface.vertices);
-        mesh.SetNormals(chunkSurface.normals);
-        mesh.SetUVs(0, chunkSurface.uvs);
-        if (chunkSurface.colors.Count == chunkSurface.vertices.Count)
-        {
-            mesh.SetColors(chunkSurface.colors);
-        }
-
-        mesh.subMeshCount = 1;
-        mesh.SetTriangles(chunkSurface.trianglesByBiome[GetBiomeMaterialIndex(TerrainBiome.Water)], 0, false);
-        mesh.RecalculateBounds();
-        mesh.UploadMeshData(false);
-        return mesh;
-    }
-
-    private Mesh BuildGeneratedWaterFoamMesh(ChunkSurfaceBuildData chunkSurface)
-    {
-        Mesh mesh = new Mesh();
-        mesh.indexFormat = UnityEngine.Rendering.IndexFormat.UInt32;
-
-        mesh.SetVertices(chunkSurface.vertices);
-        mesh.SetNormals(chunkSurface.normals);
-        mesh.SetUVs(0, chunkSurface.uvs);
-        if (chunkSurface.colors.Count == chunkSurface.vertices.Count)
-        {
-            mesh.SetColors(chunkSurface.colors);
-        }
-
-        mesh.subMeshCount = 1;
-        mesh.SetTriangles(chunkSurface.trianglesByBiome[GeneratedSurfaceFoamMaterialIndex], 0, false);
-        mesh.RecalculateBounds();
-        mesh.UploadMeshData(false);
+        mesh.UploadMeshData(true);
         return mesh;
     }
 
@@ -790,7 +765,7 @@ public partial class TerrainGenerator : MonoBehaviour
                     : GetGeneratedSurfaceBlendWeightsFromSnapshot(input, chunkSurface.origin, point, weightBuffer));
         }
 
-        List<int> targetTriangles = chunkSurface.trianglesByBiome[GetBiomeMaterialIndex(biome)];
+        List<int> targetTriangles = chunkSurface.trianglesByBiome[GetGeneratedSurfaceTriangleBucket(biome)];
         for (int i = 1; i < polygon.Count - 1; i++)
         {
             targetTriangles.Add(vertexStart + 0);
@@ -1537,7 +1512,7 @@ public partial class TerrainGenerator : MonoBehaviour
                     : GetGeneratedSurfaceBlendWeights(chunkSurface.origin, point, chunkSurface.blendWeightBuffer));
         }
 
-        List<int> targetTriangles = chunkSurface.trianglesByBiome[GetBiomeMaterialIndex(biome)];
+        List<int> targetTriangles = chunkSurface.trianglesByBiome[GetGeneratedSurfaceTriangleBucket(biome)];
         for (int i = 1; i < polygon.Count - 1; i++)
         {
             targetTriangles.Add(vertexStart + 0);
@@ -2056,7 +2031,7 @@ public partial class TerrainGenerator : MonoBehaviour
             chunkSurface.colors.Add(startColor);
         }
 
-        List<int> targetTriangles = chunkSurface.trianglesByBiome[GetBiomeMaterialIndex(wallBiome)];
+        List<int> targetTriangles = chunkSurface.trianglesByBiome[GetGeneratedSurfaceTriangleBucket(wallBiome)];
         targetTriangles.Add(vertexStart + 0);
         targetTriangles.Add(vertexStart + 2);
         targetTriangles.Add(vertexStart + 1);
@@ -2183,7 +2158,7 @@ public partial class TerrainGenerator : MonoBehaviour
     private Material[] GetGeneratedSurfaceMaterials()
     {
         if (generatedSurfaceMaterials != null
-            && generatedSurfaceMaterials.Length == GeneratedSurfaceBiomeMaterialCount)
+            && generatedSurfaceMaterials.Length == GeneratedSurfaceBaseRenderSubMeshCount)
         {
             return generatedSurfaceMaterials;
         }
@@ -2193,40 +2168,13 @@ public partial class TerrainGenerator : MonoBehaviour
         {
             GetBiomeMaterial(TerrainBiome.Water),
             blendMaterial ?? GetBiomeMaterial(TerrainBiome.Sand),
-            blendMaterial ?? GetBiomeMaterial(TerrainBiome.Dirt),
-            blendMaterial ?? GetBiomeMaterial(TerrainBiome.Grass),
-            blendMaterial ?? GetBiomeMaterial(TerrainBiome.Forest),
             GetBiomeMaterial(TerrainBiome.Rock)
         };
         return generatedSurfaceMaterials;
     }
 
-    private static bool HasGeneratedWaterFoam(ChunkSurfaceBuildData chunkSurface)
-    {
-        return chunkSurface != null
-            && chunkSurface.trianglesByBiome != null
-            && chunkSurface.trianglesByBiome.Length > GeneratedSurfaceFoamMaterialIndex
-            && chunkSurface.trianglesByBiome[GeneratedSurfaceFoamMaterialIndex] != null
-            && chunkSurface.trianglesByBiome[GeneratedSurfaceFoamMaterialIndex].Count > 0;
-    }
-
-    private static bool HasGeneratedWaterSurface(ChunkSurfaceBuildData chunkSurface)
-    {
-        int waterMaterialIndex = GetBiomeMaterialIndex(TerrainBiome.Water);
-        return chunkSurface != null
-            && chunkSurface.trianglesByBiome != null
-            && chunkSurface.trianglesByBiome.Length > waterMaterialIndex
-            && chunkSurface.trianglesByBiome[waterMaterialIndex] != null
-            && chunkSurface.trianglesByBiome[waterMaterialIndex].Count > 0;
-    }
-
     private Material GetGeneratedSurfaceBlendMaterial()
     {
-        if (!enableGeneratedSurfaceTextureBlend)
-        {
-            return null;
-        }
-
         if (generatedSurfaceBlendMaterial != null)
         {
             return generatedSurfaceBlendMaterial;
@@ -2264,6 +2212,10 @@ public partial class TerrainGenerator : MonoBehaviour
         material.SetFloat("_TextureTiling", generatedSurfaceBlendTextureTiling);
         material.SetFloat("_NoiseScale", generatedSurfaceBlendNoiseScale);
         material.SetFloat("_NoiseStrength", generatedSurfaceBlendNoiseStrength);
+        if (material.HasProperty("_BlendEnabled"))
+        {
+            material.SetFloat("_BlendEnabled", enableGeneratedSurfaceTextureBlend ? 1f : 0f);
+        }
 
         Material groundMaterial = ResolveSourceMaterialForBiome(TerrainBiome.Grass);
         if (groundMaterial != null && groundMaterial.HasProperty("_ShadowColor"))
@@ -2324,7 +2276,7 @@ public partial class TerrainGenerator : MonoBehaviour
 
     }
 
-    private void ApplyGeneratedSurfaceBlendSettingsToRuntimeMaterial()
+    private void ApplyGeneratedSurfaceRuntimeMaterialSettings()
     {
         if (generatedSurfaceBlendMaterial != null)
         {
@@ -2336,9 +2288,10 @@ public partial class TerrainGenerator : MonoBehaviour
             ApplyGeneratedSurfaceFoamMaterialProperties(generatedSurfaceFoamMaterial);
         }
 
-        if (generatedSurfaceGlintMaterial != null)
+        if (biomeMaterialCache.TryGetValue(TerrainBiome.Water, out Material waterMaterial)
+            && waterMaterial != null)
         {
-            ApplyGeneratedSurfaceGlintMaterialProperties(generatedSurfaceGlintMaterial);
+            ApplyGeneratedSurfaceWaterMaterialProperties(waterMaterial);
         }
     }
 
@@ -2368,32 +2321,6 @@ public partial class TerrainGenerator : MonoBehaviour
         return generatedSurfaceFoamMaterial;
     }
 
-    private Material GetGeneratedSurfaceGlintMaterial()
-    {
-        if (generatedSurfaceGlintMaterial != null)
-        {
-            return generatedSurfaceGlintMaterial;
-        }
-
-        Shader glintShader = generatedSurfaceGlintShader != null
-            ? generatedSurfaceGlintShader
-            : Shader.Find("ProjectF/Terrain/WaterSurfaceGlint");
-        if (glintShader == null)
-        {
-            glintShader = Shader.Find("Universal Render Pipeline/Unlit");
-        }
-
-        generatedSurfaceGlintMaterial = new Material(glintShader)
-        {
-            name = "Runtime_WaterSurfaceGlint",
-            enableInstancing = true
-        };
-        generatedSurfaceGlintMaterial.renderQueue = GeneratedWaterGlintRenderQueue;
-
-        ApplyGeneratedSurfaceGlintMaterialProperties(generatedSurfaceGlintMaterial);
-        return generatedSurfaceGlintMaterial;
-    }
-
     private void ApplyGeneratedSurfaceFoamMaterialProperties(Material material)
     {
         if (material == null)
@@ -2410,14 +2337,18 @@ public partial class TerrainGenerator : MonoBehaviour
         }
     }
 
-    private void ApplyGeneratedSurfaceGlintMaterialProperties(Material material)
+    private void ApplyGeneratedSurfaceWaterMaterialProperties(Material material)
     {
         if (material == null)
         {
             return;
         }
 
-        material.renderQueue = GeneratedWaterGlintRenderQueue;
+        if (material.HasProperty("_GlintEnabled"))
+        {
+            material.SetFloat("_GlintEnabled", generateWaterSurfaceGlints ? 1f : 0f);
+        }
+
         if (material.HasProperty("_GlintColor"))
         {
             material.SetColor("_GlintColor", waterSurfaceGlintColor);
@@ -2436,19 +2367,19 @@ public partial class TerrainGenerator : MonoBehaviour
             material.SetFloat("_GlintScale", waterSurfaceGlintScale);
         }
 
-        if (material.HasProperty("_LineWidth"))
+        if (material.HasProperty("_GlintLineWidth"))
         {
-            material.SetFloat("_LineWidth", waterSurfaceGlintLineWidth);
+            material.SetFloat("_GlintLineWidth", waterSurfaceGlintLineWidth);
         }
 
-        if (material.HasProperty("_Breakup"))
+        if (material.HasProperty("_GlintBreakup"))
         {
-            material.SetFloat("_Breakup", waterSurfaceGlintBreakup);
+            material.SetFloat("_GlintBreakup", waterSurfaceGlintBreakup);
         }
 
-        if (material.HasProperty("_FlowSpeed"))
+        if (material.HasProperty("_GlintFlowSpeed"))
         {
-            material.SetFloat("_FlowSpeed", waterSurfaceGlintFlowSpeed);
+            material.SetFloat("_GlintFlowSpeed", waterSurfaceGlintFlowSpeed);
         }
     }
 
@@ -2466,6 +2397,11 @@ public partial class TerrainGenerator : MonoBehaviour
 
         material.name = $"Runtime_{biome}";
         material.enableInstancing = true;
+        if (biome == TerrainBiome.Water)
+        {
+            ApplyGeneratedSurfaceWaterMaterialProperties(material);
+        }
+
         biomeMaterialCache[biome] = material;
         return material;
     }
@@ -2708,6 +2644,20 @@ public partial class TerrainGenerator : MonoBehaviour
                 return 5;
             default:
                 return 3;
+        }
+    }
+
+    private static int GetGeneratedSurfaceTriangleBucket(TerrainBiome biome)
+    {
+        switch (biome)
+        {
+            case TerrainBiome.Sand:
+            case TerrainBiome.Dirt:
+            case TerrainBiome.Grass:
+            case TerrainBiome.Forest:
+                return GetBiomeMaterialIndex(TerrainBiome.Sand);
+            default:
+                return GetBiomeMaterialIndex(biome);
         }
     }
 }

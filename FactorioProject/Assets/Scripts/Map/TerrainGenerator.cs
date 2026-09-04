@@ -29,7 +29,6 @@ public partial class TerrainGenerator : MonoBehaviour
     private const int GeneratedWaterDepthSearchRadius = 4;
     private const float GeneratedWaterDepthDeepDistance = 2.65f;
     private const int GeneratedWaterFoamRenderQueue = 3010;
-    private const int GeneratedWaterGlintRenderQueue = 3012;
 
     private static readonly ProfilerMarker TickConveyorDataMotionsMarker = new ProfilerMarker("TerrainGenerator.TickConveyorDataMotions");
     private static readonly ProfilerMarker TickConveyorsMarker = new ProfilerMarker("TerrainGenerator.TickConveyors");
@@ -47,6 +46,7 @@ public partial class TerrainGenerator : MonoBehaviour
     private static readonly ProfilerMarker InstantiateSavedInstallationMarker = new ProfilerMarker("TerrainGenerator.InstantiateSavedInstallation");
     private static readonly ProfilerMarker BindLoadedInstallationBlocksMarker = new ProfilerMarker("TerrainGenerator.BindLoadedInstallationBlocks");
     private static readonly ProfilerMarker ApplyChunkSurfaceMarker = new ProfilerMarker("TerrainGenerator.ApplyChunkBiomeSurface");
+    private static readonly ProfilerMarker RenderChunkSurfacesMarker = new ProfilerMarker("TerrainGenerator.RenderChunkSurfaces");
 
     public static TerrainGenerator Active { get; private set; }
 
@@ -80,6 +80,12 @@ public partial class TerrainGenerator : MonoBehaviour
     private const int GeneratedSurfaceBiomeMaterialCount = 6;
     private const int GeneratedSurfaceFoamMaterialIndex = GeneratedSurfaceBiomeMaterialCount;
     private const int GeneratedSurfaceMaterialCount = GeneratedSurfaceFoamMaterialIndex + 1;
+    private const int GeneratedSurfaceWaterRenderSubMeshIndex = 0;
+    private const int GeneratedSurfaceBlendRenderSubMeshIndex = 1;
+    private const int GeneratedSurfaceRockRenderSubMeshIndex = 2;
+    private const int GeneratedSurfaceBaseRenderSubMeshCount = 3;
+    private const int GeneratedSurfaceFoamRenderSubMeshIndex = GeneratedSurfaceBaseRenderSubMeshCount;
+    private const int GeneratedSurfaceRenderSubMeshCount = GeneratedSurfaceFoamRenderSubMeshIndex + 1;
 
     private sealed class ChunkSurfaceBuildData
     {
@@ -107,8 +113,9 @@ public partial class TerrainGenerator : MonoBehaviour
         public readonly Vector2Int coordinate;
         public readonly Vector2Int origin;
         public Mesh surfaceMesh;
-        public Mesh foamMesh;
-        public Mesh glintMesh;
+        public Matrix4x4 surfaceMatrix;
+        public Bounds surfaceWorldBounds;
+        public int surfaceSubMeshMask;
 
         public ChunkRuntimeData(Vector2Int coordinate, Vector2Int origin)
         {
@@ -419,9 +426,6 @@ public partial class TerrainGenerator : MonoBehaviour
     private Shader generatedSurfaceFoamShader;
 
     [SerializeField, HideInInspector]
-    private Shader generatedSurfaceGlintShader;
-
-    [SerializeField, HideInInspector]
     private Material generatedSurfaceWaterMaterial;
 
     [SerializeField, HideInInspector]
@@ -542,9 +546,6 @@ public partial class TerrainGenerator : MonoBehaviour
     [Header("Water Highlights")]
     [SerializeField]
     private bool generateWaterSurfaceGlints = false;
-
-    [SerializeField, Min(0f)]
-    private float waterSurfaceGlintOffset = 0.012f;
 
     [SerializeField]
     private Color waterSurfaceGlintColor = new Color(0.86f, 0.96f, 1f, 0.30f);
@@ -815,6 +816,8 @@ public partial class TerrainGenerator : MonoBehaviour
     private int lastActiveConveyorCornerGroupBlocksSkipped;
     private int lastActiveConveyorCornerGroupNoProgressRequeuesSkipped;
     private int lastActiveConveyorBlockWakeTicks;
+    private int lastActiveConveyorBlockNoProgressRequeuesSkipped;
+    private int lastActiveConveyorDuplicateFrameTicksSkipped;
     private int lastActiveConveyorBlockWakeLineFallbacks;
     private int lastActiveConveyorFullLineWakesProcessed;
     private int lastActiveConveyorRangedLineWakesProcessed;
@@ -856,7 +859,6 @@ public partial class TerrainGenerator : MonoBehaviour
     private bool starterTreeCacheValid;
     private Material generatedSurfaceBlendMaterial;
     private Material generatedSurfaceFoamMaterial;
-    private Material generatedSurfaceGlintMaterial;
     private Material[] generatedSurfaceMaterials;
 
     private void OnValidate()
@@ -870,7 +872,6 @@ public partial class TerrainGenerator : MonoBehaviour
         waterSurfaceDepth = Mathf.Max(0f, waterSurfaceDepth);
         waterFoamWidth = Mathf.Max(0f, waterFoamWidth);
         waterFoamSurfaceOffset = Mathf.Max(0f, waterFoamSurfaceOffset);
-        waterSurfaceGlintOffset = Mathf.Max(0f, waterSurfaceGlintOffset);
         waterSurfaceGlintScale = Mathf.Max(0.01f, waterSurfaceGlintScale);
         waterSurfaceGlintFlowSpeed = Mathf.Max(0f, waterSurfaceGlintFlowSpeed);
         NormalizeResourceGenerationSettings();
@@ -879,7 +880,7 @@ public partial class TerrainGenerator : MonoBehaviour
 #if UNITY_EDITOR
         PopulateGeneratedSurfaceBlendEditorDefaults();
 #endif
-        ApplyGeneratedSurfaceBlendSettingsToRuntimeMaterial();
+        ApplyGeneratedSurfaceRuntimeMaterialSettings();
     }
 
     private void Awake()
@@ -1045,7 +1046,10 @@ public partial class TerrainGenerator : MonoBehaviour
             }
         }
 
-        RenderLoadedChunkSurfaces();
+        using (RenderChunkSurfacesMarker.Auto())
+        {
+            RenderLoadedChunkSurfaces();
+        }
 
     }
 

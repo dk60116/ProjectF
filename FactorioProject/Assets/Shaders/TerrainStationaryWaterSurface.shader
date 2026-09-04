@@ -9,6 +9,13 @@ Shader "ProjectF/Terrain/StationaryWaterSurface"
         _RippleScaleB("Ripple Scale B", Float) = 2.15
         _RippleSpeedA("Ripple Speed A", Float) = 1.10
         _RippleSpeedB("Ripple Speed B", Float) = 1.65
+        [Toggle] _GlintEnabled("Glint Enabled", Float) = 0
+        _GlintColor("Glint Color", Color) = (0.86, 0.96, 1, 0.30)
+        _GlintDirection("Glint Direction", Vector) = (1, 0.18, 0, 0)
+        _GlintScale("Glint Scale", Float) = 1.35
+        _GlintLineWidth("Glint Line Width", Range(0.005, 0.5)) = 0.16
+        _GlintBreakup("Glint Breakup", Range(0, 1)) = 0.33
+        _GlintFlowSpeed("Glint Flow Speed", Float) = 0.28
     }
 
     SubShader
@@ -78,6 +85,13 @@ Shader "ProjectF/Terrain/StationaryWaterSurface"
                 half _RippleScaleB;
                 half _RippleSpeedA;
                 half _RippleSpeedB;
+                half _GlintEnabled;
+                half4 _GlintColor;
+                float4 _GlintDirection;
+                half _GlintScale;
+                half _GlintLineWidth;
+                half _GlintBreakup;
+                half _GlintFlowSpeed;
             CBUFFER_END
 
             #include "TerrainWaterLighting.hlsl"
@@ -110,6 +124,75 @@ Shader "ProjectF/Terrain/StationaryWaterSurface"
 
                 half3 rippleNormal = normalize(half3(-dX * _NormalStrength, 1.0h, -dZ * _NormalStrength));
                 return normalize(lerp(meshNormalWS, rippleNormal, saturate(_NormalStrength)));
+            }
+
+            half StableGlintNoise(float2 value)
+            {
+                half waveA = 0.5h + 0.5h * sin(value.x * 12.9898h + value.y * 78.233h);
+                half waveB = 0.5h + 0.5h * sin(value.x * 4.113h - value.y * 15.719h + 1.37h);
+                return saturate((waveA * 0.58h) + (waveB * 0.42h));
+            }
+
+            half StationaryGlintPulse(float along, float across, half phase, half speed)
+            {
+                float time = _Time.y * speed;
+                half phaseA = StableGlintNoise(float2((along * 0.071) + phase, (across * 0.113) - phase)) * 6.28318h;
+                half phaseB = StableGlintNoise(float2((along * 0.193) - phase, (across * 0.157) + phase)) * 6.28318h;
+                half pulseA = 0.5h + 0.5h * sin(time + phaseA);
+                half pulseB = 0.5h + 0.5h * sin((time * 1.37h) + phaseB);
+                return saturate((pulseA * 0.64h) + (pulseB * 0.36h));
+            }
+
+            half GlintFlowLayer(float along, float across, half scale, half lineWidth, half phase, half speed)
+            {
+                half localPulse = StationaryGlintPulse(along, across, phase, speed);
+                half animatedLineWidth = lineWidth * lerp(0.55h, 1.55h, localPulse);
+                float warpedAcross = (across * scale)
+                    + sin((along * 0.58) + phase) * (0.10 + (0.10 * localPulse))
+                    + sin((along * 1.43) + (phase * 1.37)) * (0.035 + (0.045 * localPulse));
+                half lane = smoothstep(animatedLineWidth, 0.0h, abs(frac(warpedAcross) - 0.5h));
+
+                half dash = 0.5h + 0.5h * sin((along * scale * 1.15) + phase);
+                dash = smoothstep(0.36h, 0.92h, dash);
+                dash *= lerp(0.25h, 1.35h, localPulse);
+
+                half noise = StableGlintNoise(float2((along * 0.19) + phase, (across * 0.31) + phase));
+                half breakup = lerp(1.0h, smoothstep(_GlintBreakup, 1.0h, noise), 0.62h);
+                return lane * dash * breakup;
+            }
+
+            half GetWaterGlintAlpha(float3 positionWS, half waterBrightness)
+            {
+                float2 direction = _GlintDirection.xy;
+                direction = dot(direction, direction) > 0.0001 ? normalize(direction) : float2(1, 0);
+                float2 perpendicular = float2(-direction.y, direction.x);
+                float along = dot(positionWS.xz, direction);
+                float across = dot(positionWS.xz, perpendicular);
+
+                half layerA = GlintFlowLayer(
+                    along,
+                    across,
+                    max(_GlintScale, 0.01h),
+                    _GlintLineWidth,
+                    0.0h,
+                    _GlintFlowSpeed);
+                half layerB = GlintFlowLayer(
+                    along + 3.7h,
+                    across - 1.9h,
+                    max(_GlintScale * 0.73h, 0.01h),
+                    _GlintLineWidth * 0.74h,
+                    2.11h,
+                    _GlintFlowSpeed * 1.37h);
+
+                half softRipple = 0.5h + 0.5h * sin((along * 1.1h) + sin(across * 1.7h) * 0.35h);
+                half softPulse = StationaryGlintPulse(along + 11.3h, across - 5.7h, 4.9h, _GlintFlowSpeed * 1.45h);
+                softRipple = smoothstep(0.78h, 1.0h, softRipple) * lerp(0.0h, 0.28h, softPulse);
+
+                half surfacePulse = StationaryGlintPulse(along - 2.1h, across + 4.3h, 7.4h, _GlintFlowSpeed * 0.83h);
+                return saturate((layerA + (layerB * 0.58h) + softRipple)
+                    * _GlintColor.a
+                    * lerp(0.45h, 1.65h, surfacePulse)
+                    * waterBrightness);
             }
 
             Varyings vert(Attributes input)
@@ -158,7 +241,8 @@ Shader "ProjectF/Terrain/StationaryWaterSurface"
                 half lightFacing = saturate(dot(normalWS, lightDirectionWS) * 0.35h + 0.65h);
                 half shadowAttenuation = mainLight.shadowAttenuation * mainLight.distanceAttenuation;
                 half3 color = baseColor * lerp(0.78h, 1.05h, lightFacing * shadowAttenuation);
-                color *= GetWorldWaterBrightness();
+                half waterBrightness = GetWorldWaterBrightness();
+                color *= waterBrightness;
 
 #if defined(_ADDITIONAL_LIGHTS_VERTEX)
                 color += baseColor * input.vertexLighting;
@@ -178,8 +262,18 @@ Shader "ProjectF/Terrain/StationaryWaterSurface"
 #endif
 
                 color = MixFog(color, input.fogFactor);
+                half outputAlpha = _BaseColor.a;
+                if (_GlintEnabled > 0.5h && _GlintColor.a > 0.0001h)
+                {
+                    half glintAlpha = GetWaterGlintAlpha(input.positionWS, waterBrightness);
+                    half3 glintColor = MixFog(_GlintColor.rgb * waterBrightness, input.fogFactor);
+                    half combinedAlpha = glintAlpha + outputAlpha * (1.0h - glintAlpha);
+                    color = ((glintColor * glintAlpha) + (color * outputAlpha * (1.0h - glintAlpha)))
+                        / max(combinedAlpha, 0.0001h);
+                    outputAlpha = combinedAlpha;
+                }
 
-                return half4(color, _BaseColor.a);
+                return half4(color, outputAlpha);
             }
             ENDHLSL
         }

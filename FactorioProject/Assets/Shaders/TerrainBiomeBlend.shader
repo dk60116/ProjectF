@@ -13,6 +13,7 @@ Shader "ProjectF/Terrain/BiomeBlend"
         _TextureTiling("Texture Tiling", Float) = 0.28
         _NoiseScale("Noise Scale", Float) = 0.11
         _NoiseStrength("Noise Strength", Range(0, 0.5)) = 0.18
+        [Toggle] _BlendEnabled("Biome Blend Enabled", Float) = 1
         _ShadowColor("Shadow Color", Color) = (0.7, 0.7, 0.75, 1)
         _ShadeThreshold("Shade Threshold", Range(0, 1)) = 0.5
         _ShadeSmoothness("Shade Smoothness", Range(0.001, 0.5)) = 0.05
@@ -133,6 +134,7 @@ Shader "ProjectF/Terrain/BiomeBlend"
                 half _TextureTiling;
                 half _NoiseScale;
                 half _NoiseStrength;
+                half _BlendEnabled;
                 half _ShadeThreshold;
                 half _ShadeSmoothness;
                 half _Surface;
@@ -257,7 +259,18 @@ Shader "ProjectF/Terrain/BiomeBlend"
             half4 GetTerrainBlendWeights(float3 positionWS, half3 normalWS, half4 blendWeights)
             {
                 float2 noiseUV = GetTerrainSurfaceUV(positionWS, normalWS, _NoiseScale);
-                return ApplyNoiseToWeights(blendWeights, noiseUV);
+                half4 weights = ApplyNoiseToWeights(blendWeights, noiseUV);
+                if (_BlendEnabled > 0.5h)
+                {
+                    return weights;
+                }
+
+                half dominantWeight = max(max(weights.r, weights.g), max(weights.b, weights.a));
+                return half4(
+                    weights.r >= dominantWeight ? 1.0h : 0.0h,
+                    weights.g >= dominantWeight && weights.r < dominantWeight ? 1.0h : 0.0h,
+                    weights.b >= dominantWeight && max(weights.r, weights.g) < dominantWeight ? 1.0h : 0.0h,
+                    max(weights.r, max(weights.g, weights.b)) < dominantWeight ? 1.0h : 0.0h);
             }
 
             half4 SampleBlendedBase(float3 positionWS, half3 normalWS, half4 weights)

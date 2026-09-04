@@ -732,31 +732,6 @@ public partial class TerrainGenerator : MonoBehaviour
         conveyorWakeQueue.Enqueue(handle);
     }
 
-    public void QueueConveyorDirectWakeAround(Block block)
-    {
-        if (!Application.isPlaying || block == null)
-        {
-            return;
-        }
-
-        QueueConveyorDirectWake(block);
-        Vector2Int coordinate = block.Coordinate;
-        QueueConveyorDirectWakeAt(coordinate + Vector2Int.up);
-        QueueConveyorDirectWakeAt(coordinate + Vector2Int.right);
-        QueueConveyorDirectWakeAt(coordinate + Vector2Int.down);
-        QueueConveyorDirectWakeAt(coordinate + Vector2Int.left);
-    }
-
-    private void QueueConveyorDirectWakeAt(Vector2Int coordinate)
-    {
-        if (!TryGetLoadedBlock(coordinate, out Block block) || block == null)
-        {
-            return;
-        }
-
-        QueueConveyorDirectWake(block);
-    }
-
     private void QueueConveyorDirectWake(Block block)
     {
         if (!Application.isPlaying
@@ -2069,7 +2044,7 @@ public partial class TerrainGenerator : MonoBehaviour
         }
     }
 
-    public void WakeConveyorNetwork(Block block)
+    public void WakeConveyorNetwork(Block block, bool queueWake = true)
     {
         if (block == null)
         {
@@ -2095,7 +2070,10 @@ public partial class TerrainGenerator : MonoBehaviour
             }
         }
 
-        QueueConveyorWake(block);
+        if (queueWake)
+        {
+            QueueConveyorWake(block);
+        }
     }
 
     public void QueueConveyorNetworkSleepCheck(Block block)
@@ -2105,14 +2083,20 @@ public partial class TerrainGenerator : MonoBehaviour
             return;
         }
 
-        if (IsConveyorRuntimeRefreshDeferred)
+        if (!TryGetRuntimeBlockHandle(block, out BlockHandle handle))
         {
             return;
         }
 
-        EnsureConveyorNetworkCache();
-        if (TryGetRuntimeBlockHandle(block, out BlockHandle handle)
-            && conveyorNetworkIds.TryGetValue(handle, out int networkId)
+        // Conveyor ticks run inside a refresh batch. The network cache was
+        // already prepared by the active-conveyor tick, so recording its id is
+        // safe here and avoids dropping the sleep request at batch boundaries.
+        if (!IsConveyorRuntimeRefreshDeferred)
+        {
+            EnsureConveyorNetworkCache();
+        }
+
+        if (conveyorNetworkIds.TryGetValue(handle, out int networkId)
             && !conveyorNetworkSleepingIds.Contains(networkId))
         {
             conveyorNetworkSleepCheckQueuedIds.Add(networkId);
@@ -2259,7 +2243,7 @@ public partial class TerrainGenerator : MonoBehaviour
 
             if (activeConveyors.Contains(handle) && block.ShouldTickActiveConveyor())
             {
-                QueueConveyorDirectWake(block);
+                QueueConveyorWake(block);
             }
         }
 
@@ -2646,7 +2630,9 @@ public partial class TerrainGenerator : MonoBehaviour
 
         if (forceDirectWake)
         {
-            block.WakeConveyorMoveAttemptsAlongRuntimeFlowImmediate();
+            // This block is already being processed. Clear stale sleep/throttle
+            // state without putting it and its neighbours back into the queue.
+            block.WakeConveyorMoveAttemptsAlongRuntimeFlowImmediate(false);
         }
 
         if (!block.ShouldTickActiveConveyor())
@@ -2662,17 +2648,30 @@ public partial class TerrainGenerator : MonoBehaviour
         BeginConveyorRuntimeRefreshBatch();
         try
         {
-            block.TickConveyor(deltaTime);
+            bool tickProgressed = block.TickConveyor(deltaTime, out bool tickExecuted);
             lastActiveConveyorBlockWakeTicks++;
+
+            if (!tickExecuted)
+            {
+                lastActiveConveyorDuplicateFrameTicksSkipped++;
+                if (activeConveyors.Contains(handle) && block.ShouldTickActiveConveyor())
+                {
+                    QueueConveyorWake(block);
+                }
+            }
+            else if (tickProgressed && activeConveyors.Contains(handle) && block.ShouldTickActiveConveyor())
+            {
+                QueueConveyorWake(block);
+            }
+            else if (!tickProgressed)
+            {
+                lastActiveConveyorBlockNoProgressRequeuesSkipped++;
+                QueueConveyorNetworkSleepCheck(block);
+            }
         }
         finally
         {
             EndConveyorRuntimeRefreshBatch();
-        }
-
-        if (activeConveyors.Contains(handle) && block.ShouldTickActiveConveyor())
-        {
-            QueueConveyorWake(block);
         }
     }
 
@@ -2748,16 +2747,25 @@ public partial class TerrainGenerator : MonoBehaviour
                         SetConveyorActive(block, true, false);
                     }
 
-                    bool tickProgressed = block.TickConveyor(deltaTime);
+                    bool tickProgressed = block.TickConveyor(deltaTime, out bool tickExecuted);
                     lastActiveConveyorCornerGroupBlocksProcessed++;
 
-                    if (tickProgressed && IsActiveConveyor(block) && block.ShouldTickActiveConveyor())
+                    if (!tickExecuted)
+                    {
+                        lastActiveConveyorDuplicateFrameTicksSkipped++;
+                        if (IsActiveConveyor(block) && block.ShouldTickActiveConveyor())
+                        {
+                            QueueConveyorWake(block);
+                        }
+                    }
+                    else if (tickProgressed && IsActiveConveyor(block) && block.ShouldTickActiveConveyor())
                     {
                         QueueConveyorWake(block);
                     }
                     else if (!tickProgressed)
                     {
                         lastActiveConveyorCornerGroupNoProgressRequeuesSkipped++;
+                        QueueConveyorNetworkSleepCheck(block);
                     }
                 }
             }
@@ -2833,6 +2841,8 @@ public partial class TerrainGenerator : MonoBehaviour
         lastActiveConveyorCornerGroupBlocksSkipped = 0;
         lastActiveConveyorCornerGroupNoProgressRequeuesSkipped = 0;
         lastActiveConveyorBlockWakeTicks = 0;
+        lastActiveConveyorBlockNoProgressRequeuesSkipped = 0;
+        lastActiveConveyorDuplicateFrameTicksSkipped = 0;
         lastActiveConveyorBlockWakeLineFallbacks = 0;
         lastActiveConveyorFullLineWakesProcessed = 0;
         lastActiveConveyorRangedLineWakesProcessed = 0;
@@ -4650,6 +4660,8 @@ public partial class TerrainGenerator : MonoBehaviour
         MapObjectTickProfiler.AddRuntimeCounter("ActiveConveyor", "CornerGroupBlocksSkipped", lastActiveConveyorCornerGroupBlocksSkipped);
         MapObjectTickProfiler.AddRuntimeCounter("ActiveConveyor", "CornerGroupNoProgressRequeuesSkipped", lastActiveConveyorCornerGroupNoProgressRequeuesSkipped);
         MapObjectTickProfiler.AddRuntimeCounter("ActiveConveyor", "BlockWakeTicks", lastActiveConveyorBlockWakeTicks);
+        MapObjectTickProfiler.AddRuntimeCounter("ActiveConveyor", "BlockNoProgressRequeuesSkipped", lastActiveConveyorBlockNoProgressRequeuesSkipped);
+        MapObjectTickProfiler.AddRuntimeCounter("ActiveConveyor", "DuplicateFrameTicksSkipped", lastActiveConveyorDuplicateFrameTicksSkipped);
         MapObjectTickProfiler.AddRuntimeCounter("ActiveConveyor", "BlockWakeLineFallbacks", lastActiveConveyorBlockWakeLineFallbacks);
         MapObjectTickProfiler.AddRuntimeCounter("ActiveConveyor", "FullLineWakesProcessed", lastActiveConveyorFullLineWakesProcessed);
         MapObjectTickProfiler.AddRuntimeCounter("ActiveConveyor", "RangedLineWakesProcessed", lastActiveConveyorRangedLineWakesProcessed);

@@ -4408,15 +4408,22 @@ public partial class Block : BaseObject
         return advancedAny;
     }
 
-    public bool TickConveyor(float deltaTime)
+    public bool TickConveyor(float deltaTime, out bool tickExecuted)
     {
+        tickExecuted = false;
         if (!Application.isPlaying || deltaTime <= 0f)
         {
             return false;
         }
 
         float elapsedTickTime = ConsumeConveyorTickDeltaTime(deltaTime);
-        return elapsedTickTime > 0f && UpdateConveyorObjects(elapsedTickTime);
+        if (elapsedTickTime <= 0f)
+        {
+            return false;
+        }
+
+        tickExecuted = true;
+        return UpdateConveyorObjects(elapsedTickTime);
     }
 
     public bool NotifyStraightConveyorLineTickCompleted(out bool hasRetryWork, out bool skippedNoMoveWork)
@@ -4665,12 +4672,12 @@ public partial class Block : BaseObject
         }
     }
 
-    private void WakeConveyorMoveAttempts(bool clearBlockedSleepImmediately = false)
+    private void WakeConveyorMoveAttempts(bool clearBlockedSleepImmediately = false, bool queueWake = true)
     {
         bool hadSleepingLanes = clearBlockedSleepImmediately
             ? ClearConveyorLaneSleepStates()
             : ClearMovableConveyorLaneSleepStates();
-        TerrainGenerator.Active?.WakeConveyorNetwork(this);
+        TerrainGenerator.Active?.WakeConveyorNetwork(this, queueWake);
         bool clearedMoveAttemptThrottle = nextConveyorMoveAttemptTime > 0f;
         nextConveyorMoveAttemptTime = 0f;
         ConveyorRuntimeArrays runtimeArrays = conveyorRuntimeArrays;
@@ -4688,7 +4695,7 @@ public partial class Block : BaseObject
         RefreshSleepAwakeDebugVisuals();
         if (hadSleepingLanes)
         {
-            RefreshConveyorActivityRegistration();
+            RefreshConveyorActivityRegistration(queueWake);
         }
     }
 
@@ -4736,8 +4743,7 @@ public partial class Block : BaseObject
 
         TerrainGenerator activeTerrain = TerrainGenerator.Active;
         activeTerrain?.WakeConveyorNetwork(this);
-        activeTerrain?.QueueConveyorDirectWakeAround(this);
-        RefreshConveyorActivityRegistration();
+        RefreshConveyorActivityRegistration(false);
         return true;
     }
 
@@ -4785,17 +4791,17 @@ public partial class Block : BaseObject
         WakeConveyorMoveAttemptsAlongRuntimeFlowImmediate();
     }
 
-    public void WakeConveyorMoveAttemptsAlongRuntimeFlowImmediate()
+    public void WakeConveyorMoveAttemptsAlongRuntimeFlowImmediate(bool queueWake = true)
     {
-        WakeConveyorMoveAttempts(true);
+        WakeConveyorMoveAttempts(true, queueWake);
         if (TryGetRuntimePreviousConveyorBlock(out Block previousBlock) && previousBlock != null)
         {
-            previousBlock.WakeConveyorMoveAttempts(true);
+            previousBlock.WakeConveyorMoveAttempts(true, queueWake);
         }
 
         if (TryGetRuntimeNextConveyorBlock(out Block nextBlock) && nextBlock != null)
         {
-            nextBlock.WakeConveyorMoveAttempts(true);
+            nextBlock.WakeConveyorMoveAttempts(true, queueWake);
         }
     }
 
@@ -4813,9 +4819,8 @@ public partial class Block : BaseObject
         }
 
         InvalidateConveyorCanMoveCaches();
-        TerrainGenerator.Active?.QueueConveyorDirectWakeAround(this);
         WakeConveyorMoveAttemptsAround();
-        RefreshConveyorActivityRegistration();
+        RefreshConveyorActivityRegistration(false);
     }
 
     private bool SleepConveyorMoveAttempts()
