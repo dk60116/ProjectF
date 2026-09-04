@@ -102,12 +102,15 @@ public partial class TerrainGenerator : MonoBehaviour
     private readonly List<TerrainAnimalInstance> animalInstancesScratch =
         new List<TerrainAnimalInstance>();
     private readonly Dictionary<long, AnimalSaveEntry> animalSaveOverrides = new Dictionary<long, AnimalSaveEntry>();
+    private readonly Dictionary<Vector2Int, List<AnimalSaveEntry>> animalSaveOverridesByChunk =
+        new Dictionary<Vector2Int, List<AnimalSaveEntry>>();
     private readonly HashSet<long> loadedAnimalIds = new HashSet<long>();
     private readonly HashSet<TerrainAnimalInstance> pinnedAnimalInstances =
         new HashSet<TerrainAnimalInstance>();
     private int animalDefinitionCacheHash = int.MinValue;
     private ChunkAnimalSpawnPhase chunkAnimalSpawnPhase;
-    private Dictionary<long, AnimalSaveEntry>.Enumerator chunkAnimalSaveOverrideEnumerator;
+    private List<AnimalSaveEntry> chunkAnimalSaveOverrides;
+    private int chunkAnimalSaveOverrideIndex;
     private Vector2Int chunkAnimalSpawnCoordinate;
     private DeterministicAnimalRandom chunkAnimalSpawnRandom;
     private int chunkAnimalSpawnHerdIndex;
@@ -217,7 +220,8 @@ public partial class TerrainGenerator : MonoBehaviour
             chunkMinCoordinate + new Vector2Int(normalizedChunkSize - 1, normalizedChunkSize - 1),
             animalUsedCoordinatesScratch);
         chunkAnimalSpawnCoordinate = chunkCoordinate;
-        chunkAnimalSaveOverrideEnumerator = animalSaveOverrides.GetEnumerator();
+        animalSaveOverridesByChunk.TryGetValue(chunkCoordinate, out chunkAnimalSaveOverrides);
+        chunkAnimalSaveOverrideIndex = 0;
         chunkAnimalSpawnPhase = ChunkAnimalSpawnPhase.SavedOverrides;
         return false;
     }
@@ -227,14 +231,19 @@ public partial class TerrainGenerator : MonoBehaviour
         double spawnStepStartTime = Time.realtimeSinceStartupAsDouble;
         if (chunkAnimalSpawnPhase == ChunkAnimalSpawnPhase.SavedOverrides)
         {
-            while (chunkAnimalSaveOverrideEnumerator.MoveNext())
+            while (chunkAnimalSaveOverrides != null
+                   && chunkAnimalSaveOverrideIndex < chunkAnimalSaveOverrides.Count)
             {
-                AnimalSaveEntry state = chunkAnimalSaveOverrideEnumerator.Current.Value;
+                AnimalSaveEntry state = chunkAnimalSaveOverrides[chunkAnimalSaveOverrideIndex++];
                 if (state == null
                     || state.removed
-                    || loadedAnimalIds.Contains(state.deterministicId)
-                    || GetAnimalChunkCoordinate(state.position) != chunkAnimalSpawnCoordinate)
+                    || loadedAnimalIds.Contains(state.deterministicId))
                 {
+                    if (allowYield && HasExceededChunkGenerationFrameBudget(spawnStepStartTime))
+                    {
+                        return false;
+                    }
+
                     continue;
                 }
 
@@ -269,7 +278,8 @@ public partial class TerrainGenerator : MonoBehaviour
                 }
             }
 
-            chunkAnimalSaveOverrideEnumerator.Dispose();
+            chunkAnimalSaveOverrides = null;
+            chunkAnimalSaveOverrideIndex = 0;
             animalEligibleCoordinatesScratch.Clear();
             animalEligibleCoordinateLookup.Clear();
             loadedBlocks.CopyRegisteredCoordinates(
@@ -362,7 +372,7 @@ public partial class TerrainGenerator : MonoBehaviour
                     continue;
                 }
 
-                Animal spawnedAnimal = SpawnAnimalInstance(
+                SpawnAnimalInstance(
                     definition,
                     deterministicId,
                     new Vector3(coordinate.x, 0f, coordinate.y),
@@ -375,9 +385,7 @@ public partial class TerrainGenerator : MonoBehaviour
                     chunkAnimalSpawnHerdRadius,
                     null,
                     transform);
-                if (allowYield
-                    && spawnedAnimal != null
-                    && HasExceededChunkGenerationFrameBudget(spawnStepStartTime))
+                if (allowYield && HasExceededChunkGenerationFrameBudget(spawnStepStartTime))
                 {
                     return false;
                 }
@@ -393,12 +401,9 @@ public partial class TerrainGenerator : MonoBehaviour
 
     private void CancelChunkAnimalSpawnWork()
     {
-        if (chunkAnimalSpawnPhase == ChunkAnimalSpawnPhase.SavedOverrides)
-        {
-            chunkAnimalSaveOverrideEnumerator.Dispose();
-        }
-
         chunkAnimalSpawnPhase = ChunkAnimalSpawnPhase.Inactive;
+        chunkAnimalSaveOverrides = null;
+        chunkAnimalSaveOverrideIndex = 0;
         chunkAnimalSpawnSpecies = null;
         chunkAnimalSpawnHerdInitialized = false;
         ClearAnimalSpawnScratch();
@@ -711,15 +716,20 @@ public partial class TerrainGenerator : MonoBehaviour
 
     private void ApplyAnimalSaveStates(MapSaveData mapSaveData)
     {
+        CancelChunkAnimalSpawnWork();
         animalSaveOverrides.Clear();
+        animalSaveOverridesByChunk.Clear();
         loadedAnimalIds.Clear();
         List<AnimalSaveEntry> entries = mapSaveData != null ? mapSaveData.animals : null;
+        int entryCount = entries?.Count ?? 0;
+        animalSaveOverrides.EnsureCapacity(entryCount);
+        animalSaveOverridesByChunk.EnsureCapacity(entryCount);
         for (int i = 0; entries != null && i < entries.Count; i++)
         {
             AnimalSaveEntry entry = entries[i];
             if (entry != null && entry.deterministicId != 0L)
             {
-                animalSaveOverrides[entry.deterministicId] = CloneAnimalSaveEntry(entry);
+                SetAnimalSaveOverride(CloneAnimalSaveEntry(entry));
             }
         }
     }
@@ -739,8 +749,7 @@ public partial class TerrainGenerator : MonoBehaviour
             }
 
             Animal animal = instance.GetComponentInChildren<Animal>(true);
-            animalSaveOverrides[instance.DeterministicId] =
-                CreateAnimalSaveEntry(instance, animal, false);
+            SetAnimalSaveOverride(CreateAnimalSaveEntry(instance, animal, false));
         }
     }
 
@@ -803,8 +812,7 @@ public partial class TerrainGenerator : MonoBehaviour
 
         if (preserveRemoval && instance.DeterministicId != 0L)
         {
-            animalSaveOverrides[instance.DeterministicId] =
-                CreateAnimalSaveEntry(instance, animal, true);
+            SetAnimalSaveOverride(CreateAnimalSaveEntry(instance, animal, true));
         }
 
         loadedAnimalIds.Remove(instance.DeterministicId);
@@ -959,9 +967,64 @@ public partial class TerrainGenerator : MonoBehaviour
 
     private void ClearAnimalPersistentState()
     {
+        CancelChunkAnimalSpawnWork();
         animalSaveOverrides.Clear();
+        animalSaveOverridesByChunk.Clear();
         loadedAnimalIds.Clear();
         pinnedAnimalInstances.Clear();
+    }
+
+    private void SetAnimalSaveOverride(AnimalSaveEntry state)
+    {
+        if (state == null || state.deterministicId == 0L)
+        {
+            return;
+        }
+
+        if (animalSaveOverrides.TryGetValue(state.deterministicId, out AnimalSaveEntry previousState))
+        {
+            RemoveAnimalSaveOverrideFromChunkIndex(previousState);
+        }
+
+        animalSaveOverrides[state.deterministicId] = state;
+        Vector2Int chunkCoordinate = GetAnimalChunkCoordinate(state.position);
+        if (!animalSaveOverridesByChunk.TryGetValue(chunkCoordinate, out List<AnimalSaveEntry> chunkOverrides))
+        {
+            chunkOverrides = new List<AnimalSaveEntry>();
+            animalSaveOverridesByChunk.Add(chunkCoordinate, chunkOverrides);
+        }
+
+        chunkOverrides.Add(state);
+    }
+
+    private void RemoveAnimalSaveOverrideFromChunkIndex(AnimalSaveEntry state)
+    {
+        if (state == null)
+        {
+            return;
+        }
+
+        Vector2Int chunkCoordinate = GetAnimalChunkCoordinate(state.position);
+        if (!animalSaveOverridesByChunk.TryGetValue(chunkCoordinate, out List<AnimalSaveEntry> chunkOverrides))
+        {
+            return;
+        }
+
+        for (int i = chunkOverrides.Count - 1; i >= 0; i--)
+        {
+            AnimalSaveEntry indexedState = chunkOverrides[i];
+            if (ReferenceEquals(indexedState, state)
+                || (indexedState != null && indexedState.deterministicId == state.deterministicId))
+            {
+                chunkOverrides.RemoveAt(i);
+                break;
+            }
+        }
+
+        if (chunkOverrides.Count == 0)
+        {
+            animalSaveOverridesByChunk.Remove(chunkCoordinate);
+        }
     }
 
     private void EnsureAnimalSpeciesCache()

@@ -68,7 +68,7 @@ public readonly struct BlockCellData
 
 /// <summary>
 /// Chunk-contiguous cell storage. Stateful cells may have a Block component
-/// proxy, but every proxy is hosted by the single TerrainGenerator GameObject;
+/// proxy hosted by one of a bounded number of TerrainGenerator-owned shards;
 /// no cell owns a GameObject or Transform.
 /// </summary>
 public sealed class BlockDataStore : IEnumerable<KeyValuePair<Vector2Int, Block>>
@@ -120,6 +120,11 @@ public sealed class BlockDataStore : IEnumerable<KeyValuePair<Vector2Int, Block>
     public int RegisteredCellCount => registeredCellCount;
     public int Count => runtimeProxyCount;
     public int RuntimeSimulationStateCount => runtimeSimulationStateCount;
+
+    public void EnsureChunkCapacity(int capacity)
+    {
+        chunks.EnsureCapacity(Mathf.Max(0, capacity));
+    }
 
     public void ConfigureChunkSize(int value)
     {

@@ -60,6 +60,7 @@ public class Resource : MapObject
     }
 
     private static readonly List<Resource> ActiveResourcesInternal = new List<Resource>();
+    private static readonly HashSet<Resource> ActiveResourceLookup = new HashSet<Resource>();
     private static readonly Dictionary<Vector2Int, List<Resource>> ActiveResourcesByCoordinate =
         new Dictionary<Vector2Int, List<Resource>>();
     private static readonly List<Renderer> BodyRendererScanBuffer = new List<Renderer>();
@@ -215,7 +216,7 @@ public class Resource : MapObject
         UpdateBodyScale();
         SetBatchedRendering(true);
 
-        if (!ActiveResourcesInternal.Contains(this))
+        if (ActiveResourceLookup.Add(this))
         {
             ActiveResourcesInternal.Add(this);
         }
@@ -227,7 +228,10 @@ public class Resource : MapObject
     {
         SetBatchedRendering(false);
         UnregisterActiveResourceCoordinate();
-        ActiveResourcesInternal.Remove(this);
+        if (ActiveResourceLookup.Remove(this))
+        {
+            ActiveResourcesInternal.Remove(this);
+        }
 
         if (!Application.isPlaying || owningBlock == null)
         {
@@ -1623,6 +1627,18 @@ public class Resource : MapObject
         return true;
     }
 
+    public static void EnsureActiveResourceCapacity(int requestedCapacity)
+    {
+        int capacity = Mathf.Max(ActiveResourcesInternal.Count, requestedCapacity);
+        if (ActiveResourcesInternal.Capacity < capacity)
+        {
+            ActiveResourcesInternal.Capacity = capacity;
+        }
+
+        ActiveResourceLookup.EnsureCapacity(capacity);
+        ActiveResourcesByCoordinate.EnsureCapacity(capacity);
+    }
+
     private static bool IsActiveResourceCoordinateEntryValid(Resource resource, Vector2Int coordinate)
     {
         return resource != null
@@ -1998,6 +2014,14 @@ public class ResourceBatchRenderer : MonoBehaviour
                 batchesDirty = true;
             }
         }
+    }
+
+    public void EnsureCapacity(int requestedCapacity)
+    {
+        int capacity = Mathf.Max(registeredResources.Count, requestedCapacity);
+        registeredResources.EnsureCapacity(capacity);
+        pendingResourceAddSet.EnsureCapacity(capacity);
+        batchedResources.EnsureCapacity(capacity);
     }
 
     public void MarkDirty(Resource resource)

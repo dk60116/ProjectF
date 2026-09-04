@@ -2842,12 +2842,24 @@ public partial class PlayerController : MonoBehaviour
 
     private Resource FindNearestResourceInteractionTarget()
     {
-        if (player == null || player.IsCarrying)
+        if (!CanPrepareHandForResourceHarvest())
         {
             return null;
         }
 
         return FindNearestResourceInteractionTarget(false);
+    }
+
+    private bool CanPrepareHandForResourceHarvest()
+    {
+        return player != null
+               && (!player.IsCarrying || player.CanClearHandIntoBag());
+    }
+
+    private bool TryPrepareHandForResourceHarvest()
+    {
+        return player != null
+               && (!player.IsCarrying || player.TryStoreHandItemsInBag());
     }
 
     public bool TryFindNearestBucketFluidSource(
@@ -3069,15 +3081,12 @@ public partial class PlayerController : MonoBehaviour
 
         combinedInteractionFocusBlocks.Clear();
         AppendUniqueBlock(combinedInteractionFocusBlocks, standingConveyorFocusBlock);
-        if (!player.IsCarrying)
+        Resource resourceInteractionTarget = FindNearestResourceInteractionTarget();
+        if (resourceInteractionTarget != null)
         {
-            Resource resourceInteractionTarget = FindNearestResourceInteractionTarget();
-            if (resourceInteractionTarget != null)
-            {
-                Block resourceBlock = ResolveResourceOwningBlock(resourceInteractionTarget);
-                AppendUniqueBlock(combinedInteractionFocusBlocks, resourceBlock);
-                CacheInteractionButtonFocusTarget(resourceInteractionTarget, resourceBlock);
-            }
+            Block resourceBlock = ResolveResourceOwningBlock(resourceInteractionTarget);
+            AppendUniqueBlock(combinedInteractionFocusBlocks, resourceBlock);
+            CacheInteractionButtonFocusTarget(resourceInteractionTarget, resourceBlock);
         }
 
         bool hasStandingAreaFocusBlock = TryGetStandingInputOutputAreaFocusBlock(
@@ -3514,7 +3523,7 @@ public partial class PlayerController : MonoBehaviour
         Vector3 origin = player.BodyTransform != null ? player.BodyTransform.position : transform.position;
         if (mapObject is Resource resource)
         {
-            if (player.IsCarrying || !resource.CanHarvest)
+            if (!CanPrepareHandForResourceHarvest() || !resource.CanHarvest)
             {
                 return false;
             }
@@ -4159,13 +4168,13 @@ public partial class PlayerController : MonoBehaviour
     {
         if (resource == null
             || !resource.CanHarvest
-            || player == null
-            || player.IsCarrying)
+            || player == null)
         {
             return false;
         }
 
-        if (!IsWithinInteractionRange(resource))
+        if (!IsWithinInteractionRange(resource)
+            || !TryPrepareHandForResourceHarvest())
         {
             return false;
         }

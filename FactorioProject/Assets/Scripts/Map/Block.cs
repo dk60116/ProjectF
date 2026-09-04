@@ -153,8 +153,9 @@ public partial class Block : BaseObject
     private bool inputAreaCenterObjectsVisible = true;
 
     /// <summary>
-    /// Runtime blocks are lightweight components hosted by TerrainGenerator. Their
-    /// shared Transform is not a cell position; spatial code must use this value.
+    /// Runtime blocks are lightweight components hosted by TerrainGenerator-owned
+    /// proxy shards. Their shared Transform is not a cell position; spatial code
+    /// must use this value.
     /// </summary>
     public Vector3 WorldPosition => new Vector3(coordinate.x, 0f, coordinate.y);
     public Transform RuntimeObjectRoot
@@ -163,7 +164,7 @@ public partial class Block : BaseObject
         {
             if (cachedTerrainGenerator == null)
             {
-                cachedTerrainGenerator = GetComponent<TerrainGenerator>();
+                cachedTerrainGenerator = GetComponentInParent<TerrainGenerator>();
             }
 
             return cachedTerrainGenerator != null ? cachedTerrainGenerator.transform : transform;
@@ -339,8 +340,16 @@ public partial class Block : BaseObject
 
     public void Initialize(Vector2Int blockCoordinate, BlockType blockType)
     {
+        Initialize(GetComponentInParent<TerrainGenerator>(), blockCoordinate, blockType);
+    }
+
+    internal void Initialize(
+        TerrainGenerator terrainGenerator,
+        Vector2Int blockCoordinate,
+        BlockType blockType)
+    {
         childReferencesCached = false;
-        cachedTerrainGenerator = GetComponent<TerrainGenerator>();
+        cachedTerrainGenerator = terrainGenerator;
         CacheChildReferences();
         coordinate = blockCoordinate;
         type = blockType;

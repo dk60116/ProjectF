@@ -26,6 +26,9 @@ public partial class TerrainGenerator : MonoBehaviour
     private const float GeneratedOilPitInnerMargin = 0.025f;
     private const float GeneratedOilPitOuterMargin = 0.115f;
     private const float GeneratedOilPitDepth = 0.20f;
+    private const int GeneratedSurfaceBiomeMargin = 4;
+    private const int ChunkCapacityGrowthHeadroom = 64;
+    private const int BlockRuntimeProxyHostCount = 64;
     public const float GeneratedOilPitInnerRadius =
         GeneratedOilSurfaceRadius + GeneratedOilPitInnerMargin;
     public const float GeneratedOilPitOuterRadius =
@@ -750,6 +753,8 @@ public partial class TerrainGenerator : MonoBehaviour
     private readonly Dictionary<Vector2Int, ChunkRuntimeData> loadedChunks =
         new Dictionary<Vector2Int, ChunkRuntimeData>();
     private readonly BlockDataStore loadedBlocks = new BlockDataStore();
+    private readonly GameObject[] blockRuntimeProxyHosts = new GameObject[BlockRuntimeProxyHostCount];
+    private int createdBlockRuntimeProxyHostCount;
     private int suppressedBlockProxyMaterializationDepth;
     private readonly List<Vector2Int> chunksToGenerateScratch = new List<Vector2Int>();
     private ChunkSurfaceBuildData reusableChunkSurfaceBuildData;
@@ -1530,6 +1535,7 @@ public partial class TerrainGenerator : MonoBehaviour
 
         currentCenterChunk = GetCenterChunkCoordinate();
         hasGeneratedChunks = true;
+        EnsureChunkActivationStorageCapacity(terrainSaveData?.activeChunkCoordinates?.Count ?? 0);
         if (!QueueSavedActiveChunks(terrainSaveData?.activeChunkCoordinates))
         {
             RefreshChunks(currentCenterChunk, true);
@@ -2291,6 +2297,11 @@ public partial class TerrainGenerator : MonoBehaviour
             }
         }
 
+        if (chunksToGenerate.Count > 0)
+        {
+            EnsureChunkActivationStorageCapacity(loadedChunks.Count + chunksToGenerate.Count);
+        }
+
         using (RefreshChunkGenerationQueueMarker.Auto())
         {
             for (int i = 0; i < chunksToGenerate.Count; i++)
@@ -2302,6 +2313,63 @@ public partial class TerrainGenerator : MonoBehaviour
             EnsureChunkGenerationProcessing();
         }
 
+    }
+
+    private void EnsureChunkActivationStorageCapacity(int requiredChunkCount)
+    {
+        if (requiredChunkCount <= 0)
+        {
+            return;
+        }
+
+        // Grow shared stores before a generation coroutine starts. Otherwise a
+        // single Add during chunk activation can rehash data accumulated by the
+        // whole save and turn an unrelated chunk into a long main-thread frame.
+        int normalizedChunkSize = Mathf.Max(4, chunkSize);
+        GetMapChunkRange(normalizedChunkSize, out Vector2Int minChunk, out Vector2Int maxChunk);
+        long mapChunkWidth = (long)maxChunk.x - minChunk.x + 1L;
+        long mapChunkHeight = (long)maxChunk.y - minChunk.y + 1L;
+        long maximumChunkCount = Math.Max(1L, mapChunkWidth * mapChunkHeight);
+        long roundedRequiredChunkCount =
+            (((long)requiredChunkCount + ChunkCapacityGrowthHeadroom - 1L)
+             / ChunkCapacityGrowthHeadroom)
+            * ChunkCapacityGrowthHeadroom;
+        long requestedWithHeadroom = roundedRequiredChunkCount + ChunkCapacityGrowthHeadroom;
+        int chunkCapacity = (int)Math.Min(
+            int.MaxValue,
+            Math.Min(maximumChunkCount, requestedWithHeadroom));
+
+        loadedChunks.EnsureCapacity(chunkCapacity);
+        loadedBlocks.EnsureChunkCapacity(chunkCapacity);
+
+        if (Application.isPlaying)
+        {
+            long maximumResources = (long)chunkCapacity * normalizedChunkSize * normalizedChunkSize;
+            int resourceCapacity = (int)Math.Min(int.MaxValue, maximumResources);
+            Resource.EnsureActiveResourceCapacity(resourceCapacity);
+            ResourceBatchRenderer batchRenderer = GetComponent<ResourceBatchRenderer>();
+            if (batchRenderer == null)
+            {
+                batchRenderer = gameObject.AddComponent<ResourceBatchRenderer>();
+            }
+
+            batchRenderer.EnsureCapacity(resourceCapacity);
+        }
+
+        int shorelineMargin = Mathf.Max(0, Mathf.Max(sandMinWidth, sandMaxWidth)) + 1;
+        int coordinateMargin = GeneratedSurfaceBiomeMargin + shorelineMargin;
+        long surfaceSampleWidth = (long)normalizedChunkSize + (coordinateMargin * 2L) + 1L;
+        long requestedCoordinateCapacity = (long)chunkCapacity * surfaceSampleWidth * surfaceSampleWidth;
+        long mapCoordinateWidth = (long)GetNormalizedMapSize() + (coordinateMargin * 2L);
+        long maximumCoordinateCapacity = mapCoordinateWidth * mapCoordinateWidth;
+        int coordinateCapacity = (int)Math.Min(
+            int.MaxValue,
+            Math.Min(maximumCoordinateCapacity, requestedCoordinateCapacity));
+
+        tileBiomeCache.EnsureCapacity(coordinateCapacity);
+        rawWaterCache.EnsureCapacity(coordinateCapacity);
+        directWaterBlockCache.EnsureCapacity(coordinateCapacity);
+        bufferedWaterBlockCache.EnsureCapacity(coordinateCapacity);
     }
 
     private sealed class ChunkDistanceComparer : IComparer<Vector2Int>
@@ -2929,16 +2997,41 @@ public partial class TerrainGenerator : MonoBehaviour
         // handle. Empty cells never allocate a simulation-state object.
         loadedBlocks.RegisterCell(coordinate, blockType, out BlockHandle handle);
 
-        Block block = gameObject.AddComponent<Block>();
+        GameObject proxyHost = GetOrCreateBlockRuntimeProxyHost(handle.ChunkCoordinate);
+        Block block = proxyHost.AddComponent<Block>();
         block.hideFlags = HideFlags.HideInInspector | HideFlags.DontSave;
         block.ConfigureRuntimeTemplate(template);
         block.BindRuntimeHandle(handle);
-        block.Initialize(coordinate, blockType);
+        block.Initialize(this, coordinate, blockType);
         if (loadedBlocks.BindRuntimeProxy(coordinate, block, out BlockHandle boundHandle))
         {
             block.BindRuntimeHandle(boundHandle);
         }
         return block;
+    }
+
+    private GameObject GetOrCreateBlockRuntimeProxyHost(Vector2Int chunkCoordinate)
+    {
+        int hostIndex;
+        unchecked
+        {
+            int chunkHash = (chunkCoordinate.x * 73856093) ^ (chunkCoordinate.y * 19349663);
+            hostIndex = chunkHash & (BlockRuntimeProxyHostCount - 1);
+        }
+
+        GameObject host = blockRuntimeProxyHosts[hostIndex];
+        if (host != null)
+        {
+            return host;
+        }
+
+        host = new GameObject($"Block Runtime Proxies {hostIndex:00}");
+        host.hideFlags = HideFlags.HideAndDontSave;
+        host.layer = gameObject.layer;
+        host.transform.SetParent(transform, false);
+        blockRuntimeProxyHosts[hostIndex] = host;
+        createdBlockRuntimeProxyHostCount++;
+        return host;
     }
 
     private bool TryMaterializeBlockRuntimeProxy(Vector2Int coordinate, out Block block)

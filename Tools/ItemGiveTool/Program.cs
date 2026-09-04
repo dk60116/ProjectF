@@ -40,6 +40,7 @@ internal sealed class EditorToolForm : Form
     private readonly NumericUpDown itemIdInput = new NumericUpDown();
     private readonly NumericUpDown countInput = new NumericUpDown();
     private readonly Button giveButton = new Button();
+    private readonly Button giveTenButton = new Button();
     private readonly Button pingButton = new Button();
     private readonly Button conveyorLineButton = new Button();
     private readonly Button conveyorItemFillButton = new Button();
@@ -251,6 +252,9 @@ internal sealed class EditorToolForm : Form
         StylePrimaryButton(giveButton, "Give");
         giveButton.Click += async (_, _) => await SendGiveAsync();
 
+        StylePrimaryButton(giveTenButton, "Give 10");
+        giveTenButton.Click += async (_, _) => await SendGiveAsync(10);
+
         StyleSecondaryButton(pingButton, "연결 확인");
         pingButton.Click += async (_, _) => await SendPingAsync();
 
@@ -282,6 +286,7 @@ internal sealed class EditorToolForm : Form
         statusLabel.Padding = new Padding(12, 8, 0, 0);
 
         buttonPanel.Controls.Add(giveButton);
+        buttonPanel.Controls.Add(giveTenButton);
         buttonPanel.Controls.Add(pingButton);
         buttonPanel.Controls.Add(conveyorLineButton);
         buttonPanel.Controls.Add(conveyorItemFillButton);
@@ -1003,10 +1008,10 @@ internal sealed class EditorToolForm : Form
         graphics.DrawImage(image, target);
     }
 
-    private async Task SendGiveAsync()
+    private async Task SendGiveAsync(int? countOverride = null)
     {
         int itemId = Decimal.ToInt32(itemIdInput.Value);
-        int count = Decimal.ToInt32(countInput.Value);
+        int count = countOverride ?? Decimal.ToInt32(countInput.Value);
         await SendCommandAsync($"give {itemId} {count}", $"Give itemId={itemId}, count={count}");
     }
 
@@ -1683,6 +1688,7 @@ internal sealed class EditorToolForm : Form
     private void SetBusy(bool busy, string status)
     {
         giveButton.Enabled = !busy;
+        giveTenButton.Enabled = !busy;
         pingButton.Enabled = !busy;
         conveyorLineButton.Enabled = !busy;
         conveyorItemFillButton.Enabled = !busy;

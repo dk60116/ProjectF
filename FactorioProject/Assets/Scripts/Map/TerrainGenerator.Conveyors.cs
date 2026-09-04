@@ -4500,7 +4500,10 @@ public partial class TerrainGenerator : MonoBehaviour
             : 0f;
 
         MapObjectTickProfiler.AddRuntimeCounter("World", "LoadedChunks", loadedChunks.Count);
-        MapObjectTickProfiler.AddRuntimeCounter("World", "ChunkGameObjects", 0);
+        MapObjectTickProfiler.AddRuntimeCounter(
+            "World",
+            "ChunkGameObjects",
+            createdBlockRuntimeProxyHostCount);
         MapObjectTickProfiler.AddRuntimeCounter("World", "DedicatedBlockGameObjects", 0);
         MapObjectTickProfiler.AddRuntimeCounter(
             "World",

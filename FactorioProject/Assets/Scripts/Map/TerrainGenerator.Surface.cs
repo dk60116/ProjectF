@@ -359,7 +359,7 @@ public partial class TerrainGenerator : MonoBehaviour
     private ChunkSurfaceWorkerInput CreateChunkSurfaceWorkerInput(Vector2Int origin, int chunkSizeInBlocks)
     {
         int resolution = GetChunkSurfaceResolution(origin, chunkSizeInBlocks);
-        int margin = 4;
+        int margin = GeneratedSurfaceBiomeMargin;
         int gridSize = chunkSizeInBlocks + (margin * 2) + 1;
         int gridLength = gridSize * gridSize;
         ChunkSurfaceWorkerInput input = reusableChunkSurfaceWorkerInput;
