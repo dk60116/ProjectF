@@ -208,9 +208,11 @@ public sealed class AnimalAIWorld : MonoBehaviour
                     }
                 }
             }
-            else if (!paused && runBackgroundStep && controller.IsInteracted)
+            else if (!paused && runBackgroundStep)
             {
-                controller.TickBackground(BackgroundStepInterval);
+                // Needs timers advance above, but dormant animals must not enter
+                // pathfinding, collision avoidance, or behavior simulation.
+                controller.TickDormant();
             }
         }
 

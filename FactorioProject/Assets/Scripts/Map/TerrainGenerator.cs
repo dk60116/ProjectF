@@ -1,7 +1,6 @@
 using System;
 using System.Collections;
 using System.Collections.Generic;
-using System.Threading.Tasks;
 using Unity.Profiling;
 using UnityEngine;
 #if UNITY_EDITOR
@@ -19,16 +18,21 @@ public partial class TerrainGenerator : MonoBehaviour
     private const float IslandCoastIrregularity = 0.09f;
     private const float GeneratedSurfaceBaseInset = 0.0035f;
     private const float GeneratedSurfaceBiomeLayerStep = 0.004f;
-    public const float GeneratedOilSurfaceLocalY = -0.15f;
+    public const float GeneratedOilSurfaceLocalY = -0.04f;
+    public const int GeneratedOilSurfaceSegmentCount = 48;
+    public const float GeneratedOilSurfaceRadius = 0.34f;
+    private const int GeneratedOilSurfaceYawStepCount = 8;
+    private const int GeneratedOilSurfaceYawSalt = 9127;
+    private const float GeneratedOilPitInnerMargin = 0.025f;
+    private const float GeneratedOilPitOuterMargin = 0.115f;
     private const float GeneratedOilPitDepth = 0.20f;
-    public const float GeneratedOilPitInnerRadius = 0.285f;
-    public const float GeneratedOilPitOuterRadius = 0.3675f;
-    private const float GeneratedOilPitOutlineJitter = 0.005f;
-    // Oil pits need one extra subdivision over the common runtime setting, but
-    // raising the entire 8x8 chunk to 8 subdivisions multiplies contour and
-    // mesh-upload work by more than seven times. Four samples per tile retain
-    // the pit silhouette without creating periodic streaming spikes.
-    private const int GeneratedOilChunkSurfaceSubdivisions = 4;
+    public const float GeneratedOilPitInnerRadius =
+        GeneratedOilSurfaceRadius + GeneratedOilPitInnerMargin;
+    public const float GeneratedOilPitOuterRadius =
+        GeneratedOilSurfaceRadius + GeneratedOilPitOuterMargin;
+    // Only oil-bearing chunks use the denser grid. This lets the excavated rim
+    // follow the liquid outline while keeping ordinary streaming chunks cheap.
+    private const int GeneratedOilChunkSurfaceSubdivisions = 8;
     private const float GeneratedWaterWallVerticalOverlap = 0.018f;
     private const int GeneratedWaterDepthSearchRadius = 4;
     private const float GeneratedWaterDepthDeepDistance = 2.65f;
@@ -155,6 +159,31 @@ public partial class TerrainGenerator : MonoBehaviour
 
             return contourScores;
         }
+    }
+
+    public static float GetGeneratedOilSurfaceRadius(float angle)
+    {
+        return GeneratedOilSurfaceRadius
+               + (Mathf.Sin((angle * 2f) + 0.7f) * 0.018f)
+               + (Mathf.Sin((angle * 3f) - 1.1f) * 0.012f)
+               + (Mathf.Sin((angle * 5f) + 0.35f) * 0.008f)
+               + (Mathf.Sin((angle * 7f) - 0.4f) * 0.005f);
+    }
+
+    private static int GetGeneratedOilSurfaceYawStep(int seedValue, Vector2Int coordinate)
+    {
+        return Mathf.Clamp(
+            Mathf.FloorToInt(
+                Hash01WithSeed(seedValue, coordinate.x, coordinate.y, GeneratedOilSurfaceYawSalt)
+                * GeneratedOilSurfaceYawStepCount),
+            0,
+            GeneratedOilSurfaceYawStepCount - 1);
+    }
+
+    private static float GetGeneratedOilSurfaceRotationRadians(int seedValue, Vector2Int coordinate)
+    {
+        return GetGeneratedOilSurfaceYawStep(seedValue, coordinate)
+               * (Mathf.PI * 2f / GeneratedOilSurfaceYawStepCount);
     }
 
     private sealed class ChunkRuntimeData
@@ -411,13 +440,19 @@ public partial class TerrainGenerator : MonoBehaviour
     private int chunkGenerationBlocksPerFrame = 16;
 
     [SerializeField, Min(1)]
-    private int chunkSurfaceRowsPerFrame = 12;
-
-    [SerializeField, Min(1)]
     private int chunkInstallationRestoresPerFrame = 1;
 
     [SerializeField, Min(0.25f)]
     private float chunkGenerationFrameTimeBudgetMilliseconds = 3f;
+
+    [Header("Chunk Streaming Diagnostics")]
+    [Tooltip("Measures per-stage managed allocations and active time for each generated chunk.")]
+    [SerializeField]
+    private bool enableChunkGenerationDiagnostics;
+
+    [Tooltip("Writes one detailed log after each measured chunk. Leave disabled for allocation-neutral captures.")]
+    [SerializeField]
+    private bool logChunkGenerationDiagnostics;
 
     [Header("Conveyor Runtime")]
     [SerializeField, Min(16)]
@@ -719,6 +754,7 @@ public partial class TerrainGenerator : MonoBehaviour
     private readonly List<Vector2Int> chunksToGenerateScratch = new List<Vector2Int>();
     private ChunkSurfaceBuildData reusableChunkSurfaceBuildData;
     private ChunkSurfaceWorkerInput reusableChunkSurfaceWorkerInput;
+    private readonly List<Block> generatedChunkBlockScratch = new List<Block>(64);
     private readonly List<Block> chunkRuntimeBlockScratch = new List<Block>();
     private readonly ChunkDistanceComparer chunkDistanceComparer = new ChunkDistanceComparer();
     private readonly HashSet<BlockHandle> activeConveyors = new HashSet<BlockHandle>();
@@ -1169,6 +1205,8 @@ public partial class TerrainGenerator : MonoBehaviour
 
     private void OnDestroy()
     {
+        DisposeActiveSurfaceBuildJob();
+        CleanupChunkGenerationTransientState();
         foreach (KeyValuePair<Vector2Int, ChunkRuntimeData> pair in loadedChunks)
         {
             ReleaseChunkSurfaceMeshes(pair.Value);
@@ -1724,44 +1762,21 @@ public partial class TerrainGenerator : MonoBehaviour
         }
     }
 
-    private IEnumerator ApplyStoredConveyorItemSaveStatesRoutine(Block[] blocks, bool allowYield)
+    private void ApplyStoredConveyorItemSaveState(Block block)
     {
-        if (blocks == null || blocks.Length <= 0)
+        if (block == null || resourceStateStore == null)
         {
-            yield break;
+            return;
         }
 
-        EnsureResourceStateStore();
-        if (resourceStateStore == null)
+        using (RestoreChunkConveyorItemsMarker.Auto())
         {
-            yield break;
-        }
-
-        int processedSinceYield = 0;
-        int blockBudget = Mathf.Max(1, chunkGenerationBlocksPerFrame);
-        double stepStartTime = Time.realtimeSinceStartupAsDouble;
-        for (int i = 0; i < blocks.Length; i++)
-        {
-            using (RestoreChunkConveyorItemsMarker.Auto())
+            if (resourceStateStore.TryGetConveyorItems(
+                    block.Coordinate,
+                    out List<ConveyorItemLaneSaveState> lanes)
+                && CountConveyorItemSaveLanes(lanes) > 0)
             {
-                Block block = blocks[i];
-                if (block != null
-                    && resourceStateStore.TryGetConveyorItems(
-                        block.Coordinate,
-                        out List<ConveyorItemLaneSaveState> lanes)
-                    && CountConveyorItemSaveLanes(lanes) > 0)
-                {
-                    ApplyLoadedConveyorItemSaveStatesToBlock(block.Coordinate, block, lanes, null, false);
-                }
-            }
-
-            if (allowYield
-                && (++processedSinceYield >= blockBudget
-                    || HasExceededChunkGenerationFrameBudget(stepStartTime)))
-            {
-                processedSinceYield = 0;
-                yield return null;
-                stepStartTime = Time.realtimeSinceStartupAsDouble;
+                ApplyLoadedConveyorItemSaveStatesToBlock(block.Coordinate, block, lanes, null, false);
             }
         }
     }
@@ -2336,13 +2351,31 @@ public partial class TerrainGenerator : MonoBehaviour
         }
 
         Vector2Int origin = new Vector2Int(chunkCoordinate.x * normalizedChunkSize, chunkCoordinate.y * normalizedChunkSize);
+        BeginChunkGenerationDiagnostics(chunkCoordinate);
+        long diagnosticAllocatedBytesAtStart = BeginChunkGenerationDiagnosticStage(
+            out double diagnosticStageStartTime);
         loadedBlocks.RegisterChunk(chunkCoordinate);
         ChunkRuntimeData chunk = new ChunkRuntimeData(chunkCoordinate, origin);
         loadedChunks.Add(chunkCoordinate, chunk);
-        List<Block> generatedChunkBlocks = new List<Block>(64);
+        List<Block> generatedChunkBlocks = generatedChunkBlockScratch;
+        generatedChunkBlocks.Clear();
+        long maximumBlockCount = (long)normalizedChunkSize * normalizedChunkSize;
+        int requiredBlockCapacity = (int)Math.Min(maximumBlockCount, int.MaxValue);
+        if (generatedChunkBlocks.Capacity < requiredBlockCapacity)
+        {
+            generatedChunkBlocks.Capacity = requiredBlockCapacity;
+        }
+
+        EndChunkGenerationDiagnosticStage(
+            ChunkGenerationDiagnosticStage.Preparation,
+            diagnosticAllocatedBytesAtStart,
+            diagnosticStageStartTime);
+
         int blocksSinceYield = 0;
         int blockBudget = Mathf.Max(1, chunkGenerationBlocksPerFrame);
         double blockStepStartTime = Time.realtimeSinceStartupAsDouble;
+        diagnosticAllocatedBytesAtStart = BeginChunkGenerationDiagnosticStage(
+            out diagnosticStageStartTime);
 
         for (int localY = 0; localY < normalizedChunkSize; localY++)
         {
@@ -2370,8 +2403,14 @@ public partial class TerrainGenerator : MonoBehaviour
                             || HasExceededChunkGenerationFrameBudget(blockStepStartTime)))
                     {
                         blocksSinceYield = 0;
+                        EndChunkGenerationDiagnosticStage(
+                            ChunkGenerationDiagnosticStage.RuntimeProxyGeneration,
+                            diagnosticAllocatedBytesAtStart,
+                            diagnosticStageStartTime);
                         yield return null;
                         blockStepStartTime = Time.realtimeSinceStartupAsDouble;
+                        diagnosticAllocatedBytesAtStart = BeginChunkGenerationDiagnosticStage(
+                            out diagnosticStageStartTime);
                     }
 
                     continue;
@@ -2411,130 +2450,315 @@ public partial class TerrainGenerator : MonoBehaviour
                         || HasExceededChunkGenerationFrameBudget(blockStepStartTime)))
                 {
                     blocksSinceYield = 0;
+                    EndChunkGenerationDiagnosticStage(
+                        ChunkGenerationDiagnosticStage.RuntimeProxyGeneration,
+                        diagnosticAllocatedBytesAtStart,
+                        diagnosticStageStartTime);
                     yield return null;
                     blockStepStartTime = Time.realtimeSinceStartupAsDouble;
+                    diagnosticAllocatedBytesAtStart = BeginChunkGenerationDiagnosticStage(
+                        out diagnosticStageStartTime);
                 }
             }
         }
+
+        EndChunkGenerationDiagnosticStage(
+            ChunkGenerationDiagnosticStage.RuntimeProxyGeneration,
+            diagnosticAllocatedBytesAtStart,
+            diagnosticStageStartTime);
 
         if (allowYield)
         {
             yield return null;
         }
 
-        Block[] chunkBlocks = generatedChunkBlocks.ToArray();
-        IEnumerator installationRestoreRoutine = RestoreChunkInstallationsRoutine(chunkBlocks, allowYield);
-        while (installationRestoreRoutine.MoveNext())
+        IReadOnlyList<Block> chunkBlocks = generatedChunkBlocks;
+        diagnosticAllocatedBytesAtStart = BeginChunkGenerationDiagnosticStage(
+            out diagnosticStageStartTime);
+        bool canRestoreInstallations = PrepareChunkInstallationRestore(chunkBlocks);
+        EndChunkGenerationDiagnosticStage(
+            ChunkGenerationDiagnosticStage.InstallationRestore,
+            diagnosticAllocatedBytesAtStart,
+            diagnosticStageStartTime);
+        if (canRestoreInstallations)
         {
-            if (allowYield)
+            int restoresSinceYield = 0;
+            int restoreBudget = Mathf.Max(1, chunkInstallationRestoresPerFrame);
+            double restoreStepStartTime = Time.realtimeSinceStartupAsDouble;
+            BeginConveyorRuntimeRefreshBatch();
+            try
             {
-                yield return installationRestoreRoutine.Current;
+                for (int i = 0; i < orderedChunkInstallationAnchorScratch.Count; i++)
+                {
+                    diagnosticAllocatedBytesAtStart = BeginChunkGenerationDiagnosticStage(
+                        out diagnosticStageStartTime);
+                    RestoreOrBindSavedInstallation(orderedChunkInstallationAnchorScratch[i]);
+                    EndChunkGenerationDiagnosticStage(
+                        ChunkGenerationDiagnosticStage.InstallationRestore,
+                        diagnosticAllocatedBytesAtStart,
+                        diagnosticStageStartTime);
+                    restoresSinceYield++;
+                    if (allowYield
+                        && (restoresSinceYield >= restoreBudget
+                            || HasExceededChunkGenerationFrameBudget(restoreStepStartTime)))
+                    {
+                        restoresSinceYield = 0;
+                        yield return null;
+                        restoreStepStartTime = Time.realtimeSinceStartupAsDouble;
+                    }
+                }
+
+                diagnosticAllocatedBytesAtStart = BeginChunkGenerationDiagnosticStage(
+                    out diagnosticStageStartTime);
+                InstallationPlacementController placementController =
+                    ResolveInstallationPlacementController();
+                placementController?.NormalizeLoadedFenceVariants(orderedChunkInstallationAnchorScratch);
+                placementController?.NormalizeLoadedLegacyPipeVariants(orderedChunkInstallationAnchorScratch);
+                EndChunkGenerationDiagnosticStage(
+                    ChunkGenerationDiagnosticStage.InstallationRestore,
+                    diagnosticAllocatedBytesAtStart,
+                    diagnosticStageStartTime);
+            }
+            finally
+            {
+                EndConveyorRuntimeRefreshBatch();
+                ClearChunkInstallationRestoreScratch();
             }
         }
 
-        IEnumerator blockStateRestoreRoutine = RestoreChunkBlockStatesRoutine(chunkBlocks, allowYield);
-        while (blockStateRestoreRoutine.MoveNext())
+        EnsureResourceStateStore();
+        blocksSinceYield = 0;
+        blockStepStartTime = Time.realtimeSinceStartupAsDouble;
+        BeginConveyorRuntimeRefreshBatch();
+        try
         {
-            if (allowYield)
+            for (int i = 0; i < chunkBlocks.Count; i++)
             {
-                yield return blockStateRestoreRoutine.Current;
+                diagnosticAllocatedBytesAtStart = BeginChunkGenerationDiagnosticStage(
+                    out diagnosticStageStartTime);
+                using (RestoreChunkBlockStateMarker.Auto())
+                {
+                    RestoreBlockState(chunkBlocks[i]);
+                }
+
+                EndChunkGenerationDiagnosticStage(
+                    ChunkGenerationDiagnosticStage.BlockStateRestore,
+                    diagnosticAllocatedBytesAtStart,
+                    diagnosticStageStartTime);
+                if (allowYield
+                    && (++blocksSinceYield >= blockBudget
+                        || HasExceededChunkGenerationFrameBudget(blockStepStartTime)))
+                {
+                    blocksSinceYield = 0;
+                    yield return null;
+                    blockStepStartTime = Time.realtimeSinceStartupAsDouble;
+                }
             }
         }
-
-        IEnumerator animalSpawnRoutine = SpawnAnimalsForChunkRoutine(chunkCoordinate, allowYield);
-        while (true)
+        finally
         {
-            bool hasNext;
-            object current = null;
+            EndConveyorRuntimeRefreshBatch();
+        }
+
+        diagnosticAllocatedBytesAtStart = BeginChunkGenerationDiagnosticStage(
+            out diagnosticStageStartTime);
+        bool animalSpawnComplete = BeginChunkAnimalSpawnWork(chunkCoordinate);
+        EndChunkGenerationDiagnosticStage(
+            ChunkGenerationDiagnosticStage.AnimalSpawn,
+            diagnosticAllocatedBytesAtStart,
+            diagnosticStageStartTime);
+        while (!animalSpawnComplete)
+        {
+            diagnosticAllocatedBytesAtStart = BeginChunkGenerationDiagnosticStage(
+                out diagnosticStageStartTime);
             using (SpawnChunkAnimalStepMarker.Auto())
             {
-                hasNext = animalSpawnRoutine.MoveNext();
-                if (hasNext)
+                animalSpawnComplete = AdvanceChunkAnimalSpawnWork(allowYield);
+            }
+
+            EndChunkGenerationDiagnosticStage(
+                ChunkGenerationDiagnosticStage.AnimalSpawn,
+                diagnosticAllocatedBytesAtStart,
+                diagnosticStageStartTime);
+            if (!animalSpawnComplete && allowYield)
+            {
+                yield return null;
+            }
+        }
+
+        diagnosticAllocatedBytesAtStart = BeginChunkGenerationDiagnosticStage(
+            out diagnosticStageStartTime);
+        PrepareChunkBlockRuntimeViews(chunkBlocks);
+        EndChunkGenerationDiagnosticStage(
+            ChunkGenerationDiagnosticStage.RuntimeViewRefresh,
+            diagnosticAllocatedBytesAtStart,
+            diagnosticStageStartTime);
+        blocksSinceYield = 0;
+        blockStepStartTime = Time.realtimeSinceStartupAsDouble;
+        for (int i = 0; i < chunkBlocks.Count; i++)
+        {
+            diagnosticAllocatedBytesAtStart = BeginChunkGenerationDiagnosticStage(
+                out diagnosticStageStartTime);
+            using (FinalizeChunkRuntimeViewMarker.Auto())
+            {
+                Block block = chunkBlocks[i];
+                if (block != null)
                 {
-                    current = animalSpawnRoutine.Current;
+                    RefreshRestoredBlockRuntimeRegistration(block);
                 }
             }
 
-            if (!hasNext)
+            EndChunkGenerationDiagnosticStage(
+                ChunkGenerationDiagnosticStage.RuntimeViewRefresh,
+                diagnosticAllocatedBytesAtStart,
+                diagnosticStageStartTime);
+            if (allowYield
+                && (++blocksSinceYield >= blockBudget
+                    || HasExceededChunkGenerationFrameBudget(blockStepStartTime)))
             {
-                break;
-            }
-
-            if (allowYield)
-            {
-                yield return current;
+                blocksSinceYield = 0;
+                yield return null;
+                blockStepStartTime = Time.realtimeSinceStartupAsDouble;
             }
         }
-        IEnumerator runtimeViewRoutine = RefreshChunkBlockRuntimeViewsRoutine(chunkBlocks, allowYield);
-        while (runtimeViewRoutine.MoveNext())
+
+        EnsureResourceStateStore();
+        if (resourceStateStore != null)
         {
-            if (allowYield)
+            blocksSinceYield = 0;
+            blockStepStartTime = Time.realtimeSinceStartupAsDouble;
+            for (int i = 0; i < chunkBlocks.Count; i++)
             {
-                yield return runtimeViewRoutine.Current;
+                diagnosticAllocatedBytesAtStart = BeginChunkGenerationDiagnosticStage(
+                    out diagnosticStageStartTime);
+                ApplyStoredConveyorItemSaveState(chunkBlocks[i]);
+                EndChunkGenerationDiagnosticStage(
+                    ChunkGenerationDiagnosticStage.ConveyorItemRestore,
+                    diagnosticAllocatedBytesAtStart,
+                    diagnosticStageStartTime);
+                if (allowYield
+                    && (++blocksSinceYield >= blockBudget
+                        || HasExceededChunkGenerationFrameBudget(blockStepStartTime)))
+                {
+                    blocksSinceYield = 0;
+                    yield return null;
+                    blockStepStartTime = Time.realtimeSinceStartupAsDouble;
+                }
             }
         }
 
-        IEnumerator conveyorItemRoutine = ApplyStoredConveyorItemSaveStatesRoutine(chunkBlocks, allowYield);
-        while (conveyorItemRoutine.MoveNext())
+        blocksSinceYield = 0;
+        blockStepStartTime = Time.realtimeSinceStartupAsDouble;
+        for (int i = 0; i < chunkBlocks.Count; i++)
         {
-            if (allowYield)
+            diagnosticAllocatedBytesAtStart = BeginChunkGenerationDiagnosticStage(
+                out diagnosticStageStartTime);
+            ReleaseEmptyChunkBlockRuntimeProxy(chunkBlocks[i]);
+            EndChunkGenerationDiagnosticStage(
+                ChunkGenerationDiagnosticStage.EmptyProxyRelease,
+                diagnosticAllocatedBytesAtStart,
+                diagnosticStageStartTime);
+            if (allowYield
+                && (++blocksSinceYield >= blockBudget
+                    || HasExceededChunkGenerationFrameBudget(blockStepStartTime)))
             {
-                yield return conveyorItemRoutine.Current;
+                blocksSinceYield = 0;
+                yield return null;
+                blockStepStartTime = Time.realtimeSinceStartupAsDouble;
             }
         }
 
-        IEnumerator emptyProxyRoutine = ReleaseEmptyChunkBlockRuntimeProxiesRoutine(
-            chunkCoordinate,
-            chunkBlocks,
-            allowYield);
-        while (emptyProxyRoutine.MoveNext())
-        {
-            if (allowYield)
-            {
-                yield return emptyProxyRoutine.Current;
-            }
-        }
+        diagnosticAllocatedBytesAtStart = BeginChunkGenerationDiagnosticStage(
+            out diagnosticStageStartTime);
+        loadedBlocks.CompactRuntimeProxyStorage(chunkCoordinate);
+        EndChunkGenerationDiagnosticStage(
+            ChunkGenerationDiagnosticStage.EmptyProxyRelease,
+            diagnosticAllocatedBytesAtStart,
+            diagnosticStageStartTime);
 
-        ChunkSurfaceBuildData chunkSurface;
+        ChunkSurfaceBuildData chunkSurface = null;
+        Mesh generatedSurfaceMesh = null;
+        Bounds generatedSurfaceBounds = default;
+        int generatedSurfaceSubMeshMask = 0;
         if (Application.isPlaying)
         {
-            Task<ChunkSurfaceBuildData> surfaceTask = CreateChunkSurfaceBuildTask(
-                origin,
-                normalizedChunkSize,
-                out ChunkSurfaceBuildData workerSurface);
-            while (!surfaceTask.IsCompleted)
+            diagnosticAllocatedBytesAtStart = BeginChunkGenerationDiagnosticStage(
+                out diagnosticStageStartTime);
+            TerrainSurfaceBuildJobState surfaceJob = CreateChunkSurfaceBuildJob(origin, normalizedChunkSize);
+            EndChunkGenerationDiagnosticStage(
+                ChunkGenerationDiagnosticStage.SurfaceBuildSchedule,
+                diagnosticAllocatedBytesAtStart,
+                diagnosticStageStartTime);
+            while (!surfaceJob.IsCompleted)
             {
                 yield return null;
             }
 
-            if (surfaceTask.IsFaulted || surfaceTask.IsCanceled)
+            try
             {
-                Exception surfaceException = surfaceTask.Exception?.Flatten().InnerException ?? surfaceTask.Exception;
-                if (surfaceException != null)
+                bool scheduledMeshDataCopy = false;
+                try
                 {
-                    Debug.LogException(surfaceException, this);
+                    diagnosticAllocatedBytesAtStart = BeginChunkGenerationDiagnosticStage(
+                        out diagnosticStageStartTime);
+                    CompleteChunkSurfaceBuildJob(surfaceJob);
+                    EndChunkGenerationDiagnosticStage(
+                        ChunkGenerationDiagnosticStage.SurfaceBuildComplete,
+                        diagnosticAllocatedBytesAtStart,
+                        diagnosticStageStartTime);
+                    diagnosticAllocatedBytesAtStart = BeginChunkGenerationDiagnosticStage(
+                        out diagnosticStageStartTime);
+                    scheduledMeshDataCopy = ScheduleChunkSurfaceMeshDataJob(surfaceJob);
+                    EndChunkGenerationDiagnosticStage(
+                        ChunkGenerationDiagnosticStage.SurfaceMeshDataSchedule,
+                        diagnosticAllocatedBytesAtStart,
+                        diagnosticStageStartTime);
+                }
+                catch (Exception surfaceException)
+                {
+                    chunkSurface = BuildFallbackChunkSurface(
+                        surfaceException,
+                        origin,
+                        normalizedChunkSize);
                 }
 
-                ReturnChunkSurfaceBuildData(workerSurface);
-                chunkSurface = BuildCurvedChunkSurface(origin, normalizedChunkSize);
+                if (scheduledMeshDataCopy)
+                {
+                    while (!surfaceJob.IsMeshDataReady)
+                    {
+                        yield return null;
+                    }
+
+                    try
+                    {
+                        diagnosticAllocatedBytesAtStart = BeginChunkGenerationDiagnosticStage(
+                            out diagnosticStageStartTime);
+                        generatedSurfaceMesh = CompleteChunkSurfaceMeshDataJob(
+                            surfaceJob,
+                            out generatedSurfaceBounds,
+                            out generatedSurfaceSubMeshMask);
+                        EndChunkGenerationDiagnosticStage(
+                            ChunkGenerationDiagnosticStage.SurfaceMeshDataApply,
+                            diagnosticAllocatedBytesAtStart,
+                            diagnosticStageStartTime);
+                    }
+                    catch (Exception surfaceException)
+                    {
+                        chunkSurface = BuildFallbackChunkSurface(
+                            surfaceException,
+                            origin,
+                            normalizedChunkSize);
+                    }
+                }
             }
-            else
+            finally
             {
-                chunkSurface = surfaceTask.Result;
+                ReleaseChunkSurfaceBuildJob(surfaceJob);
             }
         }
         else
         {
-            ChunkSurfaceWorkerInput surfaceInput = CreateChunkSurfaceWorkerInput(origin, normalizedChunkSize);
-            chunkSurface = RentChunkSurfaceBuildData(surfaceInput);
-            IEnumerator surfaceRoutine = BuildCurvedChunkSurfaceRoutine(chunkSurface, origin, normalizedChunkSize, allowYield);
-            while (surfaceRoutine.MoveNext())
-            {
-                if (allowYield)
-                {
-                    yield return surfaceRoutine.Current;
-                }
-            }
+            chunkSurface = BuildCurvedChunkSurface(origin, normalizedChunkSize);
         }
 
         if (allowYield)
@@ -2544,11 +2768,32 @@ public partial class TerrainGenerator : MonoBehaviour
 
         try
         {
-            ApplyChunkBiomeSurface(chunk, chunkSurface);
+            diagnosticAllocatedBytesAtStart = BeginChunkGenerationDiagnosticStage(
+                out diagnosticStageStartTime);
+            if (generatedSurfaceMesh != null)
+            {
+                ApplyChunkBiomeSurface(
+                    chunk,
+                    generatedSurfaceMesh,
+                    generatedSurfaceBounds,
+                    generatedSurfaceSubMeshMask);
+            }
+            else
+            {
+                ApplyChunkBiomeSurface(chunk, chunkSurface);
+            }
+
+            EndChunkGenerationDiagnosticStage(
+                ChunkGenerationDiagnosticStage.SurfaceAssignment,
+                diagnosticAllocatedBytesAtStart,
+                diagnosticStageStartTime);
         }
         finally
         {
-            ReturnChunkSurfaceBuildData(chunkSurface);
+            if (chunkSurface != null)
+            {
+                ReturnChunkSurfaceBuildData(chunkSurface);
+            }
         }
 
         if (allowYield)
@@ -2556,6 +2801,29 @@ public partial class TerrainGenerator : MonoBehaviour
             yield return null;
         }
 
+        generatedChunkBlocks.Clear();
+        EndChunkGenerationDiagnostics();
+
+    }
+
+    private ChunkSurfaceBuildData BuildFallbackChunkSurface(
+        Exception surfaceException,
+        Vector2Int origin,
+        int normalizedChunkSize)
+    {
+        Debug.LogException(surfaceException, this);
+        long allocatedBytesAtStart = BeginChunkGenerationDiagnosticStage(out double startTime);
+        try
+        {
+            return BuildCurvedChunkSurface(origin, normalizedChunkSize);
+        }
+        finally
+        {
+            EndChunkGenerationDiagnosticStage(
+                ChunkGenerationDiagnosticStage.SurfaceFallbackBuild,
+                allocatedBytesAtStart,
+                startTime);
+        }
     }
 
     private void ClearLoadedChunks(bool preserveRuntimeState = true, bool releaseLiveInstallations = false)
@@ -2706,58 +2974,34 @@ public partial class TerrainGenerator : MonoBehaviour
             : Array.Empty<Block>();
     }
 
-    private IEnumerator ReleaseEmptyChunkBlockRuntimeProxiesRoutine(
-        Vector2Int chunkCoordinate,
-        Block[] chunkBlocks,
-        bool allowYield)
+    private void ReleaseEmptyChunkBlockRuntimeProxy(Block block)
     {
-        if (chunkBlocks == null || chunkBlocks.Length == 0)
+        using (ReleaseEmptyChunkRuntimeProxyMarker.Auto())
         {
-            yield break;
-        }
-
-        int processedSinceYield = 0;
-        int blockBudget = Mathf.Max(1, chunkGenerationBlocksPerFrame);
-        double stepStartTime = Time.realtimeSinceStartupAsDouble;
-        for (int i = 0; i < chunkBlocks.Length; i++)
-        {
-            using (ReleaseEmptyChunkRuntimeProxyMarker.Auto())
+            if (block == null || !block.CanReleaseEmptyRuntimeProxy)
             {
-                Block block = chunkBlocks[i];
-                if (block != null && block.CanReleaseEmptyRuntimeProxy)
-                {
-                    BlockHandle handle = block.RuntimeHandle;
-                    loadedBlocks.Remove(block.Coordinate);
-                    ReleaseFarmlandVisual(block.Coordinate);
-                    block.PrepareForRuntimeRelease();
-                    if (block.HasRuntimeSimulationState)
-                    {
-                        loadedBlocks.RemoveRuntimeSimulationState(handle);
-                    }
-
-                    block.DetachRuntimeSimulationState();
-                    if (Application.isPlaying)
-                    {
-                        Destroy(block);
-                    }
-                    else
-                    {
-                        DestroyImmediate(block);
-                    }
-                }
+                return;
             }
 
-            if (allowYield
-                && (++processedSinceYield >= blockBudget
-                    || HasExceededChunkGenerationFrameBudget(stepStartTime)))
+            BlockHandle handle = block.RuntimeHandle;
+            loadedBlocks.Remove(block.Coordinate);
+            ReleaseFarmlandVisual(block.Coordinate);
+            block.PrepareForRuntimeRelease();
+            if (block.HasRuntimeSimulationState)
             {
-                processedSinceYield = 0;
-                yield return null;
-                stepStartTime = Time.realtimeSinceStartupAsDouble;
+                loadedBlocks.RemoveRuntimeSimulationState(handle);
+            }
+
+            block.DetachRuntimeSimulationState();
+            if (Application.isPlaying)
+            {
+                Destroy(block);
+            }
+            else
+            {
+                DestroyImmediate(block);
             }
         }
-
-        loadedBlocks.CompactRuntimeProxyStorage(chunkCoordinate);
     }
 
 

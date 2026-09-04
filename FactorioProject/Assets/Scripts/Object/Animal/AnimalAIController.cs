@@ -43,6 +43,7 @@ public sealed class AnimalAIController : MonoBehaviour
     private const float HerdReturnRetryDelay = 5f;
     private const float AgeGenderSpeedMultiplierInfluence = 1f / 3f;
     private const float MountedMovementDirectionEpsilonSqr = 0.0000001f;
+    private const float DormantDefecationSpreadRadius = 1.5f;
     private const float MountedRunTransitionMinimumMargin = 0.01f;
     private const float MountedRunTransitionRelativeMargin = 0.03f;
     private const float HealthRecoveryFractionPerSecond = 0.05f;
@@ -467,18 +468,17 @@ public sealed class AnimalAIController : MonoBehaviour
         animal?.SetDetailedVisuals(visible);
     }
 
-    public void TickBackground(float deltaTime)
+    public bool TickDormant()
     {
-        if (!configured || IsExternallyControlled || !IsInteracted || deltaTime <= 0f)
+        if (!configured
+            || executionActive
+            || IsExternallyControlled
+            || !CanDefecate())
         {
-            return;
+            return false;
         }
 
-        EnsureSimulationPoseInitialized();
-        transform.SetPositionAndRotation(simulationPosition, simulationRotation);
-        TickSimulation(deltaTime, deltaTime, false);
-        simulationPosition = transform.position;
-        simulationRotation = transform.rotation;
+        return TryDefecateAt(GetDormantDefecationPosition());
     }
 
     public void SetBehaviorExecutionActive(bool active)
@@ -1383,40 +1383,68 @@ public sealed class AnimalAIController : MonoBehaviour
 
     private void TryDefecateWhileIdle()
     {
-        if (animal == null
-            || definition == null
-            || !animal.IsDefecationDue
-            || currentState != AnimalAIState.Idle
+        if (currentState != AnimalAIState.Idle
             || hasTarget
             || movingToActivity
-            || waitingForStandUp
-            || IsExternallyControlled)
+            || waitingForStandUp)
         {
             return;
+        }
+
+        TryDefecateAt(transform.position);
+    }
+
+    private bool CanDefecate()
+    {
+        return animal != null
+               && definition != null
+               && animal.IsDefecationDue
+               && !IsExternallyControlled
+               && ItemDefinition.IsFertilizerEnergyItemDefinition(
+                   definition.DefecationItem);
+    }
+
+    private bool TryDefecateAt(Vector3 worldPosition)
+    {
+        if (!CanDefecate())
+        {
+            return false;
         }
 
         ItemDefinition dropping = definition.DefecationItem;
-        if (!ItemDefinition.IsFertilizerEnergyItemDefinition(dropping))
-        {
-            return;
-        }
-
         TerrainGenerator terrain = TerrainGenerator.Active;
         int amount = definition.NeedsSettings.DefecationAmount;
         if (terrain == null
             || terrain.DropAnimalDefecation(
-                transform.position,
+                worldPosition,
                 dropping.id,
                 amount,
                 IsInteracted,
                 definition.NeedsSettings.UnattendedDroppingLifetimeSeconds)
             <= 0)
         {
-            return;
+            return false;
         }
 
-        animal.CompleteDefecation(Next01());
+        if (!animal.CompleteDefecation(Next01()))
+        {
+            return false;
+        }
+
         ApplyAnimation(0f);
+        return true;
+    }
+
+    private Vector3 GetDormantDefecationPosition()
+    {
+        Vector3 center = SimulationPosition;
+        // Spread stationary-animal droppings across nearby blocks without using
+        // UnityEngine.Random or allocating temporary collections.
+        float angle = Next01() * Mathf.PI * 2f;
+        float distance = Mathf.Sqrt(Next01()) * DormantDefecationSpreadRadius;
+        center.x += Mathf.Cos(angle) * distance;
+        center.z += Mathf.Sin(angle) * distance;
+        return center;
     }
 
     private void RecoverHealthWhenCalm(float elapsedTime)

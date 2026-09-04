@@ -22,6 +22,15 @@ public partial class TerrainGenerator : MonoBehaviour
     private void ClearPendingChunkGenerations()
     {
         chunkStreamingScheduler?.Clear();
+        DisposeActiveSurfaceBuildJob();
+        CleanupChunkGenerationTransientState();
+    }
+
+    private void CleanupChunkGenerationTransientState()
+    {
+        generatedChunkBlockScratch.Clear();
+        CancelChunkAnimalSpawnWork();
+        CancelChunkGenerationDiagnostics();
     }
 
     private bool IsChunkGenerationActive(Vector2Int chunkCoordinate)
@@ -42,7 +51,8 @@ public partial class TerrainGenerator : MonoBehaviour
             ShouldGenerateChunk,
             GenerateChunk,
             GenerateChunkRoutine,
-            GenerateChunkCoroutineStepMarker);
+            GenerateChunkCoroutineStepMarker,
+            CleanupChunkGenerationTransientState);
 
         return chunkStreamingScheduler;
     }

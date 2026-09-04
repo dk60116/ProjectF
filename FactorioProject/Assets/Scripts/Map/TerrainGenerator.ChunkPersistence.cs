@@ -32,7 +32,11 @@ public partial class TerrainGenerator : MonoBehaviour
         spawnedResource.transform.rotation = Quaternion.identity;
         ApplyResourceScaleProfile(spawnedResource, prefab);
         bool isOilResource = IsOilResourcePrefab(prefab);
-        spawnedResource.ApplyBodyYawStep(GetResourceBodyYawStep(prefab, worldCoordinate));
+        int generatedBodyYawStep = GetResourceBodyYawStep(prefab, worldCoordinate);
+        if (!isOilResource)
+        {
+            spawnedResource.ApplyBodyYawStep(generatedBodyYawStep);
+        }
 
         if (resourceStateStore != null && resourceStateStore.TryGet(worldCoordinate, out Resource.ResourceSaveState savedState))
         {
@@ -51,11 +55,11 @@ public partial class TerrainGenerator : MonoBehaviour
             }
         }
 
-        // Oil is a grid-aligned liquid plane. Old resource state may contain a
-        // random ore yaw, so restore the fixed orientation after loading it.
+        // Old saves may contain the previous ore-style yaw. Keep oil aligned
+        // with the deterministic terrain pit after saved state restoration.
         if (isOilResource)
         {
-            spawnedResource.ApplyBodyYawStep(0);
+            spawnedResource.ApplyBodyYawStep(generatedBodyYawStep);
         }
 
         block.SetMapObject(spawnedResource);
@@ -597,24 +601,24 @@ public partial class TerrainGenerator : MonoBehaviour
             Mathf.RoundToInt(worldPosition.z));
     }
 
-    private IEnumerator RestoreChunkInstallationsRoutine(Block[] chunkBlocks, bool allowYield)
+    private bool PrepareChunkInstallationRestore(IReadOnlyList<Block> chunkBlocks)
     {
+        HashSet<Vector2Int> installationAnchors = chunkInstallationAnchorScratch;
+        List<Vector2Int> orderedInstallationAnchors = orderedChunkInstallationAnchorScratch;
+        installationAnchors.Clear();
+        orderedInstallationAnchors.Clear();
         if (chunkBlocks == null)
         {
-            yield break;
+            return false;
         }
 
         EnsureResourceStateStore();
         if (resourceStateStore == null)
         {
-            yield break;
+            return false;
         }
 
-        HashSet<Vector2Int> installationAnchors = chunkInstallationAnchorScratch;
-        List<Vector2Int> orderedInstallationAnchors = orderedChunkInstallationAnchorScratch;
-        installationAnchors.Clear();
-        orderedInstallationAnchors.Clear();
-        for (int i = 0; i < chunkBlocks.Length; i++)
+        for (int i = 0; i < chunkBlocks.Count; i++)
         {
             if (chunkBlocks[i] == null)
             {
@@ -631,36 +635,30 @@ public partial class TerrainGenerator : MonoBehaviour
             orderedInstallationAnchors.Add(anchorCoordinate);
         }
 
-        int restoresSinceYield = 0;
-        int restoreBudget = Mathf.Max(1, chunkInstallationRestoresPerFrame);
-        double restoreStepStartTime = Time.realtimeSinceStartupAsDouble;
-        BeginConveyorRuntimeRefreshBatch();
-        try
+        SortChunkInstallationRestoreAnchors(orderedInstallationAnchors);
+        return true;
+    }
+
+    private void ClearChunkInstallationRestoreScratch()
+    {
+        chunkInstallationAnchorScratch.Clear();
+        orderedChunkInstallationAnchorScratch.Clear();
+    }
+
+    private void SortChunkInstallationRestoreAnchors(List<Vector2Int> anchors)
+    {
+        for (int i = 1; i < anchors.Count; i++)
         {
-            orderedInstallationAnchors.Sort(CompareInstallationRestoreOrder);
-            foreach (Vector2Int anchorCoordinate in orderedInstallationAnchors)
+            Vector2Int value = anchors[i];
+            int insertionIndex = i;
+            while (insertionIndex > 0
+                   && CompareInstallationRestoreOrder(anchors[insertionIndex - 1], value) > 0)
             {
-                RestoreOrBindSavedInstallation(anchorCoordinate);
-                restoresSinceYield++;
-                if (allowYield
-                    && (restoresSinceYield >= restoreBudget
-                        || HasExceededChunkGenerationFrameBudget(restoreStepStartTime)))
-                {
-                    restoresSinceYield = 0;
-                    yield return null;
-                    restoreStepStartTime = Time.realtimeSinceStartupAsDouble;
-                }
+                anchors[insertionIndex] = anchors[insertionIndex - 1];
+                insertionIndex--;
             }
 
-            InstallationPlacementController placementController = ResolveInstallationPlacementController();
-            placementController?.NormalizeLoadedFenceVariants(orderedInstallationAnchors);
-            placementController?.NormalizeLoadedLegacyPipeVariants(orderedInstallationAnchors);
-        }
-        finally
-        {
-            EndConveyorRuntimeRefreshBatch();
-            installationAnchors.Clear();
-            orderedInstallationAnchors.Clear();
+            anchors[insertionIndex] = value;
         }
     }
 
@@ -1271,15 +1269,15 @@ public partial class TerrainGenerator : MonoBehaviour
         public int seed;
     }
 
-    private IEnumerator RefreshChunkBlockRuntimeViewsRoutine(Block[] chunkBlocks, bool allowYield)
+    private void PrepareChunkBlockRuntimeViews(IReadOnlyList<Block> chunkBlocks)
     {
         if (chunkBlocks == null)
         {
-            yield break;
+            return;
         }
 
         bool hasConveyorBlock = false;
-        for (int i = 0; i < chunkBlocks.Length; i++)
+        for (int i = 0; i < chunkBlocks.Count; i++)
         {
             Block block = chunkBlocks[i];
             if (block == null)
@@ -1293,30 +1291,6 @@ public partial class TerrainGenerator : MonoBehaviour
         if (hasConveyorBlock)
         {
             MarkConveyorNetworkDirty();
-        }
-
-        int processedSinceYield = 0;
-        int blockBudget = Mathf.Max(1, chunkGenerationBlocksPerFrame);
-        double stepStartTime = Time.realtimeSinceStartupAsDouble;
-        for (int i = 0; i < chunkBlocks.Length; i++)
-        {
-            using (FinalizeChunkRuntimeViewMarker.Auto())
-            {
-                Block block = chunkBlocks[i];
-                if (block != null)
-                {
-                    RefreshRestoredBlockRuntimeRegistration(block);
-                }
-            }
-
-            if (allowYield
-                && (++processedSinceYield >= blockBudget
-                    || HasExceededChunkGenerationFrameBudget(stepStartTime)))
-            {
-                processedSinceYield = 0;
-                yield return null;
-                stepStartTime = Time.realtimeSinceStartupAsDouble;
-            }
         }
     }
 

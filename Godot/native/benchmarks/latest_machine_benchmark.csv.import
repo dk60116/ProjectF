@@ -1,0 +1,19 @@
+[remap]
+
+importer="csv_translation"
+type="Translation"
+uid="uid://r5ureymqn6dn"
+
+[deps]
+
+files=["res://native/benchmarks/latest_machine_benchmark.active.translation", "res://native/benchmarks/latest_machine_benchmark.mode.translation", "res://native/benchmarks/latest_machine_benchmark.median.translation", "res://native/benchmarks/latest_machine_benchmark.p95.translation", "res://native/benchmarks/latest_machine_benchmark.max.translation", "res://native/benchmarks/latest_machine_benchmark.reserved.translation", "res://native/benchmarks/latest_machine_benchmark.capacity.translation", "res://native/benchmarks/latest_machine_benchmark.checksum.translation"]
+
+source_file="res://native/benchmarks/latest_machine_benchmark.csv"
+dest_files=["res://native/benchmarks/latest_machine_benchmark.active.translation", "res://native/benchmarks/latest_machine_benchmark.mode.translation", "res://native/benchmarks/latest_machine_benchmark.median.translation", "res://native/benchmarks/latest_machine_benchmark.p95.translation", "res://native/benchmarks/latest_machine_benchmark.max.translation", "res://native/benchmarks/latest_machine_benchmark.reserved.translation", "res://native/benchmarks/latest_machine_benchmark.capacity.translation", "res://native/benchmarks/latest_machine_benchmark.checksum.translation"]
+
+[params]
+
+compress=1
+delimiter=0
+unescape_keys=false
+unescape_translations=true

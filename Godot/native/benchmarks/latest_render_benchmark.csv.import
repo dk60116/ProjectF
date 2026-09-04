@@ -1,0 +1,19 @@
+[remap]
+
+importer="csv_translation"
+type="Translation"
+uid="uid://odu7t0hc6cn2"
+
+[deps]
+
+files=["res://native/benchmarks/latest_render_benchmark.visible.translation", "res://native/benchmarks/latest_render_benchmark.batches.translation", "res://native/benchmarks/latest_render_benchmark.draw.translation", "res://native/benchmarks/latest_render_benchmark.objects.translation", "res://native/benchmarks/latest_render_benchmark.wall.translation", "res://native/benchmarks/latest_render_benchmark.wall.translation", "res://native/benchmarks/latest_render_benchmark.cpu.translation", "res://native/benchmarks/latest_render_benchmark.gpu.translation", "res://native/benchmarks/latest_render_benchmark.rebuild.translation", "res://native/benchmarks/latest_render_benchmark.visibility.translation", "res://native/benchmarks/latest_render_benchmark.upload.translation"]
+
+source_file="res://native/benchmarks/latest_render_benchmark.csv"
+dest_files=["res://native/benchmarks/latest_render_benchmark.visible.translation", "res://native/benchmarks/latest_render_benchmark.batches.translation", "res://native/benchmarks/latest_render_benchmark.draw.translation", "res://native/benchmarks/latest_render_benchmark.objects.translation", "res://native/benchmarks/latest_render_benchmark.wall.translation", "res://native/benchmarks/latest_render_benchmark.wall.translation", "res://native/benchmarks/latest_render_benchmark.cpu.translation", "res://native/benchmarks/latest_render_benchmark.gpu.translation", "res://native/benchmarks/latest_render_benchmark.rebuild.translation", "res://native/benchmarks/latest_render_benchmark.visibility.translation", "res://native/benchmarks/latest_render_benchmark.upload.translation"]
+
+[params]
+
+compress=1
+delimiter=0
+unescape_keys=false
+unescape_translations=true

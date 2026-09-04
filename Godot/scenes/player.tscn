@@ -1,0 +1,163 @@
+[gd_scene format=3 uid="uid://c27ro1mr80go2"]
+
+[ext_resource type="Texture2D" uid="uid://45eb5v67jraa" path="res://assets/ui/joystick_bg.png" id="1_joystick_bg"]
+[ext_resource type="Texture2D" uid="uid://gag8jj2qiue8" path="res://assets/ui/joystick_handle.png" id="2_joystick_handle"]
+
+[sub_resource type="CapsuleShape3D" id="CapsuleShape_player"]
+radius = 0.4
+height = 1.8
+
+[sub_resource type="StandardMaterial3D" id="PlayerMaterial"]
+albedo_color = Color(0.22, 0.58, 0.95, 1)
+roughness = 0.72
+
+[sub_resource type="CapsuleMesh" id="CapsuleMesh_player"]
+radius = 0.4
+height = 1.8
+
+[sub_resource type="StandardMaterial3D" id="FacingMarkerMaterial"]
+albedo_color = Color(1, 0.72, 0.12, 1)
+roughness = 0.55
+
+[sub_resource type="BoxMesh" id="FacingMarkerMesh"]
+size = Vector3(0.18, 0.18, 0.5)
+
+[sub_resource type="StyleBoxFlat" id="ZoomButtonNormal"]
+bg_color = Color(0.075, 0.085, 0.1, 0.82)
+border_width_left = 2
+border_width_top = 2
+border_width_right = 2
+border_width_bottom = 2
+border_color = Color(0.82, 0.64, 0.31, 0.9)
+corner_radius_top_left = 12
+corner_radius_top_right = 12
+corner_radius_bottom_right = 12
+corner_radius_bottom_left = 12
+
+[sub_resource type="StyleBoxFlat" id="ZoomButtonPressed"]
+bg_color = Color(0.04, 0.045, 0.055, 0.96)
+border_width_left = 2
+border_width_top = 2
+border_width_right = 2
+border_width_bottom = 2
+border_color = Color(0.66, 0.49, 0.22, 1)
+corner_radius_top_left = 12
+corner_radius_top_right = 12
+corner_radius_bottom_right = 12
+corner_radius_bottom_left = 12
+
+[sub_resource type="StyleBoxFlat" id="ZoomButtonHover"]
+bg_color = Color(0.16, 0.18, 0.21, 0.92)
+border_width_left = 2
+border_width_top = 2
+border_width_right = 2
+border_width_bottom = 2
+border_color = Color(1, 0.78, 0.36, 1)
+corner_radius_top_left = 12
+corner_radius_top_right = 12
+corner_radius_bottom_right = 12
+corner_radius_bottom_left = 12
+
+[node name="Player" type="ProjectFPlayer" unique_id=1868707444]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, -34265.836, 0)
+velocity = Vector3(0, -819.42847, 0)
+floor_snap_length = 0.2
+
+[node name="CollisionShape3D" type="CollisionShape3D" parent="." unique_id=287278822]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.9, 0)
+shape = SubResource("CapsuleShape_player")
+
+[node name="Visual" type="Node3D" parent="." unique_id=2074059532]
+
+[node name="Body" type="MeshInstance3D" parent="Visual" unique_id=316091405]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.9, 0)
+material_override = SubResource("PlayerMaterial")
+mesh = SubResource("CapsuleMesh_player")
+
+[node name="FacingMarker" type="MeshInstance3D" parent="Visual" unique_id=841767421]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 1, 0.48)
+material_override = SubResource("FacingMarkerMaterial")
+mesh = SubResource("FacingMarkerMesh")
+
+[node name="Camera3D" type="Camera3D" parent="." unique_id=453648149]
+transform = Transform3D(-0.75309235, 0.46754122, -0.46287912, 0, 0.7035548, 0.71064097, 0.6579148, 0.5351783, -0.5298417, -5.53, 9.39, -6.33)
+projection = 1
+current = true
+size = 3.0
+near = 0.1
+far = 200.0
+
+[node name="HUD" type="CanvasLayer" parent="." unique_id=426111842]
+layer = 10
+
+[node name="VirtualJoystick" type="VirtualJoystick" parent="HUD" unique_id=869920662]
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+offset_left = -2.0
+offset_top = 1.0
+offset_right = -2.0
+offset_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+
+[node name="Background" type="TextureRect" parent="HUD/VirtualJoystick" unique_id=98354922]
+visible = false
+layout_mode = 0
+offset_right = 200.0
+offset_bottom = 200.0
+mouse_filter = 2
+texture = ExtResource("1_joystick_bg")
+expand_mode = 1
+stretch_mode = 5
+
+[node name="Handle" type="TextureRect" parent="HUD/VirtualJoystick" unique_id=776497099]
+visible = false
+layout_mode = 0
+offset_right = 80.0
+offset_bottom = 80.0
+mouse_filter = 2
+texture = ExtResource("2_joystick_handle")
+expand_mode = 1
+stretch_mode = 5
+
+[node name="ZoomControls" type="VBoxContainer" parent="HUD" unique_id=1529607451]
+anchors_preset = 3
+anchor_left = 1.0
+anchor_top = 1.0
+anchor_right = 1.0
+anchor_bottom = 1.0
+offset_left = -88.0
+offset_top = -176.0
+offset_right = -24.0
+offset_bottom = -24.0
+grow_horizontal = 0
+grow_vertical = 0
+theme_override_constants/separation = 12
+
+[node name="ZoomIn" type="Button" parent="HUD/ZoomControls" unique_id=1830882593]
+custom_minimum_size = Vector2(64, 64)
+layout_mode = 2
+focus_mode = 0
+theme_override_colors/font_color = Color(0.95, 0.91, 0.82, 1)
+theme_override_font_sizes/font_size = 32
+theme_override_styles/normal = SubResource("ZoomButtonNormal")
+theme_override_styles/pressed = SubResource("ZoomButtonPressed")
+theme_override_styles/hover = SubResource("ZoomButtonHover")
+theme_override_styles/focus = SubResource("ZoomButtonHover")
+text = "+"
+
+[node name="ZoomOut" type="Button" parent="HUD/ZoomControls" unique_id=1650734058]
+custom_minimum_size = Vector2(64, 64)
+layout_mode = 2
+focus_mode = 0
+theme_override_colors/font_color = Color(0.95, 0.91, 0.82, 1)
+theme_override_font_sizes/font_size = 32
+theme_override_styles/normal = SubResource("ZoomButtonNormal")
+theme_override_styles/pressed = SubResource("ZoomButtonPressed")
+theme_override_styles/hover = SubResource("ZoomButtonHover")
+theme_override_styles/focus = SubResource("ZoomButtonHover")
+text = "−"
+
+[connection signal="pressed" from="HUD/ZoomControls/ZoomIn" to="." method="zoom_in"]
+[connection signal="pressed" from="HUD/ZoomControls/ZoomOut" to="." method="zoom_out"]

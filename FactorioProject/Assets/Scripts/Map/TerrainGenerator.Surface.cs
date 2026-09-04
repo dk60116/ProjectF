@@ -1,7 +1,5 @@
 using System;
-using System.Collections;
 using System.Collections.Generic;
-using System.Threading.Tasks;
 using Unity.Profiling;
 using UnityEngine;
 #if UNITY_EDITOR
@@ -21,13 +19,45 @@ public partial class TerrainGenerator : MonoBehaviour
 
             DestroyGeneratedSurfaceMesh(chunk.surfaceMesh);
             Mesh generatedMesh = BuildGeneratedSurfaceMesh(chunkSurface);
-            generatedMesh.name = $"GeneratedSurface_{chunk.coordinate.x}_{chunk.coordinate.y}";
-            chunk.surfaceMesh = generatedMesh;
-            chunk.surfaceMatrix = Matrix4x4.Translate(
-                new Vector3(chunk.origin.x, 0f, chunk.origin.y));
-            chunk.surfaceWorldBounds = TransformMeshBounds(generatedMesh.bounds, chunk.surfaceMatrix);
-            chunk.surfaceSubMeshMask = GetGeneratedSurfaceRenderSubMeshMask(chunkSurface);
+            AssignChunkBiomeSurface(
+                chunk,
+                generatedMesh,
+                generatedMesh.bounds,
+                GetGeneratedSurfaceRenderSubMeshMask(chunkSurface));
         }
+    }
+
+    private void ApplyChunkBiomeSurface(
+        ChunkRuntimeData chunk,
+        Mesh generatedMesh,
+        Bounds localBounds,
+        int subMeshMask)
+    {
+        using (ApplyChunkSurfaceMarker.Auto())
+        {
+            if (chunk == null || generatedMesh == null)
+            {
+                return;
+            }
+
+            DestroyGeneratedSurfaceMesh(chunk.surfaceMesh);
+            AssignChunkBiomeSurface(chunk, generatedMesh, localBounds, subMeshMask);
+        }
+    }
+
+    private static void AssignChunkBiomeSurface(
+        ChunkRuntimeData chunk,
+        Mesh generatedMesh,
+        Bounds localBounds,
+        int subMeshMask)
+    {
+        generatedMesh.name = $"GeneratedSurface_{chunk.coordinate.x}_{chunk.coordinate.y}";
+        generatedMesh.bounds = localBounds;
+        chunk.surfaceMesh = generatedMesh;
+        chunk.surfaceMatrix = Matrix4x4.Translate(
+            new Vector3(chunk.origin.x, 0f, chunk.origin.y));
+        chunk.surfaceWorldBounds = TransformMeshBounds(localBounds, chunk.surfaceMatrix);
+        chunk.surfaceSubMeshMask = subMeshMask;
     }
 
     private void ReleaseChunkSurfaceMeshes(ChunkRuntimeData chunk)
@@ -293,17 +323,6 @@ public partial class TerrainGenerator : MonoBehaviour
             ReturnChunkSurfaceBuildData(chunkSurface);
             throw;
         }
-    }
-
-    private Task<ChunkSurfaceBuildData> CreateChunkSurfaceBuildTask(
-        Vector2Int origin,
-        int chunkSizeInBlocks,
-        out ChunkSurfaceBuildData chunkSurface)
-    {
-        ChunkSurfaceWorkerInput input = CreateChunkSurfaceWorkerInput(origin, chunkSizeInBlocks);
-        chunkSurface = RentChunkSurfaceBuildData(input);
-        ChunkSurfaceBuildData workerSurface = chunkSurface;
-        return Task.Run(() => BuildCurvedChunkSurfaceFromSnapshot(input, workerSurface));
     }
 
     private ChunkSurfaceBuildData RentChunkSurfaceBuildData(ChunkSurfaceWorkerInput input)
@@ -786,12 +805,46 @@ public partial class TerrainGenerator : MonoBehaviour
         }
 
         List<int> targetTriangles = chunkSurface.trianglesByBiome[GetGeneratedSurfaceTriangleBucket(biome)];
+        if (polygon.Count == 4
+            && HasGeneratedSurfaceHeightVariation(chunkSurface.vertices, vertexStart)
+            && UseAlternateGeneratedSurfaceQuadDiagonal(polygon[0], polygon[1], polygon[2], polygon[3], input.resolution))
+        {
+            targetTriangles.Add(vertexStart + 0);
+            targetTriangles.Add(vertexStart + 3);
+            targetTriangles.Add(vertexStart + 1);
+            targetTriangles.Add(vertexStart + 1);
+            targetTriangles.Add(vertexStart + 3);
+            targetTriangles.Add(vertexStart + 2);
+            return;
+        }
+
         for (int i = 1; i < polygon.Count - 1; i++)
         {
             targetTriangles.Add(vertexStart + 0);
             targetTriangles.Add(vertexStart + i + 1);
             targetTriangles.Add(vertexStart + i);
         }
+    }
+
+    private static bool HasGeneratedSurfaceHeightVariation(List<Vector3> vertices, int vertexStart)
+    {
+        float firstY = vertices[vertexStart].y;
+        return Mathf.Abs(vertices[vertexStart + 1].y - firstY) > 0.0001f
+               || Mathf.Abs(vertices[vertexStart + 2].y - firstY) > 0.0001f
+               || Mathf.Abs(vertices[vertexStart + 3].y - firstY) > 0.0001f;
+    }
+
+    private static bool UseAlternateGeneratedSurfaceQuadDiagonal(
+        Vector2 p0,
+        Vector2 p1,
+        Vector2 p2,
+        Vector2 p3,
+        int resolution)
+    {
+        Vector2 center = (p0 + p1 + p2 + p3) * 0.25f;
+        int cellX = Mathf.FloorToInt((center.x + 0.5f) * resolution);
+        int cellY = Mathf.FloorToInt((center.y + 0.5f) * resolution);
+        return ((cellX + cellY) & 1) != 0;
     }
 
     private static void AppendWaterContourWallsFromSnapshot(
@@ -1157,22 +1210,24 @@ public partial class TerrainGenerator : MonoBehaviour
         }
 
         Vector2 delta = worldPosition - new Vector2(oilCoordinate.x, oilCoordinate.y);
-        float angle = Mathf.Atan2(delta.y, delta.x);
-        float phase = Hash01WithSeed(input.seed, oilCoordinate.x, oilCoordinate.y, 9127) * Mathf.PI * 2f;
-        float outlineNoise =
-            (Mathf.Sin((angle * 3f) + phase) * 0.55f)
-            + (Mathf.Sin((angle * 5f) - (phase * 0.7f)) * 0.3f)
-            + (Mathf.Sin((angle * 7f) + (phase * 1.3f)) * 0.15f);
-        float outerRadius = Mathf.Min(
-            0.495f,
-            GeneratedOilPitOuterRadius + (outlineNoise * GeneratedOilPitOutlineJitter));
+        float shapeRotation = GetGeneratedOilSurfaceRotationRadians(input.seed, oilCoordinate);
+        return EvaluateOilPitDepth(delta, shapeRotation);
+    }
+
+    private static float EvaluateOilPitDepth(Vector2 delta, float shapeRotation)
+    {
+        // The oil body is rotated in eight yaw steps. Sampling the same local
+        // angle here makes the excavated terrain follow that exact outline.
+        float localAngle = Mathf.Atan2(delta.y, delta.x) + shapeRotation;
+        float surfaceRadius = GetGeneratedOilSurfaceRadius(localAngle);
+        float innerRadius = surfaceRadius + GeneratedOilPitInnerMargin;
+        float outerRadius = Mathf.Min(0.495f, surfaceRadius + GeneratedOilPitOuterMargin);
         float distance = delta.magnitude;
         if (distance >= outerRadius)
         {
             return 0f;
         }
 
-        float innerRadius = GeneratedOilPitInnerRadius + (outlineNoise * 0.008f);
         if (distance <= innerRadius)
         {
             return GeneratedOilPitDepth;
@@ -1211,573 +1266,6 @@ public partial class TerrainGenerator : MonoBehaviour
             hash ^= hash >> 16;
             return hash / (float)uint.MaxValue;
         }
-    }
-
-    private IEnumerator BuildCurvedChunkSurfaceRoutine(
-        ChunkSurfaceBuildData chunkSurface,
-        Vector2Int origin,
-        int chunkSizeInBlocks,
-        bool allowYield)
-    {
-        int resolution = chunkSurface != null && chunkSurface.surfaceInput != null
-            ? chunkSurface.surfaceInput.resolution
-            : Mathf.Max(2, terrainSurfaceSubdivisions);
-        int cellCount = Mathf.Max(1, chunkSizeInBlocks * resolution);
-        IEnumerator baseRoutine = AppendDominantBiomeBaseSurfaceRoutine(chunkSurface, origin, cellCount, resolution, allowYield);
-        while (baseRoutine.MoveNext())
-        {
-            if (allowYield)
-            {
-                yield return baseRoutine.Current;
-            }
-        }
-
-        for (int biomeIndex = 0; biomeIndex < GeneratedSurfaceBiomeMaterialCount; biomeIndex++)
-        {
-            TerrainBiome biome = (TerrainBiome)biomeIndex;
-            IEnumerator biomeRoutine = AppendBiomeContourSurfaceRoutine(chunkSurface, biome, origin, cellCount, resolution, allowYield);
-            while (biomeRoutine.MoveNext())
-            {
-                if (allowYield)
-                {
-                    yield return biomeRoutine.Current;
-                }
-            }
-        }
-
-        IEnumerator safetyRoutine = AppendContourSafetyPatchesRoutine(chunkSurface, origin, cellCount, resolution, allowYield);
-        while (safetyRoutine.MoveNext())
-        {
-            if (allowYield)
-            {
-                yield return safetyRoutine.Current;
-            }
-        }
-
-        BuildChunkSurfaceNormals(chunkSurface);
-    }
-
-    private IEnumerator AppendDominantBiomeBaseSurfaceRoutine(
-        ChunkSurfaceBuildData chunkSurface,
-        Vector2Int origin,
-        int cellCount,
-        int resolution,
-        bool allowYield)
-    {
-        if (chunkSurface == null)
-        {
-            yield break;
-        }
-
-        float[] weightBuffer = chunkSurface.blendWeightBuffer;
-        List<Vector2> polygonScratch = new List<Vector2>(4);
-        int surfaceRowBudget = Mathf.Max(1, chunkSurfaceRowsPerFrame);
-        int rowsSinceYield = 0;
-
-        for (int cellY = 0; cellY < cellCount; cellY++)
-        {
-            for (int cellX = 0; cellX < cellCount; cellX++)
-            {
-                Vector2 p00 = new Vector2(-0.5f + (cellX / (float)resolution), -0.5f + (cellY / (float)resolution));
-                Vector2 p10 = new Vector2(-0.5f + ((cellX + 1) / (float)resolution), -0.5f + (cellY / (float)resolution));
-                Vector2 p11 = new Vector2(-0.5f + ((cellX + 1) / (float)resolution), -0.5f + ((cellY + 1) / (float)resolution));
-                Vector2 p01 = new Vector2(-0.5f + (cellX / (float)resolution), -0.5f + ((cellY + 1) / (float)resolution));
-                Vector2 center = (p00 + p11) * 0.5f;
-                Vector2 centerWorld = new Vector2(origin.x + center.x, origin.y + center.y);
-                if (!IsSurfaceSampleInsideMapBounds(centerWorld))
-                {
-                    continue;
-                }
-
-                TerrainBiome dominantBiome = GetDominantBiomeAtSample(
-                    centerWorld,
-                    weightBuffer);
-
-                if (dominantBiome == TerrainBiome.Water)
-                {
-                    continue;
-                }
-
-                if (ShouldSkipDominantBaseSurfaceForWaterEdge(origin, p00, p10, p11, p01, weightBuffer))
-                {
-                    continue;
-                }
-
-                AppendContourPolygonAtHeight(
-                    chunkSurface,
-                    dominantBiome,
-                    SetContourQuad(polygonScratch, p00, p10, p11, p01),
-                    GetBiomeBaseSurfaceY(dominantBiome));
-            }
-
-            if (allowYield && ++rowsSinceYield >= surfaceRowBudget)
-            {
-                rowsSinceYield = 0;
-                yield return null;
-            }
-        }
-    }
-
-    private bool ShouldSkipDominantBaseSurfaceForWaterEdge(
-        Vector2Int origin,
-        Vector2 p00,
-        Vector2 p10,
-        Vector2 p11,
-        Vector2 p01,
-        float[] weightBuffer)
-    {
-        bool water00 = GetBiomeScoreAtSample(new Vector2(origin.x + p00.x, origin.y + p00.y), TerrainBiome.Water, weightBuffer) > 0f;
-        bool water10 = GetBiomeScoreAtSample(new Vector2(origin.x + p10.x, origin.y + p10.y), TerrainBiome.Water, weightBuffer) > 0f;
-        bool water11 = GetBiomeScoreAtSample(new Vector2(origin.x + p11.x, origin.y + p11.y), TerrainBiome.Water, weightBuffer) > 0f;
-        bool water01 = GetBiomeScoreAtSample(new Vector2(origin.x + p01.x, origin.y + p01.y), TerrainBiome.Water, weightBuffer) > 0f;
-
-        return water00 != water10
-               || water10 != water11
-               || water11 != water01;
-    }
-
-    private IEnumerator AppendBiomeContourSurfaceRoutine(
-        ChunkSurfaceBuildData chunkSurface,
-        TerrainBiome biome,
-        Vector2Int origin,
-        int cellCount,
-        int resolution,
-        bool allowYield)
-    {
-        if (chunkSurface == null)
-        {
-            yield break;
-        }
-
-        float[] weightBuffer = chunkSurface.blendWeightBuffer;
-        float[,] scores = new float[cellCount + 1, cellCount + 1];
-        List<Vector2> polygonScratch = new List<Vector2>(8);
-        int surfaceRowBudget = Mathf.Max(1, chunkSurfaceRowsPerFrame);
-        int rowsSinceYield = 0;
-
-        for (int sampleY = 0; sampleY <= cellCount; sampleY++)
-        {
-            for (int sampleX = 0; sampleX <= cellCount; sampleX++)
-            {
-                Vector2 sampleLocal = new Vector2(
-                    -0.5f + (sampleX / (float)resolution),
-                    -0.5f + (sampleY / (float)resolution));
-                Vector2 sampleWorld = new Vector2(origin.x + sampleLocal.x, origin.y + sampleLocal.y);
-                scores[sampleX, sampleY] = GetBiomeScoreAtSample(sampleWorld, biome, weightBuffer);
-            }
-
-            if (allowYield && ++rowsSinceYield >= surfaceRowBudget)
-            {
-                rowsSinceYield = 0;
-                yield return null;
-            }
-        }
-
-        rowsSinceYield = 0;
-        for (int cellY = 0; cellY < cellCount; cellY++)
-        {
-            for (int cellX = 0; cellX < cellCount; cellX++)
-            {
-                Vector2 p00 = new Vector2(-0.5f + (cellX / (float)resolution), -0.5f + (cellY / (float)resolution));
-                Vector2 p10 = new Vector2(-0.5f + ((cellX + 1) / (float)resolution), -0.5f + (cellY / (float)resolution));
-                Vector2 p11 = new Vector2(-0.5f + ((cellX + 1) / (float)resolution), -0.5f + ((cellY + 1) / (float)resolution));
-                Vector2 p01 = new Vector2(-0.5f + (cellX / (float)resolution), -0.5f + ((cellY + 1) / (float)resolution));
-                Vector2 centerWorld = new Vector2(origin.x + (p00.x + p11.x) * 0.5f, origin.y + (p00.y + p11.y) * 0.5f);
-                if (!IsSurfaceSampleInsideMapBounds(centerWorld))
-                {
-                    continue;
-                }
-
-                float s00 = scores[cellX, cellY];
-                float s10 = scores[cellX + 1, cellY];
-                float s11 = scores[cellX + 1, cellY + 1];
-                float s01 = scores[cellX, cellY + 1];
-                float centerScore = GetBiomeScoreAtSample(
-                    centerWorld,
-                    biome,
-                    weightBuffer);
-
-                AppendMarchingSquaresCell(
-                    chunkSurface,
-                    biome,
-                    p00,
-                    p10,
-                    p11,
-                    p01,
-                    s00,
-                    s10,
-                    s11,
-                    s01,
-                    centerScore,
-                    polygonScratch);
-            }
-
-            if (allowYield && ++rowsSinceYield >= surfaceRowBudget)
-            {
-                rowsSinceYield = 0;
-                yield return null;
-            }
-        }
-    }
-
-    private void AppendMarchingSquaresCell(
-        ChunkSurfaceBuildData chunkSurface,
-        TerrainBiome biome,
-        Vector2 p00,
-        Vector2 p10,
-        Vector2 p11,
-        Vector2 p01,
-        float s00,
-        float s10,
-        float s11,
-        float s01,
-        float centerScore,
-        List<Vector2> polygon)
-    {
-        bool inside00 = s00 > 0f;
-        bool inside10 = s10 > 0f;
-        bool inside11 = s11 > 0f;
-        bool inside01 = s01 > 0f;
-        int mask = (inside00 ? 1 : 0)
-                   | (inside10 ? 2 : 0)
-                   | (inside11 ? 4 : 0)
-                   | (inside01 ? 8 : 0);
-
-        if (mask == 0)
-        {
-            return;
-        }
-
-        if (mask == 15)
-        {
-            AppendContourPolygon(chunkSurface, biome, SetContourQuad(polygon, p00, p10, p11, p01));
-            return;
-        }
-
-        Vector2 bottom = InterpolateContourPoint(p00, p10, s00, s10);
-        Vector2 right = InterpolateContourPoint(p10, p11, s10, s11);
-        Vector2 top = InterpolateContourPoint(p11, p01, s11, s01);
-        Vector2 left = InterpolateContourPoint(p01, p00, s01, s00);
-        if (biome == TerrainBiome.Water)
-        {
-            AppendWaterContourWalls(
-                chunkSurface,
-                mask,
-                centerScore,
-                bottom,
-                right,
-                top,
-                left);
-        }
-
-        if ((mask == 5 || mask == 10) && centerScore <= 0f)
-        {
-            if (mask == 5)
-            {
-                AppendContourPolygon(chunkSurface, biome, SetContourTriangle(polygon, p00, bottom, left));
-                AppendContourPolygon(chunkSurface, biome, SetContourTriangle(polygon, p11, top, right));
-            }
-            else
-            {
-                AppendContourPolygon(chunkSurface, biome, SetContourTriangle(polygon, p10, right, bottom));
-                AppendContourPolygon(chunkSurface, biome, SetContourTriangle(polygon, p01, left, top));
-            }
-
-            return;
-        }
-
-        polygon.Clear();
-        if (inside00)
-        {
-            polygon.Add(p00);
-        }
-
-        if (inside00 != inside10)
-        {
-            polygon.Add(bottom);
-        }
-
-        if (inside10)
-        {
-            polygon.Add(p10);
-        }
-
-        if (inside10 != inside11)
-        {
-            polygon.Add(right);
-        }
-
-        if (inside11)
-        {
-            polygon.Add(p11);
-        }
-
-        if (inside11 != inside01)
-        {
-            polygon.Add(top);
-        }
-
-        if (inside01)
-        {
-            polygon.Add(p01);
-        }
-
-        if (inside01 != inside00)
-        {
-            polygon.Add(left);
-        }
-
-        AppendContourPolygon(chunkSurface, biome, polygon);
-    }
-
-    private void AppendContourPolygon(ChunkSurfaceBuildData chunkSurface, TerrainBiome biome, List<Vector2> polygon)
-    {
-        AppendContourPolygonAtHeight(
-            chunkSurface,
-            biome,
-            polygon,
-            GetBiomeSurfaceY(biome));
-    }
-
-    private void AppendContourPolygonAtHeight(
-        ChunkSurfaceBuildData chunkSurface,
-        TerrainBiome biome,
-        List<Vector2> polygon,
-        float y)
-    {
-        if (chunkSurface == null || polygon == null || polygon.Count < 3)
-        {
-            return;
-        }
-
-        int vertexStart = chunkSurface.vertices.Count;
-        for (int i = 0; i < polygon.Count; i++)
-        {
-            Vector2 point = polygon[i];
-            float vertexY = biome == TerrainBiome.Water || chunkSurface.surfaceInput == null
-                ? y
-                : y - GetOilPitDepthFromSnapshot(
-                    chunkSurface.surfaceInput,
-                    new Vector2(chunkSurface.origin.x + point.x, chunkSurface.origin.y + point.y));
-            chunkSurface.vertices.Add(new Vector3(point.x, vertexY, point.y));
-            chunkSurface.uvs.Add(point);
-            chunkSurface.colors.Add(
-                biome == TerrainBiome.Water
-                    ? GetGeneratedWaterDepthColor(chunkSurface.origin, point)
-                    : GetGeneratedSurfaceBlendWeights(chunkSurface.origin, point, chunkSurface.blendWeightBuffer));
-        }
-
-        List<int> targetTriangles = chunkSurface.trianglesByBiome[GetGeneratedSurfaceTriangleBucket(biome)];
-        for (int i = 1; i < polygon.Count - 1; i++)
-        {
-            targetTriangles.Add(vertexStart + 0);
-            targetTriangles.Add(vertexStart + i + 1);
-            targetTriangles.Add(vertexStart + i);
-        }
-    }
-
-    private void AppendWaterContourWalls(
-        ChunkSurfaceBuildData chunkSurface,
-        int mask,
-        float centerScore,
-        Vector2 bottom,
-        Vector2 right,
-        Vector2 top,
-        Vector2 left)
-    {
-        if (chunkSurface == null
-            || (!generateWaterFoamOverlay && waterSurfaceDepth <= 0f))
-        {
-            return;
-        }
-
-        int resolution = chunkSurface.surfaceInput != null
-            ? chunkSurface.surfaceInput.resolution
-            : Mathf.Max(2, terrainSurfaceSubdivisions);
-        float waterY = GetBiomeSurfaceY(TerrainBiome.Water);
-        float probeDistance = GetWaterWallProbeDistance(resolution);
-        int segmentCount = ResolveWaterContourWallSegments(
-            mask,
-            centerScore,
-            bottom,
-            right,
-            top,
-            left,
-            out Vector2 firstStart,
-            out Vector2 firstEnd,
-            out Vector2 secondStart,
-            out Vector2 secondEnd);
-        if (segmentCount > 0)
-        {
-            AppendWaterContourWallSegment(
-                chunkSurface,
-                waterY,
-                probeDistance,
-                firstStart,
-                firstEnd);
-        }
-
-        if (segmentCount > 1)
-        {
-            AppendWaterContourWallSegment(
-                chunkSurface,
-                waterY,
-                probeDistance,
-                secondStart,
-                secondEnd);
-        }
-    }
-
-    private void AppendWaterContourWallSegment(
-        ChunkSurfaceBuildData chunkSurface,
-        float waterY,
-        float probeDistance,
-        Vector2 start,
-        Vector2 end)
-    {
-        Vector2 edge = end - start;
-        if (edge.sqrMagnitude <= 0.000001f)
-        {
-            return;
-        }
-
-        Vector2 leftNormal = new Vector2(-edge.y, edge.x).normalized;
-        Vector2 midpoint = (start + end) * 0.5f;
-        Vector2 worldMidpoint = new Vector2(chunkSurface.origin.x + midpoint.x, chunkSurface.origin.y + midpoint.y);
-        if (!TryResolveWaterWallShoreline(
-                worldMidpoint,
-                leftNormal,
-                probeDistance,
-                out TerrainBiome landBiome,
-                out Vector2 waterNormal))
-        {
-            return;
-        }
-
-        float landY = GetBiomeSurfaceY(landBiome);
-        if (landY <= waterY + 0.0001f)
-        {
-            return;
-        }
-
-        float[] weightBuffer = chunkSurface.blendWeightBuffer;
-        Color startColor = GetGeneratedSurfaceBlendWeights(chunkSurface.origin, start, weightBuffer);
-        Color endColor = GetGeneratedSurfaceBlendWeights(chunkSurface.origin, end, weightBuffer);
-        if (waterSurfaceDepth > 0f)
-        {
-            AppendWaterWallQuad(chunkSurface, landBiome, start, end, waterY, landY, startColor, endColor);
-        }
-
-        if (generateWaterFoamOverlay)
-        {
-            AppendWaterFoamQuad(
-                chunkSurface,
-                start,
-                end,
-                waterNormal,
-                waterY + waterFoamSurfaceOffset,
-                waterFoamWidth,
-                waterFoamOverlayColor);
-        }
-    }
-
-    private IEnumerator AppendContourSafetyPatchesRoutine(
-        ChunkSurfaceBuildData chunkSurface,
-        Vector2Int origin,
-        int cellCount,
-        int resolution,
-        bool allowYield)
-    {
-        if (chunkSurface == null)
-        {
-            yield break;
-        }
-
-        float[] weightBuffer = chunkSurface.blendWeightBuffer;
-        int surfaceRowBudget = Mathf.Max(1, chunkSurfaceRowsPerFrame);
-        int rowsSinceYield = 0;
-        float patchRadius = 0.22f / Mathf.Max(1, resolution);
-        List<Vector2> polygonScratch = new List<Vector2>(4);
-
-        for (int cellY = 0; cellY < cellCount; cellY++)
-        {
-            for (int cellX = 0; cellX < cellCount; cellX++)
-            {
-                Vector2 p00 = new Vector2(-0.5f + (cellX / (float)resolution), -0.5f + (cellY / (float)resolution));
-                Vector2 p10 = new Vector2(-0.5f + ((cellX + 1) / (float)resolution), -0.5f + (cellY / (float)resolution));
-                Vector2 p11 = new Vector2(-0.5f + ((cellX + 1) / (float)resolution), -0.5f + ((cellY + 1) / (float)resolution));
-                Vector2 p01 = new Vector2(-0.5f + (cellX / (float)resolution), -0.5f + ((cellY + 1) / (float)resolution));
-                Vector2 center = (p00 + p11) * 0.5f;
-                Vector2 centerWorld = new Vector2(origin.x + center.x, origin.y + center.y);
-                if (!IsSurfaceSampleInsideMapBounds(centerWorld))
-                {
-                    continue;
-                }
-
-                TerrainBiome centerBiome = GetDominantBiomeAtSample(
-                    centerWorld,
-                    weightBuffer);
-                TerrainBiome biome00 = GetDominantBiomeAtSample(
-                    new Vector2(origin.x + p00.x, origin.y + p00.y),
-                    weightBuffer);
-                TerrainBiome biome10 = GetDominantBiomeAtSample(
-                    new Vector2(origin.x + p10.x, origin.y + p10.y),
-                    weightBuffer);
-                TerrainBiome biome11 = GetDominantBiomeAtSample(
-                    new Vector2(origin.x + p11.x, origin.y + p11.y),
-                    weightBuffer);
-                TerrainBiome biome01 = GetDominantBiomeAtSample(
-                    new Vector2(origin.x + p01.x, origin.y + p01.y),
-                    weightBuffer);
-
-                int uniqueBiomeCount = CountUniqueBiomes(centerBiome, biome00, biome10, biome11, biome01);
-                if (uniqueBiomeCount >= 3)
-                {
-                    AppendCenterSafetyPatch(chunkSurface, centerBiome, center, patchRadius, polygonScratch);
-                }
-            }
-
-            if (allowYield && ++rowsSinceYield >= surfaceRowBudget)
-            {
-                rowsSinceYield = 0;
-                yield return null;
-            }
-        }
-    }
-
-    private void AppendCenterSafetyPatch(
-        ChunkSurfaceBuildData chunkSurface,
-        TerrainBiome biome,
-        Vector2 center,
-        float patchRadius,
-        List<Vector2> polygon)
-    {
-        AppendContourPolygon(
-            chunkSurface,
-            biome,
-            SetContourQuad(
-                polygon,
-                new Vector2(center.x, center.y - patchRadius),
-                new Vector2(center.x + patchRadius, center.y),
-                new Vector2(center.x, center.y + patchRadius),
-                new Vector2(center.x - patchRadius, center.y)));
-    }
-
-    private TerrainBiome GetDominantBiomeAtSample(Vector2 sampleWorldPosition, float[] weights)
-    {
-        SampleBiomeWeights(sampleWorldPosition, weights);
-        int dominantIndex = 0;
-        float dominantWeight = float.MinValue;
-        for (int i = 0; i < weights.Length; i++)
-        {
-            if (weights[i] > dominantWeight)
-            {
-                dominantWeight = weights[i];
-                dominantIndex = i;
-            }
-        }
-
-        return (TerrainBiome)dominantIndex;
     }
 
     private static int CountUniqueBiomes(
@@ -2045,30 +1533,6 @@ public partial class TerrainGenerator : MonoBehaviour
         return false;
     }
 
-    private bool TryResolveWaterWallShoreline(
-        Vector2 worldMidpoint,
-        Vector2 leftNormal,
-        float probeDistance,
-        out TerrainBiome landBiome,
-        out Vector2 waterNormal)
-    {
-        landBiome = TerrainBiome.Sand;
-        waterNormal = leftNormal;
-        float normalizedProbeDistance = Mathf.Max(0.05f, probeDistance);
-        for (int i = 0; i < 4; i++)
-        {
-            float distance = Mathf.Min(0.6f, normalizedProbeDistance * (1 << i));
-            TerrainBiome leftBiome = GetTileBiome(GetWaterWallSampleCoordinate(worldMidpoint + (leftNormal * distance)));
-            TerrainBiome rightBiome = GetTileBiome(GetWaterWallSampleCoordinate(worldMidpoint - (leftNormal * distance)));
-            if (TryResolveWaterWallShorelineFromBiomes(leftBiome, rightBiome, leftNormal, out landBiome, out waterNormal))
-            {
-                return true;
-            }
-        }
-
-        return false;
-    }
-
     private static Vector2Int GetWaterWallSampleCoordinate(Vector2 sampleWorldPosition)
     {
         return new Vector2Int(
@@ -2240,16 +1704,6 @@ public partial class TerrainGenerator : MonoBehaviour
         targetTriangles.Add(vertexStart + 2);
         targetTriangles.Add(vertexStart + 5);
         targetTriangles.Add(vertexStart + 4);
-    }
-
-    private float GetBiomeSurfaceY(TerrainBiome biome)
-    {
-        return GetBiomeSurfaceY(biome, generatedSurfaceYOffset, waterSurfaceDepth);
-    }
-
-    private float GetBiomeBaseSurfaceY(TerrainBiome biome)
-    {
-        return GetBiomeBaseSurfaceY(biome, generatedSurfaceYOffset, waterSurfaceDepth);
     }
 
     private static float GetBiomeSurfaceY(TerrainBiome biome, float surfaceYOffset, float waterDepth)
@@ -2630,51 +2084,6 @@ public partial class TerrainGenerator : MonoBehaviour
         return GetBiomeScoreAtSample(worldPosition, TerrainBiome.Water, weightBuffer);
     }
 
-    private Color GetGeneratedSurfaceBlendWeights(Vector2Int origin, Vector2 localPoint, float[] weights)
-    {
-        Vector2 worldPoint = new Vector2(origin.x + localPoint.x, origin.y + localPoint.y);
-        SampleBiomeWeights(worldPoint, weights);
-
-        float sandWeight = weights[GetBiomeMaterialIndex(TerrainBiome.Sand)];
-        float dirtWeightValue = weights[GetBiomeMaterialIndex(TerrainBiome.Dirt)];
-        float grassWeightValue = weights[GetBiomeMaterialIndex(TerrainBiome.Grass)];
-        float forestWeightValue = weights[GetBiomeMaterialIndex(TerrainBiome.Forest)];
-        float totalWeight = sandWeight + dirtWeightValue + grassWeightValue + forestWeightValue;
-
-        if (totalWeight <= 0.0001f)
-        {
-            if (sandWeight >= dirtWeightValue && sandWeight >= grassWeightValue && sandWeight >= forestWeightValue)
-            {
-                return new Color(1f, 0f, 0f, 0f);
-            }
-
-            if (dirtWeightValue >= grassWeightValue && dirtWeightValue >= forestWeightValue)
-            {
-                return new Color(0f, 1f, 0f, 0f);
-            }
-
-            if (grassWeightValue >= forestWeightValue)
-            {
-                return new Color(0f, 0f, 1f, 0f);
-            }
-
-            return new Color(0f, 0f, 0f, 1f);
-        }
-
-        float inverseTotal = 1f / totalWeight;
-        return new Color(
-            sandWeight * inverseTotal,
-            dirtWeightValue * inverseTotal,
-            grassWeightValue * inverseTotal,
-            forestWeightValue * inverseTotal);
-    }
-
-    private Color GetGeneratedWaterDepthColor(Vector2Int origin, Vector2 localPoint)
-    {
-        Vector2 worldPoint = new Vector2(origin.x + localPoint.x, origin.y + localPoint.y);
-        return EncodeGeneratedWaterDepthColor(GetNearestGeneratedLandDistance(worldPoint));
-    }
-
     private static Color EncodeGeneratedWaterDepthColor(float landDistance)
     {
         float depth = Mathf.InverseLerp(0f, GeneratedWaterDepthDeepDistance, landDistance);
@@ -2698,28 +2107,6 @@ public partial class TerrainGenerator : MonoBehaviour
                 Vector2Int coordinate = center + new Vector2Int(offsetX, offsetY);
                 if (GetTileBiomeFromSnapshot(input, coordinate) == TerrainBiome.Water
                     && !GetBlockedForWaterFromSnapshot(input, coordinate))
-                {
-                    continue;
-                }
-
-                nearestDistance = Mathf.Min(nearestDistance, GetDistanceToTileRect(worldPoint, coordinate));
-            }
-        }
-
-        return nearestDistance;
-    }
-
-    private float GetNearestGeneratedLandDistance(Vector2 worldPoint)
-    {
-        Vector2Int center = GetSurfaceSampleCoordinate(worldPoint);
-        float nearestDistance = GeneratedWaterDepthDeepDistance;
-        for (int offsetY = -GeneratedWaterDepthSearchRadius; offsetY <= GeneratedWaterDepthSearchRadius; offsetY++)
-        {
-            for (int offsetX = -GeneratedWaterDepthSearchRadius; offsetX <= GeneratedWaterDepthSearchRadius; offsetX++)
-            {
-                Vector2Int coordinate = center + new Vector2Int(offsetX, offsetY);
-                if (GetTileBiome(coordinate) == TerrainBiome.Water
-                    && !IsBlockedForWater(coordinate))
                 {
                     continue;
                 }

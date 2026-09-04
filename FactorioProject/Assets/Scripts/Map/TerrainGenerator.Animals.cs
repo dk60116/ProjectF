@@ -1,5 +1,4 @@
 using System;
-using System.Collections;
 using System.Collections.Generic;
 using UnityEngine;
 #if UNITY_EDITOR
@@ -107,6 +106,26 @@ public partial class TerrainGenerator : MonoBehaviour
     private readonly HashSet<TerrainAnimalInstance> pinnedAnimalInstances =
         new HashSet<TerrainAnimalInstance>();
     private int animalDefinitionCacheHash = int.MinValue;
+    private ChunkAnimalSpawnPhase chunkAnimalSpawnPhase;
+    private Dictionary<long, AnimalSaveEntry>.Enumerator chunkAnimalSaveOverrideEnumerator;
+    private Vector2Int chunkAnimalSpawnCoordinate;
+    private DeterministicAnimalRandom chunkAnimalSpawnRandom;
+    private int chunkAnimalSpawnHerdIndex;
+    private int chunkAnimalSpawnMemberIndex;
+    private bool chunkAnimalSpawnHerdInitialized;
+    private AnimalSpeciesPair chunkAnimalSpawnSpecies;
+    private int chunkAnimalSpawnHerdSize;
+    private Vector2Int chunkAnimalSpawnHerdCenterCoordinate;
+    private Vector3 chunkAnimalSpawnHerdCenter;
+    private long chunkAnimalSpawnHerdId;
+    private float chunkAnimalSpawnHerdRadius;
+
+    private enum ChunkAnimalSpawnPhase
+    {
+        Inactive,
+        SavedOverrides,
+        GeneratedHerds
+    }
 
     public float AnimalDensity => animalDensity;
     public float EffectiveAnimalDensity => animalDensity * AnimalSpawnFrequencyScale;
@@ -169,25 +188,25 @@ public partial class TerrainGenerator : MonoBehaviour
 
     private void SpawnAnimalsForChunk(Vector2Int chunkCoordinate)
     {
-        IEnumerator routine = SpawnAnimalsForChunkRoutine(chunkCoordinate, false);
-        while (routine.MoveNext())
+        bool completed = BeginChunkAnimalSpawnWork(chunkCoordinate);
+        while (!completed)
         {
+            completed = AdvanceChunkAnimalSpawnWork(false);
         }
     }
 
-    private IEnumerator SpawnAnimalsForChunkRoutine(
-        Vector2Int chunkCoordinate,
-        bool allowYield)
+    private bool BeginChunkAnimalSpawnWork(Vector2Int chunkCoordinate)
     {
+        CancelChunkAnimalSpawnWork();
         if (!generateAnimals || animalDensity <= 0f)
         {
-            yield break;
+            return true;
         }
 
         EnsureAnimalSpeciesCache();
         if (animalSpeciesCache.Count == 0)
         {
-            yield break;
+            return true;
         }
 
         animalUsedCoordinatesScratch.Clear();
@@ -197,98 +216,134 @@ public partial class TerrainGenerator : MonoBehaviour
             chunkMinCoordinate,
             chunkMinCoordinate + new Vector2Int(normalizedChunkSize - 1, normalizedChunkSize - 1),
             animalUsedCoordinatesScratch);
+        chunkAnimalSpawnCoordinate = chunkCoordinate;
+        chunkAnimalSaveOverrideEnumerator = animalSaveOverrides.GetEnumerator();
+        chunkAnimalSpawnPhase = ChunkAnimalSpawnPhase.SavedOverrides;
+        return false;
+    }
 
+    private bool AdvanceChunkAnimalSpawnWork(bool allowYield)
+    {
         double spawnStepStartTime = Time.realtimeSinceStartupAsDouble;
-        foreach (KeyValuePair<long, AnimalSaveEntry> pair in animalSaveOverrides)
+        if (chunkAnimalSpawnPhase == ChunkAnimalSpawnPhase.SavedOverrides)
         {
-            AnimalSaveEntry state = pair.Value;
-            if (state == null
-                || state.removed
-                || loadedAnimalIds.Contains(state.deterministicId)
-                || GetAnimalChunkCoordinate(state.position) != chunkCoordinate)
+            while (chunkAnimalSaveOverrideEnumerator.MoveNext())
             {
-                continue;
+                AnimalSaveEntry state = chunkAnimalSaveOverrideEnumerator.Current.Value;
+                if (state == null
+                    || state.removed
+                    || loadedAnimalIds.Contains(state.deterministicId)
+                    || GetAnimalChunkCoordinate(state.position) != chunkAnimalSpawnCoordinate)
+                {
+                    continue;
+                }
+
+                AnimalDefinition definition = FindAnimalDefinitionById(state.definitionId);
+                Animal animal = SpawnAnimalInstance(
+                    definition,
+                    state.deterministicId,
+                    state.position,
+                    state.rotation,
+                    state.age,
+                    state.baseScale,
+                    true,
+                    state.herdId != 0L ? state.herdId : state.deterministicId,
+                    state.herdCenter != Vector3.zero ? state.herdCenter : state.position,
+                    state.herdRadius > 0f
+                        ? state.herdRadius
+                        : definition != null && definition.AISettings != null
+                            ? definition.AISettings.HerdAreaRadius
+                            : AnimalAISettings.DefaultHerdAreaRadius,
+                    state,
+                    transform);
+                if (animal != null)
+                {
+                    animalUsedCoordinatesScratch.Add(new Vector2Int(
+                        Mathf.RoundToInt(state.position.x),
+                        Mathf.RoundToInt(state.position.z)));
+                }
+
+                if (allowYield && HasExceededChunkGenerationFrameBudget(spawnStepStartTime))
+                {
+                    return false;
+                }
             }
 
-            AnimalDefinition definition = FindAnimalDefinitionById(state.definitionId);
-            Animal animal = SpawnAnimalInstance(
-                definition,
-                state.deterministicId,
-                state.position,
-                state.rotation,
-                state.age,
-                state.baseScale,
-                true,
-                state.herdId != 0L ? state.herdId : state.deterministicId,
-                state.herdCenter != Vector3.zero ? state.herdCenter : state.position,
-                state.herdRadius > 0f
-                    ? state.herdRadius
-                    : definition != null && definition.AISettings != null
-                        ? definition.AISettings.HerdAreaRadius
-                        : AnimalAISettings.DefaultHerdAreaRadius,
-                state,
-                transform);
-            if (animal != null)
+            chunkAnimalSaveOverrideEnumerator.Dispose();
+            animalEligibleCoordinatesScratch.Clear();
+            animalEligibleCoordinateLookup.Clear();
+            loadedBlocks.CopyRegisteredCoordinates(
+                chunkAnimalSpawnCoordinate,
+                animalChunkCoordinatesScratch);
+            for (int i = 0; i < animalChunkCoordinatesScratch.Count; i++)
             {
-                animalUsedCoordinatesScratch.Add(new Vector2Int(
-                    Mathf.RoundToInt(state.position.x),
-                    Mathf.RoundToInt(state.position.z)));
+                Vector2Int coordinate = animalChunkCoordinatesScratch[i];
+                if (!CanSpawnAnimalAtCoordinate(coordinate)
+                    || animalUsedCoordinatesScratch.Contains(coordinate))
+                {
+                    continue;
+                }
+
+                animalEligibleCoordinatesScratch.Add(coordinate);
+                animalEligibleCoordinateLookup.Add(coordinate);
             }
 
-            if (allowYield && HasExceededChunkGenerationFrameBudget(spawnStepStartTime))
+            chunkAnimalSpawnRandom = new DeterministicAnimalRandom(
+                seed,
+                chunkAnimalSpawnCoordinate);
+            float expectedAnimalCount = animalEligibleCoordinatesScratch.Count * EffectiveAnimalDensity;
+            BuildAnimalHerdPlans(
+                expectedAnimalCount,
+                animalEligibleCoordinatesScratch.Count,
+                ref chunkAnimalSpawnRandom);
+            if (animalHerdPlansScratch.Count == 0)
             {
-                yield return null;
-                spawnStepStartTime = Time.realtimeSinceStartupAsDouble;
+                CancelChunkAnimalSpawnWork();
+                return true;
             }
+
+            chunkAnimalSpawnHerdIndex = 0;
+            chunkAnimalSpawnHerdInitialized = false;
+            chunkAnimalSpawnPhase = ChunkAnimalSpawnPhase.GeneratedHerds;
         }
 
-        animalEligibleCoordinatesScratch.Clear();
-        animalEligibleCoordinateLookup.Clear();
-        loadedBlocks.CopyRegisteredCoordinates(chunkCoordinate, animalChunkCoordinatesScratch);
-        for (int i = 0; i < animalChunkCoordinatesScratch.Count; i++)
+        while (chunkAnimalSpawnHerdIndex < animalHerdPlansScratch.Count
+               && animalEligibleCoordinateLookup.Count > 0)
         {
-            Vector2Int coordinate = animalChunkCoordinatesScratch[i];
-            if (!CanSpawnAnimalAtCoordinate(coordinate)
-                || animalUsedCoordinatesScratch.Contains(coordinate))
+            if (!chunkAnimalSpawnHerdInitialized)
             {
-                continue;
+                AnimalHerdPlan herdPlan = animalHerdPlansScratch[chunkAnimalSpawnHerdIndex];
+                chunkAnimalSpawnSpecies = herdPlan.species;
+                chunkAnimalSpawnHerdSize = herdPlan.size;
+                chunkAnimalSpawnHerdCenterCoordinate = animalEligibleCoordinatesScratch[
+                    chunkAnimalSpawnRandom.Range(0, animalEligibleCoordinatesScratch.Count)];
+                chunkAnimalSpawnHerdCenter = new Vector3(
+                    chunkAnimalSpawnHerdCenterCoordinate.x,
+                    0f,
+                    chunkAnimalSpawnHerdCenterCoordinate.y);
+                chunkAnimalSpawnHerdId = BuildAnimalHerdId(
+                    chunkAnimalSpawnCoordinate,
+                    chunkAnimalSpawnHerdCenterCoordinate,
+                    chunkAnimalSpawnSpecies.Settings != null
+                        ? chunkAnimalSpawnSpecies.Settings.Id
+                        : -1,
+                    chunkAnimalSpawnHerdIndex);
+                chunkAnimalSpawnHerdRadius =
+                    chunkAnimalSpawnSpecies.Settings != null
+                    && chunkAnimalSpawnSpecies.Settings.AISettings != null
+                        ? chunkAnimalSpawnSpecies.Settings.AISettings.HerdAreaRadius
+                        : AnimalAISettings.DefaultHerdAreaRadius;
+                chunkAnimalSpawnMemberIndex = 0;
+                chunkAnimalSpawnHerdInitialized = true;
             }
 
-            animalEligibleCoordinatesScratch.Add(coordinate);
-            animalEligibleCoordinateLookup.Add(coordinate);
-        }
-
-        DeterministicAnimalRandom random = new DeterministicAnimalRandom(seed, chunkCoordinate);
-        float expectedAnimalCount = animalEligibleCoordinatesScratch.Count * EffectiveAnimalDensity;
-        BuildAnimalHerdPlans(expectedAnimalCount, animalEligibleCoordinatesScratch.Count, ref random);
-        if (animalHerdPlansScratch.Count == 0)
-        {
-            ClearAnimalSpawnScratch();
-            yield break;
-        }
-
-        for (int herdIndex = 0;
-             herdIndex < animalHerdPlansScratch.Count && animalEligibleCoordinateLookup.Count > 0;
-             herdIndex++)
-        {
-            AnimalHerdPlan herdPlan = animalHerdPlansScratch[herdIndex];
-            AnimalSpeciesPair species = herdPlan.species;
-            int herdSize = herdPlan.size;
-            Vector2Int centerCoordinate = animalEligibleCoordinatesScratch[
-                random.Range(0, animalEligibleCoordinatesScratch.Count)];
-            Vector3 herdCenter = new Vector3(centerCoordinate.x, 0f, centerCoordinate.y);
-            long herdId = BuildAnimalHerdId(
-                chunkCoordinate,
-                centerCoordinate,
-                species.Settings != null ? species.Settings.Id : -1,
-                herdIndex);
-            float herdRadius = species.Settings != null && species.Settings.AISettings != null
-                ? species.Settings.AISettings.HerdAreaRadius
-                : AnimalAISettings.DefaultHerdAreaRadius;
-
-            for (int memberIndex = 0; memberIndex < herdSize; memberIndex++)
+            while (chunkAnimalSpawnMemberIndex < chunkAnimalSpawnHerdSize)
             {
-                if (!TryTakeAnimalSpawnCoordinate(centerCoordinate, ref random, out Vector2Int coordinate))
+                chunkAnimalSpawnMemberIndex++;
+                if (!TryTakeAnimalSpawnCoordinate(
+                        chunkAnimalSpawnHerdCenterCoordinate,
+                        ref chunkAnimalSpawnRandom,
+                        out Vector2Int coordinate))
                 {
                     break;
                 }
@@ -299,7 +354,9 @@ public partial class TerrainGenerator : MonoBehaviour
                     continue;
                 }
 
-                AnimalDefinition definition = ChooseGenderDefinition(species, ref random);
+                AnimalDefinition definition = ChooseGenderDefinition(
+                    chunkAnimalSpawnSpecies,
+                    ref chunkAnimalSpawnRandom);
                 if (definition == null)
                 {
                     continue;
@@ -309,25 +366,41 @@ public partial class TerrainGenerator : MonoBehaviour
                     definition,
                     deterministicId,
                     new Vector3(coordinate.x, 0f, coordinate.y),
-                    Quaternion.Euler(0f, random.Value() * 360f, 0f),
-                    ChooseAnimalSpawnAge(definition, ref random),
+                    Quaternion.Euler(0f, chunkAnimalSpawnRandom.Value() * 360f, 0f),
+                    ChooseAnimalSpawnAge(definition, ref chunkAnimalSpawnRandom),
                     -1f,
                     false,
-                    herdId,
-                    herdCenter,
-                    herdRadius,
+                    chunkAnimalSpawnHerdId,
+                    chunkAnimalSpawnHerdCenter,
+                    chunkAnimalSpawnHerdRadius,
                     null,
                     transform);
                 if (allowYield
                     && spawnedAnimal != null
                     && HasExceededChunkGenerationFrameBudget(spawnStepStartTime))
                 {
-                    yield return null;
-                    spawnStepStartTime = Time.realtimeSinceStartupAsDouble;
+                    return false;
                 }
             }
+
+            chunkAnimalSpawnHerdIndex++;
+            chunkAnimalSpawnHerdInitialized = false;
         }
 
+        CancelChunkAnimalSpawnWork();
+        return true;
+    }
+
+    private void CancelChunkAnimalSpawnWork()
+    {
+        if (chunkAnimalSpawnPhase == ChunkAnimalSpawnPhase.SavedOverrides)
+        {
+            chunkAnimalSaveOverrideEnumerator.Dispose();
+        }
+
+        chunkAnimalSpawnPhase = ChunkAnimalSpawnPhase.Inactive;
+        chunkAnimalSpawnSpecies = null;
+        chunkAnimalSpawnHerdInitialized = false;
         ClearAnimalSpawnScratch();
     }
 

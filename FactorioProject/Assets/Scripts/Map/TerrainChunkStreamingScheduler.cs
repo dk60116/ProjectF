@@ -12,6 +12,7 @@ internal sealed class TerrainChunkStreamingScheduler
     private readonly Action<Vector2Int, int> generateChunkImmediate;
     private readonly Func<Vector2Int, int, bool, IEnumerator> createGenerateChunkRoutine;
     private readonly ProfilerMarker generateStepMarker;
+    private readonly Action cleanupGenerationTransientState;
     private readonly Queue<ChunkGenerationRequest> pendingChunkGenerations = new Queue<ChunkGenerationRequest>();
     private readonly HashSet<Vector2Int> pendingChunkGenerationCoordinates = new HashSet<Vector2Int>();
     private readonly HashSet<Vector2Int> activeChunkGenerationCoordinates = new HashSet<Vector2Int>();
@@ -23,13 +24,16 @@ internal sealed class TerrainChunkStreamingScheduler
         || activeChunkGenerationCoordinates.Count > 0
         || chunkGenerationCoroutine != null;
 
+    public int PendingCount => pendingChunkGenerations.Count;
+
     public TerrainChunkStreamingScheduler(
         MonoBehaviour owner,
         Func<Vector2Int, bool> isChunkLoaded,
         Func<Vector2Int, bool> shouldGenerateChunk,
         Action<Vector2Int, int> generateChunkImmediate,
         Func<Vector2Int, int, bool, IEnumerator> createGenerateChunkRoutine,
-        ProfilerMarker generateStepMarker)
+        ProfilerMarker generateStepMarker,
+        Action cleanupGenerationTransientState)
     {
         this.owner = owner;
         this.isChunkLoaded = isChunkLoaded;
@@ -37,6 +41,7 @@ internal sealed class TerrainChunkStreamingScheduler
         this.generateChunkImmediate = generateChunkImmediate;
         this.createGenerateChunkRoutine = createGenerateChunkRoutine;
         this.generateStepMarker = generateStepMarker;
+        this.cleanupGenerationTransientState = cleanupGenerationTransientState;
     }
 
     public bool IsGenerationActive(Vector2Int chunkCoordinate)
@@ -94,6 +99,7 @@ internal sealed class TerrainChunkStreamingScheduler
             }
             finally
             {
+                cleanupGenerationTransientState?.Invoke();
                 MarkGenerationComplete(request.coordinate);
             }
         }
@@ -132,7 +138,11 @@ internal sealed class TerrainChunkStreamingScheduler
             }
 
             activeChunkGenerationCoordinates.Add(request.coordinate);
-            IEnumerator chunkRoutine = createGenerateChunkRoutine(request.coordinate, request.chunkSize, true);
+            IEnumerator chunkRoutine;
+            using (generateStepMarker.Auto())
+            {
+                chunkRoutine = createGenerateChunkRoutine(request.coordinate, request.chunkSize, true);
+            }
             try
             {
                 while (true)
@@ -159,6 +169,7 @@ internal sealed class TerrainChunkStreamingScheduler
             finally
             {
                 (chunkRoutine as IDisposable)?.Dispose();
+                cleanupGenerationTransientState?.Invoke();
                 MarkGenerationComplete(request.coordinate);
             }
 

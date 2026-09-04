@@ -685,7 +685,10 @@ public partial class TerrainGenerator : MonoBehaviour
         meshRenderer.lightProbeUsage = LightProbeUsage.Off;
         meshRenderer.reflectionProbeUsage = ReflectionProbeUsage.Off;
 
-        float surfaceY = GetBiomeSurfaceY(GetTileBiome(block.Coordinate));
+        float surfaceY = GetBiomeSurfaceY(
+            GetTileBiome(block.Coordinate),
+            generatedSurfaceYOffset,
+            waterSurfaceDepth);
         visual.position = new Vector3(
             block.WorldPosition.x,
             surfaceY + FarmlandSurfaceOffset,

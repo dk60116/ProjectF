@@ -433,7 +433,7 @@ public partial class TerrainGenerator : MonoBehaviour
     {
         if (IsOilResourcePrefab(prefab))
         {
-            return 0;
+            return GetGeneratedOilSurfaceYawStep(seed, worldCoordinate);
         }
 
         int prefabSalt = GetStableStringHash(prefab != null ? prefab.name : string.Empty);

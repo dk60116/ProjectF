@@ -1,0 +1,36 @@
+#!/usr/bin/env python
+
+env = SConscript("godot-cpp/SConstruct", {"api_version": "4.7"})
+env.Append(CPPPATH=["src/", "bridge/", "factory_core/include/"])
+
+core_sources = Glob("factory_core/src/*.cpp")
+core_library = env.StaticLibrary(
+    "build/projectf_core{}{}".format(env["suffix"], env["LIBSUFFIX"]),
+    source=core_sources,
+)
+
+sources = Glob("src/*.cpp") + Glob("bridge/*.cpp")
+library = env.SharedLibrary(
+    "bin/libprojectf_runtime{}{}".format(env["suffix"], env["SHLIBSUFFIX"]),
+    source=sources + core_library,
+)
+
+# Pure-core executables deliberately do not link godot-cpp. This keeps their
+# build and measurements independent from the GDExtension boundary.
+core_executable_env = env.Clone()
+core_executable_env["LIBS"] = []
+core_executable_env["LIBPATH"] = []
+
+tests = core_executable_env.Program(
+    "bin/factory_core_tests{}{}".format(env["suffix"], env["PROGSUFFIX"]),
+    source=Glob("tests/*.cpp") + core_library,
+)
+benchmark = core_executable_env.Program(
+    "bin/machine_benchmark{}{}".format(env["suffix"], env["PROGSUFFIX"]),
+    source=Glob("benchmarks/*.cpp") + core_library,
+)
+
+Alias("extension", library)
+Alias("tests", tests)
+Alias("benchmark", benchmark)
+Default(library)

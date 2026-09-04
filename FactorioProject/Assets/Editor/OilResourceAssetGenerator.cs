@@ -16,6 +16,9 @@ internal static class OilResourceAssetGenerator
     private const string OilHoleMeshPath = OilFolderPath + "/Oil_Hole.mesh";
     private const string OilSurfaceMaterialPath = OilFolderPath + "/M_Oil_Surface.mat";
     private const string OilIconPath = "Assets/Items/Fluid/Oil/Oil_Icon.png";
+    private const float OilSurfaceMinimumDiameter = 0.62f;
+    private const float OilSurfaceMaximumDiameter = 0.80f;
+    private const float OilSurfaceMaximumAxisDifference = 0.08f;
 
     [MenuItem("Tools/ProjectF/Generate Oil Resource")]
     public static void Generate()
@@ -284,8 +287,12 @@ internal static class OilResourceAssetGenerator
             || rimVertexCount == 0
             || oilSurfaceSampleCount == 0
             || oilCenterOffsetXZ > 0.01f
-            || Mathf.Abs(oilBounds.size.x - 1f) > 0.01f
-            || Mathf.Abs(oilBounds.size.z - 1f) > 0.01f
+            || oilBounds.size.x < OilSurfaceMinimumDiameter
+            || oilBounds.size.x > OilSurfaceMaximumDiameter
+            || oilBounds.size.z < OilSurfaceMinimumDiameter
+            || oilBounds.size.z > OilSurfaceMaximumDiameter
+            || Mathf.Abs(oilBounds.size.x - oilBounds.size.z)
+               > OilSurfaceMaximumAxisDifference
             || oilPlaneTilt > 0.1f
             || centerMaximumY >= oilSurfaceY - 0.025f
             || rimMaximumY <= oilSurfaceY + 0.008f
@@ -465,14 +472,19 @@ internal static class OilResourceAssetGenerator
             || bodyFilter.sharedMesh.subMeshCount != 1
             || bodyRenderer == null
             || bodyRenderer.sharedMaterials.Length < 1
-            || Mathf.Abs(planeWorldSizeX - 1f) > 0.001f
-            || Mathf.Abs(planeWorldSizeZ - 1f) > 0.001f
+            || planeWorldSizeX < OilSurfaceMinimumDiameter
+            || planeWorldSizeX > OilSurfaceMaximumDiameter
+            || planeWorldSizeZ < OilSurfaceMinimumDiameter
+            || planeWorldSizeZ > OilSurfaceMaximumDiameter
+            || Mathf.Abs(planeWorldSizeX - planeWorldSizeZ)
+               > OilSurfaceMaximumAxisDifference
             || planeTilt > 0.1f)
         {
-            throw new InvalidOperationException("Oil Resource visual validation failed: the liquid must be a horizontal, grid-aligned 1x1 plane.");
+            throw new InvalidOperationException(
+                "Oil Resource visual validation failed: the liquid must be a horizontal, near-circular patch.");
         }
 
-        Debug.Log("Oil Resource visual validation passed: the prefab contains one flat black liquid plane.");
+        Debug.Log("Oil Resource visual validation passed: the prefab contains one flat, irregular circular liquid patch.");
     }
 
     private static Transform FindOilSurfaceTransform(Transform root)
@@ -627,27 +639,31 @@ internal static class OilResourceAssetGenerator
 
     private static Mesh LoadOrCreateOilHoleMesh()
     {
-        const float halfExtent = 0.5f;
         float surfaceY = TerrainGenerator.GeneratedOilSurfaceLocalY;
-        List<Vector3> vertices = new List<Vector3>(4)
+        int segmentCount = TerrainGenerator.GeneratedOilSurfaceSegmentCount;
+        float surfaceRadius = TerrainGenerator.GeneratedOilSurfaceRadius;
+        List<Vector3> vertices = new List<Vector3>(segmentCount + 1);
+        List<Vector2> uvs = new List<Vector2>(segmentCount + 1);
+        List<int> surfaceTriangles = new List<int>(segmentCount * 3);
+        vertices.Add(new Vector3(0f, surfaceY, 0f));
+        uvs.Add(new Vector2(0.5f, 0.5f));
+        for (int segmentIndex = 0; segmentIndex < segmentCount; segmentIndex++)
         {
-            new Vector3(-halfExtent, surfaceY, -halfExtent),
-            new Vector3(-halfExtent, surfaceY, halfExtent),
-            new Vector3(halfExtent, surfaceY, halfExtent),
-            new Vector3(halfExtent, surfaceY, -halfExtent)
-        };
-        List<Vector2> uvs = new List<Vector2>(4)
-        {
-            new Vector2(0f, 0f),
-            new Vector2(0f, 1f),
-            new Vector2(1f, 1f),
-            new Vector2(1f, 0f)
-        };
-        List<int> surfaceTriangles = new List<int>(6)
-        {
-            0, 1, 2,
-            0, 2, 3
-        };
+            float angle = segmentIndex * Mathf.PI * 2f / segmentCount;
+            float radius = TerrainGenerator.GetGeneratedOilSurfaceRadius(angle);
+            float x = Mathf.Cos(angle) * radius;
+            float z = Mathf.Sin(angle) * radius;
+            vertices.Add(new Vector3(x, surfaceY, z));
+            uvs.Add(new Vector2(
+                0.5f + (x / (surfaceRadius * 2f)),
+                0.5f + (z / (surfaceRadius * 2f))));
+
+            int currentVertex = segmentIndex + 1;
+            int nextVertex = ((segmentIndex + 1) % segmentCount) + 1;
+            surfaceTriangles.Add(0);
+            surfaceTriangles.Add(nextVertex);
+            surfaceTriangles.Add(currentVertex);
+        }
 
         Mesh generatedMesh = new Mesh { name = "Oil_Hole" };
         generatedMesh.SetVertices(vertices);

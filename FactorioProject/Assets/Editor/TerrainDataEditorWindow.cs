@@ -20,8 +20,9 @@ public class TerrainDataEditorWindow : EditorWindow
         "loadRadius",
         "expandEditorPreviewRange",
         "chunkGenerationBlocksPerFrame",
-        "chunkSurfaceRowsPerFrame",
         "chunkInstallationRestoresPerFrame",
+        "enableChunkGenerationDiagnostics",
+        "logChunkGenerationDiagnostics",
         "trackingTarget",
         "generateOnStart",
         "seed"

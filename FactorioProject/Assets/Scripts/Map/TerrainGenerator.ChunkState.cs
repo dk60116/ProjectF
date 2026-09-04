@@ -1,46 +1,8 @@
-using System.Collections;
 using System.Collections.Generic;
 using UnityEngine;
 
 public partial class TerrainGenerator
 {
-    private IEnumerator RestoreChunkBlockStatesRoutine(Block[] chunkBlocks, bool allowYield)
-    {
-        if (chunkBlocks == null)
-        {
-            yield break;
-        }
-
-        EnsureResourceStateStore();
-
-        int blocksSinceYield = 0;
-        int blockBudget = Mathf.Max(1, chunkGenerationBlocksPerFrame);
-        double restoreStepStartTime = Time.realtimeSinceStartupAsDouble;
-        BeginConveyorRuntimeRefreshBatch();
-        try
-        {
-            for (int i = 0; i < chunkBlocks.Length; i++)
-            {
-                using (RestoreChunkBlockStateMarker.Auto())
-                {
-                    RestoreBlockState(chunkBlocks[i]);
-                }
-                if (allowYield
-                    && (++blocksSinceYield >= blockBudget
-                        || HasExceededChunkGenerationFrameBudget(restoreStepStartTime)))
-                {
-                    blocksSinceYield = 0;
-                    yield return null;
-                    restoreStepStartTime = Time.realtimeSinceStartupAsDouble;
-                }
-            }
-        }
-        finally
-        {
-            EndConveyorRuntimeRefreshBatch();
-        }
-    }
-
     private void RestoreBlockState(Block block)
     {
         if (block == null)

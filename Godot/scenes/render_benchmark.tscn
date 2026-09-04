@@ -1,0 +1,21 @@
+[gd_scene format=3]
+
+[node name="RenderBenchmark" type="Node3D"]
+
+[node name="FactorySimulation" type="FactorySimulationBridge" parent="."]
+prototype_machine_count = 0
+populate_on_ready = false
+simulation_running = false
+
+[node name="FactoryRender" type="FactoryRenderBridge" parent="."]
+simulation_bridge_path = NodePath("../FactorySimulation")
+
+[node name="Camera3D" type="Camera3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 0, 1, 0, -1, 0, 0, 250, 0)
+projection = 1
+size = 400.0
+far = 500.0
+current = true
+
+[node name="Sun" type="DirectionalLight3D" parent="."]
+rotation_degrees = Vector3(-55, -35, 0)

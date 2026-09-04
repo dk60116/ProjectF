@@ -1,0 +1,49 @@
+[gd_scene load_steps=6 format=3]
+
+[ext_resource type="PackedScene" path="res://scenes/player.tscn" id="1_player"]
+
+[sub_resource type="StandardMaterial3D" id="GroundMaterial"]
+albedo_color = Color(0.22, 0.46, 0.24, 1)
+roughness = 0.9
+
+[sub_resource type="PlaneMesh" id="GroundMesh"]
+material = SubResource("GroundMaterial")
+size = Vector2(160, 160)
+
+[sub_resource type="BoxShape3D" id="GroundShape"]
+size = Vector3(160, 0.2, 160)
+
+[sub_resource type="Environment" id="WorldEnvironment"]
+background_mode = 1
+background_color = Color(0.4, 0.62, 0.82, 1)
+ambient_light_source = 3
+ambient_light_color = Color(0.72, 0.78, 0.88, 1)
+ambient_light_energy = 0.7
+
+[node name="Main" type="Node3D"]
+
+[node name="FactorySimulation" type="FactorySimulationBridge" parent="."]
+prototype_machine_count = 10000
+
+[node name="FactoryRender" type="FactoryRenderBridge" parent="."]
+simulation_bridge_path = NodePath("../FactorySimulation")
+
+[node name="Environment" type="WorldEnvironment" parent="."]
+environment = SubResource("WorldEnvironment")
+
+[node name="Sun" type="DirectionalLight3D" parent="."]
+rotation_degrees = Vector3(-55, -35, 0)
+shadow_enabled = true
+
+[node name="Ground" type="StaticBody3D" parent="."]
+
+[node name="Mesh" type="MeshInstance3D" parent="Ground"]
+mesh = SubResource("GroundMesh")
+
+[node name="CollisionShape3D" type="CollisionShape3D" parent="Ground"]
+position = Vector3(0, -0.1, 0)
+shape = SubResource("GroundShape")
+
+[node name="PlayerSpawner" type="PlayerSpawner" parent="."]
+player_scene = ExtResource("1_player")
+spawn_position = Vector3(0, 0.05, 0)

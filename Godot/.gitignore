@@ -1,0 +1,8 @@
+.godot/
+native/godot-cpp/
+native/bin/
+native/build/
+native/.sconsign.dblite
+native/compile_commands.json
+*.obj
+*.obj.import

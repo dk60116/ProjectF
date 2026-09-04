@@ -116,6 +116,10 @@ public sealed class PortableItemRenderer : MonoBehaviour
         new ProfilerMarker("PortableItemRenderer.RebuildVirtualConveyorBatches");
     private static readonly ProfilerMarker RenderVirtualConveyorBatchesMarker =
         new ProfilerMarker("PortableItemRenderer.RenderVirtualConveyorBatches");
+    private static readonly ProfilerMarker ScheduleConveyorItemTransformJobMarker =
+        new ProfilerMarker("PortableItemRenderer.ScheduleConveyorItemTransformJob");
+    private static readonly ProfilerMarker CompleteConveyorItemTransformJobMarker =
+        new ProfilerMarker("PortableItemRenderer.CompleteConveyorItemTransformJob");
 
     [SerializeField, Min(1f)]
     private float portableObjectBatchCellSize = 8f;
@@ -961,15 +965,15 @@ public sealed class PortableItemRenderer : MonoBehaviour
 
     private void RenderVirtualConveyorBatches()
     {
-        long dynamicRebuildStartTimestamp = BeginRuntimeProfileSample(out bool profileDynamicRebuild);
-        try
-        {
-            RebuildDynamicVirtualConveyorBatches();
-        }
-        finally
-        {
-            EndRuntimeProfileSample(profileDynamicRebuild, "Conveyor Item Rebuild Dynamic", dynamicRebuildStartTimestamp);
-        }
+        bool profileDynamicRebuild = MapObjectTickProfiler.IsEnabled;
+        long dynamicRebuildTicks = 0L;
+        long dynamicRebuildSegmentStart = profileDynamicRebuild
+            ? MapObjectTickProfiler.BeginSample()
+            : 0L;
+        DynamicConveyorBatchBuildProfile buildProfile = PrepareDynamicVirtualConveyorBatches();
+        dynamicRebuildTicks += MeasureRuntimeProfilePhase(
+            profileDynamicRebuild,
+            dynamicRebuildSegmentStart);
 
         long staticRenderStartTimestamp = BeginRuntimeProfileSample(out bool profileStaticRender);
         try
@@ -979,7 +983,31 @@ public sealed class PortableItemRenderer : MonoBehaviour
         finally
         {
             EndRuntimeProfileSample(profileStaticRender, "Conveyor Item Render Static", staticRenderStartTimestamp);
+            long completeStartTimestamp = buildProfile.ProfileBreakdown
+                ? MapObjectTickProfiler.BeginSample()
+                : 0L;
+            using (CompleteConveyorItemTransformJobMarker.Auto())
+            {
+                conveyorItemTransformJobProcessor.CompleteScheduled();
+            }
+
+            buildProfile.CompleteMatrixTicks += MeasureRuntimeProfilePhase(
+                buildProfile.ProfileBreakdown,
+                completeStartTimestamp);
         }
+
+        dynamicRebuildSegmentStart = profileDynamicRebuild
+            ? MapObjectTickProfiler.BeginSample()
+            : 0L;
+        CompleteDynamicVirtualConveyorBatches(ref buildProfile);
+        dynamicRebuildTicks += MeasureRuntimeProfilePhase(
+            profileDynamicRebuild,
+            dynamicRebuildSegmentStart);
+        dynamicRebuildTicks += buildProfile.CompleteMatrixTicks;
+        EndRuntimeProfileElapsedSample(
+            profileDynamicRebuild,
+            "Conveyor Item Rebuild Dynamic",
+            dynamicRebuildTicks);
 
         long dynamicRenderStartTimestamp = BeginRuntimeProfileSample(out bool profileDynamicRender);
         try
@@ -992,9 +1020,12 @@ public sealed class PortableItemRenderer : MonoBehaviour
         }
     }
 
-    private void RebuildDynamicVirtualConveyorBatches()
+    private DynamicConveyorBatchBuildProfile PrepareDynamicVirtualConveyorBatches()
     {
-        bool profileBreakdown = MapObjectTickProfiler.IsEnabled;
+        DynamicConveyorBatchBuildProfile profile = new DynamicConveyorBatchBuildProfile
+        {
+            ProfileBreakdown = MapObjectTickProfiler.IsEnabled
+        };
         ResetDynamicVirtualConveyorRenderCounters();
         lastDynamicVirtualConveyorCullSourceBlocks = activeDynamicVirtualConveyorRenderBlocks.Count;
         dynamicVirtualConveyorRenderItems.Clear();
@@ -1011,25 +1042,19 @@ public sealed class PortableItemRenderer : MonoBehaviour
                 EndRuntimeProfileSample(profileClear, "Conveyor Item Dynamic Clear", clearStartTimestamp);
             }
 
-            return;
+            return profile;
         }
 
         long phaseStartTimestamp;
-        long cullTicks = 0L;
-        long cacheTicks = 0L;
-        long appendDataTicks = 0L;
-        long buildMatrixTicks = 0L;
-        long syncMatrixTicks = 0L;
-        long trimCacheTicks = 0L;
 
         Camera renderCamera = mainCamera;
         bool useCullCandidateCache = renderCamera != null;
         IReadOnlyList<BlockHandle> dynamicRenderBlocks = activeDynamicVirtualConveyorRenderBlocks;
         if (useCullCandidateCache)
         {
-            phaseStartTimestamp = profileBreakdown ? MapObjectTickProfiler.BeginSample() : 0L;
+            phaseStartTimestamp = profile.ProfileBreakdown ? MapObjectTickProfiler.BeginSample() : 0L;
             bool refreshedCullCandidates = RefreshDynamicVirtualConveyorCullCandidateBlocksIfNeeded(renderCamera);
-            cullTicks += MeasureRuntimeProfilePhase(profileBreakdown, phaseStartTimestamp);
+            profile.CullTicks += MeasureRuntimeProfilePhase(profile.ProfileBreakdown, phaseStartTimestamp);
             if (refreshedCullCandidates)
             {
                 lastDynamicVirtualConveyorCullCacheRefreshes++;
@@ -1044,12 +1069,12 @@ public sealed class PortableItemRenderer : MonoBehaviour
 
         for (int i = 0; i < dynamicRenderBlocks.Count; i++)
         {
-            phaseStartTimestamp = profileBreakdown ? MapObjectTickProfiler.BeginSample() : 0L;
+            phaseStartTimestamp = profile.ProfileBreakdown ? MapObjectTickProfiler.BeginSample() : 0L;
             BlockHandle handle = dynamicRenderBlocks[i];
             if (!TryResolveConveyorBlock(handle, out Block block)
                 || !block.HasDynamicVirtualConveyorItemVisuals())
             {
-                cullTicks += MeasureRuntimeProfilePhase(profileBreakdown, phaseStartTimestamp);
+                profile.CullTicks += MeasureRuntimeProfilePhase(profile.ProfileBreakdown, phaseStartTimestamp);
                 RemoveDynamicVirtualConveyorBlockRenderCache(handle);
                 continue;
             }
@@ -1064,16 +1089,16 @@ public sealed class PortableItemRenderer : MonoBehaviour
                     if (cullResult != DynamicVirtualConveyorCullResult.Render)
                     {
                         AddDynamicVirtualConveyorCullSkip(cullResult);
-                        cullTicks += MeasureRuntimeProfilePhase(profileBreakdown, phaseStartTimestamp);
+                        profile.CullTicks += MeasureRuntimeProfilePhase(profile.ProfileBreakdown, phaseStartTimestamp);
                         continue;
                     }
                 }
             }
 
-            cullTicks += MeasureRuntimeProfilePhase(profileBreakdown, phaseStartTimestamp);
+            profile.CullTicks += MeasureRuntimeProfilePhase(profile.ProfileBreakdown, phaseStartTimestamp);
             lastDynamicVirtualConveyorCullPassedBlocks++;
 
-            phaseStartTimestamp = profileBreakdown ? MapObjectTickProfiler.BeginSample() : 0L;
+            phaseStartTimestamp = profile.ProfileBreakdown ? MapObjectTickProfiler.BeginSample() : 0L;
             DynamicBlockRenderCache blockCache = GetOrCreateDynamicVirtualConveyorBlockRenderCache(handle);
             if (blockCache.version != block.ConveyorItemVisualVersion)
             {
@@ -1082,52 +1107,72 @@ public sealed class PortableItemRenderer : MonoBehaviour
                 blockCache.version = block.ConveyorItemVisualVersion;
                 blockCache.isValid = false;
             }
-            cacheTicks += MeasureRuntimeProfilePhase(profileBreakdown, phaseStartTimestamp);
+            profile.CacheTicks += MeasureRuntimeProfilePhase(profile.ProfileBreakdown, phaseStartTimestamp);
 
-            phaseStartTimestamp = profileBreakdown ? MapObjectTickProfiler.BeginSample() : 0L;
+            phaseStartTimestamp = profile.ProfileBreakdown ? MapObjectTickProfiler.BeginSample() : 0L;
             int firstItemIndex = dynamicVirtualConveyorRenderItems.Count;
             block.AppendDynamicVirtualConveyorItemRenderData(dynamicVirtualConveyorRenderItems);
             dynamicVirtualConveyorRenderWorkItems.Add(new DynamicBlockRenderWork(
                 blockCache,
                 firstItemIndex,
                 dynamicVirtualConveyorRenderItems.Count - firstItemIndex));
-            appendDataTicks += MeasureRuntimeProfilePhase(profileBreakdown, phaseStartTimestamp);
+            profile.AppendDataTicks += MeasureRuntimeProfilePhase(profile.ProfileBreakdown, phaseStartTimestamp);
         }
 
-        phaseStartTimestamp = profileBreakdown ? MapObjectTickProfiler.BeginSample() : 0L;
+        phaseStartTimestamp = profile.ProfileBreakdown ? MapObjectTickProfiler.BeginSample() : 0L;
         lastDynamicVirtualConveyorTransformJobItems = dynamicVirtualConveyorRenderItems.Count;
-        lastDynamicVirtualConveyorTransformJobScheduled =
-            conveyorItemTransformJobProcessor.BuildMatrices(
-                dynamicVirtualConveyorRenderItems,
-                useBurstTransformJobs,
-                minimumBurstTransformJobItemCount,
-                virtualConveyorItemBatchCellSize);
-        buildMatrixTicks += MeasureRuntimeProfilePhase(profileBreakdown, phaseStartTimestamp);
+        using (ScheduleConveyorItemTransformJobMarker.Auto())
+        {
+            lastDynamicVirtualConveyorTransformJobScheduled =
+                conveyorItemTransformJobProcessor.ScheduleMatrices(
+                    dynamicVirtualConveyorRenderItems,
+                    useBurstTransformJobs,
+                    minimumBurstTransformJobItemCount,
+                    virtualConveyorItemBatchCellSize);
+        }
 
+        profile.ScheduleMatrixTicks += MeasureRuntimeProfilePhase(
+            profile.ProfileBreakdown,
+            phaseStartTimestamp);
+        return profile;
+    }
+
+    private void CompleteDynamicVirtualConveyorBatches(
+        ref DynamicConveyorBatchBuildProfile profile)
+    {
         for (int i = 0; i < dynamicVirtualConveyorRenderWorkItems.Count; i++)
         {
             DynamicBlockRenderWork workItem = dynamicVirtualConveyorRenderWorkItems[i];
-            phaseStartTimestamp = profileBreakdown ? MapObjectTickProfiler.BeginSample() : 0L;
+            long phaseStartTimestamp = profile.ProfileBreakdown
+                ? MapObjectTickProfiler.BeginSample()
+                : 0L;
             lastDynamicVirtualConveyorRenderedItems += SyncDynamicVirtualConveyorBlockRenderItems(
                 workItem.BlockCache,
                 dynamicVirtualConveyorRenderItems,
                 workItem.FirstItemIndex,
                 workItem.ItemCount);
-            syncMatrixTicks += MeasureRuntimeProfilePhase(profileBreakdown, phaseStartTimestamp);
+            profile.SyncMatrixTicks += MeasureRuntimeProfilePhase(
+                profile.ProfileBreakdown,
+                phaseStartTimestamp);
 
-            phaseStartTimestamp = profileBreakdown ? MapObjectTickProfiler.BeginSample() : 0L;
+            phaseStartTimestamp = profile.ProfileBreakdown
+                ? MapObjectTickProfiler.BeginSample()
+                : 0L;
             workItem.BlockCache.isValid = true;
-            trimCacheTicks += MeasureRuntimeProfilePhase(profileBreakdown, phaseStartTimestamp);
+            profile.TrimCacheTicks += MeasureRuntimeProfilePhase(
+                profile.ProfileBreakdown,
+                phaseStartTimestamp);
         }
 
         dynamicVirtualConveyorRenderItems.Clear();
         dynamicVirtualConveyorRenderWorkItems.Clear();
-        EndRuntimeProfileElapsedSample(profileBreakdown, "Conveyor Item Dynamic Cull", cullTicks);
-        EndRuntimeProfileElapsedSample(profileBreakdown, "Conveyor Item Dynamic Cache", cacheTicks);
-        EndRuntimeProfileElapsedSample(profileBreakdown, "Conveyor Item Dynamic AppendData", appendDataTicks);
-        EndRuntimeProfileElapsedSample(profileBreakdown, "Conveyor Item Dynamic BuildMatrices", buildMatrixTicks);
-        EndRuntimeProfileElapsedSample(profileBreakdown, "Conveyor Item Dynamic SyncMatrix", syncMatrixTicks);
-        EndRuntimeProfileElapsedSample(profileBreakdown, "Conveyor Item Dynamic TrimCache", trimCacheTicks);
+        EndRuntimeProfileElapsedSample(profile.ProfileBreakdown, "Conveyor Item Dynamic Cull", profile.CullTicks);
+        EndRuntimeProfileElapsedSample(profile.ProfileBreakdown, "Conveyor Item Dynamic Cache", profile.CacheTicks);
+        EndRuntimeProfileElapsedSample(profile.ProfileBreakdown, "Conveyor Item Dynamic AppendData", profile.AppendDataTicks);
+        EndRuntimeProfileElapsedSample(profile.ProfileBreakdown, "Conveyor Item Dynamic ScheduleMatrices", profile.ScheduleMatrixTicks);
+        EndRuntimeProfileElapsedSample(profile.ProfileBreakdown, "Conveyor Item Dynamic CompleteMatrices", profile.CompleteMatrixTicks);
+        EndRuntimeProfileElapsedSample(profile.ProfileBreakdown, "Conveyor Item Dynamic SyncMatrix", profile.SyncMatrixTicks);
+        EndRuntimeProfileElapsedSample(profile.ProfileBreakdown, "Conveyor Item Dynamic TrimCache", profile.TrimCacheTicks);
     }
 
     private bool RefreshDynamicVirtualConveyorCullCandidateBlocksIfNeeded(Camera renderCamera)
@@ -1301,10 +1346,23 @@ public sealed class PortableItemRenderer : MonoBehaviour
 
         for (int itemIndex = 0; itemIndex < itemCount; itemIndex++)
         {
+            int renderItemIndex = firstItemIndex + itemIndex;
+            if (!TryGetResolvedDynamicVirtualConveyorRenderData(
+                    renderItems,
+                    renderItemIndex,
+                    out VirtualConveyorItemRenderData renderData))
+            {
+                return RebuildDynamicVirtualConveyorBlockRenderItems(
+                    blockCache,
+                    renderItems,
+                    firstItemIndex,
+                    itemCount);
+            }
+
             if (!TryUpdateDynamicVirtualConveyorRenderItem(
                     blockCache,
                     itemIndex,
-                    renderItems[firstItemIndex + itemIndex]))
+                    renderData))
             {
                 return RebuildDynamicVirtualConveyorBlockRenderItems(
                     blockCache,
@@ -1353,7 +1411,14 @@ public sealed class PortableItemRenderer : MonoBehaviour
         int renderedItems = 0;
         for (int itemIndex = 0; itemIndex < itemCount; itemIndex++)
         {
-            VirtualConveyorItemRenderData renderData = renderItems[firstItemIndex + itemIndex];
+            if (!TryGetResolvedDynamicVirtualConveyorRenderData(
+                    renderItems,
+                    firstItemIndex + itemIndex,
+                    out VirtualConveyorItemRenderData renderData))
+            {
+                continue;
+            }
+
             if (!TryGetDynamicVirtualConveyorBatchKey(
                     blockCache,
                     itemIndex,
@@ -1373,6 +1438,30 @@ public sealed class PortableItemRenderer : MonoBehaviour
 
         blockCache.isValid = true;
         return renderedItems;
+    }
+
+    private bool TryGetResolvedDynamicVirtualConveyorRenderData(
+        List<VirtualConveyorItemRenderData> renderItems,
+        int itemIndex,
+        out VirtualConveyorItemRenderData renderData)
+    {
+        if (renderItems == null
+            || (uint)itemIndex >= (uint)renderItems.Count
+            || !conveyorItemTransformJobProcessor.TryGetResult(
+                itemIndex,
+                out Matrix4x4 matrix,
+                out int batchCellX,
+                out int batchCellZ))
+        {
+            renderData = default;
+            return false;
+        }
+
+        renderData = renderItems[itemIndex].WithResolvedTransform(
+            matrix,
+            batchCellX,
+            batchCellZ);
+        return true;
     }
 
     private bool TryGetCachedDynamicVirtualConveyorBatchKey(
@@ -1630,6 +1719,18 @@ public sealed class PortableItemRenderer : MonoBehaviour
         public readonly DynamicBlockRenderCache BlockCache;
         public readonly int FirstItemIndex;
         public readonly int ItemCount;
+    }
+
+    private struct DynamicConveyorBatchBuildProfile
+    {
+        public bool ProfileBreakdown;
+        public long CullTicks;
+        public long CacheTicks;
+        public long AppendDataTicks;
+        public long ScheduleMatrixTicks;
+        public long CompleteMatrixTicks;
+        public long SyncMatrixTicks;
+        public long TrimCacheTicks;
     }
 
     private readonly struct DynamicItemRenderKeyCache
