@@ -133,28 +133,34 @@ internal sealed class TerrainChunkStreamingScheduler
 
             activeChunkGenerationCoordinates.Add(request.coordinate);
             IEnumerator chunkRoutine = createGenerateChunkRoutine(request.coordinate, request.chunkSize, true);
-            while (true)
+            try
             {
-                bool hasNext;
-                object current = null;
-                using (generateStepMarker.Auto())
+                while (true)
                 {
-                    hasNext = chunkRoutine.MoveNext();
-                    if (hasNext)
+                    bool hasNext;
+                    object current = null;
+                    using (generateStepMarker.Auto())
                     {
-                        current = chunkRoutine.Current;
+                        hasNext = chunkRoutine.MoveNext();
+                        if (hasNext)
+                        {
+                            current = chunkRoutine.Current;
+                        }
                     }
-                }
 
-                if (!hasNext)
-                {
-                    break;
-                }
+                    if (!hasNext)
+                    {
+                        break;
+                    }
 
-                yield return current;
+                    yield return current;
+                }
             }
-
-            MarkGenerationComplete(request.coordinate);
+            finally
+            {
+                (chunkRoutine as IDisposable)?.Dispose();
+                MarkGenerationComplete(request.coordinate);
+            }
 
             // Do not start the next chunk in the same frame that just finished
             // restoration and mesh upload for the previous one. Those phases are

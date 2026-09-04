@@ -61,6 +61,9 @@ public class Resource : MapObject
     private static readonly List<Resource> ActiveResourcesInternal = new List<Resource>();
     private static readonly Dictionary<Vector2Int, List<Resource>> ActiveResourcesByCoordinate =
         new Dictionary<Vector2Int, List<Resource>>();
+    private static readonly List<Renderer> BodyRendererScanBuffer = new List<Renderer>();
+    private static readonly List<Collider> BodyColliderScanBuffer = new List<Collider>();
+    private static readonly List<MeshFilter> BodyMeshFilterScanBuffer = new List<MeshFilter>();
 
     [SerializeField]
     private HarvestMode harvestMode = HarvestMode.Auto;
@@ -113,6 +116,7 @@ public class Resource : MapObject
     private bool supportsBatchedRendering;
     private bool useBatchedRendering;
     private bool bodyPresentationVisible = true;
+    private bool portableObjectsCached;
 
     public static IReadOnlyList<Resource> ActiveResources => ActiveResourcesInternal;
 
@@ -188,25 +192,17 @@ public class Resource : MapObject
 
         cachedRenderer = GetComponentInChildren<Renderer>();
         CacheBodyTransform();
-        CachePortableObjects();
         ApplyDefinitionIfNeeded();
         EnsureStatusInitialized();
         MigrateOutputItemNameIfNeeded();
         CaptureInitialStateIfNeeded();
-        EnsurePortableObjectPool(GetCount);
+        CachePortableObjects();
         UpdateBodyScale();
     }
 
     protected void OnEnable()
     {
         RefreshItemLight();
-        CacheBodyTransform();
-        CachePortableObjects();
-        ApplyDefinitionIfNeeded();
-        EnsureStatusInitialized();
-        MigrateOutputItemNameIfNeeded();
-        CaptureInitialStateIfNeeded();
-        EnsurePortableObjectPool(GetCount);
         ShowBodyPresentation();
 
         if (!Application.isPlaying)
@@ -387,7 +383,6 @@ public class Resource : MapObject
         }
 
         ApplyAdditionalSavedState(state);
-        EnsurePortableObjectPool(GetCount);
         ShowBodyPresentation();
         UpdateBodyScale();
     }
@@ -400,7 +395,6 @@ public class Resource : MapObject
         accumulatedWork = 0f;
         ClearReservedHarvestSteps();
         initialResourceCount = Mathf.Max(1, resourceStatus.resourceCount);
-        EnsurePortableObjectPool(GetCount);
         ShowBodyPresentation();
         UpdateBodyScale();
     }
@@ -580,8 +574,6 @@ public class Resource : MapObject
         {
             HideBodyPresentation();
         }
-
-        EnsurePortableObjectPool(GetCount);
 
         StartCoroutine(PlayPickupSequenceRoutine(bagNum, objectId, GetCount, hideAfterSequence));
     }
@@ -1312,24 +1304,27 @@ public class Resource : MapObject
 
     private void CachePortableObjects()
     {
+        if (portableObjectsCached)
+        {
+            return;
+        }
+
+        portableObjectsCached = true;
         if (portableObjects == null)
         {
             portableObjects = new List<PortableObject>();
         }
 
-        PortableObject[] foundPortableObjects = GetComponentsInChildren<PortableObject>(true);
-        for (int i = 0; i < foundPortableObjects.Length; i++)
+        portableObjects.Clear();
+        GetComponentsInChildren(true, portableObjects);
+        for (int i = portableObjects.Count - 1; i >= 0; i--)
         {
-            PortableObject candidate = foundPortableObjects[i];
-            if (candidate == null || portableObjects.Contains(candidate))
+            if (portableObjects[i] == null)
             {
+                portableObjects.RemoveAt(i);
                 continue;
             }
-
-            portableObjects.Add(candidate);
         }
-
-        portableObjects.RemoveAll(item => item == null);
 
         if ((portableObj == null || !portableObjects.Contains(portableObj)) && portableObjects.Count > 0)
         {
@@ -1348,79 +1343,6 @@ public class Resource : MapObject
             candidate.SetItem(ResolveOutputItemId());
             candidate.gameObject.SetActive(false);
         }
-    }
-
-    private void EnsurePortableObjectPool(int requiredCount)
-    {
-        CachePortableObjects();
-
-        if (portableObjects == null || portableObjects.Count <= 0)
-        {
-            return;
-        }
-
-        PortableObject template = portableObjects[0];
-        if (template == null)
-        {
-            return;
-        }
-
-        while (portableObjects.Count < requiredCount)
-        {
-            PortableObject clone = Instantiate(template, transform);
-            clone.name = $"{template.name}_{portableObjects.Count}";
-            clone.transform.localPosition = template.transform.localPosition;
-            clone.transform.localRotation = template.transform.localRotation;
-            clone.transform.localScale = template.transform.localScale;
-            clone.SetItem(ResolveOutputItemId());
-            clone.gameObject.SetActive(false);
-            portableObjects.Add(clone);
-        }
-    }
-
-    private List<PortableObject> ReservePortableObjectInstances(int requiredCount)
-    {
-        EnsurePortableObjectPool(GetCount);
-        List<PortableObject> reserved = new List<PortableObject>(requiredCount);
-
-        for (int i = 0; i < requiredCount; i++)
-        {
-            PortableObject candidate = GetPortableObjectInstanceAt(i);
-            if (candidate == null)
-            {
-                continue;
-            }
-
-            candidate.SetItem(ResolveOutputItemId());
-            reserved.Add(candidate);
-        }
-
-        return reserved;
-    }
-
-    private PortableObject GetPortableObjectInstanceAt(int index)
-    {
-        EnsurePortableObjectPool(index + 1);
-
-        if (portableObjects != null && index >= 0 && index < portableObjects.Count && portableObjects[index] != null)
-        {
-            return portableObjects[index];
-        }
-
-        if (portableObjects == null || portableObjects.Count <= 0 || portableObjects[0] == null)
-        {
-            return null;
-        }
-
-        PortableObject clone = Instantiate(portableObjects[0], transform);
-        clone.name = $"{portableObjects[0].name}_{portableObjects.Count}";
-        clone.transform.localPosition = Vector3.zero;
-        clone.transform.localRotation = Quaternion.identity;
-        clone.transform.localScale = Vector3.one;
-        clone.SetItem(ResolveOutputItemId());
-        clone.gameObject.SetActive(false);
-        portableObjects.Add(clone);
-        return clone;
     }
 
     private void CaptureInitialStateIfNeeded()
@@ -1524,6 +1446,11 @@ public class Resource : MapObject
 
     private void ShowBodyPresentation()
     {
+        if (bodyPresentationVisible)
+        {
+            return;
+        }
+
         ToggleBodyPresentation(true);
     }
 
@@ -1553,10 +1480,10 @@ public class Resource : MapObject
             return;
         }
 
-        Renderer[] renderers = renderRoot.GetComponentsInChildren<Renderer>(true);
-        for (int i = 0; i < renderers.Length; i++)
+        renderRoot.GetComponentsInChildren(true, BodyRendererScanBuffer);
+        for (int i = 0; i < BodyRendererScanBuffer.Count; i++)
         {
-            Renderer targetRenderer = renderers[i];
+            Renderer targetRenderer = BodyRendererScanBuffer[i];
             if (targetRenderer == null || IsPortableHierarchy(targetRenderer.transform))
             {
                 continue;
@@ -1571,11 +1498,12 @@ public class Resource : MapObject
                                                  && IsBatchedMeshRenderer(meshRenderer);
             }
         }
+        BodyRendererScanBuffer.Clear();
 
-        Collider[] colliders = renderRoot.GetComponentsInChildren<Collider>(true);
-        for (int i = 0; i < colliders.Length; i++)
+        renderRoot.GetComponentsInChildren(true, BodyColliderScanBuffer);
+        for (int i = 0; i < BodyColliderScanBuffer.Count; i++)
         {
-            Collider targetCollider = colliders[i];
+            Collider targetCollider = BodyColliderScanBuffer[i];
             if (targetCollider == null || IsPortableHierarchy(targetCollider.transform))
             {
                 continue;
@@ -1583,6 +1511,7 @@ public class Resource : MapObject
 
             targetCollider.enabled = bodyPresentationVisible;
         }
+        BodyColliderScanBuffer.Clear();
     }
 
     private bool IsPortableHierarchy(Transform target)
@@ -1899,10 +1828,10 @@ public class Resource : MapObject
             return;
         }
 
-        MeshFilter[] meshFilters = renderRoot.GetComponentsInChildren<MeshFilter>(true);
-        for (int i = 0; i < meshFilters.Length; i++)
+        renderRoot.GetComponentsInChildren(true, BodyMeshFilterScanBuffer);
+        for (int i = 0; i < BodyMeshFilterScanBuffer.Count; i++)
         {
-            MeshFilter candidate = meshFilters[i];
+            MeshFilter candidate = BodyMeshFilterScanBuffer[i];
             if (candidate == null || candidate.sharedMesh == null || IsPortableHierarchy(candidate.transform))
             {
                 continue;
@@ -1932,6 +1861,7 @@ public class Resource : MapObject
             batchedRenderEntries.Add(new BatchRenderEntry(candidate, candidateRenderer, sharedMaterials));
             cachedRenderer ??= candidateRenderer;
         }
+        BodyMeshFilterScanBuffer.Clear();
     }
 
     private readonly struct BatchRenderEntry

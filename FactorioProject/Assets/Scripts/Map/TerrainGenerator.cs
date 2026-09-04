@@ -24,11 +24,16 @@ public partial class TerrainGenerator : MonoBehaviour
     public const float GeneratedOilPitInnerRadius = 0.285f;
     public const float GeneratedOilPitOuterRadius = 0.3675f;
     private const float GeneratedOilPitOutlineJitter = 0.005f;
-    private const int GeneratedOilChunkSurfaceSubdivisions = 8;
+    // Oil pits need one extra subdivision over the common runtime setting, but
+    // raising the entire 8x8 chunk to 8 subdivisions multiplies contour and
+    // mesh-upload work by more than seven times. Four samples per tile retain
+    // the pit silhouette without creating periodic streaming spikes.
+    private const int GeneratedOilChunkSurfaceSubdivisions = 4;
     private const float GeneratedWaterWallVerticalOverlap = 0.018f;
     private const int GeneratedWaterDepthSearchRadius = 4;
     private const float GeneratedWaterDepthDeepDistance = 2.65f;
     private const int GeneratedWaterFoamRenderQueue = 3010;
+    private const int DynamicRangeCullingBudgetPerFrame = 128;
 
     private static readonly ProfilerMarker TickConveyorDataMotionsMarker = new ProfilerMarker("TerrainGenerator.TickConveyorDataMotions");
     private static readonly ProfilerMarker TickConveyorsMarker = new ProfilerMarker("TerrainGenerator.TickConveyors");
@@ -42,6 +47,13 @@ public partial class TerrainGenerator : MonoBehaviour
     private static readonly ProfilerMarker ReleaseChunkBlocksMarker = new ProfilerMarker("TerrainGenerator.ReleaseChunkBlocks");
     private static readonly ProfilerMarker CleanupInstallationsMarker = new ProfilerMarker("TerrainGenerator.CleanupInstallations");
     private static readonly ProfilerMarker GenerateChunkCoroutineStepMarker = new ProfilerMarker("TerrainGenerator.GenerateChunkCoroutineStep");
+    private static readonly ProfilerMarker GenerateChunkRuntimeProxyMarker = new ProfilerMarker("TerrainGenerator.GenerateChunkRuntimeProxy");
+    private static readonly ProfilerMarker RestoreChunkBlockStateMarker = new ProfilerMarker("TerrainGenerator.RestoreChunkBlockState");
+    private static readonly ProfilerMarker SpawnChunkAnimalStepMarker = new ProfilerMarker("TerrainGenerator.SpawnChunkAnimalStep");
+    private static readonly ProfilerMarker FinalizeChunkRuntimeViewMarker = new ProfilerMarker("TerrainGenerator.FinalizeChunkRuntimeView");
+    private static readonly ProfilerMarker RestoreChunkConveyorItemsMarker = new ProfilerMarker("TerrainGenerator.RestoreChunkConveyorItems");
+    private static readonly ProfilerMarker ReleaseEmptyChunkRuntimeProxyMarker = new ProfilerMarker("TerrainGenerator.ReleaseEmptyChunkRuntimeProxy");
+    private static readonly ProfilerMarker RefreshChunkRangeCullingMarker = new ProfilerMarker("TerrainGenerator.RefreshChunkRangeCulling");
     private static readonly ProfilerMarker RestoreSavedInstallationMarker = new ProfilerMarker("TerrainGenerator.RestoreSavedInstallation");
     private static readonly ProfilerMarker InstantiateSavedInstallationMarker = new ProfilerMarker("TerrainGenerator.InstantiateSavedInstallation");
     private static readonly ProfilerMarker BindLoadedInstallationBlocksMarker = new ProfilerMarker("TerrainGenerator.BindLoadedInstallationBlocks");
@@ -96,7 +108,9 @@ public partial class TerrainGenerator : MonoBehaviour
         public readonly List<Vector2> uvs;
         public readonly List<Color> colors;
         public readonly float[] blendWeightBuffer = new float[GeneratedSurfaceBiomeMaterialCount];
+        public readonly List<Vector2> contourPolygonScratch = new List<Vector2>(8);
         public readonly List<int>[] trianglesByBiome;
+        private float[] contourScores = Array.Empty<float>();
 
         public ChunkSurfaceBuildData(int biomeCount, int surfaceCellWidth)
         {
@@ -129,6 +143,17 @@ public partial class TerrainGenerator : MonoBehaviour
             {
                 trianglesByBiome[i].Clear();
             }
+        }
+
+        public float[] GetContourScores(int rowLength)
+        {
+            int requiredLength = Mathf.Max(1, rowLength * rowLength);
+            if (contourScores.Length < requiredLength)
+            {
+                contourScores = new float[requiredLength];
+            }
+
+            return contourScores;
         }
     }
 
@@ -394,6 +419,9 @@ public partial class TerrainGenerator : MonoBehaviour
 
     [SerializeField, Min(1)]
     private int chunkInstallationRestoresPerFrame = 1;
+
+    [SerializeField, Min(0.25f)]
+    private float chunkGenerationFrameTimeBudgetMilliseconds = 3f;
 
     [Header("Conveyor Runtime")]
     [SerializeField, Min(16)]
@@ -700,6 +728,7 @@ public partial class TerrainGenerator : MonoBehaviour
     private readonly HashSet<Collider> terrainColliderScanSet = new HashSet<Collider>();
     private readonly List<Vector2Int> chunksToGenerateScratch = new List<Vector2Int>();
     private ChunkSurfaceBuildData reusableChunkSurfaceBuildData;
+    private ChunkSurfaceWorkerInput reusableChunkSurfaceWorkerInput;
     private readonly List<Block> chunkRuntimeBlockScratch = new List<Block>();
     private readonly ChunkDistanceComparer chunkDistanceComparer = new ChunkDistanceComparer();
     private readonly HashSet<BlockHandle> activeConveyors = new HashSet<BlockHandle>();
@@ -998,7 +1027,9 @@ public partial class TerrainGenerator : MonoBehaviour
         }
 
         RefreshTrackedPlayerRangeCullingIfNeeded();
-        playerRangeCullingIndex.RefreshDynamicColliders();
+        playerRangeCullingIndex.RefreshDynamicComponents(
+            DynamicRangeCullingBudgetPerFrame,
+            DynamicRangeCullingBudgetPerFrame);
 
         bool profileBeltTicks = RefreshBeltTickProfilerFrameState();
 
@@ -1269,22 +1300,54 @@ public partial class TerrainGenerator : MonoBehaviour
 
     private void RefreshTerrainRangeCulling(Block[] blocksToRegister)
     {
+        IEnumerator routine = RefreshTerrainRangeCullingRoutine(blocksToRegister, false);
+        while (routine.MoveNext())
+        {
+        }
+    }
+
+    private IEnumerator RefreshTerrainRangeCullingRoutine(
+        IReadOnlyList<Block> blocksToRegister,
+        bool allowYield)
+    {
         if (!Application.isPlaying || blocksToRegister == null)
         {
-            return;
+            yield break;
         }
 
-        for (int i = 0; i < blocksToRegister.Length; i++)
+        int processedSinceYield = 0;
+        int countBudget = Mathf.Max(1, chunkGenerationBlocksPerFrame);
+        double stepStartTime = Time.realtimeSinceStartupAsDouble;
+        for (int i = 0; i < blocksToRegister.Count; i++)
         {
             Block block = blocksToRegister[i];
             if (block != null)
             {
                 if (block.MapObject != null)
                 {
-                    RefreshTerrainRangeCulling(block.MapObject.transform);
+                    using (RefreshChunkRangeCullingMarker.Auto())
+                    {
+                        RefreshTerrainRangeCulling(block.MapObject.transform);
+                    }
                 }
             }
+
+            processedSinceYield++;
+            if (allowYield
+                && (processedSinceYield >= countBudget
+                    || HasExceededChunkGenerationFrameBudget(stepStartTime)))
+            {
+                processedSinceYield = 0;
+                yield return null;
+                stepStartTime = Time.realtimeSinceStartupAsDouble;
+            }
         }
+    }
+
+    private bool HasExceededChunkGenerationFrameBudget(double stepStartTime)
+    {
+        return (Time.realtimeSinceStartupAsDouble - stepStartTime) * 1000.0
+               >= Mathf.Max(0.25f, chunkGenerationFrameTimeBudgetMilliseconds);
     }
 
     public bool DoesWorldBoundsIntersectPlayerRenderRange(Bounds bounds)
@@ -1918,32 +1981,45 @@ public partial class TerrainGenerator : MonoBehaviour
         }
     }
 
-    private void ApplyStoredConveyorItemSaveStates(Block[] blocks)
+    private IEnumerator ApplyStoredConveyorItemSaveStatesRoutine(Block[] blocks, bool allowYield)
     {
         if (blocks == null || blocks.Length <= 0)
         {
-            return;
+            yield break;
         }
 
         EnsureResourceStateStore();
         if (resourceStateStore == null)
         {
-            return;
+            yield break;
         }
 
+        int processedSinceYield = 0;
+        int blockBudget = Mathf.Max(1, chunkGenerationBlocksPerFrame);
+        double stepStartTime = Time.realtimeSinceStartupAsDouble;
         for (int i = 0; i < blocks.Length; i++)
         {
-            Block block = blocks[i];
-            if (block == null
-                || !resourceStateStore.TryGetConveyorItems(
-                    block.Coordinate,
-                    out List<ConveyorItemLaneSaveState> lanes)
-                || CountConveyorItemSaveLanes(lanes) <= 0)
+            using (RestoreChunkConveyorItemsMarker.Auto())
             {
-                continue;
+                Block block = blocks[i];
+                if (block != null
+                    && resourceStateStore.TryGetConveyorItems(
+                        block.Coordinate,
+                        out List<ConveyorItemLaneSaveState> lanes)
+                    && CountConveyorItemSaveLanes(lanes) > 0)
+                {
+                    ApplyLoadedConveyorItemSaveStatesToBlock(block.Coordinate, block, lanes, null, false);
+                }
             }
 
-            ApplyLoadedConveyorItemSaveStatesToBlock(block.Coordinate, block, lanes, null, false);
+            if (allowYield
+                && (++processedSinceYield >= blockBudget
+                    || HasExceededChunkGenerationFrameBudget(stepStartTime)))
+            {
+                processedSinceYield = 0;
+                yield return null;
+                stepStartTime = Time.realtimeSinceStartupAsDouble;
+            }
         }
     }
 
@@ -2524,6 +2600,7 @@ public partial class TerrainGenerator : MonoBehaviour
         List<Block> generatedChunkBlocks = new List<Block>(64);
         int blocksSinceYield = 0;
         int blockBudget = Mathf.Max(1, chunkGenerationBlocksPerFrame);
+        double blockStepStartTime = Time.realtimeSinceStartupAsDouble;
 
         for (int localY = 0; localY < normalizedChunkSize; localY++)
         {
@@ -2541,39 +2618,51 @@ public partial class TerrainGenerator : MonoBehaviour
                     out Resource generatedResourcePrefab);
                 if (!requiresRuntimeProxy)
                 {
-                    if (allowYield && ++blocksSinceYield >= blockBudget)
+                    if (allowYield
+                        && (++blocksSinceYield >= blockBudget
+                            || HasExceededChunkGenerationFrameBudget(blockStepStartTime)))
                     {
                         blocksSinceYield = 0;
                         yield return null;
+                        blockStepStartTime = Time.realtimeSinceStartupAsDouble;
                     }
 
                     continue;
                 }
 
-                Block block = CreateBlock(
-                    groundSet,
-                    Block.BlockType.Ground,
-                    worldCoordinate);
+                Block block;
+                using (GenerateChunkRuntimeProxyMarker.Auto())
+                {
+                    block = CreateBlock(
+                        groundSet,
+                        Block.BlockType.Ground,
+                        worldCoordinate);
+                    if (block != null)
+                    {
+                        generatedChunkBlocks.Add(block);
+
+                        RefreshFarmlandVisual(block);
+                        bool spawnedPlantedResource =
+                            TrySpawnPlantedResourceOnBlock(block, worldCoordinate);
+                        if (!spawnedPlantedResource
+                            && generatedResourcePrefab != null)
+                        {
+                            SpawnResourceOnBlock(block, generatedResourcePrefab, worldCoordinate);
+                        }
+                    }
+                }
                 if (block == null)
                 {
                     continue;
                 }
 
-                generatedChunkBlocks.Add(block);
-
-                RefreshFarmlandVisual(block);
-                bool spawnedPlantedResource =
-                    TrySpawnPlantedResourceOnBlock(block, worldCoordinate);
-                if (!spawnedPlantedResource
-                    && generatedResourcePrefab != null)
-                {
-                    SpawnResourceOnBlock(block, generatedResourcePrefab, worldCoordinate);
-                }
-
-                if (allowYield && ++blocksSinceYield >= blockBudget)
+                if (allowYield
+                    && (++blocksSinceYield >= blockBudget
+                        || HasExceededChunkGenerationFrameBudget(blockStepStartTime)))
                 {
                     blocksSinceYield = 0;
                     yield return null;
+                    blockStepStartTime = Time.realtimeSinceStartupAsDouble;
                 }
             }
         }
@@ -2587,7 +2676,7 @@ public partial class TerrainGenerator : MonoBehaviour
         IEnumerator installationRestoreRoutine = RestoreChunkInstallationsRoutine(chunkBlocks, allowYield);
         while (installationRestoreRoutine.MoveNext())
         {
-            if (allowYield && installationRestoreRoutine.Current != null)
+            if (allowYield)
             {
                 yield return installationRestoreRoutine.Current;
             }
@@ -2596,16 +2685,65 @@ public partial class TerrainGenerator : MonoBehaviour
         IEnumerator blockStateRestoreRoutine = RestoreChunkBlockStatesRoutine(chunkBlocks, allowYield);
         while (blockStateRestoreRoutine.MoveNext())
         {
-            if (allowYield && blockStateRestoreRoutine.Current != null)
+            if (allowYield)
             {
                 yield return blockStateRestoreRoutine.Current;
             }
         }
 
-        SpawnAnimalsForChunk(chunkCoordinate);
-        RefreshChunkBlockRuntimeViews(chunkBlocks);
-        ApplyStoredConveyorItemSaveStates(chunkBlocks);
-        ReleaseEmptyChunkBlockRuntimeProxies(chunkCoordinate, chunkBlocks);
+        IEnumerator animalSpawnRoutine = SpawnAnimalsForChunkRoutine(chunkCoordinate, allowYield);
+        while (true)
+        {
+            bool hasNext;
+            object current = null;
+            using (SpawnChunkAnimalStepMarker.Auto())
+            {
+                hasNext = animalSpawnRoutine.MoveNext();
+                if (hasNext)
+                {
+                    current = animalSpawnRoutine.Current;
+                }
+            }
+
+            if (!hasNext)
+            {
+                break;
+            }
+
+            if (allowYield)
+            {
+                yield return current;
+            }
+        }
+        IEnumerator runtimeViewRoutine = RefreshChunkBlockRuntimeViewsRoutine(chunkBlocks, allowYield);
+        while (runtimeViewRoutine.MoveNext())
+        {
+            if (allowYield)
+            {
+                yield return runtimeViewRoutine.Current;
+            }
+        }
+
+        IEnumerator conveyorItemRoutine = ApplyStoredConveyorItemSaveStatesRoutine(chunkBlocks, allowYield);
+        while (conveyorItemRoutine.MoveNext())
+        {
+            if (allowYield)
+            {
+                yield return conveyorItemRoutine.Current;
+            }
+        }
+
+        IEnumerator emptyProxyRoutine = ReleaseEmptyChunkBlockRuntimeProxiesRoutine(
+            chunkCoordinate,
+            chunkBlocks,
+            allowYield);
+        while (emptyProxyRoutine.MoveNext())
+        {
+            if (allowYield)
+            {
+                yield return emptyProxyRoutine.Current;
+            }
+        }
 
         ChunkSurfaceBuildData chunkSurface;
         if (Application.isPlaying)
@@ -2642,7 +2780,7 @@ public partial class TerrainGenerator : MonoBehaviour
             IEnumerator surfaceRoutine = BuildCurvedChunkSurfaceRoutine(chunkSurface, origin, normalizedChunkSize, allowYield);
             while (surfaceRoutine.MoveNext())
             {
-                if (allowYield && surfaceRoutine.Current != null)
+                if (allowYield)
                 {
                     yield return surfaceRoutine.Current;
                 }
@@ -2665,7 +2803,14 @@ public partial class TerrainGenerator : MonoBehaviour
 
         if (Application.isPlaying)
         {
-            RefreshTerrainRangeCulling(chunkBlocks);
+            IEnumerator cullingRoutine = RefreshTerrainRangeCullingRoutine(chunkBlocks, allowYield);
+            while (cullingRoutine.MoveNext())
+            {
+                if (allowYield)
+                {
+                    yield return cullingRoutine.Current;
+                }
+            }
         }
 
         if (allowYield)
@@ -2673,7 +2818,6 @@ public partial class TerrainGenerator : MonoBehaviour
             yield return null;
         }
 
-        MarkChunkGenerationComplete(chunkCoordinate);
     }
 
     private void ClearLoadedChunks(bool preserveRuntimeState = true, bool releaseLiveInstallations = false)
@@ -2826,38 +2970,54 @@ public partial class TerrainGenerator : MonoBehaviour
             : Array.Empty<Block>();
     }
 
-    private void ReleaseEmptyChunkBlockRuntimeProxies(Vector2Int chunkCoordinate, Block[] chunkBlocks)
+    private IEnumerator ReleaseEmptyChunkBlockRuntimeProxiesRoutine(
+        Vector2Int chunkCoordinate,
+        Block[] chunkBlocks,
+        bool allowYield)
     {
         if (chunkBlocks == null || chunkBlocks.Length == 0)
         {
-            return;
+            yield break;
         }
 
+        int processedSinceYield = 0;
+        int blockBudget = Mathf.Max(1, chunkGenerationBlocksPerFrame);
+        double stepStartTime = Time.realtimeSinceStartupAsDouble;
         for (int i = 0; i < chunkBlocks.Length; i++)
         {
-            Block block = chunkBlocks[i];
-            if (block == null || !block.CanReleaseEmptyRuntimeProxy)
+            using (ReleaseEmptyChunkRuntimeProxyMarker.Auto())
             {
-                continue;
+                Block block = chunkBlocks[i];
+                if (block != null && block.CanReleaseEmptyRuntimeProxy)
+                {
+                    BlockHandle handle = block.RuntimeHandle;
+                    loadedBlocks.Remove(block.Coordinate);
+                    ReleaseFarmlandVisual(block.Coordinate);
+                    block.PrepareForRuntimeRelease();
+                    if (block.HasRuntimeSimulationState)
+                    {
+                        loadedBlocks.RemoveRuntimeSimulationState(handle);
+                    }
+
+                    block.DetachRuntimeSimulationState();
+                    if (Application.isPlaying)
+                    {
+                        Destroy(block);
+                    }
+                    else
+                    {
+                        DestroyImmediate(block);
+                    }
+                }
             }
 
-            BlockHandle handle = block.RuntimeHandle;
-            loadedBlocks.Remove(block.Coordinate);
-            ReleaseFarmlandVisual(block.Coordinate);
-            block.PrepareForRuntimeRelease();
-            if (block.HasRuntimeSimulationState)
+            if (allowYield
+                && (++processedSinceYield >= blockBudget
+                    || HasExceededChunkGenerationFrameBudget(stepStartTime)))
             {
-                loadedBlocks.RemoveRuntimeSimulationState(handle);
-            }
-
-            block.DetachRuntimeSimulationState();
-            if (Application.isPlaying)
-            {
-                Destroy(block);
-            }
-            else
-            {
-                DestroyImmediate(block);
+                processedSinceYield = 0;
+                yield return null;
+                stepStartTime = Time.realtimeSinceStartupAsDouble;
             }
         }
 

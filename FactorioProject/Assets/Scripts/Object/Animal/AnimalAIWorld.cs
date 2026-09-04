@@ -381,6 +381,57 @@ public sealed class AnimalAIWorld : MonoBehaviour
         return false;
     }
 
+    public void CopyOccupiedCoordinates(
+        Vector2Int minCoordinate,
+        Vector2Int maxCoordinate,
+        HashSet<Vector2Int> destination)
+    {
+        if (destination == null)
+        {
+            return;
+        }
+
+        if (!spatialIndexReady)
+        {
+            for (int i = 0; i < controllers.Count; i++)
+            {
+                AddOccupiedCoordinate(
+                    controllers[i],
+                    minCoordinate,
+                    maxCoordinate,
+                    destination);
+            }
+
+            return;
+        }
+
+        int minCellX = Mathf.FloorToInt((minCoordinate.x - SpatialCellSize) / SpatialCellSize);
+        int maxCellX = Mathf.FloorToInt((maxCoordinate.x + SpatialCellSize) / SpatialCellSize);
+        int minCellY = Mathf.FloorToInt((minCoordinate.y - SpatialCellSize) / SpatialCellSize);
+        int maxCellY = Mathf.FloorToInt((maxCoordinate.y + SpatialCellSize) / SpatialCellSize);
+        for (int cellY = minCellY; cellY <= maxCellY; cellY++)
+        {
+            for (int cellX = minCellX; cellX <= maxCellX; cellX++)
+            {
+                if (!controllersBySpatialCell.TryGetValue(
+                        new Vector2Int(cellX, cellY),
+                        out List<AnimalAIController> bucket))
+                {
+                    continue;
+                }
+
+                for (int i = 0; i < bucket.Count; i++)
+                {
+                    AddOccupiedCoordinate(
+                        bucket[i],
+                        minCoordinate,
+                        maxCoordinate,
+                        destination);
+                }
+            }
+        }
+    }
+
     public Vector3 GetSeparation(AnimalAIController source, float radius)
     {
         if (!spatialIndexReady || source == null || radius <= 0f)
@@ -1047,6 +1098,30 @@ public sealed class AnimalAIWorld : MonoBehaviour
         float x = left.x - right.x;
         float z = left.z - right.z;
         return x * x + z * z;
+    }
+
+    private static void AddOccupiedCoordinate(
+        AnimalAIController controller,
+        Vector2Int minCoordinate,
+        Vector2Int maxCoordinate,
+        HashSet<Vector2Int> destination)
+    {
+        if (!IsActiveController(controller) || controller.TerrainInstance == null)
+        {
+            return;
+        }
+
+        Vector3 position = controller.transform.position;
+        Vector2Int coordinate = new Vector2Int(
+            Mathf.RoundToInt(position.x),
+            Mathf.RoundToInt(position.z));
+        if (coordinate.x >= minCoordinate.x
+            && coordinate.x <= maxCoordinate.x
+            && coordinate.y >= minCoordinate.y
+            && coordinate.y <= maxCoordinate.y)
+        {
+            destination.Add(coordinate);
+        }
     }
 
     private static bool IsActiveController(AnimalAIController controller)

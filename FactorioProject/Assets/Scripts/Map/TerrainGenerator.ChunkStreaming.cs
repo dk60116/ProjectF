@@ -29,11 +29,6 @@ public partial class TerrainGenerator : MonoBehaviour
         return chunkStreamingScheduler != null && chunkStreamingScheduler.IsGenerationActive(chunkCoordinate);
     }
 
-    private void MarkChunkGenerationComplete(Vector2Int chunkCoordinate)
-    {
-        chunkStreamingScheduler?.MarkGenerationComplete(chunkCoordinate);
-    }
-
     private TerrainChunkStreamingScheduler EnsureChunkStreamingScheduler()
     {
         if (chunkStreamingScheduler != null)

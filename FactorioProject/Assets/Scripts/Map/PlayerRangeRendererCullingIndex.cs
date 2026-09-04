@@ -10,15 +10,18 @@ internal sealed class PlayerRangeCullingIndex
         public readonly Vector2Int minCoordinate;
         public readonly Vector2Int maxCoordinate;
         public readonly bool usesSpatialBuckets;
+        public readonly bool isDynamic;
 
         public Registration(
             Vector2Int minCoordinate,
             Vector2Int maxCoordinate,
-            bool usesSpatialBuckets)
+            bool usesSpatialBuckets,
+            bool isDynamic)
         {
             this.minCoordinate = minCoordinate;
             this.maxCoordinate = maxCoordinate;
             this.usesSpatialBuckets = usesSpatialBuckets;
+            this.isDynamic = isDynamic;
         }
     }
 
@@ -38,7 +41,8 @@ internal sealed class PlayerRangeCullingIndex
         new Dictionary<Renderer, bool>();
     private readonly Dictionary<Vector2Int, List<Renderer>> renderersByCoordinate =
         new Dictionary<Vector2Int, List<Renderer>>();
-    private readonly List<Renderer> unbucketedRenderers = new List<Renderer>();
+    private readonly List<Renderer> unbucketedStaticRenderers = new List<Renderer>();
+    private readonly List<Renderer> dynamicRenderers = new List<Renderer>();
     private readonly HashSet<Renderer> refreshSet = new HashSet<Renderer>();
     private readonly List<Renderer> cleanupBuffer = new List<Renderer>();
     private readonly Dictionary<Collider, ColliderRegistration> colliderRegistrations =
@@ -47,7 +51,7 @@ internal sealed class PlayerRangeCullingIndex
         new Dictionary<Collider, bool>();
     private readonly Dictionary<Vector2Int, List<Collider>> collidersByCoordinate =
         new Dictionary<Vector2Int, List<Collider>>();
-    private readonly List<Collider> unbucketedColliders = new List<Collider>();
+    private readonly List<Collider> unbucketedStaticColliders = new List<Collider>();
     private readonly List<Collider> dynamicColliders = new List<Collider>();
     private readonly HashSet<Collider> colliderRefreshSet = new HashSet<Collider>();
     private readonly List<Collider> colliderCleanupBuffer = new List<Collider>();
@@ -55,6 +59,8 @@ internal sealed class PlayerRangeCullingIndex
     private Vector2Int center;
     private int radius;
     private bool hasRange;
+    private int dynamicRendererCursor;
+    private int dynamicColliderCursor;
 
     public void SetRange(Vector2Int nextCenter, int nextRadius)
     {
@@ -112,13 +118,15 @@ internal sealed class PlayerRangeCullingIndex
         Bounds bounds = targetRenderer.bounds;
         Vector2Int minCoordinate = GetMinimumCoordinate(bounds);
         Vector2Int maxCoordinate = GetMaximumCoordinate(bounds);
+        bool isDynamic = IsDynamicRenderer(targetRenderer);
         bool usesSpatialBuckets = CanUseSpatialBuckets(minCoordinate, maxCoordinate)
-                                  && !IsDynamicRenderer(targetRenderer);
+                                  && !isDynamic;
 
         registrations[targetRenderer] = new Registration(
             minCoordinate,
             maxCoordinate,
-            usesSpatialBuckets);
+            usesSpatialBuckets,
+            isDynamic);
         if (usesSpatialBuckets)
         {
             AddToSpatialBuckets(
@@ -127,9 +135,13 @@ internal sealed class PlayerRangeCullingIndex
                 maxCoordinate,
                 renderersByCoordinate);
         }
+        else if (isDynamic)
+        {
+            dynamicRenderers.Add(targetRenderer);
+        }
         else
         {
-            unbucketedRenderers.Add(targetRenderer);
+            unbucketedStaticRenderers.Add(targetRenderer);
         }
 
         ApplyVisibility(targetRenderer);
@@ -172,9 +184,9 @@ internal sealed class PlayerRangeCullingIndex
                 maxCoordinate,
                 collidersByCoordinate);
         }
-        else
+        else if (!isDynamic)
         {
-            unbucketedColliders.Add(targetCollider);
+            unbucketedStaticColliders.Add(targetCollider);
         }
 
         if (isDynamic)
@@ -245,9 +257,14 @@ internal sealed class PlayerRangeCullingIndex
                 registration.maxCoordinate,
                 renderersByCoordinate);
         }
+        else if (registration.isDynamic)
+        {
+            dynamicRenderers.Remove(targetRenderer);
+            ClampDynamicCursors();
+        }
         else
         {
-            unbucketedRenderers.Remove(targetRenderer);
+            unbucketedStaticRenderers.Remove(targetRenderer);
         }
 
         registrations.Remove(targetRenderer);
@@ -272,14 +289,15 @@ internal sealed class PlayerRangeCullingIndex
                 registration.maxCoordinate,
                 collidersByCoordinate);
         }
-        else
+        else if (!registration.isDynamic)
         {
-            unbucketedColliders.Remove(targetCollider);
+            unbucketedStaticColliders.Remove(targetCollider);
         }
 
         if (registration.isDynamic)
         {
             dynamicColliders.Remove(targetCollider);
+            ClampDynamicCursors();
         }
 
         colliderRegistrations.Remove(targetCollider);
@@ -302,7 +320,8 @@ internal sealed class PlayerRangeCullingIndex
         registrations.Clear();
         hiddenRendererPreviousStates.Clear();
         renderersByCoordinate.Clear();
-        unbucketedRenderers.Clear();
+        unbucketedStaticRenderers.Clear();
+        dynamicRenderers.Clear();
         refreshSet.Clear();
         cleanupBuffer.Clear();
 
@@ -320,25 +339,76 @@ internal sealed class PlayerRangeCullingIndex
         colliderRegistrations.Clear();
         disabledColliderPreviousStates.Clear();
         collidersByCoordinate.Clear();
-        unbucketedColliders.Clear();
+        unbucketedStaticColliders.Clear();
         dynamicColliders.Clear();
         colliderRefreshSet.Clear();
         colliderCleanupBuffer.Clear();
+        dynamicRendererCursor = 0;
+        dynamicColliderCursor = 0;
         hasRange = false;
     }
 
-    public void RefreshDynamicColliders()
+    public void RefreshDynamicComponents(int rendererBudget, int colliderBudget)
     {
-        for (int i = dynamicColliders.Count - 1; i >= 0; i--)
+        RefreshDynamicRenderers(rendererBudget);
+        RefreshDynamicColliders(colliderBudget);
+    }
+
+    private void RefreshDynamicRenderers(int budget)
+    {
+        int targetCount = Mathf.Min(Mathf.Max(0, budget), dynamicRenderers.Count);
+        for (int processed = 0; processed < targetCount && dynamicRenderers.Count > 0; processed++)
         {
-            Collider targetCollider = dynamicColliders[i];
+            if (dynamicRendererCursor >= dynamicRenderers.Count)
+            {
+                dynamicRendererCursor = 0;
+            }
+
+            Renderer targetRenderer = dynamicRenderers[dynamicRendererCursor];
+            if (targetRenderer == null)
+            {
+                int previousCount = dynamicRenderers.Count;
+                Unregister(targetRenderer, false);
+                if (dynamicRenderers.Count == previousCount)
+                {
+                    dynamicRenderers.RemoveAt(dynamicRendererCursor);
+                    ClampDynamicCursors();
+                }
+
+                continue;
+            }
+
+            ApplyVisibility(targetRenderer);
+            dynamicRendererCursor++;
+        }
+    }
+
+    private void RefreshDynamicColliders(int budget)
+    {
+        int targetCount = Mathf.Min(Mathf.Max(0, budget), dynamicColliders.Count);
+        for (int processed = 0; processed < targetCount && dynamicColliders.Count > 0; processed++)
+        {
+            if (dynamicColliderCursor >= dynamicColliders.Count)
+            {
+                dynamicColliderCursor = 0;
+            }
+
+            Collider targetCollider = dynamicColliders[dynamicColliderCursor];
             if (targetCollider == null)
             {
+                int previousCount = dynamicColliders.Count;
                 Unregister(targetCollider, false);
+                if (dynamicColliders.Count == previousCount)
+                {
+                    dynamicColliders.RemoveAt(dynamicColliderCursor);
+                    ClampDynamicCursors();
+                }
+
                 continue;
             }
 
             ApplyColliderVisibility(targetCollider);
+            dynamicColliderCursor++;
         }
     }
 
@@ -401,14 +471,14 @@ internal sealed class PlayerRangeCullingIndex
         CollectRangeDifference(previousCenter, nextCenter);
         CollectRangeDifference(nextCenter, previousCenter);
 
-        for (int i = 0; i < unbucketedRenderers.Count; i++)
+        for (int i = 0; i < unbucketedStaticRenderers.Count; i++)
         {
-            refreshSet.Add(unbucketedRenderers[i]);
+            refreshSet.Add(unbucketedStaticRenderers[i]);
         }
 
-        for (int i = 0; i < unbucketedColliders.Count; i++)
+        for (int i = 0; i < unbucketedStaticColliders.Count; i++)
         {
-            colliderRefreshSet.Add(unbucketedColliders[i]);
+            colliderRefreshSet.Add(unbucketedStaticColliders[i]);
         }
 
         cleanupBuffer.Clear();
@@ -450,6 +520,19 @@ internal sealed class PlayerRangeCullingIndex
 
         colliderCleanupBuffer.Clear();
         colliderRefreshSet.Clear();
+    }
+
+    private void ClampDynamicCursors()
+    {
+        if (dynamicRendererCursor >= dynamicRenderers.Count)
+        {
+            dynamicRendererCursor = 0;
+        }
+
+        if (dynamicColliderCursor >= dynamicColliders.Count)
+        {
+            dynamicColliderCursor = 0;
+        }
     }
 
     private void CollectRangeDifference(Vector2Int sourceCenter, Vector2Int excludedCenter)

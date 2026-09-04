@@ -369,7 +369,9 @@ public partial class TerrainGenerator : MonoBehaviour
             return;
         }
 
+        ChunkSurfaceWorkerInput workerInput = chunkSurface.surfaceInput;
         chunkSurface.Reset(default, null);
+        ReturnChunkSurfaceWorkerInput(workerInput);
         if (reusableChunkSurfaceBuildData == null)
         {
             reusableChunkSurfaceBuildData = chunkSurface;
@@ -381,33 +383,34 @@ public partial class TerrainGenerator : MonoBehaviour
         int resolution = GetChunkSurfaceResolution(origin, chunkSizeInBlocks);
         int margin = 4;
         int gridSize = chunkSizeInBlocks + (margin * 2) + 1;
-        ChunkSurfaceWorkerInput input = new ChunkSurfaceWorkerInput
-        {
-            origin = origin,
-            chunkSizeInBlocks = chunkSizeInBlocks,
-            resolution = resolution,
-            cellCount = Mathf.Max(1, chunkSizeInBlocks * resolution),
-            biomeGridMinX = origin.x - margin,
-            biomeGridMinY = origin.y - margin,
-            biomeGridWidth = gridSize,
-            biomeGridHeight = gridSize,
-            mapMinX = GetMapMinCoordinate(),
-            mapMinY = GetMapMinCoordinate(),
-            mapMaxExclusiveX = GetMapMaxExclusiveCoordinate(),
-            mapMaxExclusiveY = GetMapMaxExclusiveCoordinate(),
-            biomeGrid = new TerrainBiome[gridSize * gridSize],
-            blockedWaterGrid = new bool[gridSize * gridSize],
-            oilGrid = new bool[gridSize * gridSize],
-            generatedSurfaceYOffset = generatedSurfaceYOffset,
-            waterSurfaceDepth = waterSurfaceDepth,
-            generateWaterFoamOverlay = generateWaterFoamOverlay,
-            waterFoamWidth = waterFoamWidth,
-            waterFoamSurfaceOffset = waterFoamSurfaceOffset,
-            waterFoamOverlayColor = waterFoamOverlayColor,
-            terrainBlendJitter = terrainBlendJitter,
-            terrainSurfaceVertexJitter = terrainSurfaceVertexJitter,
-            seed = seed
-        };
+        int gridLength = gridSize * gridSize;
+        ChunkSurfaceWorkerInput input = reusableChunkSurfaceWorkerInput;
+        reusableChunkSurfaceWorkerInput = null;
+        input ??= new ChunkSurfaceWorkerInput();
+        input.origin = origin;
+        input.chunkSizeInBlocks = chunkSizeInBlocks;
+        input.resolution = resolution;
+        input.cellCount = Mathf.Max(1, chunkSizeInBlocks * resolution);
+        input.biomeGridMinX = origin.x - margin;
+        input.biomeGridMinY = origin.y - margin;
+        input.biomeGridWidth = gridSize;
+        input.biomeGridHeight = gridSize;
+        input.mapMinX = GetMapMinCoordinate();
+        input.mapMinY = GetMapMinCoordinate();
+        input.mapMaxExclusiveX = GetMapMaxExclusiveCoordinate();
+        input.mapMaxExclusiveY = GetMapMaxExclusiveCoordinate();
+        input.biomeGrid = EnsureArrayCapacity(input.biomeGrid, gridLength);
+        input.blockedWaterGrid = EnsureArrayCapacity(input.blockedWaterGrid, gridLength);
+        input.oilGrid = EnsureArrayCapacity(input.oilGrid, gridLength);
+        input.generatedSurfaceYOffset = generatedSurfaceYOffset;
+        input.waterSurfaceDepth = waterSurfaceDepth;
+        input.generateWaterFoamOverlay = generateWaterFoamOverlay;
+        input.waterFoamWidth = waterFoamWidth;
+        input.waterFoamSurfaceOffset = waterFoamSurfaceOffset;
+        input.waterFoamOverlayColor = waterFoamOverlayColor;
+        input.terrainBlendJitter = terrainBlendJitter;
+        input.terrainSurfaceVertexJitter = terrainSurfaceVertexJitter;
+        input.seed = seed;
 
         for (int y = 0; y < gridSize; y++)
         {
@@ -425,6 +428,21 @@ public partial class TerrainGenerator : MonoBehaviour
         }
 
         return input;
+    }
+
+    private void ReturnChunkSurfaceWorkerInput(ChunkSurfaceWorkerInput input)
+    {
+        if (input != null && reusableChunkSurfaceWorkerInput == null)
+        {
+            reusableChunkSurfaceWorkerInput = input;
+        }
+    }
+
+    private static T[] EnsureArrayCapacity<T>(T[] array, int requiredLength)
+    {
+        return array != null && array.Length >= requiredLength
+            ? array
+            : new T[requiredLength];
     }
 
     private int GetChunkSurfaceResolution(Vector2Int origin, int chunkSizeInBlocks)
@@ -524,7 +542,7 @@ public partial class TerrainGenerator : MonoBehaviour
     private static void AppendDominantBiomeBaseSurfaceFromSnapshot(ChunkSurfaceBuildData chunkSurface, ChunkSurfaceWorkerInput input)
     {
         float[] weightBuffer = chunkSurface.blendWeightBuffer;
-        List<Vector2> polygonScratch = new List<Vector2>(4);
+        List<Vector2> polygonScratch = chunkSurface.contourPolygonScratch;
         for (int cellY = 0; cellY < input.cellCount; cellY++)
         {
             for (int cellX = 0; cellX < input.cellCount; cellX++)
@@ -594,8 +612,9 @@ public partial class TerrainGenerator : MonoBehaviour
         ChunkSurfaceWorkerInput input)
     {
         float[] weightBuffer = chunkSurface.blendWeightBuffer;
-        float[,] scores = new float[input.cellCount + 1, input.cellCount + 1];
-        List<Vector2> polygonScratch = new List<Vector2>(8);
+        int scoreRowLength = input.cellCount + 1;
+        float[] scores = chunkSurface.GetContourScores(scoreRowLength);
+        List<Vector2> polygonScratch = chunkSurface.contourPolygonScratch;
 
         for (int sampleY = 0; sampleY <= input.cellCount; sampleY++)
         {
@@ -605,7 +624,8 @@ public partial class TerrainGenerator : MonoBehaviour
                     -0.5f + (sampleX / (float)input.resolution),
                     -0.5f + (sampleY / (float)input.resolution));
                 Vector2 sampleWorld = new Vector2(input.origin.x + sampleLocal.x, input.origin.y + sampleLocal.y);
-                scores[sampleX, sampleY] = GetBiomeScoreAtSampleFromSnapshot(input, sampleWorld, biome, weightBuffer);
+                scores[sampleX + (sampleY * scoreRowLength)] =
+                    GetBiomeScoreAtSampleFromSnapshot(input, sampleWorld, biome, weightBuffer);
             }
         }
 
@@ -623,10 +643,11 @@ public partial class TerrainGenerator : MonoBehaviour
                     continue;
                 }
 
-                float s00 = scores[cellX, cellY];
-                float s10 = scores[cellX + 1, cellY];
-                float s11 = scores[cellX + 1, cellY + 1];
-                float s01 = scores[cellX, cellY + 1];
+                int scoreIndex = cellX + (cellY * scoreRowLength);
+                float s00 = scores[scoreIndex];
+                float s10 = scores[scoreIndex + 1];
+                float s11 = scores[scoreIndex + scoreRowLength + 1];
+                float s01 = scores[scoreIndex + scoreRowLength];
                 float centerScore = GetBiomeScoreAtSampleFromSnapshot(
                     input,
                     centerWorld,
@@ -925,7 +946,7 @@ public partial class TerrainGenerator : MonoBehaviour
     {
         float[] weightBuffer = chunkSurface.blendWeightBuffer;
         float patchRadius = 0.22f / Mathf.Max(1, input.resolution);
-        List<Vector2> polygonScratch = new List<Vector2>(4);
+        List<Vector2> polygonScratch = chunkSurface.contourPolygonScratch;
 
         for (int cellY = 0; cellY < input.cellCount; cellY++)
         {
@@ -1246,7 +1267,7 @@ public partial class TerrainGenerator : MonoBehaviour
         IEnumerator baseRoutine = AppendDominantBiomeBaseSurfaceRoutine(chunkSurface, origin, cellCount, resolution, allowYield);
         while (baseRoutine.MoveNext())
         {
-            if (allowYield && baseRoutine.Current != null)
+            if (allowYield)
             {
                 yield return baseRoutine.Current;
             }
@@ -1258,7 +1279,7 @@ public partial class TerrainGenerator : MonoBehaviour
             IEnumerator biomeRoutine = AppendBiomeContourSurfaceRoutine(chunkSurface, biome, origin, cellCount, resolution, allowYield);
             while (biomeRoutine.MoveNext())
             {
-                if (allowYield && biomeRoutine.Current != null)
+                if (allowYield)
                 {
                     yield return biomeRoutine.Current;
                 }
@@ -1268,7 +1289,7 @@ public partial class TerrainGenerator : MonoBehaviour
         IEnumerator safetyRoutine = AppendContourSafetyPatchesRoutine(chunkSurface, origin, cellCount, resolution, allowYield);
         while (safetyRoutine.MoveNext())
         {
-            if (allowYield && safetyRoutine.Current != null)
+            if (allowYield)
             {
                 yield return safetyRoutine.Current;
             }

@@ -2,6 +2,7 @@ using System;
 using System.Collections;
 using System.IO;
 using UnityEngine;
+using UnityEngine.SceneManagement;
 
 public class SaveManager : MonoBehaviour
 {
@@ -9,6 +10,10 @@ public class SaveManager : MonoBehaviour
 
     private const string RecentSlotPlayerPrefsKey = "ProjectF.SaveManager.RecentSlot";
     private const string SaveFileExtension = ".pfsave";
+
+    private static SaveGameData pendingRuntimeLoadData;
+    private static int pendingRuntimeLoadSlot = -1;
+    private static bool pendingRuntimeStartNewMap;
 
     [Header("Inspector")]
     [SerializeField]
@@ -26,6 +31,8 @@ public class SaveManager : MonoBehaviour
     private readonly bool[] cachedSaveFileExists = new bool[SlotCount];
     private bool saveFileExistenceCacheInitialized;
     private string cachedSaveDirectory;
+    private bool startupLoadCompleted;
+    private bool sceneReloadRequested;
 
     public int SelectedSlotIndex
     {
@@ -33,7 +40,17 @@ public class SaveManager : MonoBehaviour
         set => selectedSlotIndex = NormalizeSlotIndex(value);
     }
 
-    public bool WillInitializeTerrainOnStart => isActiveAndEnabled && loadRecentSlotOnStart;
+    public bool WillInitializeTerrainOnStart =>
+        isActiveAndEnabled
+        && (loadRecentSlotOnStart || pendingRuntimeLoadSlot >= 0);
+
+    [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.SubsystemRegistration)]
+    private static void ResetRuntimeLoadState()
+    {
+        pendingRuntimeLoadData = null;
+        pendingRuntimeLoadSlot = -1;
+        pendingRuntimeStartNewMap = false;
+    }
 
     private IEnumerator Start()
     {
@@ -41,10 +58,31 @@ public class SaveManager : MonoBehaviour
 
         yield return null;
 
+        if (TryConsumePendingRuntimeLoad(
+                out int pendingSlot,
+                out SaveGameData pendingData,
+                out bool startNewMap))
+        {
+            if (startNewMap)
+            {
+                StartNewMap(pendingSlot);
+            }
+            else
+            {
+                ApplyLoadedSlotData(pendingSlot, pendingData, GetSlotPath(pendingSlot));
+            }
+
+            startupLoadCompleted = true;
+            yield break;
+        }
+
         if (loadRecentSlotOnStart)
         {
-            LoadRecentSlotOrStartNewMap();
+            LoadSlotImmediate(
+                NormalizeSlotIndex(PlayerPrefs.GetInt(RecentSlotPlayerPrefsKey, 0)));
         }
+
+        startupLoadCompleted = true;
     }
 
     public void SaveSelectedSlot()
@@ -106,6 +144,19 @@ public class SaveManager : MonoBehaviour
     {
         slotIndex = NormalizeSlotIndex(slotIndex);
         SelectedSlotIndex = slotIndex;
+
+        if (Application.isPlaying && startupLoadCompleted)
+        {
+            return ReloadSceneForSlot(slotIndex);
+        }
+
+        return LoadSlotImmediate(slotIndex);
+    }
+
+    private bool LoadSlotImmediate(int slotIndex)
+    {
+        slotIndex = NormalizeSlotIndex(slotIndex);
+        SelectedSlotIndex = slotIndex;
         string path = GetSlotPath(slotIndex);
 
         if (!HasSaveFile(slotIndex))
@@ -123,7 +174,91 @@ public class SaveManager : MonoBehaviour
                 return true;
             }
 
-            SaveGameItemIdRemapper.RemapToCurrentDefinitions(data, GameManager.Instance?.ItemManger?.ItemDefinitions);
+            return ApplyLoadedSlotData(slotIndex, data, path);
+        }
+        catch (Exception exception)
+        {
+            Debug.LogError($"[SaveManager] Slot {slotIndex + 1} 로드 실패: {exception}");
+            return false;
+        }
+    }
+
+    private bool ReloadSceneForSlot(int slotIndex)
+    {
+        if (sceneReloadRequested)
+        {
+            return false;
+        }
+
+        string path = GetSlotPath(slotIndex);
+        SaveGameData data = null;
+        bool startNewMap = !HasSaveFile(slotIndex);
+        if (!startNewMap)
+        {
+            try
+            {
+                data = SaveGameBinarySerializer.ReadFromFile(path);
+                startNewMap = data == null;
+            }
+            catch (Exception exception)
+            {
+                Debug.LogError($"[SaveManager] Slot {slotIndex + 1} 로드 실패: {exception}");
+                return false;
+            }
+        }
+
+        Scene activeScene = SceneManager.GetActiveScene();
+        if (!activeScene.IsValid())
+        {
+            Debug.LogError("[SaveManager] 활성 씬을 찾을 수 없어 런타임 로드를 시작하지 못했습니다.");
+            return false;
+        }
+
+        pendingRuntimeLoadSlot = slotIndex;
+        pendingRuntimeLoadData = data;
+        pendingRuntimeStartNewMap = startNewMap;
+        sceneReloadRequested = true;
+
+        AsyncOperation reloadOperation;
+        if (activeScene.buildIndex >= 0)
+        {
+            reloadOperation = SceneManager.LoadSceneAsync(
+                activeScene.buildIndex,
+                LoadSceneMode.Single);
+        }
+        else
+        {
+            reloadOperation = SceneManager.LoadSceneAsync(
+                activeScene.name,
+                LoadSceneMode.Single);
+        }
+
+        if (reloadOperation == null)
+        {
+            pendingRuntimeLoadSlot = -1;
+            pendingRuntimeLoadData = null;
+            pendingRuntimeStartNewMap = false;
+            sceneReloadRequested = false;
+            Debug.LogError("[SaveManager] 활성 씬 재로드 요청을 생성하지 못했습니다.");
+            return false;
+        }
+
+        SetRecentSlot(slotIndex);
+        return true;
+    }
+
+    private bool ApplyLoadedSlotData(int slotIndex, SaveGameData data, string path)
+    {
+        if (data == null)
+        {
+            return false;
+        }
+
+        try
+        {
+            SaveGameItemIdRemapper.RemapToCurrentDefinitions(
+                data,
+                GameManager.Instance?.ItemManger?.ItemDefinitions);
             ApplySaveData(data);
             SetRecentSlot(slotIndex);
             Debug.Log($"[SaveManager] Slot {slotIndex + 1} 로드 완료: {path}");
@@ -131,9 +266,31 @@ public class SaveManager : MonoBehaviour
         }
         catch (Exception exception)
         {
-            Debug.LogError($"[SaveManager] Slot {slotIndex + 1} 로드 실패: {exception}");
+            Debug.LogError($"[SaveManager] Slot {slotIndex + 1} 적용 실패: {exception}");
             return false;
         }
+    }
+
+    private static bool TryConsumePendingRuntimeLoad(
+        out int slotIndex,
+        out SaveGameData data,
+        out bool startNewMap)
+    {
+        if (pendingRuntimeLoadSlot < 0)
+        {
+            slotIndex = -1;
+            data = null;
+            startNewMap = false;
+            return false;
+        }
+
+        slotIndex = pendingRuntimeLoadSlot;
+        data = pendingRuntimeLoadData;
+        startNewMap = pendingRuntimeStartNewMap;
+        pendingRuntimeLoadSlot = -1;
+        pendingRuntimeLoadData = null;
+        pendingRuntimeStartNewMap = false;
+        return true;
     }
 
     public bool ResetSlot(int slotIndex)
@@ -163,6 +320,11 @@ public class SaveManager : MonoBehaviour
 
         if (Application.isPlaying)
         {
+            if (startupLoadCompleted)
+            {
+                return ReloadSceneForSlot(slotIndex);
+            }
+
             StartNewMap(slotIndex);
         }
 
@@ -386,12 +548,6 @@ public class SaveManager : MonoBehaviour
         }
 
         return coordinateFallback;
-    }
-
-    private void LoadRecentSlotOrStartNewMap()
-    {
-        int recentSlot = NormalizeSlotIndex(PlayerPrefs.GetInt(RecentSlotPlayerPrefsKey, 0));
-        LoadSlot(recentSlot);
     }
 
     private void EnsureDefaultPlayerState()

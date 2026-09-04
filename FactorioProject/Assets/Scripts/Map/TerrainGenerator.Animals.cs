@@ -1,4 +1,5 @@
 using System;
+using System.Collections;
 using System.Collections.Generic;
 using UnityEngine;
 #if UNITY_EDITOR
@@ -99,6 +100,8 @@ public partial class TerrainGenerator : MonoBehaviour
     private readonly HashSet<Vector2Int> animalEligibleCoordinateLookup = new HashSet<Vector2Int>();
     private readonly List<Vector2Int> animalChunkCoordinatesScratch = new List<Vector2Int>();
     private readonly HashSet<Vector2Int> animalUsedCoordinatesScratch = new HashSet<Vector2Int>();
+    private readonly List<TerrainAnimalInstance> animalInstancesScratch =
+        new List<TerrainAnimalInstance>();
     private readonly Dictionary<long, AnimalSaveEntry> animalSaveOverrides = new Dictionary<long, AnimalSaveEntry>();
     private readonly HashSet<long> loadedAnimalIds = new HashSet<long>();
     private readonly HashSet<TerrainAnimalInstance> pinnedAnimalInstances =
@@ -166,20 +169,78 @@ public partial class TerrainGenerator : MonoBehaviour
 
     private void SpawnAnimalsForChunk(Vector2Int chunkCoordinate)
     {
+        IEnumerator routine = SpawnAnimalsForChunkRoutine(chunkCoordinate, false);
+        while (routine.MoveNext())
+        {
+        }
+    }
+
+    private IEnumerator SpawnAnimalsForChunkRoutine(
+        Vector2Int chunkCoordinate,
+        bool allowYield)
+    {
         if (!generateAnimals || animalDensity <= 0f)
         {
-            return;
+            yield break;
         }
 
         EnsureAnimalSpeciesCache();
         if (animalSpeciesCache.Count == 0)
         {
-            return;
+            yield break;
         }
 
         animalUsedCoordinatesScratch.Clear();
-        CacheExistingAnimalCoordinates(transform, animalUsedCoordinatesScratch);
-        SpawnSavedAnimalsForChunk(chunkCoordinate, transform, animalUsedCoordinatesScratch);
+        int normalizedChunkSize = Mathf.Max(4, chunkSize);
+        Vector2Int chunkMinCoordinate = chunkCoordinate * normalizedChunkSize;
+        CacheExistingAnimalCoordinates(
+            chunkMinCoordinate,
+            chunkMinCoordinate + new Vector2Int(normalizedChunkSize - 1, normalizedChunkSize - 1),
+            animalUsedCoordinatesScratch);
+
+        double spawnStepStartTime = Time.realtimeSinceStartupAsDouble;
+        foreach (KeyValuePair<long, AnimalSaveEntry> pair in animalSaveOverrides)
+        {
+            AnimalSaveEntry state = pair.Value;
+            if (state == null
+                || state.removed
+                || loadedAnimalIds.Contains(state.deterministicId)
+                || GetAnimalChunkCoordinate(state.position) != chunkCoordinate)
+            {
+                continue;
+            }
+
+            AnimalDefinition definition = FindAnimalDefinitionById(state.definitionId);
+            Animal animal = SpawnAnimalInstance(
+                definition,
+                state.deterministicId,
+                state.position,
+                state.rotation,
+                state.age,
+                state.baseScale,
+                true,
+                state.herdId != 0L ? state.herdId : state.deterministicId,
+                state.herdCenter != Vector3.zero ? state.herdCenter : state.position,
+                state.herdRadius > 0f
+                    ? state.herdRadius
+                    : definition != null && definition.AISettings != null
+                        ? definition.AISettings.HerdAreaRadius
+                        : AnimalAISettings.DefaultHerdAreaRadius,
+                state,
+                transform);
+            if (animal != null)
+            {
+                animalUsedCoordinatesScratch.Add(new Vector2Int(
+                    Mathf.RoundToInt(state.position.x),
+                    Mathf.RoundToInt(state.position.z)));
+            }
+
+            if (allowYield && HasExceededChunkGenerationFrameBudget(spawnStepStartTime))
+            {
+                yield return null;
+                spawnStepStartTime = Time.realtimeSinceStartupAsDouble;
+            }
+        }
 
         animalEligibleCoordinatesScratch.Clear();
         animalEligibleCoordinateLookup.Clear();
@@ -203,7 +264,7 @@ public partial class TerrainGenerator : MonoBehaviour
         if (animalHerdPlansScratch.Count == 0)
         {
             ClearAnimalSpawnScratch();
-            return;
+            yield break;
         }
 
         for (int herdIndex = 0;
@@ -244,7 +305,7 @@ public partial class TerrainGenerator : MonoBehaviour
                     continue;
                 }
 
-                SpawnAnimalInstance(
+                Animal spawnedAnimal = SpawnAnimalInstance(
                     definition,
                     deterministicId,
                     new Vector3(coordinate.x, 0f, coordinate.y),
@@ -257,6 +318,13 @@ public partial class TerrainGenerator : MonoBehaviour
                     herdRadius,
                     null,
                     transform);
+                if (allowYield
+                    && spawnedAnimal != null
+                    && HasExceededChunkGenerationFrameBudget(spawnStepStartTime))
+                {
+                    yield return null;
+                    spawnStepStartTime = Time.realtimeSinceStartupAsDouble;
+                }
             }
         }
 
@@ -549,49 +617,6 @@ public partial class TerrainGenerator : MonoBehaviour
         return animal;
     }
 
-    private void SpawnSavedAnimalsForChunk(
-        Vector2Int chunkCoordinate,
-        Transform parent,
-        HashSet<Vector2Int> usedCoordinates)
-    {
-        foreach (KeyValuePair<long, AnimalSaveEntry> pair in animalSaveOverrides)
-        {
-            AnimalSaveEntry state = pair.Value;
-            if (state == null
-                || state.removed
-                || loadedAnimalIds.Contains(state.deterministicId)
-                || GetAnimalChunkCoordinate(state.position) != chunkCoordinate)
-            {
-                continue;
-            }
-
-            AnimalDefinition definition = FindAnimalDefinitionById(state.definitionId);
-            Animal animal = SpawnAnimalInstance(
-                definition,
-                state.deterministicId,
-                state.position,
-                state.rotation,
-                state.age,
-                state.baseScale,
-                true,
-                state.herdId != 0L ? state.herdId : state.deterministicId,
-                state.herdCenter != Vector3.zero ? state.herdCenter : state.position,
-                state.herdRadius > 0f
-                    ? state.herdRadius
-                    : definition != null && definition.AISettings != null
-                        ? definition.AISettings.HerdAreaRadius
-                        : AnimalAISettings.DefaultHerdAreaRadius,
-                state,
-                parent);
-            if (animal != null)
-            {
-                usedCoordinates.Add(new Vector2Int(
-                    Mathf.RoundToInt(state.position.x),
-                    Mathf.RoundToInt(state.position.z)));
-            }
-        }
-    }
-
     private void CaptureAnimalSaveStates(MapSaveData mapSaveData)
     {
         if (mapSaveData == null)
@@ -629,8 +654,8 @@ public partial class TerrainGenerator : MonoBehaviour
 
     private void RefreshAnimalOverridesFromRuntime()
     {
-        TerrainAnimalInstance[] instances = GetComponentsInChildren<TerrainAnimalInstance>(true);
-        for (int i = 0; i < instances.Length; i++)
+        List<TerrainAnimalInstance> instances = CollectTerrainAnimalInstances();
+        for (int i = 0; i < instances.Count; i++)
         {
             TerrainAnimalInstance instance = instances[i];
             if (instance == null
@@ -745,8 +770,8 @@ public partial class TerrainGenerator : MonoBehaviour
     private int RemoveLoadedAnimalViews(bool includeInteracted)
     {
         int removedCount = 0;
-        TerrainAnimalInstance[] instances = GetComponentsInChildren<TerrainAnimalInstance>(true);
-        for (int i = 0; i < instances.Length; i++)
+        List<TerrainAnimalInstance> instances = CollectTerrainAnimalInstances();
+        for (int i = 0; i < instances.Count; i++)
         {
             TerrainAnimalInstance instance = instances[i];
             if (instance == null
@@ -767,10 +792,10 @@ public partial class TerrainGenerator : MonoBehaviour
 
     public void LogAnimalSpawnStats()
     {
-        TerrainAnimalInstance[] instances = GetComponentsInChildren<TerrainAnimalInstance>(true);
+        List<TerrainAnimalInstance> instances = CollectTerrainAnimalInstances();
         int activeCount = 0;
         int interactedCount = 0;
-        for (int i = 0; i < instances.Length; i++)
+        for (int i = 0; i < instances.Count; i++)
         {
             TerrainAnimalInstance instance = instances[i];
             if (instance == null || !instance.gameObject.activeSelf)
@@ -796,8 +821,8 @@ public partial class TerrainGenerator : MonoBehaviour
     private void RebuildLoadedAnimalIdCache()
     {
         loadedAnimalIds.Clear();
-        TerrainAnimalInstance[] instances = GetComponentsInChildren<TerrainAnimalInstance>(true);
-        for (int i = 0; i < instances.Length; i++)
+        List<TerrainAnimalInstance> instances = CollectTerrainAnimalInstances();
+        for (int i = 0; i < instances.Count; i++)
         {
             if (instances[i] != null
                 && instances[i].gameObject.activeSelf
@@ -810,8 +835,8 @@ public partial class TerrainGenerator : MonoBehaviour
 
     private void ForgetAnimalRuntimeIds(Vector2Int chunkCoordinate)
     {
-        TerrainAnimalInstance[] instances = GetComponentsInChildren<TerrainAnimalInstance>(true);
-        for (int i = 0; i < instances.Length; i++)
+        List<TerrainAnimalInstance> instances = CollectTerrainAnimalInstances();
+        for (int i = 0; i < instances.Count; i++)
         {
             if (instances[i] != null
                 && !pinnedAnimalInstances.Contains(instances[i])
@@ -824,8 +849,8 @@ public partial class TerrainGenerator : MonoBehaviour
 
     private void DestroyAnimalViewsInChunk(Vector2Int chunkCoordinate)
     {
-        TerrainAnimalInstance[] instances = GetComponentsInChildren<TerrainAnimalInstance>(true);
-        for (int i = 0; i < instances.Length; i++)
+        List<TerrainAnimalInstance> instances = CollectTerrainAnimalInstances();
+        for (int i = 0; i < instances.Count; i++)
         {
             TerrainAnimalInstance instance = instances[i];
             if (instance != null
@@ -839,8 +864,8 @@ public partial class TerrainGenerator : MonoBehaviour
 
     private void DestroyAllTerrainAnimalViews()
     {
-        TerrainAnimalInstance[] instances = GetComponentsInChildren<TerrainAnimalInstance>(true);
-        for (int i = 0; i < instances.Length; i++)
+        List<TerrainAnimalInstance> instances = CollectTerrainAnimalInstances();
+        for (int i = 0; i < instances.Count; i++)
         {
             if (instances[i] != null)
             {
@@ -931,10 +956,27 @@ public partial class TerrainGenerator : MonoBehaviour
         return null;
     }
 
-    private static void CacheExistingAnimalCoordinates(Transform root, HashSet<Vector2Int> coordinates)
+    private List<TerrainAnimalInstance> CollectTerrainAnimalInstances()
     {
-        TerrainAnimalInstance[] instances = root.GetComponentsInChildren<TerrainAnimalInstance>(true);
-        for (int i = 0; i < instances.Length; i++)
+        animalInstancesScratch.Clear();
+        GetComponentsInChildren(true, animalInstancesScratch);
+        return animalInstancesScratch;
+    }
+
+    private void CacheExistingAnimalCoordinates(
+        Vector2Int minCoordinate,
+        Vector2Int maxCoordinate,
+        HashSet<Vector2Int> coordinates)
+    {
+        AnimalAIWorld world = AnimalAIWorld.Instance;
+        if (world != null)
+        {
+            world.CopyOccupiedCoordinates(minCoordinate, maxCoordinate, coordinates);
+            return;
+        }
+
+        List<TerrainAnimalInstance> instances = CollectTerrainAnimalInstances();
+        for (int i = 0; i < instances.Count; i++)
         {
             if (instances[i] == null || !instances[i].gameObject.activeSelf)
             {
@@ -942,7 +984,16 @@ public partial class TerrainGenerator : MonoBehaviour
             }
 
             Vector3 position = instances[i].transform.position;
-            coordinates.Add(new Vector2Int(Mathf.RoundToInt(position.x), Mathf.RoundToInt(position.z)));
+            Vector2Int coordinate = new Vector2Int(
+                Mathf.RoundToInt(position.x),
+                Mathf.RoundToInt(position.z));
+            if (coordinate.x >= minCoordinate.x
+                && coordinate.x <= maxCoordinate.x
+                && coordinate.y >= minCoordinate.y
+                && coordinate.y <= maxCoordinate.y)
+            {
+                coordinates.Add(coordinate);
+            }
         }
     }
 
@@ -1198,7 +1249,13 @@ public partial class TerrainGenerator : MonoBehaviour
 
         Vector2Int playerCoordinate = GetWorldBlockCoordinate(player.transform.position);
         animalUsedCoordinatesScratch.Clear();
-        CacheExistingAnimalCoordinates(transform, animalUsedCoordinatesScratch);
+        Vector2Int searchOffset = new Vector2Int(
+            AnimalEditorSpawnMaximumRadius,
+            AnimalEditorSpawnMaximumRadius);
+        CacheExistingAnimalCoordinates(
+            playerCoordinate - searchOffset,
+            playerCoordinate + searchOffset,
+            animalUsedCoordinatesScratch);
 
         int spawnSequence = ++animalHarnessSpawnSequence;
         DeterministicAnimalRandom random = new DeterministicAnimalRandom(
@@ -1406,8 +1463,8 @@ public partial class TerrainGenerator : MonoBehaviour
         }
 
         Gizmos.color = new Color(0.2f, 1f, 0.35f, 0.8f);
-        TerrainAnimalInstance[] instances = GetComponentsInChildren<TerrainAnimalInstance>(true);
-        for (int i = 0; i < instances.Length; i++)
+        List<TerrainAnimalInstance> instances = CollectTerrainAnimalInstances();
+        for (int i = 0; i < instances.Count; i++)
         {
             if (instances[i] != null && instances[i].gameObject.activeSelf)
             {

@@ -693,6 +693,7 @@ public partial class TerrainGenerator : MonoBehaviour
 
         int restoresSinceYield = 0;
         int restoreBudget = Mathf.Max(1, chunkInstallationRestoresPerFrame);
+        double restoreStepStartTime = Time.realtimeSinceStartupAsDouble;
         BeginConveyorRuntimeRefreshBatch();
         try
         {
@@ -702,10 +703,13 @@ public partial class TerrainGenerator : MonoBehaviour
             {
                 RestoreOrBindSavedInstallation(anchorCoordinate);
                 restoresSinceYield++;
-                if (allowYield && restoresSinceYield >= restoreBudget)
+                if (allowYield
+                    && (restoresSinceYield >= restoreBudget
+                        || HasExceededChunkGenerationFrameBudget(restoreStepStartTime)))
                 {
                     restoresSinceYield = 0;
                     yield return null;
+                    restoreStepStartTime = Time.realtimeSinceStartupAsDouble;
                 }
             }
 
@@ -1324,11 +1328,11 @@ public partial class TerrainGenerator : MonoBehaviour
         public int seed;
     }
 
-    private void RefreshChunkBlockRuntimeViews(Block[] chunkBlocks)
+    private IEnumerator RefreshChunkBlockRuntimeViewsRoutine(Block[] chunkBlocks, bool allowYield)
     {
         if (chunkBlocks == null)
         {
-            return;
+            yield break;
         }
 
         bool hasConveyorBlock = false;
@@ -1348,15 +1352,28 @@ public partial class TerrainGenerator : MonoBehaviour
             MarkConveyorNetworkDirty();
         }
 
+        int processedSinceYield = 0;
+        int blockBudget = Mathf.Max(1, chunkGenerationBlocksPerFrame);
+        double stepStartTime = Time.realtimeSinceStartupAsDouble;
         for (int i = 0; i < chunkBlocks.Length; i++)
         {
-            Block block = chunkBlocks[i];
-            if (block == null)
+            using (FinalizeChunkRuntimeViewMarker.Auto())
             {
-                continue;
+                Block block = chunkBlocks[i];
+                if (block != null)
+                {
+                    RefreshRestoredBlockRuntimeRegistration(block);
+                }
             }
 
-            RefreshRestoredBlockRuntimeRegistration(block);
+            if (allowYield
+                && (++processedSinceYield >= blockBudget
+                    || HasExceededChunkGenerationFrameBudget(stepStartTime)))
+            {
+                processedSinceYield = 0;
+                yield return null;
+                stepStartTime = Time.realtimeSinceStartupAsDouble;
+            }
         }
     }
 
