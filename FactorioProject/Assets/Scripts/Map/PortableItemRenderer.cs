@@ -4,6 +4,44 @@ using Unity.Profiling;
 using UnityEngine;
 using UnityEngine.Rendering;
 
+/// <summary>
+/// Packs one straight belt-item move into two instance vectors.
+/// Start.w stores the CPU simulation start time and End.w stores inverse duration.
+/// </summary>
+public readonly struct ConveyorItemGpuMotionData
+{
+    public ConveyorItemGpuMotionData(Vector4 start, Vector4 end)
+    {
+        Start = start;
+        End = end;
+    }
+
+    public ConveyorItemGpuMotionData(
+        Vector3 startWorldPosition,
+        Vector3 endWorldPosition,
+        float startTime,
+        float duration)
+    {
+        Start = new Vector4(
+            startWorldPosition.x,
+            startWorldPosition.y,
+            startWorldPosition.z,
+            startTime);
+        End = new Vector4(
+            endWorldPosition.x,
+            endWorldPosition.y,
+            endWorldPosition.z,
+            duration > 0.0001f ? 1f / duration : 0f);
+    }
+
+    public readonly Vector4 Start;
+    public readonly Vector4 End;
+
+    public bool IsActive => End.w > 0f;
+    public Vector3 StartWorldPosition => new Vector3(Start.x, Start.y, Start.z);
+    public Vector3 EndWorldPosition => new Vector3(End.x, End.y, End.z);
+}
+
 public readonly struct VirtualConveyorItemRenderData
 {
     public VirtualConveyorItemRenderData(
@@ -13,7 +51,8 @@ public readonly struct VirtualConveyorItemRenderData
         int layer,
         bool useSleepAwakeDarkTint,
         bool useBeltItemLineDebugColor = false,
-        Color32 beltItemLineDebugColor = default)
+        Color32 beltItemLineDebugColor = default,
+        ConveyorItemGpuMotionData gpuMotion = default)
         : this(
             itemId,
             position,
@@ -25,7 +64,8 @@ public readonly struct VirtualConveyorItemRenderData
             beltItemLineDebugColor,
             false,
             0,
-            0)
+            0,
+            gpuMotion)
     {
     }
 
@@ -40,7 +80,8 @@ public readonly struct VirtualConveyorItemRenderData
         Color32 beltItemLineDebugColor,
         bool hasResolvedBatchCell,
         int batchCellX,
-        int batchCellZ)
+        int batchCellZ,
+        ConveyorItemGpuMotionData gpuMotion)
     {
         ItemId = itemId;
         Position = position;
@@ -53,6 +94,7 @@ public readonly struct VirtualConveyorItemRenderData
         HasResolvedBatchCell = hasResolvedBatchCell;
         BatchCellX = batchCellX;
         BatchCellZ = batchCellZ;
+        GpuMotion = gpuMotion;
     }
 
     public readonly int ItemId;
@@ -66,6 +108,7 @@ public readonly struct VirtualConveyorItemRenderData
     public readonly bool HasResolvedBatchCell;
     public readonly int BatchCellX;
     public readonly int BatchCellZ;
+    public readonly ConveyorItemGpuMotionData GpuMotion;
 
     public VirtualConveyorItemRenderData WithResolvedTransform(
         Matrix4x4 matrix,
@@ -83,7 +126,8 @@ public readonly struct VirtualConveyorItemRenderData
             BeltItemLineDebugColor,
             true,
             batchCellX,
-            batchCellZ);
+            batchCellZ,
+            GpuMotion);
     }
 
     public VirtualConveyorItemRenderData WithResolvedMatrix(Matrix4x4 matrix)
@@ -99,7 +143,8 @@ public readonly struct VirtualConveyorItemRenderData
             BeltItemLineDebugColor,
             false,
             0,
-            0);
+            0,
+            GpuMotion);
     }
 }
 
@@ -107,6 +152,7 @@ public readonly struct VirtualConveyorItemRenderData
 public sealed class PortableItemRenderer : MonoBehaviour
 {
     private const int SharedVirtualConveyorItemBatchGroupId = 0;
+    private static readonly int ConveyorMotionTimeShaderId = Shader.PropertyToID("_ConveyorMotionTime");
 
     private static readonly ProfilerMarker RebuildPortableObjectBatchesMarker =
         new ProfilerMarker("PortableItemRenderer.RebuildPortableObjectBatches");
@@ -218,6 +264,8 @@ public sealed class PortableItemRenderer : MonoBehaviour
     public int StaticVirtualConveyorItemBatchCount => virtualConveyorBatches.ActiveBatchCount;
     public int StaticVirtualConveyorItemInstanceCount => virtualConveyorBatches.ActiveMatrixCount;
     public int StaticVirtualConveyorItemDrawCallCount => virtualConveyorBatches.EstimatedDrawCallCount;
+    public int GpuMotionVirtualConveyorItemInstanceCount =>
+        virtualConveyorBatches.ActiveConveyorMotionInstanceCount;
     public int StaticVirtualConveyorItemBatchRendererGroupBatchCount =>
         virtualConveyorBatches.ActiveBatchRendererGroupBatchCount;
     public int DynamicVirtualConveyorItemBatchCount => dynamicVirtualConveyorBatches.ActiveBatchCount;
@@ -476,6 +524,7 @@ public sealed class PortableItemRenderer : MonoBehaviour
             long startTimestamp = BeginRuntimeProfileSample(out bool profileRender);
             try
             {
+                Shader.SetGlobalFloat(ConveyorMotionTimeShaderId, Time.time);
                 RenderVirtualConveyorBatches();
             }
             finally
@@ -915,7 +964,22 @@ public sealed class PortableItemRenderer : MonoBehaviour
             return;
         }
 
-        virtualConveyorBatches.AddOwnedMatrix(blockCache, blockCache.batchEntries, key, renderData.Matrix);
+        if (renderData.GpuMotion.IsActive)
+        {
+            virtualConveyorBatches.AddOwnedMatrix(
+                blockCache,
+                blockCache.batchEntries,
+                key,
+                renderData.Matrix,
+                renderData.GpuMotion);
+            return;
+        }
+
+        virtualConveyorBatches.AddOwnedMatrix(
+            blockCache,
+            blockCache.batchEntries,
+            key,
+            renderData.Matrix);
     }
 
     private void RemoveVirtualConveyorBlockBatchEntries(BlockRenderCache blockCache)
@@ -1582,7 +1646,9 @@ public sealed class PortableItemRenderer : MonoBehaviour
             renderData.BeltItemLineDebugColor,
             SharedVirtualConveyorItemBatchGroupId,
             cellX,
-            cellZ);
+            cellZ,
+            false,
+            renderData.GpuMotion.IsActive);
         return true;
     }
 

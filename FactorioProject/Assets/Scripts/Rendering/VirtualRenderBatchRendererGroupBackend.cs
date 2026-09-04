@@ -90,6 +90,7 @@ internal sealed class VirtualRenderBatchRendererGroupBackend : IDisposable
             || key.Mesh == null
             || key.Material == null
             || key.Material.shader == null
+            || key.HasConveyorMotion
             || key.UseBeltItemLineDebugColor
             || key.Material.renderQueue >= OpaqueRenderQueueUpperBound)
         {

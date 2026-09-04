@@ -458,6 +458,10 @@ public partial class TerrainGenerator : MonoBehaviour
     private bool logChunkGenerationDiagnostics;
 
     [Header("Conveyor Runtime")]
+    [Tooltip("Stores settled belt items as data and renders them through instanced virtual item batches.")]
+    [SerializeField]
+    private bool virtualizeConveyorItems = true;
+
     [SerializeField, Min(16)]
     private int conveyorWakeQueueProcessLimit = 4096;
 
@@ -1221,7 +1225,7 @@ public partial class TerrainGenerator : MonoBehaviour
         loadedChunks.Clear();
     }
 
-    public bool VirtualizeConveyorItems => false;
+    public bool VirtualizeConveyorItems => virtualizeConveyorItems;
     public bool VirtualizeConveyorBelts => true;
     public int ConveyorItemVisualBlockSetVersion => conveyorItemVisualBlockSetVersion;
     public int DynamicConveyorItemVisualBlockSetVersion => dynamicConveyorItemVisualBlockSetVersion;

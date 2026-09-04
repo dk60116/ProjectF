@@ -17,6 +17,8 @@ internal struct ConveyorCornerContinuation
 internal struct ConveyorDataMotionState
 {
     public bool active;
+    // Rendering-only capability cache. Item ownership and completion stay CPU-authoritative.
+    public bool useGpuLinearRendering;
     public bool useCornerMotion;
     public ConveyorCornerContinuation cornerContinuation;
     public Vector3 startWorldPosition;

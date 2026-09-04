@@ -24,6 +24,7 @@ public readonly struct VirtualRenderBatchKey : System.IEquatable<VirtualRenderBa
     public readonly int BatchCellX;
     public readonly int BatchCellZ;
     public readonly bool InvertCulling;
+    public readonly bool HasConveyorMotion;
 
     public VirtualRenderBatchKey(
         Mesh mesh,
@@ -39,7 +40,8 @@ public readonly struct VirtualRenderBatchKey : System.IEquatable<VirtualRenderBa
         int batchGroupId = 0,
         int batchCellX = 0,
         int batchCellZ = 0,
-        bool invertCulling = false)
+        bool invertCulling = false,
+        bool hasConveyorMotion = false)
     {
         Mesh = mesh;
         Material = material;
@@ -55,6 +57,7 @@ public readonly struct VirtualRenderBatchKey : System.IEquatable<VirtualRenderBa
         BatchCellX = batchCellX;
         BatchCellZ = batchCellZ;
         InvertCulling = invertCulling;
+        HasConveyorMotion = hasConveyorMotion;
     }
 
     public bool Equals(VirtualRenderBatchKey other)
@@ -72,7 +75,8 @@ public readonly struct VirtualRenderBatchKey : System.IEquatable<VirtualRenderBa
             && BatchGroupId == other.BatchGroupId
             && BatchCellX == other.BatchCellX
             && BatchCellZ == other.BatchCellZ
-            && InvertCulling == other.InvertCulling;
+            && InvertCulling == other.InvertCulling
+            && HasConveyorMotion == other.HasConveyorMotion;
     }
 
     public override bool Equals(object obj)
@@ -98,6 +102,7 @@ public readonly struct VirtualRenderBatchKey : System.IEquatable<VirtualRenderBa
             hash = (hash * 397) ^ BatchCellX;
             hash = (hash * 397) ^ BatchCellZ;
             hash = (hash * 397) ^ (InvertCulling ? 1 : 0);
+            hash = (hash * 397) ^ (HasConveyorMotion ? 1 : 0);
             return hash;
         }
     }
@@ -121,10 +126,14 @@ public sealed class VirtualRenderBatchCollection
     private const float MinimumWorldBoundsSize = 0.25f;
 
     private static readonly int ConveyorUvDataShaderId = Shader.PropertyToID("_ConveyorUvData");
+    private static readonly int ConveyorMotionStartShaderId = Shader.PropertyToID("_ConveyorMotionStart");
+    private static readonly int ConveyorMotionEndShaderId = Shader.PropertyToID("_ConveyorMotionEnd");
 
     private readonly Dictionary<VirtualRenderBatchKey, BatchRenderCache> batchesByKey = new Dictionary<VirtualRenderBatchKey, BatchRenderCache>();
     private readonly List<VirtualRenderBatchKey> activeBatchKeys = new List<VirtualRenderBatchKey>();
     private readonly List<Vector4> uvDrawScratch = new List<Vector4>(MaxInstancesPerDraw);
+    private readonly List<Vector4> conveyorMotionStartDrawScratch = new List<Vector4>(MaxInstancesPerDraw);
+    private readonly List<Vector4> conveyorMotionEndDrawScratch = new List<Vector4>(MaxInstancesPerDraw);
     private readonly Plane[] renderFrustumPlanes = new Plane[6];
     private VirtualRenderBatchRendererGroupBackend batchRendererGroupBackend;
 
@@ -184,6 +193,8 @@ public sealed class VirtualRenderBatchCollection
         batchesByKey.Clear();
         activeBatchKeys.Clear();
         uvDrawScratch.Clear();
+        conveyorMotionStartDrawScratch.Clear();
+        conveyorMotionEndDrawScratch.Clear();
     }
 
     public void ClearActiveMatrices()
@@ -195,6 +206,8 @@ public sealed class VirtualRenderBatchCollection
             {
                 batchCache.Matrices.Clear();
                 batchCache.InstanceUvData?.Clear();
+                batchCache.ConveyorMotionStarts?.Clear();
+                batchCache.ConveyorMotionEnds?.Clear();
                 batchCache.Owners.Clear();
                 batchCache.ClearBounds();
                 batchCache.MarkDataDirty();
@@ -215,7 +228,8 @@ public sealed class VirtualRenderBatchCollection
 
         batchCache.Matrices.Add(matrix);
         AddInstanceUvData(batchCache, key, ResolveDefaultUvData());
-        AddMatrixBounds(key, batchCache, matrix);
+        AddConveyorMotionData(batchCache, key, default);
+        AddMatrixBounds(key, batchCache, matrix, default);
         batchCache.MarkDataDirty();
     }
 
@@ -230,7 +244,43 @@ public sealed class VirtualRenderBatchCollection
             ownerEntries,
             key,
             matrix,
-            ResolveDefaultUvData());
+            ResolveDefaultUvData(),
+            default);
+    }
+
+    public int ActiveConveyorMotionInstanceCount
+    {
+        get
+        {
+            int total = 0;
+            for (int i = 0; i < activeBatchKeys.Count; i++)
+            {
+                VirtualRenderBatchKey key = activeBatchKeys[i];
+                if (key.HasConveyorMotion
+                    && batchesByKey.TryGetValue(key, out BatchRenderCache batchCache))
+                {
+                    total += batchCache.Matrices.Count;
+                }
+            }
+
+            return total;
+        }
+    }
+
+    public void AddOwnedMatrix(
+        IVirtualRenderBatchOwner owner,
+        List<VirtualRenderBatchEntry> ownerEntries,
+        VirtualRenderBatchKey key,
+        Matrix4x4 matrix,
+        ConveyorItemGpuMotionData conveyorMotion)
+    {
+        AddOwnedMatrix(
+            owner,
+            ownerEntries,
+            key,
+            matrix,
+            ResolveDefaultUvData(),
+            conveyorMotion);
     }
 
     public void AddOwnedMatrix(
@@ -239,6 +289,23 @@ public sealed class VirtualRenderBatchCollection
         VirtualRenderBatchKey key,
         Matrix4x4 matrix,
         Vector4 instanceUvData)
+    {
+        AddOwnedMatrix(
+            owner,
+            ownerEntries,
+            key,
+            matrix,
+            instanceUvData,
+            default);
+    }
+
+    private void AddOwnedMatrix(
+        IVirtualRenderBatchOwner owner,
+        List<VirtualRenderBatchEntry> ownerEntries,
+        VirtualRenderBatchKey key,
+        Matrix4x4 matrix,
+        Vector4 instanceUvData,
+        ConveyorItemGpuMotionData conveyorMotion)
     {
         if (owner == null || ownerEntries == null)
         {
@@ -256,8 +323,9 @@ public sealed class VirtualRenderBatchCollection
         ownerEntries.Add(new VirtualRenderBatchEntry(key, matrixIndex));
         batchCache.Matrices.Add(matrix);
         AddInstanceUvData(batchCache, key, instanceUvData);
+        AddConveyorMotionData(batchCache, key, conveyorMotion);
         batchCache.Owners.Add(new MatrixOwner(owner, entryIndex));
-        AddMatrixBounds(key, batchCache, matrix);
+        AddMatrixBounds(key, batchCache, matrix, conveyorMotion);
         batchCache.MarkDataDirty();
     }
 
@@ -451,6 +519,11 @@ public sealed class VirtualRenderBatchCollection
             {
                 batchCache.InstanceUvData[matrixIndex] = batchCache.InstanceUvData[lastIndex];
             }
+            if (entry.BatchKey.HasConveyorMotion)
+            {
+                batchCache.ConveyorMotionStarts[matrixIndex] = batchCache.ConveyorMotionStarts[lastIndex];
+                batchCache.ConveyorMotionEnds[matrixIndex] = batchCache.ConveyorMotionEnds[lastIndex];
+            }
             MatrixOwner movedOwner = batchCache.Owners[lastIndex];
             batchCache.Owners[matrixIndex] = movedOwner;
             if (movedOwner.Owner != null
@@ -465,6 +538,11 @@ public sealed class VirtualRenderBatchCollection
         if (entry.BatchKey.HasUvScroll)
         {
             batchCache.InstanceUvData.RemoveAt(lastIndex);
+        }
+        if (entry.BatchKey.HasConveyorMotion)
+        {
+            batchCache.ConveyorMotionStarts.RemoveAt(lastIndex);
+            batchCache.ConveyorMotionEnds.RemoveAt(lastIndex);
         }
         batchCache.Owners.RemoveAt(lastIndex);
         batchCache.MarkDataDirty();
@@ -520,7 +598,10 @@ public sealed class VirtualRenderBatchCollection
         int startIndex,
         int instanceCount)
     {
-        if (!key.HasUvScroll && !key.UseSleepAwakeDarkTint && !key.UseBeltItemLineDebugColor)
+        if (!key.HasUvScroll
+            && !key.HasConveyorMotion
+            && !key.UseSleepAwakeDarkTint
+            && !key.UseBeltItemLineDebugColor)
         {
             return null;
         }
@@ -545,6 +626,26 @@ public sealed class VirtualRenderBatchCollection
             batchCache.PropertyBlock.SetVectorArray(
                 ConveyorUvDataShaderId,
                 uvDrawScratch);
+        }
+
+        if (key.HasConveyorMotion)
+        {
+            CopyVectorDrawRange(
+                batchCache.ConveyorMotionStarts,
+                conveyorMotionStartDrawScratch,
+                startIndex,
+                instanceCount);
+            CopyVectorDrawRange(
+                batchCache.ConveyorMotionEnds,
+                conveyorMotionEndDrawScratch,
+                startIndex,
+                instanceCount);
+            batchCache.PropertyBlock.SetVectorArray(
+                ConveyorMotionStartShaderId,
+                conveyorMotionStartDrawScratch);
+            batchCache.PropertyBlock.SetVectorArray(
+                ConveyorMotionEndShaderId,
+                conveyorMotionEndDrawScratch);
         }
 
         if (key.UseBeltItemLineDebugColor)
@@ -577,6 +678,38 @@ public sealed class VirtualRenderBatchCollection
         }
     }
 
+    private static void AddConveyorMotionData(
+        BatchRenderCache batchCache,
+        VirtualRenderBatchKey key,
+        ConveyorItemGpuMotionData conveyorMotion)
+    {
+        if (!key.HasConveyorMotion)
+        {
+            return;
+        }
+
+        batchCache.ConveyorMotionStarts ??= new List<Vector4>(64);
+        batchCache.ConveyorMotionEnds ??= new List<Vector4>(64);
+        batchCache.ConveyorMotionStarts.Add(conveyorMotion.Start);
+        batchCache.ConveyorMotionEnds.Add(conveyorMotion.End);
+    }
+
+    private static void CopyVectorDrawRange(
+        List<Vector4> source,
+        List<Vector4> destination,
+        int startIndex,
+        int instanceCount)
+    {
+        destination.Clear();
+        int endIndex = Mathf.Min(
+            source != null ? source.Count : 0,
+            startIndex + instanceCount);
+        for (int i = Mathf.Max(0, startIndex); i < endIndex; i++)
+        {
+            destination.Add(source[i]);
+        }
+    }
+
     private static Vector4 ResolveDefaultUvData()
     {
         return new Vector4(0f, -0.5f, 1f, 0f);
@@ -597,14 +730,27 @@ public sealed class VirtualRenderBatchCollection
         batchCache.ClearBounds();
         for (int i = 0; i < batchCache.Matrices.Count; i++)
         {
-            AddMatrixBounds(key, batchCache, batchCache.Matrices[i]);
+            ConveyorItemGpuMotionData conveyorMotion = default;
+            if (key.HasConveyorMotion
+                && batchCache.ConveyorMotionStarts != null
+                && batchCache.ConveyorMotionEnds != null
+                && i < batchCache.ConveyorMotionStarts.Count
+                && i < batchCache.ConveyorMotionEnds.Count)
+            {
+                conveyorMotion = new ConveyorItemGpuMotionData(
+                    batchCache.ConveyorMotionStarts[i],
+                    batchCache.ConveyorMotionEnds[i]);
+            }
+
+            AddMatrixBounds(key, batchCache, batchCache.Matrices[i], conveyorMotion);
         }
     }
 
     private static void AddMatrixBounds(
         VirtualRenderBatchKey key,
         BatchRenderCache batchCache,
-        Matrix4x4 matrix)
+        Matrix4x4 matrix,
+        ConveyorItemGpuMotionData conveyorMotion)
     {
         if (batchCache.BoundsDirty)
         {
@@ -612,6 +758,11 @@ public sealed class VirtualRenderBatchCollection
         }
 
         Bounds bounds = CalculateWorldBounds(key.Mesh, matrix);
+        if (key.HasConveyorMotion && conveyorMotion.IsActive)
+        {
+            Vector3 motionDelta = conveyorMotion.EndWorldPosition - conveyorMotion.StartWorldPosition;
+            bounds.Encapsulate(new Bounds(bounds.center + motionDelta, bounds.size));
+        }
         batchCache.EncapsulateBounds(bounds);
     }
 
@@ -652,6 +803,8 @@ public sealed class VirtualRenderBatchCollection
     {
         public readonly List<Matrix4x4> Matrices = new List<Matrix4x4>(64);
         public List<Vector4> InstanceUvData;
+        public List<Vector4> ConveyorMotionStarts;
+        public List<Vector4> ConveyorMotionEnds;
         public readonly List<MatrixOwner> Owners = new List<MatrixOwner>(64);
         public MaterialPropertyBlock PropertyBlock;
         public Bounds WorldBounds;

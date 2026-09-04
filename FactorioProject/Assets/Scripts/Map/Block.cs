@@ -50,6 +50,8 @@ public partial class Block : BaseObject
     }
     private const float ConveyorContinuousMotionEpsilon = 0.0001f;
     private const string ConveyorSlotDotRootName = "ConveyorSlotDots";
+    private static readonly int ConveyorMotionStartShaderId = Shader.PropertyToID("_ConveyorMotionStart");
+    private static readonly int ConveyorMotionEndShaderId = Shader.PropertyToID("_ConveyorMotionEnd");
     private static readonly Vector2Int[] ConveyorNeighborDirections =
     {
         Vector2Int.up,
@@ -2932,7 +2934,12 @@ public partial class Block : BaseObject
                 continue;
             }
 
-            Vector3 position = GetConveyorItemVisualWorldPosition(laneIndex, portableObject);
+            ConveyorItemGpuMotionData gpuMotion = default;
+            bool useGpuMotion = !useDynamicFastPath
+                && TryGetConveyorItemGpuMotionData(laneIndex, out gpuMotion);
+            Vector3 position = useGpuMotion
+                ? gpuMotion.StartWorldPosition
+                : GetConveyorItemVisualWorldPosition(laneIndex, portableObject);
             Quaternion rotation = useIdentityRotation
                 ? Quaternion.identity
                 : GetConveyorItemVisualWorldRotation(laneIndex, position);
@@ -2955,7 +2962,8 @@ public partial class Block : BaseObject
                 gameObject.layer,
                 useSleepAwakeDarkTint,
                 useBeltItemLineDebugColor,
-                beltItemLineDebugColor);
+                beltItemLineDebugColor,
+                gpuMotion);
             if (!useDynamicFastPath)
             {
                 renderData = renderData.WithResolvedMatrix(
@@ -3107,44 +3115,6 @@ public partial class Block : BaseObject
 
             results.Add(state);
         }
-    }
-
-    public int ClearLiveConveyorItemsForVirtualization()
-    {
-        EnsureFloorObjectsInitialized();
-        CleanupConveyorStack();
-        if (!IsConveyorStackingEnabled())
-        {
-            return -1;
-        }
-
-        int clearedCount = 0;
-        int laneCount = GetConveyorLaneCount();
-        for (int laneIndex = 0; laneIndex < laneCount; laneIndex++)
-        {
-            bool hadItem = HasConveyorItemAtLane(laneIndex);
-            PortableObject existingPortableObject = GetConveyorPortableObjectAtLane(laneIndex);
-            if (!hadItem && existingPortableObject == null)
-            {
-                continue;
-            }
-
-            ClearConveyorItemAtLane(laneIndex, false);
-            ReleaseFloorObject(existingPortableObject);
-            if (hadItem)
-            {
-                clearedCount++;
-            }
-        }
-
-        if (clearedCount > 0)
-        {
-            MarkConveyorItemVisualDirty();
-            TerrainGenerator.Active?.MarkBeltItemLineDebugDirty(this);
-        }
-
-        RefreshConveyorActivityRegistration(false, false);
-        return clearedCount;
     }
 
     public int ClearRuntimeConveyorItemLanes(ICollection<int> laneIndices)
@@ -4294,7 +4264,27 @@ public partial class Block : BaseObject
         return Application.isPlaying
             && IsConveyorStackingEnabled()
             && ShouldUseVirtualConveyorItemRendering()
-            && HasConveyorMotionStates();
+            && HasCpuRenderedConveyorMotionStates();
+    }
+
+    private bool HasCpuRenderedConveyorMotionStates()
+    {
+        if (HasPortableConveyorMotionStates())
+        {
+            return true;
+        }
+
+        for (int laneIndex = 0; laneIndex < conveyorItemMotionStates.Count; laneIndex++)
+        {
+            if (IsValidConveyorLaneIndex(laneIndex)
+                && conveyorItemMotionStates[laneIndex].active
+                && !conveyorItemMotionStates[laneIndex].useGpuLinearRendering)
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     public bool TickVirtualConveyorDataMotion(float deltaTime)
@@ -8529,7 +8519,63 @@ public partial class Block : BaseObject
         motionState.startTime = duration > ConveyorContinuousMotionEpsilon
             ? now - (duration * clampedProgress)
             : now;
+        motionState.useGpuLinearRendering = CanUseGpuLinearConveyorItemRendering(motionState);
         return motionState;
+    }
+
+    private bool CanUseGpuLinearConveyorItemRendering(ConveyorDataMotionState motionState)
+    {
+        if (!motionState.active
+            || motionState.useCornerMotion
+            || motionState.cornerContinuation.active
+            || motionState.hasViaWorldPosition
+            || motionState.duration <= ConveyorContinuousMotionEpsilon
+            || !IsValidConveyorLaneIndex(motionState.destinationLaneIndex)
+            || TryGetConveyorItemBelt2F(motionState.destinationLaneIndex, out _))
+        {
+            return false;
+        }
+
+        int itemId = GetConveyorItemIdAtLane(motionState.destinationLaneIndex);
+        ItemManager itemManager = GameManager.Instance != null
+            ? GameManager.Instance.ItemManger
+            : null;
+        return itemId >= 0
+            && itemManager != null
+            && itemManager.TryGetItemSetById(itemId, out ItemManager.ItemSet itemSet)
+            && itemSet.portableMat != null
+            && itemSet.portableMat.HasProperty(ConveyorMotionStartShaderId)
+            && itemSet.portableMat.HasProperty(ConveyorMotionEndShaderId);
+    }
+
+    private bool TryGetConveyorItemGpuMotionData(
+        int laneIndex,
+        out ConveyorItemGpuMotionData gpuMotion)
+    {
+        gpuMotion = default;
+        if (laneIndex < 0
+            || laneIndex >= conveyorItemMotionStates.Count
+            || !conveyorItemMotionStates[laneIndex].active
+            || !conveyorItemMotionStates[laneIndex].useGpuLinearRendering)
+        {
+            return false;
+        }
+
+        ConveyorDataMotionState motionState = EnsureConveyorDataMotionTiming(
+            conveyorItemMotionStates[laneIndex]);
+        if (!motionState.useGpuLinearRendering)
+        {
+            conveyorItemMotionStates[laneIndex] = motionState;
+            return false;
+        }
+
+        Vector3 endWorldPosition = GetConveyorLaneWorldPosition(motionState.destinationLaneIndex);
+        gpuMotion = new ConveyorItemGpuMotionData(
+            motionState.startWorldPosition,
+            endWorldPosition,
+            motionState.startTime,
+            motionState.duration);
+        return gpuMotion.IsActive;
     }
 
     private ConveyorDataMotionState EnsureConveyorDataMotionTiming(ConveyorDataMotionState motionState)

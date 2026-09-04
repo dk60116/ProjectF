@@ -4578,6 +4578,7 @@ public partial class TerrainGenerator : MonoBehaviour
         MapObjectTickProfiler.AddRuntimeCounter("ConveyorItemRender", "StaticBatches", itemRenderer != null ? itemRenderer.StaticVirtualConveyorItemBatchCount : 0);
         MapObjectTickProfiler.AddRuntimeCounter("ConveyorItemRender", "StaticBrgBatches", itemRenderer != null ? itemRenderer.StaticVirtualConveyorItemBatchRendererGroupBatchCount : 0);
         MapObjectTickProfiler.AddRuntimeCounter("ConveyorItemRender", "StaticInstances", itemRenderer != null ? itemRenderer.StaticVirtualConveyorItemInstanceCount : 0);
+        MapObjectTickProfiler.AddRuntimeCounter("ConveyorItemRender", "GpuMotionInstances", itemRenderer != null ? itemRenderer.GpuMotionVirtualConveyorItemInstanceCount : 0);
         MapObjectTickProfiler.AddRuntimeCounter("ConveyorItemRender", "StaticDrawCalls", itemRenderer != null ? itemRenderer.StaticVirtualConveyorItemDrawCallCount : 0);
         MapObjectTickProfiler.AddRuntimeCounter("ConveyorItemRender", "DynamicBatches", itemRenderer != null ? itemRenderer.DynamicVirtualConveyorItemBatchCount : 0);
         MapObjectTickProfiler.AddRuntimeCounter("ConveyorItemRender", "DynamicBrgBatches", itemRenderer != null ? itemRenderer.DynamicVirtualConveyorItemBatchRendererGroupBatchCount : 0);

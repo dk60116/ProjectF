@@ -33,6 +33,8 @@ Shader "Custom/ToonCharacter"
         _DepthOffsetUnits("Depth Offset Units", Float) = -1.0
         [Enum(UnityEngine.Rendering.CompareFunction)] _ZTest("ZTest", Float) = 4.0
         _VertexNormalOffset("Vertex Normal Offset", Float) = 0.0
+        [HideInInspector] _ConveyorMotionStart("Conveyor Motion Start", Vector) = (0, 0, 0, 0)
+        [HideInInspector] _ConveyorMotionEnd("Conveyor Motion End", Vector) = (0, 0, 0, 0)
         [ToggleUI] _BlueprintPreview("Blueprint Preview", Float) = 0.0
         _BlueprintTint("Blueprint Tint", Color) = (0.45, 0.95, 1, 1)
         _BlueprintBrightness("Blueprint Brightness", Range(0.5, 2.0)) = 1.8
@@ -95,6 +97,13 @@ Shader "Custom/ToonCharacter"
                 half _BlueprintRimPower;
             CBUFFER_END
 
+            UNITY_INSTANCING_BUFFER_START(ConveyorItemMotion)
+                UNITY_DEFINE_INSTANCED_PROP(float4, _ConveyorMotionStart)
+                UNITY_DEFINE_INSTANCED_PROP(float4, _ConveyorMotionEnd)
+            UNITY_INSTANCING_BUFFER_END(ConveyorItemMotion)
+
+            float _ConveyorMotionTime;
+
             half4 SampleToonBase(float2 uv, out half4 rawSample)
             {
                 rawSample = SAMPLE_TEXTURE2D(_BaseMap, sampler_BaseMap, uv);
@@ -134,6 +143,24 @@ Shader "Custom/ToonCharacter"
             float3 ApplyVertexNormalOffset(float3 positionOS, float3 normalOS)
             {
                 return positionOS + normalOS * _VertexNormalOffset;
+            }
+
+            float3 ApplyConveyorItemMotion(float3 positionOS)
+            {
+#if defined(UNITY_INSTANCING_ENABLED)
+                float4 motionStart = UNITY_ACCESS_INSTANCED_PROP(
+                    ConveyorItemMotion,
+                    _ConveyorMotionStart);
+                float4 motionEnd = UNITY_ACCESS_INSTANCED_PROP(
+                    ConveyorItemMotion,
+                    _ConveyorMotionEnd);
+                float inverseDuration = max(0.0, motionEnd.w);
+                float progress = saturate((_ConveyorMotionTime - motionStart.w) * inverseDuration);
+                float3 offsetWS = (motionEnd.xyz - motionStart.xyz) * progress;
+                return positionOS + TransformWorldToObjectDir(offsetWS, false);
+#else
+                return positionOS;
+#endif
             }
         ENDHLSL
 
@@ -213,7 +240,8 @@ Shader "Custom/ToonCharacter"
                 UNITY_TRANSFER_INSTANCE_ID(input, output);
                 UNITY_INITIALIZE_VERTEX_OUTPUT_STEREO(output);
 
-                float3 positionOS = ApplyVertexNormalOffset(input.positionOS.xyz, input.normalOS);
+                float3 positionOS = ApplyConveyorItemMotion(
+                    ApplyVertexNormalOffset(input.positionOS.xyz, input.normalOS));
                 VertexPositionInputs vertexInput = GetVertexPositionInputs(positionOS);
                 VertexNormalInputs normalInput = GetVertexNormalInputs(input.normalOS);
 
@@ -384,7 +412,8 @@ Shader "Custom/ToonCharacter"
                 UNITY_INITIALIZE_VERTEX_OUTPUT_STEREO(output);
 
                 output.uv = TRANSFORM_TEX(input.uv, _BaseMap);
-                output.positionCS = TransformObjectToHClip(ApplyVertexNormalOffset(input.positionOS.xyz, input.normalOS));
+                output.positionCS = TransformObjectToHClip(ApplyConveyorItemMotion(
+                    ApplyVertexNormalOffset(input.positionOS.xyz, input.normalOS)));
                 return output;
             }
 
@@ -442,7 +471,8 @@ Shader "Custom/ToonCharacter"
                 UNITY_INITIALIZE_VERTEX_OUTPUT_STEREO(output);
 
                 output.uv = TRANSFORM_TEX(input.uv, _BaseMap);
-                output.positionCS = TransformObjectToHClip(ApplyVertexNormalOffset(input.positionOS.xyz, input.normalOS));
+                output.positionCS = TransformObjectToHClip(ApplyConveyorItemMotion(
+                    ApplyVertexNormalOffset(input.positionOS.xyz, input.normalOS)));
                 output.normalWS = NormalizeNormalPerVertex(TransformObjectToWorldNormal(input.normalOS));
                 return output;
             }
