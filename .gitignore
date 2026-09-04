@@ -30,6 +30,8 @@ CodexUnityBeltProbe/
 *.mdb
 *.opendb
 *.VC.db
+*.dll
+*.exe
 
 # Unity cache and generated files
 sysinfo.txt
