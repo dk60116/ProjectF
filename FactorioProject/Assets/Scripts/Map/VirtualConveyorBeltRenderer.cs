@@ -15,7 +15,8 @@ public readonly struct VirtualConveyorBeltRenderData
         float uvScrollY,
         float uvLengthScale,
         float uvLengthOffset,
-        bool usesDedicatedBeltTopMesh = false)
+        bool usesDedicatedBeltTopMesh = false,
+        Transform trackedTransform = null)
     {
         Mesh = mesh;
         Material = material;
@@ -27,6 +28,7 @@ public readonly struct VirtualConveyorBeltRenderData
         UvLengthScale = uvLengthScale;
         UvLengthOffset = uvLengthOffset;
         UsesDedicatedBeltTopMesh = usesDedicatedBeltTopMesh;
+        TrackedTransform = trackedTransform;
     }
 
     public readonly Mesh Mesh;
@@ -39,6 +41,7 @@ public readonly struct VirtualConveyorBeltRenderData
     public readonly float UvLengthScale;
     public readonly float UvLengthOffset;
     public readonly bool UsesDedicatedBeltTopMesh;
+    public readonly Transform TrackedTransform;
 }
 
 [DisallowMultipleComponent]
@@ -242,6 +245,25 @@ public sealed class VirtualConveyorBeltRenderer : MonoBehaviour
         }
     }
 
+    public int TrackedTransformEntryCount
+    {
+        get
+        {
+            int total = 0;
+            foreach (KeyValuePair<ConveyorBelt, BeltRenderCache> pair in beltRenderCaches)
+            {
+                if (pair.Value != null)
+                {
+                    total += pair.Value.trackedTransformEntries.Count;
+                }
+            }
+
+            return total;
+        }
+    }
+
+    public int LastTrackedTransformMatrixUpdates { get; private set; }
+
     private void Awake()
     {
         terrainGenerator = GetComponent<TerrainGenerator>();
@@ -328,6 +350,7 @@ public sealed class VirtualConveyorBeltRenderer : MonoBehaviour
         beltRenderCaches.Clear();
         batches.Clear();
         scratchRenderData.Clear();
+        LastTrackedTransformMatrixUpdates = 0;
     }
 
     private void LateUpdate()
@@ -339,6 +362,7 @@ public sealed class VirtualConveyorBeltRenderer : MonoBehaviour
 
         if (!suppressNativeSourceRenderers)
         {
+            LastTrackedTransformMatrixUpdates = 0;
             if (!IsBeltRenderingHidden())
             {
                 RestoreNativeRenderingForRegisteredBelts();
@@ -349,11 +373,13 @@ public sealed class VirtualConveyorBeltRenderer : MonoBehaviour
 
         if (batches.ActiveBatchCount == 0)
         {
+            LastTrackedTransformMatrixUpdates = 0;
             return;
         }
 
         if (IsBeltRenderingHidden())
         {
+            LastTrackedTransformMatrixUpdates = 0;
             batches.SuspendRendering();
             return;
         }
@@ -369,6 +395,7 @@ public sealed class VirtualConveyorBeltRenderer : MonoBehaviour
         {
             using (RenderBatchesMarker.Auto())
             {
+                LastTrackedTransformMatrixUpdates = SyncTrackedTransformMatrices();
                 RenderBatches();
             }
         }
@@ -469,6 +496,7 @@ public sealed class VirtualConveyorBeltRenderer : MonoBehaviour
 
         batches.RemoveOwnedEntries(cache.batchEntries);
         cache.DedicatedBeltTopEntryCount = 0;
+        cache.trackedTransformEntries.Clear();
     }
 
     private void AddBeltRenderData(BeltRenderCache beltCache, VirtualConveyorBeltRenderData renderData)
@@ -499,6 +527,7 @@ public sealed class VirtualConveyorBeltRenderer : MonoBehaviour
             batchCellZ: cellZ,
             invertCulling: HasOddNegativeScale(renderData.Matrix));
 
+        int batchEntryIndex = beltCache.batchEntries.Count;
         batches.AddOwnedMatrix(
             beltCache,
             beltCache.batchEntries,
@@ -509,10 +538,70 @@ public sealed class VirtualConveyorBeltRenderer : MonoBehaviour
                 renderData.UvScrollY,
                 renderData.UvLengthScale,
                 renderData.UvLengthOffset));
+        if (renderData.TrackedTransform != null)
+        {
+            beltCache.trackedTransformEntries.Add(new TrackedTransformEntry(
+                batchEntryIndex,
+                renderData.TrackedTransform,
+                renderData.Matrix));
+        }
+
         if (renderData.UsesDedicatedBeltTopMesh)
         {
             beltCache.DedicatedBeltTopEntryCount++;
         }
+    }
+
+    private int SyncTrackedTransformMatrices()
+    {
+        int updateCount = 0;
+        foreach (KeyValuePair<ConveyorBelt, BeltRenderCache> pair in beltRenderCaches)
+        {
+            ConveyorBelt conveyorBelt = pair.Key;
+            BeltRenderCache cache = pair.Value;
+            if (conveyorBelt == null || cache == null)
+            {
+                continue;
+            }
+
+            for (int i = 0; i < cache.trackedTransformEntries.Count; i++)
+            {
+                TrackedTransformEntry trackedEntry = cache.trackedTransformEntries[i];
+                Transform trackedTransform = trackedEntry.Transform;
+                if (trackedTransform == null)
+                {
+                    continue;
+                }
+
+                Matrix4x4 matrix = trackedTransform.localToWorldMatrix;
+                if (matrix == trackedEntry.LastMatrix)
+                {
+                    continue;
+                }
+
+                int batchEntryIndex = trackedEntry.BatchEntryIndex;
+                if (batchEntryIndex < 0 || batchEntryIndex >= cache.batchEntries.Count)
+                {
+                    continue;
+                }
+
+                VirtualRenderBatchKey key = cache.batchEntries[batchEntryIndex].BatchKey;
+                if (!batches.TryUpdateOwnedMatrix(
+                        cache.batchEntries,
+                        batchEntryIndex,
+                        key,
+                        matrix))
+                {
+                    continue;
+                }
+
+                trackedEntry.LastMatrix = matrix;
+                cache.trackedTransformEntries[i] = trackedEntry;
+                updateCount++;
+            }
+        }
+
+        return updateCount;
     }
 
     private void RenderBatches()
@@ -558,6 +647,7 @@ public sealed class VirtualConveyorBeltRenderer : MonoBehaviour
     private sealed class BeltRenderCache : IVirtualRenderBatchOwner
     {
         public readonly List<VirtualRenderBatchEntry> batchEntries = new List<VirtualRenderBatchEntry>(4);
+        public readonly List<TrackedTransformEntry> trackedTransformEntries = new List<TrackedTransformEntry>(4);
         public bool IsCornerVariant;
         public int DedicatedBeltTopEntryCount { get; set; }
 
@@ -574,5 +664,22 @@ public sealed class VirtualConveyorBeltRenderer : MonoBehaviour
             entry.MatrixIndex = matrixIndex;
             batchEntries[entryIndex] = entry;
         }
+    }
+
+    private struct TrackedTransformEntry
+    {
+        public TrackedTransformEntry(
+            int batchEntryIndex,
+            Transform transform,
+            Matrix4x4 lastMatrix)
+        {
+            BatchEntryIndex = batchEntryIndex;
+            Transform = transform;
+            LastMatrix = lastMatrix;
+        }
+
+        public int BatchEntryIndex;
+        public Transform Transform;
+        public Matrix4x4 LastMatrix;
     }
 }

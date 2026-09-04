@@ -323,13 +323,57 @@ public partial class TerrainGenerator : MonoBehaviour
 
     private ChunkSurfaceBuildData BuildCurvedChunkSurface(Vector2Int origin, int chunkSizeInBlocks)
     {
-        return BuildCurvedChunkSurfaceFromSnapshot(CreateChunkSurfaceWorkerInput(origin, chunkSizeInBlocks));
+        ChunkSurfaceWorkerInput input = CreateChunkSurfaceWorkerInput(origin, chunkSizeInBlocks);
+        ChunkSurfaceBuildData chunkSurface = RentChunkSurfaceBuildData(input);
+        try
+        {
+            return BuildCurvedChunkSurfaceFromSnapshot(input, chunkSurface);
+        }
+        catch
+        {
+            ReturnChunkSurfaceBuildData(chunkSurface);
+            throw;
+        }
     }
 
-    private Task<ChunkSurfaceBuildData> CreateChunkSurfaceBuildTask(Vector2Int origin, int chunkSizeInBlocks)
+    private Task<ChunkSurfaceBuildData> CreateChunkSurfaceBuildTask(
+        Vector2Int origin,
+        int chunkSizeInBlocks,
+        out ChunkSurfaceBuildData chunkSurface)
     {
         ChunkSurfaceWorkerInput input = CreateChunkSurfaceWorkerInput(origin, chunkSizeInBlocks);
-        return Task.Run(() => BuildCurvedChunkSurfaceFromSnapshot(input));
+        chunkSurface = RentChunkSurfaceBuildData(input);
+        ChunkSurfaceBuildData workerSurface = chunkSurface;
+        return Task.Run(() => BuildCurvedChunkSurfaceFromSnapshot(input, workerSurface));
+    }
+
+    private ChunkSurfaceBuildData RentChunkSurfaceBuildData(ChunkSurfaceWorkerInput input)
+    {
+        ChunkSurfaceBuildData chunkSurface = reusableChunkSurfaceBuildData;
+        reusableChunkSurfaceBuildData = null;
+        if (chunkSurface == null)
+        {
+            chunkSurface = new ChunkSurfaceBuildData(
+                GeneratedSurfaceMaterialCount,
+                input.cellCount);
+        }
+
+        chunkSurface.Reset(input.origin, input);
+        return chunkSurface;
+    }
+
+    private void ReturnChunkSurfaceBuildData(ChunkSurfaceBuildData chunkSurface)
+    {
+        if (chunkSurface == null || ReferenceEquals(reusableChunkSurfaceBuildData, chunkSurface))
+        {
+            return;
+        }
+
+        chunkSurface.Reset(default, null);
+        if (reusableChunkSurfaceBuildData == null)
+        {
+            reusableChunkSurfaceBuildData = chunkSurface;
+        }
     }
 
     private ChunkSurfaceWorkerInput CreateChunkSurfaceWorkerInput(Vector2Int origin, int chunkSizeInBlocks)
@@ -401,14 +445,10 @@ public partial class TerrainGenerator : MonoBehaviour
         return resolution;
     }
 
-    private static ChunkSurfaceBuildData BuildCurvedChunkSurfaceFromSnapshot(ChunkSurfaceWorkerInput input)
+    private static ChunkSurfaceBuildData BuildCurvedChunkSurfaceFromSnapshot(
+        ChunkSurfaceWorkerInput input,
+        ChunkSurfaceBuildData chunkSurface)
     {
-        ChunkSurfaceBuildData chunkSurface = new ChunkSurfaceBuildData(GeneratedSurfaceMaterialCount)
-        {
-            origin = input.origin,
-            surfaceInput = input
-        };
-
         AppendDominantBiomeBaseSurfaceFromSnapshot(chunkSurface, input);
         for (int biomeIndex = 0; biomeIndex < GeneratedSurfaceBiomeMaterialCount; biomeIndex++)
         {
@@ -483,7 +523,7 @@ public partial class TerrainGenerator : MonoBehaviour
 
     private static void AppendDominantBiomeBaseSurfaceFromSnapshot(ChunkSurfaceBuildData chunkSurface, ChunkSurfaceWorkerInput input)
     {
-        float[] weightBuffer = new float[GeneratedSurfaceBiomeMaterialCount];
+        float[] weightBuffer = chunkSurface.blendWeightBuffer;
         List<Vector2> polygonScratch = new List<Vector2>(4);
         for (int cellY = 0; cellY < input.cellCount; cellY++)
         {
@@ -553,7 +593,7 @@ public partial class TerrainGenerator : MonoBehaviour
         TerrainBiome biome,
         ChunkSurfaceWorkerInput input)
     {
-        float[] weightBuffer = new float[GeneratedSurfaceBiomeMaterialCount];
+        float[] weightBuffer = chunkSurface.blendWeightBuffer;
         float[,] scores = new float[input.cellCount + 1, input.cellCount + 1];
         List<Vector2> polygonScratch = new List<Vector2>(8);
 
@@ -792,63 +832,98 @@ public partial class TerrainGenerator : MonoBehaviour
 
         float waterY = GetBiomeSurfaceY(TerrainBiome.Water, input.generatedSurfaceYOffset, input.waterSurfaceDepth);
         float probeDistance = GetWaterWallProbeDistance(input.resolution);
-
-        void AppendSegment(Vector2 start, Vector2 end)
+        int segmentCount = ResolveWaterContourWallSegments(
+            mask,
+            centerScore,
+            bottom,
+            right,
+            top,
+            left,
+            out Vector2 firstStart,
+            out Vector2 firstEnd,
+            out Vector2 secondStart,
+            out Vector2 secondEnd);
+        if (segmentCount > 0)
         {
-            Vector2 edge = end - start;
-            if (edge.sqrMagnitude <= 0.000001f)
-            {
-                return;
-            }
-
-            Vector2 leftNormal = new Vector2(-edge.y, edge.x).normalized;
-            Vector2 midpoint = (start + end) * 0.5f;
-            Vector2 worldMidpoint = new Vector2(input.origin.x + midpoint.x, input.origin.y + midpoint.y);
-
-            if (!TryResolveWaterWallShorelineFromSnapshot(
-                    input,
-                    worldMidpoint,
-                    leftNormal,
-                    probeDistance,
-                    out TerrainBiome landBiome,
-                    out Vector2 waterNormal))
-            {
-                return;
-            }
-
-            float landY = GetBiomeSurfaceY(landBiome, input.generatedSurfaceYOffset, input.waterSurfaceDepth);
-            if (landY <= waterY + 0.0001f)
-            {
-                return;
-            }
-
-            float[] weightBuffer = new float[GeneratedSurfaceBiomeMaterialCount];
-            Color startColor = GetGeneratedSurfaceBlendWeightsFromSnapshot(input, chunkSurface.origin, start, weightBuffer);
-            Color endColor = GetGeneratedSurfaceBlendWeightsFromSnapshot(input, chunkSurface.origin, end, weightBuffer);
-            if (input.waterSurfaceDepth > 0f)
-            {
-                AppendWaterWallQuad(chunkSurface, landBiome, start, end, waterY, landY, startColor, endColor);
-            }
-
-            if (input.generateWaterFoamOverlay)
-            {
-                AppendWaterFoamQuad(
-                    chunkSurface,
-                    start,
-                    end,
-                    waterNormal,
-                    waterY + input.waterFoamSurfaceOffset,
-                    input.waterFoamWidth,
-                    input.waterFoamOverlayColor);
-            }
+            AppendWaterContourWallSegmentFromSnapshot(
+                chunkSurface,
+                input,
+                waterY,
+                probeDistance,
+                firstStart,
+                firstEnd);
         }
 
-        AppendWaterContourWallSegments(mask, centerScore, bottom, right, top, left, AppendSegment);
+        if (segmentCount > 1)
+        {
+            AppendWaterContourWallSegmentFromSnapshot(
+                chunkSurface,
+                input,
+                waterY,
+                probeDistance,
+                secondStart,
+                secondEnd);
+        }
+    }
+
+    private static void AppendWaterContourWallSegmentFromSnapshot(
+        ChunkSurfaceBuildData chunkSurface,
+        ChunkSurfaceWorkerInput input,
+        float waterY,
+        float probeDistance,
+        Vector2 start,
+        Vector2 end)
+    {
+        Vector2 edge = end - start;
+        if (edge.sqrMagnitude <= 0.000001f)
+        {
+            return;
+        }
+
+        Vector2 leftNormal = new Vector2(-edge.y, edge.x).normalized;
+        Vector2 midpoint = (start + end) * 0.5f;
+        Vector2 worldMidpoint = new Vector2(input.origin.x + midpoint.x, input.origin.y + midpoint.y);
+        if (!TryResolveWaterWallShorelineFromSnapshot(
+                input,
+                worldMidpoint,
+                leftNormal,
+                probeDistance,
+                out TerrainBiome landBiome,
+                out Vector2 waterNormal))
+        {
+            return;
+        }
+
+        float landY = GetBiomeSurfaceY(landBiome, input.generatedSurfaceYOffset, input.waterSurfaceDepth);
+        if (landY <= waterY + 0.0001f)
+        {
+            return;
+        }
+
+        float[] weightBuffer = chunkSurface.blendWeightBuffer;
+        Color startColor = GetGeneratedSurfaceBlendWeightsFromSnapshot(input, chunkSurface.origin, start, weightBuffer);
+        Color endColor = GetGeneratedSurfaceBlendWeightsFromSnapshot(input, chunkSurface.origin, end, weightBuffer);
+        if (input.waterSurfaceDepth > 0f)
+        {
+            AppendWaterWallQuad(chunkSurface, landBiome, start, end, waterY, landY, startColor, endColor);
+        }
+
+        if (input.generateWaterFoamOverlay)
+        {
+            AppendWaterFoamQuad(
+                chunkSurface,
+                start,
+                end,
+                waterNormal,
+                waterY + input.waterFoamSurfaceOffset,
+                input.waterFoamWidth,
+                input.waterFoamOverlayColor);
+        }
     }
 
     private static void AppendContourSafetyPatchesFromSnapshot(ChunkSurfaceBuildData chunkSurface, ChunkSurfaceWorkerInput input)
     {
-        float[] weightBuffer = new float[GeneratedSurfaceBiomeMaterialCount];
+        float[] weightBuffer = chunkSurface.blendWeightBuffer;
         float patchRadius = 0.22f / Mathf.Max(1, input.resolution);
         List<Vector2> polygonScratch = new List<Vector2>(4);
 
@@ -1214,7 +1289,7 @@ public partial class TerrainGenerator : MonoBehaviour
             yield break;
         }
 
-        float[] weightBuffer = new float[GeneratedSurfaceBiomeMaterialCount];
+        float[] weightBuffer = chunkSurface.blendWeightBuffer;
         List<Vector2> polygonScratch = new List<Vector2>(4);
         int surfaceRowBudget = Mathf.Max(1, chunkSurfaceRowsPerFrame);
         int rowsSinceYield = 0;
@@ -1294,7 +1369,7 @@ public partial class TerrainGenerator : MonoBehaviour
             yield break;
         }
 
-        float[] weightBuffer = new float[GeneratedSurfaceBiomeMaterialCount];
+        float[] weightBuffer = chunkSurface.blendWeightBuffer;
         float[,] scores = new float[cellCount + 1, cellCount + 1];
         List<Vector2> polygonScratch = new List<Vector2>(8);
         int surfaceRowBudget = Mathf.Max(1, chunkSurfaceRowsPerFrame);
@@ -1541,57 +1616,89 @@ public partial class TerrainGenerator : MonoBehaviour
             : Mathf.Max(2, terrainSurfaceSubdivisions);
         float waterY = GetBiomeSurfaceY(TerrainBiome.Water);
         float probeDistance = GetWaterWallProbeDistance(resolution);
-
-        void AppendSegment(Vector2 start, Vector2 end)
+        int segmentCount = ResolveWaterContourWallSegments(
+            mask,
+            centerScore,
+            bottom,
+            right,
+            top,
+            left,
+            out Vector2 firstStart,
+            out Vector2 firstEnd,
+            out Vector2 secondStart,
+            out Vector2 secondEnd);
+        if (segmentCount > 0)
         {
-            Vector2 edge = end - start;
-            if (edge.sqrMagnitude <= 0.000001f)
-            {
-                return;
-            }
-
-            Vector2 leftNormal = new Vector2(-edge.y, edge.x).normalized;
-            Vector2 midpoint = (start + end) * 0.5f;
-            Vector2 worldMidpoint = new Vector2(chunkSurface.origin.x + midpoint.x, chunkSurface.origin.y + midpoint.y);
-
-            if (!TryResolveWaterWallShoreline(
-                    worldMidpoint,
-                    leftNormal,
-                    probeDistance,
-                    out TerrainBiome landBiome,
-                    out Vector2 waterNormal))
-            {
-                return;
-            }
-
-            float landY = GetBiomeSurfaceY(landBiome);
-            if (landY <= waterY + 0.0001f)
-            {
-                return;
-            }
-
-            float[] weightBuffer = chunkSurface.blendWeightBuffer;
-            Color startColor = GetGeneratedSurfaceBlendWeights(chunkSurface.origin, start, weightBuffer);
-            Color endColor = GetGeneratedSurfaceBlendWeights(chunkSurface.origin, end, weightBuffer);
-            if (waterSurfaceDepth > 0f)
-            {
-                AppendWaterWallQuad(chunkSurface, landBiome, start, end, waterY, landY, startColor, endColor);
-            }
-
-            if (generateWaterFoamOverlay)
-            {
-                AppendWaterFoamQuad(
-                    chunkSurface,
-                    start,
-                    end,
-                    waterNormal,
-                    waterY + waterFoamSurfaceOffset,
-                    waterFoamWidth,
-                    waterFoamOverlayColor);
-            }
+            AppendWaterContourWallSegment(
+                chunkSurface,
+                waterY,
+                probeDistance,
+                firstStart,
+                firstEnd);
         }
 
-        AppendWaterContourWallSegments(mask, centerScore, bottom, right, top, left, AppendSegment);
+        if (segmentCount > 1)
+        {
+            AppendWaterContourWallSegment(
+                chunkSurface,
+                waterY,
+                probeDistance,
+                secondStart,
+                secondEnd);
+        }
+    }
+
+    private void AppendWaterContourWallSegment(
+        ChunkSurfaceBuildData chunkSurface,
+        float waterY,
+        float probeDistance,
+        Vector2 start,
+        Vector2 end)
+    {
+        Vector2 edge = end - start;
+        if (edge.sqrMagnitude <= 0.000001f)
+        {
+            return;
+        }
+
+        Vector2 leftNormal = new Vector2(-edge.y, edge.x).normalized;
+        Vector2 midpoint = (start + end) * 0.5f;
+        Vector2 worldMidpoint = new Vector2(chunkSurface.origin.x + midpoint.x, chunkSurface.origin.y + midpoint.y);
+        if (!TryResolveWaterWallShoreline(
+                worldMidpoint,
+                leftNormal,
+                probeDistance,
+                out TerrainBiome landBiome,
+                out Vector2 waterNormal))
+        {
+            return;
+        }
+
+        float landY = GetBiomeSurfaceY(landBiome);
+        if (landY <= waterY + 0.0001f)
+        {
+            return;
+        }
+
+        float[] weightBuffer = chunkSurface.blendWeightBuffer;
+        Color startColor = GetGeneratedSurfaceBlendWeights(chunkSurface.origin, start, weightBuffer);
+        Color endColor = GetGeneratedSurfaceBlendWeights(chunkSurface.origin, end, weightBuffer);
+        if (waterSurfaceDepth > 0f)
+        {
+            AppendWaterWallQuad(chunkSurface, landBiome, start, end, waterY, landY, startColor, endColor);
+        }
+
+        if (generateWaterFoamOverlay)
+        {
+            AppendWaterFoamQuad(
+                chunkSurface,
+                start,
+                end,
+                waterNormal,
+                waterY + waterFoamSurfaceOffset,
+                waterFoamWidth,
+                waterFoamOverlayColor);
+        }
     }
 
     private IEnumerator AppendContourSafetyPatchesRoutine(
@@ -1606,7 +1713,7 @@ public partial class TerrainGenerator : MonoBehaviour
             yield break;
         }
 
-        float[] weightBuffer = new float[GeneratedSurfaceBiomeMaterialCount];
+        float[] weightBuffer = chunkSurface.blendWeightBuffer;
         int surfaceRowBudget = Mathf.Max(1, chunkSurfaceRowsPerFrame);
         int rowsSinceYield = 0;
         float patchRadius = 0.22f / Mathf.Max(1, resolution);
@@ -1824,82 +1931,107 @@ public partial class TerrainGenerator : MonoBehaviour
         return 0.35f / Mathf.Max(1, resolution);
     }
 
-    private static void AppendWaterContourWallSegments(
+    private static int ResolveWaterContourWallSegments(
         int mask,
         float centerScore,
         Vector2 bottom,
         Vector2 right,
         Vector2 top,
         Vector2 left,
-        Action<Vector2, Vector2> appendSegment)
+        out Vector2 firstStart,
+        out Vector2 firstEnd,
+        out Vector2 secondStart,
+        out Vector2 secondEnd)
     {
-        if (appendSegment == null)
-        {
-            return;
-        }
+        firstStart = default;
+        firstEnd = default;
+        secondStart = default;
+        secondEnd = default;
 
         switch (mask)
         {
             case 1:
-                appendSegment(bottom, left);
-                break;
+                firstStart = bottom;
+                firstEnd = left;
+                return 1;
             case 2:
-                appendSegment(right, bottom);
-                break;
+                firstStart = right;
+                firstEnd = bottom;
+                return 1;
             case 3:
-                appendSegment(right, left);
-                break;
+                firstStart = right;
+                firstEnd = left;
+                return 1;
             case 4:
-                appendSegment(top, right);
-                break;
+                firstStart = top;
+                firstEnd = right;
+                return 1;
             case 5:
                 if (centerScore <= 0f)
                 {
-                    appendSegment(bottom, left);
-                    appendSegment(top, right);
+                    firstStart = bottom;
+                    firstEnd = left;
+                    secondStart = top;
+                    secondEnd = right;
                 }
                 else
                 {
-                    appendSegment(bottom, right);
-                    appendSegment(top, left);
+                    firstStart = bottom;
+                    firstEnd = right;
+                    secondStart = top;
+                    secondEnd = left;
                 }
-                break;
+                return 2;
             case 6:
-                appendSegment(top, bottom);
-                break;
+                firstStart = top;
+                firstEnd = bottom;
+                return 1;
             case 7:
-                appendSegment(top, left);
-                break;
+                firstStart = top;
+                firstEnd = left;
+                return 1;
             case 8:
-                appendSegment(left, top);
-                break;
+                firstStart = left;
+                firstEnd = top;
+                return 1;
             case 9:
-                appendSegment(bottom, top);
-                break;
+                firstStart = bottom;
+                firstEnd = top;
+                return 1;
             case 10:
                 if (centerScore <= 0f)
                 {
-                    appendSegment(right, bottom);
-                    appendSegment(left, top);
+                    firstStart = right;
+                    firstEnd = bottom;
+                    secondStart = left;
+                    secondEnd = top;
                 }
                 else
                 {
-                    appendSegment(right, top);
-                    appendSegment(left, bottom);
+                    firstStart = right;
+                    firstEnd = top;
+                    secondStart = left;
+                    secondEnd = bottom;
                 }
-                break;
+                return 2;
             case 11:
-                appendSegment(right, top);
-                break;
+                firstStart = right;
+                firstEnd = top;
+                return 1;
             case 12:
-                appendSegment(left, right);
-                break;
+                firstStart = left;
+                firstEnd = right;
+                return 1;
             case 13:
-                appendSegment(bottom, right);
-                break;
+                firstStart = bottom;
+                firstEnd = right;
+                return 1;
             case 14:
-                appendSegment(left, bottom);
-                break;
+                firstStart = left;
+                firstEnd = bottom;
+                return 1;
+            default:
+                return 0;
         }
     }
 

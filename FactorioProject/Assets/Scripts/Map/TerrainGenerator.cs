@@ -91,19 +91,43 @@ public partial class TerrainGenerator : MonoBehaviour
     {
         public Vector2Int origin;
         public ChunkSurfaceWorkerInput surfaceInput;
-        public readonly List<Vector3> vertices = new List<Vector3>();
-        public readonly List<Vector3> normals = new List<Vector3>();
-        public readonly List<Vector2> uvs = new List<Vector2>();
-        public readonly List<Color> colors = new List<Color>();
+        public readonly List<Vector3> vertices;
+        public readonly List<Vector3> normals;
+        public readonly List<Vector2> uvs;
+        public readonly List<Color> colors;
         public readonly float[] blendWeightBuffer = new float[GeneratedSurfaceBiomeMaterialCount];
         public readonly List<int>[] trianglesByBiome;
 
-        public ChunkSurfaceBuildData(int biomeCount)
+        public ChunkSurfaceBuildData(int biomeCount, int surfaceCellWidth)
         {
-            trianglesByBiome = new List<int>[biomeCount];
+            int normalizedBiomeCount = Mathf.Max(1, biomeCount);
+            long surfaceCellCountLong = (long)Mathf.Max(1, surfaceCellWidth) * Mathf.Max(1, surfaceCellWidth);
+            int estimatedSurfaceCellCount = (int)Math.Min(surfaceCellCountLong, int.MaxValue / 8L);
+            int estimatedVertexCapacity = Math.Max(64, estimatedSurfaceCellCount * 8);
+            int estimatedTriangleCapacity = Math.Max(96, estimatedSurfaceCellCount * 3);
+
+            vertices = new List<Vector3>(estimatedVertexCapacity);
+            normals = new List<Vector3>(estimatedVertexCapacity);
+            uvs = new List<Vector2>(estimatedVertexCapacity);
+            colors = new List<Color>(estimatedVertexCapacity);
+            trianglesByBiome = new List<int>[normalizedBiomeCount];
             for (int i = 0; i < trianglesByBiome.Length; i++)
             {
-                trianglesByBiome[i] = new List<int>();
+                trianglesByBiome[i] = new List<int>(estimatedTriangleCapacity);
+            }
+        }
+
+        public void Reset(Vector2Int nextOrigin, ChunkSurfaceWorkerInput nextSurfaceInput)
+        {
+            origin = nextOrigin;
+            surfaceInput = nextSurfaceInput;
+            vertices.Clear();
+            normals.Clear();
+            uvs.Clear();
+            colors.Clear();
+            for (int i = 0; i < trianglesByBiome.Length; i++)
+            {
+                trianglesByBiome[i].Clear();
             }
         }
     }
@@ -675,6 +699,7 @@ public partial class TerrainGenerator : MonoBehaviour
     private readonly List<Collider> terrainColliderScratch = new List<Collider>(256);
     private readonly HashSet<Collider> terrainColliderScanSet = new HashSet<Collider>();
     private readonly List<Vector2Int> chunksToGenerateScratch = new List<Vector2Int>();
+    private ChunkSurfaceBuildData reusableChunkSurfaceBuildData;
     private readonly List<Block> chunkRuntimeBlockScratch = new List<Block>();
     private readonly ChunkDistanceComparer chunkDistanceComparer = new ChunkDistanceComparer();
     private readonly HashSet<BlockHandle> activeConveyors = new HashSet<BlockHandle>();
@@ -2585,7 +2610,10 @@ public partial class TerrainGenerator : MonoBehaviour
         ChunkSurfaceBuildData chunkSurface;
         if (Application.isPlaying)
         {
-            Task<ChunkSurfaceBuildData> surfaceTask = CreateChunkSurfaceBuildTask(origin, normalizedChunkSize);
+            Task<ChunkSurfaceBuildData> surfaceTask = CreateChunkSurfaceBuildTask(
+                origin,
+                normalizedChunkSize,
+                out ChunkSurfaceBuildData workerSurface);
             while (!surfaceTask.IsCompleted)
             {
                 yield return null;
@@ -2599,6 +2627,7 @@ public partial class TerrainGenerator : MonoBehaviour
                     Debug.LogException(surfaceException, this);
                 }
 
+                ReturnChunkSurfaceBuildData(workerSurface);
                 chunkSurface = BuildCurvedChunkSurface(origin, normalizedChunkSize);
             }
             else
@@ -2608,11 +2637,8 @@ public partial class TerrainGenerator : MonoBehaviour
         }
         else
         {
-            chunkSurface = new ChunkSurfaceBuildData(GeneratedSurfaceMaterialCount)
-            {
-                origin = origin,
-                surfaceInput = CreateChunkSurfaceWorkerInput(origin, normalizedChunkSize)
-            };
+            ChunkSurfaceWorkerInput surfaceInput = CreateChunkSurfaceWorkerInput(origin, normalizedChunkSize);
+            chunkSurface = RentChunkSurfaceBuildData(surfaceInput);
             IEnumerator surfaceRoutine = BuildCurvedChunkSurfaceRoutine(chunkSurface, origin, normalizedChunkSize, allowYield);
             while (surfaceRoutine.MoveNext())
             {
@@ -2628,7 +2654,14 @@ public partial class TerrainGenerator : MonoBehaviour
             yield return null;
         }
 
-        ApplyChunkBiomeSurface(chunk, chunkSurface);
+        try
+        {
+            ApplyChunkBiomeSurface(chunk, chunkSurface);
+        }
+        finally
+        {
+            ReturnChunkSurfaceBuildData(chunkSurface);
+        }
 
         if (Application.isPlaying)
         {

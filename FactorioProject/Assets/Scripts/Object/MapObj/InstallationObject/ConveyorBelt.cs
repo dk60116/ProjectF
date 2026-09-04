@@ -474,7 +474,8 @@ public class ConveyorBelt : InstallationObject
                     uvScrollY,
                     uvLengthScale,
                     uvLengthOffset,
-                    usesDedicatedBeltTopMesh));
+                    usesDedicatedBeltTopMesh,
+                    IsTrackedVirtualRenderer(renderer) ? renderer.transform : null));
                 addedEntriesForRenderer++;
             }
 
@@ -1719,6 +1720,7 @@ public class ConveyorBelt : InstallationObject
             || rendererObject == gameObject
             || IsBodyVisualObject(rendererObject)
             || IsEndpointVisualObject(rendererObject)
+            || IsTrackedVirtualRenderer(renderer)
             || RequiresNativeRendering(renderer))
         {
             return false;
@@ -1942,7 +1944,7 @@ public class ConveyorBelt : InstallationObject
                || objectName.StartsWith("Body_", System.StringComparison.Ordinal);
     }
 
-    private bool IsReservedNativeAnimatedRenderer(MeshRenderer renderer)
+    private bool IsTrackedVirtualRenderer(MeshRenderer renderer)
     {
         Transform current = renderer != null ? renderer.transform : null;
         while (current != null && current != transform)
@@ -1962,13 +1964,13 @@ public class ConveyorBelt : InstallationObject
 
     private bool RequiresNativeRendering(MeshRenderer renderer)
     {
-        // Gears keep their GameObject renderer because their transforms will be animated.
         // Corner bodies use a prefab-specific mesh/material variant that is not yet safe on
         // the shared instanced path, so keep only that renderer native as a targeted fallback.
-        return IsReservedNativeAnimatedRenderer(renderer)
-               || (IsCornerVariant
-                   && renderer != null
-                   && IsBodyVisualObject(renderer.gameObject));
+        // Gear source objects stay active for future animation, but their renderers use the
+        // virtual batch and track transform changes instead of remaining native renderers.
+        return IsCornerVariant
+               && renderer != null
+               && IsBodyVisualObject(renderer.gameObject);
     }
 
 #if UNITY_EDITOR

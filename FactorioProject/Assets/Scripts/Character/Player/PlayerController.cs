@@ -47,6 +47,8 @@ public partial class PlayerController : MonoBehaviour
     private const int AutomaticAnimalInteractionOverlapCapacity = 32;
     private const int InitialMouseFocusRaycastHitBufferSize = 32;
     private const int MaxMouseFocusRaycastHitBufferSize = 128;
+    private const int InitialPlayerMovementSweepHitBufferSize = 32;
+    private const int MaxPlayerMovementSweepHitBufferSize = 512;
     private static readonly Vector2[] WaterBoundarySampleDirections =
     {
         new Vector2(1f, 0f),
@@ -113,6 +115,7 @@ public partial class PlayerController : MonoBehaviour
     private RaycastHit[] mouseFocusRaycastHits = new RaycastHit[InitialMouseFocusRaycastHitBufferSize];
     private readonly List<InstallationObject> nearbyInstallationObjects = new List<InstallationObject>();
     private readonly List<InstallationObject> nearbyRuntimeInstallationScratch = new List<InstallationObject>(8);
+    private readonly List<Renderer> mapObjectFocusRenderers = new List<Renderer>(16);
     private readonly List<Train> itemFilterTrainScratch = new List<Train>(8);
     private readonly Queue<Train> itemFilterTrainQueue = new Queue<Train>(8);
     private readonly HashSet<Train> itemFilterTrainVisited = new HashSet<Train>();
@@ -134,6 +137,10 @@ public partial class PlayerController : MonoBehaviour
     private readonly List<Block> focusRemovalBuffer = new List<Block>();
     private readonly float[] waterBoundaryWeightBuffer = new float[8];
     private readonly float[] waterBoundaryNormalWeightBuffer = new float[8];
+    private RaycastHit[] playerMovementSweepHits =
+        new RaycastHit[InitialPlayerMovementSweepHitBufferSize];
+    private int playerMovementCollisionMaskLayer = -1;
+    private int playerMovementCollisionMask;
     private Rigidbody cachedRigidbody;
     private CapsuleCollider cachedCapsuleCollider;
     private Vector3 defaultCapsuleColliderCenter;
@@ -1969,38 +1976,134 @@ public partial class PlayerController : MonoBehaviour
             return false;
         }
 
-        RaycastHit[] hits = cachedRigidbody.SweepTestAll(
-            direction,
-            distance,
-            QueryTriggerInteraction.Ignore);
-        if (hits == null || hits.Length == 0)
+        CacheDefaultCapsuleColliderCenter();
+        if (cachedCapsuleCollider == null || !cachedCapsuleCollider.enabled)
         {
-            return false;
+            return cachedRigidbody.SweepTest(
+                       direction,
+                       out blockingHit,
+                       distance,
+                       QueryTriggerInteraction.Ignore)
+                   && !ShouldIgnorePlayerMovementSweepHit(
+                       blockingHit,
+                       direction,
+                       ignoreLiveAnimals);
         }
 
-        System.Array.Sort(hits, CompareSweepHitsByDistance);
-        for (int i = 0; i < hits.Length; i++)
+        int hitCount = CastPlayerMovementCapsuleNonAlloc(direction, distance);
+        float nearestDistance = float.PositiveInfinity;
+        for (int i = 0; i < hitCount; i++)
         {
-            RaycastHit hit = hits[i];
+            RaycastHit hit = playerMovementSweepHits[i];
             if (hit.collider == null
+                || hit.collider.attachedRigidbody == cachedRigidbody
+                || Physics.GetIgnoreCollision(cachedCapsuleCollider, hit.collider)
                 || ShouldIgnorePlayerMovementSweepHit(
                     hit,
                     direction,
-                    ignoreLiveAnimals))
+                    ignoreLiveAnimals)
+                || hit.distance >= nearestDistance)
             {
                 continue;
             }
 
             blockingHit = hit;
-            return true;
+            nearestDistance = hit.distance;
         }
 
-        return false;
+        return !float.IsPositiveInfinity(nearestDistance);
     }
 
-    private static int CompareSweepHitsByDistance(RaycastHit left, RaycastHit right)
+    private int CastPlayerMovementCapsuleNonAlloc(Vector3 direction, float distance)
     {
-        return left.distance.CompareTo(right.distance);
+        GetPlayerMovementCapsuleWorldGeometry(
+            out Vector3 point1,
+            out Vector3 point2,
+            out float radius);
+        int collisionMask = GetPlayerMovementCollisionMask();
+        while (true)
+        {
+            int hitCount = Physics.CapsuleCastNonAlloc(
+                point1,
+                point2,
+                radius,
+                direction,
+                playerMovementSweepHits,
+                distance,
+                collisionMask,
+                QueryTriggerInteraction.Ignore);
+            if (hitCount < playerMovementSweepHits.Length
+                || playerMovementSweepHits.Length >= MaxPlayerMovementSweepHitBufferSize)
+            {
+                return hitCount;
+            }
+
+            int expandedCapacity = Mathf.Min(
+                playerMovementSweepHits.Length * 2,
+                MaxPlayerMovementSweepHitBufferSize);
+            System.Array.Resize(ref playerMovementSweepHits, expandedCapacity);
+        }
+    }
+
+    private void GetPlayerMovementCapsuleWorldGeometry(
+        out Vector3 point1,
+        out Vector3 point2,
+        out float radius)
+    {
+        Transform colliderTransform = cachedCapsuleCollider.transform;
+        Vector3 scale = colliderTransform.lossyScale;
+        Vector3 localAxis;
+        float axisScale;
+        float radiusScale;
+        switch (cachedCapsuleCollider.direction)
+        {
+            case 0:
+                localAxis = Vector3.right;
+                axisScale = Mathf.Abs(scale.x);
+                radiusScale = Mathf.Max(Mathf.Abs(scale.y), Mathf.Abs(scale.z));
+                break;
+            case 2:
+                localAxis = Vector3.forward;
+                axisScale = Mathf.Abs(scale.z);
+                radiusScale = Mathf.Max(Mathf.Abs(scale.x), Mathf.Abs(scale.y));
+                break;
+            default:
+                localAxis = Vector3.up;
+                axisScale = Mathf.Abs(scale.y);
+                radiusScale = Mathf.Max(Mathf.Abs(scale.x), Mathf.Abs(scale.z));
+                break;
+        }
+
+        radius = Mathf.Max(0.0001f, cachedCapsuleCollider.radius * radiusScale);
+        float height = Mathf.Max(radius * 2f, cachedCapsuleCollider.height * axisScale);
+        float halfSegment = Mathf.Max(0f, (height * 0.5f) - radius);
+        Vector3 worldAxis = colliderTransform.TransformDirection(localAxis).normalized;
+        Vector3 center = colliderTransform.TransformPoint(cachedCapsuleCollider.center);
+        Vector3 segmentOffset = worldAxis * halfSegment;
+        point1 = center + segmentOffset;
+        point2 = center - segmentOffset;
+    }
+
+    private int GetPlayerMovementCollisionMask()
+    {
+        int playerLayer = gameObject.layer;
+        if (playerMovementCollisionMaskLayer == playerLayer)
+        {
+            return playerMovementCollisionMask;
+        }
+
+        int collisionMask = 0;
+        for (int layer = 0; layer < 32; layer++)
+        {
+            if (!Physics.GetIgnoreLayerCollision(playerLayer, layer))
+            {
+                collisionMask |= 1 << layer;
+            }
+        }
+
+        playerMovementCollisionMaskLayer = playerLayer;
+        playerMovementCollisionMask = collisionMask;
+        return collisionMask;
     }
 
     private bool ShouldIgnorePlayerMovementSweepHit(
@@ -4982,16 +5085,15 @@ public partial class PlayerController : MonoBehaviour
             return CreateMapObjectStatusFocusBounds(mapObject, block, focusPadding);
         }
 
-        Renderer[] renderers = mapObject != null
-            ? mapObject.GetComponentsInChildren<Renderer>(true)
-            : null;
-        if (renderers != null)
+        mapObjectFocusRenderers.Clear();
+        if (mapObject != null)
         {
+            mapObject.GetComponentsInChildren(true, mapObjectFocusRenderers);
             Bounds combinedBounds = default;
             bool hasBounds = false;
-            for (int i = 0; i < renderers.Length; i++)
+            for (int i = 0; i < mapObjectFocusRenderers.Count; i++)
             {
-                Renderer rendererComponent = renderers[i];
+                Renderer rendererComponent = mapObjectFocusRenderers[i];
                 if (rendererComponent == null
                     || !rendererComponent.enabled
                     || rendererComponent is ParticleSystemRenderer
@@ -5023,10 +5125,12 @@ public partial class PlayerController : MonoBehaviour
                         focusPadding * 2f));
                 }
 
+                mapObjectFocusRenderers.Clear();
                 return combinedBounds;
             }
         }
 
+        mapObjectFocusRenderers.Clear();
         return CreateMapObjectStatusFocusBounds(mapObject, block, focusPadding);
     }
 

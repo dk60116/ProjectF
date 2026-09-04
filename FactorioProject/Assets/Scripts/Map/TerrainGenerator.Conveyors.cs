@@ -4704,6 +4704,8 @@ public partial class TerrainGenerator : MonoBehaviour
         MapObjectTickProfiler.AddRuntimeCounter("Virtualization", "VirtualBeltBrgBatches", virtualConveyorBeltRenderer != null ? virtualConveyorBeltRenderer.ActiveBatchRendererGroupBatchCount : 0);
         MapObjectTickProfiler.AddRuntimeCounter("Virtualization", "VirtualBeltEntries", virtualConveyorBeltRenderer != null ? virtualConveyorBeltRenderer.ActiveEntryCount : 0);
         MapObjectTickProfiler.AddRuntimeCounter("Virtualization", "VirtualBeltDedicatedTopEntries", virtualConveyorBeltRenderer != null ? virtualConveyorBeltRenderer.DedicatedBeltTopEntryCount : 0);
+        MapObjectTickProfiler.AddRuntimeCounter("Virtualization", "VirtualBeltTrackedTransformEntries", virtualConveyorBeltRenderer != null ? virtualConveyorBeltRenderer.TrackedTransformEntryCount : 0);
+        MapObjectTickProfiler.AddRuntimeCounter("Virtualization", "VirtualBeltTrackedTransformUpdates", virtualConveyorBeltRenderer != null ? virtualConveyorBeltRenderer.LastTrackedTransformMatrixUpdates : 0);
         MapObjectTickProfiler.AddRuntimeCounter("Virtualization", "VirtualBeltInstances", virtualConveyorBeltRenderer != null ? virtualConveyorBeltRenderer.ActiveInstanceCount : 0);
         MapObjectTickProfiler.AddRuntimeCounter("Virtualization", "VirtualBeltDrawCalls", virtualConveyorBeltRenderer != null ? virtualConveyorBeltRenderer.EstimatedDrawCallCount : 0);
 
