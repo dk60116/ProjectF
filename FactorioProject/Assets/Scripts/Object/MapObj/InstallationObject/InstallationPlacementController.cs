@@ -22182,34 +22182,19 @@ public class InstallationPlacementController : MonoBehaviour
             return false;
         }
 
-        terrain.GetPlayerRenderCoordinateBounds(
-            out Vector2Int renderRangeMin,
-            out Vector2Int renderRangeMax);
-        Vector2Int visibleTerrainMin = new Vector2Int(
-            Mathf.Max(loadedMin.x, renderRangeMin.x),
-            Mathf.Max(loadedMin.y, renderRangeMin.y));
-        Vector2Int visibleTerrainMax = new Vector2Int(
-            Mathf.Min(loadedMax.x, renderRangeMax.x),
-            Mathf.Min(loadedMax.y, renderRangeMax.y));
-        if (visibleTerrainMin.x > visibleTerrainMax.x
-            || visibleTerrainMin.y > visibleTerrainMax.y)
-        {
-            return false;
-        }
-
-        minCoordinate = visibleTerrainMin;
-        maxCoordinate = visibleTerrainMax;
+        minCoordinate = loadedMin;
+        maxCoordinate = loadedMax;
         if (!TryGetInstallGridViewportBounds(terrain, out Vector2Int viewportMin, out Vector2Int viewportMax))
         {
             return true;
         }
 
         minCoordinate = new Vector2Int(
-            Mathf.Max(visibleTerrainMin.x, viewportMin.x),
-            Mathf.Max(visibleTerrainMin.y, viewportMin.y));
+            Mathf.Max(loadedMin.x, viewportMin.x),
+            Mathf.Max(loadedMin.y, viewportMin.y));
         maxCoordinate = new Vector2Int(
-            Mathf.Min(visibleTerrainMax.x, viewportMax.x),
-            Mathf.Min(visibleTerrainMax.y, viewportMax.y));
+            Mathf.Min(loadedMax.x, viewportMax.x),
+            Mathf.Min(loadedMax.y, viewportMax.y));
         if (minCoordinate.x > maxCoordinate.x || minCoordinate.y > maxCoordinate.y)
         {
             return false;

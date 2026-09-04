@@ -613,7 +613,6 @@ public partial class TerrainGenerator : MonoBehaviour
 
         controller.Configure(animal, definition, instance, restoredState);
         loadedAnimalIds.Add(deterministicId);
-        RefreshTerrainRangeCulling(instanceObject.transform);
         return animal;
     }
 

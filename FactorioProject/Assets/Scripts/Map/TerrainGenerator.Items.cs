@@ -727,7 +727,6 @@ public partial class TerrainGenerator : MonoBehaviour
 
         resourceStateStore?.RegisterLiveInstallation(installationObject);
         RegisterVirtualConveyorBelt(installationObject as ConveyorBelt);
-        RefreshTerrainRangeCulling(installationObject.transform);
         WakeRobotArmsAroundInstallation(installationObject);
         if (installationObject is Trainstation || installationObject is Railload)
         {
@@ -758,7 +757,6 @@ public partial class TerrainGenerator : MonoBehaviour
             return;
         }
 
-        RestorePlayerRangeCulling(installationObject.transform);
         UnregisterVirtualConveyorBelt(installationObject as ConveyorBelt);
         if (Application.isPlaying)
         {
@@ -793,7 +791,6 @@ public partial class TerrainGenerator : MonoBehaviour
 
         resourceStateStore?.RegisterLiveInstallation(installationObject);
         RegisterVirtualConveyorBelt(installationObject as ConveyorBelt);
-        RefreshTerrainRangeCulling(installationObject.transform);
         WakeRobotArmsAroundInstallation(installationObject);
         if (installationObject is Trainstation || installationObject is Railload)
         {

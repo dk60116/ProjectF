@@ -1,6 +1,7 @@
 using System;
 using System.Collections;
 using System.Collections.Generic;
+using Unity.Profiling;
 using UnityEngine;
 using UnityEngine.Rendering;
 #if UNITY_EDITOR
@@ -1937,7 +1938,7 @@ public class Resource : MapObject
     {
         if (useBatchedRendering)
         {
-            batchRenderer?.MarkDirty();
+            batchRenderer?.MarkDirty(this);
         }
     }
 }
@@ -1945,17 +1946,29 @@ public class Resource : MapObject
 public class ResourceBatchRenderer : MonoBehaviour
 {
     private const int MaxInstancesPerDraw = 1023;
+    private const int MaxPendingResourceAddsPerFrame = 128;
     private const float GlobalBatchCellSizeMultiplier = 4f;
+    private static readonly ProfilerMarker ApplyPendingAddsMarker =
+        new ProfilerMarker("ResourceBatchRenderer.ApplyPendingAdds");
+    private static readonly ProfilerMarker RebuildBatchesMarker =
+        new ProfilerMarker("ResourceBatchRenderer.RebuildBatches");
+    private static readonly ProfilerMarker RenderBatchesMarker =
+        new ProfilerMarker("ResourceBatchRenderer.RenderBatches");
 
     [SerializeField, Min(1f)]
     private float batchCellSize = 8f;
 
     private readonly HashSet<Resource> registeredResources = new HashSet<Resource>();
+    private readonly Queue<Resource> pendingResourceAdds = new Queue<Resource>();
+    private readonly HashSet<Resource> pendingResourceAddSet = new HashSet<Resource>();
+    private readonly HashSet<Resource> batchedResources = new HashSet<Resource>();
     private readonly Dictionary<BatchKey, List<Matrix4x4>> matricesByBatch = new Dictionary<BatchKey, List<Matrix4x4>>();
+    private readonly Dictionary<BatchKey, Bounds> boundsByBatch = new Dictionary<BatchKey, Bounds>();
     private readonly List<BatchKey> activeBatchKeys = new List<BatchKey>();
     private readonly List<Resource> cleanupBuffer = new List<Resource>();
-    private bool batchesDirty = true;
-    private TerrainGenerator terrainGenerator;
+    private readonly Plane[] renderFrustumPlanes = new Plane[6];
+    private bool batchesDirty;
+    private Camera mainCamera;
 
     public void Register(Resource resource)
     {
@@ -1966,7 +1979,7 @@ public class ResourceBatchRenderer : MonoBehaviour
 
         if (registeredResources.Add(resource))
         {
-            batchesDirty = true;
+            QueueResourceAdd(resource);
         }
     }
 
@@ -1979,13 +1992,33 @@ public class ResourceBatchRenderer : MonoBehaviour
 
         if (registeredResources.Remove(resource))
         {
-            batchesDirty = true;
+            pendingResourceAddSet.Remove(resource);
+            if (batchedResources.Remove(resource))
+            {
+                batchesDirty = true;
+            }
         }
     }
 
-    public void MarkDirty()
+    public void MarkDirty(Resource resource)
     {
-        batchesDirty = true;
+        if (resource == null || !registeredResources.Contains(resource))
+        {
+            return;
+        }
+
+        if (pendingResourceAddSet.Contains(resource))
+        {
+            return;
+        }
+
+        if (batchedResources.Contains(resource))
+        {
+            batchesDirty = true;
+            return;
+        }
+
+        QueueResourceAdd(resource);
     }
 
     protected void LateUpdate()
@@ -1995,19 +2028,44 @@ public class ResourceBatchRenderer : MonoBehaviour
             if (activeBatchKeys.Count > 0)
             {
                 ClearActiveBatches();
-                batchesDirty = false;
             }
 
+            pendingResourceAdds.Clear();
+            pendingResourceAddSet.Clear();
+            batchedResources.Clear();
+            batchesDirty = false;
             return;
         }
 
         if (batchesDirty)
         {
-            RebuildBatches();
+            using (RebuildBatchesMarker.Auto())
+            {
+                RebuildBatches();
+            }
+
             batchesDirty = false;
         }
+        else if (pendingResourceAdds.Count > 0)
+        {
+            using (ApplyPendingAddsMarker.Auto())
+            {
+                ApplyPendingResourceAdds(MaxPendingResourceAddsPerFrame);
+            }
+        }
 
-        RenderBatches();
+        using (RenderBatchesMarker.Auto())
+        {
+            RenderBatches();
+        }
+    }
+
+    private void QueueResourceAdd(Resource resource)
+    {
+        if (resource != null && pendingResourceAddSet.Add(resource))
+        {
+            pendingResourceAdds.Enqueue(resource);
+        }
     }
 
     private void ClearActiveBatches()
@@ -2028,6 +2086,9 @@ public class ResourceBatchRenderer : MonoBehaviour
     private void RebuildBatches()
     {
         ClearActiveBatches();
+        pendingResourceAdds.Clear();
+        pendingResourceAddSet.Clear();
+        batchedResources.Clear();
 
         foreach (Resource resource in registeredResources)
         {
@@ -2037,63 +2098,108 @@ public class ResourceBatchRenderer : MonoBehaviour
                 continue;
             }
 
-            int entryCount = resource.BatchRenderEntryCount;
-            for (int entryIndex = 0; entryIndex < entryCount; entryIndex++)
-            {
-                if (!resource.TryGetBatchRenderData(
-                        entryIndex,
-                        out Mesh mesh,
-                        out Material[] materials,
-                        out Matrix4x4 localToWorldMatrix,
-                        out Vector3 worldPosition,
-                        out int layer,
-                        out ShadowCastingMode shadowCastingMode,
-                        out bool receiveShadows,
-                        out bool useGlobalBatch))
-                {
-                    continue;
-                }
-
-                int materialCount = materials != null ? materials.Length : 0;
-                if (materialCount <= 0)
-                {
-                    continue;
-                }
-
-                int subMeshCount = Mathf.Max(1, mesh.subMeshCount);
-                int renderPassCount = Mathf.Max(subMeshCount, materialCount);
-                for (int passIndex = 0; passIndex < renderPassCount; passIndex++)
-                {
-                    int materialIndex = Mathf.Min(passIndex, materialCount - 1);
-                    Material material = materials[materialIndex];
-                    if (material == null)
-                    {
-                        continue;
-                    }
-
-                    if (!material.enableInstancing)
-                    {
-                        material.enableInstancing = true;
-                    }
-
-                    int subMeshIndex = Mathf.Min(passIndex, subMeshCount - 1);
-                    AddBatchMatrix(
-                        mesh,
-                        material,
-                        subMeshIndex,
-                        localToWorldMatrix,
-                        worldPosition,
-                        layer,
-                        shadowCastingMode,
-                        receiveShadows,
-                        useGlobalBatch);
-                }
-            }
+            AddResourceToBatches(resource);
+            batchedResources.Add(resource);
         }
 
         for (int i = 0; i < cleanupBuffer.Count; i++)
         {
             registeredResources.Remove(cleanupBuffer[i]);
+        }
+
+        cleanupBuffer.Clear();
+    }
+
+    private void ApplyPendingResourceAdds(int budget)
+    {
+        int normalizedBudget = Mathf.Max(1, budget);
+        int processed = 0;
+        cleanupBuffer.Clear();
+        while (processed < normalizedBudget && pendingResourceAdds.Count > 0)
+        {
+            Resource resource = pendingResourceAdds.Dequeue();
+            processed++;
+            if (!pendingResourceAddSet.Remove(resource))
+            {
+                continue;
+            }
+
+            if (resource == null)
+            {
+                cleanupBuffer.Add(resource);
+                continue;
+            }
+
+            if (!registeredResources.Contains(resource) || batchedResources.Contains(resource))
+            {
+                continue;
+            }
+
+            AddResourceToBatches(resource);
+            batchedResources.Add(resource);
+        }
+
+        for (int i = 0; i < cleanupBuffer.Count; i++)
+        {
+            registeredResources.Remove(cleanupBuffer[i]);
+        }
+
+        cleanupBuffer.Clear();
+    }
+
+    private void AddResourceToBatches(Resource resource)
+    {
+        int entryCount = resource.BatchRenderEntryCount;
+        for (int entryIndex = 0; entryIndex < entryCount; entryIndex++)
+        {
+            if (!resource.TryGetBatchRenderData(
+                    entryIndex,
+                    out Mesh mesh,
+                    out Material[] materials,
+                    out Matrix4x4 localToWorldMatrix,
+                    out Vector3 worldPosition,
+                    out int layer,
+                    out ShadowCastingMode shadowCastingMode,
+                    out bool receiveShadows,
+                    out bool useGlobalBatch))
+            {
+                continue;
+            }
+
+            int materialCount = materials != null ? materials.Length : 0;
+            if (materialCount <= 0)
+            {
+                continue;
+            }
+
+            int subMeshCount = Mathf.Max(1, mesh.subMeshCount);
+            int renderPassCount = Mathf.Max(subMeshCount, materialCount);
+            for (int passIndex = 0; passIndex < renderPassCount; passIndex++)
+            {
+                int materialIndex = Mathf.Min(passIndex, materialCount - 1);
+                Material material = materials[materialIndex];
+                if (material == null)
+                {
+                    continue;
+                }
+
+                if (!material.enableInstancing)
+                {
+                    material.enableInstancing = true;
+                }
+
+                int subMeshIndex = Mathf.Min(passIndex, subMeshCount - 1);
+                AddBatchMatrix(
+                    mesh,
+                    material,
+                    subMeshIndex,
+                    localToWorldMatrix,
+                    worldPosition,
+                    layer,
+                    shadowCastingMode,
+                    receiveShadows,
+                    useGlobalBatch);
+            }
         }
     }
 
@@ -2135,6 +2241,13 @@ public class ResourceBatchRenderer : MonoBehaviour
         if (matrices.Count == 0)
         {
             activeBatchKeys.Add(key);
+            boundsByBatch[key] = TransformBounds(mesh.bounds, localToWorldMatrix);
+        }
+        else
+        {
+            Bounds batchBounds = boundsByBatch[key];
+            batchBounds.Encapsulate(TransformBounds(mesh.bounds, localToWorldMatrix));
+            boundsByBatch[key] = batchBounds;
         }
 
         matrices.Add(localToWorldMatrix);
@@ -2142,24 +2255,26 @@ public class ResourceBatchRenderer : MonoBehaviour
 
     private void RenderBatches()
     {
+        mainCamera ??= Camera.main;
+        bool canFrustumCull = mainCamera != null;
+        if (canFrustumCull)
+        {
+            GeometryUtility.CalculateFrustumPlanes(mainCamera, renderFrustumPlanes);
+        }
+
         for (int batchIndex = 0; batchIndex < activeBatchKeys.Count; batchIndex++)
         {
             BatchKey key = activeBatchKeys[batchIndex];
-            if (!matricesByBatch.TryGetValue(key, out List<Matrix4x4> matrices) || matrices.Count <= 0)
+            if (!matricesByBatch.TryGetValue(key, out List<Matrix4x4> matrices)
+                || matrices.Count <= 0
+                || !boundsByBatch.TryGetValue(key, out Bounds batchBounds))
             {
                 continue;
             }
 
-            terrainGenerator ??= GetComponent<TerrainGenerator>();
-            float effectiveBatchCellSize = ResolveBatchCellSize(key.UseGlobalBatch);
-            if (terrainGenerator != null
-                && !terrainGenerator.DoesWorldBoundsIntersectPlayerRenderRange(
-                    new Bounds(
-                        new Vector3(
-                            (key.CellX + 0.5f) * effectiveBatchCellSize,
-                            0f,
-                            (key.CellZ + 0.5f) * effectiveBatchCellSize),
-                        new Vector3(effectiveBatchCellSize, 0f, effectiveBatchCellSize))))
+            if (canFrustumCull
+                && (((1 << key.Layer) & mainCamera.cullingMask) == 0
+                    || !GeometryUtility.TestPlanesAABB(renderFrustumPlanes, batchBounds)))
             {
                 continue;
             }
@@ -2168,7 +2283,8 @@ public class ResourceBatchRenderer : MonoBehaviour
             {
                 layer = key.Layer,
                 shadowCastingMode = key.ShadowCastingMode,
-                receiveShadows = key.ReceiveShadows
+                receiveShadows = key.ReceiveShadows,
+                worldBounds = batchBounds
             };
 
             int remaining = matrices.Count;
@@ -2181,6 +2297,21 @@ public class ResourceBatchRenderer : MonoBehaviour
                 remaining -= drawCount;
             }
         }
+    }
+
+    private static Bounds TransformBounds(Bounds localBounds, Matrix4x4 localToWorldMatrix)
+    {
+        Vector3 localExtents = localBounds.extents;
+        Vector3 axisX = localToWorldMatrix.MultiplyVector(new Vector3(localExtents.x, 0f, 0f));
+        Vector3 axisY = localToWorldMatrix.MultiplyVector(new Vector3(0f, localExtents.y, 0f));
+        Vector3 axisZ = localToWorldMatrix.MultiplyVector(new Vector3(0f, 0f, localExtents.z));
+        Vector3 worldExtents = new Vector3(
+            Mathf.Abs(axisX.x) + Mathf.Abs(axisY.x) + Mathf.Abs(axisZ.x),
+            Mathf.Abs(axisX.y) + Mathf.Abs(axisY.y) + Mathf.Abs(axisZ.y),
+            Mathf.Abs(axisX.z) + Mathf.Abs(axisY.z) + Mathf.Abs(axisZ.z));
+        return new Bounds(
+            localToWorldMatrix.MultiplyPoint3x4(localBounds.center),
+            worldExtents * 2f);
     }
 
     private float ResolveBatchCellSize(bool useGlobalBatch)

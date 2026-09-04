@@ -429,7 +429,7 @@ public sealed class PortableItemRenderer : MonoBehaviour
 
     private void RenderPortableObjectBatches()
     {
-        portableObjectBatches.RenderBatches(mainCamera, terrainGenerator);
+        portableObjectBatches.RenderBatches(mainCamera);
     }
 
     private void RenderVirtualConveyorItems()

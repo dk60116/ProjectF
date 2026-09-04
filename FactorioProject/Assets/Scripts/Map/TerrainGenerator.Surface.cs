@@ -69,44 +69,9 @@ public partial class TerrainGenerator : MonoBehaviour
         Material[] surfaceMaterials = GetGeneratedSurfaceMaterials();
         Material foamMaterial = GetGeneratedSurfaceFoamMaterial();
 
-        if (Application.isPlaying)
-        {
-            RenderVisibleChunkSurfaces(surfaceMaterials, foamMaterial, renderCamera);
-            return;
-        }
-
         foreach (KeyValuePair<Vector2Int, ChunkRuntimeData> pair in loadedChunks)
         {
             RenderChunkSurface(pair.Value, surfaceMaterials, foamMaterial, renderCamera);
-        }
-    }
-
-    private void RenderVisibleChunkSurfaces(
-        Material[] surfaceMaterials,
-        Material foamMaterial,
-        Camera renderCamera)
-    {
-        GetPlayerRenderCoordinateBounds(out Vector2Int minCoordinate, out Vector2Int maxCoordinate);
-        int normalizedChunkSize = Mathf.Max(4, chunkSize);
-
-        // One padding chunk covers the half-cell mesh bounds and curved edge
-        // vertices. The exact world-bounds test below removes any false positives.
-        int minChunkX = Mathf.FloorToInt(minCoordinate.x / (float)normalizedChunkSize) - 1;
-        int maxChunkX = Mathf.FloorToInt(maxCoordinate.x / (float)normalizedChunkSize) + 1;
-        int minChunkY = Mathf.FloorToInt(minCoordinate.y / (float)normalizedChunkSize) - 1;
-        int maxChunkY = Mathf.FloorToInt(maxCoordinate.y / (float)normalizedChunkSize) + 1;
-
-        for (int chunkY = minChunkY; chunkY <= maxChunkY; chunkY++)
-        {
-            for (int chunkX = minChunkX; chunkX <= maxChunkX; chunkX++)
-            {
-                if (loadedChunks.TryGetValue(
-                        new Vector2Int(chunkX, chunkY),
-                        out ChunkRuntimeData chunk))
-                {
-                    RenderChunkSurface(chunk, surfaceMaterials, foamMaterial, renderCamera);
-                }
-            }
         }
     }
 
@@ -117,12 +82,6 @@ public partial class TerrainGenerator : MonoBehaviour
         Camera renderCamera)
     {
         if (chunk == null || chunk.surfaceMesh == null)
-        {
-            return;
-        }
-
-        if (Application.isPlaying
-            && !DoesWorldBoundsIntersectPlayerRenderRange(chunk.surfaceWorldBounds))
         {
             return;
         }

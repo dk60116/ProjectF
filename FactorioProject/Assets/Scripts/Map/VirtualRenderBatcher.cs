@@ -302,9 +302,7 @@ public sealed class VirtualRenderBatchCollection
         ownerEntries.Clear();
     }
 
-    public void RenderBatches(
-        Camera renderCamera = null,
-        TerrainGenerator playerRangeTerrain = null)
+    public void RenderBatches(Camera renderCamera = null)
     {
         if (renderCamera == null)
         {
@@ -325,12 +323,6 @@ public sealed class VirtualRenderBatchCollection
             }
 
             Bounds worldBounds = ResolveWorldBounds(key, batchCache);
-            if (playerRangeTerrain != null
-                && !playerRangeTerrain.DoesWorldBoundsIntersectPlayerRenderRange(worldBounds))
-            {
-                continue;
-            }
-
             if (backend == null
                 || !backend.TrySyncBatch(
                     key,
@@ -369,12 +361,6 @@ public sealed class VirtualRenderBatchCollection
             }
 
             Bounds worldBounds = ResolveWorldBounds(key, batchCache);
-            if (playerRangeTerrain != null
-                && !playerRangeTerrain.DoesWorldBoundsIntersectPlayerRenderRange(worldBounds))
-            {
-                continue;
-            }
-
             if (canFrustumCull
                 && (!IsLayerVisibleToCamera(renderCamera, key.Layer)
                     || !GeometryUtility.TestPlanesAABB(renderFrustumPlanes, worldBounds)))

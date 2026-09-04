@@ -33,7 +33,6 @@ public partial class TerrainGenerator : MonoBehaviour
     private const int GeneratedWaterDepthSearchRadius = 4;
     private const float GeneratedWaterDepthDeepDistance = 2.65f;
     private const int GeneratedWaterFoamRenderQueue = 3010;
-    private const int DynamicRangeCullingBudgetPerFrame = 128;
 
     private static readonly ProfilerMarker TickConveyorDataMotionsMarker = new ProfilerMarker("TerrainGenerator.TickConveyorDataMotions");
     private static readonly ProfilerMarker TickConveyorsMarker = new ProfilerMarker("TerrainGenerator.TickConveyors");
@@ -47,13 +46,14 @@ public partial class TerrainGenerator : MonoBehaviour
     private static readonly ProfilerMarker ReleaseChunkBlocksMarker = new ProfilerMarker("TerrainGenerator.ReleaseChunkBlocks");
     private static readonly ProfilerMarker CleanupInstallationsMarker = new ProfilerMarker("TerrainGenerator.CleanupInstallations");
     private static readonly ProfilerMarker GenerateChunkCoroutineStepMarker = new ProfilerMarker("TerrainGenerator.GenerateChunkCoroutineStep");
+    private static readonly ProfilerMarker EvaluateChunkRuntimeProxyMarker = new ProfilerMarker("TerrainGenerator.EvaluateChunkRuntimeProxy");
     private static readonly ProfilerMarker GenerateChunkRuntimeProxyMarker = new ProfilerMarker("TerrainGenerator.GenerateChunkRuntimeProxy");
+    private static readonly ProfilerMarker SpawnChunkResourceMarker = new ProfilerMarker("TerrainGenerator.SpawnChunkResource");
     private static readonly ProfilerMarker RestoreChunkBlockStateMarker = new ProfilerMarker("TerrainGenerator.RestoreChunkBlockState");
     private static readonly ProfilerMarker SpawnChunkAnimalStepMarker = new ProfilerMarker("TerrainGenerator.SpawnChunkAnimalStep");
     private static readonly ProfilerMarker FinalizeChunkRuntimeViewMarker = new ProfilerMarker("TerrainGenerator.FinalizeChunkRuntimeView");
     private static readonly ProfilerMarker RestoreChunkConveyorItemsMarker = new ProfilerMarker("TerrainGenerator.RestoreChunkConveyorItems");
     private static readonly ProfilerMarker ReleaseEmptyChunkRuntimeProxyMarker = new ProfilerMarker("TerrainGenerator.ReleaseEmptyChunkRuntimeProxy");
-    private static readonly ProfilerMarker RefreshChunkRangeCullingMarker = new ProfilerMarker("TerrainGenerator.RefreshChunkRangeCulling");
     private static readonly ProfilerMarker RestoreSavedInstallationMarker = new ProfilerMarker("TerrainGenerator.RestoreSavedInstallation");
     private static readonly ProfilerMarker InstantiateSavedInstallationMarker = new ProfilerMarker("TerrainGenerator.InstantiateSavedInstallation");
     private static readonly ProfilerMarker BindLoadedInstallationBlocksMarker = new ProfilerMarker("TerrainGenerator.BindLoadedInstallationBlocks");
@@ -402,10 +402,6 @@ public partial class TerrainGenerator : MonoBehaviour
     [SerializeField, Min(0)]
     private int loadRadius = 2;
 
-    [Header("Runtime Rendering")]
-    [SerializeField, Min(0), Tooltip("플레이어를 중심으로 전체 렌더링을 유지할 블록 반경입니다. 범위 밖 오브젝트는 계속 동작하지만 렌더링만 꺼집니다.")]
-    private int playerRenderRadius = 64;
-
     [Header("Editor Preview")]
     [SerializeField]
     private bool expandEditorPreviewRange = false;
@@ -720,12 +716,6 @@ public partial class TerrainGenerator : MonoBehaviour
         new Dictionary<Vector2Int, ChunkRuntimeData>();
     private readonly BlockDataStore loadedBlocks = new BlockDataStore();
     private int suppressedBlockProxyMaterializationDepth;
-    private readonly PlayerRangeCullingIndex playerRangeCullingIndex =
-        new PlayerRangeCullingIndex();
-    private readonly List<Renderer> terrainRendererScratch = new List<Renderer>(256);
-    private readonly HashSet<Renderer> terrainRendererScanSet = new HashSet<Renderer>();
-    private readonly List<Collider> terrainColliderScratch = new List<Collider>(256);
-    private readonly HashSet<Collider> terrainColliderScanSet = new HashSet<Collider>();
     private readonly List<Vector2Int> chunksToGenerateScratch = new List<Vector2Int>();
     private ChunkSurfaceBuildData reusableChunkSurfaceBuildData;
     private ChunkSurfaceWorkerInput reusableChunkSurfaceWorkerInput;
@@ -895,9 +885,6 @@ public partial class TerrainGenerator : MonoBehaviour
     private float nextConveyorActiveFullScanTime;
     private int activeConveyorSafetyScanIndex;
     private Vector2Int currentCenterChunk;
-    private Vector2Int currentPlayerRenderCenter;
-    private bool hasPlayerRenderCenter;
-    private int appliedPlayerRenderRadius = -1;
     private BlockStateStore resourceStateStore;
     private InstallationPlacementController installationRestoreController;
     private InstallationObjectPool installationObjectPool;
@@ -919,7 +906,6 @@ public partial class TerrainGenerator : MonoBehaviour
     {
         generatedSurfaceMaterials = null;
         NormalizeTerrainBoundsSettings();
-        playerRenderRadius = Mathf.Max(0, playerRenderRadius);
         starterOreMaxResourceCount = Mathf.Max(starterOreMinResourceCount, starterOreMaxResourceCount);
         normalOreMaxResourceCount = Mathf.Max(normalOreMinResourceCount, normalOreMaxResourceCount);
         starterTreeMaxCount = Mathf.Max(starterTreeMinCount, starterTreeMaxCount);
@@ -1025,11 +1011,6 @@ public partial class TerrainGenerator : MonoBehaviour
         {
             return;
         }
-
-        RefreshTrackedPlayerRangeCullingIfNeeded();
-        playerRangeCullingIndex.RefreshDynamicComponents(
-            DynamicRangeCullingBudgetPerFrame,
-            DynamicRangeCullingBudgetPerFrame);
 
         bool profileBeltTicks = RefreshBeltTickProfilerFrameState();
 
@@ -1165,246 +1146,10 @@ public partial class TerrainGenerator : MonoBehaviour
         return GetCenterChunkCoordinate() != currentCenterChunk;
     }
 
-    public int PlayerRenderRadius => Mathf.Max(0, playerRenderRadius);
-
-    public void GetPlayerRenderCoordinateBounds(
-        out Vector2Int minCoordinate,
-        out Vector2Int maxCoordinate)
-    {
-        Vector2Int centerCoordinate = GetTrackingBlockCoordinate();
-        int radius = PlayerRenderRadius;
-        Vector2Int range = new Vector2Int(radius, radius);
-        minCoordinate = centerCoordinate - range;
-        maxCoordinate = centerCoordinate + range;
-    }
-
-    public bool IsWorldPositionWithinPlayerRenderRange(Vector3 worldPosition)
-    {
-        if (!Application.isPlaying)
-        {
-            return true;
-        }
-
-        EnsurePlayerRenderCenter();
-        int radius = PlayerRenderRadius;
-        return Mathf.Abs(Mathf.RoundToInt(worldPosition.x) - currentPlayerRenderCenter.x) <= radius
-               && Mathf.Abs(Mathf.RoundToInt(worldPosition.z) - currentPlayerRenderCenter.y) <= radius;
-    }
-
-    private void RefreshTrackedPlayerRangeCullingIfNeeded()
-    {
-        Vector2Int renderCenter = GetTrackingBlockCoordinate();
-        int renderRadius = PlayerRenderRadius;
-        if (hasPlayerRenderCenter
-            && renderCenter == currentPlayerRenderCenter
-            && appliedPlayerRenderRadius == renderRadius)
-        {
-            return;
-        }
-
-        currentPlayerRenderCenter = renderCenter;
-        hasPlayerRenderCenter = true;
-        appliedPlayerRenderRadius = renderRadius;
-        playerRangeCullingIndex.SetRange(renderCenter, renderRadius);
-    }
-
-    private void EnsurePlayerRenderCenter()
-    {
-        if (hasPlayerRenderCenter)
-        {
-            return;
-        }
-
-        currentPlayerRenderCenter = GetTrackingBlockCoordinate();
-        hasPlayerRenderCenter = true;
-        appliedPlayerRenderRadius = PlayerRenderRadius;
-        playerRangeCullingIndex.SetRange(currentPlayerRenderCenter, appliedPlayerRenderRadius);
-    }
-
-    private Vector2Int GetTrackingBlockCoordinate()
-    {
-        ResolveTrackingTarget();
-        Vector3 sourcePosition = trackingTarget != null ? trackingTarget.position : transform.position;
-        return new Vector2Int(Mathf.RoundToInt(sourcePosition.x), Mathf.RoundToInt(sourcePosition.z));
-    }
-
-    private void RefreshAllTerrainRangeCulling()
-    {
-        EnsurePlayerRenderCenter();
-        terrainRendererScratch.Clear();
-        terrainRendererScanSet.Clear();
-        transform.GetComponentsInChildren(true, terrainRendererScratch);
-
-        for (int i = 0; i < terrainRendererScratch.Count; i++)
-        {
-            Renderer targetRenderer = terrainRendererScratch[i];
-            if (targetRenderer == null || !targetRenderer.gameObject.activeInHierarchy)
-            {
-                continue;
-            }
-
-            terrainRendererScanSet.Add(targetRenderer);
-            playerRangeCullingIndex.Register(targetRenderer);
-        }
-
-        playerRangeCullingIndex.RemoveMissing(terrainRendererScanSet);
-
-        terrainColliderScratch.Clear();
-        terrainColliderScanSet.Clear();
-        transform.GetComponentsInChildren(true, terrainColliderScratch);
-        for (int i = 0; i < terrainColliderScratch.Count; i++)
-        {
-            Collider targetCollider = terrainColliderScratch[i];
-            if (targetCollider == null || !targetCollider.gameObject.activeInHierarchy)
-            {
-                continue;
-            }
-
-            terrainColliderScanSet.Add(targetCollider);
-            playerRangeCullingIndex.Register(targetCollider);
-        }
-
-        playerRangeCullingIndex.RemoveMissing(terrainColliderScanSet);
-    }
-
-    private void RefreshTerrainRangeCulling(Transform hierarchyRoot)
-    {
-        if (!Application.isPlaying || hierarchyRoot == null)
-        {
-            return;
-        }
-
-        EnsurePlayerRenderCenter();
-        terrainRendererScratch.Clear();
-        hierarchyRoot.GetComponentsInChildren(true, terrainRendererScratch);
-        for (int i = 0; i < terrainRendererScratch.Count; i++)
-        {
-            Renderer targetRenderer = terrainRendererScratch[i];
-            if (targetRenderer != null && targetRenderer.gameObject.activeInHierarchy)
-            {
-                playerRangeCullingIndex.Register(targetRenderer);
-            }
-        }
-
-        terrainColliderScratch.Clear();
-        hierarchyRoot.GetComponentsInChildren(true, terrainColliderScratch);
-        for (int i = 0; i < terrainColliderScratch.Count; i++)
-        {
-            Collider targetCollider = terrainColliderScratch[i];
-            if (targetCollider != null && targetCollider.gameObject.activeInHierarchy)
-            {
-                playerRangeCullingIndex.Register(targetCollider);
-            }
-        }
-    }
-
-    private void RefreshTerrainRangeCulling(Block[] blocksToRegister)
-    {
-        IEnumerator routine = RefreshTerrainRangeCullingRoutine(blocksToRegister, false);
-        while (routine.MoveNext())
-        {
-        }
-    }
-
-    private IEnumerator RefreshTerrainRangeCullingRoutine(
-        IReadOnlyList<Block> blocksToRegister,
-        bool allowYield)
-    {
-        if (!Application.isPlaying || blocksToRegister == null)
-        {
-            yield break;
-        }
-
-        int processedSinceYield = 0;
-        int countBudget = Mathf.Max(1, chunkGenerationBlocksPerFrame);
-        double stepStartTime = Time.realtimeSinceStartupAsDouble;
-        for (int i = 0; i < blocksToRegister.Count; i++)
-        {
-            Block block = blocksToRegister[i];
-            if (block != null)
-            {
-                if (block.MapObject != null)
-                {
-                    using (RefreshChunkRangeCullingMarker.Auto())
-                    {
-                        RefreshTerrainRangeCulling(block.MapObject.transform);
-                    }
-                }
-            }
-
-            processedSinceYield++;
-            if (allowYield
-                && (processedSinceYield >= countBudget
-                    || HasExceededChunkGenerationFrameBudget(stepStartTime)))
-            {
-                processedSinceYield = 0;
-                yield return null;
-                stepStartTime = Time.realtimeSinceStartupAsDouble;
-            }
-        }
-    }
-
     private bool HasExceededChunkGenerationFrameBudget(double stepStartTime)
     {
         return (Time.realtimeSinceStartupAsDouble - stepStartTime) * 1000.0
                >= Mathf.Max(0.25f, chunkGenerationFrameTimeBudgetMilliseconds);
-    }
-
-    public bool DoesWorldBoundsIntersectPlayerRenderRange(Bounds bounds)
-    {
-        EnsurePlayerRenderCenter();
-        return playerRangeCullingIndex.Intersects(bounds);
-    }
-
-    private void RestorePlayerRangeCulling(Transform hierarchyRoot = null)
-    {
-        if (hierarchyRoot == null)
-        {
-            playerRangeCullingIndex.Clear(true);
-            terrainRendererScratch.Clear();
-            terrainRendererScanSet.Clear();
-            terrainColliderScratch.Clear();
-            terrainColliderScanSet.Clear();
-            hasPlayerRenderCenter = false;
-            appliedPlayerRenderRadius = -1;
-            return;
-        }
-
-        terrainRendererScratch.Clear();
-        hierarchyRoot.GetComponentsInChildren(true, terrainRendererScratch);
-        for (int i = 0; i < terrainRendererScratch.Count; i++)
-        {
-            Renderer targetRenderer = terrainRendererScratch[i];
-            playerRangeCullingIndex.Unregister(targetRenderer, true);
-        }
-
-        terrainColliderScratch.Clear();
-        hierarchyRoot.GetComponentsInChildren(true, terrainColliderScratch);
-        for (int i = 0; i < terrainColliderScratch.Count; i++)
-        {
-            Collider targetCollider = terrainColliderScratch[i];
-            playerRangeCullingIndex.Unregister(targetCollider, true);
-        }
-    }
-
-    private void RestorePlayerRangeCulling(Block[] blocksToUnregister)
-    {
-        if (blocksToUnregister == null)
-        {
-            return;
-        }
-
-        for (int i = 0; i < blocksToUnregister.Length; i++)
-        {
-            Block block = blocksToUnregister[i];
-            if (block != null)
-            {
-                if (block.MapObject != null)
-                {
-                    RestorePlayerRangeCulling(block.MapObject.transform);
-                }
-            }
-        }
     }
 
     private void OnDisable()
@@ -1417,7 +1162,6 @@ public partial class TerrainGenerator : MonoBehaviour
             Active = null;
         }
 
-        RestorePlayerRangeCulling();
         ClearConveyorRuntimeState();
         ResetAuthoritativeConveyorItemTotal();
         ClearPendingChunkGenerations();
@@ -1757,7 +1501,6 @@ public partial class TerrainGenerator : MonoBehaviour
         ApplyLoadedConveyorItemSaveStates(mapSaveData);
         RefreshLoadedRuntimeRegistrations();
         RefreshLoadedRuntimeVisibility();
-        RefreshAllTerrainRangeCulling();
     }
 
     private bool QueueSavedActiveChunks(IReadOnlyList<Vector2Int> activeChunkCoordinates)
@@ -2585,7 +2328,6 @@ public partial class TerrainGenerator : MonoBehaviour
             SaveChunkResourceStates(existingBlocks);
             ForgetAnimalRuntimeIds(chunkCoordinate);
             DestroyAnimalViewsInChunk(chunkCoordinate);
-            RestorePlayerRangeCulling(existingBlocks);
             RemoveChunkBlocksFromLookup(existingBlocks);
             ReleaseChunkBlockRuntimeProxies(existingBlocks);
             ReleaseChunkSurfaceMeshes(existingChunk);
@@ -2613,9 +2355,14 @@ public partial class TerrainGenerator : MonoBehaviour
                 }
 
                 loadedBlocks.RegisterCell(worldCoordinate, Block.BlockType.Ground, out _);
-                bool requiresRuntimeProxy = RequiresInitialBlockRuntimeProxy(
-                    worldCoordinate,
-                    out Resource generatedResourcePrefab);
+                bool requiresRuntimeProxy;
+                Resource generatedResourcePrefab;
+                using (EvaluateChunkRuntimeProxyMarker.Auto())
+                {
+                    requiresRuntimeProxy = RequiresInitialBlockRuntimeProxy(
+                        worldCoordinate,
+                        out generatedResourcePrefab);
+                }
                 if (!requiresRuntimeProxy)
                 {
                     if (allowYield
@@ -2647,7 +2394,10 @@ public partial class TerrainGenerator : MonoBehaviour
                         if (!spawnedPlantedResource
                             && generatedResourcePrefab != null)
                         {
-                            SpawnResourceOnBlock(block, generatedResourcePrefab, worldCoordinate);
+                            using (SpawnChunkResourceMarker.Auto())
+                            {
+                                SpawnResourceOnBlock(block, generatedResourcePrefab, worldCoordinate);
+                            }
                         }
                     }
                 }
@@ -2801,18 +2551,6 @@ public partial class TerrainGenerator : MonoBehaviour
             ReturnChunkSurfaceBuildData(chunkSurface);
         }
 
-        if (Application.isPlaying)
-        {
-            IEnumerator cullingRoutine = RefreshTerrainRangeCullingRoutine(chunkBlocks, allowYield);
-            while (cullingRoutine.MoveNext())
-            {
-                if (allowYield)
-                {
-                    yield return cullingRoutine.Current;
-                }
-            }
-        }
-
         if (allowYield)
         {
             yield return null;
@@ -2822,8 +2560,6 @@ public partial class TerrainGenerator : MonoBehaviour
 
     private void ClearLoadedChunks(bool preserveRuntimeState = true, bool releaseLiveInstallations = false)
     {
-        RestorePlayerRangeCulling();
-
         if (preserveRuntimeState)
         {
             RefreshAnimalOverridesFromRuntime();

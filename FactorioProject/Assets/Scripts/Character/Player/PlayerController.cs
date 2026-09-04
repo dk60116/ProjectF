@@ -1,4 +1,5 @@
 using System.Collections.Generic;
+using Unity.Profiling;
 using UnityEngine;
 using UnityEngine.EventSystems;
 using UnityEngine.UI;
@@ -6,6 +7,10 @@ using UnityEngine.UI;
 [RequireComponent(typeof(Player))]
 public partial class PlayerController : MonoBehaviour
 {
+    private static readonly ProfilerMarker RefreshMouseFocusMarker =
+        new ProfilerMarker("PlayerController.RefreshMouseMapObjectFocus");
+    private static readonly ProfilerMarker FindMouseFocusInstallationMarker =
+        new ProfilerMarker("PlayerController.FindMouseFocusInstallation");
     private const int Belt2FDefaultFootprintWidth = 1;
     private const int Belt2FDefaultFootprintLength = 3;
 
@@ -114,6 +119,8 @@ public partial class PlayerController : MonoBehaviour
     private int focusMarkerGroupCount;
     private readonly List<RaycastResult> pointerRaycastResults = new List<RaycastResult>();
     private RaycastHit[] mouseFocusRaycastHits = new RaycastHit[InitialMouseFocusRaycastHitBufferSize];
+    private readonly HashSet<InstallationObject> mouseFocusCheckedInstallations = new HashSet<InstallationObject>();
+    private readonly List<InstallationObject> mouseFocusRuntimeInstallationScratch = new List<InstallationObject>(8);
     private readonly List<InstallationObject> nearbyInstallationObjects = new List<InstallationObject>();
     private readonly List<InstallationObject> nearbyRuntimeInstallationScratch = new List<InstallationObject>(8);
     private readonly List<Renderer> mapObjectFocusRenderers = new List<Renderer>(16);
@@ -1399,7 +1406,10 @@ public partial class PlayerController : MonoBehaviour
 
         ResolveCompletedPick(finishedPickThisFrame);
         RefreshInteractionFocus();
-        RefreshMouseMapObjectFocus();
+        using (RefreshMouseFocusMarker.Auto())
+        {
+            RefreshMouseMapObjectFocus();
+        }
         ClearInactiveResourceHarvestTarget();
     }
 
@@ -5755,22 +5765,30 @@ public partial class PlayerController : MonoBehaviour
             return true;
         }
 
-        if (!TryGetPointerBlockFromGroundPlane(ray, out fallbackBlock))
+        if (!TryGetPointerCoordinateFromGroundPlane(ray, out Vector2Int pointerCoordinate))
         {
             return false;
         }
 
-        mapObject = TryFindInstallationCoveringCoordinate(
-                fallbackBlock.Coordinate,
-                out InstallationObject coveringInstallation,
-                out Block coveringFallbackBlock)
-            ? coveringInstallation
-            : fallbackBlock.MapObject != null
-                ? fallbackBlock.MapObject
-                : fallbackBlock.Resource;
-        if (coveringFallbackBlock != null)
+        TerrainGenerator terrain = ResolveTerrainGenerator();
+        terrain?.TryGetLoadedBlockRuntimeProxy(pointerCoordinate, out fallbackBlock);
+        using (FindMouseFocusInstallationMarker.Auto())
         {
-            fallbackBlock = coveringFallbackBlock;
+            mapObject = TryFindInstallationCoveringCoordinate(
+                    pointerCoordinate,
+                    out InstallationObject coveringInstallation,
+                    out Block coveringFallbackBlock)
+                ? coveringInstallation
+                : fallbackBlock != null && fallbackBlock.MapObject != null
+                    ? fallbackBlock.MapObject
+                    : fallbackBlock != null
+                        ? fallbackBlock.Resource
+                        : null;
+
+            if (coveringFallbackBlock != null)
+            {
+                fallbackBlock = coveringFallbackBlock;
+            }
         }
 
         if (!IsValidMouseFocusMapObject(mapObject))
@@ -5964,33 +5982,139 @@ public partial class PlayerController : MonoBehaviour
             return false;
         }
 
-        List<InstallationObject> checkedInstallations = new List<InstallationObject>();
+        mouseFocusCheckedInstallations.Clear();
+        mouseFocusRuntimeInstallationScratch.Clear();
+        if (TryFindMouseFocusInstallationAtSearchCoordinate(
+                coordinate,
+                coordinate,
+                terrain,
+                out installationObject,
+                out fallbackBlock))
+        {
+            ClearMouseFocusInstallationSearchBuffers();
+            return true;
+        }
+
         int searchRadius = Mathf.Max(4, Mathf.CeilToInt(InstallationObject.GlobalMaxFocusActivationRadius) + 4);
         for (int offsetY = -searchRadius; offsetY <= searchRadius; offsetY++)
         {
             for (int offsetX = -searchRadius; offsetX <= searchRadius; offsetX++)
             {
-                Vector2Int candidateCoordinate = coordinate + new Vector2Int(offsetX, offsetY);
-                if (!terrain.TryGetLoadedBlock(candidateCoordinate, out Block candidateBlock)
-                    || candidateBlock == null
-                    || !(candidateBlock.MapObject is InstallationObject candidate)
-                    || candidate == null
-                    || !candidate.gameObject.activeInHierarchy
-                    || !candidate.AllowsFocus
-                    || checkedInstallations.Contains(candidate)
-                    || !InstallationCoversCoordinate(candidate, coordinate))
+                if (offsetX == 0 && offsetY == 0)
                 {
                     continue;
                 }
 
-                checkedInstallations.Add(candidate);
-                installationObject = candidate;
-                fallbackBlock = candidateBlock;
+                Vector2Int candidateCoordinate = coordinate + new Vector2Int(offsetX, offsetY);
+                if (TryFindMouseFocusInstallationAtSearchCoordinate(
+                        candidateCoordinate,
+                        coordinate,
+                        terrain,
+                        out installationObject,
+                        out fallbackBlock))
+                {
+                    ClearMouseFocusInstallationSearchBuffers();
+                    return true;
+                }
+            }
+        }
+
+        ClearMouseFocusInstallationSearchBuffers();
+        return false;
+    }
+
+    private bool TryFindMouseFocusInstallationAtSearchCoordinate(
+        Vector2Int searchCoordinate,
+        Vector2Int targetCoordinate,
+        TerrainGenerator terrain,
+        out InstallationObject installationObject,
+        out Block fallbackBlock)
+    {
+        terrain.TryGetLoadedBlockRuntimeProxy(searchCoordinate, out Block candidateBlock);
+        if (TrySelectMouseFocusInstallation(
+                candidateBlock != null ? candidateBlock.MapObject as InstallationObject : null,
+                candidateBlock,
+                targetCoordinate,
+                terrain,
+                out installationObject,
+                out fallbackBlock))
+        {
+            return true;
+        }
+
+        mouseFocusRuntimeInstallationScratch.Clear();
+        InstallationObject.CollectActiveInstallationsAtRuntimeGridCoordinate(
+            searchCoordinate,
+            mouseFocusRuntimeInstallationScratch);
+        for (int i = 0; i < mouseFocusRuntimeInstallationScratch.Count; i++)
+        {
+            if (TrySelectMouseFocusInstallation(
+                    mouseFocusRuntimeInstallationScratch[i],
+                    candidateBlock,
+                    targetCoordinate,
+                    terrain,
+                    out installationObject,
+                    out fallbackBlock))
+            {
                 return true;
             }
         }
 
+        installationObject = null;
+        fallbackBlock = null;
         return false;
+    }
+
+    private bool TrySelectMouseFocusInstallation(
+        InstallationObject candidate,
+        Block candidateBlock,
+        Vector2Int targetCoordinate,
+        TerrainGenerator terrain,
+        out InstallationObject installationObject,
+        out Block fallbackBlock)
+    {
+        installationObject = null;
+        fallbackBlock = null;
+        if (candidate == null
+            || !candidate.gameObject.activeInHierarchy
+            || !candidate.AllowsFocus
+            || !mouseFocusCheckedInstallations.Add(candidate)
+            || !InstallationCoversCoordinate(candidate, targetCoordinate))
+        {
+            return false;
+        }
+
+        installationObject = candidate;
+        fallbackBlock = candidateBlock != null && candidateBlock.MapObject == candidate
+            ? candidateBlock
+            : null;
+        if (fallbackBlock != null || terrain == null)
+        {
+            return true;
+        }
+
+        IReadOnlyList<Vector2Int> occupiedCoordinates = candidate.RuntimeOccupiedCoordinates;
+        if (occupiedCoordinates == null)
+        {
+            return true;
+        }
+
+        for (int i = 0; i < occupiedCoordinates.Count; i++)
+        {
+            if (terrain.TryGetLoadedBlockRuntimeProxy(occupiedCoordinates[i], out fallbackBlock)
+                && fallbackBlock != null)
+            {
+                break;
+            }
+        }
+
+        return true;
+    }
+
+    private void ClearMouseFocusInstallationSearchBuffers()
+    {
+        mouseFocusCheckedInstallations.Clear();
+        mouseFocusRuntimeInstallationScratch.Clear();
     }
 
     private bool InstallationCoversCoordinate(InstallationObject installationObject, Vector2Int coordinate)
@@ -6106,6 +6230,19 @@ public partial class PlayerController : MonoBehaviour
     {
         block = null;
         TerrainGenerator terrain = ResolveTerrainGenerator();
+        if (terrain == null
+            || !TryGetPointerCoordinateFromGroundPlane(ray, out Vector2Int coordinate))
+        {
+            return false;
+        }
+
+        return terrain.TryGetLoadedBlock(coordinate, out block) && block != null;
+    }
+
+    private bool TryGetPointerCoordinateFromGroundPlane(Ray ray, out Vector2Int coordinate)
+    {
+        coordinate = default;
+        TerrainGenerator terrain = ResolveTerrainGenerator();
         if (terrain == null)
         {
             return false;
@@ -6118,11 +6255,10 @@ public partial class PlayerController : MonoBehaviour
         }
 
         Vector3 worldPoint = ray.GetPoint(enter);
-        Vector2Int coordinate = new Vector2Int(
+        coordinate = new Vector2Int(
             Mathf.RoundToInt(worldPoint.x),
             Mathf.RoundToInt(worldPoint.z));
-
-        return terrain.TryGetLoadedBlock(coordinate, out block) && block != null;
+        return true;
     }
 
     private bool IsPointerOverMouseFocusBlockingUi(Vector2 pointerPosition)

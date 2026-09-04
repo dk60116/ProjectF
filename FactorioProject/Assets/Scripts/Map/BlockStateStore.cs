@@ -312,6 +312,8 @@ public partial class BlockStateStore : MonoBehaviour
     private readonly Dictionary<Vector2Int, FloorObjectSaveState> savedFloorObjectStates = new Dictionary<Vector2Int, FloorObjectSaveState>();
     private readonly Dictionary<Vector2Int, InstallationSaveState> savedInstallationStates = new Dictionary<Vector2Int, InstallationSaveState>();
     private readonly Dictionary<Vector2Int, Vector2Int> savedInstallationAnchorsByCoordinate = new Dictionary<Vector2Int, Vector2Int>();
+    private readonly Dictionary<Vector2Int, HashSet<Vector2Int>> savedInstallationStorageKeysByOccupiedCoordinate =
+        new Dictionary<Vector2Int, HashSet<Vector2Int>>();
     private readonly Dictionary<Vector2Int, HashSet<Vector2Int>> savedPipeInstallationStorageKeysByOccupiedCoordinate =
         new Dictionary<Vector2Int, HashSet<Vector2Int>>();
     private readonly Dictionary<Vector2Int, HashSet<Vector2Int>> savedInstallationStorageKeysByInteractionCoordinate =
@@ -590,6 +592,14 @@ public partial class BlockStateStore : MonoBehaviour
         return false;
     }
 
+    internal bool TryGetInstallationStateReadOnly(
+        Vector2Int storageKey,
+        out InstallationSaveState state)
+    {
+        return savedInstallationStates.TryGetValue(storageKey, out state)
+               && state != null;
+    }
+
     public void UpdateInstallationState(InstallationSaveState state)
     {
         if (state == null)
@@ -598,11 +608,6 @@ public partial class BlockStateStore : MonoBehaviour
         }
 
         StoreInstallationState(state);
-    }
-
-    public List<Vector2Int> GetSavedInstallationStorageKeys()
-    {
-        return new List<Vector2Int>(savedInstallationStates.Keys);
     }
 
     public List<InstallationSaveState> GetInstallationStatesSnapshot()
@@ -761,6 +766,38 @@ public partial class BlockStateStore : MonoBehaviour
         }
 
         return savedInstallationAnchorsByCoordinate.TryGetValue(worldCoordinate, out storageKey);
+    }
+
+    internal void CollectInstallationStorageKeysAtCoordinate(
+        Vector2Int worldCoordinate,
+        ISet<Vector2Int> storageKeys)
+    {
+        if (storageKeys == null)
+        {
+            return;
+        }
+
+        if (liveInstallationAnchorsByCoordinate.TryGetValue(worldCoordinate, out Vector2Int liveStorageKey))
+        {
+            storageKeys.Add(liveStorageKey);
+        }
+
+        if (savedInstallationAnchorsByCoordinate.TryGetValue(worldCoordinate, out Vector2Int savedStorageKey))
+        {
+            storageKeys.Add(savedStorageKey);
+        }
+
+        if (!savedInstallationStorageKeysByOccupiedCoordinate.TryGetValue(
+                worldCoordinate,
+                out HashSet<Vector2Int> occupiedStorageKeys))
+        {
+            return;
+        }
+
+        foreach (Vector2Int occupiedStorageKey in occupiedStorageKeys)
+        {
+            storageKeys.Add(occupiedStorageKey);
+        }
     }
 
     /// <summary>
@@ -1032,6 +1069,7 @@ public partial class BlockStateStore : MonoBehaviour
         savedInstallationStoredItemCountsByItemId.Clear();
         savedInstallationItemTotal = 0;
         savedInstallationAnchorsByCoordinate.Clear();
+        savedInstallationStorageKeysByOccupiedCoordinate.Clear();
         savedPipeInstallationStorageKeysByOccupiedCoordinate.Clear();
         savedInstallationStorageKeysByInteractionCoordinate.Clear();
         liveInstallationStates.Clear();
@@ -2078,6 +2116,10 @@ public partial class BlockStateStore : MonoBehaviour
                     coordinate,
                     storageKey,
                     state);
+                RegisterSavedCoordinateStorageKey(
+                    savedInstallationStorageKeysByOccupiedCoordinate,
+                    coordinate,
+                    storageKey);
                 if (isPipeState)
                 {
                     RegisterSavedCoordinateStorageKey(
@@ -2087,6 +2129,11 @@ public partial class BlockStateStore : MonoBehaviour
                 }
             }
         }
+
+        RegisterSavedCoordinateStorageKey(
+            savedInstallationStorageKeysByOccupiedCoordinate,
+            state.anchorCoordinate,
+            storageKey);
 
         RegisterSavedInteractionCoordinateMappings(state.inputOutputState, storageKey);
     }
@@ -2109,6 +2156,10 @@ public partial class BlockStateStore : MonoBehaviour
                     savedInstallationAnchorsByCoordinate,
                     coordinate,
                     storageKey);
+                UnregisterSavedCoordinateStorageKey(
+                    savedInstallationStorageKeysByOccupiedCoordinate,
+                    coordinate,
+                    storageKey);
                 if (isPipeState)
                 {
                     UnregisterSavedCoordinateStorageKey(
@@ -2118,6 +2169,11 @@ public partial class BlockStateStore : MonoBehaviour
                 }
             }
         }
+
+        UnregisterSavedCoordinateStorageKey(
+            savedInstallationStorageKeysByOccupiedCoordinate,
+            state.anchorCoordinate,
+            storageKey);
 
         UnregisterSavedInteractionCoordinateMappings(state.inputOutputState, storageKey);
     }

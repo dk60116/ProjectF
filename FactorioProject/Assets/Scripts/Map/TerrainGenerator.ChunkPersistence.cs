@@ -10,6 +10,9 @@ using UnityEditor;
 
 public partial class TerrainGenerator : MonoBehaviour
 {
+    private readonly HashSet<Vector2Int> chunkInstallationAnchorScratch = new HashSet<Vector2Int>();
+    private readonly List<Vector2Int> orderedChunkInstallationAnchorScratch = new List<Vector2Int>();
+
     private Resource SpawnResourceOnBlock(Block block, Resource prefab, Vector2Int worldCoordinate)
     {
         if (block == null || prefab == null)
@@ -147,72 +150,6 @@ public partial class TerrainGenerator : MonoBehaviour
         }
 
         SaveActiveRuntimeInstallations(savedInstallations, chunkCoordinates);
-    }
-
-    private void AddSavedInstallationAnchorsIntersectingCoordinates(
-        ISet<Vector2Int> chunkCoordinates,
-        HashSet<Vector2Int> installationAnchors)
-    {
-        AddSavedInstallationAnchorsIntersectingCoordinates(chunkCoordinates, installationAnchors, null);
-    }
-
-    private void AddSavedInstallationAnchorsIntersectingCoordinates(
-        ISet<Vector2Int> chunkCoordinates,
-        HashSet<Vector2Int> uniqueAnchors,
-        List<Vector2Int> installationAnchors)
-    {
-        if (chunkCoordinates == null
-            || chunkCoordinates.Count <= 0
-            || uniqueAnchors == null
-            || resourceStateStore == null)
-        {
-            return;
-        }
-
-        List<Vector2Int> savedStorageKeys = resourceStateStore.GetSavedInstallationStorageKeys();
-        for (int i = 0; i < savedStorageKeys.Count; i++)
-        {
-            Vector2Int storageKey = savedStorageKeys[i];
-            if (uniqueAnchors.Contains(storageKey)
-                || !resourceStateStore.TryGetInstallationState(storageKey, out BlockStateStore.InstallationSaveState savedState)
-                || !InstallationStateIntersectsCoordinates(savedState, chunkCoordinates))
-            {
-                continue;
-            }
-
-            uniqueAnchors.Add(storageKey);
-            installationAnchors?.Add(storageKey);
-        }
-    }
-
-    private static bool InstallationStateIntersectsCoordinates(
-        BlockStateStore.InstallationSaveState state,
-        ISet<Vector2Int> coordinates)
-    {
-        if (state == null || coordinates == null || coordinates.Count <= 0)
-        {
-            return false;
-        }
-
-        if (coordinates.Contains(state.anchorCoordinate))
-        {
-            return true;
-        }
-
-        if (state.occupiedCoordinates == null)
-        {
-            return false;
-        }
-
-        for (int i = 0; i < state.occupiedCoordinates.Count; i++)
-        {
-            if (coordinates.Contains(state.occupiedCoordinates[i]))
-            {
-                return true;
-            }
-        }
-
-        return false;
     }
 
     private void RemoveChunkBlocksFromLookup(Block[] chunkBlocks)
@@ -673,8 +610,10 @@ public partial class TerrainGenerator : MonoBehaviour
             yield break;
         }
 
-        HashSet<Vector2Int> installationAnchors = new HashSet<Vector2Int>();
-        HashSet<Vector2Int> chunkCoordinates = new HashSet<Vector2Int>();
+        HashSet<Vector2Int> installationAnchors = chunkInstallationAnchorScratch;
+        List<Vector2Int> orderedInstallationAnchors = orderedChunkInstallationAnchorScratch;
+        installationAnchors.Clear();
+        orderedInstallationAnchors.Clear();
         for (int i = 0; i < chunkBlocks.Length; i++)
         {
             if (chunkBlocks[i] == null)
@@ -682,14 +621,15 @@ public partial class TerrainGenerator : MonoBehaviour
                 continue;
             }
 
-            chunkCoordinates.Add(chunkBlocks[i].Coordinate);
-            if (resourceStateStore.TryGetInstallationAnchorAtCoordinate(chunkBlocks[i].Coordinate, out Vector2Int anchorCoordinate))
-            {
-                installationAnchors.Add(anchorCoordinate);
-            }
+            resourceStateStore.CollectInstallationStorageKeysAtCoordinate(
+                chunkBlocks[i].Coordinate,
+                installationAnchors);
         }
 
-        AddSavedInstallationAnchorsIntersectingCoordinates(chunkCoordinates, installationAnchors);
+        foreach (Vector2Int anchorCoordinate in installationAnchors)
+        {
+            orderedInstallationAnchors.Add(anchorCoordinate);
+        }
 
         int restoresSinceYield = 0;
         int restoreBudget = Mathf.Max(1, chunkInstallationRestoresPerFrame);
@@ -697,7 +637,6 @@ public partial class TerrainGenerator : MonoBehaviour
         BeginConveyorRuntimeRefreshBatch();
         try
         {
-            List<Vector2Int> orderedInstallationAnchors = new List<Vector2Int>(installationAnchors);
             orderedInstallationAnchors.Sort(CompareInstallationRestoreOrder);
             foreach (Vector2Int anchorCoordinate in orderedInstallationAnchors)
             {
@@ -720,6 +659,8 @@ public partial class TerrainGenerator : MonoBehaviour
         finally
         {
             EndConveyorRuntimeRefreshBatch();
+            installationAnchors.Clear();
+            orderedInstallationAnchors.Clear();
         }
     }
 
@@ -739,7 +680,9 @@ public partial class TerrainGenerator : MonoBehaviour
     private int ResolveSavedInstallationRestorePriority(Vector2Int storageKey)
     {
         if (resourceStateStore == null
-            || !resourceStateStore.TryGetInstallationState(storageKey, out BlockStateStore.InstallationSaveState savedState)
+            || !resourceStateStore.TryGetInstallationStateReadOnly(
+                storageKey,
+                out BlockStateStore.InstallationSaveState savedState)
             || savedState == null)
         {
             return 1;
@@ -1492,7 +1435,9 @@ public partial class TerrainGenerator : MonoBehaviour
         if (resourceStateStore == null
             || resourcePrefab == null
             || !resourceStateStore.TryGetInstallationAnchorAtCoordinate(worldCoordinate, out Vector2Int anchorCoordinate)
-            || !resourceStateStore.TryGetInstallationState(anchorCoordinate, out BlockStateStore.InstallationSaveState installationState)
+            || !resourceStateStore.TryGetInstallationStateReadOnly(
+                anchorCoordinate,
+                out BlockStateStore.InstallationSaveState installationState)
             || installationState == null)
         {
             return false;

@@ -18,7 +18,6 @@ public class TerrainDataEditorWindow : EditorWindow
         "blocks",
         "chunkSize",
         "loadRadius",
-        "playerRenderRadius",
         "expandEditorPreviewRange",
         "chunkGenerationBlocksPerFrame",
         "chunkSurfaceRowsPerFrame",

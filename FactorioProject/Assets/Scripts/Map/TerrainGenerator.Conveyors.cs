@@ -56,6 +56,8 @@ public partial class TerrainGenerator : MonoBehaviour
         new ProfilerMarker("TerrainGenerator.TickConveyors.LineWakeRefresh");
     private static readonly ProfilerMarker ConveyorLineNoMoveMarker =
         new ProfilerMarker("TerrainGenerator.TickConveyors.LineNoMove");
+    private static readonly ProfilerMarker ConveyorRebuildNetworkCacheMarker =
+        new ProfilerMarker("TerrainGenerator.RebuildConveyorNetworkCache");
 
     private readonly struct ConveyorLaneCoordinateKey : IEquatable<ConveyorLaneCoordinateKey>
     {
@@ -3490,6 +3492,14 @@ public partial class TerrainGenerator : MonoBehaviour
             return;
         }
 
+        using (ConveyorRebuildNetworkCacheMarker.Auto())
+        {
+            RebuildConveyorNetworkCache();
+        }
+    }
+
+    private void RebuildConveyorNetworkCache()
+    {
         conveyorNetworkCacheDirty = false;
         conveyorNetworkIds.Clear();
         conveyorNetworkBlocksById.Clear();
@@ -4080,13 +4090,6 @@ public partial class TerrainGenerator : MonoBehaviour
 
     private void AddBeltDirectionArrowInstance(Matrix4x4 matrix)
     {
-        Vector4 translation = matrix.GetColumn(3);
-        if (!IsWorldPositionWithinPlayerRenderRange(
-                new Vector3(translation.x, translation.y, translation.z)))
-        {
-            return;
-        }
-
         if (beltDirectionArrowInstanceMatrixCount >= MaxBeltDirectionArrowInstancesPerBatch)
         {
             FlushBeltDirectionArrowInstances();
@@ -4231,11 +4234,6 @@ public partial class TerrainGenerator : MonoBehaviour
 
     public void AddConveyorSlotDotInstance(Vector3 worldPosition)
     {
-        if (!IsWorldPositionWithinPlayerRenderRange(worldPosition))
-        {
-            return;
-        }
-
         if (conveyorSlotDotInstanceMatrixCount >= MaxConveyorSlotDotInstancesPerBatch)
         {
             FlushConveyorSlotDotInstances();

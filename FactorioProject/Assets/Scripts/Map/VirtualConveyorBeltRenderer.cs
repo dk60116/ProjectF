@@ -63,7 +63,6 @@ public sealed class VirtualConveyorBeltRenderer : MonoBehaviour
     private readonly VirtualRenderBatchCollection batches = new VirtualRenderBatchCollection();
     private readonly List<VirtualConveyorBeltRenderData> scratchRenderData = new List<VirtualConveyorBeltRenderData>(8);
     private Camera mainCamera;
-    private TerrainGenerator terrainGenerator;
 
     public int RegisteredBeltCount => beltRenderCaches.Count;
     public int ActiveBatchCount => batches.ActiveBatchCount;
@@ -266,7 +265,6 @@ public sealed class VirtualConveyorBeltRenderer : MonoBehaviour
 
     private void Awake()
     {
-        terrainGenerator = GetComponent<TerrainGenerator>();
         if (!Application.isPlaying)
         {
             return;
@@ -606,12 +604,7 @@ public sealed class VirtualConveyorBeltRenderer : MonoBehaviour
 
     private void RenderBatches()
     {
-        if (terrainGenerator == null)
-        {
-            terrainGenerator = TerrainGenerator.Active;
-        }
-
-        batches.RenderBatches(mainCamera, terrainGenerator);
+        batches.RenderBatches(mainCamera);
     }
 
     private static bool IsBeltRenderingHidden()
