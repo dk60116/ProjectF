@@ -880,6 +880,7 @@ public partial class TerrainGenerator : MonoBehaviour
 
     private bool hasGeneratedChunks;
     private bool hasSeedInitialized;
+    private bool deferConveyorItemRestoreUntilBeltTopologyReady;
     private int terrainGenerationVersion;
     private bool activeConveyorOrderDirty = true;
     private bool conveyorNetworkCacheDirty = true;
@@ -1500,6 +1501,8 @@ public partial class TerrainGenerator : MonoBehaviour
         CaptureAnimalSaveStates(mapSaveData);
         CaptureFarmlandSaveState(mapSaveData);
         SaveGameConveyorItemBackfill.BackfillFromFloorObjects(mapSaveData);
+        CaptureConveyorItemSaveRuns(mapSaveData);
+        SaveGameConveyorItemBackfill.StripConveyorItemsFromFloorObjects(mapSaveData);
         return mapSaveData;
     }
 
@@ -1533,15 +1536,26 @@ public partial class TerrainGenerator : MonoBehaviour
         SaveGameConveyorItemBackfill.BackfillFromFloorObjects(mapSaveData);
         resourceStateStore?.ApplySaveState(mapSaveData);
 
-        currentCenterChunk = GetCenterChunkCoordinate();
-        hasGeneratedChunks = true;
-        EnsureChunkActivationStorageCapacity(terrainSaveData?.activeChunkCoordinates?.Count ?? 0);
-        if (!QueueSavedActiveChunks(terrainSaveData?.activeChunkCoordinates))
+        deferConveyorItemRestoreUntilBeltTopologyReady = true;
+        try
         {
-            RefreshChunks(currentCenterChunk, true);
+            currentCenterChunk = GetCenterChunkCoordinate();
+            hasGeneratedChunks = true;
+            EnsureChunkActivationStorageCapacity(terrainSaveData?.activeChunkCoordinates?.Count ?? 0);
+            if (!QueueSavedActiveChunks(terrainSaveData?.activeChunkCoordinates))
+            {
+                RefreshChunks(currentCenterChunk, true);
+            }
+
+            ProcessQueuedChunkGenerationsImmediate();
+            RefreshLoadedConveyorBeltRuntimeViews();
+            ExpandConveyorItemSaveRunsAfterBeltTopology(mapSaveData);
         }
-        ProcessQueuedChunkGenerationsImmediate();
-        RefreshLoadedConveyorBeltRuntimeViews();
+        finally
+        {
+            deferConveyorItemRestoreUntilBeltTopologyReady = false;
+        }
+
         ApplyLoadedConveyorItemSaveStates(mapSaveData);
         RefreshLoadedRuntimeRegistrations();
         RefreshLoadedRuntimeVisibility();
@@ -1770,7 +1784,9 @@ public partial class TerrainGenerator : MonoBehaviour
 
     private void ApplyStoredConveyorItemSaveState(Block block)
     {
-        if (block == null || resourceStateStore == null)
+        if (deferConveyorItemRestoreUntilBeltTopologyReady
+            || block == null
+            || resourceStateStore == null)
         {
             return;
         }
@@ -1844,6 +1860,7 @@ public partial class TerrainGenerator : MonoBehaviour
             }
 
             MarkLoadedConveyorItemBlockLive(coordinate);
+            resourceStateStore?.RemoveConveyorItems(coordinate);
             return restoredItemCount;
         }
 
@@ -1860,6 +1877,7 @@ public partial class TerrainGenerator : MonoBehaviour
                 }
 
                 MarkLoadedConveyorItemBlockLive(coordinate);
+                resourceStateStore?.RemoveConveyorItems(coordinate);
                 return fallbackItemCount;
             }
         }

@@ -3504,6 +3504,11 @@ public sealed class RuntimeItemGiveReceiver : MonoBehaviour
 
     private static ToolResult CheckConveyors()
     {
+        if (!SaveGameBinarySerializer.RunConveyorItemRunRoundTripSelfCheck(out string saveIssue))
+        {
+            return ToolResult.Error(0, 0, $"beltcheck failed first={saveIssue}");
+        }
+
         TerrainGenerator terrain = TerrainGenerator.ResolveActive();
         if (terrain == null)
         {

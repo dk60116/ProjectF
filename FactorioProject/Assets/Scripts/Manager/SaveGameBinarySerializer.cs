@@ -303,6 +303,63 @@ public static class SaveGameBinarySerializer
         return true;
     }
 
+    public static bool RunConveyorItemRunRoundTripSelfCheck(out string firstIssue)
+    {
+        ConveyorItemRunSaveEntry expected = new ConveyorItemRunSaveEntry
+        {
+            startCoordinate = new Vector2Int(-17, 23),
+            startLaneIndex = 2,
+            endCoordinate = new Vector2Int(91, -4),
+            endLaneIndex = 0,
+            itemCount = 5,
+            itemRuns = new List<ConveyorItemTypeRunSaveEntry>
+            {
+                new ConveyorItemTypeRunSaveEntry { itemId = 7, count = 2 },
+                new ConveyorItemTypeRunSaveEntry { itemId = 11, count = 3 }
+            }
+        };
+
+        using MemoryStream stream = new MemoryStream();
+        using (BinaryWriter writer = new BinaryWriter(stream, Encoding.UTF8, true))
+        {
+            WriteConveyorItemRunEntry(writer, expected);
+        }
+
+        stream.Position = 0L;
+        ConveyorItemRunSaveEntry actual;
+        using (BinaryReader reader = new BinaryReader(stream, Encoding.UTF8, true))
+        {
+            actual = ReadConveyorItemRunEntry(reader);
+        }
+
+        if (actual == null
+            || actual.startCoordinate != expected.startCoordinate
+            || actual.startLaneIndex != expected.startLaneIndex
+            || actual.endCoordinate != expected.endCoordinate
+            || actual.endLaneIndex != expected.endLaneIndex
+            || actual.itemCount != expected.itemCount
+            || actual.itemRuns == null
+            || actual.itemRuns.Count != expected.itemRuns.Count)
+        {
+            firstIssue = "conveyor_item_run_save_roundtrip_mismatch";
+            return false;
+        }
+
+        for (int i = 0; i < expected.itemRuns.Count; i++)
+        {
+            if (actual.itemRuns[i] == null
+                || actual.itemRuns[i].itemId != expected.itemRuns[i].itemId
+                || actual.itemRuns[i].count != expected.itemRuns[i].count)
+            {
+                firstIssue = "conveyor_item_type_run_save_roundtrip_mismatch";
+                return false;
+            }
+        }
+
+        firstIssue = string.Empty;
+        return true;
+    }
+
     private static void WriteMap(BinaryWriter writer, MapSaveData map)
     {
         map ??= new MapSaveData();
@@ -315,6 +372,7 @@ public static class SaveGameBinarySerializer
         WriteList(writer, map.farmlandCoordinates, WriteVector2Int);
         WriteList(writer, map.plantedResources, WritePlantedResourceEntry);
         WriteList(writer, map.farmlandFertilizer, WriteFarmlandFertilizerEntry);
+        WriteList(writer, map.conveyorItemRuns, WriteConveyorItemRunEntry);
     }
 
     private static MapSaveData ReadMap(
@@ -350,6 +408,11 @@ public static class SaveGameBinarySerializer
             map.farmlandFertilizer = ReadList(
                 reader,
                 () => ReadFarmlandFertilizerEntry(reader));
+        }
+
+        if (version >= 50)
+        {
+            map.conveyorItemRuns = ReadList(reader, () => ReadConveyorItemRunEntry(reader));
         }
 
         return map;
@@ -936,6 +999,50 @@ public static class SaveGameBinarySerializer
         {
             coordinate = ReadVector2Int(reader),
             lanes = ReadList(reader, () => ReadConveyorLaneEntry(reader))
+        };
+    }
+
+    private static void WriteConveyorItemRunEntry(
+        BinaryWriter writer,
+        ConveyorItemRunSaveEntry entry)
+    {
+        entry ??= new ConveyorItemRunSaveEntry();
+        WriteVector2Int(writer, entry.startCoordinate);
+        writer.Write(entry.startLaneIndex);
+        WriteVector2Int(writer, entry.endCoordinate);
+        writer.Write(entry.endLaneIndex);
+        writer.Write(Mathf.Max(0, entry.itemCount));
+        WriteList(writer, entry.itemRuns, WriteConveyorItemTypeRunEntry);
+    }
+
+    private static ConveyorItemRunSaveEntry ReadConveyorItemRunEntry(BinaryReader reader)
+    {
+        return new ConveyorItemRunSaveEntry
+        {
+            startCoordinate = ReadVector2Int(reader),
+            startLaneIndex = reader.ReadInt32(),
+            endCoordinate = ReadVector2Int(reader),
+            endLaneIndex = reader.ReadInt32(),
+            itemCount = reader.ReadInt32(),
+            itemRuns = ReadList(reader, () => ReadConveyorItemTypeRunEntry(reader))
+        };
+    }
+
+    private static void WriteConveyorItemTypeRunEntry(
+        BinaryWriter writer,
+        ConveyorItemTypeRunSaveEntry entry)
+    {
+        entry ??= new ConveyorItemTypeRunSaveEntry();
+        writer.Write(entry.itemId);
+        writer.Write(Mathf.Max(0, entry.count));
+    }
+
+    private static ConveyorItemTypeRunSaveEntry ReadConveyorItemTypeRunEntry(BinaryReader reader)
+    {
+        return new ConveyorItemTypeRunSaveEntry
+        {
+            itemId = reader.ReadInt32(),
+            count = reader.ReadInt32()
         };
     }
 

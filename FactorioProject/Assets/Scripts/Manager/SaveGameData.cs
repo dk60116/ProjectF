@@ -5,7 +5,7 @@ using UnityEngine;
 [Serializable]
 public sealed class SaveGameData
 {
-    public const int CurrentVersion = 49;
+    public const int CurrentVersion = 50;
 
     public int version = CurrentVersion;
     public long savedAtUtcTicks;
@@ -46,6 +46,7 @@ public sealed class MapSaveData
     public List<FloorObjectSaveEntry> floorObjects = new List<FloorObjectSaveEntry>();
     public List<InstallationSaveEntry> installations = new List<InstallationSaveEntry>();
     public List<ConveyorItemBlockSaveEntry> conveyorItems = new List<ConveyorItemBlockSaveEntry>();
+    public List<ConveyorItemRunSaveEntry> conveyorItemRuns = new List<ConveyorItemRunSaveEntry>();
     public List<AnimalSaveEntry> animals = new List<AnimalSaveEntry>();
     public List<Vector2Int> farmlandCoordinates = new List<Vector2Int>();
     public List<FarmlandFertilizerSaveEntry> farmlandFertilizer =
@@ -127,6 +128,25 @@ public sealed class ConveyorItemBlockSaveEntry
 {
     public Vector2Int coordinate;
     public List<ConveyorItemLaneSaveState> lanes = new List<ConveyorItemLaneSaveState>();
+}
+
+[Serializable]
+public sealed class ConveyorItemRunSaveEntry
+{
+    public Vector2Int startCoordinate;
+    public int startLaneIndex = -1;
+    public Vector2Int endCoordinate;
+    public int endLaneIndex = -1;
+    public int itemCount;
+    public List<ConveyorItemTypeRunSaveEntry> itemRuns =
+        new List<ConveyorItemTypeRunSaveEntry>();
+}
+
+[Serializable]
+public sealed class ConveyorItemTypeRunSaveEntry
+{
+    public int itemId = -1;
+    public int count;
 }
 
 [Serializable]
@@ -262,6 +282,66 @@ public static class SaveGameConveyorItemBackfill
         }
 
         return -1;
+    }
+
+    public static void StripConveyorItemsFromFloorObjects(MapSaveData map)
+    {
+        if (map?.floorObjects == null)
+        {
+            return;
+        }
+
+        for (int entryIndex = map.floorObjects.Count - 1; entryIndex >= 0; entryIndex--)
+        {
+            FloorObjectSaveEntry entry = map.floorObjects[entryIndex];
+            List<int> source = entry?.itemIds;
+            if (source == null || source.Count <= 0)
+            {
+                continue;
+            }
+
+            List<int> compacted = null;
+            for (int itemIndex = 0; itemIndex < source.Count; itemIndex++)
+            {
+                int itemId = source[itemIndex];
+                if (itemId != Block.ConveyorStackStateSentinel)
+                {
+                    compacted?.Add(itemId);
+                    continue;
+                }
+
+                if (compacted == null)
+                {
+                    compacted = new List<int>(source.Count);
+                    for (int copyIndex = 0; copyIndex < itemIndex; copyIndex++)
+                    {
+                        compacted.Add(source[copyIndex]);
+                    }
+                }
+
+                if (itemIndex + 1 >= source.Count)
+                {
+                    continue;
+                }
+
+                int laneCount = Mathf.Max(0, source[++itemIndex]);
+                itemIndex += Mathf.Min(laneCount, source.Count - itemIndex - 1);
+            }
+
+            if (compacted == null)
+            {
+                continue;
+            }
+
+            if (compacted.Count <= 0)
+            {
+                map.floorObjects.RemoveAt(entryIndex);
+            }
+            else
+            {
+                entry.itemIds = compacted;
+            }
+        }
     }
 }
 

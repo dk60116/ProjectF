@@ -162,6 +162,14 @@ public static class SaveGameItemIdRemapper
             }
         }
 
+        if (map.conveyorItemRuns != null)
+        {
+            for (int i = 0; i < map.conveyorItemRuns.Count; i++)
+            {
+                RemapConveyorItemRun(map.conveyorItemRuns[i], itemIdMap);
+            }
+        }
+
         if (map.installations != null)
         {
             for (int i = 0; i < map.installations.Count; i++)
@@ -186,6 +194,25 @@ public static class SaveGameItemIdRemapper
             if (lane != null)
             {
                 lane.itemId = RemapItemId(lane.itemId, itemIdMap);
+            }
+        }
+    }
+
+    private static void RemapConveyorItemRun(
+        ConveyorItemRunSaveEntry run,
+        Dictionary<int, int> itemIdMap)
+    {
+        if (run?.itemRuns == null)
+        {
+            return;
+        }
+
+        for (int i = 0; i < run.itemRuns.Count; i++)
+        {
+            ConveyorItemTypeRunSaveEntry itemRun = run.itemRuns[i];
+            if (itemRun != null)
+            {
+                itemRun.itemId = RemapItemId(itemRun.itemId, itemIdMap);
             }
         }
     }
