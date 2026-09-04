@@ -20,6 +20,7 @@ public partial class PlayerController : MonoBehaviour
     private const float ConveyorCarryDeceleration = 10f;
     private const float MinPhysicsMoveDistance = 0.00001f;
     private const float MinPhysicsMoveDistanceSqr = MinPhysicsMoveDistance * MinPhysicsMoveDistance;
+    private const float PlayerPenetrationEscapeProbeDistance = 0.05f;
     private const float WaterBoundarySkin = 0.005f;
     private const int WaterMoveClampIterations = 5;
     private const float WaterBoundaryNormalProbeDistance = 0.05f;
@@ -1544,34 +1545,54 @@ public partial class PlayerController : MonoBehaviour
         Vector3 finalMove = Vector3.zero;
 
         if (TryGetBlockingSweepHit(
+                Vector3.zero,
                 direction,
                 distance + sweepBuffer,
                 relieveAnimalCrowd,
                 out RaycastHit hit))
         {
-            float allowedDistance = Mathf.Max(0f, hit.distance - sweepBuffer);
+            float allowedDistance = Mathf.Min(
+                distance,
+                Mathf.Max(0f, hit.distance - sweepBuffer));
             if (allowedDistance > 0f)
             {
                 finalMove += direction * allowedDistance;
             }
 
             float remainingDistance = distance - allowedDistance;
-            if (remainingDistance > 0.0001f)
+            if (remainingDistance > MinPhysicsMoveDistance)
             {
                 Vector3 remaining = direction * remainingDistance;
-                Vector3 slide = Vector3.ProjectOnPlane(remaining, hit.normal);
-                if (slide.sqrMagnitude > 0.0001f)
+                Vector3 collisionNormal = hit.normal;
+                collisionNormal.y = 0f;
+                Vector3 slide = collisionNormal.sqrMagnitude > MinPhysicsMoveDistanceSqr
+                    ? Vector3.ProjectOnPlane(remaining, collisionNormal.normalized)
+                    : Vector3.zero;
+                slide.y = 0f;
+                if (slide.sqrMagnitude > MinPhysicsMoveDistanceSqr)
                 {
                     Vector3 slideDirection = slide.normalized;
                     float slideDistance = slide.magnitude;
                     bool relieveSlideCrowd = HasCrowdedAnimalPath(
                         startPosition + finalMove,
                         startPosition + finalMove + slide);
-                    if (!TryGetBlockingSweepHit(
+                    if (TryGetBlockingSweepHit(
+                            finalMove,
                             slideDirection,
                             slideDistance + sweepBuffer,
                             relieveSlideCrowd,
-                            out _))
+                            out RaycastHit slideHit))
+                    {
+                        float allowedSlideDistance = Mathf.Min(
+                            slideDistance,
+                            Mathf.Max(0f, slideHit.distance - sweepBuffer));
+                        if (allowedSlideDistance > MinPhysicsMoveDistance)
+                        {
+                            finalMove += slideDirection * allowedSlideDistance;
+                            relieveAnimalCrowd |= relieveSlideCrowd;
+                        }
+                    }
+                    else
                     {
                         finalMove += slide;
                         relieveAnimalCrowd |= relieveSlideCrowd;
@@ -1965,6 +1986,7 @@ public partial class PlayerController : MonoBehaviour
     }
 
     private bool TryGetBlockingSweepHit(
+        Vector3 originOffset,
         Vector3 direction,
         float distance,
         bool ignoreLiveAnimals,
@@ -1987,10 +2009,15 @@ public partial class PlayerController : MonoBehaviour
                    && !ShouldIgnorePlayerMovementSweepHit(
                        blockingHit,
                        direction,
+                       distance,
+                       originOffset,
                        ignoreLiveAnimals);
         }
 
-        int hitCount = CastPlayerMovementCapsuleNonAlloc(direction, distance);
+        int hitCount = CastPlayerMovementCapsuleNonAlloc(
+            originOffset,
+            direction,
+            distance);
         float nearestDistance = float.PositiveInfinity;
         for (int i = 0; i < hitCount; i++)
         {
@@ -2001,6 +2028,8 @@ public partial class PlayerController : MonoBehaviour
                 || ShouldIgnorePlayerMovementSweepHit(
                     hit,
                     direction,
+                    distance,
+                    originOffset,
                     ignoreLiveAnimals)
                 || hit.distance >= nearestDistance)
             {
@@ -2014,12 +2043,17 @@ public partial class PlayerController : MonoBehaviour
         return !float.IsPositiveInfinity(nearestDistance);
     }
 
-    private int CastPlayerMovementCapsuleNonAlloc(Vector3 direction, float distance)
+    private int CastPlayerMovementCapsuleNonAlloc(
+        Vector3 originOffset,
+        Vector3 direction,
+        float distance)
     {
         GetPlayerMovementCapsuleWorldGeometry(
             out Vector3 point1,
             out Vector3 point2,
             out float radius);
+        point1 += originOffset;
+        point2 += originOffset;
         int collisionMask = GetPlayerMovementCollisionMask();
         while (true)
         {
@@ -2109,6 +2143,8 @@ public partial class PlayerController : MonoBehaviour
     private bool ShouldIgnorePlayerMovementSweepHit(
         RaycastHit hit,
         Vector3 direction,
+        float sweepDistance,
+        Vector3 originOffset,
         bool ignoreLiveAnimals)
     {
         AnimalAIController animalController = hit.collider != null
@@ -2117,6 +2153,20 @@ public partial class PlayerController : MonoBehaviour
         if (ignoreLiveAnimals
             && animalController != null
             && animalController.IsConfigured)
+        {
+            return true;
+        }
+
+        // A cast that starts overlapped reports a zero-distance hit and normally
+        // blocks every direction. Allow only a small step that measurably reduces
+        // the existing penetration so the player can walk back out without being
+        // allowed to move farther into, or tunnel through, the obstacle.
+        if (hit.distance <= MinPhysicsMoveDistance
+            && IsPlayerMovementEscapingPenetration(
+                hit.collider,
+                direction,
+                sweepDistance,
+                originOffset))
         {
             return true;
         }
@@ -2130,6 +2180,7 @@ public partial class PlayerController : MonoBehaviour
         }
 
         Vector3 currentPosition = cachedRigidbody != null ? cachedRigidbody.position : transform.position;
+        currentPosition += originOffset;
         Vector3 hitProbePosition = hit.point;
         hitProbePosition.y = currentPosition.y;
 
@@ -2142,6 +2193,64 @@ public partial class PlayerController : MonoBehaviour
         return IsPositionOnPlayerBelt2FPath(currentPosition, belt2F)
                || IsPositionOnPlayerBelt2FPath(forwardProbePosition, belt2F)
                || IsPositionOnPlayerBelt2FPath(hitProbePosition, belt2F);
+    }
+
+    private bool IsPlayerMovementEscapingPenetration(
+        Collider obstacle,
+        Vector3 direction,
+        float sweepDistance,
+        Vector3 originOffset)
+    {
+        CacheDefaultCapsuleColliderCenter();
+        if (cachedCapsuleCollider == null
+            || !cachedCapsuleCollider.enabled
+            || obstacle == null
+            || direction.sqrMagnitude <= MinPhysicsMoveDistanceSqr
+            || sweepDistance <= MinPhysicsMoveDistance)
+        {
+            return false;
+        }
+
+        Transform capsuleTransform = cachedCapsuleCollider.transform;
+        Vector3 capsulePosition = capsuleTransform.position + originOffset;
+        Quaternion capsuleRotation = capsuleTransform.rotation;
+        if (!Physics.ComputePenetration(
+                cachedCapsuleCollider,
+                capsulePosition,
+                capsuleRotation,
+                obstacle,
+                obstacle.transform.position,
+                obstacle.transform.rotation,
+                out _,
+                out float currentPenetration))
+        {
+            return false;
+        }
+
+        direction.y = 0f;
+        if (direction.sqrMagnitude <= MinPhysicsMoveDistanceSqr)
+        {
+            return false;
+        }
+
+        float probeDistance = Mathf.Min(
+            sweepDistance,
+            PlayerPenetrationEscapeProbeDistance);
+        Vector3 probePosition = capsulePosition + (direction.normalized * probeDistance);
+        if (!Physics.ComputePenetration(
+                cachedCapsuleCollider,
+                probePosition,
+                capsuleRotation,
+                obstacle,
+                obstacle.transform.position,
+                obstacle.transform.rotation,
+                out _,
+                out float probePenetration))
+        {
+            return true;
+        }
+
+        return probePenetration < currentPenetration - MinPhysicsMoveDistance;
     }
 
     private bool TryResolvePipeBridgeBelt(Pipe pipe, out ConvayorBelt2F belt2F)
