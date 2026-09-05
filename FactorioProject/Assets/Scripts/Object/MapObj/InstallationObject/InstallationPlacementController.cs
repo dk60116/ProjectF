@@ -415,6 +415,7 @@ public class InstallationPlacementController : MonoBehaviour
         public Vector3 originalPosition;
         public Quaternion originalRotation = Quaternion.identity;
         public int originalConveyorVariantKind = -1;
+        public Spliterbelt.PersistentState splitterState;
         public int originalRailRequiredItemCount;
         public List<Vector2Int> originalOccupiedCoordinates = new List<Vector2Int>();
         public List<Vector2Int> originalStateCoordinates = new List<Vector2Int>();
@@ -4368,6 +4369,7 @@ public class InstallationPlacementController : MonoBehaviour
             editSession.boxIsOpen = boxObject.IsOpen;
         }
 
+        editSession.splitterState = (installationObject as Spliterbelt)?.CaptureSplitterState();
         editSession.itemFilterMaskInitialized = installationObject.IsItemFilterMaskInitialized;
         editSession.itemFilterMaskWords = installationObject.CaptureItemFilterMaskWords();
         CaptureLoggingMachineFilterState(
@@ -5621,6 +5623,8 @@ public class InstallationPlacementController : MonoBehaviour
             restoredObject.ApplyItemFilterMask(
                 editSession.itemFilterMaskWords,
                 editSession.itemFilterMaskInitialized);
+            if (restoredObject is Spliterbelt restoredSplitter)
+                restoredSplitter.ApplySplitterState(editSession.splitterState);
             ApplyLoggingMachineFilterState(
                 restoredObject,
                 editSession.loggingTreeFilterInitialized,
@@ -5914,6 +5918,8 @@ public class InstallationPlacementController : MonoBehaviour
         }
 
         replacementObject.ApplyItemFilterMask(editSession.itemFilterMaskWords, editSession.itemFilterMaskInitialized);
+        if (replacementObject is Spliterbelt replacementSplitter)
+            replacementSplitter.ApplySplitterState(editSession.splitterState);
         ApplyLoggingMachineFilterState(
             replacementObject,
             editSession.loggingTreeFilterInitialized,
@@ -7563,6 +7569,13 @@ public class InstallationPlacementController : MonoBehaviour
         {
             conveyorBelt = coveringBelt;
             rotation = coveringBelt.transform.rotation;
+            return true;
+        }
+
+        if (Spliterbelt.TryFindCoveringBelt(coordinate, out Spliterbelt splitter) && splitter != ignoredBelt)
+        {
+            conveyorBelt = splitter;
+            rotation = splitter.transform.rotation;
             return true;
         }
 
@@ -35837,7 +35850,7 @@ public class InstallationPlacementController : MonoBehaviour
 
     private static bool IsBaseConveyorBelt(MapObject mapObject)
     {
-        return mapObject is ConveyorBelt && !IsBelt2F(mapObject);
+        return mapObject is ConveyorBelt && !(mapObject is Spliterbelt) && !IsBelt2F(mapObject);
     }
 
     private static bool IsBelt2F(MapObject mapObject)

@@ -187,6 +187,7 @@ public partial class TerrainGenerator : MonoBehaviour
     {
         virtualConveyorBeltRenderer?.Clear();
         ConvayorBelt2F.ClearRuntimeCoverageLookup();
+        Spliterbelt.ClearRuntimeCoverageLookup();
         activeConveyors.Clear();
         conveyorTickBuffer.Clear();
         activeConveyorDataMotionBlocks.Clear();
@@ -322,6 +323,7 @@ public partial class TerrainGenerator : MonoBehaviour
         }
 
         destinationBlock.WakeConveyorVacatedLanePredecessor(destinationLaneIndex);
+        destinationBlock.WakeSplitterInputs();
         ConveyorLaneCoordinateKey destinationKey = new ConveyorLaneCoordinateKey(destinationBlock.Coordinate, destinationLaneIndex);
         WakeConveyorBlockedLaneWaitersForDestination(destinationKey);
     }

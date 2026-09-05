@@ -17,6 +17,7 @@ public partial class Block
         if (sourceBlock == null
             || sourceBlock == this
             || IsCornerConveyor()
+            || TryGetRuntimeSplitter(out _)
             || !TryGetConveyorFlowDirection(out destinationFlow)
             || !ConveyorSideHandoffPath.IsSideEntry(coordinate - sourceBlock.coordinate, destinationFlow))
         {

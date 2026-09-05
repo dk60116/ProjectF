@@ -1,0 +1,14 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net9.0</TargetFramework>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="../../FactorioProject/Assets/Scripts/Map/SplitterRoutingPolicy.cs" Link="SplitterRoutingPolicy.cs" />
+    <Compile Include="../../FactorioProject/Assets/Scripts/Map/Block.Splitter.cs" Link="Block.Splitter.cs" />
+    <Compile Include="../../FactorioProject/Assets/Scripts/Object/MapObj/InstallationObject/Spliterbelt.Routing.cs" Link="Spliterbelt.Routing.cs" />
+    <Reference Include="UnityEngine.CoreModule">
+      <HintPath>$(UnityManagedDirectory)/UnityEngine.CoreModule.dll</HintPath>
+    </Reference>
+  </ItemGroup>
+</Project>

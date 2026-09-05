@@ -24,7 +24,7 @@ MonoBehaviour:
   lightRange: 6
   lightIntensityMultiplier: 1
   size: 0
-  itemFilter: 0
+  itemFilter: 1
   ignoreFilter: 0
   isManual: 0
   manualTargetItem: {fileID: 0}

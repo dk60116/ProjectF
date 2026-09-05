@@ -1075,6 +1075,8 @@ public partial class TerrainGenerator : MonoBehaviour
         }
 
         restoredInstallation.ApplyItemFilterMask(savedState.itemFilterMaskWords, savedState.itemFilterMaskInitialized);
+        if (restoredInstallation is Spliterbelt restoredSplitter)
+            restoredSplitter.ApplySplitterState(savedState.splitterState);
         if (restoredInstallation is LoggingMachine restoredLoggingMachine)
         {
             restoredLoggingMachine.ApplyTreeFilterState(

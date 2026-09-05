@@ -4,7 +4,7 @@ using TMPro;
 using UnityEngine;
 using UnityEngine.UI;
 
-public class FilterSelectUI : MonoBehaviour
+public partial class FilterSelectUI : MonoBehaviour
 {
     [SerializeField]
     private List<ItemFilterSlot> slotList;
@@ -70,6 +70,7 @@ public class FilterSelectUI : MonoBehaviour
         ApplyBulkButtonVisibility();
         BuildVisibleDefinitions();
         ApplyDefinitionsToSlots();
+        RefreshSplitterControls();
     }
 
     public bool TryGetBoundTarget(out MapObject target)
@@ -216,7 +217,7 @@ public class FilterSelectUI : MonoBehaviour
             return;
         }
 
-        ApplyLoggingHeaderLayout(false);
+        ApplyLoggingHeaderLayout(boundTarget is Spliterbelt);
         SetLoggingGrowthControlVisible(false);
 
         int filterBitCount = GetFilterBitCount();

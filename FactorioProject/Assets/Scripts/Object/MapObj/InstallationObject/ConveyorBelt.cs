@@ -111,6 +111,7 @@ public class ConveyorBelt : InstallationObject
     }
 
     public float ConveyorSpeed => Mathf.Max(0f, conveyorSpeed);
+    public virtual bool CanSuspendRuntimeRoot => true;
     public ConveyorBelt StraightVariantPrefab => straightVariantPrefab != null ? straightVariantPrefab : this;
     public ConveyorBelt CornerVariantPrefab => cornerVariantPrefab != null ? cornerVariantPrefab : this;
     public ConveyorBelt ReverseCornerVariantPrefab => reverseCornerVariantPrefab != null ? reverseCornerVariantPrefab : CornerVariantPrefab;
@@ -525,7 +526,7 @@ public class ConveyorBelt : InstallationObject
 
     public void SetRuntimeRootSuspended(bool isSuspended)
     {
-        if (!Application.isPlaying)
+        if (!Application.isPlaying || !CanSuspendRuntimeRoot)
         {
             isSuspended = false;
         }
@@ -601,7 +602,7 @@ public class ConveyorBelt : InstallationObject
         RefreshEndpointNeighbors(lastEndpointRuntimeState, this);
     }
 
-    public void RefreshEndpointVisuals()
+    public virtual void RefreshEndpointVisuals()
     {
         EnsureEndpointVisualObjects();
 
@@ -635,7 +636,7 @@ public class ConveyorBelt : InstallationObject
         }
     }
 
-    public void RefreshEndpointVisualsForPreview(
+    public virtual void RefreshEndpointVisualsForPreview(
         Vector2Int anchorCoordinate,
         IReadOnlyList<Vector2Int> occupiedCoordinates,
         EndpointConveyorLookup lookup)
@@ -675,7 +676,7 @@ public class ConveyorBelt : InstallationObject
         ApplyBeltTopEndpointExtension(startSeam, endSeam);
     }
 
-    public void ClearEndpointVisualsForPreview()
+    public virtual void ClearEndpointVisualsForPreview()
     {
         EnsureEndpointVisualObjects();
         SetEndpointVisualsActive(false, false, false, false);
@@ -884,7 +885,7 @@ public class ConveyorBelt : InstallationObject
                && neighborInputDirection == -endpointDirection;
     }
 
-    private bool HasPerpendicularBeltAtEndpoint(
+    protected bool HasPerpendicularBeltAtEndpoint(
         Vector2Int endpointCoordinate,
         Vector2Int flowDirection,
         EndpointConveyorLookup lookup)
@@ -905,7 +906,8 @@ public class ConveyorBelt : InstallationObject
         ConveyorBelt endpointBelt,
         Vector2Int endpointCoordinate)
     {
-        if (!SupportsEndpointVisuals(endpointBelt))
+        // Splitter endpoints can meet a perpendicular belt; input into a splitter's side is unsupported.
+        if (endpointBelt is Spliterbelt || !SupportsEndpointVisuals(endpointBelt))
         {
             return false;
         }
@@ -934,7 +936,7 @@ public class ConveyorBelt : InstallationObject
                && ReferenceEquals(currentBlock.MapObject, this);
     }
 
-    private static bool TryGetConveyorBlockAtCoordinate(
+    protected static bool TryGetConveyorBlockAtCoordinate(
         Vector2Int coordinate,
         out Block block,
         out ConveyorBelt conveyorBelt)
@@ -963,6 +965,12 @@ public class ConveyorBelt : InstallationObject
             && coveringBelt.IsRuntimeRootAvailable)
         {
             conveyorBelt = coveringBelt;
+            return true;
+        }
+
+        if (Spliterbelt.TryFindCoveringBelt(coordinate, out Spliterbelt splitter))
+        {
+            conveyorBelt = splitter;
             return true;
         }
 
@@ -1099,7 +1107,7 @@ public class ConveyorBelt : InstallationObject
         return changed;
     }
 
-    private static bool SetEndpointVisualActive(GameObject targetObject, bool isActive)
+    protected static bool SetEndpointVisualActive(GameObject targetObject, bool isActive)
     {
         if (targetObject == null)
         {
@@ -1793,17 +1801,7 @@ public class ConveyorBelt : InstallationObject
         Transform current = candidate != null ? candidate.transform : null;
         while (current != null && current != transform)
         {
-            GameObject currentObject = current.gameObject;
-            string objectName = currentObject.name;
-            if (currentObject == endStartObject
-                || currentObject == endEndObject
-                || objectName == EndStartObjectName
-                || objectName == EndEndObjectName
-                || (includeSeams
-                    && (currentObject == seamStartObject
-                        || currentObject == seamEndObject
-                        || objectName == SeamStartObjectName
-                        || objectName == SeamEndObjectName)))
+            if (IsEndpointVisualRoot(current.gameObject, includeSeams))
             {
                 return true;
             }
@@ -1812,6 +1810,20 @@ public class ConveyorBelt : InstallationObject
         }
 
         return false;
+    }
+
+    protected virtual bool IsEndpointVisualRoot(GameObject candidate, bool includeSeams)
+    {
+        string objectName = candidate.name;
+        return candidate == endStartObject
+            || candidate == endEndObject
+            || objectName == EndStartObjectName
+            || objectName == EndEndObjectName
+            || (includeSeams
+                && (candidate == seamStartObject
+                    || candidate == seamEndObject
+                    || objectName == SeamStartObjectName
+                    || objectName == SeamEndObjectName));
     }
 
     private void HideVirtualizedSourceViewObjects()
@@ -2027,7 +2039,7 @@ public class ConveyorBelt : InstallationObject
         return false;
     }
 
-    private bool RequiresNativeRendering(MeshRenderer renderer)
+    protected virtual bool RequiresNativeRendering(MeshRenderer renderer)
     {
         // Corner bodies and End caps retain native renderers. Their GameObjects still
         // follow connectivity; Seam surfaces remain on the virtual rendering path.

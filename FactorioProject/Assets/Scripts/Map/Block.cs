@@ -1459,6 +1459,12 @@ public partial class Block : BaseObject
             return true;
         }
 
+        if (Spliterbelt.TryFindCoveringBelt(coordinate, out Spliterbelt splitter))
+        {
+            conveyorBelt = splitter;
+            return true;
+        }
+
         if (ConvayorBelt2F.TryFindCoveringBelt(coordinate, out ConvayorBelt2F belt2F)
             && IsActiveRuntimeConveyor(belt2F))
         {
@@ -4036,6 +4042,7 @@ public partial class Block : BaseObject
         return Application.isPlaying
             && IsConveyorStackingEnabled()
             && !TryGetRuntimeBelt2F(out _)
+            && !TryGetRuntimeSplitter(out _)
             && !TryGetBelt2FBridgeCenterBelt(out _)
             && !IsCornerConveyor()
             && !HasConveyorSideExitLane()
@@ -4772,6 +4779,7 @@ public partial class Block : BaseObject
 
     private void NotifyConveyorMotionSettled()
     {
+        WakeSplitterInputs();
         WakeConveyorMoveAttemptsAlongRuntimeFlow();
         RefreshConveyorActivityRegistration();
     }
@@ -10165,6 +10173,7 @@ public partial class Block : BaseObject
             }
 
             destinationBlock.MarkConveyorItemMovedThisFrame(move.destinationLaneIndex);
+            sourceBlock.CommitSplitterTransfer(move.sourceLaneIndex, destinationBlock, move.destinationLaneIndex);
 
             if (move.useCornerMotion && sourceBlock == destinationBlock && destinationBlock.IsCornerConveyor())
             {
@@ -10767,6 +10776,9 @@ public partial class Block : BaseObject
             return false;
         }
 
+        if (receiverBlock != null && receiverBlock.TryGetRuntimeSplitter(out _))
+            return receiverInputDirection == -incomingFlowDirection;
+
         if (receiverInputDirection == -incomingFlowDirection)
         {
             return true;
@@ -11034,6 +11046,14 @@ public partial class Block : BaseObject
             || sourceLaneIndex >= ConveyorStackLaneLimit)
         {
             return false;
+        }
+
+        if (TryGetRuntimeSplitter(out Spliterbelt splitter))
+        {
+            if (splitter.ConveyorSpeed <= 0f)
+                return false;
+            if (sourceLaneIndex == ConveyorSingleLineBackLaneIndex)
+                return TryGetSplitterSuccessor(splitter, out destinationBlock, out destinationLaneIndex);
         }
 
         if (conveyorSuccessorCacheDirty)

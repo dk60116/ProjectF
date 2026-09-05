@@ -5,7 +5,8 @@ using UnityEngine;
 [Serializable]
 public sealed class SaveGameData
 {
-    public const int CurrentVersion = 50;
+    // Version 52 preserves each splitter wheel's last committed straight/cross result.
+    public const int CurrentVersion = 52;
 
     public int version = CurrentVersion;
     public long savedAtUtcTicks;

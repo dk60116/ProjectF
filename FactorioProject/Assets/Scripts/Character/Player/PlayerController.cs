@@ -3310,6 +3310,9 @@ public partial class PlayerController : MonoBehaviour
             return block.MapObject;
         }
 
+        if (Spliterbelt.TryFindCoveringBelt(block.Coordinate, out Spliterbelt splitter))
+            return splitter;
+
         return block.Resource;
     }
 
@@ -3366,7 +3369,7 @@ public partial class PlayerController : MonoBehaviour
         standingBlock = null;
         if (!TryGetStandingConveyorBlock(out standingBlock)
             || standingBlock == null
-            || !(standingBlock.MapObject is ConveyorBelt conveyorBelt)
+            || !TryResolveConveyorFocusTarget(standingBlock, out ConveyorBelt conveyorBelt)
             || conveyorBelt == null
             || !conveyorBelt.gameObject.activeInHierarchy
             || !conveyorBelt.AllowsFocus)
@@ -3453,7 +3456,7 @@ public partial class PlayerController : MonoBehaviour
         foreach (Block block in currentFocusedBlocks)
         {
             if (block == null
-                || !(block.MapObject is ConveyorBelt conveyorBelt)
+                || !TryResolveConveyorFocusTarget(block, out ConveyorBelt conveyorBelt)
                 || conveyorBelt == null
                 || !conveyorBelt.gameObject.activeInHierarchy
                 || !conveyorBelt.AllowsFocus)
@@ -3473,6 +3476,14 @@ public partial class PlayerController : MonoBehaviour
         }
 
         return focusedConveyorBelt != null && focusedBlock != null;
+    }
+
+    private static bool TryResolveConveyorFocusTarget(Block block, out ConveyorBelt belt)
+    {
+        belt = block != null ? block.MapObject as ConveyorBelt : null;
+        if (belt == null && block != null && Spliterbelt.TryFindCoveringBelt(block.Coordinate, out Spliterbelt splitter))
+            belt = splitter;
+        return belt != null;
     }
 
     public bool TryGetFocusedRobotArm(out RobotArm focusedRobotArm)
@@ -4410,6 +4421,7 @@ public partial class PlayerController : MonoBehaviour
     {
         return mapObject != null
                && (IsItemFilterEnabled(mapObject.ResolveItemId(), definitions)
+                   || mapObject is Spliterbelt
                    || TryResolveRobotArm(mapObject, out _)
                    || TryResolveProductionMachine(mapObject, out _));
     }

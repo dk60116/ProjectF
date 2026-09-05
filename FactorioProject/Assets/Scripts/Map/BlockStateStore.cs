@@ -14,6 +14,7 @@ public partial class BlockStateStore : MonoBehaviour
         public bool hasStorageKey;
         public Vector2Int storageKey;
         public int conveyorVariantKind = -1;
+        public Spliterbelt.PersistentState splitterState;
         public int pipeConnectionMask = -1;
         public List<Vector2Int> occupiedCoordinates = new List<Vector2Int>();
         public bool utilityPoleConnectionsInitialized;
@@ -69,6 +70,7 @@ public partial class BlockStateStore : MonoBehaviour
                 hasStorageKey = hasStorageKey,
                 storageKey = storageKey,
                 conveyorVariantKind = conveyorVariantKind,
+                splitterState = splitterState?.Clone(),
                 pipeConnectionMask = pipeConnectionMask,
                 occupiedCoordinates = new List<Vector2Int>(occupiedCoordinates ?? new List<Vector2Int>()),
                 utilityPoleConnectionsInitialized = utilityPoleConnectionsInitialized,
@@ -1372,6 +1374,7 @@ public partial class BlockStateStore : MonoBehaviour
             state.boxIsOpen = boxObject.IsOpen;
         }
 
+        state.splitterState = (installationObject as Spliterbelt)?.CaptureSplitterState();
         state.itemFilterMaskInitialized = installationObject.IsItemFilterMaskInitialized;
         state.itemFilterMaskWords = installationObject.CaptureItemFilterMaskWords();
         if (installationObject is LoggingMachine loggingMachine)

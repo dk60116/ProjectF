@@ -61,7 +61,7 @@ public class MapObject : PropObj
         multiFocusMode = source.multiFocusMode;
     }
 
-    public bool IsItemFilterEnabled(int itemId, int totalItemCount)
+    public virtual bool IsItemFilterEnabled(int itemId, int totalItemCount)
     {
         if (itemId < 0)
         {
@@ -103,7 +103,7 @@ public class MapObject : PropObj
         return (filterMaskWords[wordIndex] & bitMask) != 0UL;
     }
 
-    public void SetItemFilterEnabled(int itemId, int totalItemCount, bool enabled)
+    public virtual void SetItemFilterEnabled(int itemId, int totalItemCount, bool enabled)
     {
         if (itemId < 0)
         {

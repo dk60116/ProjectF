@@ -719,6 +719,14 @@ public static class SaveGameBinarySerializer
         writer.Write(state.loggingMinimumGrowth);
         writer.Write(state.utilityPoleConnectionsInitialized);
         WriteVector2IntList(writer, state.utilityPoleConnectedAnchors);
+        writer.Write(state.splitterState != null);
+        if (state.splitterState != null)
+        {
+            writer.Write(state.splitterState.filterOutput);
+            writer.Write(state.splitterState.nextInput);
+            writer.Write(state.splitterState.nextOutput);
+            writer.Write(state.splitterState.wheelRotationMask);
+        }
     }
 
     private static BlockStateStore.InstallationSaveState ReadInstallationState(
@@ -857,6 +865,16 @@ public static class SaveGameBinarySerializer
         {
             state.utilityPoleConnectionsInitialized = reader.ReadBoolean();
             state.utilityPoleConnectedAnchors = ReadVector2IntList(reader);
+        }
+        if (version >= 51 && reader.ReadBoolean())
+        {
+            state.splitterState = new Spliterbelt.PersistentState
+            {
+                filterOutput = reader.ReadInt32(),
+                nextInput = reader.ReadInt32(),
+                nextOutput = reader.ReadInt32(),
+                wheelRotationMask = version >= 52 ? reader.ReadInt32() : 0
+            };
         }
 
         return state;
