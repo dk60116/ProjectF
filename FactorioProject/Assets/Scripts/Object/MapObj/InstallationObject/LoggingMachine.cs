@@ -981,9 +981,17 @@ public class LoggingMachine : InstallationObject,
         hingeReferenceInitialized = true;
     }
 
+    protected override bool UsesManagedVisualUpdates => true;
+
+    protected override void OnManagedVisualsResumed()
+    {
+        ApplyHingeRotation();
+        SetWorking(isWorking);
+    }
+
     private void ApplyHingeRotation()
     {
-        if (hinge != null)
+        if (ShouldUpdateVisuals && hinge != null)
         {
             hinge.localRotation = hingeBaseLocalRotation * Quaternion.Euler(0f, currentHingeAngle, 0f);
         }
@@ -992,6 +1000,8 @@ public class LoggingMachine : InstallationObject,
     private void SetWorking(bool working)
     {
         isWorking = working;
+        if (!ShouldUpdateVisuals)
+            return;
         Animator animator = ResolveWorkAnimator();
         if (animator == null || !hasWorkAnimatorParameter)
         {

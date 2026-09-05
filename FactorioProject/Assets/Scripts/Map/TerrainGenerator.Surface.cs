@@ -8,6 +8,10 @@ using UnityEditor;
 
 public partial class TerrainGenerator : MonoBehaviour
 {
+    private readonly ProjectF.Rendering.CameraRenderCulling surfaceCameraCulling = new ProjectF.Rendering.CameraRenderCulling();
+    public int LastRenderedChunkSurfaces { get; private set; }
+    public int LastCulledChunkSurfaces { get; private set; }
+
     private void ApplyChunkBiomeSurface(ChunkRuntimeData chunk, ChunkSurfaceBuildData chunkSurface)
     {
         using (ApplyChunkSurfaceMarker.Auto())
@@ -91,11 +95,14 @@ public partial class TerrainGenerator : MonoBehaviour
 
     private void RenderLoadedChunkSurfaces(Camera renderCamera = null)
     {
+        LastRenderedChunkSurfaces = 0;
+        LastCulledChunkSurfaces = 0;
         if (loadedChunks.Count == 0)
         {
             return;
         }
 
+        surfaceCameraCulling.Update(renderCamera != null ? renderCamera : Camera.main);
         Material[] surfaceMaterials = GetGeneratedSurfaceMaterials();
         Material foamMaterial = GetGeneratedSurfaceFoamMaterial();
 
@@ -115,6 +122,14 @@ public partial class TerrainGenerator : MonoBehaviour
         {
             return;
         }
+
+        if (!surfaceCameraCulling.IsLayerVisible(gameObject.layer)
+            || !surfaceCameraCulling.Intersects(chunk.surfaceWorldBounds))
+        {
+            LastCulledChunkSurfaces++;
+            return;
+        }
+        LastRenderedChunkSurfaces++;
 
         int subMeshCount = Mathf.Min(chunk.surfaceMesh.subMeshCount, surfaceMaterials.Length);
         for (int subMeshIndex = 0; subMeshIndex < subMeshCount; subMeshIndex++)

@@ -133,7 +133,13 @@ public class OilDrillingMachine : InputOutputModule
         RestorePumpjackVisual();
     }
 
-    private void LateUpdate()
+    protected override void OnManagedVisualsResumed()
+    {
+        base.OnManagedVisualsResumed();
+        ApplyAnimatorPlayback(isExtracting);
+    }
+
+    protected override void TickManagedVisuals(float deltaTime)
     {
         if (!Application.isPlaying || !isExtracting || !hasPumpjackVisual)
         {
@@ -142,7 +148,7 @@ public class OilDrillingMachine : InputOutputModule
 
         float playbackSpeed = Mathf.Max(0f, OperationalAnimationSpeedRatio);
         pumpjackPhase = Mathf.Repeat(
-            pumpjackPhase + Time.deltaTime * pumpjackCyclesPerSecond * playbackSpeed * Mathf.PI * 2f,
+            pumpjackPhase + deltaTime * pumpjackCyclesPerSecond * playbackSpeed * Mathf.PI * 2f,
             Mathf.PI * 2f);
         float stroke = Mathf.Sin(pumpjackPhase);
 
@@ -374,6 +380,8 @@ public class OilDrillingMachine : InputOutputModule
 
     private void ApplyAnimatorPlayback(bool isWorking)
     {
+        if (!ShouldUpdateVisuals)
+            return;
         Animator targetAnimator = ResolveInstallationAnimator();
         if (targetAnimator != null)
         {

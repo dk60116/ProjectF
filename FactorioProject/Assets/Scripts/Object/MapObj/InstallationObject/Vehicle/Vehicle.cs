@@ -32,6 +32,8 @@ public class Vehicle : InstallationObject
     private bool invertWheelRotation;
 
     private float currentVehicleSignedSpeed;
+    private float pendingWheelVisualDistance;
+    protected override bool UsesManagedVisualUpdates => true;
     private readonly Vector2Int[] runtimeCoordinateBuffer = new Vector2Int[1];
 
     public float VehicleAccelerationPerSecond => Mathf.Max(0.01f, vehicleAccelerationPerSecond);
@@ -161,6 +163,19 @@ public class Vehicle : InstallationObject
     }
 
     protected void RotateWheelsByDistance(float signedDistance)
+    {
+        if (ShouldUpdateVisuals)
+            pendingWheelVisualDistance += signedDistance;
+    }
+
+    protected override void TickManagedVisuals(float deltaTime)
+    {
+        float distance = pendingWheelVisualDistance;
+        pendingWheelVisualDistance = 0f;
+        ApplyWheelVisualDistance(distance);
+    }
+
+    private void ApplyWheelVisualDistance(float signedDistance)
     {
         if (wheels == null
             || wheels.Count <= 0
@@ -378,6 +393,7 @@ public class Vehicle : InstallationObject
 
     protected override void OnDisable()
     {
+        pendingWheelVisualDistance = 0f;
         ResetVehicleMotion();
         base.OnDisable();
     }

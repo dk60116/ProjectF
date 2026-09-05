@@ -102,6 +102,8 @@ public class Animal : MonoBehaviour
     private SkinnedMeshRenderer eyeLeft;
     private SkinnedMeshRenderer eyeRight;
     private bool aiAnimationStateInitialized;
+    private bool behaviorAnimationSuspended;
+    private bool animatorStateRetentionBeforeSuspend;
     private bool wakeFromRestRequested;
     private float lastAIAnimationSpeed;
     private float lastAIAnimationPlaybackScale = 1f;
@@ -929,6 +931,7 @@ public class Animal : MonoBehaviour
     private void PlayDeathAnimation()
     {
         wakeFromRestRequested = false;
+        SetBehaviorAnimationActive(true);
         if (anim == null)
         {
             anim = GetComponent<Animator>();
@@ -1079,6 +1082,7 @@ public class Animal : MonoBehaviour
 
     private void OnDisable()
     {
+        SetBehaviorAnimationActive(true);
         ClearFocusVisuals();
     }
 
@@ -1326,6 +1330,41 @@ public class Animal : MonoBehaviour
         }
     }
 
+    internal void SetBehaviorAnimationActive(bool active)
+    {
+        bool suspend = !active && IsAlive;
+        if (behaviorAnimationSuspended == suspend)
+            return;
+
+        if (anim == null)
+            anim = GetComponent<Animator>();
+        if (anim == null)
+        {
+            behaviorAnimationSuspended = false;
+            return;
+        }
+
+        if (suspend)
+        {
+            // Only restore an Animator that this suspension actually disabled.
+            if (!anim.enabled)
+                return;
+            animatorStateRetentionBeforeSuspend = anim.keepAnimatorStateOnDisable;
+            anim.keepAnimatorStateOnDisable = true;
+            // A newly spawned distant animal still needs its initial pose, not a bind pose.
+            if (anim.isActiveAndEnabled && !anim.isInitialized)
+                anim.Update(0f);
+            anim.enabled = false;
+            behaviorAnimationSuspended = true;
+        }
+        else
+        {
+            behaviorAnimationSuspended = false;
+            anim.enabled = true;
+            anim.keepAnimatorStateOnDisable = animatorStateRetentionBeforeSuspend;
+        }
+    }
+
     public void SetAIAnimation(
         float speed,
         bool isEating,
@@ -1341,6 +1380,10 @@ public class Animal : MonoBehaviour
             PlayDeathAnimation();
             return;
         }
+
+        // Dormant background bookkeeping must not wake or query a suspended Animator.
+        if (behaviorAnimationSuspended)
+            return;
 
         if (anim == null)
         {

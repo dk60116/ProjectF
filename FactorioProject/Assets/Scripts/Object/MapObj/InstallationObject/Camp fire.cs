@@ -54,17 +54,7 @@ public class Campfire : InputOutputModule
 
     protected override void OnItemLightToggleStateChanged(bool active)
     {
-        if (fireEffect != null)
-        {
-            if (active)
-            {
-                fireEffect.Play(true);
-            }
-            else
-            {
-                fireEffect.Stop(true, ParticleSystemStopBehavior.StopEmittingAndClear);
-            }
-        }
+        SetVisualParticleActive(fireEffect, active, clear: true);
 
         if (active)
         {

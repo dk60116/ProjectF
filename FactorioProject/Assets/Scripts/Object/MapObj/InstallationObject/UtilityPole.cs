@@ -36,7 +36,7 @@ public class UtilityPole : InstallationObject
     private static readonly List<WorkableObjectRangeVisualRequest> rangeVisualRequestScratch =
         new List<WorkableObjectRangeVisualRequest>();
     private static readonly HashSet<UtilityPole> rangeVisualPoleScratch = new HashSet<UtilityPole>();
-    private static readonly Plane[] rangeVisualFrustumPlanes = new Plane[6];
+    private static readonly ProjectF.Rendering.CameraRenderCulling rangeVisualCulling = new ProjectF.Rendering.CameraRenderCulling();
     private static readonly List<LineRenderer> previewConsumerLineRenderers = new List<LineRenderer>();
     private static readonly Dictionary<UtilityPole, PreviewPoleRuntime> previewPoleRuntimes =
         new Dictionary<UtilityPole, PreviewPoleRuntime>();
@@ -325,14 +325,14 @@ public class UtilityPole : InstallationObject
             return;
         }
 
-        GeometryUtility.CalculateFrustumPlanes(targetCamera, rangeVisualFrustumPlanes);
+        rangeVisualCulling.Update(targetCamera);
         screenRangePoleScratch.Clear();
         foreach (UtilityPole pole in activePoles)
         {
             if (pole == null
                 || !IsValidPlacedPole(pole)
                 || !pole.TryGetSupplyRangeBounds(out Bounds rangeBounds)
-                || !GeometryUtility.TestPlanesAABB(rangeVisualFrustumPlanes, rangeBounds))
+                || !rangeVisualCulling.Intersects(rangeBounds))
             {
                 continue;
             }

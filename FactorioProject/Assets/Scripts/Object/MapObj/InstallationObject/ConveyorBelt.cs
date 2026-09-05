@@ -68,6 +68,7 @@ public class ConveyorBelt : InstallationObject
     private readonly List<BeltTopRenderInfo> beltTopRenderInfos = new List<BeltTopRenderInfo>(8);
     private readonly List<BeltTopTransformState> beltTopTransformStates = new List<BeltTopTransformState>(8);
     private EndpointRuntimeState lastEndpointRuntimeState;
+    private bool endpointVisualObjectsCached;
     private bool beltTopTransformStateCached;
     private bool virtualRenderingSuppressed;
     private bool runtimeRenderingHidden;
@@ -705,7 +706,7 @@ public class ConveyorBelt : InstallationObject
         if (!TryGetPlacementRuntime(out Vector2Int anchorCoordinate, out _)
             || !TryCaptureEndpointPlacementState(
                 anchorCoordinate,
-                CopyRuntimeOccupiedCoordinates(),
+                RuntimeOccupiedCoordinates,
                 out state))
         {
             return false;
@@ -761,25 +762,6 @@ public class ConveyorBelt : InstallationObject
             OccupiedCoordinates = occupiedCoordinateArray
         };
         return true;
-    }
-
-    private Vector2Int[] CopyRuntimeOccupiedCoordinates()
-    {
-        IReadOnlyList<Vector2Int> occupiedCoordinates = RuntimeOccupiedCoordinates;
-        if (occupiedCoordinates == null || occupiedCoordinates.Count == 0)
-        {
-            return TryGetPlacementRuntime(out Vector2Int anchorCoordinate, out _)
-                ? new[] { anchorCoordinate }
-                : new Vector2Int[0];
-        }
-
-        Vector2Int[] result = new Vector2Int[occupiedCoordinates.Count];
-        for (int i = 0; i < occupiedCoordinates.Count; i++)
-        {
-            result[i] = occupiedCoordinates[i];
-        }
-
-        return result;
     }
 
     private static Vector2Int[] CopyOccupiedCoordinates(
@@ -979,6 +961,11 @@ public class ConveyorBelt : InstallationObject
 
     private void EnsureEndpointVisualObjects()
     {
+        if (endpointVisualObjectsCached)
+        {
+            return;
+        }
+
         if (endStartObject == null)
         {
             endStartObject = FindEndpointVisualObject(EndStartObjectName);
@@ -1006,6 +993,10 @@ public class ConveyorBelt : InstallationObject
         {
             CreateMissingEndpointVisualObjectsFromVariant();
         }
+
+        // Runtime endpoint roots are fixed after fallback creation. Cache misses too:
+        // splitters have per-channel roots, so the four shared names never resolve.
+        endpointVisualObjectsCached = Application.isPlaying;
     }
 
     private GameObject FindEndpointVisualObject(string objectName)
@@ -2056,6 +2047,7 @@ public class ConveyorBelt : InstallationObject
     {
         base.OnValidate();
 
+        endpointVisualObjectsCached = false;
         cachedRenderers = null;
         cachedRendererMeshFilters = null;
         InvalidateVirtualSourceViewObjectCache();

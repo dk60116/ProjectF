@@ -2956,7 +2956,34 @@ public class ItemDataEditorWindow : EditorWindow
         }
 
         GUILayout.EndHorizontal();
+        using (new EditorGUI.DisabledScope(EditorApplication.isPlayingOrWillChangePlaymode
+            || EditorApplication.isCompiling || EditorApplication.isUpdating))
+        {
+            if (GUILayout.Button(new GUIContent("SetMipmap",
+                "전체 ItemData와 MapObject 프리팹의 텍스처를 Mipmap 켬 + Trilinear로 설정합니다. 비활성 자식·휴대 머티리얼을 포함하며 PathUV/RemapUV 데이터는 제외합니다."),
+                GUILayout.ExpandWidth(true)))
+            {
+                SetAllObjectMipmaps();
+            }
+        }
         GUILayout.Space(6f);
+    }
+
+    private void SetAllObjectMipmaps()
+    {
+        try
+        {
+            ItemTextureMipmapUtility.Result result =
+                ItemTextureMipmapUtility.ApplyAll(DefinitionCatalog.LoadCurrent());
+            Debug.Log($"{result.Summary}\n머티리얼 {result.Materials}, 텍스처 {result.Textures}\n{result.Details}");
+            ShowNotification(new GUIContent(result.Summary));
+        }
+        catch (Exception exception)
+        {
+            Debug.LogException(exception);
+            ShowNotification(new GUIContent("SetMipmap 오류: Console을 확인해주세요."));
+        }
+        Repaint();
     }
 
     private void DrawSearchField()

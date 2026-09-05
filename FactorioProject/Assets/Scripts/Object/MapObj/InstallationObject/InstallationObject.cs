@@ -104,7 +104,7 @@ public interface IPlayerItemStoragePortablePreview
         out PortableObject previewPortableObject);
 }
 
-public class InstallationObject : MapObject
+public partial class InstallationObject : MapObject
 {
     protected const float ConnectedFluidStorageTransferLitersPerSecond = 50f;
 
@@ -812,10 +812,12 @@ public class InstallationObject : MapObject
         globalMaxFocusActivationRadiusDirty = true;
         RefreshInstalledDirectionFromCurrentTransform();
         ApplyRuntimeShadowSettings();
+        RegisterManagedVisualUpdates();
     }
 
     protected virtual void OnDisable()
     {
+        UnregisterManagedVisualUpdates();
         UnregisterRuntimeCoordinateIndex(this);
         ActiveInstances.Remove(this);
         globalMaxFocusActivationRadiusDirty = true;

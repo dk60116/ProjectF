@@ -10,6 +10,7 @@ public class SteamGenerator : InputOutputModule
     private InstallationFacingDirection localPipeAreaConnectionDirection = InstallationFacingDirection.PositiveX;
 
     private bool hasSteamGenerationReserve;
+    private bool generationVisualActive;
 
     [SerializeField]
     private Transform wheelTF;
@@ -21,8 +22,8 @@ public class SteamGenerator : InputOutputModule
     public override void ManagedUpdateTick(float deltaTime)
     {
         base.ManagedUpdateTick(deltaTime);
-        bool isGenerating = ConsumeSteamForGeneration(deltaTime);
-        UpdateGenerationVisuals(isGenerating, deltaTime);
+        generationVisualActive = ConsumeSteamForGeneration(deltaTime);
+        SetVisualParticleActive(particleEffect, generationVisualActive);
     }
 
     public override PersistentState CapturePersistentState()
@@ -547,37 +548,21 @@ public class SteamGenerator : InputOutputModule
         return false;
     }
 
-    private void UpdateGenerationVisuals(bool isGenerating, float deltaTime)
+    protected override void TickManagedVisuals(float deltaTime)
     {
-        if (!isGenerating)
-        {
-            StopGenerationVisuals(false);
+        if (!generationVisualActive)
             return;
-        }
 
         if (wheelTF != null && deltaTime > 0f && wheelRotationDegreesPerSecond > 0f)
         {
             wheelTF.Rotate(0f, 0f, -wheelRotationDegreesPerSecond * deltaTime, Space.Self);
         }
-
-        if (particleEffect != null && !particleEffect.isPlaying)
-        {
-            particleEffect.Play();
-        }
     }
 
     private void StopGenerationVisuals(bool clearParticles)
     {
-        if (particleEffect == null || !particleEffect.isPlaying)
-        {
-            return;
-        }
-
-        particleEffect.Stop(
-            true,
-            clearParticles
-                ? ParticleSystemStopBehavior.StopEmittingAndClear
-                : ParticleSystemStopBehavior.StopEmitting);
+        generationVisualActive = false;
+        SetVisualParticleActive(particleEffect, false, clear: clearParticles);
     }
 
     private static bool TryResolveDirection(

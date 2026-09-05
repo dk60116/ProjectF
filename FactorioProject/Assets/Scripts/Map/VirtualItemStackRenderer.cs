@@ -2,7 +2,7 @@ using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.Rendering;
 
-[DisallowMultipleComponent]
+[DisallowMultipleComponent, DefaultExecutionOrder(1000)]
 public sealed class VirtualItemStackRenderer : MonoBehaviour
 {
     private const int LegacyFloorStackCapacity = 10;

@@ -4101,8 +4101,16 @@ public partial class TerrainGenerator : MonoBehaviour
         return true;
     }
 
+    private readonly ProjectF.Rendering.CameraRenderCulling conveyorDebugCameraCulling = new ProjectF.Rendering.CameraRenderCulling();
+    private Bounds directionArrowCullLocalBounds;
+
     private void AddBeltDirectionArrowInstance(Matrix4x4 matrix)
     {
+        if (!conveyorDebugCameraCulling.IsLayerVisible(gameObject.layer)
+            || !conveyorDebugCameraCulling.Intersects(
+                VirtualRenderBatchCollection.CalculateWorldBounds(directionArrowCullLocalBounds, matrix)))
+            return;
+
         if (beltDirectionArrowInstanceMatrixCount >= MaxBeltDirectionArrowInstancesPerBatch)
         {
             FlushBeltDirectionArrowInstances();
@@ -4115,6 +4123,9 @@ public partial class TerrainGenerator : MonoBehaviour
     private void BeginBeltDirectionArrowInstancedRendering()
     {
         beltDirectionArrowInstanceMatrixCount = 0;
+        conveyorDebugCameraCulling.Update(Camera.main);
+        Mesh arrowMesh = Block.ResolveBeltDirectionArrowMesh();
+        directionArrowCullLocalBounds = arrowMesh != null ? arrowMesh.bounds : new Bounds(Vector3.zero, Vector3.one);
     }
 
     private void EndBeltDirectionArrowInstancedRendering()
@@ -4247,6 +4258,11 @@ public partial class TerrainGenerator : MonoBehaviour
 
     public void AddConveyorSlotDotInstance(Vector3 worldPosition)
     {
+        if (!conveyorDebugCameraCulling.IsLayerVisible(gameObject.layer)
+            || !conveyorDebugCameraCulling.Intersects(new Bounds(worldPosition,
+                Vector3.one * ConveyorSlotDotInstancedDiameter)))
+            return;
+
         if (conveyorSlotDotInstanceMatrixCount >= MaxConveyorSlotDotInstancesPerBatch)
         {
             FlushConveyorSlotDotInstances();
@@ -4262,6 +4278,7 @@ public partial class TerrainGenerator : MonoBehaviour
     private void BeginConveyorSlotDotInstancedRendering()
     {
         conveyorSlotDotInstanceMatrixCount = 0;
+        conveyorDebugCameraCulling.Update(Camera.main);
     }
 
     private void EndConveyorSlotDotInstancedRendering()
@@ -4568,6 +4585,10 @@ public partial class TerrainGenerator : MonoBehaviour
         GameManager gameManager = GameManager.Instance;
         MapObjectTickProfiler.AddRuntimeCounter("RenderToggles", "HideBelts", gameManager != null && gameManager.HideBelts);
         MapObjectTickProfiler.AddRuntimeCounter("RenderToggles", "HideBeltItems", gameManager != null && gameManager.HideBeltItems);
+        MapObjectTickProfiler.AddRuntimeCounter("RenderToggles", "DisableCameraCulling", gameManager != null && gameManager.DisableCameraCulling);
+        MapObjectTickProfiler.AddRuntimeCounter("RenderToggles", "FreeCameraPlayerCulling", gameManager != null && gameManager.FreeCamera && gameManager.FreeCameraPlayerCulling);
+        MapObjectTickProfiler.AddRuntimeCounter("Render", "RenderedChunkSurfaces", LastRenderedChunkSurfaces);
+        MapObjectTickProfiler.AddRuntimeCounter("Render", "CulledChunkSurfaces", LastCulledChunkSurfaces);
 
         MapObjectTickProfiler.AddRuntimeCounter("Physics", "MapObjectColliders", colliderCount);
         MapObjectTickProfiler.AddRuntimeCounter("Physics", "EnabledMapObjectColliders", enabledColliderCount);
@@ -4601,6 +4622,8 @@ public partial class TerrainGenerator : MonoBehaviour
         MapObjectTickProfiler.AddRuntimeCounter("ConveyorItemRender", "DynamicRenderBlocks", itemRenderer != null ? itemRenderer.DynamicVirtualConveyorRenderBlockCount : 0);
         MapObjectTickProfiler.AddRuntimeCounter("ConveyorItemRender", "DirtyRenderBlocks", itemRenderer != null ? itemRenderer.DirtyVirtualConveyorRenderBlockCount : 0);
         MapObjectTickProfiler.AddRuntimeCounter("ConveyorItemRender", "CachedRenderBlocks", itemRenderer != null ? itemRenderer.CachedVirtualConveyorRenderBlockCount : 0);
+        MapObjectTickProfiler.AddRuntimeCounter("ConveyorItemRender", "DeferredOffscreenBlocks", itemRenderer != null ? itemRenderer.DeferredStaticRenderBlocks : 0);
+        MapObjectTickProfiler.AddRuntimeCounter("ConveyorItemRender", "StaticCacheRebuilds", itemRenderer != null ? itemRenderer.LastStaticCacheRebuilds : 0);
         MapObjectTickProfiler.AddRuntimeCounter("ConveyorItemRender", "CachedDynamicRenderBlocks", itemRenderer != null ? itemRenderer.CachedDynamicVirtualConveyorRenderBlockCount : 0);
         MapObjectTickProfiler.AddRuntimeCounter("ConveyorItemRender", "CachedItemRenderAssets", itemRenderer != null ? itemRenderer.CachedItemRenderAssetCount : 0);
         MapObjectTickProfiler.AddRuntimeCounter("ConveyorItemRender", "DynamicCullSourceBlocks", itemRenderer != null ? itemRenderer.DynamicVirtualConveyorCullSourceBlocks : 0);
@@ -4721,6 +4744,8 @@ public partial class TerrainGenerator : MonoBehaviour
         MapObjectTickProfiler.AddRuntimeCounter("Virtualization", "VirtualBeltDedicatedTopEntries", virtualConveyorBeltRenderer != null ? virtualConveyorBeltRenderer.DedicatedBeltTopEntryCount : 0);
         MapObjectTickProfiler.AddRuntimeCounter("Virtualization", "VirtualBeltTrackedTransformEntries", virtualConveyorBeltRenderer != null ? virtualConveyorBeltRenderer.TrackedTransformEntryCount : 0);
         MapObjectTickProfiler.AddRuntimeCounter("Virtualization", "VirtualBeltTrackedTransformUpdates", virtualConveyorBeltRenderer != null ? virtualConveyorBeltRenderer.LastTrackedTransformMatrixUpdates : 0);
+        MapObjectTickProfiler.AddRuntimeCounter("Virtualization", "VirtualBeltTrackedTransformReads", virtualConveyorBeltRenderer != null ? virtualConveyorBeltRenderer.LastTrackedTransformMatrixReads : 0);
+        MapObjectTickProfiler.AddRuntimeCounter("Virtualization", "VirtualBeltCulledTrackedBelts", virtualConveyorBeltRenderer != null ? virtualConveyorBeltRenderer.LastCulledTrackedBelts : 0);
         MapObjectTickProfiler.AddRuntimeCounter("Virtualization", "VirtualBeltInstances", virtualConveyorBeltRenderer != null ? virtualConveyorBeltRenderer.ActiveInstanceCount : 0);
         MapObjectTickProfiler.AddRuntimeCounter("Virtualization", "VirtualBeltDrawCalls", virtualConveyorBeltRenderer != null ? virtualConveyorBeltRenderer.EstimatedDrawCallCount : 0);
 

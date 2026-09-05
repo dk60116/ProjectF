@@ -133,7 +133,7 @@ public class Sprinkler : InputOutputModule
         base.OnDisable();
     }
 
-    private void Update()
+    protected override void TickManagedVisuals(float deltaTime)
     {
         if (!Application.isPlaying || !isOperating || nozzleTransform == null)
         {
@@ -146,7 +146,7 @@ public class Sprinkler : InputOutputModule
             : DefaultNozzleRotationDegreesPerSecond;
         if (rotationSpeed > 0f)
         {
-            nozzleTransform.Rotate(Vector3.up, rotationSpeed * Time.deltaTime, Space.Self);
+            nozzleTransform.Rotate(Vector3.up, rotationSpeed * deltaTime, Space.Self);
         }
     }
 
@@ -762,14 +762,7 @@ public class Sprinkler : InputOutputModule
                 continue;
             }
 
-            if (operating)
-            {
-                effect.Play(true);
-            }
-            else
-            {
-                effect.Stop(true, ParticleSystemStopBehavior.StopEmittingAndClear);
-            }
+            SetVisualParticleActive(effect, operating, clear: true);
         }
     }
 

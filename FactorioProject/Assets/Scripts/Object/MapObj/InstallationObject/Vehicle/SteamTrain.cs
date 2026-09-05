@@ -512,7 +512,6 @@ public class SteamTrain : RailHandcar
             lastMovementParticlePosition = currentPosition;
             hasLastMovementParticlePosition = true;
             StopMovementParticle(false);
-            UpdateWaterPipeVisual(Time.deltaTime);
             return;
         }
 
@@ -550,8 +549,19 @@ public class SteamTrain : RailHandcar
         ClearPendingBurnEnergyCost();
         ClearPendingWaterCost();
         SetMovementParticleActive(isDrivenAndMoving);
-        UpdateWaterPipeVisual(Time.deltaTime);
         lastMovementParticlePosition = currentPosition;
+    }
+
+    protected override void TickManagedVisuals(float deltaTime)
+    {
+        base.TickManagedVisuals(deltaTime);
+        UpdateWaterPipeVisual(deltaTime);
+    }
+
+    protected override void OnManagedVisualsResumed()
+    {
+        // The docking state continues offscreen; synchronize to its latest visual target.
+        UpdateWaterPipeVisual(0f);
     }
 
     public void CaptureBurnEnergyState(out float storedEnergy, out float gaugeCapacity)
@@ -4020,36 +4030,12 @@ public class SteamTrain : RailHandcar
 
     private void SetMovementParticleActive(bool isMoving)
     {
-        if (particleEffect == null)
-        {
-            return;
-        }
-
-        if (isMoving)
-        {
-            if (!particleEffect.isEmitting)
-            {
-                particleEffect.Play(true);
-            }
-
-            return;
-        }
-
-        StopMovementParticle(false);
+        SetVisualParticleActive(particleEffect, isMoving);
     }
 
     private void StopMovementParticle(bool clearParticles)
     {
-        if (particleEffect == null || (!particleEffect.isPlaying && !particleEffect.isEmitting))
-        {
-            return;
-        }
-
-        particleEffect.Stop(
-            true,
-            clearParticles
-                ? ParticleSystemStopBehavior.StopEmittingAndClear
-                : ParticleSystemStopBehavior.StopEmitting);
+        SetVisualParticleActive(particleEffect, false, clear: clearParticles);
     }
 
     private static float GetPlanarDistanceSqr(Vector3 from, Vector3 to)

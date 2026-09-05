@@ -58,9 +58,11 @@ internal sealed class EditorToolForm : Form
     private readonly CheckBox showBeltItemLineCheckBox = new CheckBox();
     private readonly CheckBox hideBeltItemsCheckBox = new CheckBox();
     private readonly CheckBox hideBeltsCheckBox = new CheckBox();
+    private readonly CheckBox disableCameraCullingCheckBox = new CheckBox();
     private readonly CheckBox showRailLineCheckBox = new CheckBox();
     private readonly CheckBox showDirectionsCheckBox = new CheckBox();
     private readonly CheckBox freeCameraCheckBox = new CheckBox();
+    private readonly CheckBox freeCameraPlayerCullingCheckBox = new CheckBox();
     private readonly CheckBox freeTrainCheckBox = new CheckBox();
     private readonly CheckBox freeElectroEnergyCheckBox = new CheckBox();
     private readonly CheckBox freeBucketCheckBox = new CheckBox();
@@ -473,6 +475,7 @@ internal sealed class EditorToolForm : Form
         FlowLayoutPanel debugTogglePanel = new FlowLayoutPanel
         {
             Dock = DockStyle.Fill,
+            AutoScroll = true,
             FlowDirection = FlowDirection.LeftToRight,
             Padding = new Padding(0, 4, 0, 0)
         };
@@ -512,6 +515,13 @@ internal sealed class EditorToolForm : Form
                 hideBeltsCheckBox.Checked,
                 "Hide Belt");
 
+        StyleDebugCheckBox(disableCameraCullingCheckBox, "Disable Camera Culling");
+        disableCameraCullingCheckBox.CheckedChanged += async (_, _) =>
+            await SendDebugToggleAsync(
+                "disableCameraCulling",
+                disableCameraCullingCheckBox.Checked,
+                "Disable Camera Culling");
+
         StyleDebugCheckBox(showRailLineCheckBox, "ShowRailLine");
         showRailLineCheckBox.CheckedChanged += async (_, _) =>
             await SendDebugToggleAsync(
@@ -532,6 +542,13 @@ internal sealed class EditorToolForm : Form
                 "freeCamera",
                 freeCameraCheckBox.Checked,
                 "FreeCamera");
+
+        StyleDebugCheckBox(freeCameraPlayerCullingCheckBox, "FreeCamera: Player Culling");
+        freeCameraPlayerCullingCheckBox.CheckedChanged += async (_, _) =>
+            await SendDebugToggleAsync(
+                "freeCameraPlayerCulling",
+                freeCameraPlayerCullingCheckBox.Checked,
+                "FreeCamera: Player Culling");
 
         StyleDebugCheckBox(freeTrainCheckBox, "Free Train");
         freeTrainCheckBox.CheckedChanged += async (_, _) =>
@@ -573,9 +590,11 @@ internal sealed class EditorToolForm : Form
         debugTogglePanel.Controls.Add(showBeltItemLineCheckBox);
         debugTogglePanel.Controls.Add(hideBeltItemsCheckBox);
         debugTogglePanel.Controls.Add(hideBeltsCheckBox);
+        debugTogglePanel.Controls.Add(disableCameraCullingCheckBox);
         debugTogglePanel.Controls.Add(showRailLineCheckBox);
         debugTogglePanel.Controls.Add(showDirectionsCheckBox);
         debugTogglePanel.Controls.Add(freeCameraCheckBox);
+        debugTogglePanel.Controls.Add(freeCameraPlayerCullingCheckBox);
         debugTogglePanel.Controls.Add(freeTrainCheckBox);
         debugTogglePanel.Controls.Add(freeElectroEnergyCheckBox);
         debugTogglePanel.Controls.Add(freeBucketCheckBox);
@@ -1280,6 +1299,11 @@ internal sealed class EditorToolForm : Form
             ApplyRuntimeCheckBoxState(hideBeltsCheckBox, hideBelts);
         }
 
+        if (TryReadProtocolBool(response, "disableCameraCulling", out bool disableCameraCulling))
+        {
+            ApplyRuntimeCheckBoxState(disableCameraCullingCheckBox, disableCameraCulling);
+        }
+
         if (TryReadProtocolBool(response, "showRailLine", out bool showRailLine))
         {
             ApplyRuntimeCheckBoxState(showRailLineCheckBox, showRailLine);
@@ -1288,6 +1312,11 @@ internal sealed class EditorToolForm : Form
         if (TryReadProtocolBool(response, "showBeltDirections", out bool showBeltDirections))
         {
             ApplyRuntimeCheckBoxState(showDirectionsCheckBox, showBeltDirections);
+        }
+
+        if (TryReadProtocolBool(response, "freeCameraPlayerCulling", out bool freeCameraPlayerCulling))
+        {
+            ApplyRuntimeCheckBoxState(freeCameraPlayerCullingCheckBox, freeCameraPlayerCulling);
         }
 
         if (TryReadProtocolBool(response, "freeCamera", out bool freeCamera))
@@ -1706,9 +1735,11 @@ internal sealed class EditorToolForm : Form
         showBeltItemLineCheckBox.Enabled = !busy;
         hideBeltItemsCheckBox.Enabled = !busy;
         hideBeltsCheckBox.Enabled = !busy;
+        disableCameraCullingCheckBox.Enabled = !busy;
         showRailLineCheckBox.Enabled = !busy;
         showDirectionsCheckBox.Enabled = !busy;
         freeCameraCheckBox.Enabled = !busy;
+        freeCameraPlayerCullingCheckBox.Enabled = !busy;
         freeTrainCheckBox.Enabled = !busy;
         freeElectroEnergyCheckBox.Enabled = !busy;
         freeBucketCheckBox.Enabled = !busy;

@@ -70,6 +70,8 @@ public class PlayerCamera : MonoBehaviour
     private bool savedCameraOrthographic;
     private float savedCameraFieldOfView;
     private float savedCameraOrthographicSize;
+    private Matrix4x4 savedPlayerCullingMatrix;
+    private Vector3 savedPlayerCullingFocus;
     private float freeCameraYaw;
     private float freeCameraPitch;
     private readonly List<RaycastResult> pointerRaycastResults = new List<RaycastResult>(8);
@@ -108,7 +110,13 @@ public class PlayerCamera : MonoBehaviour
         }
 
         RestoreFreeCameraProjectionState();
+        ProjectF.Rendering.CameraRenderCulling.ClearPlayerView(cachedCamera);
         hasInitializedDistance = false;
+    }
+
+    private void OnDisable()
+    {
+        ProjectF.Rendering.CameraRenderCulling.ClearPlayerView(cachedCamera);
     }
 
     private void Start()
@@ -128,6 +136,7 @@ public class PlayerCamera : MonoBehaviour
             EnsureCameraCached();
             ApplyFreeCameraProjectionState();
             HandleFreeCameraInput();
+            RefreshPlayerCullingView();
             return;
         }
 
@@ -175,7 +184,24 @@ public class PlayerCamera : MonoBehaviour
         savedCameraOrthographic = cachedCamera.orthographic;
         savedCameraFieldOfView = cachedCamera.fieldOfView;
         savedCameraOrthographicSize = cachedCamera.orthographicSize;
+        ResolveTarget();
+        savedPlayerCullingMatrix = cachedCamera.cullingMatrix;
+        savedPlayerCullingFocus = ResolveFollowFocusPosition();
         hasSavedFreeCameraProjection = true;
+        RefreshPlayerCullingView();
+    }
+
+    private void RefreshPlayerCullingView()
+    {
+        if (!hasSavedFreeCameraProjection || cachedCamera == null)
+            return;
+        // Preserve the actual player projection and orientation, including orthographic zoom.
+        // Free-camera translation/rotation must not affect this view; player motion still does.
+        Vector3 focus = target != null || focusTarget != null
+            ? ResolveFollowFocusPosition() : savedPlayerCullingFocus;
+        Matrix4x4 matrix = savedPlayerCullingMatrix
+            * Matrix4x4.Translate(savedPlayerCullingFocus - focus);
+        ProjectF.Rendering.CameraRenderCulling.SetPlayerView(cachedCamera, matrix);
     }
 
     private void ApplyFreeCameraProjectionState()

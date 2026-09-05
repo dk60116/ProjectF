@@ -1,0 +1,322 @@
+MapObject Profiler Snapshot
+CopiedAt	2026-09-06 01:12:22
+Enabled	True
+Frame	19717
+WindowMs	1016.083
+BeltLoopProfileFrames	44
+ActiveUpdateTicks	47
+ActiveBeltTicks	366
+ActiveBeltDataMotions	48
+ActiveBeltVisualTicks	0
+
+BeltCountersPerFrame
+Loops	396.477
+DataMotionLoops	1.5
+ActiveQueueLoops	326.773
+StraightLineBlockLoops	68.205
+VisualLoops	0
+TryMoveAttempts	334.136
+TryMoveSuccesses	0.5
+StraightMoveAttempts	0
+StraightMoveSuccesses	0
+PlanMoveCalls	23.523
+PlannedMoveApplications	1.682
+TouchedBlockRefreshes	1.432
+WakeAroundCalls	0
+ActivityRefreshCalls	165.273
+
+BackgroundConveyorPerTick
+Samples	0
+SavedBlocks	0
+SavedItems	0
+Candidates	0
+Passes	0
+MoveAttempts	0
+MoveSuccesses	0
+MotionDirtyCoordinates	0
+DirtyCoordinates	0
+ReadyHeapSize	0
+DueCandidates	0
+SkippedNotReady	0
+BlockedWaiters	0
+StaleScheduleDrops	0
+SlowRetryCandidates	0
+
+RuntimeCounters
+Group	Name	Value	Note
+Frame	Fps	42.151	
+Frame	FrameMs	23.724	
+Frame	UnscaledDeltaMs	21.018	
+Frame	SmoothDeltaMs	21.308	
+Frame	TimeScale	1	
+Frame	TargetFrameRate	-1	
+Frame	VSyncCount	0	
+Frame	ScreenRefreshRate	59.94	
+Frame	IsEditor	0	
+FrameTiming	Samples	0	
+FrameTiming	CpuFrameMs	n/a	
+FrameTiming	CpuMainThreadMs	n/a	
+FrameTiming	CpuRenderThreadMs	n/a	
+FrameTiming	CpuPresentWaitMs	n/a	
+FrameTiming	GpuFrameMs	n/a	
+Memory	ManagedHeapMB	162.746	
+Memory	UnityAllocatedMB	317.83	
+Memory	UnityReservedMB	429.785	
+Memory	UnityUnusedReservedMB	111.955	
+GC	Gen0Total	304	
+GC	Gen1Total	304	
+GC	Gen2Total	304	
+GC	Gen0Delta	1	
+GC	Gen1Delta	1	
+GC	Gen2Delta	1	
+ProfilerRecorder	AvailableCounters	61	
+ProfilerRecorder	ActiveRecorders	11	
+ProfilerRecorder	MissingRecorders	6	
+ProfilerRecorder	RelevantAvailable	VSync/WaitForTargetFPS, Internal/Main Thread, Render/FrameTime.GPU, GC/GC.Collect, Render/Gfx.WaitForRenderThread, Render/Gfx.WaitForPresentOnGfxThread, Memory/System Used Memory, Memory/System Total Used Memory, Memory/App Resident Memory, Memory/App Committed Memory, Memory/Total Used Memory, Memory/Total Reserved Memory, Memory/GC Used Memory...	
+ProfilerCPU	MainThreadMs	21.015	last=21.392 samples=5 source=Internal/Main Thread
+ProfilerCPU	WaitForTargetFpsMs	0	last=0 samples=5 source=VSync/WaitForTargetFPS
+ProfilerCPU	GfxWaitForPresentMs	0.002	last=0.002 samples=5 source=Render/Gfx.WaitForPresentOnGfxThread
+ProfilerGPU	FrameGpuMs	0	last=0 samples=4 source=Render/FrameTime.GPU
+ProfilerRender	SetPassCalls	130	last=130 samples=5 source=Render/SetPass Calls Count
+ProfilerRender	Triangles	1152383.2	last=1150940 samples=5 source=Render/Triangles Count
+ProfilerRender	Vertices	1858364.6	last=1856640 samples=5 source=Render/Vertices Count
+ProfilerRender	ShadowCasters	39.6	last=39 samples=5 source=Render/Shadow Casters Count
+ProfilerGC	GcCollectMs	0	last=0 samples=5 source=GC/GC.Collect
+ProfilerMemory	GcUsedMB	162.578	last=162.746 samples=5 source=Memory/GC Used Memory
+ProfilerMemory	TotalUsedMB	481.412	last=481.592 samples=5 source=Memory/Total Used Memory
+RenderStats	EditorStats	unavailable	UNITY_EDITOR only
+World	LoadedChunks	494	
+World	ChunkGameObjects	64	
+World	DedicatedBlockGameObjects	0	
+World	BlockHostGameObjects	1	
+World	BlockComponents	11485	
+World	ChunkSurfaceMeshes	494	
+World	LoadedBlocks	11485	
+World	BlockSimulationStates	6071	
+World	RegisteredBlockCells	31616	
+World	DataOnlyBlockCells	20131	
+World	BlockDataChunks	494	
+World	LoadedMapObjects	5602	
+World	LoadedInstallations	2445	
+World	LoadedConveyorBelts	2283	
+View	ActiveBlockRoots	1	
+View	InactiveBlockRoots	0	
+View	ActiveMapObjectRoots	5602	
+View	InactiveMapObjectRoots	0	
+View	ActiveBeltRoots	2283	
+View	InactiveBeltRoots	0	
+View	SuspendedBeltRoots	0	
+View	MapObjectTransforms	45375	
+View	ActiveMapObjectTransforms	34465	
+View	InactiveMapObjectTransforms	10910	
+View	BeltTransforms	37488	
+View	ActiveBeltTransforms	26615	
+View	InactiveBeltTransforms	10873	
+Render	MapObjectRenderers	27610	
+Render	EnabledMapObjectRenderers	3999	
+Render	ActiveEnabledMapObjectRenderers	3883	
+Render	DisabledMapObjectRenderers	23611	
+Render	BeltRenderers	23425	
+Render	EnabledBeltRenderers	169	
+Render	ActiveEnabledBeltRenderers	64	
+Render	DisabledBeltRenderers	23256	
+RenderToggles	HideBelts	0	
+RenderToggles	HideBeltItems	0	
+Physics	MapObjectColliders	2329	
+Physics	EnabledMapObjectColliders	2329	
+Physics	DisabledMapObjectColliders	0	
+Physics	BeltColliders	8	
+Physics	EnabledBeltColliders	8	
+Conveyor	LoadedConveyorItems	2436	
+Conveyor	TotalConveyorItems	2438	
+Conveyor	ActiveConveyors	372	
+Conveyor	DataMotionBlocks	48	
+Conveyor	ItemVisualBlocks	1246	
+Conveyor	DirtyItemVisualBlocks	0	
+Conveyor	DynamicItemVisualBlocks	7	
+Conveyor	SlotDotVisualBlocks	0	
+Conveyor	DirectionVisualBlocks	0	
+ConveyorItemRender	ItemBatchCellSize	64	
+ConveyorItemRender	PortableBrgBatches	0	
+ConveyorItemRender	StaticBatches	275	
+ConveyorItemRender	StaticBrgBatches	0	
+ConveyorItemRender	StaticInstances	2419	
+ConveyorItemRender	GpuMotionInstances	63	
+ConveyorItemRender	StaticDrawCalls	275	
+ConveyorItemRender	DynamicBatches	0	
+ConveyorItemRender	DynamicBrgBatches	0	
+ConveyorItemRender	DynamicInstances	0	
+ConveyorItemRender	DynamicDrawCalls	0	
+ConveyorItemRender	ActiveRenderBlocks	1246	
+ConveyorItemRender	DynamicRenderBlocks	7	
+ConveyorItemRender	DirtyRenderBlocks	0	
+ConveyorItemRender	CachedRenderBlocks	1239	
+ConveyorItemRender	CachedDynamicRenderBlocks	0	
+ConveyorItemRender	CachedItemRenderAssets	93	
+ConveyorItemRender	DynamicCullSourceBlocks	7	
+ConveyorItemRender	DynamicCullCandidateBlocks	7	
+ConveyorItemRender	DynamicCullCacheRefreshes	0	
+ConveyorItemRender	DynamicCullCachedBlocks	0	
+ConveyorItemRender	DynamicCullLayerSkippedBlocks	0	
+ConveyorItemRender	DynamicCullFrustumSkippedBlocks	7	
+ConveyorItemRender	DynamicCullPassedBlocks	0	
+ConveyorItemRender	DynamicRenderedItems	0	
+ConveyorItemRender	DynamicKeyCacheHits	0	
+ConveyorItemRender	DynamicKeyCacheMisses	0	
+ConveyorItemRender	DynamicKeyRebuilds	0	
+ConveyorItemRender	DynamicMatrixUpdates	0	
+ConveyorItemRender	DynamicMatrixRebuilds	0	
+ConveyorItemRender	DynamicTransformJobItems	0	
+ConveyorItemRender	DynamicTransformJobScheduled	0	
+ConveyorItemRender	DynamicCullBoundsSize	2.25	
+ConveyorItemRender	DynamicCullBoundsHeight	2.5	
+ConveyorLoad	SavedBlocks	203	
+ConveyorLoad	SavedLanes	383	
+ConveyorLoad	LoadedBlocks	203	
+ConveyorLoad	PendingBlocks	0	
+ConveyorLoad	PendingLanes	0	
+ConveyorLoad	NotRuntimeBlocks	0	
+ConveyorLoad	ZeroLaneBlocks	0	
+ConveyorLoad	AppliedLanes	383	
+ConveyorLoad	FallbackBlocks	0	
+ConveyorLoad	ActualFailedBlocks	0	
+ConveyorLoad	ActualFailedLanes	0	
+ConveyorStateSave	SaveConveyorItemsCalls	0	
+ConveyorStateSave	SavedItems	0	
+ConveyorStateSave	ClearedNonConveyorBlocks	0	
+ConveyorQueue	WakeQueue	257	
+ConveyorQueue	WakeQueuedSet	257	
+ConveyorQueue	DirectWakeBlocks	257	
+ConveyorQueue	LineWakeQueue	1	
+ConveyorQueue	DeferredLineWakeQueue	14	
+ConveyorQueue	CornerGroupWakeQueue	17	
+ConveyorQueue	CornerGroupWakeQueuedSet	17	
+ConveyorQueue	CornerGroupWakeQueuedBlocks	23	
+ConveyorQueue	LineRetryStates	0	
+ConveyorQueue	LineRetryDueLines	0	
+ConveyorQueue	LineReadyDelayStates	0	
+ConveyorQueue	BlockedWaiterDestinations	2169	
+ConveyorQueue	BlockedWaiterSources	2200	
+ConveyorQueue	MaxLineRetryAttempt	0	
+ConveyorQueue	AvgLineRetryAttempt	0	
+ConveyorQueue	ActiveSafetyScanBudget	32	
+ConveyorQueue	ActiveSafetyScanIndex	292	
+ConveyorQueue	NetworkSleepChecks	0	
+ConveyorQueue	DeferredRuntimeRefreshBlocks	0	
+ConveyorQueue	DeferredNetworkWakeBlocks	0	
+ConveyorQueue	DeferredWakeAroundBlocks	0	
+ConveyorQueue	DeferredWakeFlowBlocks	0	
+ActiveConveyor	LastTickFrame	19717	
+ActiveConveyor	QueuedAtStart	324	
+ActiveConveyor	ProcessLimit	512	
+ActiveConveyor	Processed	324	
+ActiveConveyor	LineWakesProcessed	137	
+ActiveConveyor	BlockWakesProcessed	81	
+ActiveConveyor	CornerGroupWakesProcessed	106	
+ActiveConveyor	CornerGroupBlocksProcessed	143	
+ActiveConveyor	CornerGroupBlocksQueued	143	
+ActiveConveyor	CornerGroupBlocksSelected	143	
+ActiveConveyor	CornerGroupBlocksSkipped	0	
+ActiveConveyor	CornerGroupNoProgressRequeuesSkipped	22	
+ActiveConveyor	BlockWakeTicks	79	
+ActiveConveyor	BlockNoProgressRequeuesSkipped	79	
+ActiveConveyor	DuplicateFrameTicksSkipped	120	
+ActiveConveyor	BlockWakeLineFallbacks	0	
+ActiveConveyor	FullLineWakesProcessed	0	
+ActiveConveyor	RangedLineWakesProcessed	137	
+ActiveConveyor	DeferredLineWakesPromoted	14	
+ActiveConveyor	LineNoMoveWakes	16	
+ActiveConveyor	LineNoMoveBlocksChanged	31	
+ActiveConveyor	LineNoMoveBlocksSkipped	30	
+ActiveConveyor	LineNoMoveDirectFallbacks	7	
+ActiveConveyor	LineWakesDroppedByRetryThrottle	0	
+ActiveConveyor	DeferredLineWakesDroppedByRetryThrottle	0	
+ActiveConveyor	LineRetryRangeMerges	0	
+ActiveConveyor	RetryStatesScanned	0	
+ActiveConveyor	RetryWakesQueued	0	
+ActiveConveyor	ReadyDelayStatesScanned	0	
+ActiveConveyor	SafetyWakesQueued	29	
+ActiveConveyor	MovedLineWakesScheduled	0	
+ActiveConveyor	MovedLineWakeSlots	0	
+ActiveConveyor	BlockedWaiterRegistrations	24	
+ActiveConveyor	BlockedWaitersWoken	0	
+ConveyorCache	LineCacheDirty	0	
+ConveyorCache	NetworkCacheDirty	0	
+ConveyorCache	Lines	224	
+ConveyorCache	LineSlots	2252	
+ConveyorCache	CornerGroups	25	
+ConveyorCache	CornerGroupSlots	31	
+ConveyorCache	Networks	195	
+ConveyorCache	NetworkIds	2283	
+ConveyorCache	NetworkSleeping	0	
+ConveyorCache	NetworkActive	195	
+ConveyorCache	NetworkRetries	0	
+ConveyorCache	NextLineRetryMs	inf	
+Virtualization	VirtualBeltRegistered	2269	
+Virtualization	VirtualBeltCorners	31	
+Virtualization	VirtualBeltSourceHidden	2009	
+Virtualization	VirtualBeltSourceHiddenObjects	2009	
+Virtualization	VirtualBeltEffectiveBatchCellSize	16	
+Virtualization	VirtualBeltBatches	117	
+Virtualization	VirtualBeltBrgBatches	0	
+Virtualization	VirtualBeltEntries	14169	
+Virtualization	VirtualBeltDedicatedTopEntries	2289	
+Virtualization	VirtualBeltTrackedTransformEntries	9181	
+Virtualization	VirtualBeltTrackedTransformUpdates	0	
+Virtualization	VirtualBeltInstances	14169	
+Virtualization	VirtualBeltDrawCalls	117	
+VirtualBelt	NativeRendererTotal	23003	
+VirtualBelt	NativeRendererEnabled	131	
+VirtualBelt	NativeRendererActiveEnabled	49	
+VirtualBelt	NativeRendererSuppressed	22872	
+VirtualBelt	NativeSourceSuppressionEnabled	1	
+VirtualBelt	NativeSourceObjectHidingEnabled	1	
+VirtualBelt	SourceViewHiddenBelts	2009	
+VirtualBelt	SourceViewHiddenObjects	2009	
+VirtualBelt	VirtualizedBelts	2267	
+
+Rows
+Rank	Kind	Item	Type	ItemId	Active	Samples	TotalMs	AvgUs	MaxUs
+1	Belt	Active Belt Tick [366]	ActiveConveyor	-1	0	44	349.755	7948.968	12876.6
+2	Runtime	Conveyor Process Wake Queue [372]	ConveyorProcessWakeQueue	-1	0	44	345.617	7854.925	12856.6
+3	Runtime	Conveyor Wake Line [372]	ConveyorWakeLine	-1	0	5937	141.167	23.778	536.7
+4	Runtime	Virtual Belt Render [2,269]	VirtualConveyorBeltRenderer	-1	0	44	136.374	3099.416	4083.2
+5	Runtime	Conveyor Wake Block [372]	ConveyorWakeBlock	-1	0	3579	132.283	36.961	688.2
+6	Runtime	Conveyor Item Rebuild [2,419]	PortableItemRenderer	-1	0	44	69.977	1590.391	6860.6
+7	Runtime	Conveyor Wake Corner Group [372]	ConveyorWakeCornerGroup	-1	0	4858	69.223	14.249	3107.5
+8	Runtime	Conveyor Corner Group Tick [372]	ConveyorCornerGroupTick	-1	0	4858	61.774	12.716	3102.4
+9	Runtime	Conveyor Item Reconcile Static Cache [2,419]	PortableItemRenderer	-1	0	13	60.474	4651.862	6034.8
+10	Update	Robot arm [19]	RobotArm	59	19	797	35.758	44.865	1477.9
+11	Runtime	Conveyor Line No Move [372]	ConveyorLineNoMove	-1	0	770	27.171	35.288	233.1
+12	Runtime	Conveyor Item Render [2,419]	PortableItemRenderer	-1	0	44	18.389	417.932	605.6
+13	Runtime	Conveyor Item Render Static [2,419]	PortableItemRenderer	-1	0	44	17.688	402	587.5
+14	Runtime	Conveyor Line Blocker Scan [372]	ConveyorLineBlockerScan	-1	0	903	13.898	15.391	169.2
+15	Runtime	Conveyor Line Retry Work [372]	ConveyorLineRetryWork	-1	0	956	13.174	13.78	102.4
+16	Runtime	Conveyor Line Move Scan [372]	ConveyorLineMoveScan	-1	0	770	10.793	14.017	169
+17	Runtime	Conveyor Item Refresh Active Set [2,419]	PortableItemRenderer	-1	0	44	8.677	197.205	873.9
+18	Runtime	Conveyor Corner Group Collect [372]	ConveyorCornerGroupCollect	-1	0	4858	5.355	1.102	20.2
+19	Runtime	Conveyor Safety Scan [372]	ConveyorSafetyScan	-1	0	44	3.427	77.88	1040.9
+20	Belt	Belt Data Motion [48]	ConveyorDataMotion	-1	0	44	3.214	73.048	253.9
+21	Update	Water pump [4]	Pump	53	4	41	1.98	48.302	123.8
+22	Update	Steam generator [5]	SteamGenerator	56	5	51	1.353	26.531	74.3
+23	Update	Funance [4]	InputOutputModule	30	4	34	0.683	20.082	208.9
+24	Update	Boiler [2]	Boiler	55	2	21	0.64	30.471	52.2
+25	Runtime	Conveyor Item Refresh Dirty Cache [2,419]	PortableItemRenderer	-1	0	44	0.552	12.539	127.9
+26	Runtime	Installation Placement Update	InstallationPlacementController	-1	0	44	0.487	11.07	22.2
+27	Runtime	Conveyor Item Rebuild Dynamic [2,419]	PortableItemRenderer	-1	0	44	0.472	10.72	55.3
+28	Update	Sprinkler [1]	Sprinkler	57	1	4	0.43	107.6	126.8
+29	Runtime	Conveyor Promote Deferred Wakes [372]	ConveyorPromoteDeferredWakes	-1	0	44	0.394	8.961	34.8
+30	Update	Electric mining machine [5]	MiningMachine	48	5	50	0.313	6.25	30.7
+31	Runtime	Conveyor Item Dynamic Cull [2,419]	PortableItemRenderer	-1	0	44	0.263	5.98	39.1
+32	Runtime	Installation Placement LateUpdate	InstallationPlacementController	-1	0	44	0.137	3.12	32.3
+33	Update	Electric Oil machine [1]	OilDrillingMachine	50	1	10	0.117	11.74	20.2
+34	Update	Logging machine [1]	LoggingMachine	62	1	10	0.111	11.08	26
+35	Update	Seed Planter [1]	SeedPlanter	63	1	10	0.093	9.33	13.1
+36	Update	Fluid tank [4]	Fluidtank	54	4	40	0.092	2.31	8.6
+37	Runtime	Conveyor Item Refresh Dynamic Set [2,419]	PortableItemRenderer	-1	0	44	0.067	1.52	25.7
+38	Runtime	Conveyor Item Render Dynamic [2,419]	PortableItemRenderer	-1	0	44	0.056	1.282	3.9
+39	Runtime	Conveyor Item Dynamic ScheduleMatrices [2,419]	PortableItemRenderer	-1	0	44	0.044	1.005	1.5
+40	Runtime	Conveyor Ensure Line Cache [372]	ConveyorEnsureLineCache	-1	0	44	0.042	0.961	1.8
+41	Runtime	Conveyor Process Line Retries [372]	ConveyorProcessLineRetries	-1	0	44	0.034	0.775	1.3
+42	Runtime	Conveyor Item Dynamic CompleteMatrices [2,419]	PortableItemRenderer	-1	0	43	0.02	0.467	1
+43	Runtime	Conveyor Item Reconcile Dynamic Cache [2,419]	PortableItemRenderer	-1	0	5	0.009	1.86	6.2

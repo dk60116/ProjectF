@@ -43,6 +43,9 @@ public class GameManager : MonoBehaviour
     private bool hideBeltItems;
     [SerializeField, InspectorName("Hide Belt")]
     private bool hideBelts;
+    [SerializeField, InspectorName("Disable Camera Culling")]
+    [Tooltip("False: world camera culling ON (default). True: bypass native world-camera and custom batch culling. Simulation continues in both modes.")]
+    private bool disableCameraCulling;
     [SerializeField]
     private bool showRailLine;
     [FormerlySerializedAs("showBeltDirections")]
@@ -50,6 +53,9 @@ public class GameManager : MonoBehaviour
     private bool showDirections;
     [SerializeField]
     private bool freeCamera;
+    [SerializeField, InspectorName("FreeCamera: Player Culling")]
+    [Tooltip("In FreeCamera, observe the player's saved camera frustum instead of culling from the free view. Follows player movement. Disable Camera Culling takes precedence.")]
+    private bool freeCameraPlayerCulling;
     [SerializeField]
     private bool freeTrain;
     [SerializeField, InspectorName("Free Electro Energy")]
@@ -106,6 +112,7 @@ public class GameManager : MonoBehaviour
         }
 
         Instance = this;
+        ProjectF.Rendering.WorldCameraCulling.EnsureFor(gameObject);
         SceneManager.sceneLoaded += OnSceneLoaded;
         
         uiManager = GetComponentInChildren<UIManager>();
@@ -211,10 +218,12 @@ public class GameManager : MonoBehaviour
     public bool ShowBeltItemLine => showBeltItemLine;
     public bool HideBeltItems => hideBeltItems;
     public bool HideBelts => hideBelts;
+    public bool DisableCameraCulling => disableCameraCulling;
     public bool ShowRailLine => showRailLine;
     public bool ShowDirections => showDirections;
     public bool ShowBeltDirections => ShowDirections;
     public bool FreeCamera => freeCamera;
+    public bool FreeCameraPlayerCulling => freeCameraPlayerCulling;
     public bool FreeTrain => freeTrain;
     public bool FreeElectroEnergy => freeElectroEnergy;
     public bool FreeBucket => freeBucket;
@@ -307,6 +316,9 @@ public class GameManager : MonoBehaviour
         hideBeltItems = hide;
         SyncBeltItemRenderingRuntimeVisibility(true);
     }
+
+    public void SetDisableCameraCulling(bool disable) => disableCameraCulling = disable;
+    public void SetFreeCameraPlayerCulling(bool enabled) => freeCameraPlayerCulling = enabled;
 
     public void SetHideBelts(bool hide)
     {
@@ -1620,7 +1632,7 @@ public sealed class RuntimeItemGiveReceiver : MonoBehaviour
 
         if (parts.Length < 2 || !string.Equals(parts[0], "give", StringComparison.OrdinalIgnoreCase))
         {
-            error = "usage: give <itemId> [count] | animalstress [count] | animalcollision [count] | animalthreat [radius] | beltstress [count] | beltline [auto|itemId] [count] | beltitems [count] | beltcheck | save <slot> | load <slot> | reset [slot] [randomSeed] | seed <int> | saveslots | time <status|set|scale|pause|next sunrise|check> | debug <showConveyorSlotDots|showSleepAwake|showBeltItemLine|hideBeltItems|hideBelts|showRailLine|showDirections|freeCamera|showAnimalHerdAreas|animalAIPaused|mapObjectTickProfiling> <true|false> | camera size <minSize> <maxSize> | perf [maxRows] | ping | status";
+            error = "usage: give <itemId> [count] | animalstress [count] | animalcollision [count] | animalthreat [radius] | beltstress [count] | beltline [auto|itemId] [count] | beltitems [count] | beltcheck | save <slot> | load <slot> | reset [slot] [randomSeed] | seed <int> | saveslots | time <status|set|scale|pause|next sunrise|check> | debug <showConveyorSlotDots|showSleepAwake|showBeltItemLine|hideBeltItems|hideBelts|disableCameraCulling|showRailLine|showDirections|freeCamera|freeCameraPlayerCulling|showAnimalHerdAreas|animalAIPaused|mapObjectTickProfiling> <true|false> | camera size <minSize> <maxSize> | perf [maxRows] | ping | status";
             return false;
         }
 
@@ -2723,6 +2735,8 @@ public sealed class RuntimeItemGiveReceiver : MonoBehaviour
         return BuildExtraTokens(
             BuildSaveSlotsExtraTokens(saveManager, false, allowStaleCache),
             BuildCameraSizeExtraTokens(playerCamera),
+            $"disableCameraCulling={(GameManager.Instance != null && GameManager.Instance.DisableCameraCulling ? 1 : 0)}",
+            $"freeCameraPlayerCulling={(GameManager.Instance != null && GameManager.Instance.FreeCameraPlayerCulling ? 1 : 0)}",
             BuildSeedExtraTokens(terrain),
             BuildFreeCameraExtraTokens(GameManager.Instance),
             BuildFreeTrainExtraTokens(GameManager.Instance),
@@ -4490,6 +4504,18 @@ public sealed class RuntimeItemGiveReceiver : MonoBehaviour
         {
             gameManager.SetHideBelts(value);
             return ToolResult.Success(0, 0, 0, 0, 0, 0, $"hideBelts={(value ? 1 : 0)}");
+        }
+
+        if (string.Equals(toggleName, "freeCameraPlayerCulling", StringComparison.OrdinalIgnoreCase))
+        {
+            gameManager.SetFreeCameraPlayerCulling(value);
+            return ToolResult.Success(0, 0, 0, 0, 0, 0, $"freeCameraPlayerCulling={(value ? 1 : 0)}");
+        }
+
+        if (string.Equals(toggleName, "disableCameraCulling", StringComparison.OrdinalIgnoreCase))
+        {
+            gameManager.SetDisableCameraCulling(value);
+            return ToolResult.Success(0, 0, 0, 0, 0, 0, $"disableCameraCulling={(value ? 1 : 0)}");
         }
 
         if (string.Equals(toggleName, "showRailLine", StringComparison.OrdinalIgnoreCase)

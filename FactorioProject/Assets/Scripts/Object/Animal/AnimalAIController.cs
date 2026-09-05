@@ -484,18 +484,25 @@ public sealed class AnimalAIController : MonoBehaviour
     public void SetBehaviorExecutionActive(bool active)
     {
         active &= !IsExternallyControlled;
-        if (executionActive == active)
+        bool changed = executionActive != active;
+        executionActive = active;
+        // Run even for the initial false -> false case (spawn outside the active radius).
+        SyncBehaviorAnimationActivity();
+        if (!changed)
         {
             return;
         }
 
-        executionActive = active;
         if (!active)
         {
             ResetScheduledTick();
             ResetPresentation();
             SnapToSimulationPose();
             ApplyAnimation(0f);
+        }
+        else if (waitingForStandUp)
+        {
+            animal?.WakeFromRest();
         }
     }
 
@@ -535,6 +542,7 @@ public sealed class AnimalAIController : MonoBehaviour
         bool wasResting = currentState == AnimalAIState.Rest || waitingForStandUp;
         nooseLeashed = true;
         executionActive = false;
+        SyncBehaviorAnimationActivity();
         currentState = AnimalAIState.Idle;
         stateTimeRemaining = 0f;
         hasTarget = false;
@@ -597,6 +605,7 @@ public sealed class AnimalAIController : MonoBehaviour
         mountedRider = rider;
         ResetMountedMovement();
         executionActive = false;
+        SyncBehaviorAnimationActivity();
         currentState = AnimalAIState.Idle;
         stateTimeRemaining = 0f;
         hasTarget = false;
@@ -3346,6 +3355,12 @@ public sealed class AnimalAIController : MonoBehaviour
         return Mathf.Lerp(1f, configuredMultiplier, AgeGenderSpeedMultiplierInfluence);
     }
 
+    private void SyncBehaviorAnimationActivity()
+    {
+        // Rider/leash/draft movement is independent of the AI scheduler's pause/radius.
+        animal?.SetBehaviorAnimationActive(executionActive || IsExternallyControlled);
+    }
+
     private void ApplyAnimation(
         float speed,
         bool isRunning = false,
@@ -3356,6 +3371,7 @@ public sealed class AnimalAIController : MonoBehaviour
             return;
         }
 
+        SyncBehaviorAnimationActivity();
         float resolvedSpeed = Mathf.Max(0f, speed);
         bool performingActivity = !movingToActivity && !hasTarget;
         animal.SetAIAnimation(

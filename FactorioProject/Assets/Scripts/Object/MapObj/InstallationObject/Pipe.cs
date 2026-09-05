@@ -94,7 +94,11 @@ public class Pipe : InstallationObject
         Fluidtank.RefreshAllPipeVisuals();
     }
 
-    private void Update()
+    protected override bool UsesManagedVisualUpdates => true;
+
+    protected override void OnManagedVisualsResumed() => RefreshFluidDisplayImmediately();
+
+    protected override void TickManagedVisuals(float deltaTime)
     {
         if (Time.unscaledTime < nextFluidDisplayRefreshTime)
         {
@@ -732,6 +736,8 @@ public class Pipe : InstallationObject
 
     private void RefreshFluidDisplay(bool force)
     {
+        if (!ShouldUpdateVisuals)
+            return;
         MeshRenderer renderer = ResolveFluidDisplayRenderer();
         if (renderer == null)
         {

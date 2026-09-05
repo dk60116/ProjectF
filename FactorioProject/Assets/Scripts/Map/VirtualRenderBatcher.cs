@@ -134,7 +134,7 @@ public sealed class VirtualRenderBatchCollection
     private readonly List<Vector4> uvDrawScratch = new List<Vector4>(MaxInstancesPerDraw);
     private readonly List<Vector4> conveyorMotionStartDrawScratch = new List<Vector4>(MaxInstancesPerDraw);
     private readonly List<Vector4> conveyorMotionEndDrawScratch = new List<Vector4>(MaxInstancesPerDraw);
-    private readonly Plane[] renderFrustumPlanes = new Plane[6];
+    private readonly ProjectF.Rendering.CameraRenderCulling cameraCulling = new ProjectF.Rendering.CameraRenderCulling();
     private VirtualRenderBatchRendererGroupBackend batchRendererGroupBackend;
 
     public int ActiveBatchCount => activeBatchKeys.Count;
@@ -378,6 +378,9 @@ public sealed class VirtualRenderBatchCollection
         }
 
         VirtualRenderBatchRendererGroupBackend backend = ResolveBatchRendererGroupBackend();
+        cameraCulling.Update(renderCamera);
+        if (backend != null)
+            backend.DisableCameraCulling = ProjectF.Rendering.CameraRenderCulling.Disabled;
         backend?.BeginSync();
 
         bool hasLegacyBatches = false;
@@ -391,6 +394,13 @@ public sealed class VirtualRenderBatchCollection
             }
 
             Bounds worldBounds = ResolveWorldBounds(key, batchCache);
+            // Skip CPU uploads too, not only the final draw submission.
+            if (key.ShadowCastingMode == ShadowCastingMode.Off
+                && (!cameraCulling.IsLayerVisible(key.Layer) || !cameraCulling.Intersects(worldBounds)))
+            {
+                backend?.Deactivate(key, keepAllocated: true);
+                continue;
+            }
             if (backend == null
                 || !backend.TrySyncBatch(
                     key,
@@ -409,12 +419,6 @@ public sealed class VirtualRenderBatchCollection
             return;
         }
 
-        bool canFrustumCull = renderCamera != null;
-        if (canFrustumCull)
-        {
-            GeometryUtility.CalculateFrustumPlanes(renderCamera, renderFrustumPlanes);
-        }
-
         for (int batchIndex = 0; batchIndex < activeBatchKeys.Count; batchIndex++)
         {
             VirtualRenderBatchKey key = activeBatchKeys[batchIndex];
@@ -429,9 +433,7 @@ public sealed class VirtualRenderBatchCollection
             }
 
             Bounds worldBounds = ResolveWorldBounds(key, batchCache);
-            if (canFrustumCull
-                && (!IsLayerVisibleToCamera(renderCamera, key.Layer)
-                    || !GeometryUtility.TestPlanesAABB(renderFrustumPlanes, worldBounds)))
+            if (!cameraCulling.IsLayerVisible(key.Layer) || !cameraCulling.Intersects(worldBounds))
             {
                 continue;
             }
@@ -766,12 +768,16 @@ public sealed class VirtualRenderBatchCollection
         batchCache.EncapsulateBounds(bounds);
     }
 
-    private static Bounds CalculateWorldBounds(Mesh mesh, Matrix4x4 matrix)
+    internal static Bounds CalculateWorldBounds(Mesh mesh, Matrix4x4 matrix)
     {
         Bounds localBounds = mesh != null
             ? mesh.bounds
             : new Bounds(Vector3.zero, Vector3.one);
+        return CalculateWorldBounds(localBounds, matrix);
+    }
 
+    internal static Bounds CalculateWorldBounds(Bounds localBounds, Matrix4x4 matrix)
+    {
         Vector3 center = matrix.MultiplyPoint3x4(localBounds.center);
         Vector3 localExtents = localBounds.extents;
         Vector3 axisX = matrix.MultiplyVector(new Vector3(localExtents.x, 0f, 0f));
@@ -789,14 +795,6 @@ public sealed class VirtualRenderBatchCollection
         }
 
         return worldBounds;
-    }
-
-    private static bool IsLayerVisibleToCamera(Camera camera, int layer)
-    {
-        return camera == null
-            || layer < 0
-            || layer > 31
-            || (camera.cullingMask & (1 << layer)) != 0;
     }
 
     private sealed class BatchRenderCache

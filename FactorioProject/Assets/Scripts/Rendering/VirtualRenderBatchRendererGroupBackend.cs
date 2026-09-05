@@ -57,6 +57,7 @@ internal sealed class VirtualRenderBatchRendererGroupBackend : IDisposable
         && BatchRendererGroup.BufferTarget == BatchBufferTarget.RawBuffer;
 
     public bool IsAvailable => !initializationFailed;
+    public bool DisableCameraCulling { get; set; }
 
     public int ActiveBatchCount
     {
@@ -221,11 +222,15 @@ internal sealed class VirtualRenderBatchRendererGroupBackend : IDisposable
         }
     }
 
-    public void Deactivate(VirtualRenderBatchKey key)
+    public void Deactivate(VirtualRenderBatchKey key, bool keepAllocated = false)
     {
         if (statesByKey.TryGetValue(key, out BrgBatchState state))
         {
             state.InstanceCount = 0;
+            // Camera visibility changes must not destroy/recreate GPU buffers.
+            // Unregistered batches still expire when absent from the next sync.
+            if (keepAllocated)
+                state.LastSyncGeneration = syncGeneration;
         }
     }
 
@@ -655,7 +660,7 @@ internal sealed class VirtualRenderBatchRendererGroupBackend : IDisposable
         output->instanceSortingPositionFloatCount = 0;
     }
 
-    private static ushort ResolveSplitVisibilityMask(
+    private ushort ResolveSplitVisibilityMask(
         BrgBatchState state,
         BatchCullingContext cullingContext)
     {
@@ -669,6 +674,9 @@ internal sealed class VirtualRenderBatchRendererGroupBackend : IDisposable
         {
             return 0;
         }
+
+        if (DisableCameraCulling && cullingContext.viewType == BatchCullingViewType.Camera)
+            return ushort.MaxValue;
 
         NativeArray<CullingSplit> splits = cullingContext.cullingSplits;
         if (!splits.IsCreated || splits.Length == 0)

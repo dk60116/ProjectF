@@ -1959,6 +1959,7 @@ public class Resource : MapObject
     }
 }
 
+[DefaultExecutionOrder(1000)]
 public class ResourceBatchRenderer : MonoBehaviour
 {
     private const int MaxInstancesPerDraw = 1023;
@@ -1982,7 +1983,7 @@ public class ResourceBatchRenderer : MonoBehaviour
     private readonly Dictionary<BatchKey, Bounds> boundsByBatch = new Dictionary<BatchKey, Bounds>();
     private readonly List<BatchKey> activeBatchKeys = new List<BatchKey>();
     private readonly List<Resource> cleanupBuffer = new List<Resource>();
-    private readonly Plane[] renderFrustumPlanes = new Plane[6];
+    private readonly ProjectF.Rendering.CameraRenderCulling cameraCulling = new ProjectF.Rendering.CameraRenderCulling();
     private bool batchesDirty;
     private Camera mainCamera;
 
@@ -2265,12 +2266,12 @@ public class ResourceBatchRenderer : MonoBehaviour
         if (matrices.Count == 0)
         {
             activeBatchKeys.Add(key);
-            boundsByBatch[key] = TransformBounds(mesh.bounds, localToWorldMatrix);
+            boundsByBatch[key] = VirtualRenderBatchCollection.CalculateWorldBounds(mesh, localToWorldMatrix);
         }
         else
         {
             Bounds batchBounds = boundsByBatch[key];
-            batchBounds.Encapsulate(TransformBounds(mesh.bounds, localToWorldMatrix));
+            batchBounds.Encapsulate(VirtualRenderBatchCollection.CalculateWorldBounds(mesh, localToWorldMatrix));
             boundsByBatch[key] = batchBounds;
         }
 
@@ -2279,12 +2280,9 @@ public class ResourceBatchRenderer : MonoBehaviour
 
     private void RenderBatches()
     {
-        mainCamera ??= Camera.main;
-        bool canFrustumCull = mainCamera != null;
-        if (canFrustumCull)
-        {
-            GeometryUtility.CalculateFrustumPlanes(mainCamera, renderFrustumPlanes);
-        }
+        if (mainCamera == null || !mainCamera.isActiveAndEnabled)
+            mainCamera = Camera.main;
+        cameraCulling.Update(mainCamera);
 
         for (int batchIndex = 0; batchIndex < activeBatchKeys.Count; batchIndex++)
         {
@@ -2296,9 +2294,7 @@ public class ResourceBatchRenderer : MonoBehaviour
                 continue;
             }
 
-            if (canFrustumCull
-                && (((1 << key.Layer) & mainCamera.cullingMask) == 0
-                    || !GeometryUtility.TestPlanesAABB(renderFrustumPlanes, batchBounds)))
+            if (!cameraCulling.IsLayerVisible(key.Layer) || !cameraCulling.Intersects(batchBounds))
             {
                 continue;
             }
@@ -2321,21 +2317,6 @@ public class ResourceBatchRenderer : MonoBehaviour
                 remaining -= drawCount;
             }
         }
-    }
-
-    private static Bounds TransformBounds(Bounds localBounds, Matrix4x4 localToWorldMatrix)
-    {
-        Vector3 localExtents = localBounds.extents;
-        Vector3 axisX = localToWorldMatrix.MultiplyVector(new Vector3(localExtents.x, 0f, 0f));
-        Vector3 axisY = localToWorldMatrix.MultiplyVector(new Vector3(0f, localExtents.y, 0f));
-        Vector3 axisZ = localToWorldMatrix.MultiplyVector(new Vector3(0f, 0f, localExtents.z));
-        Vector3 worldExtents = new Vector3(
-            Mathf.Abs(axisX.x) + Mathf.Abs(axisY.x) + Mathf.Abs(axisZ.x),
-            Mathf.Abs(axisX.y) + Mathf.Abs(axisY.y) + Mathf.Abs(axisZ.y),
-            Mathf.Abs(axisX.z) + Mathf.Abs(axisY.z) + Mathf.Abs(axisZ.z));
-        return new Bounds(
-            localToWorldMatrix.MultiplyPoint3x4(localBounds.center),
-            worldExtents * 2f);
     }
 
     private float ResolveBatchCellSize(bool useGlobalBatch)

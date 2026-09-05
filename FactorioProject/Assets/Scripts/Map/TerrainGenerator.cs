@@ -980,6 +980,8 @@ public partial class TerrainGenerator : MonoBehaviour
     private void OnEnable()
     {
         Active = this;
+        if (Application.isPlaying)
+            ProjectF.Rendering.TerrainWorldRenderer.EnsureFor(this);
 #if UNITY_EDITOR
         SceneView.duringSceneGui -= RenderEditorChunkSurfaces;
         SceneView.duringSceneGui += RenderEditorChunkSurfaces;
@@ -1098,6 +1100,21 @@ public partial class TerrainGenerator : MonoBehaviour
             }
         }
 
+        if (ShouldRefreshTrackedChunks())
+        {
+            using (RefreshChunksMarker.Auto())
+            {
+                RefreshTrackedChunks();
+            }
+        }
+    }
+
+    internal void RenderWorldVisuals()
+    {
+        if (!Application.isPlaying || !hasGeneratedChunks)
+            return;
+
+        bool profileBeltTicks = MapObjectTickProfiler.IsEnabled;
         if (ShouldTickConveyorVisualRuntime())
         {
             using (TickConveyorDotsMarker.Auto())
@@ -1121,19 +1138,10 @@ public partial class TerrainGenerator : MonoBehaviour
             }
         }
 
-        if (ShouldRefreshTrackedChunks())
-        {
-            using (RefreshChunksMarker.Auto())
-            {
-                RefreshTrackedChunks();
-            }
-        }
-
         using (RenderChunkSurfacesMarker.Auto())
         {
             RenderLoadedChunkSurfaces();
         }
-
     }
 
     private bool RefreshBeltTickProfilerFrameState()

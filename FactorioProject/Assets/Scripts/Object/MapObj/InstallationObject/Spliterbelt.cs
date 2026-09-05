@@ -238,14 +238,16 @@ public partial class Spliterbelt : ConveyorBelt
 
     private float WheelAnimationTime => Time.time;
 
-    private void Update()
+    protected override bool UsesManagedVisualUpdates => true;
+
+    protected override void TickManagedVisuals(float deltaTime)
     {
         if (ConveyorSpeed <= 0f || !TryGetPlacementRuntime(out _, out _))
             return;
         int activeChannels = GetDisplayedWheelRotationMask(WheelAnimationTime);
         if (activeChannels == 0)
             return;
-        float angle = ConveyorSpeed * 180f * Time.deltaTime;
+        float angle = ConveyorSpeed * 180f * deltaTime;
         RotateWheel(LeftWheel, leftWheelChannel, activeChannels, angle);
         RotateWheel(rightWheel, rightWheelChannel, activeChannels, angle);
     }

@@ -2,7 +2,7 @@ using System.Collections.Generic;
 using Unity.Profiling;
 using UnityEngine;
 
-[DisallowMultipleComponent]
+[DisallowMultipleComponent, DefaultExecutionOrder(1000)]
 public sealed class RobotArmRenderBatcher : MonoBehaviour
 {
     private const float BatchCellSize = 8f;

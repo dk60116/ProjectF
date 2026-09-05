@@ -1547,6 +1547,15 @@ public class InputOutputModule : InstallationObject,
         return true;
     }
 
+    protected override bool UsesManagedVisualUpdates => true;
+
+    protected override void OnManagedVisualsResumed()
+    {
+        UpdateEnergyGaugeVisual();
+        UpdateCraftParticleEffectVisual();
+        RefreshWorkAnimatorState(true);
+    }
+
     public virtual void ManagedUpdateTick(float deltaTime)
     {
         if (!Application.isPlaying)
@@ -1578,9 +1587,12 @@ public class InputOutputModule : InstallationObject,
             TryStartNextCraft();
         }
 
-        UpdateEnergyGaugeVisual();
+        if (ShouldUpdateVisuals)
+        {
+            UpdateEnergyGaugeVisual();
+            RefreshWorkAnimatorState();
+        }
         UpdateCraftParticleEffectVisual();
-        RefreshWorkAnimatorState();
         RefreshRuntimeUpdateSleepState();
     }
 
@@ -6015,11 +6027,7 @@ public class InputOutputModule : InstallationObject,
             return;
         }
 
-        ApplyCraftParticleEffectSpeed(OperationalAnimationSpeedRatio);
-        if (!particleEffect.isPlaying)
-        {
-            particleEffect.Play();
-        }
+        SetVisualParticleActive(particleEffect, true, OperationalAnimationSpeedRatio);
     }
 
     protected virtual bool ShouldPlayWorkAnimation()
@@ -6043,6 +6051,8 @@ public class InputOutputModule : InstallationObject,
 
     protected void SetWorkAnimatorState(bool isWorking, bool force = false)
     {
+        if (!ShouldUpdateVisuals)
+            return;
         Animator targetAnimator = ResolveWorkAnimator();
         if (targetAnimator == null)
         {
@@ -6138,28 +6148,7 @@ public class InputOutputModule : InstallationObject,
             return;
         }
 
-        ApplyCraftParticleEffectSpeed(1f);
-        if (!particleEffect.isPlaying)
-        {
-            return;
-        }
-
-        particleEffect.Stop(
-            true,
-            clearParticles
-                ? ParticleSystemStopBehavior.StopEmittingAndClear
-                : ParticleSystemStopBehavior.StopEmitting);
-    }
-
-    private void ApplyCraftParticleEffectSpeed(float speedRatio)
-    {
-        if (particleEffect == null)
-        {
-            return;
-        }
-
-        ParticleSystem.MainModule main = particleEffect.main;
-        main.simulationSpeed = Mathf.Max(0f, speedRatio);
+        SetVisualParticleActive(particleEffect, false, clear: clearParticles);
     }
 
     private float ResolveCraftProgressGaugeFillAmount()
