@@ -1,0 +1,5 @@
+Tool: built-in image_gen (edit)
+Source: belt-splitter-concept-20260905.png
+Output: belt-splitter-housing-20260905.png
+
+Use case: precise-object-edit. Input image 1 is the edit target. Remove ALL conveyor belts extending from the central splitter/sorter housing, at both front and rear: remove their segmented belt plates, triangular belt arrows, side rails and circular rollers completely. Leave ONLY the existing central bridge-shaped classifier housing as a standalone game inventory icon. Preserve that housing's original shape, thickness, proportions, beveled panels, dark warm charcoal/brown color, gray edge highlights, thick black outlines, embossed branching arrow symbol on its top, and exactly the same isometric camera angle and stylized shading. Keep the openings beneath the bridge empty where belts were removed; only naturally complete previously obscured housing edges. Do not add replacement machinery, new legs, rollers, platforms or belt stubs. Center this isolated original housing with comfortable padding on a genuinely transparent alpha background. Do not paint a checkerboard pattern into the image. No text, no labels, no watermark.

@@ -1,0 +1,22 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net9.0</TargetFramework>
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="Program.cs" />
+    <Compile Include="BeltTopUvChecks.cs" />
+    <Compile Include="ConveyorSideBarrierChecks.cs" />
+    <Compile Include="../../FactorioProject/Assets/Scripts/Map/ConveyorSideBarrier.cs" Link="ConveyorSideBarrier.cs" />
+    <Compile Include="../../FactorioProject/Assets/Scripts/Map/ConveyorBeltTopUv.cs" Link="ConveyorBeltTopUv.cs" />
+    <Compile Include="../../FactorioProject/Assets/Scripts/Map/ConveyorSideHandoffPath.cs" Link="ConveyorSideHandoffPath.cs" />
+    <Compile Include="../../FactorioProject/Assets/Scripts/Map/ConveyorMotionTiming.cs" Link="ConveyorMotionTiming.cs" />
+    <Reference Include="UnityEngine.CoreModule">
+      <HintPath>$(UnityManagedDirectory)/UnityEngine.CoreModule.dll</HintPath>
+    </Reference>
+  </ItemGroup>
+  <Target Name="RequireUnityManagedDirectory" BeforeTargets="ResolveReferences" Condition="'$(UnityManagedDirectory)' == ''">
+    <Error Text="Pass -p:UnityManagedDirectory=.../Editor/Data/Managed/UnityEngine. This harness uses managed vector math only; it does not launch Unity." />
+  </Target>
+</Project>

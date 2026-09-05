@@ -250,7 +250,7 @@ MonoBehaviour:
   m_EditorClassIdentifier: 
   id: 0
   objectName: Wooden Fence Door
-  objId: 65
+  objId: 66
   itemDefinition: {fileID: 11400000, guid: e110bd69d6c9d9d49aa13090a2202fd1, type: 2}
   portableObj: {fileID: 0}
   mapStatus:

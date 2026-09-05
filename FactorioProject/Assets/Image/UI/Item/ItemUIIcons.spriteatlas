@@ -93,6 +93,7 @@ SpriteAtlas:
     - {fileID: 21300000, guid: ed1a52a543e41384d8bfff419ffc723c, type: 3}
     - {fileID: 21300000, guid: 86c83e332e61b5740ae19381d5fc6843, type: 3}
     - {fileID: 21300000, guid: 5074c2111e0cf234f8d8f911cf70fe24, type: 3}
+    - {fileID: 21300000, guid: 1614a7b978fab8f4eb2c69dbde0f8a98, type: 3}
     - {fileID: 21300000, guid: bedd2a65b52676a4fa821c9211aeafdd, type: 3}
     - {fileID: 21300000, guid: b6c8bfd785901674d9f07965da9cc348, type: 3}
     - {fileID: 21300000, guid: 3ca59f1903fc4caf8d2d251ad2f1d7a1, type: 3}
@@ -239,6 +240,7 @@ SpriteAtlas:
     - 5af14359cd5ad9f49aa3257d75f72597: 21300000
     - 279281695dbf1c04c87fe3dac76f17f0: 21300000
     - 2f7ffda98d27dcb4096a91463d61f5e1: 21300000
+    - 1614a7b978fab8f4eb2c69dbde0f8a98: 21300000
     - f746e9b9977c9604b9f09b6049af2215: 21300000
     - db8276e91c924ed8930c513384ad8527: 21300000
     - f09c56f9f04acdb4e9ceac56adb01f7e: 21300000
@@ -376,6 +378,7 @@ SpriteAtlas:
   - {fileID: 21300000, guid: 5af14359cd5ad9f49aa3257d75f72597, type: 3}
   - {fileID: 21300000, guid: 279281695dbf1c04c87fe3dac76f17f0, type: 3}
   - {fileID: 21300000, guid: 2f7ffda98d27dcb4096a91463d61f5e1, type: 3}
+  - {fileID: 21300000, guid: 1614a7b978fab8f4eb2c69dbde0f8a98, type: 3}
   - {fileID: 21300000, guid: f746e9b9977c9604b9f09b6049af2215, type: 3}
   - {fileID: 21300000, guid: db8276e91c924ed8930c513384ad8527, type: 3}
   - {fileID: 21300000, guid: f09c56f9f04acdb4e9ceac56adb01f7e, type: 3}
@@ -512,6 +515,7 @@ SpriteAtlas:
   - Fluid
   - Camp fire_Icon
   - Pork steak_Icon
+  - Spliter belt_Icon
   - Manual - Noose_Icon
   - Pitchfork
   - Door_Interaction_0

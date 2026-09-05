@@ -1571,6 +1571,7 @@ public partial class Block : BaseObject
     private bool IsActiveRuntimeConveyorLaneIndex(int laneIndex)
     {
         return IsActiveConveyorLaneIndex(laneIndex)
+               || (laneIndex == ConveyorSideExitLaneIndex && HasConveyorSideExitLane())
                || (IsBelt2FBridgeLaneIndex(laneIndex) && TryGetBelt2FBridgeCenterBelt(out _));
     }
 
@@ -4016,6 +4017,7 @@ public partial class Block : BaseObject
         return Application.isPlaying
             && IsConveyorStackingEnabled()
             && !IsCornerConveyor()
+            && !HasConveyorSideExitLane()
             && ShouldUseVirtualConveyorItemRendering()
             && !HasMaterializedConveyorItems()
             && !HasConveyorMotionStates()
@@ -4036,6 +4038,7 @@ public partial class Block : BaseObject
             && !TryGetRuntimeBelt2F(out _)
             && !TryGetBelt2FBridgeCenterBelt(out _)
             && !IsCornerConveyor()
+            && !HasConveyorSideExitLane()
             && ShouldUseVirtualConveyorItemRendering()
             && TryGetConveyorLaneLayout(out _, out _);
     }
@@ -4140,6 +4143,8 @@ public partial class Block : BaseObject
         Vector3 startWorldPosition = GetConveyorItemVisualWorldPosition(sourceLaneIndex);
         bool hasViaWorldPosition = TryGetConveyorLinearMoveViaWorldPosition(
             sourceLaneIndex,
+            destinationBlock,
+            destinationLaneIndex,
             startWorldPosition,
             out Vector3 viaWorldPosition);
         if (hasViaWorldPosition)
@@ -6626,6 +6631,15 @@ public partial class Block : BaseObject
 
         if (destinationBlock != null)
         {
+            if (destinationBlock.TryGetConveyorSideHandoffFlow(this, sourceLaneIndex, out Vector2Int destinationFlow))
+            {
+                Vector3 start = GetConveyorLaneWorldPosition(sourceLaneIndex);
+                Vector3 target = destinationBlock.GetConveyorLaneWorldPosition(destinationLaneIndex);
+                Vector3 turn = destinationBlock.GetConveyorSideHandoffTurnPosition(
+                    start, target, destinationLaneIndex, destinationFlow);
+                return Vector3.Distance(start, turn) + Vector3.Distance(turn, target);
+            }
+
             int coordinateDistance =
                 Mathf.Abs(destinationBlock.coordinate.x - coordinate.x)
                 + Mathf.Abs(destinationBlock.coordinate.y - coordinate.y);
@@ -6675,6 +6689,8 @@ public partial class Block : BaseObject
 
         if (!TryGetConveyorLinearMoveViaWorldPosition(
                 sourceLaneIndex,
+                destinationBlock,
+                destinationLaneIndex,
                 startWorldPosition,
                 out Vector3 viaWorldPosition))
         {
@@ -6692,9 +6708,22 @@ public partial class Block : BaseObject
 
     private bool TryGetConveyorLinearMoveViaWorldPosition(
         int sourceLaneIndex,
+        Block destinationBlock,
+        int destinationLaneIndex,
         Vector3 startWorldPosition,
         out Vector3 viaWorldPosition)
     {
+        if (destinationBlock != null
+            && destinationBlock.TryGetConveyorSideHandoffFlow(this, sourceLaneIndex, out Vector2Int destinationFlow))
+        {
+            viaWorldPosition = destinationBlock.GetConveyorSideHandoffTurnPosition(
+                startWorldPosition,
+                destinationBlock.GetConveyorLaneWorldPosition(destinationLaneIndex),
+                destinationLaneIndex,
+                destinationFlow);
+            return true;
+        }
+
         if (TryGetConveyorLaneLayout(out int frontLaneIndex, out _)
             && sourceLaneIndex == frontLaneIndex
             && TryGetNextConveyorBlock(out Block nextBlock)
@@ -6774,33 +6803,15 @@ public partial class Block : BaseObject
 
         if (sourceBlock != null
             && destinationBlock != null
-            && sourceBlock.TryGetBelt2FBridgeViaWorldPosition(out Vector3 bridgeViaWorldPosition))
+            && sourceBlock.TryGetConveyorLinearMoveViaWorldPosition(
+                sourceLaneIndex, destinationBlock, destinationLaneIndex,
+                sourceWorldPosition, out Vector3 viaWorldPosition))
         {
-            int coordinateDistance =
-                Mathf.Abs(destinationBlock.coordinate.x - sourceBlock.coordinate.x)
-                + Mathf.Abs(destinationBlock.coordinate.y - sourceBlock.coordinate.y);
-            if (coordinateDistance > 1)
-            {
-                float sourceToViaLength = Vector3.Distance(sourceWorldPosition, bridgeViaWorldPosition);
-                float viaToDestinationLength = Vector3.Distance(bridgeViaWorldPosition, destinationWorldPosition);
-                float pathLength = sourceToViaLength + viaToDestinationLength;
-                if (pathLength > ConveyorContinuousMotionEpsilon)
-                {
-                    float distance = Mathf.Clamp01(progress) * pathLength;
-                    if (sourceToViaLength > ConveyorContinuousMotionEpsilon && distance < sourceToViaLength)
-                    {
-                        return Vector3.Lerp(sourceWorldPosition, bridgeViaWorldPosition, distance / sourceToViaLength);
-                    }
-
-                    if (viaToDestinationLength > ConveyorContinuousMotionEpsilon)
-                    {
-                        return Vector3.Lerp(
-                            bridgeViaWorldPosition,
-                            destinationWorldPosition,
-                            Mathf.Clamp01((distance - sourceToViaLength) / viaToDestinationLength));
-                    }
-                }
-            }
+            return EvaluateConveyorLinearMotionWorldPosition(
+                sourceWorldPosition, true, viaWorldPosition, destinationWorldPosition,
+                Vector3.Distance(sourceWorldPosition, viaWorldPosition)
+                    + Vector3.Distance(viaWorldPosition, destinationWorldPosition),
+                progress);
         }
 
         return Vector3.LerpUnclamped(sourceWorldPosition, destinationWorldPosition, progress);
@@ -7657,6 +7668,10 @@ public partial class Block : BaseObject
         }
 
         conveyorItemIds[laneIndex] = -1;
+        if (laneIndex == ConveyorSideExitLaneIndex)
+        {
+            InvalidateConveyorSuccessorCache();
+        }
         conveyorStack[laneIndex] = null;
         conveyorItemMoveFrames[laneIndex] = -1;
         conveyorItemMotionStates[laneIndex] = default;
@@ -8259,6 +8274,10 @@ public partial class Block : BaseObject
         }
 
         movedAny |= TryMoveBelt2FBridgeCenterLanes();
+        if (HasConveyorSideExitLane())
+        {
+            movedAny |= TryMoveConveyorLane(ConveyorSideExitLaneIndex);
+        }
         movedAny |= TryMoveConveyorLane(frontLaneIndex);
         movedAny |= TryMoveConveyorLane(backLaneIndex);
         bool hasLinearMotion = HasConveyorMotionStates();
@@ -10204,15 +10223,16 @@ public partial class Block : BaseObject
                     false,
                     linearStartWorldPosition);
                 pathLength += GetConveyorCornerContinuationRemainingPathLength(cornerContinuation);
+                bool hasViaWorldPosition = sourceBlock.TryGetConveyorLinearMoveViaWorldPosition(
+                    move.sourceLaneIndex,
+                    destinationBlock,
+                    move.destinationLaneIndex,
+                    linearStartWorldPosition,
+                    out Vector3 viaWorldPosition);
 
                 if (portableObject != null)
                 {
                     destinationBlock.conveyorCornerMotionStates.Remove(portableObject);
-                    Vector3 viaWorldPosition = default;
-                    bool hasViaWorldPosition = sourceBlock.TryGetConveyorLinearMoveViaWorldPosition(
-                            move.sourceLaneIndex,
-                            linearStartWorldPosition,
-                            out viaWorldPosition);
                     destinationBlock.conveyorLinearMotionStates[portableObject] = new ConveyorLinearMotionState
                     {
                         cornerContinuation = cornerContinuation,
@@ -10227,11 +10247,6 @@ public partial class Block : BaseObject
                 }
                 else
                 {
-                    Vector3 viaWorldPosition = default;
-                    bool hasViaWorldPosition = sourceBlock.TryGetConveyorLinearMoveViaWorldPosition(
-                            move.sourceLaneIndex,
-                            linearStartWorldPosition,
-                            out viaWorldPosition);
                     ConveyorDataMotionState dataMotionState = new ConveyorDataMotionState
                     {
                         active = true,
@@ -10903,6 +10918,13 @@ public partial class Block : BaseObject
             return true;
         }
 
+        if (destinationLaneIndex == ConveyorSideExitLaneIndex && HasConveyorSideExitLane())
+        {
+            sourceBlock = this;
+            sourceLaneIndex = frontLaneIndex;
+            return true;
+        }
+
         return TryGetUpstreamConveyorPredecessor(destinationLaneIndex, out sourceBlock, out sourceLaneIndex);
     }
 
@@ -11148,7 +11170,16 @@ public partial class Block : BaseObject
             return false;
         }
 
-        if (sourceLaneIndex == frontLaneIndex)
+        bool hasSideExitLane = HasConveyorSideExitLane();
+        if (sourceLaneIndex == frontLaneIndex && hasSideExitLane)
+        {
+            destinationBlock = this;
+            destinationLaneIndex = ConveyorSideExitLaneIndex;
+            return true;
+        }
+
+        if (sourceLaneIndex == frontLaneIndex
+            || (sourceLaneIndex == ConveyorSideExitLaneIndex && hasSideExitLane))
         {
             if (!TryGetNextConveyorBlock(out destinationBlock))
             {
@@ -11374,8 +11405,17 @@ public partial class Block : BaseObject
             return TryGetPreferredCornerConveyorReceiveLaneIndex(handoffWorldPosition, out laneIndex);
         }
 
-        return TryGetConveyorLaneLayout(out _, out laneIndex)
-            && IsValidConveyorLaneIndex(laneIndex);
+        if (!TryGetConveyorLaneLayout(out int frontLaneIndex, out int backLaneIndex))
+        {
+            return false;
+        }
+
+        // A side input joins at the center, then follows the receiving belt.
+        // Reserving the back slot would pull it against the flow before departure.
+        laneIndex = TryGetConveyorSideHandoffFlow(sourceBlock, sourceLaneIndex, out _)
+            ? frontLaneIndex
+            : backLaneIndex;
+        return IsValidConveyorLaneIndex(laneIndex);
     }
 
     private bool TryGetBelt2FBridgeReceiveLaneIndex(
@@ -11498,6 +11538,15 @@ public partial class Block : BaseObject
 
     private Vector3 GetConveyorLaneWorldPosition(int laneIndex)
     {
+        if (laneIndex == ConveyorSideExitLaneIndex
+            && CanUseConveyorSideExitLane()
+            && TryGetConveyorFlowDirection(out Vector2Int sideExitFlow))
+        {
+            return ConveyorSideHandoffPath.GetApproachPosition(
+                GetConveyorLaneWorldPosition(ConveyorSingleLineFrontLaneIndex),
+                sideExitFlow, GetConveyorLaneHalfExtent() * 2f);
+        }
+
         if (TryGetConveyorCornerLaneLocalPosition(laneIndex, out Vector3 cornerLocalPosition))
         {
             cornerLocalPosition.y = GetConveyorLaneHeight();

@@ -409,7 +409,7 @@ MonoBehaviour:
   m_EditorClassIdentifier: Assembly-CSharp::Fluidtank
   id: 0
   objectName: Fluid tank
-  objId: 53
+  objId: 54
   itemDefinition: {fileID: 11400000, guid: 8b08ee1c220ce654abcb75d3541c7312, type: 2}
   portableObj: {fileID: 0}
   mapStatus:

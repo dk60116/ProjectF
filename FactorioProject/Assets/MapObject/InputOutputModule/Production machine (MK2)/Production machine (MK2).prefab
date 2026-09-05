@@ -366,7 +366,7 @@ MonoBehaviour:
   m_EditorClassIdentifier: 
   id: 0
   objectName: Production machine (MK2)
-  objId: 60
+  objId: 61
   itemDefinition: {fileID: 11400000, guid: 29927129db7b22842886fe756c71a712, type: 2}
   portableObj: {fileID: 0}
   mapStatus:

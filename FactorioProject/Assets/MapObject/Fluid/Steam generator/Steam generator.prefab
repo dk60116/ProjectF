@@ -138,7 +138,7 @@ MonoBehaviour:
   m_EditorClassIdentifier: 
   id: 0
   objectName: Steam generator
-  objId: 55
+  objId: 56
   itemDefinition: {fileID: 11400000, guid: fde3e14d2afafaf4a9603cedda8d94d6, type: 2}
   portableObj: {fileID: 0}
   mapStatus:

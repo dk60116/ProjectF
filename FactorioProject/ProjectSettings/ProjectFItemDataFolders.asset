@@ -56,7 +56,7 @@ MonoBehaviour:
   - id: fdd0cac64fda415abc3134f009e1f9ab
     displayName: Belt
     expanded: 1
-    anchorItemGuid: 347029aa316390a4982b64441c83789c
+    anchorItemGuid: 71b40722fa5571a4cbbbcaa98dbb05e1
   - id: 7f82e0373dbd406ba0fd649748577b61
     displayName: Mining
     expanded: 1
@@ -344,3 +344,5 @@ MonoBehaviour:
     folderId: 061b1e1292114fabaa190654551cea7c
   - itemGuid: 5ded7b8f8c192b94b8a9cd3649395224
     folderId: 719b89eaec88471098afae6081a59668
+  - itemGuid: 00a0cf5cedb5c624a9af78a08be87a5f
+    folderId: fdd0cac64fda415abc3134f009e1f9ab

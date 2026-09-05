@@ -1,4 +1,5 @@
 using System.Collections.Generic;
+using ProjectF.Conveyors;
 using UnityEngine;
 using UnityEngine.Rendering;
 
@@ -11,7 +12,6 @@ public class ConveyorBelt : InstallationObject
         out Quaternion rotation);
 
     private const float BeltTopUvRepeatsPerWorldUnit = 1f;
-    private const float BeltTopUvPhaseEpsilon = 0.0001f;
     private const string EndStartObjectName = "End_S";
     private const string EndEndObjectName = "End_E";
     private const string SeamStartObjectName = "Seam_S";
@@ -80,9 +80,11 @@ public class ConveyorBelt : InstallationObject
     private struct BeltTopRenderInfo
     {
         public MeshRenderer Renderer;
-        public float PathPosition;
         public float UvLengthScale;
         public float UvLengthOffset;
+        public Vector3 SurfaceStart;
+        public Vector3 SurfaceEnd;
+        public float PathPosition;
     }
 
     private struct BeltTopTransformState
@@ -1134,7 +1136,7 @@ public class ConveyorBelt : InstallationObject
         for (int i = 0; i < beltTopRenderInfos.Count; i++)
         {
             MeshRenderer renderer = beltTopRenderInfos[i].Renderer;
-            if (renderer == null || renderer.transform == null)
+            if (renderer == null || renderer.transform == null || renderer.name == SeamTopObjectName)
             {
                 continue;
             }
@@ -1226,7 +1228,9 @@ public class ConveyorBelt : InstallationObject
         float[] zExtensions,
         Vector3[] positionOffsets)
     {
-        if (!isActive || endpointObject == null)
+        // A dedicated seam top already covers the gap; extending the main top too
+        // would draw both surfaces at the same height.
+        if (!isActive || endpointObject == null || endpointObject.transform.Find(SeamTopObjectName) != null)
         {
             return;
         }
@@ -1401,20 +1405,92 @@ public class ConveyorBelt : InstallationObject
             TryAddBeltTopRenderInfo(cachedRenderers[i]);
         }
 
-        beltTopRenderInfos.Sort(CompareBeltTopPathPosition);
-
-        float uvLengthOffset = 0f;
-        for (int i = 0; i < beltTopRenderInfos.Count; i++)
+        if (this is ConvayorBelt2F)
         {
-            BeltTopRenderInfo info = beltTopRenderInfos[i];
-            info.UvLengthOffset = TryCalculateWorldAlignedBeltTopUvOffset(info, out float worldAlignedOffset)
-                ? worldAlignedOffset
-                : uvLengthOffset;
-            beltTopRenderInfos[i] = info;
-            uvLengthOffset += info.UvLengthScale;
+            ApplyBelt2FSurfaceUvMapping();
         }
 
         beltTopRenderer = beltTopRenderInfos.Count > 0 ? beltTopRenderInfos[0].Renderer : null;
+    }
+
+    private void ApplyBelt2FSurfaceUvMapping()
+    {
+        if (!TryGetOutputDirection(transform.rotation, out Vector2Int outputDirection)
+            || outputDirection == Vector2Int.zero)
+        {
+            return;
+        }
+
+        Vector3 flow = new Vector3(outputDirection.x, 0f, outputDirection.y);
+        beltTopRenderInfos.Sort(CompareBeltTopSurfacePosition);
+        int topCount = 0;
+        float surfaceLength = 0f;
+        Vector3 pathStart = default;
+        Vector3 previousEnd = default;
+        for (int i = 0; i < beltTopRenderInfos.Count; i++)
+        {
+            BeltTopRenderInfo info = beltTopRenderInfos[i];
+            if (info.Renderer.name == SeamTopObjectName)
+            {
+                break;
+            }
+
+            if (topCount == 0)
+            {
+                pathStart = info.SurfaceStart;
+                if (seamStartObject != null)
+                {
+                    // Top meshes slightly overlap the seams. Anchor the phase at
+                    // the actual connection plane, not at the overshooting mesh edge.
+                    float trim = Vector3.Dot(seamStartObject.transform.position - pathStart, flow);
+                    pathStart += flow * trim;
+                    surfaceLength = -trim;
+                }
+            }
+            else
+            {
+                surfaceLength += ConveyorBeltTopUv.GetSignedGapLength(previousEnd, info.SurfaceStart, flow);
+            }
+
+            // Reuse the offset field while measuring the path, then convert it to UV below.
+            info.UvLengthOffset = surfaceLength;
+            info.UvLengthScale = Vector3.Distance(info.SurfaceStart, info.SurfaceEnd);
+            surfaceLength += info.UvLengthScale;
+            previousEnd = info.SurfaceEnd;
+            beltTopRenderInfos[i] = info;
+            topCount++;
+        }
+
+        Vector3 pathEnd = previousEnd;
+        if (topCount > 0 && seamEndObject != null)
+        {
+            float trim = Vector3.Dot(pathEnd - seamEndObject.transform.position, flow);
+            pathEnd -= flow * trim;
+            surfaceLength -= trim;
+        }
+
+        if (topCount == 0 || surfaceLength <= 0.0001f)
+        {
+            return;
+        }
+
+        float projectedLength = Vector3.Dot(pathEnd - pathStart, flow);
+        float repeatScale = ConveyorBeltTopUv.GetSurfaceRepeatScale(
+            surfaceLength, projectedLength, BeltTopUvRepeatsPerWorldUnit);
+        for (int i = 0; i < topCount; i++)
+        {
+            BeltTopRenderInfo info = beltTopRenderInfos[i];
+            Vector2 mapping = ConveyorBeltTopUv.GetSurfaceAlignedMapping(
+                pathStart, flow, info.UvLengthOffset, info.UvLengthScale, repeatScale, BeltTopUvRepeatsPerWorldUnit);
+            info.UvLengthScale = mapping.x;
+            info.UvLengthOffset = mapping.y;
+            beltTopRenderInfos[i] = info;
+        }
+    }
+
+    private static int CompareBeltTopSurfacePosition(BeltTopRenderInfo left, BeltTopRenderInfo right)
+    {
+        return left.PathPosition.CompareTo(right.PathPosition);
     }
 
     private void ApplyBeltTopShaderProperties()
@@ -1450,20 +1526,56 @@ public class ConveyorBelt : InstallationObject
 
     private void TryAddBeltTopRenderInfo(MeshRenderer renderer)
     {
-        if (renderer == null || renderer.name != "BeltTop" || TryGetBeltTopRenderInfo(renderer, out _))
+        if (renderer == null
+            || (renderer.name != "BeltTop" && (IsCornerVariant || renderer.name != SeamTopObjectName))
+            || TryGetBeltTopRenderInfo(renderer, out _))
         {
             return;
         }
 
-        beltTopRenderInfos.Add(new BeltTopRenderInfo
+        BeltTopRenderInfo info = new BeltTopRenderInfo
         {
             Renderer = renderer,
-            PathPosition = Vector3.Dot(
-                transform.InverseTransformPoint(renderer.transform.position),
-                FacingDirectionToVector(localInputDirection)),
-            UvLengthScale = CalculateBeltTopUvLengthScale(renderer),
-            UvLengthOffset = 0f
-        });
+            UvLengthScale = 1f,
+            UvLengthOffset = 0f,
+            PathPosition = float.MaxValue
+        };
+        MeshFilter meshFilter = renderer.GetComponent<MeshFilter>();
+        Mesh mesh = meshFilter != null ? meshFilter.sharedMesh : null;
+        if (mesh != null)
+        {
+            Matrix4x4 matrix = renderer.localToWorldMatrix;
+            Vector3 worldLengthVector = new Vector3(matrix.m02, matrix.m12, matrix.m22) * mesh.bounds.size.z;
+            info.UvLengthScale = Mathf.Max(worldLengthVector.magnitude * BeltTopUvRepeatsPerWorldUnit, 0.0001f);
+            if (!IsCornerVariant
+                && TryGetOutputDirection(transform.rotation, out Vector2Int outputDirection)
+                && outputDirection != Vector2Int.zero)
+            {
+                Vector2 mapping = ConveyorBeltTopUv.GetWorldAlignedMapping(
+                    matrix.MultiplyPoint3x4(mesh.bounds.center),
+                    worldLengthVector,
+                    new Vector3(outputDirection.x, 0f, outputDirection.y),
+                    BeltTopUvRepeatsPerWorldUnit);
+                info.UvLengthScale = mapping.x;
+                info.UvLengthOffset = mapping.y;
+                if (this is ConvayorBelt2F && renderer.name != SeamTopObjectName)
+                {
+                    Vector3 flow = new Vector3(outputDirection.x, 0f, outputDirection.y);
+                    Vector3 center = matrix.MultiplyPoint3x4(mesh.bounds.center);
+                    Vector3 halfSpan = worldLengthVector * 0.5f;
+                    if (Vector3.Dot(halfSpan, flow) > 0f)
+                    {
+                        halfSpan = -halfSpan;
+                    }
+
+                    info.SurfaceStart = center + halfSpan;
+                    info.SurfaceEnd = center - halfSpan;
+                    info.PathPosition = Vector3.Dot(center, flow);
+                }
+            }
+        }
+
+        beltTopRenderInfos.Add(info);
     }
 
     private bool TryGetBeltTopRenderInfo(MeshRenderer renderer, out BeltTopRenderInfo info)
@@ -1479,75 +1591,6 @@ public class ConveyorBelt : InstallationObject
 
         info = default;
         return false;
-    }
-
-    private static int CompareBeltTopPathPosition(BeltTopRenderInfo left, BeltTopRenderInfo right)
-    {
-        int positionCompare = left.PathPosition.CompareTo(right.PathPosition);
-        if (positionCompare != 0)
-        {
-            return positionCompare;
-        }
-
-        int leftRendererId = left.Renderer != null ? left.Renderer.GetInstanceID() : int.MinValue;
-        int rightRendererId = right.Renderer != null ? right.Renderer.GetInstanceID() : int.MinValue;
-        return leftRendererId.CompareTo(rightRendererId);
-    }
-
-    private static float CalculateBeltTopUvLengthScale(MeshRenderer renderer)
-    {
-        MeshFilter meshFilter = renderer != null ? renderer.GetComponent<MeshFilter>() : null;
-        Mesh mesh = meshFilter != null ? meshFilter.sharedMesh : null;
-        if (mesh == null)
-        {
-            return 1f;
-        }
-
-        Matrix4x4 matrix = renderer.localToWorldMatrix;
-        Vector3 lengthAxis = new Vector3(matrix.m02, matrix.m12, matrix.m22);
-        float worldLength = mesh.bounds.size.z * lengthAxis.magnitude;
-        return Mathf.Max(worldLength * BeltTopUvRepeatsPerWorldUnit, 0.0001f);
-    }
-
-    private bool TryCalculateWorldAlignedBeltTopUvOffset(
-        BeltTopRenderInfo info,
-        out float uvLengthOffset)
-    {
-        uvLengthOffset = 0f;
-        if (IsCornerVariant
-            || this is ConvayorBelt2F
-            || info.Renderer == null
-            || !TryGetOutputDirection(transform.rotation, out Vector2Int outputDirection)
-            || outputDirection == Vector2Int.zero)
-        {
-            return false;
-        }
-
-        MeshFilter meshFilter = info.Renderer.GetComponent<MeshFilter>();
-        Mesh mesh = meshFilter != null ? meshFilter.sharedMesh : null;
-        if (mesh == null)
-        {
-            return false;
-        }
-
-        Vector3 flowDirection = new Vector3(outputDirection.x, 0f, outputDirection.y);
-        Vector3 worldCenter = info.Renderer.transform.TransformPoint(mesh.bounds.center);
-        // Endpoint seams stretch and shift individual top meshes. Anchoring the
-        // phase to the actual world-space center keeps adjacent flat belts continuous.
-        float worldCenterPhase =
-            Vector3.Dot(worldCenter, flowDirection) * BeltTopUvRepeatsPerWorldUnit;
-        float unwrappedOffset = worldCenterPhase
-                                + BeltTopUvRepeatsPerWorldUnit * 0.5f
-                                - info.UvLengthScale * 0.5f;
-        // Whole UV periods render identically; wrapping preserves virtual batching.
-        uvLengthOffset = Mathf.Repeat(unwrappedOffset, 1f);
-        if (uvLengthOffset <= BeltTopUvPhaseEpsilon
-            || uvLengthOffset >= 1f - BeltTopUvPhaseEpsilon)
-        {
-            uvLengthOffset = 0f;
-        }
-
-        return true;
     }
 
     private float CalculateBeltTopUvScrollY()
@@ -1744,22 +1787,31 @@ public class ConveyorBelt : InstallationObject
         return true;
     }
 
-    private bool IsEndpointVisualObject(GameObject candidate)
+    private bool IsEndpointVisualObject(GameObject candidate, bool includeSeams = true)
     {
-        if (candidate == null
-            || candidate == endStartObject
-            || candidate == endEndObject
-            || candidate == seamStartObject
-            || candidate == seamEndObject)
+        // Seam children are controlled by connectivity, never by source-view restore.
+        Transform current = candidate != null ? candidate.transform : null;
+        while (current != null && current != transform)
         {
-            return true;
+            GameObject currentObject = current.gameObject;
+            string objectName = currentObject.name;
+            if (currentObject == endStartObject
+                || currentObject == endEndObject
+                || objectName == EndStartObjectName
+                || objectName == EndEndObjectName
+                || (includeSeams
+                    && (currentObject == seamStartObject
+                        || currentObject == seamEndObject
+                        || objectName == SeamStartObjectName
+                        || objectName == SeamEndObjectName)))
+            {
+                return true;
+            }
+
+            current = current.parent;
         }
 
-        string objectName = candidate.name;
-        return objectName == EndStartObjectName
-               || objectName == EndEndObjectName
-               || objectName == SeamStartObjectName
-               || objectName == SeamEndObjectName;
+        return false;
     }
 
     private void HideVirtualizedSourceViewObjects()
@@ -1874,11 +1926,13 @@ public class ConveyorBelt : InstallationObject
         for (int i = 0; i < cachedRenderers.Length; i++)
         {
             MeshRenderer renderer = cachedRenderers[i];
-            if (!IsRuntimeRendererObjectAvailable(renderer))
+            if (renderer == null)
             {
                 continue;
             }
 
+            // Renderer ownership also applies to inactive objects. An End hidden
+            // during a global hide/show cycle must be ready when connectivity exposes it.
             renderer.enabled = RequiresNativeRendering(renderer);
         }
     }
@@ -1925,11 +1979,22 @@ public class ConveyorBelt : InstallationObject
         return count;
     }
 
-    private static bool IsRuntimeRendererObjectAvailable(MeshRenderer renderer)
+    private bool IsRuntimeRendererObjectAvailable(MeshRenderer renderer)
     {
-        return renderer != null
-               && renderer.gameObject != null
-               && renderer.gameObject.activeSelf;
+        Transform current = renderer != null ? renderer.transform : null;
+        // Ignore suspension of the virtualized root, but respect inactive seams
+        // and every other parent below it when collecting virtual render data.
+        while (current != null && current != transform)
+        {
+            if (!current.gameObject.activeSelf)
+            {
+                return false;
+            }
+
+            current = current.parent;
+        }
+
+        return current == transform;
     }
 
     private static bool IsBodyVisualObject(GameObject candidate)
@@ -1964,13 +2029,14 @@ public class ConveyorBelt : InstallationObject
 
     private bool RequiresNativeRendering(MeshRenderer renderer)
     {
-        // Corner bodies use a prefab-specific mesh/material variant that is not yet safe on
-        // the shared instanced path, so keep only that renderer native as a targeted fallback.
+        // Corner bodies and End caps retain native renderers. Their GameObjects still
+        // follow connectivity; Seam surfaces remain on the virtual rendering path.
         // Gear source objects stay active for future animation, but their renderers use the
         // virtual batch and track transform changes instead of remaining native renderers.
         return IsCornerVariant
                && renderer != null
-               && IsBodyVisualObject(renderer.gameObject);
+               && (IsBodyVisualObject(renderer.gameObject)
+                   || IsEndpointVisualObject(renderer.gameObject, includeSeams: false));
     }
 
 #if UNITY_EDITOR

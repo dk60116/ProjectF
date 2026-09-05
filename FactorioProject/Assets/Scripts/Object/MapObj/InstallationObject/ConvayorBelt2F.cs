@@ -32,6 +32,8 @@ public class ConvayorBelt2F : ConveyorBelt
     private float pathLowHeight = DefaultPathLowHeight;
     private float pathHighHeight = DefaultPathHighHeight;
     private bool pathUsesLocalX;
+    private float sideBarrierMin = -DefaultPathHalfLength;
+    private float sideBarrierMax = DefaultPathHalfLength;
 
     protected override void OnEnable()
     {
@@ -231,6 +233,17 @@ public class ConvayorBelt2F : ConveyorBelt
         Vector3 localPosition = transform.InverseTransformPoint(worldPosition);
         localPosition.y = ResolvePathHeight(GetPathCoordinate(localPosition));
         return transform.TransformPoint(localPosition);
+    }
+
+    public void GetPlayerSideBarrierEndpoints(out Vector3 start, out Vector3 end)
+    {
+        RefreshPathMetrics();
+        Vector3 localStart = Vector3.zero;
+        Vector3 localEnd = Vector3.zero;
+        SetPathCoordinate(ref localStart, sideBarrierMin);
+        SetPathCoordinate(ref localEnd, sideBarrierMax);
+        start = transform.TransformPoint(localStart);
+        end = transform.TransformPoint(localEnd);
     }
 
     public Quaternion ResolvePathItemRotation(Vector3 worldPosition)
@@ -468,6 +481,8 @@ public class ConvayorBelt2F : ConveyorBelt
         pathHighHalfLength = DefaultPathHighHalfLength;
         pathLowHeight = DefaultPathLowHeight;
         pathHighHeight = DefaultPathHighHeight;
+        sideBarrierMin = -DefaultPathHalfLength;
+        sideBarrierMax = DefaultPathHalfLength;
 
         Transform[] childTransforms = GetComponentsInChildren<Transform>(true);
         int lowBodyCount = 0;
@@ -509,6 +524,24 @@ public class ConvayorBelt2F : ConveyorBelt
 
             if (child.name == "Body_Start" || child.name == "Body_End")
             {
+                // Leave the actual low, flat landing open to lateral walking.
+                // Cache mesh-space bounds instead of using the occupied cell edge.
+                MeshFilter filter = child.GetComponent<MeshFilter>();
+                if (filter != null && filter.sharedMesh != null)
+                {
+                    Bounds bounds = filter.sharedMesh.bounds;
+                    Matrix4x4 toBelt = transform.worldToLocalMatrix * child.localToWorldMatrix;
+                    Vector3 center = toBelt.MultiplyPoint3x4(bounds.center);
+                    Vector3 extents = bounds.extents;
+                    float extent = Mathf.Abs(GetPathCoordinate(toBelt.MultiplyVector(Vector3.right))) * extents.x
+                        + Mathf.Abs(GetPathCoordinate(toBelt.MultiplyVector(Vector3.up))) * extents.y
+                        + Mathf.Abs(GetPathCoordinate(toBelt.MultiplyVector(Vector3.forward))) * extents.z;
+                    float position = GetPathCoordinate(center);
+                    if (position < 0f)
+                        sideBarrierMin = position + extent;
+                    else
+                        sideBarrierMax = position - extent;
+                }
                 Vector3 localPosition = child.localPosition;
                 lowBodyHeight += localPosition.y;
                 halfLength = Mathf.Max(halfLength, Mathf.Abs(GetPathCoordinate(localPosition)));

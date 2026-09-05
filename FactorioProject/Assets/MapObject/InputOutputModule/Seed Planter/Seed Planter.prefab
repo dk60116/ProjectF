@@ -1,5 +1,36 @@
 %YAML 1.1
 %TAG !u! tag:unity3d.com,2011:
+--- !u!1 &444507582671245976
+GameObject:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  serializedVersion: 6
+  m_Component:
+  - component: {fileID: 7816928128714588408}
+  m_Layer: 7
+  m_Name: Power Line
+  m_TagString: Untagged
+  m_Icon: {fileID: 0}
+  m_NavMeshLayer: 0
+  m_StaticEditorFlags: 0
+  m_IsActive: 1
+--- !u!4 &7816928128714588408
+Transform:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 444507582671245976}
+  serializedVersion: 2
+  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
+  m_LocalPosition: {x: 0, y: 0, z: 0.298}
+  m_LocalScale: {x: 1, y: 1, z: 1}
+  m_ConstrainProportionsScale: 0
+  m_Children: []
+  m_Father: {fileID: 2705861293071220046}
+  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
 --- !u!1 &1154151279121687388
 GameObject:
   m_ObjectHideFlags: 0
@@ -701,6 +732,7 @@ Transform:
   m_ConstrainProportionsScale: 0
   m_Children:
   - {fileID: 2184827992463310876}
+  - {fileID: 7816928128714588408}
   m_Father: {fileID: 0}
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
 --- !u!114 &5947636525656944032
@@ -716,9 +748,9 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::SeedPlanter
   id: 0
-  objectName: 
-  objId: 0
-  itemDefinition: {fileID: 0}
+  objectName: Seed Planter
+  objId: 63
+  itemDefinition: {fileID: 11400000, guid: 5ded7b8f8c192b94b8a9cd3649395224, type: 2}
   portableObj: {fileID: 0}
   mapStatus:
     mapSizeX: 1
@@ -742,7 +774,7 @@ MonoBehaviour:
   storedFluidLiters: 0
   storedFluidItemId: -1
   storedFluidTemperatureCelsius: 20
-  powerLinePoint: {fileID: 0}
+  powerLinePoint: {fileID: 7816928128714588408}
   parentInputOutputModuleItem: {fileID: 0}
   inputList: []
   outputList: []
@@ -794,7 +826,7 @@ MonoBehaviour:
   activeOutputItemId: -1
   activeOutputCount: 0
   outputAreaMarkerIcon: {fileID: 21300000, guid: 90cdf92110624b93a3ea039dbfc98ca3, type: 3}
-  warningLightRenderer: {fileID: 2850383334919849948}
+  warningLightRenderer: {fileID: 0}
   workAnimationCycleSeconds: 2.5
   plantElapsedSeconds: 0
 --- !u!135 &986190605775310727

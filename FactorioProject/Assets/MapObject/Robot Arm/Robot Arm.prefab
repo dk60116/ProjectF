@@ -534,7 +534,7 @@ MonoBehaviour:
   m_EditorClassIdentifier: 
   id: 0
   objectName: Robot arm
-  objId: 58
+  objId: 59
   itemDefinition: {fileID: 11400000, guid: 21883f622876a3f47a1c1f90a4b0004e, type: 2}
   portableObj: {fileID: 0}
   mapStatus:

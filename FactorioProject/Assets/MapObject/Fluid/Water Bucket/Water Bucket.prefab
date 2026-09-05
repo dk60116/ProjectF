@@ -278,7 +278,7 @@ MonoBehaviour:
   m_EditorClassIdentifier: Assembly-CSharp::Bucket
   id: 0
   objectName: Water Bucket
-  objId: 103
+  objId: 104
   itemDefinition: {fileID: 11400000, guid: 0c3d44b3dc7f48e0a6408d9ac6a60bd2, type: 2}
   portableObj: {fileID: 0}
   mapStatus:

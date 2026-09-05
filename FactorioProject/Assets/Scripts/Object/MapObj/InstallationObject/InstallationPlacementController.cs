@@ -18072,11 +18072,26 @@ public class InstallationPlacementController : MonoBehaviour
         Vector2Int outputDirection,
         MapObject previewToIgnore)
     {
+        return GetConveyorEndpointConnectionCandidateScore(
+            anchorCoordinate + inputDirection,
+            anchorCoordinate + outputDirection,
+            inputDirection,
+            outputDirection,
+            previewToIgnore);
+    }
+
+    private int GetConveyorEndpointConnectionCandidateScore(
+        Vector2Int inputNeighborCoordinate,
+        Vector2Int outputNeighborCoordinate,
+        Vector2Int inputDirection,
+        Vector2Int outputDirection,
+        MapObject previewToIgnore)
+    {
         Vector2Int neighborOutputDirection = Vector2Int.zero;
         ConveyorBelt inputNeighborConveyor = null;
         bool inputHasConveyor = inputDirection != Vector2Int.zero
                                 && TryGetConveyorPlacementDirectionsAtCoordinate(
-                                    anchorCoordinate + inputDirection,
+                                    inputNeighborCoordinate,
                                     previewToIgnore,
                                     out inputNeighborConveyor,
                                     out _,
@@ -18094,7 +18109,7 @@ public class InstallationPlacementController : MonoBehaviour
         ConveyorBelt outputNeighborConveyor = null;
         bool outputHasConveyor = outputDirection != Vector2Int.zero
                                  && TryGetConveyorPlacementDirectionsAtCoordinate(
-                                     anchorCoordinate + outputDirection,
+                                     outputNeighborCoordinate,
                                      previewToIgnore,
                                      out outputNeighborConveyor,
                                      out neighborInputDirection,
@@ -28162,7 +28177,9 @@ public class InstallationPlacementController : MonoBehaviour
         int quarterTurns = IsFenceDoorDefinition(activeInstallDefinition)
             ? GetPreferredFenceDoorStandaloneQuarterTurns(activeInstallDefinition, sourcePreview)
             : GetPreferredInstallPreviewQuarterTurns(activeInstallDefinition, sourcePreview);
-        if (sourcePreview == null && activeInstallDefinition.mapObject is ConveyorBelt conveyorPrototype)
+        if (sourcePreview == null
+            && activeInstallDefinition.mapObject is ConveyorBelt conveyorPrototype
+            && !IsBelt2F(conveyorPrototype))
         {
             if (!HasRememberedBlueprintRotation(activeInstallDefinition)
                 && !HasRememberedInstallRotation(activeInstallDefinition)
@@ -29647,16 +29664,6 @@ public class InstallationPlacementController : MonoBehaviour
                 out resolvedQuarterTurns);
         }
 
-        if (TryResolveBelt2FBridgeCenterInstallPreviewTarget(
-                clickedBlock,
-                previewToIgnore,
-                preferredQuarterTurns,
-                out anchorBlock,
-                out resolvedQuarterTurns))
-        {
-            return true;
-        }
-
         if (TryResolveSteamGeneratorOnBoilerOutputInstallPreviewTarget(
                 clickedBlock,
                 previewToIgnore,
@@ -29864,12 +29871,17 @@ public class InstallationPlacementController : MonoBehaviour
             return false;
         }
 
+        // Only the first preview chooses its direction from surrounding connections.
+        // Copies and moved previews preserve the player's chosen direction when placeable.
+        bool preferConnections = previewToIgnore == null;
+        int startQuarterTurns = resolvedQuarterTurns;
+        int bestConnectionScore = int.MinValue;
         int candidateCount = GetPlacementRotationCandidateCount(footprintSource);
         for (int offset = 0; offset < candidateCount; offset++)
         {
             int candidateQuarterTurns = NormalizeInstallPreviewQuarterTurns(
                 previewToIgnore,
-                resolvedQuarterTurns + offset);
+                startQuarterTurns + offset);
             Vector2Int bridgeCenterOffset = GetBelt2FBridgeCenterOffset(footprintSource, candidateQuarterTurns);
             Vector2Int candidateAnchorCoordinate = clickedBlock.Coordinate - bridgeCenterOffset;
             if (!terrain.TryGetLoadedBlock(candidateAnchorCoordinate, out Block candidateAnchorBlock)
@@ -29879,12 +29891,76 @@ public class InstallationPlacementController : MonoBehaviour
                 continue;
             }
 
-            anchorBlock = candidateAnchorBlock;
-            resolvedQuarterTurns = candidateQuarterTurns;
-            return true;
+            int connectionScore = preferConnections
+                ? GetBelt2FEndpointConnectionScore(
+                    candidateAnchorCoordinate,
+                    (ConveyorBelt)footprintSource,
+                    candidateQuarterTurns,
+                    previewToIgnore)
+                : 0;
+            if (anchorBlock == null || connectionScore > bestConnectionScore)
+            {
+                anchorBlock = candidateAnchorBlock;
+                resolvedQuarterTurns = candidateQuarterTurns;
+                bestConnectionScore = connectionScore;
+            }
+
+            if (!preferConnections)
+            {
+                return true;
+            }
         }
 
-        return false;
+        return anchorBlock != null;
+    }
+
+    private int GetBelt2FEndpointConnectionScore(
+        Vector2Int anchorCoordinate,
+        ConveyorBelt footprintSource,
+        int quarterTurns,
+        MapObject previewToIgnore)
+    {
+        Quaternion rotation = GetPlacementObjectRotation(footprintSource, quarterTurns);
+        if (!footprintSource.TryGetInputDirection(rotation, out Vector2Int inputDirection)
+            || !footprintSource.TryGetOutputDirection(rotation, out Vector2Int outputDirection))
+        {
+            return 0;
+        }
+
+        // Evaluate the outer ends of the whole bridge, not the cells beside its center.
+        Vector2Int size = GetBelt2FFootprintSize(footprintSource);
+        Vector2Int anchorCell = GetBelt2FAnchorCell(footprintSource);
+        Vector2Int inputOffset = Vector2Int.zero;
+        Vector2Int outputOffset = Vector2Int.zero;
+        int inputDistance = int.MinValue;
+        int outputDistance = int.MinValue;
+        for (int y = 0; y < size.y; y++)
+        {
+            for (int x = 0; x < size.x; x++)
+            {
+                Vector2Int offset = RotateFootprintOffset(new Vector2Int(x, y) - anchorCell, quarterTurns);
+                int inputProjection = offset.x * inputDirection.x + offset.y * inputDirection.y;
+                int outputProjection = offset.x * outputDirection.x + offset.y * outputDirection.y;
+                if (inputProjection > inputDistance)
+                {
+                    inputDistance = inputProjection;
+                    inputOffset = offset;
+                }
+
+                if (outputProjection > outputDistance)
+                {
+                    outputDistance = outputProjection;
+                    outputOffset = offset;
+                }
+            }
+        }
+
+        return GetConveyorEndpointConnectionCandidateScore(
+            anchorCoordinate + inputOffset + inputDirection,
+            anchorCoordinate + outputOffset + outputDirection,
+            inputDirection,
+            outputDirection,
+            previewToIgnore);
     }
 
     private bool TryResolveSteamGeneratorChainInstallPreviewTarget(

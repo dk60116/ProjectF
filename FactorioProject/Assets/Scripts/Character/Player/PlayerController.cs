@@ -1995,7 +1995,7 @@ public partial class PlayerController : MonoBehaviour
         return position;
     }
 
-    private bool TryGetBlockingSweepHit(
+    private bool TryGetPhysicsBlockingSweepHit(
         Vector3 originOffset,
         Vector3 direction,
         float distance,
