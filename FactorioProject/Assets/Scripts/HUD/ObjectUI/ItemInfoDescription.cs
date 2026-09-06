@@ -24,6 +24,7 @@ public class ItemInfoDescription : MonoBehaviour
     private static readonly Color BurnEnergyGaugeFillColor = new Color(1f, 0.42f, 0.08f, 1f);
     private static readonly Color HealthGaugeFillColor = new Color(0.78f, 0.12f, 0.1f, 1f);
     private static readonly Color HungerGaugeFillColor = new Color(0.95f, 0.62f, 0.12f, 1f);
+    private static readonly Color AnimalGrowthGaugeFillColor = new Color(0.25f, 0.8f, 0.35f, 1f);
     private static readonly Color ProducingSignColor = new Color(0.1f, 0.8f, 0.1f, 1f);
     private static readonly Color WarningSignColor = new Color(1f, 0.72f, 0.08f, 1f);
     private static readonly Color StoppedSignColor = new Color(0.9f, 0.05f, 0.03f, 1f);
@@ -103,6 +104,21 @@ public class ItemInfoDescription : MonoBehaviour
         ClearItemSlot(outputItem, outputItemSlot);
     }
 
+    public bool ShowPortableItemEnergy(PortableObject portableObject)
+    {
+        Clear();
+        ItemDefinition definition = portableObject != null
+            ? InputOutputModule.ResolveItemDefinition(portableObject.ItemId)
+            : null;
+        if (definition == null || definition.energyType == ItemDefinition.EnergyType.None
+            || definition.energyAmount <= 0)
+            return false;
+
+        // energyAmount belongs to one item; the focus header displays the separate stack count.
+        return SetEnergyDefaultItemSlot(0, definition.energyType, definition.id,
+            definition.energyAmount.ToString("N0", CultureInfo.InvariantCulture) + " / item");
+    }
+
     public void ShowResourceReserves(Resource resource)
     {
         Clear();
@@ -143,9 +159,7 @@ public class ItemInfoDescription : MonoBehaviour
             PlantFertilizerGaugeFillColor,
             storedEnergy,
             capacity,
-            true,
-            $"Fertilizer energy: {FormatGaugeNumber(storedEnergy, true)} / "
-            + FormatGaugeNumber(capacity, true));
+            true);
     }
 
     public void ShowAnimal(Animal animal)
@@ -199,6 +213,16 @@ public class ItemInfoDescription : MonoBehaviour
             false,
             $"Hunger: {currentHunger.ToString("0.#", CultureInfo.InvariantCulture)}"
             + $"/{maxHunger.ToString("0.#", CultureInfo.InvariantCulture)}");
+
+        float growthEnergy = animal.CurrentGrowthFoodEnergy;
+        float requiredGrowthEnergy = animal.RequiredGrowthFoodEnergy;
+        SetGauge(
+            workGauge, workFill, workText, true,
+            Mathf.Clamp01(growthEnergy / requiredGrowthEnergy),
+            AnimalGrowthGaugeFillColor, growthEnergy, requiredGrowthEnergy, false,
+            animal.IsFullyGrown ? "Growth: MAX"
+                : $"Growth: {growthEnergy.ToString("0.#", CultureInfo.InvariantCulture)}"
+                  + $"/{requiredGrowthEnergy.ToString("0.#", CultureInfo.InvariantCulture)}");
     }
 
     public void ShowConveyorBelt(ConveyorBelt conveyorBelt, Resource underlyingResource = null)
@@ -219,7 +243,9 @@ public class ItemInfoDescription : MonoBehaviour
     {
         BeginObjectDisplay(underlyingResource);
 
-        if (pipe != null && pipe.TryGetObjectInfoFluidInfo(out int fluidItemId, out float temperatureCelsius))
+        float extractionLitersPerSecond = 0f;
+        if (pipe != null && pipe.TryGetObjectInfoFluidInfo(
+                out int fluidItemId, out float temperatureCelsius, out extractionLitersPerSecond))
         {
             SetDefaultText(
                 defaultStatusLineIndex,
@@ -227,11 +253,16 @@ public class ItemInfoDescription : MonoBehaviour
                 true);
             SetDefaultSign(defaultStatusLineIndex, false, Color.white);
             SetDefaultItemSlot(0, fluidItemId, 1, 0, true, false, false, temperatureCelsius);
-            return;
+        }
+        else
+        {
+            SetDefaultText(defaultStatusLineIndex, "Fluid: None", true);
+            SetDefaultSign(defaultStatusLineIndex, false, Color.white);
         }
 
-        SetDefaultText(defaultStatusLineIndex, "Fluid: None", true);
-        SetDefaultSign(defaultStatusLineIndex, false, Color.white);
+        SetDefaultText(defaultStatusLineIndex + 1,
+            $"Extraction: {FormatGaugeNumber(extractionLitersPerSecond, true)} L/s", true);
+        SetDefaultSign(defaultStatusLineIndex + 1, false, Color.white);
     }
 
     public void ShowBoxObject(BoxObject boxObject, Resource underlyingResource = null)
@@ -861,7 +892,7 @@ public class ItemInfoDescription : MonoBehaviour
         {
             SetDefaultText(
                 2,
-                $"Field fertilizer: {FormatGaugeNumber(fieldStoredEnergy, true)} / "
+                $"Fertilizer: {FormatGaugeNumber(fieldStoredEnergy, true)} / "
                 + FormatGaugeNumber(fieldCapacity, true),
                 true);
             SetDefaultSign(2, false, Color.white);
@@ -1407,11 +1438,6 @@ public class ItemInfoDescription : MonoBehaviour
 
     private void SetFluidStorageDefaultItemSlot(int index, InstallationObject installationObject)
     {
-        if (installationObject == null || !installationObject.CanStoreFluid)
-        {
-            return;
-        }
-
         GameObject root = defaultItem != null && index >= 0 && index < defaultItem.Count ? defaultItem[index] : null;
         ItemSlot slot = defaultItemSlot != null && index >= 0 && index < defaultItemSlot.Count ? defaultItemSlot[index] : null;
         SetFluidStorageItemSlot(root, slot, installationObject);
@@ -1424,7 +1450,8 @@ public class ItemInfoDescription : MonoBehaviour
 
     private void SetFluidStorageItemSlot(GameObject root, ItemSlot slot, InstallationObject installationObject)
     {
-        if (installationObject == null || !installationObject.CanStoreFluid)
+        GetFluidStorageDisplayAmounts(installationObject, out float storedLiters, out float capacityLiters);
+        if (installationObject == null || capacityLiters <= 0f)
         {
             return;
         }
@@ -1443,8 +1470,6 @@ public class ItemInfoDescription : MonoBehaviour
             return;
         }
 
-        float storedLiters = installationObject.StoredFluidLiters;
-        float capacityLiters = installationObject.FluidStorageCapacityLiters;
         int fluidItemId = ResolveFluidGaugeItemId(installationObject);
         if (fluidItemId < 0 && installationObject is SteamTrain steamTrain)
         {
@@ -1457,7 +1482,7 @@ public class ItemInfoDescription : MonoBehaviour
             fluidItemSet.id,
             fluidItemSet.icon,
             displayName,
-            $"{FormatGaugeNumber(storedLiters, true)} / {FormatGaugeNumber(capacityLiters, true)} L");
+            FormatFluidStorageText(installationObject, storedLiters, capacityLiters, false));
     }
 
     private bool SetEnergyUseRateDefaultItemSlot(
@@ -1487,6 +1512,13 @@ public class ItemInfoDescription : MonoBehaviour
             return false;
         }
 
+        return SetEnergyDefaultItemSlot(index, energyType, preferredEnergyItemId,
+            FormatEnergyUseRate(energyType, amountPerSecond));
+    }
+
+    private bool SetEnergyDefaultItemSlot(int index, ItemDefinition.EnergyType energyType,
+        int preferredEnergyItemId, string amountText)
+    {
         GameObject root = defaultItem != null && index >= 0 && index < defaultItem.Count ? defaultItem[index] : null;
         ItemSlot slot = defaultItemSlot != null && index >= 0 && index < defaultItemSlot.Count ? defaultItemSlot[index] : null;
         SetActiveIfNeeded(root, true);
@@ -1495,7 +1527,7 @@ public class ItemInfoDescription : MonoBehaviour
             return root != null;
         }
 
-        int displayItemId = ResolveEnergyUseDisplayItemId(energyType, preferredEnergyItemId);
+        int displayItemId = ResolveEnergyDisplayItemId(energyType, preferredEnergyItemId);
         ItemManager.ItemSet itemSet = ResolveItemSet(displayItemId);
         string displayName = energyType == ItemDefinition.EnergyType.Electricity
             && displayItemId >= 0
@@ -1506,7 +1538,7 @@ public class ItemInfoDescription : MonoBehaviour
             displayItemId,
             itemSet.icon,
             displayName,
-            FormatEnergyUseRate(energyType, amountPerSecond));
+            amountText);
         return true;
     }
 
@@ -1558,8 +1590,7 @@ public class ItemInfoDescription : MonoBehaviour
         TextMeshProUGUI text,
         InstallationObject installationObject)
     {
-        float capacityLiters = installationObject != null ? installationObject.FluidStorageCapacityLiters : 0f;
-        float storedLiters = installationObject != null ? installationObject.StoredFluidLiters : 0f;
+        GetFluidStorageDisplayAmounts(installationObject, out float storedLiters, out float capacityLiters);
         SetGauge(
             root,
             fill,
@@ -1569,7 +1600,44 @@ public class ItemInfoDescription : MonoBehaviour
             ResolveFluidGaugeFillColor(installationObject),
             storedLiters,
             capacityLiters,
-            true);
+            true,
+            installationObject is Sprinkler
+                ? FormatFluidStorageText(installationObject, storedLiters, capacityLiters)
+                : null);
+    }
+
+    private static string FormatFluidStorageText(
+        InstallationObject installationObject,
+        float storedLiters,
+        float capacityLiters,
+        bool showTankCapacityBreakdown = true)
+    {
+        if (showTankCapacityBreakdown && installationObject is Sprinkler)
+        {
+            float localCapacityLiters = installationObject.FluidStorageCapacityLiters;
+            float tankCapacityLiters = Mathf.Max(0f, capacityLiters - localCapacityLiters);
+            string localText = $"{FormatGaugeNumber(storedLiters, false)}L / {FormatGaugeNumber(localCapacityLiters, false)}L";
+            return tankCapacityLiters > 0f
+                ? $"{localText} (+{FormatGaugeNumber(tankCapacityLiters, false)}L)"
+                : localText;
+        }
+
+        return $"{FormatGaugeNumber(storedLiters, true)} / {FormatGaugeNumber(capacityLiters, true)} L";
+    }
+
+    private static void GetFluidStorageDisplayAmounts(
+        InstallationObject installationObject,
+        out float storedLiters,
+        out float capacityLiters)
+    {
+        if (installationObject is Sprinkler sprinkler)
+        {
+            sprinkler.GetWaterStorageInfo(out storedLiters, out capacityLiters);
+            return;
+        }
+
+        storedLiters = installationObject != null ? installationObject.StoredFluidLiters : 0f;
+        capacityLiters = installationObject != null ? installationObject.FluidStorageCapacityLiters : 0f;
     }
 
     private void SetBoilerTemperatureGauge(
@@ -2005,6 +2073,11 @@ public class ItemInfoDescription : MonoBehaviour
             return -1;
         }
 
+        if (installationObject is Sprinkler sprinkler)
+        {
+            return sprinkler.ObjectInfoWaterItemId;
+        }
+
         int storedFluidItemId = installationObject.StoredFluidItemId;
         if (storedFluidItemId >= 0)
         {
@@ -2159,7 +2232,7 @@ public class ItemInfoDescription : MonoBehaviour
             : (float?)null;
     }
 
-    private static int ResolveEnergyUseDisplayItemId(
+    private static int ResolveEnergyDisplayItemId(
         ItemDefinition.EnergyType energyType,
         int preferredEnergyItemId)
     {

@@ -19,7 +19,7 @@ MonoBehaviour:
   placementCategory: 2
   minimumGrowth: 10
   maximumGrowth: 10
-  totalGrowthWaterLiters: 250
+  totalGrowthWaterLiters: 450
   totalGrowthFertilizerAmount: 0
   growthDurationPerLevelSeconds: 5
   dropItems:

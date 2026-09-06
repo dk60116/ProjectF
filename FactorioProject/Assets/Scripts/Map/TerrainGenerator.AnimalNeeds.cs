@@ -1,16 +1,21 @@
 using System;
+using System.Collections.Generic;
 using UnityEngine;
 
 public partial class TerrainGenerator
 {
     private static readonly Predicate<int> AnimalFoodItemFilter =
         IsAnimalFoodItemId;
+    private readonly Dictionary<Vector2Int, AnimalAIController> animalFoodConsumers =
+        new Dictionary<Vector2Int, AnimalAIController>();
 
     public bool TryFindNearestDroppedAnimalFood(
         Vector3 worldPosition,
         float searchRadius,
         out Vector2Int foodCoordinate,
-        out Vector3 foodWorldPosition)
+        out Vector3 foodWorldPosition,
+        bool requireLoadedGround,
+        Func<Vector3, bool, bool> canReach)
     {
         foodCoordinate = default;
         foodWorldPosition = worldPosition;
@@ -28,10 +33,11 @@ public partial class TerrainGenerator
                 if (!TryGetLoadedBlock(coordinate, out Block block)
                     || block == null
                     || block.Type != Block.BlockType.Ground
-                    || !block.TryGetClosestFloorObjectWorldPosition(
+                    || !block.TryGetClosestAnimalFoodWorldPosition(
                         worldPosition,
                         AnimalFoodItemFilter,
-                        out Vector3 candidatePosition))
+                        out Vector3 candidatePosition)
+                    || IsAnimalFoodBeingConsumed(coordinate))
                 {
                     continue;
                 }
@@ -40,7 +46,8 @@ public partial class TerrainGenerator
                 offset.y = 0f;
                 float distanceSqr = offset.sqrMagnitude;
                 if (distanceSqr > maximumDistanceSqr
-                    || distanceSqr >= closestDistanceSqr)
+                    || distanceSqr >= closestDistanceSqr
+                    || !canReach(candidatePosition, requireLoadedGround))
                 {
                     continue;
                 }
@@ -57,12 +64,16 @@ public partial class TerrainGenerator
 
     public bool TryConsumeDroppedAnimalFood(
         Vector2Int coordinate,
+        Vector3 foodWorldPosition,
+        AnimalAIController consumer,
         out ItemDefinition foodDefinition)
     {
         foodDefinition = null;
-        if (!TryGetLoadedBlock(coordinate, out Block block)
+        if (consumer == null || IsAnimalFoodBeingConsumed(coordinate)
+            || !TryGetLoadedBlock(coordinate, out Block block)
             || block == null
-            || !block.TryTakeSettledFloorObject(
+            || !block.TryTakeAnimalFood(
+                foodWorldPosition,
                 AnimalFoodItemFilter,
                 out int itemId))
         {
@@ -72,9 +83,39 @@ public partial class TerrainGenerator
         ItemManager itemManager = GameManager.Instance != null
             ? GameManager.Instance.ItemManger
             : null;
-        return itemManager != null
+        bool consumed = itemManager != null
                && itemManager.TryGetItemDefinitionById(itemId, out foodDefinition)
                && ItemDefinition.IsFoodEnergyItemDefinition(foodDefinition);
+        if (consumed)
+        {
+            animalFoodConsumers[coordinate] = consumer;
+        }
+
+        return consumed;
+    }
+
+    private bool IsAnimalFoodBeingConsumed(Vector2Int coordinate)
+    {
+        if (!animalFoodConsumers.TryGetValue(coordinate, out AnimalAIController consumer))
+        {
+            return false;
+        }
+
+        if (consumer != null && consumer.IsConsumingDroppedFood)
+        {
+            return true;
+        }
+
+        animalFoodConsumers.Remove(coordinate);
+        return false;
+    }
+
+    public void ReleaseAnimalFoodConsumption(Vector2Int coordinate, AnimalAIController consumer)
+    {
+        if (animalFoodConsumers.TryGetValue(coordinate, out AnimalAIController owner) && owner == consumer)
+        {
+            animalFoodConsumers.Remove(coordinate);
+        }
     }
 
     public int DropAnimalDefecation(
@@ -193,7 +234,8 @@ public partial class TerrainGenerator
                && itemManager.TryGetItemDefinitionById(
                    itemId,
                    out ItemDefinition definition)
-               && ItemDefinition.IsFoodEnergyItemDefinition(definition);
+               && ItemDefinition.IsFoodEnergyItemDefinition(definition)
+               && definition.energyAmount > 0f;
     }
 }
 

@@ -913,188 +913,115 @@ public class BagSlot : ItemSlot, IBeginDragHandler, IDragHandler, IEndDragHandle
                && IsVisibleItemSlotForPointer(this);
     }
 
+    private enum PickupSource { None, Ground, Conveyor, Box, Storage, RobotArm }
+
+    private struct PickupCandidate
+    {
+        public PickupSource source;
+        public Block block;
+        public BoxObject box;
+        public IPlayerItemStorage storage;
+        public RobotArm robotArm;
+        public PortableObject portable;
+        public int itemId;
+        public int count;
+        public float distanceSqr;
+    }
+
+    private bool TryResolvePickupCandidate(Player player, bool automatic, out PickupCandidate best)
+    {
+        best = default;
+        if (player == null)
+            return false;
+
+        Vector3 origin = ResolvePickupOrigin(player);
+        int preferredItemId = automatic ? -1 : GetPreferredPickupItemId();
+        TerrainGenerator terrain = ResolveTerrain();
+        // Ground is considered first so a focus target cannot hide an equally close item.
+        if (TryGetGroundPickupBlock(terrain, player, ResolveStandingCoordinate(player), out Block ground)
+            && ground.TryPreviewPickupFloorObjects(player, origin, GetStandingTilePickupRange(),
+                preferredItemId, out int itemId, out int count, out PortableObject portable))
+        {
+            ConsiderPickupCandidate(player, automatic, origin, ground.WorldPosition,
+                new PickupCandidate { source = PickupSource.Ground, block = ground,
+                    itemId = itemId, count = count, portable = portable }, ref best);
+        }
+
+        TryGetClickedFocusedConveyorBlock(player, out Block clickedConveyor);
+        ConsiderConveyorPickupCandidate(player, automatic, origin, preferredItemId, clickedConveyor, ref best);
+        if (TryGetFocusedConveyorBlock(player, out Block conveyor) && conveyor != clickedConveyor)
+            ConsiderConveyorPickupCandidate(player, automatic, origin, preferredItemId, conveyor, ref best);
+
+        TryGetClickedFocusedBoxObject(player, out BoxObject clickedBox);
+        ConsiderBoxPickupCandidate(player, automatic, origin, preferredItemId, clickedBox, ref best);
+        if (TryGetFocusedBoxObject(player, out BoxObject box) && box != clickedBox)
+            ConsiderBoxPickupCandidate(player, automatic, origin, preferredItemId, box, ref best);
+
+        if (TryGetFocusedItemStorage(player, out IPlayerItemStorage storage)
+            && storage != clickedBox && storage != box
+            && TryPreviewFocusedItemStorage(storage, player, origin, FocusedPickupRange, preferredItemId,
+                out itemId, out count, out portable))
+        {
+            ConsiderPickupCandidate(player, automatic, origin, ((MapObject)storage).transform.position,
+                new PickupCandidate { source = PickupSource.Storage, storage = storage,
+                    itemId = itemId, count = count, portable = portable }, ref best);
+        }
+
+        PlayerController controller = player.GetComponent<PlayerController>();
+        if (controller != null && controller.TryGetFocusedRobotArm(out RobotArm arm)
+            && arm != null && arm.HasHeldItem && arm.CanTakeHeldItemFromSlot
+            && (preferredItemId < 0 || arm.HeldItemId == preferredItemId))
+        {
+            ConsiderPickupCandidate(player, automatic, origin, arm.transform.position,
+                new PickupCandidate { source = PickupSource.RobotArm, robotArm = arm,
+                    itemId = arm.HeldItemId, count = 1, portable = arm.HeldPortableObject }, ref best);
+        }
+        return best.source != PickupSource.None;
+    }
+
+    private void ConsiderConveyorPickupCandidate(Player player, bool automatic, Vector3 origin,
+        int preferredItemId, Block block, ref PickupCandidate best)
+    {
+        if (block != null && block.TryPreviewPickupConveyorObjects(player, origin, FocusedPickupRange,
+                preferredItemId, out int itemId, out int count, out PortableObject portable))
+            ConsiderPickupCandidate(player, automatic, origin, block.WorldPosition,
+                new PickupCandidate { source = PickupSource.Conveyor, block = block,
+                    itemId = itemId, count = count, portable = portable }, ref best);
+    }
+
+    private void ConsiderBoxPickupCandidate(Player player, bool automatic, Vector3 origin,
+        int preferredItemId, BoxObject box, ref PickupCandidate best)
+    {
+        if (box != null && box.TryPreviewContainedObjectPickup(player, origin, FocusedPickupRange,
+                preferredItemId, out int itemId, out int count, out PortableObject portable))
+            ConsiderPickupCandidate(player, automatic, origin, box.transform.position,
+                new PickupCandidate { source = PickupSource.Box, box = box,
+                    itemId = itemId, count = count, portable = portable }, ref best);
+    }
+
+    private void ConsiderPickupCandidate(Player player, bool automatic, Vector3 origin,
+        Vector3 sourcePosition, PickupCandidate candidate, ref PickupCandidate best)
+    {
+        if (candidate.itemId < 0 || candidate.count <= 0
+            || (!automatic && !CanPreviewAcceptPickupItem(player, candidate.itemId)))
+            return;
+        Vector3 offset = (candidate.portable != null ? candidate.portable.transform.position : sourcePosition) - origin;
+        offset.y = 0f;
+        candidate.distanceSqr = offset.sqrMagnitude;
+        if (best.source == PickupSource.None || candidate.distanceSqr < best.distanceSqr)
+            best = candidate;
+    }
+
     private bool TryResolveAutomaticPickupPreviewItem(
-        out Player player,
-        out int previewItemId,
-        out int previewPickupCount,
+        out Player player, out int previewItemId, out int previewPickupCount,
         out PortableObject previewPortableObject)
     {
         player = ResolvePlayer();
-        previewItemId = -1;
-        previewPickupCount = 1;
-        previewPortableObject = null;
-        if (player == null)
-        {
-            return false;
-        }
-
-        Vector3 pickupOrigin = ResolvePickupOrigin(player);
-        bool hasClickedConveyor = TryGetClickedFocusedConveyorBlock(player, out Block clickedConveyorBlock);
-        if (hasClickedConveyor
-            && clickedConveyorBlock.TryPreviewPickupConveyorObjects(
-                player,
-                pickupOrigin,
-                FocusedPickupRange,
-                -1,
-                out previewItemId,
-                out previewPickupCount,
-                out previewPortableObject)
-            && previewItemId >= 0)
-        {
-            return true;
-        }
-
-        if (TryPreviewFocusedRobotArmPickupSource(
-                player,
-                out bool blockOtherPickup,
-                out previewItemId,
-                out previewPortableObject))
-        {
-            return previewItemId >= 0;
-        }
-
-        if (blockOtherPickup)
-        {
-            return false;
-        }
-
-        TerrainGenerator terrain = ResolveTerrain();
-        if (terrain == null)
-        {
-            return false;
-        }
-
-        bool hasFocusedConveyor = TryGetFocusedConveyorBlock(player, out Block focusedConveyorBlock);
-
-        if (TryGetClickedFocusedBoxObject(player, out BoxObject clickedBoxObject))
-        {
-            return clickedBoxObject.TryPreviewContainedObjectPickup(
-                       player,
-                       pickupOrigin,
-                       FocusedPickupRange,
-                       -1,
-                       out previewItemId,
-                       out previewPickupCount,
-                       out previewPortableObject)
-                   && previewItemId >= 0;
-        }
-
-        if (TryPreviewOneItemForAutomaticPickup(
-                player,
-                terrain,
-                out previewItemId,
-                out previewPickupCount,
-                out previewPortableObject)
-            && previewItemId >= 0)
-        {
-            return true;
-        }
-
-        if (TryGetFocusedBoxObject(player, out BoxObject focusedBoxObject))
-        {
-            return focusedBoxObject.TryPreviewContainedObjectPickup(
-                       player,
-                       pickupOrigin,
-                       FocusedPickupRange,
-                       -1,
-                       out previewItemId,
-                       out previewPickupCount,
-                       out previewPortableObject)
-                   && previewItemId >= 0;
-        }
-
-        if (TryGetFocusedItemStorage(player, out IPlayerItemStorage focusedItemStorage))
-        {
-            return TryPreviewFocusedItemStorage(
-                       focusedItemStorage,
-                       player,
-                       pickupOrigin,
-                       FocusedPickupRange,
-                       -1,
-                       out previewItemId,
-                       out previewPickupCount,
-                       out previewPortableObject)
-                   && previewItemId >= 0;
-        }
-
-        return hasFocusedConveyor
-               && focusedConveyorBlock != clickedConveyorBlock
-               && focusedConveyorBlock.TryPreviewPickupConveyorObjects(
-                   player,
-                   pickupOrigin,
-                   FocusedPickupRange,
-                   -1,
-                   out previewItemId,
-                   out previewPickupCount,
-                   out previewPortableObject)
-               && previewItemId >= 0;
-    }
-
-    private static bool TryPreviewFocusedRobotArmPickupSource(
-        Player player,
-        out bool blockOtherPickup,
-        out int previewItemId,
-        out PortableObject previewPortableObject)
-    {
-        blockOtherPickup = false;
-        previewItemId = -1;
-        previewPortableObject = null;
-        if (player == null)
-        {
-            return false;
-        }
-
-        PlayerController playerController = player.GetComponent<PlayerController>();
-        if (playerController == null
-            || !playerController.TryGetFocusedRobotArm(out RobotArm focusedRobotArm)
-            || focusedRobotArm == null)
-        {
-            return false;
-        }
-
-        blockOtherPickup = true;
-        if (!focusedRobotArm.HasHeldItem || !focusedRobotArm.CanTakeHeldItemFromSlot)
-        {
-            return false;
-        }
-
-        previewItemId = focusedRobotArm.HeldItemId;
-        previewPortableObject = focusedRobotArm.HeldPortableObject;
-        return previewItemId >= 0;
-    }
-
-    private bool TryPreviewOneItemForAutomaticPickup(
-        Player player,
-        TerrainGenerator terrain,
-        out int previewItemId,
-        out int previewPickupCount,
-        out PortableObject previewPortableObject)
-    {
-        previewItemId = -1;
-        previewPickupCount = 0;
-        previewPortableObject = null;
-        if (player == null || terrain == null)
-        {
-            return false;
-        }
-
-        Vector3 pickupOrigin = ResolvePickupOrigin(player);
-        Vector2Int currentCoordinate = ResolveStandingCoordinate(player);
-        float range = GetStandingTilePickupRange();
-
-        if (!TryGetGroundPickupBlock(terrain, player, currentCoordinate, out Block block))
-        {
-            return false;
-        }
-
-        return block.TryPreviewPickupFloorObjects(
-            player,
-            pickupOrigin,
-            range,
-            -1,
-            out previewItemId,
-            out previewPickupCount,
-            out previewPortableObject);
+        bool found = TryResolvePickupCandidate(player, true, out PickupCandidate candidate);
+        previewItemId = found ? candidate.itemId : -1;
+        previewPickupCount = found ? candidate.count : 0;
+        previewPortableObject = candidate.portable;
+        return found;
     }
 
     private static BagSlot FindAutomaticPickupPreviewTarget(BagSlot sourceSlot, Player player, int itemId)
@@ -3247,235 +3174,13 @@ public class BagSlot : ItemSlot, IBeginDragHandler, IDragHandler, IEndDragHandle
     }
 
     private bool TryResolvePickupPreviewItem(
-        out int previewItemId,
-        out int previewPickupCount,
-        out PortableObject previewPortableObject)
+        out int previewItemId, out int previewPickupCount, out PortableObject previewPortableObject)
     {
-        previewItemId = -1;
-        previewPickupCount = 1;
-        previewPortableObject = null;
-
-        Player player = ResolvePlayer();
-        if (player == null)
-        {
-            return false;
-        }
-
-        Vector3 pickupOrigin = ResolvePickupOrigin(player);
-        int preferredItemId = GetPreferredPickupItemId();
-        bool hasClickedConveyor = TryGetClickedFocusedConveyorBlock(player, out Block clickedConveyorBlock);
-        if (hasClickedConveyor
-            && clickedConveyorBlock.TryPreviewPickupConveyorObjects(
-                player,
-                pickupOrigin,
-                FocusedPickupRange,
-                preferredItemId,
-                out previewItemId,
-                out previewPickupCount,
-                out previewPortableObject)
-            && CanPreviewAcceptPickupItem(player, previewItemId)
-            && ShouldDisplayPickupPreviewForItem(previewItemId))
-        {
-            return true;
-        }
-
-        if (TryPreviewFocusedRobotArmPickup(
-                player,
-                out bool blockOtherPickup,
-                out previewItemId,
-                out previewPortableObject)
-            && ShouldDisplayPickupPreviewForItem(previewItemId))
-        {
-            return true;
-        }
-
-        if (blockOtherPickup)
-        {
-            return false;
-        }
-
-        TerrainGenerator terrain = ResolveTerrain();
-        if (terrain == null)
-        {
-            return false;
-        }
-
-        bool hasFocusedConveyor = TryGetFocusedConveyorBlock(player, out Block focusedConveyorBlock);
-
-        if (TryGetClickedFocusedBoxObject(player, out BoxObject clickedBoxObject))
-        {
-            return clickedBoxObject.TryPreviewContainedObjectPickup(
-                       player,
-                       pickupOrigin,
-                       FocusedPickupRange,
-                       preferredItemId,
-                       out previewItemId,
-                       out previewPickupCount,
-                       out previewPortableObject)
-                   && CanPreviewAcceptPickupItem(player, previewItemId)
-                   && ShouldDisplayPickupPreviewForItem(previewItemId);
-        }
-
-        if (TryPreviewOneItemForClick(
-                player,
-                terrain,
-                out previewItemId,
-                out previewPickupCount,
-                out previewPortableObject)
-            && ShouldDisplayPickupPreviewForItem(previewItemId))
-        {
-            return true;
-        }
-
-        if (TryGetFocusedBoxObject(player, out BoxObject focusedBoxObject))
-        {
-            return focusedBoxObject.TryPreviewContainedObjectPickup(
-                       player,
-                       pickupOrigin,
-                       FocusedPickupRange,
-                       preferredItemId,
-                       out previewItemId,
-                       out previewPickupCount,
-                       out previewPortableObject)
-                   && CanPreviewAcceptPickupItem(player, previewItemId)
-                   && ShouldDisplayPickupPreviewForItem(previewItemId);
-        }
-
-        if (TryGetFocusedItemStorage(player, out IPlayerItemStorage focusedItemStorage))
-        {
-            return TryPreviewFocusedItemStorage(
-                       focusedItemStorage,
-                       player,
-                       pickupOrigin,
-                       FocusedPickupRange,
-                       preferredItemId,
-                       out previewItemId,
-                       out previewPickupCount,
-                       out previewPortableObject)
-                   && CanPreviewAcceptPickupItem(player, previewItemId)
-                   && ShouldDisplayPickupPreviewForItem(previewItemId);
-        }
-
-        return hasFocusedConveyor
-               && focusedConveyorBlock != clickedConveyorBlock
-               && focusedConveyorBlock.TryPreviewPickupConveyorObjects(
-                   player,
-                   pickupOrigin,
-                   FocusedPickupRange,
-                   preferredItemId,
-                   out previewItemId,
-                   out previewPickupCount,
-                   out previewPortableObject)
-               && CanPreviewAcceptPickupItem(player, previewItemId)
-               && ShouldDisplayPickupPreviewForItem(previewItemId);
-    }
-
-    private bool TryPreviewOneItemForClick(
-        Player player,
-        TerrainGenerator terrain,
-        out int previewItemId,
-        out int previewPickupCount,
-        out PortableObject previewPortableObject)
-    {
-        previewItemId = -1;
-        previewPickupCount = 0;
-        previewPortableObject = null;
-        if (player == null || terrain == null)
-        {
-            return false;
-        }
-
-        Vector3 pickupOrigin = ResolvePickupOrigin(player);
-        Vector2Int currentCoordinate = ResolveStandingCoordinate(player);
-        float range = GetStandingTilePickupRange();
-
-        if (TryPreviewOneItemAtCoordinate(
-                terrain,
-                player,
-                currentCoordinate,
-                pickupOrigin,
-                range,
-                out previewItemId,
-                out previewPickupCount,
-                out previewPortableObject))
-        {
-            return true;
-        }
-
-        return false;
-    }
-
-    private bool TryPreviewOneItemAtCoordinate(
-        TerrainGenerator terrain,
-        Player player,
-        Vector2Int coordinate,
-        Vector3 pickupOrigin,
-        float pickupRange,
-        out int previewItemId,
-        out int previewPickupCount,
-        out PortableObject previewPortableObject)
-    {
-        previewItemId = -1;
-        previewPickupCount = 0;
-        previewPortableObject = null;
-        if (terrain == null || player == null || pickupRange <= 0f)
-        {
-            return false;
-        }
-
-        if (!TryGetGroundPickupBlock(terrain, player, coordinate, out Block block))
-        {
-            return false;
-        }
-
-        return block.TryPreviewPickupFloorObjects(
-                   player,
-                   pickupOrigin,
-                   pickupRange,
-                   GetPreferredPickupItemId(),
-                   out previewItemId,
-                   out previewPickupCount,
-                   out previewPortableObject)
-               && CanPreviewAcceptPickupItem(player, previewItemId);
-    }
-
-    private bool TryPreviewFocusedRobotArmPickup(
-        Player player,
-        out bool blockOtherPickup,
-        out int previewItemId,
-        out PortableObject previewPortableObject)
-    {
-        blockOtherPickup = false;
-        previewItemId = -1;
-        previewPortableObject = null;
-        if (player == null)
-        {
-            return false;
-        }
-
-        PlayerController playerController = player.GetComponent<PlayerController>();
-        if (playerController == null
-            || !playerController.TryGetFocusedRobotArm(out RobotArm focusedRobotArm)
-            || focusedRobotArm == null)
-        {
-            return false;
-        }
-
-        blockOtherPickup = true;
-        if (!focusedRobotArm.HasHeldItem || !focusedRobotArm.CanTakeHeldItemFromSlot)
-        {
-            return false;
-        }
-
-        int itemId = focusedRobotArm.HeldItemId;
-        if (!CanPreviewAcceptPickupItem(player, itemId))
-        {
-            return false;
-        }
-
-        previewItemId = itemId;
-        previewPortableObject = focusedRobotArm.HeldPortableObject;
-        return true;
+        bool found = TryResolvePickupCandidate(ResolvePlayer(), false, out PickupCandidate candidate);
+        previewItemId = found ? candidate.itemId : -1;
+        previewPickupCount = found ? candidate.count : 0;
+        previewPortableObject = candidate.portable;
+        return found && ShouldDisplayPickupPreviewForItem(candidate.itemId);
     }
 
     private static bool TryPreviewFocusedItemStorage(
@@ -3898,161 +3603,50 @@ public class BagSlot : ItemSlot, IBeginDragHandler, IDragHandler, IEndDragHandle
     private bool TryHandlePickupClick()
     {
         if (!AllowPickupOnClick || IsInventoryUiLocked())
-        {
             return false;
-        }
-
         Player player = ResolvePlayer();
-        if (player == null)
-        {
+        if (!TryResolvePickupCandidate(player, false, out PickupCandidate candidate))
             return false;
-        }
 
-        bool hasClickedConveyor = TryGetClickedFocusedConveyorBlock(player, out Block clickedConveyorBlock);
-        if (hasClickedConveyor
-            && TryPickupFocusedConveyorItem(player, clickedConveyorBlock, FocusedPickupRange, 1))
+        Vector3 origin = ResolvePickupOrigin(player);
+        bool pickedUp;
+        switch (candidate.source)
         {
+            case PickupSource.Ground:
+                pickedUp = TryPickupGroundCandidate(player, candidate.block, candidate.portable,
+                    origin, GetStandingTilePickupRange());
+                break;
+            case PickupSource.Conveyor:
+                pickedUp = TryPickupFocusedConveyorItem(player, candidate.block, FocusedPickupRange, 1);
+                break;
+            case PickupSource.Box:
+                pickedUp = TryPickupFromFocusedBox(player, candidate.box, origin, FocusedPickupRange);
+                break;
+            case PickupSource.Storage:
+                pickedUp = TryPickupFromFocusedItemStorage(player, candidate.storage, origin, FocusedPickupRange);
+                break;
+            case PickupSource.RobotArm:
+                pickedUp = boundBag != null && slotIndex >= 0
+                    && candidate.robotArm.TryTakeHeldItemToBag(boundBag, slotIndex);
+                break;
+            default:
+                return false;
+        }
+        if (pickedUp)
             SuppressPickupPreviewAfterPickup();
-            return true;
-        }
-
-        if (TryHandleFocusedRobotArmPickup(player, out bool blockPickup))
-        {
-            SuppressPickupPreviewAfterPickup();
-            return true;
-        }
-
-        if (blockPickup)
-        {
-            return true;
-        }
-
-        TerrainGenerator terrain = ResolveTerrain();
-        if (terrain == null)
-        {
-            return false;
-        }
-
-        bool hasFocusedConveyor = TryGetFocusedConveyorBlock(player, out Block focusedConveyorBlock);
-
-        Vector3 pickupOrigin = ResolvePickupOrigin(player);
-        if (TryGetClickedFocusedBoxObject(player, out BoxObject clickedBoxObject))
-        {
-            bool pickedUpFromClickedBox = TryPickupFromFocusedBox(
-                player,
-                clickedBoxObject,
-                pickupOrigin,
-                FocusedPickupRange);
-            if (pickedUpFromClickedBox)
-            {
-                SuppressPickupPreviewAfterPickup();
-            }
-
-            return true;
-        }
-
-        if (TryPickupOneItemForClick(player, terrain))
-        {
-            SuppressPickupPreviewAfterPickup();
-            return true;
-        }
-
-        if (TryHandleFocusedContainerPickup(player, pickupOrigin, FocusedPickupRange, out bool pickedUpFromContainer))
-        {
-            if (pickedUpFromContainer)
-            {
-                SuppressPickupPreviewAfterPickup();
-            }
-
-            return true;
-        }
-
-        if (hasFocusedConveyor
-            && focusedConveyorBlock != clickedConveyorBlock
-            && TryPickupFocusedConveyorItem(player, focusedConveyorBlock, FocusedPickupRange, 1))
-        {
-            SuppressPickupPreviewAfterPickup();
-            return true;
-        }
-
-        return hasClickedConveyor || hasFocusedConveyor;
-    }
-
-    private bool TryPickupOneItemForClick(Player player, TerrainGenerator terrain)
-    {
-        if (player == null || terrain == null)
-        {
-            return false;
-        }
-
-        Vector3 pickupOrigin = ResolvePickupOrigin(player);
-        Vector2Int currentCoordinate = ResolveStandingCoordinate(player);
-        float range = GetStandingTilePickupRange();
-
-        if (TryPickupOneItemAtCoordinate(terrain, player, currentCoordinate, pickupOrigin, range))
-        {
-            return true;
-        }
-
-        return false;
+        // Do not switch to another source if the chosen item changed between preview and pickup.
+        return true;
     }
 
     protected virtual bool AllowPickupOnClick => enablePickupOnClick;
 
-    protected virtual bool TryPickupOneItemAtCoordinate(TerrainGenerator terrain, Player player, Vector2Int coordinate, Vector3 pickupOrigin, float pickupRange)
+    protected virtual bool TryPickupGroundCandidate(Player player, Block block,
+        PortableObject requiredPortableObject, Vector3 pickupOrigin, float pickupRange)
     {
-        if (terrain == null || player == null)
-        {
-            return false;
-        }
-
         int targetSlotIndex = GetPickupSlotIndex();
-        if (targetSlotIndex < 0)
-        {
-            return false;
-        }
-
-        PortableObject requiredPortableObject = null;
-        Block block;
-        if (TryGetPickupPreviewSource(out PortableObject previewPortableObject, out Block previewBlock))
-        {
-            requiredPortableObject = previewPortableObject;
-            block = previewBlock;
-        }
-        else if (!TryGetGroundPickupBlock(terrain, player, coordinate, out block))
-        {
-            return false;
-        }
-
-        return block.TryPickupOneFloorObjectToBag(
-            player,
-            pickupOrigin,
-            pickupRange,
-            targetSlotIndex,
-            GetPreferredPickupItemId(),
-            requiredPortableObject);
-    }
-
-    private bool TryHandleFocusedContainerPickup(
-        Player player,
-        Vector3 pickupOrigin,
-        float pickupRange,
-        out bool pickedUp)
-    {
-        pickedUp = false;
-        if (TryGetFocusedBoxObject(player, out BoxObject focusedBoxObject))
-        {
-            pickedUp = TryPickupFromFocusedBox(player, focusedBoxObject, pickupOrigin, pickupRange);
-            return true;
-        }
-
-        if (TryGetFocusedItemStorage(player, out IPlayerItemStorage focusedItemStorage))
-        {
-            pickedUp = TryPickupFromFocusedItemStorage(player, focusedItemStorage, pickupOrigin, pickupRange);
-            return true;
-        }
-
-        return false;
+        return player != null && block != null && targetSlotIndex >= 0
+            && block.TryPickupOneFloorObjectToBag(player, pickupOrigin, pickupRange,
+                targetSlotIndex, GetPreferredPickupItemId(), requiredPortableObject);
     }
 
     protected virtual bool TryPickupFromFocusedBox(
@@ -4339,49 +3933,6 @@ public class BagSlot : ItemSlot, IBeginDragHandler, IDragHandler, IEndDragHandle
                && block.Type == Block.BlockType.Ground;
     }
 
-    protected bool TryGetPickupPreviewSource(
-        out PortableObject portableObject,
-        out Block sourceBlock)
-    {
-        portableObject = pickupPreviewOutlineOwner == this
-            ? pickupPreviewOutlineTarget
-            : null;
-        sourceBlock = portableObject != null
-            ? portableObject.PickupSourceBlock
-            : null;
-        return portableObject != null
-               && portableObject.gameObject.activeInHierarchy
-               && sourceBlock != null;
-    }
-
-    private bool TryHandleFocusedRobotArmPickup(Player player, out bool blockOtherPickup)
-    {
-        blockOtherPickup = false;
-        if (player == null)
-        {
-            return false;
-        }
-
-        PlayerController playerController = player.GetComponent<PlayerController>();
-        if (playerController == null
-            || !playerController.TryGetFocusedRobotArm(out RobotArm focusedRobotArm)
-            || focusedRobotArm == null)
-        {
-            return false;
-        }
-
-        blockOtherPickup = true;
-        if (!focusedRobotArm.HasHeldItem
-            || !focusedRobotArm.CanTakeHeldItemFromSlot
-            || boundBag == null
-            || slotIndex < 0)
-        {
-            return false;
-        }
-
-        return focusedRobotArm.TryTakeHeldItemToBag(boundBag, slotIndex);
-    }
-
     private static Player ResolvePlayer()
     {
         if (GameManager.Instance != null && GameManager.Instance.Player != null)
@@ -4392,7 +3943,7 @@ public class BagSlot : ItemSlot, IBeginDragHandler, IDragHandler, IEndDragHandle
         return UnityEngine.Object.FindObjectOfType<Player>();
     }
 
-    private static Vector3 ResolvePickupOrigin(Player player)
+    protected static Vector3 ResolvePickupOrigin(Player player)
     {
         if (player == null)
         {

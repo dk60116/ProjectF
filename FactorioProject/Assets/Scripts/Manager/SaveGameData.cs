@@ -5,8 +5,8 @@ using UnityEngine;
 [Serializable]
 public sealed class SaveGameData
 {
-    // Version 52 preserves each splitter wheel's last committed straight/cross result.
-    public const int CurrentVersion = 52;
+    // Version 54 stores individual food digestion timers instead of periodic defecation.
+    public const int CurrentVersion = 54;
 
     public int version = CurrentVersion;
     public long savedAtUtcTicks;
@@ -93,8 +93,8 @@ public sealed class AnimalSaveEntry
     public float currentHealth;
     public bool hasNeedsState;
     public float currentHunger;
-    public float defecationTimeRemaining;
-    public int digestedMealCount;
+    public float growthFoodEnergy;
+    public List<float> pendingDefecations = new List<float>();
     public bool hasSaddle;
     public bool hasDraftHandcart;
     public Vector2Int draftHandcartAnchorCoordinate;

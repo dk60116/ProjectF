@@ -24,9 +24,8 @@ internal static class ConveyorSideBarrierChecks
                 Require(Vector2.Dot(normal, side) > 0.999f, "entry normal must point outside");
 
                 Vector2 inside = origin + axis * along;
-                Require(SweepBelt(inside, side, 1f, origin, axis, radius, out distance, out normal),
-                    "walking off the upper path sideways must hit its side");
-                Require(Math.Abs(distance - (0.5f - radius)) < 0.0001f, "inside contact distance");
+                Require(!SweepBelt(inside, side, 1f, origin, axis, radius, out _, out _),
+                    "walking off the upper path sideways must remain free");
                 cases += 2;
             }
 
@@ -44,16 +43,31 @@ internal static class ConveyorSideBarrierChecks
                 && Vector2.Dot(slide, axis) > 0f, "contact must preserve movement along the wall");
 
             Vector2 overlapping = center + side * (radius * 0.5f);
-            Require(!ConveyorSideBarrier.Sweep(overlapping, side, 0.05f, center, axis,
+            Require(!ConveyorSideBarrier.Sweep(overlapping, side, 0.05f, center, axis, side,
                 0.5f, radius, out _, out _), "overlapping player must be able to escape");
-            Require(ConveyorSideBarrier.Sweep(overlapping, -side, 0.05f, center, axis,
+            Require(ConveyorSideBarrier.Sweep(overlapping, -side, 0.05f, center, axis, side,
                 0.5f, radius, out float overlapDistance, out _) && overlapDistance == 0f,
                 "overlapping player must not move deeper");
             Require(!SweepBelt(origin + axis * 2f + side, -side, 2f, origin,
                 axis, radius, out _, out _), "walking around the end must remain possible");
-            Require(!ConveyorSideBarrier.Sweep(center, side, 0.05f, center, axis,
+            Require(!ConveyorSideBarrier.Sweep(center, side, 0.05f, center, axis, side,
                 0.5f, radius, out _, out _), "placement directly on the player must permit escape");
             cases += 7;
+            Vector2 leaving = origin;
+            for (int step = 0; step < 24; step++)
+            {
+                Require(!SweepBelt(leaving, side, 0.05f, origin, axis, radius, out _, out _),
+                    "descent must remain free across contact, overlap, and the outside edge");
+                leaving += side * 0.05f;
+                cases++;
+            }
+            Require(SweepBelt(leaving, -side, 1f, origin, axis, radius, out _, out _),
+                "after stepping down, reversing toward the raised side must be blocked");
+            Require(!SweepBelt(origin, (side + axis).normalized, 2f, origin, axis, radius, out _, out _),
+                "diagonal descent from the upper path must stay free");
+            Require(SweepBelt(origin, side, 4f, origin + side * 2f, axis, radius, out _, out _),
+                "leaving one belt must not bypass the entry side of another belt");
+            cases += 3;
             foreach (int endSign in new[] { -1, 1 })
             {
                 float boundary = endSign < 0 ? -RaisedMin : RaisedMax;
@@ -76,7 +90,7 @@ internal static class ConveyorSideBarrierChecks
                 cases += 2;
             }
         }
-        Console.WriteLine($"PASS: {cases} 2F side barrier cases (four rotations, low landings, raised sides, capsule width, fast/diagonal movement, open ends, escape).");
+        Console.WriteLine($"PASS: {cases} 2F side barrier cases (four rotations, free descent, blocked re-entry, low landings, raised sides, capsule width, fast/diagonal movement, open ends, escape).");
     }
 
     // Inner edges of Body_End/Body_Start in the current 2F prefab, using mesh bounds.
@@ -94,7 +108,7 @@ internal static class ConveyorSideBarrierChecks
         {
             if (ConveyorSideBarrier.Sweep(start, direction, nearest,
                 origin + axis * ((RaisedMin + RaisedMax) * 0.5f) + side * (0.5f * sign),
-                axis, (RaisedMax - RaisedMin) * 0.5f, radius,
+                axis, side * sign, (RaisedMax - RaisedMin) * 0.5f, radius,
                 out float hitDistance, out Vector2 hitNormal))
             {
                 nearest = hitDistance;

@@ -1179,8 +1179,9 @@ public partial class TerrainGenerator : MonoBehaviour
                 currentHealth = source.currentHealth,
                 hasNeedsState = source.hasNeedsState,
                 currentHunger = source.currentHunger,
-                defecationTimeRemaining = source.defecationTimeRemaining,
-                digestedMealCount = source.digestedMealCount,
+                growthFoodEnergy = source.growthFoodEnergy,
+                pendingDefecations = source.pendingDefecations != null
+                    ? new List<float>(source.pendingDefecations) : new List<float>(),
                 hasSaddle = source.hasSaddle,
                 hasDraftHandcart = source.hasDraftHandcart,
                 draftHandcartAnchorCoordinate = source.draftHandcartAnchorCoordinate,

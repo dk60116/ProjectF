@@ -9,11 +9,17 @@ namespace ProjectF.Conveyors
         private const float Epsilon = 0.00001f;
 
         public static bool Sweep(Vector2 start, Vector2 direction, float maxDistance,
-            Vector2 center, Vector2 axis, float halfLength, float radius,
+            Vector2 center, Vector2 axis, Vector2 outward, float halfLength, float radius,
             out float distance, out Vector2 normal)
         {
             distance = float.PositiveInfinity;
             normal = Vector2.zero;
+            // The raised rail prevents climbing in, but allows stepping off the belt.
+            // Use each rail's outward direction so crossing the whole belt from outside
+            // still hits the entry rail, and neighboring belts keep their own barriers.
+            if (Vector2.Dot(direction, outward) > Epsilon)
+                return false;
+
             Vector2 side = new Vector2(-axis.y, axis.x);
             Vector2 relative = start - center;
             float along = Vector2.Dot(relative, axis);

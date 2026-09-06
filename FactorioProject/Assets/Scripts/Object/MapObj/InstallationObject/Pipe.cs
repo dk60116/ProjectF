@@ -54,6 +54,7 @@ public class Pipe : InstallationObject
     private readonly Queue<Vector2Int> objectInfoFluidSearchQueue = new Queue<Vector2Int>(32);
     private readonly HashSet<Vector2Int> objectInfoFluidSearchVisited = new HashSet<Vector2Int>();
     private readonly HashSet<int> objectInfoFluidItemIds = new HashSet<int>();
+    private readonly HashSet<InputOutputModule> objectInfoFluidOutputSources = new HashSet<InputOutputModule>();
     private readonly List<InstallationObject> objectInfoFluidStorageScratch = new List<InstallationObject>(4);
 
     [SerializeField]
@@ -65,6 +66,10 @@ public class Pipe : InstallationObject
     private bool fluidDisplayRendererResolved;
     private bool fluidDisplaySuppressedForVariantPreview;
     private float nextFluidDisplayRefreshTime;
+    private float nextObjectInfoFluidRefreshTime = float.NegativeInfinity;
+    private int cachedObjectInfoFluidItemId = -1;
+    private float cachedObjectInfoFluidTemperature;
+    private float cachedObjectInfoExtractionRate;
     private static float fluidDisplayNetworkCacheExpiresAt;
 
     public Pipe StraightVariantPrefab => straightVariantPrefab != null ? straightVariantPrefab : this;
@@ -122,6 +127,7 @@ public class Pipe : InstallationObject
 
     public void RefreshFluidDisplayImmediately()
     {
+        nextObjectInfoFluidRefreshTime = float.NegativeInfinity;
         displayedFluidItemId = NoDisplayedFluidItemId;
         displayedFluidVisible = false;
         nextFluidDisplayRefreshTime = Time.unscaledTime + GetFluidDisplayRefreshOffset();
@@ -152,20 +158,61 @@ public class Pipe : InstallationObject
 
     public bool TryGetObjectInfoFluidInfo(out int fluidItemId, out float temperatureCelsius)
     {
+        return TryGetObjectInfoFluidInfo(out fluidItemId, out temperatureCelsius, out _, false);
+    }
+
+    public bool TryGetObjectInfoFluidInfo(
+        out int fluidItemId,
+        out float temperatureCelsius,
+        out float extractionLitersPerSecond,
+        bool includeExtractionRate = true)
+    {
         fluidItemId = -1;
         temperatureCelsius = MapClimate.CurrentTemperatureCelsius;
+        extractionLitersPerSecond = 0f;
+        if (includeExtractionRate && Time.unscaledTime < nextObjectInfoFluidRefreshTime)
+        {
+            fluidItemId = cachedObjectInfoFluidItemId;
+            temperatureCelsius = cachedObjectInfoFluidTemperature;
+            extractionLitersPerSecond = cachedObjectInfoExtractionRate;
+            return fluidItemId >= 0;
+        }
+
+        objectInfoFluidOutputSources.Clear();
         if (!TryResolveObjectInfoPipeCoordinate(out Vector2Int startCoordinate))
         {
             return false;
         }
 
-        return TrySearchFluidNetwork(
+        bool foundFluid = TrySearchFluidNetwork(
             startCoordinate,
             false,
             false,
             Vector2Int.zero,
             out fluidItemId,
-            out temperatureCelsius);
+            out temperatureCelsius,
+            includeExtractionRate ? objectInfoFluidOutputSources : null);
+        if (includeExtractionRate && foundFluid)
+        {
+            foreach (InputOutputModule source in objectInfoFluidOutputSources)
+            {
+                if (source != null)
+                {
+                    extractionLitersPerSecond += source.GetObjectInfoFluidOutputLitersPerSecond(fluidItemId);
+                }
+            }
+        }
+
+        objectInfoFluidOutputSources.Clear();
+        if (includeExtractionRate)
+        {
+            cachedObjectInfoFluidItemId = foundFluid ? fluidItemId : -1;
+            cachedObjectInfoFluidTemperature = temperatureCelsius;
+            cachedObjectInfoExtractionRate = extractionLitersPerSecond;
+            nextObjectInfoFluidRefreshTime = Time.unscaledTime + FluidDisplayRefreshIntervalSeconds;
+        }
+
+        return foundFluid;
     }
 
     public bool TryGetConnectedFluidItemIdIgnoringStorageCoordinate(
@@ -193,7 +240,8 @@ public class Pipe : InstallationObject
         bool hasIgnoredStorageCoordinate,
         Vector2Int ignoredStorageCoordinate,
         out int fluidItemId,
-        out float temperatureCelsius)
+        out float temperatureCelsius,
+        ISet<InputOutputModule> outputSources = null)
     {
         fluidItemId = -1;
         temperatureCelsius = MapClimate.CurrentTemperatureCelsius;
@@ -208,7 +256,7 @@ public class Pipe : InstallationObject
         float mobileStorageFallbackTemperatureCelsius = MapClimate.CurrentTemperatureCelsius;
         int searchedNodeCount = 0;
         while (objectInfoFluidSearchQueue.Count > 0
-               && searchedNodeCount < MaxObjectInfoFluidSearchNodes)
+               && (outputSources != null || searchedNodeCount < MaxObjectInfoFluidSearchNodes))
         {
             Vector2Int coordinate = objectInfoFluidSearchQueue.Dequeue();
             searchedNodeCount++;
@@ -224,7 +272,7 @@ public class Pipe : InstallationObject
                     out temperatureCelsius))
             {
                 foundFluid = true;
-                if (!cacheDisplayNetwork)
+                if (!cacheDisplayNetwork && outputSources == null)
                 {
                     return true;
                 }
@@ -238,6 +286,11 @@ public class Pipe : InstallationObject
             if (!hasPipe || pipe == null)
             {
                 continue;
+            }
+
+            if (outputSources != null)
+            {
+                InputOutputModule.AppendFluidOutputSourcesAtCoordinate(coordinate, Vector2Int.zero, outputSources);
             }
 
             for (int i = 0; i < CardinalDirections.Length; i++)
@@ -260,16 +313,21 @@ public class Pipe : InstallationObject
                         out temperatureCelsius))
                 {
                     foundFluid = true;
-                    if (!cacheDisplayNetwork)
+                    if (!cacheDisplayNetwork && outputSources == null)
                     {
                         return true;
                     }
                 }
 
-                if (TryGetPipeAtCoordinate(terrain, neighborCoordinate, out Pipe neighborPipe, out Quaternion neighborRotation)
+                bool hasNeighborPipe = TryGetPipeAtCoordinate(terrain, neighborCoordinate, out Pipe neighborPipe, out Quaternion neighborRotation);
+                if (hasNeighborPipe
                     && neighborPipe.HasConnectionTowardsAt(neighborCoordinate, neighborRotation, -direction))
                 {
                     EnqueueObjectInfoFluidSearchCoordinate(neighborCoordinate);
+                }
+                else if (!hasNeighborPipe && outputSources != null)
+                {
+                    InputOutputModule.AppendFluidOutputSourcesAtCoordinate(neighborCoordinate, -direction, outputSources);
                 }
             }
 

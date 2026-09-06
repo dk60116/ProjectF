@@ -1064,21 +1064,9 @@ public partial class Block : BaseObject
         }
     }
 
-    public bool CanAddFloorObjects(int count, int itemId)
+    public bool CanAddFloorObjects(int count, int itemId, Resource harvestedResource = null)
     {
-        EnsureFloorObjectsInitialized();
-
-        if (count <= 0)
-        {
-            return true;
-        }
-
-        if (BlocksFloorObjectStacking(itemId))
-        {
-            return false;
-        }
-
-        return GetAvailableFloorCapacity(itemId) >= count;
+        return count <= 0 || GetAvailableFloorCapacity(itemId, harvestedResource) >= count;
     }
 
     public bool HasDroppedFloorObjects
@@ -1247,7 +1235,7 @@ public partial class Block : BaseObject
         return false;
     }
 
-    public bool TryAddFloorObjectAnimated(int objectId, Vector3 startWorldPosition, float delay, out PortableObject targetPortableObject, Action onComplete = null, Func<Vector3> startWorldPositionProvider = null)
+    public bool TryAddFloorObjectAnimated(int objectId, Vector3 startWorldPosition, float delay, out PortableObject targetPortableObject, Action onComplete = null, Func<Vector3> startWorldPositionProvider = null, Resource harvestedResource = null)
     {
         targetPortableObject = null;
         EnsureFloorObjectsInitialized();
@@ -1264,7 +1252,7 @@ public partial class Block : BaseObject
             return true;
         }
 
-        if (BlocksFloorObjectStacking(objectId))
+        if (BlocksFloorObjectStacking(objectId, harvestedResource))
         {
             return false;
         }
@@ -2096,17 +2084,9 @@ public partial class Block : BaseObject
         WakeConveyorMoveAttempts();
         RefreshConveyorActivityRegistration();
 
-        DroppedItemPickupGate gate = portableObject.GetOrAddPickupGate();
-
         if (ShouldSnapConveyorPlacementImmediately(delay, startWorldPositionProvider))
         {
-            ConfigureConveyorObjectTransform(portableObject, laneIndex);
-            ApplyConveyorObjectRenderingMode(portableObject);
-            gate?.MarkSettled();
-            TryVirtualizeSettledConveyorPortableObject(laneIndex, portableObject);
-            MarkConveyorItemVisualDirty();
-            WakeConveyorMoveAttempts();
-            RefreshConveyorActivityRegistration();
+            CompleteConveyorItemPlacement(laneIndex, portableObject, false);
             onComplete?.Invoke();
             targetPortableObject = portableObject;
             return true;
@@ -2114,25 +2094,34 @@ public partial class Block : BaseObject
 
         portableObject.MoveTo(() => GetConveyorLaneWorldPosition(laneIndex), delay, startWorldPositionProvider, () =>
         {
-            if (portableObject == null)
-            {
-                onComplete?.Invoke();
-                return;
-            }
-
-            ConfigureConveyorObjectTransform(portableObject, laneIndex);
-
-            ApplyConveyorObjectRenderingMode(portableObject);
-            gate?.MarkSettled();
-            TryVirtualizeSettledConveyorPortableObject(laneIndex, portableObject);
-            MarkConveyorItemVisualDirty();
-            WakeConveyorMoveAttempts();
-            RefreshConveyorActivityRegistration();
+            // The tween can finish just before Time.time reaches the nominal hold deadline.
+            // An animation-length hold ends on landing; a deliberately longer hold is preserved.
+            bool releaseMovementHold = movementReleaseDelay <= Mathf.Max(0f, delay) + Mathf.Max(0.001f, moveDuration);
+            CompleteConveyorItemPlacement(laneIndex, portableObject, releaseMovementHold);
             onComplete?.Invoke();
         }, false, useJumpArc, moveDuration, false);
 
         targetPortableObject = portableObject;
         return true;
+    }
+
+    private void CompleteConveyorItemPlacement(int laneIndex, PortableObject portableObject, bool releaseMovementHold)
+    {
+        if (portableObject == null || GetConveyorPortableObjectAtLane(laneIndex) != portableObject)
+            return;
+
+        ConfigureConveyorObjectTransform(portableObject, laneIndex);
+        ApplyConveyorObjectRenderingMode(portableObject);
+        portableObject.GetOrAddPickupGate()?.MarkSettled();
+        if (releaseMovementHold)
+            ClearConveyorLaneMovementHold(laneIndex);
+        else
+            InvalidateConveyorCanMoveCaches(false);
+        TryVirtualizeSettledConveyorPortableObject(laneIndex, portableObject);
+        MarkConveyorItemVisualDirty();
+        // Landing changes readiness without changing lane occupancy. Explicitly discard the
+        // lane's cached failure/sleep and the line's ready-delay before scheduling its next tick.
+        WakeConveyorBlockedLaneWaiter(laneIndex);
     }
 
     private bool TryFindConnectedConveyorInsertionBlock(out Block insertionBlock)
@@ -6975,11 +6964,11 @@ public partial class Block : BaseObject
         return GetAvailableFloorCapacity(-1);
     }
 
-    private int GetAvailableFloorCapacity(int itemId)
+    private int GetAvailableFloorCapacity(int itemId, Resource harvestedResource = null)
     {
         EnsureFloorObjectsInitialized();
 
-        if (BlocksFloorObjectStacking(itemId))
+        if (BlocksFloorObjectStacking(itemId, harvestedResource))
         {
             return 0;
         }
@@ -7040,7 +7029,7 @@ public partial class Block : BaseObject
         return floorObjectDropAnchor;
     }
 
-    private bool BlocksFloorObjectStacking(int itemId = -1)
+    private bool BlocksFloorObjectStacking(int itemId = -1, Resource harvestedResource = null)
     {
         if (mapObject is InstallationObject installationObject
             && installationObject != null
@@ -7050,7 +7039,9 @@ public partial class Block : BaseObject
             return true;
         }
 
+        // Only the resource being harvested may put its own drops beneath a growing tree.
         if (mapObject is ProjectF.MapObjects.Tree growingTree
+            && growingTree != harvestedResource
             && growingTree != null
             && growingTree.gameObject != null
             && growingTree.gameObject.activeInHierarchy

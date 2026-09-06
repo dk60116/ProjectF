@@ -56,9 +56,13 @@ public static class AnimalGridPathfinder
         int sampleCount = Mathf.Max(1, Mathf.CeilToInt(delta.magnitude / LineSampleSpacing));
         float radius = Mathf.Max(1f, areaRadius);
         float radiusSqr = radius * radius;
+        int previousX = Mathf.RoundToInt(start.x);
+        int previousZ = Mathf.RoundToInt(start.z);
         for (int i = 1; i <= sampleCount; i++)
         {
             Vector3 sample = Vector3.Lerp(start, end, i / (float)sampleCount);
+            int sampleX = Mathf.RoundToInt(sample.x);
+            int sampleZ = Mathf.RoundToInt(sample.z);
             Vector3 areaOffset = sample - areaCenter;
             areaOffset.y = 0f;
             if (areaOffset.sqrMagnitude > radiusSqr
@@ -66,6 +70,20 @@ public static class AnimalGridPathfinder
             {
                 return false;
             }
+
+            // Straight shortcuts and path smoothing must obey the same corner
+            // clearance as A*: two touching obstacles do not form a passage.
+            if (sampleX != previousX && sampleZ != previousZ
+                && !IsTraversableStep(
+                    terrain, previousX, previousZ,
+                    sampleX - previousX, sampleZ - previousZ,
+                    sample.y, requireLoadedGround))
+            {
+                return false;
+            }
+
+            previousX = sampleX;
+            previousZ = sampleZ;
         }
 
         return true;

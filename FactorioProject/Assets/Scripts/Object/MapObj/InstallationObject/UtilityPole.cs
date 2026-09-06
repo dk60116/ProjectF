@@ -3137,11 +3137,6 @@ public class UtilityPole : InstallationObject
             return module.TryGetElectricPowerRequirement(out wattsPerSecond);
         }
 
-        if (consumer is RobotArm robotArm)
-        {
-            return robotArm.TryGetElectricPowerRequirement(out wattsPerSecond);
-        }
-
         if (consumer is LoggingMachine loggingMachine)
         {
             return loggingMachine.TryGetElectricPowerRequirement(out wattsPerSecond);
@@ -3171,11 +3166,6 @@ public class UtilityPole : InstallationObject
             return module.TryGetElectricPowerDemand(out wattsPerSecond);
         }
 
-        if (consumer is RobotArm robotArm)
-        {
-            return robotArm.TryGetElectricPowerDemand(out wattsPerSecond);
-        }
-
         if (consumer is LoggingMachine loggingMachine)
         {
             return loggingMachine.TryGetElectricPowerDemand(out wattsPerSecond);
@@ -3192,7 +3182,6 @@ public class UtilityPole : InstallationObject
     private static bool HasRuntimeElectricPowerDemand(InstallationObject consumer)
     {
         return consumer is InputOutputModule
-               || consumer is RobotArm
                || consumer is LoggingMachine
                || consumer is LightObject;
     }

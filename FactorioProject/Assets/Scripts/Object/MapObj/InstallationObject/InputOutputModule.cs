@@ -8,6 +8,57 @@ public class InputOutputModule : InstallationObject,
 {
     public static event System.Action<InputOutputModule> RuntimePipeTopologyChanged;
 
+    private ProjectF.FluidTransport.FluidOutputRateMeter fluidOutputRateMeter;
+
+    protected void RecordFluidNetworkOutput(int fluidItemId, float acceptedLiters)
+    {
+        if (acceptedLiters <= 0f)
+        {
+            return;
+        }
+
+        fluidOutputRateMeter ??= new ProjectF.FluidTransport.FluidOutputRateMeter();
+        fluidOutputRateMeter.Record(fluidItemId, acceptedLiters, Time.timeAsDouble);
+    }
+
+    public float GetObjectInfoFluidOutputLitersPerSecond(int fluidItemId)
+    {
+        return isActiveAndEnabled && fluidOutputRateMeter != null
+            ? fluidOutputRateMeter.GetLitersPerSecond(fluidItemId, Time.timeAsDouble)
+            : 0f;
+    }
+
+    public static void AppendFluidOutputSourcesAtCoordinate(
+        Vector2Int coordinate,
+        Vector2Int directionToPipe,
+        ISet<InputOutputModule> sources)
+    {
+        if (sources == null)
+        {
+            return;
+        }
+
+        // Output areas are registered here even when no standalone pipe occupies the cell.
+        if (!registeredRuntimeAreaCoordinates.TryGetValue(coordinate, out HashSet<InputOutputModule> modules))
+        {
+            return;
+        }
+
+        foreach (InputOutputModule module in modules)
+        {
+            if (module == null || !module.isActiveAndEnabled
+                || !module.ContainsRuntimeOutputCoordinate(coordinate)
+                || (directionToPipe != Vector2Int.zero
+                    && (!module.TryGetRuntimePipeAreaExternalDirection(coordinate, out Vector2Int externalDirection)
+                        || externalDirection != directionToPipe)))
+            {
+                continue;
+            }
+
+            sources.Add(module);
+        }
+    }
+
     private const float DefaultManagedUpdateTickIntervalSeconds = 0.1f;
     private static readonly int WorkAnimatorBoolHash = Animator.StringToHash("bWork");
     private static readonly Vector2Int[] FluidCardinalDirections =
@@ -173,6 +224,7 @@ public class InputOutputModule : InstallationObject,
         public float boilerWaterTemperatureCelsius;
         public float boilerSteamLiterAccumulator;
         public float oilDrillingProgressLiters;
+        // Legacy binary save slot; continuous sprinkler watering no longer uses a spray timer.
         public float sprinklerSprayElapsedSeconds;
         public float seedPlanterPlantElapsedSeconds;
         public bool steamGeneratorHasGenerationReserve;
@@ -556,6 +608,7 @@ public class InputOutputModule : InstallationObject,
 
     public override void PrepareForPool()
     {
+        fluidOutputRateMeter?.Reset();
         SetRuntimeUpdateTickRegistered(false);
         runtimeSleeping = false;
         UnregisterRuntimeGridCoordinates();
@@ -1727,6 +1780,14 @@ public class InputOutputModule : InstallationObject,
         return TryFindConnectedFluidSource(requiredFluidItemId, out _);
     }
 
+    protected IReadOnlyList<InstallationObject> GetConnectedFluidSourceStorages()
+    {
+        EnsureConnectedFluidSourceStorageCache();
+        return cachedConnectedFluidSourceStorages;
+    }
+
+    protected virtual bool UsesConnectedTankNetworkStorage => false;
+
     protected bool TryPullFluidFromConnectedStorage(
         int requiredFluidItemId,
         float maxTransferLiters,
@@ -1904,7 +1965,8 @@ public class InputOutputModule : InstallationObject,
                 fluidStorage,
                 cachedConnectedFluidSourceStorages);
 
-            if (!isSeedCoordinate && !hasPipe && !storageIsPipeArea)
+            if (!isSeedCoordinate && !hasPipe && !storageIsPipeArea
+                && !(UsesConnectedTankNetworkStorage && fluidStorage is Fluidtank))
             {
                 continue;
             }
@@ -1942,7 +2004,7 @@ public class InputOutputModule : InstallationObject,
                     nextStorage,
                     cachedConnectedFluidSourceStorages);
 
-                if (canContinueRoute)
+                if (canContinueRoute || UsesConnectedTankNetworkStorage && nextStorage is Fluidtank)
                 {
                     EnqueueConnectedFluidSearchCoordinate(nextCoordinate);
                 }
@@ -2556,6 +2618,7 @@ public class InputOutputModule : InstallationObject,
 
     protected override void OnDisable()
     {
+        fluidOutputRateMeter?.Reset();
         bool hadRuntimePipeTopologyCoordinates = HasRuntimePipeTopologyCoordinates();
         SetWorkAnimatorState(false, true);
         StopCraftParticleEffectVisual(true);
@@ -3128,7 +3191,7 @@ public class InputOutputModule : InstallationObject,
         return hasActiveCraft || waitingForOutput;
     }
 
-    public bool TryGetElectricPowerRequirement(out float wattsPerSecond)
+    public virtual bool TryGetElectricPowerRequirement(out float wattsPerSecond)
     {
         wattsPerSecond = 0f;
         ItemDefinition installedDefinition = ResolveInstalledDefinition();
@@ -3168,7 +3231,7 @@ public class InputOutputModule : InstallationObject,
     public float ObjectInfoCurrentUseEnergy => ResolveObjectInfoCurrentUseEnergy();
     public float ObjectInfoCompleteEnergy => ResolveObjectInfoCompleteEnergy();
     protected float OperationalAnimationSpeedRatio => ResolveOperationalAnimationSpeedRatio();
-    public bool IsWorkingForItemLight
+    public virtual bool IsWorkingForItemLight
     {
         get
         {
@@ -3251,7 +3314,7 @@ public class InputOutputModule : InstallationObject,
             : null;
     }
 
-    public void GetObjectInfoStatus(out string statusText, out bool isProducing)
+    public virtual void GetObjectInfoStatus(out string statusText, out bool isProducing)
     {
         statusText = ResolveObjectInfoStatus(out isProducing);
     }
@@ -3811,7 +3874,7 @@ public class InputOutputModule : InstallationObject,
         return inputItemId >= 0;
     }
 
-    private void AppendRuntimeInputItemAreaCoordinates(int itemId, List<Vector2Int> coordinates)
+    protected void AppendRuntimeInputItemAreaCoordinates(int itemId, List<Vector2Int> coordinates)
     {
         if (itemId < 0 || coordinates == null || runtimeInputItemAreas == null)
         {
@@ -5244,7 +5307,7 @@ public class InputOutputModule : InstallationObject,
             return cachedInstalledDefinition;
         }
 
-        cachedInstalledDefinition = ResolveItemDefinition(itemId);
+        cachedInstalledDefinition = BoundItemDefinition != null ? BoundItemDefinition : ResolveItemDefinition(itemId);
         cachedInstalledDefinitionId = itemId;
         return cachedInstalledDefinition;
     }
@@ -5512,6 +5575,7 @@ public class InputOutputModule : InstallationObject,
             acceptedLiters += Mathf.Max(0f, acceptedThisAttempt);
         }
 
+        RecordFluidNetworkOutput(fluidItemId, acceptedLiters);
         return acceptedLiters > 0.0001f;
     }
 

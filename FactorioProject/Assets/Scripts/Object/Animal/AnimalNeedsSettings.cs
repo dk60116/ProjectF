@@ -5,11 +5,11 @@ using UnityEngine;
 public sealed class AnimalNeedsSettings
 {
     public const float DefaultMaxHunger = 100f;
-    public const float DefaultHungerDrainPerSecond = 0.05f;
+    public const float DefaultHungerDrainPerSecond = 1f;
     public const float DefaultHungryThresholdRatio = 0.5f;
-    public const float DefaultFoodEnergyPerItem = 25f;
     public const float DefaultFoodSearchRadius = 8f;
-    public const float DefaultDefecationIntervalSeconds = 300f;
+    public const float DefaultGrowthEnergyPerLevel = 100f;
+    public const float DefaultFoodDigestionSeconds = 10f;
     public const int DefaultDefecationAmount = 1;
     public const float DefaultUnattendedDroppingLifetimeSeconds = 300f;
 
@@ -17,12 +17,14 @@ public sealed class AnimalNeedsSettings
     [SerializeField, Min(1f)] private float maxHunger = DefaultMaxHunger;
     [SerializeField, Min(0f)] private float hungerDrainPerSecond = DefaultHungerDrainPerSecond;
     [SerializeField, Range(0f, 1f)] private float hungryThresholdRatio = DefaultHungryThresholdRatio;
-    [SerializeField, Min(0.01f)] private float foodEnergyPerItem = DefaultFoodEnergyPerItem;
     [SerializeField, Min(0.5f)] private float foodSearchRadius = DefaultFoodSearchRadius;
+
+    [Header("Growth")]
+    [SerializeField, Min(1f)] private float growthEnergyPerLevel = DefaultGrowthEnergyPerLevel;
 
     [Header("Defecation")]
     [SerializeField, Min(1f)]
-    private float defecationIntervalSeconds = DefaultDefecationIntervalSeconds;
+    private float foodDigestionSeconds = DefaultFoodDigestionSeconds;
     [SerializeField, Min(1)] private int defecationAmount = DefaultDefecationAmount;
     [SerializeField, Min(0f)]
     private float unattendedDroppingLifetimeSeconds =
@@ -46,22 +48,22 @@ public sealed class AnimalNeedsSettings
         set => hungryThresholdRatio = Mathf.Clamp01(value);
     }
 
-    public float FoodEnergyPerItem
-    {
-        get => Mathf.Max(0.01f, foodEnergyPerItem);
-        set => foodEnergyPerItem = Mathf.Max(0.01f, value);
-    }
-
     public float FoodSearchRadius
     {
         get => Mathf.Max(0.5f, foodSearchRadius);
         set => foodSearchRadius = Mathf.Max(0.5f, value);
     }
 
-    public float DefecationIntervalSeconds
+    public float GrowthEnergyPerLevel
     {
-        get => Mathf.Max(1f, defecationIntervalSeconds);
-        set => defecationIntervalSeconds = Mathf.Max(1f, value);
+        get => Mathf.Max(1f, growthEnergyPerLevel);
+        set => growthEnergyPerLevel = Mathf.Max(1f, value);
+    }
+
+    public float FoodDigestionSeconds
+    {
+        get => Mathf.Max(1f, foodDigestionSeconds);
+        set => foodDigestionSeconds = Mathf.Max(1f, value);
     }
 
     public int DefecationAmount
@@ -83,9 +85,9 @@ public sealed class AnimalNeedsSettings
             maxHunger = MaxHunger,
             hungerDrainPerSecond = HungerDrainPerSecond,
             hungryThresholdRatio = HungryThresholdRatio,
-            foodEnergyPerItem = FoodEnergyPerItem,
             foodSearchRadius = FoodSearchRadius,
-            defecationIntervalSeconds = DefecationIntervalSeconds,
+            growthEnergyPerLevel = GrowthEnergyPerLevel,
+            foodDigestionSeconds = FoodDigestionSeconds,
             defecationAmount = DefecationAmount,
             unattendedDroppingLifetimeSeconds = UnattendedDroppingLifetimeSeconds
         };
@@ -96,9 +98,9 @@ public sealed class AnimalNeedsSettings
         MaxHunger = maxHunger;
         HungerDrainPerSecond = hungerDrainPerSecond;
         HungryThresholdRatio = hungryThresholdRatio;
-        FoodEnergyPerItem = foodEnergyPerItem;
         FoodSearchRadius = foodSearchRadius;
-        DefecationIntervalSeconds = defecationIntervalSeconds;
+        GrowthEnergyPerLevel = growthEnergyPerLevel;
+        FoodDigestionSeconds = foodDigestionSeconds;
         DefecationAmount = defecationAmount;
         UnattendedDroppingLifetimeSeconds = unattendedDroppingLifetimeSeconds;
     }

@@ -114,6 +114,35 @@ namespace ProjectF.MapObjects
             return false;
         }
 
+        public void CollectMachineSeedDrops(List<KeyValuePair<int, int>> results)
+        {
+            results.Clear();
+            IReadOnlyList<ResourceDropEntry> drops = Definition != null ? Definition.DropItems : null;
+            for (int i = 0; drops != null && i < drops.Count; i++)
+            {
+                ItemDefinition seed = drops[i]?.ItemDefinition;
+                if (seed == null || !seed.isSeed || seed.id < 0)
+                    continue;
+
+                bool alreadyCollected = false;
+                for (int j = 0; j < i; j++)
+                {
+                    if (drops[j]?.ItemDefinition != null && drops[j].ItemDefinition.id == seed.id)
+                    {
+                        alreadyCollected = true;
+                        break;
+                    }
+                }
+                if (alreadyCollected)
+                    continue;
+
+                // Use the same growth/probability/depletion roll as other configured tree rewards.
+                int count = RollNextConfiguredHarvestDropCount(seed.id);
+                if (count > 0)
+                    results.Add(new KeyValuePair<int, int>(seed.id, count));
+            }
+        }
+
         public void SetGrowth(float value)
         {
             float clampedGrowth = Mathf.Clamp(

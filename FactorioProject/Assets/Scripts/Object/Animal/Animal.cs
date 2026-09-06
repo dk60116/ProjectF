@@ -22,6 +22,7 @@ public class Animal : MonoBehaviour
     private static readonly int LocomotionPlaybackHash =
         Animator.StringToHash("LocomotionPlayback");
     private static readonly int IsEatingHash = Animator.StringToHash("IsEating");
+    private static readonly int EatingStateHash = Animator.StringToHash("Eating");
     private static readonly int IsDrinkingHash = Animator.StringToHash("IsDrinking");
     private static readonly int IsRestingHash = Animator.StringToHash("IsResting");
     private static readonly int IsFleeingHash = Animator.StringToHash("IsFleeing");
@@ -92,8 +93,8 @@ public class Animal : MonoBehaviour
     private Vector2Int pendingDraftHandcartAnchorCoordinate;
     private long pendingDraftHandcartPlacementSequence;
     private float currentHunger;
-    private float defecationTimeRemaining;
-    private int digestedMealCount;
+    private float growthFoodEnergy;
+    private readonly List<float> pendingDefecations = new List<float>();
     private bool needsInitialized;
 
     public GameObject Eye;
@@ -129,6 +130,11 @@ public class Animal : MonoBehaviour
     public AnimalGender Gender => animalGender;
     public AnimalDefinition Definition => animalDefinition;
     public float Age => DinoAge;
+    public bool IsFullyGrown => Age >= AnimalDefinition.MaxSpawnAge;
+    public float RequiredGrowthFoodEnergy => animalDefinition != null
+        ? animalDefinition.NeedsSettings.GrowthEnergyPerLevel
+        : AnimalNeedsSettings.DefaultGrowthEnergyPerLevel;
+    public float CurrentGrowthFoodEnergy => IsFullyGrown ? RequiredGrowthFoodEnergy : growthFoodEnergy;
     public float BaseScaleValue => BaseScale;
     public float MaxHealth => animalDefinition != null
         ? animalDefinition.MaxHealth
@@ -162,8 +168,7 @@ public class Animal : MonoBehaviour
         get
         {
             EnsureNeedsInitialized();
-            return defecationTimeRemaining <= 0f
-                   && (!HasTerrainInteraction || digestedMealCount > 0);
+            return IsAlive && pendingDefecations.Count > 0 && pendingDefecations[0] <= 0f;
         }
     }
     internal float MovementAccelerationPerSecond => animalDefinition?.AISettings != null
@@ -410,8 +415,10 @@ public class Animal : MonoBehaviour
         EnsureNeedsInitialized();
         entry.hasNeedsState = true;
         entry.currentHunger = currentHunger;
-        entry.defecationTimeRemaining = defecationTimeRemaining;
-        entry.digestedMealCount = digestedMealCount;
+        entry.growthFoodEnergy = growthFoodEnergy;
+        entry.pendingDefecations ??= new List<float>();
+        entry.pendingDefecations.Clear();
+        entry.pendingDefecations.AddRange(pendingDefecations);
         entry.hasSaddle = saddleEquipped;
         Handcart handcart = AttachedDraftHandcart;
         if (handcart != null && handcart.TryGetPlacementRuntime(out Vector2Int anchorCoordinate, out _))
@@ -1106,12 +1113,39 @@ public class Animal : MonoBehaviour
             ? needs.HungerDrainPerSecond
             : AnimalNeedsSettings.DefaultHungerDrainPerSecond;
         currentHunger = Mathf.Max(0f, currentHunger - hungerDrain * deltaTime);
-        defecationTimeRemaining -= deltaTime;
+        for (int i = 0; i < pendingDefecations.Count; i++)
+        {
+            pendingDefecations[i] = Mathf.Max(0f, pendingDefecations[i] - deltaTime);
+        }
+    }
+
+    internal float GetRemainingEatingAnimationSeconds()
+    {
+        if (anim == null || !anim.isActiveAndEnabled || anim.runtimeAnimatorController == null
+            || anim.speed <= 0f)
+        {
+            return 0f;
+        }
+
+        AnimatorStateInfo state = anim.GetCurrentAnimatorStateInfo(0);
+        if (anim.IsInTransition(0))
+        {
+            AnimatorStateInfo next = anim.GetNextAnimatorStateInfo(0);
+            if (next.shortNameHash == EatingStateHash)
+            {
+                state = next;
+            }
+        }
+
+        return state.shortNameHash == EatingStateHash
+            ? Mathf.Max(0f, 1f - state.normalizedTime) * state.length / anim.speed
+            : 0f;
     }
 
     internal bool ConsumeDroppedFood(ItemDefinition foodDefinition)
     {
-        if (!IsAlive || !ItemDefinition.IsFoodEnergyItemDefinition(foodDefinition))
+        if (!IsAlive || !ItemDefinition.IsFoodEnergyItemDefinition(foodDefinition)
+            || foodDefinition.energyAmount <= 0f)
         {
             return false;
         }
@@ -1120,47 +1154,65 @@ public class Animal : MonoBehaviour
         AnimalNeedsSettings needs = animalDefinition != null
             ? animalDefinition.NeedsSettings
             : null;
-        float configuredFoodEnergy = needs != null
-            ? needs.FoodEnergyPerItem
-            : AnimalNeedsSettings.DefaultFoodEnergyPerItem;
-        float restoredHunger = Mathf.Max(configuredFoodEnergy, foodDefinition.energyAmount);
-        currentHunger = Mathf.Min(MaxHunger, currentHunger + restoredHunger);
-        digestedMealCount = Mathf.Min(digestedMealCount + 1, 32);
+        currentHunger = Mathf.Min(MaxHunger, currentHunger + foodDefinition.energyAmount);
+        AddFoodGrowth(foodDefinition.energyAmount);
+        pendingDefecations.Add(needs != null
+            ? needs.FoodDigestionSeconds
+            : AnimalNeedsSettings.DefaultFoodDigestionSeconds);
         MarkTerrainInteraction();
         return true;
     }
 
-    internal bool CompleteDefecation(float random01)
+    internal bool CompleteDefecation()
     {
         if (!IsDefecationDue)
         {
             return false;
         }
 
-        if (HasTerrainInteraction)
+        pendingDefecations.RemoveAt(0);
+        return true;
+    }
+
+    private void AddFoodGrowth(float foodEnergy)
+    {
+        if (!IsAlive || IsFullyGrown || foodEnergy <= 0f)
         {
-            digestedMealCount = Mathf.Max(0, digestedMealCount - 1);
+            return;
         }
 
-        defecationTimeRemaining = ResolveDefecationInterval(random01);
-        return true;
+        float requiredEnergy = RequiredGrowthFoodEnergy;
+        growthFoodEnergy += foodEnergy;
+        int gainedLevels = Mathf.FloorToInt(Mathf.Min(
+            growthFoodEnergy / requiredEnergy,
+            Mathf.CeilToInt(AnimalDefinition.MaxSpawnAge - Age)));
+        if (gainedLevels > 0)
+        {
+            growthFoodEnergy -= gainedLevels * requiredEnergy;
+            SetAge(Age + gainedLevels);
+        }
     }
 
     private void RestoreNeedsState(AnimalSaveEntry restoredState)
     {
         needsInitialized = true;
+        pendingDefecations.Clear();
         if (restoredState != null && restoredState.hasNeedsState)
         {
             currentHunger = Mathf.Clamp(restoredState.currentHunger, 0f, MaxHunger);
-            defecationTimeRemaining = restoredState.defecationTimeRemaining;
-            digestedMealCount = Mathf.Max(0, restoredState.digestedMealCount);
+            growthFoodEnergy = IsFullyGrown ? 0f : Mathf.Max(0f, restoredState.growthFoodEnergy);
+            if (restoredState.pendingDefecations != null)
+            {
+                for (int i = 0; i < restoredState.pendingDefecations.Count; i++)
+                {
+                    pendingDefecations.Add(Mathf.Max(0f, restoredState.pendingDefecations[i]));
+                }
+            }
             return;
         }
 
         currentHunger = MaxHunger;
-        digestedMealCount = 0;
-        defecationTimeRemaining = ResolveDefecationInterval(
-            ResolveInitialNeedsRandom01());
+        growthFoodEnergy = 0f;
     }
 
     private void EnsureNeedsInitialized()
@@ -1168,29 +1220,6 @@ public class Animal : MonoBehaviour
         if (!needsInitialized)
         {
             RestoreNeedsState(null);
-        }
-    }
-
-    private float ResolveDefecationInterval(float random01)
-    {
-        float interval = animalDefinition != null
-            ? animalDefinition.NeedsSettings.DefecationIntervalSeconds
-            : AnimalNeedsSettings.DefaultDefecationIntervalSeconds;
-        return interval * Mathf.Lerp(0.8f, 1.2f, Mathf.Clamp01(random01));
-    }
-
-    private float ResolveInitialNeedsRandom01()
-    {
-        TerrainAnimalInstance instance = ResolveTerrainInstance();
-        unchecked
-        {
-            ulong value = (ulong)(instance != null
-                ? instance.DeterministicId
-                : GetInstanceID());
-            value ^= value >> 33;
-            value *= 0xff51afd7ed558ccdUL;
-            value ^= value >> 33;
-            return (value & 0x00FFFFFFUL) / 16777216f;
         }
     }
 
@@ -1315,6 +1344,10 @@ public class Animal : MonoBehaviour
     public void SetAge(float age)
     {
         DinoAge = Mathf.Clamp(age, 0f, 10f);
+        if (IsFullyGrown)
+        {
+            growthFoodEnergy = 0f;
+        }
         if (growthInitialized || InitializeGrowth())
         {
             SetGrowth(DinoAge * 0.1f);
@@ -1546,6 +1579,20 @@ public class Animal : MonoBehaviour
         anim.SetInteger(StateHash, WakeAnimationState);
     }
 
+    // AnimationEvent receiver used by 01Cow_LayToIdle. Other clips can finish via
+    // the state polling fallback below, so completion must be safe to call twice.
+    public void WakeUp()
+    {
+        if (!IsAlive || !wakeFromRestRequested)
+        {
+            return;
+        }
+
+        wakeFromRestRequested = false;
+        aiAnimationStateInitialized = false;
+        SwitchAnimation(0);
+    }
+
     public bool IsReadyForAIMovement()
     {
         if (anim == null)
@@ -1568,9 +1615,7 @@ public class Animal : MonoBehaviour
                 && currentState.normalizedTime >= StandUpCompletionNormalizedTime
                 && !anim.IsInTransition(0))
             {
-                wakeFromRestRequested = false;
-                aiAnimationStateInitialized = false;
-                SwitchAnimation(0);
+                WakeUp();
                 return false;
             }
 
@@ -1583,9 +1628,7 @@ public class Animal : MonoBehaviour
                 return false;
             }
 
-            wakeFromRestRequested = false;
-            aiAnimationStateInitialized = false;
-            SwitchAnimation(0);
+            WakeUp();
         }
 
         if (IsRestAnimationState(currentState.shortNameHash))

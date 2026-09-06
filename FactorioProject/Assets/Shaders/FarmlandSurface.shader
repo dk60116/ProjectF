@@ -14,7 +14,9 @@ Shader "ProjectF/Farmland Surface"
         Tags
         {
             "RenderType" = "Transparent"
-            "Queue" = "Transparent-20"
+            // Blend the soil after terrain/opaque objects, before the screen-space outline.
+            // Transparent-20 runs after that composite and paints over its outer pixels.
+            "Queue" = "Geometry+499"
             "RenderPipeline" = "UniversalPipeline"
         }
 

@@ -36,6 +36,7 @@ public class SeedPlanter : InputOutputModule
     private bool hasCurrentInputCoordinate;
     private bool requestingPower;
     private bool isOperating;
+    private readonly List<Vector2Int> recoveredSeedInputCoordinates = new List<Vector2Int>(2);
 
     public override float ManagedUpdateTickIntervalSeconds => 0.1f;
     public Sprite OutputAreaMarkerIcon => outputAreaMarkerIcon;
@@ -174,6 +175,36 @@ public class SeedPlanter : InputOutputModule
         }
 
         base.ManagedUpdateTick(deltaTime);
+    }
+
+    internal int ReceiveHarvestedSeeds(Vector2Int harvestedCoordinate, int seedItemId,
+        int count, Vector3 startWorldPosition)
+    {
+        if (count <= 0 || !isActiveAndEnabled || !TryGetPlacementRuntime(out _, out _)
+            || !TryResolveOutputTarget(out Vector2Int plantingCoordinate)
+            || plantingCoordinate != harvestedCoordinate
+            || !ItemDefinition.IsPlantableSeedDefinition(ResolveItemDefinition(seedItemId)))
+            return 0;
+
+        recoveredSeedInputCoordinates.Clear();
+        AppendRuntimeInputItemAreaCoordinates(seedItemId, recoveredSeedInputCoordinates);
+        int accepted = 0;
+        for (int i = 0; i < recoveredSeedInputCoordinates.Count && accepted < count; i++)
+        {
+            Vector2Int coordinate = recoveredSeedInputCoordinates[i];
+            if (!CanAddItemToRuntimeIoOverlapCoordinate(coordinate, seedItemId))
+                continue;
+            // Shares the existing loaded/saved input-stack path and its capacity/type checks.
+            while (accepted < count
+                && TryRestoreRuntimeInputAreaCenterObject(coordinate, seedItemId, startWorldPosition))
+                accepted++;
+        }
+        if (accepted > 0)
+        {
+            RefreshSeedInput();
+            WakeRuntimeUpdate();
+        }
+        return accepted;
     }
 
     public override PersistentState CapturePersistentState()

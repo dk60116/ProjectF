@@ -22,7 +22,7 @@ public partial class PlayerController
         float nearestDistance = blocked ? blockingHit.distance : distance;
 
         // Coverage remains available while the belt's render root is suspended.
-        // Only the raised span is walled; the low input/output landings stay open.
+        // Raised sides block entry only; stepping off and low landings stay open.
         for (int y = minY; y <= maxY; y++)
         {
             for (int x = minX; x <= maxX; x++)
@@ -50,7 +50,8 @@ public partial class PlayerController
                     Vector2 wallCenter = new Vector2(x + outward.x * 0.5f, y + outward.y * 0.5f);
                     wallCenter += axis * Vector2.Dot(barrierCenter - wallCenter, axis);
                     if (!ConveyorSideBarrier.Sweep(start, flatDirection, nearestDistance,
-                            wallCenter, axis, halfLength, radius, out float hitDistance, out Vector2 normal))
+                            wallCenter, axis, new Vector2(outward.x, outward.y),
+                            halfLength, radius, out float hitDistance, out Vector2 normal))
                         continue;
 
                     nearestDistance = hitDistance;

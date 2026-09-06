@@ -94,6 +94,8 @@ public partial class PlayerController : MonoBehaviour
     private float animalKnifeInteractionTimeout;
     private NooseThrowVisual activeNooseThrowVisual;
     private readonly HashSet<Block> currentFocusedBlocks = new HashSet<Block>();
+    private MapObject closestInteractionFocusTarget;
+    private Block closestInteractionFocusBlock;
     private readonly List<Block> combinedInteractionFocusBlocks = new List<Block>();
     private Block standaloneInteractionAreaFocusBlock;
     private readonly List<Block> nearbyInputOutputModuleFocusBlocks = new List<Block>();
@@ -3086,7 +3088,6 @@ public partial class PlayerController : MonoBehaviour
         {
             Block resourceBlock = ResolveResourceOwningBlock(resourceInteractionTarget);
             AppendUniqueBlock(combinedInteractionFocusBlocks, resourceBlock);
-            CacheInteractionButtonFocusTarget(resourceInteractionTarget, resourceBlock);
         }
 
         bool hasStandingAreaFocusBlock = TryGetStandingInputOutputAreaFocusBlock(
@@ -3116,16 +3117,14 @@ public partial class PlayerController : MonoBehaviour
             standingConveyorFocusBlock);
         AppendUniqueBlocks(combinedInteractionFocusBlocks, nearbyInstallationFocusBlocks);
 
-        CacheInteractionButtonFocusTargets(
-            combinedInteractionFocusBlocks,
-            hasStandingAreaFocusBlock ? standingAreaFocusBlock : null);
-        KeepClosestInteractionFocusTarget(combinedInteractionFocusBlocks);
         if (hasStandingAreaFocusBlock)
         {
-            BuildStandingAreaAndObjectFocusBlocks(
-                standingAreaFocusBlock,
-                standingAreaOwnerModule,
-                combinedInteractionFocusBlocks);
+            if (standingAreaOwnerModule != null)
+            {
+                SetInteractionFocusTargetOverride(standingAreaFocusBlock, standingAreaOwnerModule);
+            }
+
+            AppendUniqueBlock(combinedInteractionFocusBlocks, standingAreaFocusBlock);
         }
 
         if (TryGetStandingSeedGroundBlock(out Block standingSeedGroundBlock, out _))
@@ -3146,6 +3145,19 @@ public partial class PlayerController : MonoBehaviour
             AppendUniqueBlock(combinedInteractionFocusBlocks, plantWateringBlock);
         }
 
+        // Arbitrate only after every distance-based candidate has been collected.
+        KeepClosestInteractionFocusTarget(combinedInteractionFocusBlocks);
+        if (hasStandingAreaFocusBlock
+            && (standingAreaOwnerModule != null
+                ? closestInteractionFocusTarget == standingAreaOwnerModule
+                : closestInteractionFocusBlock == standingAreaFocusBlock))
+        {
+            BuildStandingAreaAndObjectFocusBlocks(
+                standingAreaFocusBlock,
+                standingAreaOwnerModule,
+                combinedInteractionFocusBlocks);
+        }
+
         bool hasFarmlandFocusGroup = false;
         if (combinedInteractionFocusBlocks.Count == 0
             && TryFindNearestFarmlandFocusBlock(out Block farmlandFocusBlock))
@@ -3160,6 +3172,7 @@ public partial class PlayerController : MonoBehaviour
             }
         }
 
+        CacheInteractionButtonFocusTargets(combinedInteractionFocusBlocks, null);
         SetFocusedBlocks(combinedInteractionFocusBlocks, hasFarmlandFocusGroup);
     }
 
@@ -3232,8 +3245,10 @@ public partial class PlayerController : MonoBehaviour
 
     private void KeepClosestInteractionFocusTarget(List<Block> focusBlocks)
     {
-        if (focusBlocks == null || focusBlocks.Count <= 1 || player == null)
+        if (focusBlocks == null || focusBlocks.Count == 0 || player == null)
         {
+            closestInteractionFocusTarget = null;
+            closestInteractionFocusBlock = null;
             return;
         }
 
@@ -3241,6 +3256,8 @@ public partial class PlayerController : MonoBehaviour
         MapObject closestTarget = null;
         Block closestFallbackBlock = null;
         float closestDistanceSqr = float.MaxValue;
+        bool closestIsPrevious = false;
+        int closestStableId = int.MaxValue;
 
         for (int i = 0; i < focusBlocks.Count; i++)
         {
@@ -3251,8 +3268,22 @@ public partial class PlayerController : MonoBehaviour
             }
 
             MapObject target = ResolveInteractionFocusTarget(block);
+            if (target != null && (!target.gameObject.activeInHierarchy || !target.AllowsFocus))
+            {
+                continue;
+            }
+
             float distanceSqr = GetInteractionFocusTargetDistanceSqr(target, block, origin);
-            if (distanceSqr >= closestDistanceSqr)
+            bool isPrevious = target != null
+                ? target == closestInteractionFocusTarget
+                : block == closestInteractionFocusBlock;
+            int stableId = target != null ? target.GetInstanceID() : block.GetInstanceID();
+            bool tiedDistance = Mathf.Abs(distanceSqr - closestDistanceSqr) <= 0.000001f;
+            if (float.IsNaN(distanceSqr) || float.IsInfinity(distanceSqr)
+                || (tiedDistance
+                    ? (closestIsPrevious && !isPrevious
+                       || closestIsPrevious == isPrevious && stableId >= closestStableId)
+                    : distanceSqr >= closestDistanceSqr))
             {
                 continue;
             }
@@ -3260,7 +3291,12 @@ public partial class PlayerController : MonoBehaviour
             closestDistanceSqr = distanceSqr;
             closestTarget = target;
             closestFallbackBlock = block;
+            closestIsPrevious = isPrevious;
+            closestStableId = stableId;
         }
+
+        closestInteractionFocusTarget = closestTarget;
+        closestInteractionFocusBlock = closestFallbackBlock;
 
         if (closestFallbackBlock == null)
         {
@@ -4531,10 +4567,6 @@ public partial class PlayerController : MonoBehaviour
             return false;
         }
 
-        CacheInteractionButtonFocusTarget(
-            inputOutputModule,
-            results.Count > 0 ? results[0] : null);
-
         IReadOnlyList<Vector2Int> focusCoordinates = inputOutputModule.RuntimeFocusCoordinates;
         if (focusCoordinates == null || focusCoordinates.Count <= 0)
         {
@@ -4991,7 +5023,6 @@ public partial class PlayerController : MonoBehaviour
                 }
 
                 nearbyWorkableRangeObjects.Add(workableObject);
-                CacheInteractionButtonFocusTarget(workableObject, block);
 
                 AppendMapObjectFocusBlocks(workableObject, block, results);
             }
@@ -5055,7 +5086,6 @@ public partial class PlayerController : MonoBehaviour
                     continue;
                 }
 
-                CacheInteractionButtonFocusTarget(boxObject, block);
                 AppendMapObjectFocusBlocks(boxObject, block, results);
             }
         }
@@ -5170,7 +5200,6 @@ public partial class PlayerController : MonoBehaviour
             return;
         }
 
-        CacheInteractionButtonFocusTarget(installationObject, block);
         AppendMapObjectFocusBlocks(installationObject, block, results);
     }
 
@@ -5204,7 +5233,28 @@ public partial class PlayerController : MonoBehaviour
 
     private float GetMapObjectFocusSelectionDistanceSqr(MapObject mapObject, Block block, Vector3 origin)
     {
-        return GetMapObjectFocusDistanceSqr(mapObject, block, origin, 0f);
+        // Selection must not change when an outline, animation, or culling changes renderer bounds.
+        if (mapObject is InstallationObject installation)
+        {
+            IReadOnlyList<Vector2Int> occupied = installation.RuntimeOccupiedCoordinates;
+            if (occupied != null && occupied.Count > 0)
+            {
+                float nearestDistanceSqr = float.MaxValue;
+                for (int i = 0; i < occupied.Count; i++)
+                {
+                    float dx = Mathf.Max(0f, Mathf.Abs(origin.x - occupied[i].x) - 0.5f);
+                    float dz = Mathf.Max(0f, Mathf.Abs(origin.z - occupied[i].y) - 0.5f);
+                    nearestDistanceSqr = Mathf.Min(nearestDistanceSqr, dx * dx + dz * dz);
+                }
+
+                return nearestDistanceSqr;
+            }
+        }
+
+        Bounds bounds = CreateMapObjectStatusFocusBounds(mapObject, mapObject != null ? null : block, 0f);
+        Vector3 offset = bounds.ClosestPoint(origin) - origin;
+        offset.y = 0f;
+        return offset.sqrMagnitude;
     }
 
     private float GetMapObjectFocusDistanceSqr(MapObject mapObject, Block block, Vector3 origin, float focusPadding = 0f)
@@ -6420,6 +6470,8 @@ public partial class PlayerController : MonoBehaviour
 
         if (nextBlocks == null)
         {
+            closestInteractionFocusTarget = null;
+            closestInteractionFocusBlock = null;
             UpdateSelectedWorkableRangeVisuals(null);
             RefreshTemporaryDropFocusVisibility();
             return;

@@ -485,8 +485,8 @@ public static class SaveGameBinarySerializer
         writer.Write(entry.draftHandcartPlacementSequence);
         writer.Write(entry.hasNeedsState);
         writer.Write(entry.currentHunger);
-        writer.Write(entry.defecationTimeRemaining);
-        writer.Write(entry.digestedMealCount);
+        writer.Write(entry.growthFoodEnergy);
+        WriteList(writer, entry.pendingDefecations, (w, value) => w.Write(value));
     }
 
     private static AnimalSaveEntry ReadAnimalEntry(BinaryReader reader, int version)
@@ -551,8 +551,26 @@ public static class SaveGameBinarySerializer
         {
             entry.hasNeedsState = reader.ReadBoolean();
             entry.currentHunger = reader.ReadSingle();
-            entry.defecationTimeRemaining = reader.ReadSingle();
-            entry.digestedMealCount = reader.ReadInt32();
+            if (version < 54)
+            {
+                float legacyRemaining = reader.ReadSingle();
+                int legacyMeals = Mathf.Clamp(reader.ReadInt32(), 0, 32);
+                for (int i = 0; i < legacyMeals; i++)
+                {
+                    entry.pendingDefecations.Add(Mathf.Clamp(
+                        legacyRemaining, 0f, AnimalNeedsSettings.DefaultFoodDigestionSeconds));
+                }
+            }
+        }
+
+        if (version >= 53)
+        {
+            entry.growthFoodEnergy = reader.ReadSingle();
+        }
+
+        if (version >= 54)
+        {
+            entry.pendingDefecations = ReadList(reader, reader.ReadSingle);
         }
 
         return entry;
@@ -968,7 +986,7 @@ public static class SaveGameBinarySerializer
         return state;
     }
 
-    private static void WriteRobotArmState(BinaryWriter writer, RobotArm.PersistentState state)
+    private static void WriteRobotArmState(BinaryWriter writer, RobotArm.TransferState state)
     {
         writer.Write(state != null);
         if (state == null)
@@ -985,14 +1003,14 @@ public static class SaveGameBinarySerializer
         writer.Write(state.waitingForDropRetry);
     }
 
-    private static RobotArm.PersistentState ReadRobotArmState(BinaryReader reader)
+    private static RobotArm.TransferState ReadRobotArmState(BinaryReader reader)
     {
         if (!reader.ReadBoolean())
         {
             return null;
         }
 
-        return new RobotArm.PersistentState
+        return new RobotArm.TransferState
         {
             heldItemId = reader.ReadInt32(),
             state = (RobotArm.RobotArmState)reader.ReadInt32(),

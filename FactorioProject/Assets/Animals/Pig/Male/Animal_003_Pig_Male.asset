@@ -25,11 +25,10 @@ MonoBehaviour:
   defecationItem: {fileID: 11400000, guid: a2d64ede116b3754d97a23cc6bf0cfa1, type: 2}
   needsSettings:
     maxHunger: 100
-    hungerDrainPerSecond: 0.06
+    hungerDrainPerSecond: 1
     hungryThresholdRatio: 0.5
-    foodEnergyPerItem: 25
     foodSearchRadius: 8
-    defecationIntervalSeconds: 240
+    foodDigestionSeconds: 10
     defecationAmount: 1
     unattendedDroppingLifetimeSeconds: 300
   dropItems:

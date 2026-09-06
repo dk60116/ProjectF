@@ -48,8 +48,8 @@ MonoBehaviour:
   utilityPoleConnectionRadius: 6
   utilityPoleSupplyRadius: 3
   sprinklerRangeRadius: 6
-  sprinklerWaterLitersPerCell: 0.5
-  sprinklerSprayIntervalSeconds: 2
+  sprinklerWaterLitersPerCell: 1
+  sprinklerSprayIntervalSeconds: 10
   sprinklerNozzleRotationDegreesPerSecond: 180
   seedPlanterPlantDurationSeconds: 2
   craftingDurationSeconds: 5

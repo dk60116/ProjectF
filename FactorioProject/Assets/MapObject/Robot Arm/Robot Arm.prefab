@@ -560,6 +560,30 @@ MonoBehaviour:
   storedFluidItemId: -1
   storedFluidTemperatureCelsius: 20
   powerLinePoint: {fileID: 4991490805315076107}
+  parentInputOutputModuleItem: {fileID: 0}
+  inputList: []
+  outputList: []
+  slotLayoutType: 1
+  rectGridWidth: 1
+  rectGridHeight: 3
+  rectGridCells:
+  - x: 0
+    y: 0
+  - x: 0
+    y: 1
+  - x: 0
+    y: 2
+  rectGridPlacements:
+  - x: 0
+    y: 0
+    blockType: 3
+  - x: 0
+    y: 1
+    blockType: 1
+  - x: 0
+    y: 2
+    blockType: 4
+  runtimeAreaMaxObjects: 10
   body: {fileID: 5359005126396893695}
   handItem: {fileID: 2873116106080695476}
   useInstancedRendering: 1

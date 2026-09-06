@@ -7441,12 +7441,6 @@ public class InstallationPlacementController : MonoBehaviour
             return;
         }
 
-        if (ConfigureRobotArmInstallDirectionMarkers(preview, footprintSource, anchorCoordinate, quarterTurns))
-        {
-            RememberInstallPreviewVisualSyncState(preview, true, anchorCoordinate, quarterTurns);
-            return;
-        }
-
         if (ConfigureTrainStationRailMarkers(preview, footprintSource, anchorCoordinate, quarterTurns, true))
         {
             RememberInstallPreviewVisualSyncState(preview, true, anchorCoordinate, quarterTurns);
@@ -7724,49 +7718,6 @@ public class InstallationPlacementController : MonoBehaviour
         }
 
         ConfigureAreaMarkers(mapObject, areaMarkerRequestScratch, isInstallPreview);
-    }
-
-    private bool ConfigureRobotArmInstallDirectionMarkers(
-        MapObject mapObject,
-        MapObject footprintSource,
-        Vector2Int anchorCoordinate,
-        int quarterTurns)
-    {
-        if (!TryGetRobotArm(mapObject, out _))
-        {
-            return false;
-        }
-
-        Sprite arrowIcon = ResolveArrowMarkerIcon();
-        if (arrowIcon == null || !TryGetRobotArmFlowDirection(mapObject, out Vector2Int flowDirection))
-        {
-            ClearInputOutputMarkers(mapObject);
-            return true;
-        }
-
-        List<Vector2Int> objectCoordinates = GetPlacementVisualCoordinates(
-            anchorCoordinate,
-            footprintSource,
-            quarterTurns);
-        if (objectCoordinates.Count <= 0)
-        {
-            objectCoordinates.Add(anchorCoordinate);
-        }
-
-        Vector2Int inputMarkerCoordinate = GetRobotArmEdgeCoordinate(objectCoordinates, flowDirection, false) - flowDirection;
-        Vector2Int outputMarkerCoordinate = GetRobotArmEdgeCoordinate(objectCoordinates, flowDirection, true) + flowDirection;
-        Vector3 inputMarkerWorldPosition = GetAreaMarkerWorldPosition(inputMarkerCoordinate);
-        Vector3 outputMarkerWorldPosition = GetAreaMarkerWorldPosition(outputMarkerCoordinate);
-        float iconRotationZ = GetArrowMarkerRotationZ(inputMarkerWorldPosition, outputMarkerWorldPosition);
-
-        List<AreaMarkerSpawnRequest> markerRequests = new List<AreaMarkerSpawnRequest>
-        {
-            new AreaMarkerSpawnRequest(inputMarkerWorldPosition, arrowIcon, iconRotationZ),
-            new AreaMarkerSpawnRequest(outputMarkerWorldPosition, arrowIcon, iconRotationZ)
-        };
-
-        ConfigureAreaMarkers(mapObject, markerRequests, true);
-        return true;
     }
 
     private bool ConfigureLoggingMachineHarvestMarkers(
@@ -8049,6 +8000,14 @@ public class InstallationPlacementController : MonoBehaviour
         }
 
         InputOutputModuleOutputAreaController outputAreaController = installedObject.GetComponent<InputOutputModuleOutputAreaController>();
+        // A planter's output is soil, not an item-output stack. Keep harvested logs on that soil.
+        // Runtime output coordinates still identify the planting target and its marker.
+        if (installedObject is SeedPlanter)
+        {
+            outputAreaController?.Configure(null);
+            return;
+        }
+
         if (!TryGetRectGridBlockCoordinates(
                 anchorCoordinate,
                 installedObject,
@@ -20087,6 +20046,19 @@ public class InstallationPlacementController : MonoBehaviour
 
         inputItemCells.Sort(CompareInputItemPlacementCells);
 
+        if (inputOutputModule is RobotArm robotArm)
+        {
+            List<int> itemIds = new List<int>();
+            if (!robotArm.TryCollectTransferItemIds(itemIds))
+                return false;
+            for (int cellIndex = 0; cellIndex < inputItemCells.Count; cellIndex++)
+            {
+                for (int itemIndex = 0; itemIndex < itemIds.Count; itemIndex++)
+                    bindings.Add(new InputOutputModuleItemAreaBinding(inputItemCells[cellIndex].coordinate, itemIds[itemIndex]));
+            }
+            return bindings.Count > 0;
+        }
+
         if (inputOutputModule is SeedPlanter seedPlanter)
         {
             List<int> seedItemIds = new List<int>();
@@ -20298,11 +20270,6 @@ public class InstallationPlacementController : MonoBehaviour
         return bestReference;
     }
 
-    private static bool TryGetRobotArm(MapObject mapObject, out RobotArm robotArm)
-    {
-        return TryGetMapObjectComponent(mapObject, out robotArm);
-    }
-
     private static bool TryGetLoggingMachine(
         MapObject mapObject,
         out LoggingMachine loggingMachine)
@@ -20332,65 +20299,6 @@ public class InstallationPlacementController : MonoBehaviour
 
         component = mapObject.GetComponentInChildren<T>(true);
         return component != null;
-    }
-
-    private static bool TryGetRobotArmFlowDirection(MapObject mapObject, out Vector2Int flowDirection)
-    {
-        flowDirection = Vector2Int.zero;
-        if (mapObject == null)
-        {
-            return false;
-        }
-
-        return TryResolveCardinalGridDirection(mapObject.transform.rotation * Vector3.forward, out flowDirection);
-    }
-
-    private static Vector2Int GetRobotArmEdgeCoordinate(
-        IReadOnlyList<Vector2Int> objectCoordinates,
-        Vector2Int flowDirection,
-        bool front)
-    {
-        if (objectCoordinates == null || objectCoordinates.Count <= 0 || flowDirection == Vector2Int.zero)
-        {
-            return Vector2Int.zero;
-        }
-
-        Vector2Int selectedCoordinate = objectCoordinates[0];
-        int selectedProjection = GetGridProjection(selectedCoordinate, flowDirection);
-        for (int i = 1; i < objectCoordinates.Count; i++)
-        {
-            Vector2Int coordinate = objectCoordinates[i];
-            int projection = GetGridProjection(coordinate, flowDirection);
-            if ((front && projection > selectedProjection)
-                || (!front && projection < selectedProjection))
-            {
-                selectedCoordinate = coordinate;
-                selectedProjection = projection;
-            }
-        }
-
-        return selectedCoordinate;
-    }
-
-    private static int GetGridProjection(Vector2Int coordinate, Vector2Int direction)
-    {
-        return (coordinate.x * direction.x) + (coordinate.y * direction.y);
-    }
-
-    private static bool TryResolveCardinalGridDirection(Vector3 directionVector, out Vector2Int gridDirection)
-    {
-        gridDirection = Vector2Int.zero;
-        directionVector.y = 0f;
-        if (directionVector.sqrMagnitude <= 0.0001f)
-        {
-            return false;
-        }
-
-        directionVector.Normalize();
-        gridDirection = Mathf.Abs(directionVector.x) >= Mathf.Abs(directionVector.z)
-            ? new Vector2Int(directionVector.x >= 0f ? 1 : -1, 0)
-            : new Vector2Int(0, directionVector.z >= 0f ? 1 : -1);
-        return true;
     }
 
     private AreaMarkerPool ResolveAreaMarkerPool()

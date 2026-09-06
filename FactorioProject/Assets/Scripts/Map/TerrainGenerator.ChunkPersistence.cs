@@ -1046,7 +1046,7 @@ public partial class TerrainGenerator : MonoBehaviour
 
         if (savedState.robotArmState != null && restoredInstallation is RobotArm robotArm)
         {
-            robotArm.ApplyPersistentState(savedState.robotArmState);
+            robotArm.ApplyTransferState(savedState.robotArmState);
         }
 
         if (restoredInstallation.RuntimeOccupiedCoordinates != null

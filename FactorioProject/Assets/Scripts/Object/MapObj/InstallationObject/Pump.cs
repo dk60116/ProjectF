@@ -165,6 +165,7 @@ public class Pump : InputOutputModule
                 true,
                 out float acceptedLiters))
         {
+            RecordFluidNetworkOutput(waterItemId, acceptedLiters);
             float accumulatedLitersUsed = Mathf.Min(
                 waterLiterAccumulator,
                 acceptedLiters);

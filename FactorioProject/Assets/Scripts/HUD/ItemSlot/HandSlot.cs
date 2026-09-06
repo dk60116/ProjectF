@@ -4,30 +4,11 @@ public class HandSlot : BagSlot
 {
     protected override bool AllowPickupOnClick => true;
 
-    protected override bool TryPickupOneItemAtCoordinate(TerrainGenerator terrain, Player player, Vector2Int coordinate, Vector3 pickupOrigin, float pickupRange)
+    protected override bool TryPickupGroundCandidate(Player player, Block block,
+        PortableObject requiredPortableObject, Vector3 pickupOrigin, float pickupRange)
     {
-        if (terrain == null || player == null)
-        {
-            return false;
-        }
-
-        PortableObject requiredPortableObject = null;
-        Block block;
-        if (TryGetPickupPreviewSource(out PortableObject previewPortableObject, out Block previewBlock))
-        {
-            requiredPortableObject = previewPortableObject;
-            block = previewBlock;
-        }
-        else if (!TryGetGroundPickupBlock(terrain, player, coordinate, out block))
-        {
-            return false;
-        }
-
-        return block.TryPickupOneFloorObjectToHand(
-            player,
-            pickupOrigin,
-            pickupRange,
-            requiredPortableObject);
+        return player != null && block != null
+            && block.TryPickupOneFloorObjectToHand(player, pickupOrigin, pickupRange, requiredPortableObject);
     }
 
     protected override bool TryPickupFromFocusedBox(
@@ -61,7 +42,7 @@ public class HandSlot : BagSlot
             return false;
         }
 
-        return focusedConveyorBlock.TryPickupOneConveyorObjectToHand(player, player.transform.position, pickupRange, maxPickupCount);
+        return focusedConveyorBlock.TryPickupOneConveyorObjectToHand(player, ResolvePickupOrigin(player), pickupRange, maxPickupCount);
     }
 
     protected override bool CanPreviewAcceptPickupItem(Player player, int itemId)

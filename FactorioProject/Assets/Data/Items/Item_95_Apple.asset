@@ -37,7 +37,7 @@ MonoBehaviour:
   bucketFillDurationSeconds: 10
   undergroundPipeMaxDistance: 5
   energyType: 4
-  energyAmount: 0
+  energyAmount: 10
   eatRewardItem: {fileID: 11400000, guid: a49bdf81c3424dfa9a1ae44a787e40ce, type: 2}
   eatRewardChancePercent: 20
   isSeed: 1

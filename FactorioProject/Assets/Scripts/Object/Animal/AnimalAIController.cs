@@ -41,6 +41,10 @@ public sealed class AnimalAIController : MonoBehaviour
     private const float MaximumCrowdSteering = 0.65f;
     private const float NavigationProgressEpsilon = 0.04f;
     private const float HerdReturnRetryDelay = 5f;
+    private const float LocalRoamingSearchRadius = 6f;
+    private const float FeedingDuration = 1f;
+    private const float IntervalBetweenMeals = 0.5f;
+    private const float BlockedFoodRetryDelay = 2f;
     private const float AgeGenderSpeedMultiplierInfluence = 1f / 3f;
     private const float MountedMovementDirectionEpsilonSqr = 0.0000001f;
     private const float DormantDefecationSpreadRadius = 1.5f;
@@ -165,6 +169,11 @@ public sealed class AnimalAIController : MonoBehaviour
     private bool saddledFreeRoamCenterInitialized;
     private Vector2Int foodTargetCoordinate;
     private float foodSearchCooldown;
+    private TerrainGenerator feedingTerrain;
+    internal bool IsConsumingDroppedFood => executionActive && animal != null && animal.IsAlive
+        && currentState == AnimalAIState.Eat && !hasTarget && stateTimeRemaining > 0f;
+    private System.Func<Vector3, bool, bool> foodReachabilityFilter;
+    private Vector3[] foodNavigationScratch;
 
     private static bool obstacleLayerMaskInitialized;
     private static int cachedObstacleLayerMask = Physics.AllLayers;
@@ -265,6 +274,7 @@ public sealed class AnimalAIController : MonoBehaviour
 
     private void OnDestroy()
     {
+        ReleaseFoodConsumption();
         AnimalAIWorld.Unregister(this);
     }
 
@@ -274,6 +284,7 @@ public sealed class AnimalAIController : MonoBehaviour
         TerrainAnimalInstance sourceInstance,
         AnimalSaveEntry restoredState = null)
     {
+        ReleaseFoodConsumption();
         animal = sourceAnimal != null ? sourceAnimal : GetComponentInChildren<Animal>(true);
         definition = sourceDefinition != null
             ? sourceDefinition
@@ -903,6 +914,7 @@ public sealed class AnimalAIController : MonoBehaviour
 
     public void StopForDeath()
     {
+        ReleaseFoodConsumption();
         RestoreAnimalColliderLayers();
         nooseLeashed = false;
         draftAttached = false;
@@ -923,6 +935,7 @@ public sealed class AnimalAIController : MonoBehaviour
 
     private void ResetToIdleBehavior()
     {
+        ReleaseFoodConsumption();
         currentState = AnimalAIState.Idle;
         stateTimeRemaining = settings != null
             ? RandomDuration(settings.IdleDuration)
@@ -1258,6 +1271,8 @@ public sealed class AnimalAIController : MonoBehaviour
         navigationRepathCooldown = Mathf.Max(0f, navigationRepathCooldown - deltaTime);
         herdReturnRetryCooldown = Mathf.Max(0f, herdReturnRetryCooldown - deltaTime);
         foodSearchCooldown = Mathf.Max(0f, foodSearchCooldown - deltaTime);
+        // Digestion completes independently of walking, eating, or resting.
+        TryDefecateAt(transform.position);
         if (currentState == AnimalAIState.Rest && !IsNightTime())
         {
             stateTimeRemaining = 0f;
@@ -1316,11 +1331,6 @@ public sealed class AnimalAIController : MonoBehaviour
         }
 
 
-        if (!moved)
-        {
-            TryDefecateWhileIdle();
-        }
-
         ApplyAnimation(moved ? GetEffectiveMoveSpeed() : 0f);
     }
 
@@ -1330,9 +1340,27 @@ public sealed class AnimalAIController : MonoBehaviour
         out bool moved)
     {
         moved = false;
-        if (animal == null
-            || !IsInteracted
-            || !animal.IsHungry
+        if (animal == null || !animal.IsAlive)
+        {
+            return false;
+        }
+
+        if (currentState == AnimalAIState.Eat && !hasTarget && stateTimeRemaining > 0f)
+        {
+            FaceDroppedFood(deltaTime);
+            stateTimeRemaining = Mathf.Max(
+                stateTimeRemaining - deltaTime,
+                requireLoadedGround ? animal.GetRemainingEatingAnimationSeconds() : 0f);
+            if (stateTimeRemaining <= 0f)
+            {
+                ResetToIdleBehavior();
+                foodSearchCooldown = IntervalBetweenMeals;
+            }
+
+            return true;
+        }
+
+        if (!animal.IsHungry
             || currentState == AnimalAIState.Rest
             || waitingForStandUp)
         {
@@ -1352,19 +1380,28 @@ public sealed class AnimalAIController : MonoBehaviour
 
         if (currentState != AnimalAIState.Eat)
         {
-            if (foodSearchCooldown > 0f
-                || !terrain.TryFindNearestDroppedAnimalFood(
+            // Waiting must not restart the retry timer on every simulation tick.
+            if (foodSearchCooldown > 0f)
+            {
+                return false;
+            }
+
+            if (!terrain.TryFindNearestDroppedAnimalFood(
                     transform.position,
                     definition != null
                         ? definition.NeedsSettings.FoodSearchRadius
                         : AnimalNeedsSettings.DefaultFoodSearchRadius,
-                    out foodTargetCoordinate,
-                    out targetPosition))
+                    out Vector2Int candidateCoordinate,
+                    out Vector3 candidatePosition,
+                    requireLoadedGround,
+                    foodReachabilityFilter ??= CanReachDroppedFood))
             {
                 foodSearchCooldown = 1f;
                 return false;
             }
 
+            foodTargetCoordinate = candidateCoordinate;
+            targetPosition = candidatePosition;
             currentState = AnimalAIState.Eat;
             stateTimeRemaining = 0f;
             hasTarget = true;
@@ -1372,7 +1409,7 @@ public sealed class AnimalAIController : MonoBehaviour
             ResetNavigation();
         }
 
-        if (hasTarget)
+        if (hasTarget && !IsWithinDroppedFoodReach(requireLoadedGround))
         {
             moved = MoveTowardTarget(deltaTime, requireLoadedGround);
             if (hasTarget)
@@ -1381,26 +1418,109 @@ public sealed class AnimalAIController : MonoBehaviour
             }
         }
 
+        if (currentState != AnimalAIState.Eat
+            || !IsWithinDroppedFoodReach(requireLoadedGround))
+        {
+            // Navigation can also clear hasTarget when a route fails. Do not eat remotely.
+            ResetToIdleBehavior();
+            foodSearchCooldown = BlockedFoodRetryDelay;
+            return true;
+        }
+
+        // Arrival alone does not mean the body is facing the food, especially after avoidance.
+        if (!FaceDroppedFood(deltaTime))
+        {
+            return true;
+        }
+
         bool consumed = terrain.TryConsumeDroppedAnimalFood(
             foodTargetCoordinate,
+            targetPosition,
+            this,
             out ItemDefinition consumedFood)
             && animal.ConsumeDroppedFood(consumedFood);
-        ResetToIdleBehavior();
+        if (consumed)
+        {
+            feedingTerrain = terrain;
+            hasTarget = false;
+            movingToActivity = false;
+            stateTimeRemaining = FeedingDuration;
+            ResetNavigation();
+        }
+        else
+        {
+            ResetToIdleBehavior();
+        }
+
         foodSearchCooldown = consumed ? 0f : 1f;
         return true;
     }
 
-    private void TryDefecateWhileIdle()
+    private bool FaceDroppedFood(float deltaTime)
     {
-        if (currentState != AnimalAIState.Idle
-            || hasTarget
-            || movingToActivity
-            || waitingForStandUp)
+        Vector3 direction = targetPosition - transform.position;
+        direction.y = 0f;
+        if (direction.sqrMagnitude <= 0.0001f)
         {
-            return;
+            return true;
         }
 
-        TryDefecateAt(transform.position);
+        Quaternion targetRotation = Quaternion.LookRotation(direction, Vector3.up);
+        float turnSpeed = settings != null ? settings.TurnSpeed : 360f;
+        transform.rotation = Quaternion.RotateTowards(
+            transform.rotation,
+            targetRotation,
+            Mathf.Max(90f, turnSpeed) * Mathf.Min(deltaTime, MaximumRotationDeltaTime));
+        if (Quaternion.Angle(transform.rotation, targetRotation) > 3f)
+        {
+            return false;
+        }
+
+        transform.rotation = targetRotation;
+        return true;
+    }
+
+    private void ReleaseFoodConsumption()
+    {
+        feedingTerrain?.ReleaseAnimalFoodConsumption(foodTargetCoordinate, this);
+        feedingTerrain = null;
+    }
+
+    private bool IsWithinDroppedFoodReach(bool requireLoadedGround)
+    {
+        Vector3 position = transform.position;
+        Vector3 offset = targetPosition - position;
+        offset.y = 0f;
+        float reach = Mathf.Max(settings.ArrivalDistance, GetObstacleRadius() + 0.2f);
+        return offset.sqrMagnitude <= reach * reach
+               && AnimalGridPathfinder.HasWalkableLine(
+                   TerrainGenerator.Active, position, targetPosition,
+                   position, Mathf.Max(1f, reach), requireLoadedGround);
+    }
+
+    private bool CanReachDroppedFood(Vector3 destination, bool requireLoadedGround)
+    {
+        Vector3 areaCenter;
+        float areaRadius;
+        if (IsSaddledFreeRoaming)
+        {
+            GetNavigationArea(destination, out areaCenter, out areaRadius);
+        }
+        else
+        {
+            GetExtendedNavigationArea(destination, out areaCenter, out areaRadius);
+        }
+
+        if (CanNavigateDirectly(destination, areaCenter, areaRadius, requireLoadedGround))
+        {
+            return true;
+        }
+
+        // Candidate checks must not overwrite the animal's current movement path.
+        foodNavigationScratch ??= new Vector3[MaxNavigationWaypoints];
+        return AnimalGridPathfinder.FindPath(
+            TerrainGenerator.Active, transform.position, destination,
+            areaCenter, areaRadius, requireLoadedGround, foodNavigationScratch) > 0;
     }
 
     private bool CanDefecate()
@@ -1435,12 +1555,11 @@ public sealed class AnimalAIController : MonoBehaviour
             return false;
         }
 
-        if (!animal.CompleteDefecation(Next01()))
+        if (!animal.CompleteDefecation())
         {
             return false;
         }
 
-        ApplyAnimation(0f);
         return true;
     }
 
@@ -1643,6 +1762,12 @@ public sealed class AnimalAIController : MonoBehaviour
 
     private bool TryBeginHerdAreaReturn(bool requireLoadedGround)
     {
+        // Rest after eating or a failed route must not be cancelled every tick.
+        if (currentState == AnimalAIState.Idle && !hasTarget && stateTimeRemaining > 0f)
+        {
+            return false;
+        }
+
         Vector3 position = transform.position;
         if (!IsOutsideRoamingArea(position))
         {
@@ -1651,6 +1776,12 @@ public sealed class AnimalAIController : MonoBehaviour
         }
 
         if (herdReturnRetryCooldown > 0f)
+        {
+            return false;
+        }
+
+        // Finish a reachable local activity before retrying a blocked route home.
+        if (hasTarget && !herdReturnTargetActive)
         {
             return false;
         }
@@ -1666,7 +1797,8 @@ public sealed class AnimalAIController : MonoBehaviour
                 hasTarget = TryChooseTarget(
                     false,
                     requireLoadedGround,
-                    out targetPosition);
+                    out targetPosition,
+                    allowLocalRoaming: false);
             }
         }
 
@@ -2096,7 +2228,8 @@ public sealed class AnimalAIController : MonoBehaviour
     private bool TryChooseTarget(
         bool requireWaterEdge,
         bool requireLoadedGround,
-        out Vector3 result)
+        out Vector3 result,
+        bool allowLocalRoaming = true)
     {
         TerrainGenerator terrain = TerrainGenerator.Active;
         Vector3 center = GetRoamingAreaCenter();
@@ -2106,6 +2239,23 @@ public sealed class AnimalAIController : MonoBehaviour
                                     transform.position,
                                     requireLoadedGround);
         int pathSearchCount = 0;
+        if (allowLocalRoaming && !IsSaddledFreeRoaming
+            && IsOutsideRoamingArea(transform.position))
+        {
+            // A relocated animal's original herd circle may be outside its pen.
+            // Search the current connected area without changing its saved herd home.
+            if (originIsWalkable && TryBuildReachableFallbackPath(
+                    requireWaterEdge, requireLoadedGround, out result, useLocalArea: true))
+            {
+                preferReachableFallbackTarget = false;
+                reachableFallbackTargetCount++;
+                return true;
+            }
+
+            ResetNavigation();
+            result = transform.position;
+            return false;
+        }
         // Wall로 나뉜 작은 연결 영역에서는 전체 무리 반경의 무작위 후보가
         // 연속으로 실패할 수 있으므로, 직전 정체가 있었다면 연결 영역을 우선한다.
         if (preferReachableFallbackTarget
@@ -2190,7 +2340,8 @@ public sealed class AnimalAIController : MonoBehaviour
     private bool TryBuildReachableFallbackPath(
         bool requireWaterEdge,
         bool requireLoadedGround,
-        out Vector3 destination)
+        out Vector3 destination,
+        bool useLocalArea = false)
     {
         destination = transform.position;
         TerrainGenerator terrain = TerrainGenerator.Active;
@@ -2203,8 +2354,8 @@ public sealed class AnimalAIController : MonoBehaviour
         int waypointCount = AnimalGridPathfinder.FindReachableTargetPath(
             terrain,
             transform.position,
-            GetRoamingAreaCenter(),
-            GetRoamingAreaRadius(),
+            useLocalArea ? transform.position : GetRoamingAreaCenter(),
+            useLocalArea ? Mathf.Min(LocalRoamingSearchRadius, GetRoamingAreaRadius()) : GetRoamingAreaRadius(),
             requireLoadedGround,
             requireWaterEdge,
             settings.ArrivalDistance * 2f,
@@ -2280,6 +2431,7 @@ public sealed class AnimalAIController : MonoBehaviour
     {
         if (!IsSaddledFreeRoaming
             && (currentState == AnimalAIState.Drink
+                || currentState == AnimalAIState.Eat
                 || IsOutsideRoamingArea(transform.position)))
         {
             GetExtendedNavigationArea(destination, out areaCenter, out areaRadius);
@@ -2474,11 +2626,7 @@ public sealed class AnimalAIController : MonoBehaviour
 
         stuckTargetAbandonCount++;
         preferReachableFallbackTarget = true;
-        hasTarget = false;
-        movingToActivity = false;
-        currentState = AnimalAIState.Idle;
-        stateTimeRemaining = RandomDuration(settings.IdleDuration);
-        ResetNavigation();
+        ResetToIdleBehavior();
     }
 
     private void SuppressHerdReturnRetry()
@@ -2616,6 +2764,7 @@ public sealed class AnimalAIController : MonoBehaviour
         {
             if (!IsSaddledFreeRoaming
                 && currentState != AnimalAIState.Drink
+                && currentState != AnimalAIState.Eat
                 && world.TryGetHerdCenter(
                     HerdId,
                     out Vector3 currentHerdCenter))
@@ -2653,9 +2802,8 @@ public sealed class AnimalAIController : MonoBehaviour
             }
         }
 
-        Vector3 direction = navigationWaypointCount > 0
-            ? desiredDirection + Vector3.ClampMagnitude(flockSteering, 0.35f)
-            : desiredDirection + flockSteering;
+        // Social steering may bend a route, but must never reverse its direction.
+        Vector3 direction = desiredDirection + Vector3.ClampMagnitude(flockSteering, 0.35f);
         if (direction.sqrMagnitude <= 0.0001f)
         {
             if (!escapingTerrain
@@ -2671,7 +2819,9 @@ public sealed class AnimalAIController : MonoBehaviour
         }
 
         direction.Normalize();
-        float speed = GetEffectiveMoveSpeed();
+        float speed = Mathf.Min(
+            GetEffectiveMoveSpeed(),
+            toTarget.magnitude / Mathf.Max(deltaTime, 0.0001f));
         MovementAvailability availability = ResolveMovementDirection(
             position,
             direction,
@@ -2858,6 +3008,12 @@ public sealed class AnimalAIController : MonoBehaviour
             allowTerrainEscape);
         bool hasCommittedAvoidance = committedAvoidanceDirection.sqrMagnitude
                                      > 0.0001f;
+        if (hasCommittedAvoidance
+            && !CanUseAvoidanceDirection(desiredDirection, committedAvoidanceDirection, allowTerrainEscape))
+        {
+            ClearAvoidanceCommitment();
+            hasCommittedAvoidance = false;
+        }
         if (hasCommittedAvoidance)
         {
             MovementAvailability committedAvailability = ProbeMovementDirection(
@@ -2957,12 +3113,14 @@ public sealed class AnimalAIController : MonoBehaviour
         }
 
         Vector3 reverseDirection = -forward;
-        MovementAvailability reverseAvailability = ProbeMovementDirection(
+        MovementAvailability reverseAvailability = CanUseAvoidanceDirection(forward, reverseDirection, allowTerrainEscape)
+            ? ProbeMovementDirection(
             origin,
             reverseDirection,
             moveDistance,
             useLiveCollision,
-            allowTerrainEscape);
+            allowTerrainEscape)
+            : MovementAvailability.BlockedByStaticObstacle;
         if (reverseAvailability == MovementAvailability.Clear)
         {
             CommitAvoidance(reverseDirection, preferredSign);
@@ -3000,6 +3158,11 @@ public sealed class AnimalAIController : MonoBehaviour
                 0f,
                 angle * turnSign,
                 0f) * forward;
+            if (!CanUseAvoidanceDirection(forward, candidateDirection, allowTerrainEscape))
+            {
+                continue;
+            }
+
             MovementAvailability availability = ProbeMovementDirection(
                 origin,
                 candidateDirection,
@@ -3018,6 +3181,12 @@ public sealed class AnimalAIController : MonoBehaviour
 
         direction = Vector3.zero;
         return false;
+    }
+
+    private bool CanUseAvoidanceDirection(Vector3 forward, Vector3 candidate, bool allowTerrainEscape)
+    {
+        return allowTerrainEscape || currentState == AnimalAIState.Flee || !hasTarget
+               || Vector3.Dot(forward, candidate) > 0.05f;
     }
 
     private void CommitAvoidance(Vector3 direction, float turnSign)
@@ -3069,6 +3238,16 @@ public sealed class AnimalAIController : MonoBehaviour
         }
 
         float probeDistance = Mathf.Max(moveDistance, settings.ObstacleProbeDistance);
+        if (hasTarget && currentState != AnimalAIState.Flee && !allowTerrainEscape)
+        {
+            Vector3 waypoint = navigationWaypointIndex < navigationWaypointCount
+                ? navigationWaypoints[navigationWaypointIndex]
+                : targetPosition;
+            Vector3 remaining = waypoint - origin;
+            remaining.y = 0f;
+            // A wall beyond the destination does not block reaching the destination.
+            probeDistance = Mathf.Min(probeDistance, Mathf.Max(moveDistance, remaining.magnitude));
+        }
         Vector3 probe = origin + direction * probeDistance;
         probe.y = origin.y;
         if (!IsPhysicsPathClearOrEscaping(origin, direction, probeDistance, radius)
@@ -3377,8 +3556,8 @@ public sealed class AnimalAIController : MonoBehaviour
         animal.SetAIAnimation(
             resolvedSpeed,
             performingActivity
-            && (currentState == AnimalAIState.Graze
-                || currentState == AnimalAIState.Eat),
+            && currentState == AnimalAIState.Eat
+            && stateTimeRemaining > 0f,
             performingActivity && currentState == AnimalAIState.Drink,
             performingActivity && currentState == AnimalAIState.Rest && IsNightTime(),
             performingActivity && currentState == AnimalAIState.LookAround,

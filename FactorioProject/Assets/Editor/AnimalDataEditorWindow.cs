@@ -1188,21 +1188,21 @@ public sealed class AnimalDataEditorWindow : EditorWindow
             current.HungryThresholdRatio,
             0f,
             1f);
-        float foodEnergyPerItem = Mathf.Max(
-            0.01f,
-            EditorGUILayout.FloatField(
-                new GUIContent("Minimum Food Energy", "ItemData 에너지가 이 값보다 작으면 이 값을 회복합니다."),
-                current.FoodEnergyPerItem));
         float foodSearchRadius = Mathf.Max(
             0.5f,
             EditorGUILayout.FloatField("Food Search Radius", current.FoodSearchRadius));
-
-        EditorGUILayout.Space(3f);
-        float defecationInterval = Mathf.Max(
+        float growthEnergyPerLevel = Mathf.Max(
             1f,
             EditorGUILayout.FloatField(
-                new GUIContent("Defecation Interval", "실제 주기는 매회 ±20%로 무작위화됩니다."),
-                current.DefecationIntervalSeconds));
+                new GUIContent("Growth Energy / Level", "음식에 표시된 에너지를 이만큼 먹으면 Growth가 1 올라갑니다."),
+                current.GrowthEnergyPerLevel));
+
+        EditorGUILayout.Space(3f);
+        float foodDigestionSeconds = Mathf.Max(
+            1f,
+            EditorGUILayout.FloatField(
+                new GUIContent("Food Digestion Seconds", "각 음식을 먹은 뒤 배변하기까지의 시간입니다."),
+                current.FoodDigestionSeconds));
         int defecationAmount = Mathf.Max(
             1,
             EditorGUILayout.IntField("Defecation Amount", current.DefecationAmount));
@@ -1220,9 +1220,9 @@ public sealed class AnimalDataEditorWindow : EditorWindow
             next.MaxHunger = maxHunger;
             next.HungerDrainPerSecond = hungerDrainPerSecond;
             next.HungryThresholdRatio = hungryThresholdRatio;
-            next.FoodEnergyPerItem = foodEnergyPerItem;
             next.FoodSearchRadius = foodSearchRadius;
-            next.DefecationIntervalSeconds = defecationInterval;
+            next.GrowthEnergyPerLevel = growthEnergyPerLevel;
+            next.FoodDigestionSeconds = foodDigestionSeconds;
             next.DefecationAmount = defecationAmount;
             next.UnattendedDroppingLifetimeSeconds = unattendedLifetime;
             next.Normalize();

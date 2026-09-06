@@ -13,17 +13,6 @@ public class Sprinkler : InputOutputModule
     private const float WaterJetNozzleTipOffset = 0.005f;
     private const float FallbackNozzleHalfLength = 0.525f;
     private const int MaxWaterItemTransfersPerTick = 8;
-    private static readonly Vector2Int[] AdjacentPlantOffsets =
-    {
-        new Vector2Int(-1, 1),
-        new Vector2Int(0, 1),
-        new Vector2Int(1, 1),
-        new Vector2Int(-1, 0),
-        new Vector2Int(1, 0),
-        new Vector2Int(-1, -1),
-        new Vector2Int(0, -1),
-        new Vector2Int(1, -1)
-    };
     private static readonly Color RangeFillColor = new Color(0.05f, 0.45f, 1f, 0.14f);
     private static readonly Color WaterParticleColor = new Color(0.25f, 0.72f, 1f, 0.85f);
     private static readonly HashSet<Sprinkler> ActiveSprinklers = new HashSet<Sprinkler>();
@@ -39,12 +28,10 @@ public class Sprinkler : InputOutputModule
     private Transform nozzleTransform;
     [SerializeField]
     private Material waterJetMaterial;
-    [SerializeField, HideInInspector, Min(0f)]
-    private float sprayElapsedSeconds;
 
     private readonly List<Vector2Int> sprayCoordinates = new List<Vector2Int>(64);
     private readonly List<ParticleSystem> waterJetEffects = new List<ParticleSystem>(2);
-    private readonly HashSet<ProjectTree> wateringTargetScratch = new HashSet<ProjectTree>();
+    private readonly HashSet<ProjectTree> wateringTargets = new HashSet<ProjectTree>();
     private Vector2 cachedRangeCenter;
     private Vector3 previewRangeCenter;
     private int cachedRangeRadius = -1;
@@ -57,6 +44,7 @@ public class Sprinkler : InputOutputModule
 
     public override float ManagedUpdateTickIntervalSeconds => 0.25f;
     public bool IsOperating => isOperating;
+    public int ObjectInfoWaterItemId => ResolveWaterItemId();
     public int CurrentWateringTargetCount => Mathf.Max(0, currentWateringTargetCount);
     public int RangeRadiusCells
     {
@@ -120,6 +108,7 @@ public class Sprinkler : InputOutputModule
     protected override void OnDisable()
     {
         SetOperating(false);
+        wateringTargets.Clear();
         ActiveSprinklers.Remove(this);
         if (IsDirectRangeVisualRequested && !gameObject.activeInHierarchy)
         {
@@ -167,32 +156,25 @@ public class Sprinkler : InputOutputModule
         if (!Application.isPlaying || deltaTime <= 0f || !TryGetPlacementRuntime(out _, out _))
         {
             currentWateringTargetCount = 0;
+            wateringTargets.Clear();
             SetOperating(false);
             return;
         }
 
         EnsureSprayCoordinates();
-        currentWateringTargetCount = CountWateringTargets();
-        float waterRequired = WaterLitersPerSpray;
-        bool canOperate = currentWateringTargetCount > 0
-                          && waterItemId >= 0
-                          && waterRequired > WaterEpsilon
-                          && StoredFluidItemId == waterItemId
-                          && StoredFluidLiters + WaterEpsilon >= waterRequired;
+        currentWateringTargetCount = CollectWateringTargets();
+        GetWaterStorageInfo(out float availableWaterLiters, out _);
+        float waterRequired = Mathf.Min(
+            WaterLitersPerSpray * (deltaTime / SprayIntervalSeconds),
+            availableWaterLiters);
+        bool canOperate = waterItemId >= 0
+                          && waterRequired > WaterEpsilon;
         SetOperating(canOperate);
         if (!canOperate)
         {
             return;
         }
 
-        float interval = SprayIntervalSeconds;
-        sprayElapsedSeconds += deltaTime;
-        if (sprayElapsedSeconds + WaterEpsilon < interval)
-        {
-            return;
-        }
-
-        sprayElapsedSeconds = Mathf.Max(0f, sprayElapsedSeconds - interval);
         PerformSpray(waterItemId, waterRequired);
     }
 
@@ -210,22 +192,9 @@ public class Sprinkler : InputOutputModule
             : base.GetStoredFluidTemperatureCelsius(fluidItemId);
     }
 
-    public override PersistentState CapturePersistentState()
-    {
-        PersistentState state = base.CapturePersistentState();
-        state.sprinklerSprayElapsedSeconds = Mathf.Clamp(
-            sprayElapsedSeconds,
-            0f,
-            SprayIntervalSeconds);
-        return state;
-    }
-
     public override void ApplyPersistentState(PersistentState state)
     {
         base.ApplyPersistentState(state);
-        sprayElapsedSeconds = state != null
-            ? Mathf.Clamp(state.sprinklerSprayElapsedSeconds, 0f, SprayIntervalSeconds)
-            : 0f;
         InvalidateSprayCoordinates();
         WakeRuntimeUpdate();
     }
@@ -233,6 +202,80 @@ public class Sprinkler : InputOutputModule
     protected override int ResolvePreferredFluidInputItemId()
     {
         return ResolveWaterItemId();
+    }
+
+    protected override bool ShouldAutoPullFluidFromConnectedStorage()
+    {
+        // Connected tanks remain the storage owner; spraying consumes their water directly.
+        return false;
+    }
+
+    protected override bool UsesConnectedTankNetworkStorage => true;
+
+    public void GetWaterStorageInfo(out float storedLiters, out float capacityLiters)
+    {
+        int waterItemId = ResolveWaterItemId();
+        storedLiters = GetUsableWaterLiters(this, waterItemId);
+        capacityLiters = FluidStorageCapacityLiters;
+        IReadOnlyList<InstallationObject> storages = GetConnectedFluidSourceStorages();
+        for (int i = 0; i < storages.Count; i++)
+        {
+            InstallationObject storage = storages[i];
+            if (!IsConnectedWaterTank(storage, waterItemId))
+            {
+                continue;
+            }
+
+            storedLiters += GetUsableWaterLiters(storage, waterItemId);
+            capacityLiters += storage.FluidStorageCapacityLiters;
+        }
+    }
+
+    private static bool IsConnectedWaterTank(InstallationObject storage, int waterItemId)
+    {
+        return waterItemId >= 0
+               && storage != null
+               && storage is Fluidtank
+               && storage.isActiveAndEnabled
+               && storage.CanAcceptFluidItem(waterItemId);
+    }
+
+    private static float GetUsableWaterLiters(InstallationObject storage, int waterItemId)
+    {
+        return waterItemId >= 0 && storage.CanProvideFluidItem(waterItemId)
+            ? Mathf.Min(storage.StoredFluidLiters, storage.FluidStorageCapacityLiters)
+            : 0f;
+    }
+
+    private bool TryConsumeSprayWater(int waterItemId, float requiredLiters)
+    {
+        GetWaterStorageInfo(out float availableLiters, out _);
+        if (waterItemId < 0 || requiredLiters <= WaterEpsilon
+            || availableLiters + WaterEpsilon < requiredLiters)
+        {
+            return false;
+        }
+
+        // Preflight this tick's water before withdrawing from the shared storage.
+        // Keep each tank's actual fluid state authoritative for other sprinklers and saves.
+        float remainingLiters = requiredLiters;
+        if (TryConsumeFluidLiters(waterItemId, remainingLiters, out float consumedLiters))
+        {
+            remainingLiters -= consumedLiters;
+        }
+
+        IReadOnlyList<InstallationObject> storages = GetConnectedFluidSourceStorages();
+        for (int i = 0; i < storages.Count && remainingLiters > WaterEpsilon; i++)
+        {
+            InstallationObject storage = storages[i];
+            if (IsConnectedWaterTank(storage, waterItemId)
+                && storage.TryConsumeFluidLiters(waterItemId, remainingLiters, out consumedLiters))
+            {
+                remainingLiters -= consumedLiters;
+            }
+        }
+
+        return remainingLiters <= WaterEpsilon;
     }
 
     protected override bool ShouldKeepRuntimeUpdateTickActive()
@@ -265,19 +308,13 @@ public class Sprinkler : InputOutputModule
             return "Watering";
         }
 
-        if (currentWateringTargetCount <= 0)
-        {
-            return "No plants need water";
-        }
-
-        if (StoredFluidItemId != ResolveWaterItemId() || StoredFluidLiters <= WaterEpsilon)
+        GetWaterStorageInfo(out float availableWaterLiters, out _);
+        if (availableWaterLiters <= WaterEpsilon)
         {
             return "No water";
         }
 
-        return StoredFluidLiters + WaterEpsilon < WaterLitersPerSpray
-            ? "Not enough water"
-            : "Ready";
+        return "Ready";
     }
 
     public void GetObjectInfoStatus(
@@ -287,7 +324,6 @@ public class Sprinkler : InputOutputModule
     {
         statusText = ResolveObjectInfoStatus(out isWatering);
         isWarning = !isWatering
-                    && currentWateringTargetCount <= 0
                     && TryGetPlacementRuntime(out _, out _);
     }
 
@@ -518,64 +554,48 @@ public class Sprinkler : InputOutputModule
 
     private void PerformSpray(int waterItemId, float waterRequired)
     {
-        float temperature = GetStoredFluidTemperatureCelsius(waterItemId);
-        if (!TryConsumeFluidLiters(waterItemId, waterRequired, out float consumedLiters)
-            || consumedLiters + WaterEpsilon < waterRequired)
+        TerrainGenerator terrain = TerrainGenerator.ResolveActive();
+        if (terrain == null || sprayCoordinates.Count == 0
+            || !TryConsumeSprayWater(waterItemId, waterRequired))
         {
-            if (consumedLiters > WaterEpsilon)
-            {
-                TryAddFluidLiters(waterItemId, consumedLiters, temperature, out _);
-            }
-
             SetOperating(false);
             return;
         }
 
-        TerrainGenerator terrain = TerrainGenerator.ResolveActive();
-        if (terrain == null)
+        // Share the entire range's water among its plants. Redistribute water rejected
+        // by a saturated plant equally among the plants that can still absorb it.
+        float remainingWater = waterRequired;
+        int remainingTargets = wateringTargets.Count;
+        while (remainingWater > WaterEpsilon && remainingTargets > 0)
         {
-            return;
-        }
-
-        float waterPerCell = WaterLitersPerCell;
-        for (int i = 0; i < sprayCoordinates.Count; i++)
-        {
-            if (!terrain.TryGetLoadedBlock(sprayCoordinates[i], out Block block)
-                || block == null)
+            float waterPerPlant = remainingWater / remainingTargets;
+            float acceptedThisPass = 0f;
+            int nextTargetCount = 0;
+            foreach (ProjectTree tree in wateringTargets)
             {
-                continue;
+                if (tree == null || !tree.CanAcceptGrowthWater)
+                {
+                    continue;
+                }
+
+                if (tree.TryAddGrowthWater(waterPerPlant, out float acceptedLiters))
+                {
+                    acceptedThisPass += acceptedLiters;
+                }
+
+                if (tree.CanAcceptGrowthWater)
+                {
+                    nextTargetCount++;
+                }
             }
 
-            if (TryGetWateringTarget(block, out ProjectTree tree))
+            if (acceptedThisPass <= WaterEpsilon)
             {
-                tree.TryAddGrowthWater(waterPerCell, out _);
-                continue;
+                break;
             }
 
-            if (IsEmptyGround(block))
-            {
-                WaterAdjacentPlants(terrain, sprayCoordinates[i], waterPerCell);
-            }
-        }
-    }
-
-    private static void WaterAdjacentPlants(
-        TerrainGenerator terrain,
-        Vector2Int wateredGroundCoordinate,
-        float availableWaterLiters)
-    {
-        float remainingWaterLiters = availableWaterLiters;
-        for (int i = 0; i < AdjacentPlantOffsets.Length && remainingWaterLiters > WaterEpsilon; i++)
-        {
-            Vector2Int plantCoordinate = wateredGroundCoordinate + AdjacentPlantOffsets[i];
-            if (!terrain.TryGetLoadedBlock(plantCoordinate, out Block adjacentBlock)
-                || !TryGetWateringTarget(adjacentBlock, out ProjectTree tree)
-                || !tree.TryAddGrowthWater(remainingWaterLiters, out float acceptedLiters))
-            {
-                continue;
-            }
-
-            remainingWaterLiters = Mathf.Max(0f, remainingWaterLiters - acceptedLiters);
+            remainingWater = Mathf.Max(0f, remainingWater - acceptedThisPass);
+            remainingTargets = nextTargetCount;
         }
     }
 
@@ -624,15 +644,15 @@ public class Sprinkler : InputOutputModule
         }
     }
 
-    private int CountWateringTargets()
+    private int CollectWateringTargets()
     {
+        wateringTargets.Clear();
         TerrainGenerator terrain = TerrainGenerator.ResolveActive();
         if (terrain == null)
         {
             return 0;
         }
 
-        wateringTargetScratch.Clear();
         for (int i = 0; i < sprayCoordinates.Count; i++)
         {
             Vector2Int sprayCoordinate = sprayCoordinates[i];
@@ -644,40 +664,17 @@ public class Sprinkler : InputOutputModule
 
             if (TryGetWateringTarget(block, out ProjectTree directTree))
             {
-                wateringTargetScratch.Add(directTree);
-                continue;
-            }
-
-            if (!IsEmptyGround(block))
-            {
-                continue;
-            }
-
-            for (int neighborIndex = 0; neighborIndex < AdjacentPlantOffsets.Length; neighborIndex++)
-            {
-                Vector2Int neighborCoordinate = sprayCoordinate + AdjacentPlantOffsets[neighborIndex];
-                if (terrain.TryGetLoadedBlock(neighborCoordinate, out Block adjacentBlock)
-                    && TryGetWateringTarget(adjacentBlock, out ProjectTree adjacentTree))
-                {
-                    wateringTargetScratch.Add(adjacentTree);
-                }
+                wateringTargets.Add(directTree);
             }
         }
 
-        int targetCount = wateringTargetScratch.Count;
-        wateringTargetScratch.Clear();
-        return targetCount;
+        return wateringTargets.Count;
     }
 
     private static bool TryGetWateringTarget(Block block, out ProjectTree tree)
     {
         tree = block != null ? block.Resource as ProjectTree : null;
         return tree != null && tree.CanAcceptGrowthWater;
-    }
-
-    private static bool IsEmptyGround(Block block)
-    {
-        return block != null && block.MapObject == null && block.Resource == null;
     }
 
     private void EnsureSprayCoordinates()
@@ -718,6 +715,7 @@ public class Sprinkler : InputOutputModule
     {
         cachedRangeRadius = -1;
         sprayCoordinates.Clear();
+        wateringTargets.Clear();
     }
 
     private Vector3 ResolveRangeWorldCenter()
@@ -890,7 +888,6 @@ public class Sprinkler : InputOutputModule
     protected override void OnValidate()
     {
         base.OnValidate();
-        sprayElapsedSeconds = Mathf.Max(0f, sprayElapsedSeconds);
         ResolveNozzleTransform();
         InvalidateSprayCoordinates();
     }

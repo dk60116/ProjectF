@@ -24,7 +24,7 @@ public partial class BlockStateStore : MonoBehaviour
         public bool railVisualPathExtendsEnd = true;
         public int railRequiredItemCount;
         public InputOutputModule.PersistentState inputOutputState;
-        public RobotArm.PersistentState robotArmState;
+        public RobotArm.TransferState robotArmState;
         public bool? boxIsOpen;
         public bool itemFilterMaskInitialized;
         public List<ulong> itemFilterMaskWords = new List<ulong>();
@@ -1366,7 +1366,7 @@ public partial class BlockStateStore : MonoBehaviour
 
         if (installationObject is RobotArm robotArm)
         {
-            state.robotArmState = robotArm.CapturePersistentState();
+            state.robotArmState = robotArm.CaptureTransferState();
         }
 
         if (installationObject is BoxObject boxObject)

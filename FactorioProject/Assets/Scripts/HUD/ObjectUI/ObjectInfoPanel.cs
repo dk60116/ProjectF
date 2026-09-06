@@ -7,6 +7,7 @@ using UnityEngine.UI;
 public class ObjectInfoPanel : MonoBehaviour
 {
     private const float LayoutRefreshInterval = 0.5f;
+    private const float StackCountDetailsSpacing = 8f;
 
     [SerializeField, HideInInspector]
     [FormerlySerializedAs("focusedObjectSlot")]
@@ -28,6 +29,8 @@ public class ObjectInfoPanel : MonoBehaviour
     private bool referencesResolved;
     private float nextLayoutRefreshTime;
     private int displayedStackCount = -1;
+    private VerticalLayoutGroup stackCountLayout;
+    private int defaultDetailsTopPadding;
 
     private void Awake()
     {
@@ -143,9 +146,17 @@ public class ObjectInfoPanel : MonoBehaviour
             return;
         }
 
-        if (target is PortableObject)
+        if (target is PortableObject portableObject)
         {
-            CloseInfoLine();
+            if (infoLine != null && infoLine.ShowPortableItemEnergy(portableObject))
+            {
+                if (!infoLine.gameObject.activeSelf)
+                    infoLine.gameObject.SetActive(true);
+            }
+            else
+            {
+                CloseInfoLine();
+            }
             return;
         }
 
@@ -564,6 +575,42 @@ public class ObjectInfoPanel : MonoBehaviour
         if (stackCountText.gameObject.activeSelf != visible)
         {
             stackCountText.gameObject.SetActive(visible);
+        }
+
+        UpdateStackCountLayout(visible);
+    }
+
+    private void UpdateStackCountLayout(bool visible)
+    {
+        if (stackCountLayout == null)
+        {
+            Transform parent = stackCountText.transform.parent;
+            stackCountLayout = parent != null ? parent.GetComponent<VerticalLayoutGroup>() : null;
+            if (stackCountLayout == null)
+            {
+                return;
+            }
+
+            defaultDetailsTopPadding = stackCountLayout.padding.top;
+        }
+
+        RectTransform layoutRect = (RectTransform)stackCountLayout.transform;
+        int topPadding = defaultDetailsTopPadding;
+        if (visible)
+        {
+            // The focus header ignores layout. Reserve its count row explicitly
+            // so the first energy/detail row starts below it.
+            RectTransform countRect = stackCountText.rectTransform;
+            Vector3 countBottom = layoutRect.InverseTransformPoint(
+                countRect.TransformPoint(new Vector3(0f, countRect.rect.yMin, 0f)));
+            topPadding = Mathf.Max(topPadding, Mathf.CeilToInt(
+                layoutRect.rect.yMax - countBottom.y + StackCountDetailsSpacing));
+        }
+
+        if (stackCountLayout.padding.top != topPadding)
+        {
+            stackCountLayout.padding.top = topPadding;
+            LayoutRebuilder.MarkLayoutForRebuild(layoutRect);
         }
     }
 
