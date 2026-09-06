@@ -153,6 +153,7 @@ public class RobotArm : InputOutputModule
     private Vector2Int cachedPickupCoordinate;
     private Vector2Int cachedDropCoordinate;
     private readonly List<InstallationObject> freightCarCoordinateScratch = new List<InstallationObject>(4);
+    private System.Predicate<int> cachedPickupItemFilter;
 
     public bool HasHeldItem => heldItemId >= 0;
     public int HeldItemId => heldItemId;
@@ -985,6 +986,7 @@ public class RobotArm : InputOutputModule
             Mesh mesh = part.Mesh;
             Material[] materials = part.SharedMaterials;
             int materialCount = part.MaterialCount;
+            Matrix4x4 localToWorldMatrix = part.Transform.localToWorldMatrix;
             for (int materialIndex = 0; materialIndex < materialCount; materialIndex++)
             {
                 Material material = materials[materialIndex];
@@ -1007,7 +1009,7 @@ public class RobotArm : InputOutputModule
                     0,
                     cellX,
                     cellZ);
-                batches.AddMatrix(key, part.Transform.localToWorldMatrix);
+                batches.AddMatrix(key, localToWorldMatrix);
             }
         }
     }
@@ -1378,20 +1380,20 @@ public class RobotArm : InputOutputModule
         switch (pickupSource)
         {
             case RobotArmPickupSource.Floor:
-                return pickupBlock.TryTakeClosestFloorObject(referenceWorldPosition, AcceptsPickupItem, out pickedItemId);
+                return pickupBlock.TryTakeClosestFloorObject(referenceWorldPosition, PickupItemFilter, out pickedItemId);
             case RobotArmPickupSource.Box:
-                return boxObject != null && boxObject.TryTakeOneContainedObject(AcceptsPickupItem, out pickedItemId);
+                return boxObject != null && boxObject.TryTakeOneContainedObject(PickupItemFilter, out pickedItemId);
             case RobotArmPickupSource.FreightCar:
                 return freightCar != null
                        && freightCar.TryTakeOneItem(
                            referenceWorldPosition,
-                           AcceptsPickupItem,
+                           PickupItemFilter,
                            out pickedItemId,
                            out pickupWorldPosition);
             case RobotArmPickupSource.Conveyor:
                 return pickupBlock.TryTakeOneConveyorObject(
                     referenceWorldPosition,
-                    AcceptsPickupItem,
+                    PickupItemFilter,
                     GetConveyorPickupSearchRadius(pickupBlock),
                     out pickedItemId);
             case RobotArmPickupSource.InputArea:
@@ -1445,7 +1447,7 @@ public class RobotArm : InputOutputModule
         float bestDistanceSqr = float.MaxValue;
 
         if (hasLoadedPickupBlock
-            && pickupBlock.TryGetClosestFloorObjectWorldPosition(referenceWorldPosition, AcceptsPickupItem, out Vector3 candidateWorldPosition))
+            && pickupBlock.TryGetClosestFloorObjectWorldPosition(referenceWorldPosition, PickupItemFilter, out Vector3 candidateWorldPosition))
         {
             TryChoosePickupSource(RobotArmPickupSource.Floor, candidateWorldPosition, referenceWorldPosition, ref pickupSource, ref bestDistanceSqr, ref pickupWorldPosition);
         }
@@ -1464,7 +1466,7 @@ public class RobotArm : InputOutputModule
         if (hasLoadedPickupBlock && TryGetFreightCarObject(pickupBlock, pickupCoordinate, out FreightCar candidateFreightCar))
         {
             freightCar = candidateFreightCar;
-            if (candidateFreightCar.TryGetTopItem(referenceWorldPosition, AcceptsPickupItem, out _, out candidateWorldPosition))
+            if (candidateFreightCar.TryGetTopItem(referenceWorldPosition, PickupItemFilter, out _, out candidateWorldPosition))
             {
                 TryChoosePickupSource(RobotArmPickupSource.FreightCar, candidateWorldPosition, referenceWorldPosition, ref pickupSource, ref bestDistanceSqr, ref pickupWorldPosition);
             }
@@ -1537,7 +1539,7 @@ public class RobotArm : InputOutputModule
                 || (i > 0 && !candidateBlock.HasRuntimeBelt2FConveyor())
                 || !candidateBlock.TryGetClosestConveyorObjectWorldPosition(
                     conveyorReferenceWorldPosition,
-                    AcceptsPickupItem,
+                    PickupItemFilter,
                     GetConveyorPickupSearchRadius(candidateBlock),
                     out Vector3 candidateWorldPosition))
             {
@@ -1580,7 +1582,7 @@ public class RobotArm : InputOutputModule
 
         if (ShouldUseSavedFloorAreaCoordinate(terrainGenerator, pickupCoordinate, hasLoadedPickupBlock))
         {
-            if (stateStore.TryPeekSavedFloorItem(pickupCoordinate, AcceptsPickupItem, out _))
+            if (stateStore.TryPeekSavedFloorItem(pickupCoordinate, PickupItemFilter, out _))
             {
                 TryChoosePickupSource(
                     RobotArmPickupSource.SavedFloor,
@@ -1591,7 +1593,7 @@ public class RobotArm : InputOutputModule
                     ref pickupWorldPosition);
             }
 
-            if (stateStore.TryPeekSavedCenterTopItem(pickupCoordinate, AcceptsPickupItem, out _))
+            if (stateStore.TryPeekSavedCenterTopItem(pickupCoordinate, PickupItemFilter, out _))
             {
                 TryChoosePickupSource(
                     RobotArmPickupSource.SavedInputArea,
@@ -1606,7 +1608,7 @@ public class RobotArm : InputOutputModule
         if (ShouldUseSavedConveyorCoordinate(terrainGenerator, pickupCoordinate, hasLoadedPickupBlock)
             && stateStore.TryPeekSavedConveyorItem(
                 pickupCoordinate,
-                AcceptsPickupItem,
+                PickupItemFilter,
                 conveyorReferenceWorldPosition,
                 out _,
                 out Vector3 conveyorWorldPosition))
@@ -1626,7 +1628,7 @@ public class RobotArm : InputOutputModule
         pickedItemId = -1;
         BlockStateStore stateStore = ResolveBlockStateStore();
         return stateStore != null
-               && stateStore.TryTakeSavedFloorItem(pickupCoordinate, AcceptsPickupItem, out pickedItemId);
+               && stateStore.TryTakeSavedFloorItem(pickupCoordinate, PickupItemFilter, out pickedItemId);
     }
 
     private bool TryTakeSavedConveyorItem(Vector2Int pickupCoordinate, Vector3 referenceWorldPosition, out int pickedItemId)
@@ -1636,7 +1638,7 @@ public class RobotArm : InputOutputModule
         return stateStore != null
                && stateStore.TryTakeSavedConveyorItem(
                    pickupCoordinate,
-                   AcceptsPickupItem,
+                   PickupItemFilter,
                    referenceWorldPosition,
                    out pickedItemId);
     }
@@ -1646,7 +1648,7 @@ public class RobotArm : InputOutputModule
         pickedItemId = -1;
         BlockStateStore stateStore = ResolveBlockStateStore();
         return stateStore != null
-               && stateStore.TryTakeSavedCenterTopItem(pickupCoordinate, AcceptsPickupItem, out pickedItemId);
+               && stateStore.TryTakeSavedCenterTopItem(pickupCoordinate, PickupItemFilter, out pickedItemId);
     }
 
     private static void TryChoosePickupSource(
@@ -1682,6 +1684,8 @@ public class RobotArm : InputOutputModule
         return AcceptsPickupItem(itemId)
                && pickupBlock.TryConsumeOneInputAreaCenterObject(itemId, out pickedItemId);
     }
+
+    private System.Predicate<int> PickupItemFilter => cachedPickupItemFilter ??= AcceptsPickupItem;
 
     private bool AcceptsPickupItem(int itemId)
     {
@@ -2596,7 +2600,7 @@ public class RobotArm : InputOutputModule
             return;
         }
 
-        handItem.MarkBatchedRenderDataDirty();
+        handItem.RequestBatchedRenderDataRefresh();
     }
 
     private Vector3 GetHandWorldPosition()

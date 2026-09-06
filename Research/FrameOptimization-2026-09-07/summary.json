@@ -1,0 +1,1677 @@
+[
+  {
+    "Phase": "baseline-on-1",
+    "Samples": 25,
+    "From": "2026-09-07T01:48:45.9026862+09:00",
+    "To": "2026-09-07T01:49:10.1571335+09:00",
+    "MeanFps": 78.72,
+    "MeanWindowMs": 12.768,
+    "MinFps": 64.8,
+    "MaxFps": 86.9,
+    "MedianWindowMs": 13.0,
+    "MaxWindowMs": 15.4,
+    "MovingPlayerSamples": 0,
+    "InstallationCounts": [
+      "463"
+    ],
+    "ItemMin": 489.0,
+    "ItemMax": 495.0,
+    "WorldTimeFrom": "15:12",
+    "WorldTimeTo": "15:36",
+    "ProfileSnapshots": 0,
+    "ProfileFrames": null,
+    "Rows": [],
+    "Counters": {},
+    "Loops": {}
+  },
+  {
+    "Phase": "baseline-on-2",
+    "Samples": 25,
+    "From": "2026-09-07T01:50:28.9461944+09:00",
+    "To": "2026-09-07T01:50:53.2802349+09:00",
+    "MeanFps": 79.64,
+    "MeanWindowMs": 12.596,
+    "MinFps": 69.3,
+    "MaxFps": 87.7,
+    "MedianWindowMs": 12.5,
+    "MaxWindowMs": 14.4,
+    "MovingPlayerSamples": 0,
+    "InstallationCounts": [
+      "463"
+    ],
+    "ItemMin": 476.0,
+    "ItemMax": 480.0,
+    "WorldTimeFrom": "16:55",
+    "WorldTimeTo": "17:19",
+    "ProfileSnapshots": 5,
+    "ProfileFrames": 277.0,
+    "Rows": [
+      {
+        "Name": "Belt/ActiveConveyor/Active Belt Tick",
+        "MsPerFrame": 4.2933,
+        "CallsPerFrame": 1.0,
+        "MaxCallUs": 7806.4
+      },
+      {
+        "Name": "Runtime/ConveyorProcessWakeQueue/Conveyor Process Wake Queue",
+        "MsPerFrame": 4.2479,
+        "CallsPerFrame": 1.0,
+        "MaxCallUs": 7795.4
+      },
+      {
+        "Name": "Runtime/ConveyorWakeLine/Conveyor Wake Line",
+        "MsPerFrame": 1.9795,
+        "CallsPerFrame": 92.3,
+        "MaxCallUs": 543.4
+      },
+      {
+        "Name": "Runtime/ConveyorWakeBlock/Conveyor Wake Block",
+        "MsPerFrame": 1.4128,
+        "CallsPerFrame": 41.76,
+        "MaxCallUs": 585.8
+      },
+      {
+        "Name": "Update/RobotArm/Robot arm",
+        "MsPerFrame": 0.9784,
+        "CallsPerFrame": 27.47,
+        "MaxCallUs": 4617.3
+      },
+      {
+        "Name": "Runtime/ConveyorWakeCornerGroup/Conveyor Wake Corner Group",
+        "MsPerFrame": 0.8209,
+        "CallsPerFrame": 34.26,
+        "MaxCallUs": 387.9
+      },
+      {
+        "Name": "Runtime/ConveyorCornerGroupTick/Conveyor Corner Group Tick",
+        "MsPerFrame": 0.7549,
+        "CallsPerFrame": 34.26,
+        "MaxCallUs": 357.6
+      },
+      {
+        "Name": "Runtime/ConveyorLineNoMove/Conveyor Line No Move",
+        "MsPerFrame": 0.4778,
+        "CallsPerFrame": 16.56,
+        "MaxCallUs": 262.6
+      },
+      {
+        "Name": "Runtime/VirtualConveyorBeltRenderer/Virtual Belt Render",
+        "MsPerFrame": 0.4712,
+        "CallsPerFrame": 1.0,
+        "MaxCallUs": 823.7
+      },
+      {
+        "Name": "Runtime/ConveyorLineRetryWork/Conveyor Line Retry Work",
+        "MsPerFrame": 0.2131,
+        "CallsPerFrame": 16.6,
+        "MaxCallUs": 176.9
+      },
+      {
+        "Name": "Runtime/ConveyorLineMoveScan/Conveyor Line Move Scan",
+        "MsPerFrame": 0.1949,
+        "CallsPerFrame": 16.6,
+        "MaxCallUs": 417.5
+      },
+      {
+        "Name": "Runtime/ConveyorLineBlockerScan/Conveyor Line Blocker Scan",
+        "MsPerFrame": 0.1487,
+        "CallsPerFrame": 16.6,
+        "MaxCallUs": 118.0
+      },
+      {
+        "Name": "Runtime/PortableItemRenderer/Conveyor Item Rebuild",
+        "MsPerFrame": 0.0966,
+        "CallsPerFrame": 1.0,
+        "MaxCallUs": 1423.1
+      },
+      {
+        "Name": "Runtime/PortableItemRenderer/Conveyor Item Render",
+        "MsPerFrame": 0.0746,
+        "CallsPerFrame": 1.0,
+        "MaxCallUs": 185.7
+      },
+      {
+        "Name": "Runtime/PortableItemRenderer/Conveyor Item Reconcile Static Cache",
+        "MsPerFrame": 0.0625,
+        "CallsPerFrame": 0.08,
+        "MaxCallUs": 1266.9
+      },
+      {
+        "Name": "Runtime/ConveyorCornerGroupCollect/Conveyor Corner Group Collect",
+        "MsPerFrame": 0.0477,
+        "CallsPerFrame": 34.26,
+        "MaxCallUs": 53.9
+      },
+      {
+        "Name": "Runtime/PortableItemRenderer/Conveyor Item Rebuild Dynamic",
+        "MsPerFrame": 0.036,
+        "CallsPerFrame": 1.0,
+        "MaxCallUs": 110.9
+      },
+      {
+        "Name": "Runtime/PortableItemRenderer/Conveyor Item Render Static",
+        "MsPerFrame": 0.0329,
+        "CallsPerFrame": 1.0,
+        "MaxCallUs": 102.3
+      },
+      {
+        "Name": "Runtime/ConveyorSafetyScan/Conveyor Safety Scan",
+        "MsPerFrame": 0.0288,
+        "CallsPerFrame": 1.0,
+        "MaxCallUs": 659.9
+      },
+      {
+        "Name": "Belt/ConveyorDataMotion/Belt Data Motion",
+        "MsPerFrame": 0.0254,
+        "CallsPerFrame": 1.0,
+        "MaxCallUs": 1120.6
+      },
+      {
+        "Name": "Update/Pump/Water pump",
+        "MsPerFrame": 0.0244,
+        "CallsPerFrame": 0.52,
+        "MaxCallUs": 141.1
+      },
+      {
+        "Name": "Update/SteamGenerator/Steam generator",
+        "MsPerFrame": 0.0171,
+        "CallsPerFrame": 0.66,
+        "MaxCallUs": 95.0
+      },
+      {
+        "Name": "Update/InputOutputModule/Funance",
+        "MsPerFrame": 0.0151,
+        "CallsPerFrame": 0.65,
+        "MaxCallUs": 126.4
+      },
+      {
+        "Name": "Runtime/PortableItemRenderer/Conveyor Item Dynamic AppendData",
+        "MsPerFrame": 0.0149,
+        "CallsPerFrame": 0.79,
+        "MaxCallUs": 42.2
+      },
+      {
+        "Name": "Runtime/PortableItemRenderer/Conveyor Item Refresh Active Set",
+        "MsPerFrame": 0.0117,
+        "CallsPerFrame": 1.0,
+        "MaxCallUs": 208.3
+      },
+      {
+        "Name": "Update/MiningMachine/Electric mining machine",
+        "MsPerFrame": 0.0103,
+        "CallsPerFrame": 0.49,
+        "MaxCallUs": 1405.3
+      },
+      {
+        "Name": "Runtime/InstallationPlacementController/Installation Placement Update",
+        "MsPerFrame": 0.0099,
+        "CallsPerFrame": 1.0,
+        "MaxCallUs": 27.7
+      },
+      {
+        "Name": "Runtime/ConveyorPromoteDeferredWakes/Conveyor Promote Deferred Wakes",
+        "MsPerFrame": 0.0098,
+        "CallsPerFrame": 1.0,
+        "MaxCallUs": 320.9
+      },
+      {
+        "Name": "Update/Boiler/Boiler",
+        "MsPerFrame": 0.0092,
+        "CallsPerFrame": 0.26,
+        "MaxCallUs": 101.7
+      },
+      {
+        "Name": "Runtime/PortableItemRenderer/Conveyor Item Dynamic Cull",
+        "MsPerFrame": 0.009,
+        "CallsPerFrame": 0.99,
+        "MaxCallUs": 27.7
+      },
+      {
+        "Name": "Runtime/PortableItemRenderer/Conveyor Item Refresh Dirty Cache",
+        "MsPerFrame": 0.0087,
+        "CallsPerFrame": 1.0,
+        "MaxCallUs": 201.8
+      },
+      {
+        "Name": "Update/ProductionMachine/Production machine (MK2)",
+        "MsPerFrame": 0.0052,
+        "CallsPerFrame": 0.13,
+        "MaxCallUs": 83.4
+      },
+      {
+        "Name": "Update/ProductionMachine/Production machine (Mk1)",
+        "MsPerFrame": 0.0045,
+        "CallsPerFrame": 0.13,
+        "MaxCallUs": 91.2
+      },
+      {
+        "Name": "Update/Sprinkler/Sprinkler",
+        "MsPerFrame": 0.0038,
+        "CallsPerFrame": 0.05,
+        "MaxCallUs": 102.0
+      },
+      {
+        "Name": "Runtime/PortableItemRenderer/Conveyor Item Dynamic SyncMatrix",
+        "MsPerFrame": 0.0031,
+        "CallsPerFrame": 0.79,
+        "MaxCallUs": 40.1
+      },
+      {
+        "Name": "Update/SeedPlanter/Seed Planter",
+        "MsPerFrame": 0.0029,
+        "CallsPerFrame": 0.52,
+        "MaxCallUs": 25.3
+      },
+      {
+        "Name": "Runtime/PortableItemRenderer/Conveyor Item Render Dynamic",
+        "MsPerFrame": 0.0028,
+        "CallsPerFrame": 1.0,
+        "MaxCallUs": 18.4
+      },
+      {
+        "Name": "Runtime/InstallationPlacementController/Installation Placement LateUpdate",
+        "MsPerFrame": 0.0023,
+        "CallsPerFrame": 1.0,
+        "MaxCallUs": 41.8
+      },
+      {
+        "Name": "Runtime/PortableItemRenderer/Conveyor Item Dynamic Cache",
+        "MsPerFrame": 0.0022,
+        "CallsPerFrame": 0.79,
+        "MaxCallUs": 7.9
+      },
+      {
+        "Name": "Runtime/PortableItemRenderer/Conveyor Item Dynamic ScheduleMatrices",
+        "MsPerFrame": 0.0016,
+        "CallsPerFrame": 0.99,
+        "MaxCallUs": 5.1
+      },
+      {
+        "Name": "Runtime/PortableItemRenderer/Conveyor Item Refresh Dynamic Set",
+        "MsPerFrame": 0.0011,
+        "CallsPerFrame": 1.0,
+        "MaxCallUs": 24.5
+      },
+      {
+        "Name": "Runtime/ConveyorLineWakeRefresh/Conveyor Line Wake Refresh",
+        "MsPerFrame": 0.001,
+        "CallsPerFrame": 0.03,
+        "MaxCallUs": 53.8
+      },
+      {
+        "Name": "Update/Fluidtank/Fluid tank",
+        "MsPerFrame": 0.0009,
+        "CallsPerFrame": 0.55,
+        "MaxCallUs": 16.5
+      },
+      {
+        "Name": "Update/LoggingMachine/Logging machine",
+        "MsPerFrame": 0.0009,
+        "CallsPerFrame": 0.13,
+        "MaxCallUs": 17.8
+      },
+      {
+        "Name": "Runtime/ConveyorEnsureLineCache/Conveyor Ensure Line Cache",
+        "MsPerFrame": 0.0008,
+        "CallsPerFrame": 1.0,
+        "MaxCallUs": 9.6
+      },
+      {
+        "Name": "Update/OilDrillingMachine/Electric Oil machine",
+        "MsPerFrame": 0.0007,
+        "CallsPerFrame": 0.13,
+        "MaxCallUs": 10.5
+      },
+      {
+        "Name": "Runtime/ConveyorProcessLineRetries/Conveyor Process Line Retries",
+        "MsPerFrame": 0.0007,
+        "CallsPerFrame": 1.0,
+        "MaxCallUs": 3.4
+      },
+      {
+        "Name": "Runtime/PortableItemRenderer/Conveyor Item Reconcile Dynamic Cache",
+        "MsPerFrame": 0.0003,
+        "CallsPerFrame": 0.05,
+        "MaxCallUs": 11.7
+      },
+      {
+        "Name": "Runtime/PortableItemRenderer/Conveyor Item Dynamic CompleteMatrices",
+        "MsPerFrame": 0.0002,
+        "CallsPerFrame": 0.84,
+        "MaxCallUs": 0.8
+      },
+      {
+        "Name": "Runtime/PortableItemRenderer/Conveyor Item Dynamic TrimCache",
+        "MsPerFrame": 0.0,
+        "CallsPerFrame": 0.34,
+        "MaxCallUs": 0.3
+      }
+    ],
+    "Counters": {
+      "Frame/Fps": 76.702,
+      "ProfilerCPU/MainThreadMs": 12.993,
+      "ProfilerGPU/FrameGpuMs": 0.0,
+      "ProfilerRender/SetPassCalls": 141.439,
+      "ProfilerRender/Triangles": 1441634.329,
+      "ProfilerRender/ShadowCasters": 259.986,
+      "Virtualization/VirtualBeltTrackedTransformReads": 778.0,
+      "Virtualization/VirtualBeltTrackedTransformUpdates": 0.0,
+      "Render/RenderedChunkSurfaces": 28.0,
+      "Conveyor/LoadedConveyorItems": 478.0
+    },
+    "Loops": {
+      "beltTryMoveAttempts": 237.56,
+      "beltTryMoveSuccesses": 0.144,
+      "beltStraightMoveAttempts": 0.206,
+      "beltStraightMoveSuccesses": 0.206,
+      "beltPlanMoveCalls": 8.141,
+      "beltActiveLoopIterations": 168.488
+    }
+  },
+  {
+    "Phase": "baseline-restored",
+    "Samples": 25,
+    "From": "2026-09-07T01:54:31.6506777+09:00",
+    "To": "2026-09-07T01:54:55.9120445+09:00",
+    "MeanFps": 78.33,
+    "MeanWindowMs": 12.808,
+    "MinFps": 68.8,
+    "MaxFps": 88.2,
+    "MedianWindowMs": 12.7,
+    "MaxWindowMs": 14.5,
+    "MovingPlayerSamples": 0,
+    "InstallationCounts": [
+      "463"
+    ],
+    "ItemMin": 470.0,
+    "ItemMax": 476.0,
+    "WorldTimeFrom": "20:58",
+    "WorldTimeTo": "21:22",
+    "ProfileSnapshots": 5,
+    "ProfileFrames": 172.0,
+    "Rows": [
+      {
+        "Name": "Belt/ActiveConveyor/Active Belt Tick",
+        "MsPerFrame": 4.2011,
+        "CallsPerFrame": 1.0,
+        "MaxCallUs": 7040.5
+      },
+      {
+        "Name": "Runtime/ConveyorProcessWakeQueue/Conveyor Process Wake Queue",
+        "MsPerFrame": 4.1582,
+        "CallsPerFrame": 1.0,
+        "MaxCallUs": 6623.4
+      },
+      {
+        "Name": "Runtime/ConveyorWakeLine/Conveyor Wake Line",
+        "MsPerFrame": 1.9237,
+        "CallsPerFrame": 90.3,
+        "MaxCallUs": 449.8
+      },
+      {
+        "Name": "Runtime/ConveyorWakeBlock/Conveyor Wake Block",
+        "MsPerFrame": 1.3817,
+        "CallsPerFrame": 40.93,
+        "MaxCallUs": 535.5
+      },
+      {
+        "Name": "Update/RobotArm/Robot arm",
+        "MsPerFrame": 0.9422,
+        "CallsPerFrame": 27.8,
+        "MaxCallUs": 1499.3
+      },
+      {
+        "Name": "Runtime/ConveyorWakeCornerGroup/Conveyor Wake Corner Group",
+        "MsPerFrame": 0.8191,
+        "CallsPerFrame": 33.94,
+        "MaxCallUs": 172.4
+      },
+      {
+        "Name": "Runtime/ConveyorCornerGroupTick/Conveyor Corner Group Tick",
+        "MsPerFrame": 0.7514,
+        "CallsPerFrame": 33.94,
+        "MaxCallUs": 168.0
+      },
+      {
+        "Name": "Runtime/VirtualConveyorBeltRenderer/Virtual Belt Render",
+        "MsPerFrame": 0.5069,
+        "CallsPerFrame": 1.0,
+        "MaxCallUs": 1074.3
+      },
+      {
+        "Name": "Runtime/ConveyorLineNoMove/Conveyor Line No Move",
+        "MsPerFrame": 0.4579,
+        "CallsPerFrame": 16.64,
+        "MaxCallUs": 379.5
+      },
+      {
+        "Name": "Runtime/ConveyorLineRetryWork/Conveyor Line Retry Work",
+        "MsPerFrame": 0.1869,
+        "CallsPerFrame": 16.68,
+        "MaxCallUs": 81.4
+      },
+      {
+        "Name": "Runtime/ConveyorLineMoveScan/Conveyor Line Move Scan",
+        "MsPerFrame": 0.1833,
+        "CallsPerFrame": 16.65,
+        "MaxCallUs": 199.2
+      },
+      {
+        "Name": "Runtime/ConveyorLineBlockerScan/Conveyor Line Blocker Scan",
+        "MsPerFrame": 0.1393,
+        "CallsPerFrame": 16.65,
+        "MaxCallUs": 123.4
+      },
+      {
+        "Name": "Runtime/PortableItemRenderer/Conveyor Item Render",
+        "MsPerFrame": 0.0863,
+        "CallsPerFrame": 1.0,
+        "MaxCallUs": 591.1
+      },
+      {
+        "Name": "Runtime/PortableItemRenderer/Conveyor Item Rebuild",
+        "MsPerFrame": 0.0667,
+        "CallsPerFrame": 1.0,
+        "MaxCallUs": 1168.5
+      },
+      {
+        "Name": "Runtime/ConveyorCornerGroupCollect/Conveyor Corner Group Collect",
+        "MsPerFrame": 0.0495,
+        "CallsPerFrame": 33.94,
+        "MaxCallUs": 45.9
+      },
+      {
+        "Name": "Runtime/PortableItemRenderer/Conveyor Item Rebuild Dynamic",
+        "MsPerFrame": 0.048,
+        "CallsPerFrame": 1.0,
+        "MaxCallUs": 487.6
+      },
+      {
+        "Name": "Runtime/PortableItemRenderer/Conveyor Item Reconcile Static Cache",
+        "MsPerFrame": 0.0418,
+        "CallsPerFrame": 0.06,
+        "MaxCallUs": 924.6
+      },
+      {
+        "Name": "Runtime/PortableItemRenderer/Conveyor Item Render Static",
+        "MsPerFrame": 0.0323,
+        "CallsPerFrame": 1.0,
+        "MaxCallUs": 93.9
+      },
+      {
+        "Name": "Runtime/ConveyorSafetyScan/Conveyor Safety Scan",
+        "MsPerFrame": 0.0278,
+        "CallsPerFrame": 1.0,
+        "MaxCallUs": 637.3
+      },
+      {
+        "Name": "Belt/ConveyorDataMotion/Belt Data Motion",
+        "MsPerFrame": 0.0275,
+        "CallsPerFrame": 1.0,
+        "MaxCallUs": 562.2
+      },
+      {
+        "Name": "Update/Pump/Water pump",
+        "MsPerFrame": 0.0272,
+        "CallsPerFrame": 0.54,
+        "MaxCallUs": 188.4
+      },
+      {
+        "Name": "Runtime/PortableItemRenderer/Conveyor Item Dynamic AppendData",
+        "MsPerFrame": 0.0181,
+        "CallsPerFrame": 0.83,
+        "MaxCallUs": 60.5
+      },
+      {
+        "Name": "Update/SteamGenerator/Steam generator",
+        "MsPerFrame": 0.0166,
+        "CallsPerFrame": 0.65,
+        "MaxCallUs": 67.2
+      },
+      {
+        "Name": "Runtime/PortableItemRenderer/Conveyor Item Dynamic Cull",
+        "MsPerFrame": 0.0152,
+        "CallsPerFrame": 1.0,
+        "MaxCallUs": 188.9
+      },
+      {
+        "Name": "Update/InputOutputModule/Funance",
+        "MsPerFrame": 0.0119,
+        "CallsPerFrame": 0.48,
+        "MaxCallUs": 65.6
+      },
+      {
+        "Name": "Update/Boiler/Boiler",
+        "MsPerFrame": 0.0103,
+        "CallsPerFrame": 0.26,
+        "MaxCallUs": 243.5
+      },
+      {
+        "Name": "Runtime/InstallationPlacementController/Installation Placement Update",
+        "MsPerFrame": 0.0094,
+        "CallsPerFrame": 1.0,
+        "MaxCallUs": 38.7
+      },
+      {
+        "Name": "Runtime/PortableItemRenderer/Conveyor Item Refresh Active Set",
+        "MsPerFrame": 0.0086,
+        "CallsPerFrame": 1.0,
+        "MaxCallUs": 210.6
+      },
+      {
+        "Name": "Runtime/ConveyorPromoteDeferredWakes/Conveyor Promote Deferred Wakes",
+        "MsPerFrame": 0.0083,
+        "CallsPerFrame": 1.0,
+        "MaxCallUs": 49.8
+      },
+      {
+        "Name": "Runtime/PortableItemRenderer/Conveyor Item Refresh Dirty Cache",
+        "MsPerFrame": 0.0065,
+        "CallsPerFrame": 1.0,
+        "MaxCallUs": 183.1
+      },
+      {
+        "Name": "Update/MiningMachine/Electric mining machine",
+        "MsPerFrame": 0.0062,
+        "CallsPerFrame": 0.49,
+        "MaxCallUs": 906.1
+      },
+      {
+        "Name": "Update/Sprinkler/Sprinkler",
+        "MsPerFrame": 0.0045,
+        "CallsPerFrame": 0.06,
+        "MaxCallUs": 90.6
+      },
+      {
+        "Name": "Runtime/PortableItemRenderer/Conveyor Item Dynamic SyncMatrix",
+        "MsPerFrame": 0.0038,
+        "CallsPerFrame": 0.83,
+        "MaxCallUs": 21.8
+      },
+      {
+        "Name": "Runtime/PortableItemRenderer/Conveyor Item Render Dynamic",
+        "MsPerFrame": 0.0034,
+        "CallsPerFrame": 1.0,
+        "MaxCallUs": 9.2
+      },
+      {
+        "Name": "Update/SeedPlanter/Seed Planter",
+        "MsPerFrame": 0.0032,
+        "CallsPerFrame": 0.55,
+        "MaxCallUs": 22.1
+      },
+      {
+        "Name": "Runtime/PortableItemRenderer/Conveyor Item Dynamic Cache",
+        "MsPerFrame": 0.0027,
+        "CallsPerFrame": 0.83,
+        "MaxCallUs": 37.4
+      },
+      {
+        "Name": "Runtime/InstallationPlacementController/Installation Placement LateUpdate",
+        "MsPerFrame": 0.002,
+        "CallsPerFrame": 1.0,
+        "MaxCallUs": 3.9
+      },
+      {
+        "Name": "Runtime/PortableItemRenderer/Conveyor Item Dynamic ScheduleMatrices",
+        "MsPerFrame": 0.0018,
+        "CallsPerFrame": 1.0,
+        "MaxCallUs": 4.1
+      },
+      {
+        "Name": "Update/LoggingMachine/Logging machine",
+        "MsPerFrame": 0.0011,
+        "CallsPerFrame": 0.13,
+        "MaxCallUs": 33.9
+      },
+      {
+        "Name": "Runtime/PortableItemRenderer/Conveyor Item Refresh Dynamic Set",
+        "MsPerFrame": 0.001,
+        "CallsPerFrame": 1.0,
+        "MaxCallUs": 22.0
+      },
+      {
+        "Name": "Update/Fluidtank/Fluid tank",
+        "MsPerFrame": 0.001,
+        "CallsPerFrame": 0.5,
+        "MaxCallUs": 20.1
+      },
+      {
+        "Name": "Runtime/ConveyorEnsureLineCache/Conveyor Ensure Line Cache",
+        "MsPerFrame": 0.0008,
+        "CallsPerFrame": 1.0,
+        "MaxCallUs": 16.8
+      },
+      {
+        "Name": "Update/OilDrillingMachine/Electric Oil machine",
+        "MsPerFrame": 0.0008,
+        "CallsPerFrame": 0.13,
+        "MaxCallUs": 11.4
+      },
+      {
+        "Name": "Runtime/ConveyorProcessLineRetries/Conveyor Process Line Retries",
+        "MsPerFrame": 0.0006,
+        "CallsPerFrame": 1.0,
+        "MaxCallUs": 2.4
+      },
+      {
+        "Name": "Runtime/PortableItemRenderer/Conveyor Item Dynamic CompleteMatrices",
+        "MsPerFrame": 0.0002,
+        "CallsPerFrame": 0.84,
+        "MaxCallUs": 0.6
+      },
+      {
+        "Name": "Runtime/PortableItemRenderer/Conveyor Item Reconcile Dynamic Cache",
+        "MsPerFrame": 0.0001,
+        "CallsPerFrame": 0.05,
+        "MaxCallUs": 7.3
+      },
+      {
+        "Name": "Runtime/ConveyorLineWakeRefresh/Conveyor Line Wake Refresh",
+        "MsPerFrame": 0.0001,
+        "CallsPerFrame": 0.01,
+        "MaxCallUs": 15.1
+      },
+      {
+        "Name": "Runtime/PortableItemRenderer/Conveyor Item Dynamic TrimCache",
+        "MsPerFrame": 0.0,
+        "CallsPerFrame": 0.32,
+        "MaxCallUs": 0.3
+      }
+    ],
+    "Counters": {
+      "Frame/Fps": 75.542,
+      "ProfilerCPU/MainThreadMs": 13.214,
+      "ProfilerGPU/FrameGpuMs": 0.0,
+      "ProfilerRender/SetPassCalls": 140.709,
+      "ProfilerRender/Triangles": 1486521.745,
+      "ProfilerRender/ShadowCasters": 263.156,
+      "Virtualization/VirtualBeltTrackedTransformReads": 778.0,
+      "Virtualization/VirtualBeltTrackedTransformUpdates": 0.0,
+      "Render/RenderedChunkSurfaces": 28.0,
+      "Conveyor/LoadedConveyorItems": 472.2
+    },
+    "Loops": {
+      "beltTryMoveAttempts": 232.767,
+      "beltTryMoveSuccesses": 0.116,
+      "beltStraightMoveAttempts": 0.023,
+      "beltStraightMoveSuccesses": 0.023,
+      "beltPlanMoveCalls": 8.343,
+      "beltActiveLoopIterations": 165.326
+    }
+  },
+  {
+    "Phase": "culling-off",
+    "Samples": 25,
+    "From": "2026-09-07T01:53:19.606681+09:00",
+    "To": "2026-09-07T01:53:43.8608585+09:00",
+    "MeanFps": 58.73,
+    "MeanWindowMs": 17.068,
+    "MinFps": 52.4,
+    "MaxFps": 63.7,
+    "MedianWindowMs": 17.0,
+    "MaxWindowMs": 19.1,
+    "MovingPlayerSamples": 0,
+    "InstallationCounts": [
+      "463"
+    ],
+    "ItemMin": 468.0,
+    "ItemMax": 474.0,
+    "WorldTimeFrom": "19:46",
+    "WorldTimeTo": "20:10",
+    "ProfileSnapshots": 5,
+    "ProfileFrames": 196.0,
+    "Rows": [
+      {
+        "Name": "Belt/ActiveConveyor/Active Belt Tick",
+        "MsPerFrame": 5.0295,
+        "CallsPerFrame": 1.0,
+        "MaxCallUs": 9194.3
+      },
+      {
+        "Name": "Runtime/ConveyorProcessWakeQueue/Conveyor Process Wake Queue",
+        "MsPerFrame": 4.9784,
+        "CallsPerFrame": 1.0,
+        "MaxCallUs": 9176.9
+      },
+      {
+        "Name": "Runtime/ConveyorWakeLine/Conveyor Wake Line",
+        "MsPerFrame": 2.2026,
+        "CallsPerFrame": 85.59,
+        "MaxCallUs": 515.3
+      },
+      {
+        "Name": "Runtime/ConveyorWakeBlock/Conveyor Wake Block",
+        "MsPerFrame": 1.6225,
+        "CallsPerFrame": 39.65,
+        "MaxCallUs": 617.0
+      },
+      {
+        "Name": "Update/RobotArm/Robot arm",
+        "MsPerFrame": 1.3043,
+        "CallsPerFrame": 28.39,
+        "MaxCallUs": 6742.3
+      },
+      {
+        "Name": "Runtime/ConveyorWakeCornerGroup/Conveyor Wake Corner Group",
+        "MsPerFrame": 1.1118,
+        "CallsPerFrame": 34.77,
+        "MaxCallUs": 4706.5
+      },
+      {
+        "Name": "Runtime/ConveyorCornerGroupTick/Conveyor Corner Group Tick",
+        "MsPerFrame": 1.0135,
+        "CallsPerFrame": 34.77,
+        "MaxCallUs": 4700.8
+      },
+      {
+        "Name": "Runtime/VirtualConveyorBeltRenderer/Virtual Belt Render",
+        "MsPerFrame": 0.7989,
+        "CallsPerFrame": 1.0,
+        "MaxCallUs": 1317.3
+      },
+      {
+        "Name": "Runtime/ConveyorLineNoMove/Conveyor Line No Move",
+        "MsPerFrame": 0.4744,
+        "CallsPerFrame": 15.52,
+        "MaxCallUs": 325.2
+      },
+      {
+        "Name": "Runtime/ConveyorLineRetryWork/Conveyor Line Retry Work",
+        "MsPerFrame": 0.2042,
+        "CallsPerFrame": 15.55,
+        "MaxCallUs": 164.8
+      },
+      {
+        "Name": "Runtime/ConveyorLineMoveScan/Conveyor Line Move Scan",
+        "MsPerFrame": 0.1977,
+        "CallsPerFrame": 15.54,
+        "MaxCallUs": 433.0
+      },
+      {
+        "Name": "Runtime/PortableItemRenderer/Conveyor Item Render",
+        "MsPerFrame": 0.1512,
+        "CallsPerFrame": 1.0,
+        "MaxCallUs": 563.5
+      },
+      {
+        "Name": "Runtime/ConveyorLineBlockerScan/Conveyor Line Blocker Scan",
+        "MsPerFrame": 0.1416,
+        "CallsPerFrame": 15.54,
+        "MaxCallUs": 126.8
+      },
+      {
+        "Name": "Runtime/PortableItemRenderer/Conveyor Item Rebuild",
+        "MsPerFrame": 0.1212,
+        "CallsPerFrame": 1.0,
+        "MaxCallUs": 1567.0
+      },
+      {
+        "Name": "Runtime/PortableItemRenderer/Conveyor Item Rebuild Dynamic",
+        "MsPerFrame": 0.085,
+        "CallsPerFrame": 1.0,
+        "MaxCallUs": 447.2
+      },
+      {
+        "Name": "Runtime/PortableItemRenderer/Conveyor Item Reconcile Static Cache",
+        "MsPerFrame": 0.0819,
+        "CallsPerFrame": 0.09,
+        "MaxCallUs": 1377.0
+      },
+      {
+        "Name": "Runtime/ConveyorCornerGroupCollect/Conveyor Corner Group Collect",
+        "MsPerFrame": 0.0731,
+        "CallsPerFrame": 34.77,
+        "MaxCallUs": 59.7
+      },
+      {
+        "Name": "Runtime/PortableItemRenderer/Conveyor Item Render Static",
+        "MsPerFrame": 0.0588,
+        "CallsPerFrame": 1.0,
+        "MaxCallUs": 158.6
+      },
+      {
+        "Name": "Runtime/PortableItemRenderer/Conveyor Item Dynamic AppendData",
+        "MsPerFrame": 0.0409,
+        "CallsPerFrame": 1.0,
+        "MaxCallUs": 281.6
+      },
+      {
+        "Name": "Belt/ConveyorDataMotion/Belt Data Motion",
+        "MsPerFrame": 0.0404,
+        "CallsPerFrame": 1.0,
+        "MaxCallUs": 570.2
+      },
+      {
+        "Name": "Runtime/ConveyorSafetyScan/Conveyor Safety Scan",
+        "MsPerFrame": 0.0356,
+        "CallsPerFrame": 1.0,
+        "MaxCallUs": 698.6
+      },
+      {
+        "Name": "Update/Pump/Water pump",
+        "MsPerFrame": 0.0345,
+        "CallsPerFrame": 0.69,
+        "MaxCallUs": 148.1
+      },
+      {
+        "Name": "Update/SteamGenerator/Steam generator",
+        "MsPerFrame": 0.0262,
+        "CallsPerFrame": 0.87,
+        "MaxCallUs": 84.5
+      },
+      {
+        "Name": "Runtime/PortableItemRenderer/Conveyor Item Dynamic Cull",
+        "MsPerFrame": 0.0228,
+        "CallsPerFrame": 1.0,
+        "MaxCallUs": 109.0
+      },
+      {
+        "Name": "Update/InputOutputModule/Funance",
+        "MsPerFrame": 0.02,
+        "CallsPerFrame": 0.85,
+        "MaxCallUs": 85.9
+      },
+      {
+        "Name": "Runtime/PortableItemRenderer/Conveyor Item Refresh Active Set",
+        "MsPerFrame": 0.0163,
+        "CallsPerFrame": 1.0,
+        "MaxCallUs": 307.7
+      },
+      {
+        "Name": "Runtime/PortableItemRenderer/Conveyor Item Refresh Dirty Cache",
+        "MsPerFrame": 0.0157,
+        "CallsPerFrame": 1.0,
+        "MaxCallUs": 234.1
+      },
+      {
+        "Name": "Update/Boiler/Boiler",
+        "MsPerFrame": 0.0116,
+        "CallsPerFrame": 0.35,
+        "MaxCallUs": 64.7
+      },
+      {
+        "Name": "Runtime/InstallationPlacementController/Installation Placement Update",
+        "MsPerFrame": 0.0104,
+        "CallsPerFrame": 1.0,
+        "MaxCallUs": 33.7
+      },
+      {
+        "Name": "Runtime/ConveyorPromoteDeferredWakes/Conveyor Promote Deferred Wakes",
+        "MsPerFrame": 0.0081,
+        "CallsPerFrame": 1.0,
+        "MaxCallUs": 27.2
+      },
+      {
+        "Name": "Runtime/PortableItemRenderer/Conveyor Item Dynamic SyncMatrix",
+        "MsPerFrame": 0.0078,
+        "CallsPerFrame": 1.0,
+        "MaxCallUs": 51.4
+      },
+      {
+        "Name": "Update/ProductionMachine/Production machine (MK2)",
+        "MsPerFrame": 0.0074,
+        "CallsPerFrame": 0.17,
+        "MaxCallUs": 74.3
+      },
+      {
+        "Name": "Update/ProductionMachine/Production machine (Mk1)",
+        "MsPerFrame": 0.0068,
+        "CallsPerFrame": 0.18,
+        "MaxCallUs": 94.5
+      },
+      {
+        "Name": "Update/Sprinkler/Sprinkler",
+        "MsPerFrame": 0.0064,
+        "CallsPerFrame": 0.08,
+        "MaxCallUs": 138.4
+      },
+      {
+        "Name": "Update/SeedPlanter/Seed Planter",
+        "MsPerFrame": 0.0048,
+        "CallsPerFrame": 0.68,
+        "MaxCallUs": 40.2
+      },
+      {
+        "Name": "Runtime/PortableItemRenderer/Conveyor Item Render Dynamic",
+        "MsPerFrame": 0.0046,
+        "CallsPerFrame": 1.0,
+        "MaxCallUs": 17.0
+      },
+      {
+        "Name": "Runtime/PortableItemRenderer/Conveyor Item Dynamic Cache",
+        "MsPerFrame": 0.0046,
+        "CallsPerFrame": 1.0,
+        "MaxCallUs": 20.6
+      },
+      {
+        "Name": "Update/MiningMachine/Electric mining machine",
+        "MsPerFrame": 0.0046,
+        "CallsPerFrame": 0.63,
+        "MaxCallUs": 31.4
+      },
+      {
+        "Name": "Runtime/InstallationPlacementController/Installation Placement LateUpdate",
+        "MsPerFrame": 0.003,
+        "CallsPerFrame": 1.0,
+        "MaxCallUs": 42.0
+      },
+      {
+        "Name": "Runtime/PortableItemRenderer/Conveyor Item Dynamic ScheduleMatrices",
+        "MsPerFrame": 0.0026,
+        "CallsPerFrame": 1.0,
+        "MaxCallUs": 12.4
+      },
+      {
+        "Name": "Runtime/PortableItemRenderer/Conveyor Item Refresh Dynamic Set",
+        "MsPerFrame": 0.0023,
+        "CallsPerFrame": 1.0,
+        "MaxCallUs": 40.8
+      },
+      {
+        "Name": "Update/LoggingMachine/Logging machine",
+        "MsPerFrame": 0.002,
+        "CallsPerFrame": 0.17,
+        "MaxCallUs": 21.0
+      },
+      {
+        "Name": "Update/Fluidtank/Fluid tank",
+        "MsPerFrame": 0.0012,
+        "CallsPerFrame": 0.68,
+        "MaxCallUs": 5.9
+      },
+      {
+        "Name": "Update/OilDrillingMachine/Electric Oil machine",
+        "MsPerFrame": 0.0012,
+        "CallsPerFrame": 0.17,
+        "MaxCallUs": 9.5
+      },
+      {
+        "Name": "Runtime/ConveyorProcessLineRetries/Conveyor Process Line Retries",
+        "MsPerFrame": 0.0008,
+        "CallsPerFrame": 1.0,
+        "MaxCallUs": 23.8
+      },
+      {
+        "Name": "Runtime/ConveyorEnsureLineCache/Conveyor Ensure Line Cache",
+        "MsPerFrame": 0.0007,
+        "CallsPerFrame": 1.0,
+        "MaxCallUs": 1.9
+      },
+      {
+        "Name": "Runtime/ConveyorLineWakeRefresh/Conveyor Line Wake Refresh",
+        "MsPerFrame": 0.0007,
+        "CallsPerFrame": 0.02,
+        "MaxCallUs": 51.6
+      },
+      {
+        "Name": "Runtime/PortableItemRenderer/Conveyor Item Reconcile Dynamic Cache",
+        "MsPerFrame": 0.0004,
+        "CallsPerFrame": 0.1,
+        "MaxCallUs": 16.7
+      },
+      {
+        "Name": "Runtime/PortableItemRenderer/Conveyor Item Dynamic CompleteMatrices",
+        "MsPerFrame": 0.0002,
+        "CallsPerFrame": 0.84,
+        "MaxCallUs": 0.6
+      },
+      {
+        "Name": "Runtime/PortableItemRenderer/Conveyor Item Dynamic TrimCache",
+        "MsPerFrame": 0.0001,
+        "CallsPerFrame": 0.58,
+        "MaxCallUs": 1.0
+      }
+    ],
+    "Counters": {
+      "Frame/Fps": 58.55,
+      "ProfilerCPU/MainThreadMs": 17.836,
+      "ProfilerGPU/FrameGpuMs": 0.0,
+      "ProfilerRender/SetPassCalls": 387.078,
+      "ProfilerRender/Triangles": 4430641.041,
+      "ProfilerRender/ShadowCasters": 279.432,
+      "Virtualization/VirtualBeltTrackedTransformReads": 1282.0,
+      "Virtualization/VirtualBeltTrackedTransformUpdates": 0.0,
+      "Render/RenderedChunkSurfaces": 494.0,
+      "Conveyor/LoadedConveyorItems": 471.4
+    },
+    "Loops": {
+      "beltTryMoveAttempts": 219.561,
+      "beltTryMoveSuccesses": 0.183,
+      "beltStraightMoveAttempts": 0.24,
+      "beltStraightMoveSuccesses": 0.24,
+      "beltPlanMoveCalls": 10.25,
+      "beltActiveLoopIterations": 160.082
+    }
+  },
+  {
+    "Phase": "hide-belt-items",
+    "Samples": 25,
+    "From": "2026-09-07T01:52:09.044685+09:00",
+    "To": "2026-09-07T01:52:33.2890331+09:00",
+    "MeanFps": 76.92,
+    "MeanWindowMs": 13.072,
+    "MinFps": 63.9,
+    "MaxFps": 90.7,
+    "MedianWindowMs": 13.2,
+    "MaxWindowMs": 15.6,
+    "MovingPlayerSamples": 0,
+    "InstallationCounts": [
+      "463"
+    ],
+    "ItemMin": 471.0,
+    "ItemMax": 477.0,
+    "WorldTimeFrom": "18:35",
+    "WorldTimeTo": "18:59",
+    "ProfileSnapshots": 5,
+    "ProfileFrames": 144.0,
+    "Rows": [
+      {
+        "Name": "Belt/ActiveConveyor/Active Belt Tick",
+        "MsPerFrame": 4.036,
+        "CallsPerFrame": 1.0,
+        "MaxCallUs": 8095.9
+      },
+      {
+        "Name": "Runtime/ConveyorProcessWakeQueue/Conveyor Process Wake Queue",
+        "MsPerFrame": 3.9964,
+        "CallsPerFrame": 1.0,
+        "MaxCallUs": 7323.2
+      },
+      {
+        "Name": "Runtime/ConveyorWakeLine/Conveyor Wake Line",
+        "MsPerFrame": 1.855,
+        "CallsPerFrame": 89.86,
+        "MaxCallUs": 814.1
+      },
+      {
+        "Name": "Runtime/ConveyorWakeBlock/Conveyor Wake Block",
+        "MsPerFrame": 1.3042,
+        "CallsPerFrame": 41.29,
+        "MaxCallUs": 292.0
+      },
+      {
+        "Name": "Update/RobotArm/Robot arm",
+        "MsPerFrame": 0.8216,
+        "CallsPerFrame": 28.33,
+        "MaxCallUs": 4112.2
+      },
+      {
+        "Name": "Runtime/ConveyorWakeCornerGroup/Conveyor Wake Corner Group",
+        "MsPerFrame": 0.8049,
+        "CallsPerFrame": 35.13,
+        "MaxCallUs": 1066.2
+      },
+      {
+        "Name": "Runtime/ConveyorCornerGroupTick/Conveyor Corner Group Tick",
+        "MsPerFrame": 0.739,
+        "CallsPerFrame": 35.13,
+        "MaxCallUs": 1062.2
+      },
+      {
+        "Name": "Runtime/VirtualConveyorBeltRenderer/Virtual Belt Render",
+        "MsPerFrame": 0.504,
+        "CallsPerFrame": 1.0,
+        "MaxCallUs": 993.7
+      },
+      {
+        "Name": "Runtime/ConveyorLineNoMove/Conveyor Line No Move",
+        "MsPerFrame": 0.4188,
+        "CallsPerFrame": 16.13,
+        "MaxCallUs": 285.6
+      },
+      {
+        "Name": "Runtime/ConveyorLineMoveScan/Conveyor Line Move Scan",
+        "MsPerFrame": 0.1818,
+        "CallsPerFrame": 16.15,
+        "MaxCallUs": 721.7
+      },
+      {
+        "Name": "Runtime/ConveyorLineRetryWork/Conveyor Line Retry Work",
+        "MsPerFrame": 0.1816,
+        "CallsPerFrame": 16.17,
+        "MaxCallUs": 61.6
+      },
+      {
+        "Name": "Runtime/ConveyorLineBlockerScan/Conveyor Line Blocker Scan",
+        "MsPerFrame": 0.1332,
+        "CallsPerFrame": 16.15,
+        "MaxCallUs": 87.5
+      },
+      {
+        "Name": "Runtime/ConveyorCornerGroupCollect/Conveyor Corner Group Collect",
+        "MsPerFrame": 0.0476,
+        "CallsPerFrame": 35.13,
+        "MaxCallUs": 19.7
+      },
+      {
+        "Name": "Runtime/ConveyorSafetyScan/Conveyor Safety Scan",
+        "MsPerFrame": 0.0256,
+        "CallsPerFrame": 1.0,
+        "MaxCallUs": 753.7
+      },
+      {
+        "Name": "Belt/ConveyorDataMotion/Belt Data Motion",
+        "MsPerFrame": 0.0249,
+        "CallsPerFrame": 1.0,
+        "MaxCallUs": 499.5
+      },
+      {
+        "Name": "Update/Pump/Water pump",
+        "MsPerFrame": 0.0226,
+        "CallsPerFrame": 0.5,
+        "MaxCallUs": 116.1
+      },
+      {
+        "Name": "Update/InputOutputModule/Funance",
+        "MsPerFrame": 0.0154,
+        "CallsPerFrame": 0.62,
+        "MaxCallUs": 157.3
+      },
+      {
+        "Name": "Update/SteamGenerator/Steam generator",
+        "MsPerFrame": 0.0146,
+        "CallsPerFrame": 0.63,
+        "MaxCallUs": 58.0
+      },
+      {
+        "Name": "Update/Boiler/Boiler",
+        "MsPerFrame": 0.0126,
+        "CallsPerFrame": 0.25,
+        "MaxCallUs": 487.5
+      },
+      {
+        "Name": "Runtime/InstallationPlacementController/Installation Placement Update",
+        "MsPerFrame": 0.009,
+        "CallsPerFrame": 1.0,
+        "MaxCallUs": 16.2
+      },
+      {
+        "Name": "Runtime/ConveyorPromoteDeferredWakes/Conveyor Promote Deferred Wakes",
+        "MsPerFrame": 0.0077,
+        "CallsPerFrame": 1.0,
+        "MaxCallUs": 30.1
+      },
+      {
+        "Name": "Update/ProductionMachine/Production machine (MK2)",
+        "MsPerFrame": 0.0045,
+        "CallsPerFrame": 0.12,
+        "MaxCallUs": 63.4
+      },
+      {
+        "Name": "Update/ProductionMachine/Production machine (Mk1)",
+        "MsPerFrame": 0.0043,
+        "CallsPerFrame": 0.13,
+        "MaxCallUs": 54.5
+      },
+      {
+        "Name": "Update/Sprinkler/Sprinkler",
+        "MsPerFrame": 0.0037,
+        "CallsPerFrame": 0.05,
+        "MaxCallUs": 108.2
+      },
+      {
+        "Name": "Update/SeedPlanter/Seed Planter",
+        "MsPerFrame": 0.0029,
+        "CallsPerFrame": 0.46,
+        "MaxCallUs": 38.2
+      },
+      {
+        "Name": "Runtime/InstallationPlacementController/Installation Placement LateUpdate",
+        "MsPerFrame": 0.0025,
+        "CallsPerFrame": 1.0,
+        "MaxCallUs": 33.1
+      },
+      {
+        "Name": "Runtime/ConveyorLineWakeRefresh/Conveyor Line Wake Refresh",
+        "MsPerFrame": 0.0012,
+        "CallsPerFrame": 0.02,
+        "MaxCallUs": 86.4
+      },
+      {
+        "Name": "Update/MiningMachine/Electric mining machine",
+        "MsPerFrame": 0.0009,
+        "CallsPerFrame": 0.44,
+        "MaxCallUs": 4.7
+      },
+      {
+        "Name": "Update/LoggingMachine/Logging machine",
+        "MsPerFrame": 0.0009,
+        "CallsPerFrame": 0.11,
+        "MaxCallUs": 26.7
+      },
+      {
+        "Name": "Update/Fluidtank/Fluid tank",
+        "MsPerFrame": 0.0009,
+        "CallsPerFrame": 0.51,
+        "MaxCallUs": 5.1
+      },
+      {
+        "Name": "Runtime/ConveyorEnsureLineCache/Conveyor Ensure Line Cache",
+        "MsPerFrame": 0.0007,
+        "CallsPerFrame": 1.0,
+        "MaxCallUs": 1.8
+      },
+      {
+        "Name": "Update/OilDrillingMachine/Electric Oil machine",
+        "MsPerFrame": 0.0007,
+        "CallsPerFrame": 0.13,
+        "MaxCallUs": 8.5
+      },
+      {
+        "Name": "Runtime/ConveyorProcessLineRetries/Conveyor Process Line Retries",
+        "MsPerFrame": 0.0006,
+        "CallsPerFrame": 1.0,
+        "MaxCallUs": 3.6
+      }
+    ],
+    "Counters": {
+      "Frame/Fps": 81.702,
+      "ProfilerCPU/MainThreadMs": 12.295,
+      "ProfilerGPU/FrameGpuMs": 0.0,
+      "ProfilerRender/SetPassCalls": 139.44,
+      "ProfilerRender/Triangles": 1470346.138,
+      "ProfilerRender/ShadowCasters": 263.449,
+      "Virtualization/VirtualBeltTrackedTransformReads": 778.0,
+      "Virtualization/VirtualBeltTrackedTransformUpdates": 0.0,
+      "Render/RenderedChunkSurfaces": 28.0,
+      "Conveyor/LoadedConveyorItems": 473.8
+    },
+    "Loops": {
+      "beltTryMoveAttempts": 234.604,
+      "beltTryMoveSuccesses": 0.104,
+      "beltStraightMoveAttempts": 0.319,
+      "beltStraightMoveSuccesses": 0.319,
+      "beltPlanMoveCalls": 7.236,
+      "beltActiveLoopIterations": 166.507
+    }
+  },
+  {
+    "Phase": "hide-belts",
+    "Samples": 25,
+    "From": "2026-09-07T01:51:22.0119448+09:00",
+    "To": "2026-09-07T01:51:46.2810202+09:00",
+    "MeanFps": 81.48,
+    "MeanWindowMs": 12.344,
+    "MinFps": 68.9,
+    "MaxFps": 94.7,
+    "MedianWindowMs": 12.3,
+    "MaxWindowMs": 14.5,
+    "MovingPlayerSamples": 0,
+    "InstallationCounts": [
+      "463"
+    ],
+    "ItemMin": 473.0,
+    "ItemMax": 478.0,
+    "WorldTimeFrom": "17:48",
+    "WorldTimeTo": "18:12",
+    "ProfileSnapshots": 5,
+    "ProfileFrames": 213.0,
+    "Rows": [
+      {
+        "Name": "Belt/ActiveConveyor/Active Belt Tick",
+        "MsPerFrame": 4.056,
+        "CallsPerFrame": 1.0,
+        "MaxCallUs": 6055.5
+      },
+      {
+        "Name": "Runtime/ConveyorProcessWakeQueue/Conveyor Process Wake Queue",
+        "MsPerFrame": 4.0205,
+        "CallsPerFrame": 1.0,
+        "MaxCallUs": 6041.5
+      },
+      {
+        "Name": "Runtime/ConveyorWakeLine/Conveyor Wake Line",
+        "MsPerFrame": 1.8994,
+        "CallsPerFrame": 91.42,
+        "MaxCallUs": 499.7
+      },
+      {
+        "Name": "Runtime/ConveyorWakeBlock/Conveyor Wake Block",
+        "MsPerFrame": 1.3087,
+        "CallsPerFrame": 41.52,
+        "MaxCallUs": 239.5
+      },
+      {
+        "Name": "Update/RobotArm/Robot arm",
+        "MsPerFrame": 0.8859,
+        "CallsPerFrame": 29.54,
+        "MaxCallUs": 4941.9
+      },
+      {
+        "Name": "Runtime/ConveyorWakeCornerGroup/Conveyor Wake Corner Group",
+        "MsPerFrame": 0.7786,
+        "CallsPerFrame": 34.49,
+        "MaxCallUs": 567.0
+      },
+      {
+        "Name": "Runtime/ConveyorCornerGroupTick/Conveyor Corner Group Tick",
+        "MsPerFrame": 0.7139,
+        "CallsPerFrame": 34.49,
+        "MaxCallUs": 561.9
+      },
+      {
+        "Name": "Runtime/ConveyorLineNoMove/Conveyor Line No Move",
+        "MsPerFrame": 0.449,
+        "CallsPerFrame": 16.3,
+        "MaxCallUs": 184.0
+      },
+      {
+        "Name": "Runtime/ConveyorLineRetryWork/Conveyor Line Retry Work",
+        "MsPerFrame": 0.2017,
+        "CallsPerFrame": 16.34,
+        "MaxCallUs": 290.8
+      },
+      {
+        "Name": "Runtime/ConveyorLineMoveScan/Conveyor Line Move Scan",
+        "MsPerFrame": 0.183,
+        "CallsPerFrame": 16.31,
+        "MaxCallUs": 214.0
+      },
+      {
+        "Name": "Runtime/ConveyorLineBlockerScan/Conveyor Line Blocker Scan",
+        "MsPerFrame": 0.1476,
+        "CallsPerFrame": 16.31,
+        "MaxCallUs": 79.9
+      },
+      {
+        "Name": "Runtime/PortableItemRenderer/Conveyor Item Render",
+        "MsPerFrame": 0.0736,
+        "CallsPerFrame": 1.0,
+        "MaxCallUs": 333.9
+      },
+      {
+        "Name": "Runtime/PortableItemRenderer/Conveyor Item Rebuild",
+        "MsPerFrame": 0.0649,
+        "CallsPerFrame": 1.0,
+        "MaxCallUs": 1013.7
+      },
+      {
+        "Name": "Runtime/ConveyorCornerGroupCollect/Conveyor Corner Group Collect",
+        "MsPerFrame": 0.047,
+        "CallsPerFrame": 34.49,
+        "MaxCallUs": 64.1
+      },
+      {
+        "Name": "Runtime/PortableItemRenderer/Conveyor Item Rebuild Dynamic",
+        "MsPerFrame": 0.0428,
+        "CallsPerFrame": 1.0,
+        "MaxCallUs": 264.9
+      },
+      {
+        "Name": "Runtime/PortableItemRenderer/Conveyor Item Reconcile Static Cache",
+        "MsPerFrame": 0.0362,
+        "CallsPerFrame": 0.05,
+        "MaxCallUs": 864.5
+      },
+      {
+        "Name": "Belt/ConveyorDataMotion/Belt Data Motion",
+        "MsPerFrame": 0.0284,
+        "CallsPerFrame": 1.0,
+        "MaxCallUs": 543.1
+      },
+      {
+        "Name": "Runtime/PortableItemRenderer/Conveyor Item Render Static",
+        "MsPerFrame": 0.0258,
+        "CallsPerFrame": 1.0,
+        "MaxCallUs": 94.4
+      },
+      {
+        "Name": "Update/Pump/Water pump",
+        "MsPerFrame": 0.0223,
+        "CallsPerFrame": 0.49,
+        "MaxCallUs": 154.8
+      },
+      {
+        "Name": "Runtime/ConveyorSafetyScan/Conveyor Safety Scan",
+        "MsPerFrame": 0.0216,
+        "CallsPerFrame": 1.0,
+        "MaxCallUs": 622.5
+      },
+      {
+        "Name": "Update/InputOutputModule/Funance",
+        "MsPerFrame": 0.0195,
+        "CallsPerFrame": 0.61,
+        "MaxCallUs": 534.3
+      },
+      {
+        "Name": "Runtime/PortableItemRenderer/Conveyor Item Dynamic AppendData",
+        "MsPerFrame": 0.018,
+        "CallsPerFrame": 0.72,
+        "MaxCallUs": 135.3
+      },
+      {
+        "Name": "Update/SteamGenerator/Steam generator",
+        "MsPerFrame": 0.0178,
+        "CallsPerFrame": 0.61,
+        "MaxCallUs": 177.9
+      },
+      {
+        "Name": "Runtime/PortableItemRenderer/Conveyor Item Dynamic Cull",
+        "MsPerFrame": 0.013,
+        "CallsPerFrame": 1.0,
+        "MaxCallUs": 122.4
+      },
+      {
+        "Name": "Runtime/InstallationPlacementController/Installation Placement Update",
+        "MsPerFrame": 0.0092,
+        "CallsPerFrame": 1.0,
+        "MaxCallUs": 44.2
+      },
+      {
+        "Name": "Update/Boiler/Boiler",
+        "MsPerFrame": 0.0079,
+        "CallsPerFrame": 0.25,
+        "MaxCallUs": 68.3
+      },
+      {
+        "Name": "Runtime/ConveyorPromoteDeferredWakes/Conveyor Promote Deferred Wakes",
+        "MsPerFrame": 0.0078,
+        "CallsPerFrame": 1.0,
+        "MaxCallUs": 30.6
+      },
+      {
+        "Name": "Runtime/PortableItemRenderer/Conveyor Item Refresh Active Set",
+        "MsPerFrame": 0.007,
+        "CallsPerFrame": 1.0,
+        "MaxCallUs": 132.5
+      },
+      {
+        "Name": "Runtime/PortableItemRenderer/Conveyor Item Refresh Dirty Cache",
+        "MsPerFrame": 0.0068,
+        "CallsPerFrame": 1.0,
+        "MaxCallUs": 114.1
+      },
+      {
+        "Name": "Update/ProductionMachine/Production machine (Mk1)",
+        "MsPerFrame": 0.0062,
+        "CallsPerFrame": 0.15,
+        "MaxCallUs": 350.7
+      },
+      {
+        "Name": "Update/ProductionMachine/Production machine (MK2)",
+        "MsPerFrame": 0.0053,
+        "CallsPerFrame": 0.11,
+        "MaxCallUs": 109.3
+      },
+      {
+        "Name": "Update/MiningMachine/Electric mining machine",
+        "MsPerFrame": 0.0052,
+        "CallsPerFrame": 0.43,
+        "MaxCallUs": 910.6
+      },
+      {
+        "Name": "Runtime/PortableItemRenderer/Conveyor Item Dynamic SyncMatrix",
+        "MsPerFrame": 0.0034,
+        "CallsPerFrame": 0.72,
+        "MaxCallUs": 24.7
+      },
+      {
+        "Name": "Update/Sprinkler/Sprinkler",
+        "MsPerFrame": 0.0034,
+        "CallsPerFrame": 0.05,
+        "MaxCallUs": 99.8
+      },
+      {
+        "Name": "Runtime/PortableItemRenderer/Conveyor Item Render Dynamic",
+        "MsPerFrame": 0.0028,
+        "CallsPerFrame": 1.0,
+        "MaxCallUs": 10.1
+      },
+      {
+        "Name": "Update/SeedPlanter/Seed Planter",
+        "MsPerFrame": 0.0027,
+        "CallsPerFrame": 0.46,
+        "MaxCallUs": 16.4
+      },
+      {
+        "Name": "Runtime/InstallationPlacementController/Installation Placement LateUpdate",
+        "MsPerFrame": 0.0026,
+        "CallsPerFrame": 1.0,
+        "MaxCallUs": 43.6
+      },
+      {
+        "Name": "Runtime/PortableItemRenderer/Conveyor Item Dynamic Cache",
+        "MsPerFrame": 0.0021,
+        "CallsPerFrame": 0.72,
+        "MaxCallUs": 18.7
+      },
+      {
+        "Name": "Runtime/PortableItemRenderer/Conveyor Item Refresh Dynamic Set",
+        "MsPerFrame": 0.0019,
+        "CallsPerFrame": 1.0,
+        "MaxCallUs": 31.5
+      },
+      {
+        "Name": "Runtime/PortableItemRenderer/Conveyor Item Dynamic ScheduleMatrices",
+        "MsPerFrame": 0.0016,
+        "CallsPerFrame": 1.0,
+        "MaxCallUs": 14.1
+      },
+      {
+        "Name": "Update/Fluidtank/Fluid tank",
+        "MsPerFrame": 0.0009,
+        "CallsPerFrame": 0.47,
+        "MaxCallUs": 6.3
+      },
+      {
+        "Name": "Update/LoggingMachine/Logging machine",
+        "MsPerFrame": 0.0008,
+        "CallsPerFrame": 0.11,
+        "MaxCallUs": 19.5
+      },
+      {
+        "Name": "Runtime/ConveyorEnsureLineCache/Conveyor Ensure Line Cache",
+        "MsPerFrame": 0.0007,
+        "CallsPerFrame": 1.0,
+        "MaxCallUs": 11.0
+      },
+      {
+        "Name": "Update/OilDrillingMachine/Electric Oil machine",
+        "MsPerFrame": 0.0007,
+        "CallsPerFrame": 0.12,
+        "MaxCallUs": 9.6
+      },
+      {
+        "Name": "Runtime/ConveyorProcessLineRetries/Conveyor Process Line Retries",
+        "MsPerFrame": 0.0006,
+        "CallsPerFrame": 1.0,
+        "MaxCallUs": 4.5
+      },
+      {
+        "Name": "Runtime/PortableItemRenderer/Conveyor Item Reconcile Dynamic Cache",
+        "MsPerFrame": 0.0005,
+        "CallsPerFrame": 0.09,
+        "MaxCallUs": 25.5
+      },
+      {
+        "Name": "Runtime/PortableItemRenderer/Conveyor Item Dynamic CompleteMatrices",
+        "MsPerFrame": 0.0002,
+        "CallsPerFrame": 0.77,
+        "MaxCallUs": 0.6
+      },
+      {
+        "Name": "Runtime/PortableItemRenderer/Conveyor Item Dynamic TrimCache",
+        "MsPerFrame": 0.0001,
+        "CallsPerFrame": 0.25,
+        "MaxCallUs": 0.9
+      },
+      {
+        "Name": "Runtime/ConveyorLineWakeRefresh/Conveyor Line Wake Refresh",
+        "MsPerFrame": 0.0001,
+        "CallsPerFrame": 0.01,
+        "MaxCallUs": 10.4
+      }
+    ],
+    "Counters": {
+      "Frame/Fps": 83.16,
+      "ProfilerCPU/MainThreadMs": 11.996,
+      "ProfilerGPU/FrameGpuMs": 0.0,
+      "ProfilerRender/SetPassCalls": 118.395,
+      "ProfilerRender/Triangles": 1329042.592,
+      "ProfilerRender/ShadowCasters": 264.193,
+      "Virtualization/VirtualBeltTrackedTransformReads": 0.0,
+      "Virtualization/VirtualBeltTrackedTransformUpdates": 0.0,
+      "Render/RenderedChunkSurfaces": 28.0,
+      "Conveyor/LoadedConveyorItems": 475.8
+    },
+    "Loops": {
+      "beltTryMoveAttempts": 236.47,
+      "beltTryMoveSuccesses": 0.132,
+      "beltStraightMoveAttempts": 0.005,
+      "beltStraightMoveSuccesses": 0.005,
+      "beltPlanMoveCalls": 7.526,
+      "beltActiveLoopIterations": 167.681
+    }
+  },
+  {
+    "Phase": "profiler-ui-10s",
+    "Samples": 30,
+    "From": "2026-09-07T01:57:20.6948202+09:00",
+    "To": "2026-09-07T01:57:50.0232608+09:00",
+    "MeanFps": 75.19,
+    "MeanWindowMs": 13.367,
+    "MinFps": 63.9,
+    "MaxFps": 83.9,
+    "MedianWindowMs": 13.5,
+    "MaxWindowMs": 15.7,
+    "MovingPlayerSamples": 0,
+    "InstallationCounts": [
+      "463"
+    ],
+    "ItemMin": 477.0,
+    "ItemMax": 483.0,
+    "WorldTimeFrom": "23:47",
+    "WorldTimeTo": "00:16",
+    "ProfileSnapshots": 0,
+    "ProfileFrames": null,
+    "Rows": [],
+    "Counters": {},
+    "Loops": {}
+  },
+  {
+    "Phase": "profiling-off-1",
+    "Samples": 25,
+    "From": "2026-09-07T01:49:30.6270846+09:00",
+    "To": "2026-09-07T01:49:54.8677524+09:00",
+    "MeanFps": 82.79,
+    "MeanWindowMs": 12.152,
+    "MinFps": 65.4,
+    "MaxFps": 92.0,
+    "MedianWindowMs": 12.0,
+    "MaxWindowMs": 15.3,
+    "MovingPlayerSamples": 0,
+    "InstallationCounts": [
+      "463"
+    ],
+    "ItemMin": 481.0,
+    "ItemMax": 488.0,
+    "WorldTimeFrom": "15:57",
+    "WorldTimeTo": "16:21",
+    "ProfileSnapshots": 0,
+    "ProfileFrames": null,
+    "Rows": [],
+    "Counters": {},
+    "Loops": {}
+  }
+]

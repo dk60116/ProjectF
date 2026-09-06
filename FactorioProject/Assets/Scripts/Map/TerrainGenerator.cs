@@ -211,6 +211,7 @@ public partial class TerrainGenerator : MonoBehaviour
         public bool isCycle;
         public bool simulationCacheValid;
         public readonly List<BlockHandle> blockHandles = new List<BlockHandle>();
+        public BlockDataStore.RuntimeProxyCache[] runtimeBlocks = Array.Empty<BlockDataStore.RuntimeProxyCache>();
         public int[] frontLaneIndices = Array.Empty<int>();
         public int[] backLaneIndices = Array.Empty<int>();
         public float[] withinPathLengths = Array.Empty<float>();
@@ -864,6 +865,7 @@ public partial class TerrainGenerator : MonoBehaviour
     private readonly Queue<int> conveyorCornerGroupWakeQueue = new Queue<int>();
     private readonly HashSet<int> conveyorCornerGroupWakeQueued = new HashSet<int>();
     private readonly Dictionary<int, List<BlockHandle>> conveyorCornerGroupWakeBlocksById = new Dictionary<int, List<BlockHandle>>();
+    private readonly Stack<List<BlockHandle>> conveyorCornerGroupWakeBlockPool = new Stack<List<BlockHandle>>();
     private readonly HashSet<BlockHandle> conveyorCornerGroupWakeQueuedBlocks = new HashSet<BlockHandle>();
     private readonly List<ConveyorCornerGroup> conveyorCornerGroups = new List<ConveyorCornerGroup>();
     private readonly Dictionary<int, ConveyorCornerGroup> conveyorCornerGroupsById = new Dictionary<int, ConveyorCornerGroup>();

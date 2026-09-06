@@ -73,6 +73,16 @@ public readonly struct BlockCellData
 /// </summary>
 public sealed class BlockDataStore : IEnumerable<KeyValuePair<Vector2Int, Block>>
 {
+    // A transport line keeps these in slot order. Binding changes invalidate
+    // references even when the removed Block still retains its old handle.
+    internal struct RuntimeProxyCache
+    {
+        internal BlockDataStore Owner;
+        internal BlockHandle Handle;
+        internal ulong Version;
+        internal Block Proxy;
+    }
+
     internal sealed class ChunkData
     {
         public readonly Vector2Int Coordinate;
@@ -109,6 +119,7 @@ public sealed class BlockDataStore : IEnumerable<KeyValuePair<Vector2Int, Block>
     private int registeredCellCount;
     private int runtimeProxyCount;
     private int runtimeSimulationStateCount;
+    private ulong runtimeProxyVersion;
     private uint nextChunkGeneration = 1;
     private bool hasRegisteredBounds;
     private bool registeredBoundsDirty;
@@ -164,6 +175,7 @@ public sealed class BlockDataStore : IEnumerable<KeyValuePair<Vector2Int, Block>
         runtimeProxyCount -= chunk.RuntimeProxyCount;
         runtimeSimulationStateCount -= chunk.RuntimeSimulationStates.Count;
         chunks.Remove(chunkCoordinate);
+        unchecked { runtimeProxyVersion++; }
         if (chunk.RegisteredCellCount > 0)
         {
             registeredBoundsDirty = true;
@@ -346,8 +358,9 @@ public sealed class BlockDataStore : IEnumerable<KeyValuePair<Vector2Int, Block>
             runtimeProxyCount++;
         }
 
-        SetRuntimeProxy(chunk, handle.LocalIndex, block);
+        chunk.RuntimeProxies[handle.LocalIndex] = block;
         chunk.Cells[handle.LocalIndex].Flags |= BlockCellFlags.HasRuntimeProxy;
+        unchecked { runtimeProxyVersion++; }
         return true;
     }
 
@@ -426,6 +439,30 @@ public sealed class BlockDataStore : IEnumerable<KeyValuePair<Vector2Int, Block>
         return false;
     }
 
+    internal bool TryGetValue(BlockHandle handle, ref RuntimeProxyCache cache, out Block block)
+    {
+        if (ReferenceEquals(cache.Owner, this)
+            && cache.Version == runtimeProxyVersion
+            && cache.Handle == handle
+            && cache.Proxy != null)
+        {
+            block = cache.Proxy;
+            return true;
+        }
+
+        // Do not cache misses or Unity's destroyed-object null. The original
+        // lookup must still clean stale proxy flags and counts in that case.
+        bool found = TryGetValue(handle, out block);
+        cache = new RuntimeProxyCache
+        {
+            Owner = this,
+            Handle = handle,
+            Version = runtimeProxyVersion,
+            Proxy = block
+        };
+        return found;
+    }
+
     public bool Remove(Vector2Int coordinate)
     {
         if (!TryGetChunkAndLocalIndex(coordinate, out ChunkData chunk, out int localIndex)
@@ -499,6 +536,7 @@ public sealed class BlockDataStore : IEnumerable<KeyValuePair<Vector2Int, Block>
     public void Clear()
     {
         chunks.Clear();
+        unchecked { runtimeProxyVersion++; }
         registeredCellCount = 0;
         runtimeProxyCount = 0;
         runtimeSimulationStateCount = 0;
@@ -611,6 +649,7 @@ public sealed class BlockDataStore : IEnumerable<KeyValuePair<Vector2Int, Block>
         chunk.Cells[localIndex].Flags &= ~BlockCellFlags.HasRuntimeProxy;
         chunk.RuntimeProxyCount--;
         runtimeProxyCount--;
+        unchecked { runtimeProxyVersion++; }
     }
 
     private static Block GetRuntimeProxy(ChunkData chunk, int localIndex)
@@ -618,11 +657,6 @@ public sealed class BlockDataStore : IEnumerable<KeyValuePair<Vector2Int, Block>
         return chunk.RuntimeProxies.TryGetValue(localIndex, out Block block)
             ? block
             : null;
-    }
-
-    private static void SetRuntimeProxy(ChunkData chunk, int localIndex, Block block)
-    {
-        chunk.RuntimeProxies[localIndex] = block;
     }
 
     public struct Enumerator : IEnumerator<KeyValuePair<Vector2Int, Block>>

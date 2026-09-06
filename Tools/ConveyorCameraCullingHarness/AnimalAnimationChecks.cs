@@ -54,6 +54,7 @@ public partial class AnimalControllerProbe
     private bool executionActive;
     public bool IsExternallyControlled, waitingForStandUp, movingToActivity, hasTarget;
     public AnimalAIState currentState;
+    public float stateTimeRemaining;
     public int ScheduleResets, PresentationResets;
     private void ResetScheduledTick() => ScheduleResets++;
     private void ResetPresentation() => PresentationResets++;
@@ -80,7 +81,7 @@ public static class AnimalAnimationChecks
         controller.Animate();
         Checks.Require(animal.anim.enabled && animal.anim.ParameterWrites > 0 && animal.anim.LastState == 0,
             "active stationary Idle animals retain normal animation");
-        controller.currentState = AnimalAIState.Eat; controller.Animate();
+        controller.currentState = AnimalAIState.Eat; controller.stateTimeRemaining = 1f; controller.Animate();
         Checks.Require(animal.anim.enabled && animal.anim.LastState == 11, "active feeding continues");
         controller.currentState = AnimalAIState.Rest; controller.Animate();
         Checks.Require(animal.anim.enabled && animal.anim.LastState == 16, "active resting continues");

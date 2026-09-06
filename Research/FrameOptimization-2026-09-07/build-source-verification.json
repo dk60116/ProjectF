@@ -1,0 +1,50 @@
+[
+  {
+    "Path": "C:\\Git\\ProjectF\\FactorioProject\\Assets\\Scripts\\Map\\TerrainGenerator.Conveyors.cs",
+    "PdbHash": "55DEDAF5E6AC1E018E5E854A183106F750B2B0357242CCA2B6C9DC1420F1DCF3",
+    "CurrentHash": "55DEDAF5E6AC1E018E5E854A183106F750B2B0357242CCA2B6C9DC1420F1DCF3",
+    "Equal": true
+  },
+  {
+    "Path": "C:\\Git\\ProjectF\\FactorioProject\\Assets\\Scripts\\Manager\\GameManager.cs",
+    "PdbHash": "57D3AEE3242FDA49F59E54DE6871CFFC1EB7C3FDBF751036EA6269B89A090445",
+    "CurrentHash": "57D3AEE3242FDA49F59E54DE6871CFFC1EB7C3FDBF751036EA6269B89A090445",
+    "Equal": true
+  },
+  {
+    "Path": "C:\\Git\\ProjectF\\FactorioProject\\Assets\\Scripts\\Manager\\MapObjectTickManager.cs",
+    "PdbHash": "E5013289D385BEB01609A664A66369DD218E26BFEF7A3AD8FF547C8AECABC44D",
+    "CurrentHash": "E5013289D385BEB01609A664A66369DD218E26BFEF7A3AD8FF547C8AECABC44D",
+    "Equal": true
+  },
+  {
+    "Path": "C:\\Git\\ProjectF\\FactorioProject\\Assets\\Scripts\\Map\\PortableItemRenderer.cs",
+    "PdbHash": "6D49CF9E2C2BE17CDF391309354E7F256651F22BF9C807D2F1F4DEE1EBDB7CE0",
+    "CurrentHash": "6D49CF9E2C2BE17CDF391309354E7F256651F22BF9C807D2F1F4DEE1EBDB7CE0",
+    "Equal": true
+  },
+  {
+    "Path": "C:\\Git\\ProjectF\\FactorioProject\\Assets\\Scripts\\Map\\VirtualConveyorBeltRenderer.cs",
+    "PdbHash": "DA20771199541C6005B919D32E47C934CD77B460DE3A3166219A5004D58CBCA7",
+    "CurrentHash": "DA20771199541C6005B919D32E47C934CD77B460DE3A3166219A5004D58CBCA7",
+    "Equal": true
+  },
+  {
+    "Path": "C:\\Git\\ProjectF\\FactorioProject\\Assets\\Scripts\\Object\\MapObj\\InstallationObject\\InputOutputModule.cs",
+    "PdbHash": "9BFF520A827B4F91CA4106E7347DC909AE068EBB2A7674EB5708E316CBAFB12A",
+    "CurrentHash": "9BFF520A827B4F91CA4106E7347DC909AE068EBB2A7674EB5708E316CBAFB12A",
+    "Equal": true
+  },
+  {
+    "Path": "C:\\Git\\ProjectF\\FactorioProject\\Assets\\Scripts\\Object\\MapObj\\InstallationObject\\InstallationPlacementController.cs",
+    "PdbHash": "1DA0745D3095245529EDB7674F6CE4AE179F19039FEFFDC14A15C09B94912E72",
+    "CurrentHash": "1DA0745D3095245529EDB7674F6CE4AE179F19039FEFFDC14A15C09B94912E72",
+    "Equal": true
+  },
+  {
+    "Path": "C:\\Git\\ProjectF\\FactorioProject\\Assets\\Scripts\\Object\\MapObj\\InstallationObject\\RobotArm.cs",
+    "PdbHash": "74B2E4E0BEE69DD0CBA1C33BBB51A867C759CD5FF4C119360A0D1E397F0C3353",
+    "CurrentHash": "74B2E4E0BEE69DD0CBA1C33BBB51A867C759CD5FF4C119360A0D1E397F0C3353",
+    "Equal": true
+  }
+]

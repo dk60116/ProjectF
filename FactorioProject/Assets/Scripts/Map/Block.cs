@@ -4101,21 +4101,6 @@ public partial class Block : BaseObject
         int destinationLaneIndex,
         float pathLength)
     {
-        bool moved = TryMoveStraightConveyorDataLaneToCachedCore(
-            destinationBlock,
-            sourceLaneIndex,
-            destinationLaneIndex,
-            pathLength);
-        MapObjectTickProfiler.AddBeltStraightMoveAttempt(moved);
-        return moved;
-    }
-
-    private bool TryMoveStraightConveyorDataLaneToCachedCore(
-        Block destinationBlock,
-        int sourceLaneIndex,
-        int destinationLaneIndex,
-        float pathLength)
-    {
         if (destinationBlock == null
             || !IsValidConveyorLaneIndex(sourceLaneIndex)
             || !destinationBlock.IsValidConveyorLaneIndex(destinationLaneIndex)
@@ -4172,21 +4157,10 @@ public partial class Block : BaseObject
             destinationBlock.InitializeConveyorDataMotionTiming(dataMotionState, 0f);
         destinationBlock.MarkConveyorItemVisualDirty();
         destinationBlock.MarkConveyorItemMovedThisFrame(destinationLaneIndex);
+        // Line callers previously ran a separate CanMove guard before recording
+        // an attempt. Keep rejected candidates uncounted after merging the guard.
+        MapObjectTickProfiler.AddBeltStraightMoveAttempt(true);
         return true;
-    }
-
-    public bool CanMoveStraightConveyorDataLaneToCached(
-        Block destinationBlock,
-        int sourceLaneIndex,
-        int destinationLaneIndex)
-    {
-        return destinationBlock != null
-            && IsValidConveyorLaneIndex(sourceLaneIndex)
-            && destinationBlock.IsValidConveyorLaneIndex(destinationLaneIndex)
-            && !IsConveyorDestinationLaneOccupied(destinationBlock, destinationLaneIndex)
-            && HasStraightConveyorDataItemAtLane(sourceLaneIndex)
-            && !WasConveyorItemMovedThisFrame(sourceLaneIndex)
-            && IsConveyorItemReadyToMoveAtLane(sourceLaneIndex);
     }
 
     public bool TryGetStraightConveyorLineMotionData(

@@ -594,8 +594,9 @@ public static class MapObjectTickProfiler
         new Dictionary<ProfilerGroupKey, GroupStats>(128);
     private static readonly Dictionary<ProfilerGroupKey, GroupStats> activeUpdateStatsByKey =
         new Dictionary<ProfilerGroupKey, GroupStats>(128);
-    private static readonly Dictionary<object, TargetDescriptor> targetDescriptorByObject =
-        new Dictionary<object, TargetDescriptor>(512);
+    private static readonly Stack<GroupStats> unusedGroupStats = new Stack<GroupStats>(128);
+    private static readonly Dictionary<object, ProfilerGroupKey> updateGroupKeyByObject =
+        new Dictionary<object, ProfilerGroupKey>(512);
     private static readonly List<GroupStats> snapshotRows = new List<GroupStats>(128);
     private static readonly List<MapObjectRuntimeCounter> runtimeCounters = new List<MapObjectRuntimeCounter>(96);
     private static readonly StringBuilder jsonBuilder = new StringBuilder(8192);
@@ -639,38 +640,58 @@ public static class MapObjectTickProfiler
 
     public static void EndUpdateSample(object target, long startTimestamp)
     {
-        RecordSample("Update", target, startTimestamp);
+        if (target != null)
+        {
+            ProfilerGroupKey key = ResolveUpdateGroupKey(target);
+            long elapsedTicks = Math.Max(0L, Stopwatch.GetTimestamp() - startTimestamp);
+            RecordSample(key, elapsedTicks);
+        }
     }
 
     public static void EndNamedSample(string kind, string typeName, string itemName, long startTimestamp)
     {
         string resolvedTypeName = string.IsNullOrWhiteSpace(typeName) ? "Unknown" : typeName;
-        RecordSample(
-            string.IsNullOrWhiteSpace(kind) ? "Update" : kind,
+        string resolvedKind = string.IsNullOrWhiteSpace(kind) ? "Update" : kind;
+        string resolvedItemName = string.IsNullOrWhiteSpace(itemName) ? resolvedTypeName : itemName;
+        // Finish timing before hashing the group key, as with object samples.
+        long elapsedTicks = Math.Max(0L, Stopwatch.GetTimestamp() - startTimestamp);
+        ProfilerGroupKey key = new ProfilerGroupKey(
+            resolvedKind,
             resolvedTypeName,
             -1,
-            string.IsNullOrWhiteSpace(itemName) ? resolvedTypeName : itemName,
-            startTimestamp);
+            resolvedItemName);
+        RecordSample(key, elapsedTicks);
     }
 
     public static void SetActiveTickCount(int updateCount)
     {
         activeUpdateTickCount = Mathf.Max(0, updateCount);
-        activeUpdateStatsByKey.Clear();
+        RecycleGroupStats(activeUpdateStatsByKey);
     }
 
     public static void SetActiveUpdateTargets(ICollection<IMapObjectUpdateTick> updateTicks)
     {
-        activeUpdateStatsByKey.Clear();
+        RecycleGroupStats(activeUpdateStatsByKey);
         activeUpdateTickCount = updateTicks != null ? Mathf.Max(0, updateTicks.Count) : 0;
         if (updateTicks == null || updateTicks.Count <= 0)
         {
             return;
         }
 
-        foreach (IMapObjectUpdateTick tick in updateTicks)
+        // The manager supplies a HashSet. Keep its struct enumerator unboxed.
+        if (updateTicks is HashSet<IMapObjectUpdateTick> tickSet)
         {
-            RecordActiveTarget("Update", tick);
+            foreach (IMapObjectUpdateTick tick in tickSet)
+            {
+                RecordActiveTarget(tick);
+            }
+        }
+        else
+        {
+            foreach (IMapObjectUpdateTick tick in updateTicks)
+            {
+                RecordActiveTarget(tick);
+            }
         }
     }
 
@@ -820,7 +841,8 @@ public static class MapObjectTickProfiler
     {
         groupStatsByKey.Clear();
         activeUpdateStatsByKey.Clear();
-        targetDescriptorByObject.Clear();
+        unusedGroupStats.Clear();
+        updateGroupKeyByObject.Clear();
         snapshotRows.Clear();
         runtimeCounters.Clear();
         jsonBuilder.Length = 0;
@@ -960,7 +982,7 @@ public static class MapObjectTickProfiler
         jsonBuilder.Append("]}");
         string json = jsonBuilder.ToString();
 
-        groupStatsByKey.Clear();
+        RecycleGroupStats(groupStatsByKey);
         snapshotRows.Clear();
         runtimeCounters.Clear();
         windowStartTime = now;
@@ -983,8 +1005,8 @@ public static class MapObjectTickProfiler
 
         if (!enabled)
         {
-            activeUpdateStatsByKey.Clear();
-            targetDescriptorByObject.Clear();
+            RecycleGroupStats(activeUpdateStatsByKey);
+            updateGroupKeyByObject.Clear();
         }
 
         return json;
@@ -996,68 +1018,27 @@ public static class MapObjectTickProfiler
         return loopsPerFrame.ToString("0.###", CultureInfo.InvariantCulture);
     }
 
-    private static void RecordSample(string kind, object target, long startTimestamp)
+    private static void RecordActiveTarget(object target)
     {
         if (target == null)
         {
             return;
         }
 
-        RecordSample(kind, ResolveTargetDescriptor(target), startTimestamp);
-    }
-
-    private static void RecordActiveTarget(string kind, object target)
-    {
-        if (target == null)
-        {
-            return;
-        }
-
-        TargetDescriptor descriptor = ResolveTargetDescriptor(target);
-        if (descriptor == null)
-        {
-            return;
-        }
-
-        string resolvedKind = string.IsNullOrWhiteSpace(kind) ? "Update" : kind;
-        ProfilerGroupKey key = BuildGroupKey(
-            resolvedKind,
-            descriptor.TypeName,
-            descriptor.ItemId,
-            descriptor.ItemName);
+        ProfilerGroupKey key = ResolveUpdateGroupKey(target);
         if (!activeUpdateStatsByKey.TryGetValue(key, out GroupStats stats))
         {
-            stats = new GroupStats
-            {
-                Kind = resolvedKind,
-                TypeName = descriptor.TypeName,
-                ItemId = descriptor.ItemId,
-                ItemName = descriptor.ItemName
-            };
+            stats = AcquireGroupStats(key);
             activeUpdateStatsByKey[key] = stats;
         }
 
         stats.ActiveCount++;
     }
 
-    private static void RecordSample(string kind, TargetDescriptor descriptor, long startTimestamp)
-    {
-        if (descriptor == null)
-        {
-            return;
-        }
-
-        RecordSample(kind, descriptor.TypeName, descriptor.ItemId, descriptor.ItemName, startTimestamp);
-    }
-
     private static void RecordSample(
-        string kind,
-        string typeName,
-        int itemId,
-        string itemName,
-        long startTimestamp)
+        ProfilerGroupKey key,
+        long elapsedTicks)
     {
-        long elapsedTicks = Math.Max(0L, Stopwatch.GetTimestamp() - startTimestamp);
         if (elapsedTicks <= 0L)
         {
             return;
@@ -1068,16 +1049,9 @@ public static class MapObjectTickProfiler
             windowStartTime = Time.unscaledTime;
         }
 
-        ProfilerGroupKey key = BuildGroupKey(kind, typeName, itemId, itemName);
         if (!groupStatsByKey.TryGetValue(key, out GroupStats stats))
         {
-            stats = new GroupStats
-            {
-                Kind = kind,
-                TypeName = typeName,
-                ItemId = itemId,
-                ItemName = itemName
-            };
+            stats = AcquireGroupStats(key);
             groupStatsByKey[key] = stats;
         }
 
@@ -1089,16 +1063,36 @@ public static class MapObjectTickProfiler
         }
     }
 
-    private static ProfilerGroupKey BuildGroupKey(string kind, string typeName, int itemId, string itemName)
+    private static GroupStats AcquireGroupStats(ProfilerGroupKey key)
     {
-        return new ProfilerGroupKey(kind, typeName, itemId, itemName);
+        GroupStats stats = unusedGroupStats.Count > 0 ? unusedGroupStats.Pop() : new GroupStats();
+        stats.Kind = key.Kind;
+        stats.TypeName = key.TypeName;
+        stats.ItemId = key.ItemId;
+        stats.ItemName = key.ItemName;
+        stats.ActiveCount = 0;
+        stats.SampleCount = 0L;
+        stats.TotalStopwatchTicks = 0L;
+        stats.MaxStopwatchTicks = 0L;
+        return stats;
     }
 
-    private static TargetDescriptor ResolveTargetDescriptor(object target)
+    private static void RecycleGroupStats(Dictionary<ProfilerGroupKey, GroupStats> groups)
     {
-        if (targetDescriptorByObject.TryGetValue(target, out TargetDescriptor descriptor))
+        // Preserve the existing clear/reinsert order, including equal-cost rows.
+        foreach (KeyValuePair<ProfilerGroupKey, GroupStats> pair in groups)
         {
-            return descriptor;
+            unusedGroupStats.Push(pair.Value);
+        }
+
+        groups.Clear();
+    }
+
+    private static ProfilerGroupKey ResolveUpdateGroupKey(object target)
+    {
+        if (updateGroupKeyByObject.TryGetValue(target, out ProfilerGroupKey key))
+        {
+            return key;
         }
 
         Type type = target.GetType();
@@ -1115,14 +1109,13 @@ public static class MapObjectTickProfiler
             }
         }
 
-        descriptor = new TargetDescriptor
-        {
-            TypeName = string.IsNullOrWhiteSpace(typeName) ? "Unknown" : typeName,
-            ItemId = itemId,
-            ItemName = string.IsNullOrWhiteSpace(itemName) ? typeName : itemName
-        };
-        targetDescriptorByObject[target] = descriptor;
-        return descriptor;
+        key = new ProfilerGroupKey(
+            "Update",
+            string.IsNullOrWhiteSpace(typeName) ? "Unknown" : typeName,
+            itemId,
+            string.IsNullOrWhiteSpace(itemName) ? typeName : itemName);
+        updateGroupKeyByObject[target] = key;
+        return key;
     }
 
     private static bool TryResolveItemName(int itemId, out string itemName)
@@ -1234,13 +1227,6 @@ public static class MapObjectTickProfiler
         }
     }
 
-    private sealed class TargetDescriptor
-    {
-        public string TypeName;
-        public int ItemId;
-        public string ItemName;
-    }
-
     private sealed class GroupStats
     {
         public string Kind;
@@ -1255,25 +1241,34 @@ public static class MapObjectTickProfiler
 
     private readonly struct ProfilerGroupKey : IEquatable<ProfilerGroupKey>
     {
-        private readonly string kind;
-        private readonly string typeName;
-        private readonly string itemName;
-        private readonly int itemId;
+        public readonly string Kind;
+        public readonly string TypeName;
+        public readonly string ItemName;
+        public readonly int ItemId;
+        private readonly int hashCode;
 
         public ProfilerGroupKey(string kind, string typeName, int itemId, string itemName)
         {
-            this.kind = kind ?? string.Empty;
-            this.typeName = typeName ?? string.Empty;
-            this.itemName = itemName ?? string.Empty;
-            this.itemId = itemId;
+            Kind = kind ?? string.Empty;
+            TypeName = typeName ?? string.Empty;
+            ItemName = itemName ?? string.Empty;
+            ItemId = itemId;
+            unchecked
+            {
+                int hash = 17;
+                hash = (hash * 31) + Kind.GetHashCode();
+                hash = (hash * 31) + TypeName.GetHashCode();
+                hash = (hash * 31) + ItemName.GetHashCode();
+                hashCode = (hash * 31) + ItemId;
+            }
         }
 
         public bool Equals(ProfilerGroupKey other)
         {
-            return itemId == other.itemId
-                   && string.Equals(kind, other.kind, StringComparison.Ordinal)
-                   && string.Equals(typeName, other.typeName, StringComparison.Ordinal)
-                   && string.Equals(itemName, other.itemName, StringComparison.Ordinal);
+            return ItemId == other.ItemId
+                   && string.Equals(Kind, other.Kind, StringComparison.Ordinal)
+                   && string.Equals(TypeName, other.TypeName, StringComparison.Ordinal)
+                   && string.Equals(ItemName, other.ItemName, StringComparison.Ordinal);
         }
 
         public override bool Equals(object obj)
@@ -1283,15 +1278,7 @@ public static class MapObjectTickProfiler
 
         public override int GetHashCode()
         {
-            unchecked
-            {
-                int hash = 17;
-                hash = (hash * 31) + kind.GetHashCode();
-                hash = (hash * 31) + typeName.GetHashCode();
-                hash = (hash * 31) + itemName.GetHashCode();
-                hash = (hash * 31) + itemId;
-                return hash;
-            }
+            return hashCode;
         }
     }
 }

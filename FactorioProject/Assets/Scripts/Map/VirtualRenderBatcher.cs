@@ -608,48 +608,70 @@ public sealed class VirtualRenderBatchCollection
             return null;
         }
 
-        if (batchCache.PropertyBlock == null)
+        List<DrawPropertyBlockCache> drawCaches = batchCache.DrawPropertyBlocks;
+        if (drawCaches == null)
         {
-            batchCache.PropertyBlock = new MaterialPropertyBlock();
+            drawCaches = new List<DrawPropertyBlockCache>(1);
+            batchCache.DrawPropertyBlocks = drawCaches;
         }
 
-        batchCache.PropertyBlock.Clear();
-        if (key.HasUvScroll)
+        // Ranges are the existing 1023-instance draw slices, not an ever-growing
+        // cache of versions. Keep one spare so boundary crossings do not keep
+        // creating property blocks; release larger reductions.
+        if (startIndex == 0)
         {
-            uvDrawScratch.Clear();
-            int endIndex = Mathf.Min(
-                batchCache.InstanceUvData != null ? batchCache.InstanceUvData.Count : 0,
-                startIndex + instanceCount);
-            for (int i = Mathf.Max(0, startIndex); i < endIndex; i++)
+            int drawCount = (batchCache.Matrices.Count + MaxInstancesPerDraw - 1) / MaxInstancesPerDraw;
+            int retainedDrawCount = drawCount + 1;
+            if (drawCaches.Count > retainedDrawCount)
             {
-                uvDrawScratch.Add(batchCache.InstanceUvData[i]);
+                drawCaches.RemoveRange(retainedDrawCount, drawCaches.Count - retainedDrawCount);
+            }
+        }
+
+        int drawIndex = startIndex / MaxInstancesPerDraw;
+        while (drawCaches.Count <= drawIndex)
+        {
+            drawCaches.Add(new DrawPropertyBlockCache());
+        }
+
+        DrawPropertyBlockCache drawCache = drawCaches[drawIndex];
+        MaterialPropertyBlock propertyBlock = drawCache.PropertyBlock;
+        if (!drawCache.IsValid
+            || drawCache.DataVersion != batchCache.DataVersion
+            || drawCache.StartIndex != startIndex
+            || drawCache.InstanceCount != instanceCount)
+        {
+            propertyBlock.Clear();
+            if (key.HasUvScroll)
+            {
+                CopyVectorDrawRange(batchCache.InstanceUvData, uvDrawScratch, startIndex, instanceCount);
+                propertyBlock.SetVectorArray(ConveyorUvDataShaderId, uvDrawScratch);
             }
 
-            batchCache.PropertyBlock.SetVectorArray(
-                ConveyorUvDataShaderId,
-                uvDrawScratch);
+            if (key.HasConveyorMotion)
+            {
+                CopyVectorDrawRange(
+                    batchCache.ConveyorMotionStarts,
+                    conveyorMotionStartDrawScratch,
+                    startIndex,
+                    instanceCount);
+                CopyVectorDrawRange(
+                    batchCache.ConveyorMotionEnds,
+                    conveyorMotionEndDrawScratch,
+                    startIndex,
+                    instanceCount);
+                propertyBlock.SetVectorArray(ConveyorMotionStartShaderId, conveyorMotionStartDrawScratch);
+                propertyBlock.SetVectorArray(ConveyorMotionEndShaderId, conveyorMotionEndDrawScratch);
+            }
+
+            drawCache.DataVersion = batchCache.DataVersion;
+            drawCache.StartIndex = startIndex;
+            drawCache.InstanceCount = instanceCount;
+            drawCache.IsValid = true;
         }
 
-        if (key.HasConveyorMotion)
-        {
-            CopyVectorDrawRange(
-                batchCache.ConveyorMotionStarts,
-                conveyorMotionStartDrawScratch,
-                startIndex,
-                instanceCount);
-            CopyVectorDrawRange(
-                batchCache.ConveyorMotionEnds,
-                conveyorMotionEndDrawScratch,
-                startIndex,
-                instanceCount);
-            batchCache.PropertyBlock.SetVectorArray(
-                ConveyorMotionStartShaderId,
-                conveyorMotionStartDrawScratch);
-            batchCache.PropertyBlock.SetVectorArray(
-                ConveyorMotionEndShaderId,
-                conveyorMotionEndDrawScratch);
-        }
-
+        // Material color can change without instance data changing. Keep applying
+        // debug/sleep colors on cache hits, exactly as the uncached path did.
         if (key.UseBeltItemLineDebugColor)
         {
             Color color = key.BeltItemLineDebugColor;
@@ -658,14 +680,14 @@ public sealed class VirtualRenderBatchCollection
                 color = SleepAwakeDebugVisual.Darken(color);
             }
 
-            BeltItemLineDebugVisual.ApplySolidColor(batchCache.PropertyBlock, color);
+            BeltItemLineDebugVisual.ApplySolidColor(propertyBlock, color);
         }
         else if (key.UseSleepAwakeDarkTint)
         {
-            SleepAwakeDebugVisual.ApplySleepingColor(batchCache.PropertyBlock, key.Material);
+            SleepAwakeDebugVisual.ApplySleepingColor(propertyBlock, key.Material);
         }
 
-        return batchCache.PropertyBlock;
+        return propertyBlock;
     }
 
     private static void AddInstanceUvData(
@@ -804,7 +826,7 @@ public sealed class VirtualRenderBatchCollection
         public List<Vector4> ConveyorMotionStarts;
         public List<Vector4> ConveyorMotionEnds;
         public readonly List<MatrixOwner> Owners = new List<MatrixOwner>(64);
-        public MaterialPropertyBlock PropertyBlock;
+        public List<DrawPropertyBlockCache> DrawPropertyBlocks;
         public Bounds WorldBounds;
         public bool HasBounds;
         public bool BoundsDirty;
@@ -841,6 +863,15 @@ public sealed class VirtualRenderBatchCollection
                 DataVersion++;
             }
         }
+    }
+
+    private sealed class DrawPropertyBlockCache
+    {
+        public readonly MaterialPropertyBlock PropertyBlock = new MaterialPropertyBlock();
+        public bool IsValid;
+        public int DataVersion;
+        public int StartIndex;
+        public int InstanceCount;
     }
 
     private readonly struct MatrixOwner

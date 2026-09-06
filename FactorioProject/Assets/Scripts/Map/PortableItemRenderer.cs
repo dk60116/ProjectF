@@ -189,7 +189,10 @@ public sealed partial class PortableItemRenderer : MonoBehaviour
     private readonly HashSet<PortableObject> registeredPortableObjects = new HashSet<PortableObject>();
     private readonly VirtualRenderBatchCollection portableObjectBatches = new VirtualRenderBatchCollection();
     private readonly List<PortableObject> portableObjectCleanupBuffer = new List<PortableObject>();
+    private readonly List<PortableObjectRenderSnapshot> portableObjectRenderSnapshots =
+        new List<PortableObjectRenderSnapshot>();
     private bool portableObjectBatchesDirty = true;
+    private bool portableObjectRenderRefreshRequested;
 
     private readonly List<BlockHandle> activeVirtualConveyorRenderBlocks = new List<BlockHandle>(512);
     private readonly HashSet<BlockHandle> activeVirtualConveyorRenderBlockLookup = new HashSet<BlockHandle>();
@@ -335,6 +338,11 @@ public sealed partial class PortableItemRenderer : MonoBehaviour
         portableObjectBatchesDirty = true;
     }
 
+    public void RequestPortableObjectRenderDataRefresh()
+    {
+        portableObjectRenderRefreshRequested = true;
+    }
+
     private void Awake()
     {
         ResolveDependencies();
@@ -363,9 +371,19 @@ public sealed partial class PortableItemRenderer : MonoBehaviour
         {
             using (RebuildPortableObjectBatchesMarker.Auto())
             {
+                bool snapshotsRefreshed = false;
+                // Animator/tween/parent changes must be observed at the original render
+                // preparation time, not at the robot arm's earlier simulation tick.
+                if (portableObjectRenderRefreshRequested && !portableObjectBatchesDirty)
+                {
+                    portableObjectBatchesDirty = RefreshPortableObjectRenderSnapshots(true);
+                    snapshotsRefreshed = true;
+                }
+                portableObjectRenderRefreshRequested = false;
+
                 if (portableObjectBatchesDirty)
                 {
-                    RebuildPortableObjectBatches();
+                    RebuildPortableObjectBatches(!snapshotsRefreshed);
                     portableObjectBatchesDirty = false;
                 }
             }
@@ -404,62 +422,147 @@ public sealed partial class PortableItemRenderer : MonoBehaviour
         }
     }
 
-    private void RebuildPortableObjectBatches()
+    private void RebuildPortableObjectBatches(bool refreshSnapshots = true)
     {
-        portableObjectBatches.ClearActiveMatrices();
-        portableObjectCleanupBuffer.Clear();
-
-        foreach (PortableObject portableObject in registeredPortableObjects)
+        if (refreshSnapshots)
         {
-            if (portableObject == null)
-            {
-                portableObjectCleanupBuffer.Add(portableObject);
-                continue;
-            }
+            RefreshPortableObjectRenderSnapshots(false);
+        }
 
-            if (!portableObject.TryGetBatchRenderData(
-                    out int itemId,
-                    out Mesh mesh,
-                    out Material material,
-                    out Matrix4x4 localToWorldMatrix,
-                    out Vector3 worldPosition,
-                    out int layer,
-                    out ShadowCastingMode shadowCastingMode,
-                    out bool receiveShadows,
-                    out bool useSleepAwakeDarkTint,
-                    out bool useBeltItemLineDebugColor,
-                    out Color32 beltItemLineDebugColor))
+        portableObjectBatches.ClearActiveMatrices();
+        for (int i = 0; i < portableObjectRenderSnapshots.Count; i++)
+        {
+            PortableObjectRenderSnapshot snapshot = portableObjectRenderSnapshots[i];
+            if (!snapshot.IsRenderable)
             {
                 continue;
             }
 
+            Material material = snapshot.Key.Material;
             if (material != null && !material.enableInstancing)
             {
                 material.enableInstancing = true;
             }
 
-            int cellX = Mathf.FloorToInt(worldPosition.x / portableObjectBatchCellSize);
-            int cellZ = Mathf.FloorToInt(worldPosition.z / portableObjectBatchCellSize);
-            VirtualRenderBatchKey key = new VirtualRenderBatchKey(
-                mesh,
-                material,
-                layer,
-                0,
-                shadowCastingMode,
-                receiveShadows,
-                false,
-                useSleepAwakeDarkTint,
-                useBeltItemLineDebugColor,
-                beltItemLineDebugColor,
-                itemId,
-                cellX,
-                cellZ);
-            portableObjectBatches.AddMatrix(key, localToWorldMatrix);
+            portableObjectBatches.AddMatrix(snapshot.Key, snapshot.Matrix);
         }
 
         for (int i = 0; i < portableObjectCleanupBuffer.Count; i++)
         {
             registeredPortableObjects.Remove(portableObjectCleanupBuffer[i]);
+        }
+    }
+
+    private bool RefreshPortableObjectRenderSnapshots(bool compareWithPrevious)
+    {
+        // Keep the old global refresh semantics: another portable object may have
+        // moved through its parent without issuing its own dirty notification. Reuse
+        // these reads for rebuilding too, so moving items never need a second scan.
+        portableObjectCleanupBuffer.Clear();
+        bool changed = portableObjectRenderSnapshots.Count != registeredPortableObjects.Count;
+        int index = 0;
+        foreach (PortableObject portableObject in registeredPortableObjects)
+        {
+            if (portableObject == null)
+            {
+                portableObjectCleanupBuffer.Add(portableObject);
+                changed = true;
+                continue;
+            }
+
+            PortableObjectRenderSnapshot current = ReadPortableObjectRenderSnapshot(portableObject);
+            if (index < portableObjectRenderSnapshots.Count)
+            {
+                if (compareWithPrevious && !changed
+                    && (!current.Equals(portableObjectRenderSnapshots[index])
+                        || (current.IsRenderable && !current.Key.Material.enableInstancing)))
+                {
+                    changed = true;
+                }
+
+                portableObjectRenderSnapshots[index] = current;
+            }
+            else
+            {
+                portableObjectRenderSnapshots.Add(current);
+                changed = true;
+            }
+            index++;
+        }
+
+        if (index < portableObjectRenderSnapshots.Count)
+        {
+            portableObjectRenderSnapshots.RemoveRange(index, portableObjectRenderSnapshots.Count - index);
+        }
+        return changed;
+    }
+
+    private PortableObjectRenderSnapshot ReadPortableObjectRenderSnapshot(PortableObject portableObject)
+    {
+        if (!portableObject.TryGetBatchRenderData(
+                out int itemId,
+                out Mesh mesh,
+                out Material material,
+                out Matrix4x4 localToWorldMatrix,
+                out Vector3 worldPosition,
+                out int layer,
+                out ShadowCastingMode shadowCastingMode,
+                out bool receiveShadows,
+                out bool useSleepAwakeDarkTint,
+                out bool useBeltItemLineDebugColor,
+                out Color32 beltItemLineDebugColor))
+        {
+            return default;
+        }
+
+        int cellX = Mathf.FloorToInt(worldPosition.x / portableObjectBatchCellSize);
+        int cellZ = Mathf.FloorToInt(worldPosition.z / portableObjectBatchCellSize);
+        VirtualRenderBatchKey key = new VirtualRenderBatchKey(
+            mesh,
+            material,
+            layer,
+            0,
+            shadowCastingMode,
+            receiveShadows,
+            false,
+            useSleepAwakeDarkTint,
+            useBeltItemLineDebugColor,
+            beltItemLineDebugColor,
+            itemId,
+            cellX,
+            cellZ);
+        return new PortableObjectRenderSnapshot(key, localToWorldMatrix, mesh.bounds);
+    }
+
+    private readonly struct PortableObjectRenderSnapshot
+    {
+        public readonly bool IsRenderable;
+        public readonly VirtualRenderBatchKey Key;
+        public readonly Matrix4x4 Matrix;
+        private readonly Bounds meshBounds;
+        private readonly Color sleepingColor;
+
+        public PortableObjectRenderSnapshot(VirtualRenderBatchKey key, Matrix4x4 matrix, Bounds meshBounds)
+        {
+            IsRenderable = true;
+            Key = key;
+            Matrix = matrix;
+            this.meshBounds = meshBounds;
+            sleepingColor = key.UseSleepAwakeDarkTint
+                ? SleepAwakeDebugVisual.GetSleepingColor(key.Material)
+                : default;
+        }
+
+        public bool Equals(PortableObjectRenderSnapshot other)
+        {
+            // Unity's == operators use tolerances for vectors/matrices. Equals
+            // preserves every component change, including sub-pixel motion.
+            return IsRenderable == other.IsRenderable
+                   && (!IsRenderable
+                       || (Key.Equals(other.Key)
+                           && Matrix.Equals(other.Matrix)
+                           && meshBounds.Equals(other.meshBounds)
+                           && sleepingColor.Equals(other.sleepingColor)));
         }
     }
 
