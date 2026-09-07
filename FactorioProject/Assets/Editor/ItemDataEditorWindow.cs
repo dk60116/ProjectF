@@ -385,7 +385,7 @@ public class ItemDataEditorWindow : EditorWindow
     private class ItemDataJsonFile
     {
         public string format = "ProjectF.ItemData";
-        public int version = 13;
+        public int version = 15;
         public List<ItemDataJsonEntry> items = new List<ItemDataJsonEntry>();
     }
 
@@ -415,6 +415,8 @@ public class ItemDataEditorWindow : EditorWindow
         public InputOutputJsonEntry manualTargetItem;
         public bool hasUpgradeable;
         public bool upgradeable = true;
+        public bool hasRobotArmEditSettings;
+        public bool keepIoAreaItemsInPlaceWhileEditing;
         public int capacity = -1;
         public bool storesFluid;
         public float fluidStorageLiters;
@@ -455,6 +457,12 @@ public class ItemDataEditorWindow : EditorWindow
         public float vehicleDecelerationPerSecond = -1f;
         public float vehicleMaxSpeed = -1f;
         public float vehicleMass = -1f;
+        public bool hasRobotArmRuntimeSettings;
+        public bool robotArmUseInstancedRendering = true;
+        public float robotArmPickupInterval = -1f;
+        public float robotArmBodyTurnSpeedDegreesPerSecond = -1f;
+        public float robotArmDropRetryInterval = -1f;
+        public float robotArmActionTurnDelay = -1f;
         public string multiFocusMode;
         public int multiFocusModeValue = -1;
         public string mapFilter;
@@ -3214,6 +3222,8 @@ public class ItemDataEditorWindow : EditorWindow
             GetMultiSelectedDefinitionProperty(serializedObject, "manualTargetItem");
         SerializedProperty upgradeableProperty =
             GetMultiSelectedDefinitionProperty(serializedObject, "upgradeable");
+        SerializedProperty keepIoAreaItemsInPlaceWhileEditingProperty =
+            GetMultiSelectedDefinitionProperty(serializedObject, "keepIoAreaItemsInPlaceWhileEditing");
         SerializedProperty capacityProperty =
             GetMultiSelectedDefinitionProperty(serializedObject, "capacity");
         SerializedProperty storesFluidProperty =
@@ -3340,6 +3350,24 @@ public class ItemDataEditorWindow : EditorWindow
                 new GUIContent(
                     "Upgrade able",
                     "체크하면 부모 I/O 모듈을 이 아이템으로 업그레이드할 수 있습니다."));
+        }
+
+        if (keepIoAreaItemsInPlaceWhileEditingProperty != null
+            && AllSelectedDefinitionsAreRobotArms())
+        {
+            EditorGUILayout.Space(8f);
+            EditorGUILayout.LabelField("Robot Arm", EditorStyles.boldLabel);
+            for (int i = 0; i < selectedItemDefinitionsInOrder.Count; i++)
+            {
+                ItemDefinition robotDefinition = selectedItemDefinitionsInOrder[i];
+                EditorGUILayout.LabelField(GetDefinitionDisplayName(robotDefinition), EditorStyles.miniBoldLabel);
+                DrawRobotArmFields(ResolveRobotArm(robotDefinition.mapObject));
+            }
+            DrawMultiPropertyField(
+                keepIoAreaItemsInPlaceWhileEditingProperty,
+                new GUIContent(
+                    "Keep I/O Area Items In Place",
+                    "편집 모드에서 로봇팔을 옮길 때 Input/Output 영역에 놓인 아이템을 함께 옮기지 않습니다."));
         }
 
         if (capacityProperty != null && AllSelectedDefinitionsShowCapacity())
@@ -3779,6 +3807,24 @@ public class ItemDataEditorWindow : EditorWindow
         return true;
     }
 
+    private bool AllSelectedDefinitionsAreRobotArms()
+    {
+        if (selectedItemDefinitionsInOrder.Count <= 0)
+        {
+            return false;
+        }
+
+        for (int i = 0; i < selectedItemDefinitionsInOrder.Count; i++)
+        {
+            if (ResolveRobotArm(selectedItemDefinitionsInOrder[i].mapObject) == null)
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
     private void DrawSelectedItemFields(ItemDefinition definition, List<ItemDefinition> definitions)
     {
         SerializedObject serializedObject = GetSelectedDefinitionSerializedObject(definition);
@@ -3806,6 +3852,8 @@ public class ItemDataEditorWindow : EditorWindow
         SerializedProperty isManualProperty = GetSelectedDefinitionProperty(serializedObject, "isManual");
         SerializedProperty manualTargetItemProperty = GetSelectedDefinitionProperty(serializedObject, "manualTargetItem");
         SerializedProperty upgradeableProperty = GetSelectedDefinitionProperty(serializedObject, "upgradeable");
+        SerializedProperty keepIoAreaItemsInPlaceWhileEditingProperty =
+            GetSelectedDefinitionProperty(serializedObject, "keepIoAreaItemsInPlaceWhileEditing");
         SerializedProperty capacityProperty = GetSelectedDefinitionProperty(serializedObject, "capacity");
         SerializedProperty storesFluidProperty = GetSelectedDefinitionProperty(serializedObject, "storesFluid");
         SerializedProperty fluidStorageLitersProperty = GetSelectedDefinitionProperty(serializedObject, "fluidStorageLiters");
@@ -3854,7 +3902,8 @@ public class ItemDataEditorWindow : EditorWindow
                     "One Item",
                     "체크하면 모든 보관 컨텐츠에서 스택 하나당 이 아이템을 하나만 보관할 수 있습니다."));
         }
-        DrawMapObjectFields(mapObjectProperty.objectReferenceValue as MapObject, definitions);
+        MapObject selectedMapObject = mapObjectProperty.objectReferenceValue as MapObject;
+        DrawMapObjectFields(selectedMapObject, definitions);
 
         if (interactionButtonListProperty != null)
         {
@@ -3932,6 +3981,18 @@ public class ItemDataEditorWindow : EditorWindow
             EditorGUILayout.PropertyField(
                 upgradeableProperty,
                 new GUIContent("Upgrade able", "체크하면 부모 I/O 모듈을 이 아이템으로 업그레이드할 수 있습니다."));
+        }
+        RobotArm selectedRobotArm = ResolveRobotArm(selectedMapObject);
+        if (selectedRobotArm != null)
+        {
+            EditorGUILayout.Space(8f);
+            EditorGUILayout.LabelField("Robot Arm", EditorStyles.boldLabel);
+            DrawRobotArmFields(selectedRobotArm);
+            DrawMultiPropertyField(
+                keepIoAreaItemsInPlaceWhileEditingProperty,
+                new GUIContent(
+                    "Keep I/O Area Items In Place",
+                    "편집 모드에서 로봇팔을 옮길 때 Input/Output 영역에 놓인 아이템을 함께 옮기지 않습니다."));
         }
         if (ShouldShowCapacity(definition) && capacityProperty != null)
         {
@@ -4585,6 +4646,58 @@ public class ItemDataEditorWindow : EditorWindow
             }
 
             Repaint();
+        }
+    }
+
+    private static void DrawRobotArmFields(RobotArm robotArm)
+    {
+        if (robotArm == null)
+        {
+            return;
+        }
+
+        EditorGUI.BeginChangeCheck();
+        bool useInstancedRendering = EditorGUILayout.Toggle(
+            new GUIContent("Use Instanced Rendering"),
+            robotArm.UsesInstancedRendering);
+        float pickupInterval = Mathf.Max(
+            0.01f,
+            EditorGUILayout.FloatField(
+                new GUIContent("Pickup Interval (sec)"),
+                robotArm.PickupIntervalSeconds));
+        float bodyTurnSpeed = Mathf.Max(
+            1f,
+            EditorGUILayout.FloatField(
+                new GUIContent("Body Turn Speed (deg/sec)"),
+                robotArm.BodyTurnSpeedDegreesPerSecond));
+        float dropRetryInterval = Mathf.Max(
+            0.01f,
+            EditorGUILayout.FloatField(
+                new GUIContent("Drop Retry Interval (sec)"),
+                robotArm.DropRetryIntervalSeconds));
+        float actionTurnDelay = Mathf.Max(
+            0f,
+            EditorGUILayout.FloatField(
+                new GUIContent(
+                    "Action Turn Delay (sec)",
+                    "집기·놓기 동작 타이밍과 실제 아이템 이동 사이의 지연입니다."),
+                robotArm.ActionTurnDelaySeconds));
+        if (!EditorGUI.EndChangeCheck())
+        {
+            return;
+        }
+
+        Undo.RecordObject(robotArm, "Edit Robot Arm Settings");
+        robotArm.SetEditorSettings(
+            useInstancedRendering,
+            pickupInterval,
+            bodyTurnSpeed,
+            dropRetryInterval,
+            actionTurnDelay);
+        EditorUtility.SetDirty(robotArm);
+        if (robotArm.gameObject != null)
+        {
+            EditorUtility.SetDirty(robotArm.gameObject);
         }
     }
 
@@ -7237,6 +7350,8 @@ public class ItemDataEditorWindow : EditorWindow
                 : null,
             hasUpgradeable = true,
             upgradeable = definition.upgradeable,
+            hasRobotArmEditSettings = definition.mapObject is RobotArm,
+            keepIoAreaItemsInPlaceWhileEditing = definition.keepIoAreaItemsInPlaceWhileEditing,
             capacity = definition.capacity > 0 ? definition.capacity : 10,
             storesFluid = definition.storesFluid,
             fluidStorageLiters = definition.storesFluid ? Mathf.Max(0f, definition.fluidStorageLiters) : 0f,
@@ -7342,6 +7457,17 @@ public class ItemDataEditorWindow : EditorWindow
             if (definition.mapObject is Vehicle massVehicle)
             {
                 entry.vehicleMass = massVehicle.VehicleMass;
+            }
+
+            RobotArm robotArm = ResolveRobotArm(definition.mapObject);
+            if (robotArm != null)
+            {
+                entry.hasRobotArmRuntimeSettings = true;
+                entry.robotArmUseInstancedRendering = robotArm.UsesInstancedRendering;
+                entry.robotArmPickupInterval = robotArm.PickupIntervalSeconds;
+                entry.robotArmBodyTurnSpeedDegreesPerSecond = robotArm.BodyTurnSpeedDegreesPerSecond;
+                entry.robotArmDropRetryInterval = robotArm.DropRetryIntervalSeconds;
+                entry.robotArmActionTurnDelay = robotArm.ActionTurnDelaySeconds;
             }
 
             if (definition.mapObject is InstallationObject installationObject)
@@ -7518,6 +7644,10 @@ public class ItemDataEditorWindow : EditorWindow
         if (entry.hasUpgradeable)
         {
             definition.upgradeable = entry.upgradeable;
+        }
+        if (entry.hasRobotArmEditSettings)
+        {
+            definition.keepIoAreaItemsInPlaceWhileEditing = entry.keepIoAreaItemsInPlaceWhileEditing;
         }
         if (entry.capacity > 0)
         {
@@ -7799,6 +7929,12 @@ public class ItemDataEditorWindow : EditorWindow
             ApplyVehicleJson(serializedMapObject, entry);
         }
 
+        RobotArm robotArm = ResolveRobotArm(mapObject);
+        if (robotArm != null && entry.hasRobotArmRuntimeSettings)
+        {
+            ApplyRobotArmJson(robotArm, entry);
+        }
+
         if (mapObject is InputOutputModule)
         {
             ApplyInputOutputModuleJson(serializedMapObject, entry, definitions);
@@ -7832,6 +7968,51 @@ public class ItemDataEditorWindow : EditorWindow
                 }
             }
         }
+    }
+
+    private static void ApplyRobotArmJson(
+        RobotArm robotArm,
+        ItemDataJsonEntry entry)
+    {
+        robotArm.SetEditorSettings(
+            entry.robotArmUseInstancedRendering,
+            entry.robotArmPickupInterval >= 0f
+                ? entry.robotArmPickupInterval
+                : robotArm.PickupIntervalSeconds,
+            entry.robotArmBodyTurnSpeedDegreesPerSecond >= 0f
+                ? entry.robotArmBodyTurnSpeedDegreesPerSecond
+                : robotArm.BodyTurnSpeedDegreesPerSecond,
+            entry.robotArmDropRetryInterval >= 0f
+                ? entry.robotArmDropRetryInterval
+                : robotArm.DropRetryIntervalSeconds,
+            entry.robotArmActionTurnDelay >= 0f
+                ? entry.robotArmActionTurnDelay
+                : robotArm.ActionTurnDelaySeconds);
+        EditorUtility.SetDirty(robotArm);
+    }
+
+    private static RobotArm ResolveRobotArm(MapObject mapObject)
+    {
+        if (mapObject == null)
+        {
+            return null;
+        }
+
+        if (mapObject is RobotArm robotArm)
+        {
+            return robotArm;
+        }
+
+        robotArm = mapObject.GetComponent<RobotArm>();
+        if (robotArm != null)
+        {
+            return robotArm;
+        }
+
+        robotArm = mapObject.GetComponentInParent<RobotArm>(true);
+        return robotArm != null
+            ? robotArm
+            : mapObject.GetComponentInChildren<RobotArm>(true);
     }
 
     private static ItemDefinition.EnergyType ParseEnergyType(string rawValue, int rawEnumValue, ItemDefinition.EnergyType fallback)

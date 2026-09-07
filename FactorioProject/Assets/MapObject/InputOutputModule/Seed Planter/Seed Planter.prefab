@@ -749,7 +749,7 @@ MonoBehaviour:
   m_EditorClassIdentifier: Assembly-CSharp::SeedPlanter
   id: 0
   objectName: Seed Planter
-  objId: 63
+  objId: 64
   itemDefinition: {fileID: 11400000, guid: 5ded7b8f8c192b94b8a9cd3649395224, type: 2}
   portableObj: {fileID: 0}
   mapStatus:

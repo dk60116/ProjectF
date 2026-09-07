@@ -13,7 +13,7 @@ MonoBehaviour:
   m_Name: Item_69_Manual - Steam train
   m_EditorClassIdentifier: Assembly-CSharp::ItemDefinition
   itemName: Manual - Steam train
-  id: 80
+  id: 82
   mapObject: {fileID: 0}
   portableMesh: {fileID: 4300000, guid: 9588b4b5941582f4d80b4be71786ce12, type: 2}
   portableMat: {fileID: 2100000, guid: b486575d52816424fad992a10a64323e, type: 2}
@@ -29,6 +29,7 @@ MonoBehaviour:
   isManual: 1
   manualTargetItem: {fileID: 11400000, guid: 4d68593c4bba3a34487b0f60cff9fd9e, type: 2}
   upgradeable: 1
+  keepIoAreaItemsInPlaceWhileEditing: 0
   capacity: 10
   storesFluid: 0
   fluidStorageLiters: 0

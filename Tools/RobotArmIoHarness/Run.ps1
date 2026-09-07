@@ -11,6 +11,7 @@ function Member([string]$path, [string]$signature) {
 }
 $arm = 'FactorioProject/Assets/Scripts/Object/MapObj/InstallationObject/RobotArm.cs'
 $io = 'FactorioProject/Assets/Scripts/Object/MapObj/InstallationObject/InputOutputModule.cs'
+$placement = 'FactorioProject/Assets/Scripts/Object/MapObj/InstallationObject/InstallationPlacementController.cs'
 $serializer = 'FactorioProject/Assets/Scripts/Manager/SaveGameBinarySerializer.cs'
 $source = "using System; using System.IO; using System.Collections.Generic; using UnityEngine; public partial class RobotArm {`n"
 foreach ($member in @('public enum RobotArmState', 'public sealed class TransferState', 'private bool EnsureInteractionCoordinateCache(', 'private bool TryResolvePickupCoordinate(', 'private bool TryResolveDropCoordinate(', 'private void InvalidateInteractionCoordinateCache(', 'public bool TryCollectTransferItemIds(', 'private void RefreshRegisteredWakeCoordinates(', 'private void RegisterWakeCoordinatesAround(', 'private void RegisterWakeCoordinate(', 'private void UnregisterWakeCoordinates(')) {
@@ -18,8 +19,23 @@ foreach ($member in @('public enum RobotArmState', 'public sealed class Transfer
 }
 $source += "} public partial class InputOutputModule {`n"
 foreach ($member in @('public enum SlotLayoutType', 'public enum RectGridBlockType', 'public struct RectGridBlockPlacement', 'public bool TryGetRectGridPlacementCoordinate(', 'public static Vector2Int RotateRectGridOffset(', 'public static bool IsFluidItemDefinition(')) { $source += (Member $io $member) + "`n" }
+$source += "} public partial class InstallationPlacementController {`n"
+$source += (Member $placement 'private static bool IsNonBlockingRobotArmInteractionArea(') + "`n"
+$source += (Member $placement 'private static bool ShouldInputOutputAreasBlockInstallationPlacement(') + "`n"
+$source += (Member $placement 'private static bool ShouldCaptureInteractionAreaBlockStatesForEdit(') + "`n"
+$source += "public static bool IsNonBlockingRobotArmArea(MapObject source, InputOutputModule.RectGridBlockType blockType) => IsNonBlockingRobotArmInteractionArea(source, blockType);`n"
+$source += "public static bool AreasBlockPlacement(MapObject source) => ShouldInputOutputAreasBlockInstallationPlacement(source);`n"
+$source += "public static bool CapturesInteractionAreaItemsInEdit(ItemDefinition definition) => ShouldCaptureInteractionAreaBlockStatesForEdit(definition);`n"
 $source += "} public static partial class Checks {`n"
 foreach ($member in @('private static void WriteRobotArmState(', 'private static RobotArm.TransferState ReadRobotArmState(')) { $source += (Member $serializer $member) + "`n" }
+$source += "} public partial class Block {`n"
+$block = 'FactorioProject/Assets/Scripts/Map/Block.cs'
+$blockSource = [IO.File]::ReadAllText((Join-Path $repo $block))
+foreach ($methodName in @('TryTakeOneConveyorObject', 'TryGetClosestConveyorObjectWorldPosition', 'TryGetClosestConveyorItemLane')) {
+    foreach ($match in [regex]::Matches($blockSource, '(?:public|private) bool ' + $methodName + '\([^)]*\)')) {
+        $source += (Member $block $match.Value) + "`n"
+    }
+}
 $source += "}`n"
 $probe = Join-Path ([IO.Path]::GetTempPath()) ('ProjectF-RobotIO-' + [guid]::NewGuid().ToString('N'))
 New-Item -ItemType Directory -Path $probe | Out-Null

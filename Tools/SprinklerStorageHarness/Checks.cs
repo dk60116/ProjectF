@@ -301,7 +301,7 @@ public static class Checks
         TerrainGenerator.Active.Blocks[new(4, 0)] = new Block { Tree = outside };
         supply.Fill(100);
         continuous.ManagedUpdateTick(.25f);
-        Check(Near(supply.StoredFluidLiters, 96.25f) && Near(inside.Water, 3.75f), "empty-cell water is redistributed to the plant inside the range");
+        Check(Near(supply.StoredFluidLiters, 96.25f) && Near(inside.Water, .9375f), "a plant receives only the water assigned to its own cell");
         Check(Near(outside.Water, 0) && continuous.TargetCount == 1, "adjacent plant outside the range receives no water and is not counted");
         TerrainGenerator.Active.Blocks[new(0, 0)].Tree = null;
         continuous.ManagedUpdateTick(.25f);
@@ -311,19 +311,19 @@ public static class Checks
         TerrainGenerator.Active.Blocks[new(2, 0)].Tree = secondInside;
         float beforeFirst = inside.Water;
         continuous.ManagedUpdateTick(.25f);
-        Check(Near(inside.Water - beforeFirst, secondInside.Water) && Near(secondInside.Water, 1.875f), "all plants inside the range share water equally regardless of distance or farmland connection");
+        Check(Near(inside.Water - beforeFirst, .9375f) && Near(secondInside.Water, .9375f), "each occupied cell receives one fixed coordinate share");
         inside.Capacity = inside.Water + .2f;
         float beforeSecond = secondInside.Water;
         continuous.ManagedUpdateTick(.25f);
-        Check(Near(inside.Water, inside.Capacity) && Near(secondInside.Water - beforeSecond, 3.55f), "water rejected by a nearly full plant is redistributed to remaining plants");
+        Check(Near(inside.Water, inside.Capacity) && Near(secondInside.Water - beforeSecond, .9375f), "water rejected by a nearly full plant is not pulled into another plant's cell");
         TerrainGenerator.Active.Blocks[new(1, 0)].Tree = secondInside;
         beforeSecond = secondInside.Water;
         continuous.ManagedUpdateTick(.25f);
-        Check(continuous.TargetCount == 1 && Near(secondInside.Water - beforeSecond, 3.75f), "a plant referenced by multiple cells is counted and supplied only once");
+        Check(continuous.TargetCount == 1 && Near(secondInside.Water - beforeSecond, .9375f), "a plant referenced by multiple cells is counted and supplied only once");
         secondInside.Capacity = secondInside.Water + .1f;
         float beforeSupply = supply.StoredFluidLiters;
         continuous.ManagedUpdateTick(.25f);
-        Check(Near(secondInside.Water, secondInside.Capacity) && Near(beforeSupply - supply.StoredFluidLiters, 3.75f), "saturated range terminates redistribution and keeps the configured spray consumption");
+        Check(Near(secondInside.Water, secondInside.Capacity) && Near(beforeSupply - supply.StoredFluidLiters, 3.75f), "saturated cells keep the configured whole-range spray consumption without redistribution");
         Console.WriteLine($"{passed} sprinkler storage checks passed.");
     }
 }

@@ -670,10 +670,44 @@ public class InputOutputModuleAreaMarkerController : MonoBehaviour
     }
 }
 
+internal sealed class InstallationPlacementAreaRegistry
+{
+    private readonly Dictionary<Vector2Int, int> coordinateCounts = new Dictionary<Vector2Int, int>();
+
+    public bool Contains(Vector2Int coordinate)
+    {
+        return coordinateCounts.TryGetValue(coordinate, out int count) && count > 0;
+    }
+
+    public void Register(Vector2Int coordinate)
+    {
+        coordinateCounts.TryGetValue(coordinate, out int count);
+        coordinateCounts[coordinate] = count + 1;
+    }
+
+    public void Unregister(Vector2Int coordinate)
+    {
+        if (!coordinateCounts.TryGetValue(coordinate, out int count))
+        {
+            return;
+        }
+
+        if (count <= 1)
+        {
+            coordinateCounts.Remove(coordinate);
+            return;
+        }
+
+        coordinateCounts[coordinate] = count - 1;
+    }
+}
+
 public class InputOutputModuleEnergyAreaController : MonoBehaviour
 {
     private static readonly Dictionary<Vector2Int, Dictionary<ItemDefinition.EnergyType, int>> registeredEnergyAreas
         = new Dictionary<Vector2Int, Dictionary<ItemDefinition.EnergyType, int>>();
+    private static readonly InstallationPlacementAreaRegistry placementBlockingAreas
+        = new InstallationPlacementAreaRegistry();
 
     [SerializeField]
     private ItemDefinition.EnergyType acceptedEnergyType = ItemDefinition.EnergyType.None;
@@ -681,12 +715,19 @@ public class InputOutputModuleEnergyAreaController : MonoBehaviour
     [SerializeField]
     private List<Vector2Int> inputEnergyCoordinates = new List<Vector2Int>();
 
+    [SerializeField, HideInInspector]
+    private bool blocksInstallationPlacement = true;
+
     private bool isRegistered;
 
-    public void Configure(ItemDefinition.EnergyType energyType, IReadOnlyList<Vector2Int> coordinates)
+    public void Configure(
+        ItemDefinition.EnergyType energyType,
+        IReadOnlyList<Vector2Int> coordinates,
+        bool blocksPlacement = true)
     {
         UnregisterCoordinates();
         acceptedEnergyType = energyType;
+        blocksInstallationPlacement = blocksPlacement;
         inputEnergyCoordinates.Clear();
 
         if (coordinates == null)
@@ -785,6 +826,11 @@ public class InputOutputModuleEnergyAreaController : MonoBehaviour
         return false;
     }
 
+    public static bool CoordinateBlocksInstallationPlacement(Vector2Int coordinate)
+    {
+        return placementBlockingAreas.Contains(coordinate);
+    }
+
     private void RegisterCoordinates()
     {
         if (isRegistered || acceptedEnergyType == ItemDefinition.EnergyType.None || inputEnergyCoordinates.Count <= 0)
@@ -804,6 +850,10 @@ public class InputOutputModuleEnergyAreaController : MonoBehaviour
 
             energyCounts.TryGetValue(acceptedEnergyType, out int existingCount);
             energyCounts[acceptedEnergyType] = existingCount + 1;
+            if (blocksInstallationPlacement)
+            {
+                placementBlockingAreas.Register(coordinate);
+            }
         }
 
         isRegistered = true;
@@ -841,6 +891,11 @@ public class InputOutputModuleEnergyAreaController : MonoBehaviour
             {
                 registeredEnergyAreas.Remove(coordinate);
             }
+
+            if (blocksInstallationPlacement)
+            {
+                placementBlockingAreas.Unregister(coordinate);
+            }
         }
 
         isRegistered = false;
@@ -864,15 +919,23 @@ public class InputOutputModuleItemAreaController : MonoBehaviour
 
     private static readonly Dictionary<Vector2Int, Dictionary<int, int>> registeredItemAreas
         = new Dictionary<Vector2Int, Dictionary<int, int>>();
+    private static readonly InstallationPlacementAreaRegistry placementBlockingAreas
+        = new InstallationPlacementAreaRegistry();
 
     [SerializeField]
     private List<InputItemAreaEntry> inputItemAreas = new List<InputItemAreaEntry>();
 
+    [SerializeField, HideInInspector]
+    private bool blocksInstallationPlacement = true;
+
     private bool isRegistered;
 
-    public void Configure(IReadOnlyList<InputOutputModuleItemAreaBinding> bindings)
+    public void Configure(
+        IReadOnlyList<InputOutputModuleItemAreaBinding> bindings,
+        bool blocksPlacement = true)
     {
         UnregisterCoordinates();
+        blocksInstallationPlacement = blocksPlacement;
         inputItemAreas.Clear();
 
         if (bindings == null)
@@ -990,6 +1053,11 @@ public class InputOutputModuleItemAreaController : MonoBehaviour
         return false;
     }
 
+    public static bool CoordinateBlocksInstallationPlacement(Vector2Int coordinate)
+    {
+        return placementBlockingAreas.Contains(coordinate);
+    }
+
     private void RegisterCoordinates()
     {
         if (isRegistered || inputItemAreas.Count <= 0)
@@ -1014,6 +1082,10 @@ public class InputOutputModuleItemAreaController : MonoBehaviour
 
             itemCounts.TryGetValue(entry.itemId, out int existingCount);
             itemCounts[entry.itemId] = existingCount + 1;
+            if (blocksInstallationPlacement)
+            {
+                placementBlockingAreas.Register(entry.coordinate);
+            }
         }
 
         isRegistered = true;
@@ -1056,6 +1128,11 @@ public class InputOutputModuleItemAreaController : MonoBehaviour
             {
                 registeredItemAreas.Remove(entry.coordinate);
             }
+
+            if (blocksInstallationPlacement)
+            {
+                placementBlockingAreas.Unregister(entry.coordinate);
+            }
         }
 
         isRegistered = false;
@@ -1066,15 +1143,21 @@ public class InputOutputModuleOutputAreaController : MonoBehaviour
 {
     private static readonly Dictionary<Vector2Int, int> registeredOutputAreas
         = new Dictionary<Vector2Int, int>();
+    private static readonly InstallationPlacementAreaRegistry placementBlockingAreas
+        = new InstallationPlacementAreaRegistry();
 
     [SerializeField]
     private List<Vector2Int> outputCoordinates = new List<Vector2Int>();
 
+    [SerializeField, HideInInspector]
+    private bool blocksInstallationPlacement = true;
+
     private bool isRegistered;
 
-    public void Configure(IReadOnlyList<Vector2Int> coordinates)
+    public void Configure(IReadOnlyList<Vector2Int> coordinates, bool blocksPlacement = true)
     {
         UnregisterCoordinates();
+        blocksInstallationPlacement = blocksPlacement;
         outputCoordinates.Clear();
 
         if (coordinates == null)
@@ -1114,6 +1197,11 @@ public class InputOutputModuleOutputAreaController : MonoBehaviour
         return registeredOutputAreas.TryGetValue(coordinate, out int count) && count > 0;
     }
 
+    public static bool CoordinateBlocksInstallationPlacement(Vector2Int coordinate)
+    {
+        return placementBlockingAreas.Contains(coordinate);
+    }
+
     private void RegisterCoordinates()
     {
         if (isRegistered || outputCoordinates.Count <= 0)
@@ -1126,6 +1214,10 @@ public class InputOutputModuleOutputAreaController : MonoBehaviour
             Vector2Int coordinate = outputCoordinates[i];
             registeredOutputAreas.TryGetValue(coordinate, out int existingCount);
             registeredOutputAreas[coordinate] = existingCount + 1;
+            if (blocksInstallationPlacement)
+            {
+                placementBlockingAreas.Register(coordinate);
+            }
         }
 
         isRegistered = true;
@@ -1153,6 +1245,11 @@ public class InputOutputModuleOutputAreaController : MonoBehaviour
             else
             {
                 registeredOutputAreas[coordinate] = existingCount - 1;
+            }
+
+            if (blocksInstallationPlacement)
+            {
+                placementBlockingAreas.Unregister(coordinate);
             }
         }
 

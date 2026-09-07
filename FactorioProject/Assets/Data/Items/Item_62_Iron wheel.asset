@@ -13,7 +13,7 @@ MonoBehaviour:
   m_Name: Item_62_Iron wheel
   m_EditorClassIdentifier: Assembly-CSharp::ItemDefinition
   itemName: Iron wheel
-  id: 96
+  id: 98
   mapObject: {fileID: 0}
   portableMesh: {fileID: 4300000, guid: 2a5347a55d1f97842aae2067f837f850, type: 2}
   portableMat: {fileID: 2100000, guid: 17a38530f2fece544bd8bcf26b55fd6b, type: 2}
@@ -29,6 +29,7 @@ MonoBehaviour:
   isManual: 0
   manualTargetItem: {fileID: 0}
   upgradeable: 1
+  keepIoAreaItemsInPlaceWhileEditing: 0
   capacity: 10
   storesFluid: 0
   fluidStorageLiters: 0

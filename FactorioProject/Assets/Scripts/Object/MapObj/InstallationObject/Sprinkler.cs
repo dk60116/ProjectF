@@ -562,40 +562,21 @@ public class Sprinkler : InputOutputModule
             return;
         }
 
-        // Share the entire range's water among its plants. Redistribute water rejected
-        // by a saturated plant equally among the plants that can still absorb it.
-        float remainingWater = waterRequired;
-        int remainingTargets = wateringTargets.Count;
-        while (remainingWater > WaterEpsilon && remainingTargets > 0)
+        // Every sprayed coordinate owns its share of this tick's water. A plant may
+        // absorb only the share landing on its own cell; empty and saturated cells
+        // do not donate their water to another plant.
+        float waterPerCoordinate = waterRequired / sprayCoordinates.Count;
+        if (waterPerCoordinate <= WaterEpsilon)
         {
-            float waterPerPlant = remainingWater / remainingTargets;
-            float acceptedThisPass = 0f;
-            int nextTargetCount = 0;
-            foreach (ProjectTree tree in wateringTargets)
+            return;
+        }
+
+        foreach (ProjectTree tree in wateringTargets)
+        {
+            if (tree != null && tree.CanAcceptGrowthWater)
             {
-                if (tree == null || !tree.CanAcceptGrowthWater)
-                {
-                    continue;
-                }
-
-                if (tree.TryAddGrowthWater(waterPerPlant, out float acceptedLiters))
-                {
-                    acceptedThisPass += acceptedLiters;
-                }
-
-                if (tree.CanAcceptGrowthWater)
-                {
-                    nextTargetCount++;
-                }
+                tree.TryAddGrowthWater(waterPerCoordinate, out _);
             }
-
-            if (acceptedThisPass <= WaterEpsilon)
-            {
-                break;
-            }
-
-            remainingWater = Mathf.Max(0f, remainingWater - acceptedThisPass);
-            remainingTargets = nextTargetCount;
         }
     }
 

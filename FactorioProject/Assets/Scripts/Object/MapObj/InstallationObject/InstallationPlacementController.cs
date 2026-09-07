@@ -4453,6 +4453,14 @@ public class InstallationPlacementController : MonoBehaviour
         MapObject footprintSource = editSession.definition != null && editSession.definition.mapObject != null
             ? editSession.definition.mapObject
             : editSession.originalInstallation;
+        if (!ShouldCaptureInteractionAreaBlockStatesForEdit(editSession.definition))
+        {
+            return GetInstalledObjectBlockingCoordinates(
+                anchorCoordinate,
+                footprintSource,
+                quarterTurns);
+        }
+
         List<Vector2Int> coordinates = GetFootprintCoordinates(anchorCoordinate, footprintSource, quarterTurns);
         if (ShouldSkipBelt2FBridgeCenterBinding(anchorCoordinate, footprintSource, quarterTurns, out Vector2Int bridgeCenterCoordinate))
         {
@@ -4460,6 +4468,11 @@ public class InstallationPlacementController : MonoBehaviour
         }
 
         return coordinates;
+    }
+
+    private static bool ShouldCaptureInteractionAreaBlockStatesForEdit(ItemDefinition definition)
+    {
+        return definition == null || !definition.keepIoAreaItemsInPlaceWhileEditing;
     }
 
     private void CaptureAttachedAreaBoxes(InstallationEditSession editSession)
@@ -7959,7 +7972,10 @@ public class InstallationPlacementController : MonoBehaviour
             energyAreaController = installedObject.gameObject.AddComponent<InputOutputModuleEnergyAreaController>();
         }
 
-        energyAreaController.Configure(installationDefinition.useEnergyType, inputEnergyCoordinates);
+        energyAreaController.Configure(
+            installationDefinition.useEnergyType,
+            inputEnergyCoordinates,
+            ShouldInputOutputAreasBlockInstallationPlacement(installedObject));
     }
 
     private void ConfigureInstalledInputOutputItemAreas(MapObject installedObject, Vector2Int anchorCoordinate, int quarterTurns)
@@ -7989,7 +8005,9 @@ public class InstallationPlacementController : MonoBehaviour
             itemAreaController = installedObject.gameObject.AddComponent<InputOutputModuleItemAreaController>();
         }
 
-        itemAreaController.Configure(itemAreaBindings);
+        itemAreaController.Configure(
+            itemAreaBindings,
+            ShouldInputOutputAreasBlockInstallationPlacement(installedObject));
     }
 
     private void ConfigureInstalledInputOutputOutputAreas(MapObject installedObject, Vector2Int anchorCoordinate, int quarterTurns)
@@ -8026,7 +8044,9 @@ public class InstallationPlacementController : MonoBehaviour
             outputAreaController = installedObject.gameObject.AddComponent<InputOutputModuleOutputAreaController>();
         }
 
-        outputAreaController.Configure(outputCoordinates);
+        outputAreaController.Configure(
+            outputCoordinates,
+            ShouldInputOutputAreasBlockInstallationPlacement(installedObject));
     }
 
     private void ConfigureInstalledInputOutputRuntimeAreas(MapObject installedObject, Vector2Int anchorCoordinate, int quarterTurns)
@@ -23118,10 +23138,21 @@ public class InstallationPlacementController : MonoBehaviour
                 placement.x - objectAnchorCell.x,
                 placement.y - objectAnchorCell.y);
             Vector2Int coordinate = anchorCoordinate + RotateFootprintOffset(localOffset, quarterTurns);
+            bool ignoresPlacementObstacles = IsNonBlockingRobotArmInteractionArea(
+                footprintSource,
+                placement.blockType);
             if (!terrain.TryGetLoadedBlockCellData(coordinate, out BlockCellData cellData)
-                || (blocksDroppedFloorObjects && terrain.HasDroppedFloorObjectsAt(coordinate)))
+                || (!ignoresPlacementObstacles
+                    && blocksDroppedFloorObjects
+                    && terrain.HasDroppedFloorObjectsAt(coordinate)))
             {
                 return false;
+            }
+
+            if (ignoresPlacementObstacles)
+            {
+                checkedAnyPlacement = true;
+                continue;
             }
 
             bool cellCanPlace;
@@ -23241,12 +23272,7 @@ public class InstallationPlacementController : MonoBehaviour
                   && block.Resource == null
                   && !hasOtherPreview
                   && CanPlaceOnTerrainBiome(block, installGridSimpleAllowedFilter)
-                  && !CoordinateHasNormalInputOutputAreaBlockForPlacement(
-                      coordinate,
-                      previewToIgnore)
-                  && !InputOutputModule.CoordinateIsRuntimeInputOutputAreaBlock(coordinate)
-                  && !HasPipeAreaFluidStorageAtCoordinate(coordinate)
-                  && !IsPumpOutputCoordinateForPlacement(coordinate);
+                  && !CoordinateHasInputOutputAreaForPlacement(coordinate, previewToIgnore);
         installGridSimpleClearCellCache[coordinate] = isClear;
         return isClear;
     }
@@ -23262,10 +23288,7 @@ public class InstallationPlacementController : MonoBehaviour
             return true;
         }
 
-        return CoordinateHasNormalInputOutputAreaBlockForPlacement(coordinate, previewToIgnore)
-               || InputOutputModule.CoordinateIsRuntimeInputOutputAreaBlock(coordinate)
-               || HasPipeAreaFluidStorageAtCoordinate(coordinate)
-               || IsPumpRuntimeOutputCoordinate(coordinate)
+        return CoordinateHasInputOutputAreaForPlacement(coordinate, previewToIgnore)
                || TryGetSavedPlacementSnapshot(coordinate, out _);
     }
 
@@ -23335,11 +23358,7 @@ public class InstallationPlacementController : MonoBehaviour
             return false;
         }
 
-        bool isInputOutputAreaBlock =
-            InputOutputModuleEnergyAreaController.CoordinateIsEnergyArea(block.Coordinate)
-            || InputOutputModuleItemAreaController.CoordinateIsItemArea(block.Coordinate)
-            || InputOutputModuleOutputAreaController.CoordinateIsOutputArea(block.Coordinate)
-            || InputOutputModule.CoordinateIsRuntimeInputOutputAreaBlock(block.Coordinate);
+        bool isInputOutputAreaBlock = CoordinateHasInputOutputAreaForPlacement(block.Coordinate, null);
         bool isRuntimePipeAreaBlock = InputOutputModule.CoordinateAllowsRuntimePipeBlock(block.Coordinate);
         if (isInputOutputAreaBlock && !isRuntimePipeAreaBlock)
         {
@@ -31457,7 +31476,8 @@ public class InstallationPlacementController : MonoBehaviour
         for (int i = 0; i < placements.Count; i++)
         {
             InputOutputModule.RectGridBlockPlacement placement = placements[i];
-            if (!IsNormalInputOutputAreaBlockType(placement.blockType)
+            if (IsNonBlockingRobotArmInteractionArea(footprintSource, placement.blockType)
+                || !IsNormalInputOutputAreaBlockType(placement.blockType)
                 || placement.x < 0
                 || placement.x >= rectGridWidth
                 || placement.y < 0
@@ -31689,6 +31709,16 @@ public class InstallationPlacementController : MonoBehaviour
             PlacementAreaBlockKind.InputItem);
     }
 
+    private bool CoordinateHasOutputAreaBlockForPlacement(
+        Vector2Int coordinate,
+        MapObject previewToIgnore)
+    {
+        return CoordinateHasPlacementAreaBlock(
+            coordinate,
+            previewToIgnore,
+            PlacementAreaBlockKind.Output);
+    }
+
     private bool CoordinateHasBoilerEnergyInputBlockForPlacement(
         Vector2Int coordinate,
         MapObject previewToIgnore)
@@ -31778,12 +31808,13 @@ public class InstallationPlacementController : MonoBehaviour
         return areaKind switch
         {
             PlacementAreaBlockKind.Normal =>
-                InputOutputModuleEnergyAreaController.CoordinateIsEnergyArea(coordinate)
-                || InputOutputModuleItemAreaController.CoordinateIsItemArea(coordinate)
-                || InputOutputModuleOutputAreaController.CoordinateIsOutputArea(coordinate),
+                InputOutputModuleEnergyAreaController.CoordinateBlocksInstallationPlacement(coordinate)
+                || InputOutputModuleItemAreaController.CoordinateBlocksInstallationPlacement(coordinate)
+                || InputOutputModuleOutputAreaController.CoordinateBlocksInstallationPlacement(coordinate),
             PlacementAreaBlockKind.InputItem =>
-                InputOutputModuleItemAreaController.CoordinateIsItemArea(coordinate)
-                || InputOutputModule.CoordinateIsRuntimeInputItemBlock(coordinate),
+                InputOutputModuleItemAreaController.CoordinateBlocksInstallationPlacement(coordinate),
+            PlacementAreaBlockKind.Output =>
+                InputOutputModuleOutputAreaController.CoordinateBlocksInstallationPlacement(coordinate),
             _ => false
         };
     }
@@ -31808,10 +31839,12 @@ public class InstallationPlacementController : MonoBehaviour
                    snapshot.quarterTurns,
                    coordinate,
                    out InputOutputModule.RectGridBlockType blockType)
+               && !IsNonBlockingRobotArmInteractionArea(footprintSource, blockType)
                && (areaKind switch
                    {
                        PlacementAreaBlockKind.Normal => IsNormalInputOutputAreaBlockType(blockType),
                        PlacementAreaBlockKind.InputItem => InputOutputModule.IsInputItemBlockType(blockType),
+                       PlacementAreaBlockKind.Output => InputOutputModule.IsOutputBlockType(blockType),
                        PlacementAreaBlockKind.BoilerEnergyInput => InputOutputModule.IsInputEnergyBlockType(blockType),
                        _ => false
                    });
@@ -31821,6 +31854,7 @@ public class InstallationPlacementController : MonoBehaviour
     {
         Normal,
         InputItem,
+        Output,
         BoilerEnergyInput
     }
 
@@ -31832,10 +31866,8 @@ public class InstallationPlacementController : MonoBehaviour
 
     private bool CoordinateHasInputOutputAreaForPlacement(Vector2Int coordinate, MapObject previewToIgnore)
     {
-        if (InputOutputModuleEnergyAreaController.CoordinateIsEnergyArea(coordinate)
-            || InputOutputModuleItemAreaController.CoordinateIsItemArea(coordinate)
-            || InputOutputModuleOutputAreaController.CoordinateIsOutputArea(coordinate)
-            || InputOutputModule.CoordinateIsRuntimeInputOutputAreaBlock(coordinate)
+        if (CoordinateHasNormalInputOutputAreaBlockForPlacement(coordinate, previewToIgnore)
+            || InputOutputModule.CoordinateAllowsRuntimePipeBlock(coordinate)
             || HasPipeAreaFluidStorageAtCoordinate(coordinate)
             || IsPumpOutputCoordinateForPlacement(coordinate))
         {
@@ -31854,11 +31886,13 @@ public class InstallationPlacementController : MonoBehaviour
             }
 
             MapObject previewFootprintSource = ResolveInstallPreviewFootprintSource(preview);
-            if (IsRectGridAreaBlockType(GetRectGridBlockTypeAtCoordinate(
-                    previewAnchorCoordinate,
-                    previewFootprintSource,
-                    GetPreviewAreaQuarterTurns(preview),
-                    coordinate)))
+            InputOutputModule.RectGridBlockType blockType = GetRectGridBlockTypeAtCoordinate(
+                previewAnchorCoordinate,
+                previewFootprintSource,
+                GetPreviewAreaQuarterTurns(preview),
+                coordinate);
+            if (IsRectGridAreaBlockType(blockType)
+                && !IsNonBlockingRobotArmInteractionArea(previewFootprintSource, blockType))
             {
                 return true;
             }
@@ -32748,17 +32782,28 @@ public class InstallationPlacementController : MonoBehaviour
                 return false;
             }
 
-            if (blocksDroppedFloorObjects && terrain.HasDroppedFloorObjectsAt(coordinate))
-            {
-                return false;
-            }
-
             TryGetRectGridFootprintBlockType(
                 anchorCoordinate,
                 footprintSource,
                 quarterTurns,
                 coordinate,
                 out InputOutputModule.RectGridBlockType rectGridBlockType);
+            bool ignoresPlacementObstacles = IsNonBlockingRobotArmInteractionArea(
+                footprintSource,
+                rectGridBlockType);
+            if (!ignoresPlacementObstacles
+                && blocksDroppedFloorObjects
+                && terrain.HasDroppedFloorObjectsAt(coordinate))
+            {
+                return false;
+            }
+
+            if (ignoresPlacementObstacles)
+            {
+                footprintBlocks.Add(footprintBlock);
+                continue;
+            }
+
             if (!CanPlacePreviewOnTargetBlockType(
                     footprintBlock,
                     footprintSource,
@@ -32873,6 +32918,11 @@ public class InstallationPlacementController : MonoBehaviour
             return false;
         }
 
+        if (IsNonBlockingRobotArmInteractionArea(footprintSource, rectGridBlockType))
+        {
+            return true;
+        }
+
         MapObject occupyingObject = GetOccupyingObjectForPlacement(block, previewToIgnore);
 
         if (!TryResolveInstallationObject(footprintSource, out InstallationObject installationObject))
@@ -32889,15 +32939,15 @@ public class InstallationPlacementController : MonoBehaviour
         }
 
         bool isRectGridAreaBlock = IsRectGridAreaBlockType(rectGridBlockType);
-        bool isInputOutputEnergyAreaBlock = InputOutputModuleEnergyAreaController.CoordinateIsEnergyArea(block.Coordinate)
+        bool isInputOutputEnergyAreaBlock = InputOutputModuleEnergyAreaController.CoordinateBlocksInstallationPlacement(block.Coordinate)
             || InputOutputModule.CoordinateIsRuntimeInputEnergyBlock(block.Coordinate);
         bool isInputOutputItemAreaBlock = CoordinateHasInputItemAreaBlockForPlacement(
             block.Coordinate,
             previewToIgnore);
         bool isPumpRuntimeOutputAreaBlock = IsPumpOutputCoordinateForPlacement(block.Coordinate);
-        bool isInputOutputOutputAreaBlock = InputOutputModuleOutputAreaController.CoordinateIsOutputArea(block.Coordinate)
-            || (InputOutputModule.CoordinateIsRuntimeOutputBlock(block.Coordinate)
-                && !isPumpRuntimeOutputAreaBlock);
+        bool isInputOutputOutputAreaBlock = CoordinateHasOutputAreaBlockForPlacement(
+            block.Coordinate,
+            previewToIgnore) && !isPumpRuntimeOutputAreaBlock;
         bool isRuntimePipeAreaBlock = InputOutputModule.CoordinateAllowsRuntimePipeBlock(block.Coordinate);
         bool isFluidStoragePipeNodeBlock = HasPipeAreaFluidStorageAtCoordinate(block.Coordinate);
         bool hasNormalInputOutputAreaBlock = CoordinateHasNormalInputOutputAreaBlockForPlacement(
@@ -35693,11 +35743,7 @@ public class InstallationPlacementController : MonoBehaviour
             return true;
         }
 
-        bool isInputOutputAreaBlock =
-            InputOutputModuleEnergyAreaController.CoordinateIsEnergyArea(block.Coordinate)
-            || InputOutputModuleItemAreaController.CoordinateIsItemArea(block.Coordinate)
-            || InputOutputModuleOutputAreaController.CoordinateIsOutputArea(block.Coordinate)
-            || InputOutputModule.CoordinateIsRuntimeInputOutputAreaBlock(block.Coordinate);
+        bool isInputOutputAreaBlock = CoordinateHasInputOutputAreaForPlacement(block.Coordinate, null);
         if (isInputOutputAreaBlock)
         {
             return false;
@@ -36575,6 +36621,12 @@ public class InstallationPlacementController : MonoBehaviour
         Vector2Int existingAnchorCoordinate,
         int existingQuarterTurns)
     {
+        if (IsNonBlockingRobotArmInteractionArea(candidateFootprintSource, candidateBlockType)
+            || IsNonBlockingRobotArmInteractionArea(existingFootprintSource, existingBlockType))
+        {
+            return true;
+        }
+
         if (SimpleInstallationAllowsItemAreaOverlap(
                 candidateFootprintSource,
                 candidateBlockType,
@@ -36690,6 +36742,20 @@ public class InstallationPlacementController : MonoBehaviour
             candidateAnchorCoordinate,
             candidateQuarterTurns,
             existingOutputItemIds);
+    }
+
+    private static bool IsNonBlockingRobotArmInteractionArea(
+        MapObject footprintSource,
+        InputOutputModule.RectGridBlockType blockType)
+    {
+        return !ShouldInputOutputAreasBlockInstallationPlacement(footprintSource)
+               && (blockType == InputOutputModule.RectGridBlockType.InputItem
+                   || blockType == InputOutputModule.RectGridBlockType.Output);
+    }
+
+    private static bool ShouldInputOutputAreasBlockInstallationPlacement(MapObject footprintSource)
+    {
+        return !(footprintSource is RobotArm);
     }
 
     private static bool SimpleInstallationAllowsItemAreaOverlap(

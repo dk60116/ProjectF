@@ -8,9 +8,9 @@ public class ConvayorBelt2F : ConveyorBelt
     private const int DefaultFootprintLength = 3;
     private const float DefaultPathHalfLength = 1.33f;
     private const float DefaultPathHighHalfLength = 0.5f;
-    private const float DefaultPathLowHeight = 0.2f;
-    private const float DefaultPathHighHeight = 0.876f;
-    private const float PathItemVerticalOffset = 0.2f;
+    private const float DefaultPathLowHeight = 0.13f;
+    private const float DefaultPathHighHeight = 0.806f;
+    private const float PathItemVerticalOffset = 0.13f;
     private const float SlotLongitudinalOffset = 0.25f;
     private const float PathSlopeItemPitchDegrees = 45f;
     private const float PathSlopeRotationEpsilon = 0.0001f;

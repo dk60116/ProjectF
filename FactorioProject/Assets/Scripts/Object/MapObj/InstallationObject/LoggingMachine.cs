@@ -392,11 +392,10 @@ public class LoggingMachine : InstallationObject,
         activeTree = null;
         consumedWorkEnergy = 0f;
 
-        if (CanDropTreeLogs(tree))
+        if (tree != null && tree.OwningBlock != null)
         {
             Block treeBlock = tree.OwningBlock;
             Vector3 startWorldPosition = tree.FocusPoint;
-            Vector3 dropWorldPosition = tree.transform.position;
             int appleItemId = -1;
             int appleCount = 0;
             bool hasAppleDrop = tree is ProjectF.MapObjects.Tree harvestedTree
@@ -410,11 +409,14 @@ public class LoggingMachine : InstallationObject,
                 && outputItemId >= 0
                 && outputCount > 0)
             {
-                // Capacity is checked before harvesting; logs never use the player/nearby drop routing.
+                // Logging output is authoritative at the harvested tree coordinate.
                 for (int i = 0; i < outputCount; i++)
                 {
-                    if (!treeBlock.TryAddFloorObjectAnimated(outputItemId, startWorldPosition, 0f,
-                            out _, harvestedResource: tree))
+                    if (!treeBlock.TryAddHarvestedFloorObjectAnimated(
+                            outputItemId,
+                            startWorldPosition,
+                            out _,
+                            tree))
                     {
                         Debug.LogError($"{nameof(LoggingMachine)} could not place harvested logs at {treeBlock.Coordinate}.", this);
                         break;
@@ -430,7 +432,7 @@ public class LoggingMachine : InstallationObject,
                         appleCount);
                 }
 
-                RecoverHarvestedSeeds(treeBlock, startWorldPosition, dropWorldPosition);
+                RecoverHarvestedSeeds(treeBlock, startWorldPosition);
             }
         }
 
@@ -438,12 +440,11 @@ public class LoggingMachine : InstallationObject,
         AdvanceDirection();
     }
 
-    private void RecoverHarvestedSeeds(Block treeBlock, Vector3 startWorldPosition, Vector3 dropWorldPosition)
+    private void RecoverHarvestedSeeds(Block treeBlock, Vector3 startWorldPosition)
     {
-        if (harvestedSeedDrops.Count == 0)
+        if (treeBlock == null || harvestedSeedDrops.Count == 0)
             return;
-        Vector2Int coordinate = treeBlock != null ? treeBlock.Coordinate
-            : new Vector2Int(Mathf.RoundToInt(dropWorldPosition.x), Mathf.RoundToInt(dropWorldPosition.z));
+        Vector2Int coordinate = treeBlock.Coordinate;
         seedRecoveryModules.Clear();
         InputOutputModule.CollectModulesAtRuntimeAreaCoordinate(coordinate, seedRecoveryModules);
         for (int i = 0; i < harvestedSeedDrops.Count; i++)
@@ -456,43 +457,40 @@ public class LoggingMachine : InstallationObject,
                     remaining -= planter.ReceiveHarvestedSeeds(coordinate, reward.Key, remaining, startWorldPosition);
             }
             if (remaining > 0)
-                DropHarvestedItems(treeBlock, startWorldPosition, dropWorldPosition, reward.Key, remaining);
+                DropHarvestedSeedsNearTree(treeBlock, startWorldPosition, reward.Key, remaining);
         }
         seedRecoveryModules.Clear();
     }
 
-    private static void DropHarvestedItems(
+    private static void DropHarvestedSeedsNearTree(
         Block treeBlock,
         Vector3 startWorldPosition,
-        Vector3 dropWorldPosition,
         int itemId,
         int count)
     {
         TerrainGenerator terrain = TerrainGenerator.ResolveActive();
+        if (terrain == null
+            || treeBlock == null
+            || !TryResolveNearbyEmptyDropBlock(
+                terrain,
+                treeBlock.Coordinate,
+                itemId,
+                count,
+                out Block targetBlock))
+        {
+            return;
+        }
 
         for (int i = 0; i < count; i++)
         {
-            if (treeBlock != null
-                && treeBlock.TryAddFloorObjectAnimated(
+            if (!targetBlock.TryAddFloorObjectAnimated(
                     itemId,
                     startWorldPosition,
                     0f,
                     out _))
             {
-                continue;
+                return;
             }
-
-            if (terrain != null
-                && terrain.TryAddDroppedItemAnimated(
-                    dropWorldPosition,
-                    itemId,
-                    startWorldPosition,
-                    out _))
-            {
-                continue;
-            }
-
-            terrain?.TryAddDroppedItemNear(dropWorldPosition, itemId, out _);
         }
     }
 
@@ -869,15 +867,7 @@ public class LoggingMachine : InstallationObject,
         }
 
         tree = block.Resource;
-        return IsHarvestableTree(tree) && CanDropTreeLogs(tree);
-    }
-
-    private static bool CanDropTreeLogs(Resource tree)
-    {
-        return tree != null
-               && tree.OwningBlock != null
-               && tree.TryPeekMachineHarvestOutput(out int itemId, out int count)
-               && tree.OwningBlock.CanAddFloorObjects(count, itemId, tree);
+        return IsHarvestableTree(tree);
     }
 
     private bool IsHarvestableTree(Resource resource)

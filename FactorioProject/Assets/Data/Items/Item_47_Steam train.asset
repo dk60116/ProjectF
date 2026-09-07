@@ -13,7 +13,7 @@ MonoBehaviour:
   m_Name: Item_52_Steam train
   m_EditorClassIdentifier: 
   itemName: Steam train
-  id: 102
+  id: 104
   mapObject: {fileID: 6151593433542269344, guid: d719f22bffbaf23419a1efce8f6354f9, type: 3}
   portableMesh: {fileID: 4300000, guid: 628cea7c87ae22644b204243295f4429, type: 2}
   portableMat: {fileID: 2100000, guid: 1dfbd69284c27484dab13e0668a01836, type: 2}
@@ -31,6 +31,7 @@ MonoBehaviour:
   isManual: 0
   manualTargetItem: {fileID: 0}
   upgradeable: 1
+  keepIoAreaItemsInPlaceWhileEditing: 0
   capacity: 10
   storesFluid: 1
   fluidStorageLiters: 100

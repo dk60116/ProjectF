@@ -13,7 +13,7 @@ MonoBehaviour:
   m_Name: Item_59_Wooden wheel
   m_EditorClassIdentifier: Assembly-CSharp::ItemDefinition
   itemName: Wooden wheel
-  id: 95
+  id: 97
   mapObject: {fileID: 0}
   portableMesh: {fileID: 4300000, guid: 2a5347a55d1f97842aae2067f837f850, type: 2}
   portableMat: {fileID: 2100000, guid: bf23af0625dc43a4e804d51b21ce1f37, type: 2}
@@ -29,6 +29,7 @@ MonoBehaviour:
   isManual: 0
   manualTargetItem: {fileID: 0}
   upgradeable: 1
+  keepIoAreaItemsInPlaceWhileEditing: 0
   capacity: 10
   storesFluid: 0
   fluidStorageLiters: 0

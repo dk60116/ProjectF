@@ -16,7 +16,7 @@ public partial class Block : BaseObject
     private const int ConveyorStackLaneLimit = ConveyorCellItemUnit;
     private const int ConveyorSingleLineFrontLaneIndex = 0;
     private const int ConveyorSingleLineBackLaneIndex = 2;
-    private const float ConveyorLaneHeight = 0.2f;
+    private const float ConveyorLaneHeight = 0.13f;
     private const float ConveyorLaneSettleEpsilon = 0.01f;
     private const float ConveyorCycleReadyDistance = 0.12f;
     private const float ConveyorItemSpacing = 0.5f;
@@ -1237,6 +1237,44 @@ public partial class Block : BaseObject
 
     public bool TryAddFloorObjectAnimated(int objectId, Vector3 startWorldPosition, float delay, out PortableObject targetPortableObject, Action onComplete = null, Func<Vector3> startWorldPositionProvider = null, Resource harvestedResource = null)
     {
+        return TryAddFloorObjectAnimatedInternal(
+            objectId,
+            startWorldPosition,
+            delay,
+            out targetPortableObject,
+            onComplete,
+            startWorldPositionProvider,
+            harvestedResource,
+            false);
+    }
+
+    public bool TryAddHarvestedFloorObjectAnimated(
+        int objectId,
+        Vector3 startWorldPosition,
+        out PortableObject targetPortableObject,
+        Resource harvestedResource)
+    {
+        return TryAddFloorObjectAnimatedInternal(
+            objectId,
+            startWorldPosition,
+            0f,
+            out targetPortableObject,
+            null,
+            null,
+            harvestedResource,
+            true);
+    }
+
+    private bool TryAddFloorObjectAnimatedInternal(
+        int objectId,
+        Vector3 startWorldPosition,
+        float delay,
+        out PortableObject targetPortableObject,
+        Action onComplete,
+        Func<Vector3> startWorldPositionProvider,
+        Resource harvestedResource,
+        bool forceHarvestPlacement)
+    {
         targetPortableObject = null;
         EnsureFloorObjectsInitialized();
 
@@ -1252,7 +1290,7 @@ public partial class Block : BaseObject
             return true;
         }
 
-        if (BlocksFloorObjectStacking(objectId, harvestedResource))
+        if (!forceHarvestPlacement && BlocksFloorObjectStacking(objectId, harvestedResource))
         {
             return false;
         }
@@ -1262,7 +1300,10 @@ public partial class Block : BaseObject
             return false;
         }
 
-        if (!TryGetAvailableFloorStack(objectId, out Transform anchor, out List<PortableObject> stack))
+        bool hasTargetStack = forceHarvestPlacement
+            ? TryGetForcedHarvestFloorStack(objectId, out Transform anchor, out List<PortableObject> stack)
+            : TryGetAvailableFloorStack(objectId, out anchor, out stack);
+        if (!hasTargetStack)
         {
             return false;
         }
@@ -2438,13 +2479,29 @@ public partial class Block : BaseObject
         float maxDistance,
         out int takenItemId)
     {
+        return TryTakeOneConveyorObject(
+            referenceWorldPosition,
+            referenceWorldPosition,
+            itemFilter,
+            maxDistance,
+            out takenItemId);
+    }
+
+    public bool TryTakeOneConveyorObject(
+        Vector3 selectionReferenceWorldPosition,
+        Vector3 pickupRangeReferenceWorldPosition,
+        Predicate<int> itemFilter,
+        float maxDistance,
+        out int takenItemId)
+    {
         takenItemId = -1;
         EnsureFloorObjectsInitialized();
         CleanupConveyorStack();
 
         if (!IsConveyorStackingEnabled()
             || !TryGetClosestConveyorItemLane(
-                referenceWorldPosition,
+                selectionReferenceWorldPosition,
+                pickupRangeReferenceWorldPosition,
                 itemFilter,
                 maxDistance,
                 out int laneIndex))
@@ -2486,6 +2543,21 @@ public partial class Block : BaseObject
         float maxDistance,
         out Vector3 worldPosition)
     {
+        return TryGetClosestConveyorObjectWorldPosition(
+            referenceWorldPosition,
+            referenceWorldPosition,
+            itemFilter,
+            maxDistance,
+            out worldPosition);
+    }
+
+    public bool TryGetClosestConveyorObjectWorldPosition(
+        Vector3 selectionReferenceWorldPosition,
+        Vector3 pickupRangeReferenceWorldPosition,
+        Predicate<int> itemFilter,
+        float maxDistance,
+        out Vector3 worldPosition)
+    {
         worldPosition = WorldPosition;
         EnsureFloorObjectsInitialized();
         CleanupConveyorStack();
@@ -2495,40 +2567,17 @@ public partial class Block : BaseObject
             return false;
         }
 
-        int bestLaneIndex = -1;
-        float bestDistanceSqr = float.MaxValue;
-        float maxDistanceSqr = maxDistance >= 0f ? maxDistance * maxDistance : float.MaxValue;
-        Vector3 bestWorldPosition = worldPosition;
-        int laneCount = GetConveyorLaneCount();
-        for (int laneIndex = 0; laneIndex < laneCount; laneIndex++)
-        {
-            int itemId = GetConveyorItemIdAtLane(laneIndex);
-            if (itemId < 0 || (itemFilter != null && !itemFilter(itemId)))
-            {
-                continue;
-            }
-
-            Vector3 candidateWorldPosition = GetConveyorItemVisualWorldPosition(laneIndex);
-            Vector3 offset = candidateWorldPosition - referenceWorldPosition;
-            offset.y = 0f;
-            float distanceSqr = offset.sqrMagnitude;
-            if (distanceSqr > maxDistanceSqr
-                || (bestLaneIndex >= 0 && distanceSqr >= bestDistanceSqr))
-            {
-                continue;
-            }
-
-            bestLaneIndex = laneIndex;
-            bestDistanceSqr = distanceSqr;
-            bestWorldPosition = candidateWorldPosition;
-        }
-
-        if (bestLaneIndex < 0)
+        if (!TryGetClosestConveyorItemLane(
+                selectionReferenceWorldPosition,
+                pickupRangeReferenceWorldPosition,
+                itemFilter,
+                maxDistance,
+                out int bestLaneIndex))
         {
             return false;
         }
 
-        worldPosition = bestWorldPosition;
+        worldPosition = GetConveyorItemVisualWorldPosition(bestLaneIndex);
         return true;
     }
 
@@ -6978,6 +7027,45 @@ public partial class Block : BaseObject
                && stack.Count < ResolveFloorStackCapacity(objectId);
     }
 
+    private bool TryGetForcedHarvestFloorStack(
+        int objectId,
+        out Transform anchor,
+        out List<PortableObject> stack)
+    {
+        anchor = ResolveFloorObjectDropAnchor();
+        stack = null;
+        if (objectId < 0 || anchor == null)
+        {
+            return false;
+        }
+
+        if (floorStacks.Count == 0)
+        {
+            floorStacks.Add(new List<PortableObject>());
+        }
+
+        stack = floorStacks[0];
+        if (stack == null)
+        {
+            stack = new List<PortableObject>();
+            floorStacks[0] = stack;
+        }
+
+        if (IsStackCompatible(stack, objectId))
+        {
+            return true;
+        }
+
+        // A tree-owned cell must always receive its logs. Any impossible stale
+        // floor content is discarded so the single authoritative stack stays valid.
+        for (int objectIndex = stack.Count - 1; objectIndex >= 0; objectIndex--)
+        {
+            ReleaseFloorObject(stack[objectIndex]);
+        }
+        stack.Clear();
+        return true;
+    }
+
     private int ResolveFloorStackCapacity(int itemId)
     {
         int defaultCapacity = Mathf.Max(1, maxFloorObjectsPerStack);
@@ -8014,6 +8102,21 @@ public partial class Block : BaseObject
         float maxDistance,
         out int bestLaneIndex)
     {
+        return TryGetClosestConveyorItemLane(
+            referenceWorldPosition,
+            referenceWorldPosition,
+            itemFilter,
+            maxDistance,
+            out bestLaneIndex);
+    }
+
+    private bool TryGetClosestConveyorItemLane(
+        Vector3 selectionReferenceWorldPosition,
+        Vector3 pickupRangeReferenceWorldPosition,
+        Predicate<int> itemFilter,
+        float maxDistance,
+        out int bestLaneIndex)
+    {
         bestLaneIndex = -1;
         float bestDistanceSqr = float.MaxValue;
         float maxDistanceSqr = maxDistance >= 0f ? maxDistance * maxDistance : float.MaxValue;
@@ -8026,17 +8129,23 @@ public partial class Block : BaseObject
                 continue;
             }
 
-            Vector3 offset = GetConveyorItemVisualWorldPosition(laneIndex) - referenceWorldPosition;
-            offset.y = 0f;
-            float distanceSqr = offset.sqrMagnitude;
-            if (distanceSqr > maxDistanceSqr
-                || (bestLaneIndex >= 0 && distanceSqr >= bestDistanceSqr))
+            Vector3 candidateWorldPosition = GetConveyorItemVisualWorldPosition(laneIndex);
+            Vector3 selectionOffset = candidateWorldPosition - selectionReferenceWorldPosition;
+            selectionOffset.y = 0f;
+            float selectionDistanceSqr = selectionOffset.sqrMagnitude;
+            Vector3 rangeOffset = candidateWorldPosition - pickupRangeReferenceWorldPosition;
+            rangeOffset.y = 0f;
+            float rangeDistanceSqr = selectionReferenceWorldPosition.Equals(pickupRangeReferenceWorldPosition)
+                ? selectionDistanceSqr
+                : rangeOffset.sqrMagnitude;
+            if (rangeDistanceSqr > maxDistanceSqr
+                || (bestLaneIndex >= 0 && selectionDistanceSqr >= bestDistanceSqr))
             {
                 continue;
             }
 
             bestLaneIndex = laneIndex;
-            bestDistanceSqr = distanceSqr;
+            bestDistanceSqr = selectionDistanceSqr;
         }
 
         return bestLaneIndex >= 0;

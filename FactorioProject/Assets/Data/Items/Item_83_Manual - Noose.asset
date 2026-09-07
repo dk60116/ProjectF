@@ -13,7 +13,7 @@ MonoBehaviour:
   m_Name: Item_83_Manual - Noose
   m_EditorClassIdentifier: Assembly-CSharp::ItemDefinition
   itemName: Manual - Noose
-  id: 79
+  id: 81
   mapObject: {fileID: 0}
   portableMesh: {fileID: 4300000, guid: 9588b4b5941582f4d80b4be71786ce12, type: 2}
   portableMat: {fileID: 2100000, guid: cf28cebeafedfd04ea0ebaf8a656e53e, type: 2}
@@ -29,6 +29,7 @@ MonoBehaviour:
   isManual: 1
   manualTargetItem: {fileID: 11400000, guid: f5afae373c201a7438785dd9cdf2ee6c, type: 2}
   upgradeable: 1
+  keepIoAreaItemsInPlaceWhileEditing: 0
   capacity: 10
   storesFluid: 0
   fluidStorageLiters: 0

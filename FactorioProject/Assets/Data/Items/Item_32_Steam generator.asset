@@ -29,6 +29,7 @@ MonoBehaviour:
   isManual: 0
   manualTargetItem: {fileID: 0}
   upgradeable: 1
+  keepIoAreaItemsInPlaceWhileEditing: 0
   capacity: 10
   storesFluid: 1
   fluidStorageLiters: 50

@@ -10,18 +10,9 @@ public class RobotArm : InputOutputModule
     private static readonly List<RobotArm> ActiveRobotArms = new List<RobotArm>();
     private static readonly Dictionary<Vector2Int, List<RobotArm>> WakeRobotArmsByCoordinate =
         new Dictionary<Vector2Int, List<RobotArm>>();
-    private static readonly Vector2Int[] Belt2FPickupSearchOffsets =
-    {
-        Vector2Int.zero,
-        Vector2Int.up,
-        Vector2Int.right,
-        Vector2Int.down,
-        Vector2Int.left
-    };
 
     private const float DefaultManagedUpdateDeltaSeconds = 1f / 60f;
     private const float MaxManagedUpdateDeltaSeconds = 0.12f;
-    private const float ConveyorPickupFrameAllowanceMax = 0.25f;
     private const float ItemMoveDuration = PortableObject.MoveToDuration * 0.5f;
     private const float RuntimeSleepRecheckIntervalSeconds = 0.1f;
     private const float AnimatorSpeedChangeEpsilon = 0.001f;
@@ -110,8 +101,6 @@ public class RobotArm : InputOutputModule
     [SerializeField, Min(0f), Tooltip("Delay between action timing and the actual pickup/drop.")]
     [FormerlySerializedAs("postActionTurnDelay")]
     private float actionTurnDelay = 0.1f;
-    [SerializeField, Min(0f), Tooltip("Maximum horizontal distance from the hand to pick up belt items.")]
-    private float conveyorPickupRadius = 0.35f;
 
     [SerializeField, HideInInspector]
     private int heldItemId = -1;
@@ -161,11 +150,27 @@ public class RobotArm : InputOutputModule
     public bool CanTakeHeldItemFromSlot => CanTakeHeldItemFromSlotInternal();
     public Vector3 HeldItemWorldPosition => GetHandWorldPosition();
     public bool IsRuntimeSleeping => runtimeSleeping;
+    public bool UsesInstancedRendering => useInstancedRendering;
     public float PickupIntervalSeconds => Mathf.Max(0.01f, pickupInterval);
+    public float BodyTurnSpeedDegreesPerSecond => Mathf.Max(1f, bodyTurnSpeedDegreesPerSecond);
     public float DropRetryIntervalSeconds => Mathf.Max(0.01f, dropRetryInterval);
     public float ActionTurnDelaySeconds => Mathf.Max(0f, actionTurnDelay);
     private float TurnDurationSeconds => 180f / Mathf.Max(1f, bodyTurnSpeedDegreesPerSecond);
     public override float ManagedUpdateTickIntervalSeconds => 0.001f;
+
+    public void SetEditorSettings(
+        bool enableInstancedRendering,
+        float pickupIntervalSeconds,
+        float turnSpeedDegreesPerSecond,
+        float retryIntervalSeconds,
+        float turnDelaySeconds)
+    {
+        useInstancedRendering = enableInstancedRendering;
+        pickupInterval = Mathf.Max(0.01f, pickupIntervalSeconds);
+        bodyTurnSpeedDegreesPerSecond = Mathf.Max(1f, turnSpeedDegreesPerSecond);
+        dropRetryInterval = Mathf.Max(0.01f, retryIntervalSeconds);
+        actionTurnDelay = Mathf.Max(0f, turnDelaySeconds);
+    }
 
     public override bool IsWorkingForItemLight
     {
@@ -1394,14 +1399,13 @@ public class RobotArm : InputOutputModule
                 return pickupBlock.TryTakeOneConveyorObject(
                     referenceWorldPosition,
                     PickupItemFilter,
-                    GetConveyorPickupSearchRadius(pickupBlock),
                     out pickedItemId);
             case RobotArmPickupSource.InputArea:
                 return TryTakeFilteredInputAreaItem(pickupBlock, out pickedItemId);
             case RobotArmPickupSource.SavedFloor:
                 return TryTakeSavedFloorItem(pickupCoordinate, out pickedItemId);
             case RobotArmPickupSource.SavedConveyor:
-                return TryTakeSavedConveyorItem(pickupCoordinate, referenceWorldPosition, out pickedItemId);
+                return TryTakeSavedConveyorItem(pickupCoordinate, GetBodyWorldPosition(), out pickedItemId);
             case RobotArmPickupSource.SavedInputArea:
                 return TryTakeSavedInputAreaItem(pickupCoordinate, out pickedItemId);
             default:
@@ -1443,7 +1447,7 @@ public class RobotArm : InputOutputModule
         }
 
         bool hasLoadedPickupBlock = terrainGenerator.TryGetLoadedBlock(pickupCoordinate, out pickupBlock) && pickupBlock != null;
-        Vector3 conveyorReferenceWorldPosition = GetPickupReferencePosition(pickupBlock, pickupCoordinate);
+        Vector3 conveyorSelectionReferenceWorldPosition = GetBodyWorldPosition();
         float bestDistanceSqr = float.MaxValue;
 
         if (hasLoadedPickupBlock
@@ -1472,15 +1476,12 @@ public class RobotArm : InputOutputModule
             }
         }
 
-        if (TryResolveConveyorPickupCandidate(
-                terrainGenerator,
-                pickupCoordinate,
-                pickupBlock,
-                conveyorReferenceWorldPosition,
-                out Block conveyorPickupBlock,
+        if (hasLoadedPickupBlock
+            && pickupBlock.TryGetClosestConveyorObjectWorldPosition(
+                conveyorSelectionReferenceWorldPosition,
+                PickupItemFilter,
                 out candidateWorldPosition))
         {
-            pickupBlock = conveyorPickupBlock;
             TryChoosePickupSource(RobotArmPickupSource.Conveyor, candidateWorldPosition, referenceWorldPosition, ref pickupSource, ref bestDistanceSqr, ref pickupWorldPosition);
         }
 
@@ -1498,7 +1499,7 @@ public class RobotArm : InputOutputModule
             terrainGenerator,
             pickupCoordinate,
             hasLoadedPickupBlock,
-            conveyorReferenceWorldPosition,
+            conveyorSelectionReferenceWorldPosition,
             ref pickupSource,
             ref bestDistanceSqr,
             ref pickupWorldPosition);
@@ -1506,67 +1507,17 @@ public class RobotArm : InputOutputModule
         if (pickupSource == RobotArmPickupSource.Conveyor
             || pickupSource == RobotArmPickupSource.SavedConveyor)
         {
-            referenceWorldPosition = conveyorReferenceWorldPosition;
+            referenceWorldPosition = conveyorSelectionReferenceWorldPosition;
         }
 
         return pickupSource != RobotArmPickupSource.None;
-    }
-
-    private bool TryResolveConveyorPickupCandidate(
-        TerrainGenerator terrainGenerator,
-        Vector2Int pickupCoordinate,
-        Block primaryPickupBlock,
-        Vector3 conveyorReferenceWorldPosition,
-        out Block conveyorPickupBlock,
-        out Vector3 pickupWorldPosition)
-    {
-        conveyorPickupBlock = null;
-        pickupWorldPosition = conveyorReferenceWorldPosition;
-        if (terrainGenerator == null || primaryPickupBlock == null)
-        {
-            return false;
-        }
-
-        bool searchBelt2FNeighbors = primaryPickupBlock.HasRuntimeBelt2FConveyor();
-        int searchCount = searchBelt2FNeighbors ? Belt2FPickupSearchOffsets.Length : 1;
-        float bestDistanceSqr = float.MaxValue;
-
-        for (int i = 0; i < searchCount; i++)
-        {
-            Vector2Int candidateCoordinate = pickupCoordinate + Belt2FPickupSearchOffsets[i];
-            if (!terrainGenerator.TryGetLoadedBlock(candidateCoordinate, out Block candidateBlock)
-                || candidateBlock == null
-                || (i > 0 && !candidateBlock.HasRuntimeBelt2FConveyor())
-                || !candidateBlock.TryGetClosestConveyorObjectWorldPosition(
-                    conveyorReferenceWorldPosition,
-                    PickupItemFilter,
-                    GetConveyorPickupSearchRadius(candidateBlock),
-                    out Vector3 candidateWorldPosition))
-            {
-                continue;
-            }
-
-            Vector3 offset = candidateWorldPosition - conveyorReferenceWorldPosition;
-            offset.y = 0f;
-            float distanceSqr = offset.sqrMagnitude;
-            if (conveyorPickupBlock != null && distanceSqr >= bestDistanceSqr)
-            {
-                continue;
-            }
-
-            conveyorPickupBlock = candidateBlock;
-            pickupWorldPosition = candidateWorldPosition;
-            bestDistanceSqr = distanceSqr;
-        }
-
-        return conveyorPickupBlock != null;
     }
 
     private void TryResolveSavedPickupCandidate(
         TerrainGenerator terrainGenerator,
         Vector2Int pickupCoordinate,
         bool hasLoadedPickupBlock,
-        Vector3 conveyorReferenceWorldPosition,
+        Vector3 conveyorSelectionReferenceWorldPosition,
         ref RobotArmPickupSource pickupSource,
         ref float bestDistanceSqr,
         ref Vector3 pickupWorldPosition)
@@ -1609,7 +1560,7 @@ public class RobotArm : InputOutputModule
             && stateStore.TryPeekSavedConveyorItem(
                 pickupCoordinate,
                 PickupItemFilter,
-                conveyorReferenceWorldPosition,
+                conveyorSelectionReferenceWorldPosition,
                 out _,
                 out Vector3 conveyorWorldPosition))
         {
@@ -1695,26 +1646,6 @@ public class RobotArm : InputOutputModule
         }
 
         return IsItemFilterEnabled(itemId, ResolveFilterBitCount(itemId));
-    }
-
-    private float GetConveyorPickupRadius()
-    {
-        return Mathf.Max(0f, conveyorPickupRadius);
-    }
-
-    private float GetConveyorPickupSearchRadius(Block conveyorBlock)
-    {
-        float radius = GetConveyorPickupRadius();
-        if (conveyorBlock == null)
-        {
-            return radius;
-        }
-
-        float frameDeltaTime = Mathf.Max(Time.deltaTime, lastManagedUpdateDeltaTime);
-        float frameMovementAllowance = Mathf.Min(
-            ConveyorPickupFrameAllowanceMax,
-            Mathf.Max(0f, conveyorBlock.RuntimeConveyorSpeed) * Mathf.Max(0f, frameDeltaTime));
-        return radius + frameMovementAllowance;
     }
 
     private int ResolveFilterBitCount(int fallbackItemId)
@@ -2616,6 +2547,11 @@ public class RobotArm : InputOutputModule
         }
 
         return transform.position;
+    }
+
+    private Vector3 GetBodyWorldPosition()
+    {
+        return body != null ? body.position : transform.position;
     }
 
     private void BeginHeldItemMoveToHand(Vector3 startWorldPosition)

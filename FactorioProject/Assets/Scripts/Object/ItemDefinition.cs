@@ -56,6 +56,9 @@ public class ItemDefinition : ScriptableObject
     public ItemDefinition manualTargetItem;
     [Tooltip("부모 I/O 모듈이 설치되어 있을 때 이 아이템으로 업그레이드할 수 있는지 여부입니다.")]
     public bool upgradeable = true;
+    [Header("Map Editing")]
+    [Tooltip("편집 모드에서 설치물을 옮길 때 Input/Output 영역에 놓인 아이템을 제자리에 유지합니다.")]
+    public bool keepIoAreaItemsInPlaceWhileEditing;
     [Min(1)]
     public int capacity = 10;
     public bool storesFluid;

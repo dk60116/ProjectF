@@ -1110,7 +1110,6 @@ public class BoxObject : InputOutputModule
         IReadOnlyList<Vector2Int> occupiedCoordinates = RuntimeOccupiedCoordinates;
         Block firstOccupiedBlock = null;
         Block preferredItemAreaBlock = null;
-        int preferredFilteredItemId = TryGetSingleResolvedItemId(out int filteredItemId) ? filteredItemId : -1;
         if (occupiedCoordinates != null)
         {
             for (int i = 0; i < occupiedCoordinates.Count; i++)
@@ -1126,25 +1125,8 @@ public class BoxObject : InputOutputModule
                     firstOccupiedBlock = occupiedBlock;
                 }
 
-                bool isInputItemAreaCoordinate = InputOutputModuleItemAreaController.CoordinateIsItemArea(occupiedCoordinates[i]);
-                if (isInputItemAreaCoordinate
-                    && InputOutputModule.TryGetModuleAtRuntimeGridCoordinate(occupiedCoordinates[i], out InputOutputModule module)
-                    && module != null
-                    && module.TryGetRuntimeInputBlock(terrainGenerator, preferredFilteredItemId, out Block moduleInputBlock)
-                    && moduleInputBlock != null)
-                {
-                    if (moduleInputBlock.GetInputAreaCenterItemCount() > 0)
-                    {
-                        contentBlock = moduleInputBlock;
-                        return true;
-                    }
-
-                    if (preferredItemAreaBlock == null)
-                    {
-                        preferredItemAreaBlock = moduleInputBlock;
-                    }
-                }
-
+                // Overlapping I/O areas do not change which cells belong to this box.
+                // A module may have other input cells occupied by a different box.
                 if (preferredItemAreaBlock == null && IsItemAreaCoordinate(occupiedCoordinates[i]))
                 {
                     preferredItemAreaBlock = occupiedBlock;

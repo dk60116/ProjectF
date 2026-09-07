@@ -15,9 +15,34 @@ public partial class InputOutputModule : MapObject
     private bool IsValidRectGridCell(int x, int y) => x >= 0 && y >= 0;
     private bool TryGetRectGridObjectAnchorCell(MapObject source, out Vector2Int cell) { cell = AnchorCell; return true; }
 }
-public class ItemDefinition { public int id; public string itemName; }
+public class ItemDefinition { public int id; public string itemName; public bool keepIoAreaItemsInPlaceWhileEditing; }
 public class ItemManager { public List<ItemDefinition> ItemDefinitions = new(); }
 public class GameManager { public static GameManager Instance = new(); public ItemManager ItemManger = new(); }
+public class PortableObject { }
+public class TerrainGenerator
+{
+    public static TerrainGenerator Active = new();
+    public int RemovalNotifications;
+    public void NotifyConveyorItemRemovedFromBelt() => RemovalNotifications++;
+}
+public partial class Block
+{
+    public int[] Items = { -1, -1 };
+    public Vector3[] Positions = new Vector3[2];
+    public Vector3 WorldPosition;
+    public bool Enabled = true;
+    private void EnsureFloorObjectsInitialized() { }
+    private void CleanupConveyorStack() { }
+    private bool IsConveyorStackingEnabled() => Enabled;
+    private int GetConveyorLaneCount() => Items.Length;
+    private int GetConveyorItemIdAtLane(int lane) => Items[lane];
+    private Vector3 GetConveyorItemVisualWorldPosition(int lane) => Positions[lane];
+    private PortableObject GetConveyorPortableObjectAtLane(int lane) => null;
+    private PortableObject MaterializeConveyorObjectForTransfer(PortableObject item, int id, int lane) => item;
+    private void ClearConveyorItemForExternalRemoval(int lane) => Items[lane] = -1;
+    private void ReleaseFloorObject(PortableObject item) { }
+    private void NotifyRuntimeItemStackChanged() { }
+}
 public partial class RobotArm : InputOutputModule
 {
     private bool interactionCoordinateCacheValid;
@@ -49,7 +74,10 @@ public static partial class Checks
     private static void Require(bool ok, string message) { if (!ok) throw new Exception(message); count++; }
     public static void Main(string[] args)
     {
-        string prefab = File.ReadAllText(Path.Combine(args[0], "FactorioProject/Assets/MapObject/Robot Arm/Robot Arm.prefab"));
+        CheckConveyorPickup();
+        string prefab = File.ReadAllText(Path.Combine(
+            args[0],
+            "FactorioProject/Assets/MapObject/InputOutputModule/Robot arm/Robot arm.prefab"));
         string grid = Regex.Match(prefab, @"rectGridPlacements:\s*([\s\S]*?)  runtimeAreaMaxObjects:").Groups[1].Value;
         var arm = new RobotArm();
         foreach (Match match in Regex.Matches(grid, @"- x: (\d+)\s+y: (\d+)\s+blockType: (\d+)"))
@@ -61,6 +89,41 @@ public static partial class Checks
             if (cell.blockType == InputOutputModule.RectGridBlockType.Object) arm.AnchorCell = new(cell.x, cell.y);
         }
         Require(arm.RectGridPlacements.Count == 3, "prefab must define standard input/body/output");
+        Require(InstallationPlacementController.IsNonBlockingRobotArmArea(
+            arm,
+            InputOutputModule.RectGridBlockType.InputItem),
+            "robot arm pickup area must not block placement");
+        Require(InstallationPlacementController.IsNonBlockingRobotArmArea(
+            arm,
+            InputOutputModule.RectGridBlockType.Output),
+            "robot arm drop area must not block placement");
+        Require(!InstallationPlacementController.IsNonBlockingRobotArmArea(
+            arm,
+            InputOutputModule.RectGridBlockType.Object),
+            "robot arm body must keep placement collision");
+        Require(!InstallationPlacementController.IsNonBlockingRobotArmArea(
+            new InputOutputModule(),
+            InputOutputModule.RectGridBlockType.InputItem),
+            "other installation item areas must keep their placement rules");
+        Require(!InstallationPlacementController.AreasBlockPlacement(arm),
+            "installed robot arm IO registrations must not become placement obstacles");
+        Require(InstallationPlacementController.AreasBlockPlacement(new InputOutputModule()),
+            "installed non-robot IO registrations must keep placement collision");
+        Require(!InstallationPlacementController.CapturesInteractionAreaItemsInEdit(
+                new ItemDefinition { keepIoAreaItemsInPlaceWhileEditing = true }),
+            "the ItemData edit option must leave pickup and drop area items in place");
+        Require(InstallationPlacementController.CapturesInteractionAreaItemsInEdit(new ItemDefinition()),
+            "definitions without the edit option must keep the existing edit-state capture behavior");
+        foreach (string robotArmItemDataPath in new[]
+                 {
+                     "FactorioProject/Assets/Data/Items/Item_33_Robot arm.asset",
+                     "FactorioProject/Assets/Data/Items/Item_106_Long Robot arm.asset"
+                 })
+        {
+            string robotArmItemData = File.ReadAllText(Path.Combine(args[0], robotArmItemDataPath));
+            Require(Regex.IsMatch(robotArmItemData, @"(?m)^  keepIoAreaItemsInPlaceWhileEditing: 1$"),
+                "every current robot arm ItemData asset must preserve IO area items while editing");
+        }
         foreach (var origin in new[] { Vector2Int.zero, new Vector2Int(-13, 25) })
         for (int rotation = 0; rotation < 4; rotation++)
         {
@@ -106,5 +169,26 @@ public static partial class Checks
             Require(stream.Length == 26, "transfer save layout must remain compatible");
         }
         Console.WriteLine($"PASS: {count} robot arm standard IO and transfer save checks.");
+    }
+
+    private static void CheckConveyorPickup()
+    {
+        var belt = new Block { Items = new[] { 10, 20 }, Positions = new[] { new Vector3(12, 0, 0), new Vector3(11, 0, 0) } };
+        var body = Vector3.zero;
+        Require(belt.TryGetClosestConveyorObjectWorldPosition(body, null, out var position) && position == belt.Positions[1],
+            "both belt slots must be eligible beyond the old radius; closest to the body wins");
+        Require(belt.TryTakeOneConveyorObject(body, null, out int itemId) && itemId == 20 && belt.Items[0] == 10,
+            "actual pickup must match the nearest preview and remove only one item");
+        Require(belt.TryTakeOneConveyorObject(body, null, out itemId) && itemId == 10,
+            "the remaining far slot must be picked without approaching the hand");
+        Require(!belt.TryTakeOneConveyorObject(body, null, out _), "an empty belt must not supply an item");
+        belt.Items = new[] { 10, 20 };
+        Require(belt.TryTakeOneConveyorObject(body, id => id == 10, out itemId) && itemId == 10 && belt.Items[1] == 20,
+            "item filter must still reject the closer slot");
+        belt.Items = new[] { 10, 20 };
+        Require(belt.TryTakeOneConveyorObject(new Vector3(15, 0, 0), null, out itemId) && itemId == 10,
+            "changing the body side must reverse nearest-slot priority");
+        belt.Enabled = false;
+        Require(!belt.TryTakeOneConveyorObject(body, null, out _), "non-conveyor storage must not be picked as belt items");
     }
 }

@@ -12,10 +12,10 @@ It checks shared consumption, insufficient supply without partial loss, multiple
 fluid type filtering, local input fallback, and live storage amounts. Production
 update and spray methods also verify immediate proportional consumption/watering,
 the configured average rate, partial supply, and unplaced/invalid-world handling.
-Range checks verify equal sharing among plants throughout the range, redistribution
-when a plant saturates, no duplicate supply to multi-cell plants, no supply outside
-the range, and watering independent of farmland connections. Empty or saturated
-ranges still consume the configured spray amount.
+Range checks verify that each plant receives only its own coordinate's fixed share,
+unused water is not pulled from empty or saturated neighboring cells, duplicate
+references are supplied once, and plants outside the range receive no water. Empty
+or saturated ranges still consume the configured whole-range spray amount.
 
 Unity objects, notifications, and coordinate/connector lookup are managed test doubles.
 Traversal checks include serial tanks, pipes beyond tanks, cycles, disconnection,

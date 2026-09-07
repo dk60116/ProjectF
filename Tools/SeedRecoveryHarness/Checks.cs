@@ -127,12 +127,8 @@ static class Checks
         harvestBlock.Capacity = 3;
         logger = new LoggingMachine();
         logger.Harvest(harvested);
-        Check(harvested.CanHarvest && harvestBlock.floorStacks[0].Count == 0 && logger.Drops.Count == 0,
-            "insufficient original-cell space leaves tree and rewards intact");
-        harvestBlock.Capacity = 20;
-        logger.Harvest(harvested);
         Check(!harvested.CanHarvest && harvestBlock.floorStacks[0].Count == 4,
-            "harvest resumes when original cell can hold complete log output");
+            "logging always removes the tree and forces every log onto its original cell");
 
         var terrain = new TerrainGenerator();
         terrain.farmlandCoordinates.Add(harvestBlock.Coordinate);
@@ -213,9 +209,12 @@ public partial class Block
     private int ResolveFloorStackCapacity(int id) => Capacity;
     private static bool IsStackCompatible(List<PortableObject> stack, int id) => stack.Count == 0 || stack[0].ItemId == id;
     private bool IsFarmlandFertilizerItem(int id) => false;
-    public bool TryAddFloorObjectAnimated(int id, Vector3 start, float delay, out object visual, Resource harvestedResource = null)
+    public bool TryAddFloorObjectAnimated(int id, Vector3 start, float delay, out object visual,
+        Action onComplete = null, Func<Vector3> startProvider = null, Resource harvestedResource = null)
     { visual = null; if (!CanAddFloorObjects(1,id,harvestedResource)) return false;
       floorStacks[0].Add(new PortableObject { ItemId = id }); return true; }
+    public bool TryAddHarvestedFloorObjectAnimated(int id, Vector3 start, out object visual, Resource harvestedResource)
+    { visual = null; floorStacks[0].Add(new PortableObject { ItemId = id }); return true; }
     public Slot Slot;
     public bool TryAddInputAreaCenterObjectAnimated(int id, Vector3 start, float delay, out object visual)
     { visual = null; return Slot.Add(id,1,Slot.Capacity); }
@@ -274,7 +273,7 @@ public partial class LoggingMachine
     public void Harvest(Resource tree) => CompleteTreeHarvest(tree);
     private void SetWorking(bool working) { }
     private void AdvanceDirection() { Advances++; }
-    private void DropHarvestedItems(Block block, Vector3 start, Vector3 drop, int id, int count)
+    private void DropHarvestedSeedsNearTree(Block block, Vector3 start, int id, int count)
     { Drops.TryGetValue(id,out int old); Drops[id] = old + count; }
     private void DropApplesIntoNearbyEmptyBlocks(Block block, Vector3 start, int id, int count) { Apples += count; }
 }
