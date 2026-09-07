@@ -317,6 +317,37 @@ public class Boiler : InputOutputModule
                && pipePassDirection != Vector2Int.zero;
     }
 
+    public bool TryGetRuntimeWaterPass(
+        Vector2Int coordinate,
+        out Vector2Int otherCoordinate,
+        out Vector2Int externalDirection)
+    {
+        otherCoordinate = default;
+        externalDirection = default;
+        if (!TryGetPlacementRuntime(out Vector2Int anchor, out int quarterTurns)
+            || !TryGetPipePassDirectionAtCoordinate(this, anchor, quarterTurns, coordinate, out Vector2Int inwardDirection))
+        {
+            return false;
+        }
+
+        IReadOnlyList<RectGridBlockPlacement> placements = RectGridPlacements;
+        for (int i = 0; i < placements.Count; i++)
+        {
+            RectGridBlockPlacement placement = placements[i];
+            // Only connect the water PipeInput cells. The steam output remains separate.
+            if (placement.blockType == RectGridBlockType.PipeInput
+                && TryGetRectGridPlacementCoordinate(this, anchor, quarterTurns, placement, out Vector2Int candidate)
+                && candidate != coordinate)
+            {
+                otherCoordinate = candidate;
+                externalDirection = -inwardDirection;
+                return true;
+            }
+        }
+
+        return false;
+    }
+
     public bool PipePassAtCoordinateMatchesDirection(
         MapObject footprintSource,
         Vector2Int anchorCoordinate,

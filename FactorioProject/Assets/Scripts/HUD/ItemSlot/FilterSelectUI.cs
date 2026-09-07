@@ -217,8 +217,16 @@ public partial class FilterSelectUI : MonoBehaviour
             return;
         }
 
-        ApplyLoggingHeaderLayout(boundTarget is Spliterbelt);
-        SetLoggingGrowthControlVisible(false);
+        bool hasThresholdControl = boundTarget is BoxObject;
+        ApplyLoggingHeaderLayout(boundTarget is Spliterbelt || hasThresholdControl);
+        if (boundTarget is BoxObject boxObject)
+        {
+            RefreshBoxMinimumRetainedControl(boxObject);
+        }
+        else
+        {
+            SetLoggingGrowthControlVisible(false);
+        }
 
         int filterBitCount = GetFilterBitCount();
         bool isProductionTargetFilter = TryResolveProductionMachine(boundTarget, out ProductionMachine productionMachine);
@@ -1077,6 +1085,8 @@ public partial class FilterSelectUI : MonoBehaviour
             : ResourceDefinition.MinGrowth;
         if (loggingGrowthSlider != null)
         {
+            loggingGrowthSlider.minValue = ResourceDefinition.MinGrowth;
+            loggingGrowthSlider.maxValue = ResourceDefinition.MaxGrowth;
             loggingGrowthSlider.SetValueWithoutNotify(growth);
         }
 
@@ -1091,6 +1101,33 @@ public partial class FilterSelectUI : MonoBehaviour
         }
     }
 
+    private void RefreshBoxMinimumRetainedControl(BoxObject boxObject)
+    {
+        EnsureLoggingGrowthControl();
+        SetLoggingGrowthControlVisible(true);
+        int retainedCount = boxObject != null
+            ? boxObject.MinimumRetainedItemCount
+            : BoxObject.DefaultMinimumRetainedItemCount;
+        if (loggingGrowthSlider != null)
+        {
+            loggingGrowthSlider.minValue = 0f;
+            loggingGrowthSlider.maxValue = boxObject != null
+                ? Mathf.Max(1, boxObject.GetMinimumRetainedItemCountLimit())
+                : 1f;
+            loggingGrowthSlider.SetValueWithoutNotify(retainedCount);
+        }
+
+        if (loggingGrowthLabel != null)
+        {
+            loggingGrowthLabel.text = "MINIMUM RETAINED";
+        }
+
+        if (loggingGrowthValueLabel != null)
+        {
+            loggingGrowthValueLabel.text = retainedCount.ToString();
+        }
+    }
+
     private void SetLoggingGrowthControlVisible(bool visible)
     {
         if (loggingGrowthControl != null && loggingGrowthControl.activeSelf != visible)
@@ -1101,7 +1138,16 @@ public partial class FilterSelectUI : MonoBehaviour
 
     private void HandleLoggingGrowthChanged(float value)
     {
-        if (!(ResolveCurrentTarget() is LoggingMachine loggingMachine))
+        MapObject target = ResolveCurrentTarget();
+        if (target is BoxObject boxObject)
+        {
+            boxObject.SetMinimumRetainedItemCount(Mathf.RoundToInt(value));
+            PersistTargetFilterState(boxObject);
+            RefreshBoxMinimumRetainedControl(boxObject);
+            return;
+        }
+
+        if (!(target is LoggingMachine loggingMachine))
         {
             return;
         }

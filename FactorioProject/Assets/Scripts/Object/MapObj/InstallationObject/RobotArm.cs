@@ -1460,6 +1460,7 @@ public class RobotArm : InputOutputModule
         {
             boxObject = candidateBoxObject;
             if (candidateBoxObject.TryGetContainedObjectTopItemId(out int containedItemId)
+                && candidateBoxObject.CanTakeContainedObject()
                 && AcceptsPickupItem(containedItemId)
                 && candidateBoxObject.TryGetContainedObjectTopWorldPosition(out candidateWorldPosition))
             {
@@ -1485,7 +1486,7 @@ public class RobotArm : InputOutputModule
             TryChoosePickupSource(RobotArmPickupSource.Conveyor, candidateWorldPosition, referenceWorldPosition, ref pickupSource, ref bestDistanceSqr, ref pickupWorldPosition);
         }
 
-        if (hasLoadedPickupBlock)
+        if (hasLoadedPickupBlock && boxObject == null)
         {
             int inputAreaItemId = pickupBlock.GetInputAreaCenterItemId();
             if (AcceptsPickupItem(inputAreaItemId)
@@ -1698,7 +1699,7 @@ public class RobotArm : InputOutputModule
         bool hasLoadedDropBlock = terrainGenerator != null
                                   && terrainGenerator.TryGetLoadedBlock(dropCoordinate, out dropBlock)
                                   && dropBlock != null;
-        if (ShouldUseSavedDropCoordinate(terrainGenerator, dropCoordinate, hasLoadedDropBlock))
+        if (ShouldUseSavedDropCoordinate(terrainGenerator, dropCoordinate, dropBlock))
         {
             return TryPlaceHeldItemInSavedCoordinate(dropCoordinate, itemId, true);
         }
@@ -1785,7 +1786,7 @@ public class RobotArm : InputOutputModule
         bool hasLoadedDropBlock = terrainGenerator != null
                                   && terrainGenerator.TryGetLoadedBlock(dropCoordinate, out dropBlock)
                                   && dropBlock != null;
-        if (ShouldUseSavedDropCoordinate(terrainGenerator, dropCoordinate, hasLoadedDropBlock))
+        if (ShouldUseSavedDropCoordinate(terrainGenerator, dropCoordinate, dropBlock))
         {
             return TryPlaceHeldItemInSavedCoordinate(dropCoordinate, heldItemId, false);
         }
@@ -2052,12 +2053,18 @@ public class RobotArm : InputOutputModule
     private static bool ShouldUseSavedDropCoordinate(
         TerrainGenerator terrainGenerator,
         Vector2Int coordinate,
-        bool hasLoadedBlock)
+        Block dropBlock)
     {
-        return !hasLoadedBlock
-               || (terrainGenerator != null
-                   && (terrainGenerator.IsConveyorItemCoordinateVirtualized(coordinate)
-                       || terrainGenerator.IsFloorObjectCoordinateVirtualized(coordinate)));
+        if (dropBlock == null)
+        {
+            return true;
+        }
+
+        // Floor stacks and belt lanes can be virtualized independently.
+        return terrainGenerator != null
+               && (IsConveyorBeltMapObject(dropBlock.MapObject)
+                   ? terrainGenerator.IsConveyorItemCoordinateVirtualized(coordinate)
+                   : terrainGenerator.IsFloorObjectCoordinateVirtualized(coordinate));
     }
 
     private static Vector3 GetPickupReferencePosition(Block pickupBlock, Vector2Int pickupCoordinate)
@@ -2093,7 +2100,7 @@ public class RobotArm : InputOutputModule
 
     private static bool CanPlaceSingleLineDrop(Block dropBlock, Vector2Int coordinate)
     {
-        if (dropBlock == null)
+        if (dropBlock == null || IsConveyorBeltMapObject(dropBlock.MapObject))
         {
             return false;
         }
@@ -2134,9 +2141,18 @@ public class RobotArm : InputOutputModule
 
     private static bool CanPlaceSavedSingleLineDrop(BlockStateStore stateStore, Vector2Int coordinate)
     {
+        Vector2Int anchorCoordinate = default;
+        bool hasInstallation = stateStore != null
+            && stateStore.TryGetInstallationAnchorAtCoordinate(coordinate, out anchorCoordinate);
+        if (hasInstallation
+            && stateStore.TryGetInstallationStateReadOnly(anchorCoordinate, out BlockStateStore.InstallationSaveState installationState)
+            && IsConveyorBeltMapObject(InputOutputModule.ResolveItemDefinition(installationState.itemId)?.mapObject))
+        {
+            return false;
+        }
+
         return CoordinateAcceptsInputAreaObject(coordinate)
-               || stateStore == null
-               || !stateStore.TryGetInstallationAnchorAtCoordinate(coordinate, out _);
+               || !hasInstallation;
     }
 
     private static int ResolveSavedCenterCapacity(

@@ -1264,6 +1264,17 @@ public class InputOutputModule : InstallationObject,
             return false;
         }
 
+        // A box owns its storage filter. Overlapping machine input areas decide
+        // what they consume, not what the box can receive from an output area.
+        TerrainGenerator terrain = TerrainGenerator.Active;
+        if (terrain != null
+            && terrain.TryGetLoadedBlock(coordinate, out Block block)
+            && block != null
+            && block.MapObject is BoxObject box)
+        {
+            return box.AcceptsItem(itemId);
+        }
+
         HashSet<int> allowedItemIds = new HashSet<int>();
         return !TryGetRuntimeIoOverlapAllowedItemIds(coordinate, allowedItemIds)
             || allowedItemIds.Contains(itemId);
@@ -1953,7 +1964,7 @@ public class InputOutputModule : InstallationObject,
         while (connectedFluidSearchQueue.Count > 0)
         {
             Vector2Int coordinate = connectedFluidSearchQueue.Dequeue();
-            EnqueueSteamGeneratorPipePassCoordinatesAt(coordinate);
+            EnqueueFluidStoragePipePassCoordinatesAt(coordinate);
             bool isSeedCoordinate = ContainsCoordinate(connectedFluidSeedCoordinates, coordinate);
             bool hasPipe = TryGetConnectedPipeAtCoordinate(coordinate, out Pipe pipe, out Quaternion pipeRotation);
             TryResolveConnectedFluidSearchStorageAtCoordinate(
@@ -2021,16 +2032,16 @@ public class InputOutputModule : InstallationObject,
         return cachedConnectedFluidSourceStorages.Count > 0;
     }
 
-    private void EnqueueSteamGeneratorPipePassCoordinatesAt(Vector2Int coordinate)
+    private void EnqueueFluidStoragePipePassCoordinatesAt(Vector2Int coordinate)
     {
-        bool hasSteamGeneratorPipeArea = EnqueueSteamGeneratorPipePassCoordinatesAt(
+        bool hasConnectedPipeArea = EnqueueFluidStoragePipePassCoordinatesAt(
             registeredRuntimeAreaCoordinates.TryGetValue(
                 coordinate,
                 out HashSet<InputOutputModule> areaModules)
                 ? areaModules
                 : null,
             coordinate);
-        hasSteamGeneratorPipeArea |= EnqueueSteamGeneratorPipePassCoordinatesAt(
+        hasConnectedPipeArea |= EnqueueFluidStoragePipePassCoordinatesAt(
             registeredRuntimeGridCoordinates.TryGetValue(
                 coordinate,
                 out HashSet<InputOutputModule> gridModules)
@@ -2038,7 +2049,7 @@ public class InputOutputModule : InstallationObject,
                 : null,
             coordinate);
 
-        if (!hasSteamGeneratorPipeArea
+        if (!hasConnectedPipeArea
             || !TryResolveConnectedFluidStorageBodyAtCoordinate(
                 coordinate,
                 out InstallationObject bodyStorage)
@@ -2050,7 +2061,7 @@ public class InputOutputModule : InstallationObject,
         EnqueueSteamGeneratorPipePassCoordinates(bodyGenerator);
     }
 
-    private bool EnqueueSteamGeneratorPipePassCoordinatesAt(
+    private bool EnqueueFluidStoragePipePassCoordinatesAt(
         IEnumerable<InputOutputModule> modules,
         Vector2Int coordinate)
     {
@@ -2062,6 +2073,15 @@ public class InputOutputModule : InstallationObject,
         bool foundPipeArea = false;
         foreach (InputOutputModule module in modules)
         {
+            if (module is Boiler boiler
+                && boiler.gameObject.activeInHierarchy
+                && boiler.TryGetRuntimeWaterPass(coordinate, out Vector2Int otherCoordinate, out _))
+            {
+                EnqueueConnectedFluidSearchCoordinate(otherCoordinate);
+                foundPipeArea = true;
+                continue;
+            }
+
             if (!(module is SteamGenerator steamGenerator)
                 || !steamGenerator.gameObject.activeInHierarchy
                 || !steamGenerator.ContainsRuntimePipeAreaBlockCoordinate(coordinate))
@@ -5599,7 +5619,7 @@ public class InputOutputModule : InstallationObject,
         while (connectedFluidSearchQueue.Count > 0)
         {
             Vector2Int coordinate = connectedFluidSearchQueue.Dequeue();
-            EnqueueSteamGeneratorPipePassCoordinatesAt(coordinate);
+            EnqueueFluidStoragePipePassCoordinatesAt(coordinate);
             AddFluidOutputStorageCacheCandidatesAtCoordinate(coordinate);
 
             bool isOutputSeed = ContainsCoordinate(runtimeOutputCoordinates, coordinate);

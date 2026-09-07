@@ -23,6 +23,7 @@ internal static class Program
                 itemName = "Spliter belt",
                 itemFilterMaskInitialized = true,
                 itemFilterMaskWords = new System.Collections.Generic.List<ulong> { 1UL << 42 },
+                boxMinimumRetainedItemCount = wheels + 2,
                 splitterState = new Spliterbelt.PersistentState
                     { filterOutput = mode, nextInput = input, nextOutput = output, wheelRotationMask = wheels }
             };
@@ -31,28 +32,37 @@ internal static class Program
             write.Invoke(null, new object[] { writer, state });
             writer.Flush(); stream.Position = 0;
             using var reader = new BinaryReader(stream, System.Text.Encoding.UTF8, true);
-            var restored = (BlockStateStore.InstallationSaveState)read.Invoke(null, new[] { reader, (object)52, current });
+            var restored = (BlockStateStore.InstallationSaveState)read.Invoke(null, new[] { reader, (object)55, current });
             if (restored.splitterState.filterOutput != mode || restored.splitterState.nextInput != input
                 || restored.splitterState.nextOutput != output || restored.itemFilterMaskWords[0] != 1UL << 42
-                || restored.splitterState.wheelRotationMask != wheels || stream.Position != stream.Length)
+                || restored.splitterState.wheelRotationMask != wheels
+                || restored.boxMinimumRetainedItemCount != wheels + 2 || stream.Position != stream.Length)
                 throw new Exception("Splitter save round-trip mismatch");
 
-            // Version 51 lacks the wheel field; version 50 lacks the entire splitter tail.
+            // Version 52 lacks the box reserve; version 51 also lacks the wheel field;
+            // version 50 lacks the entire splitter tail.
             byte[] bytes = stream.ToArray();
-            using var previousStream = new MemoryStream(bytes, 0, bytes.Length - 4);
+            using var v52Stream = new MemoryStream(bytes, 0, bytes.Length - 4);
+            using var v52Reader = new BinaryReader(v52Stream);
+            var v52 = (BlockStateStore.InstallationSaveState)read.Invoke(null, new[] { v52Reader, (object)52, current });
+            if (v52.splitterState.wheelRotationMask != wheels
+                || v52.boxMinimumRetainedItemCount != BoxObject.DefaultMinimumRetainedItemCount
+                || v52Stream.Position != v52Stream.Length)
+                throw new Exception("Version 52 installation alignment changed");
+            using var previousStream = new MemoryStream(bytes, 0, bytes.Length - 8);
             using var previousReader = new BinaryReader(previousStream);
             var previous = (BlockStateStore.InstallationSaveState)read.Invoke(null, new[] { previousReader, (object)51, current });
             if (previous.splitterState.wheelRotationMask != 0 || previous.splitterState.nextInput != input
                 || previous.splitterState.nextOutput != output || previousStream.Position != previousStream.Length)
                 throw new Exception("Version 51 splitter alignment changed");
-            using var legacyStream = new MemoryStream(bytes, 0, bytes.Length - 17);
+            using var legacyStream = new MemoryStream(bytes, 0, bytes.Length - 21);
             using var legacyReader = new BinaryReader(legacyStream);
             var legacy = (BlockStateStore.InstallationSaveState)read.Invoke(null, new[] { legacyReader, (object)50, current });
             if (legacy.splitterState != null || legacy.itemFilterMaskWords[0] != 1UL << 42
                 || legacyStream.Position != legacyStream.Length)
                 throw new Exception("Legacy installation alignment changed");
-            cases += 3;
+            cases += 4;
         }
-        Console.WriteLine($"PASS: {cases} production serializer installation round-trips, including versions 50/51 compatibility. No engine launched.");
+        Console.WriteLine($"PASS: {cases} production serializer installation round-trips, including versions 50/51/52 compatibility. No engine launched.");
     }
 }

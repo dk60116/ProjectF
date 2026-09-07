@@ -5,8 +5,8 @@ using UnityEngine;
 [Serializable]
 public sealed class SaveGameData
 {
-    // Version 54 stores individual food digestion timers instead of periodic defecation.
-    public const int CurrentVersion = 54;
+    // Version 55 stores the minimum item count retained by boxes.
+    public const int CurrentVersion = 55;
 
     public int version = CurrentVersion;
     public long savedAtUtcTicks;

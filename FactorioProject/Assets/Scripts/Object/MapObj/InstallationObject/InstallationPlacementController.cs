@@ -423,6 +423,7 @@ public class InstallationPlacementController : MonoBehaviour
         public Dictionary<Vector2Int, List<int>> blockStatesByCanonicalOffset = new Dictionary<Vector2Int, List<int>>();
         public InputOutputModule.PersistentState inputOutputState;
         public bool? boxIsOpen;
+        public int boxMinimumRetainedItemCount = BoxObject.DefaultMinimumRetainedItemCount;
         public bool itemFilterMaskInitialized;
         public List<ulong> itemFilterMaskWords = new List<ulong>();
         public bool loggingTreeFilterInitialized;
@@ -447,6 +448,7 @@ public class InstallationPlacementController : MonoBehaviour
         public Quaternion originalRotation = Quaternion.identity;
         public Vector2Int canonicalAnchorOffset;
         public bool? boxIsOpen;
+        public int boxMinimumRetainedItemCount = BoxObject.DefaultMinimumRetainedItemCount;
         public bool itemFilterMaskInitialized;
         public List<ulong> itemFilterMaskWords = new List<ulong>();
     }
@@ -4367,6 +4369,7 @@ public class InstallationPlacementController : MonoBehaviour
         if (installationObject is BoxObject boxObject)
         {
             editSession.boxIsOpen = boxObject.IsOpen;
+            editSession.boxMinimumRetainedItemCount = boxObject.MinimumRetainedItemCount;
         }
 
         editSession.splitterState = (installationObject as Spliterbelt)?.CaptureSplitterState();
@@ -4516,6 +4519,7 @@ public class InstallationPlacementController : MonoBehaviour
             originalRotation = boxObject.transform.rotation,
             canonicalAnchorOffset = RotateFootprintOffset(worldOffset, -editSession.originalQuarterTurns),
             boxIsOpen = boxObject.IsOpen,
+            boxMinimumRetainedItemCount = boxObject.MinimumRetainedItemCount,
             itemFilterMaskInitialized = boxObject.IsItemFilterMaskInitialized,
             itemFilterMaskWords = boxObject.CaptureItemFilterMaskWords()
         };
@@ -5661,6 +5665,7 @@ public class InstallationPlacementController : MonoBehaviour
             if (restoredObject is BoxObject restoredBoxObject && editSession.boxIsOpen.HasValue)
             {
                 restoredBoxObject.SetOpenState(editSession.boxIsOpen.Value, false);
+                restoredBoxObject.SetMinimumRetainedItemCount(editSession.boxMinimumRetainedItemCount);
             }
         }
 
@@ -5895,6 +5900,7 @@ public class InstallationPlacementController : MonoBehaviour
             {
                 boxObject.SetOpenState(boxState.boxIsOpen.Value, false);
             }
+            boxObject.SetMinimumRetainedItemCount(boxState.boxMinimumRetainedItemCount);
 
             RegisterInstalledObjectPersistence(boxObject);
         }
@@ -5938,6 +5944,14 @@ public class InstallationPlacementController : MonoBehaviour
             editSession.loggingTreeFilterInitialized,
             editSession.loggingEnabledTreeDefinitionKeys,
             editSession.loggingMinimumGrowth);
+        if (replacementObject is BoxObject replacementBoxObject)
+        {
+            replacementBoxObject.SetMinimumRetainedItemCount(editSession.boxMinimumRetainedItemCount);
+            if (editSession.boxIsOpen.HasValue)
+            {
+                replacementBoxObject.SetOpenState(editSession.boxIsOpen.Value, false);
+            }
+        }
         if (replacementObject is InstallationObject replacementInstallation)
         {
             replacementInstallation.SetStoredFluid(

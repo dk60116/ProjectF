@@ -1098,9 +1098,13 @@ public partial class TerrainGenerator : MonoBehaviour
             collectionStorage.ApplyPersistentStoredItemIds(savedState.storedInstallationItemIds);
         }
 
-        if (restoredInstallation is BoxObject restoredBoxObject && savedState.boxIsOpen.HasValue)
+        if (restoredInstallation is BoxObject restoredBoxObject)
         {
-            restoredBoxObject.SetOpenState(savedState.boxIsOpen.Value, false);
+            if (savedState.boxIsOpen.HasValue)
+            {
+                restoredBoxObject.SetOpenState(savedState.boxIsOpen.Value, false);
+            }
+            restoredBoxObject.SetMinimumRetainedItemCount(savedState.boxMinimumRetainedItemCount);
         }
 
         restoredInstallation.gameObject.SetActive(true);

@@ -300,7 +300,16 @@ public class Pump : InputOutputModule
                 ref targetStorage,
                 ref targetStorageFillRatio);
 
-            if (!hasPipe && !hasFluidStorageBody)
+            Vector2Int waterPassDirection = default;
+            Vector2Int otherWaterPassCoordinate = default;
+            bool hasBoilerWaterPass = fluidStorage is Boiler boiler
+                && boiler.TryGetRuntimeWaterPass(coordinate, out otherWaterPassCoordinate, out waterPassDirection);
+            if (hasBoilerWaterPass)
+            {
+                EnqueueFluidSearchCoordinate(otherWaterPassCoordinate);
+            }
+
+            if (!hasPipe && !hasFluidStorageBody && !hasBoilerWaterPass)
             {
                 continue;
             }
@@ -308,6 +317,10 @@ public class Pump : InputOutputModule
             for (int directionIndex = 0; directionIndex < CardinalDirections.Length; directionIndex++)
             {
                 Vector2Int direction = CardinalDirections[directionIndex];
+                if (!hasPipe && hasBoilerWaterPass && direction != waterPassDirection)
+                {
+                    continue;
+                }
                 if (hasPipe && !pipe.HasConnectionTowardsAt(coordinate, pipeRotation, direction))
                 {
                     continue;
@@ -345,7 +358,42 @@ public class Pump : InputOutputModule
             }
         }
 
-        return TryUseFluidStorage(targetStorage, requestedLiters, commit, out acceptedLiters);
+        if (!commit)
+        {
+            return TryUseFluidStorage(targetStorage, requestedLiters, false, out acceptedLiters);
+        }
+
+        // A running boiler may need only a fraction of this tick's water. Keep
+        // routing the remainder through the already discovered network.
+        while (targetStorage != null)
+        {
+            fluidSearchStorageCandidates.Remove(targetStorage);
+            TryUseFluidStorage(targetStorage, requestedLiters - acceptedLiters, true, out float acceptedHere);
+            acceptedLiters += acceptedHere;
+            if (requestedLiters - acceptedLiters <= FluidEpsilon)
+            {
+                break;
+            }
+
+            targetStorage = null;
+            targetStorageFillRatio = float.PositiveInfinity;
+            foreach (InstallationObject candidate in fluidSearchStorageCandidates)
+            {
+                if (!candidate.CanAcceptFluidItem(waterItemId, FluidEpsilon))
+                {
+                    continue;
+                }
+
+                float fillRatio = Mathf.Clamp01(candidate.StoredFluidLiters / candidate.FluidStorageCapacityLiters);
+                if (fillRatio < targetStorageFillRatio)
+                {
+                    targetStorage = candidate;
+                    targetStorageFillRatio = fillRatio;
+                }
+            }
+        }
+
+        return acceptedLiters > FluidEpsilon;
     }
 
     private void EnqueueFluidSearchCoordinate(Vector2Int coordinate)
@@ -391,6 +439,16 @@ public class Pump : InputOutputModule
             return true;
         }
 
+        if (TryResolveFluidStorageAtCoordinate(coordinate, fluidItemId, false, out storage)
+            && storage is Boiler boiler
+            && boiler.TryGetRuntimeWaterPass(coordinate, out _, out Vector2Int externalDirection)
+            && externalDirection == directionToPrevious)
+        {
+            canContinueRoute = true;
+            return true;
+        }
+
+        storage = null;
         return false;
     }
 

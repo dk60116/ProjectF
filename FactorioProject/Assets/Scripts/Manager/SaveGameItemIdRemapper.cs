@@ -3,9 +3,6 @@ using System.Collections.Generic;
 
 public static class SaveGameItemIdRemapper
 {
-    private const int DuplicateRailloadItemId = 51;
-    private const string RailloadItemName = "Railload";
-
     public static List<SaveItemCatalogEntry> CaptureItemCatalog(IReadOnlyList<ItemDefinition> definitions)
     {
         List<SaveItemCatalogEntry> catalog = new List<SaveItemCatalogEntry>();
@@ -42,30 +39,10 @@ public static class SaveGameItemIdRemapper
         }
 
         Dictionary<int, int> itemIdMap = BuildUnambiguousItemIdMap(data.itemCatalog, currentDefinitions);
-        AddLegacyItemIdAlias(itemIdMap, currentDefinitions, DuplicateRailloadItemId, RailloadItemName);
+        // Only the saved catalog can identify a reused ID. A numeric legacy alias
+        // for rail 51 would also turn current pipes, recipes and box filters into rail.
         RemapMap(data.map, itemIdMap, currentDefinitions);
         RemapPlayer(data.player, itemIdMap);
-    }
-
-    private static void AddLegacyItemIdAlias(
-        Dictionary<int, int> itemIdMap,
-        IReadOnlyList<ItemDefinition> currentDefinitions,
-        int legacyItemId,
-        string stableItemName)
-    {
-        if (itemIdMap == null || legacyItemId < 0 || string.IsNullOrWhiteSpace(stableItemName))
-        {
-            return;
-        }
-
-        ItemDefinition currentDefinition =
-            ItemDefinitionLookup.ResolveByStableName(currentDefinitions, stableItemName);
-        if (currentDefinition != null
-            && currentDefinition.id >= 0
-            && currentDefinition.id != legacyItemId)
-        {
-            itemIdMap[legacyItemId] = currentDefinition.id;
-        }
     }
 
     private static Dictionary<int, int> BuildUnambiguousItemIdMap(

@@ -26,6 +26,7 @@ public partial class BlockStateStore : MonoBehaviour
         public InputOutputModule.PersistentState inputOutputState;
         public RobotArm.TransferState robotArmState;
         public bool? boxIsOpen;
+        public int boxMinimumRetainedItemCount = BoxObject.DefaultMinimumRetainedItemCount;
         public bool itemFilterMaskInitialized;
         public List<ulong> itemFilterMaskWords = new List<ulong>();
         public bool loggingTreeFilterInitialized;
@@ -83,6 +84,7 @@ public partial class BlockStateStore : MonoBehaviour
                 inputOutputState = inputOutputState != null ? inputOutputState.Clone() : null,
                 robotArmState = robotArmState != null ? robotArmState.Clone() : null,
                 boxIsOpen = boxIsOpen,
+                boxMinimumRetainedItemCount = boxMinimumRetainedItemCount,
                 itemFilterMaskInitialized = itemFilterMaskInitialized,
                 itemFilterMaskWords = new List<ulong>(itemFilterMaskWords ?? new List<ulong>()),
                 loggingTreeFilterInitialized = loggingTreeFilterInitialized,
@@ -1372,6 +1374,7 @@ public partial class BlockStateStore : MonoBehaviour
         if (installationObject is BoxObject boxObject)
         {
             state.boxIsOpen = boxObject.IsOpen;
+            state.boxMinimumRetainedItemCount = boxObject.MinimumRetainedItemCount;
         }
 
         state.splitterState = (installationObject as Spliterbelt)?.CaptureSplitterState();

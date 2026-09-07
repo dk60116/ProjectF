@@ -17,6 +17,9 @@ $source = "using System; using System.IO; using System.Collections.Generic; usin
 foreach ($member in @('public enum RobotArmState', 'public sealed class TransferState', 'private bool EnsureInteractionCoordinateCache(', 'private bool TryResolvePickupCoordinate(', 'private bool TryResolveDropCoordinate(', 'private void InvalidateInteractionCoordinateCache(', 'public bool TryCollectTransferItemIds(', 'private void RefreshRegisteredWakeCoordinates(', 'private void RegisterWakeCoordinatesAround(', 'private void RegisterWakeCoordinate(', 'private void UnregisterWakeCoordinates(')) {
     $source += (Member $arm $member) + "`n"
 }
+foreach ($member in @('private static bool CanPlaceSingleLineDrop(', 'private static bool CanPlaceSavedSingleLineDrop(', 'private static bool CoordinateAcceptsInputAreaObject(', 'private static bool IsConveyorBeltMapObject(', 'private static bool IsOreMapObject(', 'private static bool ShouldUseSavedDropCoordinate(')) {
+    $source += (Member $arm $member) + "`n"
+}
 $source += "} public partial class InputOutputModule {`n"
 foreach ($member in @('public enum SlotLayoutType', 'public enum RectGridBlockType', 'public struct RectGridBlockPlacement', 'public bool TryGetRectGridPlacementCoordinate(', 'public static Vector2Int RotateRectGridOffset(', 'public static bool IsFluidItemDefinition(')) { $source += (Member $io $member) + "`n" }
 $source += "} public partial class InstallationPlacementController {`n"

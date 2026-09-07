@@ -745,6 +745,7 @@ public static class SaveGameBinarySerializer
             writer.Write(state.splitterState.nextOutput);
             writer.Write(state.splitterState.wheelRotationMask);
         }
+        writer.Write(state.boxMinimumRetainedItemCount);
     }
 
     private static BlockStateStore.InstallationSaveState ReadInstallationState(
@@ -893,6 +894,10 @@ public static class SaveGameBinarySerializer
                 nextOutput = reader.ReadInt32(),
                 wheelRotationMask = version >= 52 ? reader.ReadInt32() : 0
             };
+        }
+        if (version >= 55)
+        {
+            state.boxMinimumRetainedItemCount = reader.ReadInt32();
         }
 
         return state;

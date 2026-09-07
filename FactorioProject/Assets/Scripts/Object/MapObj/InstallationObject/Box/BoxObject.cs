@@ -6,6 +6,7 @@ using UnityEngine.Serialization;
 
 public class BoxObject : InputOutputModule
 {
+    public const int DefaultMinimumRetainedItemCount = 0;
     private static readonly HashSet<BoxObject> ActiveInstances = new HashSet<BoxObject>();
     private static readonly Dictionary<Block, int> RuntimeContentBlockReferenceCounts = new Dictionary<Block, int>();
     private static float cachedGlobalMaxFocusActivationRadius;
@@ -20,6 +21,8 @@ public class BoxObject : InputOutputModule
     private float focusActivationRadius = 1f;
     [SerializeField]
     private bool isOpen = true;
+    [SerializeField, Min(0)]
+    private int minimumRetainedItemCount = DefaultMinimumRetainedItemCount;
     [SerializeField, Min(0.01f)]
     private float hingeTweenDuration = 0.2f;
     [SerializeField]
@@ -44,6 +47,7 @@ public class BoxObject : InputOutputModule
 
     public override float FocusActivationRadius => Mathf.Max(0f, focusActivationRadius);
     public bool IsOpen => isOpen;
+    public int MinimumRetainedItemCount => Mathf.Max(0, minimumRetainedItemCount);
     public new static float GlobalMaxFocusActivationRadius
     {
         get
@@ -177,7 +181,7 @@ public class BoxObject : InputOutputModule
 
     public bool TryPickupContainedObjectToBag(Player player, Vector3 playerPosition, float pickupRadius, int preferredSlotIndex, int preferredItemId = -1)
     {
-        if (!isOpen || player == null || pickupRadius <= 0f)
+        if (!isOpen || player == null || pickupRadius <= 0f || !CanTakeContainedObject())
         {
             return false;
         }
@@ -192,7 +196,7 @@ public class BoxObject : InputOutputModule
 
     public bool TryPickupContainedObjectToHand(Player player, Vector3 playerPosition, float pickupRadius)
     {
-        if (!isOpen || player == null || pickupRadius <= 0f)
+        if (!isOpen || player == null || pickupRadius <= 0f || !CanTakeContainedObject())
         {
             return false;
         }
@@ -250,14 +254,22 @@ public class BoxObject : InputOutputModule
             return false;
         }
 
-        return contentBlock.TryPreviewPickupInputAreaCenterObjects(
+        if (!contentBlock.TryPreviewPickupInputAreaCenterObjects(
             player,
             playerPosition,
             pickupRadius,
             preferredItemId,
             out previewItemId,
             out previewPickupCount,
-            out previewPortableObject);
+            out previewPortableObject))
+        {
+            return false;
+        }
+
+        previewPickupCount = Mathf.Min(
+            previewPickupCount,
+            GetExtractableContainedItemCount(previewItemId));
+        return previewPickupCount > 0;
     }
 
     public bool TryTakeOneContainedObject(out int takenItemId, bool requireOpen = false)
@@ -279,12 +291,84 @@ public class BoxObject : InputOutputModule
         }
 
         int itemId = contentBlock.GetInputAreaCenterItemId();
-        if (itemId < 0 || (itemFilter != null && !itemFilter(itemId)))
+        if (itemId < 0
+            || contentBlock.GetInputAreaCenterItemCount(itemId) <= MinimumRetainedItemCount
+            || (itemFilter != null && !itemFilter(itemId)))
         {
             return false;
         }
 
         return contentBlock.TryConsumeOneInputAreaCenterObject(itemId, out takenItemId);
+    }
+
+    public int GetExtractableContainedItemCount(int expectedItemId = -1)
+    {
+        if (!TryGetContentBlock(out Block contentBlock) || contentBlock == null)
+        {
+            return 0;
+        }
+
+        int itemId = contentBlock.GetInputAreaCenterItemId();
+        if (itemId < 0 || (expectedItemId >= 0 && itemId != expectedItemId))
+        {
+            return 0;
+        }
+
+        return Mathf.Max(
+            0,
+            contentBlock.GetInputAreaCenterItemCount(itemId) - MinimumRetainedItemCount);
+    }
+
+    public bool CanTakeContainedObject()
+    {
+        return GetExtractableContainedItemCount() > 0;
+    }
+
+    public int GetMinimumRetainedItemCountLimit()
+    {
+        return TryResolveMinimumRetainedItemCountLimit(out int limit)
+            ? limit
+            : Mathf.Max(MinimumRetainedItemCount, 1);
+    }
+
+    public void SetMinimumRetainedItemCount(int value)
+    {
+        int limit = TryResolveMinimumRetainedItemCountLimit(out int resolvedLimit)
+            ? resolvedLimit
+            : int.MaxValue;
+        int clampedValue = Mathf.Clamp(
+            value,
+            0,
+            limit);
+        if (minimumRetainedItemCount == clampedValue)
+        {
+            return;
+        }
+
+        minimumRetainedItemCount = clampedValue;
+        if (TryGetContentBlock(out Block contentBlock) && contentBlock != null)
+        {
+            RobotArm.WakeAroundCoordinate(contentBlock.Coordinate);
+            InputOutputModule.WakeRuntimeModulesAtCoordinate(contentBlock.Coordinate);
+        }
+    }
+
+    private bool TryResolveMinimumRetainedItemCountLimit(out int limit)
+    {
+        limit = 0;
+        if (!TryGetContentBlock(out Block contentBlock) || contentBlock == null)
+        {
+            return false;
+        }
+
+        if (contentBlock.TryGetInstalledItemAreaCapacity(out int installedCapacity))
+        {
+            limit = Mathf.Max(0, installedCapacity);
+            return true;
+        }
+
+        limit = Mathf.Max(0, contentBlock.GetInputAreaCenterCapacity());
+        return true;
     }
 
     public bool TryGetContainedObjectTopWorldPosition(out Vector3 worldPosition)
@@ -449,6 +533,7 @@ public class BoxObject : InputOutputModule
 
     public override void PrepareForPool()
     {
+        minimumRetainedItemCount = DefaultMinimumRetainedItemCount;
         hinge?.DOKill();
         RestoreLastContainedStackVisibilityBlock();
         ApplyItemIconSprite(null, -1, true);
@@ -775,6 +860,8 @@ public class BoxObject : InputOutputModule
         {
             return;
         }
+
+        minimumRetainedItemCount = Mathf.Max(0, minimumRetainedItemCount);
 
         SetLockIconVisible(false, force);
 

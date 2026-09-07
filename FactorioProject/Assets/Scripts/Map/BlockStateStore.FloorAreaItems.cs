@@ -4,6 +4,8 @@ using UnityEngine;
 
 public partial class BlockStateStore
 {
+    private readonly List<InstallationSaveState> savedCenterBoxStateBuffer =
+        new List<InstallationSaveState>(2);
     private static readonly Vector2Int[] SavedFloorAreaWakeOffsets =
     {
         Vector2Int.zero,
@@ -197,8 +199,11 @@ public partial class BlockStateStore
 
     public bool TryPeekSavedCenterTopItem(Vector2Int worldCoordinate, Predicate<int> itemFilter, out int itemId)
     {
-        itemId = GetSavedCenterTopItemId(worldCoordinate);
-        return itemId >= 0 && (itemFilter == null || itemFilter(itemId));
+        SavedFloorAreaInventory inventory = LoadSavedFloorAreaInventory(worldCoordinate);
+        itemId = GetSavedCenterTopItemId(inventory);
+        return itemId >= 0
+               && inventory.centerItems.Count > GetSavedBoxMinimumRetainedItemCount(worldCoordinate)
+               && (itemFilter == null || itemFilter(itemId));
     }
 
     public bool TryTakeSavedCenterTopItem(Vector2Int worldCoordinate, Predicate<int> itemFilter, out int itemId)
@@ -206,7 +211,9 @@ public partial class BlockStateStore
         itemId = -1;
         SavedFloorAreaInventory inventory = LoadSavedFloorAreaInventory(worldCoordinate);
         itemId = GetSavedCenterTopItemId(inventory);
-        if (itemId < 0 || (itemFilter != null && !itemFilter(itemId)))
+        if (itemId < 0
+            || inventory.centerItems.Count <= GetSavedBoxMinimumRetainedItemCount(worldCoordinate)
+            || (itemFilter != null && !itemFilter(itemId)))
         {
             return false;
         }
@@ -215,6 +222,30 @@ public partial class BlockStateStore
         SaveSavedFloorAreaInventory(worldCoordinate, inventory);
         NotifySavedFloorAreaStackChanged(worldCoordinate);
         return true;
+    }
+
+    private int GetSavedBoxMinimumRetainedItemCount(Vector2Int worldCoordinate)
+    {
+        savedCenterBoxStateBuffer.Clear();
+        CollectSavedInstallationStatesAtInteractionCoordinate(
+            worldCoordinate,
+            savedCenterBoxStateBuffer);
+        if (savedCenterBoxStateBuffer.Count == 0
+            && TryGetInstallationAnchorAtCoordinate(worldCoordinate, out Vector2Int storageKey)
+            && TryGetInstallationStateReadOnly(storageKey, out InstallationSaveState coordinateState))
+        {
+            savedCenterBoxStateBuffer.Add(coordinateState);
+        }
+        int retainedCount = BoxObject.DefaultMinimumRetainedItemCount;
+        for (int i = 0; i < savedCenterBoxStateBuffer.Count; i++)
+        {
+            InstallationSaveState state = savedCenterBoxStateBuffer[i];
+            if (state != null && state.boxIsOpen.HasValue)
+            {
+                retainedCount = Mathf.Max(retainedCount, state.boxMinimumRetainedItemCount);
+            }
+        }
+        return retainedCount;
     }
 
     public int GetSavedCenterItemCount(Vector2Int worldCoordinate, int itemId = -1)

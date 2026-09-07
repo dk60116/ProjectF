@@ -18,3 +18,7 @@ transfer state now have separate APIs and are both handled by existing save path
 The harness supplies placement metadata and runtime lookups as test doubles. It does
 not instantiate a Unity prefab or execute animation, physics, world IO registration,
 electrical networks, or full save restoration. These need in-game verification.
+
+Also exercises the production drop fallback guards for regular, elevated and splitter
+belts with overlapping item/energy areas, in loaded and saved state. Covers independent
+floor/conveyor virtualization and preserves ordinary ground and machine-area stacks.

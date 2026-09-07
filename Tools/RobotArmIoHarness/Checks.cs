@@ -5,8 +5,37 @@ using System.Text.RegularExpressions;
 using UnityEngine;
 
 public class MapObject { public Vector2Int PlacementCenterCell; }
+public class ConveyorBelt : MapObject { }
+public class ConvayorBelt2F : ConveyorBelt { }
+public class Spliterbelt : ConveyorBelt { }
+public class Resource : MapObject
+{
+    public enum HarvestMode { Mining, Logging }
+    public HarvestMode ResolvedHarvestMode;
+}
+public static class InputOutputModuleItemAreaController
+{
+    public static bool Registered;
+    public static bool CoordinateIsItemArea(Vector2Int coordinate) => Registered;
+}
+public static class InputOutputModuleEnergyAreaController
+{
+    public static bool Registered;
+    public static bool CoordinateIsEnergyArea(Vector2Int coordinate) => Registered;
+}
+public class BlockStateStore
+{
+    public class InstallationSaveState { public int itemId; }
+    public InstallationSaveState State;
+    public bool TryGetInstallationAnchorAtCoordinate(Vector2Int coordinate, out Vector2Int anchor)
+    { anchor = coordinate; return State != null; }
+    public bool TryGetInstallationStateReadOnly(Vector2Int anchor, out InstallationSaveState state)
+    { state = State; return state != null; }
+}
 public partial class InputOutputModule : MapObject
 {
+    public static readonly Dictionary<int, ItemDefinition> Definitions = new();
+    public static ItemDefinition ResolveItemDefinition(int id) => Definitions.TryGetValue(id, out var definition) ? definition : null;
     public List<RectGridBlockPlacement> RectGridPlacements = new();
     public Vector2Int AnchorCell;
     private SlotLayoutType slotLayoutType = SlotLayoutType.RectGrid;
@@ -15,18 +44,22 @@ public partial class InputOutputModule : MapObject
     private bool IsValidRectGridCell(int x, int y) => x >= 0 && y >= 0;
     private bool TryGetRectGridObjectAnchorCell(MapObject source, out Vector2Int cell) { cell = AnchorCell; return true; }
 }
-public class ItemDefinition { public int id; public string itemName; public bool keepIoAreaItemsInPlaceWhileEditing; }
+public class ItemDefinition { public int id; public string itemName; public bool keepIoAreaItemsInPlaceWhileEditing; public MapObject mapObject; }
 public class ItemManager { public List<ItemDefinition> ItemDefinitions = new(); }
 public class GameManager { public static GameManager Instance = new(); public ItemManager ItemManger = new(); }
 public class PortableObject { }
 public class TerrainGenerator
 {
+    public bool FloorVirtualized, ConveyorVirtualized;
+    public bool IsFloorObjectCoordinateVirtualized(Vector2Int coordinate) => FloorVirtualized;
+    public bool IsConveyorItemCoordinateVirtualized(Vector2Int coordinate) => ConveyorVirtualized;
     public static TerrainGenerator Active = new();
     public int RemovalNotifications;
     public void NotifyConveyorItemRemovedFromBelt() => RemovalNotifications++;
 }
 public partial class Block
 {
+    public MapObject MapObject;
     public int[] Items = { -1, -1 };
     public Vector3[] Positions = new Vector3[2];
     public Vector3 WorldPosition;
@@ -45,6 +78,9 @@ public partial class Block
 }
 public partial class RobotArm : InputOutputModule
 {
+    public static bool AllowsStackFallback(Block block) => CanPlaceSingleLineDrop(block, Vector2Int.zero);
+    public static bool AllowsSavedStackFallback(BlockStateStore store) => CanPlaceSavedSingleLineDrop(store, Vector2Int.zero);
+    public static bool UsesSavedDrop(TerrainGenerator terrain, Block block) => ShouldUseSavedDropCoordinate(terrain, Vector2Int.zero, block);
     private bool interactionCoordinateCacheValid;
     private long cachedInteractionPlacementSequence;
     private Vector2Int cachedPickupCoordinate, cachedDropCoordinate;
@@ -75,6 +111,14 @@ public static partial class Checks
     public static void Main(string[] args)
     {
         CheckConveyorPickup();
+        CheckConveyorDropFallback();
+        string robotArmSource = File.ReadAllText(Path.Combine(
+            args[0],
+            "FactorioProject/Assets/Scripts/Object/MapObj/InstallationObject/RobotArm.cs"));
+        Require(Regex.IsMatch(
+                robotArmSource,
+                @"if \(hasLoadedPickupBlock && boxObject == null\)\s*\{\s*int inputAreaItemId"),
+            "box storage must not fall through to the unrestricted input-area pickup path");
         string prefab = File.ReadAllText(Path.Combine(
             args[0],
             "FactorioProject/Assets/MapObject/InputOutputModule/Robot arm/Robot arm.prefab"));
@@ -169,6 +213,39 @@ public static partial class Checks
             Require(stream.Length == 26, "transfer save layout must remain compatible");
         }
         Console.WriteLine($"PASS: {count} robot arm standard IO and transfer save checks.");
+    }
+
+    private static void CheckConveyorDropFallback()
+    {
+        var terrain = new TerrainGenerator();
+        var store = new BlockStateStore { State = new() { itemId = 99 } };
+        foreach (MapObject belt in new MapObject[] { new ConveyorBelt(), new ConvayorBelt2F(), new Spliterbelt() })
+        for (int overlap = 0; overlap < 4; overlap++)
+        {
+            InputOutputModuleItemAreaController.Registered = (overlap & 1) != 0;
+            InputOutputModuleEnergyAreaController.Registered = (overlap & 2) != 0;
+            var block = new Block { MapObject = belt };
+            InputOutputModule.Definitions[99] = new() { mapObject = belt };
+            Require(!RobotArm.AllowsStackFallback(block), "a full or unavailable belt must never fall back to a center stack, even under IO areas");
+            Require(!RobotArm.AllowsSavedStackFallback(store), "saved belts must not use center stacks when lane placement fails");
+            for (int virtualization = 0; virtualization < 4; virtualization++)
+            {
+                terrain.FloorVirtualized = (virtualization & 1) != 0;
+                terrain.ConveyorVirtualized = (virtualization & 2) != 0;
+                Require(RobotArm.UsesSavedDrop(terrain, block) == terrain.ConveyorVirtualized,
+                    "belt deposits must follow lane virtualization independently of floor-stack virtualization");
+            }
+        }
+        InputOutputModuleItemAreaController.Registered = true;
+        InputOutputModuleEnergyAreaController.Registered = false;
+        InputOutputModule.Definitions[99] = new() { mapObject = new InputOutputModule() };
+        Require(RobotArm.AllowsStackFallback(new Block { MapObject = new InputOutputModule() }), "normal machine input areas must still accept stacks");
+        Require(RobotArm.AllowsSavedStackFallback(store), "saved machine input areas must still accept stacks");
+        InputOutputModuleItemAreaController.Registered = false;
+        Require(RobotArm.AllowsStackFallback(new Block()), "empty ground must still accept stacks");
+        Require(RobotArm.AllowsSavedStackFallback(new BlockStateStore()), "saved empty ground must still accept stacks");
+        Require(!RobotArm.AllowsStackFallback(new Block { MapObject = new InputOutputModule() }), "unregistered machine bodies must still block stacks");
+        Require(RobotArm.UsesSavedDrop(terrain, null), "unloaded coordinates must use saved state");
     }
 
     private static void CheckConveyorPickup()

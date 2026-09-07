@@ -45,7 +45,7 @@ MonoBehaviour:
   seedTargetResource: {fileID: 0}
   useEnergyType: 2
   useEnergyAmount: 40
-  completeEnergy: 200
+  completeEnergy: 400
   utilityPoleConnectionRadius: 6
   utilityPoleSupplyRadius: 3
   sprinklerRangeRadius: 3
