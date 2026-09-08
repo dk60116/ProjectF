@@ -4181,119 +4181,6 @@ public class RailHandcar : Train
         return 0.05f;
     }
 
-    private bool TryBuildInitialConsistPathSegment(
-        ConnectedTrainRailMove backMove,
-        ConnectedTrainRailMove frontMove,
-        Vector2 travelDirection,
-        float pathStartDistance,
-        out float pathEndDistance)
-    {
-        pathEndDistance = pathStartDistance;
-        if (backMove.StartSample.Rail == null
-            || frontMove.StartSample.Rail == null
-            || !TryResolveInitialConsistSegmentDirection(
-                backMove,
-                frontMove,
-                travelDirection,
-                out Vector2 initialTravelDirection))
-        {
-            return false;
-        }
-
-        if (TryCommitInitialConsistPathSegmentInDirection(
-                backMove,
-                frontMove,
-                initialTravelDirection,
-                pathStartDistance,
-                out pathEndDistance))
-        {
-            return true;
-        }
-
-        if (TryCommitInitialConsistPathSegmentWithRouteSearch(
-                backMove,
-                frontMove,
-                initialTravelDirection,
-                pathStartDistance,
-                out pathEndDistance))
-        {
-            return true;
-        }
-
-        if (TryCommitInitialConsistPathSegmentInDirection(
-                backMove,
-                frontMove,
-                -initialTravelDirection,
-                pathStartDistance,
-                out pathEndDistance))
-        {
-            return true;
-        }
-
-        if (TryCommitInitialConsistPathSegmentWithRouteSearch(
-                backMove,
-                frontMove,
-                -initialTravelDirection,
-                pathStartDistance,
-                out pathEndDistance))
-        {
-            return true;
-        }
-
-        pathEndDistance = pathStartDistance;
-        return false;
-    }
-
-    private bool TryCommitInitialConsistPathSegmentInDirection(
-        ConnectedTrainRailMove backMove,
-        ConnectedTrainRailMove frontMove,
-        Vector2 travelDirection,
-        float pathStartDistance,
-        out float pathEndDistance)
-    {
-        initialConsistSegmentScratch.Clear();
-        if (TryBuildInitialConsistPathSegmentInDirection(
-                backMove,
-                frontMove,
-                travelDirection,
-                pathStartDistance,
-                initialConsistSegmentScratch,
-                out pathEndDistance))
-        {
-            AppendConsistPathFrame(initialConsistSegmentScratch);
-            initialConsistSegmentScratch.Clear();
-            return true;
-        }
-
-        initialConsistSegmentScratch.Clear();
-        return false;
-    }
-
-    private bool TryCommitInitialConsistPathSegmentWithRouteSearch(
-        ConnectedTrainRailMove backMove,
-        ConnectedTrainRailMove frontMove,
-        Vector2 travelDirection,
-        float pathStartDistance,
-        out float pathEndDistance)
-    {
-        initialConsistSegmentScratch.Clear();
-        if (TryBuildInitialConsistPathSegmentWithRouteSearch(
-                backMove,
-                frontMove,
-                travelDirection,
-                pathStartDistance,
-                initialConsistSegmentScratch,
-                out pathEndDistance))
-        {
-            AppendConsistPathFrame(initialConsistSegmentScratch);
-            initialConsistSegmentScratch.Clear();
-            return true;
-        }
-
-        initialConsistSegmentScratch.Clear();
-        return false;
-    }
-
     private bool TryBuildInitialConsistPathSegmentWithRouteSearch(
         ConnectedTrainRailMove backMove,
         ConnectedTrainRailMove frontMove,
@@ -4543,7 +4430,7 @@ public class RailHandcar : Train
         float pathStartDistance,
         float maxSearchDistance)
     {
-        float travelDot = Vector2.Dot(currentNode.TravelDirection, currentNode.Sample.Tangent);
+        float travelDot = Vector2.Dot(currentNode.TravelDirection, ResolveRailPathTangent(currentNode.Sample));
         if (Mathf.Abs(travelDot) <= 0.0001f)
         {
             return;
@@ -4686,13 +4573,23 @@ public class RailHandcar : Train
 
     private void RebuildInitialConsistPathSamples(int targetIndex, List<ConsistPathSample> pathSamples)
     {
+        // Replace samples left by a failed endpoint scan with this route only.
+        pathSamples.Clear();
         int currentIndex = targetIndex;
         while (currentIndex >= 0 && currentIndex < initialConsistPathRouteNodes.Count)
         {
             InitialConsistPathRouteNode node = initialConsistPathRouteNodes[currentIndex];
-            AddConsistPathSample(pathSamples, node.PathDistance, node.Sample);
+            pathSamples.Add(new ConsistPathSample
+            {
+                Distance = node.PathDistance,
+                Sample = node.Sample
+            });
             currentIndex = node.ParentIndex;
         }
+
+        // Parent links run backwards. Reverse once so equal-distance connection
+        // endpoints keep their source-to-target order instead of being sorted.
+        pathSamples.Reverse();
     }
 
     private void ClearInitialConsistPathRouteScratch()
@@ -4746,7 +4643,7 @@ public class RailHandcar : Train
                 return false;
             }
 
-            float travelDot = Vector2.Dot(currentTravelDirection, currentSample.Tangent);
+            float travelDot = Vector2.Dot(currentTravelDirection, ResolveRailPathTangent(currentSample));
             if (Mathf.Abs(travelDot) <= 0.0001f)
             {
                 travelDot = 1f;
@@ -4818,7 +4715,9 @@ public class RailHandcar : Train
         out Vector2 travelDirection)
     {
         travelDirection = Vector2.zero;
-        Vector2 backTangent = backMove.StartSample.Tangent;
+        // Stored sample tangents describe the car's facing, which may oppose
+        // the rail's increasing distance. Route traversal must use the rail axis.
+        Vector2 backTangent = ResolveRailPathTangent(backMove.StartSample);
         if (backTangent.sqrMagnitude > 0.0001f)
         {
             backTangent.Normalize();

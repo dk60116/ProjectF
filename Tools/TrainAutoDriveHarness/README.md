@@ -23,6 +23,18 @@ Coverage includes:
   endpoints, preserving junction progress and one-cell spacing on return departure.
 - Initial tape alignment from actual car positions on curves and junctions, followed
   by normal convergence to one-cell spacing after movement begins.
+- First-departure path construction and sampling across overlapping rails, using
+  the production endpoint scan and fallback search with all four headings, both
+  authored rail directions and opposing car orientations. Every car must retain
+  one-cell spacing throughout the first cell of travel.
+- First-departure movement from an empty tape through production vehicle ordering,
+  route locking, leader advance, follower sampling and the pose-application loop.
+  384 scenarios cover straight and curved linked rails, uniform and alternating
+  rail directions, either driving end, forward/reverse manual travel, opposing car
+  facings and first-frame route locking. All five cars must move continuously and
+  keep one-cell spacing over 80 frames, including their first rail crossings.
+- Fallback replacement of failed samples, including samples past the successful
+  endpoint, and traversal order through several equal-distance rail transitions.
 - Empty leading locomotive waiting instead of using a trailing engine in reverse.
 - Automatic input, reverse momentum, exact docking step limits, forward-only
   station docking, and bidirectional water-pipe docking through the common
@@ -34,7 +46,10 @@ Coverage includes:
 - Station discovery from either drivable end of a consist, including aligned,
   forward automatic, reverse-blocked automatic, and manual reverse approaches.
 
-Engine objects, station lookup, fuel storage, route discovery and physics are
-substituted. Tape transfer, reversal, interpolation and pose validation use the
-production methods. Actual in-game rail geometry, animations, energy deduction and
+Engine objects, station lookup, fuel storage, endpoint connection lookup and physics
+are substituted. Initial tape construction and its fallback search, movement
+preparation and application, tape transfer, reversal, interpolation and pose
+validation use the production methods. Departure fixtures use deterministic
+straight/arc geometry and capture the final poses instead of applying Unity physics.
+Actual in-game rail geometry, animations, energy deduction and
 save-file I/O still require a play-mode check by the project owner.

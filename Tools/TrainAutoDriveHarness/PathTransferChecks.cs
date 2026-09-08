@@ -3,7 +3,7 @@ using System.Collections.Generic;
 using UnityEngine;
 
 // Production tape transfer, reversal, interpolation and pose validation run here.
-// Rails provide deterministic samples; Unity physics and route search are absent.
+// Rails provide deterministic samples; Unity physics is absent.
 public partial class RailHandcar
 {
     readonly List<ConsistPathSample> consistPathTape = new();

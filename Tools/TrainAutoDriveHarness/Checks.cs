@@ -9,12 +9,15 @@ static class Time { public static int frameCount = 1; }
 public class Player { }
 public class FakeObject { public bool activeInHierarchy = true; }
 public class FakeTransform { public Vector3 forward; }
-public class Railload
+public partial class Railload
 {
     public Vector2 Origin;
     public Vector2 Direction = Vector2.right;
     public bool TrySampleRenderedPath(float distance, out Vector2 point, out Vector2 tangent)
-    { tangent = Direction; point = Origin + Direction * distance; return true; }
+    {
+        if (CurveRadius > 0f) { SampleCurve(distance, out point, out tangent); return true; }
+        tangent = Direction; point = Origin + Direction * distance; return true;
+    }
 }
 public class Trainstation
 {
@@ -23,7 +26,7 @@ public class Trainstation
     public bool TryGetRailCoordinate(out Vector2Int coordinate)
     { coordinate = new Vector2Int(Distance, 0); return true; }
 }
-public class Train
+public partial class Train
 {
     public static ulong ConnectionGraphRevision = 1;
     static int nextId;
@@ -37,7 +40,7 @@ public class Train
     public int GetInstanceID() => id;
     public bool TryGetPlacementRuntime(out int a, out int b) { a = b = 0; return Rail != null; }
     public bool TryGetCurrentRailPose(out Railload rail, out float distance, out Vector2 point, out Vector2 tangent)
-    { rail = Rail; distance = Distance; point = Rail.Origin + Rail.Direction * distance; tangent = new(transform.forward.x, transform.forward.z); return true; }
+    { rail = Rail; distance = Distance; Rail.TrySampleRenderedPath(distance, out point, out _); tangent = new(transform.forward.x, transform.forward.z); return true; }
     public static void Link(Train a, Train b)
     { a.ConnectedTrains.Add(b); b.ConnectedTrains.Add(a); ConnectionGraphRevision++; }
 }
@@ -404,6 +407,8 @@ public partial class SteamTrain
               && stationDriver.DockMovement < 0f,
             "Manual driving must be able to align the opposite locomotive by reversing the consist");
         RunPathTransferChecks();
+        RailHandcar.RunInitialPathChecks(Check);
+        RailHandcar.RunDepartureChecks(Check);
         Console.WriteLine($"PASS: {checks} train automatic-driving checks");
     }
 }
