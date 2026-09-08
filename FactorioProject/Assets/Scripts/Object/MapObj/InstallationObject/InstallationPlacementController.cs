@@ -269,6 +269,8 @@ public class InstallationPlacementController : MonoBehaviour
     private readonly List<InstallationObject> railAlignmentInstallationScratch = new List<InstallationObject>(4);
     private readonly List<TrainCollisionBox2D> trainPlacementCollisionBoxes = new List<TrainCollisionBox2D>(4);
     private readonly List<TrainCollisionBox2D> trainPlacementOtherCollisionBoxes = new List<TrainCollisionBox2D>(4);
+    private readonly List<Train> trainPlacementInstalledScratch = new List<Train>(32);
+    private readonly List<BoxCollider> trainPlacementColliderScratch = new List<BoxCollider>(8);
     private readonly List<Train> mapEditRailOccupancyTrainScratch = new List<Train>(16);
     private readonly List<RendererPropertyBlockState> selectedEditableTintStates = new List<RendererPropertyBlockState>();
     private InstallationObject selectedEditableInstallation;
@@ -1135,7 +1137,8 @@ public class InstallationPlacementController : MonoBehaviour
         int handItemId = handBag != null ? handBag.GetSlotItemId(0) : -1;
         bool hasHandItem = handBag != null && handBag.GetSlotCount(0) > 0;
         SetInstallButtonVisible(
-            hasHandItem && TryGetInventoryInstallationDefinition(handItemId, out _));
+            hasHandItem && TryGetInventoryInstallationDefinition(handItemId, out _),
+            !IsMountedTrainAutoDriving());
     }
 
     private void RefreshInstallButton()
@@ -1773,7 +1776,8 @@ public class InstallationPlacementController : MonoBehaviour
         CleanupSelectedEditableInstallation();
         if (mapEditButton != null)
         {
-            mapEditButton.interactable = !IsInstallationModeActive();
+            mapEditButton.interactable = !IsInstallationModeActive()
+                                         && !IsMountedTrainAutoDriving();
         }
 
         bool canPack = mapEditModeActive && CanPackSelectedInstallation();
@@ -1811,7 +1815,8 @@ public class InstallationPlacementController : MonoBehaviour
             CleanupInstallPreviewReferences();
             return activeInstallationEditSession != null
                    && activeInstallPreview != null
-                   && TryGetPreviewAnchorCoordinate(activeInstallPreview, out _);
+                   && TryGetPreviewAnchorCoordinate(activeInstallPreview, out _)
+                   && CanPackEditableInstallation(activeInstallationEditSession.originalInstallation);
         }
 
         CleanupSelectedEditableInstallation();
@@ -1855,7 +1860,33 @@ public class InstallationPlacementController : MonoBehaviour
     private bool CanPackEditableInstallation(InstallationObject installationObject)
     {
         return installationObject != null
+               && !IsPlayerMountedOnVehicle(installationObject as Vehicle)
                && (!(installationObject is Railload rail) || !IsRailOccupiedByTrain(rail));
+    }
+
+    private static bool IsPlayerMountedOnVehicle(Vehicle vehicle)
+    {
+        if (vehicle == null)
+        {
+            return false;
+        }
+
+        Player player = GameManager.Instance != null ? GameManager.Instance.Player : null;
+        PlayerController playerController = player != null
+            ? player.GetComponent<PlayerController>()
+            : null;
+        return playerController != null && playerController.IsMountedOnVehicle(vehicle);
+    }
+
+    private static bool IsMountedTrainAutoDriving()
+    {
+        Player player = GameManager.Instance != null ? GameManager.Instance.Player : null;
+        PlayerController playerController = player != null
+            ? player.GetComponent<PlayerController>()
+            : null;
+        return playerController != null
+               && playerController.MountedVehicle is SteamTrain steamTrain
+               && steamTrain.AutoDriveEnabled;
     }
 
     private bool IsRailOccupiedByTrain(Railload rail)
@@ -2069,6 +2100,7 @@ public class InstallationPlacementController : MonoBehaviour
         Physics.SyncTransforms();
         train.ClearTrainConnections();
         ConnectTrainToNearbyTrains(train);
+        RefreshTrainInstallPreviewTints();
         if (train.TryGetPlacementRuntime(out Vector2Int anchorCoordinate, out _))
         {
             selectedEditableAnchorCoordinate = anchorCoordinate;
@@ -3121,6 +3153,17 @@ public class InstallationPlacementController : MonoBehaviour
 
     private void RefreshTrainInstallPreviewTints()
     {
+        Train selectedTrain = mapEditModeActive
+            ? selectedEditableInstallation as Train
+            : null;
+        if (selectedTrain != null)
+        {
+            // The selection tint stores the property block beneath it. Restore it
+            // before regrouping so a dragged train does not later restore a stale
+            // connection-group color when the selection changes.
+            ClearSelectedEditableTint();
+        }
+
         ClearInstalledTrainConnectionTints();
         trainConnectionPreviewTints.Clear();
         trainConnectionPreviewObjectsByTrain.Clear();
@@ -3156,7 +3199,7 @@ public class InstallationPlacementController : MonoBehaviour
             AddTrainConnectionNode(previewTrain);
         }
 
-        if (trainConnectionPreviewScratch.Count > 0)
+        if (trainConnectionPreviewScratch.Count > 0 || mapEditModeActive)
         {
             Train.CollectActiveRuntimeTrains(trainConnectionInstalledScratch);
             for (int i = 0; i < trainConnectionInstalledScratch.Count; i++)
@@ -3229,6 +3272,13 @@ public class InstallationPlacementController : MonoBehaviour
         trainConnectionVisited.Clear();
         trainConnectionQueue.Clear();
         trainConnectionPreviewObjectsByTrain.Clear();
+
+        if (selectedTrain != null
+            && selectedEditableInstallation == selectedTrain
+            && selectedTrain.gameObject.activeInHierarchy)
+        {
+            ApplySelectedEditableTint(selectedTrain);
+        }
     }
 
     private void AddTrainConnectionNode(Train train)
@@ -3463,7 +3513,7 @@ public class InstallationPlacementController : MonoBehaviour
 
     private void HandleMapEditButtonClicked()
     {
-        if (IsInstallationModeActive())
+        if (IsInstallationModeActive() || IsMountedTrainAutoDriving())
         {
             RefreshMapEditButtonState();
             return;
@@ -3647,6 +3697,7 @@ public class InstallationPlacementController : MonoBehaviour
             packedSession.editSession,
             packedSession.anchorCoordinate,
             packedSession.quarterTurns);
+        RefreshTrainInstallPreviewTints();
         return true;
     }
 
@@ -4228,6 +4279,12 @@ public class InstallationPlacementController : MonoBehaviour
 
     private void HandleInstallButtonClicked()
     {
+        if (IsMountedTrainAutoDriving())
+        {
+            RefreshInstallButton();
+            return;
+        }
+
         SetMapEditModeActive(false);
 
         if (!TryGetHandInstallationDefinition(out ItemDefinition definition) || definition == null || definition.mapObject == null)
@@ -4275,7 +4332,8 @@ public class InstallationPlacementController : MonoBehaviour
         InstallationObject installationObject,
         Vector2Int? selectedCoordinate = null)
     {
-        if (installationObject == null
+        if (IsMountedTrainAutoDriving()
+            || installationObject == null
             || ShouldSelectOnlyInMapEdit(installationObject)
             || !TryCreateInstallationEditSession(
                 installationObject,
@@ -5541,6 +5599,7 @@ public class InstallationPlacementController : MonoBehaviour
             ResetInstallGridRefreshState();
         }
 
+        RefreshTrainInstallPreviewTints();
         RefreshMapEditButtonState();
     }
 
@@ -6040,6 +6099,11 @@ public class InstallationPlacementController : MonoBehaviour
         }
 
         Physics.SyncTransforms();
+        // Rotation changes which physical end may couple. Rebuild contacts just
+        // like dragging, instead of retaining nose links and only changing tint.
+        steamTrain.ClearTrainConnections();
+        ConnectTrainToNearbyTrains(steamTrain);
+        RefreshTrainInstallPreviewTints();
         if (steamTrain.TryGetPlacementRuntime(out Vector2Int anchorCoordinate, out _))
         {
             selectedEditableAnchorCoordinate = anchorCoordinate;
@@ -6059,6 +6123,10 @@ public class InstallationPlacementController : MonoBehaviour
 
         if (mapEditModeActive)
         {
+            trainPlacementInstalledScratch.Clear();
+            Train.CollectActiveRuntimeTrains(trainPlacementInstalledScratch);
+            CompleteTrainPlacement(trainPlacementInstalledScratch);
+            trainPlacementInstalledScratch.Clear();
             SetMapEditModeActive(false);
             return;
         }
@@ -6273,12 +6341,8 @@ public class InstallationPlacementController : MonoBehaviour
             placedCount++;
         }
 
-        // All newly installed cars must be connected before the Complete layout is
-        // applied. Do this before animations capture their destination transforms.
-        if (!trainPlacementSpacing.AlignPlacedTrains(placedObjects))
-        {
-            Debug.LogWarning("Could not align a connected train chain to one-cell spacing on its current rail route.", this);
-        }
+        // Commit connections and spacing before animations capture destinations.
+        CompleteTrainPlacement(placedObjects);
 
         List<HandcartPreviewConnection> committedHandcartConnections =
             ResolveCommittedHandcartConnections();
@@ -15068,7 +15132,29 @@ public class InstallationPlacementController : MonoBehaviour
             railSample.DistanceAlongPath,
             railSample.Point,
             facing);
-        ConnectTrainToNearbyTrains(train);
+        // Batch placement connects once all cars have their final rail poses.
+        if (placementPlan == null)
+        {
+            ConnectTrainToNearbyTrains(train);
+        }
+    }
+
+    private void CompleteTrainPlacement(IReadOnlyList<MapObject> placedObjects)
+    {
+        // Preview colors also include touching cars. Commit those contacts before
+        // traversing the runtime graph, for both installation and map-edit Complete.
+        for (int i = 0; i < placedObjects.Count; i++)
+        {
+            if (placedObjects[i] is Train train)
+            {
+                ConnectTrainToNearbyTrains(train);
+            }
+        }
+
+        if (!trainPlacementSpacing.AlignPlacedTrains(placedObjects))
+        {
+            Debug.LogWarning("Could not align a connected train chain to one-cell spacing on its current rail route.", this);
+        }
     }
 
     private void ConnectTrainToNearbyTrains(Train train)
@@ -15690,24 +15776,136 @@ public class InstallationPlacementController : MonoBehaviour
         return committedHandcart != null;
     }
 
-    private static void ApplyTrainPlacementPose(Train train, Vector3 position, Quaternion rotation)
+    private void ResolveTrainBlueprintDisplayPose(
+        Block anchorBlock, MapObject placementSource, Vector3 referencePosition,
+        ref Vector3 position, ref Quaternion rotation)
     {
-        if (train == null)
+        if (!IsTrainSource(placementSource)
+            || !TryResolveTrainPlacementPose(anchorBlock, placementSource, installPreviewQuarterTurns,
+                referencePosition, activeInstallPreview,
+                out Vector3 snappedPosition, out Quaternion snappedRotation, out _, out _)) return;
+        position = snappedPosition;
+        rotation = snappedRotation;
+        SetInstallPreviewRailReferenceForPlacement(placementSource, position);
+    }
+
+    private bool TrySnapTrainBlueprintToConnection(
+        MapObject sourcePrefab, MapObject previewToIgnore,
+        ref Vector3 position, ref Quaternion rotation, ref TrainPlacementRailSample railSample)
+    {
+        Train sourceTrain = ResolveTrainSource(sourcePrefab);
+        if (sourceTrain == null || railSample.Rail == null) return false;
+
+        Vector3 referencePosition = position;
+        Vector3 forward = rotation * Vector3.forward;
+        Vector2 referenceFacing = new Vector2(forward.x, forward.z);
+        TrainPlacementRailSample referenceSample = railSample;
+        float bestDistanceSqr = float.PositiveInfinity;
+        trainConnectionInstalledScratch.Clear();
+        Train.CollectActiveRuntimeTrains(trainConnectionInstalledScratch);
+        for (int i = 0; i < trainConnectionInstalledScratch.Count; i++)
         {
-            return;
+            TrySnapTrainBlueprintToNeighbor(sourcePrefab, sourceTrain, previewToIgnore,
+                trainConnectionInstalledScratch[i], referencePosition, referenceFacing, referenceSample,
+                ref bestDistanceSqr, ref position, ref rotation, ref railSample);
+        }
+        trainConnectionInstalledScratch.Clear();
+
+        for (int i = 0; i < installPreviewInstances.Count; i++)
+        {
+            MapObject other = installPreviewInstances[i];
+            if (other == null || other == previewToIgnore) continue;
+            TrySnapTrainBlueprintToNeighbor(sourcePrefab, sourceTrain, previewToIgnore,
+                ResolveTrainSource(other), referencePosition, referenceFacing, referenceSample,
+                ref bestDistanceSqr, ref position, ref rotation, ref railSample);
         }
 
-        Rigidbody trainRigidbody = train.GetComponent<Rigidbody>();
-        if (trainRigidbody != null)
+        return !float.IsPositiveInfinity(bestDistanceSqr);
+    }
+
+    private void TrySnapTrainBlueprintToNeighbor(
+        MapObject sourcePrefab, Train sourceTrain, MapObject previewToIgnore, Train other,
+        Vector3 referencePosition, Vector2 referenceFacing, TrainPlacementRailSample referenceSample,
+        ref float bestDistanceSqr, ref Vector3 position, ref Quaternion rotation,
+        ref TrainPlacementRailSample railSample)
+    {
+        if (other == null || other == previewToIgnore || !other.gameObject.activeInHierarchy) return;
+        Vector2 otherPoint = new Vector2(other.transform.position.x, other.transform.position.z);
+        float snapDistance = Mathf.Max(sourceTrain.ConnectionSnapMaxDistance, other.ConnectionSnapMaxDistance);
+        float maxCenterDistance = Train.ResolveConnectionMaxCenterDistance(sourceTrain, other);
+        float searchDistance = maxCenterDistance + snapDistance;
+        if ((referenceSample.Point - otherPoint).sqrMagnitude > searchDistance * searchDistance) return;
+
+        if (!other.TryGetCurrentRailPose(out Railload otherRail, out float otherDistance, out _, out Vector2 otherFacing))
         {
-            trainRigidbody.position = position;
-            trainRigidbody.rotation = rotation;
-            trainRigidbody.linearVelocity = Vector3.zero;
-            trainRigidbody.angularVelocity = Vector3.zero;
+            if (!TryFindNearestTrainPlacementRailSampleAroundCoordinate(
+                    RoundWorldPositionToCoordinate(other.transform.position), otherPoint,
+                    Mathf.CeilToInt(TrainPlacementRailSearchRadius), out TrainPlacementRailSample otherSample)
+                || otherSample.SqrDistance > 0.0001f) return;
+            otherRail = otherSample.Rail;
+            otherDistance = otherSample.DistanceAlongPath;
+            otherFacing = new Vector2(other.transform.forward.x, other.transform.forward.z);
         }
 
-        train.transform.SetPositionAndRotation(position, rotation);
-        Physics.SyncTransforms();
+        if (!trainPlacementSpacing.TryPrepareConnectionRoute(
+                otherRail, otherDistance, referenceSample.Rail, referenceSample.DistanceAlongPath)) return;
+
+        // Find the closest non-overlapping end position along this rail route.
+        // Complete will subsequently normalize the whole consist to one-cell pitch.
+        const float searchStep = 0.05f;
+        for (float offset = Train.ConnectionCenterDistance; offset <= maxCenterDistance + 0.0001f; offset += searchStep)
+        {
+            if (!trainPlacementSpacing.TrySampleConnectionOffset(offset,
+                    out Railload candidateRail, out float candidateDistance, out Vector2 candidatePoint, out Vector2 tangent)) continue;
+            if (!TryResolveTrainConnectionPlacementFacing(
+                    sourceTrain, candidatePoint, tangent, referenceFacing,
+                    other, otherPoint, otherFacing, out Vector2 facing)) continue;
+            Vector3 candidatePosition = new Vector3(candidatePoint.x, referencePosition.y, candidatePoint.y);
+            float distanceSqr = (candidatePosition - referencePosition).sqrMagnitude;
+            if (distanceSqr > snapDistance * snapDistance) continue;
+            Quaternion candidateRotation = Quaternion.LookRotation(new Vector3(facing.x, 0f, facing.y), Vector3.up);
+            if (!CanPlaceTrainAtPose(sourcePrefab, candidatePosition, candidateRotation, previewToIgnore)) continue;
+            if (distanceSqr < bestDistanceSqr)
+            {
+                bestDistanceSqr = distanceSqr;
+                position = candidatePosition;
+                rotation = candidateRotation;
+                railSample = new TrainPlacementRailSample
+                {
+                    Rail = candidateRail, DistanceAlongPath = candidateDistance,
+                    Point = candidatePoint, Tangent = tangent, SqrDistance = 0f
+                };
+            }
+            break;
+        }
+    }
+
+    private static bool TryResolveTrainConnectionPlacementFacing(
+        Train sourceTrain,
+        Vector2 candidatePoint,
+        Vector2 railTangent,
+        Vector2 referenceFacing,
+        Train other,
+        Vector2 otherPoint,
+        Vector2 otherFacing,
+        out Vector2 facing)
+    {
+        facing = ResolveTrainPlacementFacingTangent(railTangent, referenceFacing);
+        if (Train.CanConnectByPose(sourceTrain, candidatePoint, facing, other, otherPoint, otherFacing))
+        {
+            return true;
+        }
+
+        // Keep the selected heading whenever it can couple. A newly placed
+        // locomotive may turn around only when its tail otherwise faces away
+        // from the adjacent car.
+        if (!(sourceTrain is SteamTrain))
+        {
+            return false;
+        }
+
+        facing = -facing;
+        return Train.CanConnectByPose(sourceTrain, candidatePoint, facing, other, otherPoint, otherFacing);
     }
 
     private bool CanPlaceTrainAtPose(
@@ -15733,10 +15931,11 @@ public class InstallationPlacementController : MonoBehaviour
             return true;
         }
 
-        Train[] activeTrains = FindObjectsOfType<Train>(false);
-        for (int i = 0; i < activeTrains.Length; i++)
+        trainPlacementInstalledScratch.Clear();
+        Train.CollectActiveRuntimeTrains(trainPlacementInstalledScratch);
+        for (int i = 0; i < trainPlacementInstalledScratch.Count; i++)
         {
-            Train train = activeTrains[i];
+            Train train = trainPlacementInstalledScratch[i];
             if (train == null
                 || train == previewToIgnore
                 || !train.gameObject.activeInHierarchy
@@ -15842,7 +16041,7 @@ public class InstallationPlacementController : MonoBehaviour
         return false;
     }
 
-    private static void BuildTrainCollisionBoxes(
+    private void BuildTrainCollisionBoxes(
         MapObject source,
         Vector3 position,
         Quaternion rotation,
@@ -15860,10 +16059,10 @@ public class InstallationPlacementController : MonoBehaviour
         }
 
         Transform root = source.transform;
-        BoxCollider[] colliders = source.GetComponentsInChildren<BoxCollider>(true);
-        for (int i = 0; i < colliders.Length; i++)
+        source.GetComponentsInChildren(true, trainPlacementColliderScratch);
+        for (int i = 0; i < trainPlacementColliderScratch.Count; i++)
         {
-            BoxCollider boxCollider = colliders[i];
+            BoxCollider boxCollider = trainPlacementColliderScratch[i];
             if (boxCollider == null || !boxCollider.enabled)
             {
                 continue;
@@ -21564,6 +21763,8 @@ public class InstallationPlacementController : MonoBehaviour
 
         SetInstallPreviewRailReferenceForPlacement(placementSource, rotationRailReferenceWorldPosition);
         Quaternion targetRotation = GetInstallPreviewRotation();
+        ResolveTrainBlueprintDisplayPose(anchorBlock, placementSource,
+            railReferenceWorldPosition ?? targetPosition, ref targetPosition, ref targetRotation);
 
         activeInstallPreview.transform.position = targetPosition;
         activeInstallPreview.transform.rotation = targetRotation;
@@ -21912,6 +22113,11 @@ public class InstallationPlacementController : MonoBehaviour
 
             position = GetPreviewWorldPosition(anchorBlock, sourcePrefab, resolvedQuarterTurns);
             rotation = GetPlacementObjectRotation(sourcePrefab, resolvedQuarterTurns);
+        }
+
+        if (hasRailSample)
+        {
+            TrySnapTrainBlueprintToConnection(sourcePrefab, previewToIgnore, ref position, ref rotation, ref railSample);
         }
 
         return CanPlaceTrainAtPose(sourcePrefab, position, rotation, previewToIgnore);
@@ -22822,6 +23028,20 @@ public class InstallationPlacementController : MonoBehaviour
                 return CanPlacePipeFromGridCoordinate(block, pipePrototype);
             }
 
+            if (IsTrainSource(footprintSource))
+            {
+                int preferredQuarterTurns = activeInstallPreview != null
+                    ? GetPreviewQuarterTurns(activeInstallPreview)
+                    : GetPreferredInstallPreviewQuarterTurns(activeInstallDefinition, null);
+                return TryResolveTrainInstallPreviewTarget(
+                    block,
+                    footprintSource,
+                    preferredQuarterTurns,
+                    null,
+                    out _,
+                    out _);
+            }
+
             if (IsBoilerSource(footprintSource) && IsExactPumpOutputCoordinateForPlacement(block.Coordinate))
             {
                 return true;
@@ -22917,7 +23137,21 @@ public class InstallationPlacementController : MonoBehaviour
             return true;
         }
 
-        if (IsTrainStationSource(footprintSource) || IsTrainSource(footprintSource))
+        if (IsTrainSource(footprintSource))
+        {
+            if (!CoordinateHasRuntimeRailload(coordinate)
+                || !terrain.TryGetLoadedBlock(coordinate, out Block trainBlock)
+                || trainBlock == null)
+            {
+                canPlace = false;
+                return true;
+            }
+
+            canPlace = CanPlaceActiveDefinitionFromGridCoordinate(trainBlock);
+            return true;
+        }
+
+        if (IsTrainStationSource(footprintSource))
         {
             canPlace = false;
             return true;
@@ -28285,6 +28519,8 @@ public class InstallationPlacementController : MonoBehaviour
             placementSource,
             IsTrainSource(placementSource) ? targetPosition : (Vector3?)null);
         Quaternion targetRotation = GetInstallPreviewRotation();
+        ResolveTrainBlueprintDisplayPose(anchorBlock, placementSource,
+            targetPosition, ref targetPosition, ref targetRotation);
 
         activeInstallPreview.transform.position = targetPosition;
         activeInstallPreview.transform.rotation = targetRotation;
@@ -39299,6 +39535,10 @@ public class InstallationPlacementController : MonoBehaviour
             return false;
         }
 
+        TrySnapTrainPlacementRailSampleToStraightCellCenter(
+            anchorCoordinate,
+            ref railSample);
+
         Vector3 railForward = FlattenHorizontalDirection(new Vector3(railSample.Tangent.x, 0f, railSample.Tangent.y));
         if (railForward.sqrMagnitude <= 0.0001f)
         {
@@ -39317,6 +39557,71 @@ public class InstallationPlacementController : MonoBehaviour
         position.x = railSample.Point.x + positionOffset.x;
         position.z = railSample.Point.y + positionOffset.y;
         rotation = AlignBaseRotationForwardToDirection(baseRotation, railForward);
+        return true;
+    }
+
+    private static bool TrySnapTrainPlacementRailSampleToStraightCellCenter(
+        Vector2Int anchorCoordinate,
+        ref TrainPlacementRailSample railSample)
+    {
+        const float centerTolerance = 0.01f;
+        const float straightProbeDistance = 0.25f;
+        const float straightMinTangentDot = 0.999f;
+        if (railSample.Rail == null)
+        {
+            return false;
+        }
+
+        Vector2 cellCenter = new Vector2(anchorCoordinate.x, anchorCoordinate.y);
+        if (!railSample.Rail.TryFindNearestRenderedPathSample(
+                cellCenter,
+                out float centerDistanceAlongPath,
+                out Vector2 centerRailPoint,
+                out Vector2 centerTangent,
+                out float centerSqrDistance)
+            || centerSqrDistance > centerTolerance * centerTolerance
+            || centerTangent.sqrMagnitude <= 0.0001f
+            || !railSample.Rail.TryGetRenderedPathLength(out float pathLength))
+        {
+            return false;
+        }
+
+        centerTangent.Normalize();
+        bool checkedProbe = false;
+        float beforeDistance = Mathf.Max(0f, centerDistanceAlongPath - straightProbeDistance);
+        if (centerDistanceAlongPath - beforeDistance > 0.0001f)
+        {
+            if (!railSample.Rail.TrySampleRenderedPath(beforeDistance, out _, out Vector2 beforeTangent)
+                || beforeTangent.sqrMagnitude <= 0.0001f
+                || Mathf.Abs(Vector2.Dot(centerTangent, beforeTangent.normalized)) < straightMinTangentDot)
+            {
+                return false;
+            }
+
+            checkedProbe = true;
+        }
+
+        float afterDistance = Mathf.Min(pathLength, centerDistanceAlongPath + straightProbeDistance);
+        if (afterDistance - centerDistanceAlongPath > 0.0001f)
+        {
+            if (!railSample.Rail.TrySampleRenderedPath(afterDistance, out _, out Vector2 afterTangent)
+                || afterTangent.sqrMagnitude <= 0.0001f
+                || Mathf.Abs(Vector2.Dot(centerTangent, afterTangent.normalized)) < straightMinTangentDot)
+            {
+                return false;
+            }
+
+            checkedProbe = true;
+        }
+
+        if (!checkedProbe)
+        {
+            return false;
+        }
+
+        railSample.DistanceAlongPath = centerDistanceAlongPath;
+        railSample.Point = centerRailPoint;
+        railSample.Tangent = centerTangent;
         return true;
     }
 
@@ -39784,9 +40089,13 @@ public class InstallationPlacementController : MonoBehaviour
         straightFirstConveyorPreviews.Clear();
         activeInstallPreview = null;
         RefreshInstallOrEditWorkableRangeVisualRequest();
+        if (mapEditModeActive)
+        {
+            RefreshTrainInstallPreviewTints();
+        }
     }
 
-    private void SetInstallButtonVisible(bool isVisible)
+    private void SetInstallButtonVisible(bool isVisible, bool isInteractable = true)
     {
         if (installButton == null)
         {
@@ -39798,6 +40107,6 @@ public class InstallationPlacementController : MonoBehaviour
             installButton.gameObject.SetActive(isVisible);
         }
 
-        installButton.interactable = isVisible;
+        installButton.interactable = isVisible && isInteractable;
     }
 }

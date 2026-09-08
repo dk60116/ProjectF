@@ -7,7 +7,6 @@ public class Train : Vehicle
     public const float ConnectionCenterDistance = 1f;
     private const float MinConnectionDistance = 0.05f;
     private const float DefaultConnectionFallbackDistance = 1.4f;
-    private const float ConnectionSideEpsilon = 0.01f;
     private const float StoredRailPointDeviationSqr = 0.000001f;
 
     private static readonly HashSet<Train> ActiveRuntimeTrains = new HashSet<Train>();
@@ -30,7 +29,9 @@ public class Train : Vehicle
     private Vector2 currentRailConnectionTargetTangent;
     private float currentRailConnectionPathDistance;
     private float currentRailConnectionProgress;
-    private readonly HashSet<Train> connectedTrains = new HashSet<Train>();
+    // Connection identity includes the physical end of this car. Rail path point
+    // order and the direction of travel must not change which end is the front.
+    private readonly Dictionary<Train, bool> connectedTrainEnds = new Dictionary<Train, bool>();
     private readonly Queue<Train> connectionActionGroupQueue = new Queue<Train>();
     private readonly HashSet<Train> connectionActionGroupVisited = new HashSet<Train>();
 
@@ -38,7 +39,7 @@ public class Train : Vehicle
     public float ConnectionMaxLateralDistance => Mathf.Max(MinConnectionDistance, trainConnectionMaxLateralDistance);
     public float ConnectionMinForwardDot => Mathf.Clamp01(trainConnectionMinForwardDot);
     public bool HasPlacedRailSample => currentRail != null;
-    public IReadOnlyCollection<Train> ConnectedTrains => connectedTrains;
+    public IReadOnlyCollection<Train> ConnectedTrains => connectedTrainEnds.Keys;
     public static ulong ConnectionGraphRevision => connectionGraphRevision;
 
     public void RotateTrainWheelsByDistance(float signedDistance)
@@ -111,7 +112,7 @@ public class Train : Vehicle
     {
         target = null;
         float nearestDistanceSqr = float.MaxValue;
-        foreach (Train candidate in connectedTrains)
+        foreach (Train candidate in ConnectedTrains)
         {
             if (candidate == null || !candidate.gameObject.activeInHierarchy)
             {
@@ -133,9 +134,12 @@ public class Train : Vehicle
         return target != null;
     }
 
+    public virtual bool BlocksManualDisconnection => false;
+
     public bool TryDisconnectConnectedTrain()
     {
-        if (!TryGetConnectedTrain(out Train target))
+        if (BlocksManualDisconnection
+            || !TryGetConnectedTrain(out Train target))
         {
             return false;
         }
@@ -154,7 +158,7 @@ public class Train : Vehicle
         while (connectionActionGroupQueue.Count > 0)
         {
             Train current = connectionActionGroupQueue.Dequeue();
-            foreach (Train connectedTrain in current.connectedTrains)
+            foreach (Train connectedTrain in current.ConnectedTrains)
             {
                 if (connectedTrain == null
                     || !connectedTrain.gameObject.activeInHierarchy
@@ -215,14 +219,88 @@ public class Train : Vehicle
             return false;
         }
 
-        bool changed = connectedTrains.Add(other);
-        changed |= other.connectedTrains.Add(this);
+        bool changed = AddTrainConnection(other);
+        changed |= other.AddTrainConnection(this);
         if (changed)
         {
             IncrementConnectionGraphRevision();
         }
 
         return changed;
+    }
+
+    private bool AddTrainConnection(Train other)
+    {
+        if (connectedTrainEnds.ContainsKey(other)) return false;
+        TryGetConnectionPose(this, out Vector2 point, out Vector2 facing);
+        TryGetConnectionPose(other, out Vector2 otherPoint, out _);
+        connectedTrainEnds.Add(other, Vector2.Dot(otherPoint - point, facing) > 0f);
+        return true;
+    }
+
+    internal void SetConnectionEnd(Train other, bool atFront)
+    {
+        if (other != null && connectedTrainEnds.TryGetValue(other, out bool previous) && previous != atFront)
+        {
+            connectedTrainEnds[other] = atFront;
+            IncrementConnectionGraphRevision();
+        }
+    }
+
+    internal bool TryGetConnectionFacingSign(Train other, bool otherIsAheadOnPath, out float sign)
+    {
+        sign = 1f;
+        if (other == null || !connectedTrainEnds.TryGetValue(other, out bool atFront)) return false;
+        sign = atFront == otherIsAheadOnPath ? 1f : -1f;
+        return true;
+    }
+
+    internal static Vector2 ResolveRailConnectionForward(
+        Railload sourceRail,
+        float sourceDistance,
+        Railload targetRail,
+        float targetDistance,
+        float progress,
+        Vector2 referenceForward)
+    {
+        // The gap between two rail endpoints can be lateral (or even point
+        // backwards). It joins positions; the rails define the car's axis.
+        Vector2 sourceForward = ResolveRailConnectionEndpointForward(
+            sourceRail, sourceDistance, true, referenceForward);
+        Vector2 targetForward = ResolveRailConnectionEndpointForward(
+            targetRail, targetDistance, false, sourceForward);
+        Vector2 forward = Vector2.Lerp(sourceForward, targetForward, Mathf.Clamp01(progress));
+        return forward.sqrMagnitude > 0.0001f
+            ? forward.normalized
+            : (progress < 0.5f ? sourceForward : targetForward);
+    }
+
+    private static Vector2 ResolveRailConnectionEndpointForward(
+        Railload rail, float distance, bool exiting, Vector2 referenceForward)
+    {
+        if (rail == null
+            || !rail.TrySampleRenderedPath(distance, out _, out Vector2 tangent)
+            || tangent.sqrMagnitude <= 0.0001f)
+        {
+            return referenceForward.sqrMagnitude > 0.0001f ? referenceForward.normalized : Vector2.up;
+        }
+
+        float sign;
+        if (distance <= 0.0001f)
+        {
+            sign = exiting ? -1f : 1f;
+        }
+        else if (rail.TryGetRenderedPathLength(out float length) && distance >= length - 0.0001f)
+        {
+            sign = exiting ? 1f : -1f;
+        }
+        else
+        {
+            // A branch may enter the interior of the adjacent rail.
+            sign = Vector2.Dot(tangent, referenceForward) < 0f ? -1f : 1f;
+        }
+
+        return tangent.normalized * sign;
     }
 
     public void DisconnectFrom(Train other)
@@ -232,8 +310,8 @@ public class Train : Vehicle
             return;
         }
 
-        bool changed = connectedTrains.Remove(other);
-        changed |= other.connectedTrains.Remove(this);
+        bool changed = connectedTrainEnds.Remove(other);
+        changed |= other.connectedTrainEnds.Remove(this);
         if (changed)
         {
             IncrementConnectionGraphRevision();
@@ -242,19 +320,19 @@ public class Train : Vehicle
 
     public void ClearTrainConnections()
     {
-        if (connectedTrains.Count <= 0)
+        if (connectedTrainEnds.Count <= 0)
         {
             return;
         }
 
-        Train[] connectedSnapshot = new Train[connectedTrains.Count];
-        connectedTrains.CopyTo(connectedSnapshot);
+        Train[] connectedSnapshot = new Train[connectedTrainEnds.Count];
+        connectedTrainEnds.Keys.CopyTo(connectedSnapshot, 0);
         for (int i = 0; i < connectedSnapshot.Length; i++)
         {
             DisconnectFrom(connectedSnapshot[i]);
         }
 
-        connectedTrains.Clear();
+        connectedTrainEnds.Clear();
     }
 
     private static void IncrementConnectionGraphRevision()
@@ -291,6 +369,37 @@ public class Train : Vehicle
             return false;
         }
 
+        return CanConnectByPose(first, firstPoint, firstTangent, second, secondPoint, secondTangent);
+    }
+
+    internal static bool CanConnectByPose(
+        Train first, Vector2 firstPoint, Vector2 firstTangent,
+        Train second, Vector2 secondPoint, Vector2 secondTangent)
+    {
+        if (first == null || second == null || first == second
+            || firstTangent.sqrMagnitude <= 0.0001f || secondTangent.sqrMagnitude <= 0.0001f)
+        {
+            return false;
+        }
+
+        firstTangent.Normalize();
+        secondTangent.Normalize();
+        Vector2 delta = secondPoint - firstPoint;
+        float maxCenterDistance = ResolveConnectionMaxCenterDistance(first, second);
+        float maxLateralDistance = Mathf.Max(
+            first.ConnectionMaxLateralDistance,
+            second.ConnectionMaxLateralDistance);
+
+        if (first is SteamTrain || second is SteamTrain)
+        {
+            // A locomotive's tail supplies the coupling point. The approaching
+            // car's heading, including another locomotive's nose, cannot veto it.
+            return (first is SteamTrain
+                    && IsConnectionOffsetInRange(delta, -firstTangent, maxCenterDistance, maxLateralDistance))
+                   || (second is SteamTrain
+                       && IsConnectionOffsetInRange(-delta, -secondTangent, maxCenterDistance, maxLateralDistance));
+        }
+
         float tangentDot = Mathf.Abs(Vector2.Dot(firstTangent, secondTangent));
         float minForwardDot = Mathf.Min(first.ConnectionMinForwardDot, second.ConnectionMinForwardDot);
         if (tangentDot < minForwardDot)
@@ -298,45 +407,26 @@ public class Train : Vehicle
             return false;
         }
 
-        Vector2 delta = secondPoint - firstPoint;
-        if (!first.CanConnectToTrainAtOffset(second, delta, firstTangent)
-            || !second.CanConnectToTrainAtOffset(first, -delta, secondTangent))
+        // The bisector follows the connection between two cars on a curve.
+        // Testing only the first car's axis made connection depend on call order.
+        Vector2 alignedSecondTangent = Vector2.Dot(firstTangent, secondTangent) < 0f
+            ? -secondTangent : secondTangent;
+        Vector2 connectionAxis = (firstTangent + alignedSecondTangent).normalized;
+        if (Vector2.Dot(delta, connectionAxis) < 0f)
         {
-            return false;
+            connectionAxis = -connectionAxis;
         }
 
-        float alongDistance = Mathf.Abs(Vector2.Dot(delta, firstTangent));
-        float maxCenterDistance = ResolveConnectionMaxCenterDistance(first, second);
-        if (alongDistance > maxCenterDistance)
-        {
-            return false;
-        }
-
-        float lateralDistance = Mathf.Abs(Cross(firstTangent, delta));
-        float maxLateralDistance = Mathf.Max(
-            first.ConnectionMaxLateralDistance,
-            second.ConnectionMaxLateralDistance);
-        return lateralDistance <= maxLateralDistance;
+        return IsConnectionOffsetInRange(delta, connectionAxis, maxCenterDistance, maxLateralDistance);
     }
 
-    protected virtual bool CanConnectToTrainAtOffset(
-        Train other,
-        Vector2 offsetToOther,
-        Vector2 forwardTangent)
+    private static bool IsConnectionOffsetInRange(
+        Vector2 offset, Vector2 connectionAxis, float maxCenterDistance, float maxLateralDistance)
     {
-        return other != null
-               && forwardTangent.sqrMagnitude > 0.0001f;
-    }
-
-    protected static bool IsConnectionOffsetAhead(Vector2 offsetToOther, Vector2 forwardTangent)
-    {
-        if (forwardTangent.sqrMagnitude <= 0.0001f)
-        {
-            return false;
-        }
-
-        forwardTangent.Normalize();
-        return Vector2.Dot(offsetToOther, forwardTangent) > ConnectionSideEpsilon;
+        float alongDistance = Vector2.Dot(offset, connectionAxis);
+        return alongDistance >= ConnectionCenterDistance * 0.5f
+               && alongDistance <= maxCenterDistance
+               && Mathf.Abs(Cross(connectionAxis, offset)) <= maxLateralDistance;
     }
 
     private static bool TryGetConnectionPose(Train train, out Vector2 point, out Vector2 tangent)
@@ -368,7 +458,7 @@ public class Train : Vehicle
         return true;
     }
 
-    private static float ResolveConnectionMaxCenterDistance(Train first, Train second)
+    internal static float ResolveConnectionMaxCenterDistance(Train first, Train second)
     {
         if (first == null || second == null)
         {

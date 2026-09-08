@@ -795,7 +795,7 @@ public class RailHandcar : Train
         return pipeDirection.y < bestPipeDirection.y;
     }
 
-    private static bool TryBuildCurrentRailSample(Train train, out RailSample sample)
+    protected static bool TryBuildCurrentRailSample(Train train, out RailSample sample)
     {
         sample = default;
         if (train == null
@@ -817,12 +817,13 @@ public class RailHandcar : Train
         return true;
     }
 
-    private bool TryApplyConnectedTrainMemberDocking(
+    protected bool TryApplyConnectedTrainMemberDocking(
         RailSample currentSample,
         Vector2 currentFacing,
         RailSample memberSample,
         RailSample dockSample,
-        float deltaTime)
+        float deltaTime,
+        bool allowReverseDocking = true)
     {
         float signedPathDelta = dockSample.DistanceAlongPath - memberSample.DistanceAlongPath;
         float remainingDistance = Mathf.Abs(signedPathDelta);
@@ -836,6 +837,12 @@ public class RailHandcar : Train
                 dockSample,
                 signedPathDelta,
                 out Vector2 travelDirection))
+        {
+            return false;
+        }
+
+        if (!allowReverseDocking
+            && !CanDockInDirection(currentFacing, travelDirection))
         {
             return false;
         }
@@ -854,29 +861,94 @@ public class RailHandcar : Train
             true);
     }
 
-    private bool TryApplyStationDocking(
+    protected bool TryApplyStationDocking(
         RailSample currentSample,
         Vector2 currentFacing,
         float deltaTime)
     {
-        if (deltaTime <= 0f
-            || currentSample.Rail == null
-            || !TryFindStationDockSample(
-                currentSample,
-                out RailSample dockSample,
-                out float signedPathDelta))
+        if (deltaTime <= 0f || currentSample.Rail == null)
         {
             return false;
         }
 
+        CollectConnectedTrainGroupForMovement(this);
+        RailHandcar bestDockingTrain = null;
+        RailSample bestMemberSample = default;
+        RailSample bestDockSample = default;
+        float bestSignedPathDelta = 0f;
+        float bestDockDistance = float.MaxValue;
+        bool hasDirectionBlockedStation = false;
+        for (int i = 0; i < connectedTrainGroupScratch.Count; i++)
+        {
+            if (connectedTrainGroupScratch[i] is not RailHandcar candidate
+                || !TryBuildCurrentRailSample(candidate, out RailSample candidateSample)
+                || !TryFindStationDockSample(
+                    candidateSample,
+                    out RailSample candidateDockSample,
+                    out float candidateSignedPathDelta))
+            {
+                continue;
+            }
+
+            float candidateDockDistance = Mathf.Abs(candidateSignedPathDelta);
+            if (candidateDockDistance > 0.0001f
+                && (!TryResolveDockTravelDirection(
+                        candidateSample,
+                        candidateDockSample,
+                        candidateSignedPathDelta,
+                        out Vector2 candidateTravelDirection)
+                    || !CanDockInDirection(currentFacing, candidateTravelDirection)))
+            {
+                hasDirectionBlockedStation = true;
+                continue;
+            }
+
+            if (candidateDockDistance >= bestDockDistance)
+            {
+                continue;
+            }
+
+            bestDockingTrain = candidate;
+            bestMemberSample = candidateSample;
+            bestDockSample = candidateDockSample;
+            bestSignedPathDelta = candidateSignedPathDelta;
+            bestDockDistance = candidateDockDistance;
+        }
+
+        if (bestDockingTrain == null)
+        {
+            // A nearby station still owns idle docking even when automatic
+            // forward-only travel cannot approach it from this direction.
+            return hasDirectionBlockedStation;
+        }
+
         // Keep the station reservation even when this frame's movement is
         // blocked, so a fluid dock cannot pull the consist away instead.
-        TryApplyDockingToSample(
-            currentSample,
-            currentFacing,
-            dockSample,
-            signedPathDelta,
-            deltaTime);
+        if (bestDockingTrain == this)
+        {
+            TryApplyDockingToSample(
+                currentSample,
+                currentFacing,
+                bestDockSample,
+                bestSignedPathDelta,
+                deltaTime);
+        }
+        else
+        {
+            TryApplyConnectedTrainMemberDocking(
+                currentSample,
+                currentFacing,
+                bestMemberSample,
+                bestDockSample,
+                deltaTime,
+                allowReverseDocking: false);
+        }
+
+        return true;
+    }
+
+    protected virtual bool CanDockInDirection(Vector2 facing, Vector2 travelDirection)
+    {
         return true;
     }
 
@@ -887,9 +959,19 @@ public class RailHandcar : Train
         float signedPathDelta,
         float deltaTime,
         bool preserveCoastTravelDirection = false,
-        bool snapToDock = false)
+        bool snapToDock = false,
+        bool allowReverseDocking = false)
     {
         float remainingDistance = Mathf.Abs(signedPathDelta);
+        bool hasTravelDirection = TryResolveDockTravelDirection(
+            currentSample, dockSample, signedPathDelta, out Vector2 travelDirection);
+        if (remainingDistance > 0.0001f
+            && (!hasTravelDirection
+                || (!allowReverseDocking && !CanDockInDirection(currentFacing, travelDirection))))
+        {
+            return false;
+        }
+
         bool shouldSnapToDock = snapToDock || remainingDistance <= ResolveDockCompleteDistance();
         if (shouldSnapToDock && ConnectedTrains.Count <= 0)
         {
@@ -897,13 +979,9 @@ public class RailHandcar : Train
             return true;
         }
 
-        if (!TryResolveDockTravelDirection(
-                currentSample,
-                dockSample,
-                signedPathDelta,
-                out Vector2 travelDirection))
+        if (!hasTravelDirection)
         {
-            return false;
+            return shouldSnapToDock && remainingDistance <= 0.0001f;
         }
 
         float dockStep = shouldSnapToDock
@@ -1017,9 +1095,9 @@ public class RailHandcar : Train
         return Mathf.Max(0.001f, stationDockCompleteDistance);
     }
 
-    public bool TryGetPreferredRouteTravelDirection(out Vector2 direction)
+    public bool TryGetRailForwardDirection(out Vector2 direction)
     {
-        direction = ResolveCoastTravelDirection();
+        direction = ResolveReferenceFacing();
         if (direction.sqrMagnitude <= 0.0001f)
         {
             return false;
@@ -2623,9 +2701,13 @@ public class RailHandcar : Train
             Vector2 facingFallback = railMove.Train == drivenTrain
                 ? drivenFacing
                 : routeLeaderTravelDirection;
-            Vector2 facingTangent = ResolveTrainFacingFromOwnOrientation(
-                railMove,
-                facingFallback);
+            Vector2 facingTangent = leaderTraveledDistance <= 0.0001f
+                ? railMove.StartFacingTangent
+                : ResolveConnectedTrainFacing(
+                    i,
+                    leaderStartPathDistance - railMove.FollowOffset,
+                    leaderEndPathDistance - railMove.FollowOffset,
+                    facingFallback);
             ApplyConnectedTrainRailPose(railMove.Train, railMove.TargetSample, facingTangent, deltaTime);
             RotateConnectedTrainWheels(
                 railMove.Train,
@@ -2654,6 +2736,54 @@ public class RailHandcar : Train
         TrimConsistPathTape(leaderEndPathDistance - maxFollowOffset - ResolveConsistPathTrimPadding());
         ClearConnectedTrainMovementScratch();
         return true;
+    }
+
+    protected void TransferConsistPathTo(RailHandcar nextDriver)
+    {
+        if (nextDriver == null || nextDriver == this)
+        {
+            return;
+        }
+
+        // The inactive locomotive may still hold the tape from an earlier leg.
+        // Only the current driver's route can describe the cars' present poses.
+        nextDriver.ResetConsistPathTape();
+        CollectConnectedTrainGroupForMovement(this);
+        int trainCount = connectedTrainGroupScratch.Count;
+        if (consistPathTape.Count <= 1
+            || consistPathTrainOrder.Count != trainCount
+            || consistPathFollowOffsets.Count != trainCount
+            || !connectedTrainGroupScratch.Contains(nextDriver))
+        {
+            return;
+        }
+
+        for (int i = 0; i < trainCount; i++)
+        {
+            Train train = consistPathTrainOrder[i];
+            if (!connectedTrainGroupScratch.Contains(train)
+                || !TryBuildCurrentRailSample(train, out RailSample currentSample)
+                || !TrySampleConsistPathTape(
+                    consistPathEndDistance - consistPathFollowOffsets[i],
+                    out RailSample pathSample,
+                    false)
+                || !IsConsistPathSampleAlignedWithTrainStart(
+                    pathSample,
+                    new ConnectedTrainRailMove { Train = train, StartSample = currentSample }))
+            {
+                return;
+            }
+        }
+
+        nextDriver.consistPathTape.AddRange(consistPathTape);
+        nextDriver.consistPathTrainOrder.AddRange(consistPathTrainOrder);
+        nextDriver.consistPathFollowOffsets.AddRange(consistPathFollowOffsets);
+        nextDriver.consistPathLeader = consistPathLeader;
+        nextDriver.consistPathTravelDirection = consistPathTravelDirection;
+        nextDriver.consistPathEndDistance = consistPathEndDistance;
+        // Keep the recorded traversal order: EnsureConsistPathTape reverses it
+        // against the new driver's prepared order, including junction progress.
+        ResetConsistPathTape();
     }
 
     private ConsistPathStateSnapshot CaptureConsistPathState()
@@ -3835,22 +3965,135 @@ public class RailHandcar : Train
         return true;
     }
 
-    private static Vector2 ResolveTrainFacingFromOwnOrientation(
-        ConnectedTrainRailMove railMove,
+    private Vector2 ResolveConnectedTrainFacing(
+        int trainIndex,
+        float startPathDistance,
+        float targetPathDistance,
         Vector2 fallbackFacing)
     {
+        ConnectedTrainRailMove railMove = connectedTrainRailMoveScratch[trainIndex];
+        Vector2 pathForward = ResolveConsistPathForward(targetPathDistance, railMove.TargetSample, fallbackFacing);
+        if (trainIndex > 0
+            && TryResolveFacingFromConnectedTarget(
+                railMove,
+                connectedTrainRailMoveScratch[trainIndex - 1],
+                true,
+                pathForward,
+                out Vector2 connectedFacing)
+            || trainIndex + 1 < connectedTrainRailMoveScratch.Count
+            && TryResolveFacingFromConnectedTarget(
+                railMove,
+                connectedTrainRailMoveScratch[trainIndex + 1],
+                false,
+                pathForward,
+                out connectedFacing))
+        {
+            return connectedFacing;
+        }
+
+        // Single cars and unconnected pushing contacts keep the facing/travel sign
+        // measured at the start of the move, before crossing any rail boundaries.
         Vector2 referenceFacing = railMove.StartFacingTangent.sqrMagnitude > 0.0001f
             ? railMove.StartFacingTangent
             : fallbackFacing;
-        if (referenceFacing.sqrMagnitude <= 0.0001f)
+        Vector2 startForward = ResolveConsistPathForward(startPathDistance, railMove.StartSample, fallbackFacing);
+        return pathForward * (Vector2.Dot(referenceFacing, startForward) < 0f ? -1f : 1f);
+    }
+
+    private static bool TryResolveFacingFromConnectedTarget(
+        ConnectedTrainRailMove railMove,
+        ConnectedTrainRailMove connectedMove,
+        bool connectedTrainIsAheadOnPath,
+        Vector2 pathForward,
+        out Vector2 facing)
+    {
+        facing = pathForward;
+        if (railMove.Train == null
+            || connectedMove.Train == null
+            || !railMove.Train.TryGetConnectionFacingSign(
+                connectedMove.Train,
+                connectedTrainIsAheadOnPath,
+                out float facingSign))
         {
-            referenceFacing = railMove.TargetSample.Tangent;
+            return false;
         }
 
-        return ResolveFollowerFacingTangent(
-            railMove.TargetSample.Tangent,
-            railMove.StartFacingTangent,
-            referenceFacing);
+        Vector2 offsetToConnectedTrain = connectedMove.TargetSample.Point - railMove.TargetSample.Point;
+        if (pathForward.sqrMagnitude > 0.0001f
+            && offsetToConnectedTrain.sqrMagnitude > 0.0001f)
+        {
+            float targetOrderDot = Vector2.Dot(
+                pathForward.normalized,
+                offsetToConnectedTrain.normalized);
+            if (Mathf.Abs(targetOrderDot) > RailDirectionReferenceDeadZone
+                && (targetOrderDot > 0f) != connectedTrainIsAheadOnPath)
+            {
+                // Sparse, overlapping rail endpoints can temporarily give the
+                // path tape the opposite sign. The connected target centers
+                // provide the stable order for this frame.
+                facingSign = -facingSign;
+            }
+        }
+
+        facing = pathForward * facingSign;
+        return true;
+    }
+
+    private Vector2 ResolveConsistPathForward(float pathDistance, RailSample sample, Vector2 fallback)
+    {
+        if (consistPathTape.Count > 1)
+        {
+            int endIndex = Mathf.Clamp(FindConsistPathUpperBound(pathDistance), 1, consistPathTape.Count - 1);
+            ConsistPathSample start = consistPathTape[endIndex - 1];
+            ConsistPathSample end = consistPathTape[endIndex];
+            RailSample bridge = HasRailConnectionBridgeState(sample) ? sample
+                : HasRailConnectionBridgeState(start.Sample) ? start.Sample
+                : HasRailConnectionBridgeState(end.Sample) ? end.Sample : default;
+            if (bridge.ConnectionTargetRail != null
+                && bridge.Rail.TrySampleRenderedPath(bridge.DistanceAlongPath, out Vector2 sourcePoint, out _))
+            {
+                Vector2 gap = bridge.ConnectionTargetPoint - sourcePoint;
+                float progress = gap.sqrMagnitude > RailConnectionDistanceEpsilon * RailConnectionDistanceEpsilon
+                    ? Vector2.Dot(sample.Point - sourcePoint, gap) / gap.sqrMagnitude
+                    : bridge.ConnectionProgress / bridge.ConnectionPathDistance;
+                Vector2 connectionForward = ResolveRailConnectionForward(
+                    bridge.Rail, bridge.DistanceAlongPath,
+                    bridge.ConnectionTargetRail, bridge.ConnectionTargetDistanceAlongPath,
+                    progress, fallback);
+                // Tape order can reverse on backwards travel; use the positional
+                // gap only to determine traversal order, never as the body axis.
+                float sign = Vector2.Dot(end.Sample.Point - start.Sample.Point, gap) < 0f ? -1f : 1f;
+                return connectionForward * sign;
+            }
+
+            if (start.Sample.Rail != end.Sample.Rail)
+            {
+                return ResolveRailConnectionForward(
+                    start.Sample.Rail, start.Sample.DistanceAlongPath,
+                    end.Sample.Rail, end.Sample.DistanceAlongPath,
+                    sample.Rail == end.Sample.Rail ? 1f : 0f, fallback);
+            }
+
+            if (sample.Rail != null && start.Sample.Rail == sample.Rail && end.Sample.Rail == sample.Rail)
+            {
+                float railDelta = end.Sample.DistanceAlongPath - start.Sample.DistanceAlongPath;
+                if (Mathf.Abs(railDelta) > RailConnectionDistanceEpsilon
+                    && sample.Rail.TrySampleRenderedPath(sample.DistanceAlongPath, out _, out Vector2 tangent))
+                {
+                    // Rail assets may store their points in either order. Only the
+                    // increasing distance on the consist's actual route defines forward.
+                    return tangent.normalized * Mathf.Sign(railDelta);
+                }
+            }
+
+            Vector2 segment = end.Sample.Point - start.Sample.Point;
+            if (segment.sqrMagnitude > RailConnectionDistanceEpsilon * RailConnectionDistanceEpsilon)
+            {
+                return segment.normalized;
+            }
+        }
+
+        return fallback.sqrMagnitude > 0.0001f ? fallback.normalized : Vector2.up;
     }
 
     private Vector2 ResolveRouteLeaderTravelDirection(Train drivenTrain, Vector2 fallbackDirection)
@@ -4745,6 +4988,9 @@ public class RailHandcar : Train
                 return true;
             }
 
+            // A missing/rejected old tape is expected on first use. Report the
+            // actual initialization failure instead of this discarded attempt.
+            RecordRailMoveFailure(string.Empty);
             return InitializeConsistPathTape(travelDirection);
         }
 
@@ -5260,13 +5506,19 @@ public class RailHandcar : Train
                     railMove);
             }
 
-            float targetFollowOffset = Mathf.Max(0f, desiredFollowOffset);
-            if (i == 0)
+            float targetFollowOffset = ResolveConsistFollowOffset(
+                rebuildConsistPathTape,
+                leaderPathDistance,
+                actualConsistDistanceScratch[i],
+                desiredFollowOffset);
+            if (rebuildConsistPathTape || i == 0)
             {
-                railMove.FollowOffset = 0f;
+                // A newly built tape describes the cars' current positions.
+                // Desired one-cell spacing is applied gradually after movement
+                // starts, so curves and junctions cannot fail initialization.
+                railMove.FollowOffset = targetFollowOffset;
             }
-            else if (rebuildConsistPathTape
-                     || float.IsInfinity(maxFollowOffsetChange)
+            else if (float.IsInfinity(maxFollowOffsetChange)
                      || float.IsNaN(maxFollowOffsetChange)
                      || Mathf.Abs(railMove.FollowOffset - targetFollowOffset) <= maxFollowOffsetChange
                      || railMove.FollowOffset <= ConsistPathSampleDistanceEpsilon)
@@ -5288,6 +5540,17 @@ public class RailHandcar : Train
 
         actualConsistDistanceScratch.Clear();
         return true;
+    }
+
+    private static float ResolveConsistFollowOffset(
+        bool rebuildingPathTape,
+        float leaderPathDistance,
+        float actualPathDistanceFromTail,
+        float desiredFollowOffset)
+    {
+        return rebuildingPathTape
+            ? Mathf.Max(0f, leaderPathDistance - actualPathDistanceFromTail)
+            : Mathf.Max(0f, desiredFollowOffset);
     }
 
     private bool TryBuildActualConsistPathSegment(
@@ -6032,7 +6295,7 @@ public class RailHandcar : Train
 
         if (train is RailHandcar handcar)
         {
-            handcar.ApplyRailPose(sample, facingTangent, deltaTime, true, false);
+            handcar.ApplyRailPose(sample, facingTangent, deltaTime, true, false, true);
             railMovementTransformsDirty = true;
             return;
         }
@@ -7205,7 +7468,8 @@ public class RailHandcar : Train
         Vector2 facingTangent,
         float deltaTime = 0f,
         bool smoothRotation = false,
-        bool syncPhysics = true)
+        bool syncPhysics = true,
+        bool preserveSuppliedFacing = false)
     {
         if (sample.Rail == null)
         {
@@ -7219,10 +7483,13 @@ public class RailHandcar : Train
                 : Vector2.up;
         }
 
-        facingTangent = ResolveAlignedRailTangent(
-            facingTangent,
-            currentFacingTangent,
-            ResolveReferenceFacing());
+        if (!preserveSuppliedFacing)
+        {
+            facingTangent = ResolveAlignedRailTangent(
+                facingTangent,
+                currentFacingTangent,
+                ResolveReferenceFacing());
+        }
         facingTangent.Normalize();
         Quaternion targetRotation = Quaternion.LookRotation(
             new Vector3(facingTangent.x, 0f, facingTangent.y),

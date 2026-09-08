@@ -3,8 +3,8 @@ using UnityEngine;
 
 namespace ProjectF.Trains
 {
-    // Complete-only layout: contract each connected chain along the route it already
-    // occupies. Planning every pose first avoids partially moving an invalid chain.
+    // Complete contracts each connected chain along its occupied route. Blueprint
+    // snapping uses the same route sampler without moving any installed cars.
     internal sealed class TrainPlacementSpacing
     {
         private const float Epsilon = 0.0001f;
@@ -23,6 +23,7 @@ namespace ProjectF.Trains
             public float Distance;
             public Vector2 Point;
             public Vector2 Facing;
+            public bool FacesAlongRoute;
             public Railload BridgeTarget;
             public float BridgeTargetDistance;
             public Vector2 BridgeTargetPoint;
@@ -39,6 +40,43 @@ namespace ProjectF.Trains
             public float Length;
             public float BridgeStartProgress;
             public float BridgeEndProgress;
+        }
+
+        public bool TryPrepareConnectionRoute(
+            Railload fromRail, float fromDistance, Railload toRail, float toDistance)
+        {
+            route.Clear();
+            routeLength = 0f;
+            Pose from = new Pose { Rail = fromRail, Distance = fromDistance };
+            Pose to = new Pose { Rail = toRail, Distance = toDistance };
+            return fromRail != null && toRail != null
+                && fromRail.TrySampleRenderedPath(fromDistance, out from.Point, out from.Facing)
+                && toRail.TrySampleRenderedPath(toDistance, out to.Point, out to.Facing)
+                && AppendPair(from, to) && routeLength > Epsilon;
+        }
+
+        public bool TrySampleConnectionOffset(
+            float offset, out Railload rail, out float distance, out Vector2 point, out Vector2 tangent)
+        {
+            rail = null;
+            distance = 0f;
+            point = tangent = Vector2.zero;
+            if (offset > routeLength + Epsilon && !TryExtendTail(offset)) return false;
+            // Preview placement stores a rail sample. Complete may subsequently
+            // place a car in a bridge and records the full transition state.
+            if (!TrySample(offset, out Pose pose)) return false;
+            if (pose.BridgeTarget != null)
+            {
+                if (pose.BridgeProgress > Epsilon && pose.BridgeProgress < pose.BridgeLength - Epsilon) return false;
+                if (!TryGetBridgeEndpoint(pose, pose.BridgeProgress >= pose.BridgeLength - Epsilon, out Pose endpoint)) return false;
+                endpoint.Facing *= Vector2.Dot(endpoint.Facing, pose.Facing) < 0f ? -1f : 1f;
+                pose = endpoint;
+            }
+            rail = pose.Rail;
+            distance = pose.Distance;
+            point = pose.Point;
+            tangent = pose.Facing;
+            return true;
         }
 
         public bool AlignPlacedTrains(IReadOnlyList<MapObject> placedObjects)
@@ -141,6 +179,14 @@ namespace ProjectF.Trains
                 }
             }
 
+            for (int i = 0; i < order.Count; i++)
+            {
+                // The order runs from the anchored endpoint towards the tail.
+                // Freeze these physical coupling ends only after all poses are set.
+                if (i > 0) order[i].SetConnectionEnd(order[i - 1], !targets[i].FacesAlongRoute);
+                if (i + 1 < order.Count) order[i].SetConnectionEnd(order[i + 1], targets[i].FacesAlongRoute);
+            }
+
             return true;
         }
 
@@ -169,7 +215,8 @@ namespace ProjectF.Trains
             {
                 if (!TrySample(i * Train.ConnectionCenterDistance, out Pose target)
                     || !TrySample(originalOffsets[i], out Pose originalRoutePose)) return false;
-                if (Vector2.Dot(originals[i].Facing, originalRoutePose.Facing) < 0f)
+                target.FacesAlongRoute = Vector2.Dot(originals[i].Facing, originalRoutePose.Facing) >= 0f;
+                if (!target.FacesAlongRoute)
                 {
                     target.Facing = -target.Facing;
                 }
@@ -341,8 +388,11 @@ namespace ProjectF.Trains
                     float bridgeLength = Vector2.Distance(segment.Start.Point, segment.End.Point);
                     float progress = Mathf.Lerp(segment.BridgeStartProgress, segment.BridgeEndProgress, t);
                     pose.Point = Vector2.Lerp(segment.Start.Point, segment.End.Point, progress / bridgeLength);
-                    pose.Facing = (segment.End.Point - segment.Start.Point).normalized
-                                  * Mathf.Sign(segment.BridgeEndProgress - segment.BridgeStartProgress);
+                    pose.Facing = Train.ResolveRailConnectionForward(
+                        segment.Start.Rail, segment.Start.Distance,
+                        segment.End.Rail, segment.End.Distance,
+                        progress / bridgeLength, segment.Start.Facing)
+                        * Mathf.Sign(segment.BridgeEndProgress - segment.BridgeStartProgress);
                     pose.BridgeTarget = segment.End.Rail;
                     pose.BridgeTargetDistance = segment.End.Distance;
                     pose.BridgeTargetPoint = segment.End.Point;

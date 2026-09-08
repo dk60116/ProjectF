@@ -180,12 +180,14 @@ public class SteamTrain : RailHandcar
     }
     public float ObjectInfoStoredWaterLiters => Mathf.Max(0f, StoredFluidLiters);
     public float ObjectInfoWaterCapacityLiters => Mathf.Max(0f, FluidStorageCapacityLiters);
-    public bool AutoDriveEnabled => autoDriveEnabled;
-    public string AutoDriveTargetAStationName => autoDriveTargetAStationName;
-    public string AutoDriveTargetBStationName => autoDriveTargetBStationName;
-    public string AutoDriveFuelFilterName => autoDriveFuelFilter.ToString();
-    public string AutoDriveFreightFilterName => autoDriveFreightFilter.ToString();
-    public string AutoDriveStatusText => ResolveAutoDriveStatusText();
+    private SteamTrain AutoDriveSettingsOwner => ResolveAutoDriveControllerForConsist() ?? this;
+    public bool AutoDriveEnabled => AutoDriveSettingsOwner.autoDriveEnabled;
+    public string AutoDriveTargetAStationName => AutoDriveSettingsOwner.autoDriveTargetAStationName;
+    public string AutoDriveTargetBStationName => AutoDriveSettingsOwner.autoDriveTargetBStationName;
+    public string AutoDriveFuelFilterName => AutoDriveSettingsOwner.autoDriveFuelFilter.ToString();
+    public string AutoDriveFreightFilterName => AutoDriveSettingsOwner.autoDriveFreightFilter.ToString();
+    public string AutoDriveStatusText => AutoDriveSettingsOwner.ResolveAutoDriveStatusText();
+    public override bool BlocksManualDisconnection => AutoDriveEnabled;
     private bool HasAnyAutoDriveTarget =>
         !string.IsNullOrWhiteSpace(autoDriveTargetAStationName)
         || !string.IsNullOrWhiteSpace(autoDriveTargetBStationName);
@@ -213,6 +215,12 @@ public class SteamTrain : RailHandcar
 
     public bool TryGetAutoDriveDebugRouteSegments(List<AutoDriveDebugRouteSegment> result)
     {
+        SteamTrain controller = AutoDriveSettingsOwner;
+        if (controller != this)
+        {
+            return controller.TryGetAutoDriveDebugRouteSegments(result);
+        }
+
         result?.Clear();
         if (result == null || !autoDriveEnabled)
         {
@@ -347,15 +355,6 @@ public class SteamTrain : RailHandcar
                && CanAcceptFluidItem(fluidItemId, requireStorageSpace ? 0.0001f : 0f);
     }
 
-    protected override bool CanConnectToTrainAtOffset(
-        Train other,
-        Vector2 offsetToOther,
-        Vector2 forwardTangent)
-    {
-        return base.CanConnectToTrainAtOffset(other, offsetToOther, forwardTangent)
-               && !IsConnectionOffsetAhead(offsetToOther, forwardTangent);
-    }
-
     protected override void OnEnable()
     {
         base.OnEnable();
@@ -404,14 +403,15 @@ public class SteamTrain : RailHandcar
         float deltaTime,
         Player mountedPlayer)
     {
-        ClearPendingBurnEnergyCost();
-        ClearPendingWaterCost();
-        if (autoDriveEnabled)
+        SteamTrain controller = ResolveAutoDriveControllerForConsist();
+        if (controller != null)
         {
-            TickAutoDrive(deltaTime, mountedPlayer);
+            controller.TickAutoDrive(deltaTime, mountedPlayer);
             return;
         }
 
+        ClearPendingBurnEnergyCost();
+        ClearPendingWaterCost();
         HandleResolvedDriveMotion(
             worldMoveDirection,
             moveSpeed,
@@ -446,7 +446,20 @@ public class SteamTrain : RailHandcar
             return;
         }
 
-        Vector3 moveDirection = ResolveAutoDriveMoveDirection(deltaTime);
+        Vector3 moveDirection = ResolveAutoDriveMoveDirection(deltaTime, out SteamTrain powerSource);
+        if (powerSource != null && powerSource != this)
+        {
+            TransferAutoDriveControl(powerSource);
+            powerSource.TickAutoDrive(deltaTime, mountedPlayer);
+            return;
+        }
+
+        // Manual reverse momentum must not carry over into automatic driving.
+        if (CurrentVehicleSignedSpeed < 0f || powerSource == null)
+        {
+            ResetVehicleMotion();
+        }
+
         DriveMotionOutcome outcome = HandleResolvedDriveMotion(moveDirection, 0f, deltaTime, mountedPlayer);
         if (outcome == DriveMotionOutcome.BlockedByFuel)
         {
@@ -545,6 +558,10 @@ public class SteamTrain : RailHandcar
         {
             RequestWaterPipeRetract();
         }
+        else if (!hasMovedSinceLastFrame)
+        {
+            RefreshAlignedWaterPipeDock();
+        }
 
         ClearPendingBurnEnergyCost();
         ClearPendingWaterCost();
@@ -583,6 +600,13 @@ public class SteamTrain : RailHandcar
         string fuelFilterName,
         string freightFilterName)
     {
+        SteamTrain controller = AutoDriveSettingsOwner;
+        if (controller != this)
+        {
+            controller.ApplyAutoDriveSettings(enabled, targetAStationName, targetBStationName, fuelFilterName, freightFilterName);
+            return;
+        }
+
         string normalizedTargetA = NormalizeAutoDriveStationName(targetAStationName);
         string normalizedTargetB = NormalizeAutoDriveStationName(targetBStationName);
         AutoDriveFuelFilter normalizedFuelFilter = ParseAutoDriveFuelFilter(fuelFilterName);
@@ -688,33 +712,129 @@ public class SteamTrain : RailHandcar
     {
         if (deltaTime > 0f
             && currentSample.Rail != null
-            && HasFluidStorageSpace
-            && TryResolveWaterPipeDockSample(
+            && TryApplyConsistWaterPipeDocking(currentSample, currentFacing, deltaTime))
+        {
+            return true;
+        }
+
+        return base.TryApplyCustomIdleDocking(currentSample, currentFacing, deltaTime);
+    }
+
+    private bool TryApplyConsistWaterPipeDocking(
+        RailSample currentSample,
+        Vector2 currentFacing,
+        float deltaTime)
+    {
+        CollectAutoDriveConnectedTrains();
+        SteamTrain bestMovingTrain = null;
+        RailSample bestMovingTrainSample = default;
+        RailSample bestMovingDockSample = default;
+        Vector2 bestMovingDockFacing = Vector2.zero;
+        Vector2Int bestMovingPipeDirection = Vector2Int.zero;
+        float bestMovingSignedPathDelta = 0f;
+        float bestMovingDistance = float.MaxValue;
+        bool hasReadyDock = false;
+
+        for (int i = 0; i < autoDriveConnectedTrainScratch.Count; i++)
+        {
+            if (autoDriveConnectedTrainScratch[i] is not SteamTrain candidate
+                || !candidate.HasFluidStorageSpace
+                || !TryBuildCurrentRailSample(candidate, out RailSample candidateSample)
+                || !candidate.TryResolveWaterPipeDockSample(
+                    candidateSample,
+                    candidateSample.Tangent,
+                    out RailSample candidateDockSample,
+                    out float candidateSignedPathDelta,
+                    out Vector2Int candidatePipeDirection,
+                    out Vector2 candidateDockFacing))
+            {
+                if (autoDriveConnectedTrainScratch[i] is SteamTrain unavailableCandidate)
+                {
+                    unavailableCandidate.RequestWaterPipeRetract();
+                }
+
+                continue;
+            }
+
+            float candidateDistance = Mathf.Abs(candidateSignedPathDelta);
+            if (candidateDistance <= ResolveDockCompleteDistance())
+            {
+                candidate.SetWaterPipeDockTarget(candidatePipeDirection, true);
+                hasReadyDock = true;
+                continue;
+            }
+
+            if (candidateDistance >= bestMovingDistance)
+            {
+                candidate.RequestWaterPipeRetract();
+                continue;
+            }
+
+            if (bestMovingTrain != null)
+            {
+                bestMovingTrain.RequestWaterPipeRetract();
+            }
+
+            bestMovingTrain = candidate;
+            bestMovingTrainSample = candidateSample;
+            bestMovingDockSample = candidateDockSample;
+            bestMovingDockFacing = candidateDockFacing;
+            bestMovingPipeDirection = candidatePipeDirection;
+            bestMovingSignedPathDelta = candidateSignedPathDelta;
+            bestMovingDistance = candidateDistance;
+        }
+
+        // Do not pull an already filling locomotive away to align another one.
+        if (hasReadyDock)
+        {
+            bestMovingTrain?.RequestWaterPipeRetract();
+            return true;
+        }
+
+        if (bestMovingTrain == null)
+        {
+            return false;
+        }
+
+        bestMovingTrain.SetWaterPipeDockTarget(bestMovingPipeDirection, false);
+        return bestMovingTrain == this
+            ? TryApplyDockingToSample(
+                currentSample,
+                bestMovingDockFacing,
+                bestMovingDockSample,
+                bestMovingSignedPathDelta,
+                deltaTime,
+                preserveCoastTravelDirection: true,
+                allowReverseDocking: true)
+            : TryApplyConnectedTrainMemberDocking(
                 currentSample,
                 currentFacing,
+                bestMovingTrainSample,
+                bestMovingDockSample,
+                deltaTime);
+    }
+
+    private void RefreshAlignedWaterPipeDock()
+    {
+        if (!TryBuildCurrentRailSample(this, out RailSample currentSample)
+            || !TryFindWaterPipeDockSample(
+                currentSample,
                 out RailSample dockSample,
                 out float signedPathDelta,
                 out Vector2Int directionFromTrainToPipe,
-                out Vector2 dockFacing))
+                out Vector2Int pipeCoordinate)
+            || Mathf.Abs(signedPathDelta) > ResolveDockCompleteDistance())
         {
-            SetWaterPipeDockTarget(
-                directionFromTrainToPipe,
-                Mathf.Abs(signedPathDelta) <= ResolveDockCompleteDistance());
-
-            if (TryApplyDockingToSample(
-                currentSample,
-                dockFacing,
-                dockSample,
-                signedPathDelta,
-                deltaTime,
-                true))
-            {
-                return true;
-            }
+            RequestWaterPipeRetract();
+            return;
         }
 
-        RequestWaterPipeRetract();
-        return base.TryApplyCustomIdleDocking(currentSample, currentFacing, deltaTime);
+        LockWaterPipeDock(
+            dockSample,
+            currentSample.Tangent,
+            directionFromTrainToPipe,
+            pipeCoordinate);
+        SetWaterPipeDockTarget(directionFromTrainToPipe, true);
     }
 
     private bool RequiresPoweredBurnEnergy(Vector3 worldMoveDirection, float deltaTime, out float burnEnergyCost)
@@ -1338,8 +1458,28 @@ public class SteamTrain : RailHandcar
 
     private bool IsPrimaryAutoDriveControllerForConsist()
     {
+        if (ResolveAutoDriveControllerForConsist() != this)
+        {
+            return false;
+        }
+
+        for (int i = 0; i < autoDriveConnectedTrainScratch.Count; i++)
+        {
+            if (autoDriveConnectedTrainScratch[i] is SteamTrain candidate
+                && candidate != this
+                && candidate.lastDrivenInputFrame == Time.frameCount)
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    private SteamTrain ResolveAutoDriveControllerForConsist()
+    {
         CollectAutoDriveConnectedTrains();
-        SteamTrain controller = this;
+        SteamTrain controller = null;
         for (int i = 0; i < autoDriveConnectedTrainScratch.Count; i++)
         {
             SteamTrain candidate = autoDriveConnectedTrainScratch[i] as SteamTrain;
@@ -1348,18 +1488,14 @@ public class SteamTrain : RailHandcar
                 continue;
             }
 
-            if (candidate != this && candidate.lastDrivenInputFrame == Time.frameCount)
-            {
-                return false;
-            }
-
             if (!candidate.autoDriveEnabled
                 || !candidate.HasCompleteAutoDriveTargets())
             {
                 continue;
             }
 
-            if (candidate.autoDriveControllerRevision > controller.autoDriveControllerRevision
+            if (controller == null
+                || candidate.autoDriveControllerRevision > controller.autoDriveControllerRevision
                 || (candidate.autoDriveControllerRevision == controller.autoDriveControllerRevision
                     && candidate.GetInstanceID() < controller.GetInstanceID()))
             {
@@ -1367,7 +1503,34 @@ public class SteamTrain : RailHandcar
             }
         }
 
-        return controller == this;
+        return controller;
+    }
+
+    private void TransferAutoDriveControl(SteamTrain powerSource)
+    {
+        // Preserve the current leg and station wait while changing the locomotive
+        // that actually accelerates, consumes fuel and follows the route.
+        TransferConsistPathTo(powerSource);
+        powerSource.ApplyAutoDriveState(
+            true,
+            autoDriveTargetAStationName,
+            autoDriveTargetBStationName,
+            (int)autoDriveFuelFilter,
+            (int)autoDriveFreightFilter,
+            autoDriveResolvedTargetStationName,
+            autoDriveLastArrivedStationName,
+            autoDriveStationWaitTimer);
+        powerSource.CollectAutoDriveConnectedTrains();
+        powerSource.CacheAutoDriveRouteReferenceTrain(autoDriveResolvedTargetStationName, powerSource);
+        powerSource.ResetVehicleMotion();
+        ResetVehicleMotion();
+        StopMovementParticle(false);
+        autoDriveEnabled = false;
+        autoDriveControllerRevision = 0;
+        ResetAutoDriveRuntimeState();
+        SetAutoDriveStatus(AutoDriveStatus.Idle, string.Empty, string.Empty);
+        PersistAutoDriveState();
+        powerSource.PersistAutoDriveState();
     }
 
     private void ResetAutoDriveRuntimeState()
@@ -1499,7 +1662,8 @@ public class SteamTrain : RailHandcar
             }
         }
 
-        return TryAlignAutoDriveRouteSegmentsToCurrentPose(routeReferenceTrain, result);
+        return TryAlignAutoDriveRouteSegmentsToCurrentPose(routeReferenceTrain, result)
+               && AutoDriveRoutePlanner.IsForwardRoute(routeReferenceTrain, result);
     }
 
     private bool TryAlignAutoDriveRouteSegmentsToCurrentPose(
@@ -1713,8 +1877,9 @@ public class SteamTrain : RailHandcar
         TerrainGenerator.ResolveActive()?.SaveRuntimeInstallationState(this);
     }
 
-    private Vector3 ResolveAutoDriveMoveDirection(float deltaTime)
+    private Vector3 ResolveAutoDriveMoveDirection(float deltaTime, out SteamTrain powerSource)
     {
+        powerSource = null;
         if (!TryResolveAutoDriveTargets(
                 out Trainstation targetStation,
                 out string targetStationName,
@@ -1737,6 +1902,17 @@ public class SteamTrain : RailHandcar
         autoDriveResolvedTargetStation = targetStation;
         autoDriveResolvedTargetStationName = targetStationName;
         autoDriveResolvedNextStationName = nextTargetStationName;
+
+        powerSource = ResolveAutoDriveRouteReferenceTrain(targetStation, targetStationName) as SteamTrain;
+        if (powerSource != this)
+        {
+            if (powerSource == null)
+            {
+                SetAutoDriveStatus(AutoDriveStatus.WaitingForPath, targetStationName, nextTargetStationName);
+            }
+
+            return Vector3.zero;
+        }
 
         bool hasDockDistance = TryGetAutoDriveTargetDockDistance(
             targetStation,
@@ -2137,7 +2313,7 @@ public class SteamTrain : RailHandcar
         if (currentFacing.sqrMagnitude <= 0.0001f
             || dockTravelDirection.sqrMagnitude <= 0.0001f
             || remainingDistance <= 0.0001f
-            || Mathf.Abs(requestedSignedStep) <= 0.0001f)
+            || requestedSignedStep <= 0.0001f)
         {
             return false;
         }
@@ -2145,13 +2321,12 @@ public class SteamTrain : RailHandcar
         float facingDot = Vector2.Dot(
             currentFacing.normalized,
             dockTravelDirection.normalized);
-        if (Mathf.Abs(facingDot) <= 0.0001f)
+        if (facingDot <= 0.0001f)
         {
             return false;
         }
 
-        dockSignedStep = Mathf.Sign(facingDot)
-                         * Mathf.Min(Mathf.Abs(requestedSignedStep), remainingDistance);
+        dockSignedStep = Mathf.Min(requestedSignedStep, remainingDistance);
         return true;
     }
 
@@ -2334,9 +2509,13 @@ public class SteamTrain : RailHandcar
         float deltaTime,
         float signedStep)
     {
-        if (!autoDriveEnabled
-            || !hasInput
-            || Mathf.Abs(signedStep) <= 0.0001f
+        if (!autoDriveEnabled)
+        {
+            return signedStep;
+        }
+
+        signedStep = Mathf.Max(0f, signedStep);
+        if (signedStep <= 0.0001f
             || autoDriveResolvedTargetStation == null
             || !TryGetAutoDriveTargetDockPathDelta(
                 autoDriveResolvedTargetStation,
@@ -2347,9 +2526,7 @@ public class SteamTrain : RailHandcar
         }
 
         float remainingDistance = Mathf.Abs(signedDockDelta);
-        float arrivalSnapDistance = ResolveAutoDriveArrivalSnapDistance();
-        if (remainingDistance > ResolveAutoDriveDockApproachDistance()
-            || remainingDistance <= ResolveDockCompleteDistance())
+        if (remainingDistance > ResolveAutoDriveDockApproachDistance())
         {
             return signedStep;
         }
@@ -2361,10 +2538,15 @@ public class SteamTrain : RailHandcar
                 signedStep,
                 out float dockSignedStep))
         {
-            return signedStep;
+            return 0f;
         }
 
         return dockSignedStep;
+    }
+
+    protected override bool CanDockInDirection(Vector2 facing, Vector2 travelDirection)
+    {
+        return !autoDriveEnabled || Vector2.Dot(facing, travelDirection) > 0f;
     }
 
     protected override float ResolveRailInputAxis(
@@ -2380,12 +2562,16 @@ public class SteamTrain : RailHandcar
             inputMagnitude,
             facing,
             currentSample);
-        if (!autoDriveEnabled
-            || !hasInput
+        if (!autoDriveEnabled)
+        {
+            return baseAxis;
+        }
+
+        if (!hasInput
             || autoDriveRouteSegments.Count <= 0
             || IsAutoDriveDockingApproachActive())
         {
-            return baseAxis;
+            return Mathf.Max(0f, baseAxis);
         }
 
         return TryResolveAutoDriveRouteInputAxis(
@@ -2393,8 +2579,8 @@ public class SteamTrain : RailHandcar
             facing,
             inputMagnitude,
             out float routeAxis)
-            ? routeAxis
-            : baseAxis;
+            ? Mathf.Max(0f, routeAxis)
+            : Mathf.Max(0f, baseAxis);
     }
 
     private bool TryResolveAutoDriveRouteInputAxis(
@@ -2443,12 +2629,12 @@ public class SteamTrain : RailHandcar
 
         Vector2 routeDirection = pathTangent.normalized * directionSign;
         float facingDot = Vector2.Dot(routeDirection, facing.normalized);
-        if (Mathf.Abs(facingDot) <= 0.05f)
+        if (facingDot <= 0.05f)
         {
             return false;
         }
 
-        inputAxis = Mathf.Sign(facingDot) * Mathf.Clamp01(inputMagnitude);
+        inputAxis = Mathf.Clamp01(inputMagnitude);
         return true;
     }
 
@@ -3242,20 +3428,8 @@ public class SteamTrain : RailHandcar
             return endpointTrain;
         }
 
-        RailHandcar fallbackRouteReferenceTrain = ResolveFallbackAutoDriveRouteReferenceTrain();
-        CacheAutoDriveRouteReferenceTrain(targetStationName, fallbackRouteReferenceTrain);
-        return fallbackRouteReferenceTrain;
-    }
-
-    private RailHandcar ResolveFallbackAutoDriveRouteReferenceTrain()
-    {
-        RailHandcar routeReferenceTrain = CurrentRailDebugPowerSourceTrain as RailHandcar;
-        if (IsValidAutoDriveRouteReferenceTrain(routeReferenceTrain))
-        {
-            return routeReferenceTrain;
-        }
-
-        return IsValidAutoDriveRouteReferenceTrain(this) ? this : null;
+        // A failed forward route must wait, rather than fall back to reversing.
+        return null;
     }
 
     private bool TryResolveAutoDriveClosestEndpointTrain(
@@ -3269,23 +3443,22 @@ public class SteamTrain : RailHandcar
             return false;
         }
 
-        RailHandcar fallbackReferenceTrain = ResolveFallbackAutoDriveRouteReferenceTrain();
         if (TryResolveAutoDriveClosestRouteReferenceTrain(
                 targetStation,
                 targetStationName,
                 endpointOnly: true,
-                fallbackReferenceTrain,
+                this,
                 out routeReferenceTrain))
         {
             return true;
         }
 
-        // Keep auto-drive usable even when a consist endpoint is not drivable.
+        // A powered vehicle inside the consist is usable only on a forward route.
         return TryResolveAutoDriveClosestRouteReferenceTrain(
             targetStation,
             targetStationName,
             endpointOnly: false,
-            fallbackReferenceTrain,
+            this,
             out routeReferenceTrain);
     }
 
@@ -3353,7 +3526,7 @@ public class SteamTrain : RailHandcar
         bool endpointOnly,
         out RailHandcar candidate)
     {
-        candidate = train as RailHandcar;
+        candidate = train as SteamTrain;
         if (!IsValidAutoDriveRouteReferenceTrain(candidate))
         {
             return false;
@@ -3372,6 +3545,14 @@ public class SteamTrain : RailHandcar
         if (!IsValidAutoDriveRouteReferenceTrain(candidate) || targetStation == null)
         {
             return false;
+        }
+
+        if (targetStation.TryGetRailCoordinate(out Vector2Int dockCoordinate)
+            && candidate.TryGetRailDockDeltaAtCoordinate(dockCoordinate, out float dockDelta)
+            && Mathf.Abs(dockDelta) <= 0.0001f)
+        {
+            routeLength = 0f;
+            return true;
         }
 
         autoDriveRouteReferenceScratchSegments.Clear();
@@ -3410,6 +3591,7 @@ public class SteamTrain : RailHandcar
         autoDriveConnectedTrainQueue.Clear();
         autoDriveConnectedTrainGraphRevision = graphRevision;
         autoDriveConnectedTrainCacheValid = true;
+        autoDriveCachedRouteReferenceTrain = null;
         if (!IsValidAutoDriveRouteReferenceTrain(this))
         {
             return;
@@ -4051,9 +4233,7 @@ public class SteamTrain : RailHandcar
         private const float RouteEndpointSnapDistance = 0.75f;
         private const float RouteRailConnectionSnapDistance = RailConnectionUtility.ConnectionDistance;
         private const float RouteRailConnectionMinTangentDot = 0.2f;
-        private const float RouteStartReversePenalty = 1000f;
-        private const float RouteStartReverseDotThreshold = -0.1f;
-        private const float RouteTurnReversePenalty = 1000f;
+        private const float RouteStartForwardDotThreshold = 0.05f;
         private const float RouteTurnSharpPenalty = 240f;
         private const float RouteTurnReverseDotThreshold = -0.1f;
         private const float RouteTurnSharpDotThreshold = 0.35f;
@@ -4315,24 +4495,51 @@ public class SteamTrain : RailHandcar
                 result);
         }
 
-        private static Vector2 ResolvePreferredRouteStartDirection(Train train, Vector2 currentRailTangent)
+        public static bool IsForwardRoute(Train train, IReadOnlyList<RouteSegment> segments)
         {
-            if (train is RailHandcar railHandcar
-                && railHandcar.TryGetPreferredRouteTravelDirection(out Vector2 routeDirection))
+            if (train == null || segments == null)
             {
-                return routeDirection;
+                return false;
             }
 
-            if (currentRailTangent.sqrMagnitude > 0.0001f)
+            for (int i = 0; i < segments.Count; i++)
             {
-                return currentRailTangent.normalized;
+                RouteSegment segment = segments[i];
+                if (segment.Length <= 0.0001f)
+                {
+                    continue;
+                }
+
+                if (segment.Rail == null
+                    || !segment.Rail.TrySampleRenderedPath(segment.StartDistance, out _, out Vector2 tangent)
+                    || tangent.sqrMagnitude <= 0.0001f)
+                {
+                    return false;
+                }
+
+                Vector2 forward = ResolvePreferredRouteStartDirection(train, tangent);
+                Vector2 travelDirection = tangent.normalized * Mathf.Sign(segment.EndDistance - segment.StartDistance);
+                return Vector2.Dot(forward, travelDirection) > RouteStartForwardDotThreshold;
+            }
+
+            return true; // Already at the destination: no reverse movement is required.
+        }
+
+        private static Vector2 ResolvePreferredRouteStartDirection(Train train, Vector2 currentRailTangent)
+        {
+            // The physical front is fixed at Complete. Previous coasting or manual
+            // reverse movement does not redefine the front for automatic driving.
+            if (train is RailHandcar railHandcar
+                && railHandcar.TryGetRailForwardDirection(out Vector2 railForward))
+            {
+                return railForward;
             }
 
             Vector3 transformForward = train.transform.forward;
             Vector2 forward = new Vector2(transformForward.x, transformForward.z);
             if (forward.sqrMagnitude <= 0.0001f)
             {
-                return Vector2.zero;
+                return currentRailTangent.normalized;
             }
 
             forward.Normalize();
@@ -4906,6 +5113,11 @@ public class SteamTrain : RailHandcar
                     rails,
                     edge,
                     preferredStartDirection);
+                if (float.IsPositiveInfinity(startPenalty))
+                {
+                    continue;
+                }
+
                 distances[stateIndex] = Mathf.Max(0.01f, edge.Cost) + startPenalty;
                 PushRouteQueue(openSet, new RouteQueueEntry(stateIndex, distances[stateIndex]));
             }
@@ -5073,8 +5285,8 @@ public class SteamTrain : RailHandcar
             }
 
             float directionDot = Vector2.Dot(preferredStartDirection, edgeTravelDirection);
-            return directionDot < RouteStartReverseDotThreshold
-                ? RouteStartReversePenalty
+            return directionDot <= RouteStartForwardDotThreshold
+                ? float.PositiveInfinity
                 : 0f;
         }
 
@@ -5105,7 +5317,7 @@ public class SteamTrain : RailHandcar
             float directionDot = Vector2.Dot(incomingDirection, outgoingDirection);
             if (directionDot < RouteTurnReverseDotThreshold)
             {
-                return RouteTurnReversePenalty;
+                return float.PositiveInfinity;
             }
 
             if (directionDot >= RouteTurnSharpDotThreshold)

@@ -21,7 +21,8 @@ static class Checks
         car.ApplyCount = 0;
         return car;
     }
-    static void Link(Train a, Train b) { a.ConnectedTrains.Add(b); b.ConnectedTrains.Add(a); }
+    // These fixtures model an existing graph, including curves outside new-contact range.
+    static void Link(Train a, Train b) { a.SeedConnection(b); }
     static void Main()
     {
         Check(Near(Train.ConnectionCenterDistance, 1f), "Production center pitch must be one block");
@@ -78,6 +79,19 @@ static class Checks
         Check(new TrainPlacementSpacing().AlignPlacedTrains(new[] { gapC }), "Appending to a chain with an existing bridge car must work");
         Check(Near(gapC.Point.x, 4.2f), "Car after a bridge must use one-cell spacing");
 
+        var lateralRail = new Railload(new Vector2(8, 0.02f), new Vector2(3, 0.02f));
+        var lateralA = Car(left, 2.01f, 1);
+        var lateralB = Car(lateralRail, 4.75f, 2, true);
+        Link(lateralA, lateralB);
+        var lateralLayout = new TrainPlacementSpacing();
+        Check(lateralLayout.AlignPlacedTrains(new[] { lateralB }), "Complete must align cars across a lateral endpoint gap");
+        Check(lateralB.BridgeTarget == lateralRail && Near(lateralB.Point.y, 0.01f), "Complete must retain the one-cell route distance inside the gap");
+        Check(Vector2.Dot(lateralB.Facing, Vector2.right) > 0.999f, "Complete must use the rails' longitudinal axis inside the gap");
+        Check(lateralB.TryGetConnectionFacingSign(lateralA, false, out float lateralSign) && lateralSign == 1f,
+            "Complete must fix the physical rear connection while the car straddles a lateral gap");
+        Check(lateralLayout.AlignPlacedTrains(new[] { lateralB }) && Vector2.Dot(lateralB.Facing, Vector2.right) > 0.999f,
+            "Repeating Complete inside a lateral gap must retain the car's front");
+
         var isolated = Car(left, 0.2f, 99);
         Check(new TrainPlacementSpacing().AlignPlacedTrains(new[] { isolated }), "Unconnected train must remain valid");
         Check(isolated.ApplyCount == 0, "Unconnected train must not move");
@@ -92,16 +106,42 @@ static class Checks
         Link(closeA, closeB);
         Check(new TrainPlacementSpacing().AlignPlacedTrains(new[] { closeA }), "Placement tolerance must still produce exactly one-cell spacing");
         Check(Near(closeB.Distance, 1.2f), "Short placement must extend onto the available tail rail");
+        FacingChecks.Run();
+        BlueprintChecks.Run();
+        EditChecks.Run();
         Console.WriteLine($"Train spacing harness passed: {checks} checks");
     }
 }
 
-public class MapObject { }
+public class MapObject
+{
+    public readonly FakeTransform transform = new FakeTransform();
+    public readonly FakeGameObject gameObject = new FakeGameObject();
+    public Vector2 CollisionHalfExtents = new Vector2(0.3f, 0.5f);
+}
+public class FakeTransform
+{
+    public Vector3 position;
+    public PreviewRotation rotation = PreviewRotation.identity;
+    public Vector3 forward => rotation * Vector3.forward;
+}
 public class FakeGameObject { public bool activeInHierarchy = true; }
 public partial class Train : MapObject
 {
-    public readonly FakeGameObject gameObject = new FakeGameObject();
-    public readonly HashSet<Train> ConnectedTrains = new HashSet<Train>();
+    public float ConnectionSnapMaxDistance = 0.6f;
+    public float ConnectionMaxLateralDistance = 0.45f;
+    public float ConnectionMinForwardDot = 0.5f;
+    const float DefaultConnectionFallbackDistance = 1.4f;
+    public static readonly List<Train> ActiveRuntimeTrains = new List<Train>();
+    public static void CollectActiveRuntimeTrains(ICollection<Train> results)
+    { foreach (Train train in ActiveRuntimeTrains) results.Add(train); }
+    public bool TryGetPlacementRuntime(out Vector2Int coordinate, out int quarterTurns)
+    { coordinate = Vector2Int.zero; quarterTurns = 0; return RuntimePlacementSequence > 0; }
+    readonly Dictionary<Train, bool> connectedTrainEnds = new Dictionary<Train, bool>();
+    public IReadOnlyCollection<Train> ConnectedTrains => connectedTrainEnds.Keys;
+    public static int GraphRevision;
+    static void IncrementConnectionGraphRevision() { GraphRevision++; }
+    public void SeedConnection(Train other) { AddTrainConnection(other); other.AddTrainConnection(this); }
     public long RuntimePlacementSequence;
     public Railload Rail;
     public float Distance;
@@ -113,18 +153,24 @@ public partial class Train : MapObject
     public bool TryGetCurrentRailPose(out Railload rail, out float distance, out Vector2 point, out Vector2 facing)
     { rail = Rail; distance = Distance; point = Point; facing = Facing; return rail != null; }
     public bool TryApplyRailPose(Railload rail, float distance, Vector2 point, Vector2 facing)
-    { Rail = rail; Distance = distance; Point = point; Facing = facing; ApplyCount++; BridgeTarget = null; return true; }
+    {
+        Rail = rail; Distance = distance; Point = point; Facing = facing; ApplyCount++; BridgeTarget = null;
+        transform.position = new Vector3(point.x, 0, point.y);
+        transform.rotation = PreviewRotation.LookRotation(new Vector3(facing.x, 0, facing.y), Vector3.up);
+        return true;
+    }
     public bool TryGetCurrentRailConnectionTransition(out Railload rail, out float distance, out Vector2 point, out Vector2 tangent, out float length, out float progress)
     { rail = BridgeTarget; distance = bridgeDistance; length = bridgeLength; progress = bridgeProgress; point = bridgePoint; tangent = bridgeTangent; return rail != null; }
     public void ConfigureCurrentRailConnectionTransition(Railload rail, float distance, Vector2 point, Vector2 tangent, float length, float progress)
     { BridgeTarget = rail; bridgeDistance = distance; bridgePoint = point; bridgeTangent = tangent; bridgeLength = length; bridgeProgress = progress; }
 }
-public class RailHandcar : Train
+public partial class RailHandcar : Train
 {
     public int ResetCount;
     public void ResetRailPlacementState() { ResetCount++; }
     public bool TryApplyExplicitRailPose(Railload rail, float distance, Vector2 point, Vector2 facing) => TryApplyRailPose(rail, distance, point, facing);
 }
+public class SteamTrain : RailHandcar { }
 public static class RailConnectionUtility { public const float ConnectionDistance = 0.55f; }
 public class Railload
 {

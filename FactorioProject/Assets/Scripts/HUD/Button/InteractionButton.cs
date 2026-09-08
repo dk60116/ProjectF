@@ -85,6 +85,19 @@ public class InteractionButton : MonoBehaviour
         }
     }
 
+    public void SetInteractable(bool isInteractable)
+    {
+        if (cachedButton == null)
+        {
+            cachedButton = GetComponent<Button>();
+        }
+
+        if (cachedButton != null)
+        {
+            cachedButton.interactable = isInteractable && gameObject.activeSelf;
+        }
+    }
+
     public void SetClickAction(UnityAction action)
     {
         if (cachedButton == null)

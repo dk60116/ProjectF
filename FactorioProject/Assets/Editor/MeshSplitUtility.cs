@@ -370,6 +370,35 @@ namespace ProjectF.EditorTools.MeshSplit
             return true;
         }
 
+        public static int[] BuildColorGroupRemap(
+            IReadOnlyList<Color> groupColors,
+            out Color[] mergedColors)
+        {
+            if (groupColors == null)
+            {
+                throw new ArgumentNullException(nameof(groupColors));
+            }
+
+            int[] groupRemap = new int[groupColors.Count];
+            Dictionary<uint, int> mergedGroupByColor = new Dictionary<uint, int>();
+            List<Color> colors = new List<Color>(groupColors.Count);
+            for (int groupIndex = 0; groupIndex < groupColors.Count; groupIndex++)
+            {
+                uint colorKey = PackOpaqueColor(groupColors[groupIndex], out Color32 color);
+                if (!mergedGroupByColor.TryGetValue(colorKey, out int mergedGroupIndex))
+                {
+                    mergedGroupIndex = colors.Count;
+                    mergedGroupByColor.Add(colorKey, mergedGroupIndex);
+                    colors.Add(color);
+                }
+
+                groupRemap[groupIndex] = mergedGroupIndex;
+            }
+
+            mergedColors = colors.ToArray();
+            return groupRemap;
+        }
+
         public static bool TryParseExportedGroupColor(string value, out Color32 color)
         {
             color = default;
@@ -610,9 +639,7 @@ namespace ProjectF.EditorTools.MeshSplit
             for (int triangleIndex = 0; triangleIndex < data.TriangleCount; triangleIndex++)
             {
                 int groupIndex = Mathf.Clamp(triangleGroups[triangleIndex], 0, groupColors.Count - 1);
-                Color32 color = groupColors[groupIndex];
-                color.a = 255;
-                uint key = PackColor(color);
+                uint key = PackOpaqueColor(groupColors[groupIndex], out Color32 color);
                 if (!trianglesByColor.TryGetValue(key, out List<int> colorTriangles))
                 {
                     colorTriangles = new List<int>();
@@ -1198,6 +1225,13 @@ namespace ProjectF.EditorTools.MeshSplit
         private static uint PackColor(Color32 color)
         {
             return ((uint)color.r << 24) | ((uint)color.g << 16) | ((uint)color.b << 8) | color.a;
+        }
+
+        private static uint PackOpaqueColor(Color color, out Color32 opaqueColor)
+        {
+            opaqueColor = color;
+            opaqueColor.a = 255;
+            return PackColor(opaqueColor);
         }
     }
 }

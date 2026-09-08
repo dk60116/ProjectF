@@ -30,27 +30,6 @@ public class FreightCar : Train, IPlayerItemStorage, IPlayerItemStoragePortableP
     private Quaternion lastMountedTankMotionRotation;
     private float mountedTankCarrierStationarySeconds;
 
-    public override void ApplyPlacedRailSample(
-        Railload rail,
-        float distanceAlongPath,
-        Vector2 railPoint,
-        Vector2 facingTangent)
-    {
-        if (rail != null
-            && rail.TrySampleRenderedPath(distanceAlongPath, out Vector2 sampledPoint, out Vector2 railTangent)
-            && railTangent.sqrMagnitude > 0.0001f)
-        {
-            base.ApplyPlacedRailSample(
-                rail,
-                distanceAlongPath,
-                sampledPoint,
-                railTangent);
-            return;
-        }
-
-        base.ApplyPlacedRailSample(rail, distanceAlongPath, railPoint, facingTangent);
-    }
-
     public bool TryApplyRailPose(
         Railload rail,
         float distanceAlongPath,

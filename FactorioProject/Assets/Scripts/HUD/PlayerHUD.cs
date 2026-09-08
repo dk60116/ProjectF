@@ -2432,6 +2432,8 @@ public partial class PlayerHUD : BagSlot
                                      ? steamTrain.TryGetConnectedTrain(out _)
                                      : hasDraftInteraction
                                        && currentDraftAnimalInteractionDetaches);
+        bool disconnectInteractable = steamTrain == null
+                                      || !steamTrain.BlocksManualDisconnection;
 
         SetParallelInteractionButtonState(
             TrainConnectInteractionButton,
@@ -2440,14 +2442,16 @@ public partial class PlayerHUD : BagSlot
         SetParallelInteractionButtonState(
             TrainDisconnectInteractionButton,
             trainDisconnectInteractionIcon,
-            canDisconnect);
+            canDisconnect,
+            disconnectInteractable);
         UpdateInteractionButtonLayout();
     }
 
     private static void SetParallelInteractionButtonState(
         InteractionButton interactionButton,
         Sprite icon,
-        bool visible)
+        bool visible,
+        bool interactable = true)
     {
         if (interactionButton == null)
         {
@@ -2462,6 +2466,7 @@ public partial class PlayerHUD : BagSlot
 
         interactionButton.SetIcon(icon);
         interactionButton.SetVisible(true);
+        interactionButton.SetInteractable(interactable);
     }
 
     private void UpdateInteractionButtonLayout()
@@ -3477,7 +3482,12 @@ public partial class PlayerHUD : BagSlot
         }
         else
         {
-            ResolveMountedSteamTrain()?.TryDisconnectConnectedTrain();
+            SteamTrain mountedSteamTrain = ResolveMountedSteamTrain();
+            if (mountedSteamTrain != null
+                && !mountedSteamTrain.BlocksManualDisconnection)
+            {
+                mountedSteamTrain.TryDisconnectConnectedTrain();
+            }
         }
 
         UpdateInteractionButtonState();

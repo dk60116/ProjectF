@@ -193,6 +193,7 @@ namespace ProjectF.EditorTools.MeshSplit
             }
 
             activeGroupIndex = Mathf.Clamp(activeGroupIndex, 0, groups.Count - 1);
+            bool colorChanged = false;
             for (int groupIndex = 0; groupIndex < groups.Count; groupIndex++)
             {
                 GroupDefinition group = groups[groupIndex];
@@ -217,11 +218,21 @@ namespace ProjectF.EditorTools.MeshSplit
                     {
                         nextColor.a = 1f;
                         group.color = nextColor;
-                        previewMaterialsDirty = true;
-                        EditorUtility.SetDirty(this);
-                        Repaint();
+                        colorChanged = true;
                     }
                 }
+            }
+
+            if (colorChanged)
+            {
+                int previousGroupCount = groups.Count;
+                MergeSameColorGroups();
+                previewMaterialsDirty = true;
+                statusMessage = groups.Count < previousGroupCount
+                    ? $"같은 색으로 중복된 그룹 {previousGroupCount - groups.Count}개를 정리했습니다."
+                    : "색 그룹의 색상을 변경했습니다.";
+                EditorUtility.SetDirty(this);
+                Repaint();
             }
 
             if (GUILayout.Button("Add Color Group"))
@@ -242,7 +253,7 @@ namespace ProjectF.EditorTools.MeshSplit
             }
 
             EditorGUILayout.HelpBox(
-                "저장 시 색 값이 완전히 같은 그룹들은 하나의 Mesh로 합쳐집니다.",
+                "색 값이 같은 그룹은 즉시 하나로 합쳐지며 저장 결과에도 하나의 Mesh로 출력됩니다.",
                 MessageType.None);
 
             using (new EditorGUILayout.HorizontalScope())
@@ -445,6 +456,9 @@ namespace ProjectF.EditorTools.MeshSplit
                 });
             }
 
+            int unmergedGroupCount = groups.Count;
+            MergeSameColorGroups();
+
             if (groups.Count == 0)
             {
                 groups.Add(new GroupDefinition { name = "Group 01", color = GenerateGroupColor(0) });
@@ -460,9 +474,72 @@ namespace ProjectF.EditorTools.MeshSplit
             previewMeshDirty = true;
             wireframeMeshDirty = true;
             previewMaterialsDirty = true;
-            statusMessage = $"{islandCount}개 아일랜드를 분석했습니다. 브러시로 색 그룹을 편집할 수 있습니다.";
+            int removedGroupCount = unmergedGroupCount - groups.Count;
+            statusMessage = removedGroupCount > 0
+                ? $"{islandCount}개 아일랜드를 분석하고, 같은 색으로 중복된 그룹 {removedGroupCount}개를 정리했습니다."
+                : $"{islandCount}개 아일랜드를 분석했습니다. 브러시로 색 그룹을 편집할 수 있습니다.";
             EditorUtility.SetDirty(this);
             Repaint();
+        }
+
+        private void MergeSameColorGroups()
+        {
+            if (groups.Count <= 1)
+            {
+                return;
+            }
+
+            List<Color> sourceColors = new List<Color>(groups.Count);
+            for (int groupIndex = 0; groupIndex < groups.Count; groupIndex++)
+            {
+                sourceColors.Add(groups[groupIndex].color);
+            }
+
+            int[] groupRemap = MeshSplitUtility.BuildColorGroupRemap(sourceColors, out Color[] mergedColors);
+            if (mergedColors.Length == groups.Count)
+            {
+                return;
+            }
+
+            Vector3[] mergedOffsets = new Vector3[mergedColors.Length];
+            bool[] hasMergedOffset = new bool[mergedColors.Length];
+            for (int groupIndex = 0; groupIndex < groups.Count; groupIndex++)
+            {
+                int mergedGroupIndex = groupRemap[groupIndex];
+                if (!hasMergedOffset[mergedGroupIndex] && groupIndex < visualGroupOffsets.Count)
+                {
+                    mergedOffsets[mergedGroupIndex] = visualGroupOffsets[groupIndex];
+                    hasMergedOffset[mergedGroupIndex] = true;
+                }
+            }
+
+            for (int triangleIndex = 0; triangleIndex < triangleGroups.Length; triangleIndex++)
+            {
+                int oldGroupIndex = Mathf.Clamp(triangleGroups[triangleIndex], 0, groupRemap.Length - 1);
+                triangleGroups[triangleIndex] = groupRemap[oldGroupIndex];
+            }
+
+            activeGroupIndex = groupRemap[Mathf.Clamp(activeGroupIndex, 0, groupRemap.Length - 1)];
+            movingVisualGroupIndex = movingVisualGroupIndex >= 0 && movingVisualGroupIndex < groupRemap.Length
+                ? groupRemap[movingVisualGroupIndex]
+                : -1;
+
+            groups.Clear();
+            visualGroupOffsets.Clear();
+            for (int groupIndex = 0; groupIndex < mergedColors.Length; groupIndex++)
+            {
+                groups.Add(new GroupDefinition
+                {
+                    name = $"Group {groupIndex + 1:00}",
+                    color = mergedColors[groupIndex]
+                });
+                visualGroupOffsets.Add(mergedOffsets[groupIndex]);
+            }
+
+            ClearHistory();
+            previewMeshDirty = true;
+            wireframeMeshDirty = true;
+            previewMaterialsDirty = true;
         }
 
         private void ReloadSerializedSource()

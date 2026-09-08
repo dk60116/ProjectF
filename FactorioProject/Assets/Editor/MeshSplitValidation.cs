@@ -16,6 +16,7 @@ namespace ProjectF.EditorTools.MeshSplit
             ValidateDisconnectedIslandDetectionAcrossDuplicatedVertices();
             ValidateDifferentMeshFiltersStayDisconnected();
             ValidateWireframeEdgeWelding();
+            ValidateSameColorGroupRemap();
             ValidateSameColorMergeAndDifferentColorSplit();
             ValidateExportedGroupColorRestoration();
             ValidateObjExport();
@@ -133,6 +134,20 @@ namespace ProjectF.EditorTools.MeshSplit
             {
                 DestroyOutputs(outputs);
             }
+        }
+
+        private static void ValidateSameColorGroupRemap()
+        {
+            Color red = new Color32(0xE1, 0x22, 0x33, 0xFF);
+            Color blue = new Color32(0x22, 0x55, 0xDD, 0xFF);
+            int[] remap = MeshSplitUtility.BuildColorGroupRemap(
+                new[] { red, blue, red },
+                out Color[] mergedColors);
+
+            Assert(mergedColors.Length == 2, $"같은 색 편집 그룹이 하나로 정리되지 않았습니다: {mergedColors.Length}");
+            Assert(remap[0] == 0 && remap[1] == 1 && remap[2] == 0, "같은 색 편집 그룹의 인덱스 매핑이 올바르지 않습니다.");
+            Assert(((Color32)mergedColors[0]).Equals((Color32)red), "병합된 첫 번째 그룹 색상이 변경됐습니다.");
+            Assert(((Color32)mergedColors[1]).Equals((Color32)blue), "병합된 두 번째 그룹 색상이 변경됐습니다.");
         }
 
         private static void ValidateObjExport()
