@@ -35,6 +35,9 @@ public class ItemDefinition : ScriptableObject
     public string itemName;
     public int id;
     public MapObject mapObject;
+    [SerializeField] private bool useMapColor;
+    [SerializeField, ColorUsage(false)] private Color mapColor = Color.white;
+    [SerializeField] private MapMarkerSize mapMarkerSize = MapMarkerSize.Middle;
     public Mesh portableMesh;
     public Material portableMat;
     public Sprite icon;
@@ -124,6 +127,14 @@ public class ItemDefinition : ScriptableObject
     public float FluidOutputLitersPerSecond => Mathf.Max(0f, fluidOutputLitersPerSecond);
     public int UndergroundPipeMaxDistance => Mathf.Max(2, undergroundPipeMaxDistance);
     public ItemDefinition ManualTargetItem => isManual ? manualTargetItem : null;
+    public MapMarkerSize MarkerSize => mapMarkerSize;
+    public bool TryGetMapColor32(out Color32 color)
+    {
+        color = mapColor;
+        color.a = 255;
+        return useMapColor && mapObject != null;
+    }
+
     public float UseEnergyRatePerSecond => ResolveUseEnergyRatePerSecond(this);
     public float ElectricUseWatts => ResolveElectricUseWatts(this);
 

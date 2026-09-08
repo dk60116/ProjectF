@@ -717,16 +717,6 @@ MonoBehaviour:
     lightRange: 10
     lightIntensityMultiplier: 3
     size: 0
-  - name: Leather
-    id: 52
-    prefab: {fileID: 0}
-    portableMesh: {fileID: 4300000, guid: a93c1180b6e5c4549b44e7103f3ee726, type: 2}
-    portableMat: {fileID: 2100000, guid: c0de1ea7a6ab4d54b8dd61fd4689fa02, type: 2}
-    icon: {fileID: 21300000, guid: fa63be29f879a9a4ca1d652750263558, type: 3}
-    lightMode: 0
-    lightRange: 6
-    lightIntensityMultiplier: 1
-    size: 0
   - name: Wooden fence door
     id: 53
     prefab: {fileID: 3131218003902393541, guid: f792eb3818b43ab4aa29e8e6a5a7e454, type: 3}
@@ -873,6 +863,16 @@ MonoBehaviour:
     portableMesh: {fileID: 4300000, guid: ea9b655b8482846488ba82133e50d299, type: 2}
     portableMat: {fileID: 2100000, guid: 0804dd1f3fe5f3f4bb07d25f01714c32, type: 2}
     icon: {fileID: 21300000, guid: 161f451b97cff754aa9bdf7a064be046, type: 3}
+    lightMode: 0
+    lightRange: 6
+    lightIntensityMultiplier: 1
+    size: 0
+  - name: Leather
+    id: 68
+    prefab: {fileID: 0}
+    portableMesh: {fileID: 4300000, guid: a93c1180b6e5c4549b44e7103f3ee726, type: 2}
+    portableMat: {fileID: 2100000, guid: c0de1ea7a6ab4d54b8dd61fd4689fa02, type: 2}
+    icon: {fileID: 21300000, guid: b1d96a7dc50b6c84197f8953ca69b19f, type: 3}
     lightMode: 0
     lightRange: 6
     lightIntensityMultiplier: 1

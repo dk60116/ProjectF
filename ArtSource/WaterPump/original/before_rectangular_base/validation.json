@@ -1,0 +1,20 @@
+{
+  "geometry_and_ids_unchanged": true,
+  "vertices": 1837,
+  "triangles": 3408,
+  "uv_range": [
+    0.00599998980761,
+    0.99397200346
+  ],
+  "degenerate_uv_on_visible_triangles": 0,
+  "preexisting_zero_area_geometry": 2,
+  "overlapping_interior_texels": 0,
+  "uv_area_fraction": 0.30599715217511636,
+  "texture_dimensions": [
+    2048,
+    2048
+  ],
+  "fbx_sha256": "c083b600ccb47adb958113de8130109ed730cce8492f6830dd5759a73086a12a",
+  "texture_sha256": "b175719937882f8d474f7a7a95ebf7d817e181b0031683a834a3d40a0800ca24",
+  "installed_matches_generated": true
+}

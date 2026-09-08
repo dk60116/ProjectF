@@ -1,0 +1,20 @@
+{
+  "source_texture_unchanged": true,
+  "islands": 194,
+  "max_similarity_error": 4.5232573901710094e-08,
+  "island_scale_range": [
+    0.7976933568603315,
+    0.7976996409637725
+  ],
+  "texture_transfer": "Original image through OriginalUV to packed UV, emission only; no repainting or lighting bake",
+  "render_comparison": {
+    "front": {
+      "mean_abs_rgb": 0.00012385787925757395,
+      "p95_abs_rgb": 0.0
+    },
+    "back": {
+      "mean_abs_rgb": 0.00019347083671290662,
+      "p95_abs_rgb": 0.0
+    }
+  }
+}

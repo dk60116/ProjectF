@@ -18,6 +18,8 @@ internal sealed class TerrainChunkStreamingScheduler
     private readonly HashSet<Vector2Int> activeChunkGenerationCoordinates = new HashSet<Vector2Int>();
 
     private Coroutine chunkGenerationCoroutine;
+    private int totalGenerationCount;
+    private int completedGenerationCount;
 
     public bool IsBusy =>
         pendingChunkGenerations.Count > 0
@@ -25,6 +27,11 @@ internal sealed class TerrainChunkStreamingScheduler
         || chunkGenerationCoroutine != null;
 
     public int PendingCount => pendingChunkGenerations.Count;
+    public int TotalGenerationCount => totalGenerationCount;
+    public int CompletedGenerationCount => completedGenerationCount;
+    public float GenerationProgress => totalGenerationCount > 0
+        ? Mathf.Clamp01(completedGenerationCount / (float)totalGenerationCount)
+        : 0f;
 
     public TerrainChunkStreamingScheduler(
         MonoBehaviour owner,
@@ -58,8 +65,15 @@ internal sealed class TerrainChunkStreamingScheduler
             return;
         }
 
+        if (!IsBusy && completedGenerationCount >= totalGenerationCount)
+        {
+            totalGenerationCount = 0;
+            completedGenerationCount = 0;
+        }
+
         pendingChunkGenerations.Enqueue(new ChunkGenerationRequest(chunkCoordinate, normalizedChunkSize));
         pendingChunkGenerationCoordinates.Add(chunkCoordinate);
+        totalGenerationCount++;
     }
 
     public void EnsureGenerationProcessing()
@@ -89,6 +103,7 @@ internal sealed class TerrainChunkStreamingScheduler
             pendingChunkGenerationCoordinates.Remove(request.coordinate);
             if (!shouldGenerateChunk(request.coordinate))
             {
+                completedGenerationCount++;
                 continue;
             }
 
@@ -107,7 +122,10 @@ internal sealed class TerrainChunkStreamingScheduler
 
     public void MarkGenerationComplete(Vector2Int chunkCoordinate)
     {
-        activeChunkGenerationCoordinates.Remove(chunkCoordinate);
+        if (activeChunkGenerationCoordinates.Remove(chunkCoordinate))
+        {
+            completedGenerationCount++;
+        }
     }
 
     public void Clear()
@@ -115,6 +133,8 @@ internal sealed class TerrainChunkStreamingScheduler
         pendingChunkGenerations.Clear();
         pendingChunkGenerationCoordinates.Clear();
         activeChunkGenerationCoordinates.Clear();
+        totalGenerationCount = 0;
+        completedGenerationCount = 0;
 
         if (chunkGenerationCoroutine != null)
         {
@@ -134,6 +154,7 @@ internal sealed class TerrainChunkStreamingScheduler
             pendingChunkGenerationCoordinates.Remove(request.coordinate);
             if (!shouldGenerateChunk(request.coordinate))
             {
+                completedGenerationCount++;
                 continue;
             }
 

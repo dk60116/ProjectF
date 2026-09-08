@@ -14,6 +14,9 @@ MonoBehaviour:
   m_EditorClassIdentifier: 
   resourceName: Cooper Ore
   resourceIcon: {fileID: 21300000, guid: 92c773fd17775e94ab557c2f38c8cdd8, type: 3}
+  mapColorMode: 1
+  mapColor: {r: 1, g: 0.48472303, b: 0, a: 1}
+  mapMarkerSize: 0
   prefab: {fileID: 3654828918463552362, guid: c972d3bc9888d61498a3bbabd03743e6, type: 3}
   harvestMode: 1
   placementCategory: 0

@@ -27,6 +27,7 @@ foreach ($signature in @(
     'private bool HasAnyAdjacentTree()',
     'private bool TryResolveAdjacentTree(',
     'private bool IsHarvestableTree(',
+    'public void SetGrowthRange(',
     'private static int NormalizeDirectionIndex(')) {
     $generated += (Read-Member $loggingFile $signature) + "`n"
 }

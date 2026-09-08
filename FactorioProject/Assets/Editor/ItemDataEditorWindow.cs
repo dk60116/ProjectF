@@ -98,6 +98,7 @@ public class ItemDataEditorWindow : EditorWindow
     private const int ItemListOverscanRows = 3;
     private const int LargeInputOutputPairAutoCollapseThreshold = 8;
     private const float RectGridCellSize = 34f;
+    private static readonly string[] MapMarkerSizeLabels = { "S", "M", "L" };
     private const float RectGridCellSpacing = 5f;
     private const float RectGridPaletteBlockWidth = 78f;
     private const float PlacementCenterGridCellSize = 30f;
@@ -3200,6 +3201,12 @@ public class ItemDataEditorWindow : EditorWindow
 
         serializedObject.UpdateIfRequiredOrScript();
 
+        SerializedProperty useMapColorProperty =
+            GetMultiSelectedDefinitionProperty(serializedObject, "useMapColor");
+        SerializedProperty mapColorProperty =
+            GetMultiSelectedDefinitionProperty(serializedObject, "mapColor");
+        SerializedProperty mapMarkerSizeProperty =
+            GetMultiSelectedDefinitionProperty(serializedObject, "mapMarkerSize");
         SerializedProperty interactionButtonListProperty =
             GetMultiSelectedDefinitionProperty(serializedObject, "interactionButtonList");
         SerializedProperty lightModeProperty =
@@ -3281,6 +3288,19 @@ public class ItemDataEditorWindow : EditorWindow
             new GUIContent(
                 "One Item",
                 "체크하면 모든 보관 컨텐츠에서 스택 하나당 이 아이템을 하나만 보관할 수 있습니다."));
+
+        if (AllSelectedDefinitionsHaveMapColorSettings())
+        {
+            EditorGUILayout.Space(8f);
+            EditorGUILayout.LabelField("Map", EditorStyles.boldLabel);
+            DrawMultiPropertyField(useMapColorProperty, new GUIContent("Use Map Color"));
+            if (useMapColorProperty != null
+                && (useMapColorProperty.hasMultipleDifferentValues || useMapColorProperty.boolValue))
+            {
+                DrawMultiPropertyField(mapColorProperty, new GUIContent("Marker Color"));
+                DrawMapMarkerSizeToolbar(mapMarkerSizeProperty);
+            }
+        }
 
         if (interactionButtonListProperty != null)
         {
@@ -3620,6 +3640,24 @@ public class ItemDataEditorWindow : EditorWindow
         }
     }
 
+    private static void DrawMapMarkerSizeToolbar(SerializedProperty property)
+    {
+        if (property == null)
+        {
+            return;
+        }
+
+        EditorGUILayout.BeginHorizontal();
+        EditorGUILayout.PrefixLabel("Marker Size");
+        int selectedIndex = property.hasMultipleDifferentValues ? -1 : property.enumValueIndex;
+        int newIndex = GUILayout.Toolbar(selectedIndex, MapMarkerSizeLabels);
+        if (newIndex >= 0 && newIndex != selectedIndex)
+        {
+            property.enumValueIndex = newIndex;
+        }
+        EditorGUILayout.EndHorizontal();
+    }
+
     private static void DrawMultiClampedFloatProperty(
         SerializedProperty property,
         GUIContent label,
@@ -3667,6 +3705,25 @@ public class ItemDataEditorWindow : EditorWindow
         {
             if (!(selectedItemDefinitionsInOrder[i].mapObject is InputOutputModule inputOutputModule)
                 || inputOutputModule.ParentInputOutputModuleItem == null)
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    private bool AllSelectedDefinitionsHaveMapColorSettings()
+    {
+        if (selectedItemDefinitionsInOrder.Count <= 0)
+        {
+            return false;
+        }
+
+        for (int i = 0; i < selectedItemDefinitionsInOrder.Count; i++)
+        {
+            MapObject mapObject = selectedItemDefinitionsInOrder[i]?.mapObject;
+            if (mapObject == null || mapObject is Resource)
             {
                 return false;
             }
@@ -3838,6 +3895,9 @@ public class ItemDataEditorWindow : EditorWindow
         SerializedProperty itemNameProperty = GetSelectedDefinitionProperty(serializedObject, "itemName");
         SerializedProperty idProperty = GetSelectedDefinitionProperty(serializedObject, "id");
         SerializedProperty mapObjectProperty = GetSelectedDefinitionProperty(serializedObject, "mapObject");
+        SerializedProperty useMapColorProperty = GetSelectedDefinitionProperty(serializedObject, "useMapColor");
+        SerializedProperty mapColorProperty = GetSelectedDefinitionProperty(serializedObject, "mapColor");
+        SerializedProperty mapMarkerSizeProperty = GetSelectedDefinitionProperty(serializedObject, "mapMarkerSize");
         SerializedProperty portableMeshProperty = GetSelectedDefinitionProperty(serializedObject, "portableMesh");
         SerializedProperty portableMatProperty = GetSelectedDefinitionProperty(serializedObject, "portableMat");
         SerializedProperty iconProperty = GetSelectedDefinitionProperty(serializedObject, "icon");
@@ -3903,6 +3963,17 @@ public class ItemDataEditorWindow : EditorWindow
                     "체크하면 모든 보관 컨텐츠에서 스택 하나당 이 아이템을 하나만 보관할 수 있습니다."));
         }
         MapObject selectedMapObject = mapObjectProperty.objectReferenceValue as MapObject;
+        if (selectedMapObject != null && !(selectedMapObject is Resource))
+        {
+            EditorGUILayout.Space(4f);
+            EditorGUILayout.PropertyField(useMapColorProperty, new GUIContent("Use Map Color"));
+            if (useMapColorProperty.boolValue)
+            {
+                EditorGUILayout.PropertyField(mapColorProperty, new GUIContent("Marker Color"));
+                DrawMapMarkerSizeToolbar(mapMarkerSizeProperty);
+            }
+        }
+
         DrawMapObjectFields(selectedMapObject, definitions);
 
         if (interactionButtonListProperty != null)

@@ -7,6 +7,7 @@ using UnityEngine.Serialization;
 public class BoxObject : InputOutputModule
 {
     public const int DefaultMinimumRetainedItemCount = 0;
+    public const int DefaultMaximumStoredItemCount = int.MaxValue;
     private static readonly HashSet<BoxObject> ActiveInstances = new HashSet<BoxObject>();
     private static readonly Dictionary<Block, int> RuntimeContentBlockReferenceCounts = new Dictionary<Block, int>();
     private static float cachedGlobalMaxFocusActivationRadius;
@@ -23,6 +24,8 @@ public class BoxObject : InputOutputModule
     private bool isOpen = true;
     [SerializeField, Min(0)]
     private int minimumRetainedItemCount = DefaultMinimumRetainedItemCount;
+    [SerializeField, Min(0)]
+    private int maximumStoredItemCount = DefaultMaximumStoredItemCount;
     [SerializeField, Min(0.01f)]
     private float hingeTweenDuration = 0.2f;
     [SerializeField]
@@ -48,6 +51,7 @@ public class BoxObject : InputOutputModule
     public override float FocusActivationRadius => Mathf.Max(0f, focusActivationRadius);
     public bool IsOpen => isOpen;
     public int MinimumRetainedItemCount => Mathf.Max(0, minimumRetainedItemCount);
+    public int MaximumStoredItemCount => Mathf.Max(MinimumRetainedItemCount, maximumStoredItemCount);
     public new static float GlobalMaxFocusActivationRadius
     {
         get
@@ -331,21 +335,24 @@ public class BoxObject : InputOutputModule
             : Mathf.Max(MinimumRetainedItemCount, 1);
     }
 
-    public void SetMinimumRetainedItemCount(int value)
+    public void SetStorageRange(int minimum, int maximum)
     {
         int limit = TryResolveMinimumRetainedItemCountLimit(out int resolvedLimit)
             ? resolvedLimit
             : int.MaxValue;
         int clampedValue = Mathf.Clamp(
-            value,
+            minimum,
             0,
             limit);
-        if (minimumRetainedItemCount == clampedValue)
+        int clampedMaximum = maximum == DefaultMaximumStoredItemCount
+            ? DefaultMaximumStoredItemCount : Mathf.Clamp(maximum, clampedValue, limit);
+        if (minimumRetainedItemCount == clampedValue && maximumStoredItemCount == clampedMaximum)
         {
             return;
         }
 
         minimumRetainedItemCount = clampedValue;
+        maximumStoredItemCount = clampedMaximum;
         if (TryGetContentBlock(out Block contentBlock) && contentBlock != null)
         {
             RobotArm.WakeAroundCoordinate(contentBlock.Coordinate);
@@ -534,6 +541,7 @@ public class BoxObject : InputOutputModule
     public override void PrepareForPool()
     {
         minimumRetainedItemCount = DefaultMinimumRetainedItemCount;
+        maximumStoredItemCount = DefaultMaximumStoredItemCount;
         hinge?.DOKill();
         RestoreLastContainedStackVisibilityBlock();
         ApplyItemIconSprite(null, -1, true);

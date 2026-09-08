@@ -424,11 +424,13 @@ public class InstallationPlacementController : MonoBehaviour
         public InputOutputModule.PersistentState inputOutputState;
         public bool? boxIsOpen;
         public int boxMinimumRetainedItemCount = BoxObject.DefaultMinimumRetainedItemCount;
+        public int boxMaximumStoredItemCount = BoxObject.DefaultMaximumStoredItemCount;
         public bool itemFilterMaskInitialized;
         public List<ulong> itemFilterMaskWords = new List<ulong>();
         public bool loggingTreeFilterInitialized;
         public List<string> loggingEnabledTreeDefinitionKeys = new List<string>();
         public int loggingMinimumGrowth = LoggingMachine.DefaultMinimumGrowth;
+        public int loggingMaximumGrowth = LoggingMachine.DefaultMaximumGrowth;
         public float storedFluidLiters;
         public int storedFluidItemId = -1;
         public float storedFluidTemperatureCelsius = MapClimate.DefaultCurrentTemperatureCelsius;
@@ -449,6 +451,7 @@ public class InstallationPlacementController : MonoBehaviour
         public Vector2Int canonicalAnchorOffset;
         public bool? boxIsOpen;
         public int boxMinimumRetainedItemCount = BoxObject.DefaultMinimumRetainedItemCount;
+        public int boxMaximumStoredItemCount = BoxObject.DefaultMaximumStoredItemCount;
         public bool itemFilterMaskInitialized;
         public List<ulong> itemFilterMaskWords = new List<ulong>();
     }
@@ -4370,6 +4373,7 @@ public class InstallationPlacementController : MonoBehaviour
         {
             editSession.boxIsOpen = boxObject.IsOpen;
             editSession.boxMinimumRetainedItemCount = boxObject.MinimumRetainedItemCount;
+            editSession.boxMaximumStoredItemCount = boxObject.MaximumStoredItemCount;
         }
 
         editSession.splitterState = (installationObject as Spliterbelt)?.CaptureSplitterState();
@@ -4379,7 +4383,8 @@ public class InstallationPlacementController : MonoBehaviour
             installationObject,
             out editSession.loggingTreeFilterInitialized,
             editSession.loggingEnabledTreeDefinitionKeys,
-            out editSession.loggingMinimumGrowth);
+            out editSession.loggingMinimumGrowth,
+            out editSession.loggingMaximumGrowth);
         editSession.storedFluidLiters = installationObject.StoredFluidLiters;
         editSession.storedFluidItemId = installationObject.StoredFluidItemId;
         editSession.storedFluidTemperatureCelsius =
@@ -4402,10 +4407,12 @@ public class InstallationPlacementController : MonoBehaviour
         MapObject source,
         out bool initialized,
         List<string> enabledDefinitionKeys,
-        out int minimumGrowth)
+        out int minimumGrowth,
+        out int maximumGrowth)
     {
         initialized = false;
         minimumGrowth = LoggingMachine.DefaultMinimumGrowth;
+        maximumGrowth = LoggingMachine.DefaultMaximumGrowth;
         enabledDefinitionKeys?.Clear();
         if (!(source is LoggingMachine loggingMachine))
         {
@@ -4414,6 +4421,7 @@ public class InstallationPlacementController : MonoBehaviour
 
         initialized = loggingMachine.IsTreeFilterInitialized;
         minimumGrowth = loggingMachine.MinimumGrowth;
+        maximumGrowth = loggingMachine.MaximumGrowth;
         if (enabledDefinitionKeys == null)
         {
             return;
@@ -4427,14 +4435,16 @@ public class InstallationPlacementController : MonoBehaviour
         MapObject target,
         bool initialized,
         IReadOnlyList<string> enabledDefinitionKeys,
-        int minimumGrowth)
+        int minimumGrowth,
+        int maximumGrowth)
     {
         if (target is LoggingMachine loggingMachine)
         {
             loggingMachine.ApplyTreeFilterState(
                 initialized,
                 enabledDefinitionKeys,
-                minimumGrowth);
+                minimumGrowth,
+                maximumGrowth);
         }
     }
 
@@ -4520,6 +4530,7 @@ public class InstallationPlacementController : MonoBehaviour
             canonicalAnchorOffset = RotateFootprintOffset(worldOffset, -editSession.originalQuarterTurns),
             boxIsOpen = boxObject.IsOpen,
             boxMinimumRetainedItemCount = boxObject.MinimumRetainedItemCount,
+            boxMaximumStoredItemCount = boxObject.MaximumStoredItemCount,
             itemFilterMaskInitialized = boxObject.IsItemFilterMaskInitialized,
             itemFilterMaskWords = boxObject.CaptureItemFilterMaskWords()
         };
@@ -5646,7 +5657,7 @@ public class InstallationPlacementController : MonoBehaviour
                 restoredObject,
                 editSession.loggingTreeFilterInitialized,
                 editSession.loggingEnabledTreeDefinitionKeys,
-                editSession.loggingMinimumGrowth);
+                editSession.loggingMinimumGrowth, editSession.loggingMaximumGrowth);
             if (restoredObject is InstallationObject restoredInstallationObject)
             {
                 restoredInstallationObject.SetStoredFluid(
@@ -5665,7 +5676,7 @@ public class InstallationPlacementController : MonoBehaviour
             if (restoredObject is BoxObject restoredBoxObject && editSession.boxIsOpen.HasValue)
             {
                 restoredBoxObject.SetOpenState(editSession.boxIsOpen.Value, false);
-                restoredBoxObject.SetMinimumRetainedItemCount(editSession.boxMinimumRetainedItemCount);
+                restoredBoxObject.SetStorageRange(editSession.boxMinimumRetainedItemCount, editSession.boxMaximumStoredItemCount);
             }
         }
 
@@ -5900,7 +5911,7 @@ public class InstallationPlacementController : MonoBehaviour
             {
                 boxObject.SetOpenState(boxState.boxIsOpen.Value, false);
             }
-            boxObject.SetMinimumRetainedItemCount(boxState.boxMinimumRetainedItemCount);
+            boxObject.SetStorageRange(boxState.boxMinimumRetainedItemCount, boxState.boxMaximumStoredItemCount);
 
             RegisterInstalledObjectPersistence(boxObject);
         }
@@ -5943,10 +5954,10 @@ public class InstallationPlacementController : MonoBehaviour
             replacementObject,
             editSession.loggingTreeFilterInitialized,
             editSession.loggingEnabledTreeDefinitionKeys,
-            editSession.loggingMinimumGrowth);
+            editSession.loggingMinimumGrowth, editSession.loggingMaximumGrowth);
         if (replacementObject is BoxObject replacementBoxObject)
         {
-            replacementBoxObject.SetMinimumRetainedItemCount(editSession.boxMinimumRetainedItemCount);
+            replacementBoxObject.SetStorageRange(editSession.boxMinimumRetainedItemCount, editSession.boxMaximumStoredItemCount);
             if (editSession.boxIsOpen.HasValue)
             {
                 replacementBoxObject.SetOpenState(editSession.boxIsOpen.Value, false);
@@ -32609,7 +32620,10 @@ public class InstallationPlacementController : MonoBehaviour
             currentObject,
             out bool loggingTreeFilterInitialized,
             loggingEnabledTreeDefinitionKeys,
-            out int loggingMinimumGrowth);
+            out int loggingMinimumGrowth,
+            out int loggingMaximumGrowth);
+        int boxMinimum = (currentObject as BoxObject)?.MinimumRetainedItemCount ?? BoxObject.DefaultMinimumRetainedItemCount;
+        int boxMaximum = (currentObject as BoxObject)?.MaximumStoredItemCount ?? BoxObject.DefaultMaximumStoredItemCount;
         int storedFluidItemId = currentObject.StoredFluidItemId;
         float storedFluidLiters = currentObject.StoredFluidLiters;
         float storedFluidTemperatureCelsius = currentObject.GetStoredFluidTemperatureCelsius(
@@ -32682,7 +32696,11 @@ public class InstallationPlacementController : MonoBehaviour
             replacementInstallation,
             loggingTreeFilterInitialized,
             loggingEnabledTreeDefinitionKeys,
-            loggingMinimumGrowth);
+            loggingMinimumGrowth, loggingMaximumGrowth);
+        if (replacementInstallation is BoxObject replacementBox)
+        {
+            replacementBox.SetStorageRange(boxMinimum, boxMaximum);
+        }
         replacementInstallation.SetStoredFluid(
             storedFluidItemId,
             storedFluidLiters,

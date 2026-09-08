@@ -16,14 +16,20 @@ function Member([string]$signature) {
     return $sourceText.Substring($start, $end - $start)
 }
 $source = "using System; using System.Collections.Generic; using UnityEngine; public partial class BoxObject { public const int DefaultMinimumRetainedItemCount = 0; private int minimumRetainedItemCount; public int MinimumRetainedItemCount => Mathf.Max(0, minimumRetainedItemCount);`n"
-foreach ($signature in @('private bool TryGetContentBlock(', 'public bool CanPutContainedObjects(', 'public bool TryPutOneContainedObjectInstant(', 'public int GetExtractableContainedItemCount(', 'public bool CanTakeContainedObject(', 'public int GetMinimumRetainedItemCountLimit(', 'public void SetMinimumRetainedItemCount(', 'private bool TryResolveMinimumRetainedItemCountLimit(', 'public bool TryTakeOneContainedObject(System.Predicate<int>')) {
+foreach ($signature in @('private bool TryGetContentBlock(', 'public bool CanPutContainedObjects(', 'public bool TryPutOneContainedObjectInstant(', 'public int GetExtractableContainedItemCount(', 'public bool CanTakeContainedObject(', 'public int GetMinimumRetainedItemCountLimit(', 'public void SetStorageRange(', 'private bool TryResolveMinimumRetainedItemCountLimit(', 'public bool TryTakeOneContainedObject(System.Predicate<int>')) {
     $source += (Member $signature) + "`n"
 }
 $source += '}'
 $sourceText = [IO.File]::ReadAllText((Join-Path $repo 'FactorioProject/Assets/Scripts/Object/MapObj/InstallationObject/InputOutputModule.cs'))
-$source += ' public partial class InputOutputModule { ' + (Member 'public static bool CanAddItemToRuntimeIoOverlapCoordinate(') + ' }'
+$source += ' public partial class InputOutputModule { ' + (Member 'public static bool CanAddItemToRuntimeIoOverlapCoordinate(') + (Member 'protected int GetRuntimeInputAreaCenterItemCount(') + ' }'
 $sourceText = [IO.File]::ReadAllText((Join-Path $repo 'FactorioProject/Assets/Scripts/Map/Block.cs'))
-$source += ' public partial class Block { ' + (Member 'public bool CanAddInputAreaCenterObjects(int count, int itemId)') + ' }'
+$source += ' public partial class Block { ' + (Member 'public bool CanAddInputAreaCenterObjects(int count, int itemId)') + (Member 'private int ResolveInputAreaCenterCapacity(') + ' }'
+$sourceText = [IO.File]::ReadAllText((Join-Path $repo 'FactorioProject/Assets/Scripts/Map/BlockStateStore.FloorAreaItems.cs'))
+$source += ' public partial class BlockStateStore { '
+foreach ($signature in @('private int GetSavedBoxMinimumRetainedItemCount(', 'private void GetSavedBoxStorageRange(', 'public int GetSavedCenterExtractableItemCount(', 'public int GetSavedCenterItemCount(', 'public bool CanAddSavedCenterItems(', 'public bool TryAddSavedCenterItems(', 'private static bool CanAddSavedCenterItems(')) {
+    $source += (Member $signature)
+}
+$source += ' }'
 $probe = Join-Path ([IO.Path]::GetTempPath()) ('ProjectF-BoxContent-' + [guid]::NewGuid().ToString('N'))
 New-Item -ItemType Directory -Path $probe | Out-Null
 [IO.File]::WriteAllText((Join-Path $probe 'Production.cs'), $source)

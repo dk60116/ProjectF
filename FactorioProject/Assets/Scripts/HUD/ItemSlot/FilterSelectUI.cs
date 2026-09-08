@@ -19,10 +19,13 @@ public partial class FilterSelectUI : MonoBehaviour
     private readonly List<ResourceDefinition> visibleTreeDefinitions = new List<ResourceDefinition>();
     private MapObject boundTarget;
     private TerrainGenerator cachedTerrainGenerator;
-    private GameObject loggingGrowthControl;
-    private Slider loggingGrowthSlider;
-    private TextMeshProUGUI loggingGrowthLabel;
-    private TextMeshProUGUI loggingGrowthValueLabel;
+    private GameObject filterRangeControl;
+    private ProjectF.UI.IntegerRangeSlider filterRangeSlider;
+    private TextMeshProUGUI filterRangeLabel;
+    private TextMeshProUGUI filterRangeValueLabel;
+    private RectTransform filterRangeTickRoot;
+    private int filterRangeTickMinimum = int.MinValue;
+    private int filterRangeTickMaximum = int.MinValue;
     private bool bulkButtonLayoutCached;
     private Vector2 originalAllButtonPosition;
     private Vector2 originalAllButtonSize;
@@ -34,7 +37,7 @@ public partial class FilterSelectUI : MonoBehaviour
         EnsureSlotList();
         ResolveButtons();
         BindButtons();
-        EnsureLoggingGrowthControl();
+        EnsureFilterRangeControl();
         HideEmptySlots();
     }
 
@@ -42,7 +45,7 @@ public partial class FilterSelectUI : MonoBehaviour
     {
         ResolveButtons();
         BindButtons();
-        EnsureLoggingGrowthControl();
+        EnsureFilterRangeControl();
         Refresh();
     }
 
@@ -212,20 +215,20 @@ public partial class FilterSelectUI : MonoBehaviour
         if (boundTarget is LoggingMachine loggingMachine)
         {
             ApplyLoggingDefinitionsToSlots(loggingMachine);
-            ApplyLoggingHeaderLayout(true);
-            RefreshLoggingGrowthControl(loggingMachine);
+            ApplyFilterHeaderLayout(true);
+            RefreshLoggingRangeControl(loggingMachine);
             return;
         }
 
         bool hasThresholdControl = boundTarget is BoxObject;
-        ApplyLoggingHeaderLayout(boundTarget is Spliterbelt || hasThresholdControl);
+        ApplyFilterHeaderLayout(boundTarget is Spliterbelt || hasThresholdControl);
         if (boundTarget is BoxObject boxObject)
         {
-            RefreshBoxMinimumRetainedControl(boxObject);
+            RefreshBoxStorageRangeControl(boxObject);
         }
         else
         {
-            SetLoggingGrowthControlVisible(false);
+            SetFilterRangeControlVisible(false);
         }
 
         int filterBitCount = GetFilterBitCount();
@@ -786,20 +789,20 @@ public partial class FilterSelectUI : MonoBehaviour
         return cachedTerrainGenerator;
     }
 
-    private void EnsureLoggingGrowthControl()
+    private void EnsureFilterRangeControl()
     {
-        if (loggingGrowthControl != null)
+        if (filterRangeControl != null)
         {
             return;
         }
 
         TextMeshProUGUI styleSource = GetComponentInChildren<TextMeshProUGUI>(true);
         Sprite woodFrameSprite = ResolveBulkButtonSprite();
-        loggingGrowthControl = new GameObject(
-            "Logging Minimum Growth",
+        filterRangeControl = new GameObject(
+            "Custom Filter Range",
             typeof(RectTransform),
             typeof(CanvasRenderer));
-        RectTransform root = loggingGrowthControl.GetComponent<RectTransform>();
+        RectTransform root = filterRangeControl.GetComponent<RectTransform>();
         root.SetParent(transform, false);
         root.anchorMin = new Vector2(1f, 1f);
         root.anchorMax = new Vector2(1f, 1f);
@@ -818,30 +821,30 @@ public partial class FilterSelectUI : MonoBehaviour
         labelRect.anchorMax = new Vector2(0.31f, 1f);
         labelRect.offsetMin = Vector2.zero;
         labelRect.offsetMax = Vector2.zero;
-        loggingGrowthLabel = labelObject.GetComponent<TextMeshProUGUI>();
-        loggingGrowthLabel.fontSize = styleSource != null
+        filterRangeLabel = labelObject.GetComponent<TextMeshProUGUI>();
+        filterRangeLabel.fontSize = styleSource != null
             ? Mathf.Min(styleSource.fontSize, 21f)
             : 21f;
-        loggingGrowthLabel.color = styleSource != null ? styleSource.color : Color.white;
-        loggingGrowthLabel.alignment = TextAlignmentOptions.MidlineRight;
-        loggingGrowthLabel.raycastTarget = false;
+        filterRangeLabel.color = styleSource != null ? styleSource.color : Color.white;
+        filterRangeLabel.alignment = TextAlignmentOptions.MidlineRight;
+        filterRangeLabel.raycastTarget = false;
         if (styleSource != null)
         {
-            loggingGrowthLabel.font = styleSource.font;
-            loggingGrowthLabel.fontSharedMaterial = styleSource.fontSharedMaterial;
+            filterRangeLabel.font = styleSource.font;
+            filterRangeLabel.fontSharedMaterial = styleSource.fontSharedMaterial;
         }
 
         RectTransform valueBadge = CreateSliderImage(
             "Value Badge",
             root,
             Color.white,
-            new Vector2(0.325f, 0.13f),
-            new Vector2(0.415f, 0.87f),
+            new Vector2(0.315f, 0.13f),
+            new Vector2(0.50f, 0.87f),
             woodFrameSprite,
             Image.Type.Sliced);
         valueBadge.offsetMin = new Vector2(2f, 0f);
         valueBadge.offsetMax = new Vector2(-2f, 0f);
-        loggingGrowthValueLabel = CreateSliderText(
+        filterRangeValueLabel = CreateSliderText(
             "Value",
             valueBadge,
             styleSource,
@@ -851,10 +854,10 @@ public partial class FilterSelectUI : MonoBehaviour
         GameObject sliderObject = new GameObject(
             "Slider",
             typeof(RectTransform),
-            typeof(Slider));
+            typeof(ProjectF.UI.IntegerRangeSlider));
         RectTransform sliderRect = sliderObject.GetComponent<RectTransform>();
         sliderRect.SetParent(root, false);
-        sliderRect.anchorMin = new Vector2(0.44f, 0f);
+        sliderRect.anchorMin = new Vector2(0.53f, 0f);
         sliderRect.anchorMax = new Vector2(1f, 1f);
         sliderRect.offsetMin = Vector2.zero;
         sliderRect.offsetMax = Vector2.zero;
@@ -875,50 +878,43 @@ public partial class FilterSelectUI : MonoBehaviour
             new Vector2(1f, 0.63f));
         track.offsetMin = new Vector2(13f, 0f);
         track.offsetMax = new Vector2(-13f, 0f);
-        RectTransform fillArea = CreateSliderContainer(
-            "Fill Area",
-            sliderRect,
-            new Vector2(0f, 0.39f),
-            new Vector2(1f, 0.61f),
-            15f);
+        RectTransform handleArea = CreateSliderContainer(
+            "Range Track", sliderRect, Vector2.zero, Vector2.one, 17f);
         RectTransform fill = CreateSliderImage(
             "Fill",
-            fillArea,
+            handleArea,
             new Color(0.95f, 0.57f, 0.16f, 1f),
-            Vector2.zero,
-            Vector2.one);
-        CreateSliderTicks(fillArea);
-        RectTransform handleArea = CreateSliderContainer(
-            "Handle Slide Area",
-            sliderRect,
-            Vector2.zero,
-            Vector2.one,
-            17f);
+            new Vector2(0f, 0.39f),
+            new Vector2(1f, 0.61f));
+        fill.GetComponent<Image>().raycastTarget = false;
+        filterRangeTickRoot = CreateSliderContainer(
+            "Ticks", handleArea, Vector2.zero, Vector2.one, 0f);
         RectTransform handle = CreateSliderImage(
-            "Handle",
+            "Minimum Bar",
             handleArea,
             Color.white,
-            new Vector2(0f, 0.13f),
-            new Vector2(0f, 0.87f),
+            new Vector2(0f, 0.06f),
+            new Vector2(0f, 0.94f),
             loggingGrowthHandleSprite != null
                 ? loggingGrowthHandleSprite
                 : woodFrameSprite,
             loggingGrowthHandleSprite != null
                 ? Image.Type.Simple
                 : Image.Type.Sliced);
-        handle.sizeDelta = new Vector2(34f, 0f);
-
-        loggingGrowthSlider = sliderObject.GetComponent<Slider>();
-        loggingGrowthSlider.minValue = ResourceDefinition.MinGrowth;
-        loggingGrowthSlider.maxValue = ResourceDefinition.MaxGrowth;
-        loggingGrowthSlider.wholeNumbers = true;
-        loggingGrowthSlider.direction = Slider.Direction.LeftToRight;
-        loggingGrowthSlider.fillRect = fill;
-        loggingGrowthSlider.handleRect = handle;
-        loggingGrowthSlider.targetGraphic = handle.GetComponent<Image>();
-        loggingGrowthSlider.onValueChanged.AddListener(HandleLoggingGrowthChanged);
+        handle.pivot = new Vector2(1f, 0.5f);
+        handle.sizeDelta = new Vector2(30f, 0f);
+        RectTransform upperHandle = CreateSliderImage(
+            "Maximum Bar", handleArea, Color.white,
+            new Vector2(1f, 0.06f), new Vector2(1f, 0.94f),
+            loggingGrowthHandleSprite != null ? loggingGrowthHandleSprite : woodFrameSprite,
+            loggingGrowthHandleSprite != null ? Image.Type.Simple : Image.Type.Sliced);
+        upperHandle.pivot = new Vector2(0f, 0.5f);
+        upperHandle.sizeDelta = new Vector2(30f, 0f);
+        filterRangeSlider = sliderObject.GetComponent<ProjectF.UI.IntegerRangeSlider>();
+        filterRangeSlider.Configure(handleArea, fill, handle, upperHandle);
+        filterRangeSlider.RangeChanged += HandleFilterRangeChanged;
         background.SetAsFirstSibling();
-        SetLoggingGrowthControlVisible(false);
+        SetFilterRangeControlVisible(false);
     }
 
     private static RectTransform CreateSliderContainer(
@@ -999,20 +995,40 @@ public partial class FilterSelectUI : MonoBehaviour
         return text;
     }
 
-    private static void CreateSliderTicks(RectTransform trackRect)
+    private void RefreshFilterRangeTicks(int minimum, int maximum)
     {
-        for (int i = ResourceDefinition.MinGrowth; i <= ResourceDefinition.MaxGrowth; i++)
+        if (filterRangeTickRoot == null
+            || (filterRangeTickMinimum == minimum && filterRangeTickMaximum == maximum))
         {
-            float normalized = (i - ResourceDefinition.MinGrowth)
-                               / (float)(ResourceDefinition.MaxGrowth - ResourceDefinition.MinGrowth);
+            return;
+        }
+
+        filterRangeTickMinimum = minimum;
+        filterRangeTickMaximum = maximum;
+        for (int i = filterRangeTickRoot.childCount - 1; i >= 0; i--)
+        {
+            Destroy(filterRangeTickRoot.GetChild(i).gameObject);
+        }
+
+        int range = maximum - minimum;
+        if (range <= 0)
+        {
+            return;
+        }
+
+        int firstTick = Mathf.CeilToInt((minimum + 1) / 5f) * 5;
+        for (int value = firstTick; value <= maximum; value += 5)
+        {
+            bool isMajor = value % 10 == 0;
+            float normalized = (value - minimum) / (float)range;
             RectTransform tick = CreateSliderImage(
-                $"Tick {i}",
-                trackRect,
-                new Color(1f, 0.82f, 0.47f, i % 5 == 0 ? 0.9f : 0.5f),
-                new Vector2(normalized, 0.05f),
-                new Vector2(normalized, 0.95f));
-            tick.anchoredPosition = Vector2.zero;
-            tick.sizeDelta = new Vector2(i % 5 == 0 ? 2f : 1f, 0f);
+                isMajor ? $"Major Tick {value}" : $"Minor Tick {value}",
+                filterRangeTickRoot,
+                Color.black,
+                new Vector2(normalized, isMajor ? 0.38f : 0.41f),
+                new Vector2(normalized, isMajor ? 0.62f : 0.59f));
+            tick.pivot = new Vector2(normalized >= 1f ? 1f : 0.5f, 0.5f);
+            tick.sizeDelta = new Vector2(isMajor ? 2f : 1f, 0f);
             tick.GetComponent<Image>().raycastTarget = false;
         }
     }
@@ -1030,7 +1046,7 @@ public partial class FilterSelectUI : MonoBehaviour
         return buttonImage != null ? buttonImage.sprite : null;
     }
 
-    private void ApplyLoggingHeaderLayout(bool loggingLayout)
+    private void ApplyFilterHeaderLayout(bool loggingLayout)
     {
         RectTransform allRect = allBtuuon != null
             ? allBtuuon.transform as RectTransform
@@ -1076,74 +1092,75 @@ public partial class FilterSelectUI : MonoBehaviour
         }
     }
 
-    private void RefreshLoggingGrowthControl(LoggingMachine loggingMachine)
+    private void RefreshLoggingRangeControl(LoggingMachine loggingMachine)
     {
-        EnsureLoggingGrowthControl();
-        SetLoggingGrowthControlVisible(true);
+        EnsureFilterRangeControl();
+        SetFilterRangeControlVisible(true);
         int growth = loggingMachine != null
             ? loggingMachine.MinimumGrowth
             : ResourceDefinition.MinGrowth;
-        if (loggingGrowthSlider != null)
+        if (filterRangeSlider != null)
         {
-            loggingGrowthSlider.minValue = ResourceDefinition.MinGrowth;
-            loggingGrowthSlider.maxValue = ResourceDefinition.MaxGrowth;
-            loggingGrowthSlider.SetValueWithoutNotify(growth);
+            filterRangeSlider.SetRangeWithoutNotify(ResourceDefinition.MinGrowth, ResourceDefinition.MaxGrowth,
+                growth, loggingMachine != null ? loggingMachine.MaximumGrowth : ResourceDefinition.MaxGrowth);
+            RefreshFilterRangeTicks(ResourceDefinition.MinGrowth, ResourceDefinition.MaxGrowth);
         }
 
-        if (loggingGrowthLabel != null)
+        if (filterRangeLabel != null)
         {
-            loggingGrowthLabel.text = "MINIMUM GROWTH";
+            filterRangeLabel.text = "GROWTH";
         }
 
-        if (loggingGrowthValueLabel != null)
+        if (filterRangeValueLabel != null)
         {
-            loggingGrowthValueLabel.text = growth.ToString();
+            filterRangeValueLabel.text = $"{growth}–{(loggingMachine != null ? loggingMachine.MaximumGrowth : ResourceDefinition.MaxGrowth)}";
         }
     }
 
-    private void RefreshBoxMinimumRetainedControl(BoxObject boxObject)
+    private void RefreshBoxStorageRangeControl(BoxObject boxObject)
     {
-        EnsureLoggingGrowthControl();
-        SetLoggingGrowthControlVisible(true);
+        EnsureFilterRangeControl();
+        SetFilterRangeControlVisible(true);
         int retainedCount = boxObject != null
             ? boxObject.MinimumRetainedItemCount
             : BoxObject.DefaultMinimumRetainedItemCount;
-        if (loggingGrowthSlider != null)
+        if (filterRangeSlider != null)
         {
-            loggingGrowthSlider.minValue = 0f;
-            loggingGrowthSlider.maxValue = boxObject != null
-                ? Mathf.Max(1, boxObject.GetMinimumRetainedItemCountLimit())
-                : 1f;
-            loggingGrowthSlider.SetValueWithoutNotify(retainedCount);
+            int limit = boxObject != null ? boxObject.GetMinimumRetainedItemCountLimit() : 1;
+            filterRangeSlider.SetRangeWithoutNotify(0, limit, retainedCount,
+                boxObject != null ? Mathf.Min(limit, boxObject.MaximumStoredItemCount) : limit);
+            RefreshFilterRangeTicks(0, limit);
         }
 
-        if (loggingGrowthLabel != null)
+        if (filterRangeLabel != null)
         {
-            loggingGrowthLabel.text = "MINIMUM RETAINED";
+            filterRangeLabel.text = "STORAGE";
         }
 
-        if (loggingGrowthValueLabel != null)
+        if (filterRangeValueLabel != null)
         {
-            loggingGrowthValueLabel.text = retainedCount.ToString();
+            int maximum = boxObject != null
+                ? Mathf.Min(boxObject.GetMinimumRetainedItemCountLimit(), boxObject.MaximumStoredItemCount) : 1;
+            filterRangeValueLabel.text = $"{retainedCount}–{maximum}";
         }
     }
 
-    private void SetLoggingGrowthControlVisible(bool visible)
+    private void SetFilterRangeControlVisible(bool visible)
     {
-        if (loggingGrowthControl != null && loggingGrowthControl.activeSelf != visible)
+        if (filterRangeControl != null && filterRangeControl.activeSelf != visible)
         {
-            loggingGrowthControl.SetActive(visible);
+            filterRangeControl.SetActive(visible);
         }
     }
 
-    private void HandleLoggingGrowthChanged(float value)
+    private void HandleFilterRangeChanged(int minimum, int maximum)
     {
         MapObject target = ResolveCurrentTarget();
         if (target is BoxObject boxObject)
         {
-            boxObject.SetMinimumRetainedItemCount(Mathf.RoundToInt(value));
+            boxObject.SetStorageRange(minimum, maximum);
             PersistTargetFilterState(boxObject);
-            RefreshBoxMinimumRetainedControl(boxObject);
+            RefreshBoxStorageRangeControl(boxObject);
             return;
         }
 
@@ -1152,9 +1169,9 @@ public partial class FilterSelectUI : MonoBehaviour
             return;
         }
 
-        loggingMachine.SetMinimumGrowth(Mathf.RoundToInt(value));
+        loggingMachine.SetGrowthRange(minimum, maximum);
         PersistTargetFilterState(loggingMachine);
-        RefreshLoggingGrowthControl(loggingMachine);
+        RefreshLoggingRangeControl(loggingMachine);
     }
 
     private Button FindButtonByNames(params string[] names)

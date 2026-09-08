@@ -15,6 +15,9 @@ MonoBehaviour:
   itemName: Logging machine
   id: 63
   mapObject: {fileID: 7230047334803947904, guid: 528a9b942febb9d4a84b27f77dfba70f, type: 3}
+  useMapColor: 1
+  mapColor: {r: 0.9716981, g: 0.2520915, b: 0.7617376, a: 1}
+  mapMarkerSize: 2
   portableMesh: {fileID: 4300000, guid: 628cea7c87ae22644b204243295f4429, type: 2}
   portableMat: {fileID: 2100000, guid: 1dfbd69284c27484dab13e0668a01836, type: 2}
   icon: {fileID: 21300000, guid: a9f2f7c458e1fe14490ad9890f98ef72, type: 3}

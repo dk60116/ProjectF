@@ -3,6 +3,13 @@ using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.Serialization;
 
+public enum MapMarkerSize
+{
+    Small = 0,
+    Middle = 1,
+    Large = 2
+}
+
 [Serializable]
 public sealed class ResourceDropEntry
 {
@@ -91,8 +98,17 @@ public class ResourceDefinition : ScriptableObject
         Tree
     }
 
+    public enum MapColorMode
+    {
+        None,
+        Custom
+    }
+
     public string resourceName;
     [SerializeField] private Sprite resourceIcon;
+    [SerializeField] private MapColorMode mapColorMode = MapColorMode.None;
+    [SerializeField, ColorUsage(false)] private Color mapColor = Color.white;
+    [SerializeField] private MapMarkerSize mapMarkerSize = MapMarkerSize.Middle;
     public Resource prefab;
     public Resource.HarvestMode harvestMode = Resource.HarvestMode.Auto;
     public PlacementCategory placementCategory = PlacementCategory.Ore;
@@ -117,6 +133,13 @@ public class ResourceDefinition : ScriptableObject
     public IReadOnlyList<ResourceDropEntry> DropItems =>
         dropItems ??= new List<ResourceDropEntry>();
     public Sprite ResourceIcon => resourceIcon;
+    public MapMarkerSize MarkerSize => mapMarkerSize;
+    public bool TryGetMapColor32(out Color32 color)
+    {
+        color = mapColor;
+        color.a = 255;
+        return mapColorMode == MapColorMode.Custom;
+    }
     public float TotalGrowthWaterLiters => Mathf.Max(0f, totalGrowthWaterLiters);
     public float TotalGrowthFertilizerAmount => Mathf.Max(0f, totalGrowthFertilizerAmount);
     public float GrowthDurationPerLevelSeconds => Mathf.Max(

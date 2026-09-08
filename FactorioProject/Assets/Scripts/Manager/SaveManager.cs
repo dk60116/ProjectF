@@ -219,21 +219,17 @@ public class SaveManager : MonoBehaviour
         pendingRuntimeStartNewMap = startNewMap;
         sceneReloadRequested = true;
 
-        AsyncOperation reloadOperation;
+        bool reloadStarted;
         if (activeScene.buildIndex >= 0)
         {
-            reloadOperation = SceneManager.LoadSceneAsync(
-                activeScene.buildIndex,
-                LoadSceneMode.Single);
+            reloadStarted = GameSceneLoadingScreen.TryLoadSceneAsync(activeScene.buildIndex);
         }
         else
         {
-            reloadOperation = SceneManager.LoadSceneAsync(
-                activeScene.name,
-                LoadSceneMode.Single);
+            reloadStarted = GameSceneLoadingScreen.TryLoadSceneAsync(activeScene.name);
         }
 
-        if (reloadOperation == null)
+        if (!reloadStarted)
         {
             pendingRuntimeLoadSlot = -1;
             pendingRuntimeLoadData = null;
@@ -355,6 +351,10 @@ public class SaveManager : MonoBehaviour
         if (terrain != null)
         {
             terrain.StartNewGeneratedMap(randomizeSeed);
+            if (Application.isPlaying)
+            {
+                GameSceneLoadingScreen.TryShowUntilWorldReady();
+            }
         }
 
         SetRecentSlot(slotIndex);
@@ -440,20 +440,33 @@ public class SaveManager : MonoBehaviour
         TerrainGenerator terrain = TerrainGenerator.ResolveActive();
         if (terrain != null)
         {
-            terrain.LoadFromSaveState(data.terrain, data.map);
+            if (Application.isPlaying)
+            {
+                GameSceneLoadingScreen.TryShowUntilWorldReady();
+            }
+
+            terrain.LoadFromSaveState(
+                data.terrain,
+                data.map,
+                () => CompletePlayerLoad(player, data.player));
+            return;
         }
 
-        if (player != null && data.player != null && data.player.hasPlayer)
+        CompletePlayerLoad(player, data.player);
+    }
+
+    private void CompletePlayerLoad(Player player, PlayerSaveData playerSaveData)
+    {
+        if (player == null || playerSaveData == null || !playerSaveData.hasPlayer)
         {
-            player.ApplyTransformState(data.player);
-            RestorePlayerMountedState(player, data.player);
+            return;
         }
 
-        if (player != null && data.player != null && data.player.hasPlayer)
-        {
-            player.ApplyInventoryAndStatState(data.player);
-            RestorePlayerNooseState(player, data.player);
-        }
+        player.ApplyTransformState(playerSaveData);
+        RestorePlayerMountedState(player, playerSaveData);
+
+        player.ApplyInventoryAndStatState(playerSaveData);
+        RestorePlayerNooseState(player, playerSaveData);
     }
 
     private static void RestorePlayerNooseState(

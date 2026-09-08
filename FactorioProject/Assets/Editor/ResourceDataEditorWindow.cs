@@ -18,6 +18,7 @@ public sealed class ResourceDataEditorWindow : EditorWindow
         "Oil",
         "Tree"
     };
+    private static readonly string[] MapMarkerSizeLabels = { "S", "M", "L" };
 
     private readonly List<ResourceDefinition> definitions = new List<ResourceDefinition>();
     private readonly List<ResourceDefinition> visibleDefinitions = new List<ResourceDefinition>();
@@ -333,6 +334,7 @@ public sealed class ResourceDataEditorWindow : EditorWindow
 
         DrawProperty(serializedDefinition, "resourceName", "Resource Name");
         DrawProperty(serializedDefinition, "resourceIcon", "Resource Icon");
+        DrawMapColor(serializedDefinition);
         DrawProperty(serializedDefinition, "prefab", "Resource Prefab");
         DrawProperty(serializedDefinition, "harvestMode", "Harvest Mode");
         DrawProperty(serializedDefinition, "placementCategory", "Placement Category");
@@ -402,6 +404,41 @@ public sealed class ResourceDataEditorWindow : EditorWindow
 
         EditorGUILayout.EndVertical();
         GUILayout.Space(6f);
+    }
+
+    private static void DrawMapColor(SerializedObject serializedDefinition)
+    {
+        SerializedProperty mode = serializedDefinition.FindProperty("mapColorMode");
+        bool enabled = EditorGUILayout.Toggle(
+            "Use Map Color",
+            mode.enumValueIndex == (int)ResourceDefinition.MapColorMode.Custom);
+        mode.enumValueIndex = (int)(enabled
+            ? ResourceDefinition.MapColorMode.Custom
+            : ResourceDefinition.MapColorMode.None);
+        if (enabled)
+        {
+            SerializedProperty color = serializedDefinition.FindProperty("mapColor");
+            EditorGUILayout.PropertyField(color, new GUIContent("Marker Color"));
+            DrawMapMarkerSizeToolbar(serializedDefinition.FindProperty("mapMarkerSize"));
+        }
+    }
+
+    private static void DrawMapMarkerSizeToolbar(SerializedProperty property)
+    {
+        if (property == null)
+        {
+            return;
+        }
+
+        EditorGUILayout.BeginHorizontal();
+        EditorGUILayout.PrefixLabel("Marker Size");
+        int selectedIndex = property.hasMultipleDifferentValues ? -1 : property.enumValueIndex;
+        int newIndex = GUILayout.Toolbar(selectedIndex, MapMarkerSizeLabels);
+        if (newIndex >= 0 && newIndex != selectedIndex)
+        {
+            property.enumValueIndex = newIndex;
+        }
+        EditorGUILayout.EndHorizontal();
     }
 
     private static void DrawPlantGrowthRequirements(SerializedObject serializedDefinition)

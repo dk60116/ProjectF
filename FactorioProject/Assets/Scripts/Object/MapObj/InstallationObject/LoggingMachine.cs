@@ -17,6 +17,7 @@ public class LoggingMachine : InstallationObject,
 
     private static readonly int WorkAnimatorBoolHash = Animator.StringToHash("bWork");
     public const int DefaultMinimumGrowth = 10;
+    public const int DefaultMaximumGrowth = ResourceDefinition.MaxGrowth;
     private const float DefaultTickIntervalSeconds = 0.1f;
     private const float DirectionAngle = 90f;
     private const float HingeAlignmentTolerance = 0.1f;
@@ -34,6 +35,8 @@ public class LoggingMachine : InstallationObject,
     private float emptyDirectionHoldSeconds = 0.25f;
     [SerializeField, Range(ResourceDefinition.MinGrowth, ResourceDefinition.MaxGrowth)]
     private int minimumGrowth = DefaultMinimumGrowth;
+    [SerializeField, Range(ResourceDefinition.MinGrowth, ResourceDefinition.MaxGrowth)]
+    private int maximumGrowth = DefaultMaximumGrowth;
     [SerializeField, HideInInspector]
     private bool treeFilterInitialized;
     [SerializeField, HideInInspector]
@@ -63,6 +66,7 @@ public class LoggingMachine : InstallationObject,
         ResourceDefinition.MinGrowth,
         ResourceDefinition.MaxGrowth);
     public bool IsTreeFilterInitialized => treeFilterInitialized;
+    public int MaximumGrowth => Mathf.Clamp(maximumGrowth, MinimumGrowth, ResourceDefinition.MaxGrowth);
 
     public bool IsTreeTypeEnabled(ResourceDefinition definition)
     {
@@ -128,18 +132,20 @@ public class LoggingMachine : InstallationObject,
         InvalidateFilteredTarget();
     }
 
-    public void SetMinimumGrowth(int value)
+    public void SetGrowthRange(int minimum, int maximum)
     {
         int clampedValue = Mathf.Clamp(
-            value,
+            minimum,
             ResourceDefinition.MinGrowth,
             ResourceDefinition.MaxGrowth);
-        if (minimumGrowth == clampedValue)
+        int clampedMaximum = Mathf.Clamp(maximum, clampedValue, ResourceDefinition.MaxGrowth);
+        if (minimumGrowth == clampedValue && maximumGrowth == clampedMaximum)
         {
             return;
         }
 
         minimumGrowth = clampedValue;
+        maximumGrowth = clampedMaximum;
         InvalidateFilteredTarget();
     }
 
@@ -153,13 +159,15 @@ public class LoggingMachine : InstallationObject,
     public void ApplyTreeFilterState(
         bool initialized,
         IReadOnlyList<string> enabledDefinitionKeys,
-        int savedMinimumGrowth)
+        int savedMinimumGrowth,
+        int savedMaximumGrowth = DefaultMaximumGrowth)
     {
         treeFilterInitialized = initialized;
         minimumGrowth = Mathf.Clamp(
             savedMinimumGrowth,
             ResourceDefinition.MinGrowth,
             ResourceDefinition.MaxGrowth);
+        maximumGrowth = Mathf.Clamp(savedMaximumGrowth, minimumGrowth, ResourceDefinition.MaxGrowth);
         enabledTreeDefinitionKeys ??= new List<string>();
         enabledTreeDefinitionKeys.Clear();
         if (enabledDefinitionKeys != null)
@@ -214,6 +222,8 @@ public class LoggingMachine : InstallationObject,
         MapObjectTickManager.UnregisterUpdateTick(this);
         SetWorking(false);
         ResetRuntimeState(true);
+        minimumGrowth = DefaultMinimumGrowth;
+        maximumGrowth = DefaultMaximumGrowth;
         base.PrepareForPool();
     }
 
@@ -884,7 +894,7 @@ public class LoggingMachine : InstallationObject,
         float growth = resource is ProjectF.MapObjects.Tree tree
             ? tree.Growth
             : ResourceDefinition.MaxGrowth;
-        return growth >= MinimumGrowth;
+        return growth >= MinimumGrowth && growth <= MaximumGrowth;
     }
 
     private void EnsureTreeFilterInitialized(IReadOnlyList<ResourceDefinition> availableDefinitions)
@@ -1092,6 +1102,7 @@ public class LoggingMachine : InstallationObject,
             minimumGrowth,
             ResourceDefinition.MinGrowth,
             ResourceDefinition.MaxGrowth);
+        maximumGrowth = Mathf.Clamp(maximumGrowth, minimumGrowth, ResourceDefinition.MaxGrowth);
         if (hinge == null)
         {
             hinge = transform.Find("Body/Floor/Hinge");

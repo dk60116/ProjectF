@@ -887,6 +887,11 @@ public partial class TerrainGenerator : MonoBehaviour
     private bool hasGeneratedChunks;
     private bool hasSeedInitialized;
     private bool deferConveyorItemRestoreUntilBeltTopologyReady;
+    private bool worldReadyForPresentation;
+    private bool pendingWorldFinalization;
+    private bool pendingSavedWorldFinalization;
+    private MapSaveData pendingWorldMapSaveData;
+    private Action pendingWorldReadyCallback;
     private int terrainGenerationVersion;
     private bool activeConveyorOrderDirty = true;
     private bool conveyorNetworkCacheDirty = true;
@@ -1058,6 +1063,12 @@ public partial class TerrainGenerator : MonoBehaviour
     private void Update()
     {
         if (!Application.isPlaying || !hasGeneratedChunks)
+        {
+            return;
+        }
+
+        TryFinalizePendingWorldLoad();
+        if (!worldReadyForPresentation)
         {
             return;
         }
@@ -1237,6 +1248,16 @@ public partial class TerrainGenerator : MonoBehaviour
 
     public bool VirtualizeConveyorItems => virtualizeConveyorItems;
     public bool VirtualizeConveyorBelts => true;
+    public bool IsWorldReadyForPresentation => worldReadyForPresentation;
+    public float WorldLoadingProgress => worldReadyForPresentation
+        ? 1f
+        : hasGeneratedChunks && chunkStreamingScheduler != null
+            ? chunkStreamingScheduler.GenerationProgress
+            : 0f;
+    public int WorldLoadingCompletedChunks =>
+        chunkStreamingScheduler?.CompletedGenerationCount ?? 0;
+    public int WorldLoadingTotalChunks =>
+        chunkStreamingScheduler?.TotalGenerationCount ?? 0;
     public int ConveyorItemVisualBlockSetVersion => conveyorItemVisualBlockSetVersion;
     public int DynamicConveyorItemVisualBlockSetVersion => dynamicConveyorItemVisualBlockSetVersion;
     public int ConveyorItemVisualDirtyBlockCount => conveyorItemVisualDirtyBlocks.Count;
@@ -1520,7 +1541,10 @@ public partial class TerrainGenerator : MonoBehaviour
         return mapSaveData;
     }
 
-    public void LoadFromSaveState(TerrainSaveData terrainSaveData, MapSaveData mapSaveData)
+    public void LoadFromSaveState(
+        TerrainSaveData terrainSaveData,
+        MapSaveData mapSaveData,
+        Action onWorldReady = null)
     {
         NormalizeTerrainBoundsSettings();
         NormalizeResourceGenerationSettings();
@@ -1550,29 +1574,25 @@ public partial class TerrainGenerator : MonoBehaviour
         SaveGameConveyorItemBackfill.BackfillFromFloorObjects(mapSaveData);
         resourceStateStore?.ApplySaveState(mapSaveData);
 
+        BeginWorldFinalization(true, mapSaveData, onWorldReady);
         deferConveyorItemRestoreUntilBeltTopologyReady = true;
-        try
+        currentCenterChunk = GetCenterChunkCoordinate();
+        hasGeneratedChunks = true;
+        EnsureChunkActivationStorageCapacity(terrainSaveData?.activeChunkCoordinates?.Count ?? 0);
+        if (!QueueSavedActiveChunks(terrainSaveData?.activeChunkCoordinates))
         {
-            currentCenterChunk = GetCenterChunkCoordinate();
-            hasGeneratedChunks = true;
-            EnsureChunkActivationStorageCapacity(terrainSaveData?.activeChunkCoordinates?.Count ?? 0);
-            if (!QueueSavedActiveChunks(terrainSaveData?.activeChunkCoordinates))
-            {
-                RefreshChunks(currentCenterChunk, true);
-            }
+            RefreshChunks(currentCenterChunk, true);
+        }
+        else
+        {
+            EnsureChunkGenerationProcessing();
+        }
 
+        if (!Application.isPlaying)
+        {
             ProcessQueuedChunkGenerationsImmediate();
-            RefreshLoadedConveyorBeltRuntimeViews();
-            ExpandConveyorItemSaveRunsAfterBeltTopology(mapSaveData);
+            TryFinalizePendingWorldLoad();
         }
-        finally
-        {
-            deferConveyorItemRestoreUntilBeltTopologyReady = false;
-        }
-
-        ApplyLoadedConveyorItemSaveStates(mapSaveData);
-        RefreshLoadedRuntimeRegistrations();
-        RefreshLoadedRuntimeVisibility();
     }
 
     private bool QueueSavedActiveChunks(IReadOnlyList<Vector2Int> activeChunkCoordinates)
@@ -1607,8 +1627,56 @@ public partial class TerrainGenerator : MonoBehaviour
         }
 
         Generate();
-        ProcessQueuedChunkGenerationsImmediate();
-        RefreshLoadedRuntimeRegistrations();
+    }
+
+    private void BeginWorldFinalization(
+        bool restoreSavedWorld,
+        MapSaveData mapSaveData,
+        Action onWorldReady)
+    {
+        deferConveyorItemRestoreUntilBeltTopologyReady = false;
+        pendingWorldFinalization = true;
+        pendingSavedWorldFinalization = restoreSavedWorld;
+        pendingWorldMapSaveData = mapSaveData;
+        pendingWorldReadyCallback = onWorldReady;
+        worldReadyForPresentation = false;
+    }
+
+    private void TryFinalizePendingWorldLoad()
+    {
+        if (!pendingWorldFinalization
+            || IsChunkStreamingBusy
+            || loadedChunks.Count <= 0)
+        {
+            return;
+        }
+
+        Action readyCallback = pendingWorldReadyCallback;
+        bool finalized = false;
+        try
+        {
+            if (pendingSavedWorldFinalization)
+            {
+                RefreshLoadedConveyorBeltRuntimeViews();
+                ExpandConveyorItemSaveRunsAfterBeltTopology(pendingWorldMapSaveData);
+                ApplyLoadedConveyorItemSaveStates(pendingWorldMapSaveData);
+            }
+
+            RefreshLoadedRuntimeRegistrations();
+            RefreshLoadedRuntimeVisibility();
+            finalized = true;
+        }
+        finally
+        {
+            deferConveyorItemRestoreUntilBeltTopologyReady = false;
+            pendingWorldFinalization = false;
+            pendingSavedWorldFinalization = false;
+            pendingWorldMapSaveData = null;
+            pendingWorldReadyCallback = null;
+            worldReadyForPresentation = finalized;
+        }
+
+        readyCallback?.Invoke();
     }
 
     public void FlushLoadedRuntimeStateToStore()
@@ -2140,6 +2208,7 @@ public partial class TerrainGenerator : MonoBehaviour
 
     public void Generate()
     {
+        BeginWorldFinalization(false, null, null);
         NormalizeTerrainBoundsSettings();
         NormalizeResourceGenerationSettings();
         NormalizeAnimalGenerationSettings();
@@ -2155,6 +2224,10 @@ public partial class TerrainGenerator : MonoBehaviour
         currentCenterChunk = GetCenterChunkCoordinate();
         hasGeneratedChunks = true;
         RefreshChunks(currentCenterChunk, true);
+        if (!Application.isPlaying)
+        {
+            TryFinalizePendingWorldLoad();
+        }
     }
 
     public void ResetChunks()
@@ -2165,6 +2238,7 @@ public partial class TerrainGenerator : MonoBehaviour
             return;
         }
 
+        BeginWorldFinalization(false, null, null);
         NormalizeTerrainBoundsSettings();
         NormalizeResourceGenerationSettings();
         NormalizeAnimalGenerationSettings();
@@ -2176,6 +2250,10 @@ public partial class TerrainGenerator : MonoBehaviour
         currentCenterChunk = GetCenterChunkCoordinate();
         hasGeneratedChunks = true;
         RefreshChunks(currentCenterChunk, true);
+        if (!Application.isPlaying)
+        {
+            TryFinalizePendingWorldLoad();
+        }
     }
 
 #if UNITY_EDITOR
@@ -2426,6 +2504,13 @@ public partial class TerrainGenerator : MonoBehaviour
 
     private IEnumerator GenerateChunkRoutine(Vector2Int chunkCoordinate, int normalizedChunkSize, bool allowYield)
     {
+        // Initial world loading already has a full-screen progress view. Avoid applying the
+        // conservative in-game streaming budget to every restoration stage, otherwise a
+        // modest load radius can take hundreds of frames before the first world is ready.
+        // Surface generation still yields while its Unity Job is running, so rendering and
+        // the progress UI continue to update. Normal runtime streaming keeps its old budget.
+        bool spreadMainThreadWorkAcrossFrames = allowYield && !pendingWorldFinalization;
+
         if (!DoesChunkIntersectMapBounds(chunkCoordinate, normalizedChunkSize))
         {
             yield break;
@@ -2498,7 +2583,7 @@ public partial class TerrainGenerator : MonoBehaviour
                 }
                 if (!requiresRuntimeProxy)
                 {
-                    if (allowYield
+                    if (spreadMainThreadWorkAcrossFrames
                         && (++blocksSinceYield >= blockBudget
                             || HasExceededChunkGenerationFrameBudget(blockStepStartTime)))
                     {
@@ -2545,7 +2630,7 @@ public partial class TerrainGenerator : MonoBehaviour
                     continue;
                 }
 
-                if (allowYield
+                if (spreadMainThreadWorkAcrossFrames
                     && (++blocksSinceYield >= blockBudget
                         || HasExceededChunkGenerationFrameBudget(blockStepStartTime)))
                 {
@@ -2567,7 +2652,7 @@ public partial class TerrainGenerator : MonoBehaviour
             diagnosticAllocatedBytesAtStart,
             diagnosticStageStartTime);
 
-        if (allowYield)
+        if (spreadMainThreadWorkAcrossFrames)
         {
             yield return null;
         }
@@ -2598,7 +2683,7 @@ public partial class TerrainGenerator : MonoBehaviour
                         diagnosticAllocatedBytesAtStart,
                         diagnosticStageStartTime);
                     restoresSinceYield++;
-                    if (allowYield
+                    if (spreadMainThreadWorkAcrossFrames
                         && (restoresSinceYield >= restoreBudget
                             || HasExceededChunkGenerationFrameBudget(restoreStepStartTime)))
                     {
@@ -2645,7 +2730,7 @@ public partial class TerrainGenerator : MonoBehaviour
                     ChunkGenerationDiagnosticStage.BlockStateRestore,
                     diagnosticAllocatedBytesAtStart,
                     diagnosticStageStartTime);
-                if (allowYield
+                if (spreadMainThreadWorkAcrossFrames
                     && (++blocksSinceYield >= blockBudget
                         || HasExceededChunkGenerationFrameBudget(blockStepStartTime)))
                 {
@@ -2673,14 +2758,14 @@ public partial class TerrainGenerator : MonoBehaviour
                 out diagnosticStageStartTime);
             using (SpawnChunkAnimalStepMarker.Auto())
             {
-                animalSpawnComplete = AdvanceChunkAnimalSpawnWork(allowYield);
+                animalSpawnComplete = AdvanceChunkAnimalSpawnWork(spreadMainThreadWorkAcrossFrames);
             }
 
             EndChunkGenerationDiagnosticStage(
                 ChunkGenerationDiagnosticStage.AnimalSpawn,
                 diagnosticAllocatedBytesAtStart,
                 diagnosticStageStartTime);
-            if (!animalSpawnComplete && allowYield)
+            if (!animalSpawnComplete && spreadMainThreadWorkAcrossFrames)
             {
                 yield return null;
             }
@@ -2712,7 +2797,7 @@ public partial class TerrainGenerator : MonoBehaviour
                 ChunkGenerationDiagnosticStage.RuntimeViewRefresh,
                 diagnosticAllocatedBytesAtStart,
                 diagnosticStageStartTime);
-            if (allowYield
+            if (spreadMainThreadWorkAcrossFrames
                 && (++blocksSinceYield >= blockBudget
                     || HasExceededChunkGenerationFrameBudget(blockStepStartTime)))
             {
@@ -2736,7 +2821,7 @@ public partial class TerrainGenerator : MonoBehaviour
                     ChunkGenerationDiagnosticStage.ConveyorItemRestore,
                     diagnosticAllocatedBytesAtStart,
                     diagnosticStageStartTime);
-                if (allowYield
+                if (spreadMainThreadWorkAcrossFrames
                     && (++blocksSinceYield >= blockBudget
                         || HasExceededChunkGenerationFrameBudget(blockStepStartTime)))
                 {
@@ -2758,7 +2843,7 @@ public partial class TerrainGenerator : MonoBehaviour
                 ChunkGenerationDiagnosticStage.EmptyProxyRelease,
                 diagnosticAllocatedBytesAtStart,
                 diagnosticStageStartTime);
-            if (allowYield
+            if (spreadMainThreadWorkAcrossFrames
                 && (++blocksSinceYield >= blockBudget
                     || HasExceededChunkGenerationFrameBudget(blockStepStartTime)))
             {
@@ -2861,7 +2946,7 @@ public partial class TerrainGenerator : MonoBehaviour
             chunkSurface = BuildCurvedChunkSurface(origin, normalizedChunkSize);
         }
 
-        if (allowYield)
+        if (spreadMainThreadWorkAcrossFrames)
         {
             yield return null;
         }
@@ -2896,7 +2981,7 @@ public partial class TerrainGenerator : MonoBehaviour
             }
         }
 
-        if (allowYield)
+        if (spreadMainThreadWorkAcrossFrames)
         {
             yield return null;
         }

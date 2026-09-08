@@ -746,6 +746,8 @@ public static class SaveGameBinarySerializer
             writer.Write(state.splitterState.wheelRotationMask);
         }
         writer.Write(state.boxMinimumRetainedItemCount);
+        writer.Write(state.boxMaximumStoredItemCount);
+        writer.Write(state.loggingMaximumGrowth);
     }
 
     private static BlockStateStore.InstallationSaveState ReadInstallationState(
@@ -898,6 +900,11 @@ public static class SaveGameBinarySerializer
         if (version >= 55)
         {
             state.boxMinimumRetainedItemCount = reader.ReadInt32();
+        }
+        if (version >= 56)
+        {
+            state.boxMaximumStoredItemCount = reader.ReadInt32();
+            state.loggingMaximumGrowth = reader.ReadInt32();
         }
 
         return state;

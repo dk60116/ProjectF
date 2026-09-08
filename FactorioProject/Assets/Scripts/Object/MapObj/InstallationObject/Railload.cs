@@ -960,22 +960,20 @@ public class Railload : InstallationObject
         Vector3 topC = topCenter + halfLength + halfWidth;
         Vector3 topD = topCenter - halfLength + halfWidth;
 
-        int start = vertices.Count;
-        vertices.Add(topA);
-        vertices.Add(topB);
-        vertices.Add(topC);
-        vertices.Add(topD);
-        vertices.Add(topA + bottomOffset);
-        vertices.Add(topB + bottomOffset);
-        vertices.Add(topC + bottomOffset);
-        vertices.Add(topD + bottomOffset);
+        Vector3 bottomA = topA + bottomOffset;
+        Vector3 bottomB = topB + bottomOffset;
+        Vector3 bottomC = topC + bottomOffset;
+        Vector3 bottomD = topD + bottomOffset;
 
-        AddQuad(triangles, start, start + 1, start + 2, start + 3);
-        AddQuad(triangles, start + 4, start + 7, start + 6, start + 5);
-        AddQuad(triangles, start + 4, start + 5, start + 1, start);
-        AddQuad(triangles, start + 5, start + 6, start + 2, start + 1);
-        AddQuad(triangles, start + 6, start + 7, start + 3, start + 2);
-        AddQuad(triangles, start + 7, start + 4, start, start + 3);
+        // Each face needs independent vertices. Sharing the eight box corners causes
+        // RecalculateNormals to average top and side normals, so identical sleepers
+        // receive different toon-light bands after a 90-degree rotation.
+        AddQuadVertices(vertices, triangles, topA, topB, topC, topD);
+        AddQuadVertices(vertices, triangles, bottomA, bottomD, bottomC, bottomB);
+        AddQuadVertices(vertices, triangles, bottomA, bottomB, topB, topA);
+        AddQuadVertices(vertices, triangles, bottomB, bottomC, topC, topB);
+        AddQuadVertices(vertices, triangles, bottomC, bottomD, topD, topC);
+        AddQuadVertices(vertices, triangles, bottomD, bottomA, topA, topD);
     }
 
     private static float CalculateFlatPathLength(IReadOnlyList<Vector3> pathPoints)
@@ -1350,6 +1348,22 @@ public class Railload : InstallationObject
         triangles.Add(d);
     }
 
+    private static void AddQuadVertices(
+        List<Vector3> vertices,
+        List<int> triangles,
+        Vector3 a,
+        Vector3 b,
+        Vector3 c,
+        Vector3 d)
+    {
+        int start = vertices.Count;
+        vertices.Add(a);
+        vertices.Add(b);
+        vertices.Add(c);
+        vertices.Add(d);
+        AddQuad(triangles, start, start + 1, start + 2, start + 3);
+    }
+
     private static void ApplyMesh(Mesh mesh, List<Vector3> vertices, List<int> triangles)
     {
         if (mesh == null)
@@ -1411,6 +1425,7 @@ public class Railload : InstallationObject
         SetMaterialColor(material, "_BaseColor", baseColor);
         SetMaterialColor(material, "_Color", baseColor);
         SetMaterialColor(material, "_ShadowColor", shadowColor);
+        SetMaterialFloat(material, "_UseWorldUpLighting", 1f);
         SetMaterialFloat(material, "_UseSpecular", useSpecular ? 1f : 0f);
         SetMaterialFloat(material, "_SpecularIntensity", useSpecular ? 0.35f : 0f);
         SetMaterialFloat(material, "_SpecularPower", 32f);

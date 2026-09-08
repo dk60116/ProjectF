@@ -1,0 +1,15 @@
+# Resource map colors
+
+Run `./Tools/ResourceMapColorHarness/Run.ps1` from PowerShell with the .NET 9 SDK. It compiles production map-resource resolution and raster composition into an isolated temporary harness; it does not start Unity.
+
+The checks cover None/custom color selection, S/M/L marker sizes, opaque dots, preserving the selected color when disabled, live and saved resources, depletion, planted resource identity, legacy prefab definitions, live and saved MapObject MapSize footprints, live and saved bent rail paths, resource/rail/train layer ordering, moving train Transform tracking, rotation, ItemArea exclusion, negative map coordinates, stationary changes, terrain restoration, and avoiding redundant texture uploads.
+
+Resource Data offers a `Use Map Color` toggle (off by default). Enable it to select `Marker Color` and `Marker Size` with S/M/L buttons; M is the default. S scales multi-cell footprints to 0.5x and thins adjacent single-cell resources with a stable checker pattern, M keeps the exact footprint, and L scales it to 1.5x. Isolated resources remain visible, and dimensions are rounded to whole map pixels without going below one pixel. Disabling the color hides the marker and retains both selections. Settings are serialized in each ResourceDefinition asset. The map displays generated live resources and saved resources in unloaded chunks; it does not create or reveal resources in ungenerated chunks. Resource markers refresh every 0.5 seconds without recomputing the terrain layer.
+
+Item Data exposes the same English controls for items with a non-resource Map Object, including common multi-selection editing. A placed MapObject starts with every cell in its rotated MapSize, excludes ItemArea cells, and expands that shape according to S/M/L. Installations stored in unloaded chunks use the same rules. Resource items continue to use their Resource Data settings so there is only one authoritative source for them.
+
+Railroad is the dynamic-footprint exception: its prefab MapSize is 1x1 while each placed rail owns an arbitrary runtime path. The map clips the live or saved collision footprint against the visual center path, preserves bends without filling their bounding rectangle or their wider curve collision cells, and keeps a one-cell-wide Small path connected.
+
+The tracked player position is shown at the center of the map with an 8-pixel yellow diamond. The map texture follows the gameplay camera's horizontal angle and is scaled just enough to keep the masked map area filled while rotating. The current camera view is projected onto the player's ground plane and drawn as a clipped white four-edge outline, including camera zoom and rotation. Both markers are separate, non-interactive UI elements above the map texture, so camera or fractional player movement does not require texture uploads and map pixels remain unchanged.
+
+This harness uses lightweight engine stubs, so it does not validate Unity's visual color picker or scene rendering. Runtime and editor sources were also compiled with Roslyn against the project's Unity references; the Unity application was not operated.

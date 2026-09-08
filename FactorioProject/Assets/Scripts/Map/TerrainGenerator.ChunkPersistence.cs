@@ -13,6 +13,17 @@ public partial class TerrainGenerator : MonoBehaviour
     private readonly HashSet<Vector2Int> chunkInstallationAnchorScratch = new HashSet<Vector2Int>();
     private readonly List<Vector2Int> orderedChunkInstallationAnchorScratch = new List<Vector2Int>();
 
+    public void SaveRuntimeResourceState(Resource resource)
+    {
+        if (resource == null || resource.OwningBlock == null)
+        {
+            return;
+        }
+
+        EnsureResourceStateStore();
+        resourceStateStore?.Save(resource.OwningBlock.Coordinate, resource);
+    }
+
     private Resource SpawnResourceOnBlock(Block block, Resource prefab, Vector2Int worldCoordinate)
     {
         if (block == null || prefab == null)
@@ -1082,7 +1093,8 @@ public partial class TerrainGenerator : MonoBehaviour
             restoredLoggingMachine.ApplyTreeFilterState(
                 savedState.loggingTreeFilterInitialized,
                 savedState.loggingEnabledTreeDefinitionKeys,
-                savedState.loggingMinimumGrowth);
+                savedState.loggingMinimumGrowth,
+                savedState.loggingMaximumGrowth);
         }
         restoredInstallation.SetStoredFluid(
             savedState.storedFluidItemId,
@@ -1104,7 +1116,7 @@ public partial class TerrainGenerator : MonoBehaviour
             {
                 restoredBoxObject.SetOpenState(savedState.boxIsOpen.Value, false);
             }
-            restoredBoxObject.SetMinimumRetainedItemCount(savedState.boxMinimumRetainedItemCount);
+            restoredBoxObject.SetStorageRange(savedState.boxMinimumRetainedItemCount, savedState.boxMaximumStoredItemCount);
         }
 
         restoredInstallation.gameObject.SetActive(true);

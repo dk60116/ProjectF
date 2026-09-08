@@ -7,6 +7,7 @@ Shader "Custom/ToonCharacter"
         _ShadowColor("Shadow Color", Color) = (0.7,0.7,0.75,1)
         _ShadeThreshold("Shade Threshold", Range(0,1)) = 0.5
         _ShadeSmoothness("Shade Smoothness", Range(0.001,0.5)) = 0.05
+        [ToggleUI] _UseWorldUpLighting("Use World Up Lighting", Float) = 0
         [ToggleUI] _UseSpecular("Use Specular", Float) = 0
         [HDR] _SpecularColor("Specular Color", Color) = (1,1,1,1)
         _SpecularIntensity("Specular Intensity", Range(0,2)) = 0.5
@@ -75,6 +76,7 @@ Shader "Custom/ToonCharacter"
                 float4 _SpecularColor;
                 half _ShadeThreshold;
                 half _ShadeSmoothness;
+                half _UseWorldUpLighting;
                 half _UseSpecular;
                 half _SpecularIntensity;
                 half _SpecularPower;
@@ -274,7 +276,11 @@ Shader "Custom/ToonCharacter"
             {
                 inputData = (InputData)0;
                 inputData.positionWS = input.positionWS;
-                inputData.normalWS = NormalizeNormalPerPixel(input.normalWS);
+                half3 surfaceNormalWS = NormalizeNormalPerPixel(input.normalWS);
+                inputData.normalWS = SafeNormalize(lerp(
+                    surfaceNormalWS,
+                    half3(0.0h, 1.0h, 0.0h),
+                    saturate(_UseWorldUpLighting)));
                 inputData.viewDirectionWS = GetWorldSpaceNormalizeViewDir(input.positionWS);
 
 #if defined(REQUIRES_VERTEX_SHADOW_COORD_INTERPOLATOR)

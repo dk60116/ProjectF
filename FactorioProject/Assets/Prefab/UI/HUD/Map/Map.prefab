@@ -127,8 +127,13 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: 
   targetImage: {fileID: 3614190997416975258}
+  targetRawImage: {fileID: 0}
   viewRadius: {x: 100, y: 100}
-  refreshInterval: 0.15
+  texturePadding: 2
+  playerMarkerColor: {r: 1, g: 0.82, b: 0.12, a: 1}
+  playerMarkerSize: 8
+  cameraViewportColor: {r: 1, g: 1, b: 1, a: 1}
+  cameraViewportLineWidth: 2
 --- !u!222 &1167573071181929307
 CanvasRenderer:
   m_ObjectHideFlags: 0
@@ -150,7 +155,7 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: 
   m_Material: {fileID: 0}
-  m_Color: {r: 1, g: 1, b: 1, a: 1}
+  m_Color: {r: 1, g: 1, b: 1, a: 0}
   m_RaycastTarget: 1
   m_RaycastPadding: {x: 0, y: 0, z: 0, w: 0}
   m_Maskable: 1

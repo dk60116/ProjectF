@@ -444,6 +444,12 @@ public partial class TerrainGenerator : MonoBehaviour
 
     private void InvalidateTerrainBiomeMaterialCaches()
     {
+        // GetGeneratedSurfaceMaterials caches the render array separately from
+        // the materials below. Runtime map resets destroy those materials, so
+        // retaining the array would leave terrain rendering bound to destroyed
+        // Unity objects on the following frame.
+        generatedSurfaceMaterials = null;
+
         foreach (KeyValuePair<TerrainBiome, Material> entry in biomeMaterialCache)
         {
             if (entry.Value == null)

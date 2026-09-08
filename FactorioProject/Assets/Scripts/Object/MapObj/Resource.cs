@@ -559,6 +559,7 @@ public class Resource : MapObject
                 resourceStatus.currentGague = 0;
                 ClearReservedHarvestSteps();
                 resourceFullyDepleted = true;
+                PersistDepletedResourceState();
                 break;
             }
 
@@ -571,6 +572,18 @@ public class Resource : MapObject
         }
 
         return depletedResourceCount;
+    }
+
+    private void PersistDepletedResourceState()
+    {
+        // Deactivation clears the resource reference from its block. Persist the
+        // zero-count tombstone first so deterministic terrain generation cannot
+        // recreate this resource when the chunk or save is loaded again.
+        TerrainGenerator terrain = TerrainGenerator.ResolveActive();
+        if (terrain != null)
+        {
+            terrain.SaveRuntimeResourceState(this);
+        }
     }
 
     private void PlayPickupSequence(int bagNum, int objectId, bool hideAfterSequence)

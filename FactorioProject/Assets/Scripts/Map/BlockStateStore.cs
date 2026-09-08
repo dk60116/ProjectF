@@ -27,11 +27,13 @@ public partial class BlockStateStore : MonoBehaviour
         public RobotArm.TransferState robotArmState;
         public bool? boxIsOpen;
         public int boxMinimumRetainedItemCount = BoxObject.DefaultMinimumRetainedItemCount;
+        public int boxMaximumStoredItemCount = BoxObject.DefaultMaximumStoredItemCount;
         public bool itemFilterMaskInitialized;
         public List<ulong> itemFilterMaskWords = new List<ulong>();
         public bool loggingTreeFilterInitialized;
         public List<string> loggingEnabledTreeDefinitionKeys = new List<string>();
         public int loggingMinimumGrowth = LoggingMachine.DefaultMinimumGrowth;
+        public int loggingMaximumGrowth = LoggingMachine.DefaultMaximumGrowth;
         public float storedFluidLiters;
         public int storedFluidItemId = -1;
         public float storedFluidTemperatureCelsius = MapClimate.DefaultCurrentTemperatureCelsius;
@@ -85,12 +87,14 @@ public partial class BlockStateStore : MonoBehaviour
                 robotArmState = robotArmState != null ? robotArmState.Clone() : null,
                 boxIsOpen = boxIsOpen,
                 boxMinimumRetainedItemCount = boxMinimumRetainedItemCount,
+                boxMaximumStoredItemCount = boxMaximumStoredItemCount,
                 itemFilterMaskInitialized = itemFilterMaskInitialized,
                 itemFilterMaskWords = new List<ulong>(itemFilterMaskWords ?? new List<ulong>()),
                 loggingTreeFilterInitialized = loggingTreeFilterInitialized,
                 loggingEnabledTreeDefinitionKeys = new List<string>(
                     loggingEnabledTreeDefinitionKeys ?? new List<string>()),
                 loggingMinimumGrowth = loggingMinimumGrowth,
+                loggingMaximumGrowth = loggingMaximumGrowth,
                 storedFluidLiters = storedFluidLiters,
                 storedFluidItemId = storedFluidItemId,
                 storedFluidTemperatureCelsius = storedFluidTemperatureCelsius,
@@ -652,12 +656,27 @@ public partial class BlockStateStore : MonoBehaviour
 
     public bool TryGetLiveInstallation(Vector2Int storageKey, out InstallationObject installationObject, out InstallationSaveState state)
     {
+        if (!TryGetLiveInstallationReadOnly(storageKey, out installationObject, out InstallationSaveState storedState))
+        {
+            state = null;
+            return false;
+        }
+
+        state = storedState != null ? storedState.Clone() : null;
+        return true;
+    }
+
+    internal bool TryGetLiveInstallationReadOnly(
+        Vector2Int storageKey,
+        out InstallationObject installationObject,
+        out InstallationSaveState state)
+    {
         if (liveInstallationStates.TryGetValue(storageKey, out LiveInstallationRecord record)
             && record != null
             && record.installationObject != null)
         {
             installationObject = record.installationObject;
-            state = record.state != null ? record.state.Clone() : null;
+            state = record.state;
             return true;
         }
 
@@ -1375,6 +1394,7 @@ public partial class BlockStateStore : MonoBehaviour
         {
             state.boxIsOpen = boxObject.IsOpen;
             state.boxMinimumRetainedItemCount = boxObject.MinimumRetainedItemCount;
+            state.boxMaximumStoredItemCount = boxObject.MaximumStoredItemCount;
         }
 
         state.splitterState = (installationObject as Spliterbelt)?.CaptureSplitterState();
@@ -1385,6 +1405,7 @@ public partial class BlockStateStore : MonoBehaviour
             state.loggingTreeFilterInitialized = loggingMachine.IsTreeFilterInitialized;
             state.loggingEnabledTreeDefinitionKeys = loggingMachine.CaptureEnabledTreeDefinitionKeys();
             state.loggingMinimumGrowth = loggingMachine.MinimumGrowth;
+            state.loggingMaximumGrowth = loggingMachine.MaximumGrowth;
         }
         state.storedFluidLiters = installationObject.StoredFluidLiters;
         state.storedFluidItemId = installationObject.StoredFluidItemId;

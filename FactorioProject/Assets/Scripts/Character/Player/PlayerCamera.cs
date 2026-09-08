@@ -7,7 +7,10 @@ public class PlayerCamera : MonoBehaviour
 {
     private static readonly Quaternion FixedRotation = Quaternion.Euler(45f, 45f, 0f);
     private static readonly Vector3 FixedForward = FixedRotation * Vector3.forward;
+    private static readonly Vector3 FixedUp = FixedRotation * Vector3.up;
     private const float MinFreeCameraLookSensitivity = 1.5f;
+    private const float StableNearClipPlane = 0.1f;
+    private const float OrthographicDepthPadding = 10f;
 
     [SerializeField]
     private Transform target;
@@ -171,7 +174,7 @@ public class PlayerCamera : MonoBehaviour
         HandleZoomInput();
         UpdateZoom();
         transform.rotation = FixedRotation;
-        transform.position = focusPoint - FixedForward * followDistance;
+        transform.position = focusPoint - FixedForward * ResolveRenderDistance();
     }
 
     private void CaptureFreeCameraProjectionState()
@@ -494,8 +497,29 @@ public class PlayerCamera : MonoBehaviour
         }
 
         cachedCamera.allowMSAA = false;
-        cachedCamera.nearClipPlane = Mathf.Max(0.1f, cachedCamera.nearClipPlane);
+        cachedCamera.nearClipPlane = StableNearClipPlane;
         cachedCamera.farClipPlane = Mathf.Min(200f, Mathf.Max(cachedCamera.nearClipPlane + 1f, cachedCamera.farClipPlane));
+    }
+
+    private float ResolveRenderDistance()
+    {
+        if (cachedCamera == null || !cachedCamera.orthographic)
+        {
+            return followDistance;
+        }
+
+        // Moving an orthographic camera along its view axis preserves framing. Keep enough
+        // positive depth for the lowest visible ground edge and elevated effects instead of
+        // extending the projection behind the camera with a negative near clip plane.
+        float verticalDepthScale = Mathf.Abs(FixedUp.y)
+            / Mathf.Max(0.01f, Mathf.Abs(FixedForward.y));
+        float largestVerticalExtent = Mathf.Max(
+            cachedCamera.orthographicSize,
+            maxOrthographicSize);
+        float requiredDistance = (largestVerticalExtent * verticalDepthScale)
+            + OrthographicDepthPadding
+            + StableNearClipPlane;
+        return Mathf.Max(followDistance, requiredDistance);
     }
 
     private void EnsureOrthographicSizeInitialized()

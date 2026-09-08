@@ -14,6 +14,9 @@ MonoBehaviour:
   m_EditorClassIdentifier: 
   resourceName: Dead tree
   resourceIcon: {fileID: 21300000, guid: bd94e8dd13b44e0ead70e807a207cf9a, type: 3}
+  mapColorMode: 1
+  mapColor: {r: 0.5660378, g: 0.19502142, b: 0, a: 1}
+  mapMarkerSize: 1
   prefab: {fileID: 7254935756546121798, guid: 977be3527be2bcf4eba75fa0023161ec, type: 3}
   harvestMode: 2
   placementCategory: 2

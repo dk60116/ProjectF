@@ -5,8 +5,8 @@ using UnityEngine;
 [Serializable]
 public sealed class SaveGameData
 {
-    // Version 55 stores the minimum item count retained by boxes.
-    public const int CurrentVersion = 55;
+    // Version 56 adds upper bounds to box storage and logging growth filters.
+    public const int CurrentVersion = 56;
 
     public int version = CurrentVersion;
     public long savedAtUtcTicks;

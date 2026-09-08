@@ -5,6 +5,8 @@ public readonly record struct Vector2Int(int x, int y);
 public class PortableObject { }
 public partial class Block
 {
+    public enum BlockType { Ground }
+    public BlockType Type => BlockType.Ground;
     public object MapObject;
     private readonly List<PortableObject> inputAreaCenterStack = new();
     public Vector2Int Coordinate;
@@ -33,7 +35,8 @@ public partial class Block
     }
     private void CleanupPortableStack(List<PortableObject> stack) { }
     private bool IsStackCompatible(List<PortableObject> stack, int itemId) => stack.Count == 0 || itemId == 1;
-    private int ResolveInputAreaCenterCapacity(int itemId) => Capacity;
+    private object mapObject => MapObject;
+    private int inputAreaCenterMaxObjects = 10;
     public bool TryAddInputAreaCenterObject(int itemId, out PortableObject item, bool instant)
     {
         item = null;
@@ -49,8 +52,24 @@ public class TerrainGenerator
     public readonly Dictionary<Vector2Int, Block> Blocks = new();
     public bool TryGetLoadedBlock(Vector2Int coordinate, out Block block) => Blocks.TryGetValue(coordinate, out block);
 }
+public class GameManager { public static GameManager Instance; public ItemManager ItemManger; }
+public class ItemManager { }
+public static class ItemDefinition
+{
+    public static int ResolveStackCapacity(ItemManager manager, int itemId, int capacity) => Math.Max(1, capacity);
+}
 public partial class InputOutputModule
 {
+    public bool UseSaved;
+    public BlockStateStore SavedStore;
+    private bool TryResolveRuntimeAreaBlock(Vector2Int coordinate, out Block block, out bool useSaved)
+    {
+        TerrainGenerator.Active.TryGetLoadedBlock(coordinate, out block);
+        useSaved = UseSaved;
+        return true;
+    }
+    private BlockStateStore ResolveBlockStateStore() => SavedStore;
+    public int AvailableInput(Vector2Int coordinate) => GetRuntimeInputAreaCenterItemCount(coordinate, 1);
     public static bool HasOverlapRestriction;
     public static readonly HashSet<int> OverlapAllowedItems = new();
     private static bool TryGetRuntimeIoOverlapAllowedItemIds(Vector2Int coordinate, ISet<int> allowedItems)
@@ -75,8 +94,33 @@ public static class InputOutputModuleItemAreaController
     public static readonly HashSet<Vector2Int> Areas = new();
     public static bool CoordinateIsItemArea(Vector2Int coordinate) => Areas.Contains(coordinate);
 }
+public partial class BlockStateStore
+{
+    public class InstallationSaveState
+    {
+        public bool? boxIsOpen = true;
+        public int boxMinimumRetainedItemCount;
+        public int boxMaximumStoredItemCount = int.MaxValue;
+    }
+    private class SavedFloorAreaInventory { public List<int> centerItems = new(); }
+    private readonly List<InstallationSaveState> savedCenterBoxStateBuffer = new();
+    public InstallationSaveState State = new();
+    private readonly SavedFloorAreaInventory inventory = new();
+    public int Count => inventory.centerItems.Count;
+    private SavedFloorAreaInventory LoadSavedFloorAreaInventory(Vector2Int coordinate) => inventory;
+    private void SaveSavedFloorAreaInventory(Vector2Int coordinate, SavedFloorAreaInventory value) { }
+    private void NotifySavedFloorAreaStackChanged(Vector2Int coordinate) { }
+    private void CollectSavedInstallationStatesAtInteractionCoordinate(Vector2Int coordinate, List<InstallationSaveState> states)
+    { if (State != null) states.Add(State); }
+    private bool TryGetInstallationAnchorAtCoordinate(Vector2Int coordinate, out Vector2Int anchor) { anchor = coordinate; return false; }
+    private bool TryGetInstallationStateReadOnly(Vector2Int coordinate, out InstallationSaveState state) { state = null; return false; }
+    private static int ResolveSavedCenterStackCapacity(int itemId, int capacity) => Math.Max(1, capacity);
+}
 public partial class BoxObject
 {
+    public const int DefaultMaximumStoredItemCount = int.MaxValue;
+    private int maximumStoredItemCount = DefaultMaximumStoredItemCount;
+    public int MaximumStoredItemCount => Math.Max(MinimumRetainedItemCount, maximumStoredItemCount);
     private bool isOpen = true;
     public bool ExcludeFromTerrainPersistence;
     public bool GroundDrop;
@@ -138,17 +182,17 @@ public static class Checks
         Require(!box.TryPutOneContainedObjectInstant(1, out _), "box filters must still reject items");
         box.Accepts = true;
         target.Count = 4;
-        box.SetMinimumRetainedItemCount(3);
+        box.SetStorageRange(3, BoxObject.DefaultMaximumStoredItemCount);
         Require(box.MinimumRetainedItemCount == 3 && box.GetExtractableContainedItemCount() == 1,
             "reserve must expose only inventory above the minimum");
         Require(box.CanTakeContainedObject() && box.TryTakeOneContainedObject(null, out int taken) && taken == 1 && target.Count == 3,
             "the last extractable item may be removed");
         Require(!box.CanTakeContainedObject() && !box.TryTakeOneContainedObject(null, out _) && target.Count == 3,
             "robot extraction must stop at the configured minimum");
-        box.SetMinimumRetainedItemCount(99);
+        box.SetStorageRange(99, BoxObject.DefaultMaximumStoredItemCount);
         Require(box.MinimumRetainedItemCount == target.Capacity,
             "reserve setting must clamp to box capacity");
-        box.SetMinimumRetainedItemCount(0);
+        box.SetStorageRange(0, BoxObject.DefaultMaximumStoredItemCount);
         box.GroundDrop = true;
         Require(box.Content() == target, "standalone ground-drop boxes must keep anchor storage");
         box.GroundDrop = false;
@@ -177,6 +221,48 @@ public static class Checks
         Require(!target.CanAddInputAreaCenterObjects(1, 1) && target.CanAddInputAreaCenterObjects(1, 2),
             "shared IO areas without a box must preserve their item restriction");
         Require(!InputOutputModule.CanAddItemToRuntimeIoOverlapCoordinate(targetCoordinate, -1), "invalid item IDs must remain rejected");
+        target.MapObject = box;
+        box.SetStorageRange(2, 4);
+        target.Count = 3;
+        Require(box.TryPutOneContainedObjectInstant(1, out _) && target.Count == 4, "box accepts up to its configured maximum");
+        Require(!box.TryPutOneContainedObjectInstant(1, out _) && target.Count == 4, "box refuses items beyond maximum");
+        Require(box.GetMinimumRetainedItemCountLimit() == target.Capacity, "UI can raise upper bound back to physical capacity");
+        box.SetStorageRange(2, 3);
+        Require(target.Count == 4 && !box.CanPutContainedObjects(1, 1), "lowering maximum must preserve existing contents");
+        Require(box.TryTakeOneContainedObject(null, out _) && box.TryTakeOneContainedObject(null, out _) && target.Count == 2,
+            "items above reserve remain extractable even after lowering the maximum");
+        Require(!box.TryTakeOneContainedObject(null, out _), "extraction stops at lower bound");
+        Require(box.TryPutOneContainedObjectInstant(1, out _) && target.Count == 3, "receiving resumes below upper bound");
+        box.SetStorageRange(0, 0);
+        target.Count = 0;
+        Require(!box.TryPutOneContainedObjectInstant(1, out _), "zero upper bound disables receiving");
+        box.SetStorageRange(4, 1);
+        Require(box.MinimumRetainedItemCount == 4 && box.MaximumStoredItemCount == 4, "crossed bounds normalize");
+        box.SetStorageRange(0, BoxObject.DefaultMaximumStoredItemCount);
+        Require(box.CanPutContainedObjects(1, target.Capacity), "legacy default still allows full physical capacity");
+        var module = new InputOutputModule();
+        box.SetStorageRange(2, 4);
+        target.Count = 3;
+        Require(module.AvailableInput(targetCoordinate) == 1, "machines may consume only contents above lower bound");
+        target.Count = 2;
+        Require(module.AvailableInput(targetCoordinate) == 0, "machine input stops at lower bound");
+        var saved = new BlockStateStore();
+        saved.State.boxMinimumRetainedItemCount = 2;
+        saved.State.boxMaximumStoredItemCount = 4;
+        Require(saved.CanAddSavedCenterItems(targetCoordinate, 1, 4, 10)
+            && saved.TryAddSavedCenterItems(targetCoordinate, 1, 4, 10), "saved box accepts up to maximum");
+        Require(!saved.CanAddSavedCenterItems(targetCoordinate, 1, 1, 10)
+            && !saved.TryAddSavedCenterItems(targetCoordinate, 1, 1, 10) && saved.Count == 4, "saved box enforces upper bound for preview and deposit");
+        module.UseSaved = true;
+        module.SavedStore = saved;
+        Require(module.AvailableInput(targetCoordinate) == 2, "saved machine input reserves minimum too");
+        saved.State.boxMaximumStoredItemCount = 3;
+        Require(!saved.TryAddSavedCenterItems(targetCoordinate, 1, 1, 10) && saved.Count == 4, "saved contents survive lowering maximum");
+        saved.State.boxMaximumStoredItemCount = 0;
+        saved.State.boxMinimumRetainedItemCount = 0;
+        Require(!saved.CanAddSavedCenterItems(targetCoordinate, 1, 1, 10), "saved zero maximum rejects deposits");
+        saved.State = null;
+        Require(saved.CanAddSavedCenterItems(targetCoordinate, 1, 1, 10), "ordinary saved IO areas keep physical capacity");
         Console.WriteLine($"PASS: {count} box storage isolation checks.");
     }
 }

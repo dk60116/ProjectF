@@ -12999,7 +12999,8 @@ public partial class Block : BaseObject
         ItemManager itemManager = GameManager.Instance != null
             ? GameManager.Instance.ItemManger
             : null;
-        return ItemDefinition.ResolveStackCapacity(itemManager, itemId, defaultCapacity);
+        int stackCapacity = ItemDefinition.ResolveStackCapacity(itemManager, itemId, defaultCapacity);
+        return mapObject is BoxObject box ? Mathf.Min(stackCapacity, box.MaximumStoredItemCount) : stackCapacity;
     }
 
     private ItemDefinition ResolveInstalledItemAreaDefinition()

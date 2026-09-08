@@ -15,6 +15,9 @@ MonoBehaviour:
   itemName: Steam generator
   id: 56
   mapObject: {fileID: 7245704639458897854, guid: 51e722e4dbe80d84e91d00b9220f57e0, type: 3}
+  useMapColor: 1
+  mapColor: {r: 0.6980392, g: 0.1333333, b: 0.1333333, a: 1}
+  mapMarkerSize: 1
   portableMesh: {fileID: 4300000, guid: 628cea7c87ae22644b204243295f4429, type: 2}
   portableMat: {fileID: 2100000, guid: 1dfbd69284c27484dab13e0668a01836, type: 2}
   icon: {fileID: 21300000, guid: c8e209659c2ed834280db61e53da32f2, type: 3}

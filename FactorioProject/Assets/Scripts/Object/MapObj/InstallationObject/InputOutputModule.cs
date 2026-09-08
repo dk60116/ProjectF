@@ -5209,11 +5209,12 @@ public class InputOutputModule : InstallationObject,
         if (useSavedCenterStack)
         {
             BlockStateStore stateStore = ResolveBlockStateStore();
-            return stateStore != null ? stateStore.GetSavedCenterItemCount(coordinate, itemId) : 0;
+            return stateStore != null ? stateStore.GetSavedCenterExtractableItemCount(coordinate, itemId) : 0;
         }
 
         return block != null && block.Type == Block.BlockType.Ground
-            ? block.GetInputAreaCenterItemCount(itemId)
+            ? Mathf.Max(0, block.GetInputAreaCenterItemCount(itemId)
+                - (block.MapObject is BoxObject box ? box.MinimumRetainedItemCount : 0))
             : 0;
     }
 
@@ -5226,6 +5227,12 @@ public class InputOutputModule : InstallationObject,
         bool animateVirtualizedConsumption = false)
     {
         if (itemId < 0 || count <= 0)
+        {
+            return 0;
+        }
+
+        count = Mathf.Min(count, GetRuntimeInputAreaCenterItemCount(coordinate, itemId));
+        if (count <= 0)
         {
             return 0;
         }

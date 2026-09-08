@@ -226,6 +226,12 @@ public partial class BlockStateStore
 
     private int GetSavedBoxMinimumRetainedItemCount(Vector2Int worldCoordinate)
     {
+        GetSavedBoxStorageRange(worldCoordinate, out int minimum, out _);
+        return minimum;
+    }
+
+    private void GetSavedBoxStorageRange(Vector2Int worldCoordinate, out int minimum, out int maximum)
+    {
         savedCenterBoxStateBuffer.Clear();
         CollectSavedInstallationStatesAtInteractionCoordinate(
             worldCoordinate,
@@ -236,16 +242,22 @@ public partial class BlockStateStore
         {
             savedCenterBoxStateBuffer.Add(coordinateState);
         }
-        int retainedCount = BoxObject.DefaultMinimumRetainedItemCount;
+        minimum = BoxObject.DefaultMinimumRetainedItemCount;
+        maximum = BoxObject.DefaultMaximumStoredItemCount;
         for (int i = 0; i < savedCenterBoxStateBuffer.Count; i++)
         {
             InstallationSaveState state = savedCenterBoxStateBuffer[i];
             if (state != null && state.boxIsOpen.HasValue)
             {
-                retainedCount = Mathf.Max(retainedCount, state.boxMinimumRetainedItemCount);
+                minimum = Mathf.Max(minimum, state.boxMinimumRetainedItemCount);
+                maximum = Mathf.Min(maximum, Mathf.Max(state.boxMinimumRetainedItemCount, state.boxMaximumStoredItemCount));
             }
         }
-        return retainedCount;
+    }
+
+    public int GetSavedCenterExtractableItemCount(Vector2Int worldCoordinate, int itemId = -1)
+    {
+        return Mathf.Max(0, GetSavedCenterItemCount(worldCoordinate, itemId) - GetSavedBoxMinimumRetainedItemCount(worldCoordinate));
     }
 
     public int GetSavedCenterItemCount(Vector2Int worldCoordinate, int itemId = -1)
@@ -275,7 +287,9 @@ public partial class BlockStateStore
 
     public bool CanAddSavedCenterItems(Vector2Int worldCoordinate, int itemId, int count, int capacity)
     {
-        return CanAddSavedCenterItems(LoadSavedFloorAreaInventory(worldCoordinate), itemId, count, capacity);
+        GetSavedBoxStorageRange(worldCoordinate, out _, out int maximum);
+        return capacity > 0 && maximum > 0
+            && CanAddSavedCenterItems(LoadSavedFloorAreaInventory(worldCoordinate), itemId, count, Mathf.Min(capacity, maximum));
     }
 
     public bool TryAddSavedCenterItems(Vector2Int worldCoordinate, int itemId, int count, int capacity)
@@ -286,7 +300,8 @@ public partial class BlockStateStore
         }
 
         SavedFloorAreaInventory inventory = LoadSavedFloorAreaInventory(worldCoordinate);
-        if (!CanAddSavedCenterItems(inventory, itemId, count, capacity))
+        GetSavedBoxStorageRange(worldCoordinate, out _, out int maximum);
+        if (capacity <= 0 || maximum <= 0 || !CanAddSavedCenterItems(inventory, itemId, count, Mathf.Min(capacity, maximum)))
         {
             return false;
         }
