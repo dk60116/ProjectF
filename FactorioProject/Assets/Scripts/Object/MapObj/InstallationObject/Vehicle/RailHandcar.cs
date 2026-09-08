@@ -175,6 +175,7 @@ public class RailHandcar : Train
     {
         currentFacingTangent = Vector2.zero;
         lastRailTravelDirection = Vector2.zero;
+        ResetConsistPathTape();
         InvalidateConnectedTrainGroupCache();
         ClearLockedBranchRail();
         ClearCurrentMovementLoadTracking();
@@ -3052,7 +3053,7 @@ public class RailHandcar : Train
                 TraveledDistance = 0f,
                 FollowOffset = 0f
             };
-            float desiredSpacing = ResolveDesiredConsistPairSpacing(frontMove.Train, candidateTrain);
+            float desiredSpacing = Train.ConnectionCenterDistance;
             if (!TryEstimateForwardRailGapDistance(
                     frontMove,
                     candidateMove,
@@ -3243,7 +3244,7 @@ public class RailHandcar : Train
             return false;
         }
 
-        float desiredSpacing = ResolveDesiredConsistPairSpacing(frontMove.Train, candidateTrain);
+        float desiredSpacing = Train.ConnectionCenterDistance;
         bool releaseAfterMove = false;
         bool hasRailGap = TryEstimateForwardRailGapDistance(
                 frontMove,
@@ -3309,7 +3310,7 @@ public class RailHandcar : Train
             return false;
         }
 
-        float desiredSpacing = ResolveDesiredConsistPairSpacing(anchorMove.Train, candidateTrain);
+        float desiredSpacing = Train.ConnectionCenterDistance;
         float maxContactDistance = desiredSpacing + contactPadding;
         float maxLateralDistance = Mathf.Max(
             anchorMove.Train.ConnectionMaxLateralDistance,
@@ -3931,7 +3932,7 @@ public class RailHandcar : Train
 
         if (first.Train != null && second.Train != null)
         {
-            return Train.ResolveConnectionCenterDistance(first.Train, second.Train);
+            return Train.ConnectionCenterDistance;
         }
 
         return 0.05f;
@@ -5377,15 +5378,10 @@ public class RailHandcar : Train
     {
         if (first.Train != null && second.Train != null)
         {
-            return ResolveDesiredConsistPairSpacing(first.Train, second.Train);
+            return Train.ConnectionCenterDistance;
         }
 
         return Mathf.Max(0.05f, EstimateConsistSampleDistance(first, second));
-    }
-
-    private static float ResolveDesiredConsistPairSpacing(Train first, Train second)
-    {
-        return Train.ResolveConnectionCenterDistance(first, second);
     }
 
     private void RememberConsistPathOrder(Vector2 travelDirection)

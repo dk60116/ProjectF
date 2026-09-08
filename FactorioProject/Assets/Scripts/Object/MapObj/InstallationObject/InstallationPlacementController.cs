@@ -242,6 +242,7 @@ public class InstallationPlacementController : MonoBehaviour
     private readonly Dictionary<Train, MapObject> trainConnectionPreviewObjectsByTrain = new Dictionary<Train, MapObject>();
     private readonly List<Train> trainConnectionPreviewScratch = new List<Train>(16);
     private readonly List<Train> trainConnectionInstalledScratch = new List<Train>(32);
+    private readonly ProjectF.Trains.TrainPlacementSpacing trainPlacementSpacing = new ProjectF.Trains.TrainPlacementSpacing();
     private readonly List<Handcart> handcartConnectionInstalledScratch = new List<Handcart>(16);
     private readonly HashSet<Handcart> handcartConnectionPreviewHandleOverrides = new HashSet<Handcart>();
     private readonly Dictionary<MapObject, Color> handcartConnectionPreviewTints =
@@ -6270,6 +6271,13 @@ public class InstallationPlacementController : MonoBehaviour
             }
 
             placedCount++;
+        }
+
+        // All newly installed cars must be connected before the Complete layout is
+        // applied. Do this before animations capture their destination transforms.
+        if (!trainPlacementSpacing.AlignPlacedTrains(placedObjects))
+        {
+            Debug.LogWarning("Could not align a connected train chain to one-cell spacing on its current rail route.", this);
         }
 
         List<HandcartPreviewConnection> committedHandcartConnections =
@@ -15738,9 +15746,7 @@ public class InstallationPlacementController : MonoBehaviour
             }
 
             if (HasRequiredTrainPlacementClearance(
-                    sourceTrain,
                     position,
-                    train,
                     train.transform.position)
                 && !TrainCollisionBoxesOverlapWith(
                     trainPlacementCollisionBoxes,
@@ -15772,9 +15778,7 @@ public class InstallationPlacementController : MonoBehaviour
             }
 
             if (HasRequiredTrainPlacementClearance(
-                    sourceTrain,
                     position,
-                    otherPreviewTrain,
                     otherPreview.transform.position)
                 && !TrainCollisionBoxesOverlapWith(
                     trainPlacementCollisionBoxes,
@@ -15794,14 +15798,12 @@ public class InstallationPlacementController : MonoBehaviour
     }
 
     private static bool HasRequiredTrainPlacementClearance(
-        Train candidate,
         Vector3 candidatePosition,
-        Train other,
         Vector3 otherPosition)
     {
         float requiredCenterDistance = Mathf.Max(
             0f,
-            Train.ResolveConnectionCenterDistance(candidate, other) - TrainPlacementSeparationEpsilon);
+            Train.ConnectionCenterDistance - TrainPlacementSeparationEpsilon);
         Vector2 centerOffset = new Vector2(
             otherPosition.x - candidatePosition.x,
             otherPosition.z - candidatePosition.z);

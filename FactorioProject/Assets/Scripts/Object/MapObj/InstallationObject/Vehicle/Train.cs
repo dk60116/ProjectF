@@ -3,6 +3,8 @@ using UnityEngine;
 
 public class Train : Vehicle
 {
+    // Grid cells are one world unit. Installation and movement share this pitch.
+    public const float ConnectionCenterDistance = 1f;
     private const float MinConnectionDistance = 0.05f;
     private const float DefaultConnectionFallbackDistance = 1.4f;
     private const float ConnectionSideEpsilon = 0.01f;
@@ -11,12 +13,8 @@ public class Train : Vehicle
     private static readonly HashSet<Train> ActiveRuntimeTrains = new HashSet<Train>();
     private static ulong connectionGraphRevision;
 
-    [SerializeField, Min(0.05f)]
-    private float trainConnectionCenterDistance = 0.9f;
-    [SerializeField, Min(0f)]
-    private float trainConnectionGapDistance = 0.35f;
     [SerializeField, Min(0.01f)]
-    private float trainConnectionSnapMaxDistance = 0.35f;
+    private float trainConnectionSnapMaxDistance = 0.6f;
     [SerializeField, Min(0.01f)]
     private float trainConnectionMaxLateralDistance = 0.45f;
     [SerializeField, Range(0f, 1f)]
@@ -36,27 +34,12 @@ public class Train : Vehicle
     private readonly Queue<Train> connectionActionGroupQueue = new Queue<Train>();
     private readonly HashSet<Train> connectionActionGroupVisited = new HashSet<Train>();
 
-    public float ConnectionCenterDistance => Mathf.Max(
-        MinConnectionDistance,
-        trainConnectionCenterDistance + trainConnectionGapDistance);
     public float ConnectionSnapMaxDistance => Mathf.Max(MinConnectionDistance, trainConnectionSnapMaxDistance);
     public float ConnectionMaxLateralDistance => Mathf.Max(MinConnectionDistance, trainConnectionMaxLateralDistance);
     public float ConnectionMinForwardDot => Mathf.Clamp01(trainConnectionMinForwardDot);
     public bool HasPlacedRailSample => currentRail != null;
     public IReadOnlyCollection<Train> ConnectedTrains => connectedTrains;
     public static ulong ConnectionGraphRevision => connectionGraphRevision;
-
-    public static float ResolveConnectionCenterDistance(Train first, Train second)
-    {
-        if (first == null || second == null)
-        {
-            return MinConnectionDistance;
-        }
-
-        return Mathf.Max(
-            MinConnectionDistance,
-            (first.ConnectionCenterDistance + second.ConnectionCenterDistance) * 0.5f);
-    }
 
     public void RotateTrainWheelsByDistance(float signedDistance)
     {
@@ -392,9 +375,8 @@ public class Train : Vehicle
             return DefaultConnectionFallbackDistance;
         }
 
-        float centerDistance = ResolveConnectionCenterDistance(first, second);
         float snapDistance = Mathf.Max(first.ConnectionSnapMaxDistance, second.ConnectionSnapMaxDistance);
-        return Mathf.Max(MinConnectionDistance, centerDistance + snapDistance);
+        return ConnectionCenterDistance + snapDistance;
     }
 
     private static float Cross(Vector2 a, Vector2 b)

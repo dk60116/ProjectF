@@ -278,9 +278,7 @@ MonoBehaviour:
   wheelLocalRotationAxis: {x: 1, y: 0, z: 0}
   wheelRotationUsesVehicleSpace: 0
   invertWheelRotation: 0
-  trainConnectionCenterDistance: 0.9
-  trainConnectionGapDistance: 0.35
-  trainConnectionSnapMaxDistance: 0.35
+  trainConnectionSnapMaxDistance: 0.6
   trainConnectionMaxLateralDistance: 0.45
   trainConnectionMinForwardDot: 0.5
   railMoveSpeedMultiplier: 1
