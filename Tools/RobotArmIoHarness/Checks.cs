@@ -6,7 +6,10 @@ using UnityEngine;
 
 public class MapObject { public Vector2Int PlacementCenterCell; }
 public class ConveyorBelt : MapObject { }
-public class ConvayorBelt2F : ConveyorBelt { }
+public class ConvayorBelt2F : ConveyorBelt
+{
+    public List<Vector2Int> RuntimeOccupiedCoordinates = new();
+}
 public class Spliterbelt : ConveyorBelt { }
 public class Resource : MapObject
 {
@@ -31,11 +34,16 @@ public class BlockStateStore
     { anchor = coordinate; return State != null; }
     public bool TryGetInstallationStateReadOnly(Vector2Int anchor, out InstallationSaveState state)
     { state = State; return state != null; }
+    public bool CanAddSavedCenterItems(Vector2Int coordinate, int itemId, int count, int capacity) => true;
 }
 public partial class InputOutputModule : MapObject
 {
     public static readonly Dictionary<int, ItemDefinition> Definitions = new();
+    public static bool RuntimeIoAccepts = true;
+    public Block RuntimeOutputBlock;
+    public bool UseSavedOutput, SavedOutputIsConveyor;
     public static ItemDefinition ResolveItemDefinition(int id) => Definitions.TryGetValue(id, out var definition) ? definition : null;
+    public static bool CanAddItemToRuntimeIoOverlapCoordinate(Vector2Int coordinate, int itemId) => RuntimeIoAccepts;
     public List<RectGridBlockPlacement> RectGridPlacements = new();
     public Vector2Int AnchorCell;
     private SlotLayoutType slotLayoutType = SlotLayoutType.RectGrid;
@@ -43,23 +51,50 @@ public partial class InputOutputModule : MapObject
     private void EnsureRectGridPlacementData() { }
     private bool IsValidRectGridCell(int x, int y) => x >= 0 && y >= 0;
     private bool TryGetRectGridObjectAnchorCell(MapObject source, out Vector2Int cell) { cell = AnchorCell; return true; }
+    private bool TryResolveRuntimeAreaBlock(Vector2Int coordinate, out Block block, out bool useSavedCenterStack)
+    { block = RuntimeOutputBlock; useSavedCenterStack = UseSavedOutput; return block != null || useSavedCenterStack; }
+    private bool CoordinateHasSavedConveyor(Vector2Int coordinate) => SavedOutputIsConveyor;
+    private bool RuntimeCenterStorageAcceptsItem(Vector2Int coordinate, int itemId, Block block, bool useSaved) => true;
+    private BlockStateStore ResolveBlockStateStore() => new BlockStateStore();
+    private int ResolveRuntimeBlockCenterCapacity(Vector2Int coordinate, int itemId, int defaultCapacity) => defaultCapacity;
+    private const int RuntimeAreaMaxObjects = 10;
 }
 public class ItemDefinition { public int id; public string itemName; public bool keepIoAreaItemsInPlaceWhileEditing; public MapObject mapObject; }
 public class ItemManager { public List<ItemDefinition> ItemDefinitions = new(); }
 public class GameManager { public static GameManager Instance = new(); public ItemManager ItemManger = new(); }
-public class PortableObject { }
-public class TerrainGenerator
+public class DroppedItemPickupGate
 {
+    public bool AutoPickupBlocked;
+    public void SetAutoPickupBlocked(bool blocked) => AutoPickupBlocked = blocked;
+}
+public class PortableObject
+{
+    public DroppedItemPickupGate Gate;
+    public T GetComponent<T>() where T : class => Gate as T;
+}
+public partial class TerrainGenerator
+{
+    public readonly Dictionary<Vector2Int, Block> Blocks = new();
     public bool FloorVirtualized, ConveyorVirtualized;
     public bool IsFloorObjectCoordinateVirtualized(Vector2Int coordinate) => FloorVirtualized;
     public bool IsConveyorItemCoordinateVirtualized(Vector2Int coordinate) => ConveyorVirtualized;
     public static TerrainGenerator Active = new();
     public int RemovalNotifications;
     public void NotifyConveyorItemRemovedFromBelt() => RemovalNotifications++;
+    public bool TryGetLoadedBlock(Vector2Int coordinate, out Block block) => Blocks.TryGetValue(coordinate, out block);
 }
 public partial class Block
 {
+    public enum BlockType { Ground, Water }
     public MapObject MapObject;
+    public bool ConveyorAccepts = true, CenterAccepts = true;
+    public int AvailableCapacity = 1;
+    public int ConveyorAdds, CenterAdds;
+    public Vector3 PlacementReference, StartPosition;
+    public float AddDelay;
+    public PortableObject AddedObject;
+    public BlockType Type = BlockType.Ground;
+    public Vector2Int Coordinate;
     public int[] Items = { -1, -1 };
     public Vector3[] Positions = new Vector3[2];
     public Vector3 WorldPosition;
@@ -75,6 +110,23 @@ public partial class Block
     private void ClearConveyorItemForExternalRemoval(int lane) => Items[lane] = -1;
     private void ReleaseFloorObject(PortableObject item) { }
     private void NotifyRuntimeItemStackChanged() { }
+    public int GetAvailableConveyorCapacity() => AvailableCapacity;
+    public bool CanAddConveyorObjects(int count) => ConveyorAccepts;
+    public bool CanAddInputAreaCenterObjects(int count, int itemId) => CenterAccepts;
+    public bool TryAddConveyorObjectAnimatedAtPlacement(int itemId, Vector3 placementReference, Vector3 start,
+        float delay, out PortableObject output)
+    {
+        PlacementReference = placementReference; StartPosition = start; AddDelay = delay;
+        if (!ConveyorAccepts) { output = null; return false; }
+        ConveyorAdds++; output = AddedObject = new PortableObject(); return true;
+    }
+    public bool TryAddInputAreaCenterObjectAnimated(int itemId, Vector3 start, float delay,
+        out PortableObject output)
+    {
+        StartPosition = start; AddDelay = delay;
+        if (!CenterAccepts) { output = null; return false; }
+        CenterAdds++; output = AddedObject = new PortableObject { Gate = new DroppedItemPickupGate() }; return true;
+    }
 }
 public partial class RobotArm : InputOutputModule
 {
@@ -112,6 +164,8 @@ public static partial class Checks
     {
         CheckConveyorPickup();
         CheckConveyorDropFallback();
+        CheckMachineOutputToConveyor();
+        CheckNearestBelt2FDrop();
         string robotArmSource = File.ReadAllText(Path.Combine(
             args[0],
             "FactorioProject/Assets/Scripts/Object/MapObj/InstallationObject/RobotArm.cs"));
@@ -153,6 +207,27 @@ public static partial class Checks
             "installed robot arm IO registrations must not become placement obstacles");
         Require(InstallationPlacementController.AreasBlockPlacement(new InputOutputModule()),
             "installed non-robot IO registrations must keep placement collision");
+        foreach (MapObject conveyor in new MapObject[] { new ConveyorBelt(), new ConvayorBelt2F(), new Spliterbelt() })
+        {
+            Require(InstallationPlacementController.ConveyorCanOverlapOutput(
+                    conveyor, false, true, false, false, false, false, false),
+                "every conveyor type must be placeable on an unobstructed direct item output area");
+            Require(!InstallationPlacementController.ConveyorCanOverlapOutput(
+                    conveyor, false, true, true, false, false, false, false),
+                "an energy input sharing the coordinate must still block conveyor placement");
+            Require(!InstallationPlacementController.ConveyorCanOverlapOutput(
+                    conveyor, false, true, false, true, false, false, false),
+                "an item input sharing the coordinate must still block conveyor placement");
+            Require(!InstallationPlacementController.ConveyorCanOverlapOutput(
+                    conveyor, false, true, false, false, false, false, true),
+                "items waiting in the output area must block conveyor placement");
+        }
+        Require(!InstallationPlacementController.ConveyorCanOverlapOutput(
+                new InputOutputModule(), false, true, false, false, false, false, false),
+            "non-conveyor installations must still be blocked by output areas");
+        Require(!InstallationPlacementController.ConveyorCanOverlapOutput(
+                new ConvayorBelt2F(), true, true, false, false, false, false, false),
+            "the raised bridge center must not masquerade as a belt output surface");
         Require(!InstallationPlacementController.CapturesInteractionAreaItemsInEdit(
                 new ItemDefinition { keepIoAreaItemsInPlaceWhileEditing = true }),
             "the ItemData edit option must leave pickup and drop area items in place");
@@ -213,6 +288,85 @@ public static partial class Checks
             Require(stream.Length == 26, "transfer save layout must remain compatible");
         }
         Console.WriteLine($"PASS: {count} robot arm standard IO and transfer save checks.");
+    }
+
+    private static void CheckMachineOutputToConveyor()
+    {
+        Vector3 start = new Vector3(3f, 2f, 1f);
+        var outputModule = new InputOutputModule();
+        var beltBlock = new Block { MapObject = new ConveyorBelt() };
+        outputModule.RuntimeOutputBlock = beltBlock;
+        Require(outputModule.CanAcceptRuntimeOutput(Vector2Int.zero, 17, 1),
+            "machine output capacity must use conveyor lane capacity");
+        Require(InputOutputModule.EmitOutputItem(beltBlock, 17, start, .25f, out PortableObject beltItem),
+            "machine output must enter an installed conveyor lane");
+        Require(beltItem == beltBlock.AddedObject && beltBlock.ConveyorAdds == 1 && beltBlock.CenterAdds == 0,
+            "conveyor output must not create an input-area center stack");
+        Require(beltBlock.PlacementReference == start && beltBlock.StartPosition == start && beltBlock.AddDelay == .25f,
+            "conveyor output must preserve lane-selection reference and animation timing");
+
+        var fullBeltBlock = new Block { MapObject = new ConveyorBelt(), ConveyorAccepts = false };
+        outputModule.RuntimeOutputBlock = fullBeltBlock;
+        Require(!outputModule.CanAcceptRuntimeOutput(Vector2Int.zero, 17, 1),
+            "a full conveyor must block machine completion");
+        Require(!InputOutputModule.EmitOutputItem(fullBeltBlock, 17, start, 0f, out _)
+                && fullBeltBlock.CenterAdds == 0,
+            "a full conveyor must backpressure the machine without falling back to a center stack");
+
+        InputOutputModule.RuntimeIoAccepts = false;
+        fullBeltBlock.ConveyorAccepts = true;
+        Require(!outputModule.CanAcceptRuntimeOutput(Vector2Int.zero, 17, 1),
+            "an incompatible overlapping input filter must still reject conveyor output");
+        InputOutputModule.RuntimeIoAccepts = true;
+
+        outputModule.RuntimeOutputBlock = null;
+        outputModule.UseSavedOutput = true;
+        outputModule.SavedOutputIsConveyor = true;
+        Require(!outputModule.CanAcceptRuntimeOutput(Vector2Int.zero, 17, 1),
+            "unloaded conveyors must not receive output through the saved center stack");
+
+        var groundBlock = new Block();
+        outputModule.RuntimeOutputBlock = groundBlock;
+        outputModule.UseSavedOutput = false;
+        outputModule.SavedOutputIsConveyor = false;
+        Require(outputModule.CanAcceptRuntimeOutput(Vector2Int.zero, 17, 1),
+            "ordinary output areas must retain center-stack capacity checks");
+        Require(InputOutputModule.EmitOutputItem(groundBlock, 17, start, 0f, out PortableObject floorItem)
+                && groundBlock.CenterAdds == 1 && groundBlock.ConveyorAdds == 0,
+            "an ordinary output area must retain center-stack emission");
+        Require(floorItem.Gate != null && floorItem.Gate.AutoPickupBlocked,
+            "ordinary output items must retain their pickup gate");
+    }
+
+    private static void CheckNearestBelt2FDrop()
+    {
+        var terrain = new TerrainGenerator();
+        var belt2F = new ConvayorBelt2F();
+        var left = new Block { MapObject = belt2F, Coordinate = new Vector2Int(-1, 0), WorldPosition = new Vector3(-1f, 0f, 0f) };
+        var center = new Block { MapObject = belt2F, Coordinate = Vector2Int.zero, WorldPosition = Vector3.zero };
+        var right = new Block { MapObject = belt2F, Coordinate = new Vector2Int(1, 0), WorldPosition = new Vector3(1f, 0f, 0f) };
+        foreach (Block block in new[] { left, center, right })
+        {
+            belt2F.RuntimeOccupiedCoordinates.Add(block.Coordinate);
+            terrain.Blocks.Add(block.Coordinate, block);
+        }
+
+        Require(terrain.ResolveNearestBelt2FDropBlock(center, new Vector3(.9f, 5f, 0f), out Block nearest)
+                && nearest == right,
+            "2F belt drops must start at the available belt cell nearest the player in the horizontal plane");
+        right.AvailableCapacity = 0;
+        Require(terrain.ResolveNearestBelt2FDropBlock(center, new Vector3(.9f, 0f, 0f), out nearest)
+                && nearest == center,
+            "a full nearest 2F cell must select the next closest available cell");
+        center.MapObject = new ConveyorBelt();
+        Require(terrain.ResolveNearestBelt2FDropBlock(left, new Vector3(.1f, 0f, 0f), out nearest)
+                && nearest == left,
+            "a crossing belt at the bridge center must not receive an upper 2F drop");
+        Require(!terrain.ResolveNearestBelt2FDropBlock(
+                new Block { MapObject = new ConveyorBelt() },
+                Vector3.zero,
+                out _),
+            "ordinary conveyors must retain their focused-block drop behavior");
     }
 
     private static void CheckConveyorDropFallback()

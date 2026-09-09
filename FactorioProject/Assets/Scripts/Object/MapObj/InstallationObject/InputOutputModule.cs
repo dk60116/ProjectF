@@ -4622,20 +4622,15 @@ public class InputOutputModule : InstallationObject,
             }
 
             Block outputBlock = outputTarget.block;
-            if (outputBlock == null
-                || !outputBlock.TryAddInputAreaCenterObjectAnimated(
+            if (!TryEmitOutputItemToBlock(
+                    outputBlock,
                     outputItemId,
                     startWorldPosition,
                     outputIndex * Mathf.Max(0f, outputMoveInterval),
-                    out PortableObject droppedObject))
+                    out _))
             {
                 return false;
             }
-
-            DroppedItemPickupGate gate = droppedObject != null
-                ? droppedObject.GetComponent<DroppedItemPickupGate>()
-                : null;
-            gate?.SetAutoPickupBlocked(true);
         }
 
         return true;
@@ -4657,7 +4652,7 @@ public class InputOutputModule : InstallationObject,
         {
             Vector2Int coordinate = runtimeOutputCoordinates[i];
             if (!singleItemOutputVisitedCoordinates.Add(coordinate)
-                || !CanAddRuntimeCenterItems(coordinate, itemId, 1, out _, out _))
+                || !CanAddRuntimeOutputItems(coordinate, itemId, 1, out _, out _))
             {
                 continue;
             }
@@ -4681,19 +4676,56 @@ public class InputOutputModule : InstallationObject,
 
         for (int outputIndex = 0; outputIndex < outputCount; outputIndex++)
         {
-            if (!outputBlock.TryAddInputAreaCenterObjectAnimated(
+            if (!TryEmitOutputItemToBlock(
+                    outputBlock,
                     outputItemId,
                     startWorldPosition,
                     outputIndex * Mathf.Max(0f, outputMoveInterval),
-                    out PortableObject droppedObject))
+                    out _))
             {
                 return false;
             }
-
-            DroppedItemPickupGate gate = droppedObject != null ? droppedObject.GetComponent<DroppedItemPickupGate>() : null;
-            gate?.SetAutoPickupBlocked(true);
         }
 
+        return true;
+    }
+
+    private static bool TryEmitOutputItemToBlock(
+        Block outputBlock,
+        int outputItemId,
+        Vector3 startWorldPosition,
+        float delay,
+        out PortableObject outputObject)
+    {
+        outputObject = null;
+        if (outputBlock == null)
+        {
+            return false;
+        }
+
+        if (outputBlock.MapObject is ConveyorBelt)
+        {
+            return outputBlock.TryAddConveyorObjectAnimatedAtPlacement(
+                outputItemId,
+                startWorldPosition,
+                startWorldPosition,
+                delay,
+                out outputObject);
+        }
+
+        if (!outputBlock.TryAddInputAreaCenterObjectAnimated(
+                outputItemId,
+                startWorldPosition,
+                delay,
+                out outputObject))
+        {
+            return false;
+        }
+
+        DroppedItemPickupGate gate = outputObject != null
+            ? outputObject.GetComponent<DroppedItemPickupGate>()
+            : null;
+        gate?.SetAutoPickupBlocked(true);
         return true;
     }
 
@@ -4902,7 +4934,7 @@ public class InputOutputModule : InstallationObject,
             for (int i = 0; i < runtimeOutputCoordinates.Count; i++)
             {
                 Vector2Int coordinate = runtimeOutputCoordinates[i];
-                if (!CanAddRuntimeCenterItems(coordinate, outputItemId, outputCount, out Block block, out bool useSavedCenterStack))
+                if (!CanAddRuntimeOutputItems(coordinate, outputItemId, outputCount, out Block block, out bool useSavedCenterStack))
                 {
                     continue;
                 }
@@ -4920,7 +4952,7 @@ public class InputOutputModule : InstallationObject,
         return false;
     }
 
-    private bool CanAddRuntimeCenterItems(
+    private bool CanAddRuntimeOutputItems(
         Vector2Int coordinate,
         int itemId,
         int count,
@@ -4935,6 +4967,19 @@ public class InputOutputModule : InstallationObject,
         }
 
         if (!TryResolveRuntimeAreaBlock(coordinate, out block, out useSavedCenterStack))
+        {
+            return false;
+        }
+
+        if (!useSavedCenterStack && block != null && block.MapObject is ConveyorBelt)
+        {
+            return InputOutputModule.CanAddItemToRuntimeIoOverlapCoordinate(coordinate, itemId)
+                   && block.CanAddConveyorObjects(count);
+        }
+
+        // An unloaded conveyor has its own lane state. Never write machine output
+        // into the unrelated saved center stack when those lanes are unavailable.
+        if (useSavedCenterStack && CoordinateHasSavedConveyor(coordinate))
         {
             return false;
         }
@@ -4955,6 +5000,20 @@ public class InputOutputModule : InstallationObject,
         return block != null
                && block.Type == Block.BlockType.Ground
                && block.CanAddInputAreaCenterObjects(count, itemId);
+    }
+
+    private bool CoordinateHasSavedConveyor(Vector2Int coordinate)
+    {
+        BlockStateStore stateStore = ResolveBlockStateStore();
+        if (stateStore == null
+            || !stateStore.TryGetInstallationAnchorAtCoordinate(coordinate, out Vector2Int anchorCoordinate)
+            || !stateStore.TryGetInstallationState(anchorCoordinate, out BlockStateStore.InstallationSaveState installationState))
+        {
+            return false;
+        }
+
+        ItemDefinition definition = ResolveItemDefinition(installationState.itemId);
+        return definition != null && definition.mapObject is ConveyorBelt;
     }
 
     private bool RuntimeCenterStorageAcceptsItem(

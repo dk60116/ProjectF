@@ -26,7 +26,8 @@ $generated += (Read-Member 'FactorioProject/Assets/Scripts/Map/Block.cs' 'public
 $generated += (Read-Member 'FactorioProject/Assets/Scripts/Map/Block.cs' 'private int GetAvailableFloorCapacity(int itemId,') + "`n"
 $generated += (Read-Member 'FactorioProject/Assets/Scripts/Map/Block.cs' 'private bool BlocksFloorObjectStacking(') + "`n}`npublic partial class TerrainGenerator {`n"
 $generated += (Read-Member 'FactorioProject/Assets/Scripts/Map/TerrainGenerator.Farming.cs' 'public bool CanPlantSeed(') + "`n}`npublic partial class InstallationPlacementController {`n"
-$generated += (Read-Member ($base + 'InstallationObject/InstallationPlacementController.cs') 'private void ConfigureInstalledInputOutputOutputAreas(') + "`n}`npublic partial class BlockStateStore {`n"
+$generated += (Read-Member ($base + 'InstallationObject/InstallationPlacementController.cs') 'private void ConfigureInstalledInputOutputOutputAreas(') + "`n"
+$generated += (Read-Member ($base + 'InstallationObject/InstallationPlacementController.cs') 'private static bool ShouldInputOutputAreasBlockInstallationPlacement(') + "`n}`npublic partial class BlockStateStore {`n"
 $generated += (Read-Member 'FactorioProject/Assets/Scripts/Map/BlockStateStore.PlantBackground.cs' 'public bool IsSavedCoordinateEmptyGround(') + "`n}"
 $probeDir = Join-Path ([IO.Path]::GetTempPath()) ('ProjectF-SeedRecovery-' + [Guid]::NewGuid().ToString('N'))
 New-Item -ItemType Directory -Path $probeDir | Out-Null

@@ -24,6 +24,13 @@ function Member([string]$source, [string]$signature) {
     $source.Substring($start, $end - $start)
 }
 $blockSource = [IO.File]::ReadAllText((Join-Path $repo 'FactorioProject/Assets/Scripts/Map/Block.cs'))
+$dynamicRender = Member $blockSource 'public void AppendDynamicVirtualConveyorItemRenderData('
+if ($dynamicRender.IndexOf('!HasDynamicVirtualConveyorItemVisuals()') -lt 0) {
+    throw 'Dynamic belt item rendering must include transport-owned straight runs.'
+}
+if ($dynamicRender.IndexOf('!HasConveyorMotionStates()') -ge 0) {
+    throw 'Dynamic belt item rendering must not depend only on legacy motion state.'
+}
 $reads = "using ProjectF.Conveyors; public partial class Block {`n"
 foreach ($signature in @('private int GetConveyorStoredItemIdAtLane(', 'private ConveyorPickupGateState GetConveyorPickupGateStateAtLane(', 'private void SetConveyorPickupGateStateAtLane(', 'private void IncrementConveyorLaneOccupancyVersion(', 'private int GetConveyorLaneOccupancyVersion(', 'public int ConveyorItemVisualVersion')) {
     $reads += (Member $blockSource $signature) + "`n"
@@ -50,6 +57,18 @@ foreach ($signature in @(
 $fields = [IO.File]::ReadAllText((Join-Path $repo 'FactorioProject/Assets/Scripts/Map/TerrainGenerator.cs'))
 $scheduler += (Member $fields 'private struct ConveyorLineWakeRange') + "`n}`n"
 [IO.File]::WriteAllText((Join-Path $probe 'ProductionScheduler.cs'), $scheduler)
+$rebuildCount = Member $fields 'private void RebuildAuthoritativeConveyorItemTotal()'
+if ($rebuildCount.IndexOf('CalculateConveyorItemCountSnapshot()') -lt 0 -or
+    $rebuildCount.IndexOf('authoritativeConveyorItemTotalInitialized = true') -lt 0) {
+    throw 'Authoritative conveyor item totals must rebuild from the complete runtime and saved snapshot.'
+}
+$finalizeLoad = Member $fields 'private void TryFinalizePendingWorldLoad()'
+$expandIndex = $finalizeLoad.IndexOf('ExpandConveyorItemSaveRunsAfterBeltTopology', [StringComparison]::Ordinal)
+$registrationIndex = $finalizeLoad.IndexOf('RefreshLoadedRuntimeRegistrations', [StringComparison]::Ordinal)
+$countIndex = $finalizeLoad.IndexOf('RebuildAuthoritativeConveyorItemTotal', [StringComparison]::Ordinal)
+if ($expandIndex -lt 0 -or $registrationIndex -le $expandIndex -or $countIndex -le $registrationIndex) {
+    throw 'Saved-world finalization must rebuild the item total after run expansion and runtime registration.'
+}
 [IO.File]::WriteAllText((Join-Path $probe 'Probe.csproj'), '<Project Sdk="Microsoft.NET.Sdk"><PropertyGroup><OutputType>Exe</OutputType><TargetFramework>net9.0</TargetFramework><NoWarn>0649;0414</NoWarn></PropertyGroup></Project>')
 dotnet run -c Release --project (Join-Path $probe 'Probe.csproj')
 exit $LASTEXITCODE

@@ -296,6 +296,7 @@ public class MapObject
     public T GetComponent<T>() where T : class => Controller as T;
 }
 public class InstallationObject : MapObject { }
+public class RobotArm : MapObject { }
 public partial class TerrainGenerator { public HashSet<Vector2Int> farmlandCoordinates = new HashSet<Vector2Int>(); }
 public class InputOutputModuleEnergyAreaController { public static bool CoordinateIsEnergyArea(Vector2Int coordinate) => false; }
 public class InputOutputModuleItemAreaController { public static bool CoordinateIsItemArea(Vector2Int coordinate) => false; }
@@ -304,7 +305,7 @@ public class InputOutputModuleOutputAreaController
     public static bool Blocked;
     public int ClearCalls;
     public static bool CoordinateIsOutputArea(Vector2Int coordinate) => Blocked;
-    public void Configure(List<Vector2Int> coordinates) { Blocked = coordinates != null; if (coordinates == null) ClearCalls++; }
+    public void Configure(List<Vector2Int> coordinates, bool blocksPlacement = true) { Blocked = coordinates != null && blocksPlacement; if (coordinates == null) ClearCalls++; }
 }
 public partial class InstallationPlacementController
 {

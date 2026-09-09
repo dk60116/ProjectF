@@ -121,6 +121,7 @@ public partial class TerrainGenerator
     private readonly Dictionary<int, ConveyorLineWakeRange> deferredConveyorLineWakeRangesById = new Dictionary<int, ConveyorLineWakeRange>();
     private int lastActiveConveyorLineWakesDroppedByRetryThrottle, lastActiveConveyorDeferredLineWakesDroppedByRetryThrottle;
     private int lastActiveConveyorBlockWakeLineFallbacks, lastActiveConveyorBlockWakeTicks, lastActiveConveyorDuplicateFrameTicksSkipped, lastActiveConveyorBlockNoProgressRequeuesSkipped;
+    private int lastActiveConveyorDirectWakeInactiveSkips;
     private int wakeFrame = -1;
     internal int DirectDispatches, LastDispatched;
     internal bool SimulateLegacyPorts;
@@ -187,7 +188,6 @@ public partial class Block
     internal TerrainGenerator World;
     internal int Index => index;
     private int tickFrame = -1;
-    internal void WakeConveyorMoveAttemptsAlongRuntimeFlowImmediate(bool queueWake) { }
     internal bool ShouldTickActiveConveyor() => World.SimulateLegacyPorts && RawCount > 0;
     internal bool TickConveyor(float deltaTime, out bool executed)
     {

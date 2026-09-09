@@ -1,4 +1,5 @@
 using System.Collections.Generic;
+using ProjectF.Conveyors;
 using UnityEngine;
 
 public class ConvayorBelt2F : ConveyorBelt
@@ -231,7 +232,13 @@ public class ConvayorBelt2F : ConveyorBelt
     {
         RefreshPathMetrics();
         Vector3 localPosition = transform.InverseTransformPoint(worldPosition);
-        localPosition.y = ResolvePathHeight(GetPathCoordinate(localPosition));
+        localPosition = ConveyorBelt2FPath.ConformItemPosition(
+            localPosition,
+            pathUsesLocalX,
+            pathHalfLength,
+            pathHighHalfLength,
+            pathLowHeight,
+            pathHighHeight);
         return transform.TransformPoint(localPosition);
     }
 
@@ -313,7 +320,13 @@ public class ConvayorBelt2F : ConveyorBelt
                 pathHalfLength));
         }
 
-        localPosition.y = ResolvePathHeight(GetPathCoordinate(localPosition));
+        localPosition = ConveyorBelt2FPath.ConformItemPosition(
+            localPosition,
+            pathUsesLocalX,
+            pathHalfLength,
+            pathHighHalfLength,
+            pathLowHeight,
+            pathHighHeight);
 
         worldPosition = transform.TransformPoint(localPosition);
         return true;
@@ -368,21 +381,6 @@ public class ConvayorBelt2F : ConveyorBelt
         {
             results.Add(-1);
         }
-    }
-
-    private float ResolvePathHeight(float localZ)
-    {
-        float absoluteZ = Mathf.Abs(localZ);
-        if (absoluteZ <= pathHighHalfLength)
-        {
-            return pathHighHeight;
-        }
-
-        float slope01 = Mathf.InverseLerp(
-            pathHighHalfLength,
-            Mathf.Max(pathHalfLength, pathHighHalfLength + 0.0001f),
-            absoluteZ);
-        return Mathf.Lerp(pathHighHeight, pathLowHeight, slope01);
     }
 
     private float ResolvePathItemPitch(float localZ)

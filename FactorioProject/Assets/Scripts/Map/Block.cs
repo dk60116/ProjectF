@@ -2932,8 +2932,7 @@ public partial class Block : BaseObject
 
         EnsureFloorObjectsInitialized();
 
-        if (!IsConveyorStackingEnabled()
-            || !HasConveyorMotionStates())
+        if (!HasDynamicVirtualConveyorItemVisuals())
         {
             return;
         }
@@ -9005,13 +9004,16 @@ public partial class Block : BaseObject
 
     private Vector3 GetConveyorItemVisualWorldPosition(int laneIndex, PortableObject portableObject)
     {
-        if (ReadTransportLane(laneIndex, out _, out double position)) return ConveyorTransport.WorldPosition(position);
-        if (portableObject != null)
+        Vector3 worldPosition;
+        if (ReadTransportLane(laneIndex, out _, out double position))
         {
-            return GetConveyorObjectVisualWorldPosition(laneIndex, portableObject);
+            worldPosition = ConveyorTransport.WorldPosition(position);
         }
-
-        if (laneIndex >= 0
+        else if (portableObject != null)
+        {
+            worldPosition = GetConveyorObjectVisualWorldPosition(laneIndex, portableObject);
+        }
+        else if (laneIndex >= 0
             && laneIndex < conveyorItemMotionStates.Count
             && conveyorItemMotionStates[laneIndex].active)
         {
@@ -9025,26 +9027,39 @@ public partial class Block : BaseObject
             float motionProgress = EvaluateConveyorDataMotionProgress(motionState);
             if (motionState.useCornerMotion)
             {
-                return EvaluateConveyorCornerMotionWorldPosition(
+                worldPosition = EvaluateConveyorCornerMotionWorldPosition(
                     motionState.sourceLaneIndex,
                     motionState.destinationLaneIndex,
                     motionState.startWorldPosition,
                     motionState.pathLength,
                     motionProgress);
             }
-
-            Vector3 targetPosition = GetConveyorLaneWorldPosition(motionState.destinationLaneIndex);
-            return EvaluateConveyorLinearMotionWorldPosition(
-                motionState.cornerContinuation,
-                motionState.startWorldPosition,
-                motionState.hasViaWorldPosition,
-                motionState.viaWorldPosition,
-                targetPosition,
-                motionState.pathLength,
-                motionProgress);
+            else
+            {
+                Vector3 targetPosition = GetConveyorLaneWorldPosition(motionState.destinationLaneIndex);
+                worldPosition = EvaluateConveyorLinearMotionWorldPosition(
+                    motionState.cornerContinuation,
+                    motionState.startWorldPosition,
+                    motionState.hasViaWorldPosition,
+                    motionState.viaWorldPosition,
+                    targetPosition,
+                    motionState.pathLength,
+                    motionProgress);
+            }
+        }
+        else
+        {
+            worldPosition = GetConveyorLaneWorldPosition(laneIndex);
         }
 
-        return GetConveyorLaneWorldPosition(laneIndex);
+        return ConformConveyorItemToBelt2FPath(laneIndex, worldPosition);
+    }
+
+    private Vector3 ConformConveyorItemToBelt2FPath(int laneIndex, Vector3 worldPosition)
+    {
+        return TryGetConveyorItemBelt2F(laneIndex, out ConvayorBelt2F belt2F)
+            ? belt2F.ApplyPathHeight(worldPosition)
+            : worldPosition;
     }
 
     private Quaternion GetConveyorItemVisualWorldRotation(int laneIndex, Vector3 worldPosition)
@@ -9059,7 +9074,10 @@ public partial class Block : BaseObject
             return;
         }
 
-        portableObject.SetWorldPose(worldPosition, ResolveConveyorItemWorldRotation(laneIndex, worldPosition));
+        Vector3 conformedWorldPosition = ConformConveyorItemToBelt2FPath(laneIndex, worldPosition);
+        portableObject.SetWorldPose(
+            conformedWorldPosition,
+            ResolveConveyorItemWorldRotation(laneIndex, conformedWorldPosition));
     }
 
     private Quaternion ResolveConveyorItemWorldRotation(int laneIndex, Vector3 worldPosition)
@@ -9487,6 +9505,7 @@ public partial class Block : BaseObject
         if (TryGetCachedConveyorPlanFailure(sourceLaneIndex, ignoreMoveAttemptThrottle, out float cachedFailureRetryDelay))
         {
             DelayConveyorLaneMoveAttempt(sourceLaneIndex, cachedFailureRetryDelay);
+            CacheCanMoveConveyorLane(sourceLaneIndex, ignoreMoveAttemptThrottle, false);
             return false;
         }
 
@@ -9507,6 +9526,10 @@ public partial class Block : BaseObject
             DelayConveyorLaneMoveAttempt(sourceLaneIndex, GetConveyorBlockedRetryDelay());
             conveyorMoveVisiting.Clear();
             conveyorPlannedMoves.Clear();
+            // Reuse this result when sleep/wake checks ask the same question.
+            // Publish after retry/cycle bookkeeping has invalidated older results;
+            // frame, global state version and throttle mode still guard the cache.
+            CacheCanMoveConveyorLane(sourceLaneIndex, ignoreMoveAttemptThrottle, false);
             return false;
         }
 

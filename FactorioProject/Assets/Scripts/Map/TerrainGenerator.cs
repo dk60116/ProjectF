@@ -878,7 +878,8 @@ public partial class TerrainGenerator : MonoBehaviour
     private readonly Dictionary<BlockHandle, int> conveyorCornerGroupBuildIndices = new Dictionary<BlockHandle, int>();
     private readonly List<BlockHandle> conveyorCornerGroupTickBlocks = new List<BlockHandle>();
     private readonly HashSet<BlockHandle> deferredConveyorRuntimeRefreshBlocks = new HashSet<BlockHandle>();
-    private readonly HashSet<BlockHandle> deferredConveyorNetworkWakeBlocks = new HashSet<BlockHandle>();
+    private readonly Dictionary<BlockHandle, bool> deferredConveyorNetworkWakeBlocks = new Dictionary<BlockHandle, bool>();
+    private readonly List<KeyValuePair<BlockHandle, bool>> deferredConveyorNetworkWakeBuffer = new List<KeyValuePair<BlockHandle, bool>>();
     private readonly HashSet<BlockHandle> deferredConveyorMoveAttemptWakeAroundBlocks = new HashSet<BlockHandle>();
     private readonly HashSet<BlockHandle> deferredConveyorMoveAttemptWakeFlowBlocks = new HashSet<BlockHandle>();
     private readonly List<ConveyorItemLaneSaveState> conveyorItemCountLaneScratch = new List<ConveyorItemLaneSaveState>();
@@ -938,6 +939,8 @@ public partial class TerrainGenerator : MonoBehaviour
     private int lastActiveConveyorMovedLineWakeSlots;
     private int lastActiveConveyorBlockedWaiterRegistrations;
     private int lastActiveConveyorBlockedWaitersWoken;
+    private int lastActiveConveyorDeferredNetworkWakeSuppressed;
+    private int lastActiveConveyorDirectWakeInactiveSkips;
     private float nextConveyorLineRetryTime = float.PositiveInfinity;
     private float nextConveyorActiveFullScanTime;
     private int activeConveyorSafetyScanIndex;
@@ -1331,6 +1334,11 @@ public partial class TerrainGenerator : MonoBehaviour
             return;
         }
 
+        RebuildAuthoritativeConveyorItemTotal();
+    }
+
+    private void RebuildAuthoritativeConveyorItemTotal()
+    {
         authoritativeConveyorItemTotal = CalculateConveyorItemCountSnapshot();
         authoritativeConveyorItemTotalInitialized = true;
     }
@@ -1668,6 +1676,13 @@ public partial class TerrainGenerator : MonoBehaviour
 
             RefreshLoadedRuntimeRegistrations();
             RefreshLoadedRuntimeVisibility();
+            if (pendingSavedWorldFinalization)
+            {
+                // 압축 저장된 운송 라인은 위 토폴로지 복원 전까지 BlockStateStore에 없다.
+                // 스트리밍 중 상태 조회로 만들어진 부분 합계를 최종 런타임 상태에서 교체한다.
+                RebuildAuthoritativeConveyorItemTotal();
+            }
+
             finalized = true;
         }
         finally

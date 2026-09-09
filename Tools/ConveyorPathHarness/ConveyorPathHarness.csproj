@@ -6,12 +6,14 @@
   </PropertyGroup>
   <ItemGroup>
     <Compile Include="Program.cs" />
+    <Compile Include="Belt2FItemPathChecks.cs" />
     <Compile Include="BeltTopUvChecks.cs" />
     <Compile Include="ConveyorSideBarrierChecks.cs" />
     <Compile Include="../../FactorioProject/Assets/Scripts/Map/ConveyorSideBarrier.cs" Link="ConveyorSideBarrier.cs" />
     <Compile Include="../../FactorioProject/Assets/Scripts/Map/ConveyorBeltTopUv.cs" Link="ConveyorBeltTopUv.cs" />
     <Compile Include="../../FactorioProject/Assets/Scripts/Map/ConveyorSideHandoffPath.cs" Link="ConveyorSideHandoffPath.cs" />
     <Compile Include="../../FactorioProject/Assets/Scripts/Map/ConveyorMotionTiming.cs" Link="ConveyorMotionTiming.cs" />
+    <Compile Include="../../FactorioProject/Assets/Scripts/Map/ConveyorBelt2FPath.cs" Link="ConveyorBelt2FPath.cs" />
     <Reference Include="UnityEngine.CoreModule">
       <HintPath>$(UnityManagedDirectory)/UnityEngine.CoreModule.dll</HintPath>
     </Reference>

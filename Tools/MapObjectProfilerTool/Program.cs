@@ -648,13 +648,6 @@ internal sealed class ProfilerForm : Form
             return true;
         }
 
-        if (string.Equals(type, "BackgroundConveyor", StringComparison.OrdinalIgnoreCase)
-            || ContainsOrdinalIgnoreCase(itemName, "Background Belt Tick"))
-        {
-            count = snapshot.BackgroundConveyorSavedBlocks;
-            return true;
-        }
-
         if (string.Equals(type, "ConveyorDataMotion", StringComparison.OrdinalIgnoreCase)
             || ContainsOrdinalIgnoreCase(itemName, "Belt Data Motion"))
         {
@@ -1054,196 +1047,133 @@ internal sealed class ProfilerForm : Form
         snapshotBeltTickForm.SetSnapshot(lastSnapshot);
     }
 
-    internal static BackgroundConveyorMetric[] BuildActiveBeltTickMetrics(ProfileSnapshot snapshot)
+    internal static BeltMetric[] BuildActiveBeltTickMetrics(ProfileSnapshot snapshot)
     {
         if (snapshot == null)
         {
-            return Array.Empty<BackgroundConveyorMetric>();
+            return Array.Empty<BeltMetric>();
         }
 
         return new[]
         {
-            new BackgroundConveyorMetric(
+            new BeltMetric(
                 "ActiveBeltTicks",
                 "Active belts",
                 snapshot.ActiveBeltTicks,
-                BackgroundConveyorMetricIcon.Blocks,
+                BeltMetricIcon.Blocks,
                 Color.FromArgb(104, 181, 255)),
-            new BackgroundConveyorMetric(
+            new BeltMetric(
                 "ActiveBeltDataMotions",
                 "Data motions",
                 snapshot.ActiveBeltDataMotions,
-                BackgroundConveyorMetricIcon.MotionDirty,
+                BeltMetricIcon.MotionDirty,
                 Color.FromArgb(111, 213, 196)),
-            new BackgroundConveyorMetric(
+            new BeltMetric(
                 "ActiveBeltVisualTicks",
                 "Visual ticks",
                 snapshot.ActiveBeltVisualTicks,
-                BackgroundConveyorMetricIcon.Items,
+                BeltMetricIcon.Items,
                 Color.FromArgb(176, 141, 255)),
-            new BackgroundConveyorMetric(
+            new BeltMetric(
                 "ActiveQueueLoops",
                 "Active queue loops",
                 snapshot.BeltActiveLoopIterations,
-                BackgroundConveyorMetricIcon.Candidates,
+                BeltMetricIcon.Candidates,
                 Color.FromArgb(235, 189, 92)),
-            new BackgroundConveyorMetric(
+            new BeltMetric(
                 "StraightLineBlockLoops",
                 "Straight line loops",
                 snapshot.BeltStraightLineBlockLoopIterations,
-                BackgroundConveyorMetricIcon.Blocks,
+                BeltMetricIcon.Blocks,
                 Color.FromArgb(132, 177, 255)),
-            new BackgroundConveyorMetric(
+            new BeltMetric(
                 "DataMotionLoops",
                 "Data motion loops",
                 snapshot.BeltDataMotionLoopIterations,
-                BackgroundConveyorMetricIcon.MotionDirty,
+                BeltMetricIcon.MotionDirty,
                 Color.FromArgb(208, 136, 255)),
-            new BackgroundConveyorMetric(
+            new BeltMetric(
                 "TryMoveAttempts",
                 "TryMove attempts",
                 snapshot.BeltTryMoveAttempts,
-                BackgroundConveyorMetricIcon.Attempts,
+                BeltMetricIcon.Attempts,
                 Color.FromArgb(245, 150, 92)),
-            new BackgroundConveyorMetric(
+            new BeltMetric(
                 "TryMoveSuccesses",
                 "TryMove successes",
                 snapshot.BeltTryMoveSuccesses,
-                BackgroundConveyorMetricIcon.Successes,
+                BeltMetricIcon.Successes,
                 Color.FromArgb(119, 218, 151)),
-            new BackgroundConveyorMetric(
+            new BeltMetric(
                 "StraightMoveAttempts",
                 "Straight attempts",
                 snapshot.BeltStraightMoveAttempts,
-                BackgroundConveyorMetricIcon.Attempts,
+                BeltMetricIcon.Attempts,
                 Color.FromArgb(247, 128, 116)),
-            new BackgroundConveyorMetric(
+            new BeltMetric(
                 "PlanMoveCalls",
                 "Plan move calls",
                 snapshot.BeltPlanMoveCalls,
-                BackgroundConveyorMetricIcon.Passes,
+                BeltMetricIcon.Passes,
                 Color.FromArgb(255, 208, 112)),
-            new BackgroundConveyorMetric(
+            new BeltMetric(
                 "PlannedMoveApplications",
                 "Move applications",
                 snapshot.BeltPlannedMoveApplications,
-                BackgroundConveyorMetricIcon.Successes,
+                BeltMetricIcon.Successes,
                 Color.FromArgb(152, 196, 138)),
-            new BackgroundConveyorMetric(
+            new BeltMetric(
                 "TouchedBlockRefreshes",
                 "Touched refreshes",
                 snapshot.BeltTouchedBlockRefreshes,
-                BackgroundConveyorMetricIcon.Dirty,
+                BeltMetricIcon.Dirty,
                 Color.FromArgb(236, 104, 94)),
-            new BackgroundConveyorMetric(
+            new BeltMetric(
                 "WakeAroundCalls",
                 "Wake around calls",
                 snapshot.BeltWakeAroundCalls,
-                BackgroundConveyorMetricIcon.Candidates,
+                BeltMetricIcon.Candidates,
                 Color.FromArgb(178, 154, 122)),
-            new BackgroundConveyorMetric(
+            new BeltMetric(
                 "ActivityRefreshCalls",
                 "Activity refreshes",
                 snapshot.BeltActivityRefreshCalls,
-                BackgroundConveyorMetricIcon.Passes,
+                BeltMetricIcon.Passes,
                 Color.FromArgb(197, 142, 245))
         };
     }
 
-    internal static BackgroundConveyorMetric[] BuildBackgroundConveyorMetrics(ProfileSnapshot snapshot)
+    internal static BeltMetric[] BuildBeltSchedulingMetrics(ProfileSnapshot snapshot)
     {
         if (snapshot == null)
         {
-            return Array.Empty<BackgroundConveyorMetric>();
+            return Array.Empty<BeltMetric>();
         }
 
         return new[]
         {
-            new BackgroundConveyorMetric(
-                "SavedBlocks",
-                "Saved blocks",
-                snapshot.BackgroundConveyorSavedBlocks,
-                BackgroundConveyorMetricIcon.Blocks,
-                Color.FromArgb(104, 181, 255)),
-            new BackgroundConveyorMetric(
-                "SavedItems",
-                "Saved items",
-                snapshot.BackgroundConveyorSavedItems,
-                BackgroundConveyorMetricIcon.Items,
-                Color.FromArgb(119, 218, 151)),
-            new BackgroundConveyorMetric(
-                "Candidates",
-                "Candidates",
-                snapshot.BackgroundConveyorCandidates,
-                BackgroundConveyorMetricIcon.Candidates,
-                Color.FromArgb(235, 189, 92)),
-            new BackgroundConveyorMetric(
-                "Passes",
-                "Passes",
-                snapshot.BackgroundConveyorPasses,
-                BackgroundConveyorMetricIcon.Passes,
-                Color.FromArgb(176, 141, 255)),
-            new BackgroundConveyorMetric(
-                "MoveAttempts",
-                "Move attempts",
-                snapshot.BackgroundConveyorMoveAttempts,
-                BackgroundConveyorMetricIcon.Attempts,
-                Color.FromArgb(245, 150, 92)),
-            new BackgroundConveyorMetric(
-                "MoveSuccesses",
-                "Move successes",
-                snapshot.BackgroundConveyorMoveSuccesses,
-                BackgroundConveyorMetricIcon.Successes,
-                Color.FromArgb(111, 213, 196)),
-            new BackgroundConveyorMetric(
-                "MotionDirtyCoordinates",
-                "Motion dirty",
-                snapshot.BackgroundConveyorMotionDirtyCoordinates,
-                BackgroundConveyorMetricIcon.MotionDirty,
-                Color.FromArgb(208, 136, 255)),
-            new BackgroundConveyorMetric(
-                "DirtyCoordinates",
-                "Dirty coordinates",
-                snapshot.BackgroundConveyorDirtyCoordinates,
-                BackgroundConveyorMetricIcon.Dirty,
-                Color.FromArgb(236, 104, 94)),
-            new BackgroundConveyorMetric(
-                "ReadyHeapSize",
-                "Ready heap",
-                snapshot.BackgroundConveyorReadyHeapSize,
-                BackgroundConveyorMetricIcon.Candidates,
-                Color.FromArgb(132, 177, 255)),
-            new BackgroundConveyorMetric(
-                "DueCandidates",
-                "Due candidates",
-                snapshot.BackgroundConveyorDueCandidates,
-                BackgroundConveyorMetricIcon.Candidates,
-                Color.FromArgb(255, 208, 112)),
-            new BackgroundConveyorMetric(
-                "SkippedNotReady",
-                "Skipped not ready",
-                snapshot.BackgroundConveyorSkippedNotReady,
-                BackgroundConveyorMetricIcon.Items,
-                Color.FromArgb(152, 196, 138)),
-            new BackgroundConveyorMetric(
-                "BlockedWaiters",
-                "Blocked waiters",
-                snapshot.BackgroundConveyorBlockedWaiters,
-                BackgroundConveyorMetricIcon.Attempts,
-                Color.FromArgb(247, 128, 116)),
-            new BackgroundConveyorMetric(
-                "StaleScheduleDrops",
-                "Stale drops",
-                snapshot.BackgroundConveyorStaleScheduleDrops,
-                BackgroundConveyorMetricIcon.MotionDirty,
-                Color.FromArgb(197, 142, 245)),
-            new BackgroundConveyorMetric(
-                "SlowRetryCandidates",
-                "Slow retries",
-                snapshot.BackgroundConveyorSlowRetryCandidates,
-                BackgroundConveyorMetricIcon.Passes,
-                Color.FromArgb(178, 154, 122))
+            CreateRuntimeMetric(snapshot, "ActiveConveyor", "DeferredNetworkWakeSuppressed", "Deferred wake deduped", BeltMetricIcon.Successes, Color.FromArgb(111, 213, 196)),
+            CreateRuntimeMetric(snapshot, "ActiveConveyor", "DirectWakeInactiveSkips", "Inactive wakes skipped", BeltMetricIcon.Successes, Color.FromArgb(119, 218, 151)),
+            CreateRuntimeMetric(snapshot, "ActiveConveyor", "BlockNoProgressRequeuesSkipped", "Block requeues skipped", BeltMetricIcon.Passes, Color.FromArgb(176, 141, 255)),
+            CreateRuntimeMetric(snapshot, "ActiveConveyor", "CornerGroupNoProgressRequeuesSkipped", "Corner requeues skipped", BeltMetricIcon.Passes, Color.FromArgb(197, 142, 245)),
+            CreateRuntimeMetric(snapshot, "ActiveConveyor", "LineWakesDroppedByRetryThrottle", "Line wakes throttled", BeltMetricIcon.Dirty, Color.FromArgb(236, 104, 94)),
+            CreateRuntimeMetric(snapshot, "ActiveConveyor", "DeferredLineWakesDroppedByRetryThrottle", "Deferred wakes throttled", BeltMetricIcon.Dirty, Color.FromArgb(245, 150, 92)),
+            CreateRuntimeMetric(snapshot, "ActiveConveyor", "BlockedWaiterRegistrations", "Waiters registered", BeltMetricIcon.Attempts, Color.FromArgb(247, 128, 116)),
+            CreateRuntimeMetric(snapshot, "ActiveConveyor", "BlockedWaitersWoken", "Waiters woken", BeltMetricIcon.Candidates, Color.FromArgb(235, 189, 92)),
+            CreateRuntimeMetric(snapshot, "ConveyorQueue", "DeferredNetworkWakeBlocks", "Pending network wakes", BeltMetricIcon.Blocks, Color.FromArgb(104, 181, 255))
         };
+    }
+
+    private static BeltMetric CreateRuntimeMetric(
+        ProfileSnapshot snapshot,
+        string group,
+        string name,
+        string label,
+        BeltMetricIcon icon,
+        Color color)
+    {
+        TryGetRuntimeCounterNumber(snapshot, group, name, out double value);
+        return new BeltMetric(name, label, value, icon, color);
     }
 
     private string BuildSnapshotText(ProfileSnapshot snapshot)
@@ -1275,15 +1205,6 @@ internal sealed class ProfilerForm : Form
         AppendMetric(builder, "TouchedBlockRefreshes", snapshot.BeltTouchedBlockRefreshes);
         AppendMetric(builder, "WakeAroundCalls", snapshot.BeltWakeAroundCalls);
         AppendMetric(builder, "ActivityRefreshCalls", snapshot.BeltActivityRefreshCalls);
-        builder.AppendLine();
-        builder.AppendLine("BackgroundConveyorPerTick");
-        builder.AppendLine($"Samples\t{snapshot.BackgroundConveyorProfileSamples.ToString(CultureInfo.InvariantCulture)}");
-        BackgroundConveyorMetric[] backgroundMetrics = BuildBackgroundConveyorMetrics(snapshot);
-        for (int i = 0; i < backgroundMetrics.Length; i++)
-        {
-            AppendMetric(builder, backgroundMetrics[i].Key, backgroundMetrics[i].Value);
-        }
-
         if (snapshot.RuntimeCounters != null && snapshot.RuntimeCounters.Count > 0)
         {
             builder.AppendLine();
@@ -1420,14 +1341,14 @@ internal sealed class ProfilerForm : Form
 internal sealed class SnapshotBeltTickForm : Form
 {
     private readonly Label summaryLabel = new Label();
-    private readonly BackgroundConveyorGraphPanel activeGraphPanel = new BackgroundConveyorGraphPanel();
-    private readonly BackgroundConveyorGraphPanel backgroundGraphPanel = new BackgroundConveyorGraphPanel();
+    private readonly BeltMetricGraphPanel activeGraphPanel = new BeltMetricGraphPanel();
+    private readonly BeltMetricGraphPanel schedulingGraphPanel = new BeltMetricGraphPanel();
     private readonly Button copyButton = new Button();
     private readonly Button closeButton = new Button();
 
     private ProfileSnapshot? snapshot;
-    private BackgroundConveyorMetric[] activeMetrics = Array.Empty<BackgroundConveyorMetric>();
-    private BackgroundConveyorMetric[] backgroundMetrics = Array.Empty<BackgroundConveyorMetric>();
+    private BeltMetric[] activeMetrics = Array.Empty<BeltMetric>();
+    private BeltMetric[] schedulingMetrics = Array.Empty<BeltMetric>();
 
     public SnapshotBeltTickForm()
     {
@@ -1471,18 +1392,18 @@ internal sealed class SnapshotBeltTickForm : Form
             Dock = DockStyle.Fill
         };
         TabPage activeTabPage = new TabPage("Active");
-        TabPage backgroundTabPage = new TabPage("Background");
+        TabPage schedulingTabPage = new TabPage("Scheduling");
         activeTabPage.BackColor = Color.FromArgb(34, 38, 41);
-        backgroundTabPage.BackColor = Color.FromArgb(34, 38, 41);
+        schedulingTabPage.BackColor = Color.FromArgb(34, 38, 41);
 
         activeGraphPanel.Dock = DockStyle.Fill;
         activeGraphPanel.BackColor = Color.FromArgb(34, 38, 41);
-        backgroundGraphPanel.Dock = DockStyle.Fill;
-        backgroundGraphPanel.BackColor = Color.FromArgb(34, 38, 41);
+        schedulingGraphPanel.Dock = DockStyle.Fill;
+        schedulingGraphPanel.BackColor = Color.FromArgb(34, 38, 41);
         activeTabPage.Controls.Add(activeGraphPanel);
-        backgroundTabPage.Controls.Add(backgroundGraphPanel);
+        schedulingTabPage.Controls.Add(schedulingGraphPanel);
         tabControl.TabPages.Add(activeTabPage);
-        tabControl.TabPages.Add(backgroundTabPage);
+        tabControl.TabPages.Add(schedulingTabPage);
         shell.Controls.Add(tabControl, 0, 1);
 
         FlowLayoutPanel actionPanel = new FlowLayoutPanel
@@ -1513,10 +1434,10 @@ internal sealed class SnapshotBeltTickForm : Form
         snapshot = nextSnapshot;
         activeMetrics = snapshot != null
             ? ProfilerForm.BuildActiveBeltTickMetrics(snapshot)
-            : Array.Empty<BackgroundConveyorMetric>();
-        backgroundMetrics = snapshot != null
-            ? ProfilerForm.BuildBackgroundConveyorMetrics(snapshot)
-            : Array.Empty<BackgroundConveyorMetric>();
+            : Array.Empty<BeltMetric>();
+        schedulingMetrics = snapshot != null
+            ? ProfilerForm.BuildBeltSchedulingMetrics(snapshot)
+            : Array.Empty<BeltMetric>();
 
         if (snapshot == null || !snapshot.Enabled)
         {
@@ -1525,17 +1446,19 @@ internal sealed class SnapshotBeltTickForm : Form
             activeGraphPanel.SetMetrics(
                 activeMetrics,
                 0,
-                0,
                 0.0,
                 "Active belt per frame",
-                "No active belt samples yet");
-            backgroundGraphPanel.SetMetrics(
-                backgroundMetrics,
-                0,
+                "Samples 0",
+                "No active belt samples yet",
+                false);
+            schedulingGraphPanel.SetMetrics(
+                schedulingMetrics,
                 0,
                 0.0,
-                "Background conveyor per tick",
-                "No background conveyor samples yet");
+                "Scheduling snapshot",
+                "Latest active tick + live queues",
+                "No scheduling counters yet",
+                false);
             return;
         }
 
@@ -1544,22 +1467,24 @@ internal sealed class SnapshotBeltTickForm : Form
             ? $" / Active avg {activeRow.AvgUs:0.#} us / max {activeRow.MaxUs:0.#} us"
             : string.Empty;
         summaryLabel.Text =
-            $"Active {snapshot.ActiveBeltTicks:N0} / Data {snapshot.ActiveBeltDataMotions:N0} / Visual {snapshot.ActiveBeltVisualTicks:N0} / BG samples {snapshot.BackgroundConveyorProfileSamples:N0} / Frame {snapshot.Frame:N0}{activeTimeText}";
+            $"Active {snapshot.ActiveBeltTicks:N0} / Data {snapshot.ActiveBeltDataMotions:N0} / Visual {snapshot.ActiveBeltVisualTicks:N0} / Frame {snapshot.Frame:N0}{activeTimeText}";
         copyButton.Enabled = true;
         activeGraphPanel.SetMetrics(
             activeMetrics,
-            snapshot.BeltLoopProfileFrames,
             snapshot.Frame,
             snapshot.WindowMs,
             "Active belt per frame",
-            "No active belt samples yet");
-        backgroundGraphPanel.SetMetrics(
-            backgroundMetrics,
-            snapshot.BackgroundConveyorProfileSamples,
+            $"Samples {snapshot.BeltLoopProfileFrames:N0}",
+            "No active belt samples yet",
+            snapshot.BeltLoopProfileFrames > 0);
+        schedulingGraphPanel.SetMetrics(
+            schedulingMetrics,
             snapshot.Frame,
             snapshot.WindowMs,
-            "Background conveyor per tick",
-            "No background conveyor samples yet");
+            "Scheduling snapshot",
+            "Latest active tick + live queues",
+            "No scheduling counters yet",
+            snapshot.RuntimeCounters != null && snapshot.RuntimeCounters.Count > 0);
     }
 
     private void CopyBeltTickText()
@@ -1595,12 +1520,11 @@ internal sealed class SnapshotBeltTickForm : Form
         }
 
         builder.AppendLine();
-        builder.AppendLine("BackgroundConveyorPerTick");
-        builder.AppendLine($"Samples\t{snapshot.BackgroundConveyorProfileSamples.ToString(CultureInfo.InvariantCulture)}");
-        for (int i = 0; i < backgroundMetrics.Length; i++)
+        builder.AppendLine("BeltSchedulingSnapshot");
+        for (int i = 0; i < schedulingMetrics.Length; i++)
         {
-            builder.Append(backgroundMetrics[i].Key).Append('\t')
-                .AppendLine(backgroundMetrics[i].Value.ToString("0.###", CultureInfo.InvariantCulture));
+            builder.Append(schedulingMetrics[i].Key).Append('\t')
+                .AppendLine(schedulingMetrics[i].Value.ToString("0.###", CultureInfo.InvariantCulture));
         }
 
         try
@@ -1636,36 +1560,40 @@ internal sealed class SnapshotBeltTickForm : Form
 
         return null;
     }
+
 }
 
-internal sealed class BackgroundConveyorGraphPanel : Panel
+internal sealed class BeltMetricGraphPanel : Panel
 {
-    private BackgroundConveyorMetric[] metrics = Array.Empty<BackgroundConveyorMetric>();
-    private int sampleCount;
+    private BeltMetric[] metrics = Array.Empty<BeltMetric>();
     private int frame;
     private double windowMs;
     private string title = "Metric average";
+    private string context = string.Empty;
     private string emptyText = "No samples yet";
+    private bool hasData;
 
-    public BackgroundConveyorGraphPanel()
+    public BeltMetricGraphPanel()
     {
         DoubleBuffered = true;
     }
 
     public void SetMetrics(
-        BackgroundConveyorMetric[] nextMetrics,
-        int nextSampleCount,
+        BeltMetric[] nextMetrics,
         int nextFrame,
         double nextWindowMs,
         string nextTitle,
-        string nextEmptyText)
+        string nextContext,
+        string nextEmptyText,
+        bool nextHasData)
     {
-        metrics = nextMetrics ?? Array.Empty<BackgroundConveyorMetric>();
-        sampleCount = Math.Max(0, nextSampleCount);
+        metrics = nextMetrics ?? Array.Empty<BeltMetric>();
         frame = Math.Max(0, nextFrame);
         windowMs = Math.Max(0.0, nextWindowMs);
         title = string.IsNullOrWhiteSpace(nextTitle) ? "Metric average" : nextTitle;
+        context = nextContext ?? string.Empty;
         emptyText = string.IsNullOrWhiteSpace(nextEmptyText) ? "No samples yet" : nextEmptyText;
+        hasData = nextHasData;
         Invalidate();
     }
 
@@ -1688,15 +1616,16 @@ internal sealed class BackgroundConveyorGraphPanel : Panel
         using Pen dividerPen = new Pen(Color.FromArgb(55, 62, 66));
 
         Rectangle inner = Rectangle.Inflate(bounds, -18, -16);
+        string contextSuffix = string.IsNullOrWhiteSpace(context) ? string.Empty : $" / {context}";
         e.Graphics.DrawString(
-            $"{title} / Samples {sampleCount:N0} / Frame {frame:N0} / Window {windowMs:0.#} ms",
+            $"{title}{contextSuffix} / Frame {frame:N0} / Window {windowMs:0.#} ms",
             titleFont,
             textBrush,
             inner.X,
             inner.Y);
 
         int graphTop = inner.Y + 38;
-        if (metrics.Length <= 0 || sampleCount <= 0)
+        if (metrics.Length <= 0 || !hasData)
         {
             e.Graphics.DrawString(emptyText, textFont, dimBrush, inner.X, graphTop);
             return;
@@ -1719,7 +1648,7 @@ internal sealed class BackgroundConveyorGraphPanel : Panel
 
         for (int i = 0; i < metrics.Length; i++)
         {
-            BackgroundConveyorMetric metric = metrics[i];
+            BeltMetric metric = metrics[i];
             int y = graphTop + (i * rowHeight);
             Rectangle rowRect = new Rectangle(inner.X, y, inner.Width, rowHeight);
             Rectangle iconRect = new Rectangle(inner.X + 2, y + ((rowHeight - iconSize) / 2), iconSize, iconSize);
@@ -1759,7 +1688,7 @@ internal sealed class BackgroundConveyorGraphPanel : Panel
         }
     }
 
-    private static void DrawMetricIcon(Graphics graphics, Rectangle rect, BackgroundConveyorMetric metric)
+    private static void DrawMetricIcon(Graphics graphics, Rectangle rect, BeltMetric metric)
     {
         using Brush fillBrush = new SolidBrush(Color.FromArgb(58, 65, 69));
         using Brush accentBrush = new SolidBrush(metric.Color);
@@ -1776,18 +1705,18 @@ internal sealed class BackgroundConveyorGraphPanel : Panel
         Rectangle content = Rectangle.Inflate(rect, -7, -7);
         switch (metric.Icon)
         {
-            case BackgroundConveyorMetricIcon.Blocks:
+            case BeltMetricIcon.Blocks:
                 int cell = Math.Max(5, content.Width / 2 - 1);
                 graphics.FillRectangle(accentBrush, content.X, content.Y, cell, cell);
                 graphics.FillRectangle(accentBrush, content.X + cell + 2, content.Y, cell, cell);
                 graphics.FillRectangle(accentBrush, content.X, content.Y + cell + 2, cell, cell);
                 graphics.FillRectangle(accentBrush, content.X + cell + 2, content.Y + cell + 2, cell, cell);
                 break;
-            case BackgroundConveyorMetricIcon.Items:
+            case BeltMetricIcon.Items:
                 graphics.FillEllipse(accentBrush, content);
                 graphics.DrawEllipse(Pens.White, Rectangle.Inflate(content, -4, -4));
                 break;
-            case BackgroundConveyorMetricIcon.Candidates:
+            case BeltMetricIcon.Candidates:
                 graphics.DrawLine(accentPen, content.Left, content.Top + content.Height / 2, content.Right - 3, content.Top + content.Height / 2);
                 graphics.FillPolygon(accentBrush, new[]
                 {
@@ -1796,7 +1725,7 @@ internal sealed class BackgroundConveyorGraphPanel : Panel
                     new Point(content.Right - 7, content.Bottom - 2)
                 });
                 break;
-            case BackgroundConveyorMetricIcon.Passes:
+            case BeltMetricIcon.Passes:
                 graphics.DrawArc(accentPen, content, 35, 285);
                 graphics.FillPolygon(accentBrush, new[]
                 {
@@ -1805,7 +1734,7 @@ internal sealed class BackgroundConveyorGraphPanel : Panel
                     new Point(content.Right - 6, content.Top + 12)
                 });
                 break;
-            case BackgroundConveyorMetricIcon.Attempts:
+            case BeltMetricIcon.Attempts:
                 graphics.FillPolygon(accentBrush, new[]
                 {
                     new Point(content.Left + content.Width / 2, content.Top),
@@ -1813,7 +1742,7 @@ internal sealed class BackgroundConveyorGraphPanel : Panel
                     new Point(content.Left, content.Bottom)
                 });
                 break;
-            case BackgroundConveyorMetricIcon.Successes:
+            case BeltMetricIcon.Successes:
                 graphics.DrawLines(accentPen, new[]
                 {
                     new Point(content.Left + 1, content.Top + content.Height / 2),
@@ -1821,7 +1750,7 @@ internal sealed class BackgroundConveyorGraphPanel : Panel
                     new Point(content.Right, content.Top + 2)
                 });
                 break;
-            case BackgroundConveyorMetricIcon.MotionDirty:
+            case BeltMetricIcon.MotionDirty:
                 graphics.DrawBezier(
                     accentPen,
                     content.Left,
@@ -1834,7 +1763,7 @@ internal sealed class BackgroundConveyorGraphPanel : Panel
                     content.Top + content.Height / 2);
                 graphics.FillEllipse(accentBrush, content.Right - 4, content.Top + content.Height / 2 - 3, 6, 6);
                 break;
-            case BackgroundConveyorMetricIcon.Dirty:
+            case BeltMetricIcon.Dirty:
                 graphics.FillPolygon(accentBrush, new[]
                 {
                     new Point(content.Left + content.Width / 2, content.Top),
@@ -1847,19 +1776,19 @@ internal sealed class BackgroundConveyorGraphPanel : Panel
     }
 }
 
-internal readonly struct BackgroundConveyorMetric
+internal readonly struct BeltMetric
 {
     public readonly string Key;
     public readonly string Label;
     public readonly double Value;
-    public readonly BackgroundConveyorMetricIcon Icon;
+    public readonly BeltMetricIcon Icon;
     public readonly Color Color;
 
-    public BackgroundConveyorMetric(
+    public BeltMetric(
         string key,
         string label,
         double value,
-        BackgroundConveyorMetricIcon icon,
+        BeltMetricIcon icon,
         Color color)
     {
         Key = key;
@@ -1870,7 +1799,7 @@ internal readonly struct BackgroundConveyorMetric
     }
 }
 
-internal enum BackgroundConveyorMetricIcon
+internal enum BeltMetricIcon
 {
     Blocks,
     Items,
@@ -2044,51 +1973,6 @@ internal sealed class ProfileSnapshot
 
     [JsonPropertyName("beltActivityRefreshCalls")]
     public double BeltActivityRefreshCalls { get; set; }
-
-    [JsonPropertyName("backgroundConveyorProfileSamples")]
-    public int BackgroundConveyorProfileSamples { get; set; }
-
-    [JsonPropertyName("backgroundConveyorSavedBlocks")]
-    public double BackgroundConveyorSavedBlocks { get; set; }
-
-    [JsonPropertyName("backgroundConveyorSavedItems")]
-    public double BackgroundConveyorSavedItems { get; set; }
-
-    [JsonPropertyName("backgroundConveyorCandidates")]
-    public double BackgroundConveyorCandidates { get; set; }
-
-    [JsonPropertyName("backgroundConveyorPasses")]
-    public double BackgroundConveyorPasses { get; set; }
-
-    [JsonPropertyName("backgroundConveyorMoveAttempts")]
-    public double BackgroundConveyorMoveAttempts { get; set; }
-
-    [JsonPropertyName("backgroundConveyorMoveSuccesses")]
-    public double BackgroundConveyorMoveSuccesses { get; set; }
-
-    [JsonPropertyName("backgroundConveyorDirtyCoordinates")]
-    public double BackgroundConveyorDirtyCoordinates { get; set; }
-
-    [JsonPropertyName("backgroundConveyorMotionDirtyCoordinates")]
-    public double BackgroundConveyorMotionDirtyCoordinates { get; set; }
-
-    [JsonPropertyName("backgroundConveyorReadyHeapSize")]
-    public double BackgroundConveyorReadyHeapSize { get; set; }
-
-    [JsonPropertyName("backgroundConveyorDueCandidates")]
-    public double BackgroundConveyorDueCandidates { get; set; }
-
-    [JsonPropertyName("backgroundConveyorSkippedNotReady")]
-    public double BackgroundConveyorSkippedNotReady { get; set; }
-
-    [JsonPropertyName("backgroundConveyorBlockedWaiters")]
-    public double BackgroundConveyorBlockedWaiters { get; set; }
-
-    [JsonPropertyName("backgroundConveyorStaleScheduleDrops")]
-    public double BackgroundConveyorStaleScheduleDrops { get; set; }
-
-    [JsonPropertyName("backgroundConveyorSlowRetryCandidates")]
-    public double BackgroundConveyorSlowRetryCandidates { get; set; }
 
     [JsonPropertyName("runtimeCounterCount")]
     public int RuntimeCounterCount { get; set; }

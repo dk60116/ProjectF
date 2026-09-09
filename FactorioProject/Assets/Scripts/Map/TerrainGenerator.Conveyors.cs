@@ -442,7 +442,7 @@ public partial class TerrainGenerator : MonoBehaviour
         deferredConveyorRuntimeRefreshBlocks.Add(handle);
     }
 
-    private void QueueDeferredConveyorNetworkWake(Block block)
+    private void QueueDeferredConveyorNetworkWake(Block block, bool queueWake)
     {
         if (!Application.isPlaying
             || !TryGetRuntimeBlockHandle(block, out BlockHandle handle))
@@ -450,7 +450,19 @@ public partial class TerrainGenerator : MonoBehaviour
             return;
         }
 
-        deferredConveyorNetworkWakeBlocks.Add(handle);
+        // A network state refresh does not necessarily request a simulation tick.
+        // Preserve a real wake when a later refresh-only request is merged into it.
+        if (deferredConveyorNetworkWakeBlocks.TryGetValue(handle, out bool existingWake))
+        {
+            if (queueWake && !existingWake)
+            {
+                deferredConveyorNetworkWakeBlocks[handle] = true;
+            }
+        }
+        else
+        {
+            deferredConveyorNetworkWakeBlocks.Add(handle, queueWake);
+        }
     }
 
     public void QueueDeferredConveyorMoveAttemptWakeAround(Block block)
@@ -635,22 +647,18 @@ public partial class TerrainGenerator : MonoBehaviour
             return;
         }
 
-        conveyorTickBuffer.Clear();
-        foreach (BlockHandle handle in deferredConveyorNetworkWakeBlocks)
+        deferredConveyorNetworkWakeBuffer.Clear();
+        foreach (KeyValuePair<BlockHandle, bool> request in deferredConveyorNetworkWakeBlocks)
         {
-            conveyorTickBuffer.Add(handle);
+            deferredConveyorNetworkWakeBuffer.Add(request);
         }
 
         deferredConveyorNetworkWakeBlocks.Clear();
-        if (conveyorTickBuffer.Count == 0)
-        {
-            return;
-        }
-
         EnsureConveyorNetworkCache();
-        for (int i = 0; i < conveyorTickBuffer.Count; i++)
+        for (int i = 0; i < deferredConveyorNetworkWakeBuffer.Count; i++)
         {
-            BlockHandle handle = conveyorTickBuffer[i];
+            KeyValuePair<BlockHandle, bool> request = deferredConveyorNetworkWakeBuffer[i];
+            BlockHandle handle = request.Key;
             if (!TryResolveLoadedRuntimeBlock(handle, out Block block))
             {
                 continue;
@@ -667,10 +675,17 @@ public partial class TerrainGenerator : MonoBehaviour
                 }
             }
 
-            QueueConveyorWake(block);
+            if (request.Value)
+            {
+                QueueConveyorWake(block);
+            }
+            else
+            {
+                lastActiveConveyorDeferredNetworkWakeSuppressed++;
+            }
         }
 
-        conveyorTickBuffer.Clear();
+        deferredConveyorNetworkWakeBuffer.Clear();
     }
 
     public void QueueConveyorWake(Block block)
@@ -2099,7 +2114,7 @@ public partial class TerrainGenerator : MonoBehaviour
 
         if (IsConveyorRuntimeRefreshDeferred)
         {
-            QueueDeferredConveyorNetworkWake(block);
+            QueueDeferredConveyorNetworkWake(block, queueWake);
             return;
         }
 
@@ -2676,15 +2691,14 @@ public partial class TerrainGenerator : MonoBehaviour
             return;
         }
 
-        if (forceDirectWake)
-        {
-            // This block is already being processed. Clear stale sleep/throttle
-            // state without putting it and its neighbours back into the queue.
-            block.WakeConveyorMoveAttemptsAlongRuntimeFlowImmediate(false);
-        }
-
+        // Direct selects the legacy backend; it is not an occupancy/ready event.
+        // Vacancy, motion completion and external changes own sleep invalidation.
         if (!block.ShouldTickActiveConveyor())
         {
+            if (forceDirectWake)
+            {
+                lastActiveConveyorDirectWakeInactiveSkips++;
+            }
             return;
         }
 
@@ -2921,6 +2935,8 @@ public partial class TerrainGenerator : MonoBehaviour
         lastActiveConveyorMovedLineWakeSlots = 0;
         lastActiveConveyorBlockedWaiterRegistrations = 0;
         lastActiveConveyorBlockedWaitersWoken = 0;
+        lastActiveConveyorDeferredNetworkWakeSuppressed = 0;
+        lastActiveConveyorDirectWakeInactiveSkips = 0;
     }
 
     private static long BeginConveyorRuntimeSample(bool enabled)
@@ -3362,7 +3378,8 @@ public partial class TerrainGenerator : MonoBehaviour
                 continue;
             }
 
-            if (!block.ShouldTickActiveConveyor() && block.GetRuntimeConveyorItemCount() <= 0)
+            // Item presence alone cannot invalidate a blocked/ready wait.
+            if (!block.ShouldTickActiveConveyor())
             {
                 continue;
             }
@@ -4758,6 +4775,8 @@ public partial class TerrainGenerator : MonoBehaviour
         MapObjectTickProfiler.AddRuntimeCounter("ActiveConveyor", "MovedLineWakeSlots", lastActiveConveyorMovedLineWakeSlots);
         MapObjectTickProfiler.AddRuntimeCounter("ActiveConveyor", "BlockedWaiterRegistrations", lastActiveConveyorBlockedWaiterRegistrations);
         MapObjectTickProfiler.AddRuntimeCounter("ActiveConveyor", "BlockedWaitersWoken", lastActiveConveyorBlockedWaitersWoken);
+        MapObjectTickProfiler.AddRuntimeCounter("ActiveConveyor", "DeferredNetworkWakeSuppressed", lastActiveConveyorDeferredNetworkWakeSuppressed);
+        MapObjectTickProfiler.AddRuntimeCounter("ActiveConveyor", "DirectWakeInactiveSkips", lastActiveConveyorDirectWakeInactiveSkips);
 
         MapObjectTickProfiler.AddRuntimeCounter("ConveyorCache", "LineCacheDirty", conveyorLineCacheDirty);
         MapObjectTickProfiler.AddRuntimeCounter("ConveyorCache", "NetworkCacheDirty", conveyorNetworkCacheDirty);

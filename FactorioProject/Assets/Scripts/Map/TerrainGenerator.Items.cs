@@ -97,6 +97,14 @@ public partial class TerrainGenerator : MonoBehaviour
 
         if (TryGetFocusedConveyorBeltBlock(GetActivePlayer(), out _, out Block focusedConveyorBlock))
         {
+            if (TryResolveNearestBelt2FDropBlock(
+                    focusedConveyorBlock,
+                    worldPosition,
+                    out Block nearestBelt2FBlock))
+            {
+                focusedConveyorBlock = nearestBelt2FBlock;
+            }
+
             if (!TryResolveFocusedConveyorDropBlock(focusedConveyorBlock, null, out targetBlock)
                 || targetBlock == null)
             {
@@ -277,6 +285,14 @@ public partial class TerrainGenerator : MonoBehaviour
     {
         targetPortableObject = null;
         targetConveyorBlock = null;
+        if (TryResolveNearestBelt2FDropBlock(
+                focusedConveyorBlock,
+                worldPosition,
+                out Block nearestBelt2FBlock))
+        {
+            focusedConveyorBlock = nearestBelt2FBlock;
+        }
+
         conveyorDropBlockScratch.Clear();
         while (TryResolveFocusedConveyorDropBlock(
                    focusedConveyorBlock,
@@ -307,6 +323,50 @@ public partial class TerrainGenerator : MonoBehaviour
 
         conveyorDropBlockScratch.Clear();
         return false;
+    }
+
+    private bool TryResolveNearestBelt2FDropBlock(
+        Block focusedConveyorBlock,
+        Vector3 playerWorldPosition,
+        out Block nearestBlock)
+    {
+        nearestBlock = null;
+        if (focusedConveyorBlock == null
+            || !(focusedConveyorBlock.MapObject is ConvayorBelt2F belt2F))
+        {
+            return false;
+        }
+
+        IReadOnlyList<Vector2Int> occupiedCoordinates = belt2F.RuntimeOccupiedCoordinates;
+        if (occupiedCoordinates == null || occupiedCoordinates.Count <= 0)
+        {
+            return false;
+        }
+
+        float nearestDistanceSqr = float.MaxValue;
+        for (int i = 0; i < occupiedCoordinates.Count; i++)
+        {
+            if (!TryGetLoadedBlock(occupiedCoordinates[i], out Block candidateBlock)
+                || candidateBlock == null
+                || !ReferenceEquals(candidateBlock.MapObject, belt2F)
+                || candidateBlock.GetAvailableConveyorCapacity() <= 0)
+            {
+                continue;
+            }
+
+            Vector3 offset = candidateBlock.WorldPosition - playerWorldPosition;
+            offset.y = 0f;
+            float distanceSqr = offset.sqrMagnitude;
+            if (nearestBlock != null && distanceSqr >= nearestDistanceSqr)
+            {
+                continue;
+            }
+
+            nearestBlock = candidateBlock;
+            nearestDistanceSqr = distanceSqr;
+        }
+
+        return nearestBlock != null;
     }
 
     public bool TryAddDroppedItemStackAtPlayerBlock(

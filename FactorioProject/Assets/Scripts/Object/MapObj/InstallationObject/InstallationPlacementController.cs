@@ -31972,6 +31972,16 @@ public class InstallationPlacementController : MonoBehaviour
             PlacementAreaBlockKind.InputItem);
     }
 
+    private bool CoordinateHasInputEnergyAreaBlockForPlacement(
+        Vector2Int coordinate,
+        MapObject previewToIgnore)
+    {
+        return CoordinateHasPlacementAreaBlock(
+            coordinate,
+            previewToIgnore,
+            PlacementAreaBlockKind.InputEnergy);
+    }
+
     private bool CoordinateHasOutputAreaBlockForPlacement(
         Vector2Int coordinate,
         MapObject previewToIgnore)
@@ -31980,6 +31990,16 @@ public class InstallationPlacementController : MonoBehaviour
             coordinate,
             previewToIgnore,
             PlacementAreaBlockKind.Output);
+    }
+
+    private bool CoordinateHasDirectItemOutputAreaBlockForPlacement(
+        Vector2Int coordinate,
+        MapObject previewToIgnore)
+    {
+        return CoordinateHasPlacementAreaBlock(
+            coordinate,
+            previewToIgnore,
+            PlacementAreaBlockKind.DirectItemOutput);
     }
 
     private bool CoordinateHasBoilerEnergyInputBlockForPlacement(
@@ -32076,7 +32096,11 @@ public class InstallationPlacementController : MonoBehaviour
                 || InputOutputModuleOutputAreaController.CoordinateBlocksInstallationPlacement(coordinate),
             PlacementAreaBlockKind.InputItem =>
                 InputOutputModuleItemAreaController.CoordinateBlocksInstallationPlacement(coordinate),
+            PlacementAreaBlockKind.InputEnergy =>
+                InputOutputModuleEnergyAreaController.CoordinateBlocksInstallationPlacement(coordinate),
             PlacementAreaBlockKind.Output =>
+                InputOutputModuleOutputAreaController.CoordinateBlocksInstallationPlacement(coordinate),
+            PlacementAreaBlockKind.DirectItemOutput =>
                 InputOutputModuleOutputAreaController.CoordinateBlocksInstallationPlacement(coordinate),
             _ => false
         };
@@ -32106,9 +32130,13 @@ public class InstallationPlacementController : MonoBehaviour
                && (areaKind switch
                    {
                        PlacementAreaBlockKind.Normal => IsNormalInputOutputAreaBlockType(blockType),
-                       PlacementAreaBlockKind.InputItem => InputOutputModule.IsInputItemBlockType(blockType),
-                       PlacementAreaBlockKind.Output => InputOutputModule.IsOutputBlockType(blockType),
-                       PlacementAreaBlockKind.BoilerEnergyInput => InputOutputModule.IsInputEnergyBlockType(blockType),
+                        PlacementAreaBlockKind.InputItem => InputOutputModule.IsInputItemBlockType(blockType),
+                        PlacementAreaBlockKind.InputEnergy => InputOutputModule.IsInputEnergyBlockType(blockType),
+                        PlacementAreaBlockKind.Output => InputOutputModule.IsOutputBlockType(blockType),
+                        PlacementAreaBlockKind.DirectItemOutput =>
+                            InputOutputModule.IsOutputBlockType(blockType)
+                            && InputOutputModule.AllowsDirectAreaInteraction(blockType),
+                        PlacementAreaBlockKind.BoilerEnergyInput => InputOutputModule.IsInputEnergyBlockType(blockType),
                        _ => false
                    });
     }
@@ -32117,7 +32145,9 @@ public class InstallationPlacementController : MonoBehaviour
     {
         Normal,
         InputItem,
+        InputEnergy,
         Output,
+        DirectItemOutput,
         BoilerEnergyInput
     }
 
@@ -33209,8 +33239,9 @@ public class InstallationPlacementController : MonoBehaviour
         }
 
         bool isRectGridAreaBlock = IsRectGridAreaBlockType(rectGridBlockType);
-        bool isInputOutputEnergyAreaBlock = InputOutputModuleEnergyAreaController.CoordinateBlocksInstallationPlacement(block.Coordinate)
-            || InputOutputModule.CoordinateIsRuntimeInputEnergyBlock(block.Coordinate);
+        bool isInputOutputEnergyAreaBlock = CoordinateHasInputEnergyAreaBlockForPlacement(
+            block.Coordinate,
+            previewToIgnore);
         bool isInputOutputItemAreaBlock = CoordinateHasInputItemAreaBlockForPlacement(
             block.Coordinate,
             previewToIgnore);
@@ -33218,18 +33249,38 @@ public class InstallationPlacementController : MonoBehaviour
         bool isInputOutputOutputAreaBlock = CoordinateHasOutputAreaBlockForPlacement(
             block.Coordinate,
             previewToIgnore) && !isPumpRuntimeOutputAreaBlock;
+        bool isDirectItemOutputAreaBlock = CoordinateHasDirectItemOutputAreaBlockForPlacement(
+            block.Coordinate,
+            previewToIgnore) && !isPumpRuntimeOutputAreaBlock;
         bool isRuntimePipeAreaBlock = InputOutputModule.CoordinateAllowsRuntimePipeBlock(block.Coordinate);
         bool isFluidStoragePipeNodeBlock = HasPipeAreaFluidStorageAtCoordinate(block.Coordinate);
         bool hasNormalInputOutputAreaBlock = CoordinateHasNormalInputOutputAreaBlockForPlacement(
             block.Coordinate,
             previewToIgnore);
+        bool canConveyorOverlapItemOutputArea = CanConveyorOverlapItemOutputArea(
+            footprintSource,
+            IsBelt2F(footprintSource)
+            && anchorCoordinate.HasValue
+            && block.Coordinate == GetBelt2FBridgeCenterCoordinate(
+                anchorCoordinate.Value,
+                footprintSource,
+                quarterTurns),
+            isDirectItemOutputAreaBlock,
+            isInputOutputEnergyAreaBlock,
+            isInputOutputItemAreaBlock,
+            isPumpRuntimeOutputAreaBlock,
+            isFluidStoragePipeNodeBlock,
+            block.HasInputAreaCenterObjects());
         bool isExistingNormalInputOutputAreaBlock = hasNormalInputOutputAreaBlock
             && !isRuntimePipeAreaBlock
             && !isPumpRuntimeOutputAreaBlock
-            && !isFluidStoragePipeNodeBlock;
+            && !isFluidStoragePipeNodeBlock
+            && !canConveyorOverlapItemOutputArea;
+        bool isBlockingInputOutputOutputAreaBlock = isInputOutputOutputAreaBlock
+            && !canConveyorOverlapItemOutputArea;
         bool isInputOutputAreaBlock = isInputOutputEnergyAreaBlock
             || isInputOutputItemAreaBlock
-            || isInputOutputOutputAreaBlock
+            || isBlockingInputOutputOutputAreaBlock
             || isExistingNormalInputOutputAreaBlock
             || isPumpRuntimeOutputAreaBlock;
         // ItemArea represents every non-pipe item interaction cell: item input, fuel input, and output.
@@ -36014,7 +36065,16 @@ public class InstallationPlacementController : MonoBehaviour
         }
 
         bool isInputOutputAreaBlock = CoordinateHasInputOutputAreaForPlacement(block.Coordinate, null);
-        if (isInputOutputAreaBlock)
+        bool canOverlapItemOutputArea = CanConveyorOverlapItemOutputArea(
+            footprintSource,
+            false,
+            CoordinateHasDirectItemOutputAreaBlockForPlacement(block.Coordinate, null),
+            CoordinateHasInputEnergyAreaBlockForPlacement(block.Coordinate, null),
+            CoordinateHasInputItemAreaBlockForPlacement(block.Coordinate, null),
+            IsPumpOutputCoordinateForPlacement(block.Coordinate),
+            HasPipeAreaFluidStorageAtCoordinate(block.Coordinate),
+            block.HasInputAreaCenterObjects());
+        if (isInputOutputAreaBlock && !canOverlapItemOutputArea)
         {
             return false;
         }
@@ -37021,6 +37081,31 @@ public class InstallationPlacementController : MonoBehaviour
         return !ShouldInputOutputAreasBlockInstallationPlacement(footprintSource)
                && (blockType == InputOutputModule.RectGridBlockType.InputItem
                    || blockType == InputOutputModule.RectGridBlockType.Output);
+    }
+
+    private static bool CanConveyorOverlapItemOutputArea(
+        MapObject footprintSource,
+        bool isBelt2FBridgeCenter,
+        bool isDirectItemOutputAreaBlock,
+        bool isInputEnergyAreaBlock,
+        bool isInputItemAreaBlock,
+        bool isPumpOutputAreaBlock,
+        bool isFluidStoragePipeNodeBlock,
+        bool hasOutputAreaItems)
+    {
+        if (!(footprintSource is ConveyorBelt)
+            || !isDirectItemOutputAreaBlock
+            || isBelt2FBridgeCenter
+            || isInputEnergyAreaBlock
+            || isInputItemAreaBlock
+            || isPumpOutputAreaBlock
+            || isFluidStoragePipeNodeBlock
+            || hasOutputAreaItems)
+        {
+            return false;
+        }
+
+        return true;
     }
 
     private static bool ShouldInputOutputAreasBlockInstallationPlacement(MapObject footprintSource)

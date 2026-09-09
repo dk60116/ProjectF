@@ -22,3 +22,9 @@ electrical networks, or full save restoration. These need in-game verification.
 Also exercises the production drop fallback guards for regular, elevated and splitter
 belts with overlapping item/energy areas, in loaded and saved state. Covers independent
 floor/conveyor virtualization and preserves ordinary ground and machine-area stacks.
+It also checks conveyor placement eligibility on direct item-output areas and verifies
+that machine output uses conveyor lanes, applies backpressure when full, and never falls
+back to the area's center stack. A direct output must be empty before a conveyor can be
+placed over it.
+For elevated belts, manual drops choose the available footprint cell nearest the player
+and skip a lower crossing belt that occupies the bridge center.

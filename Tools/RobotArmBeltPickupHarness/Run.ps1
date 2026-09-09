@@ -23,7 +23,11 @@ $arm = [IO.File]::ReadAllText((Join-Path $repo $armPath))
 if ($arm -notmatch 'Vector3 conveyorSelectionReferenceWorldPosition = GetBodyWorldPosition\(\);') {
     throw 'Conveyor preview does not use the robot-arm body position.'
 }
-if ($arm -notmatch 'TryTakeOneConveyorObject\(\s*GetBodyWorldPosition\(\),\s*referenceWorldPosition,') {
+# The resolver now returns the body reference for either conveyor source; the
+# removal call consumes that reference through the shared three-argument API.
+$resolver = Read-Member $armPath 'private bool TryResolvePickupCandidate('
+if ($arm -notmatch 'TryTakeOneConveyorObject\(\s*referenceWorldPosition,\s*PickupItemFilter,\s*out pickedItemId\)' -or
+    $resolver -notmatch 'if \(pickupSource == RobotArmPickupSource.Conveyor\s*\|\| pickupSource == RobotArmPickupSource.SavedConveyor\)\s*\{\s*referenceWorldPosition = conveyorSelectionReferenceWorldPosition;') {
     throw 'Loaded conveyor removal does not use the robot-arm body position for selection.'
 }
 if ($arm -notmatch 'TryTakeSavedConveyorItem\(pickupCoordinate, GetBodyWorldPosition\(\),') {
