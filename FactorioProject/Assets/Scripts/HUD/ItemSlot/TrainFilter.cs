@@ -1,6 +1,7 @@
 using System.Collections.Generic;
 using TMPro;
 using UnityEngine;
+using UnityEngine.Serialization;
 using UnityEngine.UI;
 
 public class TrainFilter : MonoBehaviour
@@ -35,10 +36,22 @@ public class TrainFilter : MonoBehaviour
     [SerializeField]
     private TMP_Dropdown targetA, targetB;
     [SerializeField]
-    private TMP_Dropdown fuel, freight;
+    private Image targetAStationColor, targetBStationColor;
+    [SerializeField]
+    [FormerlySerializedAs("fuel")]
+    private TMP_Dropdown targetAFuel;
+    [SerializeField]
+    [FormerlySerializedAs("freight")]
+    private TMP_Dropdown targetAFreight;
+    [SerializeField]
+    private TMP_Dropdown targetBFuel;
+    [SerializeField]
+    private TMP_Dropdown targetBFreight;
 
     private SteamTrain boundTrain;
     private readonly List<string> stationNameScratch = new List<string>(8);
+    private readonly Dictionary<string, Color32> stationColorByNameScratch =
+        new Dictionary<string, Color32>(System.StringComparer.OrdinalIgnoreCase);
     private readonly List<TMP_Dropdown.OptionData> stationOptionScratch = new List<TMP_Dropdown.OptionData>(8);
     private readonly List<TMP_Dropdown.OptionData> filterOptionScratch = new List<TMP_Dropdown.OptionData>(4);
 
@@ -166,11 +179,15 @@ public class TrainFilter : MonoBehaviour
     private void RefreshStationTargetDropdowns()
     {
         stationNameScratch.Clear();
+        stationColorByNameScratch.Clear();
 
         TerrainGenerator terrain = TerrainGenerator.ResolveActive();
         if (terrain != null && boundTrain != null)
         {
-            terrain.CollectTrainStationNamesOnSameRailLine(boundTrain, stationNameScratch);
+            terrain.CollectTrainStationNamesOnSameRailLine(
+                boundTrain,
+                stationNameScratch,
+                stationColorByNameScratch);
         }
 
         if (stationNameScratch.Count <= 0
@@ -181,6 +198,31 @@ public class TrainFilter : MonoBehaviour
 
         RefreshStationTargetDropdown(targetA);
         RefreshStationTargetDropdown(targetB);
+        RefreshStationTargetColors();
+    }
+
+    private void RefreshStationTargetColors()
+    {
+        RefreshStationTargetColor(targetA, targetAStationColor);
+        RefreshStationTargetColor(targetB, targetBStationColor);
+    }
+
+    private void RefreshStationTargetColor(TMP_Dropdown dropdown, Image colorImage)
+    {
+        if (colorImage == null)
+        {
+            return;
+        }
+
+        string stationName = NormalizeStationSelection(ResolveSelectedOptionText(dropdown));
+        Color32 stationColor = default;
+        bool hasStationColor = !string.IsNullOrWhiteSpace(stationName)
+                               && stationColorByNameScratch.TryGetValue(stationName, out stationColor);
+        colorImage.enabled = hasStationColor;
+        if (hasStationColor)
+        {
+            colorImage.color = stationColor;
+        }
     }
 
     private void RefreshStationTargetDropdown(TMP_Dropdown dropdown)
@@ -218,8 +260,10 @@ public class TrainFilter : MonoBehaviour
 
     private void RefreshFilterDropdowns()
     {
-        RefreshFixedOptionDropdown(fuel, FuelOptions);
-        RefreshFixedOptionDropdown(freight, FreightOptions);
+        RefreshFixedOptionDropdown(targetAFuel, FuelOptions);
+        RefreshFixedOptionDropdown(targetAFreight, FreightOptions);
+        RefreshFixedOptionDropdown(targetBFuel, FuelOptions);
+        RefreshFixedOptionDropdown(targetBFreight, FreightOptions);
     }
 
     private void RefreshFixedOptionDropdown(
@@ -260,8 +304,10 @@ public class TrainFilter : MonoBehaviour
         BindToggleListener(autoDriaveToggle);
         BindDropdownListener(targetA);
         BindDropdownListener(targetB);
-        BindDropdownListener(fuel);
-        BindDropdownListener(freight);
+        BindDropdownListener(targetAFuel);
+        BindDropdownListener(targetAFreight);
+        BindDropdownListener(targetBFuel);
+        BindDropdownListener(targetBFreight);
     }
 
     private void UnbindDropdownListeners()
@@ -269,8 +315,10 @@ public class TrainFilter : MonoBehaviour
         UnbindToggleListener(autoDriaveToggle);
         UnbindDropdownListener(targetA);
         UnbindDropdownListener(targetB);
-        UnbindDropdownListener(fuel);
-        UnbindDropdownListener(freight);
+        UnbindDropdownListener(targetAFuel);
+        UnbindDropdownListener(targetAFreight);
+        UnbindDropdownListener(targetBFuel);
+        UnbindDropdownListener(targetBFreight);
     }
 
     private void BindToggleListener(Toggle toggle)
@@ -326,6 +374,7 @@ public class TrainFilter : MonoBehaviour
     private void HandleDropdownChanged(int _)
     {
         ApplyCurrentSettingsToBoundTrain();
+        RefreshStationTargetColors();
         RefreshAutoDriveToggle();
         CacheCurrentRouteSelection();
         MarkRouteSelectionDirty();
@@ -468,14 +517,24 @@ public class TrainFilter : MonoBehaviour
     {
         if (boundTrain != null)
         {
-            if (dropdown == fuel)
+            if (dropdown == targetAFuel)
             {
-                return boundTrain.AutoDriveFuelFilterName;
+                return boundTrain.AutoDriveTargetAFuelFilterName;
             }
 
-            if (dropdown == freight)
+            if (dropdown == targetAFreight)
             {
-                return boundTrain.AutoDriveFreightFilterName;
+                return boundTrain.AutoDriveTargetAFreightFilterName;
+            }
+
+            if (dropdown == targetBFuel)
+            {
+                return boundTrain.AutoDriveTargetBFuelFilterName;
+            }
+
+            if (dropdown == targetBFreight)
+            {
+                return boundTrain.AutoDriveTargetBFreightFilterName;
             }
         }
 
@@ -497,8 +556,10 @@ public class TrainFilter : MonoBehaviour
             enabled,
             targetAStationName,
             targetBStationName,
-            ResolveSelectedOptionText(fuel),
-            ResolveSelectedOptionText(freight));
+            ResolveSelectedOptionText(targetAFuel),
+            ResolveSelectedOptionText(targetAFreight),
+            ResolveSelectedOptionText(targetBFuel),
+            ResolveSelectedOptionText(targetBFreight));
 
         if (autoDriaveToggle != null)
         {

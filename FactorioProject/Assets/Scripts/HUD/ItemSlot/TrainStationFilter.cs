@@ -1,4 +1,5 @@
 using ProjectF.Attributes;
+using System.Collections.Generic;
 using TMPro;
 using UnityEngine;
 using UnityEngine.UI;
@@ -14,19 +15,28 @@ public class TrainStationFilter : MonoBehaviour
     private TMP_InputField nameInputField;
     [SerializeField]
     private Image colorSelect;
+    [SerializeField]
+    private RectTransform colorPanel;
 
     private Trainstation boundStation;
+    private Button colorSelectButton;
+    private readonly List<Button> colorOptionButtons = new List<Button>();
 
     private void Awake()
     {
         ResolveSerializedReferences();
         BindInputField();
+        BindColorButton();
+        BuildColorPanel();
+        SetColorPanelVisible(false);
     }
 
     private void OnEnable()
     {
         ResolveSerializedReferences();
         BindInputField();
+        BindColorButton();
+        BuildColorPanel();
         Refresh();
     }
 
@@ -34,6 +44,8 @@ public class TrainStationFilter : MonoBehaviour
     {
         CommitNameInput();
         UnbindInputField();
+        UnbindColorButton();
+        SetColorPanelVisible(false);
     }
 
     public void Bind(Trainstation station)
@@ -45,6 +57,7 @@ public class TrainStationFilter : MonoBehaviour
         }
 
         boundStation = station;
+        SetColorPanelVisible(false);
         Refresh();
     }
 
@@ -58,7 +71,7 @@ public class TrainStationFilter : MonoBehaviour
     {
         ResolveSerializedReferences();
         stationName = ResolveDisplayedStationName();
-        stationColor = Color.white;
+        stationColor = ResolveDisplayedStationColor();
 
         if (nameInputField != null)
         {
@@ -69,6 +82,21 @@ public class TrainStationFilter : MonoBehaviour
         {
             colorSelect.color = stationColor;
         }
+    }
+
+    private Color ResolveDisplayedStationColor()
+    {
+        if (boundStation == null)
+        {
+            return Color.white;
+        }
+
+        if (!boundStation.HasAssignedStationColor)
+        {
+            TerrainGenerator.ResolveActive()?.SaveRuntimeInstallationState(boundStation);
+        }
+
+        return boundStation.StationColor;
     }
 
     private string ResolveDisplayedStationName()
@@ -92,6 +120,19 @@ public class TrainStationFilter : MonoBehaviour
         {
             nameInputField = GetComponentInChildren<TMP_InputField>(true);
         }
+
+        if (colorSelect == null)
+        {
+            Transform colorTransform = transform.Find("Station Color/Color");
+            colorSelect = colorTransform != null ? colorTransform.GetComponent<Image>() : null;
+        }
+
+        if (colorPanel == null)
+        {
+            colorPanel = transform.Find("Color Panel") as RectTransform;
+        }
+
+        colorSelectButton = colorSelect != null ? colorSelect.GetComponent<Button>() : null;
     }
 
     private void BindInputField()
@@ -111,6 +152,80 @@ public class TrainStationFilter : MonoBehaviour
         if (nameInputField != null)
         {
             nameInputField.onEndEdit.RemoveListener(HandleNameInputEndEdit);
+        }
+    }
+
+    private void BindColorButton()
+    {
+        ResolveSerializedReferences();
+        if (colorSelectButton == null)
+        {
+            return;
+        }
+
+        colorSelectButton.onClick.RemoveListener(HandleColorSelectClicked);
+        colorSelectButton.onClick.AddListener(HandleColorSelectClicked);
+    }
+
+    private void UnbindColorButton()
+    {
+        if (colorSelectButton != null)
+        {
+            colorSelectButton.onClick.RemoveListener(HandleColorSelectClicked);
+        }
+    }
+
+    private void BuildColorPanel()
+    {
+        if (colorPanel == null || colorOptionButtons.Count > 0)
+        {
+            return;
+        }
+
+        for (int i = 0; i < Trainstation.StationColorOptionCount; i++)
+        {
+            Color32 optionColor = Trainstation.GetStationColorOption(i);
+            GameObject optionObject = new GameObject(
+                $"Color Option {i + 1}",
+                typeof(RectTransform),
+                typeof(CanvasRenderer),
+                typeof(Image),
+                typeof(Button));
+            optionObject.layer = colorPanel.gameObject.layer;
+            optionObject.transform.SetParent(colorPanel, false);
+
+            Image optionImage = optionObject.GetComponent<Image>();
+            optionImage.color = optionColor;
+
+            Button optionButton = optionObject.GetComponent<Button>();
+            optionButton.targetGraphic = optionImage;
+            optionButton.onClick.AddListener(() => SelectStationColor(optionColor));
+            colorOptionButtons.Add(optionButton);
+        }
+    }
+
+    private void HandleColorSelectClicked()
+    {
+        SetColorPanelVisible(colorPanel != null && !colorPanel.gameObject.activeSelf);
+    }
+
+    private void SelectStationColor(Color32 color)
+    {
+        if (boundStation == null)
+        {
+            return;
+        }
+
+        boundStation.SetStationColor(color);
+        SetColorPanelVisible(false);
+        Refresh();
+    }
+
+    private void SetColorPanelVisible(bool visible)
+    {
+        if (colorPanel != null && colorPanel.gameObject.activeSelf != visible)
+        {
+            colorPanel.gameObject.SetActive(visible);
         }
     }
 

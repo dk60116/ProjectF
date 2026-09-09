@@ -1453,7 +1453,7 @@ public partial class TerrainGenerator : MonoBehaviour
 
         if (installationObject is Trainstation trainStation)
         {
-            EnsureTrainStationNameAssigned(trainStation);
+            EnsureTrainStationIdentityAssigned(trainStation);
         }
 
         resourceStateStore.SaveInstallation(installationObject);

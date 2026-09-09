@@ -57,6 +57,17 @@ public partial class Block
         if (transportOutputRun != null && (lane < 0 || lane == transportOutputRun.OutletLane)) transportOutputRun.NotifyOutputChanged();
     }
 
+    internal void EnsureConveyorTransportInteractionBoundary()
+    {
+        if (!IsConveyorStackingEnabled() || conveyorTransportInteractionBoundary)
+        {
+            return;
+        }
+
+        conveyorTransportInteractionBoundary = true;
+        ReleaseConveyorTransport();
+    }
+
     internal double GetTransportInputReadyTime(int lane)
     {
         if (!HasConveyorItemAtLane(lane)) return double.PositiveInfinity;

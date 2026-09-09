@@ -93,6 +93,7 @@ public partial class PlayerHUD : BagSlot
     [SerializeField]
     private FilterSelectUI itemFilterUI;
     private int itemFilterUiOpenedFrame = -1;
+    private MapObject itemFilterButtonTarget;
 
     [SerializeField]
     private TrainStationFilter trainStationFilter;
@@ -2235,6 +2236,12 @@ public partial class PlayerHUD : BagSlot
             return false;
         }
 
+        if (IsLoggingMachineFilterTarget(mapObject)
+            || TryResolveTrainStation(mapObject, out _))
+        {
+            return false;
+        }
+
         if (mapObject is IPlayerMapObjectInteraction playerInteraction)
         {
             if (!playerInteraction.CanPlayerInteract(currentPlayer))
@@ -2997,48 +3004,23 @@ public partial class PlayerHUD : BagSlot
             return;
         }
 
-        bool isVisible = false;
-        if (GameManager.Instance != null
-            && GameManager.Instance.Player != null
-            && !GameManager.Instance.PlayerInteractionLocked)
-        {
-            if (TryGetFocusedItemFilterMapObject(out _))
-            {
-                isVisible = true;
-            }
-
-            if (!isVisible && TryGetFocusedSteamTrain(out _))
-            {
-                isVisible = true;
-            }
-        }
-
+        bool canInteract = GameManager.Instance != null
+                           && GameManager.Instance.Player != null
+                           && !GameManager.Instance.PlayerInteractionLocked;
+        MapObject clickedTarget = null;
+        bool isVisible = canInteract
+                         && TryGetClickedFilterTarget(out clickedTarget);
+        itemFilterButtonTarget = isVisible ? clickedTarget : null;
         if (ItemFilterButton.gameObject.activeSelf != isVisible)
         {
             ItemFilterButton.gameObject.SetActive(isVisible);
         }
 
-        if (!isVisible
-            && IsItemFilterButtonPanelActive()
-            && !IsLoggingMachineInteractionFilterActive())
+        if (!isVisible && IsFilterPanelActive())
         {
-            HideItemFilterButtonPanelsImmediate();
+            HideFilterPanelsImmediate();
             itemFilterUiOpenedFrame = -1;
         }
-    }
-
-    private bool IsLoggingMachineInteractionFilterActive()
-    {
-        if (itemFilterUI == null
-            || !itemFilterUI.gameObject.activeSelf
-            || !itemFilterUI.TryGetBoundTarget(out MapObject boundTarget)
-            || !(boundTarget is LoggingMachine boundLoggingMachine)
-            || !TryResolveLoggingMachine(currentInteractionMapObject, out LoggingMachine focusedLoggingMachine))
-        {
-            return false;
-        }
-
-        return boundLoggingMachine == focusedLoggingMachine;
     }
 
     private static Sprite ResolveInteractionIcon(BoxObject boxObject)
@@ -3395,16 +3377,6 @@ public partial class PlayerHUD : BagSlot
         }
     }
 
-    private bool IsItemFilterButtonPanelActive()
-    {
-        if (itemFilterUI != null && itemFilterUI.gameObject.activeSelf)
-        {
-            return true;
-        }
-
-        return trainFilter != null && trainFilter.gameObject.activeSelf;
-    }
-
     private void HideItemFilterButtonPanelsImmediate()
     {
         if (itemFilterUI != null && itemFilterUI.gameObject.activeSelf)
@@ -3633,21 +3605,6 @@ public partial class PlayerHUD : BagSlot
 
         if (currentInteractionMapObject != null)
         {
-            if (TryResolveLoggingMachine(currentInteractionMapObject, out LoggingMachine loggingMachine))
-            {
-                PlayerController playerController = currentPlayer != null
-                    ? currentPlayer.GetComponent<PlayerController>()
-                    : null;
-                if (playerController != null
-                    && playerController.IsWithinInteractionRange(loggingMachine))
-                {
-                    ShowLoggingMachineFilter(loggingMachine);
-                }
-
-                UpdateInteractionButtonState();
-                return;
-            }
-
             if (currentInteractionMapObject is IPlayerMapObjectInteraction playerInteraction)
             {
                 PlayerController playerController = currentPlayer != null
@@ -3659,13 +3616,6 @@ public partial class PlayerHUD : BagSlot
                     playerInteraction.TryPlayerInteract(currentPlayer);
                 }
 
-                UpdateInteractionButtonState();
-                return;
-            }
-
-            if (TryResolveTrainStation(currentInteractionMapObject, out Trainstation trainStation))
-            {
-                ShowTrainStationFilter(trainStation);
                 UpdateInteractionButtonState();
                 return;
             }
@@ -3704,9 +3654,9 @@ public partial class PlayerHUD : BagSlot
         }
     }
 
-    private void ShowLoggingMachineFilter(LoggingMachine loggingMachine)
+    private void ShowItemFilter(MapObject target)
     {
-        if (loggingMachine == null)
+        if (!IsUsableFilterButtonTarget(target))
         {
             return;
         }
@@ -3719,7 +3669,7 @@ public partial class PlayerHUD : BagSlot
 
         if (itemFilterUI.gameObject.activeSelf
             && itemFilterUI.TryGetBoundTarget(out MapObject boundTarget)
-            && boundTarget == loggingMachine)
+            && boundTarget == target)
         {
             itemFilterUI.gameObject.SetActive(false);
             itemFilterUiOpenedFrame = -1;
@@ -3727,7 +3677,7 @@ public partial class PlayerHUD : BagSlot
         }
 
         HideFilterPanelsImmediate();
-        itemFilterUI.Bind(loggingMachine);
+        itemFilterUI.Bind(target);
         itemFilterUI.gameObject.SetActive(true);
         itemFilterUiOpenedFrame = Time.frameCount;
     }
@@ -3754,7 +3704,7 @@ public partial class PlayerHUD : BagSlot
             return;
         }
 
-        HideItemFilterButtonPanelsImmediate();
+        HideFilterPanelsImmediate();
         trainStationFilter.Bind(trainStation);
         trainStationFilter.gameObject.SetActive(true);
         itemFilterUiOpenedFrame = Time.frameCount;
@@ -3773,42 +3723,20 @@ public partial class PlayerHUD : BagSlot
             return false;
         }
 
-        trainStation = mapObject.GetComponent<Trainstation>();
-        if (trainStation == null)
-        {
-            trainStation = mapObject.GetComponentInChildren<Trainstation>(true);
-        }
+        trainStation = mapObject.GetComponentInParent<Trainstation>();
 
         return trainStation != null && trainStation.gameObject.activeInHierarchy;
     }
 
-    private static bool TryResolveLoggingMachine(
-        MapObject mapObject,
-        out LoggingMachine loggingMachine)
+    private static bool IsLoggingMachineFilterTarget(MapObject mapObject)
     {
-        loggingMachine = mapObject as LoggingMachine;
-        if (loggingMachine != null)
+        if (mapObject is LoggingMachine)
         {
-            return loggingMachine.gameObject.activeInHierarchy;
+            return true;
         }
 
-        if (mapObject == null)
-        {
-            return false;
-        }
-
-        loggingMachine = mapObject.GetComponent<LoggingMachine>();
-        if (loggingMachine == null)
-        {
-            loggingMachine = mapObject.GetComponentInParent<LoggingMachine>();
-        }
-
-        if (loggingMachine == null)
-        {
-            loggingMachine = mapObject.GetComponentInChildren<LoggingMachine>(true);
-        }
-
-        return loggingMachine != null && loggingMachine.gameObject.activeInHierarchy;
+        return mapObject != null
+               && mapObject.GetComponentInParent<LoggingMachine>() != null;
     }
 
     private void HandleInteractionButtonKeyboardInput()
@@ -3871,99 +3799,120 @@ public partial class PlayerHUD : BagSlot
 
     private void HandleItemFilterButtonClicked()
     {
-        bool trainFilterActive = trainFilter != null && trainFilter.gameObject.activeSelf;
-        if (trainFilterActive)
+        MapObject target = itemFilterButtonTarget;
+        if (!IsUsableFilterButtonTarget(target)
+            && !TryGetClickedFilterTarget(out target))
         {
-            HideItemFilterButtonPanelsImmediate();
+            return;
+        }
+
+        itemFilterButtonTarget = target;
+        if (TryResolveTrainStation(target, out Trainstation trainStation))
+        {
+            ShowTrainStationFilter(trainStation);
+            return;
+        }
+
+        if (TryResolveSteamTrain(target, out SteamTrain steamTrain))
+        {
+            ShowTrainFilter(steamTrain);
+            return;
+        }
+
+        ShowItemFilter(target);
+    }
+
+    private void ShowTrainFilter(SteamTrain steamTrain)
+    {
+        if (steamTrain == null)
+        {
+            return;
+        }
+
+        ResolveTrainFilter();
+        if (trainFilter == null)
+        {
+            return;
+        }
+
+        if (trainFilter.gameObject.activeSelf
+            && trainFilter.TryGetBoundTarget(out SteamTrain boundTrain)
+            && boundTrain == steamTrain)
+        {
+            trainFilter.gameObject.SetActive(false);
             itemFilterUiOpenedFrame = -1;
             return;
         }
 
-        if (TryGetFocusedSteamTrain(out SteamTrain steamTrain))
-        {
-            if (trainFilter == null)
-            {
-                return;
-            }
-
-            if (itemFilterUI != null && itemFilterUI.gameObject.activeSelf)
-            {
-                itemFilterUI.gameObject.SetActive(false);
-            }
-
-            trainFilter.Bind(steamTrain);
-            trainFilter.gameObject.SetActive(true);
-            itemFilterUiOpenedFrame = Time.frameCount;
-            return;
-        }
-
-        if (itemFilterUI == null)
-        {
-            return;
-        }
-
-        bool shouldOpen = !itemFilterUI.gameObject.activeSelf;
-        if (shouldOpen)
-        {
-            if (!TryGetFocusedItemFilterMapObject(out MapObject focusedMapObject))
-            {
-                return;
-            }
-
-            itemFilterUI.Bind(focusedMapObject);
-            if (trainFilter != null && trainFilter.gameObject.activeSelf)
-            {
-                HideItemFilterButtonPanelsImmediate();
-            }
-        }
-
-        itemFilterUI.gameObject.SetActive(shouldOpen);
-        itemFilterUiOpenedFrame = shouldOpen ? Time.frameCount : -1;
-    }
-
-    private bool TryGetFocusedSteamTrain(out SteamTrain steamTrain)
-    {
-        steamTrain = null;
-        PlayerController playerController = ResolvePlayerController();
-        if (playerController == null
-            || !playerController.TryGetFocusedMapObject(out MapObject focusedMapObject))
-        {
-            return false;
-        }
-
-        steamTrain = focusedMapObject as SteamTrain;
-        if (steamTrain == null)
-        {
-            steamTrain = focusedMapObject.GetComponent<SteamTrain>();
-        }
-
-        if (steamTrain == null)
-        {
-            steamTrain = focusedMapObject.GetComponentInChildren<SteamTrain>(true);
-        }
-
-        return steamTrain != null && steamTrain.gameObject.activeInHierarchy;
+        HideFilterPanelsImmediate();
+        trainFilter.Bind(steamTrain);
+        trainFilter.gameObject.SetActive(true);
+        itemFilterUiOpenedFrame = Time.frameCount;
     }
 
     private void UpdateTrainRouteFocusState()
     {
         TrainFilter.SetFocusedRouteTrain(
-            TryGetFocusedSteamTrain(out SteamTrain steamTrain)
+            TryGetClickedSteamTrain(out SteamTrain steamTrain)
                 ? steamTrain
                 : null);
     }
 
-    private bool TryGetFocusedItemFilterMapObject(out MapObject focusedMapObject)
+    private bool TryGetClickedSteamTrain(out SteamTrain steamTrain)
     {
-        focusedMapObject = null;
+        steamTrain = null;
+        return TryGetClickedObjectInfoFocusedMapObject(out MapObject clickedMapObject)
+               && TryResolveSteamTrain(clickedMapObject, out steamTrain);
+    }
+
+    private bool TryGetClickedFilterTarget(out MapObject filterTarget)
+    {
+        filterTarget = null;
         PlayerController playerController = ResolvePlayerController();
-        if (playerController != null
-            && playerController.TryGetFocusedItemFilterMapObject(out focusedMapObject))
+        if (playerController == null
+            || !TryGetClickedObjectInfoFocusedMapObject(out MapObject clickedMapObject))
         {
+            return false;
+        }
+
+        if (TryResolveTrainStation(clickedMapObject, out Trainstation trainStation))
+        {
+            filterTarget = trainStation;
             return true;
         }
 
-        return false;
+        if (TryResolveSteamTrain(clickedMapObject, out SteamTrain steamTrain))
+        {
+            filterTarget = steamTrain;
+            return true;
+        }
+
+        return playerController.TryResolveItemFilterTarget(clickedMapObject, out filterTarget);
+    }
+
+    private static bool TryResolveSteamTrain(MapObject mapObject, out SteamTrain steamTrain)
+    {
+        steamTrain = mapObject as SteamTrain;
+        if (steamTrain != null)
+        {
+            return steamTrain.gameObject.activeInHierarchy;
+        }
+
+        if (mapObject == null)
+        {
+            return false;
+        }
+
+        steamTrain = mapObject.GetComponentInParent<SteamTrain>();
+
+        return steamTrain != null && steamTrain.gameObject.activeInHierarchy;
+    }
+
+    private static bool IsUsableFilterButtonTarget(MapObject target)
+    {
+        return target != null
+               && target.gameObject.activeInHierarchy
+               && target.AllowsFocus;
     }
 
     private bool TryGetFocusedMapObject(out MapObject focusedMapObject)

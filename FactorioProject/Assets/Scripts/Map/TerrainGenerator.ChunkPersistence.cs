@@ -763,8 +763,10 @@ public partial class TerrainGenerator : MonoBehaviour
             {
                 if (restoredInstallation is Trainstation restoredTrainStation)
                 {
-                    EnsureTrainStationNameAssigned(restoredTrainStation);
+                    EnsureTrainStationIdentityAssigned(restoredTrainStation);
                     savedState.stationName = restoredTrainStation.StoredStationName;
+                    savedState.stationColor = restoredTrainStation.StoredStationColor;
+                    savedState.stationColorAssigned = restoredTrainStation.HasAssignedStationColor;
                 }
 
                 resourceStateStore.RegisterLiveInstallation(restoredInstallation, savedState);
@@ -1043,8 +1045,10 @@ public partial class TerrainGenerator : MonoBehaviour
                 savedState.steamTrainAutoDriveEnabled,
                 savedState.steamTrainAutoDriveTargetAStationName,
                 savedState.steamTrainAutoDriveTargetBStationName,
-                savedState.steamTrainAutoDriveFuelFilter,
-                savedState.steamTrainAutoDriveFreightFilter,
+                savedState.steamTrainAutoDriveTargetAFuelFilter,
+                savedState.steamTrainAutoDriveTargetAFreightFilter,
+                savedState.steamTrainAutoDriveTargetBFuelFilter,
+                savedState.steamTrainAutoDriveTargetBFreightFilter,
                 savedState.steamTrainAutoDriveRouteTargetStationName,
                 savedState.steamTrainAutoDriveLastArrivedStationName,
                 savedState.steamTrainAutoDriveStationWaitTimer);
@@ -1053,6 +1057,7 @@ public partial class TerrainGenerator : MonoBehaviour
         if (restoredInstallation is Trainstation restoredTrainStation)
         {
             restoredTrainStation.ApplyStationName(savedState.stationName);
+            restoredTrainStation.ApplyStationColor(savedState.stationColor, savedState.stationColorAssigned);
         }
 
         if (savedState.robotArmState != null && restoredInstallation is RobotArm robotArm)

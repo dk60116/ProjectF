@@ -328,6 +328,7 @@ public partial class TerrainGenerator : MonoBehaviour
             return;
         }
 
+        InputOutputModule.WakeRuntimeOutputModulesAtCoordinate(destinationBlock.Coordinate);
         destinationBlock.WakeConveyorVacatedLanePredecessor(destinationLaneIndex);
         destinationBlock.WakeSplitterInputs();
         ConveyorLaneCoordinateKey destinationKey = new ConveyorLaneCoordinateKey(destinationBlock.Coordinate, destinationLaneIndex);

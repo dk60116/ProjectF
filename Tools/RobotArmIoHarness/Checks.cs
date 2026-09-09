@@ -4,7 +4,30 @@ using System.IO;
 using System.Text.RegularExpressions;
 using UnityEngine;
 
-public class MapObject { public Vector2Int PlacementCenterCell; }
+public class FakeGameObject { public bool activeInHierarchy = true; }
+public class MapObject
+{
+    public Vector2Int PlacementCenterCell;
+    public readonly FakeGameObject gameObject = new();
+}
+public class Vehicle : MapObject
+{
+    public float CurrentVehicleSignedSpeed;
+    public float CurrentVehicleSpeed => Mathf.Abs(CurrentVehicleSignedSpeed);
+}
+public partial class Train : Vehicle
+{
+    private readonly Dictionary<Train, bool> connectedTrainEnds = new();
+    private readonly Queue<Train> connectionActionGroupQueue = new();
+    private readonly HashSet<Train> connectionActionGroupVisited = new();
+    public IReadOnlyCollection<Train> ConnectedTrains => connectedTrainEnds.Keys;
+    public static void Link(Train first, Train second)
+    {
+        first.connectedTrainEnds[second] = true;
+        second.connectedTrainEnds[first] = true;
+    }
+}
+public sealed class FreightCar : Train { }
 public class ConveyorBelt : MapObject { }
 public class ConvayorBelt2F : ConveyorBelt
 {
@@ -88,6 +111,7 @@ public partial class Block
     public enum BlockType { Ground, Water }
     public MapObject MapObject;
     public bool ConveyorAccepts = true, CenterAccepts = true;
+    public int ConveyorInteractionBoundaryRequests;
     public int AvailableCapacity = 1;
     public int ConveyorAdds, CenterAdds;
     public Vector3 PlacementReference, StartPosition;
@@ -111,6 +135,7 @@ public partial class Block
     private void ReleaseFloorObject(PortableObject item) { }
     private void NotifyRuntimeItemStackChanged() { }
     public int GetAvailableConveyorCapacity() => AvailableCapacity;
+    public void EnsureConveyorTransportInteractionBoundary() => ConveyorInteractionBoundaryRequests++;
     public bool CanAddConveyorObjects(int count) => ConveyorAccepts;
     public bool CanAddInputAreaCenterObjects(int count, int itemId) => CenterAccepts;
     public bool TryAddConveyorObjectAnimatedAtPlacement(int itemId, Vector3 placementReference, Vector3 start,
@@ -146,6 +171,16 @@ public partial class RobotArm : InputOutputModule
     private readonly List<Vector2Int> registeredWakeCoordinates = new();
     private static readonly Dictionary<Vector2Int, List<RobotArm>> WakeRobotArmsByCoordinate = new();
     public void RefreshWake() => RefreshRegisteredWakeCoordinates();
+    public int WakeCount;
+    private void WakeRuntimeSleep() { WakeCount++; }
+    private RobotArmState state = RobotArmState.WaitingForDrop;
+    public FreightCar DropTrain;
+    public bool DropHasRoom;
+    public bool SleepsWithCargo() => ShouldRuntimeSleepWithHeldItem();
+    private TerrainGenerator ResolveTerrainGenerator() => TerrainGenerator.Active;
+    private bool TryGetFreightCarObject(Block block, Vector2Int coordinate, out FreightCar car)
+    { car = DropTrain; return car != null; }
+    private bool CanPlaceHeldItem() => DropHasRoom && (DropTrain == null || !DropTrain.IsConsistMoving());
     public bool WakesAt(Vector2Int point) => registeredWakeCoordinates.Contains(point);
     private bool TryGetPlacementRuntime(out Vector2Int anchor, out int rotation) { anchor = Anchor; rotation = Rotation; return Placed; }
     public bool Coordinates(out Vector2Int input, out Vector2Int output)
@@ -162,6 +197,7 @@ public static partial class Checks
     private static void Require(bool ok, string message) { if (!ok) throw new Exception(message); count++; }
     public static void Main(string[] args)
     {
+        CheckMovingTrainTransferGuard();
         CheckConveyorPickup();
         CheckConveyorDropFallback();
         CheckMachineOutputToConveyor();
@@ -173,6 +209,15 @@ public static partial class Checks
                 robotArmSource,
                 @"if \(hasLoadedPickupBlock && boxObject == null\)\s*\{\s*int inputAreaItemId"),
             "box storage must not fall through to the unrestricted input-area pickup path");
+        Require(Regex.Matches(robotArmSource, @"\.IsConsistMoving\(\)").Count >= 4,
+            "robot arm freight pickup, final take, capacity check and final placement must all reject a moving consist");
+        string conveyorRuntimeSource = File.ReadAllText(Path.Combine(
+            args[0],
+            "FactorioProject/Assets/Scripts/Map/TerrainGenerator.Conveyors.cs"));
+        Require(Regex.IsMatch(
+                conveyorRuntimeSource,
+                @"NotifyConveyorLaneVacated\(Block destinationBlock,[\s\S]*?WakeRuntimeOutputModulesAtCoordinate\(destinationBlock\.Coordinate\)"),
+            "a vacated conveyor lane must wake sleeping production modules registered on that coordinate");
         string prefab = File.ReadAllText(Path.Combine(
             args[0],
             "FactorioProject/Assets/MapObject/InputOutputModule/Robot arm/Robot arm.prefab"));
@@ -228,6 +273,29 @@ public static partial class Checks
         Require(!InstallationPlacementController.ConveyorCanOverlapOutput(
                 new ConvayorBelt2F(), true, true, false, false, false, false, false),
             "the raised bridge center must not masquerade as a belt output surface");
+
+        foreach (MapObject conveyor in new MapObject[] { new ConveyorBelt(), new ConvayorBelt2F(), new Spliterbelt() })
+        {
+            Require(InstallationPlacementController.OutputCanOverlapConveyor(
+                    InputOutputModule.RectGridBlockType.Output, conveyor, false),
+                "a direct item output area must be placeable over every conveyor type");
+            Require(InstallationPlacementController.OutputCanOverlapConveyor(
+                    InputOutputModule.RectGridBlockType.DoublePipeOutputItem, conveyor, false),
+                "a combined direct-output cell must be placeable over a conveyor");
+            Require(!InstallationPlacementController.OutputCanOverlapConveyor(
+                    InputOutputModule.RectGridBlockType.PipeOutputItem, conveyor, false),
+                "a pipe-only output area must not overlap a conveyor");
+            Require(!InstallationPlacementController.OutputCanOverlapConveyor(
+                    InputOutputModule.RectGridBlockType.InputItem, conveyor, false),
+                "an item input area must not use the output-over-conveyor exception");
+        }
+        Require(!InstallationPlacementController.OutputCanOverlapConveyor(
+                InputOutputModule.RectGridBlockType.Output, new InputOutputModule(), false),
+            "a direct item output area must not overlap a non-conveyor installation");
+        Require(!InstallationPlacementController.OutputCanOverlapConveyor(
+                InputOutputModule.RectGridBlockType.Output, new ConvayorBelt2F(), true),
+            "an output area must not treat the raised 2F bridge center as a belt surface");
+
         Require(!InstallationPlacementController.CapturesInteractionAreaItemsInEdit(
                 new ItemDefinition { keepIoAreaItemsInPlaceWhileEditing = true }),
             "the ItemData edit option must leave pickup and drop area items in place");
@@ -263,7 +331,31 @@ public static partial class Checks
         arm.RuntimeOccupiedCoordinates.Add(arm.Anchor); arm.RefreshWake();
         Require(arm.WakesAt(extendedInput) && arm.WakesAt(extendedOutput)
             && arm.WakesAt(extendedInput + Vector2Int.left), "distant standard IO ports and adjacent belt cells must wake sleeping arms");
+        int wakeCount = arm.WakeCount;
+        RobotArm.WakeAroundCoordinate(extendedInput);
+        RobotArm.WakeAroundCoordinate(extendedOutput);
+        RobotArm.WakeAroundCoordinate(extendedInput + Vector2Int.left);
+        RobotArm.WakeAroundCoordinate(extendedOutput);
+        Require(arm.WakeCount == wakeCount + 4,
+            "distant port notifications must actually wake the arm repeatedly without deleting its registration");
+        RobotArm.WakeAroundCoordinate(new Vector2Int(500, 500));
+        Require(arm.WakeCount == wakeCount + 4, "unrelated coordinates must not wake the arm");
+
+        var arrivalTrain = new FreightCar { CurrentVehicleSignedSpeed = 0.5f };
+        arm.DropTrain = arrivalTrain;
+        arm.DropHasRoom = true;
+        TerrainGenerator.Active.Blocks[extendedOutput] = new Block();
+        Require(!arm.SleepsWithCargo(),
+            "waiting for a moving train must keep retrying because stopping in the same cell has no grid wake event");
+        arrivalTrain.CurrentVehicleSignedSpeed = 0f;
+        Require(!arm.SleepsWithCargo(), "a stopped train with room must allow transfer to resume");
+        arm.DropHasRoom = false;
+        Require(arm.SleepsWithCargo(), "a full stopped train may sleep until cargo removal wakes the arm");
+        arm.DropTrain = null;
+        Require(arm.SleepsWithCargo(), "static blocked output must retain event-driven sleep");
         arm.isActiveAndEnabled = false; arm.RefreshWake();
+        RobotArm.WakeAroundCoordinate(extendedOutput);
+        Require(arm.WakeCount == wakeCount + 4, "disabled arms must not receive wake callbacks");
         Require(!arm.WakesAt(extendedInput) && !arm.WakesAt(extendedOutput), "disabling an arm must remove IO wake registrations");
         arm.ClearPlacement();
         Require(!arm.Coordinates(out _, out _), "clearing placement must invalidate cached endpoints");
@@ -290,6 +382,28 @@ public static partial class Checks
         Console.WriteLine($"PASS: {count} robot arm standard IO and transfer save checks.");
     }
 
+    private static void CheckMovingTrainTransferGuard()
+    {
+        var engine = new Train();
+        var middle = new Train();
+        var freightCar = new FreightCar();
+        Train.Link(engine, middle);
+        Train.Link(middle, freightCar);
+
+        Require(!freightCar.IsConsistMoving(),
+            "a fully stopped consist must allow robot arm freight transfer");
+        engine.CurrentVehicleSignedSpeed = 0.5f;
+        Require(freightCar.IsConsistMoving(),
+            "a freight car must inherit the connected locomotive's moving state");
+        engine.CurrentVehicleSignedSpeed = 0f;
+        middle.CurrentVehicleSignedSpeed = -0.25f;
+        Require(freightCar.IsConsistMoving(),
+            "movement anywhere in a connected cyclic graph must block freight transfer");
+        middle.CurrentVehicleSignedSpeed = 0.00005f;
+        Require(!freightCar.IsConsistMoving(),
+            "sub-threshold numerical speed noise must still count as stopped");
+    }
+
     private static void CheckMachineOutputToConveyor()
     {
         Vector3 start = new Vector3(3f, 2f, 1f);
@@ -298,6 +412,8 @@ public static partial class Checks
         outputModule.RuntimeOutputBlock = beltBlock;
         Require(outputModule.CanAcceptRuntimeOutput(Vector2Int.zero, 17, 1),
             "machine output capacity must use conveyor lane capacity");
+        Require(beltBlock.ConveyorInteractionBoundaryRequests == 1,
+            "a conveyor under a machine output must become an observable transport boundary");
         Require(InputOutputModule.EmitOutputItem(beltBlock, 17, start, .25f, out PortableObject beltItem),
             "machine output must enter an installed conveyor lane");
         Require(beltItem == beltBlock.AddedObject && beltBlock.ConveyorAdds == 1 && beltBlock.CenterAdds == 0,
@@ -309,6 +425,8 @@ public static partial class Checks
         outputModule.RuntimeOutputBlock = fullBeltBlock;
         Require(!outputModule.CanAcceptRuntimeOutput(Vector2Int.zero, 17, 1),
             "a full conveyor must block machine completion");
+        Require(fullBeltBlock.ConveyorInteractionBoundaryRequests == 1,
+            "even an initially full output belt must leave the packed transport path before the producer sleeps");
         Require(!InputOutputModule.EmitOutputItem(fullBeltBlock, 17, start, 0f, out _)
                 && fullBeltBlock.CenterAdds == 0,
             "a full conveyor must backpressure the machine without falling back to a center stack");

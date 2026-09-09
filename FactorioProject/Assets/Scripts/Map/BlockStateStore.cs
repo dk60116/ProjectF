@@ -54,12 +54,16 @@ public partial class BlockStateStore : MonoBehaviour
         public bool steamTrainAutoDriveEnabled;
         public string steamTrainAutoDriveTargetAStationName = string.Empty;
         public string steamTrainAutoDriveTargetBStationName = string.Empty;
-        public int steamTrainAutoDriveFuelFilter;
-        public int steamTrainAutoDriveFreightFilter;
+        public int steamTrainAutoDriveTargetAFuelFilter;
+        public int steamTrainAutoDriveTargetAFreightFilter;
+        public int steamTrainAutoDriveTargetBFuelFilter;
+        public int steamTrainAutoDriveTargetBFreightFilter;
         public string steamTrainAutoDriveRouteTargetStationName = string.Empty;
         public string steamTrainAutoDriveLastArrivedStationName = string.Empty;
         public float steamTrainAutoDriveStationWaitTimer;
         public string stationName = string.Empty;
+        public Color32 stationColor = new Color32(255, 255, 255, 255);
+        public bool stationColorAssigned;
 
         public InstallationSaveState Clone()
         {
@@ -115,12 +119,16 @@ public partial class BlockStateStore : MonoBehaviour
                 steamTrainAutoDriveEnabled = steamTrainAutoDriveEnabled,
                 steamTrainAutoDriveTargetAStationName = steamTrainAutoDriveTargetAStationName,
                 steamTrainAutoDriveTargetBStationName = steamTrainAutoDriveTargetBStationName,
-                steamTrainAutoDriveFuelFilter = steamTrainAutoDriveFuelFilter,
-                steamTrainAutoDriveFreightFilter = steamTrainAutoDriveFreightFilter,
+                steamTrainAutoDriveTargetAFuelFilter = steamTrainAutoDriveTargetAFuelFilter,
+                steamTrainAutoDriveTargetAFreightFilter = steamTrainAutoDriveTargetAFreightFilter,
+                steamTrainAutoDriveTargetBFuelFilter = steamTrainAutoDriveTargetBFuelFilter,
+                steamTrainAutoDriveTargetBFreightFilter = steamTrainAutoDriveTargetBFreightFilter,
                 steamTrainAutoDriveRouteTargetStationName = steamTrainAutoDriveRouteTargetStationName,
                 steamTrainAutoDriveLastArrivedStationName = steamTrainAutoDriveLastArrivedStationName,
                 steamTrainAutoDriveStationWaitTimer = steamTrainAutoDriveStationWaitTimer,
-                stationName = stationName
+                stationName = stationName,
+                stationColor = stationColor,
+                stationColorAssigned = stationColorAssigned
             };
         }
     }
@@ -1357,8 +1365,10 @@ public partial class BlockStateStore : MonoBehaviour
                 out state.steamTrainAutoDriveEnabled,
                 out state.steamTrainAutoDriveTargetAStationName,
                 out state.steamTrainAutoDriveTargetBStationName,
-                out state.steamTrainAutoDriveFuelFilter,
-                out state.steamTrainAutoDriveFreightFilter,
+                out state.steamTrainAutoDriveTargetAFuelFilter,
+                out state.steamTrainAutoDriveTargetAFreightFilter,
+                out state.steamTrainAutoDriveTargetBFuelFilter,
+                out state.steamTrainAutoDriveTargetBFreightFilter,
                 out state.steamTrainAutoDriveRouteTargetStationName,
                 out state.steamTrainAutoDriveLastArrivedStationName,
                 out state.steamTrainAutoDriveStationWaitTimer);
@@ -1368,6 +1378,8 @@ public partial class BlockStateStore : MonoBehaviour
         if (installationObject is Trainstation trainStation)
         {
             state.stationName = trainStation.StoredStationName;
+            state.stationColor = trainStation.StoredStationColor;
+            state.stationColorAssigned = trainStation.HasAssignedStationColor;
         }
 
         if (installationObject is InputOutputModule inputOutputModule)

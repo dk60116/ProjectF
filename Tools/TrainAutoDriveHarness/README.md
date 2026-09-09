@@ -17,6 +17,11 @@ Coverage includes:
   reversals at connections, and forward alternatives longer than the old penalty.
 - Actual control and fuel-request handoff, return trips, station wait preservation,
   save state, UI ownership and duplicate ticks from mounted input.
+- Independent Target A/Target B fuel and freight departure conditions, including
+  Full and Empty freight checks across the connected consist.
+- Target A/Target B station color indicators being serialized and refreshed from
+  the selected stations in the Train Filter prefab.
+- Train Filter controls arranged in paired Target, Fuel, and Freight rows.
 - Movement-tape ownership transfer with the schedule, replacement of an earlier
   leg's tape, and rejection of unrelated or moved cars.
 - Production tape reversal and follower sampling across oppositely authored rail

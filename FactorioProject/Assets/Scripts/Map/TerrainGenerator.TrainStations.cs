@@ -57,6 +57,15 @@ public partial class TerrainGenerator
 
     public void CollectTrainStationNamesOnSameRailLine(Train train, List<string> results)
     {
+        CollectTrainStationNamesOnSameRailLine(train, results, null);
+    }
+
+    public void CollectTrainStationNamesOnSameRailLine(
+        Train train,
+        List<string> results,
+        IDictionary<string, Color32> stationColorsByName)
+    {
+        stationColorsByName?.Clear();
         if (results == null)
         {
             return;
@@ -90,9 +99,9 @@ public partial class TerrainGenerator
                 continue;
             }
 
-            if (!station.HasAssignedStationName)
+            if (!station.HasAssignedStationName || !station.HasAssignedStationColor)
             {
-                EnsureTrainStationNameAssigned(station);
+                EnsureTrainStationIdentityAssigned(station);
             }
 
             string stationName = station.StationName;
@@ -102,6 +111,10 @@ public partial class TerrainGenerator
             }
 
             results.Add(stationName);
+            if (stationColorsByName != null && station.HasAssignedStationColor)
+            {
+                stationColorsByName[stationName] = station.StoredStationColor;
+            }
         }
 
         for (int i = 0; i < states.Count; i++)
@@ -109,19 +122,28 @@ public partial class TerrainGenerator
             BlockStateStore.InstallationSaveState state = states[i];
             if (!IsTrainStationState(state)
                 || string.IsNullOrWhiteSpace(state.stationName)
-                || FindStationRailComponent(state, railNetwork) != targetComponent
-                || !addedNames.Add(state.stationName.Trim()))
+                || FindStationRailComponent(state, railNetwork) != targetComponent)
             {
                 continue;
             }
 
-            results.Add(state.stationName.Trim());
+            string stationName = state.stationName.Trim();
+            if (!addedNames.Add(stationName))
+            {
+                continue;
+            }
+
+            results.Add(stationName);
+            if (stationColorsByName != null && state.stationColorAssigned)
+            {
+                stationColorsByName[stationName] = state.stationColor;
+            }
         }
 
         results.Sort(System.StringComparer.OrdinalIgnoreCase);
     }
 
-    private void EnsureTrainStationNameAssigned(Trainstation station)
+    private void EnsureTrainStationIdentityAssigned(Trainstation station)
     {
         if (station == null)
         {
@@ -132,6 +154,105 @@ public partial class TerrainGenerator
             ? station.StoredStationName
             : string.Empty;
         station.ApplyStationName(ResolveUniqueTrainStationName(station, requestedName));
+
+        if (!station.HasAssignedStationColor)
+        {
+            station.ApplyStationColor(ResolveUniqueTrainStationColor(station), true);
+        }
+    }
+
+    private Color32 ResolveUniqueTrainStationColor(Trainstation station)
+    {
+        EnsureResourceStateStore();
+        List<BlockStateStore.InstallationSaveState> states = resourceStateStore != null
+            ? resourceStateStore.GetInstallationStatesSnapshot()
+            : new List<BlockStateStore.InstallationSaveState>();
+        Trainstation[] liveStations = FindObjectsOfType<Trainstation>(false);
+        HashSet<Color32> usedColors = new HashSet<Color32>();
+
+        for (int i = 0; i < states.Count; i++)
+        {
+            BlockStateStore.InstallationSaveState state = states[i];
+            if (!IsTrainStationState(state)
+                || IsSameTrainStationState(state, station)
+                || !state.stationColorAssigned)
+            {
+                continue;
+            }
+
+            usedColors.Add(state.stationColor);
+        }
+
+        for (int i = 0; i < liveStations.Length; i++)
+        {
+            Trainstation liveStation = liveStations[i];
+            if (liveStation == null
+                || liveStation == station
+                || !liveStation.HasAssignedStationColor)
+            {
+                continue;
+            }
+
+            usedColors.Add(liveStation.StoredStationColor);
+        }
+
+        int optionCount = Trainstation.StationColorOptionCount;
+        int availableOptionCount = 0;
+        for (int i = 0; i < optionCount; i++)
+        {
+            Color32 candidate = Trainstation.GetStationColorOption(i);
+            if (!usedColors.Contains(candidate))
+            {
+                availableOptionCount++;
+            }
+        }
+
+        if (availableOptionCount > 0)
+        {
+            int selectedAvailableIndex = Random.Range(0, availableOptionCount);
+            for (int i = 0; i < optionCount; i++)
+            {
+                Color32 candidate = Trainstation.GetStationColorOption(i);
+                if (usedColors.Contains(candidate))
+                {
+                    continue;
+                }
+
+                if (selectedAvailableIndex-- == 0)
+                {
+                    return candidate;
+                }
+            }
+        }
+
+        // The picker palette can be exhausted in very large worlds. Continue with
+        // random HSV colors so initial station assignment still remains unique.
+        for (int attempt = 0; attempt < 1024; attempt++)
+        {
+            Color32 candidate = Color.HSVToRGB(Random.value, Random.Range(0.55f, 0.9f), Random.Range(0.75f, 1f));
+            candidate.a = 255;
+            if (!usedColors.Contains(candidate))
+            {
+                return candidate;
+            }
+        }
+
+        int randomRgb = Random.Range(0, 1 << 24);
+        for (int offset = 0; offset < 1 << 24; offset++)
+        {
+            int rgb = (randomRgb + offset) & 0xFFFFFF;
+            Color32 candidate = new Color32(
+                (byte)(rgb >> 16),
+                (byte)(rgb >> 8),
+                (byte)rgb,
+                255);
+            if (!usedColors.Contains(candidate))
+            {
+                return candidate;
+            }
+        }
+
+        return new Color32(255, 255, 255, 255);
     }
 
     private void RefreshAutomaticTrainStationNames()

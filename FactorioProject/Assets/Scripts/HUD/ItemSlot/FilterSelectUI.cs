@@ -56,7 +56,7 @@ public partial class FilterSelectUI : MonoBehaviour
 
     public void Bind(Player player)
     {
-        boundTarget = ResolveFocusedFilterTarget();
+        boundTarget = ResolveSelectedFilterTarget();
         Refresh();
     }
 
@@ -496,11 +496,11 @@ public partial class FilterSelectUI : MonoBehaviour
             return boundTarget;
         }
 
-        boundTarget = ResolveFocusedFilterTarget();
+        boundTarget = ResolveSelectedFilterTarget();
         return boundTarget;
     }
 
-    private static MapObject ResolveFocusedFilterTarget()
+    private static MapObject ResolveSelectedFilterTarget()
     {
         if (GameManager.Instance == null || GameManager.Instance.Player == null)
         {
@@ -508,12 +508,12 @@ public partial class FilterSelectUI : MonoBehaviour
         }
 
         PlayerController playerController = GameManager.Instance.Player.GetComponent<PlayerController>();
-        if (playerController == null || !playerController.TryGetFocusedItemFilterMapObject(out MapObject focusedMapObject))
+        if (playerController == null || !playerController.TryGetSelectedItemFilterMapObject(out MapObject selectedMapObject))
         {
             return null;
         }
 
-        return focusedMapObject;
+        return selectedMapObject;
     }
 
     private void PersistTargetFilterState(MapObject target)

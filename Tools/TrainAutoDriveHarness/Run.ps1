@@ -2,6 +2,49 @@ $ErrorActionPreference = 'Stop'
 $repo = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '../..'))
 $probe = Join-Path ([IO.Path]::GetTempPath()) ('ProjectF-TrainAutoDrive-' + [guid]::NewGuid().ToString('N'))
 New-Item -ItemType Directory -Path $probe | Out-Null
+$trainFilterSource = [IO.File]::ReadAllText((Join-Path $repo 'FactorioProject/Assets/Scripts/HUD/ItemSlot/TrainFilter.cs'))
+$trainFilterPrefab = [IO.File]::ReadAllText((Join-Path $repo 'FactorioProject/Assets/Prefab/UI/HUD/Filter/Train Filter.prefab'))
+if (!$trainFilterSource.Contains('RefreshStationTargetColor(targetA, targetAStationColor);') -or
+    !$trainFilterSource.Contains('RefreshStationTargetColor(targetB, targetBStationColor);')) {
+    throw 'Train Filter must refresh both target station color images.'
+}
+if (!$trainFilterPrefab.Contains('targetAStationColor: {fileID: 6360845314720199763}') -or
+    !$trainFilterPrefab.Contains('targetBStationColor: {fileID: 5456011993426495286}')) {
+    throw 'Train Filter prefab must bind the Target A and Target B color images.'
+}
+function Read-PrefabBlock([string]$header) {
+    $start = $trainFilterPrefab.IndexOf($header, [StringComparison]::Ordinal)
+    if ($start -lt 0) { throw "Missing Train Filter prefab block: $header" }
+    $end = $trainFilterPrefab.IndexOf('--- !u!', $start + $header.Length, [StringComparison]::Ordinal)
+    if ($end -lt 0) { $end = $trainFilterPrefab.Length }
+    $trainFilterPrefab.Substring($start, $end - $start)
+}
+function Assert-PrefabBlockContains([string]$header, [string[]]$requiredText) {
+    $block = Read-PrefabBlock $header
+    foreach ($text in $requiredText) {
+        if (!$block.Contains($text)) {
+            throw "Train Filter prefab block $header is missing: $text"
+        }
+    }
+}
+Assert-PrefabBlockContains '--- !u!224 &5932625448762877212' @(
+    '- {fileID: 7168427658842336564}',
+    '- {fileID: 9000000000000000074}',
+    '- {fileID: 9100000000000000002}')
+Assert-PrefabBlockContains '--- !u!224 &7168427658842336564' @(
+    '- {fileID: 3337683063725499522}',
+    '- {fileID: 1434913788011842552}')
+Assert-PrefabBlockContains '--- !u!224 &9000000000000000074' @(
+    '- {fileID: 5190120407831880711}',
+    '- {fileID: 9000000000000000052}')
+Assert-PrefabBlockContains '--- !u!224 &9100000000000000002' @(
+    '- {fileID: 7735309841600087034}',
+    '- {fileID: 9000000000000000080}')
+foreach ($rowName in @('Target Row', 'Fuel Row', 'Freight Row')) {
+    if (!$trainFilterPrefab.Contains("m_Name: $rowName")) {
+        throw "Train Filter prefab is missing layout row: $rowName"
+    }
+}
 $source = [IO.File]::ReadAllText((Join-Path $repo 'FactorioProject/Assets/Scripts/Object/MapObj/InstallationObject/Vehicle/SteamTrain.cs'))
 function Read-Member([string]$signature) {
     $start = $source.IndexOf($signature, [StringComparison]::Ordinal)
@@ -35,7 +78,8 @@ foreach ($signature in @(
     'private static AutoDriveFuelFilter ParseAutoDriveFuelFilter(', 'private static AutoDriveFreightFilter ParseAutoDriveFreightFilter(',
     'private static AutoDriveFuelFilter ClampAutoDriveFuelFilter(', 'private static AutoDriveFreightFilter ClampAutoDriveFreightFilter(',
     'private Vector3 ResolveAutoDriveMoveDirection(', 'private bool TryResolveAutoDriveTargets(', 'private bool TryBuildRouteLengthToStation(',
-    'private bool TryEnsureAutoDriveRoute(', 'private void HandleAutoDriveArrived(', 'private static bool TryResolveAutoDriveDockSignedStep(',
+    'private void ResolveAutoDriveDepartureFilters(', 'private bool TryEvaluateAutoDriveFuelFilterSatisfied(',
+    'private bool TryEvaluateAutoDriveFreightFilterSatisfied(', 'private bool TryEnsureAutoDriveRoute(', 'private void HandleAutoDriveArrived(', 'private static bool TryResolveAutoDriveDockSignedStep(',
     'protected override float AdjustDrivenSignedStep(', 'protected override bool CanDockInDirection(', 'protected override float ResolveRailInputAxis(',
     'private bool TryResolveAutoDriveRouteInputAxis(',
     'private RailHandcar ResolveAutoDriveRouteReferenceTrain(', 'private bool TryResolveAutoDriveClosestEndpointTrain(',

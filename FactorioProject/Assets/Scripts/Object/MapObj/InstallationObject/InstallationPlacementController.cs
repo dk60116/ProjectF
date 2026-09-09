@@ -36518,6 +36518,15 @@ public class InstallationPlacementController : MonoBehaviour
             return true;
         }
 
+        if (CanItemOutputAreaOverlapConveyor(
+                rectGridBlockType,
+                occupyingObject,
+                occupyingObject is ConvayorBelt2F occupyingBelt2F
+                && occupyingBelt2F.IsBridgeCenterCoordinate(block.Coordinate)))
+        {
+            return true;
+        }
+
         if (occupyingObject == null || occupyingObject is BoxObject)
         {
             return true;
@@ -37106,6 +37115,17 @@ public class InstallationPlacementController : MonoBehaviour
         }
 
         return true;
+    }
+
+    private static bool CanItemOutputAreaOverlapConveyor(
+        InputOutputModule.RectGridBlockType candidateBlockType,
+        MapObject occupyingObject,
+        bool isBelt2FBridgeCenter)
+    {
+        return occupyingObject is ConveyorBelt
+               && !isBelt2FBridgeCenter
+               && InputOutputModule.IsOutputBlockType(candidateBlockType)
+               && InputOutputModule.AllowsDirectAreaInteraction(candidateBlockType);
     }
 
     private static bool ShouldInputOutputAreasBlockInstallationPlacement(MapObject footprintSource)

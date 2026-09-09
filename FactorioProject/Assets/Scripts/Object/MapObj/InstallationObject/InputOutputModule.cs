@@ -778,6 +778,16 @@ public class InputOutputModule : InstallationObject,
 
     public static void WakeRuntimeModulesAtCoordinate(Vector2Int coordinate)
     {
+        WakeRuntimeModulesAtCoordinate(coordinate, false);
+    }
+
+    public static void WakeRuntimeOutputModulesAtCoordinate(Vector2Int coordinate)
+    {
+        WakeRuntimeModulesAtCoordinate(coordinate, true);
+    }
+
+    private static void WakeRuntimeModulesAtCoordinate(Vector2Int coordinate, bool outputOnly)
+    {
         runtimeWakeScratch.Clear();
         if (registeredRuntimeAreaCoordinates.TryGetValue(coordinate, out HashSet<InputOutputModule> modules)
             && modules != null
@@ -788,6 +798,7 @@ public class InputOutputModule : InstallationObject,
                 if (module == null
                     || !module.gameObject.activeInHierarchy
                     || !module.ContainsRuntimeAreaCoordinate(coordinate)
+                    || (outputOnly && !module.ContainsRuntimeOutputCoordinate(coordinate))
                     || runtimeWakeScratch.Contains(module))
                 {
                     continue;
@@ -4973,6 +4984,10 @@ public class InputOutputModule : InstallationObject,
 
         if (!useSavedCenterStack && block != null && block.MapObject is ConveyorBelt)
         {
+            // A producer can sleep while this belt cell is full. Keep its cell at
+            // a transport boundary so a later lane vacancy is observable and can
+            // wake the producer instead of remaining hidden inside a packed run.
+            block.EnsureConveyorTransportInteractionBoundary();
             return InputOutputModule.CanAddItemToRuntimeIoOverlapCoordinate(coordinate, itemId)
                    && block.CanAddConveyorObjects(count);
         }

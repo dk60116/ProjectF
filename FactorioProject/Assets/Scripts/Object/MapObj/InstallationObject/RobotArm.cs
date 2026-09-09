@@ -724,6 +724,14 @@ public class RobotArm : InputOutputModule
             return false;
         }
 
+        // Speed can reach zero without crossing a grid cell or changing cargo.
+        // Keep the normal drop retry active until that moving target stops.
+        if (TryGetFreightCarObject(dropBlock, dropCoordinate, out FreightCar freightCar)
+            && freightCar.IsConsistMoving())
+        {
+            return false;
+        }
+
         return !CanPlaceHeldItem();
     }
 
@@ -807,22 +815,7 @@ public class RobotArm : InputOutputModule
 
     private bool IsCoordinateInsideRuntimeSleepWakeRange(Vector2Int coordinate)
     {
-        if (RuntimeOccupiedCoordinates == null || RuntimeOccupiedCoordinates.Count <= 0)
-        {
-            return false;
-        }
-
-        for (int i = 0; i < RuntimeOccupiedCoordinates.Count; i++)
-        {
-            Vector2Int occupiedCoordinate = RuntimeOccupiedCoordinates[i];
-            if (Mathf.Abs(coordinate.x - occupiedCoordinate.x) <= 1
-                && Mathf.Abs(coordinate.y - occupiedCoordinate.y) <= 1)
-            {
-                return true;
-            }
-        }
-
-        return false;
+        return registeredWakeCoordinates.Contains(coordinate);
     }
 
     private void WakeRuntimeSleep()
@@ -1390,6 +1383,7 @@ public class RobotArm : InputOutputModule
                 return boxObject != null && boxObject.TryTakeOneContainedObject(PickupItemFilter, out pickedItemId);
             case RobotArmPickupSource.FreightCar:
                 return freightCar != null
+                       && !freightCar.IsConsistMoving()
                        && freightCar.TryTakeOneItem(
                            referenceWorldPosition,
                            PickupItemFilter,
@@ -1468,8 +1462,14 @@ public class RobotArm : InputOutputModule
             }
         }
 
-        if (hasLoadedPickupBlock && TryGetFreightCarObject(pickupBlock, pickupCoordinate, out FreightCar candidateFreightCar))
+        if (hasLoadedPickupBlock
+            && TryGetFreightCarObject(pickupBlock, pickupCoordinate, out FreightCar candidateFreightCar))
         {
+            if (candidateFreightCar.IsConsistMoving())
+            {
+                return false;
+            }
+
             freightCar = candidateFreightCar;
             if (candidateFreightCar.TryGetTopItem(referenceWorldPosition, PickupItemFilter, out _, out candidateWorldPosition))
             {
@@ -1711,17 +1711,24 @@ public class RobotArm : InputOutputModule
 
         Vector3 dropReferenceWorldPosition = GetDropReferencePosition(dropBlock, dropCoordinate);
         Vector3 dropStartWorldPosition = GetHandRestWorldPosition();
-        if (TryGetFreightCarObject(dropBlock, dropCoordinate, out FreightCar freightCar)
-            && freightCar.TryAddItemStack(
-                itemId,
-                1,
-                dropStartWorldPosition,
-                () => dropStartWorldPosition,
-                0f,
-                out int addedCount)
-            && addedCount > 0)
+        if (TryGetFreightCarObject(dropBlock, dropCoordinate, out FreightCar freightCar))
         {
-            return true;
+            if (freightCar.IsConsistMoving())
+            {
+                return false;
+            }
+
+            if (freightCar.TryAddItemStack(
+                    itemId,
+                    1,
+                    dropStartWorldPosition,
+                    () => dropStartWorldPosition,
+                    0f,
+                    out int addedCount)
+                && addedCount > 0)
+            {
+                return true;
+            }
         }
 
         if (IsFarmlandFertilizerDropTarget(
@@ -1810,10 +1817,17 @@ public class RobotArm : InputOutputModule
         int itemId = heldItemId;
         TerrainGenerator terrainGenerator = ResolveTerrainGenerator();
         Vector3 dropReferenceWorldPosition = GetDropReferencePosition(dropBlock, dropCoordinate);
-        if (TryGetFreightCarObject(dropBlock, dropCoordinate, out FreightCar freightCar)
-            && freightCar.CanAddItem(itemId, dropReferenceWorldPosition))
+        if (TryGetFreightCarObject(dropBlock, dropCoordinate, out FreightCar freightCar))
         {
-            return true;
+            if (freightCar.IsConsistMoving())
+            {
+                return false;
+            }
+
+            if (freightCar.CanAddItem(itemId, dropReferenceWorldPosition))
+            {
+                return true;
+            }
         }
 
         if (IsFarmlandFertilizerDropTarget(

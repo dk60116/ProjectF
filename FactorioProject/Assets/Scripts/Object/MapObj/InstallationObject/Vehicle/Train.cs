@@ -42,6 +42,47 @@ public class Train : Vehicle
     public IReadOnlyCollection<Train> ConnectedTrains => connectedTrainEnds.Keys;
     public static ulong ConnectionGraphRevision => connectionGraphRevision;
 
+    public bool IsConsistMoving(float speedThreshold = 0.0001f)
+    {
+        float normalizedThreshold = Mathf.Max(0f, speedThreshold);
+        connectionActionGroupQueue.Clear();
+        connectionActionGroupVisited.Clear();
+        connectionActionGroupQueue.Enqueue(this);
+        connectionActionGroupVisited.Add(this);
+
+        bool isMoving = false;
+        while (connectionActionGroupQueue.Count > 0)
+        {
+            Train current = connectionActionGroupQueue.Dequeue();
+            if (current != null && current.CurrentVehicleSpeed > normalizedThreshold)
+            {
+                isMoving = true;
+                break;
+            }
+
+            if (current == null)
+            {
+                continue;
+            }
+
+            foreach (Train connectedTrain in current.ConnectedTrains)
+            {
+                if (connectedTrain == null
+                    || !connectedTrain.gameObject.activeInHierarchy
+                    || !connectionActionGroupVisited.Add(connectedTrain))
+                {
+                    continue;
+                }
+
+                connectionActionGroupQueue.Enqueue(connectedTrain);
+            }
+        }
+
+        connectionActionGroupQueue.Clear();
+        connectionActionGroupVisited.Clear();
+        return isMoving;
+    }
+
     public void RotateTrainWheelsByDistance(float signedDistance)
     {
         RotateWheelsByDistance(signedDistance);

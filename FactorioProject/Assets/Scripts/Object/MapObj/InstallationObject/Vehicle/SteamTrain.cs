@@ -43,9 +43,10 @@ public class SteamTrain : RailHandcar
         Docking = 4,
         WaitingAtStation = 5,
         WaitingForFuel = 6,
-        WaitingForPath = 7,
-        WaitingForClearTrack = 8,
-        Arrived = 9
+        WaitingForFreight = 7,
+        WaitingForPath = 8,
+        WaitingForClearTrack = 9,
+        Arrived = 10
     }
 
     private enum DriveMotionOutcome
@@ -113,8 +114,10 @@ public class SteamTrain : RailHandcar
     private bool autoDriveEnabled;
     private string autoDriveTargetAStationName = string.Empty;
     private string autoDriveTargetBStationName = string.Empty;
-    private AutoDriveFuelFilter autoDriveFuelFilter;
-    private AutoDriveFreightFilter autoDriveFreightFilter;
+    private AutoDriveFuelFilter autoDriveTargetAFuelFilter;
+    private AutoDriveFreightFilter autoDriveTargetAFreightFilter;
+    private AutoDriveFuelFilter autoDriveTargetBFuelFilter;
+    private AutoDriveFreightFilter autoDriveTargetBFreightFilter;
     private AutoDriveStatus autoDriveStatus;
     private string autoDriveCurrentTargetStationName = string.Empty;
     private string autoDriveNextTargetStationName = string.Empty;
@@ -184,8 +187,10 @@ public class SteamTrain : RailHandcar
     public bool AutoDriveEnabled => AutoDriveSettingsOwner.autoDriveEnabled;
     public string AutoDriveTargetAStationName => AutoDriveSettingsOwner.autoDriveTargetAStationName;
     public string AutoDriveTargetBStationName => AutoDriveSettingsOwner.autoDriveTargetBStationName;
-    public string AutoDriveFuelFilterName => AutoDriveSettingsOwner.autoDriveFuelFilter.ToString();
-    public string AutoDriveFreightFilterName => AutoDriveSettingsOwner.autoDriveFreightFilter.ToString();
+    public string AutoDriveTargetAFuelFilterName => AutoDriveSettingsOwner.autoDriveTargetAFuelFilter.ToString();
+    public string AutoDriveTargetAFreightFilterName => AutoDriveSettingsOwner.autoDriveTargetAFreightFilter.ToString();
+    public string AutoDriveTargetBFuelFilterName => AutoDriveSettingsOwner.autoDriveTargetBFuelFilter.ToString();
+    public string AutoDriveTargetBFreightFilterName => AutoDriveSettingsOwner.autoDriveTargetBFreightFilter.ToString();
     public string AutoDriveStatusText => AutoDriveSettingsOwner.ResolveAutoDriveStatusText();
     public override bool BlocksManualDisconnection => AutoDriveEnabled;
     private bool HasAnyAutoDriveTarget =>
@@ -597,34 +602,49 @@ public class SteamTrain : RailHandcar
         bool enabled,
         string targetAStationName,
         string targetBStationName,
-        string fuelFilterName,
-        string freightFilterName)
+        string targetAFuelFilterName,
+        string targetAFreightFilterName,
+        string targetBFuelFilterName,
+        string targetBFreightFilterName)
     {
         SteamTrain controller = AutoDriveSettingsOwner;
         if (controller != this)
         {
-            controller.ApplyAutoDriveSettings(enabled, targetAStationName, targetBStationName, fuelFilterName, freightFilterName);
+            controller.ApplyAutoDriveSettings(
+                enabled,
+                targetAStationName,
+                targetBStationName,
+                targetAFuelFilterName,
+                targetAFreightFilterName,
+                targetBFuelFilterName,
+                targetBFreightFilterName);
             return;
         }
 
         string normalizedTargetA = NormalizeAutoDriveStationName(targetAStationName);
         string normalizedTargetB = NormalizeAutoDriveStationName(targetBStationName);
-        AutoDriveFuelFilter normalizedFuelFilter = ParseAutoDriveFuelFilter(fuelFilterName);
-        AutoDriveFreightFilter normalizedFreightFilter = ParseAutoDriveFreightFilter(freightFilterName);
+        AutoDriveFuelFilter normalizedTargetAFuelFilter = ParseAutoDriveFuelFilter(targetAFuelFilterName);
+        AutoDriveFreightFilter normalizedTargetAFreightFilter = ParseAutoDriveFreightFilter(targetAFreightFilterName);
+        AutoDriveFuelFilter normalizedTargetBFuelFilter = ParseAutoDriveFuelFilter(targetBFuelFilterName);
+        AutoDriveFreightFilter normalizedTargetBFreightFilter = ParseAutoDriveFreightFilter(targetBFreightFilterName);
         bool normalizedEnabled = enabled && HasCompleteAutoDriveTargets(normalizedTargetA, normalizedTargetB);
 
         bool changed =
             autoDriveEnabled != normalizedEnabled
             || !string.Equals(autoDriveTargetAStationName, normalizedTargetA, System.StringComparison.OrdinalIgnoreCase)
             || !string.Equals(autoDriveTargetBStationName, normalizedTargetB, System.StringComparison.OrdinalIgnoreCase)
-            || autoDriveFuelFilter != normalizedFuelFilter
-            || autoDriveFreightFilter != normalizedFreightFilter;
+            || autoDriveTargetAFuelFilter != normalizedTargetAFuelFilter
+            || autoDriveTargetAFreightFilter != normalizedTargetAFreightFilter
+            || autoDriveTargetBFuelFilter != normalizedTargetBFuelFilter
+            || autoDriveTargetBFreightFilter != normalizedTargetBFreightFilter;
 
         autoDriveEnabled = normalizedEnabled;
         autoDriveTargetAStationName = normalizedTargetA;
         autoDriveTargetBStationName = normalizedTargetB;
-        autoDriveFuelFilter = normalizedFuelFilter;
-        autoDriveFreightFilter = normalizedFreightFilter;
+        autoDriveTargetAFuelFilter = normalizedTargetAFuelFilter;
+        autoDriveTargetAFreightFilter = normalizedTargetAFreightFilter;
+        autoDriveTargetBFuelFilter = normalizedTargetBFuelFilter;
+        autoDriveTargetBFreightFilter = normalizedTargetBFreightFilter;
         if (autoDriveEnabled)
         {
             if (changed || autoDriveControllerRevision == 0)
@@ -651,8 +671,10 @@ public class SteamTrain : RailHandcar
         out bool enabled,
         out string targetAStationName,
         out string targetBStationName,
-        out int fuelFilter,
-        out int freightFilter,
+        out int targetAFuelFilter,
+        out int targetAFreightFilter,
+        out int targetBFuelFilter,
+        out int targetBFreightFilter,
         out string routeTargetStationName,
         out string lastArrivedStationName,
         out float stationWaitTimer)
@@ -660,8 +682,10 @@ public class SteamTrain : RailHandcar
         enabled = autoDriveEnabled;
         targetAStationName = autoDriveTargetAStationName;
         targetBStationName = autoDriveTargetBStationName;
-        fuelFilter = (int)autoDriveFuelFilter;
-        freightFilter = (int)autoDriveFreightFilter;
+        targetAFuelFilter = (int)autoDriveTargetAFuelFilter;
+        targetAFreightFilter = (int)autoDriveTargetAFreightFilter;
+        targetBFuelFilter = (int)autoDriveTargetBFuelFilter;
+        targetBFreightFilter = (int)autoDriveTargetBFreightFilter;
         routeTargetStationName = !string.IsNullOrWhiteSpace(autoDriveRouteTargetStationName)
             ? autoDriveRouteTargetStationName
             : autoDriveResolvedTargetStationName;
@@ -673,16 +697,20 @@ public class SteamTrain : RailHandcar
         bool enabled,
         string targetAStationName,
         string targetBStationName,
-        int fuelFilter,
-        int freightFilter,
+        int targetAFuelFilter,
+        int targetAFreightFilter,
+        int targetBFuelFilter,
+        int targetBFreightFilter,
         string routeTargetStationName,
         string lastArrivedStationName,
         float stationWaitTimer)
     {
         autoDriveTargetAStationName = NormalizeAutoDriveStationName(targetAStationName);
         autoDriveTargetBStationName = NormalizeAutoDriveStationName(targetBStationName);
-        autoDriveFuelFilter = ClampAutoDriveFuelFilter(fuelFilter);
-        autoDriveFreightFilter = ClampAutoDriveFreightFilter(freightFilter);
+        autoDriveTargetAFuelFilter = ClampAutoDriveFuelFilter(targetAFuelFilter);
+        autoDriveTargetAFreightFilter = ClampAutoDriveFreightFilter(targetAFreightFilter);
+        autoDriveTargetBFuelFilter = ClampAutoDriveFuelFilter(targetBFuelFilter);
+        autoDriveTargetBFreightFilter = ClampAutoDriveFreightFilter(targetBFreightFilter);
         autoDriveEnabled = enabled && HasCompleteAutoDriveTargets();
         if (autoDriveEnabled)
         {
@@ -1439,8 +1467,10 @@ public class SteamTrain : RailHandcar
         autoDriveControllerRevision = 0;
         autoDriveTargetAStationName = string.Empty;
         autoDriveTargetBStationName = string.Empty;
-        autoDriveFuelFilter = AutoDriveFuelFilter.Free;
-        autoDriveFreightFilter = AutoDriveFreightFilter.Free;
+        autoDriveTargetAFuelFilter = AutoDriveFuelFilter.Free;
+        autoDriveTargetAFreightFilter = AutoDriveFreightFilter.Free;
+        autoDriveTargetBFuelFilter = AutoDriveFuelFilter.Free;
+        autoDriveTargetBFreightFilter = AutoDriveFreightFilter.Free;
         ResetAutoDriveRuntimeState();
         SetAutoDriveStatus(AutoDriveStatus.Idle, string.Empty, string.Empty);
     }
@@ -1515,8 +1545,10 @@ public class SteamTrain : RailHandcar
             true,
             autoDriveTargetAStationName,
             autoDriveTargetBStationName,
-            (int)autoDriveFuelFilter,
-            (int)autoDriveFreightFilter,
+            (int)autoDriveTargetAFuelFilter,
+            (int)autoDriveTargetAFreightFilter,
+            (int)autoDriveTargetBFuelFilter,
+            (int)autoDriveTargetBFreightFilter,
             autoDriveResolvedTargetStationName,
             autoDriveLastArrivedStationName,
             autoDriveStationWaitTimer);
@@ -1807,6 +1839,7 @@ public class SteamTrain : RailHandcar
             AutoDriveStatus.Docking => $"AutoDrive: Docking{targetSuffix}",
             AutoDriveStatus.WaitingAtStation => $"AutoDrive: Waiting{targetSuffix}",
             AutoDriveStatus.WaitingForFuel => $"AutoDrive: Waiting Fuel{targetSuffix}",
+            AutoDriveStatus.WaitingForFreight => $"AutoDrive: Waiting Freight{targetSuffix}",
             AutoDriveStatus.WaitingForPath => $"AutoDrive: No Path{targetSuffix}",
             AutoDriveStatus.WaitingForClearTrack => $"AutoDrive: Track Busy{targetSuffix}",
             AutoDriveStatus.Arrived => $"AutoDrive: Arrived{targetSuffix}",
@@ -1932,6 +1965,27 @@ public class SteamTrain : RailHandcar
             autoDriveStationWaitTimer = Mathf.Max(0f, autoDriveStationWaitTimer - Mathf.Max(0f, deltaTime));
             SetAutoDriveStatus(
                 AutoDriveStatus.WaitingAtStation,
+                autoDriveLastArrivedStationName,
+                targetStationName);
+            return Vector3.zero;
+        }
+
+        ResolveAutoDriveDepartureFilters(
+            out AutoDriveFuelFilter departureFuelFilter,
+            out AutoDriveFreightFilter departureFreightFilter);
+        if (!TryEvaluateAutoDriveFuelFilterSatisfied(departureFuelFilter))
+        {
+            SetAutoDriveStatus(
+                AutoDriveStatus.WaitingForFuel,
+                autoDriveLastArrivedStationName,
+                targetStationName);
+            return Vector3.zero;
+        }
+
+        if (!TryEvaluateAutoDriveFreightFilterSatisfied(departureFreightFilter))
+        {
+            SetAutoDriveStatus(
+                AutoDriveStatus.WaitingForFreight,
                 autoDriveLastArrivedStationName,
                 targetStationName);
             return Vector3.zero;
@@ -2129,6 +2183,93 @@ public class SteamTrain : RailHandcar
     {
         return TryGetAutoDriveTargetDockDistance(targetStation, out float remainingDistance)
                && remainingDistance <= ResolveAutoDriveArrivalSnapDistance();
+    }
+
+    private void ResolveAutoDriveDepartureFilters(
+        out AutoDriveFuelFilter fuelFilter,
+        out AutoDriveFreightFilter freightFilter)
+    {
+        if (string.Equals(
+                autoDriveLastArrivedStationName,
+                autoDriveTargetAStationName,
+                System.StringComparison.OrdinalIgnoreCase))
+        {
+            fuelFilter = autoDriveTargetAFuelFilter;
+            freightFilter = autoDriveTargetAFreightFilter;
+            return;
+        }
+
+        if (string.Equals(
+                autoDriveLastArrivedStationName,
+                autoDriveTargetBStationName,
+                System.StringComparison.OrdinalIgnoreCase))
+        {
+            fuelFilter = autoDriveTargetBFuelFilter;
+            freightFilter = autoDriveTargetBFreightFilter;
+            return;
+        }
+
+        fuelFilter = AutoDriveFuelFilter.Free;
+        freightFilter = AutoDriveFreightFilter.Free;
+    }
+
+    private bool TryEvaluateAutoDriveFuelFilterSatisfied(AutoDriveFuelFilter fuelFilter)
+    {
+        if (fuelFilter != AutoDriveFuelFilter.Full || IsFreeTrainEnabled())
+        {
+            return true;
+        }
+
+        if (!TryGetRearFreightCar(out FreightCar freightCar))
+        {
+            return false;
+        }
+
+        freightCar.GetAutoDriveStorageSummary(
+            IsUsableBurnEnergyItem,
+            out int storedFuelCount,
+            out int fuelCapacity,
+            out bool hasFuelStorage);
+        return hasFuelStorage
+               && fuelCapacity > 0
+               && storedFuelCount >= fuelCapacity;
+    }
+
+    private bool TryEvaluateAutoDriveFreightFilterSatisfied(AutoDriveFreightFilter freightFilter)
+    {
+        CollectAutoDriveConnectedTrains();
+        int totalItemCount = 0;
+        int totalCapacity = 0;
+        bool hasStorage = false;
+        for (int i = 0; i < autoDriveConnectedTrainScratch.Count; i++)
+        {
+            if (autoDriveConnectedTrainScratch[i] is not FreightCar freightCar
+                || freightCar == null
+                || !freightCar.gameObject.activeInHierarchy)
+            {
+                continue;
+            }
+
+            freightCar.GetAutoDriveStorageSummary(
+                out int itemCount,
+                out int capacity,
+                out bool freightHasStorage);
+            totalItemCount += Mathf.Max(0, itemCount);
+            totalCapacity += Mathf.Max(0, capacity);
+            hasStorage |= freightHasStorage;
+        }
+
+        if (!hasStorage || totalCapacity <= 0)
+        {
+            return false;
+        }
+
+        return freightFilter switch
+        {
+            AutoDriveFreightFilter.Full => totalItemCount >= totalCapacity,
+            AutoDriveFreightFilter.Empty => totalItemCount <= 0,
+            _ => totalItemCount < totalCapacity
+        };
     }
 
     private void HandleAutoDriveArrived(string currentStationName, string nextTargetStationName)
@@ -3889,7 +4030,7 @@ public class SteamTrain : RailHandcar
         return true;
     }
 
-    private bool IsUsableBurnEnergyItem(int itemId)
+    private static bool IsUsableBurnEnergyItem(int itemId)
     {
         return TryResolveBurnEnergyAmount(itemId, out _);
     }

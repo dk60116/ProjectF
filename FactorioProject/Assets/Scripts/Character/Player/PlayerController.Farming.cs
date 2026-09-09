@@ -84,6 +84,7 @@ public partial class PlayerController
         selectedPitchforkGroundBlock = null;
         selectedSeedGroundBlock = null;
         selectedSeedDefinition = null;
+        currentSelectedMapObject = null;
         selectedFocusBlocks.Clear();
         bool hasFarmlandFocusGroup = IsFarmlandFocusBlock(farmlandBlock)
                                      && AppendConnectedFarmlandFocusBlocks(
@@ -315,6 +316,7 @@ public partial class PlayerController
         selectedPitchforkGroundBlock = null;
         selectedSeedGroundBlock = block;
         selectedSeedDefinition = block != null ? seedDefinition : null;
+        currentSelectedMapObject = null;
         selectedFocusBlocks.Clear();
         if (block != null)
         {

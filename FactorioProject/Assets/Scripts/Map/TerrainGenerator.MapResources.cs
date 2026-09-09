@@ -260,6 +260,11 @@ public partial class TerrainGenerator
                         return false;
                     }
 
+                    if (installation is Trainstation liveStation && liveStation.HasAssignedStationColor)
+                    {
+                        color = liveStation.StoredStationColor;
+                    }
+
                     if (installation is Railload)
                     {
                         Railload rail = (Railload)installation;
@@ -335,6 +340,11 @@ public partial class TerrainGenerator
                 return false;
             }
 
+            if (liveInstallation is Trainstation liveStation && liveStation.HasAssignedStationColor)
+            {
+                color = liveStation.StoredStationColor;
+            }
+
             if (isLiveRail)
             {
                 marker = CreateMapMarkerSample(
@@ -383,6 +393,11 @@ public partial class TerrainGenerator
             || !TryGetItemMapMarker(savedDefinition, out Color32 savedColor, out MapMarkerSize savedMarkerSize))
         {
             return false;
+        }
+
+        if (savedDefinition.mapObject is Trainstation && state.stationColorAssigned)
+        {
+            savedColor = state.stationColor;
         }
 
         if (isSavedRail)

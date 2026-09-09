@@ -5,8 +5,8 @@ using UnityEngine;
 [Serializable]
 public sealed class SaveGameData
 {
-    // Version 56 adds upper bounds to box storage and logging growth filters.
-    public const int CurrentVersion = 56;
+    // Version 57 stores independent departure conditions for both automatic train targets.
+    public const int CurrentVersion = 58;
 
     public int version = CurrentVersion;
     public long savedAtUtcTicks;

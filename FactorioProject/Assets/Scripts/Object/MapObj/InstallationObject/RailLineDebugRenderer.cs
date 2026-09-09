@@ -43,7 +43,6 @@ public sealed class RailLineDebugRenderer : MonoBehaviour
     private static readonly Color BlockedCartDirectionColor = Color.black;
     private static readonly Color RouteHighlightColor = new Color(1.00f, 1.00f, 1.00f, 0.98f);
     private static readonly Color PowerSourceMarkerColor = new Color(1.00f, 0.35f, 0.10f, 1f);
-    private static readonly Color TargetStationMarkerColor = new Color(0.20f, 1.00f, 0.55f, 1f);
 
     [SerializeField, Min(0.01f)]
     private float connectionDistance = RailGroupConnectionDistance;
@@ -745,7 +744,12 @@ public sealed class RailLineDebugRenderer : MonoBehaviour
             }
 
             Vector3 center = targetStation.transform.position + Vector3.up * targetStationMarkerYOffset;
-            rendererIndex = ApplyTargetStationMarkerCross(rendererIndex, center, radius, diagonalRadius);
+            rendererIndex = ApplyTargetStationMarkerCross(
+                rendererIndex,
+                center,
+                radius,
+                diagonalRadius,
+                targetStation.StationColor);
         }
 
         DisableTargetStationMarkerRenderers(rendererIndex);
@@ -785,31 +789,32 @@ public sealed class RailLineDebugRenderer : MonoBehaviour
         int rendererIndex,
         Vector3 center,
         float radius,
-        float diagonalRadius)
+        float diagonalRadius,
+        Color color)
     {
         ApplyArrowSegment(
             EnsureTargetStationMarkerRenderer(rendererIndex++),
             center + new Vector3(-radius, 0f, 0f),
             center + new Vector3(radius, 0f, 0f),
-            TargetStationMarkerColor,
+            color,
             targetStationMarkerLineWidth);
         ApplyArrowSegment(
             EnsureTargetStationMarkerRenderer(rendererIndex++),
             center + new Vector3(0f, 0f, -radius),
             center + new Vector3(0f, 0f, radius),
-            TargetStationMarkerColor,
+            color,
             targetStationMarkerLineWidth);
         ApplyArrowSegment(
             EnsureTargetStationMarkerRenderer(rendererIndex++),
             center + new Vector3(-diagonalRadius, 0f, -diagonalRadius),
             center + new Vector3(diagonalRadius, 0f, diagonalRadius),
-            TargetStationMarkerColor,
+            color,
             targetStationMarkerLineWidth);
         ApplyArrowSegment(
             EnsureTargetStationMarkerRenderer(rendererIndex++),
             center + new Vector3(-diagonalRadius, 0f, diagonalRadius),
             center + new Vector3(diagonalRadius, 0f, -diagonalRadius),
-            TargetStationMarkerColor,
+            color,
             targetStationMarkerLineWidth);
         return rendererIndex;
     }

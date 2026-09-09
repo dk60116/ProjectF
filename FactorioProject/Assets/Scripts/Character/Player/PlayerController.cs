@@ -126,9 +126,6 @@ public partial class PlayerController : MonoBehaviour
     private readonly List<InstallationObject> nearbyInstallationObjects = new List<InstallationObject>();
     private readonly List<InstallationObject> nearbyRuntimeInstallationScratch = new List<InstallationObject>(8);
     private readonly List<Renderer> mapObjectFocusRenderers = new List<Renderer>(16);
-    private readonly List<Train> itemFilterTrainScratch = new List<Train>(8);
-    private readonly Queue<Train> itemFilterTrainQueue = new Queue<Train>(8);
-    private readonly HashSet<Train> itemFilterTrainVisited = new HashSet<Train>();
     private readonly Dictionary<Block, MapObject> interactionFocusTargetOverrides = new Dictionary<Block, MapObject>();
     private readonly List<WorkableObject> nearbyWorkableObjects = new List<WorkableObject>();
     private readonly List<WorkableObject> nearbyWorkableRangeObjects = new List<WorkableObject>();
@@ -178,6 +175,7 @@ public partial class PlayerController : MonoBehaviour
     private Block temporaryDropFocusBlock;
     private float temporaryDropFocusUntilTime;
     private MapObject currentMouseFocusedMapObject;
+    private MapObject currentSelectedMapObject;
     private Animal currentMouseFocusedAnimal;
     private PortableObject currentMouseFocusedPortableObject;
     private Camera cachedMouseFocusCamera;
@@ -336,6 +334,7 @@ public partial class PlayerController : MonoBehaviour
         selectedPitchforkGroundBlock = null;
         CancelSeedPlanting();
         selectedSeedGroundBlock = null;
+        currentSelectedMapObject = null;
         SetSelectedFocusedBlocks(null);
         SetFocusedBlocks(null);
         SetMouseFocusedAnimal(null);
@@ -440,6 +439,7 @@ public partial class PlayerController : MonoBehaviour
         selectedPitchforkGroundBlock = null;
         selectedSeedGroundBlock = null;
         selectedFocusBlocks.Clear();
+        currentSelectedMapObject = null;
         if (mapObject == null
             || !mapObject.gameObject.activeInHierarchy
             || !mapObject.AllowsFocus)
@@ -455,6 +455,7 @@ public partial class PlayerController : MonoBehaviour
             return;
         }
 
+        currentSelectedMapObject = mapObject;
         SetSelectedFocusedBlocks(selectedFocusBlocks);
     }
 
@@ -536,6 +537,7 @@ public partial class PlayerController : MonoBehaviour
         }
 
         selectedPitchforkGroundBlock = block;
+        currentSelectedMapObject = null;
         selectedFocusBlocks.Clear();
         if (block != null)
         {
@@ -4270,10 +4272,26 @@ public partial class PlayerController : MonoBehaviour
         return true;
     }
 
-    public bool TryGetFocusedItemFilterMapObject(out MapObject focusedMapObject)
+    public bool TryGetSelectedItemFilterMapObject(out MapObject selectedMapObject)
     {
-        focusedMapObject = null;
-        if (player == null)
+        selectedMapObject = null;
+        if (currentSelectedMapObject == null
+            || !currentSelectedMapObject.gameObject.activeInHierarchy
+            || !currentSelectedMapObject.AllowsFocus)
+        {
+            return false;
+        }
+
+        return TryResolveItemFilterTarget(currentSelectedMapObject, out selectedMapObject);
+    }
+
+    public bool TryResolveItemFilterTarget(MapObject mapObject, out MapObject filterTarget)
+    {
+        filterTarget = null;
+        if (player == null
+            || mapObject == null
+            || !mapObject.gameObject.activeInHierarchy
+            || !mapObject.AllowsFocus)
         {
             return false;
         }
@@ -4286,140 +4304,7 @@ public partial class PlayerController : MonoBehaviour
         }
 
         Vector3 origin = player.BodyTransform != null ? player.BodyTransform.position : transform.position;
-        float nearestDistanceSqr = float.MaxValue;
-
-        foreach (Block block in currentFocusedBlocks)
-        {
-            MapObject mapObject = ResolveInteractionFocusTarget(block);
-            if (mapObject == null || !mapObject.gameObject.activeInHierarchy || !mapObject.AllowsFocus)
-            {
-                continue;
-            }
-
-            if (!TryResolveFocusedItemFilterTarget(mapObject, definitions, origin, out MapObject filterTarget))
-            {
-                continue;
-            }
-
-            float distanceSqr = GetMapObjectFocusSelectionDistanceSqr(filterTarget, block, origin);
-            if (distanceSqr >= nearestDistanceSqr)
-            {
-                continue;
-            }
-
-            nearestDistanceSqr = distanceSqr;
-            focusedMapObject = filterTarget;
-        }
-
-        TryFindFreightCarAttachedBoxFilterTarget(
-            definitions,
-            origin,
-            ref nearestDistanceSqr,
-            ref focusedMapObject);
-
-        return focusedMapObject != null;
-    }
-
-    private bool TryFindFreightCarAttachedBoxFilterTarget(
-        List<ItemDefinition> definitions,
-        Vector3 origin,
-        ref float nearestDistanceSqr,
-        ref MapObject focusedMapObject)
-    {
-        itemFilterTrainScratch.Clear();
-        Train.CollectActiveRuntimeTrains(itemFilterTrainScratch);
-        if (itemFilterTrainScratch.Count <= 0)
-        {
-            return false;
-        }
-
-        bool found = false;
-        Train mountedTrain = MountedVehicle as Train;
-        for (int i = 0; i < itemFilterTrainScratch.Count; i++)
-        {
-            if (!(itemFilterTrainScratch[i] is FreightCar freightCar)
-                || freightCar == null
-                || !freightCar.gameObject.activeInHierarchy
-                || !freightCar.AllowsFocus)
-            {
-                continue;
-            }
-
-            bool isMountedTrainGroup = mountedTrain != null
-                                       && IsSameConnectedTrainGroup(mountedTrain, freightCar);
-            float freightCarDistanceSqr = GetMapObjectFocusSelectionDistanceSqr(freightCar, null, origin);
-            if (!isMountedTrainGroup)
-            {
-                float focusRadius = Mathf.Max(0f, freightCar.FocusActivationRadius);
-                if (focusRadius <= 0f || freightCarDistanceSqr > focusRadius * focusRadius)
-                {
-                    continue;
-                }
-            }
-
-            if (!freightCar.TryGetClosestAttachedBoxObject(origin, out BoxObject attachedBox)
-                || attachedBox == null
-                || !attachedBox.gameObject.activeInHierarchy
-                || !SupportsItemFilter(attachedBox, definitions))
-            {
-                continue;
-            }
-
-            float attachedBoxDistanceSqr = GetMapObjectFocusSelectionDistanceSqr(attachedBox, null, origin);
-            if (attachedBoxDistanceSqr >= nearestDistanceSqr)
-            {
-                continue;
-            }
-
-            nearestDistanceSqr = attachedBoxDistanceSqr;
-            focusedMapObject = attachedBox;
-            found = true;
-        }
-
-        itemFilterTrainScratch.Clear();
-        itemFilterTrainQueue.Clear();
-        itemFilterTrainVisited.Clear();
-        return found;
-    }
-
-    private bool IsSameConnectedTrainGroup(Train first, Train second)
-    {
-        if (first == null || second == null)
-        {
-            return false;
-        }
-
-        if (first == second)
-        {
-            return true;
-        }
-
-        itemFilterTrainQueue.Clear();
-        itemFilterTrainVisited.Clear();
-        itemFilterTrainQueue.Enqueue(first);
-        itemFilterTrainVisited.Add(first);
-        while (itemFilterTrainQueue.Count > 0)
-        {
-            Train train = itemFilterTrainQueue.Dequeue();
-            foreach (Train connectedTrain in train.ConnectedTrains)
-            {
-                if (connectedTrain == null
-                    || !connectedTrain.gameObject.activeInHierarchy
-                    || !itemFilterTrainVisited.Add(connectedTrain))
-                {
-                    continue;
-                }
-
-                if (connectedTrain == second)
-                {
-                    return true;
-                }
-
-                itemFilterTrainQueue.Enqueue(connectedTrain);
-            }
-        }
-
-        return false;
+        return TryResolveFocusedItemFilterTarget(mapObject, definitions, origin, out filterTarget);
     }
 
     private static bool TryResolveFocusedItemFilterTarget(

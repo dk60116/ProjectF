@@ -782,7 +782,7 @@ public partial class TerrainGenerator : MonoBehaviour
         EnsureResourceStateStore();
         if (installationObject is Trainstation trainStation)
         {
-            EnsureTrainStationNameAssigned(trainStation);
+            EnsureTrainStationIdentityAssigned(trainStation);
         }
 
         resourceStateStore?.RegisterLiveInstallation(installationObject);
@@ -846,7 +846,7 @@ public partial class TerrainGenerator : MonoBehaviour
         EnsureResourceStateStore();
         if (installationObject is Trainstation trainStation)
         {
-            EnsureTrainStationNameAssigned(trainStation);
+            EnsureTrainStationIdentityAssigned(trainStation);
         }
 
         resourceStateStore?.RegisterLiveInstallation(installationObject);

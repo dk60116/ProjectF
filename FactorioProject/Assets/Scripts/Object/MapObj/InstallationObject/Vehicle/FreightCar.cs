@@ -2,7 +2,10 @@ using System;
 using System.Collections.Generic;
 using UnityEngine;
 
-public class FreightCar : Train, IPlayerItemStorage, IPlayerItemStoragePortablePreview
+public class FreightCar : Train,
+    IPlayerItemStorage,
+    IPlayerItemStoragePortablePreview,
+    IPersistentInstallationItemCollectionStorage
 {
     private const float MountedTankMotionPositionEpsilonSqr = 0.000001f;
     private const float MountedTankMotionRotationEpsilonDegrees = 0.05f;
@@ -122,6 +125,76 @@ public class FreightCar : Train, IPlayerItemStorage, IPlayerItemStoragePortableP
         return addedCount > 0;
     }
 
+    public void CapturePersistentStoredItemIds(List<int> destination)
+    {
+        if (destination == null)
+        {
+            return;
+        }
+
+        destination.Clear();
+        EnsureItemPointStacks();
+        EnsureBoxPointBoxes();
+
+        for (int i = 0; i < itemPointStacks.Count; i++)
+        {
+            AppendPersistentItemIds(itemPointStacks[i], destination);
+        }
+
+        for (int i = 0; i < boxPointItemStacks.Count; i++)
+        {
+            if (IsBoxPointStorageActive(i))
+            {
+                AppendPersistentItemIds(boxPointItemStacks[i], destination);
+            }
+        }
+    }
+
+    public void ApplyPersistentStoredItemIds(IReadOnlyList<int> itemIds)
+    {
+        ClearLoadedItems();
+        EnsureItemPointStacks();
+        EnsureBoxPointBoxes();
+
+        int restoredCount = 0;
+        if (itemIds != null)
+        {
+            for (int i = 0; i < itemIds.Count; i++)
+            {
+                int itemId = itemIds[i];
+                if (itemId >= 0 && TryAddRestoredItem(itemId))
+                {
+                    restoredCount++;
+                }
+            }
+        }
+
+        if (restoredCount > 0)
+        {
+            NotifyRobotArmsAtRuntimeCoordinates();
+        }
+    }
+
+    private static void AppendPersistentItemIds(
+        List<PortableObject> stack,
+        List<int> destination)
+    {
+        CleanupItemStack(stack);
+        if (stack == null)
+        {
+            return;
+        }
+
+        for (int i = 0; i < stack.Count; i++)
+        {
+            PortableObject portableObject = stack[i];
+            if (portableObject != null && portableObject.ItemId >= 0)
+            {
+                destination.Add(portableObject.ItemId);
+            }
+        }
+    }
+
     public bool CanAddItem(int itemId, Vector3 referenceWorldPosition)
     {
         return itemId >= 0
@@ -233,6 +306,19 @@ public class FreightCar : Train, IPlayerItemStorage, IPlayerItemStoragePortableP
         out int storageCapacity,
         out bool hasStorage)
     {
+        GetAutoDriveStorageSummary(
+            null,
+            out storedItemCount,
+            out storageCapacity,
+            out hasStorage);
+    }
+
+    public void GetAutoDriveStorageSummary(
+        Predicate<int> itemFilter,
+        out int storedItemCount,
+        out int storageCapacity,
+        out bool hasStorage)
+    {
         storedItemCount = 0;
         storageCapacity = 0;
         hasStorage = false;
@@ -253,19 +339,15 @@ public class FreightCar : Train, IPlayerItemStorage, IPlayerItemStoragePortableP
                     continue;
                 }
 
-                hasStorage = true;
                 List<PortableObject> stack = i < itemPointStacks.Count
                     ? itemPointStacks[i]
                     : null;
-                CleanupItemStack(stack);
-                int storedItemId = stack != null && stack.Count > 0 && stack[0] != null
-                    ? stack[0].ItemId
-                    : -1;
-                storageCapacity += GetStackCapacityForItem(storedItemId);
-                if (stack != null)
-                {
-                    storedItemCount += stack.Count;
-                }
+                AccumulateAutoDriveStackSummary(
+                    stack,
+                    itemFilter,
+                    ref storedItemCount,
+                    ref storageCapacity,
+                    ref hasStorage);
             }
         }
 
@@ -282,18 +364,56 @@ public class FreightCar : Train, IPlayerItemStorage, IPlayerItemStoragePortableP
                 continue;
             }
 
-            hasStorage = true;
             CleanupBoxPointSlot(i);
+            if (IsBoxPointStorageActive(i))
+            {
+                List<PortableObject> stack = i < boxPointItemStacks.Count
+                    ? boxPointItemStacks[i]
+                    : null;
+                AccumulateAutoDriveStackSummary(
+                    stack,
+                    itemFilter,
+                    ref storedItemCount,
+                    ref storageCapacity,
+                    ref hasStorage);
+            }
+
             BoxObject attachedBox = i < boxPointLoads.Count
                 ? boxPointLoads[i] as BoxObject
                 : null;
             if (attachedBox != null
                 && attachedBox.gameObject.activeInHierarchy
-                && attachedBox.TryGetObjectInfoItem(out _, out int itemCount, out int capacity))
+                && attachedBox.TryGetObjectInfoItem(out int itemId, out int itemCount, out int capacity)
+                && (itemId < 0 || itemFilter == null || itemFilter(itemId)))
             {
+                hasStorage = true;
                 storedItemCount += Mathf.Max(0, itemCount);
                 storageCapacity += Mathf.Max(0, capacity);
             }
+        }
+    }
+
+    private void AccumulateAutoDriveStackSummary(
+        List<PortableObject> stack,
+        Predicate<int> itemFilter,
+        ref int storedItemCount,
+        ref int storageCapacity,
+        ref bool hasStorage)
+    {
+        CleanupItemStack(stack);
+        int storedItemId = stack != null && stack.Count > 0 && stack[0] != null
+            ? stack[0].ItemId
+            : -1;
+        if (storedItemId >= 0 && itemFilter != null && !itemFilter(storedItemId))
+        {
+            return;
+        }
+
+        hasStorage = true;
+        storageCapacity += GetStackCapacityForItem(storedItemId);
+        if (stack != null)
+        {
+            storedItemCount += stack.Count;
         }
     }
 
@@ -690,6 +810,41 @@ public class FreightCar : Train, IPlayerItemStorage, IPlayerItemStoragePortableP
             PortableObject.MoveToDuration,
             false);
 
+        return true;
+    }
+
+    private bool TryAddRestoredItem(int itemId)
+    {
+        if (!TryGetBestItemStorageStack(
+                itemId,
+                transform.position,
+                out Transform itemPoint,
+                out List<PortableObject> stack)
+            || itemPoint == null
+            || stack == null)
+        {
+            return false;
+        }
+
+        PortableObject portableObject = CreateItemPortableObject(itemId);
+        if (portableObject == null)
+        {
+            return false;
+        }
+
+        int objectIndex = stack.Count;
+        portableObject.CancelMove();
+        portableObject.SetBatchedRendering(false);
+        portableObject.transform.SetParent(itemPoint, false);
+        portableObject.transform.localPosition = new Vector3(
+            0f,
+            objectIndex * Mathf.Max(0.001f, itemStackVerticalSpacing),
+            0f);
+        portableObject.transform.localRotation = Quaternion.identity;
+        portableObject.transform.localScale = Vector3.one;
+        portableObject.gameObject.SetActive(true);
+        portableObject.GetOrAddPickupGate()?.MarkSettled();
+        stack.Add(portableObject);
         return true;
     }
 

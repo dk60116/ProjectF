@@ -44,6 +44,26 @@ public partial class Train
     public static void Link(Train a, Train b)
     { a.ConnectedTrains.Add(b); b.ConnectedTrains.Add(a); ConnectionGraphRevision++; }
 }
+public sealed class FreightCar : Train
+{
+    public int StoredItemCount;
+    public int StorageCapacity = 10;
+    public int StoredFuelCount;
+    public int FuelCapacity = 10;
+    public bool HasStorage = true;
+    public void GetAutoDriveStorageSummary(out int storedItemCount, out int storageCapacity, out bool hasStorage)
+    {
+        storedItemCount = StoredItemCount;
+        storageCapacity = StorageCapacity;
+        hasStorage = HasStorage;
+    }
+    public void GetAutoDriveStorageSummary(Predicate<int> filter, out int storedItemCount, out int storageCapacity, out bool hasStorage)
+    {
+        storedItemCount = StoredFuelCount;
+        storageCapacity = FuelCapacity;
+        hasStorage = HasStorage;
+    }
+}
 public partial class RailHandcar : Train
 {
     readonly List<Train> connectedTrainGroupScratch = new();
@@ -182,6 +202,32 @@ public partial class SteamTrain
     bool RequiresPoweredBurnEnergy(Vector3 direction, float dt, out float cost)
     { cost = direction.sqrMagnitude > .0001f ? dt : 0; return cost > 0; }
     bool TryEnsureBurnEnergyAvailable(float cost, Player player) { fuelRequests++; return HasFuel; }
+    static bool IsFreeTrainEnabled() => false;
+    static bool IsUsableBurnEnergyItem(int itemId) => itemId == 2;
+    bool TryGetRearFreightCar(out FreightCar freightCar)
+    {
+        foreach (Train connectedTrain in ConnectedTrains)
+        {
+            if (connectedTrain is FreightCar candidate)
+            {
+                freightCar = candidate;
+                return true;
+            }
+        }
+
+        freightCar = null;
+        return false;
+    }
+    public bool TestDepartureFuelSatisfied()
+    {
+        ResolveAutoDriveDepartureFilters(out AutoDriveFuelFilter filter, out _);
+        return TryEvaluateAutoDriveFuelFilterSatisfied(filter);
+    }
+    public bool TestDepartureFreightSatisfied()
+    {
+        ResolveAutoDriveDepartureFilters(out _, out AutoDriveFreightFilter filter);
+        return TryEvaluateAutoDriveFreightFilterSatisfied(filter);
+    }
     void SetAutoDriveStatus(AutoDriveStatus status, string current, string next)
     { autoDriveStatus = status; autoDriveCurrentTargetStationName = current; autoDriveNextTargetStationName = next; }
     string ResolveAutoDriveStatusText() => autoDriveStatus.ToString();
@@ -261,16 +307,29 @@ public partial class SteamTrain
         AutoDriveRoutePlanner.CheckGraph();
         var left = Engine(4, Vector2.left);
         var right = Engine(7, Vector2.right);
-        var wagon = new Train { Rail = TestRail, Distance = 5 };
+        var wagon = new FreightCar
+        {
+            Rail = TestRail,
+            Distance = 5,
+            StoredItemCount = 0,
+            StorageCapacity = 10,
+            StoredFuelCount = 10,
+            FuelCapacity = 10
+        };
         Train.Link(left, wagon); Train.Link(wagon, right);
-        left.ApplyAutoDriveState(true, "A", "B", 1, 2, "B", "A", 0);
+        left.ApplyAutoDriveState(true, "A", "B", 1, 2, 0, 0, "B", "A", 0);
         left.TickAutoDrive(.1f, null);
         Check(!left.autoDriveEnabled && right.autoDriveEnabled, "Control must move to the destination-side locomotive");
         Check(left.PoweredMoves == 0 && right.PoweredMoves == 1, "Only the selected locomotive may accelerate");
         Check(left.fuelRequests == 0 && right.fuelRequests == 1, "Fuel must be requested from the selected locomotive");
         Check(right.LastStep > 0, "Automatic movement must be forward relative to the selected locomotive");
         Check(right.autoDriveLastArrivedStationName == "A" && right.autoDriveResolvedTargetStationName == "B", "Handoff must preserve the current service leg");
-        Check(left.AutoDriveEnabled && left.AutoDriveFuelFilterName == "Full" && left.AutoDriveFreightFilterName == "Empty", "Old locomotive UI must follow the active schedule");
+        Check(left.AutoDriveEnabled
+              && left.AutoDriveTargetAFuelFilterName == "Full"
+              && left.AutoDriveTargetAFreightFilterName == "Empty"
+              && left.AutoDriveTargetBFuelFilterName == "Free"
+              && left.AutoDriveTargetBFreightFilterName == "Free",
+            "Old locomotive UI must follow every condition in the active schedule");
         Check(left.BlocksManualDisconnection && right.BlocksManualDisconnection, "Automatic driving must lock manual disconnection from either locomotive");
         left.HandleMountedInput(Vector3.left, 1, .1f, new Player());
         right.TickAutoDrive(.1f, null);
@@ -286,20 +345,91 @@ public partial class SteamTrain
         Check(left.HasRecordedPath && !right.HasRecordedPath, "Schedule handoff must transfer the actual movement tape to the return locomotive");
         Check(Near(left.autoDriveStationWaitTimer, 2.9f), "Station wait must survive handoff and tick once");
         Check(left.autoDriveResolvedTargetStationName == "A", "Return service must retain the destination");
-        left.CaptureAutoDriveState(out bool savedEnabled, out _, out _, out _, out _, out string savedTarget, out string savedArrival, out float savedWait);
-        right.CaptureAutoDriveState(out bool oldEnabled, out _, out _, out _, out _, out _, out _, out _);
-        Check(savedEnabled && !oldEnabled && savedTarget == "A" && savedArrival == "B" && Near(savedWait, 2.9f), "Only the actual controller schedule must be serialized as enabled");
+        left.CaptureAutoDriveState(
+            out bool savedEnabled,
+            out _,
+            out _,
+            out int savedTargetAFuel,
+            out int savedTargetAFreight,
+            out int savedTargetBFuel,
+            out int savedTargetBFreight,
+            out string savedTarget,
+            out string savedArrival,
+            out float savedWait);
+        right.CaptureAutoDriveState(out bool oldEnabled, out _, out _, out _, out _, out _, out _, out _, out _, out _);
+        Check(savedEnabled
+              && !oldEnabled
+              && savedTargetAFuel == 1
+              && savedTargetAFreight == 2
+              && savedTargetBFuel == 0
+              && savedTargetBFreight == 0
+              && savedTarget == "A"
+              && savedArrival == "B"
+              && Near(savedWait, 2.9f),
+            "The active controller must serialize both targets' conditions and current service leg");
 
         Time.frameCount++;
         left.autoDriveStationWaitTimer = 0; left.HasFuel = false;
         left.TickAutoDrive(.1f, null);
         Check(left.autoDriveStatus == AutoDriveStatus.WaitingForFuel && right.fuelRequests == 1, "Empty leading locomotive must wait instead of reversing with the other engine");
-        right.ApplyAutoDriveSettings(false, "A", "B", "Full", "Empty");
+        right.ApplyAutoDriveSettings(false, "A", "B", "Full", "Empty", "Free", "Full");
         Check(!left.AutoDriveEnabled && !right.AutoDriveEnabled, "Stopping from the old locomotive UI must stop the current controller");
         Check(!left.BlocksManualDisconnection && !right.BlocksManualDisconnection, "Stopping automatic driving must unlock manual disconnection");
         Time.frameCount++;
         right.HandleMountedInput(Vector3.left, 1, .1f, new Player());
         Check(right.LastStep < 0, "Manual reverse must remain available");
+
+        var freightConditionEngine = Engine(7, Vector2.right);
+        var freightConditionCar = new FreightCar
+        {
+            Rail = TestRail,
+            Distance = 5,
+            StoredItemCount = 9,
+            StorageCapacity = 10
+        };
+        Train.Link(freightConditionEngine, freightConditionCar);
+        freightConditionEngine.ApplyAutoDriveState(true, "A", "B", 0, 1, 0, 2, "B", "A", 0);
+        Time.frameCount++;
+        freightConditionEngine.TickAutoDrive(.1f, null);
+        Check(freightConditionEngine.PoweredMoves == 0
+              && freightConditionEngine.autoDriveStatus == AutoDriveStatus.WaitingForFreight,
+            "A Full freight condition must keep the train at the station while capacity remains");
+        freightConditionCar.StoredItemCount = 10;
+        Time.frameCount++;
+        freightConditionEngine.TickAutoDrive(.1f, null);
+        Check(freightConditionEngine.PoweredMoves == 1,
+            "A Full freight condition must release the train when the consist is full");
+        freightConditionEngine.ApplyAutoDriveSettings(true, "A", "B", "Free", "Empty", "Free", "Full");
+        freightConditionEngine.autoDriveLastArrivedStationName = "A";
+        freightConditionEngine.autoDriveStationWaitTimer = 0;
+        Time.frameCount++;
+        freightConditionEngine.TickAutoDrive(.1f, null);
+        Check(freightConditionEngine.PoweredMoves == 1
+              && freightConditionEngine.autoDriveStatus == AutoDriveStatus.WaitingForFreight,
+            "An Empty freight condition must keep the train at the station while cargo remains");
+        freightConditionCar.StoredItemCount = 0;
+        Time.frameCount++;
+        freightConditionEngine.TickAutoDrive(.1f, null);
+        Check(freightConditionEngine.PoweredMoves == 2,
+            "An Empty freight condition must release the train after all connected freight cars are empty");
+
+        freightConditionCar.StoredItemCount = 9;
+        freightConditionCar.StoredFuelCount = 9;
+        freightConditionCar.FuelCapacity = 10;
+        freightConditionEngine.ApplyAutoDriveSettings(true, "A", "B", "Full", "Empty", "Free", "Full");
+        freightConditionEngine.autoDriveLastArrivedStationName = "A";
+        Check(!freightConditionEngine.TestDepartureFuelSatisfied(),
+            "Target A must use its own Full fuel condition");
+        Check(!freightConditionEngine.TestDepartureFreightSatisfied(),
+            "Target A must use its own Empty freight condition");
+        freightConditionEngine.autoDriveLastArrivedStationName = "B";
+        Check(freightConditionEngine.TestDepartureFuelSatisfied(),
+            "Target B Free fuel condition must ignore Target A fuel state");
+        Check(!freightConditionEngine.TestDepartureFreightSatisfied(),
+            "Target B must use its own Full freight condition");
+        freightConditionCar.StoredItemCount = 10;
+        Check(freightConditionEngine.TestDepartureFreightSatisfied(),
+            "Target B Full freight condition must release at capacity");
 
         // Both powered vehicles face the same way: choose the closer forward one.
         var trailing = Engine(4, Vector2.right); var leading = Engine(7, Vector2.right);
@@ -314,7 +444,7 @@ public partial class SteamTrain
 
         // A lone locomotive pointing away from the target must wait.
         var lone = Engine(7, Vector2.left);
-        lone.ApplyAutoDriveState(true, "A", "B", 0, 0, "B", "A", 0);
+        lone.ApplyAutoDriveState(true, "A", "B", 0, 0, 0, 0, "B", "A", 0);
         lone.CurrentVehicleSignedSpeed = -2;
         Time.frameCount++; lone.TickAutoDrive(.1f, null);
         Check(lone.PoweredMoves == 0 && Near(lone.CurrentVehicleSignedSpeed, 0) && lone.autoDriveStatus == AutoDriveStatus.WaitingForPath,
