@@ -86,9 +86,13 @@ public class ObjectInfoPanel : MonoBehaviour
             ? ResolveUnderlyingResource(mapObject)
             : null;
         RefreshFocusedInfoPanels(boundTarget, underlyingResource);
-        if (boundTarget is RailHandcar || boundTarget is ProjectF.MapObjects.Tree)
+        if (boundTarget is RailHandcar || boundTarget is FreightCar || boundTarget is ProjectF.MapObjects.Tree)
         {
             // Live values and gauges are updated by ItemInfoDescription itself.
+            if (boundTarget is FreightCar)
+            {
+                RefreshInfoLineRectTransformThrottled();
+            }
             return;
         }
 
@@ -230,6 +234,19 @@ public class ObjectInfoPanel : MonoBehaviour
         if (mapObject is RailHandcar railHandcar)
         {
             ShowRailHandcarInfo(railHandcar, underlyingResource);
+            return;
+        }
+
+        if (mapObject is FreightCar freightCar)
+        {
+            if (infoLine != null)
+            {
+                if (!infoLine.gameObject.activeSelf)
+                {
+                    infoLine.gameObject.SetActive(true);
+                }
+                infoLine.ShowFreightCar(freightCar, underlyingResource);
+            }
             return;
         }
 

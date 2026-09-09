@@ -19,6 +19,15 @@ Coverage includes:
   save state, UI ownership and duplicate ticks from mounted input.
 - Independent Target A/Target B fuel and freight departure conditions, including
   Full and Empty freight checks across the connected consist.
+- Freight excludes the fuel-supply cars of all locomotives, including the return
+  engine. Ordinary cargo remains counted even when carrying fuel. Full fuel plus
+  Empty cargo can depart; fuel Full remains independent. A fuel-only consist is
+  cargo-empty, never cargo-full. Shared suppliers and changing supply roles are covered.
+- InfoPanel reason text and existing indicator binding: station-time/Full-fuel/
+  Full-or-Empty-freight waits are yellow, actual fuel/water shortages are red.
+  Water shortage and fuel-capacity conditions use distinct runtime statuses.
+  A resumed trip clears the lamp; selecting the other locomotive follows the
+  active controller. The real UI refresh method is extracted into a render facade.
 - Departure after the arrival wait with Free freight, including full/empty/no
   freight storage. Free imposes no storage or capacity requirement.
 - Departure conditions remain armed while motion is blocked and are completed

@@ -11,7 +11,11 @@ namespace UnityEngine
     }
 
     public struct Quaternion { public static Quaternion identity => new(); }
-    public static class Mathf { public static float Max(float a, float b) => Math.Max(a, b); }
+    public static class Mathf
+    {
+        public static float Max(float a, float b) => Math.Max(a, b);
+        public static int Max(int a, int b) => Math.Max(a, b);
+    }
     public sealed class GameObject
     {
         public bool activeInHierarchy = true;
@@ -53,7 +57,26 @@ public sealed class PortableObject
     public DroppedItemPickupGate GetOrAddPickupGate() => Gate;
 }
 
-public partial class FreightCar
+public class BoxObject
+{
+    public readonly UnityEngine.GameObject gameObject = new();
+    public int ItemId = -1, Count, Capacity = 20;
+    public bool TryGetObjectInfoItem(out int itemId, out int count, out int capacity)
+    { itemId = ItemId; count = Count; capacity = Capacity; return true; }
+}
+
+public class Train
+{
+    public readonly List<Train> ConnectedTrains = new();
+    public readonly UnityEngine.GameObject gameObject = new();
+}
+public class SteamTrain : Train
+{
+    public FreightCar FuelCar;
+    public bool TryGetRearFreightCar(out FreightCar car) { car = FuelCar; return car != null; }
+}
+
+public partial class FreightCar : Train
 {
     const int Capacity = 2;
     readonly List<List<PortableObject>> itemPointStacks = new();
@@ -61,6 +84,13 @@ public partial class FreightCar
     readonly List<UnityEngine.Transform> itemPoints = new();
     readonly List<UnityEngine.Transform> boxPoints = new();
     readonly List<bool> activeBoxPoints = new();
+    List<UnityEngine.Transform> itemPointList => itemPoints;
+    List<UnityEngine.Transform> boxPointList => boxPoints;
+    public readonly List<BoxObject> boxPointLoads = new();
+    public bool HasTank;
+    bool TryGetAttachedFluidTank(out object tank) { tank = null; return HasTank; }
+    void CleanupBoxPointSlot(int index) { }
+    int GetStackCapacityForItem(int id) => Capacity;
     readonly UnityEngine.Transform transform = new();
     float itemStackVerticalSpacing = .05f;
     public int RobotArmNotifications;
@@ -146,6 +176,7 @@ static class Checks
 
     public static void Main()
     {
+        checks += MountedFocusProbe.Run();
         var source = new FreightCar(2, true, false);
         source.SeedItemPoint(0, 4, 4);
         source.SeedItemPoint(1, 5);
@@ -172,6 +203,40 @@ static class Checks
         roundTrip.Clear();
         restored.CapturePersistentStoredItemIds(roundTrip);
         Expect(roundTrip.Count == 0, "Applying an empty payload must clear stale freight.");
+        var cargo = new List<FreightCar.CargoInfo>();
+        source.CopyObjectInfoCargo(cargo, out int count, out int capacity);
+        Expect(count == 5 && capacity == 6 && cargo.Count == 3,
+            "Info cargo includes active item/box stacks, excludes inactive stacks.");
+        Expect(cargo[0].ItemId == 4 && cargo[0].Count == 2 && cargo[0].Capacity == 2,
+            "Cargo row binds the item's ID, quantity and capacity.");
+        var combined = new FreightCar(2, false);
+        combined.SeedItemPoint(0, 4);
+        combined.SeedItemPoint(1, 4, 4);
+        var box = new BoxObject { ItemId = 4, Count = 7 };
+        combined.boxPointLoads.Add(box);
+        combined.CopyObjectInfoCargo(cargo, out count, out capacity);
+        Expect(count == 10 && capacity == 24 && cargo.Count == 1 && cargo[0].Count == 10,
+            "Same item in multiple stacks and an attached box is aggregated once.");
+        box.gameObject.activeInHierarchy = false;
+        combined.CopyObjectInfoCargo(cargo, out count, out capacity);
+        Expect(count == 3 && capacity == 4, "Removed box contents leave the panel summary.");
+        restored.CopyObjectInfoCargo(cargo, out count, out capacity);
+        Expect(count == 0 && capacity == 6 && cargo.Count == 1 && cargo[0].ItemId == -1,
+            "Unloading clears stale rows and retains empty capacity.");
+        combined.HasTank = true;
+        combined.CopyObjectInfoCargo(cargo, out count, out capacity);
+        Expect(count == 0 && capacity == 0 && cargo.Count == 0,
+            "A mounted fluid tank uses fluid info rather than stale solid cargo rows.");
+        var engine = new SteamTrain { FuelCar = combined };
+        combined.ConnectedTrains.Add(engine);
+        Expect(combined.IsFuelSupplyCar, "A connected engine's actual supplier shows the coal marker.");
+        engine.FuelCar = source;
+        Expect(!combined.IsFuelSupplyCar, "An ordinary car must not show the marker just because it carries coal.");
+        var returnEngine = new SteamTrain { FuelCar = combined };
+        combined.ConnectedTrains.Add(returnEngine);
+        Expect(combined.IsFuelSupplyCar, "The return engine's supplier also shows the marker.");
+        returnEngine.gameObject.activeInHierarchy = false;
+        Expect(!combined.IsFuelSupplyCar, "An inactive engine does not retain the fuel-role marker.");
         Console.WriteLine($"FreightCar persistence checks passed: {checks}");
     }
 }

@@ -66,5 +66,21 @@ namespace ProjectF.Rendering
         public bool IsAnyLayerVisible(int mask) => !Enabled || (layerMask & mask) != 0;
 
         public bool Intersects(Bounds bounds) => !Enabled || GeometryUtility.TestPlanesAABB(planes, bounds);
+
+        // Fully visible batches need no per-instance scan. Only boundary batches are compacted.
+        public bool Contains(Bounds bounds)
+        {
+            if (!Enabled) return true;
+            Vector3 center = bounds.center;
+            Vector3 extents = bounds.extents;
+            for (int i = 0; i < planes.Length; i++)
+            {
+                Vector3 normal = planes[i].normal;
+                float radius = Mathf.Abs(normal.x) * extents.x + Mathf.Abs(normal.y) * extents.y
+                    + Mathf.Abs(normal.z) * extents.z;
+                if (Vector3.Dot(normal, center) + planes[i].distance < radius) return false;
+            }
+            return true;
+        }
     }
 }

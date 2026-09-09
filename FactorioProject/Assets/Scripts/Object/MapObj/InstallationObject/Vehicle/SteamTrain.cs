@@ -46,13 +46,23 @@ public class SteamTrain : RailHandcar
         WaitingForFreight = 7,
         WaitingForPath = 8,
         WaitingForClearTrack = 9,
-        Arrived = 10
+        Arrived = 10,
+        WaitingForDepartureFuel = 11,
+        WaitingForWater = 12
     }
 
     private enum DriveMotionOutcome
     {
         Applied = 0,
-        BlockedByFuel = 1
+        BlockedByFuel = 1,
+        BlockedByWater = 2
+    }
+
+    public enum InfoWarning
+    {
+        None,
+        DepartureCondition,
+        ResourceShortage
     }
 
     [SerializeField]
@@ -134,6 +144,7 @@ public class SteamTrain : RailHandcar
     private readonly List<AutoDriveRoutePlanner.RouteSegment> autoDriveRouteScratchSegments = new List<AutoDriveRoutePlanner.RouteSegment>(32);
     private readonly List<AutoDriveRoutePlanner.RouteSegment> autoDriveRouteReferenceScratchSegments = new List<AutoDriveRoutePlanner.RouteSegment>(32);
     private readonly List<Train> autoDriveConnectedTrainScratch = new List<Train>(8);
+    private readonly HashSet<FreightCar> autoDriveFuelFreightCarScratch = new HashSet<FreightCar>();
     private readonly Queue<Vector2Int> waterPipeSearchQueue = new Queue<Vector2Int>(32);
     private readonly Queue<Train> autoDriveConnectedTrainQueue = new Queue<Train>(8);
     private readonly HashSet<Vector2Int> waterPipeSearchVisited = new HashSet<Vector2Int>();
@@ -471,10 +482,11 @@ public class SteamTrain : RailHandcar
             && !string.IsNullOrEmpty(autoDriveLastArrivedStationName);
         Vector3 departurePosition = isDepartureAttempt ? transform.position : default;
         DriveMotionOutcome outcome = HandleResolvedDriveMotion(moveDirection, 0f, deltaTime, mountedPlayer);
-        if (outcome == DriveMotionOutcome.BlockedByFuel)
+        if (outcome != DriveMotionOutcome.Applied)
         {
             SetAutoDriveStatus(
-                AutoDriveStatus.WaitingForFuel,
+                outcome == DriveMotionOutcome.BlockedByWater
+                    ? AutoDriveStatus.WaitingForWater : AutoDriveStatus.WaitingForFuel,
                 autoDriveResolvedTargetStationName,
                 autoDriveResolvedNextStationName);
             return;
@@ -512,7 +524,7 @@ public class SteamTrain : RailHandcar
         {
             StopMovementParticle(false);
             base.HandleMountedInput(Vector3.zero, moveSpeed, deltaTime);
-            return DriveMotionOutcome.BlockedByFuel;
+            return DriveMotionOutcome.BlockedByWater;
         }
 
         if (RequiresPoweredBurnEnergy(resolvedMoveDirection, deltaTime, out float burnEnergyCost)
@@ -1108,7 +1120,7 @@ public class SteamTrain : RailHandcar
         return false;
     }
 
-    private bool TryGetRearFreightCar(out FreightCar freightCar)
+    internal bool TryGetRearFreightCar(out FreightCar freightCar)
     {
         freightCar = null;
         if (!TryResolveForward2D(out Vector2 forward))
@@ -1857,12 +1869,76 @@ public class SteamTrain : RailHandcar
             AutoDriveStatus.Docking => $"AutoDrive: Docking{targetSuffix}",
             AutoDriveStatus.WaitingAtStation => $"AutoDrive: Waiting{targetSuffix}",
             AutoDriveStatus.WaitingForFuel => $"AutoDrive: Waiting Fuel{targetSuffix}",
+            AutoDriveStatus.WaitingForDepartureFuel => $"AutoDrive: Waiting Full Fuel{targetSuffix}",
+            AutoDriveStatus.WaitingForWater => $"AutoDrive: Waiting Water{targetSuffix}",
             AutoDriveStatus.WaitingForFreight => $"AutoDrive: Waiting Freight{targetSuffix}",
             AutoDriveStatus.WaitingForPath => $"AutoDrive: No Path{targetSuffix}",
             AutoDriveStatus.WaitingForClearTrack => $"AutoDrive: Track Busy{targetSuffix}",
             AutoDriveStatus.Arrived => $"AutoDrive: Arrived{targetSuffix}",
             _ => "AutoDrive: Ready"
         };
+    }
+
+    public void GetObjectInfoStatus(out string statusText, out InfoWarning warning)
+    {
+        SteamTrain controller = AutoDriveSettingsOwner;
+        warning = InfoWarning.None;
+        if (!controller.autoDriveEnabled)
+        {
+            statusText = Mathf.Abs(CurrentVehicleSignedSpeed) > 0.0001f
+                ? "Manual driving" : "Stopped: Auto-drive off";
+            return;
+        }
+
+        switch (controller.autoDriveStatus)
+        {
+            case AutoDriveStatus.WaitingAtStation:
+                statusText = "Waiting: Station wait";
+                warning = InfoWarning.DepartureCondition;
+                return;
+            case AutoDriveStatus.WaitingForDepartureFuel:
+                statusText = "Waiting: Full fuel";
+                warning = InfoWarning.DepartureCondition;
+                return;
+            case AutoDriveStatus.WaitingForFreight:
+                controller.ResolveAutoDriveDepartureFilters(out _, out AutoDriveFreightFilter freightFilter);
+                statusText = freightFilter == AutoDriveFreightFilter.Empty
+                    ? "Waiting: Empty freight" : "Waiting: Full freight";
+                warning = InfoWarning.DepartureCondition;
+                return;
+            case AutoDriveStatus.WaitingForFuel:
+                statusText = "Resource shortage: Fuel";
+                warning = InfoWarning.ResourceShortage;
+                return;
+            case AutoDriveStatus.WaitingForWater:
+                statusText = "Resource shortage: Water";
+                warning = InfoWarning.ResourceShortage;
+                return;
+            case AutoDriveStatus.WaitingForPath:
+                statusText = "Stopped: No available route";
+                return;
+            case AutoDriveStatus.WaitingForClearTrack:
+                statusText = "Stopped: Waiting for clear track";
+                return;
+            case AutoDriveStatus.NoTarget:
+                statusText = "Stopped: No destination";
+                return;
+            case AutoDriveStatus.Planning:
+                statusText = "Planning route";
+                return;
+            case AutoDriveStatus.Moving:
+                statusText = "Auto-driving";
+                return;
+            case AutoDriveStatus.Docking:
+                statusText = "Approaching station";
+                return;
+            case AutoDriveStatus.Arrived:
+                statusText = "Stopped: Arrived at destination";
+                return;
+            default:
+                statusText = "Preparing departure";
+                return;
+        }
     }
 
     private static string NormalizeAutoDriveStationName(string stationName)
@@ -1994,7 +2070,7 @@ public class SteamTrain : RailHandcar
         if (!TryEvaluateAutoDriveFuelFilterSatisfied(departureFuelFilter))
         {
             SetAutoDriveStatus(
-                AutoDriveStatus.WaitingForFuel,
+                AutoDriveStatus.WaitingForDepartureFuel,
                 autoDriveLastArrivedStationName,
                 targetStationName);
             return Vector3.zero;
@@ -2262,6 +2338,20 @@ public class SteamTrain : RailHandcar
         }
 
         CollectAutoDriveConnectedTrains();
+        // Reserve every locomotive's fuel supplier, including the return-trip engine.
+        // Identify the car by its supply role, not by the items currently loaded in it.
+        autoDriveFuelFreightCarScratch.Clear();
+        for (int i = 0; i < autoDriveConnectedTrainScratch.Count; i++)
+        {
+            if (autoDriveConnectedTrainScratch[i] is SteamTrain engine
+                && engine != null
+                && engine.gameObject.activeInHierarchy
+                && engine.TryGetRearFreightCar(out FreightCar fuelCar))
+            {
+                autoDriveFuelFreightCarScratch.Add(fuelCar);
+            }
+        }
+
         int totalItemCount = 0;
         int totalCapacity = 0;
         bool hasStorage = false;
@@ -2269,7 +2359,8 @@ public class SteamTrain : RailHandcar
         {
             if (autoDriveConnectedTrainScratch[i] is not FreightCar freightCar
                 || freightCar == null
-                || !freightCar.gameObject.activeInHierarchy)
+                || !freightCar.gameObject.activeInHierarchy
+                || autoDriveFuelFreightCarScratch.Contains(freightCar))
             {
                 continue;
             }
@@ -2285,7 +2376,8 @@ public class SteamTrain : RailHandcar
 
         if (!hasStorage || totalCapacity <= 0)
         {
-            return false;
+            // A fuel-only consist has no cargo to unload, but cannot be cargo-full.
+            return freightFilter == AutoDriveFreightFilter.Empty;
         }
 
         return freightFilter switch
@@ -3790,6 +3882,7 @@ public class SteamTrain : RailHandcar
     private void InvalidateAutoDriveConnectedTrainCache()
     {
         autoDriveConnectedTrainScratch.Clear();
+        autoDriveFuelFreightCarScratch.Clear();
         autoDriveConnectedTrainVisited.Clear();
         autoDriveConnectedTrainQueue.Clear();
         autoDriveConnectedTrainGraphRevision = 0;

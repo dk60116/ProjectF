@@ -69,6 +69,7 @@ $properties = $source.Substring($source.IndexOf('    private SteamTrain AutoDriv
 $generated += $properties
 foreach ($signature in @(
     'private enum AutoDriveFuelFilter', 'private enum AutoDriveFreightFilter', 'private enum AutoDriveStatus', 'private enum DriveMotionOutcome',
+    'public enum InfoWarning', 'public void GetObjectInfoStatus(',
     'public override void HandleMountedInput(', 'private void TickAutoDrive(', 'private DriveMotionOutcome HandleResolvedDriveMotion(',
     'public void ApplyAutoDriveSettings(', 'public void CaptureAutoDriveState(', 'public void ApplyAutoDriveState(',
     'private void ClaimAutoDriveControl(', 'private bool IsPrimaryAutoDriveControllerForConsist(', 'private SteamTrain ResolveAutoDriveControllerForConsist(',
@@ -169,6 +170,9 @@ $generated += 'public partial class Train { ' + $spacingConstant.Value + ' }'
 $source = $trainSource
 $generated += 'public partial class Train { ' + (Read-Member 'internal static Vector2 ResolveRailConnectionForward(') + (Read-Member 'private static Vector2 ResolveRailConnectionEndpointForward(') + ' }'
 [IO.File]::WriteAllText((Join-Path $probe 'Production.cs'), $generated)
+$source = [IO.File]::ReadAllText((Join-Path $repo 'FactorioProject/Assets/Scripts/HUD/ObjectUI/ItemInfoDescription.cs'))
+$uiMethod = (Read-Member 'private void RefreshSteamTrainInfo(')
+[IO.File]::WriteAllText((Join-Path $probe 'TrainInfoUi.cs'), "public partial class TrainInfoProbe {`n" + $uiMethod + "`n}")
 Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'Checks.cs') -Destination $probe
 Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'PathTransferChecks.cs') -Destination $probe
 Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'InitialPathChecks.cs') -Destination $probe

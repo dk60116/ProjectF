@@ -106,7 +106,14 @@ public sealed partial class PortableItemRenderer
     }
 }
 public interface IVirtualRenderBatchOwner { }
-public class VirtualRenderBatchKey { public VirtualRenderBatchKey(Mesh mesh, Material material, int layer, int submesh, ShadowCastingMode shadow, bool receive, bool uv, int batchCellX, int batchCellZ, bool invertCulling) { } }
+public class VirtualRenderBatchKey
+{
+    public Mesh Mesh;
+    public bool HasUvScroll, HasConveyorMotion;
+    public VirtualRenderBatchKey() { }
+    public VirtualRenderBatchKey(Mesh mesh, Material material, int layer, int submesh, ShadowCastingMode shadow, bool receive, bool uv, int batchCellX, int batchCellZ, bool invertCulling)
+    { Mesh = mesh; HasUvScroll = uv; }
+}
 public struct VirtualRenderBatchEntry { public VirtualRenderBatchKey BatchKey; public int MatrixIndex; }
 public partial class VirtualRenderBatchCollection
 {
@@ -202,6 +209,9 @@ public static class Checks
         PortableItemRenderer.Check(); BeltProbe.Check(); BackendProbe.Check(); WorldChecks.Check();
         AnimalAnimationChecks.Check();
         FreeCameraChecks.Check();
+        VirtualRenderBatchCollection.CheckInstanceCulling();
+        ResourceCameraProbe.Check();
+        BrgInstanceProbe.Check();
         Console.WriteLine($"PASS: {count} world-camera/animal-animation/deferred-item/tracked-cell/batch-lifetime checks; production methods, managed scene/render doubles. No engine launched.");
     }
 }

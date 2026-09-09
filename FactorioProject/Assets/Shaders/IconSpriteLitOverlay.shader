@@ -4,6 +4,7 @@ Shader "ProjectF/UI/Box Sprite Lit Overlay"
     {
         [PerRendererData] _MainTex("Sprite Texture", 2D) = "white" {}
         _Color("Tint", Color) = (1,1,1,1)
+        [Enum(UnityEngine.Rendering.CompareFunction)] _ZTest("Depth Test", Float) = 8
         [MaterialToggle] PixelSnap("Pixel snap", Float) = 0
     }
 
@@ -20,8 +21,7 @@ Shader "ProjectF/UI/Box Sprite Lit Overlay"
 
         Cull Off
         ZWrite Off
-        // 상자 뚜껑과 같은 불투명 표면에 붙는 상태 표기이므로 깊이에 가려지지 않아야 한다.
-        ZTest Always
+        ZTest [_ZTest]
         Blend One OneMinusSrcAlpha
 
         Pass

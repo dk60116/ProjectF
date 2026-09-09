@@ -3187,8 +3187,7 @@ public partial class PlayerController : MonoBehaviour
 
         if (!IsValidMouseFocusMapObject(mountedPinnedFocusTarget))
         {
-            mountedPinnedFocusTarget = MountedVehicle;
-            mountedPinnedFocusFallbackBlock = null;
+            ClearMountedPinnedFocus();
         }
 
         if (mountedPinnedFocusTarget == null
@@ -5603,12 +5602,19 @@ public partial class PlayerController : MonoBehaviour
         }
 
         Vector2 pointerPosition = Input.mousePosition;
-        if (IsPointerOverMouseFocusBlockingUi(pointerPosition)
-            || !TryResolveMouseFocusedMapObject(
+        if (IsPointerOverMouseFocusBlockingUi(pointerPosition))
+        {
+            return;
+        }
+
+        if (!TryResolveMouseFocusedMapObject(
                 pointerPosition,
                 out MapObject mapObject,
                 out Block fallbackBlock))
         {
+            ClearMountedPinnedFocus();
+            SetMouseFocusedBlocks(null);
+            RefreshMountedPinnedInteractionFocus();
             return;
         }
 
@@ -5619,6 +5625,10 @@ public partial class PlayerController : MonoBehaviour
         if (AppendMapObjectFocusBlocks(mapObject, fallbackBlock, mouseFocusBlocks))
         {
             SetMouseFocusedBlocks(mouseFocusBlocks, mapObject);
+        }
+        else
+        {
+            SetMouseFocusedBlocks(null);
         }
 
         RefreshMountedPinnedInteractionFocus();

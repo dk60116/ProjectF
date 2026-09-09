@@ -1994,6 +1994,7 @@ public class ResourceBatchRenderer : MonoBehaviour
     private readonly HashSet<Resource> batchedResources = new HashSet<Resource>();
     private readonly Dictionary<BatchKey, List<Matrix4x4>> matricesByBatch = new Dictionary<BatchKey, List<Matrix4x4>>();
     private readonly Dictionary<BatchKey, Bounds> boundsByBatch = new Dictionary<BatchKey, Bounds>();
+    private readonly Dictionary<BatchKey, CameraBatch> cameraBatches = new Dictionary<BatchKey, CameraBatch>();
     private readonly List<BatchKey> activeBatchKeys = new List<BatchKey>();
     private readonly List<Resource> cleanupBuffer = new List<Resource>();
     private readonly ProjectF.Rendering.CameraRenderCulling cameraCulling = new ProjectF.Rendering.CameraRenderCulling();
@@ -2108,6 +2109,7 @@ public class ResourceBatchRenderer : MonoBehaviour
 
     private void ClearActiveBatches()
     {
+        foreach (CameraBatch cache in cameraBatches.Values) cache.SourceCount = -1;
         for (int i = 0; i < activeBatchKeys.Count; i++)
         {
             BatchKey key = activeBatchKeys[i];
@@ -2312,24 +2314,66 @@ public class ResourceBatchRenderer : MonoBehaviour
                 continue;
             }
 
-            RenderParams renderParams = new RenderParams(key.Material)
+            if (!cameraCulling.Contains(batchBounds) && key.ShadowCastingMode != ShadowCastingMode.ShadowsOnly
+                && key.ShadowCastingMode != ShadowCastingMode.TwoSided)
             {
-                layer = key.Layer,
-                shadowCastingMode = key.ShadowCastingMode,
-                receiveShadows = key.ReceiveShadows,
-                worldBounds = batchBounds
-            };
-
-            int remaining = matrices.Count;
-            int startIndex = 0;
-            while (remaining > 0)
-            {
-                int drawCount = Mathf.Min(MaxInstancesPerDraw, remaining);
-                Graphics.RenderMeshInstanced(renderParams, key.Mesh, key.SubMeshIndex, matrices, drawCount, startIndex);
-                startIndex += drawCount;
-                remaining -= drawCount;
+                CameraBatch cache = ResolveCameraBatch(key, matrices);
+                DrawResourceBatch(key, cache.Visible, batchBounds, key.ShadowCastingMode);
+                if (key.ShadowCastingMode == ShadowCastingMode.On)
+                    DrawResourceBatch(key, cache.Hidden, batchBounds, ShadowCastingMode.ShadowsOnly);
+                continue;
             }
+            DrawResourceBatch(key, matrices, batchBounds, key.ShadowCastingMode);
         }
+    }
+
+    private CameraBatch ResolveCameraBatch(BatchKey key, List<Matrix4x4> matrices)
+    {
+        if (!cameraBatches.TryGetValue(key, out CameraBatch cache))
+        {
+            cache = new CameraBatch();
+            cameraBatches.Add(key, cache);
+        }
+        if (cache.SourceCount == matrices.Count && cache.CameraVersion == cameraCulling.Version) return cache;
+        cache.SourceCount = matrices.Count;
+        cache.CameraVersion = cameraCulling.Version;
+        cache.Visible.Clear();
+        cache.Hidden.Clear();
+        for (int i = 0; i < matrices.Count; i++)
+        {
+            Bounds bounds = VirtualRenderBatchCollection.CalculateWorldBounds(key.Mesh, matrices[i]);
+            (cameraCulling.Intersects(bounds) ? cache.Visible : cache.Hidden).Add(matrices[i]);
+        }
+        return cache;
+    }
+
+    private static void DrawResourceBatch(BatchKey key, List<Matrix4x4> matrices, Bounds batchBounds,
+        ShadowCastingMode shadowCastingMode)
+    {
+        RenderParams renderParams = new RenderParams(key.Material)
+        {
+            layer = key.Layer,
+            shadowCastingMode = shadowCastingMode,
+            receiveShadows = key.ReceiveShadows,
+            worldBounds = batchBounds
+        };
+
+        int remaining = matrices.Count;
+        int startIndex = 0;
+        while (remaining > 0)
+        {
+            int drawCount = Mathf.Min(MaxInstancesPerDraw, remaining);
+            Graphics.RenderMeshInstanced(renderParams, key.Mesh, key.SubMeshIndex, matrices, drawCount, startIndex);
+            startIndex += drawCount;
+            remaining -= drawCount;
+        }
+    }
+
+    private sealed class CameraBatch
+    {
+        public int SourceCount = -1, CameraVersion = -1;
+        public readonly List<Matrix4x4> Visible = new List<Matrix4x4>();
+        public readonly List<Matrix4x4> Hidden = new List<Matrix4x4>();
     }
 
     private float ResolveBatchCellSize(bool useGlobalBatch)

@@ -43,3 +43,15 @@ GameManager Inspector와 EditorTool의 `Disable Camera Culling` 토글을 함께
 게임 검증 시에는 카메라 이동·줌 후 지형·자원·건물·동물·플레이어·기차와 일반/코너/2F/분배기 및 Seam Top이 나타나는지, 화면 밖에서 이동한 아이템이 현재 위치에 나타나는지도 확인한다. 컬링을 껐다 켠 뒤 카메라 추적·줌·자유 카메라가 유지되는지 함께 확인한다.
 
 FreeCamera player-view inspection: 15 additional checks exercise the actual PlayerCamera matrix update, shared custom-culling selection, native renderer override/restoration, player translation, camera ownership, missing-camera fallback, and Disable Camera Culling precedence. Total: 72 checks. Screen projection stays on the free camera; its occlusion culling is disabled only during the native inspection render, then restored.
+
+## 배치 경계의 개별 오브젝트 컬링
+
+터레인의 16칸 청크와 달리 나무·풀은 기본 32칸 묶음, 벨트는 기본 16칸 묶음을 사용한다. 묶음 전체의 AABB가 시야에 걸친다는 이유만으로 안의 모든 인스턴스를 색상 렌더링에 제출하던 경로를 수정했다.
+
+- 일반 인스턴싱과 자원 렌더러는 시야 경계에 걸친 묶음만 개별 메시의 월드 AABB로 검사한다. 완전히 시야 안인 묶음은 추가 검사를 생략한다.
+- 카메라나 원본 데이터가 바뀌지 않으면 압축된 목록을 재사용한다. 원본 인스턴스 순서와 시뮬레이션 데이터는 변경하지 않는다.
+- 벨트의 UV 및 GPU 이동 벡터를 같은 인덱스로 압축하며, 이동 경로의 끝이 시야 안에 들어오는 아이템은 유지한다.
+- 일반 그림자(On)를 만드는 화면 밖 인스턴스는 ShadowsOnly 제출로 유지한다. 기존 ShadowsOnly 및 TwoSided 경로는 그림자 의미를 보존하기 위해 보수적인 묶음 판정을 유지한다.
+- BRG의 카메라 콜백은 개별 경계가 보이는 원본 인덱스만 제출한다. 라이트 콜백은 카메라 판정으로 그림자 생성 대상을 제거하지 않는다.
+
+`InstanceChecks.cs`는 실제 압축·분류·BRG 인덱스 선택 메서드를 추출해 19개 회귀 검사를 추가한다(전체 91개). GPU 드로우 결과, 양면 그림자, 실제 프레임 비용은 엔진 검증 대상이다. 일반 Renderer는 계속 Unity 자체 경계 판정을 사용하며, 높거나 큰 오브젝트가 평평한 터레인보다 먼저 시야에 걸치는 정상적인 차이는 유지된다.

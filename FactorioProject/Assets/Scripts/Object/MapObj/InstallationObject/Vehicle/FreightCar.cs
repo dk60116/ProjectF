@@ -22,6 +22,36 @@ public class FreightCar : Train,
     private int maxItemsPerPoint = 10;
     [SerializeField, Min(0.001f)]
     private float itemStackVerticalSpacing = 0.05f;
+    [SerializeField]
+    private SpriteRenderer fuelRoleIcon;
+
+    public readonly struct CargoInfo
+    {
+        public readonly int ItemId, Count, Capacity;
+        public CargoInfo(int itemId, int count, int capacity)
+        {
+            ItemId = itemId;
+            Count = count;
+            Capacity = capacity;
+        }
+    }
+
+    public bool IsFuelSupplyCar
+    {
+        get
+        {
+            foreach (Train connected in ConnectedTrains)
+            {
+                if (connected is SteamTrain engine
+                    && engine != null && engine.gameObject.activeInHierarchy
+                    && engine.TryGetRearFreightCar(out FreightCar fuelCar) && fuelCar == this)
+                {
+                    return true;
+                }
+            }
+            return false;
+        }
+    }
 
     private readonly List<List<PortableObject>> itemPointStacks = new List<List<PortableObject>>();
     private readonly List<InstallationObject> boxPointLoads = new List<InstallationObject>();
@@ -319,6 +349,22 @@ public class FreightCar : Train,
         out int storageCapacity,
         out bool hasStorage)
     {
+        CollectStorageSummary(itemFilter, null, out storedItemCount, out storageCapacity, out hasStorage);
+    }
+
+    public void CopyObjectInfoCargo(List<CargoInfo> destination, out int count, out int capacity)
+    {
+        destination.Clear();
+        CollectStorageSummary(null, destination, out count, out capacity, out _);
+    }
+
+    private void CollectStorageSummary(
+        Predicate<int> itemFilter,
+        List<CargoInfo> cargo,
+        out int storedItemCount,
+        out int storageCapacity,
+        out bool hasStorage)
+    {
         storedItemCount = 0;
         storageCapacity = 0;
         hasStorage = false;
@@ -345,6 +391,7 @@ public class FreightCar : Train,
                 AccumulateAutoDriveStackSummary(
                     stack,
                     itemFilter,
+                    cargo,
                     ref storedItemCount,
                     ref storageCapacity,
                     ref hasStorage);
@@ -373,6 +420,7 @@ public class FreightCar : Train,
                 AccumulateAutoDriveStackSummary(
                     stack,
                     itemFilter,
+                    cargo,
                     ref storedItemCount,
                     ref storageCapacity,
                     ref hasStorage);
@@ -389,6 +437,7 @@ public class FreightCar : Train,
                 hasStorage = true;
                 storedItemCount += Mathf.Max(0, itemCount);
                 storageCapacity += Mathf.Max(0, capacity);
+                AppendCargoInfo(cargo, itemId, Mathf.Max(0, itemCount), Mathf.Max(0, capacity));
             }
         }
     }
@@ -396,6 +445,7 @@ public class FreightCar : Train,
     private void AccumulateAutoDriveStackSummary(
         List<PortableObject> stack,
         Predicate<int> itemFilter,
+        List<CargoInfo> cargo,
         ref int storedItemCount,
         ref int storageCapacity,
         ref bool hasStorage)
@@ -410,11 +460,29 @@ public class FreightCar : Train,
         }
 
         hasStorage = true;
-        storageCapacity += GetStackCapacityForItem(storedItemId);
-        if (stack != null)
+        int capacity = GetStackCapacityForItem(storedItemId);
+        int count = stack != null ? stack.Count : 0;
+        storageCapacity += capacity;
+        storedItemCount += count;
+        AppendCargoInfo(cargo, storedItemId, count, capacity);
+    }
+
+    private static void AppendCargoInfo(List<CargoInfo> cargo, int itemId, int count, int capacity)
+    {
+        if (cargo == null)
         {
-            storedItemCount += stack.Count;
+            return;
         }
+        for (int i = 0; i < cargo.Count; i++)
+        {
+            CargoInfo previous = cargo[i];
+            if (previous.ItemId == itemId)
+            {
+                cargo[i] = new CargoInfo(itemId, previous.Count + count, previous.Capacity + capacity);
+                return;
+            }
+        }
+        cargo.Add(new CargoInfo(itemId, count, capacity));
     }
 
     public bool TryAttachBoxObject(BoxObject boxObject, Vector3 referenceWorldPosition)
@@ -690,6 +758,10 @@ public class FreightCar : Train,
 
     protected override void OnDisable()
     {
+        if (fuelRoleIcon != null)
+        {
+            fuelRoleIcon.enabled = false;
+        }
         ResetMountedTankMotionTracking();
         ClearLoadedItems();
         base.OnDisable();
@@ -713,6 +785,14 @@ public class FreightCar : Train,
 
     private void LateUpdate()
     {
+        if (fuelRoleIcon != null)
+        {
+            bool visible = IsFuelSupplyCar;
+            if (fuelRoleIcon.enabled != visible)
+            {
+                fuelRoleIcon.enabled = visible;
+            }
+        }
         UpdateMountedTankMotionTracking(Time.deltaTime);
         SyncAttachedLoadsRuntime();
     }

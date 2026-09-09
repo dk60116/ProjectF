@@ -446,28 +446,17 @@ public sealed class VirtualRenderBatchCollection
 
             try
             {
-                List<Matrix4x4> matrices = batchCache.Matrices;
-                int remaining = matrices.Count;
-                int startIndex = 0;
-                while (remaining > 0)
+                if (!cameraCulling.Contains(worldBounds) && key.ShadowCastingMode != ShadowCastingMode.ShadowsOnly
+                    && key.ShadowCastingMode != ShadowCastingMode.TwoSided)
                 {
-                    int drawCount = Mathf.Min(MaxInstancesPerDraw, remaining);
-                    RenderParams renderParams = new RenderParams(key.Material)
-                    {
-                        layer = key.Layer,
-                        shadowCastingMode = key.ShadowCastingMode,
-                        receiveShadows = key.ReceiveShadows,
-                        worldBounds = worldBounds,
-                        matProps = ResolveBatchPropertyBlock(
-                            key,
-                            batchCache,
-                            startIndex,
-                            drawCount)
-                    };
-                    Graphics.RenderMeshInstanced(renderParams, key.Mesh, key.SubmeshIndex, matrices, drawCount, startIndex);
-                    startIndex += drawCount;
-                    remaining -= drawCount;
+                    ResolveCameraBatches(key, batchCache, out BatchRenderCache visible, out BatchRenderCache hidden);
+                    DrawLegacyBatch(key, visible, worldBounds, key.ShadowCastingMode);
+                    if (key.ShadowCastingMode == ShadowCastingMode.On)
+                        DrawLegacyBatch(key, hidden, worldBounds, ShadowCastingMode.ShadowsOnly);
+                    continue;
                 }
+
+                DrawLegacyBatch(key, batchCache, worldBounds, key.ShadowCastingMode);
             }
             finally
             {
@@ -476,6 +465,56 @@ public sealed class VirtualRenderBatchCollection
                     GL.invertCulling = previousInvertCulling;
                 }
             }
+        }
+    }
+
+    private void DrawLegacyBatch(VirtualRenderBatchKey key, BatchRenderCache batchCache,
+        Bounds worldBounds, ShadowCastingMode shadowCastingMode)
+    {
+        List<Matrix4x4> matrices = batchCache.Matrices;
+        int remaining = matrices.Count;
+        int startIndex = 0;
+        while (remaining > 0)
+        {
+            int drawCount = Mathf.Min(MaxInstancesPerDraw, remaining);
+            RenderParams renderParams = new RenderParams(key.Material)
+            {
+                layer = key.Layer,
+                shadowCastingMode = shadowCastingMode,
+                receiveShadows = key.ReceiveShadows,
+                worldBounds = worldBounds,
+                matProps = ResolveBatchPropertyBlock(
+                    key,
+                    batchCache,
+                    startIndex,
+                    drawCount)
+            };
+            Graphics.RenderMeshInstanced(renderParams, key.Mesh, key.SubmeshIndex, matrices, drawCount, startIndex);
+            startIndex += drawCount;
+            remaining -= drawCount;
+        }
+    }
+
+    private void ResolveCameraBatches(VirtualRenderBatchKey key, BatchRenderCache source,
+        out BatchRenderCache visible, out BatchRenderCache hidden)
+    {
+        visible = source.CameraVisible ??= new BatchRenderCache();
+        hidden = source.CameraHidden ??= new BatchRenderCache();
+        if (source.CameraDataVersion == source.DataVersion && source.CameraVersion == cameraCulling.Version)
+            return;
+        source.CameraDataVersion = source.DataVersion;
+        source.CameraVersion = cameraCulling.Version;
+        visible.ClearCameraData();
+        hidden.ClearCameraData();
+        for (int i = 0; i < source.Matrices.Count; i++)
+        {
+            ConveyorItemGpuMotionData motion = key.HasConveyorMotion
+                ? new ConveyorItemGpuMotionData(source.ConveyorMotionStarts[i], source.ConveyorMotionEnds[i]) : default;
+            Bounds bounds = CalculateInstanceBounds(key, source.Matrices[i], motion);
+            BatchRenderCache target = cameraCulling.Intersects(bounds) ? visible : hidden;
+            target.Matrices.Add(source.Matrices[i]);
+            if (key.HasUvScroll) AddInstanceUvData(target, key, source.InstanceUvData[i]);
+            AddConveyorMotionData(target, key, motion);
         }
     }
 
@@ -781,13 +820,19 @@ public sealed class VirtualRenderBatchCollection
             return;
         }
 
+        batchCache.EncapsulateBounds(CalculateInstanceBounds(key, matrix, conveyorMotion));
+    }
+
+    private static Bounds CalculateInstanceBounds(VirtualRenderBatchKey key, Matrix4x4 matrix,
+        ConveyorItemGpuMotionData conveyorMotion)
+    {
         Bounds bounds = CalculateWorldBounds(key.Mesh, matrix);
         if (key.HasConveyorMotion && conveyorMotion.IsActive)
         {
             Vector3 motionDelta = conveyorMotion.EndWorldPosition - conveyorMotion.StartWorldPosition;
             bounds.Encapsulate(new Bounds(bounds.center + motionDelta, bounds.size));
         }
-        batchCache.EncapsulateBounds(bounds);
+        return bounds;
     }
 
     internal static Bounds CalculateWorldBounds(Mesh mesh, Matrix4x4 matrix)
@@ -831,6 +876,17 @@ public sealed class VirtualRenderBatchCollection
         public bool HasBounds;
         public bool BoundsDirty;
         public int DataVersion;
+        public BatchRenderCache CameraVisible, CameraHidden;
+        public int CameraDataVersion = -1, CameraVersion = -1;
+
+        public void ClearCameraData()
+        {
+            Matrices.Clear();
+            InstanceUvData?.Clear();
+            ConveyorMotionStarts?.Clear();
+            ConveyorMotionEnds?.Clear();
+            MarkDataDirty();
+        }
 
         public void EncapsulateBounds(Bounds bounds)
         {

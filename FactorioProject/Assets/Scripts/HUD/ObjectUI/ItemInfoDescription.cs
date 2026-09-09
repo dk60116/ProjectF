@@ -54,6 +54,9 @@ public class ItemInfoDescription : MonoBehaviour
     private readonly List<int> conveyorItemIds = new List<int>(2);
     private readonly List<int> handcartItemIds = new List<int>(6);
     private readonly List<int> handcartItemCounts = new List<int>(6);
+    private readonly List<FreightCar.CargoInfo> freightCargo = new List<FreightCar.CargoInfo>(6);
+    private FreightCar liveGaugeFreightCar;
+    private float nextFreightInfoRefreshTime;
     private readonly List<int> defaultItemOriginalSiblingIndices = new List<int>();
     private int defaultStatusLineIndex;
     private bool defaultItemSiblingIndicesCaptured;
@@ -413,10 +416,7 @@ public class ItemInfoDescription : MonoBehaviour
         liveGaugeRailHandcar = railHandcar;
         if (railHandcar is SteamTrain steamTrain)
         {
-            SetSteamTrainBurnEnergyGauge(steamTrain);
-            SetSteamTrainWaterGauge(workGauge, workFill, workText, steamTrain);
-            SetRailHandcarSpeedGauge(defaultGauge, defaultFill, defaultGaugeText, railHandcar);
-            SetFluidStorageDefaultItemSlot(0, steamTrain);
+            RefreshSteamTrainInfo(steamTrain);
         }
         else
         {
@@ -430,6 +430,46 @@ public class ItemInfoDescription : MonoBehaviour
     {
         BeginObjectDisplay(underlyingResource);
         SetFluidStorageDefaultItemSlot(0, installationObject);
+    }
+
+    public void ShowFreightCar(FreightCar freightCar, Resource underlyingResource = null)
+    {
+        BeginObjectDisplay(underlyingResource);
+        liveGaugeFreightCar = freightCar;
+        RefreshFreightCarInfo(freightCar);
+    }
+
+    private void RefreshFreightCarInfo(FreightCar freightCar)
+    {
+        nextFreightInfoRefreshTime = Time.unscaledTime + 0.2f;
+        int slotCount = defaultItemSlot != null ? defaultItemSlot.Count : 0;
+        if (freightCar.TryGetAttachedFluidTank(out Fluidtank tank))
+        {
+            SetDefaultText(defaultStatusLineIndex,
+                $"Fluid cargo: {FormatGaugeNumber(tank.StoredFluidLiters, true)} / {FormatGaugeNumber(tank.FluidStorageCapacityLiters, true)} L", true);
+            SetFluidStorageDefaultItemSlot(0, tank);
+            for (int i = 1; i < slotCount; i++)
+            {
+                SetDefaultItemSlot(i, -1, false);
+            }
+            return;
+        }
+
+        freightCar.CopyObjectInfoCargo(freightCargo, out int count, out int capacity);
+        string role = freightCar.IsFuelSupplyCar ? "Fuel cargo" : "Cargo";
+        SetDefaultText(defaultStatusLineIndex, $"{role}: {count} / {capacity}", true);
+        for (int i = 0; i < slotCount; i++)
+        {
+            if (i < freightCargo.Count)
+            {
+                FreightCar.CargoInfo cargo = freightCargo[i];
+                SetDefaultItemSlot(i, cargo.ItemId, cargo.Count, cargo.Capacity, true, true, true);
+            }
+            else
+            {
+                SetDefaultItemSlot(i, -1, false);
+            }
+        }
     }
 
     public void ShowTrainstation(Trainstation trainStation, Resource underlyingResource = null)
@@ -789,6 +829,8 @@ public class ItemInfoDescription : MonoBehaviour
 
     private void ClearLiveGaugeSource()
     {
+        liveGaugeFreightCar = null;
+        nextFreightInfoRefreshTime = 0f;
         nextPlantInfoRefreshTime = 0f;
         liveGaugePlant = null;
         liveGaugeLoggingMachine = null;
@@ -803,6 +845,15 @@ public class ItemInfoDescription : MonoBehaviour
     {
         if (!Application.isPlaying || !gameObject.activeInHierarchy)
         {
+            return;
+        }
+
+        if (liveGaugeFreightCar != null && liveGaugeFreightCar.gameObject.activeInHierarchy)
+        {
+            if (Time.unscaledTime >= nextFreightInfoRefreshTime)
+            {
+                RefreshFreightCarInfo(liveGaugeFreightCar);
+            }
             return;
         }
 
@@ -846,10 +897,7 @@ public class ItemInfoDescription : MonoBehaviour
         {
             if (liveGaugeRailHandcar is SteamTrain steamTrain)
             {
-                SetSteamTrainBurnEnergyGauge(steamTrain);
-                SetSteamTrainWaterGauge(workGauge, workFill, workText, steamTrain);
-                SetRailHandcarSpeedGauge(defaultGauge, defaultFill, defaultGaugeText, liveGaugeRailHandcar);
-                SetFluidStorageDefaultItemSlot(0, steamTrain);
+                RefreshSteamTrainInfo(steamTrain);
             }
             else
             {
@@ -1180,6 +1228,18 @@ public class ItemInfoDescription : MonoBehaviour
             seedPlanter.RuntimeAreaMaxObjects,
             true,
             true);
+    }
+
+    private void RefreshSteamTrainInfo(SteamTrain steamTrain)
+    {
+        steamTrain.GetObjectInfoStatus(out string statusText, out SteamTrain.InfoWarning warning);
+        SetDefaultText(defaultStatusLineIndex, statusText, true);
+        SetDefaultSign(defaultStatusLineIndex, warning != SteamTrain.InfoWarning.None,
+            warning == SteamTrain.InfoWarning.ResourceShortage ? StoppedSignColor : WarningSignColor);
+        SetSteamTrainBurnEnergyGauge(steamTrain);
+        SetSteamTrainWaterGauge(workGauge, workFill, workText, steamTrain);
+        SetRailHandcarSpeedGauge(defaultGauge, defaultFill, defaultGaugeText, steamTrain);
+        SetFluidStorageDefaultItemSlot(0, steamTrain);
     }
 
     private void SetRailHandcarSpeedGauge(RailHandcar railHandcar)

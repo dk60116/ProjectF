@@ -434,6 +434,7 @@ internal sealed class VirtualRenderBatchRendererGroupBackend : IDisposable
         {
             Matrix4x4 matrix = matrices[i];
             state.ObjectToWorldMatrices[i] = new PackedMatrix(matrix);
+            state.InstanceBounds[i] = VirtualRenderBatchCollection.CalculateWorldBounds(key.Mesh, matrix);
             state.WorldToObjectMatrices[i] = new PackedMatrix(matrix.inverse);
         }
 
@@ -552,8 +553,10 @@ internal sealed class VirtualRenderBatchRendererGroupBackend : IDisposable
                 continue;
             }
 
+            CollectVisibleInstances(state, cullingContext);
+            if (state.VisibleIndices.Count == 0) continue;
             visibleBatchCount++;
-            visibleInstanceCount += state.InstanceCount;
+            visibleInstanceCount += state.VisibleIndices.Count;
         }
 
         BatchCullingOutputDrawCommands* output =
@@ -588,7 +591,7 @@ internal sealed class VirtualRenderBatchRendererGroupBackend : IDisposable
             BrgBatchState state = states[stateIndex];
             ushort splitVisibilityMask =
                 ResolveSplitVisibilityMask(state, cullingContext);
-            if (splitVisibilityMask == 0)
+            if (splitVisibilityMask == 0 || state.VisibleIndices.Count == 0)
             {
                 continue;
             }
@@ -599,7 +602,7 @@ internal sealed class VirtualRenderBatchRendererGroupBackend : IDisposable
             output->drawCommands[drawIndex] = new BatchDrawCommand
             {
                 visibleOffset = (uint)visibleOffset,
-                visibleCount = (uint)state.InstanceCount,
+                visibleCount = (uint)state.VisibleIndices.Count,
                 batchID = state.BatchId,
                 materialID = state.MaterialId,
                 meshID = state.MeshId,
@@ -627,13 +630,13 @@ internal sealed class VirtualRenderBatchRendererGroupBackend : IDisposable
             };
 
             for (int instanceIndex = 0;
-                 instanceIndex < state.InstanceCount;
+                 instanceIndex < state.VisibleIndices.Count;
                  instanceIndex++)
             {
-                output->visibleInstances[visibleOffset + instanceIndex] = instanceIndex;
+                output->visibleInstances[visibleOffset + instanceIndex] = state.VisibleIndices[instanceIndex];
             }
 
-            visibleOffset += state.InstanceCount;
+            visibleOffset += state.VisibleIndices.Count;
             drawIndex++;
         }
 
@@ -678,6 +681,23 @@ internal sealed class VirtualRenderBatchRendererGroupBackend : IDisposable
         if (DisableCameraCulling && cullingContext.viewType == BatchCullingViewType.Camera)
             return ushort.MaxValue;
 
+        return ResolveBoundsSplitVisibilityMask(state.WorldBounds, cullingContext);
+    }
+
+    private void CollectVisibleInstances(BrgBatchState state, BatchCullingContext cullingContext)
+    {
+        state.VisibleIndices.Clear();
+        for (int i = 0; i < state.InstanceCount; i++)
+        {
+            // Camera filtering must not remove potential casters from a light's view.
+            if (cullingContext.viewType != BatchCullingViewType.Camera || DisableCameraCulling
+                || ResolveBoundsSplitVisibilityMask(state.InstanceBounds[i], cullingContext) != 0)
+                state.VisibleIndices.Add(i);
+        }
+    }
+
+    private static ushort ResolveBoundsSplitVisibilityMask(Bounds bounds, BatchCullingContext cullingContext)
+    {
         NativeArray<CullingSplit> splits = cullingContext.cullingSplits;
         if (!splits.IsCreated || splits.Length == 0)
         {
@@ -689,7 +709,7 @@ internal sealed class VirtualRenderBatchRendererGroupBackend : IDisposable
         ushort visibilityMask = 0;
         for (int splitIndex = 0; splitIndex < splitCount; splitIndex++)
         {
-            if (IntersectsSplit(state.WorldBounds, splits[splitIndex], planes))
+            if (IntersectsSplit(bounds, splits[splitIndex], planes))
             {
                 visibilityMask |= (ushort)(1 << splitIndex);
             }
@@ -778,6 +798,8 @@ internal sealed class VirtualRenderBatchRendererGroupBackend : IDisposable
         public BatchMaterialID MaterialId;
         public GraphicsBuffer InstanceDataBuffer;
         public PackedMatrix[] ObjectToWorldMatrices;
+        public Bounds[] InstanceBounds;
+        public readonly List<int> VisibleIndices = new List<int>();
         public PackedMatrix[] WorldToObjectMatrices;
         public Vector4[] UvProperties;
         public Bounds WorldBounds;
@@ -797,6 +819,7 @@ internal sealed class VirtualRenderBatchRendererGroupBackend : IDisposable
                 || ObjectToWorldMatrices.Length < requiredCapacity)
             {
                 ObjectToWorldMatrices = new PackedMatrix[Capacity];
+                InstanceBounds = new Bounds[Capacity];
                 WorldToObjectMatrices = new PackedMatrix[Capacity];
             }
 

@@ -35,7 +35,7 @@ $itemFile = 'FactorioProject/Assets/Scripts/Map/PortableItemRenderer.cs'
 $beltFile = 'FactorioProject/Assets/Scripts/Map/VirtualConveyorBeltRenderer.cs'
 $batchFile = 'FactorioProject/Assets/Scripts/Map/VirtualRenderBatcher.cs'
 $backendFile = 'FactorioProject/Assets/Scripts/Rendering/VirtualRenderBatchRendererGroupBackend.cs'
-$generated = "using System.Collections.Generic; using UnityEngine; using UnityEngine.Rendering;`n"
+$generated = "using System; using System.Collections.Generic; using UnityEngine; using UnityEngine.Rendering;`n"
 $generated += "public sealed partial class PortableItemRenderer {`n"
 foreach ($signature in @('private void RefreshVirtualConveyorBlockRenderCache(', 'private BlockRenderCache GetOrCreateVirtualConveyorBlockRenderCache(', 'private void RemoveVirtualConveyorBlockRenderCache(', 'private Bounds CreateDynamicVirtualConveyorBlockCullBounds(')) {
     $generated += (Read-Member $itemFile $signature) + "`n"
@@ -51,6 +51,22 @@ $generated += (Read-Member $batchFile 'internal static Bounds CalculateWorldBoun
 $generated += (Read-Member $batchFile 'internal static Bounds CalculateWorldBounds(Bounds') + "`n}"
 $generated += "`npublic partial class BackendProbe {`n"
 foreach ($signature in @('public void BeginSync()', 'public void Deactivate(', 'public void EndSync()')) {
+    $generated += (Read-Member $backendFile $signature) + "`n"
+}
+$generated += "}`n"
+$generated += (Read-Member $itemFile 'public readonly struct ConveyorItemGpuMotionData') + "`n"
+$generated += "public partial class VirtualRenderBatchCollection {`n"
+foreach ($signature in @('private void ResolveCameraBatches(', 'private static Bounds CalculateInstanceBounds(',
+    'private static void AddInstanceUvData(', 'private static void AddConveyorMotionData(',
+    'private sealed class BatchRenderCache', 'private readonly struct MatrixOwner', 'private sealed class DrawPropertyBlockCache')) {
+    $generated += (Read-Member $batchFile $signature) + "`n"
+}
+$generated += "} public partial class ResourceCameraProbe {`n"
+foreach ($signature in @('private CameraBatch ResolveCameraBatch(', 'private sealed class CameraBatch')) {
+    $generated += (Read-Member 'FactorioProject/Assets/Scripts/Object/MapObj/Resource.cs' $signature) + "`n"
+}
+$generated += "} public partial class BrgInstanceProbe {`n"
+foreach ($signature in @('private void CollectVisibleInstances(', 'private static ushort ResolveBoundsSplitVisibilityMask(', 'private static bool IntersectsSplit(')) {
     $generated += (Read-Member $backendFile $signature) + "`n"
 }
 $generated += "}`n"
@@ -74,6 +90,7 @@ $files = @(
     (Join-Path $PSScriptRoot 'WorldChecks.cs'),
     (Join-Path $PSScriptRoot 'AnimalAnimationChecks.cs'),
     (Join-Path $PSScriptRoot 'FreeCameraChecks.cs'),
+    (Join-Path $PSScriptRoot 'InstanceChecks.cs'),
     (Join-Path $repo 'FactorioProject/Assets/Scripts/Rendering/CameraRenderCulling.cs'),
     (Join-Path $repo 'FactorioProject/Assets/Scripts/Rendering/WorldCameraCulling.cs'),
     (Join-Path $repo 'FactorioProject/Assets/Scripts/Map/PortableItemRenderer.CameraCulling.cs'))

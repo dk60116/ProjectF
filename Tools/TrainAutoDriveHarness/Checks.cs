@@ -202,26 +202,20 @@ public partial class SteamTrain
     }
     void StopMovementParticle(bool unused) { }
     void PersistAutoDriveState() { }
-    bool RequiresWater(Vector3 direction, float dt, out float cost) { cost = 0; return false; }
-    bool TryEnsureWaterAvailable(float cost) => true;
+    public bool TestRequiresWater, TestHasWater = true;
+    bool RequiresWater(Vector3 direction, float dt, out float cost)
+    { cost = TestRequiresWater && direction.sqrMagnitude > .0001f ? dt : 0; return cost > 0; }
+    bool TryEnsureWaterAvailable(float cost) => TestHasWater;
     bool RequiresPoweredBurnEnergy(Vector3 direction, float dt, out float cost)
     { cost = direction.sqrMagnitude > .0001f ? dt : 0; return cost > 0; }
     bool TryEnsureBurnEnergyAvailable(float cost, Player player) { fuelRequests++; return HasFuel; }
     static bool IsFreeTrainEnabled() => false;
     static bool IsUsableBurnEnergyItem(int itemId) => itemId == 2;
+    public FreightCar TestFuelCar;
     bool TryGetRearFreightCar(out FreightCar freightCar)
     {
-        foreach (Train connectedTrain in ConnectedTrains)
-        {
-            if (connectedTrain is FreightCar candidate)
-            {
-                freightCar = candidate;
-                return true;
-            }
-        }
-
-        freightCar = null;
-        return false;
+        freightCar = TestFuelCar;
+        return freightCar != null && freightCar.gameObject.activeInHierarchy;
     }
     public bool TestDepartureFuelSatisfied()
     {
@@ -325,18 +319,21 @@ public partial class SteamTrain
         var full = Engine(0, Vector2.right);
         var car = new FreightCar { Rail = TestRail, StoredItemCount = 10, StorageCapacity = 10, StoredFuelCount = 10, FuelCapacity = 10 };
         Train.Link(full, car);
+        var fuel = new FreightCar { Rail = TestRail, StoredFuelCount = 10 };
+        Train.Link(car, fuel);
+        full.TestFuelCar = fuel;
         full.ApplyAutoDriveState(true, "A", "B", 1, 1, 1, 1, "B", "A", 0);
         full.BlockTestMovement = true;
         Time.frameCount++; full.TickAutoDrive(.1f, null);
         Check(full.autoDriveLastArrivedStationName == "A", "Track blockage must not complete station departure");
-        car.StoredFuelCount = 9;
+        fuel.StoredFuelCount = 9;
         Time.frameCount++; full.TickAutoDrive(.1f, null);
-        Check(full.autoDriveStatus == AutoDriveStatus.WaitingForFuel, "Blocked departure must recheck Full fuel");
+        Check(full.autoDriveStatus == AutoDriveStatus.WaitingForDepartureFuel, "Blocked departure must recheck Full fuel");
         full.BlockTestMovement = false;
-        car.StoredFuelCount = 10;
+        fuel.StoredFuelCount = 10;
         Time.frameCount++; full.TickAutoDrive(.1f, null);
         int moves = full.PoweredMoves;
-        car.StoredFuelCount = 9; car.StoredItemCount = 9;
+        fuel.StoredFuelCount = 9; car.StoredItemCount = 9;
         Time.frameCount++; full.TickAutoDrive(.1f, null);
         Check(full.PoweredMoves == moves + 1, "Fuel consumed after departure must not reinstate Full departure conditions");
         full.CaptureAutoDriveState(out bool enabled, out string a, out string b, out int af, out int ac,
@@ -350,8 +347,8 @@ public partial class SteamTrain
         full.HandleAutoDriveArrived("B", "A");
         Time.frameCount++; full.TickAutoDrive(5, null);
         Time.frameCount++; full.TickAutoDrive(.1f, null);
-        Check(full.autoDriveStatus == AutoDriveStatus.WaitingForFuel, "Next arrival must rearm that station's Full conditions");
-        car.StoredFuelCount = 10;
+        Check(full.autoDriveStatus == AutoDriveStatus.WaitingForDepartureFuel, "Next arrival must rearm that station's Full conditions");
+        fuel.StoredFuelCount = 10;
         Time.frameCount++; full.TickAutoDrive(.1f, null);
         Check(full.autoDriveStatus == AutoDriveStatus.WaitingForFreight, "Next arrival must recheck freight independently of fuel");
         car.StoredItemCount = 10;
@@ -359,10 +356,119 @@ public partial class SteamTrain
         Check(full.PoweredMoves == moves + 3, "Next leg resumes once both station conditions are met");
     }
 
+    static void CheckTrainInfo(SteamTrain train, string expectedText, InfoWarning expectedWarning)
+    {
+        train.GetObjectInfoStatus(out string text, out InfoWarning warning);
+        Check(text == expectedText && warning == expectedWarning, "InfoPanel reason/severity: " + expectedText);
+        var ui = new TrainInfoProbe();
+        ui.Refresh(train);
+        Check(ui.Text == expectedText && ui.LampVisible == (expectedWarning != InfoWarning.None), "InfoPanel text/lamp visibility binding");
+        if (expectedWarning != InfoWarning.None)
+            Check(ui.LampColor == (expectedWarning == InfoWarning.ResourceShortage ? Color.red : Color.yellow), "InfoPanel yellow condition/red resource color binding");
+    }
+
+    static void RunTrainInfoChecks()
+    {
+        var engine = Engine(0, Vector2.right);
+        var car = new FreightCar { Rail = TestRail, StoredFuelCount = 9, FuelCapacity = 10, StoredItemCount = 1 };
+        Train.Link(engine, car);
+        var fuel = new FreightCar { Rail = TestRail, StoredFuelCount = 9 };
+        Train.Link(car, fuel);
+        engine.TestFuelCar = fuel;
+        engine.ApplyAutoDriveState(true, "A", "B", 1, 2, 0, 0, "B", "A", 1);
+        Time.frameCount++; engine.TickAutoDrive(1, null);
+        CheckTrainInfo(engine, "Waiting: Station wait", InfoWarning.DepartureCondition);
+        Time.frameCount++; engine.TickAutoDrive(.1f, null);
+        CheckTrainInfo(engine, "Waiting: Full fuel", InfoWarning.DepartureCondition);
+        fuel.StoredFuelCount = 10;
+        Time.frameCount++; engine.TickAutoDrive(.1f, null);
+        CheckTrainInfo(engine, "Waiting: Empty freight", InfoWarning.DepartureCondition);
+        car.StoredItemCount = 0;
+        engine.HasFuel = false;
+        Time.frameCount++; engine.TickAutoDrive(.1f, null);
+        CheckTrainInfo(engine, "Resource shortage: Fuel", InfoWarning.ResourceShortage);
+        engine.HasFuel = true;
+        engine.TestRequiresWater = true; engine.TestHasWater = false;
+        Time.frameCount++; engine.TickAutoDrive(.1f, null);
+        CheckTrainInfo(engine, "Resource shortage: Water", InfoWarning.ResourceShortage);
+        engine.TestHasWater = true;
+        Time.frameCount++; engine.TickAutoDrive(.1f, null);
+        CheckTrainInfo(engine, "Auto-driving", InfoWarning.None);
+        engine.ApplyAutoDriveState(true, "A", "B", 0, 1, 0, 0, "B", "A", 0);
+        Time.frameCount++; engine.TickAutoDrive(.1f, null);
+        CheckTrainInfo(engine, "Waiting: Full freight", InfoWarning.DepartureCondition);
+        var otherEnd = Engine(-2, Vector2.left);
+        Train.Link(otherEnd, car);
+        CheckTrainInfo(otherEnd, "Waiting: Full freight", InfoWarning.DepartureCondition);
+        engine.ApplyAutoDriveSettings(false, "A", "B", "Free", "Free", "Free", "Free");
+        engine.ResetVehicleMotion();
+        CheckTrainInfo(engine, "Stopped: Auto-drive off", InfoWarning.None);
+    }
+
+    static void RunFuelFreightSeparationChecks()
+    {
+        var forward = Engine(7, Vector2.right);
+        var reverse = Engine(0, Vector2.left);
+        var forwardFuel = new FreightCar { Rail = TestRail, StoredItemCount = 10, StoredFuelCount = 10 };
+        var reverseFuel = new FreightCar { Rail = TestRail, StoredItemCount = 5, StoredFuelCount = 5 };
+        var cargo = new FreightCar { Rail = TestRail };
+        Train.Link(forward, forwardFuel);
+        Train.Link(forwardFuel, cargo);
+        Train.Link(cargo, reverseFuel);
+        Train.Link(reverseFuel, reverse);
+        forward.TestFuelCar = forwardFuel;
+        reverse.TestFuelCar = reverseFuel;
+        forward.ApplyAutoDriveState(true, "A", "B", 1, 2, 0, 1, "B", "A", 0);
+        Check(forward.TestDepartureFuelSatisfied() && forward.TestDepartureFreightSatisfied(),
+            "Full fuel and Empty freight must both pass with loaded tenders and empty cargo");
+        Time.frameCount++; forward.TickAutoDrive(.1f, null);
+        Check(forward.PoweredMoves == 1, "Full fuel plus Empty cargo must actually depart");
+        cargo.StoredItemCount = 1;
+        Check(!forward.TryEvaluateAutoDriveFreightFilterSatisfied(AutoDriveFreightFilter.Empty),
+            "Real cargo still blocks Empty even when fuel cars are excluded");
+        cargo.StoredItemCount = 10;
+        forwardFuel.StoredItemCount = 0;
+        reverseFuel.StoredItemCount = 0;
+        Check(forward.TryEvaluateAutoDriveFreightFilterSatisfied(AutoDriveFreightFilter.Full),
+            "Empty fuel suppliers must not block Full cargo");
+        Check(reverse.TryEvaluateAutoDriveFreightFilterSatisfied(AutoDriveFreightFilter.Full),
+            "Both driving ends must exclude the same fuel suppliers");
+        cargo.StoredFuelCount = 10;
+        Check(!forward.TryEvaluateAutoDriveFreightFilterSatisfied(AutoDriveFreightFilter.Empty),
+            "Fuel carried in an ordinary cargo car remains freight");
+        forwardFuel.StoredFuelCount = 9;
+        Check(!forward.TryEvaluateAutoDriveFuelFilterSatisfied(AutoDriveFuelFilter.Full),
+            "Fuel Full remains independently enforced after freight exclusion");
+        cargo.gameObject.activeInHierarchy = false;
+        Check(forward.TryEvaluateAutoDriveFreightFilterSatisfied(AutoDriveFreightFilter.Empty),
+            "Fuel-only consist has no cargo to unload");
+        Check(!forward.TryEvaluateAutoDriveFreightFilterSatisfied(AutoDriveFreightFilter.Full),
+            "Fuel-only consist cannot satisfy Full cargo");
+        cargo.gameObject.activeInHierarchy = true;
+        cargo.StoredItemCount = 0;
+        reverseFuel.StoredItemCount = 3;
+        reverse.TestFuelCar = null;
+        Check(!forward.TryEvaluateAutoDriveFreightFilterSatisfied(AutoDriveFreightFilter.Empty),
+            "A car that loses its fuel-supply role must immediately count as cargo");
+        reverse.TestFuelCar = reverseFuel;
+        Check(forward.TryEvaluateAutoDriveFreightFilterSatisfied(AutoDriveFreightFilter.Empty),
+            "Restored fuel-supply role must immediately be excluded");
+        reverse.TestFuelCar = forwardFuel;
+        reverseFuel.StoredItemCount = 0;
+        cargo.StoredItemCount = 10;
+        Check(!forward.TryEvaluateAutoDriveFreightFilterSatisfied(AutoDriveFreightFilter.Full),
+            "Shared fuel supplier is excluded once while remaining cargo still needs filling");
+        reverseFuel.StoredItemCount = 10;
+        Check(forward.TryEvaluateAutoDriveFreightFilterSatisfied(AutoDriveFreightFilter.Full),
+            "Full counts every ordinary cargo car when locomotives share one supplier");
+    }
+
     static void Main()
     {
         AutoDriveRoutePlanner.CheckGraph();
         RunDepartureResumeChecks();
+        RunTrainInfoChecks();
+        RunFuelFreightSeparationChecks();
         var left = Engine(4, Vector2.left);
         var right = Engine(7, Vector2.right);
         var wagon = new FreightCar
@@ -375,6 +481,7 @@ public partial class SteamTrain
             FuelCapacity = 10
         };
         Train.Link(left, wagon); Train.Link(wagon, right);
+        left.TestFuelCar = right.TestFuelCar = wagon;
         left.ApplyAutoDriveState(true, "A", "B", 1, 2, 0, 0, "B", "A", 0);
         left.TickAutoDrive(.1f, null);
         Check(!left.autoDriveEnabled && right.autoDriveEnabled, "Control must move to the destination-side locomotive");
@@ -446,6 +553,9 @@ public partial class SteamTrain
             StorageCapacity = 10
         };
         Train.Link(freightConditionEngine, freightConditionCar);
+        var freightConditionFuel = new FreightCar { Rail = TestRail, StoredFuelCount = 9 };
+        Train.Link(freightConditionCar, freightConditionFuel);
+        freightConditionEngine.TestFuelCar = freightConditionFuel;
         freightConditionEngine.ApplyAutoDriveState(true, "A", "B", 0, 1, 0, 2, "B", "A", 0);
         Time.frameCount++;
         freightConditionEngine.TickAutoDrive(.1f, null);
@@ -472,8 +582,7 @@ public partial class SteamTrain
             "An Empty freight condition must release the train after all connected freight cars are empty");
 
         freightConditionCar.StoredItemCount = 9;
-        freightConditionCar.StoredFuelCount = 9;
-        freightConditionCar.FuelCapacity = 10;
+        freightConditionFuel.StoredFuelCount = 9;
         freightConditionEngine.ApplyAutoDriveSettings(true, "A", "B", "Full", "Empty", "Free", "Full");
         freightConditionEngine.autoDriveLastArrivedStationName = "A";
         Check(!freightConditionEngine.TestDepartureFuelSatisfied(),
@@ -599,4 +708,22 @@ public partial class SteamTrain
         RailHandcar.RunDepartureChecks(Check);
         Console.WriteLine($"PASS: {checks} train automatic-driving checks");
     }
+}
+
+// Rendering boundaries only; the production refresh method is extracted by Run.ps1.
+public partial class TrainInfoProbe
+{
+    private readonly object workGauge, workFill, workText, defaultGauge, defaultFill, defaultGaugeText;
+    private int defaultStatusLineIndex;
+    private static readonly Color StoppedSignColor = Color.red, WarningSignColor = Color.yellow;
+    public string Text;
+    public bool LampVisible;
+    public Color LampColor;
+    public void Refresh(SteamTrain train) => RefreshSteamTrainInfo(train);
+    private void SetDefaultText(int index, string text, bool visible) { Text = text; }
+    private void SetDefaultSign(int index, bool visible, Color color) { LampVisible = visible; LampColor = color; }
+    private void SetSteamTrainBurnEnergyGauge(SteamTrain train) { }
+    private void SetSteamTrainWaterGauge(object gauge, object fill, object text, SteamTrain train) { }
+    private void SetRailHandcarSpeedGauge(object gauge, object fill, object text, RailHandcar train) { }
+    private void SetFluidStorageDefaultItemSlot(int index, SteamTrain train) { }
 }
