@@ -31,6 +31,8 @@ public partial class TerrainGenerator : MonoBehaviour
         new ProfilerMarker("TerrainGenerator.TickConveyors.PromoteDeferredWakes");
     private static readonly ProfilerMarker ConveyorEnsureLineCacheMarker =
         new ProfilerMarker("TerrainGenerator.TickConveyors.EnsureLineCache");
+    private static readonly ProfilerMarker ConveyorTransportMarker =
+        new ProfilerMarker("TerrainGenerator.TickConveyors.Transport");
     private static readonly ProfilerMarker ConveyorProcessLineRetriesMarker =
         new ProfilerMarker("TerrainGenerator.TickConveyors.ProcessLineRetries");
     private static readonly ProfilerMarker ConveyorSafetyScanMarker =
@@ -186,6 +188,9 @@ public partial class TerrainGenerator : MonoBehaviour
 
     private void ClearConveyorRuntimeState()
     {
+        // Export while the old registry and lane layout still exist. Any wake
+        // produced by export is then discarded with the rest of this state.
+        ReleaseAllConveyorTransport();
         virtualConveyorBeltRenderer?.Clear();
         ConvayorBelt2F.ClearRuntimeCoverageLookup();
         Spliterbelt.ClearRuntimeCoverageLookup();
@@ -1859,7 +1864,7 @@ public partial class TerrainGenerator : MonoBehaviour
 
     private int CaptureConveyorBlockItemCount(Block block)
     {
-        return block != null && block.IsRuntimeConveyor
+        return block != null && block.IsRuntimeConveyor && !block.OwnsConveyorTransport
             ? block.GetRuntimeConveyorItemCount()
             : 0;
     }
@@ -2468,6 +2473,18 @@ public partial class TerrainGenerator : MonoBehaviour
 
         ResetLastActiveConveyorTickCounters();
         bool profileActiveConveyors = MapObjectTickProfiler.IsEnabled;
+        using (ConveyorEnsureLineCacheMarker.Auto())
+        {
+            long startTimestamp = BeginConveyorRuntimeSample(profileActiveConveyors);
+            EnsureConveyorLineCache();
+            EndConveyorRuntimeSample(profileActiveConveyors, "ConveyorEnsureLineCache", "Conveyor Ensure Line Cache", startTimestamp);
+        }
+        using (ConveyorTransportMarker.Auto())
+        {
+            long startTimestamp = BeginConveyorRuntimeSample(profileActiveConveyors);
+            TickOwnedConveyorRuns();
+            EndConveyorRuntimeSample(profileActiveConveyors, "ConveyorTransport", "Conveyor Transport", startTimestamp);
+        }
         using (ConveyorPromoteDeferredWakesMarker.Auto())
         {
             long startTimestamp = BeginConveyorRuntimeSample(profileActiveConveyors);
@@ -2487,17 +2504,6 @@ public partial class TerrainGenerator : MonoBehaviour
             && conveyorNetworkSleepCheckQueuedIds.Count == 0)
         {
             return;
-        }
-
-        using (ConveyorEnsureLineCacheMarker.Auto())
-        {
-            long startTimestamp = BeginConveyorRuntimeSample(profileActiveConveyors);
-            EnsureConveyorLineCache();
-            EndConveyorRuntimeSample(
-                profileActiveConveyors,
-                "ConveyorEnsureLineCache",
-                "Conveyor Ensure Line Cache",
-                startTimestamp);
         }
 
         conveyorLinesTickedThisFrame.Clear();
@@ -2663,6 +2669,7 @@ public partial class TerrainGenerator : MonoBehaviour
         }
 
         bool forceDirectWake = conveyorDirectWakeBlocks.Remove(handle);
+        if (block.OwnsConveyorTransport) return;
         if (!forceDirectWake && TryTickStraightConveyorLine(block))
         {
             lastActiveConveyorBlockWakeLineFallbacks++;
@@ -3032,13 +3039,15 @@ public partial class TerrainGenerator : MonoBehaviour
             return false;
         }
 
+        ConveyorLine line = FindConveyorLine(lineId);
+        if (line != null && RouteOwnedConveyorLineWake(line, wakeRange)) return true;
+
         if (conveyorLinesTickedThisFrame.Contains(lineId))
         {
             DeferConveyorLineWake(lineId, wakeRange);
             return true;
         }
 
-        ConveyorLine line = FindConveyorLine(lineId);
         if (!CanTickStraightConveyorLine(line))
         {
             ClearStraightConveyorLineRetry(lineId);
@@ -3653,6 +3662,7 @@ public partial class TerrainGenerator : MonoBehaviour
 
     private void ClearConveyorLineCache()
     {
+        ReleaseAllConveyorTransport();
         conveyorLines.Clear();
         conveyorLinesById.Clear();
         conveyorLineSlots.Clear();
@@ -3720,6 +3730,7 @@ public partial class TerrainGenerator : MonoBehaviour
         }
 
         conveyorLineCacheDirty = false;
+        ReleaseAllConveyorTransport();
         conveyorLines.Clear();
         conveyorLinesById.Clear();
         conveyorLineSlots.Clear();
@@ -4613,7 +4624,7 @@ public partial class TerrainGenerator : MonoBehaviour
         MapObjectTickProfiler.AddRuntimeCounter("Physics", "BeltColliders", beltColliderCount);
         MapObjectTickProfiler.AddRuntimeCounter("Physics", "EnabledBeltColliders", enabledBeltColliderCount);
 
-        MapObjectTickProfiler.AddRuntimeCounter("Conveyor", "LoadedConveyorItems", cachedLoadedConveyorItemCount);
+        MapObjectTickProfiler.AddRuntimeCounter("Conveyor", "LoadedConveyorItems", GetLoadedConveyorItemCount());
         MapObjectTickProfiler.AddRuntimeCounter("Conveyor", "TotalConveyorItems", GetConveyorItemCount());
         MapObjectTickProfiler.AddRuntimeCounter("Conveyor", "ActiveConveyors", activeConveyors.Count);
         MapObjectTickProfiler.AddRuntimeCounter("Conveyor", "DataMotionBlocks", activeConveyorDataMotionBlocks.Count);
@@ -4722,6 +4733,17 @@ public partial class TerrainGenerator : MonoBehaviour
         MapObjectTickProfiler.AddRuntimeCounter("ActiveConveyor", "RangedLineWakesProcessed", lastActiveConveyorRangedLineWakesProcessed);
         MapObjectTickProfiler.AddRuntimeCounter("ActiveConveyor", "DeferredLineWakesPromoted", lastActiveConveyorDeferredLineWakesPromoted);
         MapObjectTickProfiler.AddRuntimeCounter("ActiveConveyor", "LineNoMoveWakes", lastActiveConveyorLineNoMoveWakes);
+        MapObjectTickProfiler.AddRuntimeCounter("ActiveConveyor", "TransportRuns", lastTransportRuns);
+        MapObjectTickProfiler.AddRuntimeCounter("ActiveConveyor", "TransportItems", lastTransportItems);
+        MapObjectTickProfiler.AddRuntimeCounter("ActiveConveyor", "TransportLegacyBlocks", lastTransportLegacyBlocks);
+        MapObjectTickProfiler.AddRuntimeCounter("ActiveConveyor", "TransportCommonMoves", (int)lastTransportCommonMoves);
+        MapObjectTickProfiler.AddRuntimeCounter("ActiveConveyor", "TransportTreeVisits", (int)lastTransportTreeVisits);
+        MapObjectTickProfiler.AddRuntimeCounter("ActiveConveyor", "TransportRoutedBlockWakes", lastTransportRoutedBlockWakes);
+        MapObjectTickProfiler.AddRuntimeCounter("ActiveConveyor", "TransportBoundaryChecks", (int)lastTransportBoundaryChecks);
+        MapObjectTickProfiler.AddRuntimeCounter("ActiveConveyor", "TransportInputAttempts", (int)lastTransportInputAttempts);
+        MapObjectTickProfiler.AddRuntimeCounter("ActiveConveyor", "TransportOutputAttempts", (int)lastTransportOutputAttempts);
+        MapObjectTickProfiler.AddRuntimeCounter("ActiveConveyor", "TransportSleepingRuns", lastTransportSleepingRuns);
+        MapObjectTickProfiler.AddRuntimeCounter("ActiveConveyor", "TransportRebuilds", lastTransportRebuilds);
         MapObjectTickProfiler.AddRuntimeCounter("ActiveConveyor", "LineNoMoveBlocksChanged", lastActiveConveyorLineNoMoveBlocksChanged);
         MapObjectTickProfiler.AddRuntimeCounter("ActiveConveyor", "LineNoMoveBlocksSkipped", lastActiveConveyorLineNoMoveBlocksSkipped);
         MapObjectTickProfiler.AddRuntimeCounter("ActiveConveyor", "LineNoMoveDirectFallbacks", lastActiveConveyorLineNoMoveDirectFallbacks);

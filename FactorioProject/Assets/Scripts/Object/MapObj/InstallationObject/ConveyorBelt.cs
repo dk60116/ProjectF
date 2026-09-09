@@ -2046,6 +2046,9 @@ public class ConveyorBelt : InstallationObject
     protected override void OnValidate()
     {
         base.OnValidate();
+        // The run keeps its previous speed for synchronization; exporting uses
+        // the edited belt speed and the next build computes fresh appointments.
+        if (Application.isPlaying && TryGetCurrentRuntimeBlock(out Block block)) block.ReleaseConveyorTransport();
 
         endpointVisualObjectsCached = false;
         cachedRenderers = null;

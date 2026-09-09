@@ -1,0 +1,15 @@
+# Conveyor transport ownership harness
+
+저장소 루트에서 `./Tools/ConveyorTransportHarness/Run.ps1`을 실행한다. .NET 9 SDK를 사용하며 게임 엔진을 실행하지 않는다.
+
+첫 검사는 실제 `ConveyorTransportStore<T>`를 개별 항목을 이동시키는 독립 List 모델과 비교한다. 삽입·회수·압축·예약 슬롯·순서·수량을 확인한다. 이동 아이템 수 100/1,000/10,000/100,000의 공통 이동 횟수, 노드 방문 수, GC도 검사한다.
+
+두 번째 검사는 실제 `ConveyorTransportRun`, `Block.ConveyorTransport`, `TerrainGenerator.ConveyorTransport`를 사용한다. Block.cs의 ID/gate 조회·변경 메서드도 현재 소스에서 추출한다. 소유권 이관, 입출구 adapter, 중간 회수, 표시 위치 조회, 외부 삽입 후 분할, 토폴로지 폐기, 이동 중 위치 보존을 검사한다. 10만 블록의 관리 루프가 내부 슬롯을 매번 재작성하지 않는지도 확인한다.
+
+`WakeChecks.cs`는 실제 직접 큐 등록, 라인 범위 병합, 지연 알림 병합·승격, 블록 wake 처리, 라인 범위 제한 메서드를 추출해 연결한다. 빈 라인·완전 정체에서 불필요한 큐 호출이 없는지, 늦게 도착한 다른 범위의 알림이 다음 프레임에 보존되는지, 분할된 구간의 가까운 기존 블록만 호출하는지 검사한다. 입구 뒤 슬롯에 공급하고 출구 앞 슬롯에서 소비하여 큐를 통한 양쪽 포트의 이동이 필요한 FIFO 시나리오도 양방향으로 검증한다. 제거한 매 프레임 양 끝 호출만 재현하는 비교 대역은 빈 라인 100틱에서 직접 처리 200회, 현재 코드는 0회다. 전체 이전 버전이나 FPS의 비교가 아니다.
+
+`TimingChecks.cs`는 경계 도착 시각 예약을 검증한다. 실제 라인 예약과 포트 변경 알림, Block의 점유 버전 증가·조회 및 렌더 버전 조회 코드를 사용한다. 120Hz × 10초의 빈 라인과 완전 정체에서 추가 경계 검사 0회, 간격 0.5/속도 1일 때 입력 간격 0.5초, 성긴 아이템의 개별 도착 시각, 선두 회수 후 예약 취소, 입구 모션 완료·hold 만료·조기 해제, 같은 프레임 이동 제한 후 재개를 확인한다. 전역 프록시 버전만 바뀌었을 때 소유권·예약·슬롯 데이터가 유지되는지, 속도 및 포트 구조 변경 때 예약을 폐기하는지도 검사한다. 속도 편집은 편집 후 기존 소유권 해제 순서의 대역이며 Unity Inspector 자체는 구동하지 않는다.
+
+Unity 시간·벡터와 월드, 기존 Block 전송·저장 경계는 대역이다. 큐 구동은 단순한 하네스 루프이고, 네트워크 sleep·retry 서비스와 데이터 모션 완료 타이밍은 대역이다. 전체 wake scheduler의 예산·공정성, 실제 Shader/Physics/Tween, FPS, 바이너리 세이브 파일 왕복은 이 검사의 범위가 아니다. 기존 전송 본문의 비교는 ConveyorStraightTransferHarness, 착지는 ConveyorPlacementHarness와 함께 실행한다.
+
+이전 `ConveyorLineGapHarness`와 점유 인덱스 런타임은 제거했다. 적용 범위와 측정 결과는 `Research/ObjectScale-2026-09-09/LINE-GAP-IMPLEMENTATION.md`에 정리했다.

@@ -13,6 +13,12 @@ static class MapObjectTickProfiler {
     public static void Reset() { Attempts = Successes = 0; }
 }
 abstract partial class Block {
+    // These cases cover the legacy endpoints. The transport world harness
+    // separately exercises the real owned-line boundary adapter.
+    public bool OwnsConveyorTransport => false;
+    public TransportStub ConveyorTransport => null;
+    public bool ReadTransportLane(int lane, out ProjectF.Conveyors.ConveyorTransportItem item, out double position) { item = default; position = 0; return false; }
+    public bool TryAcceptTransportTransfer(Block source, int lane, int destination) => throw new InvalidOperationException("Unexpected owned endpoint in legacy transfer cases.");
     public const float ConveyorContinuousMotionEpsilon = 0.0001f;
     public readonly List<int> conveyorItemIds = new() { -1, -1, -1, -1 };
     public readonly List<int> conveyorItemMoveFrames = new() { -1, -1, -1, -1 };
@@ -190,3 +196,7 @@ static class Checks {
         return 0;
     }
 }
+// Type boundaries used only by the unreachable owned branch of the extracted methods.
+sealed class TransportStub { public EndStub Items; }
+sealed class EndStub { public double End; }
+namespace ProjectF.Conveyors { internal struct ConveyorTransportItem { internal int Id; } }

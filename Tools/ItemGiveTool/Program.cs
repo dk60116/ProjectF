@@ -44,6 +44,9 @@ internal sealed class EditorToolForm : Form
     private readonly Button pingButton = new Button();
     private readonly Button conveyorLineButton = new Button();
     private readonly Button conveyorItemFillButton = new Button();
+    private readonly Button beltItemClearButton = new Button();
+    private readonly Button floorItemClearButton = new Button();
+    private readonly Button ioItemClearButton = new Button();
     private readonly Button animalStress100Button = new Button();
     private readonly Button animalStress500Button = new Button();
     private readonly Button animalThreatButton = new Button();
@@ -102,7 +105,7 @@ internal sealed class EditorToolForm : Form
     public EditorToolForm()
     {
         Text = ToolTitle;
-        MinimumSize = new Size(760, 1140);
+        MinimumSize = new Size(760, 1180);
         StartPosition = FormStartPosition.CenterScreen;
         Font = new Font("Segoe UI", 10f, FontStyle.Regular, GraphicsUnit.Point);
         BackColor = Color.FromArgb(31, 34, 29);
@@ -124,7 +127,7 @@ internal sealed class EditorToolForm : Form
         layout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100f));
         layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 72f));
         layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 284f));
-        layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 112f));
+        layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 152f));
         layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 68f));
         layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 44f));
         layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 96f));
@@ -268,6 +271,15 @@ internal sealed class EditorToolForm : Form
         conveyorItemFillButton.Width = 190;
         conveyorItemFillButton.Click += async (_, _) => await SendConveyorItemFillAsync();
 
+        StyleSecondaryButton(beltItemClearButton, "Belt Item Clear");
+        beltItemClearButton.Click += async (_, _) => await SendItemClearAsync("belt", "Belt Item Clear");
+
+        StyleSecondaryButton(floorItemClearButton, "Floor Item Clear");
+        floorItemClearButton.Click += async (_, _) => await SendItemClearAsync("floor", "Floor Item Clear");
+
+        StyleSecondaryButton(ioItemClearButton, "IO Item Clear");
+        ioItemClearButton.Click += async (_, _) => await SendItemClearAsync("io", "IO Item Clear");
+
         StyleSecondaryButton(animalStress100Button, "동물 100마리");
         animalStress100Button.Width = 130;
         animalStress100Button.Click += async (_, _) =>
@@ -292,6 +304,9 @@ internal sealed class EditorToolForm : Form
         buttonPanel.Controls.Add(pingButton);
         buttonPanel.Controls.Add(conveyorLineButton);
         buttonPanel.Controls.Add(conveyorItemFillButton);
+        buttonPanel.Controls.Add(beltItemClearButton);
+        buttonPanel.Controls.Add(floorItemClearButton);
+        buttonPanel.Controls.Add(ioItemClearButton);
         buttonPanel.Controls.Add(animalStress100Button);
         buttonPanel.Controls.Add(animalStress500Button);
         buttonPanel.Controls.Add(animalThreatButton);
@@ -1057,6 +1072,15 @@ internal sealed class EditorToolForm : Form
         await RefreshStatusAsync();
     }
 
+    private async Task SendItemClearAsync(string scope, string displayName)
+    {
+        await SendCommandAsync(
+            $"clear {scope}",
+            displayName,
+            timeoutMilliseconds: ConveyorStressTestTimeoutMilliseconds);
+        await RefreshStatusAsync();
+    }
+
     private async Task SendAnimalStressAsync(int count)
     {
         await SendCommandAsync(
@@ -1721,6 +1745,9 @@ internal sealed class EditorToolForm : Form
         pingButton.Enabled = !busy;
         conveyorLineButton.Enabled = !busy;
         conveyorItemFillButton.Enabled = !busy;
+        beltItemClearButton.Enabled = !busy;
+        floorItemClearButton.Enabled = !busy;
+        ioItemClearButton.Enabled = !busy;
         animalStress100Button.Enabled = !busy;
         animalStress500Button.Enabled = !busy;
         animalThreatButton.Enabled = !busy;

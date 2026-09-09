@@ -216,6 +216,10 @@ public partial class TerrainGenerator : MonoBehaviour
         public int[] backLaneIndices = Array.Empty<int>();
         public float[] withinPathLengths = Array.Empty<float>();
         public float[] nextPathLengths = Array.Empty<float>();
+        public List<ProjectF.Conveyors.ConveyorTransportRun> transportRuns;
+        public List<int> transportLegacySlots;
+        public ulong transportProxyVersion;
+        public float transportRetryTime;
 
         public ConveyorLine(int id)
         {
@@ -1283,7 +1287,7 @@ public partial class TerrainGenerator : MonoBehaviour
     {
         if (Application.isPlaying)
         {
-            return cachedLoadedConveyorItemCount;
+            return cachedLoadedConveyorItemCount + CountOwnedConveyorItems();
         }
 
         int count = 0;

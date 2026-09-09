@@ -131,6 +131,7 @@ public sealed class BlockDataStore : IEnumerable<KeyValuePair<Vector2Int, Block>
     public int RegisteredCellCount => registeredCellCount;
     public int Count => runtimeProxyCount;
     public int RuntimeSimulationStateCount => runtimeSimulationStateCount;
+    internal ulong RuntimeProxyVersion => runtimeProxyVersion;
 
     public void EnsureChunkCapacity(int capacity)
     {

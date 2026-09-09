@@ -4,6 +4,8 @@ using System.Runtime.CompilerServices;
 using UnityEngine;
 
 internal static class HarnessMetrics { internal static long HandleLookups; }
+// Ownership is outside this resolver-only harness; the world harness runs the actual transport.
+namespace ProjectF.Conveyors { internal sealed class ConveyorTransportRun { } }
 public sealed class BlockRuntimeSimulationState { }
 public sealed class Block : UnityEngine.Object
 {

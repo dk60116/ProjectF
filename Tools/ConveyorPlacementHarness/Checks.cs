@@ -2,6 +2,14 @@ using System;
 using System.Collections.Generic;
 using UnityEngine;
 
+public partial class Block
+{
+    // Placement scenarios start on the legacy backend. Owned-run demotion is
+    // exercised by ConveyorTransportHarness using the actual ownership adapter.
+    private void ReleaseConveyorTransport(bool interactionBoundary = false) { }
+    private void NotifyTransportPortChanged(int lane = -1) { }
+}
+
 static class Checks
 {
     static int checks;

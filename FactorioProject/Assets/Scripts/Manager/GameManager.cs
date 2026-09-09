@@ -966,6 +966,11 @@ public sealed class RuntimeItemGiveReceiver : MonoBehaviour
             case ToolCommand.FillConveyorItems:
                 request.Result = FillRandomConveyorItems(request.Count);
                 break;
+            case ToolCommand.ClearBeltItems:
+            case ToolCommand.ClearFloorItems:
+            case ToolCommand.ClearInputOutputAreaItems:
+                request.Result = ClearWorldItems(request.Command);
+                break;
             case ToolCommand.CheckConveyors:
                 request.Result = CheckConveyors();
                 break;
@@ -1285,6 +1290,13 @@ public sealed class RuntimeItemGiveReceiver : MonoBehaviour
         if (parts.Length == 1 && string.Equals(parts[0], "status", StringComparison.OrdinalIgnoreCase))
         {
             command = ToolCommand.Status;
+            itemId = 0;
+            count = 0;
+            return true;
+        }
+
+        if (TryParseItemClearCommand(parts, out command))
+        {
             itemId = 0;
             count = 0;
             return true;
@@ -1632,7 +1644,7 @@ public sealed class RuntimeItemGiveReceiver : MonoBehaviour
 
         if (parts.Length < 2 || !string.Equals(parts[0], "give", StringComparison.OrdinalIgnoreCase))
         {
-            error = "usage: give <itemId> [count] | animalstress [count] | animalcollision [count] | animalthreat [radius] | beltstress [count] | beltline [auto|itemId] [count] | beltitems [count] | beltcheck | save <slot> | load <slot> | reset [slot] [randomSeed] | seed <int> | saveslots | time <status|set|scale|pause|next sunrise|check> | debug <showConveyorSlotDots|showSleepAwake|showBeltItemLine|hideBeltItems|hideBelts|disableCameraCulling|showRailLine|showDirections|freeCamera|freeCameraPlayerCulling|showAnimalHerdAreas|animalAIPaused|mapObjectTickProfiling> <true|false> | camera size <minSize> <maxSize> | perf [maxRows] | ping | status";
+            error = "usage: give <itemId> [count] | clear <belt|floor|io> | animalstress [count] | animalcollision [count] | animalthreat [radius] | beltstress [count] | beltline [auto|itemId] [count] | beltitems [count] | beltcheck | save <slot> | load <slot> | reset [slot] [randomSeed] | seed <int> | saveslots | time <status|set|scale|pause|next sunrise|check> | debug <showConveyorSlotDots|showSleepAwake|showBeltItemLine|hideBeltItems|hideBelts|disableCameraCulling|showRailLine|showDirections|freeCamera|freeCameraPlayerCulling|showAnimalHerdAreas|animalAIPaused|mapObjectTickProfiling> <true|false> | camera size <minSize> <maxSize> | perf [maxRows] | ping | status";
             return false;
         }
 
@@ -1650,6 +1662,52 @@ public sealed class RuntimeItemGiveReceiver : MonoBehaviour
 
         count = Math.Min(Math.Max(count, 1), MaxItemsPerRequest);
         return true;
+    }
+
+    private static bool TryParseItemClearCommand(string[] parts, out ToolCommand command)
+    {
+        command = ToolCommand.Give;
+        string target = null;
+        if (parts.Length == 2 && string.Equals(parts[0], "clear", StringComparison.OrdinalIgnoreCase))
+        {
+            target = parts[1];
+        }
+        else if (parts.Length == 1)
+        {
+            if (string.Equals(parts[0], "beltitemclear", StringComparison.OrdinalIgnoreCase))
+            {
+                target = "belt";
+            }
+            else if (string.Equals(parts[0], "flooritemclear", StringComparison.OrdinalIgnoreCase))
+            {
+                target = "floor";
+            }
+            else if (string.Equals(parts[0], "ioitemclear", StringComparison.OrdinalIgnoreCase))
+            {
+                target = "io";
+            }
+        }
+
+        if (string.Equals(target, "belt", StringComparison.OrdinalIgnoreCase))
+        {
+            command = ToolCommand.ClearBeltItems;
+            return true;
+        }
+
+        if (string.Equals(target, "floor", StringComparison.OrdinalIgnoreCase))
+        {
+            command = ToolCommand.ClearFloorItems;
+            return true;
+        }
+
+        if (string.Equals(target, "io", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(target, "ioarea", StringComparison.OrdinalIgnoreCase))
+        {
+            command = ToolCommand.ClearInputOutputAreaItems;
+            return true;
+        }
+
+        return false;
     }
 
     private static bool TryParseWorldTimeRequest(
@@ -3039,6 +3097,48 @@ public sealed class RuntimeItemGiveReceiver : MonoBehaviour
         }
 
         return ToolResult.Success(itemId, count, givenCount, bagCount, handCount, droppedCount);
+    }
+
+    private ToolResult ClearWorldItems(ToolCommand command)
+    {
+        TerrainGenerator terrain = TerrainGenerator.ResolveActive();
+        if (terrain == null)
+        {
+            return ToolResult.Error(-1, 0, "terrain not found");
+        }
+
+        int clearedCount;
+        int runtimeCleared;
+        int savedCleared;
+        string scope;
+        switch (command)
+        {
+            case ToolCommand.ClearBeltItems:
+                clearedCount = terrain.ClearAllBeltItems(out runtimeCleared, out savedCleared);
+                scope = "belt";
+                break;
+            case ToolCommand.ClearFloorItems:
+                runtimeCleared = terrain.ClearAllDroppedFloorItems(out savedCleared);
+                clearedCount = runtimeCleared;
+                scope = "floor";
+                break;
+            default:
+                runtimeCleared = terrain.ClearAllInputOutputAreaItems(out savedCleared);
+                clearedCount = runtimeCleared;
+                scope = "io";
+                break;
+        }
+
+        cachedStatusWorldStatsTime = float.NegativeInfinity;
+        return ToolResult.Success(
+            -1,
+            clearedCount,
+            clearedCount,
+            0,
+            0,
+            0,
+            $"{scope} items cleared",
+            $"scope={scope} runtimeCleared={runtimeCleared} savedCleared={savedCleared}");
     }
 
     private ToolResult CreateConveyorLine(int itemId, int count)
@@ -4795,6 +4895,9 @@ public sealed class RuntimeItemGiveReceiver : MonoBehaviour
         CreateAnimalCollisionStressTest,
         ForceAnimalThreat,
         FillConveyorItems,
+        ClearBeltItems,
+        ClearFloorItems,
+        ClearInputOutputAreaItems,
         CheckConveyors,
         SaveSlot,
         LoadSlot,

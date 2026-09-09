@@ -381,6 +381,7 @@ public partial class Block
 
     internal void DetachRuntimeSimulationState()
     {
+        ReleaseConveyorTransport();
         runtimeSimulationState = null;
     }
 
