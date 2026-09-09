@@ -27,24 +27,6 @@ public partial class TerrainGenerator : MonoBehaviour
     private const float ConveyorSlotDotInstancedDiameter = 0.08f;
     private static readonly Color ConveyorSlotDotInstancedColor = new Color(1f, 0.36f, 0.08f, 1f);
     private static readonly Color BeltDirectionArrowInstancedColor = new Color(1f, 0.92f, 0.08f, 1f);
-    private static readonly ProfilerMarker ConveyorPromoteDeferredWakesMarker =
-        new ProfilerMarker("TerrainGenerator.TickConveyors.PromoteDeferredWakes");
-    private static readonly ProfilerMarker ConveyorEnsureLineCacheMarker =
-        new ProfilerMarker("TerrainGenerator.TickConveyors.EnsureLineCache");
-    private static readonly ProfilerMarker ConveyorTransportMarker =
-        new ProfilerMarker("TerrainGenerator.TickConveyors.Transport");
-    private static readonly ProfilerMarker ConveyorProcessLineRetriesMarker =
-        new ProfilerMarker("TerrainGenerator.TickConveyors.ProcessLineRetries");
-    private static readonly ProfilerMarker ConveyorSafetyScanMarker =
-        new ProfilerMarker("TerrainGenerator.TickConveyors.SafetyScan");
-    private static readonly ProfilerMarker ConveyorProcessWakeQueueMarker =
-        new ProfilerMarker("TerrainGenerator.TickConveyors.ProcessWakeQueue");
-    private static readonly ProfilerMarker ConveyorWakeLineMarker =
-        new ProfilerMarker("TerrainGenerator.TickConveyors.WakeLine");
-    private static readonly ProfilerMarker ConveyorWakeCornerGroupMarker =
-        new ProfilerMarker("TerrainGenerator.TickConveyors.WakeCornerGroup");
-    private static readonly ProfilerMarker ConveyorWakeBlockMarker =
-        new ProfilerMarker("TerrainGenerator.TickConveyors.WakeBlock");
     private static readonly ProfilerMarker ConveyorCornerGroupCollectMarker =
         new ProfilerMarker("TerrainGenerator.TickConveyors.CornerGroupCollect");
     private static readonly ProfilerMarker ConveyorCornerGroupTickMarker =
@@ -188,6 +170,8 @@ public partial class TerrainGenerator : MonoBehaviour
 
     private void ClearConveyorRuntimeState()
     {
+        ClearBeltJobs();
+        ClearBeltSplitState();
         // Export while the old registry and lane layout still exist. Any wake
         // produced by export is then discarded with the rest of this state.
         ReleaseAllConveyorTransport();
@@ -329,6 +313,7 @@ public partial class TerrainGenerator : MonoBehaviour
         }
 
         InputOutputModule.WakeRuntimeOutputModulesAtCoordinate(destinationBlock.Coordinate);
+        if (destinationBlock.UsesBeltJobs) { WakeBeltJobBlock(destinationBlock); return; }
         destinationBlock.WakeConveyorVacatedLanePredecessor(destinationLaneIndex);
         destinationBlock.WakeSplitterInputs();
         ConveyorLaneCoordinateKey destinationKey = new ConveyorLaneCoordinateKey(destinationBlock.Coordinate, destinationLaneIndex);
@@ -691,6 +676,7 @@ public partial class TerrainGenerator : MonoBehaviour
 
     public void QueueConveyorWake(Block block)
     {
+        if (block != null && block.UsesBeltJobs) { WakeBeltJobBlock(block); return; }
         if (!Application.isPlaying || block == null)
         {
             return;
@@ -729,6 +715,7 @@ public partial class TerrainGenerator : MonoBehaviour
 
     internal void QueueConveyorVacancyWake(Block block)
     {
+        if (block != null && block.UsesBeltJobs) { WakeBeltJobBlock(block); return; }
         if (!Application.isPlaying || block == null)
         {
             return;
@@ -1834,8 +1821,11 @@ public partial class TerrainGenerator : MonoBehaviour
 
     private void ClearConveyorItemVisualTracking()
     {
+        // Keep removals observable by PortableItemRenderer. Its steady-state cache
+        // maintenance consumes this set incrementally instead of rescanning every
+        // active render block whenever item membership changes.
+        conveyorItemVisualDirtyBlocks.UnionWith(conveyorItemVisualBlocks);
         conveyorItemVisualBlocks.Clear();
-        conveyorItemVisualDirtyBlocks.Clear();
         dynamicConveyorItemVisualBlocks.Clear();
         dynamicConveyorItemVisualBlockIndices.Clear();
         conveyorItemCountsByBlock.Clear();
@@ -1929,6 +1919,8 @@ public partial class TerrainGenerator : MonoBehaviour
 
     public void MarkConveyorNetworkDirty()
     {
+        beltJobsDirty = true;
+        beltSplitDirty = true;
         conveyorNetworkCacheDirty = true;
         conveyorLineCacheDirty = true;
         conveyorNetworkBlocksById.Clear();
@@ -1944,6 +1936,8 @@ public partial class TerrainGenerator : MonoBehaviour
 
     public void MarkConveyorLineCacheDirty()
     {
+        beltJobsDirty = true;
+        beltSplitDirty = true;
         conveyorLineCacheDirty = true;
         ClearConveyorLineWakeQueue();
         ClearStraightConveyorLineRetries();
@@ -2108,6 +2102,7 @@ public partial class TerrainGenerator : MonoBehaviour
 
     public void WakeConveyorNetwork(Block block, bool queueWake = true)
     {
+        if (block != null && block.UsesBeltJobs) { WakeBeltJobBlock(block); return; }
         if (block == null)
         {
             return;
@@ -2251,69 +2246,6 @@ public partial class TerrainGenerator : MonoBehaviour
         }
     }
 
-    private void TickActiveConveyorDataMotions(float deltaTime)
-    {
-        if (deltaTime <= 0f || activeConveyorDataMotionBlocks.Count == 0)
-        {
-            return;
-        }
-
-        float now = Time.time;
-        int processedCount = 0;
-        int loopIterations = 0;
-        int processLimit = Mathf.Max(GetEffectiveConveyorWakeQueueProcessLimit(), activeConveyorDataMotionBlocks.Count);
-        while (activeConveyorDataMotionBlocks.Count > 0 && processedCount < processLimit)
-        {
-            loopIterations++;
-            BlockHandle handle = activeConveyorDataMotionBlocks[0];
-            if (!handle.IsValid || !activeConveyorDataMotionDueTimes.ContainsKey(handle))
-            {
-                RemoveActiveConveyorDataMotionAt(0);
-                continue;
-            }
-
-            float dueTime = GetActiveConveyorDataMotionDueTime(handle);
-            if (dueTime > now + 0.0001f)
-            {
-                break;
-            }
-
-            processedCount++;
-            RemoveActiveConveyorDataMotionAt(0);
-            if (!TryResolveLoadedRuntimeBlock(handle, out Block block))
-            {
-                RemoveActiveConveyorHandle(handle);
-                continue;
-            }
-
-            if (!block.HasActiveVirtualConveyorDataMotion())
-            {
-                block.RefreshConveyorActivityRegistration();
-                continue;
-            }
-
-            BeginConveyorRuntimeRefreshBatch();
-            try
-            {
-                block.CompleteDueVirtualConveyorDataMotions(now);
-                block.RefreshConveyorActivityRegistration(false);
-            }
-            finally
-            {
-                EndConveyorRuntimeRefreshBatch();
-            }
-
-            if (activeConveyors.Contains(handle) && block.ShouldTickActiveConveyor())
-            {
-                QueueConveyorWake(block);
-            }
-        }
-
-        if (loopIterations > 0)
-        {
-            MapObjectTickProfiler.AddBeltLoopIterations(loopIterations, 0, 0, 0);
-        }
-    }
 
     private void AddActiveConveyorDataMotionBlock(Block block)
     {
@@ -2475,190 +2407,6 @@ public partial class TerrainGenerator : MonoBehaviour
         }
     }
 
-    private void TickActiveConveyors(float deltaTime)
-    {
-        if (deltaTime <= 0f)
-        {
-            return;
-        }
-
-        if (IsConveyorRuntimeRefreshDeferred)
-        {
-            return;
-        }
-
-        ResetLastActiveConveyorTickCounters();
-        bool profileActiveConveyors = MapObjectTickProfiler.IsEnabled;
-        using (ConveyorEnsureLineCacheMarker.Auto())
-        {
-            long startTimestamp = BeginConveyorRuntimeSample(profileActiveConveyors);
-            EnsureConveyorLineCache();
-            EndConveyorRuntimeSample(profileActiveConveyors, "ConveyorEnsureLineCache", "Conveyor Ensure Line Cache", startTimestamp);
-        }
-        using (ConveyorTransportMarker.Auto())
-        {
-            long startTimestamp = BeginConveyorRuntimeSample(profileActiveConveyors);
-            TickOwnedConveyorRuns();
-            EndConveyorRuntimeSample(profileActiveConveyors, "ConveyorTransport", "Conveyor Transport", startTimestamp);
-        }
-        using (ConveyorPromoteDeferredWakesMarker.Auto())
-        {
-            long startTimestamp = BeginConveyorRuntimeSample(profileActiveConveyors);
-            lastActiveConveyorDeferredLineWakesPromoted = PromoteDeferredConveyorLineWakes();
-            EndConveyorRuntimeSample(
-                profileActiveConveyors,
-                "ConveyorPromoteDeferredWakes",
-                "Conveyor Promote Deferred Wakes",
-                startTimestamp);
-        }
-
-        if (activeConveyors.Count == 0
-            && conveyorWakeQueue.Count == 0
-            && conveyorLineWakeQueue.Count == 0
-            && conveyorCornerGroupWakeQueue.Count == 0
-            && !HasDueStraightConveyorLineRetry()
-            && conveyorNetworkSleepCheckQueuedIds.Count == 0)
-        {
-            return;
-        }
-
-        conveyorLinesTickedThisFrame.Clear();
-        using (ConveyorProcessLineRetriesMarker.Auto())
-        {
-            long startTimestamp = BeginConveyorRuntimeSample(profileActiveConveyors);
-            ProcessDueStraightConveyorLineRetries();
-            EndConveyorRuntimeSample(
-                profileActiveConveyors,
-                "ConveyorProcessLineRetries",
-                "Conveyor Process Line Retries",
-                startTimestamp);
-        }
-
-        using (ConveyorSafetyScanMarker.Auto())
-        {
-            long startTimestamp = BeginConveyorRuntimeSample(profileActiveConveyors);
-            lastActiveConveyorSafetyWakesQueued = MaybeEnqueueActiveConveyorSafetyScan();
-            EndConveyorRuntimeSample(
-                profileActiveConveyors,
-                "ConveyorSafetyScan",
-                "Conveyor Safety Scan",
-                startTimestamp);
-        }
-
-        if (conveyorWakeQueue.Count == 0
-            && conveyorLineWakeQueue.Count == 0
-            && conveyorCornerGroupWakeQueue.Count == 0)
-        {
-            ProcessQueuedConveyorNetworkSleepChecks();
-            return;
-        }
-
-        int queuedAtFrameStart = conveyorWakeQueue.Count + conveyorLineWakeQueue.Count + conveyorCornerGroupWakeQueue.Count;
-        int processLimit = GetEffectiveConveyorWakeQueueProcessLimit();
-        lastActiveConveyorQueuedAtStart = queuedAtFrameStart;
-        lastActiveConveyorProcessLimit = processLimit;
-        int processedCount = 0;
-        int activeLoopIterations = 0;
-        conveyorLineBlockLoopIterations = 0;
-        using (ConveyorProcessWakeQueueMarker.Auto())
-        {
-            long startTimestamp = BeginConveyorRuntimeSample(profileActiveConveyors);
-            while ((conveyorLineWakeQueue.Count > 0
-                    || conveyorCornerGroupWakeQueue.Count > 0
-                    || conveyorWakeQueue.Count > 0)
-                && processedCount < queuedAtFrameStart
-                && processedCount < processLimit)
-            {
-                activeLoopIterations++;
-                bool processBlockWake = ShouldProcessConveyorBlockWakeBeforeGroupedWakes(processedCount);
-                if (!processBlockWake && conveyorLineWakeQueue.Count > 0)
-                {
-                    using (ConveyorWakeLineMarker.Auto())
-                    {
-                        long lineStartTimestamp = BeginConveyorRuntimeSample(profileActiveConveyors);
-                        int lineId = conveyorLineWakeQueue.Dequeue();
-                        ConveyorLineWakeRange wakeRange = conveyorLineWakeRangesById.TryGetValue(lineId, out ConveyorLineWakeRange queuedWakeRange)
-                            ? queuedWakeRange
-                            : new ConveyorLineWakeRange(0, int.MaxValue, true);
-                        conveyorLineWakeRangesById.Remove(lineId);
-                        processedCount++;
-                        lastActiveConveyorLineWakesProcessed++;
-                        if (wakeRange.fullLine)
-                        {
-                            lastActiveConveyorFullLineWakesProcessed++;
-                        }
-                        else
-                        {
-                            lastActiveConveyorRangedLineWakesProcessed++;
-                        }
-
-                        TryTickStraightConveyorLine(lineId, wakeRange);
-                        EndConveyorRuntimeSample(
-                            profileActiveConveyors,
-                            "ConveyorWakeLine",
-                            "Conveyor Wake Line",
-                            lineStartTimestamp);
-                    }
-
-                    continue;
-                }
-
-                if (!processBlockWake && conveyorCornerGroupWakeQueue.Count > 0)
-                {
-                    using (ConveyorWakeCornerGroupMarker.Auto())
-                    {
-                        long cornerStartTimestamp = BeginConveyorRuntimeSample(profileActiveConveyors);
-                        int groupId = conveyorCornerGroupWakeQueue.Dequeue();
-                        conveyorCornerGroupWakeQueued.Remove(groupId);
-                        processedCount++;
-                        lastActiveConveyorCornerGroupWakesProcessed++;
-                        TryTickConveyorCornerGroup(groupId, deltaTime);
-                        EndConveyorRuntimeSample(
-                            profileActiveConveyors,
-                            "ConveyorWakeCornerGroup",
-                            "Conveyor Wake Corner Group",
-                            cornerStartTimestamp);
-                    }
-
-                    continue;
-                }
-
-                if (conveyorWakeQueue.Count == 0)
-                {
-                    continue;
-                }
-
-                BlockHandle handle = conveyorWakeQueue.Dequeue();
-                conveyorWakeQueued.Remove(handle);
-                processedCount++;
-                lastActiveConveyorBlockWakesProcessed++;
-                using (ConveyorWakeBlockMarker.Auto())
-                {
-                    long blockStartTimestamp = BeginConveyorRuntimeSample(profileActiveConveyors);
-                    ProcessQueuedConveyorBlockWake(handle, deltaTime);
-                    EndConveyorRuntimeSample(
-                        profileActiveConveyors,
-                        "ConveyorWakeBlock",
-                        "Conveyor Wake Block",
-                        blockStartTimestamp);
-                }
-            }
-
-            EndConveyorRuntimeSample(
-                profileActiveConveyors,
-                "ConveyorProcessWakeQueue",
-                "Conveyor Process Wake Queue",
-                startTimestamp);
-        }
-
-        lastActiveConveyorProcessed = processedCount;
-        if (activeLoopIterations > 0 || conveyorLineBlockLoopIterations > 0)
-        {
-            MapObjectTickProfiler.AddBeltLoopIterations(0, activeLoopIterations, conveyorLineBlockLoopIterations, 0);
-        }
-
-        ProcessQueuedConveyorNetworkSleepChecks();
-    }
 
     private bool ShouldProcessConveyorBlockWakeBeforeGroupedWakes(int processedCount)
     {
@@ -4547,33 +4295,6 @@ public partial class TerrainGenerator : MonoBehaviour
                 ref enabledBeltColliderCount);
         }
 
-        int retryAttemptSampleCount = 0;
-        int totalLineRetryAttempts = 0;
-        int maxLineRetryAttempt = 0;
-        int currentLineReadyDelayStates = 0;
-        foreach (KeyValuePair<int, ConveyorLineRetryState> pair in conveyorLineRetryStatesById)
-        {
-            int attemptCount = Mathf.Max(0, pair.Value.attemptCount);
-            retryAttemptSampleCount++;
-            totalLineRetryAttempts += attemptCount;
-            maxLineRetryAttempt = Mathf.Max(maxLineRetryAttempt, attemptCount);
-            if (pair.Value.readyDelay)
-            {
-                currentLineReadyDelayStates++;
-            }
-        }
-
-        foreach (KeyValuePair<int, int> pair in conveyorLineRetryAttemptsByDueLineId)
-        {
-            int attemptCount = Mathf.Max(0, pair.Value);
-            retryAttemptSampleCount++;
-            totalLineRetryAttempts += attemptCount;
-            maxLineRetryAttempt = Mathf.Max(maxLineRetryAttempt, attemptCount);
-        }
-
-        float averageLineRetryAttempt = retryAttemptSampleCount > 0
-            ? totalLineRetryAttempts / (float)retryAttemptSampleCount
-            : 0f;
 
         MapObjectTickProfiler.AddRuntimeCounter("World", "LoadedChunks", loadedChunks.Count);
         MapObjectTickProfiler.AddRuntimeCounter(
@@ -4708,76 +4429,7 @@ public partial class TerrainGenerator : MonoBehaviour
             "ClearedNonConveyorBlocks",
             conveyorStateSaveClearedNonConveyorBlocks);
 
-        MapObjectTickProfiler.AddRuntimeCounter("ConveyorQueue", "WakeQueue", conveyorWakeQueue.Count);
-        MapObjectTickProfiler.AddRuntimeCounter("ConveyorQueue", "WakeQueuedSet", conveyorWakeQueued.Count);
-        MapObjectTickProfiler.AddRuntimeCounter("ConveyorQueue", "DirectWakeBlocks", conveyorDirectWakeBlocks.Count);
-        MapObjectTickProfiler.AddRuntimeCounter("ConveyorQueue", "LineWakeQueue", conveyorLineWakeQueue.Count);
-        MapObjectTickProfiler.AddRuntimeCounter("ConveyorQueue", "DeferredLineWakeQueue", deferredConveyorLineWakeQueue.Count);
-        MapObjectTickProfiler.AddRuntimeCounter("ConveyorQueue", "CornerGroupWakeQueue", conveyorCornerGroupWakeQueue.Count);
-        MapObjectTickProfiler.AddRuntimeCounter("ConveyorQueue", "CornerGroupWakeQueuedSet", conveyorCornerGroupWakeQueued.Count);
-        MapObjectTickProfiler.AddRuntimeCounter("ConveyorQueue", "CornerGroupWakeQueuedBlocks", conveyorCornerGroupWakeQueuedBlocks.Count);
-        MapObjectTickProfiler.AddRuntimeCounter("ConveyorQueue", "LineRetryStates", conveyorLineRetryStatesById.Count);
-        MapObjectTickProfiler.AddRuntimeCounter("ConveyorQueue", "LineRetryDueLines", conveyorLineRetryAttemptsByDueLineId.Count);
-        MapObjectTickProfiler.AddRuntimeCounter("ConveyorQueue", "LineReadyDelayStates", currentLineReadyDelayStates);
-        MapObjectTickProfiler.AddRuntimeCounter("ConveyorQueue", "BlockedWaiterDestinations", conveyorBlockedSourcesByDestinationLane.Count);
-        MapObjectTickProfiler.AddRuntimeCounter("ConveyorQueue", "BlockedWaiterSources", conveyorBlockedDestinationBySourceLane.Count);
-        MapObjectTickProfiler.AddRuntimeCounter("ConveyorQueue", "MaxLineRetryAttempt", maxLineRetryAttempt);
-        MapObjectTickProfiler.AddRuntimeCounter("ConveyorQueue", "AvgLineRetryAttempt", averageLineRetryAttempt);
-        MapObjectTickProfiler.AddRuntimeCounter("ConveyorQueue", "ActiveSafetyScanBudget", GetEffectiveActiveConveyorSafetyScanBudget(activeConveyors.Count));
-        MapObjectTickProfiler.AddRuntimeCounter("ConveyorQueue", "ActiveSafetyScanIndex", activeConveyorSafetyScanIndex);
-        MapObjectTickProfiler.AddRuntimeCounter("ConveyorQueue", "NetworkSleepChecks", conveyorNetworkSleepCheckQueuedIds.Count);
-        MapObjectTickProfiler.AddRuntimeCounter("ConveyorQueue", "DeferredRuntimeRefreshBlocks", deferredConveyorRuntimeRefreshBlocks.Count);
-        MapObjectTickProfiler.AddRuntimeCounter("ConveyorQueue", "DeferredNetworkWakeBlocks", deferredConveyorNetworkWakeBlocks.Count);
-        MapObjectTickProfiler.AddRuntimeCounter("ConveyorQueue", "DeferredWakeAroundBlocks", deferredConveyorMoveAttemptWakeAroundBlocks.Count);
-        MapObjectTickProfiler.AddRuntimeCounter("ConveyorQueue", "DeferredWakeFlowBlocks", deferredConveyorMoveAttemptWakeFlowBlocks.Count);
-
-        MapObjectTickProfiler.AddRuntimeCounter("ActiveConveyor", "LastTickFrame", lastActiveConveyorTickFrame);
-        MapObjectTickProfiler.AddRuntimeCounter("ActiveConveyor", "QueuedAtStart", lastActiveConveyorQueuedAtStart);
-        MapObjectTickProfiler.AddRuntimeCounter("ActiveConveyor", "ProcessLimit", lastActiveConveyorProcessLimit);
-        MapObjectTickProfiler.AddRuntimeCounter("ActiveConveyor", "Processed", lastActiveConveyorProcessed);
-        MapObjectTickProfiler.AddRuntimeCounter("ActiveConveyor", "LineWakesProcessed", lastActiveConveyorLineWakesProcessed);
-        MapObjectTickProfiler.AddRuntimeCounter("ActiveConveyor", "BlockWakesProcessed", lastActiveConveyorBlockWakesProcessed);
-        MapObjectTickProfiler.AddRuntimeCounter("ActiveConveyor", "CornerGroupWakesProcessed", lastActiveConveyorCornerGroupWakesProcessed);
-        MapObjectTickProfiler.AddRuntimeCounter("ActiveConveyor", "CornerGroupBlocksProcessed", lastActiveConveyorCornerGroupBlocksProcessed);
-        MapObjectTickProfiler.AddRuntimeCounter("ActiveConveyor", "CornerGroupBlocksQueued", lastActiveConveyorCornerGroupBlocksQueued);
-        MapObjectTickProfiler.AddRuntimeCounter("ActiveConveyor", "CornerGroupBlocksSelected", lastActiveConveyorCornerGroupBlocksSelected);
-        MapObjectTickProfiler.AddRuntimeCounter("ActiveConveyor", "CornerGroupBlocksSkipped", lastActiveConveyorCornerGroupBlocksSkipped);
-        MapObjectTickProfiler.AddRuntimeCounter("ActiveConveyor", "CornerGroupNoProgressRequeuesSkipped", lastActiveConveyorCornerGroupNoProgressRequeuesSkipped);
-        MapObjectTickProfiler.AddRuntimeCounter("ActiveConveyor", "BlockWakeTicks", lastActiveConveyorBlockWakeTicks);
-        MapObjectTickProfiler.AddRuntimeCounter("ActiveConveyor", "BlockNoProgressRequeuesSkipped", lastActiveConveyorBlockNoProgressRequeuesSkipped);
-        MapObjectTickProfiler.AddRuntimeCounter("ActiveConveyor", "DuplicateFrameTicksSkipped", lastActiveConveyorDuplicateFrameTicksSkipped);
-        MapObjectTickProfiler.AddRuntimeCounter("ActiveConveyor", "BlockWakeLineFallbacks", lastActiveConveyorBlockWakeLineFallbacks);
-        MapObjectTickProfiler.AddRuntimeCounter("ActiveConveyor", "FullLineWakesProcessed", lastActiveConveyorFullLineWakesProcessed);
-        MapObjectTickProfiler.AddRuntimeCounter("ActiveConveyor", "RangedLineWakesProcessed", lastActiveConveyorRangedLineWakesProcessed);
-        MapObjectTickProfiler.AddRuntimeCounter("ActiveConveyor", "DeferredLineWakesPromoted", lastActiveConveyorDeferredLineWakesPromoted);
-        MapObjectTickProfiler.AddRuntimeCounter("ActiveConveyor", "LineNoMoveWakes", lastActiveConveyorLineNoMoveWakes);
-        MapObjectTickProfiler.AddRuntimeCounter("ActiveConveyor", "TransportRuns", lastTransportRuns);
-        MapObjectTickProfiler.AddRuntimeCounter("ActiveConveyor", "TransportItems", lastTransportItems);
-        MapObjectTickProfiler.AddRuntimeCounter("ActiveConveyor", "TransportLegacyBlocks", lastTransportLegacyBlocks);
-        MapObjectTickProfiler.AddRuntimeCounter("ActiveConveyor", "TransportCommonMoves", (int)lastTransportCommonMoves);
-        MapObjectTickProfiler.AddRuntimeCounter("ActiveConveyor", "TransportTreeVisits", (int)lastTransportTreeVisits);
-        MapObjectTickProfiler.AddRuntimeCounter("ActiveConveyor", "TransportRoutedBlockWakes", lastTransportRoutedBlockWakes);
-        MapObjectTickProfiler.AddRuntimeCounter("ActiveConveyor", "TransportBoundaryChecks", (int)lastTransportBoundaryChecks);
-        MapObjectTickProfiler.AddRuntimeCounter("ActiveConveyor", "TransportInputAttempts", (int)lastTransportInputAttempts);
-        MapObjectTickProfiler.AddRuntimeCounter("ActiveConveyor", "TransportOutputAttempts", (int)lastTransportOutputAttempts);
-        MapObjectTickProfiler.AddRuntimeCounter("ActiveConveyor", "TransportSleepingRuns", lastTransportSleepingRuns);
-        MapObjectTickProfiler.AddRuntimeCounter("ActiveConveyor", "TransportRebuilds", lastTransportRebuilds);
-        MapObjectTickProfiler.AddRuntimeCounter("ActiveConveyor", "LineNoMoveBlocksChanged", lastActiveConveyorLineNoMoveBlocksChanged);
-        MapObjectTickProfiler.AddRuntimeCounter("ActiveConveyor", "LineNoMoveBlocksSkipped", lastActiveConveyorLineNoMoveBlocksSkipped);
-        MapObjectTickProfiler.AddRuntimeCounter("ActiveConveyor", "LineNoMoveDirectFallbacks", lastActiveConveyorLineNoMoveDirectFallbacks);
-        MapObjectTickProfiler.AddRuntimeCounter("ActiveConveyor", "LineWakesDroppedByRetryThrottle", lastActiveConveyorLineWakesDroppedByRetryThrottle);
-        MapObjectTickProfiler.AddRuntimeCounter("ActiveConveyor", "DeferredLineWakesDroppedByRetryThrottle", lastActiveConveyorDeferredLineWakesDroppedByRetryThrottle);
-        MapObjectTickProfiler.AddRuntimeCounter("ActiveConveyor", "LineRetryRangeMerges", lastActiveConveyorLineRetryRangeMerges);
-        MapObjectTickProfiler.AddRuntimeCounter("ActiveConveyor", "RetryStatesScanned", lastActiveConveyorRetryStatesScanned);
-        MapObjectTickProfiler.AddRuntimeCounter("ActiveConveyor", "RetryWakesQueued", lastActiveConveyorRetryWakesQueued);
-        MapObjectTickProfiler.AddRuntimeCounter("ActiveConveyor", "ReadyDelayStatesScanned", lastActiveConveyorReadyDelayStates);
-        MapObjectTickProfiler.AddRuntimeCounter("ActiveConveyor", "SafetyWakesQueued", lastActiveConveyorSafetyWakesQueued);
-        MapObjectTickProfiler.AddRuntimeCounter("ActiveConveyor", "MovedLineWakesScheduled", lastActiveConveyorMovedLineWakesScheduled);
-        MapObjectTickProfiler.AddRuntimeCounter("ActiveConveyor", "MovedLineWakeSlots", lastActiveConveyorMovedLineWakeSlots);
-        MapObjectTickProfiler.AddRuntimeCounter("ActiveConveyor", "BlockedWaiterRegistrations", lastActiveConveyorBlockedWaiterRegistrations);
-        MapObjectTickProfiler.AddRuntimeCounter("ActiveConveyor", "BlockedWaitersWoken", lastActiveConveyorBlockedWaitersWoken);
-        MapObjectTickProfiler.AddRuntimeCounter("ActiveConveyor", "DeferredNetworkWakeSuppressed", lastActiveConveyorDeferredNetworkWakeSuppressed);
-        MapObjectTickProfiler.AddRuntimeCounter("ActiveConveyor", "DirectWakeInactiveSkips", lastActiveConveyorDirectWakeInactiveSkips);
+        PublishBeltJobRuntimeCounters();
 
         MapObjectTickProfiler.AddRuntimeCounter("ConveyorCache", "LineCacheDirty", conveyorLineCacheDirty);
         MapObjectTickProfiler.AddRuntimeCounter("ConveyorCache", "NetworkCacheDirty", conveyorNetworkCacheDirty);

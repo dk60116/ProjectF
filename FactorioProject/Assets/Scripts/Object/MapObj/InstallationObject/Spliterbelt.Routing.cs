@@ -42,6 +42,25 @@ public partial class Spliterbelt
 
     public FilterOutput SelectedFilterOutput => filterOutput;
 
+    internal BeltSplitterState CaptureBeltJobRouting() => new BeltSplitterState
+    {
+        NextInput = routing.NextInput, NextOutput = routing.NextOutput,
+        WheelMask = wheelRotationMask, FilterOutput = (int)filterOutput
+    };
+
+    internal void ApplyBeltJobRouting(BeltSplitterState state)
+    {
+        routing.NextInput = state.NextInput;
+        routing.NextOutput = state.NextOutput;
+        if (wheelRotationMask == state.WheelMask) return;
+        float now = WheelAnimationTime;
+        GetDisplayedWheelRotationMask(now);
+        int changed = wheelRotationMask ^ state.WheelMask;
+        wheelRotationMask = state.WheelMask;
+        if ((changed & 1) != 0) leftWheelTransitionTime = now + Mathf.Max(0, wheelTransitionDelay);
+        if ((changed & 2) != 0) rightWheelTransitionTime = now + Mathf.Max(0, wheelTransitionDelay);
+    }
+
     public override bool IsItemFilterEnabled(int itemId, int totalItemCount)
         => IsItemFilterMaskInitialized && base.IsItemFilterEnabled(itemId, totalItemCount);
 

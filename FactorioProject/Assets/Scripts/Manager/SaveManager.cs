@@ -113,6 +113,7 @@ public class SaveManager : MonoBehaviour
             return false;
         }
 
+        ProjectF.Conveyors.BeltSimulationSnapshot beltSnapshot = terrain.CaptureBeltSimulationSnapshot();
         SaveGameData data = new SaveGameData
         {
             version = SaveGameData.CurrentVersion,
@@ -121,7 +122,8 @@ public class SaveManager : MonoBehaviour
             terrain = terrain.CaptureTerrainSaveState(),
             worldTime = GameManager.Instance?.WorldTime?.CaptureSaveState() ?? new WorldTimeSaveData(),
             map = terrain.CaptureMapSaveState(),
-            player = player != null ? player.CaptureSaveState() : new PlayerSaveData()
+            player = player != null ? player.CaptureSaveState() : new PlayerSaveData(),
+            beltSimulation = beltSnapshot
         };
 
         string path = GetSlotPath(slotIndex);
@@ -448,7 +450,11 @@ public class SaveManager : MonoBehaviour
             terrain.LoadFromSaveState(
                 data.terrain,
                 data.map,
-                () => CompletePlayerLoad(player, data.player));
+                () =>
+                {
+                    terrain.RestoreBeltSimulationSnapshot(data.beltSimulation);
+                    CompletePlayerLoad(player, data.player);
+                });
             return;
         }
 

@@ -43,6 +43,9 @@ public static class SaveGameItemIdRemapper
         // for rail 51 would also turn current pipes, recipes and box filters into rail.
         RemapMap(data.map, itemIdMap, currentDefinitions);
         RemapPlayer(data.player, itemIdMap);
+        if (data.beltSimulation != null)
+            foreach (ProjectF.Conveyors.BeltSavedLane lane in data.beltSimulation.Lanes)
+                if (lane != null) lane.State.ItemId = RemapItemId(lane.State.ItemId, itemIdMap);
     }
 
     private static Dictionary<int, int> BuildUnambiguousItemIdMap(
@@ -171,6 +174,7 @@ public static class SaveGameItemIdRemapper
             if (lane != null)
             {
                 lane.itemId = RemapItemId(lane.itemId, itemIdMap);
+                if (lane.nativeBeltState != null) lane.nativeBeltState.State.ItemId = lane.itemId;
             }
         }
     }

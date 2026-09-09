@@ -41,8 +41,6 @@ public partial class TerrainGenerator : MonoBehaviour
     private const float GeneratedWaterDepthDeepDistance = 2.65f;
     private const int GeneratedWaterFoamRenderQueue = 3010;
 
-    private static readonly ProfilerMarker TickConveyorDataMotionsMarker = new ProfilerMarker("TerrainGenerator.TickConveyorDataMotions");
-    private static readonly ProfilerMarker TickConveyorsMarker = new ProfilerMarker("TerrainGenerator.TickConveyors");
     private static readonly ProfilerMarker TickConveyorDotsMarker = new ProfilerMarker("TerrainGenerator.TickConveyorDots");
     private static readonly ProfilerMarker RefreshChunksMarker = new ProfilerMarker("TerrainGenerator.RefreshTrackedChunks");
     private static readonly ProfilerMarker RefreshChunkLoadScanMarker = new ProfilerMarker("TerrainGenerator.RefreshChunkLoadScan");
@@ -463,10 +461,6 @@ public partial class TerrainGenerator : MonoBehaviour
     private bool logChunkGenerationDiagnostics;
 
     [Header("Conveyor Runtime")]
-    [Tooltip("Stores settled belt items as data and renders them through instanced virtual item batches.")]
-    [SerializeField]
-    private bool virtualizeConveyorItems = true;
-
     [SerializeField, Min(16)]
     private int conveyorWakeQueueProcessLimit = 4096;
 
@@ -1084,41 +1078,12 @@ public partial class TerrainGenerator : MonoBehaviour
 
         TickFarmlandFertilizerAbsorption();
 
-        profileBeltTicks = RefreshBeltTickProfilerFrameState();
+        long beltJobsStart = profileBeltTicks ? MapObjectTickProfiler.BeginSample() : 0L;
+        TickBeltJobs(Time.deltaTime);
+        if (profileBeltTicks)
+            MapObjectTickProfiler.EndNamedSample("Belt", "BeltJobs", "Belt Jobs Tick", beltJobsStart);
 
-        if (ShouldTickConveyorDataMotions(Time.deltaTime))
-        {
-            using (TickConveyorDataMotionsMarker.Auto())
-            {
-                long startTimestamp = profileBeltTicks ? MapObjectTickProfiler.BeginSample() : 0L;
-                TickActiveConveyorDataMotions(Time.deltaTime);
-                if (profileBeltTicks)
-                {
-                    MapObjectTickProfiler.EndNamedSample(
-                        "Belt",
-                        "ConveyorDataMotion",
-                        "Belt Data Motion",
-                        startTimestamp);
-                }
-            }
-        }
-
-        if (ShouldTickActiveConveyorRuntime(Time.deltaTime))
-        {
-            using (TickConveyorsMarker.Auto())
-            {
-                long startTimestamp = profileBeltTicks ? MapObjectTickProfiler.BeginSample() : 0L;
-                TickActiveConveyors(Time.deltaTime);
-                if (profileBeltTicks)
-                {
-                    MapObjectTickProfiler.EndNamedSample(
-                        "Belt",
-                        "ActiveConveyor",
-                        "Active Belt Tick",
-                        startTimestamp);
-                }
-            }
-        }
+        EnsureBeltSplitGroups();
 
         if (ShouldRefreshTrackedChunks())
         {
@@ -1158,6 +1123,8 @@ public partial class TerrainGenerator : MonoBehaviour
             }
         }
 
+        DrawBeltSplitGroups();
+
         using (RenderChunkSurfacesMarker.Auto())
         {
             RenderLoadedChunkSurfaces();
@@ -1180,23 +1147,6 @@ public partial class TerrainGenerator : MonoBehaviour
         }
 
         return profileBeltTicks;
-    }
-
-    private bool ShouldTickConveyorDataMotions(float deltaTime)
-    {
-        return deltaTime > 0f && activeConveyorDataMotionBlocks.Count > 0;
-    }
-
-    private bool ShouldTickActiveConveyorRuntime(float deltaTime)
-    {
-        return deltaTime > 0f
-               && (activeConveyors.Count > 0
-                   || conveyorWakeQueue.Count > 0
-                   || conveyorLineWakeQueue.Count > 0
-                   || conveyorCornerGroupWakeQueue.Count > 0
-                   || deferredConveyorLineWakeQueue.Count > 0
-                   || HasDueStraightConveyorLineRetry()
-                   || conveyorNetworkSleepCheckQueuedIds.Count > 0);
     }
 
     private bool ShouldTickConveyorVisualRuntime()
@@ -1253,7 +1203,8 @@ public partial class TerrainGenerator : MonoBehaviour
         loadedChunks.Clear();
     }
 
-    public bool VirtualizeConveyorItems => virtualizeConveyorItems;
+    // Native simulation always publishes data slots to the instanced item renderer.
+    public bool VirtualizeConveyorItems => true;
     public bool VirtualizeConveyorBelts => true;
     public bool IsWorldReadyForPresentation => worldReadyForPresentation;
     public float WorldLoadingProgress => worldReadyForPresentation

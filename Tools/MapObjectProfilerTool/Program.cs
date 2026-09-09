@@ -46,12 +46,15 @@ internal sealed class ProfilerForm : Form
     private readonly List<ItemCatalogEntry> catalogItems = new List<ItemCatalogEntry>();
     private readonly Dictionary<int, Image> iconCache = new Dictionary<int, Image>();
     private readonly List<ProfileRow> profileRows = new List<ProfileRow>();
+    private readonly List<ProfileRow> displayRows = new List<ProfileRow>();
+    private const string BeltGroupRowTag = "__belt_group__";
 
     private ProfileSnapshot? lastSnapshot;
     private SnapshotTextForm? snapshotTextForm;
     private SnapshotBeltTickForm? snapshotBeltTickForm;
     private bool applyingRuntimeState;
     private bool polling;
+    private bool beltRowsExpanded;
 
     public ProfilerForm()
     {
@@ -290,6 +293,19 @@ internal sealed class ProfilerForm : Form
         rowsGrid.Columns.Add(CreateTextColumn("TotalMs", "Total ms", 11));
         rowsGrid.Columns.Add(CreateTextColumn("AvgUs", "Avg us", 11));
         rowsGrid.Columns.Add(CreateTextColumn("MaxUs", "Max us", 11));
+        rowsGrid.CellClick += (_, e) =>
+        {
+            if (e.RowIndex < 0 || e.RowIndex >= rowsGrid.Rows.Count
+                || !string.Equals(rowsGrid.Rows[e.RowIndex].Tag as string, BeltGroupRowTag, StringComparison.Ordinal))
+            {
+                return;
+            }
+
+            beltRowsExpanded = !beltRowsExpanded;
+            RebuildDisplayRows();
+            RefreshGrid();
+            chartPanel.Invalidate();
+        };
     }
 
     private static DataGridViewTextBoxColumn CreateTextColumn(string name, string headerText, float fillWeight)
@@ -441,6 +457,7 @@ internal sealed class ProfilerForm : Form
         {
             profileRows.AddRange(snapshot.Rows.Where(row => row.Samples > 0 || row.ActiveCount > 0));
         }
+        RebuildDisplayRows();
 
         if (snapshot == null)
         {
@@ -467,6 +484,7 @@ internal sealed class ProfilerForm : Form
     {
         lastSnapshot = null;
         profileRows.Clear();
+        displayRows.Clear();
         summaryLabel.Text = message;
         rowsGrid.Rows.Clear();
         chartPanel.Invalidate();
@@ -484,23 +502,151 @@ internal sealed class ProfilerForm : Form
 
     private void RefreshGrid()
     {
-        rowsGrid.Rows.Clear();
+        GridViewportState viewport = CaptureGridViewport();
+        rowsGrid.SuspendLayout();
+        try
+        {
+            rowsGrid.Rows.Clear();
+            for (int i = 0; i < displayRows.Count; i++)
+            {
+                ProfileRow row = displayRows[i];
+                bool isBeltGroup = ReferenceEquals(row, beltGroupDisplayRow);
+                int rowIndex = rowsGrid.Rows.Add(
+                    ResolveRowIcon(row) ?? ResolveEmptyIcon(),
+                    isBeltGroup ? (beltRowsExpanded ? "▼" : "▶") : row.Rank,
+                    ResolveRowDisplayName(row),
+                    row.Type,
+                    row.Kind,
+                    row.ActiveCount.ToString("N0", CultureInfo.InvariantCulture),
+                    row.Samples.ToString("N0", CultureInfo.InvariantCulture),
+                    (row.TotalUs / 1000.0).ToString("0.###", CultureInfo.InvariantCulture),
+                    row.AvgUs.ToString("0.#", CultureInfo.InvariantCulture),
+                    row.MaxUs.ToString("0.#", CultureInfo.InvariantCulture));
+                DataGridViewRow gridRow = rowsGrid.Rows[rowIndex];
+                gridRow.Tag = isBeltGroup ? BeltGroupRowTag : BuildProfileRowTag(row);
+                if (isBeltGroup)
+                {
+                    gridRow.DefaultCellStyle.BackColor = Color.FromArgb(52, 58, 50);
+                    gridRow.Cells[2].ToolTipText = "클릭하여 벨트 측정 세부 항목을 열거나 닫습니다.";
+                }
+            }
+
+            RestoreGridViewport(viewport);
+        }
+        finally
+        {
+            rowsGrid.ResumeLayout();
+        }
+    }
+
+    private ProfileRow? beltGroupDisplayRow;
+
+    private void RebuildDisplayRows()
+    {
+        displayRows.Clear();
+        beltGroupDisplayRow = null;
+        int beltCount = 0, firstBeltIndex = -1, activeCount = 0;
+        long samples = 0;
+        double totalUs = 0.0, maxUs = 0.0;
         for (int i = 0; i < profileRows.Count; i++)
         {
             ProfileRow row = profileRows[i];
-            rowsGrid.Rows.Add(
-                ResolveRowIcon(row) ?? ResolveEmptyIcon(),
-                row.Rank,
-                ResolveRowDisplayName(row),
-                row.Type,
-                row.Kind,
-                row.ActiveCount.ToString("N0", CultureInfo.InvariantCulture),
-                row.Samples.ToString("N0", CultureInfo.InvariantCulture),
-                (row.TotalUs / 1000.0).ToString("0.###", CultureInfo.InvariantCulture),
-                row.AvgUs.ToString("0.#", CultureInfo.InvariantCulture),
-                row.MaxUs.ToString("0.#", CultureInfo.InvariantCulture));
+            if (!IsBeltRelatedRow(row)) continue;
+            if (firstBeltIndex < 0) firstBeltIndex = i;
+            beltCount++;
+            activeCount += row.ActiveCount;
+            samples += row.Samples;
+            totalUs += row.TotalUs;
+            maxUs = Math.Max(maxUs, row.MaxUs);
+        }
+
+        if (beltCount > 0)
+        {
+            beltGroupDisplayRow = new ProfileRow
+            {
+                Rank = profileRows[firstBeltIndex].Rank,
+                Kind = "Belt",
+                Type = $"{beltCount:N0} metrics",
+                ItemId = -1,
+                ItemName = $"Belt ({beltCount:N0})",
+                ActiveCount = activeCount,
+                Samples = samples,
+                TotalUs = totalUs,
+                AvgUs = samples > 0 ? totalUs / samples : 0.0,
+                MaxUs = maxUs
+            };
+        }
+
+        bool groupAdded = false;
+        for (int i = 0; i < profileRows.Count; i++)
+        {
+            ProfileRow row = profileRows[i];
+            if (!IsBeltRelatedRow(row))
+            {
+                displayRows.Add(row);
+                continue;
+            }
+
+            if (!groupAdded)
+            {
+                displayRows.Add(beltGroupDisplayRow!);
+                groupAdded = true;
+            }
+            if (beltRowsExpanded) displayRows.Add(row);
         }
     }
+
+    private readonly struct GridViewportState
+    {
+        public GridViewportState(string? topTag, int topIndex, string? currentTag, int horizontalOffset)
+        { TopTag = topTag; TopIndex = topIndex; CurrentTag = currentTag; HorizontalOffset = horizontalOffset; }
+        public string? TopTag { get; }
+        public int TopIndex { get; }
+        public string? CurrentTag { get; }
+        public int HorizontalOffset { get; }
+    }
+
+    private GridViewportState CaptureGridViewport()
+    {
+        int top = rowsGrid.FirstDisplayedScrollingRowIndex;
+        string? topTag = top >= 0 && top < rowsGrid.Rows.Count ? rowsGrid.Rows[top].Tag as string : null;
+        string? currentTag = rowsGrid.CurrentRow?.Tag as string;
+        return new GridViewportState(topTag, top, currentTag, rowsGrid.HorizontalScrollingOffset);
+    }
+
+    private void RestoreGridViewport(GridViewportState state)
+    {
+        if (rowsGrid.Rows.Count == 0) return;
+        int top = FindGridRow(state.TopTag);
+        if (top < 0 && state.TopTag?.StartsWith("belt:", StringComparison.Ordinal) == true) top = FindGridRow(BeltGroupRowTag);
+        if (top < 0) top = Math.Clamp(state.TopIndex, 0, rowsGrid.Rows.Count - 1);
+        int current = FindGridRow(state.CurrentTag);
+        if (current >= 0)
+        {
+            rowsGrid.ClearSelection();
+            rowsGrid.CurrentCell = rowsGrid.Rows[current].Cells[0];
+            rowsGrid.Rows[current].Selected = true;
+        }
+
+        // Setting CurrentCell can scroll it into view, so restore the user's viewport last.
+        try
+        {
+            rowsGrid.FirstDisplayedScrollingRowIndex = top;
+            rowsGrid.HorizontalScrollingOffset = state.HorizontalOffset;
+        }
+        catch (Exception exception) when (exception is InvalidOperationException || exception is ArgumentOutOfRangeException) { }
+    }
+
+    private int FindGridRow(string? tag)
+    {
+        if (string.IsNullOrEmpty(tag)) return -1;
+        for (int i = 0; i < rowsGrid.Rows.Count; i++)
+            if (string.Equals(rowsGrid.Rows[i].Tag as string, tag, StringComparison.Ordinal)) return i;
+        return -1;
+    }
+
+    private static string BuildProfileRowTag(ProfileRow row)
+        => $"{(IsBeltRelatedRow(row) ? "belt:" : "row:")}{row.Kind}\u001f{row.Type}\u001f{row.ItemId}\u001f{row.ItemName}";
 
     private void DrawChart(object? sender, PaintEventArgs e)
     {
@@ -509,16 +655,17 @@ internal sealed class ProfilerForm : Form
         using SolidBrush backgroundBrush = new SolidBrush(Color.FromArgb(34, 38, 41));
         e.Graphics.FillRectangle(backgroundBrush, bounds);
 
-        if (profileRows.Count <= 0)
+        if (displayRows.Count <= 0)
         {
             DrawCenteredText(e.Graphics, bounds, "측정 데이터 없음");
             return;
         }
 
         Rectangle inner = Rectangle.Inflate(bounds, -14, -12);
-        int visibleRows = Math.Min(profileRows.Count, Math.Max(1, inner.Height / 34));
+        int visibleRows = Math.Min(displayRows.Count, Math.Max(1, inner.Height / 34));
         int rowHeight = Math.Max(30, inner.Height / visibleRows);
-        double maxTotalUs = Math.Max(1.0, profileRows[0].TotalUs);
+        double maxTotalUs = 1.0;
+        for (int i = 0; i < displayRows.Count; i++) maxTotalUs = Math.Max(maxTotalUs, displayRows[i].TotalUs);
 
         using SolidBrush textBrush = new SolidBrush(Color.FromArgb(232, 238, 235));
         using SolidBrush dimBrush = new SolidBrush(Color.FromArgb(158, 169, 172));
@@ -531,7 +678,7 @@ internal sealed class ProfilerForm : Form
 
         for (int i = 0; i < visibleRows; i++)
         {
-            ProfileRow row = profileRows[i];
+            ProfileRow row = displayRows[i];
             int y = inner.Top + i * rowHeight;
             Rectangle rowRect = new Rectangle(inner.Left, y, inner.Width, rowHeight - 2);
             Rectangle iconRect = new Rectangle(rowRect.Left, rowRect.Top + 3, 26, 26);
@@ -1877,12 +2024,20 @@ internal sealed class SnapshotTextForm : Form
             return;
         }
 
-        int selectionStart = snapshotTextBox.Focused
-            ? Math.Min(snapshotTextBox.SelectionStart, nextText.Length)
+        int selectionStart = Math.Min(snapshotTextBox.SelectionStart, nextText.Length);
+        int firstVisibleLine = snapshotTextBox.IsHandleCreated
+            ? (int)NativeTextBoxScroll.SendMessage(snapshotTextBox.Handle, NativeTextBoxScroll.GetFirstVisibleLine, 0, 0)
             : 0;
         snapshotTextBox.Text = nextText;
         snapshotTextBox.SelectionStart = selectionStart;
         snapshotTextBox.SelectionLength = 0;
+        if (snapshotTextBox.IsHandleCreated)
+        {
+            int currentFirstLine = (int)NativeTextBoxScroll.SendMessage(
+                snapshotTextBox.Handle, NativeTextBoxScroll.GetFirstVisibleLine, 0, 0);
+            NativeTextBoxScroll.SendMessage(
+                snapshotTextBox.Handle, NativeTextBoxScroll.LineScroll, 0, firstVisibleLine - currentFirstLine);
+        }
     }
 
     private void CopySnapshotText()
@@ -1901,6 +2056,15 @@ internal sealed class SnapshotTextForm : Form
                 MessageBoxIcon.Warning);
         }
     }
+}
+
+internal static class NativeTextBoxScroll
+{
+    internal const int GetFirstVisibleLine = 0x00CE;
+    internal const int LineScroll = 0x00B6;
+
+    [DllImport("user32.dll", CharSet = CharSet.Auto)]
+    internal static extern IntPtr SendMessage(IntPtr handle, int message, int wParam, int lParam);
 }
 
 internal sealed class ProfileSnapshot

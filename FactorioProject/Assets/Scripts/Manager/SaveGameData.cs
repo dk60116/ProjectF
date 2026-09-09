@@ -5,8 +5,8 @@ using UnityEngine;
 [Serializable]
 public sealed class SaveGameData
 {
-    // Version 57 stores independent departure conditions for both automatic train targets.
-    public const int CurrentVersion = 58;
+    // Version 59 preserves the integer belt clock, lane progress and deterministic merge cursors.
+    public const int CurrentVersion = 59;
 
     public int version = CurrentVersion;
     public long savedAtUtcTicks;
@@ -15,6 +15,7 @@ public sealed class SaveGameData
     public WorldTimeSaveData worldTime = new WorldTimeSaveData();
     public MapSaveData map = new MapSaveData();
     public PlayerSaveData player = new PlayerSaveData();
+    public ProjectF.Conveyors.BeltSimulationSnapshot beltSimulation;
 }
 
 [Serializable]
@@ -153,6 +154,7 @@ public sealed class ConveyorItemTypeRunSaveEntry
 [Serializable]
 public sealed class ConveyorItemLaneSaveState
 {
+    public ProjectF.Conveyors.BeltSavedLane nativeBeltState;
     public int laneIndex = -1;
     public int itemId = -1;
     public Vector3 visualWorldPosition;

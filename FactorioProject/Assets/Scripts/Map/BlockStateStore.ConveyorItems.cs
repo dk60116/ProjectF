@@ -576,6 +576,7 @@ public partial class BlockStateStore
 
         ConveyorItemLaneSaveState clonedState = new ConveyorItemLaneSaveState
         {
+            nativeBeltState = source.nativeBeltState?.Clone(),
             laneIndex = source.laneIndex,
             itemId = source.itemId,
             visualWorldPosition = source.visualWorldPosition,

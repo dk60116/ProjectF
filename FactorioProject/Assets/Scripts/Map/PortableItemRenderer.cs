@@ -730,11 +730,14 @@ public sealed partial class PortableItemRenderer : MonoBehaviour
             }
         }
 
-        bool activeSetChanged;
+        // Membership changes are already queued in ConveyorItemVisualDirtyBlocks.
+        // Only a renderer reset needs the O(all active blocks) cache reconciliation;
+        // ordinary item transfers are handled below from their changed block handles.
+        bool requiresFullStaticCacheReconcile = cachedVirtualConveyorVisualBlockSetVersion == int.MinValue;
         long activeSetStartTimestamp = BeginRuntimeProfileSample(out bool profileActiveSet);
         try
         {
-            activeSetChanged = RefreshActiveVirtualConveyorRenderBlocksIfNeeded();
+            RefreshActiveVirtualConveyorRenderBlocksIfNeeded();
         }
         finally
         {
@@ -752,7 +755,7 @@ public sealed partial class PortableItemRenderer : MonoBehaviour
             EndRuntimeProfileSample(profileDynamicSet, "Conveyor Item Refresh Dynamic Set", dynamicSetStartTimestamp);
         }
 
-        if (activeSetChanged)
+        if (requiresFullStaticCacheReconcile)
         {
             long staticCacheStartTimestamp = BeginRuntimeProfileSample(out bool profileStaticCache);
             try
@@ -792,17 +795,17 @@ public sealed partial class PortableItemRenderer : MonoBehaviour
             RefreshVisibleDeferredConveyorBlocks();
     }
 
-    private bool RefreshActiveVirtualConveyorRenderBlocksIfNeeded()
+    private void RefreshActiveVirtualConveyorRenderBlocksIfNeeded()
     {
         if (terrainGenerator == null)
         {
-            return false;
+            return;
         }
 
         int version = terrainGenerator.ConveyorItemVisualBlockSetVersion;
         if (cachedVirtualConveyorVisualBlockSetVersion == version)
         {
-            return false;
+            return;
         }
 
         terrainGenerator.CopyConveyorItemVisualBlocks(activeVirtualConveyorRenderBlocks);
@@ -817,7 +820,6 @@ public sealed partial class PortableItemRenderer : MonoBehaviour
         }
 
         cachedVirtualConveyorVisualBlockSetVersion = version;
-        return true;
     }
 
     private bool TryResolveConveyorBlock(BlockHandle handle, out Block block)

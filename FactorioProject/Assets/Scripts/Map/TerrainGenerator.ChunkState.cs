@@ -92,6 +92,7 @@ public partial class TerrainGenerator
             {
                 ConveyorItemLaneSaveState laneState = entry.lanes[laneStateIndex];
                 if (laneState == null
+                    || laneState.nativeBeltState != null
                     || laneState.itemId < 0
                     || laneState.laneIndex < 0
                     || laneState.laneIndex >= laneCount)

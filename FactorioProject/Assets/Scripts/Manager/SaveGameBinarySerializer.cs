@@ -169,6 +169,7 @@ public static class SaveGameBinarySerializer
         WriteWorldTime(writer, data.worldTime);
         WriteMap(writer, data.map);
         WritePlayer(writer, data.player);
+        ProjectF.Conveyors.BeltSimulationSnapshot.Write(writer, data.beltSimulation);
     }
 
     private static SaveGameData ReadSaveGameData(
@@ -191,6 +192,7 @@ public static class SaveGameBinarySerializer
             : new WorldTimeSaveData { hasTime = false };
         data.map = ReadMap(reader, fileVersion, compatibilityMode);
         data.player = ReadPlayer(reader, fileVersion);
+        if (fileVersion >= 59) data.beltSimulation = ProjectF.Conveyors.BeltSimulationSnapshot.Read(reader);
         return data;
     }
 
@@ -385,7 +387,7 @@ public static class SaveGameBinarySerializer
             resources = ReadList(reader, () => ReadResourceEntry(reader, version)),
             floorObjects = ReadList(reader, () => ReadFloorObjectEntry(reader)),
             installations = ReadList(reader, () => ReadInstallationEntry(reader, version, compatibilityMode)),
-            conveyorItems = ReadList(reader, () => ReadConveyorBlockEntry(reader))
+            conveyorItems = ReadList(reader, () => ReadConveyorBlockEntry(reader, version))
         };
 
         if (version >= 22)
@@ -1072,12 +1074,12 @@ public static class SaveGameBinarySerializer
         WriteList(writer, entry.lanes, WriteConveyorLaneEntry);
     }
 
-    private static ConveyorItemBlockSaveEntry ReadConveyorBlockEntry(BinaryReader reader)
+    private static ConveyorItemBlockSaveEntry ReadConveyorBlockEntry(BinaryReader reader, int version)
     {
         return new ConveyorItemBlockSaveEntry
         {
             coordinate = ReadVector2Int(reader),
-            lanes = ReadList(reader, () => ReadConveyorLaneEntry(reader))
+            lanes = ReadList(reader, () => ReadConveyorLaneEntry(reader, version))
         };
     }
 
@@ -1149,9 +1151,10 @@ public static class SaveGameBinarySerializer
         writer.Write(state.cornerContinuationStartProgress);
         writer.Write(state.cornerContinuationPathLength);
         writer.Write(state.cornerContinuationDurationPathLength);
+        ProjectF.Conveyors.BeltSimulationSnapshot.WriteLane(writer, state.nativeBeltState);
     }
 
-    private static ConveyorItemLaneSaveState ReadConveyorLaneEntry(BinaryReader reader)
+    private static ConveyorItemLaneSaveState ReadConveyorLaneEntry(BinaryReader reader, int version)
     {
         return new ConveyorItemLaneSaveState
         {
@@ -1175,7 +1178,8 @@ public static class SaveGameBinarySerializer
             cornerContinuationStartWorldPosition = ReadVector3(reader),
             cornerContinuationStartProgress = reader.ReadSingle(),
             cornerContinuationPathLength = reader.ReadSingle(),
-            cornerContinuationDurationPathLength = reader.ReadSingle()
+            cornerContinuationDurationPathLength = reader.ReadSingle(),
+            nativeBeltState = version >= 59 ? ProjectF.Conveyors.BeltSimulationSnapshot.ReadLane(reader) : null
         };
     }
 

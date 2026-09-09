@@ -39,6 +39,8 @@ public class GameManager : MonoBehaviour
     private bool showSleepAwake;
     [SerializeField]
     private bool showBeltItemLine;
+    [SerializeField, InspectorName("Show Belt Split")]
+    private bool showBeltSplit;
     [SerializeField, InspectorName("Hide Belt Item")]
     private bool hideBeltItems;
     [SerializeField, InspectorName("Hide Belt")]
@@ -216,6 +218,7 @@ public class GameManager : MonoBehaviour
     public bool ShowConveyorSlotDots => showConveyorSlotDots;
     public bool ShowSleepAwake => showSleepAwake;
     public bool ShowBeltItemLine => showBeltItemLine;
+    public bool ShowBeltSplit => showBeltSplit;
     public bool HideBeltItems => hideBeltItems;
     public bool HideBelts => hideBelts;
     public bool DisableCameraCulling => disableCameraCulling;
@@ -310,6 +313,8 @@ public class GameManager : MonoBehaviour
         showBeltItemLine = show;
         SyncBeltItemLineRuntimeVisibility(true);
     }
+
+    public void SetShowBeltSplit(bool show) => showBeltSplit = show;
 
     public void SetHideBeltItems(bool hide)
     {
@@ -1644,7 +1649,7 @@ public sealed class RuntimeItemGiveReceiver : MonoBehaviour
 
         if (parts.Length < 2 || !string.Equals(parts[0], "give", StringComparison.OrdinalIgnoreCase))
         {
-            error = "usage: give <itemId> [count] | clear <belt|floor|io> | animalstress [count] | animalcollision [count] | animalthreat [radius] | beltstress [count] | beltline [auto|itemId] [count] | beltitems [count] | beltcheck | save <slot> | load <slot> | reset [slot] [randomSeed] | seed <int> | saveslots | time <status|set|scale|pause|next sunrise|check> | debug <showConveyorSlotDots|showSleepAwake|showBeltItemLine|hideBeltItems|hideBelts|disableCameraCulling|showRailLine|showDirections|freeCamera|freeCameraPlayerCulling|showAnimalHerdAreas|animalAIPaused|mapObjectTickProfiling> <true|false> | camera size <minSize> <maxSize> | perf [maxRows] | ping | status";
+            error = "usage: give <itemId> [count] | clear <belt|floor|io> | animalstress [count] | animalcollision [count] | animalthreat [radius] | beltstress [count] | beltline [auto|itemId] [count] | beltitems [count] | beltcheck | save <slot> | load <slot> | reset [slot] [randomSeed] | seed <int> | saveslots | time <status|set|scale|pause|next sunrise|check> | debug <showConveyorSlotDots|showSleepAwake|showBeltItemLine|showBeltSplit|hideBeltItems|hideBelts|disableCameraCulling|showRailLine|showDirections|freeCamera|freeCameraPlayerCulling|showAnimalHerdAreas|animalAIPaused|mapObjectTickProfiling> <true|false> | camera size <minSize> <maxSize> | perf [maxRows] | ping | status";
             return false;
         }
 
@@ -2793,6 +2798,7 @@ public sealed class RuntimeItemGiveReceiver : MonoBehaviour
         return BuildExtraTokens(
             BuildSaveSlotsExtraTokens(saveManager, false, allowStaleCache),
             BuildCameraSizeExtraTokens(playerCamera),
+            $"showBeltSplit={(GameManager.Instance != null && GameManager.Instance.ShowBeltSplit ? 1 : 0)}",
             $"disableCameraCulling={(GameManager.Instance != null && GameManager.Instance.DisableCameraCulling ? 1 : 0)}",
             $"freeCameraPlayerCulling={(GameManager.Instance != null && GameManager.Instance.FreeCameraPlayerCulling ? 1 : 0)}",
             BuildSeedExtraTokens(terrain),
@@ -4579,6 +4585,12 @@ public sealed class RuntimeItemGiveReceiver : MonoBehaviour
         {
             gameManager.SetShowSleepAwake(value);
             return ToolResult.Success(0, 0, 0, 0, 0, 0, $"showSleepAwake={(value ? 1 : 0)}");
+        }
+
+        if (string.Equals(toggleName, "showBeltSplit", StringComparison.OrdinalIgnoreCase))
+        {
+            gameManager.SetShowBeltSplit(value);
+            return ToolResult.Success(0, 0, 0, 0, 0, 0, $"showBeltSplit={(value ? 1 : 0)}");
         }
 
         if (string.Equals(toggleName, "showBeltItemLine", StringComparison.OrdinalIgnoreCase)
