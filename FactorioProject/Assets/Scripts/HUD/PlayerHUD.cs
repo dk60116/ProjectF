@@ -2427,21 +2427,20 @@ public partial class PlayerHUD : BagSlot
 
     private void SetTrainConnectionInteractionButtonState(SteamTrain steamTrain)
     {
+        bool trainConnectionBlocked = steamTrain != null
+                                      && (steamTrain.AutoDriveEnabled || steamTrain.IsConsistMoving());
         bool hasDraftInteraction = currentDraftAnimalInteractionHandcart != null
                                    && currentDraftAnimalInteractionAnimal != null;
         bool canConnect = trainConnectInteractionIcon != null
                           && (steamTrain != null
-                                  ? steamTrain.TryGetTouchingUnconnectedTrain(out _)
+                                  ? !trainConnectionBlocked && steamTrain.TryGetTouchingUnconnectedTrain(out _)
                                   : hasDraftInteraction
                                     && !currentDraftAnimalInteractionDetaches);
         bool canDisconnect = trainDisconnectInteractionIcon != null
                              && (steamTrain != null
-                                     ? steamTrain.TryGetConnectedTrain(out _)
+                                     ? !trainConnectionBlocked && steamTrain.TryGetConnectedTrain(out _)
                                      : hasDraftInteraction
                                        && currentDraftAnimalInteractionDetaches);
-        bool disconnectInteractable = steamTrain == null
-                                      || !steamTrain.BlocksManualDisconnection;
-
         SetParallelInteractionButtonState(
             TrainConnectInteractionButton,
             trainConnectInteractionIcon,
@@ -2449,16 +2448,14 @@ public partial class PlayerHUD : BagSlot
         SetParallelInteractionButtonState(
             TrainDisconnectInteractionButton,
             trainDisconnectInteractionIcon,
-            canDisconnect,
-            disconnectInteractable);
+            canDisconnect);
         UpdateInteractionButtonLayout();
     }
 
     private static void SetParallelInteractionButtonState(
         InteractionButton interactionButton,
         Sprite icon,
-        bool visible,
-        bool interactable = true)
+        bool visible)
     {
         if (interactionButton == null)
         {
@@ -2473,7 +2470,7 @@ public partial class PlayerHUD : BagSlot
 
         interactionButton.SetIcon(icon);
         interactionButton.SetVisible(true);
-        interactionButton.SetInteractable(interactable);
+        interactionButton.SetInteractable(true);
     }
 
     private void UpdateInteractionButtonLayout()
@@ -3432,7 +3429,13 @@ public partial class PlayerHUD : BagSlot
         }
         else
         {
-            ResolveMountedSteamTrain()?.TryConnectTouchingTrain();
+            SteamTrain mountedSteamTrain = ResolveMountedSteamTrain();
+            if (mountedSteamTrain != null
+                && !mountedSteamTrain.AutoDriveEnabled
+                && !mountedSteamTrain.IsConsistMoving())
+            {
+                mountedSteamTrain.TryConnectTouchingTrain();
+            }
         }
 
         UpdateInteractionButtonState();
@@ -3456,6 +3459,7 @@ public partial class PlayerHUD : BagSlot
         {
             SteamTrain mountedSteamTrain = ResolveMountedSteamTrain();
             if (mountedSteamTrain != null
+                && !mountedSteamTrain.IsConsistMoving()
                 && !mountedSteamTrain.BlocksManualDisconnection)
             {
                 mountedSteamTrain.TryDisconnectConnectedTrain();

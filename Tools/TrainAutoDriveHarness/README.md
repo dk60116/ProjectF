@@ -19,6 +19,15 @@ Coverage includes:
   save state, UI ownership and duplicate ticks from mounted input.
 - Independent Target A/Target B fuel and freight departure conditions, including
   Full and Empty freight checks across the connected consist.
+- Departure after the arrival wait with Free freight, including full/empty/no
+  freight storage. Free imposes no storage or capacity requirement.
+- Departure conditions remain armed while motion is blocked and are completed
+  only after actual movement. Consuming fuel after a Full departure does not
+  reintroduce the station wait; the next arrival rearms its own fuel/cargo filters.
+- A travelling schedule saves an empty pending-departure station and retains its
+  route destination, so loading that state does not reapply departure capacity.
+  The binary format is unchanged; the last-arrived field now means a station
+  whose departure has not yet completed, rather than historical arrival data.
 - Target A/Target B station color indicators being serialized and refreshed from
   the selected stations in the Train Filter prefab.
 - Train Filter controls arranged in paired Target, Fuel, and Freight rows.

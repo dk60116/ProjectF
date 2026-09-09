@@ -145,6 +145,8 @@ public class SteamTrain : RailHandcar
     private int autoDriveFixedRouteGraphVersion = -1;
     private bool autoDriveRouteRefreshRequested;
     private int autoDriveRouteSegmentCursor;
+    // Pending departure station. Cleared once the train actually moves; the active
+    // route keeps the destination across controller handoff and save/load.
     private string autoDriveLastArrivedStationName = string.Empty;
     private string autoDriveFixedRouteStartStationName = string.Empty;
     private string autoDriveFixedRouteEndStationName = string.Empty;
@@ -465,6 +467,9 @@ public class SteamTrain : RailHandcar
             ResetVehicleMotion();
         }
 
+        bool isDepartureAttempt = moveDirection.sqrMagnitude > 0.0001f
+            && !string.IsNullOrEmpty(autoDriveLastArrivedStationName);
+        Vector3 departurePosition = isDepartureAttempt ? transform.position : default;
         DriveMotionOutcome outcome = HandleResolvedDriveMotion(moveDirection, 0f, deltaTime, mountedPlayer);
         if (outcome == DriveMotionOutcome.BlockedByFuel)
         {
@@ -473,6 +478,19 @@ public class SteamTrain : RailHandcar
                 autoDriveResolvedTargetStationName,
                 autoDriveResolvedNextStationName);
             return;
+        }
+
+        if (isDepartureAttempt)
+        {
+            Vector3 displacement = transform.position - departurePosition;
+            if (displacement.x * displacement.x + displacement.z * displacement.z > 0f)
+            {
+                // Full fuel/cargo is a departure condition, not an invariant while driving.
+                // Wait until actual movement so fuel shortages and blocked track still retry
+                // the station's conditions. CaptureAutoDriveState preserves this completed
+                // departure as an empty station name without changing the save format.
+                autoDriveLastArrivedStationName = string.Empty;
+            }
         }
 
         TryFinalizeAutoDriveArrival(deltaTime);
@@ -2237,6 +2255,12 @@ public class SteamTrain : RailHandcar
 
     private bool TryEvaluateAutoDriveFreightFilterSatisfied(AutoDriveFreightFilter freightFilter)
     {
+        // Free is an unrestricted departure, including full or absent freight storage.
+        if (freightFilter == AutoDriveFreightFilter.Free)
+        {
+            return true;
+        }
+
         CollectAutoDriveConnectedTrains();
         int totalItemCount = 0;
         int totalCapacity = 0;
@@ -2268,7 +2292,7 @@ public class SteamTrain : RailHandcar
         {
             AutoDriveFreightFilter.Full => totalItemCount >= totalCapacity,
             AutoDriveFreightFilter.Empty => totalItemCount <= 0,
-            _ => totalItemCount < totalCapacity
+            _ => false
         };
     }
 

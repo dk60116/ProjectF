@@ -4,6 +4,7 @@ Shader "Custom/MapFocusOverlay"
     {
         [PerRendererData] _MainTex("Sprite Texture", 2D) = "white" {}
         _Color("Tint", Color) = (1,1,1,1)
+        [Enum(UnityEngine.Rendering.CompareFunction)] _ZTest("Depth Test", Float) = 8
         [MaterialToggle] PixelSnap("Pixel snap", Float) = 0
     }
 
@@ -21,7 +22,7 @@ Shader "Custom/MapFocusOverlay"
         Cull Off
         Lighting Off
         ZWrite Off
-        ZTest Always
+        ZTest [_ZTest]
         Blend One OneMinusSrcAlpha
 
         Pass

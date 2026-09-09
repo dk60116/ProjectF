@@ -8,7 +8,7 @@ using UnityEngine;
 static class Time { public static int frameCount = 1; }
 public class Player { }
 public class FakeObject { public bool activeInHierarchy = true; }
-public class FakeTransform { public Vector3 forward; }
+public class FakeTransform { public Vector3 forward, position; }
 public partial class Railload
 {
     public Vector2 Origin;
@@ -70,6 +70,7 @@ public partial class RailHandcar : Train
     readonly Dictionary<float, float> testStationDockDeltas = new();
     public float CurrentVehicleSignedSpeed;
     public int PoweredMoves;
+    public bool BlockTestMovement;
     public bool TryGetRailForwardDirection(out Vector2 direction)
     { direction = new(transform.forward.x, transform.forward.z); return true; }
     public bool TryGetRailDockDeltaAtCoordinate(Vector2Int coordinate, out float delta)
@@ -84,7 +85,11 @@ public partial class RailHandcar : Train
         float axis = ResolveRailInputAxis(hasInput, input, input.magnitude, facing, sample);
         if (hasInput) { CurrentVehicleSignedSpeed = axis; PoweredMoves++; }
         float step = AdjustDrivenSignedStep(sample, facing, hasInput, input, dt, CurrentVehicleSignedSpeed * dt);
-        if (hasInput) LastStep = step;
+        if (hasInput)
+        {
+            LastStep = step;
+            if (!BlockTestMovement) transform.position += new Vector3(facing.x, 0, facing.y) * step;
+        }
     }
     public float LastStep;
     protected void ResetVehicleMotion() { CurrentVehicleSignedSpeed = 0; }
@@ -302,9 +307,62 @@ public partial class SteamTrain
     static bool Near(float a, float b) => Math.Abs(a - b) < .0001f;
     static SteamTrain Engine(float distance, Vector2 facing)
     { var t = new SteamTrain { Rail = TestRail, Distance = distance }; t.transform.forward = new(facing.x, 0, facing.y); return t; }
+    static void RunDepartureResumeChecks()
+    {
+        foreach (int cargoCount in new[] { -1, 0, 9, 10 })
+        {
+            var engine = Engine(0, Vector2.right);
+            if (cargoCount >= 0)
+                Train.Link(engine, new FreightCar { Rail = TestRail, StoredItemCount = cargoCount, StorageCapacity = 10 });
+            engine.ApplyAutoDriveState(true, "A", "B", 0, 0, 0, 0, "A", "", 0);
+            engine.HandleAutoDriveArrived("A", "B");
+            Time.frameCount++; engine.TickAutoDrive(5, null);
+            Check(engine.PoweredMoves == 0, "Arrival wait must remain in effect before departure");
+            Time.frameCount++; engine.TickAutoDrive(.1f, null);
+            Check(engine.PoweredMoves == 1, $"Free freight must resume after arrival regardless of cargo/storage: {cargoCount}");
+        }
+
+        var full = Engine(0, Vector2.right);
+        var car = new FreightCar { Rail = TestRail, StoredItemCount = 10, StorageCapacity = 10, StoredFuelCount = 10, FuelCapacity = 10 };
+        Train.Link(full, car);
+        full.ApplyAutoDriveState(true, "A", "B", 1, 1, 1, 1, "B", "A", 0);
+        full.BlockTestMovement = true;
+        Time.frameCount++; full.TickAutoDrive(.1f, null);
+        Check(full.autoDriveLastArrivedStationName == "A", "Track blockage must not complete station departure");
+        car.StoredFuelCount = 9;
+        Time.frameCount++; full.TickAutoDrive(.1f, null);
+        Check(full.autoDriveStatus == AutoDriveStatus.WaitingForFuel, "Blocked departure must recheck Full fuel");
+        full.BlockTestMovement = false;
+        car.StoredFuelCount = 10;
+        Time.frameCount++; full.TickAutoDrive(.1f, null);
+        int moves = full.PoweredMoves;
+        car.StoredFuelCount = 9; car.StoredItemCount = 9;
+        Time.frameCount++; full.TickAutoDrive(.1f, null);
+        Check(full.PoweredMoves == moves + 1, "Fuel consumed after departure must not reinstate Full departure conditions");
+        full.CaptureAutoDriveState(out bool enabled, out string a, out string b, out int af, out int ac,
+            out int bf, out int bc, out string destination, out string arrived, out float wait);
+        Check(destination == "B" && arrived == "" && wait == 0, "Travelling save retains destination without pending station conditions");
+        full.ApplyAutoDriveState(enabled, a, b, af, ac, bf, bc, destination, arrived, wait);
+        Time.frameCount++; full.TickAutoDrive(.1f, null);
+        Check(full.PoweredMoves == moves + 2, "Loading an in-flight schedule must continue below departure capacity");
+        full.Distance = 20;
+        full.transform.forward = Vector3.left;
+        full.HandleAutoDriveArrived("B", "A");
+        Time.frameCount++; full.TickAutoDrive(5, null);
+        Time.frameCount++; full.TickAutoDrive(.1f, null);
+        Check(full.autoDriveStatus == AutoDriveStatus.WaitingForFuel, "Next arrival must rearm that station's Full conditions");
+        car.StoredFuelCount = 10;
+        Time.frameCount++; full.TickAutoDrive(.1f, null);
+        Check(full.autoDriveStatus == AutoDriveStatus.WaitingForFreight, "Next arrival must recheck freight independently of fuel");
+        car.StoredItemCount = 10;
+        Time.frameCount++; full.TickAutoDrive(.1f, null);
+        Check(full.PoweredMoves == moves + 3, "Next leg resumes once both station conditions are met");
+    }
+
     static void Main()
     {
         AutoDriveRoutePlanner.CheckGraph();
+        RunDepartureResumeChecks();
         var left = Engine(4, Vector2.left);
         var right = Engine(7, Vector2.right);
         var wagon = new FreightCar
@@ -323,7 +381,7 @@ public partial class SteamTrain
         Check(left.PoweredMoves == 0 && right.PoweredMoves == 1, "Only the selected locomotive may accelerate");
         Check(left.fuelRequests == 0 && right.fuelRequests == 1, "Fuel must be requested from the selected locomotive");
         Check(right.LastStep > 0, "Automatic movement must be forward relative to the selected locomotive");
-        Check(right.autoDriveLastArrivedStationName == "A" && right.autoDriveResolvedTargetStationName == "B", "Handoff must preserve the current service leg");
+        Check(right.autoDriveLastArrivedStationName == string.Empty && right.autoDriveResolvedTargetStationName == "B", "Handoff must preserve the destination and complete the station departure after movement");
         Check(left.AutoDriveEnabled
               && left.AutoDriveTargetAFuelFilterName == "Full"
               && left.AutoDriveTargetAFreightFilterName == "Empty"

@@ -97,7 +97,7 @@ public class InstallationPlacementController : MonoBehaviour
     private Camera installPreviewCamera;
     private TerrainGenerator installPreviewTerrain;
     private RailloadInstallationController railloadInstallationController;
-    private AreaMarkerPool areaMarkerPool;
+    private AreaMarkerRenderer areaMarkerRenderer;
     [SerializeField]
     private Sprite pipePassMarkerIcon;
     [SerializeField]
@@ -2987,8 +2987,7 @@ public class InstallationPlacementController : MonoBehaviour
         {
             Renderer renderer = renderers[i];
             if (renderer == null
-                || renderer.GetComponentInParent<WorkableObjectRangeVisual>() != null
-                || renderer.GetComponentInParent<AreaMarker>(true) != null)
+                || renderer.GetComponentInParent<WorkableObjectRangeVisual>() != null)
             {
                 continue;
             }
@@ -7936,8 +7935,8 @@ public class InstallationPlacementController : MonoBehaviour
             return false;
         }
 
-        AreaMarkerPool pool = ResolveAreaMarkerPool();
-        if (pool == null)
+        AreaMarkerRenderer markerRenderer = ResolveAreaMarkerRenderer();
+        if (markerRenderer == null)
         {
             ClearInputOutputMarkers(mapObject);
             return false;
@@ -7951,7 +7950,7 @@ public class InstallationPlacementController : MonoBehaviour
 
         markerController.enabled = true;
         markerController.Configure(
-            pool,
+            markerRenderer,
             markerRequests,
             isInstallPreview,
             sortingOrderOffsetOverride ?? (isInstallPreview ? InstallPreviewAreaMarkerSortingOrderOffset : 0),
@@ -20547,20 +20546,20 @@ public class InstallationPlacementController : MonoBehaviour
         return component != null;
     }
 
-    private AreaMarkerPool ResolveAreaMarkerPool()
+    private AreaMarkerRenderer ResolveAreaMarkerRenderer()
     {
-        if (areaMarkerPool != null)
+        if (areaMarkerRenderer != null)
         {
-            return areaMarkerPool;
+            return areaMarkerRenderer;
         }
 
-        areaMarkerPool = GetComponent<AreaMarkerPool>();
-        if (areaMarkerPool == null)
+        areaMarkerRenderer = GetComponent<AreaMarkerRenderer>();
+        if (areaMarkerRenderer == null)
         {
-            areaMarkerPool = gameObject.AddComponent<AreaMarkerPool>();
+            areaMarkerRenderer = gameObject.AddComponent<AreaMarkerRenderer>();
         }
 
-        return areaMarkerPool;
+        return areaMarkerRenderer;
     }
 
     private Sprite ResolveArrowMarkerIcon()

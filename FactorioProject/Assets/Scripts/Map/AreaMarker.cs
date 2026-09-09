@@ -27,388 +27,38 @@ public readonly struct InputOutputModuleItemAreaBinding
     }
 }
 
+// The prefab is a visual template only. Runtime markers never instantiate it.
 public class AreaMarker : MonoBehaviour
 {
-    private const string LateRenderShaderName = "Custom/MapFocusOverlay";
-    private const string LateRenderMaterialResourcePath = "Materials/AreaMarkerLateRender";
-    private const string LateRenderFallbackMaterialName = "AreaMarkerLateRender_Runtime";
-    private const int LateRenderQueue = 5000;
-
-    [SerializeField]
-    private SpriteRenderer icon;
-
-    private bool hasCapturedOriginalIconColor;
-    private Color originalIconColor;
-    private bool hasCapturedOriginalIconLocalRotation;
-    private Quaternion originalIconLocalRotation;
-    private bool hasCapturedOriginalRendererState;
-    private SpriteRenderer[] capturedSpriteRenderers;
-    private int[] originalSortingOrders;
-    private Material[] originalSharedMaterials;
-    private Sprite currentIconSprite;
-    private float currentIconRotationZ;
-    private bool currentIconInitialized;
-    private int currentSortingOrderOffset;
-    private bool currentSortingOrderInitialized;
-    private bool currentRenderOnTop;
-    private bool currentRenderOnTopInitialized;
-    private static Material lateRenderMaterial;
-
-    private void Awake()
-    {
-        CaptureOriginalIconColor();
-        CaptureOriginalIconLocalRotation();
-        CaptureOriginalRendererState();
-    }
-
-    public void SetIcon(Sprite sprite, float iconRotationZ = 0f)
-    {
-        if (icon == null)
-        {
-            return;
-        }
-
-        CaptureOriginalIconColor();
-        CaptureOriginalIconLocalRotation();
-        if (currentIconInitialized
-            && currentIconSprite == sprite
-            && Mathf.Approximately(currentIconRotationZ, iconRotationZ))
-        {
-            return;
-        }
-
-        icon.sprite = sprite;
-        icon.transform.localRotation = originalIconLocalRotation * Quaternion.Euler(0f, 0f, iconRotationZ);
-        PreserveOriginalIconAlpha();
-        icon.enabled = sprite != null;
-        currentIconSprite = sprite;
-        currentIconRotationZ = iconRotationZ;
-        currentIconInitialized = true;
-    }
-
-    public void SetSortingOrderOffset(int sortingOrderOffset)
-    {
-        CaptureOriginalRendererState();
-        if (capturedSpriteRenderers == null || originalSortingOrders == null)
-        {
-            return;
-        }
-
-        if (currentSortingOrderInitialized && currentSortingOrderOffset == sortingOrderOffset)
-        {
-            return;
-        }
-
-        for (int i = 0; i < capturedSpriteRenderers.Length && i < originalSortingOrders.Length; i++)
-        {
-            SpriteRenderer spriteRenderer = capturedSpriteRenderers[i];
-            if (spriteRenderer != null)
-            {
-                spriteRenderer.sortingOrder = originalSortingOrders[i] + sortingOrderOffset;
-            }
-        }
-
-        currentSortingOrderOffset = sortingOrderOffset;
-        currentSortingOrderInitialized = true;
-    }
-
-    public void SetRenderOnTop(bool renderOnTop)
-    {
-        CaptureOriginalRendererState();
-        if (capturedSpriteRenderers == null || originalSharedMaterials == null)
-        {
-            return;
-        }
-
-        if (currentRenderOnTopInitialized && currentRenderOnTop == renderOnTop)
-        {
-            return;
-        }
-
-        Material renderOnTopMaterial = renderOnTop ? ResolveLateRenderMaterial() : null;
-        for (int i = 0; i < capturedSpriteRenderers.Length && i < originalSharedMaterials.Length; i++)
-        {
-            SpriteRenderer spriteRenderer = capturedSpriteRenderers[i];
-            if (spriteRenderer == null)
-            {
-                continue;
-            }
-
-            spriteRenderer.sharedMaterial = renderOnTop && renderOnTopMaterial != null
-                ? renderOnTopMaterial
-                : originalSharedMaterials[i];
-        }
-
-        currentRenderOnTop = renderOnTop;
-        currentRenderOnTopInitialized = true;
-    }
-
-    public void ResetVisuals()
-    {
-        CaptureOriginalRendererState();
-        if (icon != null)
-        {
-            CaptureOriginalIconColor();
-            CaptureOriginalIconLocalRotation();
-            icon.sprite = null;
-            icon.transform.localRotation = originalIconLocalRotation;
-            PreserveOriginalIconAlpha();
-            icon.enabled = false;
-        }
-
-        currentIconSprite = null;
-        currentIconRotationZ = 0f;
-        currentIconInitialized = true;
-        currentSortingOrderInitialized = false;
-        currentRenderOnTopInitialized = false;
-        ResetRendererSorting();
-        SetRenderOnTop(false);
-        ResetRendererPropertyBlocks();
-    }
-
-    private void CaptureOriginalIconColor()
-    {
-        if (icon == null || hasCapturedOriginalIconColor)
-        {
-            return;
-        }
-
-        originalIconColor = icon.color;
-        hasCapturedOriginalIconColor = true;
-    }
-
-    private void CaptureOriginalIconLocalRotation()
-    {
-        if (icon == null || hasCapturedOriginalIconLocalRotation)
-        {
-            return;
-        }
-
-        originalIconLocalRotation = icon.transform.localRotation;
-        hasCapturedOriginalIconLocalRotation = true;
-    }
-
-    private void PreserveOriginalIconAlpha()
-    {
-        if (icon == null || hasCapturedOriginalIconColor == false)
-        {
-            return;
-        }
-
-        Color iconColor = icon.color;
-        iconColor.a = originalIconColor.a;
-        icon.color = iconColor;
-    }
-
-    private void CaptureOriginalRendererState()
-    {
-        if (hasCapturedOriginalRendererState)
-        {
-            return;
-        }
-
-        capturedSpriteRenderers = GetComponentsInChildren<SpriteRenderer>(true);
-        originalSortingOrders = new int[capturedSpriteRenderers.Length];
-        originalSharedMaterials = new Material[capturedSpriteRenderers.Length];
-        for (int i = 0; i < capturedSpriteRenderers.Length; i++)
-        {
-            SpriteRenderer spriteRenderer = capturedSpriteRenderers[i];
-            originalSortingOrders[i] = spriteRenderer != null
-                ? spriteRenderer.sortingOrder
-                : 0;
-            originalSharedMaterials[i] = spriteRenderer != null
-                ? spriteRenderer.sharedMaterial
-                : null;
-        }
-
-        hasCapturedOriginalRendererState = true;
-    }
-
-    private void ResetRendererSorting()
-    {
-        CaptureOriginalRendererState();
-        if (capturedSpriteRenderers == null || originalSortingOrders == null)
-        {
-            return;
-        }
-
-        for (int i = 0; i < capturedSpriteRenderers.Length && i < originalSortingOrders.Length; i++)
-        {
-            SpriteRenderer spriteRenderer = capturedSpriteRenderers[i];
-            if (spriteRenderer != null)
-            {
-                spriteRenderer.sortingOrder = originalSortingOrders[i];
-            }
-        }
-    }
-
-    private void ResetRendererPropertyBlocks()
-    {
-        CaptureOriginalRendererState();
-        if (capturedSpriteRenderers == null)
-        {
-            return;
-        }
-
-        for (int i = 0; i < capturedSpriteRenderers.Length; i++)
-        {
-            SpriteRenderer spriteRenderer = capturedSpriteRenderers[i];
-            if (spriteRenderer != null)
-            {
-                spriteRenderer.SetPropertyBlock(null);
-            }
-        }
-    }
-
-    private static Material ResolveLateRenderMaterial()
-    {
-        if (lateRenderMaterial != null)
-        {
-            return lateRenderMaterial;
-        }
-
-        lateRenderMaterial = Resources.Load<Material>(LateRenderMaterialResourcePath);
-        if (lateRenderMaterial != null)
-        {
-            return lateRenderMaterial;
-        }
-
-        Shader lateRenderShader = Shader.Find(LateRenderShaderName);
-        if (lateRenderShader == null)
-        {
-            return null;
-        }
-
-        lateRenderMaterial = new Material(lateRenderShader)
-        {
-            name = LateRenderFallbackMaterialName,
-            hideFlags = HideFlags.HideAndDontSave,
-            renderQueue = LateRenderQueue
-        };
-        return lateRenderMaterial;
-    }
+    [SerializeField] private SpriteRenderer icon;
+    public SpriteRenderer Icon => icon;
 }
 
-public class AreaMarkerPool : MonoBehaviour
-{
-    private const string DefaultResourcePath = "Prefab/Enviroment/Block/AreaMarker";
-
-    [SerializeField]
-    private AreaMarker defaultPrefab;
-
-    private readonly Stack<AreaMarker> pooledMarkers = new Stack<AreaMarker>();
-    private Transform poolRoot;
-
-    public void Configure(AreaMarker prefab)
-    {
-        if (prefab != null && defaultPrefab == null)
-        {
-            defaultPrefab = prefab;
-        }
-    }
-
-    public AreaMarker Get(AreaMarker prefabOverride = null)
-    {
-        AreaMarker prefab = prefabOverride != null ? prefabOverride : ResolveDefaultPrefab();
-        if (prefab == null)
-        {
-            return null;
-        }
-
-        if (defaultPrefab == null)
-        {
-            defaultPrefab = prefab;
-        }
-
-        while (pooledMarkers.Count > 0)
-        {
-            AreaMarker pooled = pooledMarkers.Pop();
-            if (pooled == null)
-            {
-                continue;
-            }
-
-            PrepareBorrowedMarker(pooled);
-            return pooled;
-        }
-
-        AreaMarker created = Instantiate(prefab, GetPoolRoot());
-        created.gameObject.SetActive(false);
-        PrepareBorrowedMarker(created);
-        return created;
-    }
-
-    public void Release(AreaMarker marker)
-    {
-        if (marker == null)
-        {
-            return;
-        }
-
-        marker.ResetVisuals();
-        marker.gameObject.SetActive(false);
-        marker.transform.SetParent(GetPoolRoot(), false);
-        marker.transform.localPosition = Vector3.zero;
-        marker.transform.localRotation = Quaternion.identity;
-        marker.transform.localScale = Vector3.one;
-        pooledMarkers.Push(marker);
-    }
-
-    private AreaMarker ResolveDefaultPrefab()
-    {
-        if (defaultPrefab != null)
-        {
-            return defaultPrefab;
-        }
-
-        defaultPrefab = Resources.Load<AreaMarker>(DefaultResourcePath);
-        return defaultPrefab;
-    }
-
-    private void PrepareBorrowedMarker(AreaMarker marker)
-    {
-        marker.ResetVisuals();
-        marker.gameObject.SetActive(true);
-    }
-
-    private Transform GetPoolRoot()
-    {
-        if (poolRoot != null)
-        {
-            return poolRoot;
-        }
-
-        GameObject rootObject = new GameObject("AreaMarkerPool");
-        rootObject.transform.SetParent(transform, false);
-        poolRoot = rootObject.transform;
-        return poolRoot;
-    }
-}
-
+// A lifecycle/selection bridge on the existing installation, with no per-object Update.
 public class InputOutputModuleAreaMarkerController : MonoBehaviour
 {
-    // Floor tiles rise roughly 0.05 units above the terrain. Keep markers physically
-    // above that surface so normal depth testing still hides them behind real objects.
-    private const float DefaultVerticalOffset = 0.08f;
-
-    private readonly List<AreaMarker> activeMarkers = new List<AreaMarker>();
-
-    [SerializeField, Min(0f)]
-    private float visibleRange = 5f;
-
-    [SerializeField, Min(0f)]
-    private float verticalOffset = DefaultVerticalOffset;
-
-    private AreaMarkerPool areaMarkerPool;
-    private bool areMarkersVisible = true;
+    [SerializeField, Min(0f)] private float visibleRange = 5f;
+    [SerializeField, Min(0f)] private float verticalOffset = 0.08f;
+    private readonly List<AreaMarkerSpawnRequest> requests = new List<AreaMarkerSpawnRequest>();
+    private AreaMarkerRenderer markerRenderer;
+    private Transform markerParent;
+    private Matrix4x4 configuredParentInverse = Matrix4x4.identity;
+    private Matrix4x4 renderedParentDelta = Matrix4x4.identity;
     private bool forceMarkerVisibility;
     private bool selectionVisibilityRequested;
-    private int markerSortingOrderOffset;
-    private bool renderMarkersOnTop;
+    private bool visible;
+    private int sortingOrderOffset;
+    private bool renderOnTop;
     private float markerVerticalOffset;
 
+    internal int MarkerCount => requests.Count;
+    internal bool IsVisible => visible;
+    // Retain the batch partition even after Unity destroys the parent, so unregistration
+    // invalidates the mesh that actually contains these markers.
+    internal bool UsesMovingBatches => !object.ReferenceEquals(markerParent, null);
+
     public void Configure(
-        AreaMarkerPool pool,
+        AreaMarkerRenderer renderer,
         IReadOnlyList<AreaMarkerSpawnRequest> markerRequests,
         bool forceVisible = false,
         int sortingOrderOffset = 0,
@@ -416,257 +66,132 @@ public class InputOutputModuleAreaMarkerController : MonoBehaviour
         Transform markerParent = null,
         float? verticalOffsetOverride = null)
     {
-        if (areaMarkerPool != null && areaMarkerPool != pool)
+        float offset = verticalOffsetOverride.HasValue
+            ? Mathf.Max(0f, verticalOffsetOverride.Value) : verticalOffset;
+        Matrix4x4 inverse = markerParent != null ? markerParent.worldToLocalMatrix : Matrix4x4.identity;
+        int count = markerRequests != null ? markerRequests.Count : 0;
+        bool changed = markerRenderer != renderer || this.markerParent != markerParent
+            || forceMarkerVisibility != forceVisible || this.sortingOrderOffset != sortingOrderOffset
+            || this.renderOnTop != renderOnTop || markerVerticalOffset != offset
+            || !configuredParentInverse.Equals(inverse) || requests.Count != count;
+        if (!changed)
         {
-            ReleaseMarkers();
-        }
-
-        areaMarkerPool = pool;
-        forceMarkerVisibility = forceVisible;
-        markerSortingOrderOffset = sortingOrderOffset;
-        renderMarkersOnTop = renderOnTop;
-        markerVerticalOffset = verticalOffsetOverride.HasValue
-            ? Mathf.Max(0f, verticalOffsetOverride.Value)
-            : verticalOffset;
-
-        if (areaMarkerPool == null || markerRequests == null || markerRequests.Count <= 0)
-        {
-            ReleaseMarkers();
-            return;
-        }
-
-        SyncMarkerCount(markerRequests.Count);
-        for (int i = 0; i < markerRequests.Count && i < activeMarkers.Count; i++)
-        {
-            AreaMarker marker = activeMarkers[i];
-            if (marker == null)
+            for (int i = 0; i < count; i++)
             {
-                continue;
+                AreaMarkerSpawnRequest a = requests[i];
+                AreaMarkerSpawnRequest b = markerRequests[i];
+                if (a.WorldPosition != b.WorldPosition || a.Icon != b.Icon || a.IconRotationZ != b.IconRotationZ)
+                {
+                    changed = true;
+                    break;
+                }
             }
-
-            AreaMarkerSpawnRequest request = markerRequests[i];
-            ConfigureMarker(marker, request, markerParent);
         }
+        if (!changed) return;
 
-        RefreshMarkerVisibility(true);
+        if (markerRenderer != null) markerRenderer.Unregister(this);
+        markerRenderer = renderer;
+        this.markerParent = markerParent;
+        configuredParentInverse = inverse;
+        forceMarkerVisibility = forceVisible;
+        this.sortingOrderOffset = sortingOrderOffset;
+        this.renderOnTop = renderOnTop;
+        markerVerticalOffset = offset;
+        requests.Clear();
+        for (int i = 0; i < count; i++) requests.Add(markerRequests[i]);
+        visible = false;
+        if (isActiveAndEnabled && markerRenderer != null && count > 0) markerRenderer.Register(this);
     }
 
     public bool ShouldShowLinkedUi()
     {
-        return ShouldMarkersBeVisible();
+        AreaMarkerVisibilityContext context = AreaMarkerVisibilityContext.Capture();
+        return isActiveAndEnabled && requests.Count > 0 && ShouldBeVisible(context);
     }
 
     public void SetSelectionVisibilityRequested(bool requested)
     {
-        if (selectionVisibilityRequested == requested)
-        {
-            if (requested)
-            {
-                RefreshMarkerVisibility(true);
-            }
-
-            return;
-        }
-
         selectionVisibilityRequested = requested;
-        RefreshMarkerVisibility(true);
     }
 
-    private void Update()
+    private void OnEnable()
     {
-        RefreshMarkerVisibility(false);
+        if (markerRenderer != null && requests.Count > 0) markerRenderer.Register(this);
     }
 
     private void OnDisable()
     {
-        ReleaseMarkers();
+        if (markerRenderer != null) markerRenderer.Unregister(this);
+        visible = false;
     }
 
     private void OnDestroy()
     {
-        ReleaseMarkers();
+        if (markerRenderer != null) markerRenderer.Unregister(this);
     }
 
-    private void ReleaseMarkers()
+    internal bool RefreshVisibility(in AreaMarkerVisibilityContext context)
     {
-        if (activeMarkers.Count <= 0)
-        {
-            return;
-        }
-
-        for (int i = activeMarkers.Count - 1; i >= 0; i--)
-        {
-            AreaMarker marker = activeMarkers[i];
-            if (marker == null)
-            {
-                continue;
-            }
-
-            if (areaMarkerPool != null)
-            {
-                areaMarkerPool.Release(marker);
-                continue;
-            }
-
-            if (Application.isPlaying)
-            {
-                Destroy(marker.gameObject);
-            }
-            else
-            {
-                DestroyImmediate(marker.gameObject);
-            }
-        }
-
-        activeMarkers.Clear();
+        bool nextVisible = isActiveAndEnabled && requests.Count > 0
+            && (!UsesMovingBatches || markerParent != null) && ShouldBeVisible(context);
+        Matrix4x4 delta = markerParent != null
+            ? markerParent.localToWorldMatrix * configuredParentInverse : Matrix4x4.identity;
+        bool changed = visible != nextVisible || (nextVisible && !renderedParentDelta.Equals(delta));
+        visible = nextVisible;
+        renderedParentDelta = delta;
+        return changed;
     }
 
-    private void SyncMarkerCount(int markerCount)
+    private bool ShouldBeVisible(in AreaMarkerVisibilityContext context)
     {
-        int desiredCount = Mathf.Max(0, markerCount);
-        for (int i = activeMarkers.Count - 1; i >= desiredCount; i--)
-        {
-            AreaMarker marker = activeMarkers[i];
-            activeMarkers.RemoveAt(i);
-            if (marker == null)
-            {
-                continue;
-            }
-
-            if (areaMarkerPool != null)
-            {
-                areaMarkerPool.Release(marker);
-            }
-            else if (Application.isPlaying)
-            {
-                Destroy(marker.gameObject);
-            }
-            else
-            {
-                DestroyImmediate(marker.gameObject);
-            }
-        }
-
-        while (activeMarkers.Count < desiredCount)
-        {
-            AreaMarker marker = areaMarkerPool != null ? areaMarkerPool.Get() : null;
-            if (marker == null)
-            {
-                break;
-            }
-
-            activeMarkers.Add(marker);
-        }
+        return AreaMarkerVisibilityContext.ShouldShow(visibleRange, forceMarkerVisibility,
+            selectionVisibilityRequested, context.ShowAll, context.HasPlayer,
+            context.PlayerPosition, transform.position);
     }
 
-    private void ConfigureMarker(
-        AreaMarker marker,
-        AreaMarkerSpawnRequest request,
-        Transform markerParent)
+    internal void AppendMarkers(AreaMarkerRenderer renderer)
     {
-        if (marker == null)
+        for (int i = 0; i < requests.Count; i++)
         {
-            return;
-        }
-
-        Transform markerTransform = marker.transform;
-        Vector3 targetPosition = request.WorldPosition + Vector3.up * markerVerticalOffset;
-        if ((markerTransform.position - targetPosition).sqrMagnitude > 0.000001f)
-        {
-            markerTransform.position = targetPosition;
-        }
-
-        if (Mathf.Abs(Quaternion.Dot(markerTransform.rotation, Quaternion.identity)) < 0.9999f)
-        {
-            markerTransform.rotation = Quaternion.identity;
-        }
-
-        if (markerTransform.localScale != Vector3.one)
-        {
-            markerTransform.localScale = Vector3.one;
-        }
-
-        if (markerParent != null)
-        {
-            if (markerTransform.parent != markerParent)
-            {
-                markerTransform.SetParent(markerParent, true);
-            }
-        }
-        else if (markerTransform.parent != null)
-        {
-            markerTransform.SetParent(null, true);
-        }
-
-        marker.SetIcon(request.Icon, request.IconRotationZ);
-        marker.SetSortingOrderOffset(markerSortingOrderOffset);
-        marker.SetRenderOnTop(renderMarkersOnTop);
-    }
-
-    private void RefreshMarkerVisibility(bool forceRefresh)
-    {
-        bool shouldBeVisible = ShouldMarkersBeVisible();
-        if (!forceRefresh && areMarkersVisible == shouldBeVisible)
-        {
-            return;
-        }
-
-        areMarkersVisible = shouldBeVisible;
-        for (int i = 0; i < activeMarkers.Count; i++)
-        {
-            AreaMarker marker = activeMarkers[i];
-            if (marker == null)
-            {
-                continue;
-            }
-
-            if (marker.gameObject.activeSelf != shouldBeVisible)
-            {
-                marker.gameObject.SetActive(shouldBeVisible);
-            }
+            AreaMarkerSpawnRequest request = requests[i];
+            Matrix4x4 matrix = renderedParentDelta * Matrix4x4.Translate(
+                request.WorldPosition + Vector3.up * markerVerticalOffset);
+            renderer.Append(request, matrix, sortingOrderOffset, renderOnTop, UsesMovingBatches);
         }
     }
+}
 
-    private bool ShouldMarkersBeVisible()
+internal readonly struct AreaMarkerVisibilityContext
+{
+    public readonly bool ShowAll;
+    public readonly bool HasPlayer;
+    public readonly Vector3 PlayerPosition;
+
+    private AreaMarkerVisibilityContext(bool showAll, bool hasPlayer, Vector3 playerPosition)
     {
-        if (activeMarkers.Count <= 0)
-        {
-            return false;
-        }
+        ShowAll = showAll;
+        HasPlayer = hasPlayer;
+        PlayerPosition = playerPosition;
+    }
 
-        if (visibleRange <= 0f)
-        {
-            return true;
-        }
+    public static AreaMarkerVisibilityContext Capture()
+    {
+        GameManager manager = GameManager.Instance;
+        Player player = manager != null ? manager.Player : null;
+        return new AreaMarkerVisibilityContext(
+            manager != null && (manager.InstallationPlacementActive || manager.MapEditActive),
+            player != null,
+            player != null ? (player.BodyTransform != null ? player.BodyTransform.position : player.transform.position) : default);
+    }
 
-        if (forceMarkerVisibility)
-        {
-            return true;
-        }
-
-        if (selectionVisibilityRequested)
-        {
-            return true;
-        }
-
-        GameManager gameManager = GameManager.Instance;
-        if (gameManager != null && (gameManager.InstallationPlacementActive || gameManager.MapEditActive))
-        {
-            return true;
-        }
-
-        Player player = gameManager != null ? gameManager.Player : null;
-        if (player == null)
-        {
-            return false;
-        }
-
-        Vector3 playerPosition = player.BodyTransform != null ? player.BodyTransform.position : player.transform.position;
-        Vector3 mapObjectPosition = transform.position;
-        Vector2 playerXZ = new Vector2(playerPosition.x, playerPosition.z);
-        Vector2 mapObjectXZ = new Vector2(mapObjectPosition.x, mapObjectPosition.z);
-        float visibleRangeSqr = visibleRange * visibleRange;
-        return (playerXZ - mapObjectXZ).sqrMagnitude <= visibleRangeSqr;
+    internal static bool ShouldShow(float range, bool forced, bool selected, bool showAll,
+        bool hasPlayer, Vector3 playerPosition, Vector3 ownerPosition)
+    {
+        if (range <= 0f || forced || selected || showAll) return true;
+        if (!hasPlayer) return false;
+        float x = playerPosition.x - ownerPosition.x;
+        float z = playerPosition.z - ownerPosition.z;
+        return x * x + z * z <= range * range;
     }
 }
 
