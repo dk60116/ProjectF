@@ -37,8 +37,11 @@ public partial class Block
         EnsureFloorObjectsInitialized();
     }
 
-    internal Spliterbelt GetBeltJobSplitter(int lane)
-        => lane == ConveyorSingleLineBackLaneIndex && TryGetRuntimeSplitter(out Spliterbelt splitter) ? splitter : null;
+    internal ConveyorRuntimeRecord GetBeltJobSplitter(int lane)
+        => lane == ConveyorSingleLineBackLaneIndex
+           && TryGetRuntimeSplitterRecord(out ConveyorRuntimeRecord splitter)
+            ? splitter
+            : null;
 
     internal bool HasBeltJobStoredItem(int lane) => IsValidConveyorLaneIndex(lane) && HasConveyorStoredItemAtLane(lane);
 

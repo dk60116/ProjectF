@@ -15,6 +15,7 @@ MonoBehaviour:
   itemName: Flatcar
   id: 102
   mapObject: {fileID: 8246531933118439867, guid: a34b33398bb75a84aaa6febe564ccb3e, type: 3}
+  mapObjectArchetype: {fileID: 11400000, guid: c2e78d408e7e09d4aa21f39280633b66, type: 2}
   useMapColor: 1
   mapColor: {r: 0.8588236, g: 0.4392157, b: 0.5764706, a: 1}
   mapMarkerSize: 2

@@ -95,6 +95,7 @@ internal sealed class EditorToolForm : Form
     private readonly Label fpsLabel = new Label();
     private readonly Label playerSpeedLabel = new Label();
     private readonly Label runtimeStatsLabel = new Label();
+    private readonly Label sceneGameObjectCountLabel = new Label();
     private readonly TextBox runtimeStatsTextBox = new TextBox();
     private readonly System.Windows.Forms.Timer statusTimer = new System.Windows.Forms.Timer();
     private bool refreshingItems;
@@ -680,15 +681,21 @@ internal sealed class EditorToolForm : Form
         {
             Dock = DockStyle.Fill,
             ColumnCount = 1,
-            RowCount = 2
+            RowCount = 3
         };
         runtimeStatsLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 28f));
+        runtimeStatsLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 26f));
         runtimeStatsLayout.RowStyles.Add(new RowStyle(SizeType.Percent, 100f));
 
         runtimeStatsLabel.Text = "Runtime Stats: --";
         runtimeStatsLabel.Dock = DockStyle.Fill;
         runtimeStatsLabel.ForeColor = Color.FromArgb(243, 234, 206);
         runtimeStatsLabel.Font = new Font(Font.FontFamily, 11.5f, FontStyle.Bold);
+
+        sceneGameObjectCountLabel.Text = "씬 GameObject: --";
+        sceneGameObjectCountLabel.Dock = DockStyle.Fill;
+        sceneGameObjectCountLabel.ForeColor = Color.FromArgb(176, 177, 158);
+        sceneGameObjectCountLabel.Font = new Font(Font.FontFamily, 10f, FontStyle.Regular);
 
         runtimeStatsTextBox.Dock = DockStyle.Fill;
         runtimeStatsTextBox.Multiline = true;
@@ -701,7 +708,8 @@ internal sealed class EditorToolForm : Form
         runtimeStatsTextBox.Text = "설치 오브젝트 종류: --";
 
         runtimeStatsLayout.Controls.Add(runtimeStatsLabel, 0, 0);
-        runtimeStatsLayout.Controls.Add(runtimeStatsTextBox, 0, 1);
+        runtimeStatsLayout.Controls.Add(sceneGameObjectCountLabel, 0, 1);
+        runtimeStatsLayout.Controls.Add(runtimeStatsTextBox, 0, 2);
         runtimeStatsCard.Controls.Add(runtimeStatsLayout);
         layout.Controls.Add(runtimeStatsCard, 0, 8);
         layout.SetColumnSpan(runtimeStatsCard, 2);
@@ -1300,8 +1308,36 @@ internal sealed class EditorToolForm : Form
         TryReadProtocolToken(response, "installTypes", out string installTypes);
         TryReadProtocolInt(response, "animalTotal", out int animalTotal);
         TryReadProtocolInt(response, "animalAIActive", out int animalAIActive);
+        bool hasBeltRecords = TryReadProtocolInt(response, "beltRecords", out int beltRecords);
+        bool hasBeltHostGameObjects = TryReadProtocolInt(
+            response,
+            "beltHostGameObjects",
+            out int beltHostGameObjects);
         runtimeStatsLabel.Text =
             $"Runtime Stats: 설치 {installTotal:N0}개    벨트 아이템 {beltItems:N0}개    동물 {animalAIActive:N0}/{animalTotal:N0}";
+        if (hasBeltRecords && hasBeltHostGameObjects)
+        {
+            runtimeStatsLabel.Text +=
+                $"    벨트 레코드 {beltRecords:N0}개 / 호스트 GO {beltHostGameObjects:N0}개";
+        }
+        bool hasSceneGameObjectTotal =
+            TryReadProtocolInt(response, "sceneGameObjects", out int sceneGameObjects);
+        bool hasActiveSceneGameObjectTotal =
+            TryReadProtocolInt(response, "activeSceneGameObjects", out int activeSceneGameObjects);
+        bool hasSceneMonoBehaviourTotal =
+            TryReadProtocolInt(response, "sceneMonoBehaviours", out int sceneMonoBehaviours);
+        bool hasActiveSceneMonoBehaviourTotal =
+            TryReadProtocolInt(response, "activeSceneMonoBehaviours", out int activeSceneMonoBehaviours);
+        bool hasSceneGameObjectCounts = hasSceneGameObjectTotal && hasActiveSceneGameObjectTotal;
+        bool hasSceneMonoBehaviourCounts = hasSceneMonoBehaviourTotal && hasActiveSceneMonoBehaviourTotal;
+        sceneGameObjectCountLabel.Text = hasSceneGameObjectCounts
+            ? $"씬 GameObject: {sceneGameObjects:N0}개 (활성 {activeSceneGameObjects:N0}개)"
+            : "씬 GameObject: --";
+        if (hasSceneMonoBehaviourCounts)
+        {
+            sceneGameObjectCountLabel.Text +=
+                $"    MonoBehaviour: {sceneMonoBehaviours:N0}개 (활성 {activeSceneMonoBehaviours:N0}개)";
+        }
         runtimeStatsTextBox.Text = FormatInstallTypeCounts(installTypes);
 
         if (TryReadProtocolBool(response, "showConveyorSlotDots", out bool showConveyorSlotDots))
@@ -1445,6 +1481,7 @@ internal sealed class EditorToolForm : Form
     private void SetRuntimeStatsUnavailable(string message)
     {
         runtimeStatsLabel.Text = $"Runtime Stats: {message}";
+        sceneGameObjectCountLabel.Text = "씬 GameObject: --";
         runtimeStatsTextBox.Text = "설치 오브젝트 종류: --";
     }
 

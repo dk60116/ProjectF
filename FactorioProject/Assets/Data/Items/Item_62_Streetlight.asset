@@ -15,6 +15,7 @@ MonoBehaviour:
   itemName: Streetlight
   id: 58
   mapObject: {fileID: 666971777691185006, guid: ae1df0edda6375e4d8677bb94970dfbf, type: 3}
+  mapObjectArchetype: {fileID: 11400000, guid: d0c18263ea7d84943a08d0736fb4f8ee, type: 2}
   useMapColor: 1
   mapColor: {r: 1, g: 0.9774979, b: 0.5896226, a: 1}
   mapMarkerSize: 2

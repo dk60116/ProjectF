@@ -25,6 +25,7 @@ public readonly struct VirtualRenderBatchKey : System.IEquatable<VirtualRenderBa
     public readonly int BatchCellZ;
     public readonly bool InvertCulling;
     public readonly bool HasConveyorMotion;
+    public readonly uint RenderingLayerMask;
 
     public VirtualRenderBatchKey(
         Mesh mesh,
@@ -41,7 +42,8 @@ public readonly struct VirtualRenderBatchKey : System.IEquatable<VirtualRenderBa
         int batchCellX = 0,
         int batchCellZ = 0,
         bool invertCulling = false,
-        bool hasConveyorMotion = false)
+        bool hasConveyorMotion = false,
+        uint renderingLayerMask = uint.MaxValue)
     {
         Mesh = mesh;
         Material = material;
@@ -58,6 +60,7 @@ public readonly struct VirtualRenderBatchKey : System.IEquatable<VirtualRenderBa
         BatchCellZ = batchCellZ;
         InvertCulling = invertCulling;
         HasConveyorMotion = hasConveyorMotion;
+        RenderingLayerMask = renderingLayerMask;
     }
 
     public bool Equals(VirtualRenderBatchKey other)
@@ -76,7 +79,8 @@ public readonly struct VirtualRenderBatchKey : System.IEquatable<VirtualRenderBa
             && BatchCellX == other.BatchCellX
             && BatchCellZ == other.BatchCellZ
             && InvertCulling == other.InvertCulling
-            && HasConveyorMotion == other.HasConveyorMotion;
+            && HasConveyorMotion == other.HasConveyorMotion
+            && RenderingLayerMask == other.RenderingLayerMask;
     }
 
     public override bool Equals(object obj)
@@ -103,6 +107,7 @@ public readonly struct VirtualRenderBatchKey : System.IEquatable<VirtualRenderBa
             hash = (hash * 397) ^ BatchCellZ;
             hash = (hash * 397) ^ (InvertCulling ? 1 : 0);
             hash = (hash * 397) ^ (HasConveyorMotion ? 1 : 0);
+            hash = (hash * 397) ^ (int)RenderingLayerMask;
             return hash;
         }
     }
@@ -480,6 +485,7 @@ public sealed class VirtualRenderBatchCollection
             RenderParams renderParams = new RenderParams(key.Material)
             {
                 layer = key.Layer,
+                renderingLayerMask = key.RenderingLayerMask,
                 shadowCastingMode = shadowCastingMode,
                 receiveShadows = key.ReceiveShadows,
                 worldBounds = worldBounds,

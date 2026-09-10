@@ -1,0 +1,826 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: a4d286e989be41fe853b78a59ca3a4e8, type: 3}
+  m_Name: MapObjectArchetype_45_Conveyor belt 2F
+  m_EditorClassIdentifier: Assembly-CSharp::ProjectF.MapObjects.MapObjectArchetype
+  schemaVersion: 1
+  itemDefinition: {fileID: 11400000, guid: ae10ba0d1a5a35a4f9732630fda54471, type: 2}
+  sourcePrefab: {fileID: 4923497655988066394, guid: ad2b1061faaacad479734368ff5211cc, type: 3}
+  itemId: 45
+  itemName: Conveyor belt 2F
+  sourcePrefabGuid: ad2b1061faaacad479734368ff5211cc
+  sourceContentHash:
+    serializedVersion: 2
+    Hash: 3a40e08407ab1ca8c73e35dec770e5f8
+  sourceRuntimeType: ConvayorBelt2F, Assembly-CSharp, Version=0.0.0.0, Culture=neutral,
+    PublicKeyToken=null
+  mapStatus:
+    mapSizeX: 3
+    mapSizeY: 1
+    centerCellX: 1
+    centerCellY: 0
+  focusMode: 1
+  defaultRootScale: {x: 1, y: 1, z: 1}
+  defaultRootRotation: {x: -0, y: -0, z: -0, w: 1}
+  localRenderBounds:
+    m_Center: {x: -0.00000011920929, y: 0.403, z: -0.000000029802322}
+    m_Extent: {x: 1.6875002, y: 0.403, z: 0.36663753}
+  hasRenderBounds: 1
+  featureFlags: 0
+  nodes:
+  - hierarchyPath: 0:Conveyor belt 2F
+    animationPath: 
+    parentIndex: -1
+    localPosition: {x: 0, y: 0, z: 0}
+    localRotation: {x: 0, y: 0, z: 0, w: 1}
+    localScale: {x: 1, y: 1, z: 1}
+    defaultLocalToRoot:
+      e00: 1
+      e01: 0
+      e02: 0
+      e03: 0
+      e10: 0
+      e11: 1
+      e12: 0
+      e13: 0
+      e20: 0
+      e21: 0
+      e22: 1
+      e23: 0
+      e30: 0
+      e31: 0
+      e32: 0
+      e33: 1
+    activeByDefault: 1
+    hasAnimatedTransform: 0
+  - hierarchyPath: 0:Conveyor belt 2F/0:Body
+    animationPath: Body
+    parentIndex: 0
+    localPosition: {x: 0, y: 0, z: 0}
+    localRotation: {x: 0, y: 0, z: 0, w: 1}
+    localScale: {x: 1, y: 1, z: 1}
+    defaultLocalToRoot:
+      e00: 1
+      e01: 0
+      e02: 0
+      e03: 0
+      e10: 0
+      e11: 1
+      e12: 0
+      e13: 0
+      e20: 0
+      e21: 0
+      e22: 1
+      e23: 0
+      e30: 0
+      e31: 0
+      e32: 0
+      e33: 1
+    activeByDefault: 1
+    hasAnimatedTransform: 0
+  - hierarchyPath: 0:Conveyor belt 2F/1:BeltTop
+    animationPath: BeltTop
+    parentIndex: 0
+    localPosition: {x: 0, y: 0, z: 0}
+    localRotation: {x: 0, y: 0, z: 0, w: 1}
+    localScale: {x: 1, y: 1, z: 1}
+    defaultLocalToRoot:
+      e00: 1
+      e01: 0
+      e02: 0
+      e03: 0
+      e10: 0
+      e11: 1
+      e12: 0
+      e13: 0
+      e20: 0
+      e21: 0
+      e22: 1
+      e23: 0
+      e30: 0
+      e31: 0
+      e32: 0
+      e33: 1
+    activeByDefault: 1
+    hasAnimatedTransform: 0
+  - hierarchyPath: 0:Conveyor belt 2F/2:Gear
+    animationPath: Gear
+    parentIndex: 0
+    localPosition: {x: -0.254, y: 0.739, z: 0.35}
+    localRotation: {x: -0.5, y: -0.5, z: 0.5, w: 0.5}
+    localScale: {x: 0.50000006, y: 0.5000001, z: 0.50000006}
+    defaultLocalToRoot:
+      e00: 0
+      e01: 0
+      e02: -0.50000006
+      e03: -0.254
+      e10: 0.50000006
+      e11: 0
+      e12: 0
+      e13: 0.739
+      e20: 0
+      e21: -0.5000001
+      e22: 0
+      e23: 0.35
+      e30: 0
+      e31: 0
+      e32: 0
+      e33: 1
+    activeByDefault: 1
+    hasAnimatedTransform: 0
+  - hierarchyPath: 0:Conveyor belt 2F/3:Gear (1)
+    animationPath: Gear (1)
+    parentIndex: 0
+    localPosition: {x: 0.25000006, y: 0.739, z: 0.35}
+    localRotation: {x: -0.5, y: -0.5, z: 0.5, w: 0.5}
+    localScale: {x: 0.50000006, y: 0.5000001, z: 0.50000006}
+    defaultLocalToRoot:
+      e00: 0
+      e01: 0
+      e02: -0.50000006
+      e03: 0.25000006
+      e10: 0.50000006
+      e11: 0
+      e12: 0
+      e13: 0.739
+      e20: 0
+      e21: -0.5000001
+      e22: 0
+      e23: 0.35
+      e30: 0
+      e31: 0
+      e32: 0
+      e33: 1
+    activeByDefault: 1
+    hasAnimatedTransform: 0
+  - hierarchyPath: 0:Conveyor belt 2F/4:Gear (2)
+    animationPath: Gear (2)
+    parentIndex: 0
+    localPosition: {x: -0.254, y: 0.739, z: -0.35000005}
+    localRotation: {x: -0.5, y: -0.5, z: 0.5, w: 0.5}
+    localScale: {x: 0.50000006, y: 0.5000001, z: 0.50000006}
+    defaultLocalToRoot:
+      e00: 0
+      e01: 0
+      e02: -0.50000006
+      e03: -0.254
+      e10: 0.50000006
+      e11: 0
+      e12: 0
+      e13: 0.739
+      e20: 0
+      e21: -0.5000001
+      e22: 0
+      e23: -0.35000005
+      e30: 0
+      e31: 0
+      e32: 0
+      e33: 1
+    activeByDefault: 1
+    hasAnimatedTransform: 0
+  - hierarchyPath: 0:Conveyor belt 2F/5:Gear (3)
+    animationPath: Gear (3)
+    parentIndex: 0
+    localPosition: {x: 0.25000006, y: 0.739, z: -0.35}
+    localRotation: {x: -0.5, y: -0.5, z: 0.5, w: 0.5}
+    localScale: {x: 0.50000006, y: 0.5000001, z: 0.50000006}
+    defaultLocalToRoot:
+      e00: 0
+      e01: 0
+      e02: -0.50000006
+      e03: 0.25000006
+      e10: 0.50000006
+      e11: 0
+      e12: 0
+      e13: 0.739
+      e20: 0
+      e21: -0.5000001
+      e22: 0
+      e23: -0.35
+      e30: 0
+      e31: 0
+      e32: 0
+      e33: 1
+    activeByDefault: 1
+    hasAnimatedTransform: 0
+  - hierarchyPath: 0:Conveyor belt 2F/6:Gear (4)
+    animationPath: Gear (4)
+    parentIndex: 0
+    localPosition: {x: -1.233, y: 0.239, z: -0.35}
+    localRotation: {x: -0.5, y: -0.5, z: 0.5, w: 0.5}
+    localScale: {x: 0.50000006, y: 0.5000001, z: 0.50000006}
+    defaultLocalToRoot:
+      e00: 0
+      e01: 0
+      e02: -0.50000006
+      e03: -1.233
+      e10: 0.50000006
+      e11: 0
+      e12: 0
+      e13: 0.239
+      e20: 0
+      e21: -0.5000001
+      e22: 0
+      e23: -0.35
+      e30: 0
+      e31: 0
+      e32: 0
+      e33: 1
+    activeByDefault: 1
+    hasAnimatedTransform: 0
+  - hierarchyPath: 0:Conveyor belt 2F/7:Gear (6)
+    animationPath: Gear (6)
+    parentIndex: 0
+    localPosition: {x: -1.233, y: 0.239, z: 0.35}
+    localRotation: {x: -0.5, y: -0.5, z: 0.5, w: 0.5}
+    localScale: {x: 0.50000006, y: 0.5000001, z: 0.50000006}
+    defaultLocalToRoot:
+      e00: 0
+      e01: 0
+      e02: -0.50000006
+      e03: -1.233
+      e10: 0.50000006
+      e11: 0
+      e12: 0
+      e13: 0.239
+      e20: 0
+      e21: -0.5000001
+      e22: 0
+      e23: 0.35
+      e30: 0
+      e31: 0
+      e32: 0
+      e33: 1
+    activeByDefault: 1
+    hasAnimatedTransform: 0
+  - hierarchyPath: 0:Conveyor belt 2F/8:Gear (5)
+    animationPath: Gear (5)
+    parentIndex: 0
+    localPosition: {x: -0.8, y: 0.539, z: -0.35}
+    localRotation: {x: -0.5, y: -0.5, z: 0.5, w: 0.5}
+    localScale: {x: 0.50000006, y: 0.5000001, z: 0.50000006}
+    defaultLocalToRoot:
+      e00: 0
+      e01: 0
+      e02: -0.50000006
+      e03: -0.8
+      e10: 0.50000006
+      e11: 0
+      e12: 0
+      e13: 0.539
+      e20: 0
+      e21: -0.5000001
+      e22: 0
+      e23: -0.35
+      e30: 0
+      e31: 0
+      e32: 0
+      e33: 1
+    activeByDefault: 1
+    hasAnimatedTransform: 0
+  - hierarchyPath: 0:Conveyor belt 2F/9:Gear (7)
+    animationPath: Gear (7)
+    parentIndex: 0
+    localPosition: {x: -0.8, y: 0.539, z: 0.35}
+    localRotation: {x: -0.5, y: -0.5, z: 0.5, w: 0.5}
+    localScale: {x: 0.50000006, y: 0.5000001, z: 0.50000006}
+    defaultLocalToRoot:
+      e00: 0
+      e01: 0
+      e02: -0.50000006
+      e03: -0.8
+      e10: 0.50000006
+      e11: 0
+      e12: 0
+      e13: 0.539
+      e20: 0
+      e21: -0.5000001
+      e22: 0
+      e23: 0.35
+      e30: 0
+      e31: 0
+      e32: 0
+      e33: 1
+    activeByDefault: 1
+    hasAnimatedTransform: 0
+  - hierarchyPath: 0:Conveyor belt 2F/10:Gear (8)
+    animationPath: Gear (8)
+    parentIndex: 0
+    localPosition: {x: 1.233, y: 0.239, z: -0.35}
+    localRotation: {x: -0.5, y: -0.5, z: 0.5, w: 0.5}
+    localScale: {x: 0.50000006, y: 0.5000001, z: 0.50000006}
+    defaultLocalToRoot:
+      e00: 0
+      e01: 0
+      e02: -0.50000006
+      e03: 1.233
+      e10: 0.50000006
+      e11: 0
+      e12: 0
+      e13: 0.239
+      e20: 0
+      e21: -0.5000001
+      e22: 0
+      e23: -0.35
+      e30: 0
+      e31: 0
+      e32: 0
+      e33: 1
+    activeByDefault: 1
+    hasAnimatedTransform: 0
+  - hierarchyPath: 0:Conveyor belt 2F/11:Gear (9)
+    animationPath: Gear (9)
+    parentIndex: 0
+    localPosition: {x: 1.233, y: 0.239, z: 0.35}
+    localRotation: {x: -0.5, y: -0.5, z: 0.5, w: 0.5}
+    localScale: {x: 0.50000006, y: 0.5000001, z: 0.50000006}
+    defaultLocalToRoot:
+      e00: 0
+      e01: 0
+      e02: -0.50000006
+      e03: 1.233
+      e10: 0.50000006
+      e11: 0
+      e12: 0
+      e13: 0.239
+      e20: 0
+      e21: -0.5000001
+      e22: 0
+      e23: 0.35
+      e30: 0
+      e31: 0
+      e32: 0
+      e33: 1
+    activeByDefault: 1
+    hasAnimatedTransform: 0
+  - hierarchyPath: 0:Conveyor belt 2F/12:Gear (10)
+    animationPath: Gear (10)
+    parentIndex: 0
+    localPosition: {x: 0.8, y: 0.539, z: -0.35}
+    localRotation: {x: -0.5, y: -0.5, z: 0.5, w: 0.5}
+    localScale: {x: 0.50000006, y: 0.5000001, z: 0.50000006}
+    defaultLocalToRoot:
+      e00: 0
+      e01: 0
+      e02: -0.50000006
+      e03: 0.8
+      e10: 0.50000006
+      e11: 0
+      e12: 0
+      e13: 0.539
+      e20: 0
+      e21: -0.5000001
+      e22: 0
+      e23: -0.35
+      e30: 0
+      e31: 0
+      e32: 0
+      e33: 1
+    activeByDefault: 1
+    hasAnimatedTransform: 0
+  - hierarchyPath: 0:Conveyor belt 2F/13:Gear (11)
+    animationPath: Gear (11)
+    parentIndex: 0
+    localPosition: {x: 0.8, y: 0.539, z: 0.35}
+    localRotation: {x: -0.5, y: -0.5, z: 0.5, w: 0.5}
+    localScale: {x: 0.50000006, y: 0.5000001, z: 0.50000006}
+    defaultLocalToRoot:
+      e00: 0
+      e01: 0
+      e02: -0.50000006
+      e03: 0.8
+      e10: 0.50000006
+      e11: 0
+      e12: 0
+      e13: 0.539
+      e20: 0
+      e21: -0.5000001
+      e22: 0
+      e23: 0.35
+      e30: 0
+      e31: 0
+      e32: 0
+      e33: 1
+    activeByDefault: 1
+    hasAnimatedTransform: 0
+  - hierarchyPath: 0:Conveyor belt 2F/14:End_S
+    animationPath: End_S
+    parentIndex: 0
+    localPosition: {x: 1.5, y: 0, z: -0}
+    localRotation: {x: -0, y: 0.70710677, z: -0, w: 0.7071068}
+    localScale: {x: 1.02, y: 1, z: 1}
+    defaultLocalToRoot:
+      e00: 0.00000006079674
+      e01: 0
+      e02: 1
+      e03: 1.5
+      e10: 0
+      e11: 1
+      e12: 0
+      e13: 0
+      e20: -1.02
+      e21: 0
+      e22: 0.000000059604645
+      e23: 0
+      e30: 0
+      e31: 0
+      e32: 0
+      e33: 1
+    activeByDefault: 0
+    hasAnimatedTransform: 0
+  - hierarchyPath: 0:Conveyor belt 2F/15:End_E
+    animationPath: End_E
+    parentIndex: 0
+    localPosition: {x: -1.5, y: 0, z: -0}
+    localRotation: {x: -0, y: -0.70710677, z: -0, w: 0.7071068}
+    localScale: {x: 1.02, y: 1, z: 1}
+    defaultLocalToRoot:
+      e00: 0.00000006079674
+      e01: 0
+      e02: -1
+      e03: -1.5
+      e10: 0
+      e11: 1
+      e12: 0
+      e13: 0
+      e20: 1.02
+      e21: 0
+      e22: 0.000000059604645
+      e23: 0
+      e30: 0
+      e31: 0
+      e32: 0
+      e33: 1
+    activeByDefault: 0
+    hasAnimatedTransform: 0
+  - hierarchyPath: 0:Conveyor belt 2F/16:Seam_S
+    animationPath: Seam_S
+    parentIndex: 0
+    localPosition: {x: 1.5, y: 0, z: 0}
+    localRotation: {x: -0, y: 0.70710677, z: -0, w: 0.7071068}
+    localScale: {x: 1.02, y: 1, z: 1}
+    defaultLocalToRoot:
+      e00: 0.00000006079674
+      e01: 0
+      e02: 1
+      e03: 1.5
+      e10: 0
+      e11: 1
+      e12: 0
+      e13: 0
+      e20: -1.02
+      e21: 0
+      e22: 0.000000059604645
+      e23: 0
+      e30: 0
+      e31: 0
+      e32: 0
+      e33: 1
+    activeByDefault: 0
+    hasAnimatedTransform: 0
+  - hierarchyPath: 0:Conveyor belt 2F/16:Seam_S/0:BeltTop_Seam
+    animationPath: Seam_S/BeltTop_Seam
+    parentIndex: 17
+    localPosition: {x: 0, y: 0.13, z: 0.09375}
+    localRotation: {x: 0, y: 0, z: 0, w: 1}
+    localScale: {x: 0.06252812, y: 1, z: 0.01875}
+    defaultLocalToRoot:
+      e00: 0.0000000038015053
+      e01: 0
+      e02: 0.01875
+      e03: 1.59375
+      e10: 0
+      e11: 1
+      e12: 0
+      e13: 0.13
+      e20: -0.063778676
+      e21: 0
+      e22: 0.0000000011175871
+      e23: 0.0000000055879354
+      e30: 0
+      e31: 0
+      e32: 0
+      e33: 1
+    activeByDefault: 0
+    hasAnimatedTransform: 0
+  - hierarchyPath: 0:Conveyor belt 2F/17:Seam_E
+    animationPath: Seam_E
+    parentIndex: 0
+    localPosition: {x: -1.5, y: 0, z: 0}
+    localRotation: {x: -0, y: -0.7071071, z: -0, w: 0.70710653}
+    localScale: {x: 1.02, y: 1, z: 1}
+    defaultLocalToRoot:
+      e00: -0.0000009727478
+      e01: 0
+      e02: -1.0000001
+      e03: -1.5
+      e10: 0
+      e11: 1
+      e12: 0
+      e13: 0
+      e20: 1.0200001
+      e21: 0
+      e22: -0.0000009536743
+      e23: 0
+      e30: 0
+      e31: 0
+      e32: 0
+      e33: 1
+    activeByDefault: 0
+    hasAnimatedTransform: 0
+  - hierarchyPath: 0:Conveyor belt 2F/17:Seam_E/0:BeltTop_Seam
+    animationPath: Seam_E/BeltTop_Seam
+    parentIndex: 19
+    localPosition: {x: 0, y: 0.13, z: 0.09375}
+    localRotation: {x: 0, y: 1, z: 0, w: 0}
+    localScale: {x: 0.06252812, y: 1, z: 0.01875}
+    defaultLocalToRoot:
+      e00: 0.000000060824085
+      e01: 0
+      e02: 0.018750003
+      e03: -1.59375
+      e10: 0
+      e11: 1
+      e12: 0
+      e13: 0.13
+      e20: -0.06377868
+      e21: 0
+      e22: 0.000000017881394
+      e23: -0.00000008940697
+      e30: 0
+      e31: 0
+      e32: 0
+      e33: 1
+    activeByDefault: 0
+    hasAnimatedTransform: 0
+  renderParts:
+  - kind: 0
+    nodeIndex: 1
+    mesh: {fileID: 4300000, guid: 709d613955da4ff5983fb30b59a682c7, type: 2}
+    material: {fileID: 2100000, guid: a248d1e072f169244a16f7003f971690, type: 2}
+    subMeshIndex: 0
+    localBounds:
+      m_Center: {x: 0, y: 0.4005, z: 0}
+      m_Extent: {x: 1.5, y: 0.4005, z: 0.336}
+    layer: 7
+    renderingLayerMask: 1
+    shadowCastingMode: 1
+    receiveShadows: 1
+    enabledByDefault: 1
+  - kind: 0
+    nodeIndex: 2
+    mesh: {fileID: 4300000, guid: 624fa47c10031a84f96dd4ec27c1dcc7, type: 2}
+    material: {fileID: 2100000, guid: b38abcf8d9328ce4faa869bd293e2b1b, type: 2}
+    subMeshIndex: 0
+    localBounds:
+      m_Center: {x: 0, y: 0.468, z: 0}
+      m_Extent: {x: 1.4999999, y: 0.338, z: 0.32512504}
+    layer: 7
+    renderingLayerMask: 1
+    shadowCastingMode: 0
+    receiveShadows: 1
+    enabledByDefault: 1
+  - kind: 0
+    nodeIndex: 3
+    mesh: {fileID: -5320583514307937505, guid: aa03b77214b221240923e637a6e5d462, type: 3}
+    material: {fileID: 2100000, guid: f8dcf2a2c290e6545b35da5512403502, type: 2}
+    subMeshIndex: 0
+    localBounds:
+      m_Center: {x: 0, y: 0, z: 0}
+      m_Extent: {x: 0.11780307, y: 0.033275, z: 0.11583561}
+    layer: 0
+    renderingLayerMask: 1
+    shadowCastingMode: 1
+    receiveShadows: 1
+    enabledByDefault: 1
+  - kind: 0
+    nodeIndex: 4
+    mesh: {fileID: -5320583514307937505, guid: aa03b77214b221240923e637a6e5d462, type: 3}
+    material: {fileID: 2100000, guid: f8dcf2a2c290e6545b35da5512403502, type: 2}
+    subMeshIndex: 0
+    localBounds:
+      m_Center: {x: 0, y: 0, z: 0}
+      m_Extent: {x: 0.11780307, y: 0.033275, z: 0.11583561}
+    layer: 0
+    renderingLayerMask: 1
+    shadowCastingMode: 1
+    receiveShadows: 1
+    enabledByDefault: 1
+  - kind: 0
+    nodeIndex: 5
+    mesh: {fileID: -5320583514307937505, guid: aa03b77214b221240923e637a6e5d462, type: 3}
+    material: {fileID: 2100000, guid: f8dcf2a2c290e6545b35da5512403502, type: 2}
+    subMeshIndex: 0
+    localBounds:
+      m_Center: {x: 0, y: 0, z: 0}
+      m_Extent: {x: 0.11780307, y: 0.033275, z: 0.11583561}
+    layer: 0
+    renderingLayerMask: 1
+    shadowCastingMode: 1
+    receiveShadows: 1
+    enabledByDefault: 1
+  - kind: 0
+    nodeIndex: 6
+    mesh: {fileID: -5320583514307937505, guid: aa03b77214b221240923e637a6e5d462, type: 3}
+    material: {fileID: 2100000, guid: f8dcf2a2c290e6545b35da5512403502, type: 2}
+    subMeshIndex: 0
+    localBounds:
+      m_Center: {x: 0, y: 0, z: 0}
+      m_Extent: {x: 0.11780307, y: 0.033275, z: 0.11583561}
+    layer: 0
+    renderingLayerMask: 1
+    shadowCastingMode: 1
+    receiveShadows: 1
+    enabledByDefault: 1
+  - kind: 0
+    nodeIndex: 7
+    mesh: {fileID: -5320583514307937505, guid: aa03b77214b221240923e637a6e5d462, type: 3}
+    material: {fileID: 2100000, guid: f8dcf2a2c290e6545b35da5512403502, type: 2}
+    subMeshIndex: 0
+    localBounds:
+      m_Center: {x: 0, y: 0, z: 0}
+      m_Extent: {x: 0.11780307, y: 0.033275, z: 0.11583561}
+    layer: 0
+    renderingLayerMask: 1
+    shadowCastingMode: 1
+    receiveShadows: 1
+    enabledByDefault: 1
+  - kind: 0
+    nodeIndex: 8
+    mesh: {fileID: -5320583514307937505, guid: aa03b77214b221240923e637a6e5d462, type: 3}
+    material: {fileID: 2100000, guid: f8dcf2a2c290e6545b35da5512403502, type: 2}
+    subMeshIndex: 0
+    localBounds:
+      m_Center: {x: 0, y: 0, z: 0}
+      m_Extent: {x: 0.11780307, y: 0.033275, z: 0.11583561}
+    layer: 0
+    renderingLayerMask: 1
+    shadowCastingMode: 1
+    receiveShadows: 1
+    enabledByDefault: 1
+  - kind: 0
+    nodeIndex: 9
+    mesh: {fileID: -5320583514307937505, guid: aa03b77214b221240923e637a6e5d462, type: 3}
+    material: {fileID: 2100000, guid: f8dcf2a2c290e6545b35da5512403502, type: 2}
+    subMeshIndex: 0
+    localBounds:
+      m_Center: {x: 0, y: 0, z: 0}
+      m_Extent: {x: 0.11780307, y: 0.033275, z: 0.11583561}
+    layer: 0
+    renderingLayerMask: 1
+    shadowCastingMode: 1
+    receiveShadows: 1
+    enabledByDefault: 1
+  - kind: 0
+    nodeIndex: 10
+    mesh: {fileID: -5320583514307937505, guid: aa03b77214b221240923e637a6e5d462, type: 3}
+    material: {fileID: 2100000, guid: f8dcf2a2c290e6545b35da5512403502, type: 2}
+    subMeshIndex: 0
+    localBounds:
+      m_Center: {x: 0, y: 0, z: 0}
+      m_Extent: {x: 0.11780307, y: 0.033275, z: 0.11583561}
+    layer: 0
+    renderingLayerMask: 1
+    shadowCastingMode: 1
+    receiveShadows: 1
+    enabledByDefault: 1
+  - kind: 0
+    nodeIndex: 11
+    mesh: {fileID: -5320583514307937505, guid: aa03b77214b221240923e637a6e5d462, type: 3}
+    material: {fileID: 2100000, guid: f8dcf2a2c290e6545b35da5512403502, type: 2}
+    subMeshIndex: 0
+    localBounds:
+      m_Center: {x: 0, y: 0, z: 0}
+      m_Extent: {x: 0.11780307, y: 0.033275, z: 0.11583561}
+    layer: 0
+    renderingLayerMask: 1
+    shadowCastingMode: 1
+    receiveShadows: 1
+    enabledByDefault: 1
+  - kind: 0
+    nodeIndex: 12
+    mesh: {fileID: -5320583514307937505, guid: aa03b77214b221240923e637a6e5d462, type: 3}
+    material: {fileID: 2100000, guid: f8dcf2a2c290e6545b35da5512403502, type: 2}
+    subMeshIndex: 0
+    localBounds:
+      m_Center: {x: 0, y: 0, z: 0}
+      m_Extent: {x: 0.11780307, y: 0.033275, z: 0.11583561}
+    layer: 0
+    renderingLayerMask: 1
+    shadowCastingMode: 1
+    receiveShadows: 1
+    enabledByDefault: 1
+  - kind: 0
+    nodeIndex: 13
+    mesh: {fileID: -5320583514307937505, guid: aa03b77214b221240923e637a6e5d462, type: 3}
+    material: {fileID: 2100000, guid: f8dcf2a2c290e6545b35da5512403502, type: 2}
+    subMeshIndex: 0
+    localBounds:
+      m_Center: {x: 0, y: 0, z: 0}
+      m_Extent: {x: 0.11780307, y: 0.033275, z: 0.11583561}
+    layer: 0
+    renderingLayerMask: 1
+    shadowCastingMode: 1
+    receiveShadows: 1
+    enabledByDefault: 1
+  - kind: 0
+    nodeIndex: 14
+    mesh: {fileID: -5320583514307937505, guid: aa03b77214b221240923e637a6e5d462, type: 3}
+    material: {fileID: 2100000, guid: f8dcf2a2c290e6545b35da5512403502, type: 2}
+    subMeshIndex: 0
+    localBounds:
+      m_Center: {x: 0, y: 0, z: 0}
+      m_Extent: {x: 0.11780307, y: 0.033275, z: 0.11583561}
+    layer: 0
+    renderingLayerMask: 1
+    shadowCastingMode: 1
+    receiveShadows: 1
+    enabledByDefault: 1
+  - kind: 0
+    nodeIndex: 15
+    mesh: {fileID: 4300000, guid: d52830dc103cc8a4e8ae1721564db23b, type: 2}
+    material: {fileID: 2100000, guid: a248d1e072f169244a16f7003f971690, type: 2}
+    subMeshIndex: 0
+    localBounds:
+      m_Center: {x: -0.000000014901161, y: 0.062499996, z: 0.0625}
+      m_Extent: {x: 0.33499998, y: 0.0625, z: 0.0625}
+    layer: 0
+    renderingLayerMask: 1
+    shadowCastingMode: 1
+    receiveShadows: 1
+    enabledByDefault: 1
+  - kind: 0
+    nodeIndex: 16
+    mesh: {fileID: 4300000, guid: d52830dc103cc8a4e8ae1721564db23b, type: 2}
+    material: {fileID: 2100000, guid: a248d1e072f169244a16f7003f971690, type: 2}
+    subMeshIndex: 0
+    localBounds:
+      m_Center: {x: -0.000000014901161, y: 0.062499996, z: 0.0625}
+      m_Extent: {x: 0.33499998, y: 0.0625, z: 0.0625}
+    layer: 0
+    renderingLayerMask: 1
+    shadowCastingMode: 1
+    receiveShadows: 1
+    enabledByDefault: 1
+  - kind: 0
+    nodeIndex: 17
+    mesh: {fileID: 4300000, guid: 79742452f9b7d9e45a655fdfe96f0c0d, type: 2}
+    material: {fileID: 2100000, guid: a248d1e072f169244a16f7003f971690, type: 2}
+    subMeshIndex: 0
+    localBounds:
+      m_Center: {x: 0, y: 0.0625, z: 0.09375}
+      m_Extent: {x: 0.336, y: 0.0625, z: 0.09375}
+    layer: 0
+    renderingLayerMask: 1
+    shadowCastingMode: 1
+    receiveShadows: 1
+    enabledByDefault: 1
+  - kind: 0
+    nodeIndex: 18
+    mesh: {fileID: 10209, guid: 0000000000000000e000000000000000, type: 0}
+    material: {fileID: 2100000, guid: b38abcf8d9328ce4faa869bd293e2b1b, type: 2}
+    subMeshIndex: 0
+    localBounds:
+      m_Center: {x: 0, y: 0, z: 0}
+      m_Extent: {x: 5, y: 1.110223e-16, z: 5}
+    layer: 0
+    renderingLayerMask: 1
+    shadowCastingMode: 0
+    receiveShadows: 1
+    enabledByDefault: 1
+  - kind: 0
+    nodeIndex: 19
+    mesh: {fileID: 4300000, guid: 79742452f9b7d9e45a655fdfe96f0c0d, type: 2}
+    material: {fileID: 2100000, guid: a248d1e072f169244a16f7003f971690, type: 2}
+    subMeshIndex: 0
+    localBounds:
+      m_Center: {x: 0, y: 0.0625, z: 0.09375}
+      m_Extent: {x: 0.336, y: 0.0625, z: 0.09375}
+    layer: 0
+    renderingLayerMask: 1
+    shadowCastingMode: 1
+    receiveShadows: 1
+    enabledByDefault: 1
+  - kind: 0
+    nodeIndex: 20
+    mesh: {fileID: 10209, guid: 0000000000000000e000000000000000, type: 0}
+    material: {fileID: 2100000, guid: b38abcf8d9328ce4faa869bd293e2b1b, type: 2}
+    subMeshIndex: 0
+    localBounds:
+      m_Center: {x: 0, y: 0, z: 0}
+      m_Extent: {x: 5, y: 1.110223e-16, z: 5}
+    layer: 0
+    renderingLayerMask: 1
+    shadowCastingMode: 0
+    receiveShadows: 1
+    enabledByDefault: 1
+  animationClips: []

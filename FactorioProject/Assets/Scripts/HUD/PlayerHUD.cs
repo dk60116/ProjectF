@@ -2754,7 +2754,8 @@ public partial class PlayerHUD : BagSlot
             return;
         }
 
-        if (!currentObjectInfoTarget.gameObject.activeInHierarchy
+        PlayerController playerController = ResolvePlayerController();
+        if (!IsObjectInfoTargetAvailable(currentObjectInfoTarget, playerController)
             || (currentObjectInfoTarget is PortableObject portableObject
                 && (portableObject.ItemId < 0
                     || portableObject.IsMovingToTarget
@@ -2884,8 +2885,12 @@ public partial class PlayerHUD : BagSlot
             return;
         }
 
-        playerController.SetSelectedMapObjectFocus(
-            requested ? target as MapObject : null);
+        MapObject mapObject = requested ? target as MapObject : null;
+        Block fallbackBlock = requested
+                              && ReferenceEquals(target, clickedObjectInfoTarget)
+            ? clickedObjectInfoFallbackBlock
+            : null;
+        playerController.SetSelectedMapObjectFocus(mapObject, fallbackBlock);
     }
 
     private void SetObjectInfoAreaMarkerVisibility(MapObject target, bool requested)
@@ -3994,7 +3999,9 @@ public partial class PlayerHUD : BagSlot
     private bool HasActiveObjectInfoTarget()
     {
         if (currentObjectInfoTarget == null
-            || !currentObjectInfoTarget.gameObject.activeInHierarchy)
+            || !IsObjectInfoTargetAvailable(
+                currentObjectInfoTarget,
+                ResolvePlayerController()))
         {
             return false;
         }
@@ -4003,6 +4010,42 @@ public partial class PlayerHUD : BagSlot
         return objectInfoPanel != null
                && objectInfoPanel.gameObject.activeSelf
                && objectInfoPanel.IsBoundTo(currentObjectInfoTarget);
+    }
+
+    private bool IsObjectInfoTargetAvailable(
+        Component target,
+        PlayerController playerController)
+    {
+        if (target == null)
+        {
+            return false;
+        }
+
+        if (target.gameObject.activeInHierarchy)
+        {
+            return true;
+        }
+
+        if (!(target is ConveyorBelt conveyorBelt))
+        {
+            return false;
+        }
+
+        if (ReferenceEquals(target, clickedObjectInfoTarget)
+            && clickedObjectInfoFallbackBlock != null
+            && ConveyorWorld.Current != null
+            && ConveyorWorld.Current.TryGetMatchingAtCoordinate(
+                clickedObjectInfoFallbackBlock.Coordinate,
+                conveyorBelt,
+                out _))
+        {
+            return true;
+        }
+
+        return currentObjectInfoOpenedByYellowFocus
+               && playerController != null
+               && playerController.TryGetFocusedMapObject(out MapObject focusedMapObject)
+               && ReferenceEquals(focusedMapObject, conveyorBelt);
     }
 
     private PlayerController ResolvePlayerController()

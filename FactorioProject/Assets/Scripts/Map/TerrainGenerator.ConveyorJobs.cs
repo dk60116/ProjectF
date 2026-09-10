@@ -15,8 +15,9 @@ public partial class TerrainGenerator
     private readonly Dictionary<(Block block, int lane), int> beltJobIndices = new Dictionary<(Block, int), int>();
     private readonly List<int> beltJobGroupIds = new List<int>();
     private readonly List<BeltGroupRange> beltJobRanges = new List<BeltGroupRange>();
-    private readonly List<Spliterbelt> beltJobSplitters = new List<Spliterbelt>();
-    private readonly Dictionary<Spliterbelt, int> beltJobSplitterIndices = new Dictionary<Spliterbelt, int>();
+    private readonly List<ConveyorRuntimeRecord> beltJobSplitters = new List<ConveyorRuntimeRecord>();
+    private readonly Dictionary<ConveyorRuntimeRecord, int> beltJobSplitterIndices =
+        new Dictionary<ConveyorRuntimeRecord, int>();
     private readonly List<ulong> beltJobFilterWords = new List<ulong>();
     private readonly List<BeltSplitterState> beltJobSplitterBuild = new List<BeltSplitterState>();
     private readonly Dictionary<(Block block, int lane), BeltLaneState> beltJobRebuildStates = new Dictionary<(Block, int), BeltLaneState>();
@@ -242,7 +243,7 @@ public partial class TerrainGenerator
                 for (int i = range.Start; i < range.Start + range.Count; i++)
                 {
                     var key = beltJobNodes[i];
-                    Spliterbelt splitter = key.block.GetBeltJobSplitter(key.lane);
+                    ConveyorRuntimeRecord splitter = key.block.GetBeltJobSplitter(key.lane);
                     if (splitter == null || beltJobSplitterIndices.ContainsKey(splitter)) continue;
                     beltJobSplitterIndices.Add(splitter, beltJobSplitters.Count); beltJobSplitters.Add(splitter);
                     beltJobSplitterBuild.Add(BuildBeltJobSplitter(splitter)); range.SplitterCount++;
@@ -282,8 +283,12 @@ public partial class TerrainGenerator
                         beltJobRanges[group] = range;
                     }
                 }
-                Spliterbelt splitter = key.block.GetBeltJobSplitter(key.lane);
-                if (splitter != null) { route.Splitter = beltJobSplitterIndices[splitter]; route.SplitterInput = splitter.GetChannel(key.block.Coordinate); }
+                ConveyorRuntimeRecord splitter = key.block.GetBeltJobSplitter(key.lane);
+                if (splitter != null && splitter.TryGetSplitterChannel(key.block.Coordinate, out int splitterInput))
+                {
+                    route.Splitter = beltJobSplitterIndices[splitter];
+                    route.SplitterInput = splitterInput;
+                }
                 beltJobBuffers.Topology[i] = route;
             }
             for (int g = 0; g < beltJobRanges.Count; g++) beltJobBuffers.Groups[g] = beltJobRanges[g];
@@ -312,21 +317,38 @@ public partial class TerrainGenerator
         return beltSplitGraph.Representative(index);
     }
 
-    private BeltSplitterState BuildBeltJobSplitter(Spliterbelt splitter)
+    private BeltSplitterState BuildBeltJobSplitter(ConveyorRuntimeRecord splitter)
     {
         BeltSplitterState state = splitter.CaptureBeltJobRouting();
         state.LeftInput = state.RightInput = state.LeftOutput = state.RightOutput = -1;
         for (int channel = 0; channel < 2; channel++)
         {
-            if (!splitter.TryGetChannelCoordinate(channel, out Vector2Int cell) || !TryGetLoadedBlock(cell, out Block block)) continue;
+            Vector2Int cell = default;
+            bool foundCell = false;
+            IReadOnlyList<Vector2Int> coordinates = splitter.OccupiedCoordinates;
+            for (int coordinateIndex = 0; coordinateIndex < coordinates.Count; coordinateIndex++)
+            {
+                if (splitter.TryGetSplitterChannel(coordinates[coordinateIndex], out int resolvedChannel)
+                    && resolvedChannel == channel)
+                {
+                    cell = coordinates[coordinateIndex];
+                    foundCell = true;
+                    break;
+                }
+            }
+
+            if (!foundCell || !TryGetLoadedBlock(cell, out Block block)) continue;
             int input = beltJobIndices.TryGetValue((block, 2), out int back) ? back : -1;
             int output = beltJobIndices.TryGetValue((block, 0), out int front) ? front : -1;
             if (channel == 0) { state.LeftInput = input; state.LeftOutput = output; }
             else { state.RightInput = input; state.RightOutput = output; }
         }
         state.FilterStart = beltJobFilterWords.Count;
-        List<ulong> mask = splitter.CaptureItemFilterMaskWords();
-        if (splitter.IsItemFilterMaskInitialized && mask != null) beltJobFilterWords.AddRange(mask);
+        IReadOnlyList<ulong> mask = splitter.SplitterItemFilterWords;
+        if (splitter.HasSplitterItemFilter && mask != null)
+        {
+            for (int i = 0; i < mask.Count; i++) beltJobFilterWords.Add(mask[i]);
+        }
         state.FilterWords = beltJobFilterWords.Count - state.FilterStart;
         return state;
     }

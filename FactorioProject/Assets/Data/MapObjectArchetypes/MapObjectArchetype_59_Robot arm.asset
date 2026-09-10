@@ -1,0 +1,506 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: a4d286e989be41fe853b78a59ca3a4e8, type: 3}
+  m_Name: MapObjectArchetype_59_Robot arm
+  m_EditorClassIdentifier: Assembly-CSharp::ProjectF.MapObjects.MapObjectArchetype
+  schemaVersion: 1
+  itemDefinition: {fileID: 11400000, guid: 21883f622876a3f47a1c1f90a4b0004e, type: 2}
+  sourcePrefab: {fileID: 5617472291595085519, guid: 7c64585bed65e8843aa24eb07a5f02f3, type: 3}
+  itemId: 59
+  itemName: Robot arm
+  sourcePrefabGuid: 7c64585bed65e8843aa24eb07a5f02f3
+  sourceContentHash:
+    serializedVersion: 2
+    Hash: ffba32eba4f095f080d7cf87c3b58d94
+  sourceRuntimeType: RobotArm, Assembly-CSharp, Version=0.0.0.0, Culture=neutral,
+    PublicKeyToken=null
+  mapStatus:
+    mapSizeX: 1
+    mapSizeY: 1
+    centerCellX: 0
+    centerCellY: 0
+  focusMode: 1
+  defaultRootScale: {x: 1, y: 1, z: 1}
+  defaultRootRotation: {x: 0, y: 0, z: 0, w: 1}
+  localRenderBounds:
+    m_Center: {x: 0, y: 0.5902607, z: -0.17787004}
+    m_Extent: {x: 0.29941407, y: 0.5902607, z: 0.47728407}
+  hasRenderBounds: 1
+  featureFlags: 2113
+  nodes:
+  - hierarchyPath: 0:Robot arm
+    animationPath: 
+    parentIndex: -1
+    localPosition: {x: 0, y: 0, z: 0}
+    localRotation: {x: 0, y: 0, z: 0, w: 1}
+    localScale: {x: 1, y: 1, z: 1}
+    defaultLocalToRoot:
+      e00: 1
+      e01: 0
+      e02: 0
+      e03: 0
+      e10: 0
+      e11: 1
+      e12: 0
+      e13: 0
+      e20: 0
+      e21: 0
+      e22: 1
+      e23: 0
+      e30: 0
+      e31: 0
+      e32: 0
+      e33: 1
+    activeByDefault: 1
+    hasAnimatedTransform: 0
+  - hierarchyPath: 0:Robot arm/0:Robot Arm_Bottom
+    animationPath: Robot Arm_Bottom
+    parentIndex: 0
+    localPosition: {x: 0, y: 0, z: 0}
+    localRotation: {x: 0, y: 0, z: 0, w: 1}
+    localScale: {x: 1, y: 1, z: 1}
+    defaultLocalToRoot:
+      e00: 1
+      e01: 0
+      e02: 0
+      e03: 0
+      e10: 0
+      e11: 1
+      e12: 0
+      e13: 0
+      e20: 0
+      e21: 0
+      e22: 1
+      e23: 0
+      e30: 0
+      e31: 0
+      e32: 0
+      e33: 1
+    activeByDefault: 1
+    hasAnimatedTransform: 0
+  - hierarchyPath: 0:Robot arm/0:Robot Arm_Bottom/0:Body
+    animationPath: Robot Arm_Bottom/Body
+    parentIndex: 1
+    localPosition: {x: 0, y: 0.186, z: 0}
+    localRotation: {x: 0, y: 0, z: 0, w: 1}
+    localScale: {x: 1, y: 1, z: 1}
+    defaultLocalToRoot:
+      e00: 1
+      e01: 0
+      e02: 0
+      e03: 0
+      e10: 0
+      e11: 1
+      e12: 0
+      e13: 0.186
+      e20: 0
+      e21: 0
+      e22: 1
+      e23: 0
+      e30: 0
+      e31: 0
+      e32: 0
+      e33: 1
+    activeByDefault: 1
+    hasAnimatedTransform: 0
+  - hierarchyPath: 0:Robot arm/0:Robot Arm_Bottom/0:Body/0:Robot Arm_Body
+    animationPath: Robot Arm_Bottom/Body/Robot Arm_Body
+    parentIndex: 2
+    localPosition: {x: -0, y: 0, z: 0}
+    localRotation: {x: 0, y: 0, z: 0, w: 1}
+    localScale: {x: 1, y: 1, z: 1}
+    defaultLocalToRoot:
+      e00: 1
+      e01: 0
+      e02: 0
+      e03: 0
+      e10: 0
+      e11: 1
+      e12: 0
+      e13: 0.186
+      e20: 0
+      e21: 0
+      e22: 1
+      e23: 0
+      e30: 0
+      e31: 0
+      e32: 0
+      e33: 1
+    activeByDefault: 1
+    hasAnimatedTransform: 0
+  - hierarchyPath: 0:Robot arm/0:Robot Arm_Bottom/0:Body/0:Robot Arm_Body/0:Center
+    animationPath: Robot Arm_Bottom/Body/Robot Arm_Body/Center
+    parentIndex: 3
+    localPosition: {x: 0, y: -0.185, z: 0.191}
+    localRotation: {x: -0, y: -0, z: -0, w: 1}
+    localScale: {x: 1, y: 1, z: 1}
+    defaultLocalToRoot:
+      e00: 1
+      e01: 0
+      e02: 0
+      e03: 0
+      e10: 0
+      e11: 1
+      e12: 0
+      e13: 0.001000002
+      e20: 0
+      e21: 0
+      e22: 1
+      e23: 0.191
+      e30: 0
+      e31: 0
+      e32: 0
+      e33: 1
+    activeByDefault: 1
+    hasAnimatedTransform: 0
+  - hierarchyPath: 0:Robot arm/0:Robot Arm_Bottom/0:Body/0:Robot Arm_Body/0:Center/0:Arm_0
+    animationPath: Robot Arm_Bottom/Body/Robot Arm_Body/Center/Arm_0
+    parentIndex: 4
+    localPosition: {x: -0.09967336, y: 0.262, z: -0.134}
+    localRotation: {x: -0, y: -0, z: -0, w: 1}
+    localScale: {x: 1, y: 1, z: 1}
+    defaultLocalToRoot:
+      e00: 1
+      e01: 0
+      e02: 0
+      e03: -0.09967336
+      e10: 0
+      e11: 1
+      e12: 0
+      e13: 0.263
+      e20: 0
+      e21: 0
+      e22: 1
+      e23: 0.056999996
+      e30: 0
+      e31: 0
+      e32: 0
+      e33: 1
+    activeByDefault: 1
+    hasAnimatedTransform: 0
+  - hierarchyPath: 0:Robot arm/0:Robot Arm_Bottom/0:Body/0:Robot Arm_Body/0:Center/0:Arm_0/0:Arm_1
+    animationPath: Robot Arm_Bottom/Body/Robot Arm_Body/Center/Arm_0/Arm_1
+    parentIndex: 5
+    localPosition: {x: 0.08847906, y: 0.355, z: -0.051}
+    localRotation: {x: 0.5, y: 0, z: 0, w: 0.8660254}
+    localScale: {x: 1, y: 1, z: 1}
+    defaultLocalToRoot:
+      e00: 1
+      e01: 0
+      e02: 0
+      e03: -0.011194304
+      e10: 0
+      e11: 0.5
+      e12: -0.8660254
+      e13: 0.618
+      e20: 0
+      e21: 0.8660254
+      e22: 0.5
+      e23: 0.0059999973
+      e30: 0
+      e31: 0
+      e32: 0
+      e33: 1
+    activeByDefault: 1
+    hasAnimatedTransform: 1
+  - hierarchyPath: 0:Robot arm/0:Robot Arm_Bottom/0:Body/0:Robot Arm_Body/0:Center/0:Arm_0/0:Arm_1/0:Robot
+      Arm_Hand
+    animationPath: Robot Arm_Bottom/Body/Robot Arm_Body/Center/Arm_0/Arm_1/Robot
+      Arm_Hand
+    parentIndex: 6
+    localPosition: {x: -0.001, y: -0.126, z: -0.43}
+    localRotation: {x: -0.21643952, y: 0, z: 0, w: 0.97629607}
+    localScale: {x: 1, y: 1, z: 1}
+    defaultLocalToRoot:
+      e00: 1
+      e01: 0
+      e02: 0
+      e03: -0.012194306
+      e10: 0
+      e11: 0.81915194
+      e12: -0.57357657
+      e13: 0.9273909
+      e20: 0
+      e21: 0.57357657
+      e22: 0.81915194
+      e23: -0.31811923
+      e30: 0
+      e31: 0
+      e32: 0
+      e33: 1
+    activeByDefault: 1
+    hasAnimatedTransform: 0
+  - hierarchyPath: 0:Robot arm/0:Robot Arm_Bottom/0:Body/0:Robot Arm_Body/0:Center/0:Arm_0/0:Arm_1/0:Robot
+      Arm_Hand/0:Body
+    animationPath: Robot Arm_Bottom/Body/Robot Arm_Body/Center/Arm_0/Arm_1/Robot
+      Arm_Hand/Body
+    parentIndex: 7
+    localPosition: {x: -0, y: 0, z: 0}
+    localRotation: {x: 0.0000000037252903, y: -0.0000000037252903, z: -0.0022376105, w: 0.99999756}
+    localScale: {x: 1, y: 1, z: 1}
+    defaultLocalToRoot:
+      e00: 0.99999
+      e01: 0.0044752103
+      e02: -0.000000007467234
+      e03: -0.012194306
+      e10: -0.0036658812
+      e11: 0.8191438
+      e12: -0.57357657
+      e13: 0.9273909
+      e20: -0.0025668694
+      e21: 0.57357085
+      e22: 0.81915194
+      e23: -0.31811923
+      e30: 0
+      e31: 0
+      e32: 0
+      e33: 1
+    activeByDefault: 1
+    hasAnimatedTransform: 0
+  - hierarchyPath: 0:Robot arm/0:Robot Arm_Bottom/0:Body/0:Robot Arm_Body/0:Center/0:Arm_0/0:Arm_1/0:Robot
+      Arm_Hand/1:Right
+    animationPath: Robot Arm_Bottom/Body/Robot Arm_Body/Center/Arm_0/Arm_1/Robot
+      Arm_Hand/Right
+    parentIndex: 7
+    localPosition: {x: -0.06, y: -0, z: -0.169}
+    localRotation: {x: 0, y: -0, z: -0, w: 1}
+    localScale: {x: 1, y: 1, z: 1}
+    defaultLocalToRoot:
+      e00: 1
+      e01: 0
+      e02: 0
+      e03: -0.0721943
+      e10: 0
+      e11: 0.81915194
+      e12: -0.57357657
+      e13: 1.0243254
+      e20: 0
+      e21: 0.57357657
+      e22: 0.81915194
+      e23: -0.4565559
+      e30: 0
+      e31: 0
+      e32: 0
+      e33: 1
+    activeByDefault: 1
+    hasAnimatedTransform: 1
+  - hierarchyPath: 0:Robot arm/0:Robot Arm_Bottom/0:Body/0:Robot Arm_Body/0:Center/0:Arm_0/0:Arm_1/0:Robot
+      Arm_Hand/2:Left
+    animationPath: Robot Arm_Bottom/Body/Robot Arm_Body/Center/Arm_0/Arm_1/Robot
+      Arm_Hand/Left
+    parentIndex: 7
+    localPosition: {x: 0.06, y: 0, z: -0.169}
+    localRotation: {x: 0, y: -0, z: -0, w: 1}
+    localScale: {x: -1, y: 1, z: 1}
+    defaultLocalToRoot:
+      e00: -1
+      e01: 0
+      e02: 0
+      e03: 0.047805697
+      e10: 0
+      e11: 0.81915194
+      e12: -0.57357657
+      e13: 1.0243254
+      e20: 0
+      e21: 0.57357657
+      e22: 0.81915194
+      e23: -0.4565559
+      e30: 0
+      e31: 0
+      e32: 0
+      e33: 1
+    activeByDefault: 1
+    hasAnimatedTransform: 1
+  - hierarchyPath: 0:Robot arm/0:Robot Arm_Bottom/0:Body/0:Robot Arm_Body/0:Center/0:Arm_0/0:Arm_1/0:Robot
+      Arm_Hand/3:PortableObject
+    animationPath: Robot Arm_Bottom/Body/Robot Arm_Body/Center/Arm_0/Arm_1/Robot
+      Arm_Hand/PortableObject
+    parentIndex: 7
+    localPosition: {x: -0.0019999985, y: -0.013, z: -0.367}
+    localRotation: {x: 0.21643952, y: -0, z: -0, w: 0.97629607}
+    localScale: {x: 1, y: 1, z: 1}
+    defaultLocalToRoot:
+      e00: 1
+      e01: 0
+      e02: 0
+      e03: -0.014194302
+      e10: 0
+      e11: 0.5
+      e12: -0.8660254
+      e13: 1.1272446
+      e20: 0
+      e21: 0.8660254
+      e22: 0.5
+      e23: -0.6262045
+      e30: 0
+      e31: 0
+      e32: 0
+      e33: 1
+    activeByDefault: 1
+    hasAnimatedTransform: 0
+  - hierarchyPath: 0:Robot arm/0:Robot Arm_Bottom/0:Body/0:Robot Arm_Body/0:Center/0:Arm_0/0:Arm_1/0:Robot
+      Arm_Hand/3:PortableObject/0:Body
+    animationPath: Robot Arm_Bottom/Body/Robot Arm_Body/Center/Arm_0/Arm_1/Robot
+      Arm_Hand/PortableObject/Body
+    parentIndex: 11
+    localPosition: {x: 0, y: 0, z: 0}
+    localRotation: {x: 0, y: 0, z: 0, w: 1}
+    localScale: {x: 1, y: 1, z: 1}
+    defaultLocalToRoot:
+      e00: 1
+      e01: 0
+      e02: 0
+      e03: -0.014194302
+      e10: 0
+      e11: 0.5
+      e12: -0.8660254
+      e13: 1.1272446
+      e20: 0
+      e21: 0.8660254
+      e22: 0.5
+      e23: -0.6262045
+      e30: 0
+      e31: 0
+      e32: 0
+      e33: 1
+    activeByDefault: 1
+    hasAnimatedTransform: 0
+  - hierarchyPath: 0:Robot arm/0:Robot Arm_Bottom/1:PowerLinePoint
+    animationPath: Robot Arm_Bottom/PowerLinePoint
+    parentIndex: 1
+    localPosition: {x: 0, y: 0.264, z: 0.2021}
+    localRotation: {x: 0, y: 0, z: 0, w: 1}
+    localScale: {x: 1, y: 1, z: 1}
+    defaultLocalToRoot:
+      e00: 1
+      e01: 0
+      e02: 0
+      e03: 0
+      e10: 0
+      e11: 1
+      e12: 0
+      e13: 0.264
+      e20: 0
+      e21: 0
+      e22: 1
+      e23: 0.2021
+      e30: 0
+      e31: 0
+      e32: 0
+      e33: 1
+    activeByDefault: 1
+    hasAnimatedTransform: 0
+  renderParts:
+  - kind: 0
+    nodeIndex: 1
+    mesh: {fileID: 1105320367578091304, guid: 4834165d2c2f7f34c9a88b566d9d7eb4, type: 3}
+    material: {fileID: 2100000, guid: f019839209b895547b736521b6c72fce, type: 2}
+    subMeshIndex: 0
+    localBounds:
+      m_Center: {x: 0, y: 0.106054656, z: 0}
+      m_Extent: {x: 0.29941407, y: 0.10605467, z: 0.29941404}
+    layer: 0
+    renderingLayerMask: 1
+    shadowCastingMode: 1
+    receiveShadows: 0
+    enabledByDefault: 1
+  - kind: 0
+    nodeIndex: 4
+    mesh: {fileID: 4400702161093148050, guid: a4a3f084a69b09849aea75285cf8eca5, type: 3}
+    material: {fileID: 2100000, guid: 1bdd021228c9885448f2c19b6fcab20d, type: 2}
+    subMeshIndex: 0
+    localBounds:
+      m_Center: {x: -0.012468934, y: 0.3366791, z: -0.16418783}
+      m_Extent: {x: 0.15623048, y: 0.14682372, z: 0.1794555}
+    layer: 0
+    renderingLayerMask: 1
+    shadowCastingMode: 1
+    receiveShadows: 0
+    enabledByDefault: 1
+  - kind: 0
+    nodeIndex: 5
+    mesh: {fileID: -932648827855117281, guid: a4a3f084a69b09849aea75285cf8eca5, type: 3}
+    material: {fileID: 2100000, guid: 28facf7eee100014ba1eea2eaab37748, type: 2}
+    subMeshIndex: 0
+    localBounds:
+      m_Center: {x: 0.08720446, y: 0.1919013, z: -0.06827733}
+      m_Extent: {x: 0.13992187, y: 0.26855466, z: 0.13301879}
+    layer: 0
+    renderingLayerMask: 1
+    shadowCastingMode: 1
+    receiveShadows: 0
+    enabledByDefault: 1
+  - kind: 0
+    nodeIndex: 6
+    mesh: {fileID: 3581797078889487372, guid: a4a3f084a69b09849aea75285cf8eca5, type: 3}
+    material: {fileID: 2100000, guid: f5919fe42583bfe44bb1666c901e73bf, type: 2}
+    subMeshIndex: 0
+    localBounds:
+      m_Center: {x: -0.00064961985, y: -0.010786407, z: -0.14839812}
+      m_Extent: {x: 0.07780273, y: 0.18635246, z: 0.2911328}
+    layer: 0
+    renderingLayerMask: 1
+    shadowCastingMode: 1
+    receiveShadows: 0
+    enabledByDefault: 1
+  - kind: 0
+    nodeIndex: 8
+    mesh: {fileID: 6047364576717079604, guid: fec67bb49e4d6ce45b06e979c1d60fb3, type: 3}
+    material: {fileID: 2100000, guid: 70e2b656dcc18fe4ca6c7583abcdb61b, type: 2}
+    subMeshIndex: 0
+    localBounds:
+      m_Center: {x: 0.00016784668, y: -0.02037327, z: -0.0958365}
+      m_Extent: {x: 0.0992218, y: 0.08631313, z: 0.101739295}
+    layer: 0
+    renderingLayerMask: 1
+    shadowCastingMode: 1
+    receiveShadows: 0
+    enabledByDefault: 1
+  - kind: 0
+    nodeIndex: 9
+    mesh: {fileID: -3488966222827643449, guid: fec67bb49e4d6ce45b06e979c1d60fb3, type: 3}
+    material: {fileID: 2100000, guid: 15f2681191d9dcf46a4c151bf6a84ae1, type: 2}
+    subMeshIndex: 0
+    localBounds:
+      m_Center: {x: -0.033885755, y: -0.0000000018626451, z: -0.09620017}
+      m_Extent: {x: 0.054681398, y: 0.041041344, z: 0.11750607}
+    layer: 0
+    renderingLayerMask: 1
+    shadowCastingMode: 1
+    receiveShadows: 0
+    enabledByDefault: 1
+  - kind: 0
+    nodeIndex: 10
+    mesh: {fileID: -3488966222827643449, guid: fec67bb49e4d6ce45b06e979c1d60fb3, type: 3}
+    material: {fileID: 2100000, guid: 15f2681191d9dcf46a4c151bf6a84ae1, type: 2}
+    subMeshIndex: 0
+    localBounds:
+      m_Center: {x: -0.033885755, y: -0.0000000018626451, z: -0.09620017}
+      m_Extent: {x: 0.054681398, y: 0.041041344, z: 0.11750607}
+    layer: 0
+    renderingLayerMask: 1
+    shadowCastingMode: 1
+    receiveShadows: 0
+    enabledByDefault: 1
+  animationClips:
+  - clip: {fileID: 7400000, guid: 971e5fd9c28c9ba40a3598922a0421a2, type: 2}
+    lengthSeconds: 1
+    frameRate: 60
+    looping: 0
+    transformCurveCount: 9
+    objectReferenceCurveCount: 0
+  - clip: {fileID: 7400000, guid: bad992e31a4a5974cb526e0f2e5dac82, type: 2}
+    lengthSeconds: 1
+    frameRate: 60
+    looping: 0
+    transformCurveCount: 9
+    objectReferenceCurveCount: 0

@@ -1,0 +1,369 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: a4d286e989be41fe853b78a59ca3a4e8, type: 3}
+  m_Name: MapObjectArchetype_104_Steam train
+  m_EditorClassIdentifier: Assembly-CSharp::ProjectF.MapObjects.MapObjectArchetype
+  schemaVersion: 1
+  itemDefinition: {fileID: 11400000, guid: 4d68593c4bba3a34487b0f60cff9fd9e, type: 2}
+  sourcePrefab: {fileID: 6151593433542269344, guid: d719f22bffbaf23419a1efce8f6354f9, type: 3}
+  itemId: 104
+  itemName: Steam train
+  sourcePrefabGuid: d719f22bffbaf23419a1efce8f6354f9
+  sourceContentHash:
+    serializedVersion: 2
+    Hash: a49b788e6f3e2ebadd9b23cd0d6ad5b0
+  sourceRuntimeType: SteamTrain, Assembly-CSharp, Version=0.0.0.0, Culture=neutral,
+    PublicKeyToken=null
+  mapStatus:
+    mapSizeX: 1
+    mapSizeY: 1
+    centerCellX: 0
+    centerCellY: 0
+  focusMode: 1
+  defaultRootScale: {x: 1, y: 1, z: 1}
+  defaultRootRotation: {x: 0, y: 0, z: 0, w: 1}
+  localRenderBounds:
+    m_Center: {x: 0, y: 0.6167166, z: 0.0434497}
+    m_Extent: {x: 0.3940776, y: 0.60091615, z: 0.63395965}
+  hasRenderBounds: 1
+  featureFlags: 72
+  nodes:
+  - hierarchyPath: 0:Steam train
+    animationPath: 
+    parentIndex: -1
+    localPosition: {x: 0, y: 0, z: 0}
+    localRotation: {x: 0, y: 0, z: 0, w: 1}
+    localScale: {x: 1, y: 1, z: 1}
+    defaultLocalToRoot:
+      e00: 1
+      e01: 0
+      e02: 0
+      e03: 0
+      e10: 0
+      e11: 1
+      e12: 0
+      e13: 0
+      e20: 0
+      e21: 0
+      e22: 1
+      e23: 0
+      e30: 0
+      e31: 0
+      e32: 0
+      e33: 1
+    activeByDefault: 1
+    hasAnimatedTransform: 0
+  - hierarchyPath: 0:Steam train/0:Body
+    animationPath: Body
+    parentIndex: 0
+    localPosition: {x: 0, y: 0, z: 0.045}
+    localRotation: {x: 0, y: 0, z: 0, w: 1}
+    localScale: {x: 1, y: 1, z: 1}
+    defaultLocalToRoot:
+      e00: 1
+      e01: 0
+      e02: 0
+      e03: 0
+      e10: 0
+      e11: 1
+      e12: 0
+      e13: 0
+      e20: 0
+      e21: 0
+      e22: 1
+      e23: 0.045
+      e30: 0
+      e31: 0
+      e32: 0
+      e33: 1
+    activeByDefault: 1
+    hasAnimatedTransform: 0
+  - hierarchyPath: 0:Steam train/1:PlayerPoint
+    animationPath: PlayerPoint
+    parentIndex: 0
+    localPosition: {x: 0, y: 0.414, z: -0.286}
+    localRotation: {x: 0, y: 0, z: 0, w: 1}
+    localScale: {x: 1, y: 1, z: 1}
+    defaultLocalToRoot:
+      e00: 1
+      e01: 0
+      e02: 0
+      e03: 0
+      e10: 0
+      e11: 1
+      e12: 0
+      e13: 0.414
+      e20: 0
+      e21: 0
+      e22: 1
+      e23: -0.286
+      e30: 0
+      e31: 0
+      e32: 0
+      e33: 1
+    activeByDefault: 1
+    hasAnimatedTransform: 0
+  - hierarchyPath: 0:Steam train/2:Coupler
+    animationPath: Coupler
+    parentIndex: 0
+    localPosition: {x: 0, y: 0.264, z: 0.043}
+    localRotation: {x: -0, y: -0, z: -0, w: 1}
+    localScale: {x: 1, y: 1, z: 1}
+    defaultLocalToRoot:
+      e00: 1
+      e01: 0
+      e02: 0
+      e03: 0
+      e10: 0
+      e11: 1
+      e12: 0
+      e13: 0.264
+      e20: 0
+      e21: 0
+      e22: 1
+      e23: 0.043
+      e30: 0
+      e31: 0
+      e32: 0
+      e33: 1
+    activeByDefault: 1
+    hasAnimatedTransform: 0
+  - hierarchyPath: 0:Steam train/3:WheelJoint
+    animationPath: WheelJoint
+    parentIndex: 0
+    localPosition: {x: 0, y: 0.16199994, z: 0.09999995}
+    localRotation: {x: -0, y: -0, z: -0, w: 1}
+    localScale: {x: 1, y: 1, z: 1}
+    defaultLocalToRoot:
+      e00: 1
+      e01: 0
+      e02: 0
+      e03: 0
+      e10: 0
+      e11: 1
+      e12: 0
+      e13: 0.16199994
+      e20: 0
+      e21: 0
+      e22: 1
+      e23: 0.09999995
+      e30: 0
+      e31: 0
+      e32: 0
+      e33: 1
+    activeByDefault: 1
+    hasAnimatedTransform: 0
+  - hierarchyPath: 0:Steam train/3:WheelJoint/0:Wheel
+    animationPath: WheelJoint/Wheel
+    parentIndex: 4
+    localPosition: {x: 0, y: -0.0019999444, z: 0.32600006}
+    localRotation: {x: -0, y: -0, z: -0, w: 1}
+    localScale: {x: 1, y: 1, z: 1}
+    defaultLocalToRoot:
+      e00: 1
+      e01: 0
+      e02: 0
+      e03: 0
+      e10: 0
+      e11: 1
+      e12: 0
+      e13: 0.16
+      e20: 0
+      e21: 0
+      e22: 1
+      e23: 0.426
+      e30: 0
+      e31: 0
+      e32: 0
+      e33: 1
+    activeByDefault: 1
+    hasAnimatedTransform: 0
+  - hierarchyPath: 0:Steam train/3:WheelJoint/1:Wheel (1)
+    animationPath: WheelJoint/Wheel (1)
+    parentIndex: 4
+    localPosition: {x: 0, y: -0.0019999295, z: -0.33199996}
+    localRotation: {x: -0, y: -0, z: -0, w: 1}
+    localScale: {x: 1, y: 1, z: 1}
+    defaultLocalToRoot:
+      e00: 1
+      e01: 0
+      e02: 0
+      e03: 0
+      e10: 0
+      e11: 1
+      e12: 0
+      e13: 0.16000001
+      e20: 0
+      e21: 0
+      e22: 1
+      e23: -0.23200001
+      e30: 0
+      e31: 0
+      e32: 0
+      e33: 1
+    activeByDefault: 1
+    hasAnimatedTransform: 0
+  - hierarchyPath: 0:Steam train/4:Smoke_White
+    animationPath: Smoke_White
+    parentIndex: 0
+    localPosition: {x: 0, y: 1.21, z: 0.516}
+    localRotation: {x: 0, y: 0, z: 0, w: 1}
+    localScale: {x: 1, y: 1, z: 1}
+    defaultLocalToRoot:
+      e00: 1
+      e01: 0
+      e02: 0
+      e03: 0
+      e10: 0
+      e11: 1
+      e12: 0
+      e13: 1.21
+      e20: 0
+      e21: 0
+      e22: 1
+      e23: 0.516
+      e30: 0
+      e31: 0
+      e32: 0
+      e33: 1
+    activeByDefault: 1
+    hasAnimatedTransform: 0
+  - hierarchyPath: 0:Steam train/4:Smoke_White/0:Smoke
+    animationPath: Smoke_White/Smoke
+    parentIndex: 7
+    localPosition: {x: 0, y: 0, z: 0}
+    localRotation: {x: -0.7071068, y: -0, z: -0, w: 0.7071068}
+    localScale: {x: 1, y: 1, z: 1}
+    defaultLocalToRoot:
+      e00: 1
+      e01: 0
+      e02: 0
+      e03: 0
+      e10: 0
+      e11: -0.00000011920929
+      e12: 1.0000001
+      e13: 1.21
+      e20: 0
+      e21: -1.0000001
+      e22: -0.00000011920929
+      e23: 0.516
+      e30: 0
+      e31: 0
+      e32: 0
+      e33: 1
+    activeByDefault: 1
+    hasAnimatedTransform: 0
+  - hierarchyPath: 0:Steam train/5:Pipe
+    animationPath: Pipe
+    parentIndex: 0
+    localPosition: {x: 0, y: 0.4, z: 0}
+    localRotation: {x: -0, y: -0, z: -0, w: 1}
+    localScale: {x: 1, y: 1, z: 1}
+    defaultLocalToRoot:
+      e00: 1
+      e01: 0
+      e02: 0
+      e03: 0
+      e10: 0
+      e11: 1
+      e12: 0
+      e13: 0.4
+      e20: 0
+      e21: 0
+      e22: 1
+      e23: 0
+      e30: 0
+      e31: 0
+      e32: 0
+      e33: 1
+    activeByDefault: 1
+    hasAnimatedTransform: 0
+  renderParts:
+  - kind: 0
+    nodeIndex: 1
+    mesh: {fileID: -372628140832948172, guid: 1d53817a5d6658a4ab75829c8732f437, type: 3}
+    material: {fileID: 2100000, guid: 85f1ce544db465e4498b63baff976252, type: 2}
+    subMeshIndex: 0
+    localBounds:
+      m_Center: {x: 0.000000059604645, y: 0.65881634, z: 0.08099997}
+      m_Extent: {x: 0.34029087, y: 0.55881643, z: 0.5514094}
+    layer: 0
+    renderingLayerMask: 1
+    shadowCastingMode: 1
+    receiveShadows: 1
+    enabledByDefault: 1
+  - kind: 0
+    nodeIndex: 3
+    mesh: {fileID: 4300000, guid: 314007493f3a7ac4eacd27a777e45d6a, type: 2}
+    material: {fileID: 2100000, guid: f8dcf2a2c290e6545b35da5512403502, type: 2}
+    subMeshIndex: 0
+    localBounds:
+      m_Center: {x: 0.000000007450581, y: 0, z: -0.03546545}
+      m_Extent: {x: 0.06750001, y: 0.06863308, z: 0.5980445}
+    layer: 0
+    renderingLayerMask: 1
+    shadowCastingMode: 1
+    receiveShadows: 1
+    enabledByDefault: 1
+  - kind: 0
+    nodeIndex: 4
+    mesh: {fileID: 4300000, guid: 0ff8b22c3ae8ecb469f2793ac1bac9d0, type: 2}
+    material: {fileID: 2100000, guid: 30367c74e2faa634b8a9cfb4c5f8f98a, type: 2}
+    subMeshIndex: 0
+    localBounds:
+      m_Center: {x: -0.000000014901161, y: 0, z: 0}
+      m_Extent: {x: 0.3940776, y: 0.04577131, z: 0.37867135}
+    layer: 0
+    renderingLayerMask: 1
+    shadowCastingMode: 1
+    receiveShadows: 1
+    enabledByDefault: 1
+  - kind: 0
+    nodeIndex: 5
+    mesh: {fileID: 4300000, guid: c3774876f501b4f4c96c941f58e48f00, type: 2}
+    material: {fileID: 2100000, guid: 2077e6b8af2db6a438786f2f4ff8dfa0, type: 2}
+    subMeshIndex: 0
+    localBounds:
+      m_Center: {x: 0, y: 0.000031098723, z: 0.010907792}
+      m_Extent: {x: 0.37774882, y: 0.14423063, z: 0.14316478}
+    layer: 0
+    renderingLayerMask: 1
+    shadowCastingMode: 1
+    receiveShadows: 1
+    enabledByDefault: 1
+  - kind: 0
+    nodeIndex: 6
+    mesh: {fileID: 4300000, guid: c3774876f501b4f4c96c941f58e48f00, type: 2}
+    material: {fileID: 2100000, guid: 2077e6b8af2db6a438786f2f4ff8dfa0, type: 2}
+    subMeshIndex: 0
+    localBounds:
+      m_Center: {x: 0, y: 0.000031098723, z: 0.010907792}
+      m_Extent: {x: 0.37774882, y: 0.14423063, z: 0.14316478}
+    layer: 0
+    renderingLayerMask: 1
+    shadowCastingMode: 1
+    receiveShadows: 1
+    enabledByDefault: 1
+  - kind: 0
+    nodeIndex: 9
+    mesh: {fileID: 4300000, guid: c2ba6cf41842b3e45b470c83e392ca62, type: 2}
+    material: {fileID: 2100000, guid: f8dcf2a2c290e6545b35da5512403502, type: 2}
+    subMeshIndex: 0
+    localBounds:
+      m_Center: {x: 0.000000014901161, y: 0, z: 0}
+      m_Extent: {x: 0.121896245, y: 0.23750003, z: 0.23749998}
+    layer: 0
+    renderingLayerMask: 1
+    shadowCastingMode: 1
+    receiveShadows: 1
+    enabledByDefault: 1
+  animationClips: []

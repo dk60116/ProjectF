@@ -80,6 +80,8 @@ public partial class Block : BaseObject
     [SerializeField, ReadOnly]
     private Resource resource;
     private ConveyorBelt runtimeConveyorOverride;
+    private ConveyorRuntimeRecord runtimeConveyorRecord;
+    private ConveyorRuntimeRecord runtimeConveyorRecordOverride;
 
     [SerializeField]
     private Transform floorObjectDropAnchor;
@@ -379,6 +381,12 @@ public partial class Block : BaseObject
         bool wasConveyor = IsConveyorStackingEnabled();
         bool wasFluidDirectionObject = IsFluidDirectionMapObject(mapObject);
 
+        if (!(value is ConveyorBelt))
+        {
+            runtimeConveyorRecord = null;
+            runtimeConveyorRecordOverride = null;
+        }
+
         Resource existingResource = resource != null ? resource : mapObject as Resource;
         if (value is Resource nextResource)
         {
@@ -419,8 +427,15 @@ public partial class Block : BaseObject
                 RefreshBeltDirectionDebugVisuals();
             }
 
-            previousConveyorBelt?.RefreshEndpointVisualsAndNeighbors();
-            if (mapObject is ConveyorBelt currentConveyorBelt && currentConveyorBelt != previousConveyorBelt)
+            if (runtimeConveyorRecord == null && IsSceneInstance(previousConveyorBelt))
+            {
+                previousConveyorBelt.RefreshEndpointVisualsAndNeighbors();
+            }
+
+            if (runtimeConveyorRecord == null
+                && mapObject is ConveyorBelt currentConveyorBelt
+                && currentConveyorBelt != previousConveyorBelt
+                && IsSceneInstance(currentConveyorBelt))
             {
                 currentConveyorBelt.RefreshEndpointVisualsAndNeighbors();
             }
@@ -562,6 +577,53 @@ public partial class Block : BaseObject
         {
             DestroyImmediate(target.gameObject);
         }
+    }
+
+    public void BindRuntimeConveyor(ConveyorRuntimeRecord record)
+    {
+        if (record == null)
+        {
+            if (runtimeConveyorRecord != null)
+            {
+                SetMapObject(null);
+            }
+
+            return;
+        }
+
+        runtimeConveyorRecord = record;
+        SetMapObject(record.Prototype);
+    }
+
+    public bool TryGetRuntimeConveyorRecord(out ConveyorRuntimeRecord record)
+    {
+        if (runtimeConveyorRecordOverride != null)
+        {
+            record = runtimeConveyorRecordOverride;
+            return true;
+        }
+
+        if (runtimeConveyorRecord != null && runtimeConveyorRecord.Covers(coordinate))
+        {
+            record = runtimeConveyorRecord;
+            return true;
+        }
+
+        ConveyorWorld world = ConveyorWorld.Current;
+        if (world != null && world.TryGetAtCoordinate(coordinate, out record))
+        {
+            return true;
+        }
+
+        record = null;
+        return false;
+    }
+
+    private static bool IsSceneInstance(Component component)
+    {
+        return component != null
+               && component.gameObject != null
+               && component.gameObject.scene.IsValid();
     }
 
     internal void ClearResource(Resource expectedResource)
@@ -1471,6 +1533,12 @@ public partial class Block : BaseObject
     private bool TryGetRuntimeConveyorBelt(out ConveyorBelt conveyorBelt)
     {
         conveyorBelt = null;
+        if (TryGetRuntimeConveyorRecord(out ConveyorRuntimeRecord record))
+        {
+            conveyorBelt = record.Prototype;
+            return conveyorBelt != null;
+        }
+
         if (IsActiveRuntimeConveyor(runtimeConveyorOverride))
         {
             conveyorBelt = runtimeConveyorOverride;
@@ -1508,11 +1576,34 @@ public partial class Block : BaseObject
 
     private bool TryGetPlayerRuntimeConveyorBelt(out ConveyorBelt conveyorBelt)
     {
+        return TryGetPlayerRuntimeConveyor(out conveyorBelt, out _);
+    }
+
+    private bool TryGetPlayerRuntimeConveyor(
+        out ConveyorBelt conveyorBelt,
+        out ConveyorRuntimeRecord record)
+    {
+        record = null;
+        ConveyorWorld conveyorWorld = ConveyorWorld.Current;
+        if (conveyorWorld != null
+            && conveyorWorld.TryGetBelt2FAtCoordinate(coordinate, out ConveyorRuntimeRecord belt2FRecord))
+        {
+            record = belt2FRecord;
+            conveyorBelt = belt2FRecord.Prototype;
+            return conveyorBelt != null;
+        }
+
         if (ConvayorBelt2F.TryFindCoveringBelt(coordinate, out ConvayorBelt2F belt2F)
             && IsActiveRuntimeConveyor(belt2F))
         {
             conveyorBelt = belt2F;
             return true;
+        }
+
+        if (TryGetRuntimeConveyorRecord(out record))
+        {
+            conveyorBelt = record.Prototype;
+            return conveyorBelt != null;
         }
 
         return TryGetRuntimeConveyorBelt(out conveyorBelt);
@@ -1527,6 +1618,11 @@ public partial class Block : BaseObject
     private bool TryGetRuntimeBelt2F(out ConvayorBelt2F belt2F)
     {
         belt2F = null;
+        if (TryGetRuntimeBelt2FRecord(out _))
+        {
+            return false;
+        }
+
         if (TryGetRuntimeConveyorBelt(out ConveyorBelt conveyorBelt)
             && conveyorBelt is ConvayorBelt2F resolvedBelt2F)
         {
@@ -1534,6 +1630,31 @@ public partial class Block : BaseObject
             return true;
         }
 
+        return false;
+    }
+
+    private bool TryGetRuntimeBelt2FRecord(out ConveyorRuntimeRecord record)
+    {
+        if (TryGetRuntimeConveyorRecord(out record) && record.IsBelt2F)
+        {
+            return true;
+        }
+
+        record = null;
+        return false;
+    }
+
+    private bool TryGetBelt2FBridgeCenterRecord(out ConveyorRuntimeRecord record)
+    {
+        ConveyorWorld world = ConveyorWorld.Current;
+        if (world != null
+            && world.TryGetBelt2FAtCoordinate(coordinate, out record)
+            && record.IsBridgeCenter(coordinate))
+        {
+            return true;
+        }
+
+        record = null;
         return false;
     }
 
@@ -1600,6 +1721,15 @@ public partial class Block : BaseObject
                && ReferenceEquals(centerBelt, belt2F);
     }
 
+    private bool IsBelt2FBridgeCenterFor(ConveyorRuntimeRecord record)
+    {
+        return record != null
+               && record.IsBelt2F
+               && record.IsBridgeCenter(coordinate)
+               && TryGetBelt2FBridgeCenterRecord(out ConveyorRuntimeRecord centerRecord)
+               && ReferenceEquals(centerRecord, record);
+    }
+
     private static bool IsBelt2FBridgeLaneIndex(int laneIndex)
     {
         return laneIndex == 1 || laneIndex == 3;
@@ -1609,6 +1739,7 @@ public partial class Block : BaseObject
     {
         return IsActiveConveyorLaneIndex(laneIndex)
                || (laneIndex == ConveyorSideExitLaneIndex && HasConveyorSideExitLane())
+               || (IsBelt2FBridgeLaneIndex(laneIndex) && TryGetBelt2FBridgeCenterRecord(out _))
                || (IsBelt2FBridgeLaneIndex(laneIndex) && TryGetBelt2FBridgeCenterBelt(out _));
     }
 
@@ -1619,20 +1750,24 @@ public partial class Block : BaseObject
 
     public bool HasRuntimeBelt2FConveyor()
     {
-        return TryGetRuntimeBelt2F(out _)
+        return TryGetRuntimeBelt2FRecord(out _)
+               || TryGetBelt2FBridgeCenterRecord(out _)
+               || TryGetRuntimeBelt2F(out _)
                || TryGetBelt2FBridgeCenterBelt(out _);
     }
 
     public bool TryGetConveyorStandingDistanceSqr(Vector3 worldPosition, out float distanceSqr)
     {
         distanceSqr = float.MaxValue;
-        if (!TryGetPlayerRuntimeConveyorBelt(out ConveyorBelt playerConveyor))
+        if (!TryGetPlayerRuntimeConveyor(out ConveyorBelt playerConveyor, out ConveyorRuntimeRecord playerRecord))
         {
             return false;
         }
 
         ConveyorBelt previousOverride = runtimeConveyorOverride;
+        ConveyorRuntimeRecord previousRecordOverride = runtimeConveyorRecordOverride;
         runtimeConveyorOverride = playerConveyor;
+        runtimeConveyorRecordOverride = playerRecord;
         try
         {
             if (!IsConveyorStackingEnabled())
@@ -1665,19 +1800,22 @@ public partial class Block : BaseObject
         finally
         {
             runtimeConveyorOverride = previousOverride;
+            runtimeConveyorRecordOverride = previousRecordOverride;
         }
     }
 
     public bool TryGetConveyorCarryVelocity(Vector3 worldPosition, out Vector3 velocity)
     {
         velocity = Vector3.zero;
-        if (!TryGetPlayerRuntimeConveyorBelt(out ConveyorBelt playerConveyor))
+        if (!TryGetPlayerRuntimeConveyor(out ConveyorBelt playerConveyor, out ConveyorRuntimeRecord playerRecord))
         {
             return false;
         }
 
         ConveyorBelt previousOverride = runtimeConveyorOverride;
+        ConveyorRuntimeRecord previousRecordOverride = runtimeConveyorRecordOverride;
         runtimeConveyorOverride = playerConveyor;
+        runtimeConveyorRecordOverride = playerRecord;
         try
         {
             if (!IsConveyorStackingEnabled())
@@ -1726,6 +1864,7 @@ public partial class Block : BaseObject
         finally
         {
             runtimeConveyorOverride = previousOverride;
+            runtimeConveyorRecordOverride = previousRecordOverride;
         }
     }
 
@@ -1752,18 +1891,26 @@ public partial class Block : BaseObject
     public bool TryGetConveyorStandingWorldHeight(Vector3 worldPosition, out float worldHeight)
     {
         worldHeight = 0f;
-        if (!TryGetPlayerRuntimeConveyorBelt(out ConveyorBelt playerConveyor))
+        if (!TryGetPlayerRuntimeConveyor(out ConveyorBelt playerConveyor, out ConveyorRuntimeRecord playerRecord))
         {
             return false;
         }
 
         ConveyorBelt previousOverride = runtimeConveyorOverride;
+        ConveyorRuntimeRecord previousRecordOverride = runtimeConveyorRecordOverride;
         runtimeConveyorOverride = playerConveyor;
+        runtimeConveyorRecordOverride = playerRecord;
         try
         {
             if (!IsConveyorStackingEnabled())
             {
                 return false;
+            }
+
+            if (runtimeConveyorRecordOverride != null && runtimeConveyorRecordOverride.IsBelt2F)
+            {
+                worldHeight = runtimeConveyorRecordOverride.ApplyBelt2FPathHeight(worldPosition).y;
+                return true;
             }
 
             if (playerConveyor is ConvayorBelt2F belt2F)
@@ -1778,6 +1925,7 @@ public partial class Block : BaseObject
         finally
         {
             runtimeConveyorOverride = previousOverride;
+            runtimeConveyorRecordOverride = previousRecordOverride;
         }
     }
 
@@ -1785,6 +1933,19 @@ public partial class Block : BaseObject
     {
         lowerDirection = Vector3.zero;
         upperDirection = Vector3.zero;
+        ConveyorWorld world = ConveyorWorld.Current;
+        if (TryGetRuntimeConveyorRecord(out ConveyorRuntimeRecord lowerRecord)
+            && lowerRecord != null
+            && !lowerRecord.IsBelt2F
+            && world != null
+            && world.TryGetBelt2FAtCoordinate(coordinate, out ConveyorRuntimeRecord upperRecord)
+            && TryGetFlatOutputDirection(lowerRecord, out lowerDirection)
+            && TryGetFlatOutputDirection(upperRecord, out upperDirection)
+            && Mathf.Abs(Vector3.Dot(lowerDirection, upperDirection)) <= 0.0001f)
+        {
+            return true;
+        }
+
         if (!(mapObject is ConveyorBelt mappedConveyor)
             || mappedConveyor is ConvayorBelt2F
             || !IsActiveRuntimeConveyor(mappedConveyor)
@@ -1800,6 +1961,22 @@ public partial class Block : BaseObject
         }
 
         return true;
+    }
+
+    private static bool TryGetFlatOutputDirection(
+        ConveyorRuntimeRecord record,
+        out Vector3 direction)
+    {
+        direction = Vector3.zero;
+        if (record == null
+            || !record.TryGetOutputDirection(out Vector2Int outputDirection)
+            || outputDirection == Vector2Int.zero)
+        {
+            return false;
+        }
+
+        direction = new Vector3(outputDirection.x, 0f, outputDirection.y).normalized;
+        return direction.sqrMagnitude > 0.0001f;
     }
 
     private static bool TryGetFlatOutputDirection(ConveyorBelt conveyorBelt, out Vector3 direction)
@@ -1819,13 +1996,15 @@ public partial class Block : BaseObject
     public bool TryGetConveyorCarryDelta(Vector3 worldPosition, float deltaTime, out Vector3 delta)
     {
         delta = Vector3.zero;
-        if (!TryGetPlayerRuntimeConveyorBelt(out ConveyorBelt playerConveyor))
+        if (!TryGetPlayerRuntimeConveyor(out ConveyorBelt playerConveyor, out ConveyorRuntimeRecord playerRecord))
         {
             return false;
         }
 
         ConveyorBelt previousOverride = runtimeConveyorOverride;
+        ConveyorRuntimeRecord previousRecordOverride = runtimeConveyorRecordOverride;
         runtimeConveyorOverride = playerConveyor;
+        runtimeConveyorRecordOverride = playerRecord;
         try
         {
             if (!IsConveyorStackingEnabled() || deltaTime <= 0f)
@@ -1858,11 +2037,22 @@ public partial class Block : BaseObject
         finally
         {
             runtimeConveyorOverride = previousOverride;
+            runtimeConveyorRecordOverride = previousRecordOverride;
         }
     }
 
     private Vector3 ApplyConveyorCarryPathHeightDelta(Vector3 worldPosition, Vector3 delta)
     {
+        if (delta.sqrMagnitude > 0.0000001f
+            && TryGetRuntimeConveyorRecord(out ConveyorRuntimeRecord record)
+            && record.IsBelt2F)
+        {
+            Vector3 currentRecordPathPosition = record.ApplyBelt2FPathHeight(worldPosition);
+            Vector3 nextRecordPathPosition = record.ApplyBelt2FPathHeight(worldPosition + delta);
+            delta.y += nextRecordPathPosition.y - currentRecordPathPosition.y;
+            return delta;
+        }
+
         if (delta.sqrMagnitude <= 0.0000001f
             || !TryGetRuntimeConveyorBelt(out ConveyorBelt conveyorBelt)
             || !(conveyorBelt is ConvayorBelt2F belt2F))
@@ -1880,13 +2070,15 @@ public partial class Block : BaseObject
     {
         resultingBlock = this;
         delta = Vector3.zero;
-        if (!TryGetPlayerRuntimeConveyorBelt(out ConveyorBelt playerConveyor))
+        if (!TryGetPlayerRuntimeConveyor(out ConveyorBelt playerConveyor, out ConveyorRuntimeRecord playerRecord))
         {
             return false;
         }
 
         ConveyorBelt previousOverride = runtimeConveyorOverride;
+        ConveyorRuntimeRecord previousRecordOverride = runtimeConveyorRecordOverride;
         runtimeConveyorOverride = playerConveyor;
+        runtimeConveyorRecordOverride = playerRecord;
         try
         {
             if (!IsConveyorStackingEnabled() || deltaTime <= 0f)
@@ -1916,6 +2108,7 @@ public partial class Block : BaseObject
         finally
         {
             runtimeConveyorOverride = previousOverride;
+            runtimeConveyorRecordOverride = previousRecordOverride;
         }
     }
 
@@ -3873,6 +4066,8 @@ public partial class Block : BaseObject
             if (mapObject != null
                 || Resource != null
                 || runtimeConveyorOverride != null
+                || runtimeConveyorRecord != null
+                || runtimeConveyorRecordOverride != null
                 || focus != null
                 || inputAreaCenterAnchor != null
                 || conveyorSlotDotRoot != null
@@ -4119,8 +4314,11 @@ public partial class Block : BaseObject
         CleanupConveyorStack();
         return Application.isPlaying
             && IsConveyorStackingEnabled()
+            && !TryGetRuntimeBelt2FRecord(out _)
             && !TryGetRuntimeBelt2F(out _)
+            && !TryGetRuntimeSplitterRecord(out _)
             && !TryGetRuntimeSplitter(out _)
+            && !TryGetBelt2FBridgeCenterRecord(out _)
             && !TryGetBelt2FBridgeCenterBelt(out _)
             && !IsCornerConveyor()
             && !HasConveyorSideExitLane()
@@ -6831,6 +7029,12 @@ public partial class Block : BaseObject
     private bool TryGetBelt2FBridgeViaWorldPosition(out Vector3 viaWorldPosition)
     {
         viaWorldPosition = default;
+        if (TryGetRuntimeConveyorRecord(out ConveyorRuntimeRecord record) && record.IsBelt2F)
+        {
+            viaWorldPosition = record.Belt2FBridgePeakWorldPosition;
+            return true;
+        }
+
         return TryGetRuntimeConveyorBelt(out ConveyorBelt runtimeConveyor)
                && runtimeConveyor is ConvayorBelt2F belt2F
                && belt2F != null
@@ -8465,7 +8669,8 @@ public partial class Block : BaseObject
 
     private bool TryMoveBelt2FBridgeCenterLanes()
     {
-        if (!TryGetBelt2FBridgeCenterBelt(out _))
+        if (!TryGetBelt2FBridgeCenterRecord(out _)
+            && !TryGetBelt2FBridgeCenterBelt(out _))
         {
             return false;
         }
@@ -8689,6 +8894,11 @@ public partial class Block : BaseObject
 
     private float GetConveyorSpeed()
     {
+        if (TryGetRuntimeConveyorRecord(out ConveyorRuntimeRecord record))
+        {
+            return record.Speed;
+        }
+
         return TryGetRuntimeConveyorBelt(out ConveyorBelt conveyorBelt) ? conveyorBelt.ConveyorSpeed : 0f;
     }
 
@@ -8726,6 +8936,7 @@ public partial class Block : BaseObject
             || motionState.hasViaWorldPosition
             || motionState.duration <= ConveyorContinuousMotionEpsilon
             || !IsValidConveyorLaneIndex(motionState.destinationLaneIndex)
+            || TryGetConveyorItemBelt2FRecord(motionState.destinationLaneIndex, out _)
             || TryGetConveyorItemBelt2F(motionState.destinationLaneIndex, out _))
         {
             return false;
@@ -9113,6 +9324,11 @@ public partial class Block : BaseObject
 
     private Vector3 ConformConveyorItemToBelt2FPath(int laneIndex, Vector3 worldPosition)
     {
+        if (TryGetConveyorItemBelt2FRecord(laneIndex, out ConveyorRuntimeRecord record))
+        {
+            return record.ApplyBelt2FPathHeight(worldPosition);
+        }
+
         return TryGetConveyorItemBelt2F(laneIndex, out ConvayorBelt2F belt2F)
             ? belt2F.ApplyPathHeight(worldPosition)
             : worldPosition;
@@ -9138,12 +9354,30 @@ public partial class Block : BaseObject
 
     private Quaternion ResolveConveyorItemWorldRotation(int laneIndex, Vector3 worldPosition)
     {
+        if (TryGetConveyorItemBelt2FRecord(laneIndex, out ConveyorRuntimeRecord record))
+        {
+            return record.ResolveBelt2FPathItemRotation(worldPosition);
+        }
+
         if (TryGetConveyorItemBelt2F(laneIndex, out ConvayorBelt2F belt2F))
         {
             return belt2F.ResolvePathItemRotation(worldPosition);
         }
 
         return Quaternion.identity;
+    }
+
+    private bool TryGetConveyorItemBelt2FRecord(
+        int laneIndex,
+        out ConveyorRuntimeRecord record)
+    {
+        if (IsBelt2FBridgeLaneIndex(laneIndex)
+            && TryGetBelt2FBridgeCenterRecord(out record))
+        {
+            return true;
+        }
+
+        return TryGetRuntimeBelt2FRecord(out record);
     }
 
     private bool TryGetConveyorItemBelt2F(int laneIndex, out ConvayorBelt2F belt2F)
@@ -10912,6 +11146,14 @@ public partial class Block : BaseObject
             return;
         }
 
+        if (TryGetRuntimeBelt2FRecord(out ConveyorRuntimeRecord currentBelt2FRecord)
+            && nextBlock.IsBelt2FBridgeCenterFor(currentBelt2FRecord))
+        {
+            cachedNextConveyorBlock = nextBlock;
+            cachedHasNextConveyorBlock = true;
+            return;
+        }
+
         if (TryGetRuntimeBelt2F(out ConvayorBelt2F currentBelt2F)
             && nextBlock.IsBelt2FBridgeCenterFor(currentBelt2F))
         {
@@ -10963,6 +11205,12 @@ public partial class Block : BaseObject
             return false;
         }
 
+        if (TryGetRuntimeBelt2FRecord(out ConveyorRuntimeRecord currentBelt2FRecord)
+            && previousBlock.IsBelt2FBridgeCenterFor(currentBelt2FRecord))
+        {
+            return true;
+        }
+
         if (TryGetRuntimeBelt2F(out ConvayorBelt2F currentBelt2F)
             && previousBlock.IsBelt2FBridgeCenterFor(currentBelt2F))
         {
@@ -10997,7 +11245,9 @@ public partial class Block : BaseObject
             return false;
         }
 
-        if (receiverBlock != null && receiverBlock.TryGetRuntimeSplitter(out _))
+        if (receiverBlock != null
+            && (receiverBlock.TryGetRuntimeSplitterRecord(out _)
+                || receiverBlock.TryGetRuntimeSplitter(out _)))
             return receiverInputDirection == -incomingFlowDirection;
 
         if (receiverInputDirection == -incomingFlowDirection)
@@ -11008,8 +11258,11 @@ public partial class Block : BaseObject
         // 2F가 덮는 내부/중앙에서 직각으로 만난 1F 벨트는 물리적으로 교차할 뿐이다.
         // 단, 2F의 실제 입력/출력 가장자리에서 풋프린트 밖의 벨트와 만난 경우는
         // 일반 벨트의 측면 투입과 같은 T자 연결로 취급한다.
-        if (TryGetRuntimeBelt2F(out _)
-            || (receiverBlock != null && receiverBlock.TryGetRuntimeBelt2F(out _)))
+        if (TryGetRuntimeBelt2FRecord(out _)
+            || TryGetRuntimeBelt2F(out _)
+            || (receiverBlock != null
+                && (receiverBlock.TryGetRuntimeBelt2FRecord(out _)
+                    || receiverBlock.TryGetRuntimeBelt2F(out _))))
         {
             return CanUseBelt2FTerminalSideHandoff(
                 receiverBlock,
@@ -11034,11 +11287,24 @@ public partial class Block : BaseObject
             return false;
         }
 
+        if (TryGetRuntimeBelt2FRecord(out ConveyorRuntimeRecord sourceRecord))
+        {
+            return sourceRecord.IsOutputEdge(coordinate)
+                   && !sourceRecord.Covers(receiverBlock.coordinate)
+                   && !receiverBlock.TryGetRuntimeBelt2FRecord(out _);
+        }
+
         if (TryGetRuntimeBelt2F(out ConvayorBelt2F sourceBelt2F))
         {
             return sourceBelt2F.IsOutputEdgeCoordinate(coordinate)
                    && !sourceBelt2F.CoversCoordinate(receiverBlock.coordinate)
                    && !receiverBlock.TryGetRuntimeBelt2F(out _);
+        }
+
+        if (receiverBlock.TryGetRuntimeBelt2FRecord(out ConveyorRuntimeRecord receiverRecord))
+        {
+            return receiverRecord.IsInputEdge(receiverBlock.coordinate)
+                   && !receiverRecord.Covers(coordinate);
         }
 
         return receiverBlock.TryGetRuntimeBelt2F(out ConvayorBelt2F receiverBelt2F)
@@ -11060,6 +11326,28 @@ public partial class Block : BaseObject
         out Block resolvedBlock)
     {
         resolvedBlock = null;
+        if (terrainGenerator != null
+            && immediateBlock != null
+            && direction != Vector2Int.zero
+            && TryGetRuntimeBelt2FRecord(out ConveyorRuntimeRecord record)
+            && record.Covers(coordinate)
+            && record.Covers(immediateBlock.Coordinate)
+            && !immediateBlock.IsBelt2FBridgeCenterFor(record)
+            && immediateBlock.TryGetRuntimeConveyorRecord(out ConveyorRuntimeRecord centerRecord)
+            && centerRecord != null
+            && !centerRecord.IsBelt2F)
+        {
+            Vector2Int recordSkippedCoordinate = immediateBlock.Coordinate + direction;
+            if (terrainGenerator.TryGetLoadedBlock(recordSkippedCoordinate, out Block recordCandidate)
+                && recordCandidate != null
+                && recordCandidate != this
+                && record.Covers(recordCandidate.Coordinate))
+            {
+                resolvedBlock = recordCandidate;
+                return true;
+            }
+        }
+
         if (terrainGenerator == null
             || immediateBlock == null
             || direction == Vector2Int.zero
@@ -11168,6 +11456,51 @@ public partial class Block : BaseObject
     {
         sourceBlock = null;
         sourceLaneIndex = -1;
+        if (TryGetBelt2FBridgeCenterRecord(out ConveyorRuntimeRecord record))
+        {
+            if (destinationLaneIndex == 1)
+            {
+                sourceBlock = this;
+                sourceLaneIndex = 3;
+                return IsValidConveyorLaneIndex(sourceLaneIndex);
+            }
+
+            if (destinationLaneIndex != 3
+                || !record.TryGetInputDirection(out Vector2Int recordInputDirection)
+                || recordInputDirection == Vector2Int.zero
+                || !TryResolveOwningTerrainGenerator(out TerrainGenerator recordTerrain)
+                || recordTerrain == null)
+            {
+                return false;
+            }
+
+            Vector2Int recordPreviousCoordinate = coordinate + recordInputDirection;
+            if (!recordTerrain.TryGetLoadedBlock(recordPreviousCoordinate, out Block recordPreviousBlock)
+                || recordPreviousBlock == null
+                || recordPreviousBlock == this
+                || !record.Covers(recordPreviousBlock.Coordinate))
+            {
+                return false;
+            }
+
+            const int recordSourceLaneIndex = ConveyorSingleLineFrontLaneIndex;
+            if (!recordPreviousBlock.IsValidConveyorLaneIndex(recordSourceLaneIndex)
+                || !recordPreviousBlock.TryGetConveyorSuccessor(
+                    recordSourceLaneIndex,
+                    out Block recordDestination,
+                    out int recordDestinationLane,
+                    out _)
+                || recordDestination != this
+                || recordDestinationLane != destinationLaneIndex)
+            {
+                return false;
+            }
+
+            sourceBlock = recordPreviousBlock;
+            sourceLaneIndex = recordSourceLaneIndex;
+            return true;
+        }
+
         if (!TryGetBelt2FBridgeCenterBelt(out ConvayorBelt2F belt2F))
         {
             return false;
@@ -11269,7 +11602,22 @@ public partial class Block : BaseObject
             return false;
         }
 
-        if (TryGetRuntimeSplitter(out Spliterbelt splitter))
+        if (TryGetRuntimeSplitterRecord(out ConveyorRuntimeRecord splitterRecord))
+        {
+            if (splitterRecord.Speed <= 0f)
+            {
+                return false;
+            }
+
+            if (sourceLaneIndex == ConveyorSingleLineBackLaneIndex)
+            {
+                return TryGetSplitterSuccessor(
+                    splitterRecord,
+                    out destinationBlock,
+                    out destinationLaneIndex);
+            }
+        }
+        else if (TryGetRuntimeSplitter(out Spliterbelt splitter))
         {
             if (splitter.ConveyorSpeed <= 0f)
                 return false;
@@ -11347,6 +11695,11 @@ public partial class Block : BaseObject
     private bool TryGetConveyorFlowDirection(out Vector2Int flowDirection)
     {
         flowDirection = Vector2Int.zero;
+        if (TryGetRuntimeConveyorRecord(out ConveyorRuntimeRecord record))
+        {
+            return record.TryGetOutputDirection(out flowDirection);
+        }
+
         if (!TryGetRuntimeConveyorBelt(out ConveyorBelt conveyorBelt))
         {
             return false;
@@ -11358,6 +11711,11 @@ public partial class Block : BaseObject
     private bool TryGetConveyorInputDirection(out Vector2Int inputDirection)
     {
         inputDirection = Vector2Int.zero;
+        if (TryGetRuntimeConveyorRecord(out ConveyorRuntimeRecord record))
+        {
+            return record.TryGetInputDirection(out inputDirection);
+        }
+
         if (!TryGetRuntimeConveyorBelt(out ConveyorBelt conveyorBelt))
         {
             return false;
@@ -11451,6 +11809,24 @@ public partial class Block : BaseObject
         out int laneIndex)
     {
         laneIndex = -1;
+        if (TryGetBelt2FBridgeCenterRecord(out ConveyorRuntimeRecord record))
+        {
+            if (!record.IsUpperBelt2FWorldPosition(referenceWorldPosition))
+            {
+                return false;
+            }
+
+            const int recordBridgeBackLaneIndex = 3;
+            if (!IsValidConveyorLaneIndex(recordBridgeBackLaneIndex)
+                || (requireEmpty && HasConveyorItemAtLane(recordBridgeBackLaneIndex)))
+            {
+                return false;
+            }
+
+            laneIndex = recordBridgeBackLaneIndex;
+            return true;
+        }
+
         if (!TryGetBelt2FBridgeCenterBelt(out ConvayorBelt2F belt2F)
             || !belt2F.IsUpperPathWorldPosition(referenceWorldPosition))
         {
@@ -11559,6 +11935,11 @@ public partial class Block : BaseObject
 
     private bool IsCornerConveyor()
     {
+        if (TryGetRuntimeConveyorRecord(out ConveyorRuntimeRecord record))
+        {
+            return record.IsCorner;
+        }
+
         return TryGetRuntimeConveyorBelt(out ConveyorBelt conveyorBelt)
                && conveyorBelt.IsCornerVariant;
     }
@@ -11588,6 +11969,21 @@ public partial class Block : BaseObject
 
     private Vector3 ResolveConveyorLaneWorldPosition(int laneIndex, Vector3 worldPosition)
     {
+        if (TryGetBelt2FBridgeCenterRecord(out ConveyorRuntimeRecord centerRecord))
+        {
+            if (IsBelt2FBridgeLaneIndex(laneIndex))
+            {
+                centerRecord.TryGetBelt2FLaneWorldPosition(
+                    coordinate,
+                    laneIndex,
+                    worldPosition,
+                    out Vector3 bridgeLaneWorldPosition);
+                return bridgeLaneWorldPosition;
+            }
+
+            return worldPosition;
+        }
+
         if (TryGetBelt2FBridgeCenterBelt(out ConvayorBelt2F centerBelt2F))
         {
             if (IsBelt2FBridgeLaneIndex(laneIndex))
@@ -11602,11 +11998,23 @@ public partial class Block : BaseObject
             return worldPosition;
         }
 
+        if (TryGetRuntimeConveyorRecord(out ConveyorRuntimeRecord record)
+            && record.IsBelt2F)
+        {
+            return record.TryGetBelt2FLaneWorldPosition(
+                coordinate,
+                laneIndex,
+                worldPosition,
+                out Vector3 laneWorldPosition)
+                ? laneWorldPosition
+                : record.ApplyBelt2FPathHeight(worldPosition);
+        }
+
         if (TryGetRuntimeConveyorBelt(out ConveyorBelt conveyorBelt)
             && conveyorBelt is ConvayorBelt2F belt2F)
         {
-            return belt2F.TryGetLaneWorldPosition(coordinate, laneIndex, worldPosition, out Vector3 laneWorldPosition)
-                ? laneWorldPosition
+            return belt2F.TryGetLaneWorldPosition(coordinate, laneIndex, worldPosition, out Vector3 legacyLaneWorldPosition)
+                ? legacyLaneWorldPosition
                 : belt2F.ApplyPathHeight(worldPosition);
         }
 
@@ -11710,6 +12118,20 @@ public partial class Block : BaseObject
     {
         localInputDirection = Vector2.zero;
         localOutputDirection = Vector2.zero;
+        if (TryGetRuntimeConveyorRecord(out ConveyorRuntimeRecord record))
+        {
+            if (!record.TryGetInputDirection(out Vector2Int recordInputDirection)
+                || !record.TryGetOutputDirection(out Vector2Int recordOutputDirection))
+            {
+                return false;
+            }
+
+            localInputDirection = new Vector2(recordInputDirection.x, recordInputDirection.y);
+            localOutputDirection = new Vector2(recordOutputDirection.x, recordOutputDirection.y);
+            return localInputDirection.sqrMagnitude > 0.5f
+                   && localOutputDirection.sqrMagnitude > 0.5f;
+        }
+
         if (!TryGetRuntimeConveyorBelt(out ConveyorBelt conveyorBelt))
         {
             return false;

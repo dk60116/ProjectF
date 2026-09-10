@@ -234,7 +234,10 @@ public class ItemInfoDescription : MonoBehaviour
 
         conveyorItemIds.Clear();
         int slotCount = conveyorBelt is ConvayorBelt2F ? Belt2FInfoSlotCount : DefaultConveyorInfoSlotCount;
-        conveyorBelt?.CopyObjectInfoItemIds(conveyorItemIds, slotCount);
+        if (!TryCopyDataOnlyConveyorItemIds(conveyorBelt, slotCount))
+        {
+            conveyorBelt?.CopyObjectInfoItemIds(conveyorItemIds, slotCount);
+        }
 
         for (int i = 0; i < slotCount; i++)
         {
@@ -354,6 +357,70 @@ public class ItemInfoDescription : MonoBehaviour
         {
             SetDefaultItemSlot(0, -1, false);
         }
+    }
+
+    private bool TryCopyDataOnlyConveyorItemIds(ConveyorBelt conveyorBelt, int slotCount)
+    {
+        Player player = GameManager.Instance != null ? GameManager.Instance.Player : null;
+        PlayerController playerController = player != null ? player.GetComponent<PlayerController>() : null;
+        if (conveyorBelt == null
+            || playerController == null
+            || !playerController.TryGetFocusedConveyorBelt(out _, out Block focusedBlock)
+            || focusedBlock == null
+            || !focusedBlock.TryGetRuntimeConveyorRecord(out ConveyorRuntimeRecord record)
+            || record == null)
+        {
+            return false;
+        }
+
+        if (!record.IsBelt2F)
+        {
+            AppendConveyorInfoLane(focusedBlock, 0, slotCount);
+            AppendConveyorInfoLane(focusedBlock, 2, slotCount);
+            return true;
+        }
+
+        IReadOnlyList<Vector2Int> coordinates = record.OccupiedCoordinates;
+        for (int i = 0; i < coordinates.Count && conveyorItemIds.Count < slotCount; i++)
+        {
+            if (TerrainGenerator.Active != null
+                && TerrainGenerator.Active.TryGetLoadedBlock(coordinates[i], out Block block)
+                && block != null)
+            {
+                int firstLane = record.IsBridgeCenter(coordinates[i])
+                                && block.TryGetRuntimeConveyorRecord(out ConveyorRuntimeRecord primary)
+                                && primary != null
+                                && !primary.IsBelt2F
+                    ? 1
+                    : 0;
+                AppendConveyorInfoLane(block, firstLane, slotCount);
+                AppendConveyorInfoLane(block, firstLane + 2, slotCount);
+            }
+            else
+            {
+                conveyorItemIds.Add(-1);
+                conveyorItemIds.Add(-1);
+            }
+        }
+
+        while (conveyorItemIds.Count < slotCount)
+        {
+            conveyorItemIds.Add(-1);
+        }
+
+        return true;
+    }
+
+    private void AppendConveyorInfoLane(Block block, int laneIndex, int slotCount)
+    {
+        if (conveyorItemIds.Count >= slotCount)
+        {
+            return;
+        }
+
+        int itemId = -1;
+        block?.TryGetRuntimeConveyorItemSlotIdAtLane(laneIndex, out itemId);
+        conveyorItemIds.Add(itemId);
     }
 
     public void ShowUtilityPole(UtilityPole utilityPole, Resource underlyingResource = null)

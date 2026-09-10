@@ -122,8 +122,10 @@ public partial class PlayerController : MonoBehaviour
     private readonly List<RaycastResult> pointerRaycastResults = new List<RaycastResult>();
     private RaycastHit[] mouseFocusRaycastHits = new RaycastHit[InitialMouseFocusRaycastHitBufferSize];
     private readonly HashSet<InstallationObject> mouseFocusCheckedInstallations = new HashSet<InstallationObject>();
+    private readonly HashSet<ConveyorRuntimeRecord> mouseFocusCheckedConveyorRecords = new HashSet<ConveyorRuntimeRecord>();
     private readonly List<InstallationObject> mouseFocusRuntimeInstallationScratch = new List<InstallationObject>(8);
-    private readonly List<InstallationObject> nearbyInstallationObjects = new List<InstallationObject>();
+    private readonly HashSet<InstallationObject> nearbyInstallationObjects = new HashSet<InstallationObject>();
+    private readonly HashSet<ConveyorRuntimeRecord> nearbyConveyorRecords = new HashSet<ConveyorRuntimeRecord>();
     private readonly List<InstallationObject> nearbyRuntimeInstallationScratch = new List<InstallationObject>(8);
     private readonly List<Renderer> mapObjectFocusRenderers = new List<Renderer>(16);
     private readonly Dictionary<Block, MapObject> interactionFocusTargetOverrides = new Dictionary<Block, MapObject>();
@@ -422,7 +424,7 @@ public partial class PlayerController : MonoBehaviour
         }
     }
 
-    public void SetSelectedMapObjectFocus(MapObject mapObject)
+    public void SetSelectedMapObjectFocus(MapObject mapObject, Block fallbackBlock = null)
     {
         if (mapObject == null
             && HasGroundActionFocusSelectionOrTarget())
@@ -440,15 +442,13 @@ public partial class PlayerController : MonoBehaviour
         selectedSeedGroundBlock = null;
         selectedFocusBlocks.Clear();
         currentSelectedMapObject = null;
-        if (mapObject == null
-            || !mapObject.gameObject.activeInHierarchy
-            || !mapObject.AllowsFocus)
+        fallbackBlock ??= ResolveSelectedFocusFallbackBlock(mapObject);
+        if (!IsAvailableMapObjectFocusTarget(mapObject, fallbackBlock))
         {
             SetSelectedFocusedBlocks(null);
             return;
         }
 
-        Block fallbackBlock = ResolveSelectedFocusFallbackBlock(mapObject);
         if (!AppendMapObjectFocusBlocks(mapObject, fallbackBlock, selectedFocusBlocks))
         {
             SetSelectedFocusedBlocks(null);
@@ -3185,7 +3185,9 @@ public partial class PlayerController : MonoBehaviour
         interactionFocusTargetOverrides.Clear();
         mountedPinnedFocusBlocks.Clear();
 
-        if (!IsValidMouseFocusMapObject(mountedPinnedFocusTarget))
+        if (!IsAvailableMapObjectFocusTarget(
+                mountedPinnedFocusTarget,
+                mountedPinnedFocusFallbackBlock))
         {
             ClearMountedPinnedFocus();
         }
@@ -3232,9 +3234,7 @@ public partial class PlayerController : MonoBehaviour
 
     private void CacheInteractionButtonFocusTarget(MapObject target, Block fallbackBlock)
     {
-        if (target == null
-            || !target.gameObject.activeInHierarchy
-            || !target.AllowsFocus
+        if (!IsAvailableMapObjectFocusTarget(target, fallbackBlock)
             || interactionButtonFocusTargets.Contains(target))
         {
             return;
@@ -3269,7 +3269,7 @@ public partial class PlayerController : MonoBehaviour
             }
 
             MapObject target = ResolveInteractionFocusTarget(block);
-            if (target != null && (!target.gameObject.activeInHierarchy || !target.AllowsFocus))
+            if (target != null && !IsAvailableMapObjectFocusTarget(target, block))
             {
                 continue;
             }
@@ -3325,9 +3325,7 @@ public partial class PlayerController : MonoBehaviour
         }
 
         if (interactionFocusTargetOverrides.TryGetValue(block, out MapObject overrideTarget)
-            && overrideTarget != null
-            && overrideTarget.gameObject.activeInHierarchy
-            && overrideTarget.AllowsFocus)
+            && IsAvailableMapObjectFocusTarget(overrideTarget, block))
         {
             return overrideTarget;
         }
@@ -3407,9 +3405,7 @@ public partial class PlayerController : MonoBehaviour
         if (!TryGetStandingConveyorBlock(out standingBlock)
             || standingBlock == null
             || !TryResolveConveyorFocusTarget(standingBlock, out ConveyorBelt conveyorBelt)
-            || conveyorBelt == null
-            || !conveyorBelt.gameObject.activeInHierarchy
-            || !conveyorBelt.AllowsFocus)
+            || !IsAvailableMapObjectFocusTarget(conveyorBelt, standingBlock))
         {
             return false;
         }
@@ -3494,9 +3490,7 @@ public partial class PlayerController : MonoBehaviour
         {
             if (block == null
                 || !TryResolveConveyorFocusTarget(block, out ConveyorBelt conveyorBelt)
-                || conveyorBelt == null
-                || !conveyorBelt.gameObject.activeInHierarchy
-                || !conveyorBelt.AllowsFocus)
+                || !IsAvailableMapObjectFocusTarget(conveyorBelt, block))
             {
                 continue;
             }
@@ -3515,9 +3509,15 @@ public partial class PlayerController : MonoBehaviour
         return focusedConveyorBelt != null && focusedBlock != null;
     }
 
-    private static bool TryResolveConveyorFocusTarget(Block block, out ConveyorBelt belt)
+    private bool TryResolveConveyorFocusTarget(Block block, out ConveyorBelt belt)
     {
-        belt = block != null ? block.MapObject as ConveyorBelt : null;
+        belt = ResolveInteractionFocusTarget(block) as ConveyorBelt;
+        if (belt == null
+            && block != null
+            && block.TryGetRuntimeConveyorRecord(out ConveyorRuntimeRecord record))
+        {
+            belt = record.Prototype;
+        }
         if (belt == null && block != null && Spliterbelt.TryFindCoveringBelt(block.Coordinate, out Spliterbelt splitter))
             belt = splitter;
         return belt != null;
@@ -3562,8 +3562,7 @@ public partial class PlayerController : MonoBehaviour
     {
         if (player == null
             || mapObject == null
-            || !mapObject.gameObject.activeInHierarchy
-            || !mapObject.AllowsFocus)
+            || !IsAvailableMapObjectFocusTarget(mapObject, currentFocusedBlocks))
         {
             return false;
         }
@@ -3586,9 +3585,23 @@ public partial class PlayerController : MonoBehaviour
         }
 
         float interactionRadius = Mathf.Max(0f, installationObject.FocusActivationRadius);
-        return interactionRadius > 0f
-               && GetMapObjectFocusSelectionDistanceSqr(installationObject, null, origin)
-               <= interactionRadius * interactionRadius;
+        if (interactionRadius <= 0f)
+        {
+            return false;
+        }
+
+        float interactionRadiusSqr = interactionRadius * interactionRadius;
+        foreach (Block block in currentFocusedBlocks)
+        {
+            if (IsAvailableMapObjectFocusTarget(mapObject, block)
+                && GetMapObjectFocusSelectionDistanceSqr(installationObject, block, origin)
+                <= interactionRadiusSqr)
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     public int InteractionButtonFocusTargetCount => interactionButtonFocusTargets.Count;
@@ -3609,14 +3622,12 @@ public partial class PlayerController : MonoBehaviour
         }
 
         MapObject candidate = interactionButtonFocusTargets[index];
-        if (candidate == null
-            || !candidate.gameObject.activeInHierarchy
-            || !candidate.AllowsFocus)
+        Block fallbackBlock = interactionButtonFocusTargetBlocks[index];
+        if (!IsAvailableMapObjectFocusTarget(candidate, fallbackBlock))
         {
             return false;
         }
 
-        Block fallbackBlock = interactionButtonFocusTargetBlocks[index];
         Vector3 origin = player.BodyTransform != null
             ? player.BodyTransform.position
             : transform.position;
@@ -3643,9 +3654,7 @@ public partial class PlayerController : MonoBehaviour
         {
             MapObject mapObject = ResolveInteractionFocusTarget(block);
 
-            if (mapObject == null
-                || !mapObject.gameObject.activeInHierarchy
-                || !mapObject.AllowsFocus)
+            if (!IsAvailableMapObjectFocusTarget(mapObject, block))
             {
                 continue;
             }
@@ -3669,9 +3678,7 @@ public partial class PlayerController : MonoBehaviour
     {
         RefreshMouseMapObjectFocus();
         focusedMapObject = currentMouseFocusedMapObject;
-        return focusedMapObject != null
-               && focusedMapObject.gameObject.activeInHierarchy
-               && focusedMapObject.AllowsFocus;
+        return IsAvailableMapObjectFocusTarget(focusedMapObject, currentMouseFocusedBlocks);
     }
 
     public bool TryGetMouseFocusedAnimal(out Animal focusedAnimal)
@@ -4274,9 +4281,7 @@ public partial class PlayerController : MonoBehaviour
     public bool TryGetSelectedItemFilterMapObject(out MapObject selectedMapObject)
     {
         selectedMapObject = null;
-        if (currentSelectedMapObject == null
-            || !currentSelectedMapObject.gameObject.activeInHierarchy
-            || !currentSelectedMapObject.AllowsFocus)
+        if (!IsAvailableMapObjectFocusTarget(currentSelectedMapObject, currentSelectedFocusedBlocks))
         {
             return false;
         }
@@ -4284,13 +4289,34 @@ public partial class PlayerController : MonoBehaviour
         return TryResolveItemFilterTarget(currentSelectedMapObject, out selectedMapObject);
     }
 
+    public bool TryGetSelectedConveyorRecord(out ConveyorRuntimeRecord record)
+    {
+        record = null;
+        if (!(currentSelectedMapObject is ConveyorBelt))
+        {
+            return false;
+        }
+
+        foreach (Block block in currentSelectedFocusedBlocks)
+        {
+            if (TryGetMatchingConveyorRecord(
+                    currentSelectedMapObject,
+                    block,
+                    out ConveyorRuntimeRecord candidate))
+            {
+                record = candidate;
+                return true;
+            }
+        }
+
+        return false;
+    }
+
     public bool TryResolveItemFilterTarget(MapObject mapObject, out MapObject filterTarget)
     {
         filterTarget = null;
         if (player == null
-            || mapObject == null
-            || !mapObject.gameObject.activeInHierarchy
-            || !mapObject.AllowsFocus)
+            || !IsAvailableMapObjectFocusTarget(mapObject, currentSelectedFocusedBlocks))
         {
             return false;
         }
@@ -5003,6 +5029,7 @@ public partial class PlayerController : MonoBehaviour
             Mathf.RoundToInt(origin.x),
             Mathf.RoundToInt(origin.z));
         nearbyInstallationObjects.Clear();
+        nearbyConveyorRecords.Clear();
 
         for (int offsetY = -searchRadius; offsetY <= searchRadius; offsetY++)
         {
@@ -5049,15 +5076,24 @@ public partial class PlayerController : MonoBehaviour
     {
         if (installationObject == null
             || block == null
-            || !installationObject.gameObject.activeInHierarchy
-            || !installationObject.AllowsFocus
+            || !IsAvailableMapObjectFocusTarget(installationObject, block)
             || installationObject is WorkableObject
             || installationObject is BoxObject)
         {
             return;
         }
 
-        if (nearbyInstallationObjects.Contains(installationObject))
+        if (TryGetMatchingConveyorRecord(
+                installationObject,
+                block,
+                out ConveyorRuntimeRecord conveyorRecord))
+        {
+            if (!nearbyConveyorRecords.Add(conveyorRecord))
+            {
+                return;
+            }
+        }
+        else if (!nearbyInstallationObjects.Add(installationObject))
         {
             return;
         }
@@ -5066,8 +5102,6 @@ public partial class PlayerController : MonoBehaviour
         {
             return;
         }
-
-        nearbyInstallationObjects.Add(installationObject);
 
         float focusRadius = Mathf.Max(0f, installationObject.FocusActivationRadius);
         if (focusRadius <= 0f)
@@ -5118,27 +5152,44 @@ public partial class PlayerController : MonoBehaviour
     private float GetMapObjectFocusSelectionDistanceSqr(MapObject mapObject, Block block, Vector3 origin)
     {
         // Selection must not change when an outline, animation, or culling changes renderer bounds.
+        if (TryGetMatchingConveyorRecord(mapObject, block, out ConveyorRuntimeRecord conveyorRecord))
+        {
+            return GetOccupiedCoordinateDistanceSqr(conveyorRecord.OccupiedCoordinates, origin);
+        }
+
         if (mapObject is InstallationObject installation)
         {
             IReadOnlyList<Vector2Int> occupied = installation.RuntimeOccupiedCoordinates;
             if (occupied != null && occupied.Count > 0)
             {
-                float nearestDistanceSqr = float.MaxValue;
-                for (int i = 0; i < occupied.Count; i++)
-                {
-                    float dx = Mathf.Max(0f, Mathf.Abs(origin.x - occupied[i].x) - 0.5f);
-                    float dz = Mathf.Max(0f, Mathf.Abs(origin.z - occupied[i].y) - 0.5f);
-                    nearestDistanceSqr = Mathf.Min(nearestDistanceSqr, dx * dx + dz * dz);
-                }
-
-                return nearestDistanceSqr;
+                return GetOccupiedCoordinateDistanceSqr(occupied, origin);
             }
         }
 
-        Bounds bounds = CreateMapObjectStatusFocusBounds(mapObject, mapObject != null ? null : block, 0f);
+        Bounds bounds = CreateMapObjectStatusFocusBounds(mapObject, block, 0f);
         Vector3 offset = bounds.ClosestPoint(origin) - origin;
         offset.y = 0f;
         return offset.sqrMagnitude;
+    }
+
+    private static float GetOccupiedCoordinateDistanceSqr(
+        IReadOnlyList<Vector2Int> occupiedCoordinates,
+        Vector3 origin)
+    {
+        float nearestDistanceSqr = float.MaxValue;
+        if (occupiedCoordinates == null)
+        {
+            return nearestDistanceSqr;
+        }
+
+        for (int i = 0; i < occupiedCoordinates.Count; i++)
+        {
+            float dx = Mathf.Max(0f, Mathf.Abs(origin.x - occupiedCoordinates[i].x) - 0.5f);
+            float dz = Mathf.Max(0f, Mathf.Abs(origin.z - occupiedCoordinates[i].y) - 0.5f);
+            nearestDistanceSqr = Mathf.Min(nearestDistanceSqr, dx * dx + dz * dz);
+        }
+
+        return nearestDistanceSqr;
     }
 
     private float GetMapObjectFocusDistanceSqr(MapObject mapObject, Block block, Vector3 origin, float focusPadding = 0f)
@@ -5293,6 +5344,17 @@ public partial class PlayerController : MonoBehaviour
                         continue;
                     }
 
+                    appended = true;
+                }
+            }
+        }
+        else if (TryGetMatchingConveyorRecord(mapObject, fallbackBlock, out ConveyorRuntimeRecord conveyorRecord))
+        {
+            IReadOnlyList<Vector2Int> occupiedCoordinates = conveyorRecord.OccupiedCoordinates;
+            for (int i = 0; i < occupiedCoordinates.Count; i++)
+            {
+                if (TryAppendFocusBlock(results, occupiedCoordinates[i], mapObject))
+                {
                     appended = true;
                 }
             }
@@ -5757,7 +5819,7 @@ public partial class PlayerController : MonoBehaviour
             }
         }
 
-        if (!IsValidMouseFocusMapObject(mapObject))
+        if (!IsAvailableMapObjectFocusTarget(mapObject, fallbackBlock))
         {
             mapObject = null;
             fallbackBlock = null;
@@ -5898,6 +5960,68 @@ public partial class PlayerController : MonoBehaviour
                && mapObject.AllowsFocus;
     }
 
+    private static bool IsAvailableMapObjectFocusTarget(MapObject mapObject, Block fallbackBlock)
+    {
+        if (mapObject == null || !mapObject.AllowsFocus)
+        {
+            return false;
+        }
+
+        if (mapObject.gameObject.activeInHierarchy)
+        {
+            return true;
+        }
+
+        return TryGetMatchingConveyorRecord(mapObject, fallbackBlock, out _);
+    }
+
+    private static bool TryGetMatchingConveyorRecord(
+        MapObject mapObject,
+        Block fallbackBlock,
+        out ConveyorRuntimeRecord record)
+    {
+        record = null;
+        if (!(mapObject is ConveyorBelt) || fallbackBlock == null)
+        {
+            return false;
+        }
+
+        ConveyorWorld world = ConveyorWorld.Current;
+        return world != null
+               && world.TryGetMatchingAtCoordinate(
+                   fallbackBlock.Coordinate,
+                   (ConveyorBelt)mapObject,
+                   out record);
+    }
+
+    private static bool IsAvailableMapObjectFocusTarget(MapObject mapObject, HashSet<Block> focusBlocks)
+    {
+        if (mapObject == null || !mapObject.AllowsFocus)
+        {
+            return false;
+        }
+
+        if (mapObject.gameObject.activeInHierarchy)
+        {
+            return true;
+        }
+
+        if (!(mapObject is ConveyorBelt) || focusBlocks == null)
+        {
+            return false;
+        }
+
+        foreach (Block block in focusBlocks)
+        {
+            if (IsAvailableMapObjectFocusTarget(mapObject, block))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
     private bool TryResolveMouseFocusFallbackBlock(MapObject mapObject, Ray ray, out Block fallbackBlock)
     {
         fallbackBlock = null;
@@ -5949,6 +6073,7 @@ public partial class PlayerController : MonoBehaviour
         }
 
         mouseFocusCheckedInstallations.Clear();
+        mouseFocusCheckedConveyorRecords.Clear();
         mouseFocusRuntimeInstallationScratch.Clear();
         if (TryFindMouseFocusInstallationAtSearchCoordinate(
                 coordinate,
@@ -5997,6 +6122,37 @@ public partial class PlayerController : MonoBehaviour
         out Block fallbackBlock)
     {
         terrain.TryGetLoadedBlockRuntimeProxy(searchCoordinate, out Block candidateBlock);
+        ConveyorWorld conveyorWorld = ConveyorWorld.Current;
+        if (conveyorWorld != null
+            && conveyorWorld.TryGetBelt2FAtCoordinate(
+                searchCoordinate,
+                out ConveyorRuntimeRecord belt2FRecord)
+            && TrySelectMouseFocusInstallation(
+                belt2FRecord.Prototype,
+                candidateBlock,
+                targetCoordinate,
+                terrain,
+                out installationObject,
+                out fallbackBlock))
+        {
+            return true;
+        }
+
+        if (conveyorWorld != null
+            && conveyorWorld.TryGetAtCoordinate(
+                searchCoordinate,
+                out ConveyorRuntimeRecord conveyorRecord)
+            && TrySelectMouseFocusInstallation(
+                conveyorRecord.Prototype,
+                candidateBlock,
+                targetCoordinate,
+                terrain,
+                out installationObject,
+                out fallbackBlock))
+        {
+            return true;
+        }
+
         if (TrySelectMouseFocusInstallation(
                 candidateBlock != null ? candidateBlock.MapObject as InstallationObject : null,
                 candidateBlock,
@@ -6041,17 +6197,32 @@ public partial class PlayerController : MonoBehaviour
     {
         installationObject = null;
         fallbackBlock = null;
-        if (candidate == null
-            || !candidate.gameObject.activeInHierarchy
-            || !candidate.AllowsFocus
-            || !mouseFocusCheckedInstallations.Add(candidate)
-            || !InstallationCoversCoordinate(candidate, targetCoordinate))
+        if (!IsAvailableMapObjectFocusTarget(candidate, candidateBlock))
+        {
+            return false;
+        }
+
+        bool hasConveyorRecord = TryGetMatchingConveyorRecord(
+            candidate,
+            candidateBlock,
+            out ConveyorRuntimeRecord conveyorRecord);
+        if (hasConveyorRecord)
+        {
+            if (!mouseFocusCheckedConveyorRecords.Add(conveyorRecord)
+                || !conveyorRecord.Covers(targetCoordinate))
+            {
+                return false;
+            }
+        }
+        else if (!mouseFocusCheckedInstallations.Add(candidate)
+                 || !InstallationCoversCoordinate(candidate, targetCoordinate))
         {
             return false;
         }
 
         installationObject = candidate;
-        fallbackBlock = candidateBlock != null && candidateBlock.MapObject == candidate
+        fallbackBlock = hasConveyorRecord
+                        || candidateBlock != null && candidateBlock.MapObject == candidate
             ? candidateBlock
             : null;
         if (fallbackBlock != null || terrain == null)
@@ -6080,10 +6251,11 @@ public partial class PlayerController : MonoBehaviour
     private void ClearMouseFocusInstallationSearchBuffers()
     {
         mouseFocusCheckedInstallations.Clear();
+        mouseFocusCheckedConveyorRecords.Clear();
         mouseFocusRuntimeInstallationScratch.Clear();
     }
 
-    private bool InstallationCoversCoordinate(InstallationObject installationObject, Vector2Int coordinate)
+    private static bool InstallationCoversCoordinate(InstallationObject installationObject, Vector2Int coordinate)
     {
         if (installationObject == null)
         {

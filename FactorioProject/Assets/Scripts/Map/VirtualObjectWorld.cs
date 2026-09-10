@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using ProjectF.MapObjects;
 using UnityEngine;
 
 public enum VirtualObjectKind : byte
@@ -183,6 +184,7 @@ public sealed class VirtualItemStackState
 public sealed class VirtualObjectRecord
 {
     public VirtualObjectId id;
+    public MapObjectHandle mapObjectHandle;
     public VirtualObjectKind kind;
     public VirtualObjectResidency residency;
     public int itemId = -1;
@@ -209,6 +211,7 @@ public sealed class VirtualObjectRecord
         VirtualObjectRecord clone = new VirtualObjectRecord
         {
             id = id,
+            mapObjectHandle = mapObjectHandle,
             kind = kind,
             residency = residency,
             itemId = itemId,
@@ -244,8 +247,10 @@ public sealed class VirtualObjectWorld : MonoBehaviour
     private readonly Dictionary<Vector2Int, int> resourceRecordByCoordinate = new Dictionary<Vector2Int, int>();
     private readonly Dictionary<Vector2Int, int> installationRecordByAnchor = new Dictionary<Vector2Int, int>();
     private int nextId = 1;
+    private uint nextMapObjectGeneration = 1;
     private int version;
     private int itemStackVersion;
+    private int installationVersion;
 
     public static VirtualObjectWorld Current
     {
@@ -264,6 +269,7 @@ public sealed class VirtualObjectWorld : MonoBehaviour
     public int Count => recordsById.Count;
     public int Version => version;
     public int ItemStackVersion => itemStackVersion;
+    public int InstallationVersion => installationVersion;
 
     public static VirtualObjectWorld EnsureFor(GameObject host)
     {
@@ -299,6 +305,81 @@ public sealed class VirtualObjectWorld : MonoBehaviour
 
         record = storedRecord.Clone();
         return true;
+    }
+
+    public bool TryGetRecord(MapObjectHandle handle, out VirtualObjectRecord record)
+    {
+        if (!TryResolveRecord(handle, out VirtualObjectRecord storedRecord))
+        {
+            record = null;
+            return false;
+        }
+
+        record = storedRecord.Clone();
+        return true;
+    }
+
+    public bool IsHandleAlive(MapObjectHandle handle)
+    {
+        return TryResolveRecord(handle, out _);
+    }
+
+    public bool TryGetInstallationHandle(Vector2Int storageKey, out MapObjectHandle handle)
+    {
+        if (installationRecordByAnchor.TryGetValue(storageKey, out int recordId)
+            && recordsById.TryGetValue(recordId, out VirtualObjectRecord record)
+            && record != null
+            && record.kind == VirtualObjectKind.Installation
+            && record.mapObjectHandle.IsValid)
+        {
+            handle = record.mapObjectHandle;
+            return true;
+        }
+
+        handle = default;
+        return false;
+    }
+
+    public bool TryGetResourceHandle(Vector2Int coordinate, out MapObjectHandle handle)
+    {
+        if (resourceRecordByCoordinate.TryGetValue(coordinate, out int recordId)
+            && recordsById.TryGetValue(recordId, out VirtualObjectRecord record)
+            && record != null
+            && record.kind == VirtualObjectKind.Resource
+            && record.mapObjectHandle.IsValid)
+        {
+            handle = record.mapObjectHandle;
+            return true;
+        }
+
+        handle = default;
+        return false;
+    }
+
+    public void CopyMapObjectHandlesAtCoordinate(
+        Vector2Int coordinate,
+        List<MapObjectHandle> destination)
+    {
+        if (destination == null)
+        {
+            return;
+        }
+
+        destination.Clear();
+        if (!recordIdsByCoordinate.TryGetValue(coordinate, out List<int> recordIds))
+        {
+            return;
+        }
+
+        for (int i = 0; i < recordIds.Count; i++)
+        {
+            if (recordsById.TryGetValue(recordIds[i], out VirtualObjectRecord record)
+                && record != null
+                && record.mapObjectHandle.IsValid)
+            {
+                destination.Add(record.mapObjectHandle);
+            }
+        }
     }
 
     public bool TryGetFloorItemStack(Vector2Int coordinate, out List<int> itemIds)
@@ -492,6 +573,7 @@ public sealed class VirtualObjectWorld : MonoBehaviour
         record.currentGauge = Mathf.Max(0, state.currentGauge);
         record.initialResourceCount = Mathf.Max(1, state.initialResourceCount);
         record.resourceState = state;
+        EnsureMapObjectHandle(record, itemId, record.id.Value);
         record.liveInstanceId = liveResource != null && residency != VirtualObjectResidency.Virtual
             ? liveResource.GetInstanceID()
             : 0;
@@ -501,6 +583,15 @@ public sealed class VirtualObjectWorld : MonoBehaviour
     }
 
     public VirtualObjectId UpsertInstallation(
+        BlockStateStore.InstallationSaveState state,
+        VirtualObjectResidency residency = VirtualObjectResidency.Virtual,
+        InstallationObject liveInstallation = null)
+    {
+        MapObjectHandle handle = UpsertInstallationHandle(state, residency, liveInstallation);
+        return handle.IsValid ? new VirtualObjectId(handle.Slot) : default;
+    }
+
+    public MapObjectHandle UpsertInstallationHandle(
         BlockStateStore.InstallationSaveState state,
         VirtualObjectResidency residency = VirtualObjectResidency.Virtual,
         InstallationObject liveInstallation = null)
@@ -533,10 +624,11 @@ public sealed class VirtualObjectWorld : MonoBehaviour
         record.count = 1;
         record.sequence = state.placementSequence;
         record.installationState = state.Clone();
+        EnsureMapObjectHandle(record, state.itemId, state.placementSequence);
         record.liveInstanceId = liveInstallation != null ? liveInstallation.GetInstanceID() : 0;
         ReplaceOccupiedCoordinates(record, state.occupiedCoordinates);
         StoreRecord(record);
-        return record.id;
+        return record.mapObjectHandle;
     }
 
     public bool UpdateLiveInstallationWorldPose(
@@ -584,6 +676,40 @@ public sealed class VirtualObjectWorld : MonoBehaviour
         RemoveIndexedRecord(installationRecordByAnchor, anchorCoordinate);
     }
 
+    public bool RemoveInstallation(MapObjectHandle handle)
+    {
+        if (!TryResolveRecord(handle, out VirtualObjectRecord record)
+            || record.kind != VirtualObjectKind.Installation
+            || record.installationState == null)
+        {
+            return false;
+        }
+
+        Vector2Int storageKey = BlockStateStore.GetInstallationStorageKey(record.installationState);
+        if (!installationRecordByAnchor.TryGetValue(storageKey, out int recordId)
+            || recordId != handle.Slot)
+        {
+            return false;
+        }
+
+        RemoveIndexedRecord(installationRecordByAnchor, storageKey);
+        return true;
+    }
+
+    public bool RemoveResource(MapObjectHandle handle)
+    {
+        if (!TryResolveRecord(handle, out VirtualObjectRecord record)
+            || record.kind != VirtualObjectKind.Resource
+            || !resourceRecordByCoordinate.TryGetValue(record.anchorCoordinate, out int recordId)
+            || recordId != handle.Slot)
+        {
+            return false;
+        }
+
+        RemoveIndexedRecord(resourceRecordByCoordinate, record.anchorCoordinate);
+        return true;
+    }
+
     public void Clear()
     {
         recordsById.Clear();
@@ -594,6 +720,7 @@ public sealed class VirtualObjectWorld : MonoBehaviour
         nextId = 1;
         version++;
         itemStackVersion++;
+        installationVersion++;
     }
 
     private void Awake()
@@ -644,6 +771,10 @@ public sealed class VirtualObjectWorld : MonoBehaviour
         if (record.kind == VirtualObjectKind.ItemStack)
         {
             itemStackVersion++;
+        }
+        else if (record.kind == VirtualObjectKind.Installation)
+        {
+            installationVersion++;
         }
     }
 
@@ -702,6 +833,7 @@ public sealed class VirtualObjectWorld : MonoBehaviour
         }
 
         bool removesItemStack = ReferenceEquals(index, floorStackRecordByCoordinate);
+        bool removesInstallation = ReferenceEquals(index, installationRecordByAnchor);
         index.Remove(key);
         if (recordsById.TryGetValue(recordId, out VirtualObjectRecord record) && record != null)
         {
@@ -718,6 +850,56 @@ public sealed class VirtualObjectWorld : MonoBehaviour
         {
             itemStackVersion++;
         }
+        else if (removesInstallation)
+        {
+            installationVersion++;
+        }
+    }
+
+    private bool TryResolveRecord(MapObjectHandle handle, out VirtualObjectRecord record)
+    {
+        if (!handle.IsValid
+            || !recordsById.TryGetValue(handle.Slot, out record)
+            || record == null
+            || record.mapObjectHandle != handle)
+        {
+            record = null;
+            return false;
+        }
+
+        return true;
+    }
+
+    private void EnsureMapObjectHandle(
+        VirtualObjectRecord record,
+        int typeId,
+        long simulationId)
+    {
+        MapObjectHandle currentHandle = record.mapObjectHandle;
+        if (currentHandle.IsValid
+            && currentHandle.TypeId == typeId
+            && currentHandle.SimulationId == simulationId)
+        {
+            return;
+        }
+
+        record.mapObjectHandle = new MapObjectHandle(
+            typeId,
+            record.id.Value,
+            AllocateMapObjectGeneration(),
+            simulationId);
+    }
+
+    private uint AllocateMapObjectGeneration()
+    {
+        uint generation = nextMapObjectGeneration++;
+        if (generation != 0)
+        {
+            return generation;
+        }
+
+        generation = nextMapObjectGeneration++;
+        return generation != 0 ? generation : 1u;
     }
 
     private void RemoveCoordinateMappings(VirtualObjectRecord record)

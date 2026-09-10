@@ -15,6 +15,7 @@ MonoBehaviour:
   itemName: Sturdy wooden box
   id: 27
   mapObject: {fileID: 6524911674366201629, guid: 4c4bd387a46e24b488d86f0bb4d12e69, type: 3}
+  mapObjectArchetype: {fileID: 11400000, guid: ff9ff4714f8c56c47b5b23e599f44d7b, type: 2}
   useMapColor: 1
   mapColor: {r: 1, g: 0.2705882, b: 0, a: 1}
   mapMarkerSize: 2

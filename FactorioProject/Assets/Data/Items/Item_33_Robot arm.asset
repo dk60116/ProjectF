@@ -15,6 +15,7 @@ MonoBehaviour:
   itemName: Robot arm
   id: 59
   mapObject: {fileID: 5617472291595085519, guid: 7c64585bed65e8843aa24eb07a5f02f3, type: 3}
+  mapObjectArchetype: {fileID: 11400000, guid: fa30f8a080e23ad429eec1fcc63230da, type: 2}
   useMapColor: 1
   mapColor: {r: 0.9716981, g: 0.43543077, b: 0.43543077, a: 1}
   mapMarkerSize: 2

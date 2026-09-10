@@ -10,7 +10,8 @@ public partial class FilterSelectUI
     private void RefreshSplitterControls()
     {
         Spliterbelt splitter = boundTarget as Spliterbelt;
-        if (splitter == null)
+        bool hasDataSplitter = TryResolveSelectedSplitterRecord(out ConveyorRuntimeRecord splitterRecord);
+        if (splitter == null && !hasDataSplitter)
         {
             if (splitterControls != null) splitterControls.SetActive(false);
             return;
@@ -41,12 +42,22 @@ public partial class FilterSelectUI
             }
         }
         splitterControls.SetActive(true);
+        int selectedOutput = hasDataSplitter
+            ? splitterRecord.SelectedSplitterFilterOutput
+            : (int)splitter.SelectedFilterOutput;
         for (int i = 0; i < splitterModeButtons.Length; i++)
-            splitterModeButtons[i].interactable = i != (int)splitter.SelectedFilterOutput;
+            splitterModeButtons[i].interactable = i != selectedOutput;
     }
 
     private void SetSplitterFilterMode(int mode)
     {
+        if (TryResolveSelectedSplitterRecord(out ConveyorRuntimeRecord splitterRecord))
+        {
+            splitterRecord.SetSplitterFilterOutput(mode);
+            Refresh();
+            return;
+        }
+
         if (!(ResolveCurrentTarget() is Spliterbelt splitter))
             return;
         splitter.SetFilterOutput((Spliterbelt.FilterOutput)mode);

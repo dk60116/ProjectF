@@ -1,0 +1,141 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: a4d286e989be41fe853b78a59ca3a4e8, type: 3}
+  m_Name: MapObjectArchetype_106_Water Bucket
+  m_EditorClassIdentifier: Assembly-CSharp::ProjectF.MapObjects.MapObjectArchetype
+  schemaVersion: 1
+  itemDefinition: {fileID: 11400000, guid: 0c3d44b3dc7f48e0a6408d9ac6a60bd2, type: 2}
+  sourcePrefab: {fileID: 3525437405879595132, guid: 1bdc2cf4c67c4d27941cd3bbf8ff1f0b, type: 3}
+  itemId: 106
+  itemName: Water Bucket
+  sourcePrefabGuid: 1bdc2cf4c67c4d27941cd3bbf8ff1f0b
+  sourceContentHash:
+    serializedVersion: 2
+    Hash: 446678eb052810dfcb73e28078872b64
+  sourceRuntimeType: Bucket, Assembly-CSharp, Version=0.0.0.0, Culture=neutral, PublicKeyToken=null
+  mapStatus:
+    mapSizeX: 1
+    mapSizeY: 1
+    centerCellX: 0
+    centerCellY: 0
+  focusMode: 1
+  defaultRootScale: {x: 1, y: 1, z: 1}
+  defaultRootRotation: {x: -0, y: -0, z: -0, w: 1}
+  localRenderBounds:
+    m_Center: {x: -0.000000029802322, y: 0.22668923, z: -0.000000029802322}
+    m_Extent: {x: 0.17087516, y: 0.22668923, z: 0.1598009}
+  hasRenderBounds: 1
+  featureFlags: 64
+  nodes:
+  - hierarchyPath: 0:Water Bucket
+    animationPath: 
+    parentIndex: -1
+    localPosition: {x: 0, y: 0, z: 0}
+    localRotation: {x: 0, y: 0, z: 0, w: 1}
+    localScale: {x: 1, y: 1, z: 1}
+    defaultLocalToRoot:
+      e00: 1
+      e01: 0
+      e02: 0
+      e03: 0
+      e10: 0
+      e11: 1
+      e12: 0
+      e13: 0
+      e20: 0
+      e21: 0
+      e22: 1
+      e23: 0
+      e30: 0
+      e31: 0
+      e32: 0
+      e33: 1
+    activeByDefault: 1
+    hasAnimatedTransform: 0
+  - hierarchyPath: 0:Water Bucket/0:Body
+    animationPath: Body
+    parentIndex: 0
+    localPosition: {x: 0, y: 0, z: 0}
+    localRotation: {x: 0, y: 0, z: 0, w: 1}
+    localScale: {x: 1, y: 1, z: 1}
+    defaultLocalToRoot:
+      e00: 1
+      e01: 0
+      e02: 0
+      e03: 0
+      e10: 0
+      e11: 1
+      e12: 0
+      e13: 0
+      e20: 0
+      e21: 0
+      e22: 1
+      e23: 0
+      e30: 0
+      e31: 0
+      e32: 0
+      e33: 1
+    activeByDefault: 1
+    hasAnimatedTransform: 0
+  - hierarchyPath: 0:Water Bucket/0:Body/0:Water Surface
+    animationPath: Body/Water Surface
+    parentIndex: 1
+    localPosition: {x: -0.0000000023562, y: 0.229, z: -0.0000000036882}
+    localRotation: {x: 0, y: 0, z: 0, w: 1}
+    localScale: {x: 0.13866578, y: 1.905801, z: 0.13866578}
+    defaultLocalToRoot:
+      e00: 0.13866578
+      e01: 0
+      e02: 0
+      e03: -0.0000000023562
+      e10: 0
+      e11: 1.905801
+      e12: 0
+      e13: 0.229
+      e20: 0
+      e21: 0
+      e22: 0.13866578
+      e23: -0.0000000036882
+      e30: 0
+      e31: 0
+      e32: 0
+      e33: 1
+    activeByDefault: 1
+    hasAnimatedTransform: 0
+  renderParts:
+  - kind: 0
+    nodeIndex: 1
+    mesh: {fileID: -944563635335726766, guid: 9974b89052cde1945867164b1a305a1e, type: 3}
+    material: {fileID: 2100000, guid: 9ba65a70312657e4e9fb5e9dc40e706f, type: 2}
+    subMeshIndex: 0
+    localBounds:
+      m_Center: {x: -0.000000022351742, y: 0.22668923, z: -0.000000029802322}
+      m_Extent: {x: 0.17087516, y: 0.22668923, z: 0.1598009}
+    layer: 0
+    renderingLayerMask: 1
+    shadowCastingMode: 1
+    receiveShadows: 1
+    enabledByDefault: 1
+  - kind: 0
+    nodeIndex: 2
+    mesh: {fileID: 4300000, guid: 0128bb840cdd9e5449b6e75d380e3e18, type: 2}
+    material: {fileID: 2100000, guid: 0615416a612e1a04c9c3000c9227de9a, type: 2}
+    subMeshIndex: 0
+    localBounds:
+      m_Center: {x: 0, y: 0, z: 0}
+      m_Extent: {x: 1, y: 0.005, z: 1}
+    layer: 0
+    renderingLayerMask: 1
+    shadowCastingMode: 0
+    receiveShadows: 0
+    enabledByDefault: 1
+  animationClips: []

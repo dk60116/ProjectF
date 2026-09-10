@@ -949,6 +949,7 @@ public partial class TerrainGenerator : MonoBehaviour,
     private InstallationObjectPool installationObjectPool;
     private PortableItemRenderer portableItemRenderer;
     private VirtualConveyorBeltRenderer virtualConveyorBeltRenderer;
+    private ConveyorWorld conveyorWorld;
     private TerrainChunkStreamingScheduler chunkStreamingScheduler;
 
     private readonly List<ResourceEntry> starterTreeCacheEntries = new List<ResourceEntry>();
@@ -987,6 +988,7 @@ public partial class TerrainGenerator : MonoBehaviour,
         Active = this;
         loadedBlocks.ConfigureChunkSize(Mathf.Max(4, chunkSize));
         EnsurePortableItemRenderer();
+        EnsureConveyorWorld();
         EnsureVirtualConveyorBeltRenderer();
     }
 
@@ -1058,6 +1060,7 @@ public partial class TerrainGenerator : MonoBehaviour,
         NormalizeAnimalGenerationSettings();
         EnsureResourceStateStore();
         EnsurePortableItemRenderer();
+        EnsureConveyorWorld();
         EnsureVirtualConveyorBeltRenderer();
 
         SaveManager saveManager = FindFirstObjectByType<SaveManager>();
@@ -1692,7 +1695,8 @@ public partial class TerrainGenerator : MonoBehaviour,
 
             SaveLoadedBlockFloorObjects(block);
 
-            if (block.MapObject is InstallationObject installationObject
+            if (!block.TryGetRuntimeConveyorRecord(out _)
+                && block.MapObject is InstallationObject installationObject
                 && !installationObject.ExcludeFromTerrainPersistence
                 && savedInstallations.Add(installationObject))
             {
@@ -2101,11 +2105,33 @@ public partial class TerrainGenerator : MonoBehaviour,
 
         List<ConveyorBelt> conveyorBelts = new List<ConveyorBelt>();
         HashSet<ConveyorBelt> uniqueConveyorBelts = new HashSet<ConveyorBelt>();
+        EnsureResourceStateStore();
         foreach (KeyValuePair<Vector2Int, Block> pair in loadedBlocks)
         {
-            if (pair.Value?.MapObject is ConveyorBelt conveyorBelt
+            Block block = pair.Value;
+            if (block != null
+                && !block.TryGetRuntimeConveyorRecord(out _)
+                && block.MapObject is ConveyorBelt conveyorBelt
                 && uniqueConveyorBelts.Add(conveyorBelt))
             {
+                if (conveyorBelt.TryGetPlacementRuntime(out Vector2Int anchorCoordinate, out _)
+                    && resourceStateStore != null
+                    && resourceStateStore.TryGetLiveInstallation(
+                        anchorCoordinate,
+                        out InstallationObject liveInstallation,
+                        out BlockStateStore.InstallationSaveState liveState)
+                    && ReferenceEquals(liveInstallation, conveyorBelt))
+                {
+                    MapObject sourcePrefab = ResolveInstallationSourcePrefab(liveState);
+                    if (RegisterDataOnlyConveyorInstallation(
+                            conveyorBelt,
+                            sourcePrefab as ConveyorBelt))
+                    {
+                        ReleaseInstallationObject(conveyorBelt, sourcePrefab);
+                        continue;
+                    }
+                }
+
                 conveyorBelts.Add(conveyorBelt);
             }
         }

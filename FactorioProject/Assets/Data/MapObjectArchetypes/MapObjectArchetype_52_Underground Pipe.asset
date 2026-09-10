@@ -1,0 +1,218 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: a4d286e989be41fe853b78a59ca3a4e8, type: 3}
+  m_Name: MapObjectArchetype_52_Underground Pipe
+  m_EditorClassIdentifier: Assembly-CSharp::ProjectF.MapObjects.MapObjectArchetype
+  schemaVersion: 1
+  itemDefinition: {fileID: 11400000, guid: 0fff3b18f5681864380d5935d5e1cd08, type: 2}
+  sourcePrefab: {fileID: 5559195666338308925, guid: 2fe61d390dd7fa2499184f75e8cda8be, type: 3}
+  itemId: 52
+  itemName: Underground Pipe
+  sourcePrefabGuid: 2fe61d390dd7fa2499184f75e8cda8be
+  sourceContentHash:
+    serializedVersion: 2
+    Hash: f6baa561ca473baf2566fc2e549d3845
+  sourceRuntimeType: UndergroundPipe, Assembly-CSharp, Version=0.0.0.0, Culture=neutral,
+    PublicKeyToken=null
+  mapStatus:
+    mapSizeX: 1
+    mapSizeY: 1
+    centerCellX: 0
+    centerCellY: 0
+  focusMode: 1
+  defaultRootScale: {x: 1, y: 1, z: 1}
+  defaultRootRotation: {x: 0, y: 0, z: 0, w: 1}
+  localRenderBounds:
+    m_Center: {x: -0.000000059604645, y: 0.19499996, z: -0.18900007}
+    m_Extent: {x: 0.24000025, y: 0.44500014, z: 0.4230001}
+  hasRenderBounds: 1
+  featureFlags: 64
+  nodes:
+  - hierarchyPath: 0:Underground Pipe
+    animationPath: 
+    parentIndex: -1
+    localPosition: {x: 0, y: 0, z: 0}
+    localRotation: {x: 0, y: 0, z: 0, w: 1}
+    localScale: {x: 1, y: 1, z: 1}
+    defaultLocalToRoot:
+      e00: 1
+      e01: 0
+      e02: 0
+      e03: 0
+      e10: 0
+      e11: 1
+      e12: 0
+      e13: 0
+      e20: 0
+      e21: 0
+      e22: 1
+      e23: 0
+      e30: 0
+      e31: 0
+      e32: 0
+      e33: 1
+    activeByDefault: 1
+    hasAnimatedTransform: 0
+  - hierarchyPath: 0:Underground Pipe/0:Body
+    animationPath: Body
+    parentIndex: 0
+    localPosition: {x: 0, y: 0.4, z: 0}
+    localRotation: {x: 0, y: 0, z: 0.7071068, w: 0.7071068}
+    localScale: {x: 1, y: 1, z: 1}
+    defaultLocalToRoot:
+      e00: -0.00000011920929
+      e01: -1.0000001
+      e02: 0
+      e03: 0
+      e10: 1.0000001
+      e11: -0.00000011920929
+      e12: 0
+      e13: 0.4
+      e20: 0
+      e21: 0
+      e22: 1
+      e23: 0
+      e30: 0
+      e31: 0
+      e32: 0
+      e33: 1
+    activeByDefault: 1
+    hasAnimatedTransform: 0
+  - hierarchyPath: 0:Underground Pipe/0:Body/0:Cylinder
+    animationPath: Body/Cylinder
+    parentIndex: 1
+    localPosition: {x: 0, y: 0, z: -0.487}
+    localRotation: {x: 0.70710707, y: -0, z: -0, w: 0.70710653}
+    localScale: {x: 1, y: 1, z: 1}
+    defaultLocalToRoot:
+      e00: -0.00000011920929
+      e01: 0.00000083446514
+      e02: 1.0000001
+      e03: 0
+      e10: 1.0000001
+      e11: 9.947598e-14
+      e12: 0.00000011920929
+      e13: 0.4
+      e20: 0
+      e21: 1
+      e22: -0.000000834465
+      e23: -0.487
+      e30: 0
+      e31: 0
+      e32: 0
+      e33: 1
+    activeByDefault: 1
+    hasAnimatedTransform: 0
+  - hierarchyPath: 0:Underground Pipe/0:Body/1:Cylinder (1)
+    animationPath: Body/Cylinder (1)
+    parentIndex: 1
+    localPosition: {x: -0.5250001, y: 0, z: -0.006}
+    localRotation: {x: 0.5, y: 0.5, z: -0.5, w: 0.5}
+    localScale: {x: 1, y: 1, z: 1}
+    defaultLocalToRoot:
+      e00: 0
+      e01: -0.00000011920929
+      e02: 1.0000001
+      e03: 0.00000006258489
+      e10: 0
+      e11: 1.0000001
+      e12: 0.00000011920929
+      e13: -0.12500015
+      e20: -1
+      e21: 0
+      e22: 0
+      e23: -0.006
+      e30: 0
+      e31: 0
+      e32: 0
+      e33: 1
+    activeByDefault: 1
+    hasAnimatedTransform: 0
+  - hierarchyPath: 0:Underground Pipe/0:Body/2:Fluid DP
+    animationPath: Body/Fluid DP
+    parentIndex: 1
+    localPosition: {x: 0, y: 0, z: 0}
+    localRotation: {x: 0, y: 0, z: 0, w: 1}
+    localScale: {x: 1, y: 1, z: 1}
+    defaultLocalToRoot:
+      e00: -0.00000011920929
+      e01: -1.0000001
+      e02: 0
+      e03: 0
+      e10: 1.0000001
+      e11: -0.00000011920929
+      e12: 0
+      e13: 0.4
+      e20: 0
+      e21: 0
+      e22: 1
+      e23: 0
+      e30: 0
+      e31: 0
+      e32: 0
+      e33: 1
+    activeByDefault: 1
+    hasAnimatedTransform: 0
+  renderParts:
+  - kind: 0
+    nodeIndex: 1
+    mesh: {fileID: 4300000, guid: 1fb058edd28ea644480fea2bd505e917, type: 2}
+    material: {fileID: 2100000, guid: f8dcf2a2c290e6545b35da5512403502, type: 2}
+    subMeshIndex: 0
+    localBounds:
+      m_Center: {x: -0.16999999, y: 0, z: -0.17}
+      m_Extent: {x: 0.33, y: 0.16, z: 0.32999998}
+    layer: 0
+    renderingLayerMask: 1
+    shadowCastingMode: 1
+    receiveShadows: 1
+    enabledByDefault: 1
+  - kind: 0
+    nodeIndex: 2
+    mesh: {fileID: 4300000, guid: e0f6b7921e91fbe439915112b074b2bc, type: 2}
+    material: {fileID: 2100000, guid: f8dcf2a2c290e6545b35da5512403502, type: 2}
+    subMeshIndex: 0
+    localBounds:
+      m_Center: {x: 0.000000029802322, y: 0, z: -0.000000059604645}
+      m_Extent: {x: 0.24000004, y: 0.125, z: 0.24000008}
+    layer: 0
+    renderingLayerMask: 1
+    shadowCastingMode: 1
+    receiveShadows: 1
+    enabledByDefault: 1
+  - kind: 0
+    nodeIndex: 3
+    mesh: {fileID: 4300000, guid: e0f6b7921e91fbe439915112b074b2bc, type: 2}
+    material: {fileID: 2100000, guid: f8dcf2a2c290e6545b35da5512403502, type: 2}
+    subMeshIndex: 0
+    localBounds:
+      m_Center: {x: 0.000000029802322, y: 0, z: -0.000000059604645}
+      m_Extent: {x: 0.24000004, y: 0.125, z: 0.24000008}
+    layer: 0
+    renderingLayerMask: 1
+    shadowCastingMode: 1
+    receiveShadows: 1
+    enabledByDefault: 1
+  - kind: 0
+    nodeIndex: 4
+    mesh: {fileID: 4300000, guid: 77e31e6e76324d4591f76d4a3d27e801, type: 2}
+    material: {fileID: 2100000, guid: 0615416a612e1a04c9c3000c9227de9a, type: 2}
+    subMeshIndex: 0
+    localBounds:
+      m_Center: {x: -0.0675, y: 0, z: -0.0675}
+      m_Extent: {x: 0.1725, y: 0.105, z: 0.1725}
+    layer: 7
+    renderingLayerMask: 1
+    shadowCastingMode: 0
+    receiveShadows: 1
+    enabledByDefault: 0
+  animationClips: []

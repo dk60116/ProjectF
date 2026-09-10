@@ -15,6 +15,7 @@ MonoBehaviour:
   itemName: Funance
   id: 30
   mapObject: {fileID: 3843491245406909261, guid: 482d646ee24530540a103d758c71b5b2, type: 3}
+  mapObjectArchetype: {fileID: 11400000, guid: 39875aa15bdd75143a55d66e6fa7f0c2, type: 2}
   useMapColor: 1
   mapColor: {r: 0.7215686, g: 0.5254902, b: 0.04313726, a: 1}
   mapMarkerSize: 2

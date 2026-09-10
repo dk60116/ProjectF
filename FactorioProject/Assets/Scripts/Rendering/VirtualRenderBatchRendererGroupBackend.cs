@@ -615,7 +615,7 @@ internal sealed class VirtualRenderBatchRendererGroupBackend : IDisposable
 
             BatchFilterSettings filterSettings = new BatchFilterSettings
             {
-                renderingLayerMask = uint.MaxValue,
+                renderingLayerMask = state.Key.RenderingLayerMask,
                 layer = (byte)Mathf.Clamp(state.Key.Layer, 0, 31)
             };
             filterSettings.shadowCastingMode = state.Key.ShadowCastingMode;

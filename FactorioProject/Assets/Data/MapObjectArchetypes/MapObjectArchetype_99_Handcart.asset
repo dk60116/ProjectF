@@ -1,0 +1,443 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: a4d286e989be41fe853b78a59ca3a4e8, type: 3}
+  m_Name: MapObjectArchetype_99_Handcart
+  m_EditorClassIdentifier: Assembly-CSharp::ProjectF.MapObjects.MapObjectArchetype
+  schemaVersion: 1
+  itemDefinition: {fileID: 11400000, guid: e50f8db30407552438483841405afcb2, type: 2}
+  sourcePrefab: {fileID: 1311924932887929831, guid: ee02ddd42c01fdd46b2f5e3d7b8bdd2f, type: 3}
+  itemId: 99
+  itemName: Handcart
+  sourcePrefabGuid: ee02ddd42c01fdd46b2f5e3d7b8bdd2f
+  sourceContentHash:
+    serializedVersion: 2
+    Hash: 80e49527a3d4dc71f50baa245b2d4716
+  sourceRuntimeType: Handcart, Assembly-CSharp, Version=0.0.0.0, Culture=neutral,
+    PublicKeyToken=null
+  mapStatus:
+    mapSizeX: 1
+    mapSizeY: 1
+    centerCellX: 0
+    centerCellY: 0
+  focusMode: 1
+  defaultRootScale: {x: 1, y: 1, z: 1}
+  defaultRootRotation: {x: 0, y: 0, z: 0, w: 1}
+  localRenderBounds:
+    m_Center: {x: 0.0015002489, y: 0.29700002, z: 0.20343524}
+    m_Extent: {x: 0.48949245, y: 0.29941404, z: 0.7283983}
+  hasRenderBounds: 1
+  featureFlags: 64
+  nodes:
+  - hierarchyPath: 0:Handcart
+    animationPath: 
+    parentIndex: -1
+    localPosition: {x: 0, y: 0, z: 0}
+    localRotation: {x: 0, y: 0, z: 0, w: 1}
+    localScale: {x: 1, y: 1, z: 1}
+    defaultLocalToRoot:
+      e00: 1
+      e01: 0
+      e02: 0
+      e03: 0
+      e10: 0
+      e11: 1
+      e12: 0
+      e13: 0
+      e20: 0
+      e21: 0
+      e22: 1
+      e23: 0
+      e30: 0
+      e31: 0
+      e32: 0
+      e33: 1
+    activeByDefault: 1
+    hasAnimatedTransform: 0
+  - hierarchyPath: 0:Handcart/0:Body
+    animationPath: Body
+    parentIndex: 0
+    localPosition: {x: 0, y: 0.408, z: 0.025}
+    localRotation: {x: 0, y: 0, z: 0, w: 1}
+    localScale: {x: 1, y: 1, z: 1}
+    defaultLocalToRoot:
+      e00: 1
+      e01: 0
+      e02: 0
+      e03: 0
+      e10: 0
+      e11: 1
+      e12: 0
+      e13: 0.408
+      e20: 0
+      e21: 0
+      e22: 1
+      e23: 0.025
+      e30: 0
+      e31: 0
+      e32: 0
+      e33: 1
+    activeByDefault: 1
+    hasAnimatedTransform: 0
+  - hierarchyPath: 0:Handcart/0:Body/0:Wheel
+    animationPath: Body/Wheel
+    parentIndex: 1
+    localPosition: {x: -0.396, y: -0.111, z: 0.003}
+    localRotation: {x: 0, y: 0, z: 0, w: 1}
+    localScale: {x: 1, y: 1, z: 1}
+    defaultLocalToRoot:
+      e00: 1
+      e01: 0
+      e02: 0
+      e03: -0.396
+      e10: 0
+      e11: 1
+      e12: 0
+      e13: 0.297
+      e20: 0
+      e21: 0
+      e22: 1
+      e23: 0.028
+      e30: 0
+      e31: 0
+      e32: 0
+      e33: 1
+    activeByDefault: 1
+    hasAnimatedTransform: 0
+  - hierarchyPath: 0:Handcart/0:Body/1:Wheel (1)
+    animationPath: Body/Wheel (1)
+    parentIndex: 1
+    localPosition: {x: 0.399, y: -0.11099997, z: 0.0030000173}
+    localRotation: {x: -0, y: -1, z: -0, w: -0.0000008344649}
+    localScale: {x: 1, y: 1, z: 1}
+    defaultLocalToRoot:
+      e00: -1
+      e01: 0
+      e02: 0.0000016689298
+      e03: 0.399
+      e10: 0
+      e11: 1
+      e12: 0
+      e13: 0.29700002
+      e20: -0.0000016689298
+      e21: 0
+      e22: -1
+      e23: 0.028000018
+      e30: 0
+      e31: 0
+      e32: 0
+      e33: 1
+    activeByDefault: 1
+    hasAnimatedTransform: 0
+  - hierarchyPath: 0:Handcart/0:Body/2:Container
+    animationPath: Body/Container
+    parentIndex: 1
+    localPosition: {x: -0.000000026893535, y: -0.11099996, z: 0.527}
+    localRotation: {x: 0, y: -0, z: -0, w: 1}
+    localScale: {x: 1, y: 0.5, z: 1.1007}
+    defaultLocalToRoot:
+      e00: 1
+      e01: 0
+      e02: 0
+      e03: -0.000000026893535
+      e10: 0
+      e11: 0.5
+      e12: 0
+      e13: 0.29700005
+      e20: 0
+      e21: 0
+      e22: 1.1007
+      e23: 0.552
+      e30: 0
+      e31: 0
+      e32: 0
+      e33: 1
+    activeByDefault: 1
+    hasAnimatedTransform: 0
+  - hierarchyPath: 0:Handcart/0:Body/3:Handle
+    animationPath: Body/Handle
+    parentIndex: 1
+    localPosition: {x: -0.0013453609, y: -0.3512891, z: 0.5581776}
+    localRotation: {x: -0.14223517, y: -0, z: -0, w: 0.98983294}
+    localScale: {x: 1.3125, y: 1, z: 1}
+    defaultLocalToRoot:
+      e00: 1.3125
+      e01: 0
+      e02: 0
+      e03: -0.0013453609
+      e10: 0
+      e11: 0.95953834
+      e12: 0.28157812
+      e13: 0.0567109
+      e20: 0
+      e21: -0.28157812
+      e22: 0.95953834
+      e23: 0.58317757
+      e30: 0
+      e31: 0
+      e32: 0
+      e33: 1
+    activeByDefault: 1
+    hasAnimatedTransform: 0
+  - hierarchyPath: 0:Handcart/0:Body/4:ItemPoints
+    animationPath: Body/ItemPoints
+    parentIndex: 1
+    localPosition: {x: 0, y: -0.107, z: 0.0030000173}
+    localRotation: {x: 0, y: 0, z: 0, w: 1}
+    localScale: {x: 1, y: 1, z: 1}
+    defaultLocalToRoot:
+      e00: 1
+      e01: 0
+      e02: 0
+      e03: 0
+      e10: 0
+      e11: 1
+      e12: 0
+      e13: 0.301
+      e20: 0
+      e21: 0
+      e22: 1
+      e23: 0.028000018
+      e30: 0
+      e31: 0
+      e32: 0
+      e33: 1
+    activeByDefault: 1
+    hasAnimatedTransform: 0
+  - hierarchyPath: 0:Handcart/0:Body/4:ItemPoints/0:ItemPoint
+    animationPath: Body/ItemPoints/ItemPoint
+    parentIndex: 6
+    localPosition: {x: -0.15, y: 0, z: 0.28}
+    localRotation: {x: 0, y: 0, z: 0, w: 1}
+    localScale: {x: 1, y: 1, z: 1}
+    defaultLocalToRoot:
+      e00: 1
+      e01: 0
+      e02: 0
+      e03: -0.15
+      e10: 0
+      e11: 1
+      e12: 0
+      e13: 0.301
+      e20: 0
+      e21: 0
+      e22: 1
+      e23: 0.30800003
+      e30: 0
+      e31: 0
+      e32: 0
+      e33: 1
+    activeByDefault: 1
+    hasAnimatedTransform: 0
+  - hierarchyPath: 0:Handcart/0:Body/4:ItemPoints/1:ItemPoint (1)
+    animationPath: Body/ItemPoints/ItemPoint (1)
+    parentIndex: 6
+    localPosition: {x: 0.15, y: 0, z: 0.28}
+    localRotation: {x: 0, y: 0, z: 0, w: 1}
+    localScale: {x: 1, y: 1, z: 1}
+    defaultLocalToRoot:
+      e00: 1
+      e01: 0
+      e02: 0
+      e03: 0.15
+      e10: 0
+      e11: 1
+      e12: 0
+      e13: 0.301
+      e20: 0
+      e21: 0
+      e22: 1
+      e23: 0.30800003
+      e30: 0
+      e31: 0
+      e32: 0
+      e33: 1
+    activeByDefault: 1
+    hasAnimatedTransform: 0
+  - hierarchyPath: 0:Handcart/0:Body/4:ItemPoints/2:ItemPoint (2)
+    animationPath: Body/ItemPoints/ItemPoint (2)
+    parentIndex: 6
+    localPosition: {x: -0.15, y: 0, z: 0}
+    localRotation: {x: 0, y: 0, z: 0, w: 1}
+    localScale: {x: 1, y: 1, z: 1}
+    defaultLocalToRoot:
+      e00: 1
+      e01: 0
+      e02: 0
+      e03: -0.15
+      e10: 0
+      e11: 1
+      e12: 0
+      e13: 0.301
+      e20: 0
+      e21: 0
+      e22: 1
+      e23: 0.028000018
+      e30: 0
+      e31: 0
+      e32: 0
+      e33: 1
+    activeByDefault: 1
+    hasAnimatedTransform: 0
+  - hierarchyPath: 0:Handcart/0:Body/4:ItemPoints/3:ItemPoint (3)
+    animationPath: Body/ItemPoints/ItemPoint (3)
+    parentIndex: 6
+    localPosition: {x: 0.15, y: 0, z: 0}
+    localRotation: {x: 0, y: 0, z: 0, w: 1}
+    localScale: {x: 1, y: 1, z: 1}
+    defaultLocalToRoot:
+      e00: 1
+      e01: 0
+      e02: 0
+      e03: 0.15
+      e10: 0
+      e11: 1
+      e12: 0
+      e13: 0.301
+      e20: 0
+      e21: 0
+      e22: 1
+      e23: 0.028000018
+      e30: 0
+      e31: 0
+      e32: 0
+      e33: 1
+    activeByDefault: 1
+    hasAnimatedTransform: 0
+  - hierarchyPath: 0:Handcart/0:Body/4:ItemPoints/4:ItemPoint (4)
+    animationPath: Body/ItemPoints/ItemPoint (4)
+    parentIndex: 6
+    localPosition: {x: -0.15, y: 0, z: -0.28}
+    localRotation: {x: 0, y: 0, z: 0, w: 1}
+    localScale: {x: 1, y: 1, z: 1}
+    defaultLocalToRoot:
+      e00: 1
+      e01: 0
+      e02: 0
+      e03: -0.15
+      e10: 0
+      e11: 1
+      e12: 0
+      e13: 0.301
+      e20: 0
+      e21: 0
+      e22: 1
+      e23: -0.25199997
+      e30: 0
+      e31: 0
+      e32: 0
+      e33: 1
+    activeByDefault: 1
+    hasAnimatedTransform: 0
+  - hierarchyPath: 0:Handcart/0:Body/4:ItemPoints/5:ItemPoint (5)
+    animationPath: Body/ItemPoints/ItemPoint (5)
+    parentIndex: 6
+    localPosition: {x: 0.15, y: 0, z: -0.28}
+    localRotation: {x: 0, y: 0, z: 0, w: 1}
+    localScale: {x: 1, y: 1, z: 1}
+    defaultLocalToRoot:
+      e00: 1
+      e01: 0
+      e02: 0
+      e03: 0.15
+      e10: 0
+      e11: 1
+      e12: 0
+      e13: 0.301
+      e20: 0
+      e21: 0
+      e22: 1
+      e23: -0.25199997
+      e30: 0
+      e31: 0
+      e32: 0
+      e33: 1
+    activeByDefault: 1
+    hasAnimatedTransform: 0
+  - hierarchyPath: 0:Handcart/1:PlayerPoint
+    animationPath: PlayerPoint
+    parentIndex: 0
+    localPosition: {x: 0, y: 0, z: 0.785}
+    localRotation: {x: 0, y: -1, z: 0, w: 0}
+    localScale: {x: 1, y: 1, z: 1}
+    defaultLocalToRoot:
+      e00: -1
+      e01: 0
+      e02: 0
+      e03: 0
+      e10: 0
+      e11: 1
+      e12: 0
+      e13: 0
+      e20: 0
+      e21: 0
+      e22: -1
+      e23: 0.785
+      e30: 0
+      e31: 0
+      e32: 0
+      e33: 1
+    activeByDefault: 1
+    hasAnimatedTransform: 0
+  renderParts:
+  - kind: 0
+    nodeIndex: 2
+    mesh: {fileID: 8883716428008063337, guid: d28fc82181d047f4faf8e46d0a461c6d, type: 3}
+    material: {fileID: 2100000, guid: 34cf07fe12e16404e9e799de9ed7ea73, type: 2}
+    subMeshIndex: 0
+    localBounds:
+      m_Center: {x: -0.000000011175871, y: 0, z: 0}
+      m_Extent: {x: 0.0919922, y: 0.299414, z: 0.2994141}
+    layer: 0
+    renderingLayerMask: 1
+    shadowCastingMode: 1
+    receiveShadows: 1
+    enabledByDefault: 1
+  - kind: 0
+    nodeIndex: 3
+    mesh: {fileID: 8883716428008063337, guid: d28fc82181d047f4faf8e46d0a461c6d, type: 3}
+    material: {fileID: 2100000, guid: 34cf07fe12e16404e9e799de9ed7ea73, type: 2}
+    subMeshIndex: 0
+    localBounds:
+      m_Center: {x: -0.000000011175871, y: 0, z: 0}
+      m_Extent: {x: 0.0919922, y: 0.299414, z: 0.2994141}
+    layer: 0
+    renderingLayerMask: 1
+    shadowCastingMode: 1
+    receiveShadows: 1
+    enabledByDefault: 1
+  - kind: 0
+    nodeIndex: 4
+    mesh: {fileID: 6047364576717079604, guid: 9ca5c0638bdc24f4fb9b0d7457d35bf4, type: 3}
+    material: {fileID: 2100000, guid: f1cedf1fdae75914cb81e45145e31e2d, type: 2}
+    subMeshIndex: 0
+    localBounds:
+      m_Center: {x: 0, y: 0.012893371, z: -0.47557944}
+      m_Extent: {x: 0.3805958, y: 0.2277832, z: 0.50285524}
+    layer: 0
+    renderingLayerMask: 1
+    shadowCastingMode: 1
+    receiveShadows: 1
+    enabledByDefault: 1
+  - kind: 0
+    nodeIndex: 5
+    mesh: {fileID: 462801706982568381, guid: 9ca5c0638bdc24f4fb9b0d7457d35bf4, type: 3}
+    material: {fileID: 2100000, guid: f74917361dfe5ef4e8b4a3e3c1b6cb7c, type: 2}
+    subMeshIndex: 0
+    localBounds:
+      m_Center: {x: -0.0006077513, y: 0.30834055, z: 0.23122704}
+      m_Extent: {x: 0.17123413, y: 0.028377056, z: 0.2142868}
+    layer: 0
+    renderingLayerMask: 1
+    shadowCastingMode: 1
+    receiveShadows: 1
+    enabledByDefault: 1
+  animationClips: []

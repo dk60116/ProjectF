@@ -130,6 +130,41 @@ public partial class Block
     {
         destinationBlock = null;
         destinationLaneIndex = -1;
+        if (TryGetBelt2FBridgeCenterRecord(out ConveyorRuntimeRecord record))
+        {
+            if (sourceLaneIndex == 3)
+            {
+                destinationBlock = this;
+                destinationLaneIndex = 1;
+                return topologyOnly
+                    ? IsBeltSplitLane(destinationLaneIndex)
+                    : IsValidConveyorLaneIndex(destinationLaneIndex);
+            }
+
+            if (sourceLaneIndex != 1
+                || !record.TryGetOutputDirection(out Vector2Int recordOutputDirection)
+                || recordOutputDirection == Vector2Int.zero
+                || !TryResolveOwningTerrainGenerator(out TerrainGenerator recordTerrain)
+                || !recordTerrain.TryGetLoadedBlock(coordinate + recordOutputDirection, out destinationBlock)
+                || destinationBlock == null
+                || destinationBlock == this
+                || !record.Covers(destinationBlock.Coordinate)
+                || !destinationBlock.IsConveyorStackingEnabled())
+            {
+                destinationBlock = null;
+                return false;
+            }
+
+            Vector3 recordHandoffWorldPosition = GetConveyorLaneWorldPosition(sourceLaneIndex);
+            return TryGetConveyorHandoffReceiveLaneIndex(
+                this,
+                sourceLaneIndex,
+                destinationBlock,
+                recordHandoffWorldPosition,
+                out destinationLaneIndex,
+                topologyOnly);
+        }
+
         if (!TryGetBelt2FBridgeCenterBelt(out ConvayorBelt2F belt2F))
         {
             return false;
@@ -196,6 +231,20 @@ public partial class Block
         bool topologyOnly = false)
     {
         laneIndex = -1;
+        if (TryGetBelt2FBridgeCenterRecord(out ConveyorRuntimeRecord bridgeRecord)
+            && sourceBlock != null
+            && sourceBlock.TryGetConveyorItemBelt2FRecord(
+                sourceLaneIndex,
+                out ConveyorRuntimeRecord sourceRecord)
+            && ReferenceEquals(sourceRecord, bridgeRecord))
+        {
+            const int bridgeBackLaneIndex = 3;
+            laneIndex = bridgeBackLaneIndex;
+            return topologyOnly
+                ? IsBeltSplitLane(bridgeBackLaneIndex)
+                : IsValidConveyorLaneIndex(bridgeBackLaneIndex);
+        }
+
         if (TryGetBelt2FBridgeCenterBelt(out ConvayorBelt2F bridgeBelt2F)
             && sourceBlock != null
             && sourceBlock.TryGetConveyorItemBelt2F(sourceLaneIndex, out ConvayorBelt2F sourceBelt2F)

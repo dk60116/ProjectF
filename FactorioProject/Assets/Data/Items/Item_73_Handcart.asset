@@ -15,6 +15,7 @@ MonoBehaviour:
   itemName: Handcart
   id: 99
   mapObject: {fileID: 1311924932887929831, guid: ee02ddd42c01fdd46b2f5e3d7b8bdd2f, type: 3}
+  mapObjectArchetype: {fileID: 11400000, guid: 94d68673dd72136438618ba4c9fa0b18, type: 2}
   useMapColor: 1
   mapColor: {r: 0.8113208, g: 0.34637007, b: 0.18752226, a: 1}
   mapMarkerSize: 2

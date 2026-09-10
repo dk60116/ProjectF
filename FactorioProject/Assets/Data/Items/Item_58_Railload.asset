@@ -15,6 +15,7 @@ MonoBehaviour:
   itemName: Railload
   id: 100
   mapObject: {fileID: 8251220719155574395, guid: 0dc98386c96b46b4a952a73e308a908f, type: 3}
+  mapObjectArchetype: {fileID: 11400000, guid: 96598a7a0f423dc46a63d6debeb0878d, type: 2}
   useMapColor: 1
   mapColor: {r: 0.9607844, g: 0.9607844, b: 0.9607844, a: 1}
   mapMarkerSize: 1

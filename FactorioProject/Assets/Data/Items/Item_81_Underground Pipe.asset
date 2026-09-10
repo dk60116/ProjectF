@@ -15,8 +15,10 @@ MonoBehaviour:
   itemName: Underground Pipe
   id: 52
   mapObject: {fileID: 5559195666338308925, guid: 2fe61d390dd7fa2499184f75e8cda8be, type: 3}
+  mapObjectArchetype: {fileID: 11400000, guid: fded8a5f73fdddd45b14fe1833c79c8b, type: 2}
   useMapColor: 1
   mapColor: {r: 0.75686276, g: 0.75686276, b: 0.75686276, a: 1}
+  mapMarkerSize: 1
   portableMesh: {fileID: 4300000, guid: 628cea7c87ae22644b204243295f4429, type: 2}
   portableMat: {fileID: 2100000, guid: 1dfbd69284c27484dab13e0668a01836, type: 2}
   icon: {fileID: 21300000, guid: 4163ea964ac6e0c4887aa859d33a9f8c, type: 3}

@@ -15,6 +15,7 @@ MonoBehaviour:
   itemName: Book desk
   id: 86
   mapObject: {fileID: 2696065824665056805, guid: 27727148c8ab1b546aa4e1dd6f389261, type: 3}
+  mapObjectArchetype: {fileID: 11400000, guid: 1b732a7259fef044d9dc0fc2abcd65fd, type: 2}
   useMapColor: 1
   mapColor: {r: 0.4772974, g: 0.3280082, b: 0.764151, a: 1}
   mapMarkerSize: 2

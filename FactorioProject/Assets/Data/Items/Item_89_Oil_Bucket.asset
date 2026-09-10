@@ -15,6 +15,7 @@ MonoBehaviour:
   itemName: Oil Bucket
   id: 107
   mapObject: {fileID: 3525437405879595132, guid: 8d2fb53ebe5fa2d448cf0d63b521f261, type: 3}
+  mapObjectArchetype: {fileID: 11400000, guid: 3ece98643ac3b86418ef03408f727e66, type: 2}
   useMapColor: 1
   mapColor: {r: 0.11320752, g: 0.020825913, b: 0.020825913, a: 1}
   mapMarkerSize: 2

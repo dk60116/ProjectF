@@ -15,6 +15,10 @@ MonoBehaviour:
   itemName: Reed
   id: 11
   mapObject: {fileID: 5596077993400562758, guid: 24eb9727d7e44e846927e90bd34ba20f, type: 3}
+  mapObjectArchetype: {fileID: 11400000, guid: bbd71924b14136c4b9a5a221e12b884c, type: 2}
+  useMapColor: 0
+  mapColor: {r: 1, g: 1, b: 1, a: 1}
+  mapMarkerSize: 1
   portableMesh: {fileID: 4300000, guid: 0c2622a1a4ba51d41bca1072c81ca88a, type: 2}
   portableMat: {fileID: 2100000, guid: 5a00e9aab5c35e2488536bbe962012f8, type: 2}
   icon: {fileID: 21300000, guid: de1de8772e6bd95418f5e646676e941b, type: 3}

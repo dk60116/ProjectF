@@ -15,6 +15,7 @@ MonoBehaviour:
   itemName: Bucket
   id: 105
   mapObject: {fileID: 3525437405879595132, guid: f2ee43aae45a6ad40af89ae6e4f8259a, type: 3}
+  mapObjectArchetype: {fileID: 11400000, guid: 930b92f3954794648987bf4543b2f853, type: 2}
   useMapColor: 1
   mapColor: {r: 0.5, g: 0.5, b: 0.5, a: 1}
   mapMarkerSize: 2

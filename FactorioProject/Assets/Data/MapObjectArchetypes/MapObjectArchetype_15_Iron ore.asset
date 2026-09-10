@@ -1,0 +1,104 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: a4d286e989be41fe853b78a59ca3a4e8, type: 3}
+  m_Name: MapObjectArchetype_15_Iron ore
+  m_EditorClassIdentifier: Assembly-CSharp::ProjectF.MapObjects.MapObjectArchetype
+  schemaVersion: 1
+  itemDefinition: {fileID: 11400000, guid: 97f6dea012d4db649abc845562a30b93, type: 2}
+  sourcePrefab: {fileID: 2667034222479840192, guid: 14f483af5ebd67544b8067e0db8985d3, type: 3}
+  itemId: 15
+  itemName: Iron ore
+  sourcePrefabGuid: 14f483af5ebd67544b8067e0db8985d3
+  sourceContentHash:
+    serializedVersion: 2
+    Hash: f39edfa9c7229fc9ffae81ce87b4518e
+  sourceRuntimeType: Resource, Assembly-CSharp, Version=0.0.0.0, Culture=neutral,
+    PublicKeyToken=null
+  mapStatus:
+    mapSizeX: 1
+    mapSizeY: 1
+    centerCellX: 0
+    centerCellY: 0
+  focusMode: 0
+  defaultRootScale: {x: 1, y: 1, z: 1}
+  defaultRootRotation: {x: -0, y: -0, z: -0, w: 1}
+  localRenderBounds:
+    m_Center: {x: 0, y: 0.05228496, z: 0}
+    m_Extent: {x: 0.3425314, y: 0.05228496, z: 0.38002512}
+  hasRenderBounds: 1
+  featureFlags: 0
+  nodes:
+  - hierarchyPath: 0:Iron ore
+    animationPath: 
+    parentIndex: -1
+    localPosition: {x: 0, y: 0, z: 0}
+    localRotation: {x: 0, y: 0, z: 0, w: 1}
+    localScale: {x: 1, y: 1, z: 1}
+    defaultLocalToRoot:
+      e00: 1
+      e01: 0
+      e02: 0
+      e03: 0
+      e10: 0
+      e11: 1
+      e12: 0
+      e13: 0
+      e20: 0
+      e21: 0
+      e22: 1
+      e23: 0
+      e30: 0
+      e31: 0
+      e32: 0
+      e33: 1
+    activeByDefault: 1
+    hasAnimatedTransform: 0
+  - hierarchyPath: 0:Iron ore/0:Body
+    animationPath: Body
+    parentIndex: 0
+    localPosition: {x: 0, y: 0, z: 0}
+    localRotation: {x: 0, y: 0, z: 0, w: 1}
+    localScale: {x: 1, y: 1, z: 1}
+    defaultLocalToRoot:
+      e00: 1
+      e01: 0
+      e02: 0
+      e03: 0
+      e10: 0
+      e11: 1
+      e12: 0
+      e13: 0
+      e20: 0
+      e21: 0
+      e22: 1
+      e23: 0
+      e30: 0
+      e31: 0
+      e32: 0
+      e33: 1
+    activeByDefault: 1
+    hasAnimatedTransform: 0
+  renderParts:
+  - kind: 0
+    nodeIndex: 1
+    mesh: {fileID: 4300000, guid: 7661d649fc33da74bafea8977db540f6, type: 3}
+    material: {fileID: 2100000, guid: 5cf11bd62c6bb7d42bb88ab36ff9b203, type: 2}
+    subMeshIndex: 0
+    localBounds:
+      m_Center: {x: 0, y: 0.05228496, z: 0}
+      m_Extent: {x: 0.3425314, y: 0.05228496, z: 0.38002512}
+    layer: 7
+    renderingLayerMask: 1
+    shadowCastingMode: 1
+    receiveShadows: 1
+    enabledByDefault: 1
+  animationClips: []

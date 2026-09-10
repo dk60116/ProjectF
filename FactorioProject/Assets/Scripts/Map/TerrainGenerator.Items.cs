@@ -331,13 +331,12 @@ public partial class TerrainGenerator : MonoBehaviour
         out Block nearestBlock)
     {
         nearestBlock = null;
-        if (focusedConveyorBlock == null
-            || !(focusedConveyorBlock.MapObject is ConvayorBelt2F belt2F))
+        if (!TryResolveBelt2FRecord(focusedConveyorBlock, out ConveyorRuntimeRecord belt2FRecord))
         {
             return false;
         }
 
-        IReadOnlyList<Vector2Int> occupiedCoordinates = belt2F.RuntimeOccupiedCoordinates;
+        IReadOnlyList<Vector2Int> occupiedCoordinates = belt2FRecord.OccupiedCoordinates;
         if (occupiedCoordinates == null || occupiedCoordinates.Count <= 0)
         {
             return false;
@@ -348,7 +347,8 @@ public partial class TerrainGenerator : MonoBehaviour
         {
             if (!TryGetLoadedBlock(occupiedCoordinates[i], out Block candidateBlock)
                 || candidateBlock == null
-                || !ReferenceEquals(candidateBlock.MapObject, belt2F)
+                || belt2FRecord.IsBridgeCenter(candidateBlock.Coordinate)
+                || !IsBlockBoundToConveyorRecord(candidateBlock, belt2FRecord)
                 || candidateBlock.GetAvailableConveyorCapacity() <= 0)
             {
                 continue;
@@ -367,6 +367,49 @@ public partial class TerrainGenerator : MonoBehaviour
         }
 
         return nearestBlock != null;
+    }
+
+    private static bool TryResolveBelt2FRecord(
+        Block focusedConveyorBlock,
+        out ConveyorRuntimeRecord record)
+    {
+        record = null;
+        if (focusedConveyorBlock == null)
+        {
+            return false;
+        }
+
+        if (focusedConveyorBlock.TryGetRuntimeConveyorRecord(out record) && record.IsBelt2F)
+        {
+            return true;
+        }
+
+        ConveyorWorld world = ConveyorWorld.Current;
+        return world != null
+               && world.TryGetBelt2FAtCoordinate(focusedConveyorBlock.Coordinate, out record)
+               && record.IsBelt2F;
+    }
+
+    private static bool IsBlockBoundToConveyorRecord(
+        Block block,
+        ConveyorRuntimeRecord expectedRecord)
+    {
+        if (block == null || expectedRecord == null)
+        {
+            return false;
+        }
+
+        if (block.TryGetRuntimeConveyorRecord(out ConveyorRuntimeRecord directRecord)
+            && ReferenceEquals(directRecord, expectedRecord))
+        {
+            return true;
+        }
+
+        ConveyorWorld world = ConveyorWorld.Current;
+        return expectedRecord.IsBelt2F
+               && world != null
+               && world.TryGetBelt2FAtCoordinate(block.Coordinate, out ConveyorRuntimeRecord belt2FRecord)
+               && ReferenceEquals(belt2FRecord, expectedRecord);
     }
 
     public bool TryAddDroppedItemStackAtPlayerBlock(
@@ -794,6 +837,138 @@ public partial class TerrainGenerator : MonoBehaviour
         }
     }
 
+    public bool RegisterDataOnlyConveyorInstallation(
+        ConveyorBelt conveyorBelt,
+        ConveyorBelt sourcePrefab = null)
+    {
+        if (conveyorBelt == null || conveyorBelt.ExcludeFromTerrainPersistence)
+        {
+            return false;
+        }
+
+        EnsureResourceStateStore();
+        if (resourceStateStore == null
+            || !resourceStateStore.TryCaptureInstallationState(
+                conveyorBelt,
+                out BlockStateStore.InstallationSaveState state))
+        {
+            return false;
+        }
+
+        state.hasWorldPose = true;
+        state.worldPosition = conveyorBelt.transform.position;
+        state.worldRotation = conveyorBelt.transform.rotation;
+        ConveyorBelt prototype = ResolveDataOnlyConveyorPrototype(state, sourcePrefab);
+        if (prototype == null)
+        {
+            return false;
+        }
+
+        if (!resourceStateStore.RegisterDataOnlyInstallation(state, out BlockStateStore.InstallationSaveState storedState))
+        {
+            return false;
+        }
+
+        ConveyorRuntimeRecord record = EnsureConveyorWorld()?.Register(
+            storedState,
+            prototype,
+            conveyorBelt.transform.position,
+            conveyorBelt.transform.rotation,
+            conveyorBelt.transform.localScale);
+        if (record == null)
+        {
+            return false;
+        }
+
+        BindLoadedBlocksToDataOnlyConveyor(record);
+        MarkConveyorNetworkDirty();
+        MarkConveyorLineCacheDirty();
+        for (int i = 0; i < record.OccupiedCoordinates.Count; i++)
+        {
+            RobotArm.WakeAroundCoordinate(record.OccupiedCoordinates[i]);
+        }
+        return true;
+    }
+
+    private ConveyorBelt ResolveDataOnlyConveyorPrototype(
+        BlockStateStore.InstallationSaveState state,
+        ConveyorBelt sourcePrefab)
+    {
+        ConveyorBelt resolvedPrefab = ResolveInstallationSourcePrefab(state) as ConveyorBelt;
+        if (IsConveyorPrefabAsset(resolvedPrefab))
+        {
+            return resolvedPrefab;
+        }
+
+        return IsConveyorPrefabAsset(sourcePrefab) ? sourcePrefab : null;
+    }
+
+    private static bool IsConveyorPrefabAsset(ConveyorBelt conveyorBelt)
+    {
+        return conveyorBelt != null && !conveyorBelt.gameObject.scene.IsValid();
+    }
+
+    public void UpdateDataOnlyConveyorState(BlockStateStore.InstallationSaveState state)
+    {
+        if (state == null)
+        {
+            return;
+        }
+
+        EnsureResourceStateStore();
+        resourceStateStore?.UpdateInstallationState(state);
+    }
+
+    private void BindLoadedBlocksToDataOnlyConveyor(ConveyorRuntimeRecord record)
+    {
+        if (record == null)
+        {
+            return;
+        }
+
+        IReadOnlyList<Vector2Int> coordinates = record.OccupiedCoordinates;
+        for (int i = 0; i < coordinates.Count; i++)
+        {
+            BindLoadedBlockToDataOnlyConveyor(record, coordinates[i]);
+        }
+
+        if (record.IsBelt2F)
+        {
+            for (int y = -2; y <= 2; y++)
+            {
+                for (int x = -2; x <= 2; x++)
+                {
+                    Vector2Int coordinate = record.AnchorCoordinate + new Vector2Int(x, y);
+                    if (record.Covers(coordinate))
+                    {
+                        BindLoadedBlockToDataOnlyConveyor(record, coordinate);
+                    }
+                }
+            }
+        }
+    }
+
+    private void BindLoadedBlockToDataOnlyConveyor(
+        ConveyorRuntimeRecord record,
+        Vector2Int coordinate)
+    {
+        if (!loadedBlocks.TryGetValue(coordinate, out Block block) || block == null)
+        {
+            return;
+        }
+
+        if (record.IsBridgeCenter(coordinate)
+            && block.TryGetRuntimeConveyorRecord(out ConveyorRuntimeRecord existing)
+            && existing != null
+            && !existing.IsBelt2F)
+        {
+            block.InvalidateRuntimeConveyorTopology();
+            return;
+        }
+
+        block.BindRuntimeConveyor(record);
+    }
+
     public InstallationObject CreateInstallationObject(MapObject sourcePrefab, Transform parent = null)
     {
         if (sourcePrefab == null)
@@ -802,6 +977,11 @@ public partial class TerrainGenerator : MonoBehaviour
         }
 
         Transform resolvedParent = parent != null ? parent : transform;
+        if (sourcePrefab is ConveyorBelt)
+        {
+            return Instantiate(sourcePrefab, resolvedParent) as InstallationObject;
+        }
+
         if (Application.isPlaying)
         {
             return ResolveInstallationObjectPool()?.Get(sourcePrefab, resolvedParent);
@@ -817,7 +997,21 @@ public partial class TerrainGenerator : MonoBehaviour
             return;
         }
 
-        UnregisterVirtualConveyorBelt(installationObject as ConveyorBelt);
+        if (installationObject is ConveyorBelt conveyorBelt)
+        {
+            UnregisterVirtualConveyorBelt(conveyorBelt);
+            if (Application.isPlaying)
+            {
+                Destroy(installationObject.gameObject);
+            }
+            else
+            {
+                DestroyImmediate(installationObject.gameObject);
+            }
+
+            return;
+        }
+
         if (Application.isPlaying)
         {
             InstallationObjectPool resolvedPool = ResolveInstallationObjectPool();
@@ -926,7 +1120,13 @@ public partial class TerrainGenerator : MonoBehaviour
         bool hideBelts = IsBeltRenderingHidden();
         foreach (KeyValuePair<Vector2Int, Block> pair in loadedBlocks)
         {
-            if (pair.Value != null && pair.Value.MapObject is ConveyorBelt conveyorBelt)
+            Block block = pair.Value;
+            if (block == null || block.TryGetRuntimeConveyorRecord(out _))
+            {
+                continue;
+            }
+
+            if (block.MapObject is ConveyorBelt conveyorBelt)
             {
                 if (hideBelts)
                 {

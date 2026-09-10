@@ -1,0 +1,319 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: a4d286e989be41fe853b78a59ca3a4e8, type: 3}
+  m_Name: MapObjectArchetype_57_Sprinkler
+  m_EditorClassIdentifier: Assembly-CSharp::ProjectF.MapObjects.MapObjectArchetype
+  schemaVersion: 1
+  itemDefinition: {fileID: 11400000, guid: e3e51ef812b2cca4a8b0033722dde4a1, type: 2}
+  sourcePrefab: {fileID: 3543931225916085951, guid: 5c9d27cd414052a4fab2eee000e42bdd, type: 3}
+  itemId: 57
+  itemName: Sprinkler
+  sourcePrefabGuid: 5c9d27cd414052a4fab2eee000e42bdd
+  sourceContentHash:
+    serializedVersion: 2
+    Hash: a6eef0f841d1605d93f36f9cd3613fc5
+  sourceRuntimeType: Sprinkler, Assembly-CSharp, Version=0.0.0.0, Culture=neutral,
+    PublicKeyToken=null
+  mapStatus:
+    mapSizeX: 2
+    mapSizeY: 1
+    centerCellX: 1
+    centerCellY: 0
+  focusMode: 1
+  defaultRootScale: {x: 1, y: 1, z: 1}
+  defaultRootRotation: {x: 0, y: 0, z: 0, w: 1}
+  localRenderBounds:
+    m_Center: {x: -0.0872674, y: 0.23306186, z: 0}
+    m_Extent: {x: 0.99617255, y: 0.440138, z: 0.5010704}
+  hasRenderBounds: 1
+  featureFlags: 64
+  nodes:
+  - hierarchyPath: 0:Sprinkler
+    animationPath: 
+    parentIndex: -1
+    localPosition: {x: 0, y: 0, z: 0}
+    localRotation: {x: 0, y: 0, z: 0, w: 1}
+    localScale: {x: 1, y: 1, z: 1}
+    defaultLocalToRoot:
+      e00: 1
+      e01: 0
+      e02: 0
+      e03: 0
+      e10: 0
+      e11: 1
+      e12: 0
+      e13: 0
+      e20: 0
+      e21: 0
+      e22: 1
+      e23: 0
+      e30: 0
+      e31: 0
+      e32: 0
+      e33: 1
+    activeByDefault: 1
+    hasAnimatedTransform: 0
+  - hierarchyPath: 0:Sprinkler/0:Body
+    animationPath: Body
+    parentIndex: 0
+    localPosition: {x: 0, y: 0, z: 0}
+    localRotation: {x: 0, y: 0, z: 0, w: 1}
+    localScale: {x: 1, y: 1, z: 1}
+    defaultLocalToRoot:
+      e00: 1
+      e01: 0
+      e02: 0
+      e03: 0
+      e10: 0
+      e11: 1
+      e12: 0
+      e13: 0
+      e20: 0
+      e21: 0
+      e22: 1
+      e23: 0
+      e30: 0
+      e31: 0
+      e32: 0
+      e33: 1
+    activeByDefault: 1
+    hasAnimatedTransform: 0
+  - hierarchyPath: 0:Sprinkler/0:Body/0:Floor
+    animationPath: Body/Floor
+    parentIndex: 1
+    localPosition: {x: 0.5, y: 0, z: 0}
+    localRotation: {x: 0, y: -0, z: -0, w: 1}
+    localScale: {x: 1, y: 1, z: 1}
+    defaultLocalToRoot:
+      e00: 1
+      e01: 0
+      e02: 0
+      e03: 0.5
+      e10: 0
+      e11: 1
+      e12: 0
+      e13: 0
+      e20: 0
+      e21: 0
+      e22: 1
+      e23: 0
+      e30: 0
+      e31: 0
+      e32: 0
+      e33: 1
+    activeByDefault: 1
+    hasAnimatedTransform: 0
+  - hierarchyPath: 0:Sprinkler/0:Body/0:Floor/0:Tank
+    animationPath: Body/Floor/Tank
+    parentIndex: 2
+    localPosition: {x: 0, y: 0.156, z: 0}
+    localRotation: {x: -0, y: -0, z: -0, w: 1}
+    localScale: {x: 1, y: 1, z: 1}
+    defaultLocalToRoot:
+      e00: 1
+      e01: 0
+      e02: 0
+      e03: 0.5
+      e10: 0
+      e11: 1
+      e12: 0
+      e13: 0.156
+      e20: 0
+      e21: 0
+      e22: 1
+      e23: 0
+      e30: 0
+      e31: 0
+      e32: 0
+      e33: 1
+    activeByDefault: 1
+    hasAnimatedTransform: 0
+  - hierarchyPath: 0:Sprinkler/0:Body/0:Floor/0:Tank/0:Nozzle
+    animationPath: Body/Floor/Tank/Nozzle
+    parentIndex: 3
+    localPosition: {x: 0, y: 0.27, z: 0}
+    localRotation: {x: -0, y: -0, z: -0, w: 1}
+    localScale: {x: 1, y: 1, z: 1}
+    defaultLocalToRoot:
+      e00: 1
+      e01: 0
+      e02: 0
+      e03: 0.5
+      e10: 0
+      e11: 1
+      e12: 0
+      e13: 0.426
+      e20: 0
+      e21: 0
+      e22: 1
+      e23: 0
+      e30: 0
+      e31: 0
+      e32: 0
+      e33: 1
+    activeByDefault: 1
+    hasAnimatedTransform: 0
+  - hierarchyPath: 0:Sprinkler/0:Body/1:Pipe_Corner
+    animationPath: Body/Pipe_Corner
+    parentIndex: 1
+    localPosition: {x: -0.5, y: 0.4049241, z: 0}
+    localRotation: {x: -0.7071068, y: -0, z: -0, w: 0.7071068}
+    localScale: {x: 0.8976, y: 1, z: 1}
+    defaultLocalToRoot:
+      e00: 0.8976
+      e01: 0
+      e02: 0
+      e03: -0.5
+      e10: 0
+      e11: -0.00000011920929
+      e12: 1.0000001
+      e13: 0.4049241
+      e20: 0
+      e21: -1.0000001
+      e22: -0.00000011920929
+      e23: 0
+      e30: 0
+      e31: 0
+      e32: 0
+      e33: 1
+    activeByDefault: 1
+    hasAnimatedTransform: 0
+  - hierarchyPath: 0:Sprinkler/0:Body/1:Pipe_Corner/0:Cylinder
+    animationPath: Body/Pipe_Corner/Cylinder
+    parentIndex: 5
+    localPosition: {x: 0, y: 0, z: -0.487}
+    localRotation: {x: 0.70710707, y: -0, z: -0, w: 0.70710653}
+    localScale: {x: 1, y: 1, z: 1}
+    defaultLocalToRoot:
+      e00: 0.8976
+      e01: 0
+      e02: 0
+      e03: -0.5
+      e10: 0
+      e11: 1.0000001
+      e12: -0.00000071525585
+      e13: -0.08207595
+      e20: 0
+      e21: 0.00000071525585
+      e22: 1.0000001
+      e23: 0.000000058054923
+      e30: 0
+      e31: 0
+      e32: 0
+      e33: 1
+    activeByDefault: 1
+    hasAnimatedTransform: 0
+  - hierarchyPath: 0:Sprinkler/0:Body/1:Pipe_Corner/1:Cylinder (1)
+    animationPath: Body/Pipe_Corner/Cylinder (1)
+    parentIndex: 5
+    localPosition: {x: -0.525, y: 0, z: -0.006}
+    localRotation: {x: 0.5, y: 0.5, z: -0.5, w: 0.5}
+    localScale: {x: 1, y: 1, z: 1}
+    defaultLocalToRoot:
+      e00: 0
+      e01: 0.8976
+      e02: 0
+      e03: -0.97124
+      e10: -1.0000001
+      e11: 0
+      e12: 0.00000011920929
+      e13: 0.39892408
+      e20: 0.00000011920929
+      e21: 0
+      e22: 1.0000001
+      e23: 7.1525574e-10
+      e30: 0
+      e31: 0
+      e32: 0
+      e33: 1
+    activeByDefault: 1
+    hasAnimatedTransform: 0
+  renderParts:
+  - kind: 0
+    nodeIndex: 2
+    mesh: {fileID: 6047364576717079604, guid: 33a1af76f117d364f882ab58e52beef8, type: 3}
+    material: {fileID: 2100000, guid: d55231aebf1ebec489686edfeb3a4a7b, type: 2}
+    subMeshIndex: 0
+    localBounds:
+      m_Center: {x: 0, y: 0.089889534, z: 0}
+      m_Extent: {x: 0.4089051, y: 0.089889534, z: 0.40913397}
+    layer: 0
+    renderingLayerMask: 1
+    shadowCastingMode: 1
+    receiveShadows: 1
+    enabledByDefault: 1
+  - kind: 0
+    nodeIndex: 3
+    mesh: {fileID: 4969726072811684949, guid: 33a1af76f117d364f882ab58e52beef8, type: 3}
+    material: {fileID: 2100000, guid: d55231aebf1ebec489686edfeb3a4a7b, type: 2}
+    subMeshIndex: 0
+    localBounds:
+      m_Center: {x: 0, y: 0.1538887, z: 0.000000007450581}
+      m_Extent: {x: 0.13166048, y: 0.1538887, z: 0.13165283}
+    layer: 0
+    renderingLayerMask: 1
+    shadowCastingMode: 1
+    receiveShadows: 1
+    enabledByDefault: 1
+  - kind: 0
+    nodeIndex: 4
+    mesh: {fileID: 7155317104978529882, guid: 33a1af76f117d364f882ab58e52beef8, type: 3}
+    material: {fileID: 2100000, guid: d55231aebf1ebec489686edfeb3a4a7b, type: 2}
+    subMeshIndex: 0
+    localBounds:
+      m_Center: {x: 0, y: 0.12359994, z: 0}
+      m_Extent: {x: 0.078989096, y: 0.12359997, z: 0.5010704}
+    layer: 0
+    renderingLayerMask: 1
+    shadowCastingMode: 1
+    receiveShadows: 1
+    enabledByDefault: 1
+  - kind: 0
+    nodeIndex: 5
+    mesh: {fileID: 4300000, guid: 695e96c390da7754ea6ce014ed2e2bf5, type: 2}
+    material: {fileID: 2100000, guid: f8dcf2a2c290e6545b35da5512403502, type: 2}
+    subMeshIndex: 0
+    localBounds:
+      m_Center: {x: -0.17, y: 0, z: -0.17}
+      m_Extent: {x: 0.32999998, y: 0.16, z: 0.32999998}
+    layer: 0
+    renderingLayerMask: 1
+    shadowCastingMode: 1
+    receiveShadows: 1
+    enabledByDefault: 1
+  - kind: 0
+    nodeIndex: 6
+    mesh: {fileID: 4300000, guid: e0f6b7921e91fbe439915112b074b2bc, type: 2}
+    material: {fileID: 2100000, guid: f8dcf2a2c290e6545b35da5512403502, type: 2}
+    subMeshIndex: 0
+    localBounds:
+      m_Center: {x: 0.000000029802322, y: 0, z: -0.000000059604645}
+      m_Extent: {x: 0.24000004, y: 0.125, z: 0.24000008}
+    layer: 0
+    renderingLayerMask: 1
+    shadowCastingMode: 1
+    receiveShadows: 1
+    enabledByDefault: 1
+  - kind: 0
+    nodeIndex: 7
+    mesh: {fileID: 4300000, guid: e0f6b7921e91fbe439915112b074b2bc, type: 2}
+    material: {fileID: 2100000, guid: f8dcf2a2c290e6545b35da5512403502, type: 2}
+    subMeshIndex: 0
+    localBounds:
+      m_Center: {x: 0.000000029802322, y: 0, z: -0.000000059604645}
+      m_Extent: {x: 0.24000004, y: 0.125, z: 0.24000008}
+    layer: 0
+    renderingLayerMask: 1
+    shadowCastingMode: 1
+    receiveShadows: 1
+    enabledByDefault: 1
+  animationClips: []

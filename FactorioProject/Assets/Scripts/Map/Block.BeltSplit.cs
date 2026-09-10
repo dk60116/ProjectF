@@ -9,6 +9,7 @@ public partial class Block
     {
         if (lane < 0 || lane >= ConveyorStackLaneLimit || !IsConveyorStackingEnabled()) return false;
         return IsActiveConveyorLaneIndex(lane)
+            || (IsBelt2FBridgeLaneIndex(lane) && TryGetBelt2FBridgeCenterRecord(out _))
             || (IsBelt2FBridgeLaneIndex(lane) && TryGetBelt2FBridgeCenterBelt(out _))
             || (lane == ConveyorSideExitLaneIndex && HasBeltSplitSideExitLane());
     }
@@ -25,6 +26,16 @@ public partial class Block
     internal void AppendBeltSplitConnections(int lane, List<(Block block, int lane)> results)
     {
         if (!IsBeltSplitLane(lane)) return;
+        if (lane == ConveyorSingleLineBackLaneIndex
+            && TryGetRuntimeSplitterRecord(out ConveyorRuntimeRecord splitterRecord))
+        {
+            if (TryGetSplitterChannels(splitterRecord, out Block left, out Block right))
+            {
+                results.Add((left, ConveyorSingleLineFrontLaneIndex));
+                results.Add((right, ConveyorSingleLineFrontLaneIndex));
+            }
+            return;
+        }
         if (lane == ConveyorSingleLineBackLaneIndex && TryGetRuntimeSplitter(out Spliterbelt splitter))
         {
             // Both outputs can receive an item, regardless of current fullness/filter/arbitration.

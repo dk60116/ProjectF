@@ -9,6 +9,7 @@ using System.Reflection;
 using System.Text;
 using System.Threading;
 using ProjectF.Diagnostics;
+using ProjectF.MapObjects;
 using TMPro;
 using Unity.Profiling;
 using Unity.Profiling.LowLevel.Unsafe;
@@ -27,10 +28,16 @@ public class GameManager : MonoBehaviour
     private ItemManager itemManager;
     private VirtualObjectWorld virtualObjectWorld;
     private VirtualItemStackRenderer virtualItemStackRenderer;
+    private StaticMapObjectBatchRenderer staticMapObjectBatchRenderer;
     private WorldTimeService worldTimeService;
 
     [SerializeField]
     private Player player;
+    [Header("Map Object Type Runtime")]
+    [FormerlySerializedAs("enableStaticMapObjectBatchPrototype")]
+    [SerializeField, Tooltip("적격한 설치물의 본체와 자식 렌더링을 Item ID별 단일 GameObject 호스트로 관리합니다.")]
+    private bool enableMapObjectTypeRuntime = true;
+    [Header("Debug Visualization")]
     [SerializeField]
     private bool debugConveyorInstallGridEnds;
     [SerializeField]
@@ -127,6 +134,12 @@ public class GameManager : MonoBehaviour
             virtualItemStackRenderer = gameObject.AddComponent<VirtualItemStackRenderer>();
         }
 
+        staticMapObjectBatchRenderer = GetComponent<StaticMapObjectBatchRenderer>();
+        if (staticMapObjectBatchRenderer == null)
+        {
+            staticMapObjectBatchRenderer = gameObject.AddComponent<StaticMapObjectBatchRenderer>();
+        }
+
         railLineDebugRenderer = GetComponent<RailLineDebugRenderer>();
         if (railLineDebugRenderer == null)
         {
@@ -142,6 +155,8 @@ public class GameManager : MonoBehaviour
 
         animalHerdDebugRenderer.SetVisible(showAnimalHerdAreas);
         virtualItemStackRenderer.Configure(virtualObjectWorld, itemManager);
+        staticMapObjectBatchRenderer.Configure(virtualObjectWorld, itemManager);
+        staticMapObjectBatchRenderer.enabled = enableMapObjectTypeRuntime;
         ConfigureRuntimeItemGiveReceiver();
     }
 
@@ -209,6 +224,7 @@ public class GameManager : MonoBehaviour
     public ItemManager ItemManger => itemManager;
     public VirtualObjectWorld VirtualWorld => virtualObjectWorld;
     public VirtualItemStackRenderer VirtualItemRenderer => virtualItemStackRenderer;
+    public StaticMapObjectBatchRenderer StaticMapObjectRenderer => staticMapObjectBatchRenderer;
     public WorldTimeService WorldTime => worldTimeService != null
         ? worldTimeService
         : WorldTimeService.Active;
@@ -710,6 +726,9 @@ public sealed class RuntimeItemGiveReceiver : MonoBehaviour
     private readonly Dictionary<int, int> installationCountsByItemId = new Dictionary<int, int>();
     private readonly List<KeyValuePair<int, int>> installationCountSortBuffer = new List<KeyValuePair<int, int>>();
     private readonly StringBuilder installationCountTokenBuilder = new StringBuilder(128);
+    private readonly List<GameObject> sceneRootGameObjectBuffer = new List<GameObject>(256);
+    private readonly List<Transform> sceneTransformBuffer = new List<Transform>(1024);
+    private readonly List<MonoBehaviour> sceneMonoBehaviourBuffer = new List<MonoBehaviour>(16);
     private readonly FrameTiming[] frameTimingBuffer = new FrameTiming[1];
     private readonly List<RuntimeProfilerRecorder> runtimeProfilerRecorders = new List<RuntimeProfilerRecorder>();
     private readonly List<ProfilerRecorderHandle> runtimeProfilerRecorderHandles = new List<ProfilerRecorderHandle>(256);
@@ -733,6 +752,10 @@ public sealed class RuntimeItemGiveReceiver : MonoBehaviour
     private float cachedStatusWorldStatsTime = float.NegativeInfinity;
     private int cachedInstalledObjectTotal;
     private int cachedConveyorItemTotal;
+    private int cachedSceneGameObjectTotal;
+    private int cachedActiveSceneGameObjectTotal;
+    private int cachedSceneMonoBehaviourTotal;
+    private int cachedActiveSceneMonoBehaviourTotal;
     private string cachedInstallationTypeCounts = "-";
     private float cachedSaveSlotsStatusTime = float.NegativeInfinity;
     private int cachedSaveSlotsSelectedSlotIndex = -1;
@@ -1889,7 +1912,11 @@ public sealed class RuntimeItemGiveReceiver : MonoBehaviour
             isChunkStreamingBusy,
             out int installedObjectTotal,
             out int conveyorItemTotal,
-            out string installationTypeCounts);
+            out string installationTypeCounts,
+            out int sceneGameObjectTotal,
+            out int activeSceneGameObjectTotal,
+            out int sceneMonoBehaviourTotal,
+            out int activeSceneMonoBehaviourTotal);
         GameManager gameManager = GameManager.Instance;
         bool currentShowConveyorSlotDots = gameManager != null && gameManager.ShowConveyorSlotDots;
         bool currentShowSleepAwake = gameManager != null && gameManager.ShowSleepAwake;
@@ -1902,7 +1929,11 @@ public sealed class RuntimeItemGiveReceiver : MonoBehaviour
             ResolveSaveManager(),
             ResolvePlayerCamera(),
             terrain,
-            isChunkStreamingBusy);
+            isChunkStreamingBusy,
+            sceneGameObjectTotal,
+            activeSceneGameObjectTotal,
+            sceneMonoBehaviourTotal,
+            activeSceneMonoBehaviourTotal);
         return ToolResult.Status(
             fps,
             frameMs,
@@ -2793,7 +2824,11 @@ public sealed class RuntimeItemGiveReceiver : MonoBehaviour
         SaveManager saveManager,
         PlayerCamera playerCamera,
         TerrainGenerator terrain,
-        bool allowStaleCache = false)
+        bool allowStaleCache,
+        int sceneGameObjectTotal,
+        int activeSceneGameObjectTotal,
+        int sceneMonoBehaviourTotal,
+        int activeSceneMonoBehaviourTotal)
     {
         return BuildExtraTokens(
             BuildSaveSlotsExtraTokens(saveManager, false, allowStaleCache),
@@ -2809,7 +2844,17 @@ public sealed class RuntimeItemGiveReceiver : MonoBehaviour
             BuildAnimalAIExtraTokens(GameManager.Instance),
             BuildMapObjectTickProfilingExtraTokens(GameManager.Instance),
             BuildPlayerSpeedExtraTokens(),
+            BuildConveyorWorldExtraTokens(),
+            $"sceneGameObjects={sceneGameObjectTotal} activeSceneGameObjects={activeSceneGameObjectTotal} sceneMonoBehaviours={sceneMonoBehaviourTotal} activeSceneMonoBehaviours={activeSceneMonoBehaviourTotal}",
             BuildWorldTimeExtraTokens(ResolveWorldTime()));
+    }
+
+    private static string BuildConveyorWorldExtraTokens()
+    {
+        ConveyorWorld world = ConveyorWorld.Current;
+        return world != null
+            ? $"beltRecords={world.InstalledBeltCount} beltHostGameObjects={world.SceneGameObjectCount} beltBatchEntries={world.BatchEntryCount}"
+            : "beltRecords=0 beltHostGameObjects=0 beltBatchEntries=0";
     }
 
     private string BuildPlayerSpeedExtraTokens()
@@ -2960,7 +3005,11 @@ public sealed class RuntimeItemGiveReceiver : MonoBehaviour
         bool allowStaleCache,
         out int installedObjectTotal,
         out int conveyorItemTotal,
-        out string installationTypeCounts)
+        out string installationTypeCounts,
+        out int sceneGameObjectTotal,
+        out int activeSceneGameObjectTotal,
+        out int sceneMonoBehaviourTotal,
+        out int activeSceneMonoBehaviourTotal)
     {
         float now = Time.unscaledTime;
         if (allowStaleCache
@@ -2973,8 +3022,18 @@ public sealed class RuntimeItemGiveReceiver : MonoBehaviour
                 : cachedConveyorItemTotal;
             cachedConveyorItemTotal = conveyorItemTotal;
             installationTypeCounts = cachedInstallationTypeCounts;
+            sceneGameObjectTotal = cachedSceneGameObjectTotal;
+            activeSceneGameObjectTotal = cachedActiveSceneGameObjectTotal;
+            sceneMonoBehaviourTotal = cachedSceneMonoBehaviourTotal;
+            activeSceneMonoBehaviourTotal = cachedActiveSceneMonoBehaviourTotal;
             return;
         }
+
+        CaptureSceneObjectCounts(
+            out cachedSceneGameObjectTotal,
+            out cachedActiveSceneGameObjectTotal,
+            out cachedSceneMonoBehaviourTotal,
+            out cachedActiveSceneMonoBehaviourTotal);
 
         if (terrain == null)
         {
@@ -2986,6 +3045,10 @@ public sealed class RuntimeItemGiveReceiver : MonoBehaviour
             installedObjectTotal = cachedInstalledObjectTotal;
             conveyorItemTotal = cachedConveyorItemTotal;
             installationTypeCounts = cachedInstallationTypeCounts;
+            sceneGameObjectTotal = cachedSceneGameObjectTotal;
+            activeSceneGameObjectTotal = cachedActiveSceneGameObjectTotal;
+            sceneMonoBehaviourTotal = cachedSceneMonoBehaviourTotal;
+            activeSceneMonoBehaviourTotal = cachedActiveSceneMonoBehaviourTotal;
             return;
         }
 
@@ -2997,6 +3060,86 @@ public sealed class RuntimeItemGiveReceiver : MonoBehaviour
         installedObjectTotal = cachedInstalledObjectTotal;
         conveyorItemTotal = cachedConveyorItemTotal;
         installationTypeCounts = cachedInstallationTypeCounts;
+        sceneGameObjectTotal = cachedSceneGameObjectTotal;
+        activeSceneGameObjectTotal = cachedActiveSceneGameObjectTotal;
+        sceneMonoBehaviourTotal = cachedSceneMonoBehaviourTotal;
+        activeSceneMonoBehaviourTotal = cachedActiveSceneMonoBehaviourTotal;
+    }
+
+    private void CaptureSceneObjectCounts(
+        out int gameObjectTotal,
+        out int activeGameObjectTotal,
+        out int monoBehaviourTotal,
+        out int activeMonoBehaviourTotal)
+    {
+        gameObjectTotal = 0;
+        activeGameObjectTotal = 0;
+        monoBehaviourTotal = 0;
+        activeMonoBehaviourTotal = 0;
+        sceneTransformBuffer.Clear();
+
+        int sceneCount = SceneManager.sceneCount;
+        for (int sceneIndex = 0; sceneIndex < sceneCount; sceneIndex++)
+        {
+            Scene scene = SceneManager.GetSceneAt(sceneIndex);
+            if (!scene.isLoaded)
+            {
+                continue;
+            }
+
+            sceneRootGameObjectBuffer.Clear();
+            scene.GetRootGameObjects(sceneRootGameObjectBuffer);
+            for (int rootIndex = 0; rootIndex < sceneRootGameObjectBuffer.Count; rootIndex++)
+            {
+                GameObject root = sceneRootGameObjectBuffer[rootIndex];
+                if (root != null)
+                {
+                    sceneTransformBuffer.Add(root.transform);
+                }
+            }
+        }
+
+        while (sceneTransformBuffer.Count > 0)
+        {
+            int lastIndex = sceneTransformBuffer.Count - 1;
+            Transform current = sceneTransformBuffer[lastIndex];
+            sceneTransformBuffer.RemoveAt(lastIndex);
+            if (current == null)
+            {
+                continue;
+            }
+
+            gameObjectTotal++;
+            if (current.gameObject.activeInHierarchy)
+            {
+                activeGameObjectTotal++;
+            }
+
+            sceneMonoBehaviourBuffer.Clear();
+            current.GetComponents(sceneMonoBehaviourBuffer);
+            for (int behaviourIndex = 0; behaviourIndex < sceneMonoBehaviourBuffer.Count; behaviourIndex++)
+            {
+                MonoBehaviour behaviour = sceneMonoBehaviourBuffer[behaviourIndex];
+                if (behaviour == null)
+                {
+                    continue;
+                }
+
+                monoBehaviourTotal++;
+                if (behaviour.isActiveAndEnabled)
+                {
+                    activeMonoBehaviourTotal++;
+                }
+            }
+
+            for (int childIndex = 0; childIndex < current.childCount; childIndex++)
+            {
+                sceneTransformBuffer.Add(current.GetChild(childIndex));
+            }
+        }
+
+        sceneRootGameObjectBuffer.Clear();
+        sceneMonoBehaviourBuffer.Clear();
     }
 
     private static bool IsTerrainChunkStreamingBusy()
@@ -3528,6 +3671,15 @@ public sealed class RuntimeItemGiveReceiver : MonoBehaviour
             installedObject,
             plan.Coordinate,
             plan.QuarterTurns);
+        if (installedInstallation is ConveyorBelt installedConveyor
+            && terrain.RegisterDataOnlyConveyorInstallation(
+                installedConveyor,
+                plan.SourcePrefab as ConveyorBelt))
+        {
+            terrain.ReleaseInstallationObject(installedInstallation, plan.SourcePrefab);
+            return true;
+        }
+
         terrain.RegisterLiveInstallationObject(installedInstallation);
         return true;
     }
@@ -4508,9 +4660,18 @@ public sealed class RuntimeItemGiveReceiver : MonoBehaviour
         if (terrain == null
             || !terrain.TryGetLoadedBlock(coordinate, out Block block)
             || block == null
-            || !(block.MapObject is ConveyorBelt conveyor)
-            || conveyor == null
-            || !conveyor.gameObject.activeInHierarchy)
+            || !(block.MapObject is ConveyorBelt conveyor))
+        {
+            return false;
+        }
+
+        if (block.TryGetRuntimeConveyorRecord(out ConveyorRuntimeRecord record))
+        {
+            return record.TryGetInputDirection(out inputDirection)
+                   && record.TryGetOutputDirection(out outputDirection);
+        }
+
+        if (conveyor == null || !conveyor.gameObject.activeInHierarchy)
         {
             return false;
         }

@@ -15,6 +15,7 @@ MonoBehaviour:
   itemName: Spliter belt
   id: 46
   mapObject: {fileID: 3055157777023880970, guid: 09f7fb2b66f582848aedabcf3fdc9f18, type: 3}
+  mapObjectArchetype: {fileID: 11400000, guid: 0b0379e38bc863d4fb726d4be9acde04, type: 2}
   useMapColor: 1
   mapColor: {r: 1, g: 0.7053032, b: 0.3254717, a: 1}
   mapMarkerSize: 1

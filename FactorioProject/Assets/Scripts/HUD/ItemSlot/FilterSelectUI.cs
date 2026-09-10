@@ -250,9 +250,17 @@ public partial class FilterSelectUI : MonoBehaviour
                     slot.gameObject.SetActive(true);
                 }
 
-                bool isChecked = isProductionTargetFilter
-                    ? productionMachine.IsProductionTargetSelected(definition.id)
-                    : boundTarget == null || boundTarget.IsItemFilterEnabled(definition.id, filterBitCount);
+                bool isChecked;
+                if (TryResolveSelectedSplitterRecord(out ConveyorRuntimeRecord splitterRecord))
+                {
+                    isChecked = splitterRecord.IsSplitterItemFilterEnabled(definition.id);
+                }
+                else
+                {
+                    isChecked = isProductionTargetFilter
+                        ? productionMachine.IsProductionTargetSelected(definition.id)
+                        : boundTarget == null || boundTarget.IsItemFilterEnabled(definition.id, filterBitCount);
+                }
                 int itemId = definition.id;
                 bool isInteractable = !isProductionTargetFilter
                     || productionMachine.CanSelectProductionTarget(itemId);
@@ -438,6 +446,13 @@ public partial class FilterSelectUI : MonoBehaviour
             return;
         }
 
+        if (TryResolveSelectedSplitterRecord(out ConveyorRuntimeRecord splitterRecord))
+        {
+            splitterRecord.SetSplitterItemFilterEnabled(itemId, GetFilterBitCount(), isOn);
+            Refresh();
+            return;
+        }
+
         if (TryApplyProductionTargetSelection(target, itemId, isOn))
         {
             PersistTargetFilterState(target);
@@ -516,6 +531,21 @@ public partial class FilterSelectUI : MonoBehaviour
         return selectedMapObject;
     }
 
+    private static bool TryResolveSelectedSplitterRecord(out ConveyorRuntimeRecord record)
+    {
+        record = null;
+        if (GameManager.Instance == null || GameManager.Instance.Player == null)
+        {
+            return false;
+        }
+
+        PlayerController controller = GameManager.Instance.Player.GetComponent<PlayerController>();
+        return controller != null
+               && controller.TryGetSelectedConveyorRecord(out record)
+               && record != null
+               && record.IsSplitter;
+    }
+
     private void PersistTargetFilterState(MapObject target)
     {
         if (!(target is InstallationObject installationObject))
@@ -546,6 +576,25 @@ public partial class FilterSelectUI : MonoBehaviour
         MapObject target = ResolveCurrentTarget();
         if (target == null)
         {
+            return;
+        }
+
+        if (TryResolveSelectedSplitterRecord(out ConveyorRuntimeRecord splitterRecord))
+        {
+            int splitterFilterBitCount = GetFilterBitCount();
+            for (int i = 0; i < visibleDefinitions.Count; i++)
+            {
+                ItemDefinition definition = visibleDefinitions[i];
+                if (definition != null && definition.id >= 0)
+                {
+                    splitterRecord.SetSplitterItemFilterEnabled(
+                        definition.id,
+                        splitterFilterBitCount,
+                        isEnabled);
+                }
+            }
+
+            Refresh();
             return;
         }
 

@@ -56,6 +56,29 @@ public class GameManagerEditor : Editor
 
             DrawWorldTimeControls(gameManager);
         }
+
+        DrawStaticMapObjectBatchStatus(gameManager);
+    }
+
+    private static void DrawStaticMapObjectBatchStatus(GameManager gameManager)
+    {
+        EditorGUILayout.Space();
+        EditorGUILayout.LabelField("Map Object Type Runtime", EditorStyles.boldLabel);
+
+        ProjectF.MapObjects.StaticMapObjectBatchRenderer renderer = gameManager.StaticMapObjectRenderer;
+        if (renderer == null)
+        {
+            EditorGUILayout.LabelField(Application.isPlaying ? "Renderer unavailable" : "Available in Play Mode");
+            return;
+        }
+
+        EditorGUILayout.LabelField("Enabled", renderer.isActiveAndEnabled ? "Yes" : "No");
+        EditorGUILayout.LabelField("Active Type Hosts", renderer.ActiveTypeCount.ToString());
+        EditorGUILayout.LabelField("Unsupported Active Types", renderer.UnsupportedActiveTypeCount.ToString());
+        EditorGUILayout.LabelField("Hosted Objects", renderer.ActiveInstanceCount.ToString());
+        EditorGUILayout.LabelField("Matrices", renderer.ActiveMatrixCount.ToString());
+        EditorGUILayout.LabelField("Batches", renderer.ActiveBatchCount.ToString());
+        EditorGUILayout.LabelField("Estimated Draw Calls", renderer.EstimatedDrawCallCount.ToString());
     }
 
     private static void DrawWorldTimeControls(GameManager gameManager)

@@ -1,0 +1,807 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: a4d286e989be41fe853b78a59ca3a4e8, type: 3}
+  m_Name: MapObjectArchetype_50_Electric Oil machine
+  m_EditorClassIdentifier: Assembly-CSharp::ProjectF.MapObjects.MapObjectArchetype
+  schemaVersion: 1
+  itemDefinition: {fileID: 11400000, guid: f73deaa4f06e2164a9a37afae9ef1854, type: 2}
+  sourcePrefab: {fileID: 8277338630082605383, guid: 0e8fab6e5b4c5334ba12a3440074b228, type: 3}
+  itemId: 50
+  itemName: Electric Oil machine
+  sourcePrefabGuid: 0e8fab6e5b4c5334ba12a3440074b228
+  sourceContentHash:
+    serializedVersion: 2
+    Hash: 139856d5c7ccb17c5aabaac2263f1966
+  sourceRuntimeType: OilDrillingMachine, Assembly-CSharp, Version=0.0.0.0, Culture=neutral,
+    PublicKeyToken=null
+  mapStatus:
+    mapSizeX: 2
+    mapSizeY: 1
+    centerCellX: 1
+    centerCellY: 0
+  focusMode: 1
+  defaultRootScale: {x: 1, y: 1, z: 1}
+  defaultRootRotation: {x: 0, y: 0, z: 0, w: 1}
+  localRenderBounds:
+    m_Center: {x: 0.16503835, y: 0.31120056, z: 0}
+    m_Extent: {x: 1.4718268, y: 1.2932007, z: 0.39411914}
+  hasRenderBounds: 1
+  featureFlags: 65
+  nodes:
+  - hierarchyPath: 0:Electric Oil machine
+    animationPath: 
+    parentIndex: -1
+    localPosition: {x: 0, y: 0, z: 0}
+    localRotation: {x: 0, y: 0, z: 0, w: 1}
+    localScale: {x: 1, y: 1, z: 1}
+    defaultLocalToRoot:
+      e00: 1
+      e01: 0
+      e02: 0
+      e03: 0
+      e10: 0
+      e11: 1
+      e12: 0
+      e13: 0
+      e20: 0
+      e21: 0
+      e22: 1
+      e23: 0
+      e30: 0
+      e31: 0
+      e32: 0
+      e33: 1
+    activeByDefault: 1
+    hasAnimatedTransform: 0
+  - hierarchyPath: 0:Electric Oil machine/0:Body
+    animationPath: Body
+    parentIndex: 0
+    localPosition: {x: 0, y: 0, z: 0}
+    localRotation: {x: 0, y: 0, z: 0, w: 1}
+    localScale: {x: 1, y: 1, z: 1}
+    defaultLocalToRoot:
+      e00: 1
+      e01: 0
+      e02: 0
+      e03: 0
+      e10: 0
+      e11: 1
+      e12: 0
+      e13: 0
+      e20: 0
+      e21: 0
+      e22: 1
+      e23: 0
+      e30: 0
+      e31: 0
+      e32: 0
+      e33: 1
+    activeByDefault: 1
+    hasAnimatedTransform: 0
+  - hierarchyPath: 0:Electric Oil machine/0:Body/0:Floor
+    animationPath: Body/Floor
+    parentIndex: 1
+    localPosition: {x: 0.04, y: -0.012075915, z: 0.044099998}
+    localRotation: {x: -0, y: -0, z: -0, w: 1}
+    localScale: {x: 0.8976, y: 1, z: 1}
+    defaultLocalToRoot:
+      e00: 0.8976
+      e01: 0
+      e02: 0
+      e03: 0.04
+      e10: 0
+      e11: 1
+      e12: 0
+      e13: -0.012075915
+      e20: 0
+      e21: 0
+      e22: 1
+      e23: 0.044099998
+      e30: 0
+      e31: 0
+      e32: 0
+      e33: 1
+    activeByDefault: 1
+    hasAnimatedTransform: 0
+  - hierarchyPath: 0:Electric Oil machine/0:Body/0:Floor/0:Pipe_Corner
+    animationPath: Body/Floor/Pipe_Corner
+    parentIndex: 2
+    localPosition: {x: -0.566, y: 0.417, z: -0.043088913}
+    localRotation: {x: -0.7071068, y: -0, z: -0, w: 0.7071068}
+    localScale: {x: 1, y: 1, z: 1}
+    defaultLocalToRoot:
+      e00: 0.8976
+      e01: 0
+      e02: 0
+      e03: -0.46804157
+      e10: 0
+      e11: -0.00000011920929
+      e12: 1.0000001
+      e13: 0.4049241
+      e20: 0
+      e21: -1.0000001
+      e22: -0.00000011920929
+      e23: 0.0010110848
+      e30: 0
+      e31: 0
+      e32: 0
+      e33: 1
+    activeByDefault: 1
+    hasAnimatedTransform: 0
+  - hierarchyPath: 0:Electric Oil machine/0:Body/0:Floor/0:Pipe_Corner/0:Cylinder
+    animationPath: Body/Floor/Pipe_Corner/Cylinder
+    parentIndex: 3
+    localPosition: {x: 0, y: 0, z: -0.487}
+    localRotation: {x: 0.70710707, y: -0, z: -0, w: 0.70710653}
+    localScale: {x: 1, y: 1, z: 1}
+    defaultLocalToRoot:
+      e00: 0.8976
+      e01: 0
+      e02: 0
+      e03: -0.46804157
+      e10: 0
+      e11: 1.0000001
+      e12: -0.00000071525585
+      e13: -0.08207597
+      e20: 0
+      e21: 0.00000071525585
+      e22: 1.0000001
+      e23: 0.0010111444
+      e30: 0
+      e31: 0
+      e32: 0
+      e33: 1
+    activeByDefault: 1
+    hasAnimatedTransform: 0
+  - hierarchyPath: 0:Electric Oil machine/0:Body/0:Floor/0:Pipe_Corner/1:Cylinder
+      (1)
+    animationPath: Body/Floor/Pipe_Corner/Cylinder (1)
+    parentIndex: 3
+    localPosition: {x: -0.525, y: 0, z: -0.006}
+    localRotation: {x: 0.5, y: 0.5, z: -0.5, w: 0.5}
+    localScale: {x: 1, y: 1, z: 1}
+    defaultLocalToRoot:
+      e00: 0
+      e01: 0.8976
+      e02: 0
+      e03: -0.9392815
+      e10: -1.0000001
+      e11: 0
+      e12: 0.00000011920929
+      e13: 0.39892408
+      e20: 0.00000011920929
+      e21: 0
+      e22: 1.0000001
+      e23: 0.0010110848
+      e30: 0
+      e31: 0
+      e32: 0
+      e33: 1
+    activeByDefault: 1
+    hasAnimatedTransform: 0
+  - hierarchyPath: 0:Electric Oil machine/0:Body/1:Group_03_3261D1
+    animationPath: Body/Group_03_3261D1
+    parentIndex: 1
+    localPosition: {x: -0, y: 0, z: 0}
+    localRotation: {x: 0, y: -0, z: -0, w: 1}
+    localScale: {x: 1, y: 1, z: 1}
+    defaultLocalToRoot:
+      e00: 1
+      e01: 0
+      e02: 0
+      e03: 0
+      e10: 0
+      e11: 1
+      e12: 0
+      e13: 0
+      e20: 0
+      e21: 0
+      e22: 1
+      e23: 0
+      e30: 0
+      e31: 0
+      e32: 0
+      e33: 1
+    activeByDefault: 1
+    hasAnimatedTransform: 0
+  - hierarchyPath: 0:Electric Oil machine/0:Body/2:Group_04_95E625
+    animationPath: Body/Group_04_95E625
+    parentIndex: 1
+    localPosition: {x: -0, y: 0, z: 0}
+    localRotation: {x: 0, y: -0, z: -0, w: 1}
+    localScale: {x: 1, y: 1, z: 1}
+    defaultLocalToRoot:
+      e00: 1
+      e01: 0
+      e02: 0
+      e03: 0
+      e10: 0
+      e11: 1
+      e12: 0
+      e13: 0
+      e20: 0
+      e21: 0
+      e22: 1
+      e23: 0
+      e30: 0
+      e31: 0
+      e32: 0
+      e33: 1
+    activeByDefault: 1
+    hasAnimatedTransform: 0
+  - hierarchyPath: 0:Electric Oil machine/0:Body/3:Group_05_D143BF
+    animationPath: Body/Group_05_D143BF
+    parentIndex: 1
+    localPosition: {x: -0, y: 0, z: 0}
+    localRotation: {x: 0, y: -0, z: -0, w: 1}
+    localScale: {x: 1, y: 1, z: 1}
+    defaultLocalToRoot:
+      e00: 1
+      e01: 0
+      e02: 0
+      e03: 0
+      e10: 0
+      e11: 1
+      e12: 0
+      e13: 0
+      e20: 0
+      e21: 0
+      e22: 1
+      e23: 0
+      e30: 0
+      e31: 0
+      e32: 0
+      e33: 1
+    activeByDefault: 1
+    hasAnimatedTransform: 0
+  - hierarchyPath: 0:Electric Oil machine/0:Body/4:Center
+    animationPath: Body/Center
+    parentIndex: 1
+    localPosition: {x: 0.569, y: 0.129, z: 0}
+    localRotation: {x: 0, y: -0, z: -0, w: 1}
+    localScale: {x: 1, y: 1, z: 1}
+    defaultLocalToRoot:
+      e00: 1
+      e01: 0
+      e02: 0
+      e03: 0.569
+      e10: 0
+      e11: 1
+      e12: 0
+      e13: 0.129
+      e20: 0
+      e21: 0
+      e22: 1
+      e23: 0
+      e30: 0
+      e31: 0
+      e32: 0
+      e33: 1
+    activeByDefault: 1
+    hasAnimatedTransform: 0
+  - hierarchyPath: 0:Electric Oil machine/0:Body/4:Center/0:Neck
+    animationPath: Body/Center/Neck
+    parentIndex: 9
+    localPosition: {x: 0.019, y: 1.111, z: 0}
+    localRotation: {x: -0, y: -0, z: -0, w: 1}
+    localScale: {x: 1, y: 1, z: 1}
+    defaultLocalToRoot:
+      e00: 1
+      e01: 0
+      e02: 0
+      e03: 0.588
+      e10: 0
+      e11: 1
+      e12: 0
+      e13: 1.2399999
+      e20: 0
+      e21: 0
+      e22: 1
+      e23: 0
+      e30: 0
+      e31: 0
+      e32: 0
+      e33: 1
+    activeByDefault: 1
+    hasAnimatedTransform: 1
+  - hierarchyPath: 0:Electric Oil machine/0:Body/4:Center/0:Neck/0:Head
+    animationPath: Body/Center/Neck/Head
+    parentIndex: 10
+    localPosition: {x: 0.793, y: -0.016, z: 0}
+    localRotation: {x: -0, y: -0, z: -0, w: 1}
+    localScale: {x: 1, y: 1, z: 1}
+    defaultLocalToRoot:
+      e00: 1
+      e01: 0
+      e02: 0
+      e03: 1.381
+      e10: 0
+      e11: 1
+      e12: 0
+      e13: 1.2239999
+      e20: 0
+      e21: 0
+      e22: 1
+      e23: 0
+      e30: 0
+      e31: 0
+      e32: 0
+      e33: 1
+    activeByDefault: 1
+    hasAnimatedTransform: 1
+  - hierarchyPath: 0:Electric Oil machine/0:Body/4:Center/0:Neck/0:Head/0:Hand
+    animationPath: Body/Center/Neck/Head/Hand
+    parentIndex: 11
+    localPosition: {x: 0.114, y: -0.319, z: 0}
+    localRotation: {x: -0, y: -0, z: -0, w: 1}
+    localScale: {x: 1, y: 1, z: 1}
+    defaultLocalToRoot:
+      e00: 1
+      e01: 0
+      e02: 0
+      e03: 1.495
+      e10: 0
+      e11: 1
+      e12: 0
+      e13: 0.9049999
+      e20: 0
+      e21: 0
+      e22: 1
+      e23: 0
+      e30: 0
+      e31: 0
+      e32: 0
+      e33: 1
+    activeByDefault: 1
+    hasAnimatedTransform: 0
+  - hierarchyPath: 0:Electric Oil machine/0:Body/4:Center/0:Neck/0:Head/0:Hand/0:Drill
+    animationPath: Body/Center/Neck/Head/Hand/Drill
+    parentIndex: 12
+    localPosition: {x: -0, y: -0.887, z: 0.001}
+    localRotation: {x: -0, y: -0, z: -0, w: 1}
+    localScale: {x: 1, y: 1, z: 1}
+    defaultLocalToRoot:
+      e00: 1
+      e01: 0
+      e02: 0
+      e03: 1.495
+      e10: 0
+      e11: 1
+      e12: 0
+      e13: 0.017999813
+      e20: 0
+      e21: 0
+      e22: 1
+      e23: 0.001
+      e30: 0
+      e31: 0
+      e32: 0
+      e33: 1
+    activeByDefault: 1
+    hasAnimatedTransform: 0
+  - hierarchyPath: 0:Electric Oil machine/0:Body/5:Box
+    animationPath: Body/Box
+    parentIndex: 1
+    localPosition: {x: 0.146, y: -0.047, z: 0}
+    localRotation: {x: 0, y: -0, z: -0, w: 1}
+    localScale: {x: 1, y: 1, z: 1}
+    defaultLocalToRoot:
+      e00: 1
+      e01: 0
+      e02: 0
+      e03: 0.146
+      e10: 0
+      e11: 1
+      e12: 0
+      e13: -0.047
+      e20: 0
+      e21: 0
+      e22: 1
+      e23: 0
+      e30: 0
+      e31: 0
+      e32: 0
+      e33: 1
+    activeByDefault: 1
+    hasAnimatedTransform: 0
+  - hierarchyPath: 0:Electric Oil machine/0:Body/5:Box/0:Box Arm
+    animationPath: Body/Box/Box Arm
+    parentIndex: 14
+    localPosition: {x: -0.121, y: 0.427, z: -0.005}
+    localRotation: {x: -0.0065828343, y: -0.019042794, z: 0.30166072, w: 0.9532024}
+    localScale: {x: 1, y: 0.50839, z: 1}
+    defaultLocalToRoot:
+      e00: 0.81727636
+      e01: -0.29224125
+      e02: -0.04027484
+      e03: 0.024999999
+      e10: 0.5753381
+      e11: 0.4158198
+      e12: 0.0010606218
+      e13: 0.38
+      e20: 0.03233171
+      e21: -0.012220919
+      e22: 0.99918807
+      e23: -0.005
+      e30: 0
+      e31: 0
+      e32: 0
+      e33: 1
+    activeByDefault: 1
+    hasAnimatedTransform: 0
+  - hierarchyPath: 0:Electric Oil machine/0:Body/5:Box/0:Box Arm/0:Cylinder
+    animationPath: Body/Box/Box Arm/Cylinder
+    parentIndex: 15
+    localPosition: {x: -0, y: 1.228, z: 0}
+    localRotation: {x: 4.6566134e-10, y: -0.0000000018626454, z: 0.003282594, w: 0.99999464}
+    localScale: {x: 0.05, y: 0.3764, z: 0.05}
+    defaultLocalToRoot:
+      e00: 0.040767007
+      e01: -0.11201682
+      e02: -0.0020137422
+      e03: -0.33387226
+      e10: 0.028902782
+      e11: 0.15508945
+      e12: 0.000053030966
+      e13: 0.8906267
+      e20: 0.001612539
+      e21: -0.0046797497
+      e22: 0.049959403
+      e23: -0.02000729
+      e30: 0
+      e31: 0
+      e32: 0
+      e33: 1
+    activeByDefault: 1
+    hasAnimatedTransform: 1
+  - hierarchyPath: 0:Electric Oil machine/0:Body/6:Group_09_E62565
+    animationPath: Body/Group_09_E62565
+    parentIndex: 1
+    localPosition: {x: -0.004, y: 0.107, z: 0}
+    localRotation: {x: 0, y: -0, z: -0, w: 1}
+    localScale: {x: 1, y: 1, z: 1}
+    defaultLocalToRoot:
+      e00: 1
+      e01: 0
+      e02: 0
+      e03: -0.004
+      e10: 0
+      e11: 1
+      e12: 0
+      e13: 0.107
+      e20: 0
+      e21: 0
+      e22: 1
+      e23: 0
+      e30: 0
+      e31: 0
+      e32: 0
+      e33: 1
+    activeByDefault: 0
+    hasAnimatedTransform: 0
+  - hierarchyPath: 0:Electric Oil machine/0:Body/7:Group_10_39D132
+    animationPath: Body/Group_10_39D132
+    parentIndex: 1
+    localPosition: {x: -0, y: 0, z: 0}
+    localRotation: {x: 0, y: -0, z: -0, w: 1}
+    localScale: {x: 1, y: 1, z: 1}
+    defaultLocalToRoot:
+      e00: 1
+      e01: 0
+      e02: 0
+      e03: 0
+      e10: 0
+      e11: 1
+      e12: 0
+      e13: 0
+      e20: 0
+      e21: 0
+      e22: 1
+      e23: 0
+      e30: 0
+      e31: 0
+      e32: 0
+      e33: 1
+    activeByDefault: 1
+    hasAnimatedTransform: 0
+  - hierarchyPath: 0:Electric Oil machine/0:Body/8:Group_11_D7E637
+    animationPath: Body/Group_11_D7E637
+    parentIndex: 1
+    localPosition: {x: -0, y: 0, z: 0}
+    localRotation: {x: 0, y: -0, z: -0, w: 1}
+    localScale: {x: 1, y: 1, z: 1}
+    defaultLocalToRoot:
+      e00: 1
+      e01: 0
+      e02: 0
+      e03: 0
+      e10: 0
+      e11: 1
+      e12: 0
+      e13: 0
+      e20: 0
+      e21: 0
+      e22: 1
+      e23: 0
+      e30: 0
+      e31: 0
+      e32: 0
+      e33: 1
+    activeByDefault: 1
+    hasAnimatedTransform: 0
+  - hierarchyPath: 0:Electric Oil machine/1:powerLinePoint
+    animationPath: powerLinePoint
+    parentIndex: 0
+    localPosition: {x: 0.573, y: 0, z: 0}
+    localRotation: {x: 0, y: 0, z: 0, w: 1}
+    localScale: {x: 1, y: 1, z: 1}
+    defaultLocalToRoot:
+      e00: 1
+      e01: 0
+      e02: 0
+      e03: 0.573
+      e10: 0
+      e11: 1
+      e12: 0
+      e13: 0
+      e20: 0
+      e21: 0
+      e22: 1
+      e23: 0
+      e30: 0
+      e31: 0
+      e32: 0
+      e33: 1
+    activeByDefault: 1
+    hasAnimatedTransform: 0
+  renderParts:
+  - kind: 0
+    nodeIndex: 2
+    mesh: {fileID: 6420460965937673546, guid: 1ff5102d487fb6148819fdff76c5f2b1, type: 3}
+    material: {fileID: 2100000, guid: 56e4b85b39344f4478b3923ebacf2462, type: 2}
+    subMeshIndex: 0
+    localBounds:
+      m_Center: {x: 0.12912646, y: 0.09238048, z: -0.043088913}
+      m_Extent: {x: 0.9900001, y: 0.08030456, z: 0.37384814}
+    layer: 0
+    renderingLayerMask: 1
+    shadowCastingMode: 1
+    receiveShadows: 1
+    enabledByDefault: 1
+  - kind: 0
+    nodeIndex: 3
+    mesh: {fileID: 4300000, guid: 695e96c390da7754ea6ce014ed2e2bf5, type: 2}
+    material: {fileID: 2100000, guid: f8dcf2a2c290e6545b35da5512403502, type: 2}
+    subMeshIndex: 0
+    localBounds:
+      m_Center: {x: -0.17, y: 0, z: -0.17}
+      m_Extent: {x: 0.32999998, y: 0.16, z: 0.32999998}
+    layer: 0
+    renderingLayerMask: 1
+    shadowCastingMode: 1
+    receiveShadows: 1
+    enabledByDefault: 1
+  - kind: 0
+    nodeIndex: 4
+    mesh: {fileID: 4300000, guid: e0f6b7921e91fbe439915112b074b2bc, type: 2}
+    material: {fileID: 2100000, guid: f8dcf2a2c290e6545b35da5512403502, type: 2}
+    subMeshIndex: 0
+    localBounds:
+      m_Center: {x: 0.000000029802322, y: 0, z: -0.000000059604645}
+      m_Extent: {x: 0.24000004, y: 0.125, z: 0.24000008}
+    layer: 0
+    renderingLayerMask: 1
+    shadowCastingMode: 1
+    receiveShadows: 1
+    enabledByDefault: 1
+  - kind: 0
+    nodeIndex: 5
+    mesh: {fileID: 4300000, guid: e0f6b7921e91fbe439915112b074b2bc, type: 2}
+    material: {fileID: 2100000, guid: f8dcf2a2c290e6545b35da5512403502, type: 2}
+    subMeshIndex: 0
+    localBounds:
+      m_Center: {x: 0.000000029802322, y: 0, z: -0.000000059604645}
+      m_Extent: {x: 0.24000004, y: 0.125, z: 0.24000008}
+    layer: 0
+    renderingLayerMask: 1
+    shadowCastingMode: 1
+    receiveShadows: 1
+    enabledByDefault: 1
+  - kind: 0
+    nodeIndex: 6
+    mesh: {fileID: -5682513058559100099, guid: 0f54002c4478e754d8e50e891ad9dcd5, type: 3}
+    material: {fileID: 2100000, guid: 4ef144cef8023cb4682716154a49a3b6, type: 2}
+    subMeshIndex: 0
+    localBounds:
+      m_Center: {x: 1.3660485, y: 0.9568785, z: 0.027461976}
+      m_Extent: {x: 0.00390625, y: 0, z: 0.023529023}
+    layer: 0
+    renderingLayerMask: 1
+    shadowCastingMode: 1
+    receiveShadows: 1
+    enabledByDefault: 1
+  - kind: 0
+    nodeIndex: 7
+    mesh: {fileID: -5701726155814087980, guid: 0f54002c4478e754d8e50e891ad9dcd5, type: 3}
+    material: {fileID: 2100000, guid: 4ef144cef8023cb4682716154a49a3b6, type: 2}
+    subMeshIndex: 0
+    localBounds:
+      m_Center: {x: 0.4993683, y: 1.152954, z: -0.13528055}
+      m_Extent: {x: 0, y: 0.00390625, z: 0.013721466}
+    layer: 0
+    renderingLayerMask: 1
+    shadowCastingMode: 1
+    receiveShadows: 1
+    enabledByDefault: 1
+  - kind: 0
+    nodeIndex: 8
+    mesh: {fileID: 5032147317039237779, guid: 0f54002c4478e754d8e50e891ad9dcd5, type: 3}
+    material: {fileID: 2100000, guid: 4ef144cef8023cb4682716154a49a3b6, type: 2}
+    subMeshIndex: 0
+    localBounds:
+      m_Center: {x: 0.607206, y: 1.1725767, z: -0.16860956}
+      m_Extent: {x: 0.009803742, y: 0.003936708, z: 0.003921509}
+    layer: 0
+    renderingLayerMask: 1
+    shadowCastingMode: 1
+    receiveShadows: 1
+    enabledByDefault: 1
+  - kind: 0
+    nodeIndex: 9
+    mesh: {fileID: -2079406314457312864, guid: 0f54002c4478e754d8e50e891ad9dcd5, type: 3}
+    material: {fileID: 2100000, guid: 4ef144cef8023cb4682716154a49a3b6, type: 2}
+    subMeshIndex: 0
+    localBounds:
+      m_Center: {x: 0.26275453, y: 0.59606916, z: 0}
+      m_Extent: {x: 0.5608063, y: 0.59606916, z: 0.30195612}
+    layer: 0
+    renderingLayerMask: 1
+    shadowCastingMode: 1
+    receiveShadows: 1
+    enabledByDefault: 1
+  - kind: 0
+    nodeIndex: 10
+    mesh: {fileID: 3799084712096301012, guid: 0f54002c4478e754d8e50e891ad9dcd5, type: 3}
+    material: {fileID: 2100000, guid: 4ef144cef8023cb4682716154a49a3b6, type: 2}
+    subMeshIndex: 0
+    localBounds:
+      m_Center: {x: -0.123064876, y: -0.024972714, z: 0}
+      m_Extent: {x: 1.04848, y: 0.21360248, z: 0.1431351}
+    layer: 0
+    renderingLayerMask: 1
+    shadowCastingMode: 1
+    receiveShadows: 1
+    enabledByDefault: 1
+  - kind: 0
+    nodeIndex: 11
+    mesh: {fileID: -2211853127723535784, guid: 0f54002c4478e754d8e50e891ad9dcd5, type: 3}
+    material: {fileID: 2100000, guid: 4ef144cef8023cb4682716154a49a3b6, type: 2}
+    subMeshIndex: 0
+    localBounds:
+      m_Center: {x: 0.07547587, y: -0.000000014901161, z: 0}
+      m_Extent: {x: 0.18038923, y: 0.3804015, z: 0.17058563}
+    layer: 0
+    renderingLayerMask: 1
+    shadowCastingMode: 1
+    receiveShadows: 1
+    enabledByDefault: 1
+  - kind: 0
+    nodeIndex: 12
+    mesh: {fileID: 481131018649818963, guid: 0f54002c4478e754d8e50e891ad9dcd5, type: 3}
+    material: {fileID: 2100000, guid: 4ef144cef8023cb4682716154a49a3b6, type: 2}
+    subMeshIndex: 0
+    localBounds:
+      m_Center: {x: 0, y: -0.13235569, z: 0}
+      m_Extent: {x: 0.075912476, y: 0.13235569, z: 0.075983986}
+    layer: 0
+    renderingLayerMask: 1
+    shadowCastingMode: 1
+    receiveShadows: 1
+    enabledByDefault: 1
+  - kind: 0
+    nodeIndex: 13
+    mesh: {fileID: 4300000, guid: edddfa2871c77d942a26f5a29d72a12d, type: 2}
+    material: {fileID: 2100000, guid: 958341fb0edee52469d88c0897d1e8f8, type: 2}
+    subMeshIndex: 0
+    localBounds:
+      m_Center: {x: 0.000000007450581, y: 0, z: -0.000000011175871}
+      m_Extent: {x: 0.06750001, y: 1, z: 0.067500025}
+    layer: 0
+    renderingLayerMask: 1
+    shadowCastingMode: 1
+    receiveShadows: 1
+    enabledByDefault: 1
+  - kind: 0
+    nodeIndex: 14
+    mesh: {fileID: -6402853671097805564, guid: 0f54002c4478e754d8e50e891ad9dcd5, type: 3}
+    material: {fileID: 2100000, guid: 4ef144cef8023cb4682716154a49a3b6, type: 2}
+    subMeshIndex: 0
+    localBounds:
+      m_Center: {x: -0.1476844, y: 0.45886603, z: 0.000030636787}
+      m_Extent: {x: 0.3450928, y: 0.29016486, z: 0.29803467}
+    layer: 0
+    renderingLayerMask: 1
+    shadowCastingMode: 1
+    receiveShadows: 1
+    enabledByDefault: 1
+  - kind: 0
+    nodeIndex: 15
+    mesh: {fileID: 4459122626599531140, guid: 0f54002c4478e754d8e50e891ad9dcd5, type: 3}
+    material: {fileID: 2100000, guid: 4ef144cef8023cb4682716154a49a3b6, type: 2}
+    subMeshIndex: 0
+    localBounds:
+      m_Center: {x: 0.0015032683, y: 0.44360018, z: -0.0012986176}
+      m_Extent: {x: 0.053119756, y: 0.5059047, z: 0.06804083}
+    layer: 0
+    renderingLayerMask: 1
+    shadowCastingMode: 1
+    receiveShadows: 1
+    enabledByDefault: 1
+  - kind: 0
+    nodeIndex: 16
+    mesh: {fileID: 10206, guid: 0000000000000000e000000000000000, type: 0}
+    material: {fileID: 2100000, guid: 757a1c46ec4b65240aef36cf7bf781fb, type: 2}
+    subMeshIndex: 0
+    localBounds:
+      m_Center: {x: 0.000000059604645, y: 0, z: -0.00000008940697}
+      m_Extent: {x: 0.50000006, y: 1, z: 0.5000001}
+    layer: 0
+    renderingLayerMask: 1
+    shadowCastingMode: 1
+    receiveShadows: 1
+    enabledByDefault: 1
+  - kind: 0
+    nodeIndex: 17
+    mesh: {fileID: 3132188746750409437, guid: 0f54002c4478e754d8e50e891ad9dcd5, type: 3}
+    material: {fileID: 2100000, guid: 4ef144cef8023cb4682716154a49a3b6, type: 2}
+    subMeshIndex: 0
+    localBounds:
+      m_Center: {x: 0, y: 0.0000000037252903, z: 0}
+      m_Extent: {x: 1.3027885, y: 0.09020993, z: 0.39411914}
+    layer: 0
+    renderingLayerMask: 1
+    shadowCastingMode: 1
+    receiveShadows: 1
+    enabledByDefault: 1
+  - kind: 0
+    nodeIndex: 18
+    mesh: {fileID: -7504528825440619333, guid: 0f54002c4478e754d8e50e891ad9dcd5, type: 3}
+    material: {fileID: 2100000, guid: 4ef144cef8023cb4682716154a49a3b6, type: 2}
+    subMeshIndex: 0
+    localBounds:
+      m_Center: {x: 0.47583783, y: 0.20785518, z: -0.17645259}
+      m_Extent: {x: 0.003921032, y: 0.019622803, z: 0.003921509}
+    layer: 0
+    renderingLayerMask: 1
+    shadowCastingMode: 1
+    receiveShadows: 1
+    enabledByDefault: 1
+  - kind: 0
+    nodeIndex: 19
+    mesh: {fileID: 3346277185055967906, guid: 0f54002c4478e754d8e50e891ad9dcd5, type: 3}
+    material: {fileID: 2100000, guid: 4ef144cef8023cb4682716154a49a3b6, type: 2}
+    subMeshIndex: 0
+    localBounds:
+      m_Center: {x: 0.59348077, y: 0.4843444, z: 0.22158054}
+      m_Extent: {x: 0.003921509, y: 0.0058898926, z: 0.005882263}
+    layer: 0
+    renderingLayerMask: 1
+    shadowCastingMode: 1
+    receiveShadows: 1
+    enabledByDefault: 1
+  animationClips:
+  - clip: {fileID: 7400000, guid: 26e2f3e4ff7c48b4b8f9db794a87252f, type: 2}
+    lengthSeconds: 3.5
+    frameRate: 60
+    looping: 1
+    transformCurveCount: 15
+    objectReferenceCurveCount: 0

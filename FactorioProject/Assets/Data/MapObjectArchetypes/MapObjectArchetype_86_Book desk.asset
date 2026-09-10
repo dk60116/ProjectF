@@ -1,0 +1,134 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: a4d286e989be41fe853b78a59ca3a4e8, type: 3}
+  m_Name: MapObjectArchetype_86_Book desk
+  m_EditorClassIdentifier: Assembly-CSharp::ProjectF.MapObjects.MapObjectArchetype
+  schemaVersion: 1
+  itemDefinition: {fileID: 11400000, guid: 9b769dd46a0b9fe4f91ace461114fcd2, type: 2}
+  sourcePrefab: {fileID: 2696065824665056805, guid: 27727148c8ab1b546aa4e1dd6f389261, type: 3}
+  itemId: 86
+  itemName: Book desk
+  sourcePrefabGuid: 27727148c8ab1b546aa4e1dd6f389261
+  sourceContentHash:
+    serializedVersion: 2
+    Hash: 98914e1e2195e65131b9c5f968190295
+  sourceRuntimeType: Desk, Assembly-CSharp, Version=0.0.0.0, Culture=neutral, PublicKeyToken=null
+  mapStatus:
+    mapSizeX: 1
+    mapSizeY: 1
+    centerCellX: 0
+    centerCellY: 0
+  focusMode: 1
+  defaultRootScale: {x: 1, y: 1, z: 1}
+  defaultRootRotation: {x: 0, y: 0, z: 0, w: 1}
+  localRenderBounds:
+    m_Center: {x: 0, y: 0.1598906, z: 0}
+    m_Extent: {x: 0.28743747, y: 0.1598906, z: 0.28743747}
+  hasRenderBounds: 1
+  featureFlags: 65
+  nodes:
+  - hierarchyPath: 0:Book desk
+    animationPath: 
+    parentIndex: -1
+    localPosition: {x: 0, y: 0, z: 0}
+    localRotation: {x: 0, y: 0, z: 0, w: 1}
+    localScale: {x: 1, y: 1, z: 1}
+    defaultLocalToRoot:
+      e00: 1
+      e01: 0
+      e02: 0
+      e03: 0
+      e10: 0
+      e11: 1
+      e12: 0
+      e13: 0
+      e20: 0
+      e21: 0
+      e22: 1
+      e23: 0
+      e30: 0
+      e31: 0
+      e32: 0
+      e33: 1
+    activeByDefault: 1
+    hasAnimatedTransform: 0
+  - hierarchyPath: 0:Book desk/0:Body
+    animationPath: Body
+    parentIndex: 0
+    localPosition: {x: 0, y: 0, z: 0}
+    localRotation: {x: 0, y: 0, z: 0, w: 1}
+    localScale: {x: 1, y: 1, z: 1}
+    defaultLocalToRoot:
+      e00: 1
+      e01: 0
+      e02: 0
+      e03: 0
+      e10: 0
+      e11: 1
+      e12: 0
+      e13: 0
+      e20: 0
+      e21: 0
+      e22: 1
+      e23: 0
+      e30: 0
+      e31: 0
+      e32: 0
+      e33: 1
+    activeByDefault: 1
+    hasAnimatedTransform: 0
+  - hierarchyPath: 0:Book desk/1:Manual Point
+    animationPath: Manual Point
+    parentIndex: 0
+    localPosition: {x: 0, y: 0.365, z: 0}
+    localRotation: {x: 0, y: 1, z: 0, w: 0}
+    localScale: {x: 1, y: 1, z: 1}
+    defaultLocalToRoot:
+      e00: -1
+      e01: 0
+      e02: 0
+      e03: 0
+      e10: 0
+      e11: 1
+      e12: 0
+      e13: 0.365
+      e20: 0
+      e21: 0
+      e22: -1
+      e23: 0
+      e30: 0
+      e31: 0
+      e32: 0
+      e33: 1
+    activeByDefault: 1
+    hasAnimatedTransform: 0
+  renderParts:
+  - kind: 0
+    nodeIndex: 1
+    mesh: {fileID: 2577072638618044605, guid: 8957b6f64ad37fa4faed564814cf8de6, type: 3}
+    material: {fileID: 2100000, guid: 1371b068e52e9f244a7166286fb761e3, type: 2}
+    subMeshIndex: 0
+    localBounds:
+      m_Center: {x: 0, y: 0.1598906, z: 0}
+      m_Extent: {x: 0.28743747, y: 0.1598906, z: 0.28743747}
+    layer: 0
+    renderingLayerMask: 1
+    shadowCastingMode: 1
+    receiveShadows: 1
+    enabledByDefault: 1
+  animationClips:
+  - clip: {fileID: 7400000, guid: 967d6915b6cd91a45bb3464033214228, type: 2}
+    lengthSeconds: 3
+    frameRate: 60
+    looping: 1
+    transformCurveCount: 6
+    objectReferenceCurveCount: 0

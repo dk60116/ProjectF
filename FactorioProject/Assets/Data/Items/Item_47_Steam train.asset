@@ -15,6 +15,7 @@ MonoBehaviour:
   itemName: Steam train
   id: 104
   mapObject: {fileID: 6151593433542269344, guid: d719f22bffbaf23419a1efce8f6354f9, type: 3}
+  mapObjectArchetype: {fileID: 11400000, guid: 0bf20316c7186234d9c214e1a821e5ce, type: 2}
   useMapColor: 1
   mapColor: {r: 0.6901961, g: 0.1882353, b: 0.3764706, a: 1}
   mapMarkerSize: 2

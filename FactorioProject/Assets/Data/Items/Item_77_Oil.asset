@@ -15,6 +15,10 @@ MonoBehaviour:
   itemName: Oil
   id: 4
   mapObject: {fileID: 5889860242806826768, guid: 49b74711fb3fda54cae8e732896a3353, type: 3}
+  mapObjectArchetype: {fileID: 11400000, guid: ae878a7104f2b134dae32b5b1f4a8fa3, type: 2}
+  useMapColor: 0
+  mapColor: {r: 1, g: 1, b: 1, a: 1}
+  mapMarkerSize: 1
   portableMesh: {fileID: 0}
   portableMat: {fileID: 0}
   icon: {fileID: 21300000, guid: 636111dedab44373b4ec11621b58c1d3, type: 3}

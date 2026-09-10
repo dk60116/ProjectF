@@ -15,6 +15,7 @@ MonoBehaviour:
   itemName: Conveyor belt
   id: 44
   mapObject: {fileID: 7247929509108097568, guid: 790a740c46ac28740b0b3566df1479dd, type: 3}
+  mapObjectArchetype: {fileID: 11400000, guid: 938afc3534acf2a4fad59405a7eb46b5, type: 2}
   useMapColor: 1
   mapColor: {r: 1, g: 0.76982784, b: 0.3915094, a: 1}
   mapMarkerSize: 1

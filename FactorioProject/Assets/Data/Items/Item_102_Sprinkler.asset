@@ -15,6 +15,7 @@ MonoBehaviour:
   itemName: Sprinkler
   id: 57
   mapObject: {fileID: 3543931225916085951, guid: 5c9d27cd414052a4fab2eee000e42bdd, type: 3}
+  mapObjectArchetype: {fileID: 11400000, guid: af8a6c8b3d478ff4da3358cb7dcd838c, type: 2}
   useMapColor: 1
   mapColor: {r: 0.1176471, g: 0.5647059, b: 1, a: 1}
   mapMarkerSize: 2

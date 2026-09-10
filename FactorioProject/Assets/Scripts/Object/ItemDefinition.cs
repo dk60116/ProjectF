@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using ProjectF.MapObjects;
 using UnityEngine;
 
 [CreateAssetMenu(menuName = "ProjectF/Item Definition", fileName = "ItemDef_")]
@@ -35,6 +36,8 @@ public class ItemDefinition : ScriptableObject
     public string itemName;
     public int id;
     public MapObject mapObject;
+    [SerializeField, HideInInspector]
+    private MapObjectArchetype mapObjectArchetype;
     [SerializeField] private bool useMapColor;
     [SerializeField, ColorUsage(false)] private Color mapColor = Color.white;
     [SerializeField] private MapMarkerSize mapMarkerSize = MapMarkerSize.Middle;
@@ -127,6 +130,7 @@ public class ItemDefinition : ScriptableObject
     public float FluidOutputLitersPerSecond => Mathf.Max(0f, fluidOutputLitersPerSecond);
     public int UndergroundPipeMaxDistance => Mathf.Max(2, undergroundPipeMaxDistance);
     public ItemDefinition ManualTargetItem => isManual ? manualTargetItem : null;
+    public MapObjectArchetype MapObjectArchetype => mapObjectArchetype;
     public MapMarkerSize MarkerSize => mapMarkerSize;
     public bool TryGetMapColor32(out Color32 color)
     {

@@ -3764,12 +3764,30 @@ public class BagSlot : ItemSlot, IBeginDragHandler, IDragHandler, IEndDragHandle
             focusedConveyorBelt = focusedMapObject.GetComponentInParent<ConveyorBelt>();
         }
 
-        if (focusedConveyorBelt == null || !focusedConveyorBelt.gameObject.activeInHierarchy)
+        if (focusedConveyorBelt == null)
         {
             return false;
         }
 
-        if (clickedFallbackBlock != null && clickedFallbackBlock.MapObject == focusedConveyorBelt)
+        ConveyorWorld conveyorWorld = ConveyorWorld.Current;
+        if (clickedFallbackBlock != null
+            && conveyorWorld != null
+            && conveyorWorld.TryGetMatchingAtCoordinate(
+                clickedFallbackBlock.Coordinate,
+                focusedConveyorBelt,
+                out _))
+        {
+            focusedConveyorBlock = clickedFallbackBlock;
+            return true;
+        }
+
+        if (!focusedConveyorBelt.gameObject.activeInHierarchy)
+        {
+            return false;
+        }
+
+        if (clickedFallbackBlock != null
+            && clickedFallbackBlock.MapObject == focusedConveyorBelt)
         {
             focusedConveyorBlock = clickedFallbackBlock;
             return true;

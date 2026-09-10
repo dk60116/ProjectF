@@ -15,6 +15,7 @@ MonoBehaviour:
   itemName: Camp fire
   id: 29
   mapObject: {fileID: 1218127140146215825, guid: d1bcd749f595cfb4b819a990cfe8e6a4, type: 3}
+  mapObjectArchetype: {fileID: 11400000, guid: f31f801effc042c488f054da301ceab0, type: 2}
   useMapColor: 1
   mapColor: {r: 0.8627452, g: 0.1921569, b: 0.1960784, a: 1}
   mapMarkerSize: 2

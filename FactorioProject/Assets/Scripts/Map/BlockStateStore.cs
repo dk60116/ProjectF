@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using ProjectF.MapObjects;
 using UnityEngine;
 
 public partial class BlockStateStore : MonoBehaviour
@@ -147,6 +148,7 @@ public partial class BlockStateStore : MonoBehaviour
     {
         public InstallationObject installationObject;
         public InstallationSaveState state;
+        public MapObjectHandle handle;
     }
 
     private readonly struct IntRun
@@ -510,6 +512,32 @@ public partial class BlockStateStore : MonoBehaviour
         StoreInstallationState(state);
     }
 
+    public bool TryCaptureInstallationState(
+        InstallationObject installationObject,
+        out InstallationSaveState state)
+    {
+        return TryBuildInstallationState(installationObject, out state);
+    }
+
+    public bool RegisterDataOnlyInstallation(
+        InstallationSaveState state,
+        out InstallationSaveState storedState)
+    {
+        storedState = null;
+        if (!StoreInstallationState(state, out Vector2Int storageKey, out InstallationSaveState registeredState))
+        {
+            return false;
+        }
+
+        UnregisterLiveInstallation(storageKey);
+        storedState = registeredState.Clone();
+        ResolveVirtualObjectWorld()?.UpsertInstallationHandle(
+            registeredState,
+            VirtualObjectResidency.Live,
+            null);
+        return true;
+    }
+
     public void RegisterLiveInstallation(InstallationObject installationObject)
     {
         if (!TryBuildInstallationState(installationObject, out InstallationSaveState state))
@@ -537,15 +565,21 @@ public partial class BlockStateStore : MonoBehaviour
         if (liveInstallationStates.TryGetValue(storageKey, out LiveInstallationRecord existingRecord))
         {
             UnregisterLiveCoordinateMappings(existingRecord.state, storageKey);
+            existingRecord.installationObject?.BindRuntimeMapObjectHandle(default);
         }
 
+        MapObjectHandle handle = ResolveVirtualObjectWorld()?.UpsertInstallationHandle(
+            storedState,
+            VirtualObjectResidency.Live,
+            installationObject) ?? default;
+        installationObject.BindRuntimeMapObjectHandle(handle);
         liveInstallationStates[storageKey] = new LiveInstallationRecord
         {
             installationObject = installationObject,
-            state = storedState.Clone()
+            state = storedState.Clone(),
+            handle = handle
         };
         RegisterLiveCoordinateMappings(storedState, storageKey);
-        ResolveVirtualObjectWorld()?.UpsertInstallation(storedState, VirtualObjectResidency.Live, installationObject);
     }
 
     public bool UpdateLiveInstallationWorldPose(InstallationObject installationObject)
@@ -616,6 +650,36 @@ public partial class BlockStateStore : MonoBehaviour
 
         state = null;
         return false;
+    }
+
+    public bool TryGetInstallationHandle(Vector2Int storageKey, out MapObjectHandle handle)
+    {
+        VirtualObjectWorld world = ResolveVirtualObjectWorld();
+        if (liveInstallationStates.TryGetValue(storageKey, out LiveInstallationRecord liveRecord)
+            && liveRecord != null
+            && liveRecord.handle.IsValid
+            && world != null
+            && world.IsHandleAlive(liveRecord.handle))
+        {
+            handle = liveRecord.handle;
+            return true;
+        }
+
+        handle = default;
+        return world != null
+               && world.TryGetInstallationHandle(storageKey, out handle);
+    }
+
+    public bool TryGetInstallationHandle(
+        InstallationObject installationObject,
+        out MapObjectHandle handle)
+    {
+        handle = installationObject != null
+            ? installationObject.RuntimeMapObjectHandle
+            : default;
+        return handle.IsValid
+               && ResolveVirtualObjectWorld() is VirtualObjectWorld world
+               && world.IsHandleAlive(handle);
     }
 
     internal bool TryGetInstallationStateReadOnly(
@@ -1067,6 +1131,11 @@ public partial class BlockStateStore : MonoBehaviour
     public void RemoveInstallation(Vector2Int storageKey)
     {
         Vector2Int removedAnchor = storageKey;
+        if (liveInstallationStates.TryGetValue(storageKey, out LiveInstallationRecord liveRecord))
+        {
+            liveRecord?.installationObject?.BindRuntimeMapObjectHandle(default);
+        }
+
         if (savedInstallationStates.TryGetValue(storageKey, out InstallationSaveState savedState))
         {
             removedAnchor = savedState.anchorCoordinate;
@@ -1077,6 +1146,7 @@ public partial class BlockStateStore : MonoBehaviour
 
         UnregisterLiveInstallation(storageKey);
         ResolveVirtualObjectWorld()?.RemoveInstallation(storageKey);
+        ConveyorWorld.Current?.Remove(storageKey);
         RemoveUtilityPoleConnectionReferences(removedAnchor);
     }
 
@@ -1090,6 +1160,7 @@ public partial class BlockStateStore : MonoBehaviour
         if (TryBuildInstallationState(installationObject, out InstallationSaveState state))
         {
             RemoveInstallation(ResolveInstallationStorageKey(state, savedInstallationStates));
+            installationObject.BindRuntimeMapObjectHandle(default);
             return;
         }
 
@@ -1097,10 +1168,17 @@ public partial class BlockStateStore : MonoBehaviour
         {
             RemoveInstallation(anchorCoordinate);
         }
+
+        installationObject.BindRuntimeMapObjectHandle(default);
     }
 
     public void ClearStates()
     {
+        foreach (KeyValuePair<Vector2Int, LiveInstallationRecord> pair in liveInstallationStates)
+        {
+            pair.Value?.installationObject?.BindRuntimeMapObjectHandle(default);
+        }
+
         savedStates.Clear();
         savedResourceItemIds.Clear();
         savedFloorObjectStates.Clear();
@@ -1115,6 +1193,7 @@ public partial class BlockStateStore : MonoBehaviour
         savedInstallationStorageKeysByInteractionCoordinate.Clear();
         liveInstallationStates.Clear();
         liveInstallationAnchorsByCoordinate.Clear();
+        ConveyorWorld.Current?.ClearRecords();
         ResolveVirtualObjectWorld()?.Clear();
     }
 
@@ -1862,6 +1941,7 @@ public partial class BlockStateStore : MonoBehaviour
                 continue;
             }
 
+            duplicateRecord?.installationObject?.BindRuntimeMapObjectHandle(default);
             UnregisterLiveCoordinateMappings(duplicateRecord.state, duplicateKey);
             liveInstallationStates.Remove(duplicateKey);
             if (savedInstallationStates.TryGetValue(duplicateKey, out InstallationSaveState savedState))

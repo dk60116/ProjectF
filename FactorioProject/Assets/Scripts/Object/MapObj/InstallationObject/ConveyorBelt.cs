@@ -493,7 +493,110 @@ public class ConveyorBelt : InstallationObject
         return hasCompleteCoverage;
     }
 
-    private bool RequiresAuthoredBeltTopMesh(MeshRenderer renderer, Mesh mesh)
+    internal void RefreshBeltTopUvData()
+    {
+        RefreshBeltTopRenderInfo();
+    }
+
+    internal bool TryGetBeltTopUvData(MeshRenderer renderer, out Vector4 uvData)
+    {
+        uvData = new Vector4(0f, 0f, 1f, 0f);
+        if (renderer == null)
+        {
+            return false;
+        }
+
+        if (!TryGetBeltTopRenderInfo(renderer, out BeltTopRenderInfo info))
+        {
+            return false;
+        }
+
+        uvData = new Vector4(
+            0f,
+            CalculateBeltTopUvScrollY(),
+            info.UvLengthScale,
+            info.UvLengthOffset);
+        return true;
+    }
+
+    internal bool TryGetBeltTopEndpointLocalToRoot(
+        MeshRenderer renderer,
+        bool startSeam,
+        bool endSeam,
+        out Matrix4x4 localToRoot)
+    {
+        localToRoot = Matrix4x4.identity;
+        if (renderer == null || renderer.transform == null)
+        {
+            return false;
+        }
+
+        CacheBeltTopTransformState();
+        int topIndex = -1;
+        for (int i = 0; i < beltTopTransformStates.Count; i++)
+        {
+            if (beltTopTransformStates[i].Renderer == renderer)
+            {
+                topIndex = i;
+                break;
+            }
+        }
+
+        if (topIndex < 0)
+        {
+            return false;
+        }
+
+        BeltTopTransformState topState = beltTopTransformStates[topIndex];
+        if (IsCornerVariant)
+        {
+            startSeam = false;
+            endSeam = false;
+        }
+
+        float xExtension = 0f;
+        float zExtension = 0f;
+        Vector3 positionOffset = Vector3.zero;
+        CollectEndpointExtension(
+            topState,
+            topIndex,
+            seamStartObject,
+            startSeam,
+            ref xExtension,
+            ref zExtension,
+            ref positionOffset);
+        CollectEndpointExtension(
+            topState,
+            topIndex,
+            seamEndObject,
+            endSeam,
+            ref xExtension,
+            ref zExtension,
+            ref positionOffset);
+
+        Vector3 scale = topState.BaseLocalScale;
+        if (xExtension > 0f)
+        {
+            scale.x *= (topState.BaseLocalLengthX + xExtension) / topState.BaseLocalLengthX;
+        }
+
+        if (zExtension > 0f)
+        {
+            scale.z *= (topState.BaseLocalLengthZ + zExtension) / topState.BaseLocalLengthZ;
+        }
+
+        Transform parent = topState.Transform.parent;
+        Matrix4x4 parentToRoot = parent != null
+            ? transform.worldToLocalMatrix * parent.localToWorldMatrix
+            : transform.worldToLocalMatrix;
+        localToRoot = parentToRoot * Matrix4x4.TRS(
+            topState.BaseLocalPosition + positionOffset,
+            topState.BaseLocalRotation,
+            scale);
+        return true;
+    }
+
+    internal bool RequiresAuthoredBeltTopMesh(MeshRenderer renderer, Mesh mesh)
     {
         return this is ConvayorBelt2F
                && renderer != null
@@ -1281,6 +1384,55 @@ public class ConveyorBelt : InstallationObject
         positionOffsets[topIndex] += topState.BaseLocalRotation * (localAxis * sign * extension * 0.5f);
     }
 
+    private void CollectEndpointExtension(
+        BeltTopTransformState topState,
+        int topIndex,
+        GameObject endpointObject,
+        bool isActive,
+        ref float xExtension,
+        ref float zExtension,
+        ref Vector3 positionOffset)
+    {
+        if (!isActive
+            || endpointObject == null
+            || endpointObject.transform.Find(SeamTopObjectName) != null)
+        {
+            return;
+        }
+
+        Vector3 endpointRootPosition = transform.InverseTransformPoint(endpointObject.transform.position);
+        if (FindNearestBeltTopTransformStateIndex(endpointRootPosition) != topIndex)
+        {
+            return;
+        }
+
+        Vector3 localDirection = GetEndpointDirectionInBeltTopLocalSpace(topState, endpointObject.transform);
+        bool useXAxis = Mathf.Abs(localDirection.x) > Mathf.Abs(localDirection.z);
+        float sign = useXAxis ? Mathf.Sign(localDirection.x) : Mathf.Sign(localDirection.z);
+        if (Mathf.Approximately(sign, 0f))
+        {
+            sign = 1f;
+        }
+
+        float extension = CalculateEndpointVisualLocalLength(endpointObject);
+        if (extension <= 0f)
+        {
+            return;
+        }
+
+        if (useXAxis)
+        {
+            xExtension += extension;
+        }
+        else
+        {
+            zExtension += extension;
+        }
+
+        Vector3 localAxis = useXAxis ? Vector3.right : Vector3.forward;
+        positionOffset += topState.BaseLocalRotation * (localAxis * sign * extension * 0.5f);
+    }
+
     private Vector3 GetEndpointDirectionInBeltTopLocalSpace(BeltTopTransformState topState, Transform endpointTransform)
     {
         if (topState.Transform == null || endpointTransform == null)
@@ -1621,7 +1773,7 @@ public class ConveyorBelt : InstallationObject
         return -ConveyorSpeed * BeltTopUvRepeatsPerWorldUnit;
     }
 
-    private static bool TryCreateDedicatedBeltTopMatrix(
+    internal static bool TryCreateDedicatedBeltTopMatrix(
         Mesh sourceMesh,
         Matrix4x4 sourceLocalToWorld,
         out Matrix4x4 matrix)
@@ -1647,7 +1799,7 @@ public class ConveyorBelt : InstallationObject
         return true;
     }
 
-    private static Mesh GetVirtualBeltTopMesh()
+    internal static Mesh GetVirtualBeltTopMesh()
     {
         if (virtualBeltTopMesh != null)
         {

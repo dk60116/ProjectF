@@ -15,6 +15,7 @@ MonoBehaviour:
   itemName: Concrete Utility pole
   id: 38
   mapObject: {fileID: 2570451748998091923, guid: db1c88c08b1b0f24a9ffca7c01daac56, type: 3}
+  mapObjectArchetype: {fileID: 11400000, guid: b6afbb5a50fdc964f9a0a944e4abe3e2, type: 2}
   useMapColor: 1
   mapColor: {r: 1, g: 0.8431373, b: 0, a: 1}
   mapMarkerSize: 2

@@ -17,6 +17,7 @@ public partial class Block
         if (sourceBlock == null
             || sourceBlock == this
             || IsCornerConveyor()
+            || TryGetRuntimeSplitterRecord(out _)
             || TryGetRuntimeSplitter(out _)
             || !TryGetConveyorFlowDirection(out destinationFlow)
             || !ConveyorSideHandoffPath.IsSideEntry(coordinate - sourceBlock.coordinate, destinationFlow))
@@ -24,7 +25,9 @@ public partial class Block
             return false;
         }
 
-        if (TryGetRuntimeBelt2F(out _)
+        if (TryGetRuntimeBelt2FRecord(out _)
+            || TryGetRuntimeBelt2F(out _)
+            || sourceBlock.TryGetConveyorItemBelt2FRecord(sourceLaneIndex, out _)
             || sourceBlock.TryGetConveyorItemBelt2F(sourceLaneIndex, out _))
         {
             // Use the same terminal-only rule as topology. An upper bridge lane
@@ -45,6 +48,11 @@ public partial class Block
         Vector3 turn = ConveyorSideHandoffPath.GetTurnPosition(start, destination, destinationFlow);
         // The turn is on the receiving belt. Match its surface height, including
         // a 2F entry ramp, without moving sideways before reaching its centerline.
+        if (TryGetConveyorItemBelt2FRecord(destinationLaneIndex, out ConveyorRuntimeRecord record))
+        {
+            return record.ApplyBelt2FPathHeight(turn);
+        }
+
         if (TryGetConveyorItemBelt2F(destinationLaneIndex, out ConvayorBelt2F belt2F))
         {
             return belt2F.ApplyPathHeight(turn);
@@ -58,7 +66,9 @@ public partial class Block
     {
         return IsConveyorStackingEnabled()
             && !IsCornerConveyor()
+            && !TryGetRuntimeBelt2FRecord(out _)
             && !TryGetRuntimeBelt2F(out _)
+            && !TryGetBelt2FBridgeCenterRecord(out _)
             && !TryGetBelt2FBridgeCenterBelt(out _);
     }
 

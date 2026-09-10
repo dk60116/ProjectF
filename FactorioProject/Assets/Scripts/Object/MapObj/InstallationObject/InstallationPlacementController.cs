@@ -1,5 +1,6 @@
 using System.Collections.Generic;
 using DG.Tweening;
+using ProjectF.MapObjects;
 using UnityEngine;
 using UnityEngine.EventSystems;
 using UnityEngine.Rendering;
@@ -2295,6 +2296,19 @@ public class InstallationPlacementController : MonoBehaviour
             return false;
         }
 
+        ConveyorWorld conveyorWorld = ConveyorWorld.Current;
+        if (conveyorWorld != null
+            && conveyorWorld.TryGetBelt2FAtCoordinate(
+                clickedBlock.Coordinate,
+                out ConveyorRuntimeRecord dataBelt2F)
+            && TryMaterializeDataOnlyConveyorForEditing(
+                dataBelt2F,
+                out installationObject))
+        {
+            anchorCoordinate = dataBelt2F.AnchorCoordinate;
+            return true;
+        }
+
         if (TryGetEditableBelt2FFromRaycast(ray, maxDistance, clickedBlock, out installationObject, out anchorCoordinate))
         {
             return true;
@@ -2313,6 +2327,13 @@ public class InstallationPlacementController : MonoBehaviour
         if (block == null)
         {
             return false;
+        }
+
+        if (block.TryGetRuntimeConveyorRecord(out ConveyorRuntimeRecord dataConveyor)
+            && TryMaterializeDataOnlyConveyorForEditing(dataConveyor, out installationObject))
+        {
+            anchorCoordinate = dataConveyor.AnchorCoordinate;
+            return true;
         }
 
         installationObject = block.MapObject as InstallationObject;
@@ -5741,9 +5762,20 @@ public class InstallationPlacementController : MonoBehaviour
 
         ApplyEditedInstallationBlockStates(editSession, anchorCoordinate, quarterTurns);
         RestoreAttachedAreaBoxes(editSession, anchorCoordinate, quarterTurns, terrain);
-        RegisterInstalledObjectPersistence(restoredObject);
+        bool restoredAsDataOnlyConveyor = RegisterInstalledObjectPersistence(
+            restoredObject,
+            desiredSourcePrefab);
 
-        if (restoredObject is InstallationObject restoredInstallation)
+        if (restoredAsDataOnlyConveyor)
+        {
+            ReleaseInstalledObjectInstance(
+                restoredObject as InstallationObject,
+                desiredSourcePrefab,
+                terrain);
+        }
+
+        if (!restoredAsDataOnlyConveyor
+            && restoredObject is InstallationObject restoredInstallation)
         {
             SelectEditableInstallation(restoredInstallation, anchorCoordinate);
         }
@@ -6254,7 +6286,7 @@ public class InstallationPlacementController : MonoBehaviour
                 }
             }
 
-            if (placementPlan.bindToFootprintBlocks)
+            if (placementPlan.bindToFootprintBlocks && !(installedObject is ConveyorBelt))
             {
                 for (int blockIndex = 0; blockIndex < placementPlan.footprintBlocks.Count; blockIndex++)
                 {
@@ -6293,9 +6325,21 @@ public class InstallationPlacementController : MonoBehaviour
             RegisterInstalledHandcartPreview(
                 installedObject as Handcart,
                 placementPlan.preview as Handcart);
+            bool registeredAsDataOnlyConveyor = false;
             if (placementPlan.registerTerrainPersistence)
             {
-                RegisterInstalledObjectPersistence(installedObject);
+                registeredAsDataOnlyConveyor = RegisterInstalledObjectPersistence(
+                    installedObject,
+                    placementPlan.sourcePrefab);
+            }
+
+            if (registeredAsDataOnlyConveyor)
+            {
+                ReleaseInstalledObjectInstance(
+                    installedObject as InstallationObject,
+                    placementPlan.sourcePrefab,
+                    terrain);
+                installedObject = null;
             }
 
             RememberLastInstalledRotation(activeInstallDefinition, placementPlan.quarterTurns);
@@ -7654,15 +7698,25 @@ public class InstallationPlacementController : MonoBehaviour
         TerrainGenerator terrain = ResolveInstallPreviewTerrain();
         if (terrain != null
             && terrain.TryGetLoadedBlock(coordinate, out Block block)
-            && block != null
-            && block.MapObject is ConveyorBelt directConveyor
+            && block != null)
+        {
+            if (block.TryGetRuntimeConveyorRecord(out ConveyorRuntimeRecord record)
+                && record.Prototype != ignoredBelt)
+            {
+                conveyorBelt = record.Prototype;
+                rotation = record.WorldRotation;
+                return conveyorBelt != null;
+            }
+
+            if (block.MapObject is ConveyorBelt directConveyor
             && directConveyor != null
             && directConveyor != ignoredBelt
             && directConveyor.gameObject.activeInHierarchy)
-        {
-            conveyorBelt = directConveyor;
-            rotation = directConveyor.transform.rotation;
-            return true;
+            {
+                conveyorBelt = directConveyor;
+                rotation = directConveyor.transform.rotation;
+                return true;
+            }
         }
 
         if (ConvayorBelt2F.TryFindCoveringBelt(coordinate, out ConvayorBelt2F coveringBelt)
@@ -16970,15 +17024,25 @@ public class InstallationPlacementController : MonoBehaviour
         }
 
         if (terrain.TryGetLoadedBlock(coordinate, out Block block)
-            && block != null
-            && block.MapObject is ConveyorBelt liveConveyor
-            && liveConveyor != null
-            && liveConveyor.gameObject.activeInHierarchy)
+            && block != null)
         {
-            conveyorBelt = liveConveyor;
-            placementSequence = liveConveyor.RuntimePlacementSequence;
-            return liveConveyor.TryGetInputDirection(liveConveyor.transform.rotation, out inputDirection)
-                && liveConveyor.TryGetOutputDirection(liveConveyor.transform.rotation, out outputDirection);
+            if (block.TryGetRuntimeConveyorRecord(out ConveyorRuntimeRecord record))
+            {
+                conveyorBelt = record.Prototype;
+                placementSequence = record.PlacementSequence;
+                return record.TryGetInputDirection(out inputDirection)
+                       && record.TryGetOutputDirection(out outputDirection);
+            }
+
+            if (block.MapObject is ConveyorBelt liveConveyor
+                && liveConveyor != null
+                && liveConveyor.gameObject.activeInHierarchy)
+            {
+                conveyorBelt = liveConveyor;
+                placementSequence = liveConveyor.RuntimePlacementSequence;
+                return liveConveyor.TryGetInputDirection(liveConveyor.transform.rotation, out inputDirection)
+                    && liveConveyor.TryGetOutputDirection(liveConveyor.transform.rotation, out outputDirection);
+            }
         }
 
         if (!terrain.TryGetInstallationStateAtCoordinate(coordinate, out BlockStateStore.InstallationSaveState savedState)
@@ -18457,15 +18521,25 @@ public class InstallationPlacementController : MonoBehaviour
         }
 
         if (terrain.TryGetLoadedBlock(coordinate, out Block block)
-            && block != null
-            && block.MapObject is ConveyorBelt liveConveyor
-            && liveConveyor != null
-            && liveConveyor.gameObject.activeInHierarchy)
+            && block != null)
         {
-            conveyorBelt = liveConveyor;
-            placementSequence = liveConveyor.RuntimePlacementSequence;
-            return liveConveyor.TryGetInputDirection(liveConveyor.transform.rotation, out inputDirection)
-                && liveConveyor.TryGetOutputDirection(liveConveyor.transform.rotation, out outputDirection);
+            if (block.TryGetRuntimeConveyorRecord(out ConveyorRuntimeRecord record))
+            {
+                conveyorBelt = record.Prototype;
+                placementSequence = record.PlacementSequence;
+                return record.TryGetInputDirection(out inputDirection)
+                       && record.TryGetOutputDirection(out outputDirection);
+            }
+
+            if (block.MapObject is ConveyorBelt liveConveyor
+                && liveConveyor != null
+                && liveConveyor.gameObject.activeInHierarchy)
+            {
+                conveyorBelt = liveConveyor;
+                placementSequence = liveConveyor.RuntimePlacementSequence;
+                return liveConveyor.TryGetInputDirection(liveConveyor.transform.rotation, out inputDirection)
+                    && liveConveyor.TryGetOutputDirection(liveConveyor.transform.rotation, out outputDirection);
+            }
         }
 
         if (!terrain.TryGetInstallationStateAtCoordinate(coordinate, out BlockStateStore.InstallationSaveState savedState)
@@ -23782,8 +23856,37 @@ public class InstallationPlacementController : MonoBehaviour
             {
                 Vector2Int coordinate = new Vector2Int(x, z);
                 if (!terrain.TryGetLoadedBlock(coordinate, out Block block)
-                    || block == null
-                    || !(block.MapObject is ConveyorBelt conveyor)
+                    || block == null)
+                {
+                    continue;
+                }
+
+                if (block.TryGetRuntimeConveyorRecord(out ConveyorRuntimeRecord record))
+                {
+                    if (!drawnAnchors.Add(record.AnchorCoordinate)
+                        || !record.TryGetOutputDirection(out Vector2Int recordOutputDirection))
+                    {
+                        continue;
+                    }
+
+                    if (!record.TryGetInputDirection(out Vector2Int recordInputDirection))
+                    {
+                        recordInputDirection = -recordOutputDirection;
+                    }
+
+                    AddConveyorFlowArrow(
+                        vertices,
+                        triangles,
+                        colors,
+                        record.AnchorCoordinate,
+                        recordInputDirection,
+                        recordOutputDirection,
+                        lineY + 0.001f,
+                        installGridConveyorEndDebugColor);
+                    continue;
+                }
+
+                if (!(block.MapObject is ConveyorBelt conveyor)
                     || conveyor == null
                     || !conveyor.TryGetPlacementRuntime(out Vector2Int anchorCoordinate, out _)
                     || !drawnAnchors.Add(anchorCoordinate))
@@ -37127,6 +37230,64 @@ public class InstallationPlacementController : MonoBehaviour
         return true;
     }
 
+    private bool TryMaterializeDataOnlyConveyorForEditing(
+        ConveyorRuntimeRecord record,
+        out InstallationObject installationObject)
+    {
+        installationObject = null;
+        if (record == null || record.Prototype == null)
+        {
+            return false;
+        }
+
+        TerrainGenerator terrain = ResolveInstallPreviewTerrain();
+        if (terrain == null)
+        {
+            return false;
+        }
+
+        InstallationObject materialized = terrain.CreateInstallationObject(
+            record.Prototype,
+            terrain.transform);
+        if (!(materialized is ConveyorBelt materializedBelt))
+        {
+            if (materialized != null)
+            {
+                terrain.ReleaseInstallationObject(materialized, record.Prototype);
+            }
+
+            return false;
+        }
+
+        materialized.transform.SetPositionAndRotation(record.WorldPosition, record.WorldRotation);
+        materialized.transform.localScale = record.WorldScale;
+        ConfigureInstalledObjectRuntime(
+            materialized,
+            record.AnchorCoordinate,
+            record.QuarterTurns,
+            placementSequence: record.PlacementSequence,
+            occupiedCoordinatesOverride: record.OccupiedCoordinates);
+        materialized.ApplyItemFilterMask(
+            record.State.itemFilterMaskWords,
+            record.State.itemFilterMaskInitialized);
+        if (materializedBelt is Spliterbelt splitter)
+        {
+            splitter.ApplySplitterState(record.State.splitterState);
+        }
+
+        IReadOnlyList<Vector2Int> coordinates = record.OccupiedCoordinates;
+        for (int i = 0; i < coordinates.Count; i++)
+        {
+            if (terrain.TryGetLoadedBlock(coordinates[i], out Block block) && block != null)
+            {
+                block.SetMapObject(materialized);
+            }
+        }
+
+        installationObject = materialized;
+        return true;
+    }
+
     private static bool CanItemOutputAreaOverlapConveyor(
         InputOutputModule.RectGridBlockType candidateBlockType,
         MapObject occupyingObject,
@@ -39857,15 +40018,27 @@ public class InstallationPlacementController : MonoBehaviour
         return coordinates;
     }
 
-    private void RegisterInstalledObjectPersistence(MapObject installedObject)
+    private bool RegisterInstalledObjectPersistence(
+        MapObject installedObject,
+        MapObject sourcePrefab = null)
     {
         if (!(installedObject is InstallationObject installationObject))
         {
-            return;
+            return false;
         }
 
         TerrainGenerator terrain = ResolveInstallPreviewTerrain();
+        if (installationObject is ConveyorBelt conveyorBelt
+            && terrain != null
+            && terrain.RegisterDataOnlyConveyorInstallation(
+                conveyorBelt,
+                sourcePrefab as ConveyorBelt))
+        {
+            return true;
+        }
+
         terrain?.RegisterLiveInstallationObject(installationObject);
+        return false;
     }
 
     private MapObject CreateInstalledObjectInstance(MapObject sourcePrefab, Transform parent, TerrainGenerator terrain)
@@ -39945,6 +40118,12 @@ public class InstallationPlacementController : MonoBehaviour
 
         Transform installedTransform = installedObject.transform;
         Vector3 originalScale = installedTransform.localScale;
+        if (installedObject is InstallationObject installationObject
+            && ShouldTrackMapObjectTypeVisualTransition(installationObject))
+        {
+            installationObject.SetMapObjectTypeVisualTransition(true);
+        }
+
         SetConveyorBeltVirtualRendering(installedObject, false);
         installedTransform.DOKill();
         installedTransform.localScale = Vector3.zero;
@@ -40027,6 +40206,11 @@ public class InstallationPlacementController : MonoBehaviour
 
             restoredVirtualRendering = true;
             SetConveyorBeltVirtualRendering(installedObject, true);
+            if (installedObject is InstallationObject installationObject)
+            {
+                installationObject.SetMapObjectTypeVisualTransition(false);
+            }
+
             if (installedObject is UtilityPole)
             {
                 UtilityPole.RefreshPoleTopologyNow();
@@ -40208,6 +40392,17 @@ public class InstallationPlacementController : MonoBehaviour
         {
             RefreshTrainInstallPreviewTints();
         }
+    }
+
+    private static bool ShouldTrackMapObjectTypeVisualTransition(InstallationObject installationObject)
+    {
+        StaticMapObjectBatchRenderer typeRuntime = GameManager.Instance != null
+            ? GameManager.Instance.StaticMapObjectRenderer
+            : null;
+        return installationObject != null
+               && typeRuntime != null
+               && typeRuntime.isActiveAndEnabled
+               && typeRuntime.SupportsItemType(installationObject.ResolveItemId());
     }
 
     private void SetInstallButtonVisible(bool isVisible, bool isInteractable = true)

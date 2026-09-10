@@ -141,7 +141,8 @@ public partial class TerrainGenerator : MonoBehaviour
                     chunkCoordinates.Add(block.Coordinate);
                     SaveLoadedBlockFloorObjects(block);
 
-                    if (block.MapObject is InstallationObject installationObject
+                    if (!block.TryGetRuntimeConveyorRecord(out _)
+                        && block.MapObject is InstallationObject installationObject
                         && !installationObject.ExcludeFromTerrainPersistence
                         && savedInstallations.Add(installationObject))
                     {
@@ -759,6 +760,11 @@ public partial class TerrainGenerator : MonoBehaviour
                 return;
             }
 
+            if (TryRestoreDataOnlyConveyor(savedState))
+            {
+                return;
+            }
+
             if (TryInstantiateSavedInstallation(savedState, out InstallationObject restoredInstallation))
             {
                 if (restoredInstallation is Trainstation restoredTrainStation)
@@ -830,6 +836,67 @@ public partial class TerrainGenerator : MonoBehaviour
         }
 
         return sourcePrefab != null ? sourcePrefab : definition.mapObject;
+    }
+
+    private bool TryRestoreDataOnlyConveyor(BlockStateStore.InstallationSaveState savedState)
+    {
+        if (savedState == null)
+        {
+            return false;
+        }
+
+        ItemDefinition definition = ResolveInstallationDefinition(savedState);
+        InstallationPlacementController placementController = ResolveInstallationPlacementController();
+        MapObject resolvedSource = ResolveInstallationSourcePrefab(
+            savedState,
+            placementController,
+            definition);
+        if (!(resolvedSource is ConveyorBelt conveyorPrototype))
+        {
+            return false;
+        }
+
+        int quarterTurns = ((savedState.quarterTurns % 4) + 4) % 4;
+        Quaternion rotation = placementController != null
+            ? placementController.GetInstalledObjectRotation(resolvedSource, quarterTurns)
+            : resolvedSource.transform.rotation * Quaternion.Euler(0f, quarterTurns * 90f, 0f);
+        Vector3 position = placementController != null
+            ? placementController.GetInstalledObjectWorldPosition(
+                savedState.anchorCoordinate,
+                resolvedSource,
+                quarterTurns)
+            : new Vector3(savedState.anchorCoordinate.x, transform.position.y, savedState.anchorCoordinate.y);
+        if (savedState.hasWorldPose)
+        {
+            position = savedState.worldPosition;
+            rotation = savedState.worldRotation;
+        }
+
+        savedState.hasWorldPose = true;
+        savedState.worldPosition = position;
+        savedState.worldRotation = rotation;
+        if (!resourceStateStore.RegisterDataOnlyInstallation(
+                savedState,
+                out BlockStateStore.InstallationSaveState storedState))
+        {
+            return false;
+        }
+
+        ConveyorRuntimeRecord record = EnsureConveyorWorld()?.Register(
+            storedState,
+            conveyorPrototype,
+            position,
+            rotation,
+            resolvedSource.transform.localScale);
+        if (record == null)
+        {
+            return false;
+        }
+
+        BindLoadedBlocksToDataOnlyConveyor(record);
+        MarkConveyorNetworkDirty();
+        MarkConveyorLineCacheDirty();
+        return true;
     }
 
     private bool TryInstantiateSavedInstallation(
@@ -1667,13 +1734,41 @@ public partial class TerrainGenerator : MonoBehaviour
             return virtualConveyorBeltRenderer;
         }
 
-        virtualConveyorBeltRenderer = GetComponent<VirtualConveyorBeltRenderer>();
+        ConveyorWorld world = EnsureConveyorWorld();
+        VirtualConveyorBeltRenderer legacyRenderer = GetComponent<VirtualConveyorBeltRenderer>();
+        if (legacyRenderer != null && (world == null || legacyRenderer.gameObject != world.gameObject))
+        {
+            legacyRenderer.Clear(false);
+            if (Application.isPlaying)
+            {
+                Destroy(legacyRenderer);
+            }
+            else
+            {
+                DestroyImmediate(legacyRenderer);
+            }
+        }
+
+        virtualConveyorBeltRenderer = world != null
+            ? world.GetComponent<VirtualConveyorBeltRenderer>()
+            : null;
         if (virtualConveyorBeltRenderer == null)
         {
-            virtualConveyorBeltRenderer = gameObject.AddComponent<VirtualConveyorBeltRenderer>();
+            virtualConveyorBeltRenderer = (world != null ? world.gameObject : gameObject)
+                .AddComponent<VirtualConveyorBeltRenderer>();
         }
 
         return virtualConveyorBeltRenderer;
+    }
+
+    private ConveyorWorld EnsureConveyorWorld()
+    {
+        if (conveyorWorld == null)
+        {
+            conveyorWorld = ConveyorWorld.EnsureFor(this);
+        }
+
+        return conveyorWorld;
     }
 
     private static ItemDefinition ResolveInstallationDefinition(int itemId)
