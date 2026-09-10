@@ -240,13 +240,27 @@ public partial class TerrainGenerator
 }
 
 [DisallowMultipleComponent]
-public sealed class AnimalTemporaryDropping : MonoBehaviour
+public sealed class AnimalTemporaryDropping : MonoBehaviour,
+    IMapObjectUpdateTick,
+    IMapObjectSimulationIdentity
 {
     private Block owningBlock;
     private PortableObject portableObject;
     private float timeRemaining;
     private bool expirationActive;
     public bool IsTemporary => expirationActive;
+    public long SimulationId
+    {
+        get
+        {
+            Vector2Int coordinate = owningBlock != null
+                ? owningBlock.Coordinate
+                : new Vector2Int(
+                    Mathf.RoundToInt(transform.position.x),
+                    Mathf.RoundToInt(transform.position.z));
+            return unchecked(((long)coordinate.x << 32) | (uint)coordinate.y);
+        }
+    }
 
     public void SetExpiration(
         Block block,
@@ -259,24 +273,33 @@ public sealed class AnimalTemporaryDropping : MonoBehaviour
         expirationActive = owningBlock != null
                            && portableObject != null
                            && timeRemaining > 0f;
+        if (expirationActive)
+        {
+            MapObjectTickManager.RegisterUpdateTick(this);
+        }
+        else
+        {
+            MapObjectTickManager.UnregisterUpdateTick(this);
+        }
     }
 
     public void ClearExpiration()
     {
+        MapObjectTickManager.UnregisterUpdateTick(this);
         expirationActive = false;
         owningBlock = null;
         portableObject = null;
         timeRemaining = 0f;
     }
 
-    private void Update()
+    public void ManagedUpdateTick(float deltaTime)
     {
         if (!expirationActive)
         {
             return;
         }
 
-        timeRemaining -= Time.deltaTime;
+        timeRemaining -= Mathf.Max(0f, deltaTime);
         if (timeRemaining > 0f)
         {
             return;

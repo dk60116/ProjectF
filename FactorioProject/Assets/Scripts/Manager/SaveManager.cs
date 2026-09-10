@@ -123,7 +123,9 @@ public class SaveManager : MonoBehaviour
             worldTime = GameManager.Instance?.WorldTime?.CaptureSaveState() ?? new WorldTimeSaveData(),
             map = terrain.CaptureMapSaveState(),
             player = player != null ? player.CaptureSaveState() : new PlayerSaveData(),
-            beltSimulation = beltSnapshot
+            beltSimulation = beltSnapshot,
+            simulationTick = MapObjectTickManager.CurrentSimulationTick,
+            nextInstallationSimulationId = InstallationObject.NextSimulationId
         };
 
         string path = GetSlotPath(slotIndex);
@@ -431,6 +433,8 @@ public class SaveManager : MonoBehaviour
         }
 
         Player player = ResolvePlayer();
+        MapObjectTickManager.RestoreSimulationTick(data.simulationTick);
+        InstallationObject.RestoreNextSimulationId(data.nextInstallationSimulationId);
         if (player != null && data.player != null && data.player.hasPlayer)
         {
             player.ApplyTransformState(data.player);

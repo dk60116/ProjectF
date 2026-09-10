@@ -1,7 +1,10 @@
 using System.Collections.Generic;
 using UnityEngine;
 
-public class SteamTrain : RailHandcar
+public class SteamTrain : RailHandcar,
+    IMapObjectUpdateTick,
+    IMapObjectUpdateTickInterval,
+    IMapObjectStagedUpdateTick
 {
     private static readonly List<AutoDriveRoutePlanner.RouteSegment> SharedDebugRouteSegmentScratch =
         new List<AutoDriveRoutePlanner.RouteSegment>(32);
@@ -107,11 +110,14 @@ public class SteamTrain : RailHandcar
     private Vector3 lastMovementParticlePosition;
     private bool hasLastMovementParticlePosition;
     private int lastDrivenInputFrame = -1;
-    private float storedBurnEnergy;
-    private float burnEnergyGaugeCapacity;
-    private float pendingBurnEnergyCost;
+    private long lastManualDriveSimulationTick = -1L;
+    private float plannedAutoDriveDeltaTime;
+    private bool autoDriveTickPlanned;
+    private long storedBurnEnergyUnits;
+    private long burnEnergyGaugeCapacityUnits;
+    private long pendingBurnEnergyCostUnits;
     private int pendingBurnEnergyFrame = -1;
-    private float pendingWaterCost;
+    private long pendingWaterCostUnits;
     private int pendingWaterFrame = -1;
     private Vector3 waterPipeDefaultLocalPosition;
     private Quaternion waterPipeDefaultLocalRotation = Quaternion.identity;
@@ -134,7 +140,7 @@ public class SteamTrain : RailHandcar
     private Vector2Int activeWaterPipeDirectionFromTrainToPipe;
     private bool waterPipeDockLockActive;
     private Railload lockedWaterPipeDockRail;
-    private float lockedWaterPipeDockDistanceAlongPath;
+    private long lockedWaterPipeDockDistanceUnits;
     private Vector2 lockedWaterPipeDockFacing;
     private Vector2Int lockedWaterPipeDockDirectionFromTrainToPipe;
     private Vector2Int lockedWaterPipeDockCoordinate;
@@ -151,7 +157,7 @@ public class SteamTrain : RailHandcar
     private readonly HashSet<Train> autoDriveConnectedTrainVisited = new HashSet<Train>();
     private string autoDriveRouteTargetStationName = string.Empty;
     private string autoDriveCachedRouteReferenceTargetStationName = string.Empty;
-    private int autoDriveRouteReferenceTrainInstanceId;
+    private long autoDriveRouteReferenceTrainSimulationId;
     private int autoDriveRouteGraphVersion = -1;
     private int autoDriveFixedRouteGraphVersion = -1;
     private bool autoDriveRouteRefreshRequested;
@@ -167,13 +173,16 @@ public class SteamTrain : RailHandcar
     private RailHandcar autoDriveCachedRouteReferenceTrain;
     private float autoDriveRouteRefreshTimer;
     private float autoDriveStationWaitTimer;
-    private int autoDriveTickFrame = -1;
+    private long autoDriveSimulationTick = -1L;
+    private Player autoDriveMountedPlayer;
     private ulong autoDriveControllerRevision;
     private ulong autoDriveConnectedTrainGraphRevision;
     private bool autoDriveConnectedTrainCacheValid;
 
-    public float ObjectInfoStoredBurnEnergy => Mathf.Max(0f, storedBurnEnergy);
-    public float ObjectInfoBurnEnergyGaugeCapacity => Mathf.Max(0f, burnEnergyGaugeCapacity, storedBurnEnergy);
+    public float ObjectInfoStoredBurnEnergy => DeterministicSimulationUnits.ToFloat(storedBurnEnergyUnits);
+    public float ManagedUpdateTickIntervalSeconds => MapObjectTickManager.FixedSimulationDeltaSeconds;
+    public float ObjectInfoBurnEnergyGaugeCapacity => DeterministicSimulationUnits.ToFloat(
+        System.Math.Max(burnEnergyGaugeCapacityUnits, storedBurnEnergyUnits));
     public float ObjectInfoBurnEnergyGaugeFillAmount
     {
         get
@@ -376,6 +385,7 @@ public class SteamTrain : RailHandcar
     protected override void OnEnable()
     {
         base.OnEnable();
+        MapObjectTickManager.RegisterUpdateTick(this);
         InvalidateAutoDriveConnectedTrainCache();
         ResetMovementParticleState();
         CaptureWaterPipeDefaults();
@@ -384,11 +394,14 @@ public class SteamTrain : RailHandcar
 
     protected override void OnDisable()
     {
+        MapObjectTickManager.UnregisterUpdateTick(this);
         InvalidateAutoDriveConnectedTrainCache();
         StopMovementParticle(true);
         hasLastMovementParticlePosition = false;
         lastDrivenInputFrame = -1;
-        autoDriveTickFrame = -1;
+        lastManualDriveSimulationTick = -1L;
+        autoDriveSimulationTick = -1L;
+        autoDriveMountedPlayer = null;
         ClearPendingBurnEnergyCost();
         ClearPendingWaterCost();
         ResetWaterPipeImmediate(false);
@@ -397,14 +410,17 @@ public class SteamTrain : RailHandcar
 
     public override void PrepareForPool()
     {
+        MapObjectTickManager.UnregisterUpdateTick(this);
         StopMovementParticle(true);
         hasLastMovementParticlePosition = false;
         lastDrivenInputFrame = -1;
+        lastManualDriveSimulationTick = -1L;
         ClearPendingBurnEnergyCost();
         ClearPendingWaterCost();
-        storedBurnEnergy = 0f;
-        burnEnergyGaugeCapacity = 0f;
-        autoDriveTickFrame = -1;
+        storedBurnEnergyUnits = 0L;
+        burnEnergyGaugeCapacityUnits = 0L;
+        autoDriveSimulationTick = -1L;
+        autoDriveMountedPlayer = null;
         ResetAutoDriveState();
         ResetWaterPipeImmediate(false);
         base.PrepareForPool();
@@ -424,34 +440,66 @@ public class SteamTrain : RailHandcar
         SteamTrain controller = ResolveAutoDriveControllerForConsist();
         if (controller != null)
         {
-            controller.TickAutoDrive(deltaTime, mountedPlayer);
+            controller.autoDriveMountedPlayer = mountedPlayer;
             return;
         }
 
         ClearPendingBurnEnergyCost();
         ClearPendingWaterCost();
+        lastManualDriveSimulationTick = MapObjectTickManager.CurrentSimulationTick;
         HandleResolvedDriveMotion(
             worldMoveDirection,
             moveSpeed,
             deltaTime,
-            mountedPlayer);
+            mountedPlayer,
+            false);
     }
 
-    private void Update()
+    public override void NotifyPlayerDismounted(Player dismountedPlayer)
     {
-        TickAutoDrive(Time.deltaTime, null);
+        if (autoDriveMountedPlayer == dismountedPlayer)
+        {
+            autoDriveMountedPlayer = null;
+        }
+
+        base.NotifyPlayerDismounted(dismountedPlayer);
+    }
+
+    public void ManagedUpdateTick(float deltaTime)
+    {
+        PlanManagedUpdateTick(deltaTime);
+        ApplyManagedUpdateTick();
+    }
+
+    public void PlanManagedUpdateTick(float deltaTime)
+    {
+        plannedAutoDriveDeltaTime = Mathf.Max(0f, deltaTime);
+        autoDriveTickPlanned = autoDriveEnabled && IsPrimaryAutoDriveControllerForConsist();
+    }
+
+    public void ApplyManagedUpdateTick()
+    {
+        if (!autoDriveTickPlanned)
+        {
+            return;
+        }
+
+        autoDriveTickPlanned = false;
+        TickAutoDrive(plannedAutoDriveDeltaTime, autoDriveMountedPlayer);
+        plannedAutoDriveDeltaTime = 0f;
     }
 
     private void TickAutoDrive(float deltaTime, Player mountedPlayer)
     {
+        long currentSimulationTick = MapObjectTickManager.CurrentSimulationTick;
         if (!autoDriveEnabled
-            || autoDriveTickFrame == Time.frameCount
+            || autoDriveSimulationTick == currentSimulationTick
             || !IsPrimaryAutoDriveControllerForConsist())
         {
             return;
         }
 
-        autoDriveTickFrame = Time.frameCount;
+        autoDriveSimulationTick = currentSimulationTick;
         ClearPendingBurnEnergyCost();
         ClearPendingWaterCost();
         if (!HasCompleteAutoDriveTargets())
@@ -481,7 +529,12 @@ public class SteamTrain : RailHandcar
         bool isDepartureAttempt = moveDirection.sqrMagnitude > 0.0001f
             && !string.IsNullOrEmpty(autoDriveLastArrivedStationName);
         Vector3 departurePosition = isDepartureAttempt ? transform.position : default;
-        DriveMotionOutcome outcome = HandleResolvedDriveMotion(moveDirection, 0f, deltaTime, mountedPlayer);
+        DriveMotionOutcome outcome = HandleResolvedDriveMotion(
+            moveDirection,
+            0f,
+            deltaTime,
+            mountedPlayer,
+            true);
         if (outcome != DriveMotionOutcome.Applied)
         {
             SetAutoDriveStatus(
@@ -512,7 +565,8 @@ public class SteamTrain : RailHandcar
         Vector3 resolvedMoveDirection,
         float moveSpeed,
         float deltaTime,
-        Player mountedPlayer)
+        Player mountedPlayer,
+        bool commitResourceCostsImmediately)
     {
         if (resolvedMoveDirection.sqrMagnitude > 0.0001f)
         {
@@ -535,20 +589,31 @@ public class SteamTrain : RailHandcar
             return DriveMotionOutcome.BlockedByFuel;
         }
 
-        if (burnEnergyCost > BurnEnergyEpsilon)
-        {
-            pendingBurnEnergyCost = burnEnergyCost;
-            pendingBurnEnergyFrame = Time.frameCount;
-        }
-
-        if (waterCost > WaterEpsilon)
-        {
-            pendingWaterCost = waterCost;
-            pendingWaterFrame = Time.frameCount;
-        }
-
         lastDrivenInputFrame = Time.frameCount;
         base.HandleMountedInput(resolvedMoveDirection, moveSpeed, deltaTime);
+        if (commitResourceCostsImmediately)
+        {
+            if (CurrentVehicleSpeed > BurnEnergyDrivingSpeedThreshold)
+            {
+                SpendStoredBurnEnergyUnits(DeterministicSimulationUnits.FromFloat(burnEnergyCost));
+                SpendStoredWaterUnits(DeterministicSimulationUnits.FromFloat(waterCost));
+            }
+        }
+        else
+        {
+            if (burnEnergyCost > BurnEnergyEpsilon)
+            {
+                pendingBurnEnergyCostUnits = DeterministicSimulationUnits.FromFloat(burnEnergyCost);
+                pendingBurnEnergyFrame = Time.frameCount;
+            }
+
+            if (waterCost > WaterEpsilon)
+            {
+                pendingWaterCostUnits = DeterministicSimulationUnits.FromFloat(waterCost);
+                pendingWaterFrame = Time.frameCount;
+            }
+        }
+
         return DriveMotionOutcome.Applied;
     }
 
@@ -572,14 +637,14 @@ public class SteamTrain : RailHandcar
             && pendingBurnEnergyFrame == Time.frameCount
             && CurrentVehicleSpeed > BurnEnergyDrivingSpeedThreshold)
         {
-            SpendStoredBurnEnergy(pendingBurnEnergyCost);
+            SpendStoredBurnEnergyUnits(pendingBurnEnergyCostUnits);
         }
 
         if (isDrivenThisFrame
             && pendingWaterFrame == Time.frameCount
             && CurrentVehicleSpeed > BurnEnergyDrivingSpeedThreshold)
         {
-            SpendStoredWater(pendingWaterCost);
+            SpendStoredWaterUnits(pendingWaterCostUnits);
         }
 
         if (waterPipeTargetActive
@@ -618,14 +683,31 @@ public class SteamTrain : RailHandcar
 
     public void CaptureBurnEnergyState(out float storedEnergy, out float gaugeCapacity)
     {
-        storedEnergy = Mathf.Max(0f, storedBurnEnergy);
-        gaugeCapacity = Mathf.Max(0f, burnEnergyGaugeCapacity, storedEnergy);
+        storedEnergy = DeterministicSimulationUnits.ToFloat(storedBurnEnergyUnits);
+        gaugeCapacity = DeterministicSimulationUnits.ToFloat(
+            System.Math.Max(burnEnergyGaugeCapacityUnits, storedBurnEnergyUnits));
+    }
+
+    public void CaptureBurnEnergyStateUnits(out long storedEnergyUnits, out long gaugeCapacityUnits)
+    {
+        storedEnergyUnits = System.Math.Max(0L, storedBurnEnergyUnits);
+        gaugeCapacityUnits = System.Math.Max(burnEnergyGaugeCapacityUnits, storedEnergyUnits);
     }
 
     public void ApplyBurnEnergyState(float storedEnergy, float gaugeCapacity)
     {
-        storedBurnEnergy = Mathf.Max(0f, storedEnergy);
-        burnEnergyGaugeCapacity = Mathf.Max(0f, gaugeCapacity, storedBurnEnergy);
+        storedBurnEnergyUnits = DeterministicSimulationUnits.FromFloat(storedEnergy);
+        burnEnergyGaugeCapacityUnits = System.Math.Max(
+            DeterministicSimulationUnits.FromFloat(gaugeCapacity),
+            storedBurnEnergyUnits);
+    }
+
+    public void ApplyBurnEnergyStateUnits(long storedEnergyUnits, long gaugeCapacityUnits)
+    {
+        storedBurnEnergyUnits = System.Math.Max(0L, storedEnergyUnits);
+        burnEnergyGaugeCapacityUnits = System.Math.Max(
+            System.Math.Max(0L, gaugeCapacityUnits),
+            storedBurnEnergyUnits);
     }
 
     public void ApplyAutoDriveSettings(
@@ -949,18 +1031,21 @@ public class SteamTrain : RailHandcar
     private bool TryEnsureBurnEnergyAvailable(float requiredEnergy, Player mountedPlayer)
     {
         requiredEnergy = Mathf.Max(0f, requiredEnergy);
-        while (storedBurnEnergy + BurnEnergyEpsilon < requiredEnergy)
+        long requiredEnergyUnits = DeterministicSimulationUnits.FromFloat(requiredEnergy);
+        while (storedBurnEnergyUnits < requiredEnergyUnits)
         {
             if (!TryConsumeOneBurnEnergyItem(mountedPlayer, out int gainedEnergy))
             {
                 break;
             }
 
-            storedBurnEnergy += gainedEnergy;
-            burnEnergyGaugeCapacity = Mathf.Max(burnEnergyGaugeCapacity, storedBurnEnergy, 1f);
+            storedBurnEnergyUnits += DeterministicSimulationUnits.FromFloat(gainedEnergy);
+            burnEnergyGaugeCapacityUnits = System.Math.Max(
+                burnEnergyGaugeCapacityUnits,
+                System.Math.Max(storedBurnEnergyUnits, DeterministicSimulationUnits.UnitsPerWhole));
         }
 
-        return storedBurnEnergy + BurnEnergyEpsilon >= requiredEnergy;
+        return storedBurnEnergyUnits >= requiredEnergyUnits;
     }
 
     private ItemDefinition ResolveInstalledDefinition()
@@ -1227,7 +1312,7 @@ public class SteamTrain : RailHandcar
             || currentSample.Rail != lockedWaterPipeDockRail
             || !TryValidateLockedWaterPipeDock()
             || !lockedWaterPipeDockRail.TrySampleRenderedPath(
-                lockedWaterPipeDockDistanceAlongPath,
+                DeterministicSimulationUnits.ToFloat(lockedWaterPipeDockDistanceUnits),
                 out Vector2 pathPoint,
                 out Vector2 tangent))
         {
@@ -1235,7 +1320,9 @@ public class SteamTrain : RailHandcar
             return false;
         }
 
-        signedPathDelta = lockedWaterPipeDockDistanceAlongPath - currentSample.DistanceAlongPath;
+        float lockedWaterPipeDockDistance =
+            DeterministicSimulationUnits.ToFloat(lockedWaterPipeDockDistanceUnits);
+        signedPathDelta = lockedWaterPipeDockDistance - currentSample.DistanceAlongPath;
         float captureDistance = ResolveDockCaptureDistance();
         float captureSqrDistance = captureDistance * captureDistance;
         if (Mathf.Abs(signedPathDelta) > captureDistance
@@ -1257,7 +1344,7 @@ public class SteamTrain : RailHandcar
         }
 
         dockSample.Rail = lockedWaterPipeDockRail;
-        dockSample.DistanceAlongPath = lockedWaterPipeDockDistanceAlongPath;
+        dockSample.DistanceAlongPath = lockedWaterPipeDockDistance;
         dockSample.Point = pathPoint;
         dockSample.Tangent = tangent;
         dockSample.SqrDistance = (pathPoint - currentSample.Point).sqrMagnitude;
@@ -1292,7 +1379,8 @@ public class SteamTrain : RailHandcar
     {
         waterPipeDockLockActive = true;
         lockedWaterPipeDockRail = dockSample.Rail;
-        lockedWaterPipeDockDistanceAlongPath = dockSample.DistanceAlongPath;
+        lockedWaterPipeDockDistanceUnits = DeterministicSimulationUnits.FromFloat(
+            dockSample.DistanceAlongPath);
         lockedWaterPipeDockFacing = ResolveWaterPipeDockFacing(dockSample, currentFacing);
         lockedWaterPipeDockDirectionFromTrainToPipe = directionFromTrainToPipe;
         lockedWaterPipeDockCoordinate = pipeCoordinate;
@@ -1327,7 +1415,7 @@ public class SteamTrain : RailHandcar
     {
         waterPipeDockLockActive = false;
         lockedWaterPipeDockRail = null;
-        lockedWaterPipeDockDistanceAlongPath = 0f;
+        lockedWaterPipeDockDistanceUnits = 0L;
         lockedWaterPipeDockFacing = Vector2.zero;
         lockedWaterPipeDockDirectionFromTrainToPipe = Vector2Int.zero;
         lockedWaterPipeDockCoordinate = Vector2Int.zero;
@@ -1527,7 +1615,8 @@ public class SteamTrain : RailHandcar
         {
             if (autoDriveConnectedTrainScratch[i] is SteamTrain candidate
                 && candidate != this
-                && candidate.lastDrivenInputFrame == Time.frameCount)
+                && candidate.lastManualDriveSimulationTick
+                == MapObjectTickManager.CurrentSimulationTick)
             {
                 return false;
             }
@@ -1557,7 +1646,7 @@ public class SteamTrain : RailHandcar
             if (controller == null
                 || candidate.autoDriveControllerRevision > controller.autoDriveControllerRevision
                 || (candidate.autoDriveControllerRevision == controller.autoDriveControllerRevision
-                    && candidate.GetInstanceID() < controller.GetInstanceID()))
+                    && CompareSimulationOrder(candidate, controller) < 0))
             {
                 controller = candidate;
             }
@@ -1603,7 +1692,7 @@ public class SteamTrain : RailHandcar
         autoDriveRouteTargetStationName = string.Empty;
         autoDriveCachedRouteReferenceTargetStationName = string.Empty;
         autoDriveCachedRouteReferenceTrain = null;
-        autoDriveRouteReferenceTrainInstanceId = 0;
+        autoDriveRouteReferenceTrainSimulationId = 0L;
         autoDriveRouteGraphVersion = -1;
         autoDriveRouteRefreshRequested = false;
         autoDriveRouteSegmentCursor = 0;
@@ -2394,7 +2483,7 @@ public class SteamTrain : RailHandcar
         autoDriveLastArrivedStationName = NormalizeAutoDriveStationName(currentStationName);
         autoDriveRouteSegments.Clear();
         autoDriveRouteTargetStationName = string.Empty;
-        autoDriveRouteReferenceTrainInstanceId = 0;
+        autoDriveRouteReferenceTrainSimulationId = 0L;
         autoDriveRouteGraphVersion = -1;
         autoDriveRouteRefreshRequested = false;
         autoDriveRouteSegmentCursor = 0;
@@ -2451,7 +2540,7 @@ public class SteamTrain : RailHandcar
 
         autoDriveRouteSegments.Clear();
         autoDriveRouteTargetStationName = string.Empty;
-        autoDriveRouteReferenceTrainInstanceId = 0;
+        autoDriveRouteReferenceTrainSimulationId = 0L;
         autoDriveRouteGraphVersion = -1;
         autoDriveRouteSegmentCursor = 0;
         autoDriveRouteRefreshTimer = AutoDriveRouteRefreshInterval;
@@ -2478,7 +2567,7 @@ public class SteamTrain : RailHandcar
 
         autoDriveRouteSegmentCursor = 0;
         autoDriveRouteTargetStationName = targetStationName;
-        autoDriveRouteReferenceTrainInstanceId = routeReferenceTrain.GetInstanceID();
+        autoDriveRouteReferenceTrainSimulationId = routeReferenceTrain.SimulationId;
         autoDriveRouteGraphVersion = routeGraphVersion;
         autoDriveRouteRefreshRequested = false;
         autoDriveRouteRefreshTimer = 0f;
@@ -3920,7 +4009,7 @@ public class SteamTrain : RailHandcar
     private bool HasAutoDriveRouteReferenceChanged(RailHandcar routeReferenceTrain)
     {
         return routeReferenceTrain == null
-               || routeReferenceTrain.GetInstanceID() != autoDriveRouteReferenceTrainInstanceId;
+               || routeReferenceTrain.SimulationId != autoDriveRouteReferenceTrainSimulationId;
     }
 
     private float ResolveAutoDriveDockApproachDistance()
@@ -4167,28 +4256,29 @@ public class SteamTrain : RailHandcar
         return true;
     }
 
-    private void SpendStoredBurnEnergy(float cost)
+    private void SpendStoredBurnEnergyUnits(long costUnits)
     {
-        if (cost <= BurnEnergyEpsilon)
+        if (costUnits <= 0L)
         {
             return;
         }
 
-        storedBurnEnergy = Mathf.Max(0f, storedBurnEnergy - cost);
-        if (storedBurnEnergy <= BurnEnergyEpsilon)
+        storedBurnEnergyUnits = System.Math.Max(0L, storedBurnEnergyUnits - costUnits);
+        if (storedBurnEnergyUnits <= 0L)
         {
-            storedBurnEnergy = 0f;
-            burnEnergyGaugeCapacity = 0f;
+            storedBurnEnergyUnits = 0L;
+            burnEnergyGaugeCapacityUnits = 0L;
         }
     }
 
-    private void SpendStoredWater(float cost)
+    private void SpendStoredWaterUnits(long costUnits)
     {
-        if (cost <= WaterEpsilon)
+        if (costUnits <= 0L)
         {
             return;
         }
 
+        float cost = DeterministicSimulationUnits.ToFloat(costUnits);
         int waterItemId = ResolveWaterItemId();
         if (waterItemId < 0 || !CanProvideFluidItem(waterItemId, cost))
         {
@@ -4451,13 +4541,13 @@ public class SteamTrain : RailHandcar
 
     private void ClearPendingBurnEnergyCost()
     {
-        pendingBurnEnergyCost = 0f;
+        pendingBurnEnergyCostUnits = 0L;
         pendingBurnEnergyFrame = -1;
     }
 
     private void ClearPendingWaterCost()
     {
-        pendingWaterCost = 0f;
+        pendingWaterCostUnits = 0L;
         pendingWaterFrame = -1;
     }
 
@@ -4851,6 +4941,9 @@ public class SteamTrain : RailHandcar
             CachedStationsByName.Clear();
 
             Trainstation[] liveStations = Object.FindObjectsOfType<Trainstation>(false);
+            System.Array.Sort(
+                liveStations,
+                (left, right) => CompareSimulationOrder(left, right));
             for (int i = 0; i < liveStations.Length; i++)
             {
                 Trainstation station = liveStations[i];
@@ -4869,6 +4962,9 @@ public class SteamTrain : RailHandcar
             }
 
             Railload[] liveRails = Object.FindObjectsOfType<Railload>(false);
+            System.Array.Sort(
+                liveRails,
+                (left, right) => CompareSimulationOrder(left, right));
             for (int i = 0; i < liveRails.Length; i++)
             {
                 Railload rail = liveRails[i];

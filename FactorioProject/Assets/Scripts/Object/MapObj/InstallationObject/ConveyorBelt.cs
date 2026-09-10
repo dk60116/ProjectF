@@ -436,6 +436,7 @@ public class ConveyorBelt : InstallationObject
             Matrix4x4 matrix = renderer.localToWorldMatrix;
             if (!IsCornerVariant
                 && hasUvScroll
+                && !RequiresAuthoredBeltTopMesh(renderer, mesh)
                 && TryCreateDedicatedBeltTopMatrix(mesh, matrix, out Matrix4x4 dedicatedMatrix))
             {
                 renderMesh = GetVirtualBeltTopMesh();
@@ -490,6 +491,15 @@ public class ConveyorBelt : InstallationObject
         }
 
         return hasCompleteCoverage;
+    }
+
+    private bool RequiresAuthoredBeltTopMesh(MeshRenderer renderer, Mesh mesh)
+    {
+        return this is ConvayorBelt2F
+               && renderer != null
+               && renderer.name == "BeltTop"
+               && mesh != null
+               && mesh.bounds.size.y > 0.0001f;
     }
 
     public void SetVirtualRenderingSuppressed(bool isSuppressed)
@@ -1422,6 +1432,16 @@ public class ConveyorBelt : InstallationObject
 
         Vector3 flow = new Vector3(outputDirection.x, 0f, outputDirection.y);
         beltTopRenderInfos.Sort(CompareBeltTopSurfacePosition);
+        int mainTopRendererCount = 0;
+        for (int i = 0; i < beltTopRenderInfos.Count; i++)
+        {
+            if (beltTopRenderInfos[i].Renderer.name == "BeltTop")
+            {
+                mainTopRendererCount++;
+            }
+        }
+
+        bool usesContinuousSurfaceMesh = mainTopRendererCount == 1 && this is ConvayorBelt2F;
         int topCount = 0;
         float surfaceLength = 0f;
         Vector3 pathStart = default;
@@ -1453,7 +1473,9 @@ public class ConveyorBelt : InstallationObject
 
             // Reuse the offset field while measuring the path, then convert it to UV below.
             info.UvLengthOffset = surfaceLength;
-            info.UvLengthScale = Vector3.Distance(info.SurfaceStart, info.SurfaceEnd);
+            info.UvLengthScale = usesContinuousSurfaceMesh
+                ? ((ConvayorBelt2F)this).GetVisualSurfaceLength()
+                : Vector3.Distance(info.SurfaceStart, info.SurfaceEnd);
             surfaceLength += info.UvLengthScale;
             previousEnd = info.SurfaceEnd;
             beltTopRenderInfos[i] = info;

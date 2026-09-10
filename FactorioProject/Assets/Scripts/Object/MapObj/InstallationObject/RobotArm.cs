@@ -12,7 +12,6 @@ public class RobotArm : InputOutputModule
         new Dictionary<Vector2Int, List<RobotArm>>();
 
     private const float DefaultManagedUpdateDeltaSeconds = 1f / 60f;
-    private const float MaxManagedUpdateDeltaSeconds = 0.12f;
     private const float ItemMoveDuration = PortableObject.MoveToDuration * 0.5f;
     private const float RuntimeSleepRecheckIntervalSeconds = 0.1f;
     private const float AnimatorSpeedChangeEpsilon = 0.001f;
@@ -52,6 +51,13 @@ public class RobotArm : InputOutputModule
         Error,
         Warning,
         Working
+    }
+
+    private enum PlannedTransferCommand
+    {
+        None,
+        Pickup,
+        Drop
     }
 
     [System.Serializable]
@@ -110,15 +116,13 @@ public class RobotArm : InputOutputModule
     private float pickupTimer;
     private float dropRetryTimer;
     private float actionTurnTimer;
-    private float lastManagedUpdateTime;
-    private float lastManagedUpdateDeltaTime = DefaultManagedUpdateDeltaSeconds;
-    private bool hasManagedUpdateTime;
     private bool waitingForDropRetry;
     private RobotArmState state;
     private Quaternion inputBodyLocalRotation;
     private bool hasInputBodyLocalRotation;
     private bool hasRuntimeStateInitialized;
     private bool runtimeSleeping;
+    private bool runtimeWakePending;
     private Animator cachedAnimator;
     private Renderer[] sleepAwakeRenderers;
     private MaterialPropertyBlock sleepAwakePropertyBlock;
@@ -143,6 +147,8 @@ public class RobotArm : InputOutputModule
     private Vector2Int cachedDropCoordinate;
     private readonly List<InstallationObject> freightCarCoordinateScratch = new List<InstallationObject>(4);
     private System.Predicate<int> cachedPickupItemFilter;
+    private PlannedTransferCommand plannedTransferCommand;
+    private bool stagedTickPlanned;
 
     public bool HasHeldItem => heldItemId >= 0;
     public int HeldItemId => heldItemId;
@@ -156,7 +162,7 @@ public class RobotArm : InputOutputModule
     public float DropRetryIntervalSeconds => Mathf.Max(0.01f, dropRetryInterval);
     public float ActionTurnDelaySeconds => Mathf.Max(0f, actionTurnDelay);
     private float TurnDurationSeconds => 180f / Mathf.Max(1f, bodyTurnSpeedDegreesPerSecond);
-    public override float ManagedUpdateTickIntervalSeconds => 0.001f;
+    public override float ManagedUpdateTickIntervalSeconds => DefaultManagedUpdateDeltaSeconds;
 
     public void SetEditorSettings(
         bool enableInstancedRendering,
@@ -218,13 +224,8 @@ public class RobotArm : InputOutputModule
             return true;
         }
 
-        if (state == RobotArmState.WaitingForPickup && CanPickupOneItem())
-        {
-            wattsPerSecond = configuredWatts;
-            return true;
-        }
-
         // A valid inserter waiting only for an input item remains part of the power demand.
+        // Endpoint validity is sufficient: item availability cannot change this demand.
         if (state == RobotArmState.WaitingForPickup
             && TryResolvePickupCoordinate(out _)
             && TryResolveDropCoordinate(out _))
@@ -422,21 +423,35 @@ public class RobotArm : InputOutputModule
 
     public override void ManagedUpdateTick(float deltaTime)
     {
-        deltaTime = ResolveManagedUpdateDeltaTime(deltaTime);
+        PlanManagedUpdateTick(deltaTime);
+        ApplyManagedUpdateTick();
+    }
+
+    public override void PlanManagedUpdateTick(float deltaTime)
+    {
+        plannedTransferCommand = PlannedTransferCommand.None;
+        stagedTickPlanned = true;
+        runtimeWakePending = false;
         EnsureBodyRotationCache();
-        RefreshHeldItemVisualIfNeeded();
-        if (ShouldRunRuntimeSleepCheck(deltaTime) && RefreshRuntimeSleepState())
+        using (MapObjectTickProfiler.SampleNamed("Runtime", nameof(RobotArm), "Robot Arm Sleep Check"))
         {
-            return;
+            if (ShouldRunRuntimeSleepCheck(deltaTime) && RefreshRuntimeSleepState())
+            {
+                return;
+            }
         }
 
-        deltaTime = ResolvePoweredDeltaTime(deltaTime);
-        ApplyPoweredAnimatorSpeed();
+        using (MapObjectTickProfiler.SampleNamed("Runtime", nameof(RobotArm), "Robot Arm Power"))
+        {
+            deltaTime = ResolvePoweredDeltaTime(deltaTime);
+            ApplyPoweredAnimatorSpeed();
+        }
         if (deltaTime <= 0f)
         {
             return;
         }
 
+        using var stateSample = MapObjectTickProfiler.SampleNamed("Runtime", nameof(RobotArm), "Robot Arm State Tick");
         switch (state)
         {
             case RobotArmState.WaitingForPickup:
@@ -464,6 +479,27 @@ public class RobotArm : InputOutputModule
                 TickTurnToPickup(deltaTime);
                 break;
         }
+    }
+
+    public override void ApplyManagedUpdateTick()
+    {
+        if (!stagedTickPlanned)
+        {
+            return;
+        }
+
+        stagedTickPlanned = false;
+        switch (plannedTransferCommand)
+        {
+            case PlannedTransferCommand.Pickup:
+                ApplyPlannedPickup();
+                break;
+            case PlannedTransferCommand.Drop:
+                ApplyPlannedDrop();
+                break;
+        }
+
+        plannedTransferCommand = PlannedTransferCommand.None;
     }
 
     public static void WakeAroundCoordinate(Vector2Int coordinate)
@@ -820,11 +856,36 @@ public class RobotArm : InputOutputModule
 
     private void WakeRuntimeSleep()
     {
+        // Both the coordinate observer and InputOutputModule can deliver the same
+        // change. Coalesce until the next tick, but still repair lost registration.
+        bool registered = MapObjectTickManager.IsUpdateTickRegistered(this);
+        if (runtimeWakePending && !runtimeSleeping && registered)
+        {
+            return;
+        }
+
+        using var sample = MapObjectTickProfiler.SampleNamed("Runtime", nameof(RobotArm), "Robot Arm Wake Applied");
+        runtimeWakePending = true;
         pickupTimer = 0f;
         dropRetryTimer = 0f;
         runtimeSleepCheckTimer = 0f;
         waitingForDropRetry = false;
-        SetRuntimeSleeping(false, true);
+        if (runtimeSleeping)
+        {
+            SetRuntimeSleeping(false);
+        }
+        else if (!registered)
+        {
+            SetUpdateTickRegistered(true);
+        }
+    }
+
+    protected override void WakeRuntimeUpdate()
+    {
+        if (Application.isPlaying && isActiveAndEnabled)
+        {
+            WakeRuntimeSleep();
+        }
     }
 
     private void SetRuntimeSleeping(bool sleeping, bool force = false)
@@ -866,47 +927,13 @@ public class RobotArm : InputOutputModule
     {
         if (registered)
         {
-            if (!MapObjectTickManager.IsUpdateTickRegistered(this))
-            {
-                ResetManagedUpdateClock();
-            }
-
             MapObjectTickManager.RegisterUpdateTick(this);
         }
         else
         {
-            hasManagedUpdateTime = false;
+            runtimeWakePending = false;
             MapObjectTickManager.UnregisterUpdateTick(this);
         }
-    }
-
-    private void ResetManagedUpdateClock()
-    {
-        hasManagedUpdateTime = Application.isPlaying;
-        lastManagedUpdateTime = Time.time;
-        lastManagedUpdateDeltaTime = DefaultManagedUpdateDeltaSeconds;
-    }
-
-    private float ResolveManagedUpdateDeltaTime(float fallbackDeltaTime)
-    {
-        fallbackDeltaTime = Mathf.Max(0f, fallbackDeltaTime);
-        if (!Application.isPlaying)
-        {
-            lastManagedUpdateDeltaTime = fallbackDeltaTime;
-            return fallbackDeltaTime;
-        }
-
-        float now = Time.time;
-        float elapsedTime = hasManagedUpdateTime ? now - lastManagedUpdateTime : fallbackDeltaTime;
-        hasManagedUpdateTime = true;
-        lastManagedUpdateTime = now;
-
-        float resolvedDeltaTime = Mathf.Clamp(
-            Mathf.Max(fallbackDeltaTime, elapsedTime),
-            0f,
-            MaxManagedUpdateDeltaSeconds);
-        lastManagedUpdateDeltaTime = resolvedDeltaTime;
-        return resolvedDeltaTime;
     }
 
     private void RefreshSleepAwakeVisual(bool force = false)
@@ -1219,6 +1246,16 @@ public class RobotArm : InputOutputModule
             return;
         }
 
+        plannedTransferCommand = PlannedTransferCommand.Pickup;
+    }
+
+    private void ApplyPlannedPickup()
+    {
+        if (state != RobotArmState.WaitingBeforePickupTake || heldItemId >= 0)
+        {
+            return;
+        }
+
         if (TryPickupOneItem(out int pickedItemId, out Vector3 pickupWorldPosition))
         {
             SetHeldItem(pickedItemId, pickupWorldPosition);
@@ -1310,6 +1347,16 @@ public class RobotArm : InputOutputModule
             return;
         }
 
+        plannedTransferCommand = PlannedTransferCommand.Drop;
+    }
+
+    private void ApplyPlannedDrop()
+    {
+        if (state != RobotArmState.WaitingBeforeDropPlace || heldItemId < 0)
+        {
+            return;
+        }
+
         if (TryPlaceHeldItem())
         {
             dropRetryTimer = 0f;
@@ -1361,6 +1408,7 @@ public class RobotArm : InputOutputModule
 
     private bool TryPickupOneItem(out int pickedItemId, out Vector3 pickupWorldPosition)
     {
+        using var sample = MapObjectTickProfiler.SampleNamed("Runtime", nameof(RobotArm), "Robot Arm Pickup Transfer");
         pickedItemId = -1;
         pickupWorldPosition = GetHandRestWorldPosition();
         if (!TryResolvePickupCandidate(
@@ -1421,6 +1469,7 @@ public class RobotArm : InputOutputModule
         out Vector3 referenceWorldPosition,
         out Vector3 pickupWorldPosition)
     {
+        using var sample = MapObjectTickProfiler.SampleNamed("Runtime", nameof(RobotArm), "Robot Arm Pickup Query");
         pickupBlock = null;
         boxObject = null;
         freightCar = null;
@@ -1686,6 +1735,7 @@ public class RobotArm : InputOutputModule
 
     private bool TryPlaceHeldItem()
     {
+        using var sample = MapObjectTickProfiler.SampleNamed("Runtime", nameof(RobotArm), "Robot Arm Drop Transfer");
         if (heldItemId < 0
             || IsDropSuppressedByPlacementMode()
             || !TryResolveDropCoordinate(out Vector2Int dropCoordinate))
@@ -1781,6 +1831,7 @@ public class RobotArm : InputOutputModule
 
     private bool CanPlaceHeldItem()
     {
+        using var sample = MapObjectTickProfiler.SampleNamed("Runtime", nameof(RobotArm), "Robot Arm Drop Query");
         if (heldItemId < 0
             || IsDropSuppressedByPlacementMode()
             || !TryResolveDropCoordinate(out Vector2Int dropCoordinate))
@@ -2545,6 +2596,22 @@ public class RobotArm : InputOutputModule
         else
         {
             handItem.SetCachedActive(false);
+        }
+    }
+
+    internal static void RefreshHeldItemVisualsForRendering()
+    {
+        using var sample = MapObjectTickProfiler.SampleNamed("Runtime", nameof(RobotArm), "Robot Arm Held Item Visuals");
+        // Animator runs at render frequency even when simulation ticks are skipped.
+        // PortableItemRenderer calls this before reading the final frame matrices,
+        // including arms whose body instancing is disabled.
+        for (int i = 0; i < ActiveRobotArms.Count; i++)
+        {
+            RobotArm arm = ActiveRobotArms[i];
+            if (arm != null && !arm.runtimeSleeping)
+            {
+                arm.RefreshHeldItemVisualIfNeeded();
+            }
         }
     }
 

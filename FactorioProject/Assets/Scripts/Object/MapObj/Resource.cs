@@ -8,7 +8,7 @@ using UnityEngine.Rendering;
 using UnityEditor;
 #endif
 
-public class Resource : MapObject
+public class Resource : MapObject, IMapObjectSimulationIdentity
 {
     private struct HarvestReward
     {
@@ -187,6 +187,18 @@ public class Resource : MapObject
     }
 
     public Block OwningBlock => owningBlock;
+    public long SimulationId
+    {
+        get
+        {
+            Vector2Int coordinate = owningBlock != null
+                ? owningBlock.Coordinate
+                : new Vector2Int(
+                    Mathf.RoundToInt(transform.position.x),
+                    Mathf.RoundToInt(transform.position.z));
+            return unchecked(((long)coordinate.x << 32) | (uint)coordinate.y);
+        }
+    }
 
     protected new void Awake()
     {
@@ -1581,6 +1593,11 @@ public class Resource : MapObject
         UnregisterActiveResourceCoordinate();
         owningBlock = block;
         RegisterActiveResourceCoordinate();
+        if (this is IMapObjectUpdateTick updateTick)
+        {
+            MapObjectTickManager.RefreshSimulationIdentity(updateTick);
+        }
+
         OnOwningBlockChanged(block);
     }
 

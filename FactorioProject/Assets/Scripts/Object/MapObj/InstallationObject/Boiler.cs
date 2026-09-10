@@ -14,10 +14,9 @@ public class Boiler : InputOutputModule
         new List<InstallationFacingDirection> { InstallationFacingDirection.PositiveZ };
 
     private float waterTemperatureCelsius;
-    private float steamLiterAccumulator;
     private bool preserveSteamReadyTemperatureForMakeupWater;
-    private float availableSteamOutputLiters;
-    private float steamOutputBudgetUpdatedAt = float.NegativeInfinity;
+    private long availableSteamOutputUnits;
+    private long steamOutputBudgetUpdatedTick = -1L;
 
     public IReadOnlyList<InstallationFacingDirection> LocalPipeConnectionDirections => localPipeConnectionDirections;
     public float WaterTemperatureCelsius => Mathf.Clamp(waterTemperatureCelsius, MinWaterTemperatureCelsius, MaxWaterTemperatureCelsiusValue);
@@ -61,9 +60,14 @@ public class Boiler : InputOutputModule
             : base.GetStoredFluidTemperatureCelsius(fluidItemId);
     }
 
-    public override void ManagedUpdateTick(float deltaTime)
+    public override void ApplyManagedUpdateTick()
     {
-        base.ManagedUpdateTick(deltaTime);
+        if (!TryBeginPlannedModuleApply(out float deltaTime))
+        {
+            return;
+        }
+
+        ApplyPlannedBaseModuleTick(deltaTime);
         if (!Application.isPlaying)
         {
             return;
@@ -92,20 +96,18 @@ public class Boiler : InputOutputModule
             state.boilerWaterTemperatureCelsius,
             MinWaterTemperatureCelsius,
             MaxWaterTemperatureCelsiusValue);
-        steamLiterAccumulator = 0f;
         preserveSteamReadyTemperatureForMakeupWater = false;
-        availableSteamOutputLiters = 0f;
-        steamOutputBudgetUpdatedAt = float.NegativeInfinity;
+        availableSteamOutputUnits = 0L;
+        steamOutputBudgetUpdatedTick = -1L;
     }
 
     public override void PrepareForPool()
     {
         base.PrepareForPool();
         waterTemperatureCelsius = MinWaterTemperatureCelsius;
-        steamLiterAccumulator = 0f;
         preserveSteamReadyTemperatureForMakeupWater = false;
-        availableSteamOutputLiters = 0f;
-        steamOutputBudgetUpdatedAt = float.NegativeInfinity;
+        availableSteamOutputUnits = 0L;
+        steamOutputBudgetUpdatedTick = -1L;
     }
 
     protected override void TryStartNextCraft()
@@ -607,7 +609,6 @@ public class Boiler : InputOutputModule
             targetTemperature,
             temperatureDrop);
         SetStoredFluidTemperatureCelsius(waterTemperatureCelsius);
-        steamLiterAccumulator = 0f;
         return true;
     }
 
@@ -630,14 +631,18 @@ public class Boiler : InputOutputModule
         // Steam is a per-second flow, not an internal backlog. If the connected
         // engines cannot accept this tick's steam, the boiler throttles instead
         // of saving unsent steam and dumping it later when more engines connect.
-        steamLiterAccumulator = 0f;
-        float requestedLiters = outputLitersPerSecond * Mathf.Max(0f, deltaTime);
+        long requestedUnits = DeterministicSimulationUnits.RateForTicks(
+            outputLitersPerSecond,
+            DeterministicSimulationUnits.DeltaTimeToTicks(deltaTime));
+        float requestedLiters = DeterministicSimulationUnits.ToFloat(requestedUnits);
         float waterLitersPerSteamLiter = (float)inputLitersPerSecond / outputLitersPerSecond;
         float maxSteamLitersFromWater = StoredFluidLiters / waterLitersPerSteamLiter;
         RefreshSteamOutputBudget(outputLitersPerSecond, deltaTime);
         float maxLitersToEmit = Mathf.Min(
             requestedLiters,
-            Mathf.Min(maxSteamLitersFromWater, availableSteamOutputLiters));
+            Mathf.Min(
+                maxSteamLitersFromWater,
+                DeterministicSimulationUnits.ToFloat(availableSteamOutputUnits)));
         if (maxLitersToEmit <= FluidEpsilon)
         {
             return true;
@@ -680,10 +685,9 @@ public class Boiler : InputOutputModule
             SetStoredFluidTemperatureCelsius(waterTemperatureCelsius);
         }
 
-        availableSteamOutputLiters = Mathf.Max(
-            0f,
-            availableSteamOutputLiters - Mathf.Max(0f, acceptedLiters));
-        steamLiterAccumulator = 0f;
+        availableSteamOutputUnits = System.Math.Max(
+            0L,
+            availableSteamOutputUnits - DeterministicSimulationUnits.FromFloat(acceptedLiters));
         preserveSteamReadyTemperatureForMakeupWater = true;
         return true;
     }
@@ -693,23 +697,26 @@ public class Boiler : InputOutputModule
         float initialAvailableSeconds)
     {
         float outputRate = Mathf.Max(0f, outputLitersPerSecond);
-        float now = Time.time;
-        float maximumBudget = outputRate * SteamOutputBudgetSeconds;
-        if (float.IsNegativeInfinity(steamOutputBudgetUpdatedAt)
-            || now < steamOutputBudgetUpdatedAt)
+        long nowTick = MapObjectTickManager.CurrentSimulationTick;
+        long maximumBudgetUnits = DeterministicSimulationUnits.FromFloat(
+            outputRate * SteamOutputBudgetSeconds);
+        if (steamOutputBudgetUpdatedTick < 0L || nowTick < steamOutputBudgetUpdatedTick)
         {
-            availableSteamOutputLiters = Mathf.Min(
-                maximumBudget,
-                outputRate * Mathf.Max(0f, initialAvailableSeconds));
-            steamOutputBudgetUpdatedAt = now;
+            availableSteamOutputUnits = System.Math.Min(
+                maximumBudgetUnits,
+                DeterministicSimulationUnits.RateForTicks(
+                    outputRate,
+                    DeterministicSimulationUnits.DeltaTimeToTicks(initialAvailableSeconds)));
+            steamOutputBudgetUpdatedTick = nowTick;
             return;
         }
 
-        float elapsedSeconds = Mathf.Max(0f, now - steamOutputBudgetUpdatedAt);
-        availableSteamOutputLiters = Mathf.Min(
-            maximumBudget,
-            availableSteamOutputLiters + outputRate * elapsedSeconds);
-        steamOutputBudgetUpdatedAt = now;
+        long elapsedTicks = System.Math.Max(0L, nowTick - steamOutputBudgetUpdatedTick);
+        availableSteamOutputUnits = System.Math.Min(
+            maximumBudgetUnits,
+            availableSteamOutputUnits
+            + DeterministicSimulationUnits.RateForTicks(outputRate, elapsedTicks));
+        steamOutputBudgetUpdatedTick = nowTick;
     }
 
     private bool TryConsumeBoilerOperatingEnergy(
@@ -779,7 +786,6 @@ public class Boiler : InputOutputModule
             || !CanProvideFluidItem(inputItemId))
         {
             waterTemperatureCelsius = MinWaterTemperatureCelsius;
-            steamLiterAccumulator = 0f;
             preserveSteamReadyTemperatureForMakeupWater = false;
             return false;
         }
@@ -794,7 +800,6 @@ public class Boiler : InputOutputModule
             MinWaterTemperatureCelsius,
             MaxWaterTemperatureCelsiusValue);
         SetStoredFluidTemperatureCelsius(waterTemperatureCelsius);
-        steamLiterAccumulator = Mathf.Max(0f, steamLiterAccumulator);
         return true;
     }
 
@@ -838,7 +843,6 @@ public class Boiler : InputOutputModule
 
         if (WaterTemperatureCelsius + FluidEpsilon < MaxWaterTemperatureCelsiusValue)
         {
-            steamLiterAccumulator = 0f;
         }
     }
 

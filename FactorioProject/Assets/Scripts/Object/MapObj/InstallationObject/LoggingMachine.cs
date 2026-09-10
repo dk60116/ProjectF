@@ -53,7 +53,7 @@ public class LoggingMachine : InstallationObject,
     private int currentDirectionIndex;
     private float currentHingeAngle;
     private float emptyDirectionElapsed;
-    private float consumedWorkEnergy;
+    private long consumedWorkEnergyUnits;
     private readonly List<KeyValuePair<int, int>> harvestedSeedDrops = new List<KeyValuePair<int, int>>(2);
     private readonly List<InputOutputModule> seedRecoveryModules = new List<InputOutputModule>(2);
 
@@ -279,7 +279,7 @@ public class LoggingMachine : InstallationObject,
         if (!TryResolveAdjacentTree(currentDirectionIndex, out Resource tree))
         {
             activeTree = null;
-            consumedWorkEnergy = 0f;
+            consumedWorkEnergyUnits = 0L;
             SetWorking(false);
             UpdateEmptyDirection(deltaTime);
             return;
@@ -289,7 +289,7 @@ public class LoggingMachine : InstallationObject,
         if (activeTree != tree)
         {
             activeTree = tree;
-            consumedWorkEnergy = 0f;
+            consumedWorkEnergyUnits = 0L;
         }
 
         if (!TryConsumeWorkEnergy(deltaTime, out float consumedEnergy))
@@ -298,9 +298,9 @@ public class LoggingMachine : InstallationObject,
             return;
         }
 
-        consumedWorkEnergy += consumedEnergy;
+        consumedWorkEnergyUnits += DeterministicSimulationUnits.FromFloat(consumedEnergy);
         SetWorking(true);
-        if (consumedWorkEnergy + EnergyEpsilon < ResolveRequiredWorkEnergy())
+        if (consumedWorkEnergyUnits < DeterministicSimulationUnits.FromFloat(ResolveRequiredWorkEnergy()))
         {
             return;
         }
@@ -400,7 +400,7 @@ public class LoggingMachine : InstallationObject,
         harvestedSeedDrops.Clear();
         SetWorking(false);
         activeTree = null;
-        consumedWorkEnergy = 0f;
+        consumedWorkEnergyUnits = 0L;
 
         if (tree != null && tree.OwningBlock != null)
         {
@@ -932,7 +932,7 @@ public class LoggingMachine : InstallationObject,
     private void InvalidateFilteredTarget()
     {
         activeTree = null;
-        consumedWorkEnergy = 0f;
+        consumedWorkEnergyUnits = 0L;
         hasElectricDemand = HasAnyAdjacentTree();
         if (!hasElectricDemand)
         {
@@ -999,7 +999,7 @@ public class LoggingMachine : InstallationObject,
         currentDirectionIndex = 0;
         currentHingeAngle = 0f;
         emptyDirectionElapsed = 0f;
-        consumedWorkEnergy = 0f;
+        consumedWorkEnergyUnits = 0L;
         SetWorking(false);
 
         if (applyRotation)

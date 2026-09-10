@@ -365,6 +365,7 @@ public sealed partial class PortableItemRenderer : MonoBehaviour
 
     private void LateUpdate()
     {
+        RobotArm.RefreshHeldItemVisualsForRendering();
         ResolveDependencies();
 
         if (HasPortableObjectRenderWork())

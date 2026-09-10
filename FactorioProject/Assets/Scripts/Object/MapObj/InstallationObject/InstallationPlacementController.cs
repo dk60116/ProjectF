@@ -434,7 +434,7 @@ public class InstallationPlacementController : MonoBehaviour
         public List<string> loggingEnabledTreeDefinitionKeys = new List<string>();
         public int loggingMinimumGrowth = LoggingMachine.DefaultMinimumGrowth;
         public int loggingMaximumGrowth = LoggingMachine.DefaultMaximumGrowth;
-        public float storedFluidLiters;
+        public long storedFluidUnits;
         public int storedFluidItemId = -1;
         public float storedFluidTemperatureCelsius = MapClimate.DefaultCurrentTemperatureCelsius;
         public int storedInstallationItemId = -1;
@@ -4443,7 +4443,7 @@ public class InstallationPlacementController : MonoBehaviour
             editSession.loggingEnabledTreeDefinitionKeys,
             out editSession.loggingMinimumGrowth,
             out editSession.loggingMaximumGrowth);
-        editSession.storedFluidLiters = installationObject.StoredFluidLiters;
+        editSession.storedFluidUnits = installationObject.StoredFluidUnits;
         editSession.storedFluidItemId = installationObject.StoredFluidItemId;
         editSession.storedFluidTemperatureCelsius =
             installationObject.GetStoredFluidTemperatureCelsius(editSession.storedFluidItemId);
@@ -5044,9 +5044,9 @@ public class InstallationPlacementController : MonoBehaviour
 
         if (preview is InstallationObject installationPreview)
         {
-            installationPreview.SetStoredFluid(
+            installationPreview.SetStoredFluidUnits(
                 editSession.storedFluidItemId,
-                editSession.storedFluidLiters,
+                editSession.storedFluidUnits,
                 editSession.storedFluidTemperatureCelsius);
         }
 
@@ -5719,9 +5719,9 @@ public class InstallationPlacementController : MonoBehaviour
                 editSession.loggingMinimumGrowth, editSession.loggingMaximumGrowth);
             if (restoredObject is InstallationObject restoredInstallationObject)
             {
-                restoredInstallationObject.SetStoredFluid(
+                restoredInstallationObject.SetStoredFluidUnits(
                     editSession.storedFluidItemId,
-                    editSession.storedFluidLiters,
+                    editSession.storedFluidUnits,
                     editSession.storedFluidTemperatureCelsius);
                 if (restoredInstallationObject is IPersistentInstallationItemStorage itemStorage)
                 {
@@ -6024,9 +6024,9 @@ public class InstallationPlacementController : MonoBehaviour
         }
         if (replacementObject is InstallationObject replacementInstallation)
         {
-            replacementInstallation.SetStoredFluid(
+            replacementInstallation.SetStoredFluidUnits(
                 editSession.storedFluidItemId,
-                editSession.storedFluidLiters,
+                editSession.storedFluidUnits,
                 editSession.storedFluidTemperatureCelsius);
             if (replacementInstallation is IPersistentInstallationItemStorage itemStorage)
             {
@@ -14966,11 +14966,22 @@ public class InstallationPlacementController : MonoBehaviour
             railHandcar.ResetRailPlacementState();
         }
 
-        train.ApplyPlacedRailSample(
-            railSample.Rail,
-            railSample.DistanceAlongPath,
-            railSample.Point,
-            facing);
+        if (savedState.hasDeterministicUnits)
+        {
+            train.ApplyPlacedRailSampleUnits(
+                railSample.Rail,
+                savedState.trainRailDistanceAlongPathUnits,
+                railSample.Point,
+                facing);
+        }
+        else
+        {
+            train.ApplyPlacedRailSample(
+                railSample.Rail,
+                railSample.DistanceAlongPath,
+                railSample.Point,
+                facing);
+        }
         ConnectTrainToNearbyTrains(train);
         return true;
     }
@@ -32892,7 +32903,7 @@ public class InstallationPlacementController : MonoBehaviour
         int boxMinimum = (currentObject as BoxObject)?.MinimumRetainedItemCount ?? BoxObject.DefaultMinimumRetainedItemCount;
         int boxMaximum = (currentObject as BoxObject)?.MaximumStoredItemCount ?? BoxObject.DefaultMaximumStoredItemCount;
         int storedFluidItemId = currentObject.StoredFluidItemId;
-        float storedFluidLiters = currentObject.StoredFluidLiters;
+        long storedFluidUnits = currentObject.StoredFluidUnits;
         float storedFluidTemperatureCelsius = currentObject.GetStoredFluidTemperatureCelsius(
             storedFluidItemId);
         int storedInstallationItemId = currentObject is IPersistentInstallationItemStorage itemStorage
@@ -32968,9 +32979,9 @@ public class InstallationPlacementController : MonoBehaviour
         {
             replacementBox.SetStorageRange(boxMinimum, boxMaximum);
         }
-        replacementInstallation.SetStoredFluid(
+        replacementInstallation.SetStoredFluidUnits(
             storedFluidItemId,
-            storedFluidLiters,
+            storedFluidUnits,
             storedFluidTemperatureCelsius);
         if (replacementInstallation is IPersistentInstallationItemStorage replacementItemStorage)
         {

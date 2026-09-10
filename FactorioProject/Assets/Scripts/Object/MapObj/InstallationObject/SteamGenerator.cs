@@ -19,9 +19,14 @@ public class SteamGenerator : InputOutputModule
 
     public InstallationFacingDirection LocalPipeAreaConnectionDirection => localPipeAreaConnectionDirection;
 
-    public override void ManagedUpdateTick(float deltaTime)
+    public override void ApplyManagedUpdateTick()
     {
-        base.ManagedUpdateTick(deltaTime);
+        if (!TryBeginPlannedModuleApply(out float deltaTime))
+        {
+            return;
+        }
+
+        ApplyPlannedBaseModuleTick(deltaTime);
         generationVisualActive = ConsumeSteamForGeneration(deltaTime);
         SetVisualParticleActive(particleEffect, generationVisualActive);
     }

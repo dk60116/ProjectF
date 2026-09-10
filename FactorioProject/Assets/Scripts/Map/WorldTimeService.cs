@@ -3,7 +3,10 @@ using System.Globalization;
 using UnityEngine;
 
 [DisallowMultipleComponent]
-public sealed class WorldTimeService : MonoBehaviour
+public sealed class WorldTimeService : MonoBehaviour,
+    IMapObjectUpdateTick,
+    IMapObjectUpdateTickInterval,
+    IMapObjectSimulationIdentity
 {
     public const int HoursPerDay = 24;
     public const int MinutesPerHour = 60;
@@ -85,6 +88,8 @@ public sealed class WorldTimeService : MonoBehaviour
     public int DayOfSeason => ((DayIndex - 1) % DaysPerSeason) + 1;
     public int YearIndex => ((DayIndex - 1) / (DaysPerSeason * 4)) + 1;
     public float LatitudeDegrees => Mathf.Clamp(latitudeDegrees, -90f, 90f);
+    public long SimulationId => long.MinValue + 1L;
+    public float ManagedUpdateTickIntervalSeconds => MapObjectTickManager.FixedSimulationDeltaSeconds;
     public string ClockText => string.Format(
         CultureInfo.InvariantCulture,
         "Day {0} {1:00}:{2:00}",
@@ -139,10 +144,12 @@ public sealed class WorldTimeService : MonoBehaviour
         NormalizeSettings();
         CaptureLightingDefaults();
         ApplyEnvironment();
+        MapObjectTickManager.RegisterUpdateTick(this);
     }
 
     private void OnDisable()
     {
+        MapObjectTickManager.UnregisterUpdateTick(this);
         if (Active != this)
         {
             return;
@@ -153,18 +160,18 @@ public sealed class WorldTimeService : MonoBehaviour
         ActiveChanged?.Invoke(null);
     }
 
-    private void Update()
+    public void ManagedUpdateTick(float deltaTime)
     {
-        if (!paused && worldTimeScale > 0f && Time.unscaledDeltaTime > 0f)
+        if (!paused && worldTimeScale > 0f && deltaTime > 0f)
         {
-            if (IsDay && Time.deltaTime > 0f)
+            if (IsDay)
             {
-                elapsedPlantGrowthDaylightSeconds += Time.deltaTime;
+                elapsedPlantGrowthDaylightSeconds += deltaTime;
             }
 
             double gameSecondsPerRealSecond = GameSecondsPerDay / RealSecondsPerDay;
             AdvanceGameSeconds(
-                Time.unscaledDeltaTime * gameSecondsPerRealSecond * worldTimeScale,
+                deltaTime * gameSecondsPerRealSecond * worldTimeScale,
                 true);
             return;
         }

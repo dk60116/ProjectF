@@ -18,7 +18,10 @@ function Read-Member([string]$file, [string]$signature, [int]$occurrence = 1) {
     $source.Substring($start, $end - $start)
 }
 $base = 'FactorioProject/Assets/Scripts/Object/MapObj/InstallationObject/'
-$generated = "using System.Collections.Generic;`npublic partial class InputOutputModule {`n"
+$manager = 'FactorioProject/Assets/Scripts/Manager/MapObjectTickManager.cs'
+$generated = "using System; using System.Collections.Generic;`n"
+$generated += (Read-Member $manager 'public static class DeterministicSimulationUnits') + "`n"
+$generated += "public partial class InputOutputModule {`n"
 foreach ($signature in @(
     'protected void RecordFluidNetworkOutput(',
     'public float GetObjectInfoFluidOutputLitersPerSecond(',

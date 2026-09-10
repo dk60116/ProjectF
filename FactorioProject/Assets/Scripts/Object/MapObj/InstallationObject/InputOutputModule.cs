@@ -1,11 +1,21 @@
+using System;
 using System.Collections.Generic;
 using UnityEngine;
 
 public class InputOutputModule : InstallationObject,
     IMapObjectUpdateTick,
     IMapObjectUpdateTickInterval,
+    IMapObjectStagedUpdateTick,
     IItemLightWorkStateProvider
 {
+    [System.Flags]
+    private enum PlannedModuleCommand
+    {
+        None = 0,
+        PullFluid = 1 << 0,
+        AdvanceCraft = 1 << 1,
+        StartCraft = 1 << 2
+    }
     public static event System.Action<InputOutputModule> RuntimePipeTopologyChanged;
 
     private ProjectF.FluidTransport.FluidOutputRateMeter fluidOutputRateMeter;
@@ -18,13 +28,18 @@ public class InputOutputModule : InstallationObject,
         }
 
         fluidOutputRateMeter ??= new ProjectF.FluidTransport.FluidOutputRateMeter();
-        fluidOutputRateMeter.Record(fluidItemId, acceptedLiters, Time.timeAsDouble);
+        fluidOutputRateMeter.Record(
+            fluidItemId,
+            acceptedLiters,
+            MapObjectTickManager.CurrentSimulationTimeSeconds);
     }
 
     public float GetObjectInfoFluidOutputLitersPerSecond(int fluidItemId)
     {
         return isActiveAndEnabled && fluidOutputRateMeter != null
-            ? fluidOutputRateMeter.GetLitersPerSecond(fluidItemId, Time.timeAsDouble)
+            ? fluidOutputRateMeter.GetLitersPerSecond(
+                fluidItemId,
+                MapObjectTickManager.CurrentSimulationTimeSeconds)
             : 0f;
     }
 
@@ -224,6 +239,13 @@ public class InputOutputModule : InstallationObject,
         public float boilerWaterTemperatureCelsius;
         public float boilerSteamLiterAccumulator;
         public float oilDrillingProgressLiters;
+        public bool hasDeterministicUnits;
+        public long storedEnergyUnits;
+        public long energyGaugeCapacityUnits;
+        public long remainingCraftTicks;
+        public long activeCraftConsumedEnergyUnits;
+        public long oilDrillingProgressUnits;
+        public long seedPlanterPlantElapsedUnits;
         // Legacy binary save slot; continuous sprinkler watering no longer uses a spray timer.
         public float sprinklerSprayElapsedSeconds;
         public float seedPlanterPlantElapsedSeconds;
@@ -251,10 +273,24 @@ public class InputOutputModule : InstallationObject,
                 boilerWaterTemperatureCelsius = boilerWaterTemperatureCelsius,
                 boilerSteamLiterAccumulator = boilerSteamLiterAccumulator,
                 oilDrillingProgressLiters = oilDrillingProgressLiters,
+                hasDeterministicUnits = hasDeterministicUnits,
+                storedEnergyUnits = storedEnergyUnits,
+                energyGaugeCapacityUnits = energyGaugeCapacityUnits,
+                remainingCraftTicks = remainingCraftTicks,
+                activeCraftConsumedEnergyUnits = activeCraftConsumedEnergyUnits,
+                oilDrillingProgressUnits = oilDrillingProgressUnits,
+                seedPlanterPlantElapsedUnits = seedPlanterPlantElapsedUnits,
                 sprinklerSprayElapsedSeconds = sprinklerSprayElapsedSeconds,
                 seedPlanterPlantElapsedSeconds = seedPlanterPlantElapsedSeconds,
                 steamGeneratorHasGenerationReserve = steamGeneratorHasGenerationReserve
             };
+        }
+
+        public long ResolveOilDrillingProgressUnits()
+        {
+            return hasDeterministicUnits
+                ? System.Math.Max(0L, oilDrillingProgressUnits)
+                : DeterministicSimulationUnits.FromFloat(oilDrillingProgressLiters);
         }
     }
 
@@ -311,17 +347,17 @@ public class InputOutputModule : InstallationObject,
     [SerializeField]
     private List<Vector2Int> runtimeFocusCoordinates = new List<Vector2Int>();
     [SerializeField]
-    private float storedEnergy;
+    private long storedEnergyUnits;
     [SerializeField]
-    private float energyGaugeCapacity;
+    private long energyGaugeCapacityUnits;
     [SerializeField]
     private bool hasActiveCraft;
     [SerializeField]
     private bool waitingForOutput;
     [SerializeField]
-    private float remainingCraftTime;
+    private long remainingCraftTicks;
     [SerializeField]
-    private float activeCraftConsumedEnergy;
+    private long activeCraftConsumedEnergyUnits;
     [SerializeField]
     private int activeRecipeIndex = -1;
     [SerializeField]
@@ -369,6 +405,9 @@ public class InputOutputModule : InstallationObject,
     private readonly List<ItemIoEntry> effectiveInputList = new List<ItemIoEntry>();
     private readonly List<ItemIoEntry> effectiveOutputList = new List<ItemIoEntry>();
     private bool effectivePairDataInitialized;
+    private PlannedModuleCommand plannedModuleCommands;
+    private float plannedModuleDeltaTime;
+    private bool stagedModuleTickPlanned;
 
     public ItemDefinition ParentInputOutputModuleItem => parentInputOutputModuleItem;
 
@@ -523,12 +562,17 @@ public class InputOutputModule : InstallationObject,
     {
         PersistentState state = new PersistentState
         {
-            storedEnergy = storedEnergy,
-            energyGaugeCapacity = energyGaugeCapacity,
+            hasDeterministicUnits = true,
+            storedEnergy = DeterministicSimulationUnits.ToFloat(storedEnergyUnits),
+            storedEnergyUnits = storedEnergyUnits,
+            energyGaugeCapacity = DeterministicSimulationUnits.ToFloat(energyGaugeCapacityUnits),
+            energyGaugeCapacityUnits = energyGaugeCapacityUnits,
             hasActiveCraft = hasActiveCraft,
             waitingForOutput = waitingForOutput,
-            remainingCraftTime = remainingCraftTime,
-            activeCraftConsumedEnergy = activeCraftConsumedEnergy,
+            remainingCraftTime = DeterministicSimulationUnits.TicksToSeconds(remainingCraftTicks),
+            remainingCraftTicks = remainingCraftTicks,
+            activeCraftConsumedEnergy = DeterministicSimulationUnits.ToFloat(activeCraftConsumedEnergyUnits),
+            activeCraftConsumedEnergyUnits = activeCraftConsumedEnergyUnits,
             activeRecipeIndex = activeRecipeIndex,
             activeOutputItemId = activeOutputItemId,
             activeOutputCount = activeOutputCount
@@ -586,17 +630,25 @@ public class InputOutputModule : InstallationObject,
         RegisterRuntimeAreaCoordinates();
         ConfigureRuntimeGridCoordinates(state.gridCoordinates);
 
-        storedEnergy = Mathf.Max(0f, state.storedEnergy);
-        energyGaugeCapacity = Mathf.Max(0f, state.energyGaugeCapacity);
+        storedEnergyUnits = state.hasDeterministicUnits
+            ? System.Math.Max(0L, state.storedEnergyUnits)
+            : DeterministicSimulationUnits.FromFloat(state.storedEnergy);
+        energyGaugeCapacityUnits = state.hasDeterministicUnits
+            ? System.Math.Max(0L, state.energyGaugeCapacityUnits)
+            : DeterministicSimulationUnits.FromFloat(state.energyGaugeCapacity);
         hasActiveCraft = state.hasActiveCraft;
         waitingForOutput = state.waitingForOutput;
-        remainingCraftTime = Mathf.Max(0f, state.remainingCraftTime);
-        activeCraftConsumedEnergy = Mathf.Max(0f, state.activeCraftConsumedEnergy);
-        if (hasActiveCraft && !waitingForOutput && activeCraftConsumedEnergy <= 0.0001f)
+        remainingCraftTicks = state.hasDeterministicUnits
+            ? System.Math.Max(0L, state.remainingCraftTicks)
+            : DeterministicSimulationUnits.SecondsToTicks(state.remainingCraftTime);
+        activeCraftConsumedEnergyUnits = state.hasDeterministicUnits
+            ? System.Math.Max(0L, state.activeCraftConsumedEnergyUnits)
+            : DeterministicSimulationUnits.FromFloat(state.activeCraftConsumedEnergy);
+        if (hasActiveCraft && !waitingForOutput && activeCraftConsumedEnergyUnits <= 0L)
         {
-            activeCraftConsumedEnergy = ResolveConsumedEnergyFromRemainingTime(
+            activeCraftConsumedEnergyUnits = ResolveConsumedEnergyUnitsFromRemainingTicks(
                 ResolveInstalledDefinition(),
-                remainingCraftTime);
+                remainingCraftTicks);
         }
         activeRecipeIndex = state.activeRecipeIndex;
         activeOutputItemId = state.activeOutputItemId;
@@ -620,12 +672,12 @@ public class InputOutputModule : InstallationObject,
         runtimePipeInputCoordinates.Clear();
         runtimeGridCoordinates.Clear();
         runtimeFocusCoordinates.Clear();
-        storedEnergy = 0f;
-        energyGaugeCapacity = 0f;
+        storedEnergyUnits = 0L;
+        energyGaugeCapacityUnits = 0L;
         hasActiveCraft = false;
         waitingForOutput = false;
-        remainingCraftTime = 0f;
-        activeCraftConsumedEnergy = 0f;
+        remainingCraftTicks = 0L;
+        activeCraftConsumedEnergyUnits = 0L;
         lastOperationalEnergySupplyRatio = 1f;
         ResetWorkAnimatorStateCache();
         activeRecipeIndex = -1;
@@ -655,11 +707,13 @@ public class InputOutputModule : InstallationObject,
                 continue;
             }
 
-            module = candidate;
-            return true;
+            if (module == null || CompareSimulationOrder(candidate, module) < 0)
+            {
+                module = candidate;
+            }
         }
 
-        return false;
+        return module != null;
     }
 
     public static bool CollectModulesAtRuntimeGridCoordinate(Vector2Int coordinate, List<InputOutputModule> results)
@@ -715,11 +769,13 @@ public class InputOutputModule : InstallationObject,
                 continue;
             }
 
-            module = candidate;
-            return true;
+            if (module == null || CompareSimulationOrder(candidate, module) < 0)
+            {
+                module = candidate;
+            }
         }
 
-        return false;
+        return module != null;
     }
 
     public static bool TryGetModuleAtRuntimeAreaCoordinate(Vector2Int coordinate, out InputOutputModule module)
@@ -741,11 +797,13 @@ public class InputOutputModule : InstallationObject,
                 continue;
             }
 
-            module = candidate;
-            return true;
+            if (module == null || CompareSimulationOrder(candidate, module) < 0)
+            {
+                module = candidate;
+            }
         }
 
-        return false;
+        return module != null;
     }
 
     public static bool CollectModulesAtRuntimeAreaCoordinate(Vector2Int coordinate, List<InputOutputModule> results)
@@ -996,11 +1054,13 @@ public class InputOutputModule : InstallationObject,
                 continue;
             }
 
-            storage = candidate;
-            return true;
+            if (storage == null || CompareSimulationOrder(candidate, storage) < 0)
+            {
+                storage = candidate;
+            }
         }
 
-        return false;
+        return storage != null;
     }
 
     private static bool TryGetRuntimePipeSourceAtCoordinate(
@@ -1027,11 +1087,13 @@ public class InputOutputModule : InstallationObject,
                 continue;
             }
 
-            pump = candidatePump;
-            return true;
+            if (pump == null || CompareSimulationOrder(candidatePump, pump) < 0)
+            {
+                pump = candidatePump;
+            }
         }
 
-        return false;
+        return pump != null;
     }
 
     public static bool CoordinateIsRuntimeRectGridBlockType(Vector2Int coordinate, RectGridBlockType blockType)
@@ -1633,14 +1695,62 @@ public class InputOutputModule : InstallationObject,
 
     public virtual void ManagedUpdateTick(float deltaTime)
     {
+        PlanManagedUpdateTick(deltaTime);
+        ApplyManagedUpdateTick();
+    }
+
+    public virtual void PlanManagedUpdateTick(float deltaTime)
+    {
+        plannedModuleDeltaTime = Mathf.Max(0f, deltaTime);
+        plannedModuleCommands = PlannedModuleCommand.None;
+        stagedModuleTickPlanned = Application.isPlaying;
         if (!Application.isPlaying)
         {
             return;
         }
 
+        if (CanStoreFluid && ShouldAutoPullFluidFromConnectedStorage())
+        {
+            plannedModuleCommands |= PlannedModuleCommand.PullFluid;
+        }
+
+        if (hasActiveCraft)
+        {
+            plannedModuleCommands |= PlannedModuleCommand.AdvanceCraft;
+        }
+        else
+        {
+            plannedModuleCommands |= PlannedModuleCommand.StartCraft;
+        }
+    }
+
+    public virtual void ApplyManagedUpdateTick()
+    {
+        if (!TryBeginPlannedModuleApply(out float deltaTime))
+        {
+            return;
+        }
+
+        ApplyPlannedBaseModuleTick(deltaTime);
+    }
+
+    protected bool TryBeginPlannedModuleApply(out float deltaTime)
+    {
+        deltaTime = plannedModuleDeltaTime;
+        if (!stagedModuleTickPlanned)
+        {
+            return false;
+        }
+
+        stagedModuleTickPlanned = false;
+        return true;
+    }
+
+    protected void ApplyPlannedBaseModuleTick(float deltaTime)
+    {
         runtimeSleeping = false;
         EnsureEffectivePairData();
-        if (CanStoreFluid)
+        if ((plannedModuleCommands & PlannedModuleCommand.PullFluid) != 0 && CanStoreFluid)
         {
             DiscardIncompatibleStoredFluid();
             if (ShouldAutoPullFluidFromConnectedStorage())
@@ -1649,7 +1759,7 @@ public class InputOutputModule : InstallationObject,
             }
         }
 
-        if (hasActiveCraft)
+        if ((plannedModuleCommands & PlannedModuleCommand.AdvanceCraft) != 0 && hasActiveCraft)
         {
             UpdateActiveCraft(deltaTime);
             if (!hasActiveCraft)
@@ -1657,7 +1767,7 @@ public class InputOutputModule : InstallationObject,
                 TryStartNextCraft();
             }
         }
-        else
+        else if ((plannedModuleCommands & PlannedModuleCommand.StartCraft) != 0 && !hasActiveCraft)
         {
             TryStartNextCraft();
         }
@@ -1669,6 +1779,8 @@ public class InputOutputModule : InstallationObject,
         }
         UpdateCraftParticleEffectVisual();
         RefreshRuntimeUpdateSleepState();
+        plannedModuleCommands = PlannedModuleCommand.None;
+        plannedModuleDeltaTime = 0f;
     }
 
     protected virtual bool ShouldKeepRuntimeUpdateTickActive()
@@ -1709,7 +1821,7 @@ public class InputOutputModule : InstallationObject,
         SetRuntimeSleeping(true);
     }
 
-    protected void WakeRuntimeUpdate()
+    protected virtual void WakeRuntimeUpdate()
     {
         if (!Application.isPlaying || !isActiveAndEnabled)
         {
@@ -2039,6 +2151,7 @@ public class InputOutputModule : InstallationObject,
             }
         }
 
+        cachedConnectedFluidSourceStorages.Sort(CompareSimulationOrder);
         cachedConnectedFluidSourceStoragesTopologyVersion = fluidTopologyVersion;
         return cachedConnectedFluidSourceStorages.Count > 0;
     }
@@ -3214,7 +3327,7 @@ public class InputOutputModule : InstallationObject,
 
     public bool HasStoredOperationalEnergy()
     {
-        return storedEnergy > 0f;
+        return storedEnergyUnits > 0L;
     }
 
     public bool HasActiveOrPendingCraft()
@@ -3253,8 +3366,9 @@ public class InputOutputModule : InstallationObject,
 
     public int RuntimeAreaMaxObjects => Mathf.Max(1, runtimeAreaMaxObjects);
     public float CraftDurationSeconds => Mathf.Max(0.1f, craftDuration);
-    public float ObjectInfoStoredEnergy => Mathf.Max(0f, storedEnergy);
-    public float ObjectInfoEnergyGaugeCapacity => Mathf.Max(0f, energyGaugeCapacity, storedEnergy);
+    public float ObjectInfoStoredEnergy => DeterministicSimulationUnits.ToFloat(storedEnergyUnits);
+    public float ObjectInfoEnergyGaugeCapacity => DeterministicSimulationUnits.ToFloat(
+        Math.Max(energyGaugeCapacityUnits, storedEnergyUnits));
     public float ObjectInfoEnergyGaugeFillAmount => ResolveEnergyGaugeFillAmount(ResolveInstalledDefinition());
     public float ObjectInfoWorkGaugeFillAmount => ResolveCraftProgressGaugeFillAmount();
     public Color ObjectInfoEnergyGaugeFillColor => energyGaugeFillColor;
@@ -4438,17 +4552,21 @@ public class InputOutputModule : InstallationObject,
                 return;
             }
 
-            activeCraftConsumedEnergy += consumedEnergy;
-            remainingCraftTime = ResolveRemainingEnergyCraftTime(installedDefinition, activeCraftConsumedEnergy);
-            if (activeCraftConsumedEnergy + 0.0001f < ResolveCompleteEnergy(installedDefinition))
+            activeCraftConsumedEnergyUnits += DeterministicSimulationUnits.FromFloat(consumedEnergy);
+            remainingCraftTicks = ResolveRemainingEnergyCraftTicks(
+                installedDefinition,
+                activeCraftConsumedEnergyUnits);
+            if (activeCraftConsumedEnergyUnits < ResolveCompleteEnergyUnits(installedDefinition))
             {
                 return;
             }
         }
         else
         {
-            remainingCraftTime = Mathf.Max(0f, remainingCraftTime - deltaTime);
-            if (remainingCraftTime > 0f)
+            remainingCraftTicks = Math.Max(
+                0L,
+                remainingCraftTicks - DeterministicSimulationUnits.DeltaTimeToTicks(deltaTime));
+            if (remainingCraftTicks > 0L)
             {
                 return;
             }
@@ -4750,9 +4868,11 @@ public class InputOutputModule : InstallationObject,
             return true;
         }
 
-        float remainingEnergyCost = ItemDefinition.ResolveUseEnergyRatePerSecond(installedDefinition) * Mathf.Max(0f, deltaTime);
-        float requestedEnergyCost = remainingEnergyCost;
-        if (remainingEnergyCost <= 0.0001f)
+        long requestedEnergyUnits = DeterministicSimulationUnits.RateForTicks(
+            ItemDefinition.ResolveUseEnergyRatePerSecond(installedDefinition),
+            DeterministicSimulationUnits.DeltaTimeToTicks(deltaTime));
+        long remainingEnergyUnits = requestedEnergyUnits;
+        if (requestedEnergyUnits <= 0L)
         {
             lastOperationalEnergySupplyRatio = 0f;
             return false;
@@ -4760,43 +4880,46 @@ public class InputOutputModule : InstallationObject,
 
         if (installedDefinition.useEnergyType == ItemDefinition.EnergyType.Electricity)
         {
-            energyGaugeCapacity = 0f;
-            bool consumedElectricity = UtilityPole.TryConsumeElectricity(
+            energyGaugeCapacityUnits = 0L;
+            bool consumedElectricity = UtilityPole.TryConsumeElectricityUnits(
                 this,
-                remainingEnergyCost,
-                deltaTime,
-                out consumedEnergy);
+                requestedEnergyUnits,
+                out long consumedEnergyUnits);
+            consumedEnergy = DeterministicSimulationUnits.ToFloat(consumedEnergyUnits);
             lastOperationalEnergySupplyRatio = consumedElectricity
-                ? Mathf.Clamp01(consumedEnergy / requestedEnergyCost)
+                ? Mathf.Clamp01((float)((double)consumedEnergyUnits / requestedEnergyUnits))
                 : 0f;
             return consumedElectricity;
         }
 
-        while (remainingEnergyCost > 0.0001f)
+        long consumedUnits = 0L;
+        while (remainingEnergyUnits > 0L)
         {
-            if (storedEnergy <= 0.0001f && !TryRefillEnergyStore(installedDefinition))
+            if (storedEnergyUnits <= 0L && !TryRefillEnergyStore(installedDefinition))
             {
                 break;
             }
 
-            float spentEnergy = Mathf.Min(storedEnergy, remainingEnergyCost);
-            if (spentEnergy <= 0.0001f)
+            long spentEnergyUnits = Math.Min(storedEnergyUnits, remainingEnergyUnits);
+            if (spentEnergyUnits <= 0L)
             {
                 break;
             }
 
-            storedEnergy = Mathf.Max(0f, storedEnergy - spentEnergy);
-            remainingEnergyCost -= spentEnergy;
-            consumedEnergy += spentEnergy;
+            storedEnergyUnits -= spentEnergyUnits;
+            remainingEnergyUnits -= spentEnergyUnits;
+            consumedUnits += spentEnergyUnits;
         }
 
-        if (storedEnergy <= 0f)
+        if (storedEnergyUnits <= 0L)
         {
-            energyGaugeCapacity = 0f;
+            energyGaugeCapacityUnits = 0L;
         }
 
-        lastOperationalEnergySupplyRatio = Mathf.Clamp01(consumedEnergy / requestedEnergyCost);
-        return consumedEnergy > 0.0001f;
+        consumedEnergy = DeterministicSimulationUnits.ToFloat(consumedUnits);
+        lastOperationalEnergySupplyRatio = Mathf.Clamp01(
+            (float)((double)consumedUnits / requestedEnergyUnits));
+        return consumedUnits > 0L;
     }
 
     protected bool TryEnsureCraftStartEnergy(ItemDefinition installedDefinition)
@@ -4808,12 +4931,12 @@ public class InputOutputModule : InstallationObject,
 
         if (installedDefinition.useEnergyType == ItemDefinition.EnergyType.Electricity)
         {
-            storedEnergy = 0f;
-            energyGaugeCapacity = 0f;
+            storedEnergyUnits = 0L;
+            energyGaugeCapacityUnits = 0L;
             return UtilityPole.HasElectricityAvailable(this);
         }
 
-        if (storedEnergy > 0f)
+        if (storedEnergyUnits > 0L)
         {
             return true;
         }
@@ -4833,25 +4956,28 @@ public class InputOutputModule : InstallationObject,
             return false;
         }
 
-        float minimumOperationalEnergy = Mathf.Max(1, installedDefinition.useEnergyAmount);
+        long minimumOperationalEnergyUnits = DeterministicSimulationUnits.FromFloat(
+            Mathf.Max(1, installedDefinition.useEnergyAmount));
         bool consumedAnyEnergyItem = false;
-        while (storedEnergy < minimumOperationalEnergy)
+        while (storedEnergyUnits < minimumOperationalEnergyUnits)
         {
             if (!TryConsumeOneEnergyItem(installedDefinition.useEnergyType, out int gainedEnergy))
             {
                 break;
             }
 
-            storedEnergy += gainedEnergy;
+            storedEnergyUnits += DeterministicSimulationUnits.FromFloat(gainedEnergy);
             consumedAnyEnergyItem = true;
         }
 
         if (consumedAnyEnergyItem)
         {
-            energyGaugeCapacity = Mathf.Max(storedEnergy, 1f);
+            energyGaugeCapacityUnits = Math.Max(
+                storedEnergyUnits,
+                DeterministicSimulationUnits.UnitsPerWhole);
         }
 
-        return storedEnergy >= minimumOperationalEnergy;
+        return storedEnergyUnits >= minimumOperationalEnergyUnits;
     }
 
     private bool TryConsumeOneEnergyItem(ItemDefinition.EnergyType requiredEnergyType, out int gainedEnergy)
@@ -5481,7 +5607,7 @@ public class InputOutputModule : InstallationObject,
             return UtilityPole.HasElectricityAvailable(this);
         }
 
-        return storedEnergy > 0f || HasUsableEnergyItem(installedDefinition.useEnergyType);
+        return storedEnergyUnits > 0L || HasUsableEnergyItem(installedDefinition.useEnergyType);
     }
 
     private bool HasUsableEnergyItem(ItemDefinition.EnergyType requiredEnergyType)
@@ -5759,6 +5885,7 @@ public class InputOutputModule : InstallationObject,
             }
         }
 
+        cachedFluidOutputStorages.Sort(CompareSimulationOrder);
         cachedFluidOutputStoragesTopologyVersion = fluidTopologyVersion;
         return cachedFluidOutputStorages.Count > 0;
     }
@@ -5984,6 +6111,11 @@ public class InputOutputModule : InstallationObject,
         return ResolveCompleteEnergy(installedDefinition, CraftDurationSeconds);
     }
 
+    private long ResolveCompleteEnergyUnits(ItemDefinition installedDefinition)
+    {
+        return DeterministicSimulationUnits.FromFloat(ResolveCompleteEnergy(installedDefinition));
+    }
+
     public static float ResolveCompleteEnergy(ItemDefinition installedDefinition, float fallbackCraftDuration)
     {
         if (!RequiresOperationalEnergy(installedDefinition))
@@ -6012,30 +6144,53 @@ public class InputOutputModule : InstallationObject,
         return Mathf.Max(0.1f, ResolveCompleteEnergy(installedDefinition) / energyRate);
     }
 
-    private float ResolveRemainingEnergyCraftTime(ItemDefinition installedDefinition, float consumedEnergy)
+    private long ResolveRemainingEnergyCraftTicks(
+        ItemDefinition installedDefinition,
+        long consumedEnergyUnits)
     {
         if (!RequiresOperationalEnergy(installedDefinition))
         {
-            return Mathf.Max(0f, remainingCraftTime);
+            return Math.Max(0L, remainingCraftTicks);
         }
 
         float energyRate = Mathf.Max(0.0001f, ItemDefinition.ResolveUseEnergyRatePerSecond(installedDefinition));
-        float remainingEnergy = Mathf.Max(0f, ResolveCompleteEnergy(installedDefinition) - Mathf.Max(0f, consumedEnergy));
-        return remainingEnergy / energyRate;
+        long energyRateUnits = DeterministicSimulationUnits.FromFloat(energyRate);
+        long remainingEnergyUnits = Math.Max(
+            0L,
+            ResolveCompleteEnergyUnits(installedDefinition) - Math.Max(0L, consumedEnergyUnits));
+        if (energyRateUnits <= 0L || remainingEnergyUnits <= 0L)
+        {
+            return 0L;
+        }
+
+        return Math.Max(
+            1L,
+            (long)decimal.Round(
+                (decimal)remainingEnergyUnits
+                * MapObjectTickManager.DefaultSimulationTicksPerSecond
+                / energyRateUnits,
+                0,
+                MidpointRounding.AwayFromZero));
     }
 
-    private float ResolveConsumedEnergyFromRemainingTime(ItemDefinition installedDefinition, float savedRemainingCraftTime)
+    private long ResolveConsumedEnergyUnitsFromRemainingTicks(
+        ItemDefinition installedDefinition,
+        long savedRemainingCraftTicks)
     {
         if (!RequiresOperationalEnergy(installedDefinition))
         {
-            return 0f;
+            return 0L;
         }
 
         float energyRate = Mathf.Max(0.0001f, ItemDefinition.ResolveUseEnergyRatePerSecond(installedDefinition));
         float completeEnergy = ResolveCompleteEnergy(installedDefinition);
-        float totalDuration = completeEnergy / energyRate;
-        float elapsedDuration = Mathf.Clamp(totalDuration - Mathf.Max(0f, savedRemainingCraftTime), 0f, totalDuration);
-        return Mathf.Min(completeEnergy, elapsedDuration * energyRate);
+        long totalDurationTicks = DeterministicSimulationUnits.SecondsToTicks(completeEnergy / energyRate);
+        long elapsedTicks = Math.Min(
+            totalDurationTicks,
+            Math.Max(0L, totalDurationTicks - Math.Max(0L, savedRemainingCraftTicks)));
+        return Math.Min(
+            DeterministicSimulationUnits.FromFloat(completeEnergy),
+            DeterministicSimulationUnits.RateForTicks(energyRate, elapsedTicks));
     }
 
     protected virtual Vector3 ResolveConsumeTargetWorldPosition()
@@ -6170,13 +6325,15 @@ public class InputOutputModule : InstallationObject,
             return 0f;
         }
 
-        if (storedEnergy > energyGaugeCapacity)
+        if (storedEnergyUnits > energyGaugeCapacityUnits)
         {
-            energyGaugeCapacity = storedEnergy;
+            energyGaugeCapacityUnits = storedEnergyUnits;
         }
 
-        float gaugeCapacity = Mathf.Max(energyGaugeCapacity, 1f);
-        return Mathf.Clamp01(storedEnergy / gaugeCapacity);
+        long gaugeCapacityUnits = Math.Max(
+            energyGaugeCapacityUnits,
+            DeterministicSimulationUnits.UnitsPerWhole);
+        return Mathf.Clamp01((float)((double)storedEnergyUnits / gaugeCapacityUnits));
     }
 
     private void UpdateCraftParticleEffectVisual()
@@ -6331,14 +6488,16 @@ public class InputOutputModule : InstallationObject,
         ItemDefinition installedDefinition = ResolveInstalledDefinition();
         if (RequiresOperationalEnergy(installedDefinition))
         {
-            float completeEnergy = ResolveCompleteEnergy(installedDefinition);
-            return completeEnergy > 0.0001f
-                ? Mathf.Clamp01(Mathf.Max(0f, activeCraftConsumedEnergy) / completeEnergy)
+            long completeEnergyUnits = ResolveCompleteEnergyUnits(installedDefinition);
+            return completeEnergyUnits > 0L
+                ? Mathf.Clamp01((float)((double)Math.Max(0L, activeCraftConsumedEnergyUnits) / completeEnergyUnits))
                 : 0f;
         }
 
-        float duration = Mathf.Max(0.1f, craftDuration);
-        return Mathf.Clamp01(1f - (Mathf.Max(0f, remainingCraftTime) / duration));
+        long durationTicks = DeterministicSimulationUnits.SecondsToTicks(Mathf.Max(0.1f, craftDuration));
+        return durationTicks > 0L
+            ? Mathf.Clamp01(1f - (float)((double)Math.Max(0L, remainingCraftTicks) / durationTicks))
+            : 0f;
     }
 
     private float ResolveObjectInfoCurrentUseEnergy()
@@ -6354,13 +6513,19 @@ public class InputOutputModule : InstallationObject,
             float completeEnergy = ResolveCompleteEnergy(installedDefinition);
             return waitingForOutput
                 ? completeEnergy
-                : Mathf.Clamp(Mathf.Max(0f, activeCraftConsumedEnergy), 0f, completeEnergy);
+                : Mathf.Clamp(
+                    DeterministicSimulationUnits.ToFloat(activeCraftConsumedEnergyUnits),
+                    0f,
+                    completeEnergy);
         }
 
         float duration = Mathf.Max(0.1f, craftDuration);
         return waitingForOutput
             ? duration
-            : Mathf.Clamp(duration - Mathf.Max(0f, remainingCraftTime), 0f, duration);
+            : Mathf.Clamp(
+                duration - DeterministicSimulationUnits.TicksToSeconds(remainingCraftTicks),
+                0f,
+                duration);
     }
 
     private float ResolveObjectInfoCompleteEnergy()
@@ -6487,8 +6652,9 @@ public class InputOutputModule : InstallationObject,
 
         hasActiveCraft = true;
         waitingForOutput = false;
-        remainingCraftTime = ResolveInitialCraftDuration(installedDefinition);
-        activeCraftConsumedEnergy = 0f;
+        remainingCraftTicks = DeterministicSimulationUnits.SecondsToTicks(
+            ResolveInitialCraftDuration(installedDefinition));
+        activeCraftConsumedEnergyUnits = 0L;
         lastOperationalEnergySupplyRatio = 1f;
         activeRecipeIndex = recipeIndex;
         activeOutputItemId = outputItemId;
@@ -6537,15 +6703,15 @@ public class InputOutputModule : InstallationObject,
     {
         hasActiveCraft = false;
         waitingForOutput = false;
-        remainingCraftTime = 0f;
-        activeCraftConsumedEnergy = 0f;
+        remainingCraftTicks = 0L;
+        activeCraftConsumedEnergyUnits = 0L;
         lastOperationalEnergySupplyRatio = 1f;
         activeRecipeIndex = -1;
         activeOutputItemId = -1;
         activeOutputCount = 0;
-        if (storedEnergy <= 0f)
+        if (storedEnergyUnits <= 0L)
         {
-            energyGaugeCapacity = 0f;
+            energyGaugeCapacityUnits = 0L;
         }
     }
 

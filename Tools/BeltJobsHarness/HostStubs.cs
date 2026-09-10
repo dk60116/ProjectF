@@ -55,6 +55,7 @@ public class Spliterbelt
 
 public partial class TerrainGenerator : IDisposable
 {
+    private double harnessAccumulator;
     private bool worldReadyForPresentation = true;
     private bool IsConveyorRuntimeRefreshDeferred => false;
     private readonly Dictionary<Vector2Int, Block> loadedBlocks = new();
@@ -65,7 +66,20 @@ public partial class TerrainGenerator : IDisposable
     public void Add(Block block) { loadedBlocks.Add(block.Coordinate, block); Dirty(); }
     public void Remove(Block block) { loadedBlocks.Remove(block.Coordinate); block.IsRuntimeConveyor = false; Dirty(); }
     public void Dirty() => beltJobsDirty = true;
-    public void Frame(float seconds) => TickBeltJobs(seconds);
+    public void Frame(float seconds)
+    {
+        Time.frameCount++;
+        EnsureBeltJobs();
+        harnessAccumulator += Math.Max(0, seconds);
+        const double interval = 1d / BeltSimulationJob.TickRate;
+        while (harnessAccumulator + 0.000000001d >= interval)
+        {
+            harnessAccumulator -= interval;
+            TickManagedBeltSimulation();
+        }
+
+        MapObjectTickManager.SimulationBacklogTicks = harnessAccumulator * BeltSimulationJob.TickRate;
+    }
     public void Put(Block block, int lane, int id, long hold = 0)
     {
         block.Items[lane] = id < 0 ? BeltLaneState.Empty : new BeltLaneState { ItemId = id, Origin = -1, GateBits = 8 };
@@ -108,3 +122,9 @@ public partial class TerrainGenerator : IDisposable
 }
 public static class MapObjectTickProfiler
 { public static void AddRuntimeCounter(string category, string name, object value) { } }
+public static class MapObjectTickManager
+{
+    public static double SimulationBacklogTicks;
+    public static float SimulationInterpolationAlpha =>
+        (float)Math.Min(1d, SimulationBacklogTicks);
+}

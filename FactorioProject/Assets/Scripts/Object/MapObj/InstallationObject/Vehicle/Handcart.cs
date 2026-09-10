@@ -1162,7 +1162,7 @@ public class Handcart : Vehicle, IPlayerItemStorage, IPlayerItemStoragePortableP
             return current;
         }
 
-        return candidate.GetInstanceID() < current.GetInstanceID()
+        return CompareSimulationOrder(candidate, current) < 0
             ? candidate
             : current;
     }

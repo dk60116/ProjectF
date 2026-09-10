@@ -21,6 +21,7 @@ foreach ($member in @('public void Register(', 'public void Unregister(', 'publi
 }
 $source += "}`n"
 $source += "public partial class RobotArm {`n" + (Member $arm 'internal void AppendInstancedRenderData(') + "`n" + (Member $arm 'private void RefreshHeldItemVisualIfNeeded(') + "`n"
+$source += (Member $arm 'internal static void RefreshHeldItemVisualsForRendering(') + "`n"
 $source += [regex]::Match($arm, '(?m)^\s*private System.Predicate<int> PickupItemFilter[^\r\n]+').Value + "`n"
 $source += (Member $arm 'private bool AcceptsPickupItem(') + "`n}"
 if ($arm -match 'AcceptsPickupItem\s*,') { throw 'An uncached pickup filter method group remains.' }

@@ -28,6 +28,7 @@ public class Transform
 }
 public class GameObject { public bool activeSelf = true; }
 public readonly struct Marker { public Scope Auto() => default; public readonly struct Scope : IDisposable { public void Dispose() { } } }
+public static class MapObjectTickProfiler { public static Marker.Scope SampleNamed(string kind, string type, string name) => default; }
 public sealed class VirtualRenderBatchCollection
 {
     public readonly List<(VirtualRenderBatchKey Key, Matrix4x4 Matrix, Bounds Bounds)> Entries = new();
@@ -92,6 +93,7 @@ public partial class LegacyPortableItemRenderer
 }
 public partial class RobotArm
 {
+    private static readonly List<RobotArm> ActiveRobotArms = new();
     private PortableObject handItem;
     private int heldItemId = 1;
     private Predicate<int> cachedPickupItemFilter;
@@ -100,13 +102,15 @@ public partial class RobotArm
     private bool IsItemFilterEnabled(int id, int bitCount) => AllowedItems.Contains(id);
     public Predicate<int> Filter => PickupItemFilter;
     private bool instancedRenderingActive = true;
+    private bool runtimeSleeping;
+    public void SetBodyInstancing(bool enabled) => instancedRenderingActive = enabled;
     public bool isActiveAndEnabled = true;
     public Transform transform = new();
     public RobotArmInstancedRenderPart[] instancedRenderParts;
     private bool ShouldUseSleepAwakeDarkTint() => false;
     private void EnsureInstancedRenderParts() { }
     private void RefreshHandItemVisual() { handItem.gameObject.activeSelf = true; handItem.RequestBatchedRenderDataRefresh(); }
-    public RobotArm(PortableObject item) => handItem = item;
+    public RobotArm(PortableObject item) { handItem = item; ActiveRobotArms.Add(this); }
     public void Tick() => RefreshHeldItemVisualIfNeeded();
     public class RobotArmInstancedRenderPart
     {
@@ -164,6 +168,15 @@ public static class Checks
         for (int i = 0; i < 120; i++) { arm.Tick(); optimized.Frame(); }
         long stationaryAllocated = GC.GetAllocatedBytesForCurrentThread() - stationaryAllocatedBefore;
         Require(stationaryAllocated == 0, "stationary refresh must not allocate, allocated: " + stationaryAllocated);
+        arm.SetBodyInstancing(false);
+        for (int i = 0; i < 8; i++)
+        {
+            // No simulation tick and no explicit dirty request on these frames.
+            hand.Matrix.m03 = i + 0.25f;
+            optimized.Frame(); reference.Frame();
+            Equal(optimized.Batches, reference.portableObjectBatches, "animator frame between 60Hz ticks, body instancing off");
+        }
+        arm.SetBodyInstancing(true);
         Frame("animator changes after robot tick", () => hand.Matrix.m03 = 1f);
         Frame("parent transforms after robot tick", () => hand.Matrix.m13 = 2f);
         Frame("unrelated parent movement without explicit dirty", () => unrelated.Matrix.m23 = 3f);

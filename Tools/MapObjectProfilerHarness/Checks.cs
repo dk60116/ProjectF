@@ -166,7 +166,40 @@ public static class Checks
         for (int i = 0; i < 1000; i++) MapObjectTickProfiler.SetActiveUpdateTargets(active);
         long allocated = GC.GetAllocatedBytesForCurrentThread() - allocatedBefore;
         if (allocated != 0) throw new Exception($"Steady active-group collection allocated {allocated} bytes.");
+        CheckNamedScopes();
         Console.WriteLine($"PASS: {snapshots.Count} byte-identical baseline snapshots; 1000 active-group refreshes allocated {allocated} bytes.");
         return 0;
+    }
+
+    private static void ScopedEarlyReturn()
+    {
+        using var sample = MapObjectTickProfiler.SampleNamed("Runtime", "RobotArm", "Scope");
+        ProfilerClock.Now += 7;
+        return;
+    }
+
+    private static void CheckNamedScopes()
+    {
+        MapObjectTickProfiler.Reset();
+        GameManager.Instance.MapObjectTickProfilingEnabled = true;
+        ScopedEarlyReturn(); // Warm up the group and JIT before measuring allocations.
+        long before = GC.GetAllocatedBytesForCurrentThread();
+        for (int i = 0; i < 1000; i++) ScopedEarlyReturn();
+        if (GC.GetAllocatedBytesForCurrentThread() != before) throw new Exception("Named scopes allocate");
+        using (var json = JsonDocument.Parse(MapObjectTickProfiler.BuildAndResetSnapshotJson()))
+        {
+            var row = json.RootElement.GetProperty("rows")[0];
+            if (row.GetProperty("samples").GetInt32() != 1001 || row.GetProperty("avgUs").GetDouble() != 7)
+                throw new Exception("Named scope timing/early return differs");
+        }
+        MapObjectTickProfiler.Reset();
+        GameManager.Instance.MapObjectTickProfilingEnabled = false;
+        ScopedEarlyReturn();
+        using (var json = JsonDocument.Parse(MapObjectTickProfiler.BuildAndResetSnapshotJson()))
+        {
+            if (json.RootElement.GetProperty("rowCount").GetInt32() != 0)
+                throw new Exception("Disabled named scope recorded a row");
+        }
+        Console.WriteLine("PASS: named scopes record early returns, allocate 0 bytes after warmup, and skip disabled profiling.");
     }
 }

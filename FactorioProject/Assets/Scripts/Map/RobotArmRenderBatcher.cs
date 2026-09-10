@@ -74,36 +74,7 @@ public sealed class RobotArmRenderBatcher : MonoBehaviour
 
         using (RenderMarker.Auto())
         {
-            if (registeredRobotArmsDirty)
-            {
-                CompactRegisteredRobotArms();
-            }
-
-            batches.ClearActiveMatrices();
-
-            int count = registeredRobotArms.Count;
-            for (int i = 0; i < count; i++)
-            {
-                RobotArm robotArm = registeredRobotArms[i];
-                if (robotArm == null)
-                {
-                    registeredRobotArmSet.Remove(robotArm);
-                    registeredRobotArmsDirty = true;
-                    continue;
-                }
-
-                if (registeredRobotArmsDirty && !registeredRobotArmSet.Contains(robotArm))
-                {
-                    continue;
-                }
-
-                robotArm.AppendInstancedRenderData(batches, BatchCellSize);
-            }
-
-            if (registeredRobotArmsDirty)
-            {
-                CompactRegisteredRobotArms();
-            }
+            RebuildBatches();
 
             if (registeredRobotArmSet.Count <= 0)
             {
@@ -121,7 +92,43 @@ public sealed class RobotArmRenderBatcher : MonoBehaviour
                 mainCamera = Camera.main;
             }
 
-            batches.RenderBatches(mainCamera);
+            using (MapObjectTickProfiler.SampleNamed("Runtime", nameof(RobotArmRenderBatcher), "Robot Arm Render Submit"))
+            {
+                batches.RenderBatches(mainCamera);
+            }
+        }
+    }
+
+    private void RebuildBatches()
+    {
+        using var sample = MapObjectTickProfiler.SampleNamed("Runtime", nameof(RobotArmRenderBatcher), "Robot Arm Render Build");
+        if (registeredRobotArmsDirty)
+        {
+            CompactRegisteredRobotArms();
+        }
+
+        batches.ClearActiveMatrices();
+        for (int i = 0; i < registeredRobotArms.Count; i++)
+        {
+            RobotArm robotArm = registeredRobotArms[i];
+            if (robotArm == null)
+            {
+                registeredRobotArmSet.Remove(robotArm);
+                registeredRobotArmsDirty = true;
+                continue;
+            }
+
+            if (registeredRobotArmsDirty && !registeredRobotArmSet.Contains(robotArm))
+            {
+                continue;
+            }
+
+            robotArm.AppendInstancedRenderData(batches, BatchCellSize);
+        }
+
+        if (registeredRobotArmsDirty)
+        {
+            CompactRegisteredRobotArms();
         }
     }
 

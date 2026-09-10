@@ -66,7 +66,6 @@ public partial class TerrainGenerator
         EnsureBeltJobs();
         beltJobPending.Clear();
         beltSimulationTick = snapshot.Tick;
-        beltJobAccumulator = 0;
         foreach (BeltSavedLane checkpoint in snapshot.Lanes)
         {
             if (checkpoint == null || !TryGetLoadedBlock(new Vector2Int(checkpoint.X, checkpoint.Y), out Block block)) continue;

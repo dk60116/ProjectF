@@ -550,7 +550,7 @@ MonoBehaviour:
   runtimeOccupiedCoordinates: []
   runtimePlacementSequence: 0
   excludeFromTerrainPersistence: 0
-  storedFluidLiters: 0
+  storedFluidUnits: 0
   storedFluidItemId: -1
   storedFluidTemperatureCelsius: 20
   powerLinePoint: {fileID: 0}
@@ -659,12 +659,12 @@ MonoBehaviour:
   runtimePipeInputCoordinates: []
   runtimeGridCoordinates: []
   runtimeFocusCoordinates: []
-  storedEnergy: 0
-  energyGaugeCapacity: 0
+  storedEnergyUnits: 0
+  energyGaugeCapacityUnits: 0
   hasActiveCraft: 0
   waitingForOutput: 0
-  remainingCraftTime: 0
-  activeCraftConsumedEnergy: 0
+  remainingCraftTicks: 0
+  activeCraftConsumedEnergyUnits: 0
   activeRecipeIndex: -1
   activeOutputItemId: -1
   activeOutputCount: 0

@@ -54,7 +54,7 @@ public class UtilityPole : InstallationObject
     private static readonly HashSet<InstallationObject> renderedConsumerLineScratch =
         new HashSet<InstallationObject>();
 
-    private static int networkRuntimeEvaluatedFrame = -1;
+    private static long networkRuntimeEvaluatedSimulationTick = -1L;
     private static bool networksDirty = true;
     private static bool poleConnectionsDirty = true;
     private static bool previewPoleConnectionsDirty = true;
@@ -473,31 +473,53 @@ public class UtilityPole : InstallationObject
         float deltaTime,
         out float consumedEnergy)
     {
-        consumedEnergy = 0f;
-        if (consumer == null || requestedEnergy <= EnergyEpsilon)
+        long requestedEnergyUnits = DeterministicSimulationUnits.FromFloat(requestedEnergy);
+        bool consumed = TryConsumeElectricityUnits(
+            consumer,
+            requestedEnergyUnits,
+            out long consumedEnergyUnits);
+        consumedEnergy = DeterministicSimulationUnits.ToFloat(consumedEnergyUnits);
+        return consumed;
+    }
+
+    public static bool TryConsumeElectricityUnits(
+        InstallationObject consumer,
+        long requestedEnergyUnits,
+        out long consumedEnergyUnits)
+    {
+        consumedEnergyUnits = 0L;
+        if (consumer == null || requestedEnergyUnits <= 0L)
         {
             return false;
         }
 
         if (IsFreeElectroEnergyEnabled())
         {
-            consumedEnergy = requestedEnergy;
+            consumedEnergyUnits = requestedEnergyUnits;
             return true;
         }
 
-        float requestedWatts = deltaTime > EnergyEpsilon ? requestedEnergy / deltaTime : 0f;
-        if (requestedWatts <= EnergyEpsilon && TryGetElectricPowerRequirement(consumer, out float configuredWatts))
-        {
-            requestedWatts = configuredWatts;
-        }
-
-        if (!TryGetElectricSupplyRatio(consumer, requestedWatts, out float supplyRatio))
+        if (!TryGetElectricPowerRequirement(consumer, out float requestedWatts)
+            || requestedWatts <= EnergyEpsilon)
         {
             return false;
         }
 
-        consumedEnergy = requestedEnergy * supplyRatio;
-        return consumedEnergy > EnergyEpsilon;
+        EnsureNetworksEvaluated();
+        ElectricNetwork network = ResolveBestNetworkForConsumer(consumer);
+        if (network == null || !network.HasPowerSource)
+        {
+            return false;
+        }
+
+        long productionUnits = DeterministicSimulationUnits.FromFloat(network.ProductionWatts);
+        long demandUnits = DeterministicSimulationUnits.FromFloat(
+            Mathf.Max(requestedWatts, network.RequiredWatts));
+        consumedEnergyUnits = DeterministicSimulationUnits.MultiplyRatio(
+            requestedEnergyUnits,
+            productionUnits,
+            demandUnits);
+        return consumedEnergyUnits > 0L;
     }
 
     public static bool TryGetElectricSupplyRatio(
@@ -685,20 +707,20 @@ public class UtilityPole : InstallationObject
     private static void MarkElectricNetworkDirty()
     {
         networksDirty = true;
-        networkRuntimeEvaluatedFrame = -1;
+        networkRuntimeEvaluatedSimulationTick = -1L;
         connectionLineVisualsDirty = true;
         InputOutputModule.WakeElectricRuntimeModules();
     }
 
     public static void NotifyElectricPowerSourceStateChanged()
     {
-        networkRuntimeEvaluatedFrame = -1;
+        networkRuntimeEvaluatedSimulationTick = -1L;
         InputOutputModule.WakeElectricRuntimeModules();
     }
 
     public static void NotifyFreeElectroEnergyChanged()
     {
-        networkRuntimeEvaluatedFrame = -1;
+        networkRuntimeEvaluatedSimulationTick = -1L;
         InputOutputModule.WakeElectricRuntimeModules();
     }
 
@@ -794,7 +816,7 @@ public class UtilityPole : InstallationObject
         suppliedConsumerNetworks.Remove(installationObject);
         if (membershipChanged)
         {
-            networkRuntimeEvaluatedFrame = -1;
+            networkRuntimeEvaluatedSimulationTick = -1L;
             RefreshNetworkRuntimeValues(true);
             InputOutputModule.WakeElectricRuntimeModules();
         }
@@ -1137,7 +1159,7 @@ public class UtilityPole : InstallationObject
                     continue;
                 }
 
-                UtilityPole owner = connection.FirstPole.GetInstanceID() <= connection.SecondPole.GetInstanceID()
+                UtilityPole owner = CompareSimulationOrder(connection.FirstPole, connection.SecondPole) <= 0
                     ? connection.FirstPole
                     : connection.SecondPole;
                 owner.RenderConnectionLine(connection.FirstPoint, connection.SecondPoint);
@@ -1152,7 +1174,7 @@ public class UtilityPole : InstallationObject
                 continue;
             }
 
-            UtilityPole owner = connection.FirstPole.GetInstanceID() <= connection.SecondPole.GetInstanceID()
+            UtilityPole owner = CompareSimulationOrder(connection.FirstPole, connection.SecondPole) <= 0
                 ? connection.FirstPole
                 : connection.SecondPole;
             owner.RenderConnectionLine(connection.FirstPoint, connection.SecondPoint);
@@ -1457,7 +1479,7 @@ public class UtilityPole : InstallationObject
             return difference < 0f;
         }
 
-        return candidate.GetInstanceID() < current.GetInstanceID();
+        return CompareSimulationOrder(candidate, current) < 0;
     }
 
     private static bool PoleSuppliesPreviewConsumer(
@@ -2198,6 +2220,8 @@ public class UtilityPole : InstallationObject
             connectionPoleScratch.Add(pole);
         }
 
+        connectionPoleScratch.Sort(CompareSimulationOrder);
+
         for (int i = 0; i < connectionPoleScratch.Count; i++)
         {
             UtilityPole first = connectionPoleScratch[i];
@@ -2293,6 +2317,8 @@ public class UtilityPole : InstallationObject
             }
         }
 
+        connectionPoleScratch.Sort(CompareSimulationOrder);
+
         for (int i = 0; i < poleConnections.Count; i++)
         {
             MarkConnectionLinePointsOccupied(poleConnections[i]);
@@ -2382,6 +2408,8 @@ public class UtilityPole : InstallationObject
                 connectionPoleScratch.Add(pole);
             }
         }
+
+        connectionPoleScratch.Sort(CompareSimulationOrder);
 
         for (int i = 0; i < connectionPoleScratch.Count; i++)
         {
@@ -2704,10 +2732,10 @@ public class UtilityPole : InstallationObject
             return result;
         }
 
-        result = left.FirstPole.GetInstanceID().CompareTo(right.FirstPole.GetInstanceID());
+        result = CompareSimulationOrder(left.FirstPole, right.FirstPole);
         return result != 0
             ? result
-            : left.SecondPole.GetInstanceID().CompareTo(right.SecondPole.GetInstanceID());
+            : CompareSimulationOrder(left.SecondPole, right.SecondPole);
     }
 
     private static int CompareDistance(float left, float right)
@@ -2764,6 +2792,8 @@ public class UtilityPole : InstallationObject
                 activePoleScratch.Add(pole);
             }
         }
+
+        activePoleScratch.Sort(CompareSimulationOrder);
 
         for (int i = 0; i < activePoleScratch.Count; i++)
         {
@@ -2976,10 +3006,24 @@ public class UtilityPole : InstallationObject
         }
 
         network.PowerSources.Clear();
-        network.StaticRequiredWatts = 0f;
-
+        network.OrderedSuppliedInstallations.Clear();
         foreach (InstallationObject installationObject in network.SuppliedInstallations)
         {
+            if (installationObject != null)
+            {
+                network.OrderedSuppliedInstallations.Add(installationObject);
+            }
+        }
+
+        network.OrderedSuppliedInstallations.Sort(CompareSimulationOrder);
+        network.StaticRequiredWatts = 0f;
+
+        for (int installationIndex = 0;
+             installationIndex < network.OrderedSuppliedInstallations.Count;
+             installationIndex++)
+        {
+            InstallationObject installationObject =
+                network.OrderedSuppliedInstallations[installationIndex];
             if (installationObject == null || !installationObject.gameObject.activeInHierarchy)
             {
                 continue;
@@ -3004,13 +3048,14 @@ public class UtilityPole : InstallationObject
 
     private static void RefreshNetworkRuntimeValues(bool force = false)
     {
-        int frame = Time.frameCount;
-        if (!force && networkRuntimeEvaluatedFrame == frame)
+        long currentSimulationTick = MapObjectTickManager.CurrentSimulationTick;
+        if (!force && networkRuntimeEvaluatedSimulationTick == currentSimulationTick)
         {
             return;
         }
 
-        networkRuntimeEvaluatedFrame = frame;
+        networkRuntimeEvaluatedSimulationTick = currentSimulationTick;
+        using var sample = MapObjectTickProfiler.SampleNamed("Runtime", nameof(UtilityPole), "Electric Network Runtime");
         for (int i = 0; i < networks.Count; i++)
         {
             RefreshNetworkRuntimeValues(networks[i]);
@@ -3032,8 +3077,12 @@ public class UtilityPole : InstallationObject
         network.ClearPowerRuntime();
 
         network.RequiredWatts = network.StaticRequiredWatts;
-        foreach (InstallationObject installationObject in network.SuppliedInstallations)
+        for (int installationIndex = 0;
+             installationIndex < network.OrderedSuppliedInstallations.Count;
+             installationIndex++)
         {
+            InstallationObject installationObject =
+                network.OrderedSuppliedInstallations[installationIndex];
             if (HasRuntimeElectricPowerDemand(installationObject)
                 && TryGetElectricPowerDemand(installationObject, out float demandWatts))
             {
@@ -3252,7 +3301,7 @@ public class UtilityPole : InstallationObject
         {
             if (firstPole != null
                 && secondPole != null
-                && firstPole.GetInstanceID() > secondPole.GetInstanceID())
+                && CompareSimulationOrder(firstPole, secondPole) > 0)
             {
                 FirstPole = secondPole;
                 SecondPole = firstPole;
@@ -3297,6 +3346,8 @@ public class UtilityPole : InstallationObject
     {
         public readonly List<UtilityPole> Poles = new List<UtilityPole>();
         public readonly HashSet<InstallationObject> SuppliedInstallations = new HashSet<InstallationObject>();
+        public readonly List<InstallationObject> OrderedSuppliedInstallations =
+            new List<InstallationObject>();
         public readonly List<SteamGenerator> PowerSources = new List<SteamGenerator>();
         public float StaticRequiredWatts;
         public float ProductionWatts;
@@ -3307,6 +3358,7 @@ public class UtilityPole : InstallationObject
         public void ClearTopologyRuntime()
         {
             SuppliedInstallations.Clear();
+            OrderedSuppliedInstallations.Clear();
             PowerSources.Clear();
             StaticRequiredWatts = 0f;
             ClearPowerRuntime();

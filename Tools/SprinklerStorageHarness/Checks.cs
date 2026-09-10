@@ -9,6 +9,11 @@ public static class Mathf
 }
 public static class MapClimate { public static float CurrentTemperatureCelsius => 20f; }
 public static class Application { public static bool isPlaying = true; }
+public static class MapObjectTickManager
+{
+    public const int DefaultSimulationTicksPerSecond = 60;
+    public const float FixedSimulationDeltaSeconds = 1f / DefaultSimulationTicksPerSecond;
+}
 public class ProjectTree
 {
     public float Water;
@@ -34,17 +39,24 @@ public class TerrainGenerator
 
 public partial class InstallationObject
 {
+    private static long nextSimulationId;
+    private readonly long simulationId = ++nextSimulationId;
     public bool isActiveAndEnabled = true;
     protected int storedFluidItemId = -1;
-    protected float storedFluidLiters, storedFluidTemperatureCelsius;
+    protected long storedFluidUnits;
+    protected float storedFluidTemperatureCelsius;
     public float FluidStorageCapacityLiters { get; set; } = 300f;
-    public float StoredFluidLiters => Math.Max(0f, storedFluidLiters);
-    public int StoredFluidItemId => StoredFluidLiters > .0001f ? storedFluidItemId : -1;
+    private long FluidStorageCapacityUnits => DeterministicSimulationUnits.FromFloat(FluidStorageCapacityLiters);
+    public long StoredFluidUnits => Math.Max(0L, storedFluidUnits);
+    public float StoredFluidLiters => DeterministicSimulationUnits.ToFloat(StoredFluidUnits);
+    public int StoredFluidItemId => StoredFluidUnits > 0L ? storedFluidItemId : -1;
     public float AvailableFluidStorageLiters => Math.Max(0f, FluidStorageCapacityLiters - StoredFluidLiters);
     public bool CanStoreFluid => FluidStorageCapacityLiters > 0f;
     public int Changes;
-    public void Fill(float liters, int item = 1) { storedFluidLiters = liters; storedFluidItemId = item; }
+    public void Fill(float liters, int item = 1) { storedFluidUnits = DeterministicSimulationUnits.FromFloat(liters); storedFluidItemId = item; }
     private void NotifyStoredFluidChanged(int item, float liters) { Changes++; }
+    public static int CompareSimulationOrder(InstallationObject left, InstallationObject right)
+        => ReferenceEquals(left, right) ? 0 : left.simulationId.CompareTo(right.simulationId);
 }
 public readonly record struct Vector2Int(int x, int y)
 {
@@ -97,6 +109,8 @@ public partial class InputOutputModule : InstallationObject
         }
     }
     private void EnqueueSteamGeneratorPipePassCoordinatesAt(Vector2Int coordinate) { }
+    private void EnqueueFluidStoragePipePassCoordinatesAt(Vector2Int coordinate)
+        => EnqueueConnectedFluidSearchCoordinate(coordinate);
     private static bool ContainsCoordinate(List<Vector2Int> list, Vector2Int coordinate) => list.Contains(coordinate);
     private bool TryGetConnectedPipeAtCoordinate(Vector2Int coordinate, out Pipe pipe, out Quaternion rotation)
     {
@@ -115,7 +129,19 @@ public partial class InputOutputModule : InstallationObject
     private bool TryGetRuntimePipeAreaExternalDirection(Vector2Int coordinate, out Vector2Int direction) { direction = default; return false; }
     protected virtual bool ShouldAutoPullFluidFromConnectedStorage() => true;
     protected virtual string ResolveObjectInfoStatus(out bool producing) { producing = false; return ""; }
-    public virtual void ManagedUpdateTick(float deltaTime) { }
+    private float plannedDeltaTime;
+    public virtual void ManagedUpdateTick(float deltaTime)
+    {
+        plannedDeltaTime = deltaTime;
+        ApplyManagedUpdateTick();
+    }
+    public virtual void ApplyManagedUpdateTick() { }
+    protected bool TryBeginPlannedModuleApply(out float deltaTime)
+    {
+        deltaTime = plannedDeltaTime;
+        return true;
+    }
+    protected void ApplyPlannedBaseModuleTick(float deltaTime) { }
 }
 
 public partial class ItemInfoDescription

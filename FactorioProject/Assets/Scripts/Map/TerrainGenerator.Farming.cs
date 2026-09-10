@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.Rendering;
@@ -32,8 +33,8 @@ public partial class TerrainGenerator : MonoBehaviour
     private static readonly System.Predicate<int> FertilizerItemFilter =
         IsFertilizerItemId;
     private readonly HashSet<Vector2Int> farmlandCoordinates = new HashSet<Vector2Int>();
-    private readonly Dictionary<Vector2Int, float> farmlandFertilizerEnergyByCoordinate =
-        new Dictionary<Vector2Int, float>();
+    private readonly Dictionary<Vector2Int, long> farmlandFertilizerEnergyByCoordinate =
+        new Dictionary<Vector2Int, long>();
     private readonly Dictionary<Vector2Int, int> plantedSeedItemIds =
         new Dictionary<Vector2Int, int>();
     private readonly Dictionary<Vector2Int, Transform> farmlandVisuals =
@@ -47,7 +48,7 @@ public partial class TerrainGenerator : MonoBehaviour
     [SerializeField, Min(0.01f)]
     private float farmlandFertilizerCapacityPerTile =
         DefaultFarmlandFertilizerCapacityPerTile;
-    private float nextFarmlandFertilizerAbsorptionTime;
+    private long nextFarmlandFertilizerAbsorptionTick;
     private Mesh farmlandVisualMesh;
     private Material farmlandVisualMaterial;
     private MaterialPropertyBlock farmlandVisualPropertyBlock;
@@ -84,19 +85,25 @@ public partial class TerrainGenerator : MonoBehaviour
         }
 
         connectedTileCount = farmlandNetworkCoordinates.Count;
-        float capacityPerTile = FarmlandFertilizerCapacityPerTile;
-        capacity = connectedTileCount * capacityPerTile;
+        long capacityPerTileUnits = DeterministicSimulationUnits.FromFloat(
+            FarmlandFertilizerCapacityPerTile);
+        long capacityUnits = capacityPerTileUnits * connectedTileCount;
+        long storedEnergyUnits = 0L;
+        capacity = DeterministicSimulationUnits.ToFloat(capacityUnits);
         for (int i = 0; i < farmlandNetworkCoordinates.Count; i++)
         {
             if (farmlandFertilizerEnergyByCoordinate.TryGetValue(
                     farmlandNetworkCoordinates[i],
-                    out float tileEnergy))
+                    out long tileEnergyUnits))
             {
-                storedEnergy += Mathf.Clamp(tileEnergy, 0f, capacityPerTile);
+                storedEnergyUnits += Math.Min(
+                    Math.Max(0L, tileEnergyUnits),
+                    capacityPerTileUnits);
             }
         }
 
-        storedEnergy = Mathf.Min(storedEnergy, capacity);
+        storedEnergy = DeterministicSimulationUnits.ToFloat(
+            Math.Min(storedEnergyUnits, capacityUnits));
         return true;
     }
 
@@ -155,41 +162,43 @@ public partial class TerrainGenerator : MonoBehaviour
             return false;
         }
 
-        float remaining = requestedEnergy;
+        long requestedEnergyUnits = DeterministicSimulationUnits.FromFloat(requestedEnergy);
+        long remainingUnits = requestedEnergyUnits;
         for (int i = 0;
              i < farmlandNetworkCoordinates.Count
-             && remaining > FarmlandFertilizerEpsilon;
+             && remainingUnits > 0L;
              i++)
         {
             Vector2Int networkCoordinate = farmlandNetworkCoordinates[i];
             if (!farmlandFertilizerEnergyByCoordinate.TryGetValue(
                     networkCoordinate,
-                    out float storedEnergy)
-                || storedEnergy <= FarmlandFertilizerEpsilon)
+                    out long storedEnergyUnits)
+                || storedEnergyUnits <= 0L)
             {
                 continue;
             }
 
-            float consumed = Mathf.Min(remaining, storedEnergy);
-            float updatedEnergy = Mathf.Max(0f, storedEnergy - consumed);
-            if (updatedEnergy <= FarmlandFertilizerEpsilon)
+            long consumedUnits = Math.Min(remainingUnits, storedEnergyUnits);
+            long updatedEnergyUnits = Math.Max(0L, storedEnergyUnits - consumedUnits);
+            if (updatedEnergyUnits <= 0L)
             {
                 farmlandFertilizerEnergyByCoordinate.Remove(networkCoordinate);
             }
             else
             {
-                farmlandFertilizerEnergyByCoordinate[networkCoordinate] = updatedEnergy;
+                farmlandFertilizerEnergyByCoordinate[networkCoordinate] = updatedEnergyUnits;
             }
 
-            remaining -= consumed;
+            remainingUnits -= consumedUnits;
         }
 
-        consumedEnergy = requestedEnergy - remaining;
+        consumedEnergy = DeterministicSimulationUnits.ToFloat(
+            requestedEnergyUnits - remainingUnits);
         if (consumedEnergy > FarmlandFertilizerEpsilon)
         {
-            nextFarmlandFertilizerAbsorptionTime = Mathf.Min(
-                nextFarmlandFertilizerAbsorptionTime,
-                Time.time);
+            nextFarmlandFertilizerAbsorptionTick = Math.Min(
+                nextFarmlandFertilizerAbsorptionTick,
+                MapObjectTickManager.CurrentSimulationTick);
         }
 
         return consumedEnergy > FarmlandFertilizerEpsilon;
@@ -432,17 +441,18 @@ public partial class TerrainGenerator : MonoBehaviour
             return 0f;
         }
 
-        float capacityPerTile = FarmlandFertilizerCapacityPerTile;
-        float available = 0f;
+        long capacityPerTileUnits = DeterministicSimulationUnits.FromFloat(
+            FarmlandFertilizerCapacityPerTile);
+        long availableUnits = 0L;
         for (int i = 0; i < networkCoordinates.Count; i++)
         {
             farmlandFertilizerEnergyByCoordinate.TryGetValue(
                 networkCoordinates[i],
-                out float storedEnergy);
-            available += Mathf.Max(0f, capacityPerTile - storedEnergy);
+                out long storedEnergyUnits);
+            availableUnits += Math.Max(0L, capacityPerTileUnits - storedEnergyUnits);
         }
 
-        return available;
+        return DeterministicSimulationUnits.ToFloat(availableUnits);
     }
 
     private float StoreFertilizerInCollectedNetwork(
@@ -456,29 +466,31 @@ public partial class TerrainGenerator : MonoBehaviour
             return 0f;
         }
 
-        float capacityPerTile = FarmlandFertilizerCapacityPerTile;
-        float remaining = fertilizerEnergy;
+        long capacityPerTileUnits = DeterministicSimulationUnits.FromFloat(
+            FarmlandFertilizerCapacityPerTile);
+        long fertilizerEnergyUnits = DeterministicSimulationUnits.FromFloat(fertilizerEnergy);
+        long remainingUnits = fertilizerEnergyUnits;
         for (int i = 0;
-             i < networkCoordinates.Count && remaining > FarmlandFertilizerEpsilon;
+             i < networkCoordinates.Count && remainingUnits > 0L;
              i++)
         {
             Vector2Int coordinate = networkCoordinates[i];
             farmlandFertilizerEnergyByCoordinate.TryGetValue(
                 coordinate,
-                out float storedEnergy);
-            float accepted = Mathf.Min(
-                remaining,
-                Mathf.Max(0f, capacityPerTile - storedEnergy));
-            if (accepted <= FarmlandFertilizerEpsilon)
+                out long storedEnergyUnits);
+            long acceptedUnits = Math.Min(
+                remainingUnits,
+                Math.Max(0L, capacityPerTileUnits - storedEnergyUnits));
+            if (acceptedUnits <= 0L)
             {
                 continue;
             }
 
-            farmlandFertilizerEnergyByCoordinate[coordinate] = storedEnergy + accepted;
-            remaining -= accepted;
+            farmlandFertilizerEnergyByCoordinate[coordinate] = storedEnergyUnits + acceptedUnits;
+            remainingUnits -= acceptedUnits;
         }
 
-        return fertilizerEnergy - remaining;
+        return DeterministicSimulationUnits.ToFloat(fertilizerEnergyUnits - remainingUnits);
     }
 
     private void CopyFarmlandNetworkForNotification()
@@ -534,13 +546,19 @@ public partial class TerrainGenerator : MonoBehaviour
     private void TickFarmlandFertilizerAbsorption()
     {
         if (!Application.isPlaying
-            || Time.time < nextFarmlandFertilizerAbsorptionTime)
+            || MapObjectTickManager.CurrentSimulationTick
+            < nextFarmlandFertilizerAbsorptionTick)
         {
             return;
         }
 
-        nextFarmlandFertilizerAbsorptionTime =
-            Time.time + FarmlandFertilizerAbsorptionInterval;
+        nextFarmlandFertilizerAbsorptionTick =
+            MapObjectTickManager.CurrentSimulationTick
+            + Mathf.Max(
+                1,
+                Mathf.CeilToInt(
+                    FarmlandFertilizerAbsorptionInterval
+                    * MapObjectTickManager.DefaultSimulationTicksPerSecond));
         if (farmlandCoordinates.Count <= 0)
         {
             return;
@@ -854,9 +872,9 @@ public partial class TerrainGenerator : MonoBehaviour
 
         mapSaveData.farmlandFertilizer ??= new List<FarmlandFertilizerSaveEntry>();
         mapSaveData.farmlandFertilizer.Clear();
-        foreach (KeyValuePair<Vector2Int, float> pair in farmlandFertilizerEnergyByCoordinate)
+        foreach (KeyValuePair<Vector2Int, long> pair in farmlandFertilizerEnergyByCoordinate)
         {
-            if (pair.Value <= FarmlandFertilizerEpsilon
+            if (pair.Value <= 0L
                 || !farmlandCoordinates.Contains(pair.Key))
             {
                 continue;
@@ -865,9 +883,10 @@ public partial class TerrainGenerator : MonoBehaviour
             mapSaveData.farmlandFertilizer.Add(new FarmlandFertilizerSaveEntry
             {
                 coordinate = pair.Key,
-                fertilizerEnergy = Mathf.Min(
-                    FarmlandFertilizerCapacityPerTile,
-                    pair.Value)
+                fertilizerEnergyUnits = Math.Min(
+                    DeterministicSimulationUnits.FromFloat(FarmlandFertilizerCapacityPerTile),
+                    pair.Value),
+                fertilizerEnergy = DeterministicSimulationUnits.ToFloat(pair.Value)
             });
         }
 
@@ -909,15 +928,18 @@ public partial class TerrainGenerator : MonoBehaviour
                 FarmlandFertilizerSaveEntry entry =
                     mapSaveData.farmlandFertilizer[i];
                 if (entry == null
-                    || entry.fertilizerEnergy <= FarmlandFertilizerEpsilon
+                    || entry.fertilizerEnergyUnits <= 0L
+                    && entry.fertilizerEnergy <= FarmlandFertilizerEpsilon
                     || !farmlandCoordinates.Contains(entry.coordinate))
                 {
                     continue;
                 }
 
-                farmlandFertilizerEnergyByCoordinate[entry.coordinate] = Mathf.Min(
-                    FarmlandFertilizerCapacityPerTile,
-                    entry.fertilizerEnergy);
+                farmlandFertilizerEnergyByCoordinate[entry.coordinate] = Math.Min(
+                    DeterministicSimulationUnits.FromFloat(FarmlandFertilizerCapacityPerTile),
+                    entry.fertilizerEnergyUnits > 0L
+                        ? entry.fertilizerEnergyUnits
+                        : DeterministicSimulationUnits.FromFloat(entry.fertilizerEnergy));
             }
         }
 
@@ -989,6 +1011,6 @@ public partial class TerrainGenerator : MonoBehaviour
         farmlandAbsorptionVisited.Clear();
         farmlandNetworkCoordinates.Clear();
         farmlandNotificationCoordinates.Clear();
-        nextFarmlandFertilizerAbsorptionTime = 0f;
+        nextFarmlandFertilizerAbsorptionTick = 0L;
     }
 }

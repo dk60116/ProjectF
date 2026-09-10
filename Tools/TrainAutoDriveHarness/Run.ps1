@@ -61,7 +61,7 @@ function Read-Member([string]$signature) {
 $generated = "using System.Collections.Generic;`nusing UnityEngine;`npublic partial class SteamTrain : RailHandcar {`n"
 $fieldSource = $source.Substring(0, $source.IndexOf('public float ObjectInfoStoredBurnEnergy'))
 foreach ($line in $fieldSource.Split("`n")) {
-    if ($line -cmatch '^    private .*\b(autoDrive\w*|nextAutoDriveControllerRevision|lastDrivenInputFrame)\b.*;') {
+    if ($line -cmatch '^    private .*\b(autoDrive\w*|nextAutoDriveControllerRevision|lastDrivenInputFrame|lastManualDriveSimulationTick)\b.*;') {
         $generated += $line + "`n"
     }
 }

@@ -5,8 +5,13 @@ public class Campfire : InputOutputModule
     [SerializeField]
     private ParticleSystem fireEffect;
 
-    public override void ManagedUpdateTick(float deltaTime)
+    public override void ApplyManagedUpdateTick()
     {
+        if (!TryBeginPlannedModuleApply(out float deltaTime))
+        {
+            return;
+        }
+
         if (Application.isPlaying
             && IsItemLightToggled
             && !TryConsumeOperatingEnergy(deltaTime, out _))
@@ -14,7 +19,7 @@ public class Campfire : InputOutputModule
             SetItemLightToggled(false);
         }
 
-        base.ManagedUpdateTick(deltaTime);
+        ApplyPlannedBaseModuleTick(deltaTime);
     }
 
     protected override bool ShouldKeepRuntimeUpdateTickActive()

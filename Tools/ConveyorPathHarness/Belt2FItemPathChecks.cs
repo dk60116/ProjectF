@@ -4,7 +4,7 @@ using UnityEngine;
 
 internal static class Belt2FItemPathChecks
 {
-    private const float PathHalfLength = 1.3251f;
+    private const float PathHalfLength = 1.5f;
     private const float PathHighHalfLength = 0.5f;
     private const float PathLowHeight = 0.13f;
     private const float PathHighHeight = 0.806f;

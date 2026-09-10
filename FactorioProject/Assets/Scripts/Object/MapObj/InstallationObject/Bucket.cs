@@ -376,7 +376,7 @@ public class Bucket : InstallationObject,
             return requestedLiters;
         }
 
-        float currentTime = Time.time;
+        float currentTime = (float)MapObjectTickManager.CurrentSimulationTimeSeconds;
         if (lastFluidInputBudgetTime < 0f)
         {
             lastFluidInputBudgetTime = currentTime;
@@ -599,13 +599,14 @@ public class Bucket : InstallationObject,
 
         cachedConnectedFluidSource = null;
         source = null;
-        if (Time.time < nextConnectedFluidSourceSearchTime
+        float currentTime = (float)MapObjectTickManager.CurrentSimulationTimeSeconds;
+        if (currentTime < nextConnectedFluidSourceSearchTime
             || !TryGetPlacementRuntime(out Vector2Int anchorCoordinate, out _))
         {
             return false;
         }
 
-        nextConnectedFluidSourceSearchTime = Time.time + MissingFluidSourceRetrySeconds;
+        nextConnectedFluidSourceSearchTime = currentTime + MissingFluidSourceRetrySeconds;
         connectedPipeSearchQueue.Clear();
         connectedPipeSearchVisited.Clear();
 
@@ -828,7 +829,7 @@ public class Bucket : InstallationObject,
     {
         fluidInputBudgetLiters = 0f;
         lastFluidInputBudgetTime = startClock && Application.isPlaying
-            ? Time.time
+            ? (float)MapObjectTickManager.CurrentSimulationTimeSeconds
             : -1f;
     }
 

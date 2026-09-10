@@ -181,6 +181,7 @@ public sealed class AnimalAIController : MonoBehaviour
     public Animal Animal => animal;
     public AnimalDefinition Definition => definition;
     public TerrainAnimalInstance TerrainInstance => terrainInstance;
+    public long SimulationId => ResolveSimulationId();
     public AnimalAIState CurrentState => currentState;
     public float StateTimeRemaining => stateTimeRemaining;
     public Vector3 TargetPosition => targetPosition;
@@ -294,6 +295,7 @@ public sealed class AnimalAIController : MonoBehaviour
         terrainInstance = sourceInstance != null
             ? sourceInstance
             : GetComponent<TerrainAnimalInstance>();
+        AnimalAIWorld.NotifySimulationIdentityChanged(this);
         settings = definition != null && definition.AISettings != null
             ? definition.AISettings
             : new AnimalAISettings();
@@ -3596,9 +3598,30 @@ public sealed class AnimalAIController : MonoBehaviour
     {
         unchecked
         {
-            long id = terrainInstance != null ? terrainInstance.DeterministicId : GetInstanceID();
+            long id = ResolveSimulationId();
             uint value = (uint)id ^ (uint)(id >> 32) ^ 0x9E3779B9u;
             return value != 0u ? value : 0x6D2B79F5u;
+        }
+    }
+
+    private long ResolveSimulationId()
+    {
+        if (terrainInstance != null && terrainInstance.DeterministicId != 0L)
+        {
+            return terrainInstance.DeterministicId;
+        }
+
+        Vector3 position = transform.position;
+        int x = Mathf.RoundToInt(position.x * 1000f);
+        int z = Mathf.RoundToInt(position.z * 1000f);
+        int definitionId = definition != null ? definition.Id : 0;
+        unchecked
+        {
+            ulong value = 1469598103934665603UL;
+            value = (value ^ (uint)x) * 1099511628211UL;
+            value = (value ^ (uint)z) * 1099511628211UL;
+            value = (value ^ (uint)definitionId) * 1099511628211UL;
+            return (long)value;
         }
     }
 

@@ -25,7 +25,7 @@ public class SeedPlanter : InputOutputModule
     [SerializeField] private Sprite outputAreaMarkerIcon;
     [SerializeField] private Renderer warningLightRenderer;
     [SerializeField, Min(0.1f)] private float workAnimationCycleSeconds = 2.5f;
-    [SerializeField, HideInInspector, Min(0f)] private float plantElapsedSeconds;
+    [SerializeField, HideInInspector] private long plantElapsedUnits;
 
     private MaterialPropertyBlock warningLightPropertyBlock;
     private OperatingState operatingState = OperatingState.Ready;
@@ -46,7 +46,10 @@ public class SeedPlanter : InputOutputModule
     public int CurrentSeedItemId => currentSeedItemId;
     public int CurrentSeedCount => Mathf.Max(0, currentSeedCount);
     public float PlantDurationSeconds => ResolvePlantDuration(ResolveInstalledDefinition());
-    public float PlantElapsedSeconds => Mathf.Clamp(plantElapsedSeconds, 0f, PlantDurationSeconds);
+    public float PlantElapsedSeconds => DeterministicSimulationUnits.ToFloat(
+        System.Math.Min(
+            DeterministicSimulationUnits.FromFloat(PlantDurationSeconds),
+            System.Math.Max(0L, plantElapsedUnits)));
     public float PlantProgress01 => Mathf.Clamp01(PlantElapsedSeconds / PlantDurationSeconds);
 
     protected override void OnEnable()
@@ -64,8 +67,13 @@ public class SeedPlanter : InputOutputModule
         base.OnDisable();
     }
 
-    public override void ManagedUpdateTick(float deltaTime)
+    public override void ApplyManagedUpdateTick()
     {
+        if (!TryBeginPlannedModuleApply(out float deltaTime))
+        {
+            return;
+        }
+
         requestingPower = false;
         isOperating = false;
         RefreshSeedInput();
@@ -73,7 +81,7 @@ public class SeedPlanter : InputOutputModule
         if (!Application.isPlaying || deltaTime <= 0f || !TryGetPlacementRuntime(out _, out _))
         {
             SetOperatingState(OperatingState.Ready);
-            base.ManagedUpdateTick(deltaTime);
+            ApplyPlannedBaseModuleTick(deltaTime);
             return;
         }
 
@@ -82,26 +90,26 @@ public class SeedPlanter : InputOutputModule
             || terrain == null
             || !terrain.IsFarmlandAt(targetCoordinate))
         {
-            plantElapsedSeconds = 0f;
+            plantElapsedUnits = 0L;
             SetOperatingState(OperatingState.InvalidGround);
-            base.ManagedUpdateTick(deltaTime);
+            ApplyPlannedBaseModuleTick(deltaTime);
             return;
         }
 
         if (currentSeedItemId < 0 || currentSeedCount <= 0 || !hasCurrentInputCoordinate)
         {
-            plantElapsedSeconds = 0f;
+            plantElapsedUnits = 0L;
             SetOperatingState(OperatingState.NoSeeds);
-            base.ManagedUpdateTick(deltaTime);
+            ApplyPlannedBaseModuleTick(deltaTime);
             return;
         }
 
         ItemDefinition seedDefinition = ResolveItemDefinition(currentSeedItemId);
         if (!terrain.CanPlantSeedAt(targetCoordinate, seedDefinition))
         {
-            plantElapsedSeconds = 0f;
+            plantElapsedUnits = 0L;
             SetOperatingState(OperatingState.TargetOccupied);
-            base.ManagedUpdateTick(deltaTime);
+            ApplyPlannedBaseModuleTick(deltaTime);
             return;
         }
 
@@ -110,27 +118,37 @@ public class SeedPlanter : InputOutputModule
         if (!HasOperationalEnergyAvailable(installedDefinition))
         {
             SetOperatingState(OperatingState.NoPower);
-            base.ManagedUpdateTick(deltaTime);
+            ApplyPlannedBaseModuleTick(deltaTime);
             return;
         }
 
-        float remainingDuration = Mathf.Max(0f, PlantDurationSeconds - plantElapsedSeconds);
-        float requestedOperationSeconds = Mathf.Min(deltaTime, remainingDuration);
+        long plantDurationUnits = DeterministicSimulationUnits.FromFloat(PlantDurationSeconds);
+        long remainingDurationUnits = System.Math.Max(0L, plantDurationUnits - plantElapsedUnits);
+        long requestedOperationUnits = System.Math.Min(
+            DeterministicSimulationUnits.RateForTicks(
+                1f,
+                DeterministicSimulationUnits.DeltaTimeToTicks(deltaTime)),
+            remainingDurationUnits);
+        float requestedOperationSeconds = DeterministicSimulationUnits.ToFloat(requestedOperationUnits);
         if (requestedOperationSeconds <= ProgressEpsilon
             || !TryConsumeOperatingEnergy(requestedOperationSeconds, out _))
         {
             SetOperatingState(OperatingState.NoPower);
-            base.ManagedUpdateTick(deltaTime);
+            ApplyPlannedBaseModuleTick(deltaTime);
             return;
         }
 
         isOperating = true;
         SetOperatingState(OperatingState.Planting);
-        plantElapsedSeconds = Mathf.Min(
-            PlantDurationSeconds,
-            plantElapsedSeconds + requestedOperationSeconds * OperationalAnimationSpeedRatio);
+        long speedRatioUnits = DeterministicSimulationUnits.FromFloat(OperationalAnimationSpeedRatio);
+        plantElapsedUnits = System.Math.Min(
+            plantDurationUnits,
+            plantElapsedUnits + DeterministicSimulationUnits.MultiplyRatio(
+                requestedOperationUnits,
+                speedRatioUnits,
+                DeterministicSimulationUnits.UnitsPerWhole));
 
-        if (plantElapsedSeconds + ProgressEpsilon >= PlantDurationSeconds)
+        if (plantElapsedUnits >= plantDurationUnits)
         {
             int seedItemId = currentSeedItemId;
             Vector2Int inputCoordinate = currentInputCoordinate;
@@ -142,7 +160,7 @@ public class SeedPlanter : InputOutputModule
                 consumeTargetWorldPosition,
                 InputConsumeMoveInterval,
                 true);
-            plantElapsedSeconds = 0f;
+            plantElapsedUnits = 0L;
             isOperating = false;
             requestingPower = false;
             if (consumed == 1)
@@ -174,7 +192,7 @@ public class SeedPlanter : InputOutputModule
             }
         }
 
-        base.ManagedUpdateTick(deltaTime);
+        ApplyPlannedBaseModuleTick(deltaTime);
     }
 
     internal int ReceiveHarvestedSeeds(Vector2Int harvestedCoordinate, int seedItemId,
@@ -210,16 +228,21 @@ public class SeedPlanter : InputOutputModule
     public override PersistentState CapturePersistentState()
     {
         PersistentState state = base.CapturePersistentState();
-        state.seedPlanterPlantElapsedSeconds = Mathf.Clamp(plantElapsedSeconds, 0f, PlantDurationSeconds);
+        state.seedPlanterPlantElapsedSeconds = PlantElapsedSeconds;
+        state.seedPlanterPlantElapsedUnits = plantElapsedUnits;
         return state;
     }
 
     public override void ApplyPersistentState(PersistentState state)
     {
         base.ApplyPersistentState(state);
-        plantElapsedSeconds = state != null
-            ? Mathf.Clamp(state.seedPlanterPlantElapsedSeconds, 0f, PlantDurationSeconds)
-            : 0f;
+        plantElapsedUnits = state != null
+            ? System.Math.Min(
+                DeterministicSimulationUnits.FromFloat(PlantDurationSeconds),
+                state.hasDeterministicUnits
+                    ? System.Math.Max(0L, state.seedPlanterPlantElapsedUnits)
+                    : DeterministicSimulationUnits.FromFloat(state.seedPlanterPlantElapsedSeconds))
+            : 0L;
         RefreshSeedInput();
         SetOperatingState(OperatingState.Ready);
         WakeRuntimeUpdate();
@@ -348,7 +371,7 @@ public class SeedPlanter : InputOutputModule
     protected override void OnPlacementRuntimeCleared()
     {
         base.OnPlacementRuntimeCleared();
-        plantElapsedSeconds = 0f;
+        plantElapsedUnits = 0L;
         currentSeedItemId = -1;
         currentSeedCount = 0;
         hasCurrentInputCoordinate = false;

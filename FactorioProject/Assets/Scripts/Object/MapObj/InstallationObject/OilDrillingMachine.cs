@@ -24,7 +24,7 @@ public class OilDrillingMachine : InputOutputModule
     [SerializeField, Min(0f)]
     private float pumpjackRodStroke = 0.08f;
 
-    private float productionProgressLiters;
+    private long productionProgressUnits;
     private Resource cachedOilResource;
     private bool isExtracting;
     private bool hasPumpjackVisual;
@@ -73,37 +73,43 @@ public class OilDrillingMachine : InputOutputModule
     public override PersistentState CapturePersistentState()
     {
         PersistentState state = base.CapturePersistentState();
-        state.oilDrillingProgressLiters = Mathf.Max(0f, productionProgressLiters);
+        state.oilDrillingProgressLiters = DeterministicSimulationUnits.ToFloat(productionProgressUnits);
+        state.oilDrillingProgressUnits = productionProgressUnits;
         return state;
     }
 
     public override void ApplyPersistentState(PersistentState state)
     {
         base.ApplyPersistentState(state);
-        productionProgressLiters = state != null
-            ? Mathf.Max(0f, state.oilDrillingProgressLiters)
-            : 0f;
+        productionProgressUnits = state != null
+            ? state.ResolveOilDrillingProgressUnits()
+            : 0L;
     }
 
     public override void PrepareForPool()
     {
         RestorePumpjackVisual();
-        productionProgressLiters = 0f;
+        productionProgressUnits = 0L;
         cachedOilResource = null;
         isExtracting = false;
         base.PrepareForPool();
         ApplyAnimatorPlayback(false);
     }
 
-    public override void ManagedUpdateTick(float deltaTime)
+    public override void ApplyManagedUpdateTick()
     {
+        if (!TryBeginPlannedModuleApply(out float deltaTime))
+        {
+            return;
+        }
+
         if (!Application.isPlaying || deltaTime <= 0f)
         {
             return;
         }
 
         isExtracting = ExtractOil(deltaTime);
-        base.ManagedUpdateTick(deltaTime);
+        ApplyPlannedBaseModuleTick(deltaTime);
         ApplyAnimatorPlayback(isExtracting);
     }
 
@@ -127,7 +133,7 @@ public class OilDrillingMachine : InputOutputModule
     protected override void OnPlacementRuntimeChanged()
     {
         base.OnPlacementRuntimeChanged();
-        productionProgressLiters = 0f;
+        productionProgressUnits = 0L;
         cachedOilResource = null;
         isExtracting = false;
         RestorePumpjackVisual();
@@ -271,15 +277,22 @@ public class OilDrillingMachine : InputOutputModule
             return false;
         }
 
-        float energySupplyRatio = requestedEnergy > FluidEpsilon
-            ? Mathf.Clamp01(consumedEnergy / requestedEnergy)
-            : 1f;
-        if (energySupplyRatio <= FluidEpsilon)
+        long requestedEnergyUnits = DeterministicSimulationUnits.FromFloat(requestedEnergy);
+        long consumedEnergyUnits = DeterministicSimulationUnits.FromFloat(consumedEnergy);
+        if (requestedEnergyUnits > 0L && consumedEnergyUnits <= 0L)
         {
             return false;
         }
 
-        productionProgressLiters += OilLitersPerSecond * deltaTime * energySupplyRatio;
+        long producedUnits = DeterministicSimulationUnits.RateForTicks(
+            OilLitersPerSecond,
+            DeterministicSimulationUnits.DeltaTimeToTicks(deltaTime));
+        productionProgressUnits += requestedEnergyUnits > 0L
+            ? DeterministicSimulationUnits.MultiplyRatio(
+                producedUnits,
+                consumedEnergyUnits,
+                requestedEnergyUnits)
+            : producedUnits;
         FlushCompletedOil(resource);
         return true;
     }
@@ -292,7 +305,7 @@ public class OilDrillingMachine : InputOutputModule
                && harvestCount < MaxHarvestsPerTick
                && resource.TryPeekMachineHarvestOutput(out int outputItemId, out int outputCount)
                && outputCount > 0
-               && productionProgressLiters + FluidEpsilon >= outputCount
+               && productionProgressUnits >= DeterministicSimulationUnits.FromInt(outputCount)
                && TryGetFluidOutputAvailableLiters(outputItemId, outputCount, out float availableLiters)
                && availableLiters + FluidEpsilon >= outputCount)
         {
@@ -313,7 +326,9 @@ public class OilDrillingMachine : InputOutputModule
                 return;
             }
 
-            productionProgressLiters = Mathf.Max(0f, productionProgressLiters - acceptedLiters);
+            productionProgressUnits = System.Math.Max(
+                0L,
+                productionProgressUnits - DeterministicSimulationUnits.FromFloat(acceptedLiters));
             harvestCount++;
         }
     }

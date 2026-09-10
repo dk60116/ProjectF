@@ -16,6 +16,15 @@ public static class Time
     public static float time => (float)timeAsDouble;
     public static float unscaledTime => time;
 }
+public static class MapObjectTickManager
+{
+    public const int DefaultSimulationTicksPerSecond = 60;
+    public const float FixedSimulationDeltaSeconds = 1f / DefaultSimulationTicksPerSecond;
+    public static long CurrentSimulationTick => (long)Math.Round(
+        Time.timeAsDouble * DefaultSimulationTicksPerSecond,
+        MidpointRounding.AwayFromZero);
+    public static double CurrentSimulationTimeSeconds => Time.timeAsDouble;
+}
 public static class MapClimate { public static float CurrentTemperatureCelsius => 20; }
 public readonly record struct Vector2Int(int x, int y)
 {
@@ -67,8 +76,8 @@ public partial class Pump : InputOutputModule
 {
     private const int MaxWaterEmitAttemptsPerTick = 32;
     private const float WaterOutputBudgetSeconds = 1;
-    private float waterLiterAccumulator, availableWaterOutputLiters;
-    private float waterOutputBudgetUpdatedAt = float.NegativeInfinity;
+    private long waterAccumulatorUnits, availableWaterOutputUnits;
+    private long waterOutputBudgetUpdatedTick = -1L;
     public float WaterLitersPerSecond = 10;
     public bool HasRuntimeOutputCoordinates = true;
     public int RuntimeAreaMaxObjects = 32;

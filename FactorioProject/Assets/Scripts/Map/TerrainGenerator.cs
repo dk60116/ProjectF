@@ -7,7 +7,10 @@ using UnityEngine;
 using UnityEditor;
 #endif
 
-public partial class TerrainGenerator : MonoBehaviour
+public partial class TerrainGenerator : MonoBehaviour,
+    IMapObjectUpdateTick,
+    IMapObjectUpdateTickInterval,
+    IMapObjectSimulationIdentity
 {
     private const float MinOreBodyScaleRatioLimit = 0.5f;
     private const float MaxOreBodyScaleRatioLimit = 1f;
@@ -75,6 +78,8 @@ public partial class TerrainGenerator : MonoBehaviour
     }
 
     public int CurrentSeed => seed;
+    public long SimulationId => long.MinValue;
+    public float ManagedUpdateTickIntervalSeconds => MapObjectTickManager.FixedSimulationDeltaSeconds;
     public int TerrainGenerationVersion => terrainGenerationVersion;
     public int CurrentMapSize => GetNormalizedMapSize();
 
@@ -989,7 +994,10 @@ public partial class TerrainGenerator : MonoBehaviour
     {
         Active = this;
         if (Application.isPlaying)
+        {
+            MapObjectTickManager.RegisterUpdateTick(this);
             ProjectF.Rendering.TerrainWorldRenderer.EnsureFor(this);
+        }
 #if UNITY_EDITOR
         SceneView.duringSceneGui -= RenderEditorChunkSurfaces;
         SceneView.duringSceneGui += RenderEditorChunkSurfaces;
@@ -1074,15 +1082,6 @@ public partial class TerrainGenerator : MonoBehaviour
             return;
         }
 
-        bool profileBeltTicks = RefreshBeltTickProfilerFrameState();
-
-        TickFarmlandFertilizerAbsorption();
-
-        long beltJobsStart = profileBeltTicks ? MapObjectTickProfiler.BeginSample() : 0L;
-        TickBeltJobs(Time.deltaTime);
-        if (profileBeltTicks)
-            MapObjectTickProfiler.EndNamedSample("Belt", "BeltJobs", "Belt Jobs Tick", beltJobsStart);
-
         EnsureBeltSplitGroups();
 
         if (ShouldRefreshTrackedChunks())
@@ -1091,6 +1090,27 @@ public partial class TerrainGenerator : MonoBehaviour
             {
                 RefreshTrackedChunks();
             }
+        }
+    }
+
+    public void ManagedUpdateTick(float deltaTime)
+    {
+        if (!Application.isPlaying || !hasGeneratedChunks || !worldReadyForPresentation)
+        {
+            return;
+        }
+
+        TickFarmlandFertilizerAbsorption();
+        bool profileBeltTicks = RefreshBeltTickProfilerFrameState();
+        long beltJobsStart = profileBeltTicks ? MapObjectTickProfiler.BeginSample() : 0L;
+        TickManagedBeltSimulation();
+        if (profileBeltTicks)
+        {
+            MapObjectTickProfiler.EndNamedSample(
+                "Belt",
+                "BeltJobs",
+                "Belt Jobs Tick",
+                beltJobsStart);
         }
     }
 
@@ -1178,6 +1198,7 @@ public partial class TerrainGenerator : MonoBehaviour
 
     private void OnDisable()
     {
+        MapObjectTickManager.UnregisterUpdateTick(this);
 #if UNITY_EDITOR
         SceneView.duringSceneGui -= RenderEditorChunkSurfaces;
 #endif

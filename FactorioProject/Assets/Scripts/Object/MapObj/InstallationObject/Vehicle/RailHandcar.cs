@@ -398,7 +398,7 @@ public class RailHandcar : Train
         public float EndDistance;
         public float BranchReleaseDistanceRemaining;
         public bool BranchReleaseCompleted;
-        public int LastUsedFrame;
+        public long LastUsedSimulationTick;
     }
 
     public override float EffectiveVehicleMaxSpeed => UsesTrainLoadSpeedReduction
@@ -2439,7 +2439,8 @@ public class RailHandcar : Train
                 {
                     if (HasSavedPushConsistPathState(pushSession))
                     {
-                        pushSession.LastUsedFrame = Time.frameCount;
+                        pushSession.LastUsedSimulationTick =
+                            MapObjectTickManager.CurrentSimulationTick;
                     }
                     else
                     {
@@ -2868,7 +2869,7 @@ public class RailHandcar : Train
 
         session.TravelDirection = consistPathTravelDirection;
         session.EndDistance = consistPathEndDistance;
-        session.LastUsedFrame = Time.frameCount;
+        session.LastUsedSimulationTick = MapObjectTickManager.CurrentSimulationTick;
     }
 
     private static bool CanKeepPreferredPushContact(
@@ -2917,7 +2918,7 @@ public class RailHandcar : Train
         session.EndDistance = 0f;
         session.BranchReleaseDistanceRemaining = 0f;
         session.BranchReleaseCompleted = false;
-        session.LastUsedFrame = Time.frameCount;
+        session.LastUsedSimulationTick = MapObjectTickManager.CurrentSimulationTick;
     }
 
     private void MarkPushConsistBranchReleaseCompleted(PushConsistPathSession session, Train preferredContactTrain)
@@ -2936,7 +2937,7 @@ public class RailHandcar : Train
         session.EndDistance = 0f;
         session.BranchReleaseDistanceRemaining = 0f;
         session.BranchReleaseCompleted = true;
-        session.LastUsedFrame = Time.frameCount;
+        session.LastUsedSimulationTick = MapObjectTickManager.CurrentSimulationTick;
     }
 
     private static bool HasSavedPushConsistPathState(PushConsistPathSession session)
@@ -2957,14 +2958,14 @@ public class RailHandcar : Train
         PushConsistPathSession session = FindPushConsistPathSessionContaining(contactTrain);
         if (session != null)
         {
-            session.LastUsedFrame = Time.frameCount;
+            session.LastUsedSimulationTick = MapObjectTickManager.CurrentSimulationTick;
             return session;
         }
 
         session = new PushConsistPathSession
         {
             PreferredContactTrain = contactTrain,
-            LastUsedFrame = Time.frameCount
+            LastUsedSimulationTick = MapObjectTickManager.CurrentSimulationTick
         };
         pushConsistPathSessions.Add(session);
         return session;
@@ -3004,12 +3005,13 @@ public class RailHandcar : Train
 
     private void PruneStalePushConsistPathSessions()
     {
-        int currentFrame = Time.frameCount;
+        long currentSimulationTick = MapObjectTickManager.CurrentSimulationTick;
         for (int i = pushConsistPathSessions.Count - 1; i >= 0; i--)
         {
             PushConsistPathSession session = pushConsistPathSessions[i];
             if (session == null
-                || currentFrame - session.LastUsedFrame > PushConsistSessionRetainFrameCount)
+                || currentSimulationTick - session.LastUsedSimulationTick
+                > PushConsistSessionRetainFrameCount)
             {
                 pushConsistPathSessions.RemoveAt(i);
             }

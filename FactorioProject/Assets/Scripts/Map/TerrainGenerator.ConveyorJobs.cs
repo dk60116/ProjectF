@@ -27,9 +27,9 @@ public partial class TerrainGenerator
     private readonly HashSet<Block> beltJobPublishedBlocks = new HashSet<Block>();
     private readonly List<Block> beltJobPublishedOrder = new List<Block>();
     private bool beltJobsDirty = true, beltJobsPublishing;
-    private double beltJobAccumulator;
     private long beltSimulationTick;
     private int beltJobRebuildCount, beltJobLastTickMoves, beltJobLastTickChanged, beltJobLastFrameTicks;
+    private int beltJobLastRenderedFrame = -1;
     private readonly List<(long tick, Action callback)> beltPlacementCompletions = new List<(long, Action)>();
     private readonly List<Action> beltPlacementReadyCallbacks = new List<Action>();
 
@@ -97,22 +97,19 @@ public partial class TerrainGenerator
         beltJobPending[key] = pending;
     }
 
-    private void TickBeltJobs(float elapsed)
+    private void TickManagedBeltSimulation()
     {
-        beltJobLastFrameTicks = 0;
         if (IsConveyorRuntimeRefreshDeferred) return;
         EnsureBeltJobs();
-        if (BeltSimulationExternallyClocked || elapsed <= 0) return;
-        beltJobAccumulator += elapsed;
-        const double interval = 1.0 / BeltSimulationJob.TickRate;
-        int ticks = Math.Min(8, (int)Math.Min(int.MaxValue, beltJobAccumulator / interval));
-        for (int i = 0; i < ticks; i++)
+        if (BeltSimulationExternallyClocked) return;
+        if (beltJobLastRenderedFrame != Time.frameCount)
         {
-            StepBeltSimulation();
-            beltJobLastFrameTicks++;
-            beltJobAccumulator -= interval;
+            beltJobLastRenderedFrame = Time.frameCount;
+            beltJobLastFrameTicks = 0;
         }
-        // Backlog is retained. Slow rendering never drops simulation ticks.
+
+        StepBeltSimulation();
+        beltJobLastFrameTicks++;
     }
 
     public void StepBeltSimulation()
@@ -389,7 +386,7 @@ public partial class TerrainGenerator
         position = default;
         if (!TryReadBeltJobLane(block, lane, out BeltLaneState state) || state.ItemId < 0) return false;
         double fraction = state.Origin >= 0 && beltJobBuffers.Topology[block.BeltJobIndex(lane)].Paused != 0
-            ? 0 : Math.Min(beltJobAccumulator * BeltSimulationJob.TickRate, 1.0);
+            ? 0 : MapObjectTickManager.SimulationInterpolationAlpha;
         float progress = state.Duration > 0 ? Mathf.Clamp01(1f - (float)((state.Remaining - fraction
             * BeltSimulationJob.TickUnits) / state.Duration)) : 1f;
         if (state.Origin >= 0 && state.Origin < beltJobNodes.Count)
@@ -421,7 +418,8 @@ public partial class TerrainGenerator
         beltJobPending.Clear(); beltJobPendingOrder.Clear(); beltJobPublishedBlocks.Clear();
         beltJobPublishedOrder.Clear();
         beltJobRebuildStates.Clear(); beltJobRebuildOrigins.Clear(); beltJobRebuildCursors.Clear();
-        beltJobAccumulator = 0; beltSimulationTick = 0; beltJobsDirty = true;
+        beltSimulationTick = 0; beltJobsDirty = true;
+        beltJobLastRenderedFrame = -1;
         beltJobRebuildCount = beltJobLastTickMoves = beltJobLastTickChanged = beltJobLastFrameTicks = 0;
         beltPlacementCompletions.Clear(); beltPlacementReadyCallbacks.Clear();
     }
@@ -443,7 +441,10 @@ public partial class TerrainGenerator
         MapObjectTickProfiler.AddRuntimeCounter("BeltJobs", "LastTickTransfers", beltJobLastTickMoves);
         MapObjectTickProfiler.AddRuntimeCounter("BeltJobs", "LastTickChangedLanes", beltJobLastTickChanged);
         MapObjectTickProfiler.AddRuntimeCounter("BeltJobs", "FrameTicks", beltJobLastFrameTicks);
-        MapObjectTickProfiler.AddRuntimeCounter("BeltJobs", "BacklogTicks", (float)(beltJobAccumulator * BeltSimulationJob.TickRate));
+        MapObjectTickProfiler.AddRuntimeCounter(
+            "BeltJobs",
+            "BacklogTicks",
+            (float)MapObjectTickManager.SimulationBacklogTicks);
         MapObjectTickProfiler.AddRuntimeCounter("BeltJobs", "TopologyRebuilds", beltJobRebuildCount);
     }
 }

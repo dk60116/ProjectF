@@ -40,6 +40,7 @@ namespace Unity.Profiling
 namespace UnityEngine
 {
     public static class Application { public static bool isPlaying = true; }
+    public static class Time { public static int frameCount; }
     public readonly record struct Vector2Int(int x, int y);
     public struct Vector3
     {

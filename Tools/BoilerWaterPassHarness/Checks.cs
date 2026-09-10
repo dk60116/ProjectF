@@ -8,6 +8,10 @@ public class FakeTransform { public Quaternion rotation = Quaternion.identity; }
 public static class MapClimate { public static float CurrentWaterTemperatureCelsius => 20; }
 public class InstallationObject
 {
+    private static long nextSimulationId;
+    private readonly long simulationId = ++nextSimulationId;
+    public static int CompareSimulationOrder(InstallationObject left, InstallationObject right)
+        => ReferenceEquals(left, right) ? 0 : left.simulationId.CompareTo(right.simulationId);
     public FakeGameObject gameObject = new();
     public FakeTransform transform = new();
     public float FluidStorageCapacityLiters = 50, StoredFluidLiters;

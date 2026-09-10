@@ -170,6 +170,8 @@ public static class SaveGameBinarySerializer
         WriteMap(writer, data.map);
         WritePlayer(writer, data.player);
         ProjectF.Conveyors.BeltSimulationSnapshot.Write(writer, data.beltSimulation);
+        writer.Write(data.simulationTick);
+        writer.Write(data.nextInstallationSimulationId);
     }
 
     private static SaveGameData ReadSaveGameData(
@@ -193,6 +195,11 @@ public static class SaveGameBinarySerializer
         data.map = ReadMap(reader, fileVersion, compatibilityMode);
         data.player = ReadPlayer(reader, fileVersion);
         if (fileVersion >= 59) data.beltSimulation = ProjectF.Conveyors.BeltSimulationSnapshot.Read(reader);
+        if (fileVersion >= 60)
+        {
+            data.simulationTick = reader.ReadInt64();
+            data.nextInstallationSimulationId = reader.ReadInt64();
+        }
         return data;
     }
 
@@ -409,7 +416,7 @@ public static class SaveGameBinarySerializer
         {
             map.farmlandFertilizer = ReadList(
                 reader,
-                () => ReadFarmlandFertilizerEntry(reader));
+                () => ReadFarmlandFertilizerEntry(reader, version));
         }
 
         if (version >= 50)
@@ -427,16 +434,22 @@ public static class SaveGameBinarySerializer
         entry ??= new FarmlandFertilizerSaveEntry();
         WriteVector2Int(writer, entry.coordinate);
         writer.Write(Mathf.Max(0f, entry.fertilizerEnergy));
+        writer.Write(Math.Max(0L, entry.fertilizerEnergyUnits));
     }
 
     private static FarmlandFertilizerSaveEntry ReadFarmlandFertilizerEntry(
-        BinaryReader reader)
+        BinaryReader reader,
+        int version)
     {
-        return new FarmlandFertilizerSaveEntry
+        FarmlandFertilizerSaveEntry entry = new FarmlandFertilizerSaveEntry
         {
             coordinate = ReadVector2Int(reader),
             fertilizerEnergy = Mathf.Max(0f, reader.ReadSingle())
         };
+        entry.fertilizerEnergyUnits = version >= 61
+            ? Math.Max(0L, reader.ReadInt64())
+            : DeterministicSimulationUnits.FromFloat(entry.fertilizerEnergy);
+        return entry;
     }
 
     private static void WritePlantedResourceEntry(
@@ -759,6 +772,11 @@ public static class SaveGameBinarySerializer
             writer.Write(state.stationColor.g);
             writer.Write(state.stationColor.b);
         }
+        writer.Write(state.hasDeterministicUnits);
+        writer.Write(state.storedFluidUnits);
+        writer.Write(state.trainRailDistanceAlongPathUnits);
+        writer.Write(state.steamTrainStoredBurnEnergyUnits);
+        writer.Write(state.steamTrainBurnEnergyGaugeCapacityUnits);
     }
 
     private static BlockStateStore.InstallationSaveState ReadInstallationState(
@@ -940,6 +958,15 @@ public static class SaveGameBinarySerializer
             }
         }
 
+        if (version >= 61)
+        {
+            state.hasDeterministicUnits = reader.ReadBoolean();
+            state.storedFluidUnits = reader.ReadInt64();
+            state.trainRailDistanceAlongPathUnits = reader.ReadInt64();
+            state.steamTrainStoredBurnEnergyUnits = reader.ReadInt64();
+            state.steamTrainBurnEnergyGaugeCapacityUnits = reader.ReadInt64();
+        }
+
         return state;
     }
 
@@ -972,6 +999,13 @@ public static class SaveGameBinarySerializer
         writer.Write(state.sprinklerSprayElapsedSeconds);
         writer.Write(state.seedPlanterPlantElapsedSeconds);
         writer.Write(state.steamGeneratorHasGenerationReserve);
+        writer.Write(state.hasDeterministicUnits);
+        writer.Write(state.storedEnergyUnits);
+        writer.Write(state.energyGaugeCapacityUnits);
+        writer.Write(state.remainingCraftTicks);
+        writer.Write(state.activeCraftConsumedEnergyUnits);
+        writer.Write(state.oilDrillingProgressUnits);
+        writer.Write(state.seedPlanterPlantElapsedUnits);
     }
 
     private static InputOutputModule.PersistentState ReadInputOutputState(BinaryReader reader, int version)
@@ -1026,6 +1060,17 @@ public static class SaveGameBinarySerializer
             {
                 state.steamGeneratorHasGenerationReserve = reader.ReadBoolean();
             }
+        }
+
+        if (version >= 61)
+        {
+            state.hasDeterministicUnits = reader.ReadBoolean();
+            state.storedEnergyUnits = reader.ReadInt64();
+            state.energyGaugeCapacityUnits = reader.ReadInt64();
+            state.remainingCraftTicks = reader.ReadInt64();
+            state.activeCraftConsumedEnergyUnits = reader.ReadInt64();
+            state.oilDrillingProgressUnits = reader.ReadInt64();
+            state.seedPlanterPlantElapsedUnits = reader.ReadInt64();
         }
 
         return state;

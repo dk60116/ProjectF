@@ -5,8 +5,8 @@ using UnityEngine;
 [Serializable]
 public sealed class SaveGameData
 {
-    // Version 59 preserves the integer belt clock, lane progress and deterministic merge cursors.
-    public const int CurrentVersion = 59;
+    // Version 61 stores authoritative energy, fluid, craft-progress, and rail-distance integers.
+    public const int CurrentVersion = 61;
 
     public int version = CurrentVersion;
     public long savedAtUtcTicks;
@@ -16,6 +16,8 @@ public sealed class SaveGameData
     public MapSaveData map = new MapSaveData();
     public PlayerSaveData player = new PlayerSaveData();
     public ProjectF.Conveyors.BeltSimulationSnapshot beltSimulation;
+    public long simulationTick;
+    public long nextInstallationSimulationId = 1L;
 }
 
 [Serializable]
@@ -62,6 +64,7 @@ public sealed class FarmlandFertilizerSaveEntry
 {
     public Vector2Int coordinate;
     public float fertilizerEnergy;
+    public long fertilizerEnergyUnits;
 }
 
 [Serializable]

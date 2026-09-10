@@ -2,7 +2,7 @@ using System.Collections.Generic;
 using UnityEngine;
 
 [DisallowMultipleComponent]
-public sealed class AnimalAIWorld : MonoBehaviour
+public sealed class AnimalAIWorld : MonoBehaviour, IMapObjectUpdateTick, IMapObjectSimulationIdentity
 {
     private const float BackgroundStepInterval = 1f;
     private const float SpatialCellSize = 2f;
@@ -46,6 +46,7 @@ public sealed class AnimalAIWorld : MonoBehaviour
     private float maximumAnimalColliderRadius = 0.5f;
     private bool paused;
     private bool spatialIndexReady;
+    private bool controllerOrderDirty;
     private int separationCandidateChecks;
     private int separationCandidateChecksLastFrame;
     private int animalCollisionCandidateChecks;
@@ -88,6 +89,7 @@ public sealed class AnimalAIWorld : MonoBehaviour
     public int MidActiveControllerCount => midActiveControllers;
     public int FarActiveControllerCount => farActiveControllers;
     public bool HasSpatialIndex => spatialIndexReady;
+    public long SimulationId => long.MinValue + 2L;
 
     private void Awake()
     {
@@ -104,10 +106,12 @@ public sealed class AnimalAIWorld : MonoBehaviour
         }
 
         PendingControllers.Clear();
+        MapObjectTickManager.RegisterUpdateTick(this);
     }
 
     private void OnDestroy()
     {
+        MapObjectTickManager.UnregisterUpdateTick(this);
         if (Instance == this)
         {
             Instance = null;
@@ -116,8 +120,17 @@ public sealed class AnimalAIWorld : MonoBehaviour
 
     private void Update()
     {
-        float deltaTime = Time.deltaTime;
-        TickPresentations(deltaTime);
+        TickPresentations(Time.deltaTime);
+    }
+
+    public void ManagedUpdateTick(float deltaTime)
+    {
+        if (controllerOrderDirty)
+        {
+            controllers.Sort(CompareControllers);
+            controllerOrderDirty = false;
+        }
+
         RebuildFrameCaches();
 
         GameManager gameManager = GameManager.Instance;
@@ -354,6 +367,14 @@ public sealed class AnimalAIWorld : MonoBehaviour
         Instance?.RemoveController(controller);
     }
 
+    public static void NotifySimulationIdentityChanged(AnimalAIController controller)
+    {
+        if (controller != null && Instance != null && Instance.controllerLookup.Contains(controller))
+        {
+            Instance.controllerOrderDirty = true;
+        }
+    }
+
     public void SetPaused(bool value)
     {
         paused = value;
@@ -505,9 +526,7 @@ public sealed class AnimalAIWorld : MonoBehaviour
 
     private static Vector3 GetStableCrowdDirection(AnimalAIController source)
     {
-        long sourceId = source.TerrainInstance != null
-            ? source.TerrainInstance.DeterministicId
-            : source.GetHashCode();
+        long sourceId = source.SimulationId;
         uint hash = unchecked((uint)((ulong)sourceId ^ ((ulong)sourceId >> 32)));
         return GetStableHorizontalDirection(hash);
     }
@@ -516,20 +535,16 @@ public sealed class AnimalAIWorld : MonoBehaviour
         AnimalAIController source,
         AnimalAIController neighbor)
     {
-        long sourceId = source.TerrainInstance != null
-            ? source.TerrainInstance.DeterministicId
-            : source.GetHashCode();
-        long neighborId = neighbor.TerrainInstance != null
-            ? neighbor.TerrainInstance.DeterministicId
-            : neighbor.GetHashCode();
+        long sourceId = source.SimulationId;
+        long neighborId = neighbor.SimulationId;
         bool invert = sourceId > neighborId;
         if (sourceId == neighborId)
         {
-            int sourceHash = source.GetHashCode();
-            int neighborHash = neighbor.GetHashCode();
-            invert = sourceHash > neighborHash;
-            sourceId = sourceHash;
-            neighborId = neighborHash;
+            Vector3 sourcePosition = source.SimulationPosition;
+            Vector3 neighborPosition = neighbor.SimulationPosition;
+            invert = sourcePosition.x > neighborPosition.x
+                     || (Mathf.Approximately(sourcePosition.x, neighborPosition.x)
+                         && sourcePosition.z > neighborPosition.z);
         }
 
         ulong first = unchecked((ulong)(invert ? neighborId : sourceId));
@@ -940,6 +955,7 @@ public sealed class AnimalAIWorld : MonoBehaviour
         if (controllerLookup.Add(controller))
         {
             controllers.Add(controller);
+            controllerOrderDirty = true;
         }
 
         RefreshHerdMembership(controller);
@@ -1100,6 +1116,26 @@ public sealed class AnimalAIWorld : MonoBehaviour
         float x = left.x - right.x;
         float z = left.z - right.z;
         return x * x + z * z;
+    }
+
+    private static int CompareControllers(AnimalAIController left, AnimalAIController right)
+    {
+        if (ReferenceEquals(left, right))
+        {
+            return 0;
+        }
+
+        if (left == null)
+        {
+            return 1;
+        }
+
+        if (right == null)
+        {
+            return -1;
+        }
+
+        return left.SimulationId.CompareTo(right.SimulationId);
     }
 
     private static void AddOccupiedCoordinate(

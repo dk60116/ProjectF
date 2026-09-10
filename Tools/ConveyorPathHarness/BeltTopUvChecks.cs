@@ -56,7 +56,7 @@ internal static class BeltTopUvChecks
 
     private static void CheckSurfaceDensity(Vector3[] flows, Vector3[] origins)
     {
-        float[] edges = { -1.5f, -1.15f, -0.5f, 0.5f, 1.15f, 1.5f };
+        float[] edges = { -1.5f, -0.5f, 0.5f, 1.5f };
         int cases = 0;
         foreach (Vector3 flow in flows)
         foreach (Vector3 origin in origins)
@@ -66,7 +66,7 @@ internal static class BeltTopUvChecks
             float surfaceLength = 0f;
             for (int i = 0; i < edges.Length; i++)
             {
-                points[i] = origin + flow * edges[i] + Vector3.up * (i == 2 || i == 3 ? height : 0f);
+                points[i] = origin + flow * edges[i] + Vector3.up * (i == 1 || i == 2 ? height : 0f);
                 if (i > 0) surfaceLength += Vector3.Distance(points[i - 1], points[i]);
             }
 
@@ -80,51 +80,43 @@ internal static class BeltTopUvChecks
             foreach (float time in new[] { 0f, 0.25f, 1f, 7.3f })
             {
                 Vector2 input = Map(points[0] - flow, points[0], flow);
-                Vector2 output = Map(points[5], points[5] + flow, flow);
-                float previousEnd = ShaderPhase(input, 1f, speed, time);
+                Vector2 output = Map(points[points.Length - 1], points[points.Length - 1] + flow, flow);
+                Vector2 continuousMapping = ConveyorBeltTopUv.GetSurfaceAlignedMapping(
+                    points[0], flow, 0f, surfaceLength, repeatScale, 1f);
+                RequireSamePhase(ShaderPhase(input, 1f, speed, time),
+                    ShaderPhase(continuousMapping, 0f, speed, time),
+                    "Continuous 2F top must preserve the input seam phase");
                 float distance = 0f;
-                for (int i = 0; i < 5; i++)
+                for (int i = 0; i < points.Length - 1; i++)
                 {
                     float length = Vector3.Distance(points[i], points[i + 1]);
-                    Vector2 mapping = ConveyorBeltTopUv.GetSurfaceAlignedMapping(
+                    Vector2 segmentMapping = ConveyorBeltTopUv.GetSurfaceAlignedMapping(
                         points[0], flow, distance, length, repeatScale, 1f);
-                    RequireSamePhase(previousEnd, ShaderPhase(mapping, 0f, speed, time),
-                        "Surface-density correction must preserve input and internal joins");
-                    if (Math.Abs(mapping.x / length - repeatScale) > 0.0001f)
+                    float startUv = distance / surfaceLength;
+                    float endUv = (distance + length) / surfaceLength;
+                    RequireSamePhase(
+                        ShaderPhase(segmentMapping, 0f, speed, time),
+                        ShaderPhase(continuousMapping, startUv, speed, time),
+                        "Continuous 2F UVs must preserve every bend phase");
+                    RequireSamePhase(
+                        ShaderPhase(segmentMapping, 1f, speed, time),
+                        ShaderPhase(continuousMapping, endUv, speed, time),
+                        "Continuous 2F UVs must use surface distance through every bend");
+                    if (Math.Abs(continuousMapping.x / surfaceLength - repeatScale) > 0.0001f)
                     {
-                        throw new InvalidOperationException("All five 2F tops must have uniform surface density");
+                        throw new InvalidOperationException("The continuous 2F top must have uniform surface density");
                     }
-
-                    // Real end meshes overlap their seam planes. Their UV phase
-                    // must match at the connection plane inside the mesh as well.
-                    if (i == 0)
-                    {
-                        Vector2 extended = ConveyorBeltTopUv.GetSurfaceAlignedMapping(
-                            points[0], flow, -0.05f, length + 0.05f, repeatScale, 1f);
-                        RequireSamePhase(ShaderPhase(mapping, 0f, speed, time),
-                            ShaderPhase(extended, 0.05f / (length + 0.05f), speed, time),
-                            "Input mesh overlap must not shift the seam phase");
-                    }
-                    if (i == 4)
-                    {
-                        Vector2 extended = ConveyorBeltTopUv.GetSurfaceAlignedMapping(
-                            points[0], flow, distance, length + 0.08f, repeatScale, 1f);
-                        RequireSamePhase(ShaderPhase(mapping, 1f, speed, time),
-                            ShaderPhase(extended, length / (length + 0.08f), speed, time),
-                            "Output mesh overlap must not shift the seam phase");
-                    }
-
-                    previousEnd = ShaderPhase(mapping, 1f, speed, time);
                     distance += length;
                 }
 
-                RequireSamePhase(previousEnd, ShaderPhase(output, 0f, speed, time),
+                RequireSamePhase(ShaderPhase(continuousMapping, 1f, speed, time),
+                    ShaderPhase(output, 0f, speed, time),
                     "Surface-density correction must also preserve the output 1F phase");
                 cases++;
             }
         }
 
-        Console.WriteLine($"Passed {cases} 2F surface-density cases with both 1F ends and internal joins aligned over time.");
+        Console.WriteLine($"Passed {cases} continuous 2F surface-density cases with both 1F ends and all bends aligned over time.");
     }
 
     private static Vector2 Map(Vector3 start, Vector3 end, Vector3 flow)

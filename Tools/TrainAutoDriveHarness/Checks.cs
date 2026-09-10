@@ -6,6 +6,18 @@ using UnityEngine;
 // Selection, control transfer, schedule state, forward guards and graph search
 // are extracted from production by Run.ps1.
 static class Time { public static int frameCount = 1; }
+static class MapObjectTickManager
+{
+    public const float FixedSimulationDeltaSeconds = 1f / 60f;
+    public static long CurrentSimulationTick => Time.frameCount;
+}
+static class DeterministicSimulationUnits
+{
+    public const long UnitsPerWhole = 60_000_000L;
+    public static long FromFloat(float value) => value <= 0f
+        ? 0L
+        : (long)Math.Round(value * UnitsPerWhole, MidpointRounding.AwayFromZero);
+}
 public class Player { }
 public class FakeObject { public bool activeInHierarchy = true; }
 public class FakeTransform { public Vector3 forward, position; }
@@ -38,6 +50,9 @@ public partial class Train
     public Railload Rail;
     public float Distance;
     public int GetInstanceID() => id;
+    public long SimulationId => id;
+    protected static int CompareSimulationOrder(Train left, Train right)
+        => left.SimulationId.CompareTo(right.SimulationId);
     public bool TryGetPlacementRuntime(out int a, out int b) { a = b = 0; return Rail != null; }
     public bool TryGetCurrentRailPose(out Railload rail, out float distance, out Vector2 point, out Vector2 tangent)
     { rail = Rail; distance = Distance; Rail.TrySampleRenderedPath(distance, out point, out _); tangent = new(transform.forward.x, transform.forward.z); return true; }
@@ -69,6 +84,7 @@ public partial class RailHandcar : Train
     readonly List<Train> connectedTrainGroupScratch = new();
     readonly Dictionary<float, float> testStationDockDeltas = new();
     public float CurrentVehicleSignedSpeed;
+    public float CurrentVehicleSpeed => Math.Abs(CurrentVehicleSignedSpeed);
     public int PoweredMoves;
     public bool BlockTestMovement;
     public bool TryGetRailForwardDirection(out Vector2 direction)
@@ -150,12 +166,13 @@ public partial class SteamTrain
 {
     const float AutoDriveRouteSegmentTolerance = .2f, AutoDriveRouteRefreshInterval = .25f;
     const float AutoDriveWaitDurationSeconds = 5, BurnEnergyEpsilon = .0001f, WaterEpsilon = .0001f;
+    const float BurnEnergyDrivingSpeedThreshold = .0001f;
     static readonly Railload TestRail = new();
     static readonly Trainstation StationA = new() { StationName = "A", Distance = 0 };
     static readonly Trainstation StationB = new() { StationName = "B", Distance = 20 };
     bool HasAnyAutoDriveTarget => true;
     public bool HasFuel = true;
-    float pendingBurnEnergyCost, pendingWaterCost;
+    long pendingBurnEnergyCostUnits, pendingWaterCostUnits;
     int pendingBurnEnergyFrame, pendingWaterFrame, fuelRequests;
     bool testDock;
     Vector2 testDockDirection;
@@ -164,8 +181,10 @@ public partial class SteamTrain
     public bool HasWaterDock;
     public float WaterDockDelta;
     public bool WaterPipeReady;
-    void ClearPendingBurnEnergyCost() { pendingBurnEnergyCost = 0; }
-    void ClearPendingWaterCost() { pendingWaterCost = 0; }
+    void ClearPendingBurnEnergyCost() { pendingBurnEnergyCostUnits = 0; }
+    void ClearPendingWaterCost() { pendingWaterCostUnits = 0; }
+    void SpendStoredBurnEnergyUnits(long amount) { }
+    void SpendStoredWaterUnits(long amount) { }
     void RequestWaterPipeRetract() { WaterPipeReady = false; }
     void SetWaterPipeDockTarget(Vector2Int direction, bool ready) { WaterPipeReady = ready; }
     bool TryResolveWaterPipeDockSample(
@@ -241,7 +260,7 @@ public partial class SteamTrain
     { delta = testDockDistance; direction = testDockDirection; return testDock; }
     bool TryApplyAutoDriveDockApproachSpeed(ref Vector3 direction, float distance) => false;
     bool IsAutoDriveDockingApproachActive() => testDock;
-    bool HasAutoDriveRouteReferenceChanged(RailHandcar train) => train.GetInstanceID() != autoDriveRouteReferenceTrainInstanceId;
+    bool HasAutoDriveRouteReferenceChanged(RailHandcar train) => train.SimulationId != autoDriveRouteReferenceTrainSimulationId;
     void ReconcileAutoDriveRouteCursor(Railload rail, float distance) { }
     bool TryFindBestAutoDriveRouteSegmentIndex(Railload rail, float distance, out int index)
     { index = 0; return autoDriveRouteSegments.Count > 0; }
@@ -498,8 +517,8 @@ public partial class SteamTrain
         Check(left.BlocksManualDisconnection && right.BlocksManualDisconnection, "Automatic driving must lock manual disconnection from either locomotive");
         left.HandleMountedInput(Vector3.left, 1, .1f, new Player());
         right.TickAutoDrive(.1f, null);
-        Check(right.PoweredMoves == 1 && left.PoweredMoves == 0, "Mounted input and both Update calls must not drive twice in one frame");
-        Check(right.pendingBurnEnergyCost > 0, "Duplicate mounted input must not clear pending fuel cost");
+        Check(right.PoweredMoves == 1 && left.PoweredMoves == 0, "Mounted input and repeated manager calls must not drive twice in one simulation tick");
+        Check(right.pendingBurnEnergyCostUnits == 0, "Automatic fuel cost must commit inside its simulation tick");
 
         Time.frameCount++;
         right.SeedStraightPath(left, wagon, right);

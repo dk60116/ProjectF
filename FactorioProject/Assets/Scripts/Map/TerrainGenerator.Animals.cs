@@ -1032,7 +1032,7 @@ public partial class TerrainGenerator : MonoBehaviour
         int hash = 17;
         for (int i = 0; animalDefinitions != null && i < animalDefinitions.Count; i++)
         {
-            hash = unchecked(hash * 31 + (animalDefinitions[i] != null ? animalDefinitions[i].GetInstanceID() : 0));
+            hash = unchecked(hash * 31 + (animalDefinitions[i] != null ? animalDefinitions[i].Id : 0));
         }
 
         if (hash == animalDefinitionCacheHash)

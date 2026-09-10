@@ -139,8 +139,13 @@ public class Sprinkler : InputOutputModule
         }
     }
 
-    public override void ManagedUpdateTick(float deltaTime)
+    public override void ApplyManagedUpdateTick()
     {
+        if (!TryBeginPlannedModuleApply(out float deltaTime))
+        {
+            return;
+        }
+
         int waterItemId = ResolveWaterItemId();
         if (StoredFluidItemId >= 0 && StoredFluidItemId != waterItemId)
         {
@@ -152,7 +157,7 @@ public class Sprinkler : InputOutputModule
             PullWaterItemsIntoStorage(waterItemId);
         }
 
-        base.ManagedUpdateTick(deltaTime);
+        ApplyPlannedBaseModuleTick(deltaTime);
         if (!Application.isPlaying || deltaTime <= 0f || !TryGetPlacementRuntime(out _, out _))
         {
             currentWateringTargetCount = 0;

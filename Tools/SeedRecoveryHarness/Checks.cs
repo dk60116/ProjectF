@@ -267,7 +267,7 @@ public partial class LoggingMachine
     private readonly List<KeyValuePair<int,int>> harvestedSeedDrops = new List<KeyValuePair<int,int>>();
     private readonly List<InputOutputModule> seedRecoveryModules = new List<InputOutputModule>();
     private Resource activeTree;
-    private float consumedWorkEnergy;
+    private long consumedWorkEnergyUnits;
     public Dictionary<int,int> Drops = new Dictionary<int,int>();
     public int Apples, Advances;
     public void Harvest(Resource tree) => CompleteTreeHarvest(tree);

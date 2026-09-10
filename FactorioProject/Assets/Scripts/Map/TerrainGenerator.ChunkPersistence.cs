@@ -1034,9 +1034,18 @@ public partial class TerrainGenerator : MonoBehaviour
 
         if (savedState.hasSteamTrainBurnEnergyState && restoredInstallation is SteamTrain steamTrain)
         {
-            steamTrain.ApplyBurnEnergyState(
-                savedState.steamTrainStoredBurnEnergy,
-                savedState.steamTrainBurnEnergyGaugeCapacity);
+            if (savedState.hasDeterministicUnits)
+            {
+                steamTrain.ApplyBurnEnergyStateUnits(
+                    savedState.steamTrainStoredBurnEnergyUnits,
+                    savedState.steamTrainBurnEnergyGaugeCapacityUnits);
+            }
+            else
+            {
+                steamTrain.ApplyBurnEnergyState(
+                    savedState.steamTrainStoredBurnEnergy,
+                    savedState.steamTrainBurnEnergyGaugeCapacity);
+            }
         }
 
         if (restoredInstallation is SteamTrain restoredSteamTrain)
@@ -1101,10 +1110,20 @@ public partial class TerrainGenerator : MonoBehaviour
                 savedState.loggingMinimumGrowth,
                 savedState.loggingMaximumGrowth);
         }
-        restoredInstallation.SetStoredFluid(
-            savedState.storedFluidItemId,
-            savedState.storedFluidLiters,
-            savedState.storedFluidTemperatureCelsius);
+        if (savedState.hasDeterministicUnits)
+        {
+            restoredInstallation.SetStoredFluidUnits(
+                savedState.storedFluidItemId,
+                savedState.storedFluidUnits,
+                savedState.storedFluidTemperatureCelsius);
+        }
+        else
+        {
+            restoredInstallation.SetStoredFluid(
+                savedState.storedFluidItemId,
+                savedState.storedFluidLiters,
+                savedState.storedFluidTemperatureCelsius);
+        }
 
         if (restoredInstallation is IPersistentInstallationItemStorage itemStorage)
         {

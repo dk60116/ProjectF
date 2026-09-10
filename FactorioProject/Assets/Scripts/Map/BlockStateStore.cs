@@ -35,6 +35,7 @@ public partial class BlockStateStore : MonoBehaviour
         public int loggingMinimumGrowth = LoggingMachine.DefaultMinimumGrowth;
         public int loggingMaximumGrowth = LoggingMachine.DefaultMaximumGrowth;
         public float storedFluidLiters;
+        public long storedFluidUnits;
         public int storedFluidItemId = -1;
         public float storedFluidTemperatureCelsius = MapClimate.DefaultCurrentTemperatureCelsius;
         public int storedInstallationItemId = -1;
@@ -46,11 +47,15 @@ public partial class BlockStateStore : MonoBehaviour
         public long trainRailPlacementSequence;
         public Vector2Int trainRailAnchorCoordinate;
         public float trainRailDistanceAlongPath;
+        public long trainRailDistanceAlongPathUnits;
         public Vector2 trainRailPathPoint;
         public Vector2 trainRailFacingTangent;
         public bool hasSteamTrainBurnEnergyState;
         public float steamTrainStoredBurnEnergy;
         public float steamTrainBurnEnergyGaugeCapacity;
+        public long steamTrainStoredBurnEnergyUnits;
+        public long steamTrainBurnEnergyGaugeCapacityUnits;
+        public bool hasDeterministicUnits;
         public bool steamTrainAutoDriveEnabled;
         public string steamTrainAutoDriveTargetAStationName = string.Empty;
         public string steamTrainAutoDriveTargetBStationName = string.Empty;
@@ -100,6 +105,7 @@ public partial class BlockStateStore : MonoBehaviour
                 loggingMinimumGrowth = loggingMinimumGrowth,
                 loggingMaximumGrowth = loggingMaximumGrowth,
                 storedFluidLiters = storedFluidLiters,
+                storedFluidUnits = storedFluidUnits,
                 storedFluidItemId = storedFluidItemId,
                 storedFluidTemperatureCelsius = storedFluidTemperatureCelsius,
                 storedInstallationItemId = storedInstallationItemId,
@@ -111,11 +117,15 @@ public partial class BlockStateStore : MonoBehaviour
                 trainRailPlacementSequence = trainRailPlacementSequence,
                 trainRailAnchorCoordinate = trainRailAnchorCoordinate,
                 trainRailDistanceAlongPath = trainRailDistanceAlongPath,
+                trainRailDistanceAlongPathUnits = trainRailDistanceAlongPathUnits,
                 trainRailPathPoint = trainRailPathPoint,
                 trainRailFacingTangent = trainRailFacingTangent,
                 hasSteamTrainBurnEnergyState = hasSteamTrainBurnEnergyState,
                 steamTrainStoredBurnEnergy = steamTrainStoredBurnEnergy,
                 steamTrainBurnEnergyGaugeCapacity = steamTrainBurnEnergyGaugeCapacity,
+                steamTrainStoredBurnEnergyUnits = steamTrainStoredBurnEnergyUnits,
+                steamTrainBurnEnergyGaugeCapacityUnits = steamTrainBurnEnergyGaugeCapacityUnits,
+                hasDeterministicUnits = hasDeterministicUnits,
                 steamTrainAutoDriveEnabled = steamTrainAutoDriveEnabled,
                 steamTrainAutoDriveTargetAStationName = steamTrainAutoDriveTargetAStationName,
                 steamTrainAutoDriveTargetBStationName = steamTrainAutoDriveTargetBStationName,
@@ -1340,9 +1350,9 @@ public partial class BlockStateStore : MonoBehaviour
 
         if (installationObject is Train train)
         {
-            if (train.TryGetCurrentRailPose(
+            if (train.TryGetCurrentRailPoseUnits(
                     out Railload rail,
-                    out float distanceAlongPath,
+                    out long distanceAlongPathUnits,
                     out Vector2 pathPoint,
                     out Vector2 tangent)
                 && rail != null)
@@ -1350,7 +1360,9 @@ public partial class BlockStateStore : MonoBehaviour
                 state.hasTrainRailSample = true;
                 state.trainRailPlacementSequence = rail.RuntimePlacementSequence;
                 state.trainRailAnchorCoordinate = rail.RuntimeAnchorCoordinate;
-                state.trainRailDistanceAlongPath = distanceAlongPath;
+                state.trainRailDistanceAlongPathUnits = distanceAlongPathUnits;
+                state.trainRailDistanceAlongPath = DeterministicSimulationUnits.ToFloat(
+                    distanceAlongPathUnits);
                 state.trainRailPathPoint = pathPoint;
                 state.trainRailFacingTangent = tangent;
             }
@@ -1361,6 +1373,9 @@ public partial class BlockStateStore : MonoBehaviour
             steamTrain.CaptureBurnEnergyState(
                 out state.steamTrainStoredBurnEnergy,
                 out state.steamTrainBurnEnergyGaugeCapacity);
+            steamTrain.CaptureBurnEnergyStateUnits(
+                out state.steamTrainStoredBurnEnergyUnits,
+                out state.steamTrainBurnEnergyGaugeCapacityUnits);
             steamTrain.CaptureAutoDriveState(
                 out state.steamTrainAutoDriveEnabled,
                 out state.steamTrainAutoDriveTargetAStationName,
@@ -1419,6 +1434,8 @@ public partial class BlockStateStore : MonoBehaviour
             state.loggingMinimumGrowth = loggingMachine.MinimumGrowth;
             state.loggingMaximumGrowth = loggingMachine.MaximumGrowth;
         }
+        state.hasDeterministicUnits = true;
+        state.storedFluidUnits = installationObject.StoredFluidUnits;
         state.storedFluidLiters = installationObject.StoredFluidLiters;
         state.storedFluidItemId = installationObject.StoredFluidItemId;
         state.storedFluidTemperatureCelsius = installationObject.GetStoredFluidTemperatureCelsius(state.storedFluidItemId);

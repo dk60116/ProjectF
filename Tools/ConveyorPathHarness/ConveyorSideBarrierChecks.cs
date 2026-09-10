@@ -93,9 +93,9 @@ internal static class ConveyorSideBarrierChecks
         Console.WriteLine($"PASS: {cases} 2F side barrier cases (four rotations, free descent, blocked re-entry, low landings, raised sides, capsule width, fast/diagonal movement, open ends, escape).");
     }
 
-    // Inner edges of Body_End/Body_Start in the current 2F prefab, using mesh bounds.
-    private const float RaisedMin = -1.3187f + 0.50578f * 0.38050434f;
-    private const float RaisedMax = 1.3251f - 0.50578f * 0.375513f;
+    // The collision span is authored independently from the visual mesh.
+    private const float RaisedMin = -1.13f;
+    private const float RaisedMax = 1.13f;
 
     private static bool SweepBelt(Vector2 start, Vector2 direction, float distance,
         Vector2 origin, Vector2 axis, float radius, out float nearest, out Vector2 normal)

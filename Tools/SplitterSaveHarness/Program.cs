@@ -45,6 +45,11 @@ internal static class Program
                 boxMaximumStoredItemCount = wheels + 5,
                 loggingMinimumGrowth = wheels + 1,
                 loggingMaximumGrowth = wheels + 4,
+                hasDeterministicUnits = true,
+                storedFluidUnits = 123456789L,
+                trainRailDistanceAlongPathUnits = 234567890L,
+                steamTrainStoredBurnEnergyUnits = 345678901L,
+                steamTrainBurnEnergyGaugeCapacityUnits = 456789012L,
                 splitterState = new Spliterbelt.PersistentState
                     { filterOutput = mode, nextInput = input, nextOutput = output, wheelRotationMask = wheels }
             };
@@ -60,13 +65,18 @@ internal static class Program
                 || restored.boxMinimumRetainedItemCount != wheels + 2
                 || restored.boxMaximumStoredItemCount != wheels + 5
                 || restored.loggingMinimumGrowth != wheels + 1 || restored.loggingMaximumGrowth != wheels + 4
+                || !restored.hasDeterministicUnits || restored.storedFluidUnits != 123456789L
+                || restored.trainRailDistanceAlongPathUnits != 234567890L
+                || restored.steamTrainStoredBurnEnergyUnits != 345678901L
+                || restored.steamTrainBurnEnergyGaugeCapacityUnits != 456789012L
                 || stream.Position != stream.Length)
                 throw new Exception("Splitter save round-trip mismatch");
 
             // Version 52 lacks the box reserve; version 51 also lacks the wheel field;
             // version 50 lacks the entire splitter tail.
             // The version 57 B filters and version 58 unassigned-color flag follow the v56 tail.
-            byte[] bytes = stream.ToArray()[..^9];
+            // Remove the v61 deterministic-unit tail, then the v57-v58 tail.
+            byte[] bytes = stream.ToArray()[..^42];
             using var v55Stream = new MemoryStream(bytes, 0, bytes.Length - 8);
             using var v55Reader = new BinaryReader(v55Stream);
             var v55 = (BlockStateStore.InstallationSaveState)read.Invoke(null, new[] { v55Reader, (object)55, current });
@@ -96,15 +106,53 @@ internal static class Program
                 throw new Exception("Legacy installation alignment changed");
             cases += 5;
         }
+        CheckDeterministicInputOutputState(serializer);
         Console.WriteLine($"PASS: {cases} production serializer installation round-trips, including range bounds and versions 50/51/52/55 compatibility. No engine launched.");
         CheckNativeBelts(serializer, current);
+    }
+
+    private static void CheckDeterministicInputOutputState(Type serializer)
+    {
+        MethodInfo write = serializer.GetMethod("WriteInputOutputState", BindingFlags.Static | BindingFlags.NonPublic);
+        MethodInfo read = serializer.GetMethod("ReadInputOutputState", BindingFlags.Static | BindingFlags.NonPublic);
+        var state = new InputOutputModule.PersistentState
+        {
+            hasDeterministicUnits = true,
+            storedEnergyUnits = 567890123L,
+            energyGaugeCapacityUnits = 678901234L,
+            remainingCraftTicks = 789L,
+            activeCraftConsumedEnergyUnits = 789012345L,
+            oilDrillingProgressUnits = 890123456L,
+            seedPlanterPlantElapsedUnits = 901234567L
+        };
+        using var stream = new MemoryStream();
+        using var writer = new BinaryWriter(stream, System.Text.Encoding.UTF8, true);
+        write.Invoke(null, new object[] { writer, state });
+        writer.Flush();
+        stream.Position = 0;
+        using var reader = new BinaryReader(stream, System.Text.Encoding.UTF8, true);
+        var restored = (InputOutputModule.PersistentState)read.Invoke(
+            null,
+            new object[] { reader, SaveGameData.CurrentVersion });
+        if (restored == null
+            || !restored.hasDeterministicUnits
+            || restored.storedEnergyUnits != state.storedEnergyUnits
+            || restored.energyGaugeCapacityUnits != state.energyGaugeCapacityUnits
+            || restored.remainingCraftTicks != state.remainingCraftTicks
+            || restored.activeCraftConsumedEnergyUnits != state.activeCraftConsumedEnergyUnits
+            || restored.oilDrillingProgressUnits != state.oilDrillingProgressUnits
+            || restored.seedPlanterPlantElapsedUnits != state.seedPlanterPlantElapsedUnits
+            || stream.Position != stream.Length)
+            throw new Exception("Deterministic input/output state round-trip mismatch");
     }
 
     private static void CheckNativeBelts(Type serializer, object compatibility)
     {
         var save = new SaveGameData
         {
-            beltSimulation = new ProjectF.Conveyors.BeltSimulationSnapshot { Tick = 478921 }
+            beltSimulation = new ProjectF.Conveyors.BeltSimulationSnapshot { Tick = 478921 },
+            simulationTick = 912345,
+            nextInstallationSimulationId = 67890
         };
         var lane = new ProjectF.Conveyors.BeltSavedLane
         {
@@ -120,6 +168,12 @@ internal static class Program
         });
         save.beltSimulation.Lanes.Add(new ProjectF.Conveyors.BeltSavedLane
         { X = 3, Y = -5, Lane = 0, State = ProjectF.Conveyors.BeltLaneState.Empty, CursorX = 4, CursorLane = 2 });
+        save.map.farmlandFertilizer.Add(new FarmlandFertilizerSaveEntry
+        {
+            coordinate = new UnityEngine.Vector2Int(7, 8),
+            fertilizerEnergy = 1.2345679f,
+            fertilizerEnergyUnits = 74074073L
+        });
         MethodInfo write = serializer.GetMethod("WriteSaveGameData", BindingFlags.Static | BindingFlags.NonPublic);
         MethodInfo read = serializer.GetMethod("ReadSaveGameData", BindingFlags.Static | BindingFlags.NonPublic);
         using var stream = new MemoryStream();
@@ -128,7 +182,10 @@ internal static class Program
         using var reader = new BinaryReader(stream, System.Text.Encoding.UTF8, true);
         var loaded = (SaveGameData)read.Invoke(null, new[] { reader, (object)SaveGameData.CurrentVersion, compatibility });
         var item = loaded.map.conveyorItems[0].lanes[0].nativeBeltState;
-        if (loaded.beltSimulation.Tick != 478921 || loaded.beltSimulation.Lanes[0].CursorLane != 2
+        if (loaded.beltSimulation.Tick != 478921 || loaded.simulationTick != 912345
+            || loaded.nextInstallationSimulationId != 67890
+            || loaded.beltSimulation.Lanes[0].CursorLane != 2
+            || loaded.map.farmlandFertilizer[0].fertilizerEnergyUnits != 74074073L
             || item.State.ItemId != 42 || item.State.Remaining != 1001 || item.State.Duration != 393217
             || item.OriginLane != 0 || item.CursorX != 3 || stream.Position != stream.Length)
             throw new Exception("Native belt production save round-trip mismatch");
@@ -136,6 +193,6 @@ internal static class Program
         write.Invoke(null, new object[] { secondWriter, loaded }); secondWriter.Flush();
         if (!System.Linq.Enumerable.SequenceEqual(stream.ToArray(), output.ToArray()))
             throw new Exception("Native belt save is not byte identical after round-trip");
-        Console.WriteLine("PASS: production v59 save preserves integer belt clock, occupied lanes and empty-lane merge cursors; bytes match after round-trip.");
+        Console.WriteLine("PASS: production v61 save preserves shared and belt clocks, deterministic units, stable installation ID allocation, occupied lanes and empty-lane merge cursors; bytes match after round-trip.");
     }
 }

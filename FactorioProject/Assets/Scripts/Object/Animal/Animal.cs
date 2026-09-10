@@ -926,7 +926,12 @@ public class Animal : MonoBehaviour
     private int BuildCorpseLootSeed()
     {
         TerrainAnimalInstance instance = ResolveTerrainInstance();
-        long deterministicId = instance != null ? instance.DeterministicId : GetInstanceID();
+        AnimalAIController controller = GetComponentInParent<AnimalAIController>();
+        long deterministicId = instance != null && instance.DeterministicId != 0L
+            ? instance.DeterministicId
+            : controller != null
+                ? controller.SimulationId
+                : BuildFallbackSimulationId();
         unchecked
         {
             int seed = (int)deterministicId ^ (int)(deterministicId >> 32);
@@ -1096,6 +1101,22 @@ public class Animal : MonoBehaviour
     private void OnDestroy()
     {
         DetachFromDraftHandcart();
+    }
+
+    private long BuildFallbackSimulationId()
+    {
+        Vector3 position = transform.position;
+        int x = Mathf.RoundToInt(position.x * 1000f);
+        int z = Mathf.RoundToInt(position.z * 1000f);
+        int definitionId = animalDefinition != null ? animalDefinition.Id : 0;
+        unchecked
+        {
+            ulong value = 1469598103934665603UL;
+            value = (value ^ (uint)x) * 1099511628211UL;
+            value = (value ^ (uint)z) * 1099511628211UL;
+            value = (value ^ (uint)definitionId) * 1099511628211UL;
+            return (long)value;
+        }
     }
 
     internal void TickNeeds(float deltaTime)

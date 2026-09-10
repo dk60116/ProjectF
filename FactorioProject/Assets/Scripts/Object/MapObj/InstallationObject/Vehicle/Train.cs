@@ -20,15 +20,15 @@ public class Train : Vehicle
     private float trainConnectionMinForwardDot = 0.5f;
     private Rigidbody cachedTrainRigidbody;
     private Railload currentRail;
-    private float currentRailDistance;
+    private long currentRailDistanceUnits;
     private Vector2 currentRailPoint;
     private Vector2 currentRailTangent;
     private Railload currentRailConnectionTargetRail;
-    private float currentRailConnectionTargetDistance;
+    private long currentRailConnectionTargetDistanceUnits;
     private Vector2 currentRailConnectionTargetPoint;
     private Vector2 currentRailConnectionTargetTangent;
-    private float currentRailConnectionPathDistance;
-    private float currentRailConnectionProgress;
+    private long currentRailConnectionPathDistanceUnits;
+    private long currentRailConnectionProgressUnits;
     // Connection identity includes the physical end of this car. Rail path point
     // order and the direction of travel must not change which end is the front.
     private readonly Dictionary<Train, bool> connectedTrainEnds = new Dictionary<Train, bool>();
@@ -247,7 +247,7 @@ public class Train : Vehicle
     private void ClearCurrentRailSample()
     {
         currentRail = null;
-        currentRailDistance = 0f;
+        currentRailDistanceUnits = 0L;
         currentRailPoint = Vector2.zero;
         currentRailTangent = Vector2.zero;
         ClearCurrentRailConnectionTransition();
@@ -524,6 +524,22 @@ public class Train : Vehicle
         TryApplyRailPose(rail, distanceAlongPath, railPoint, facingTangent);
     }
 
+    public virtual void ApplyPlacedRailSampleUnits(
+        Railload rail,
+        long distanceAlongPathUnits,
+        Vector2 railPoint,
+        Vector2 facingTangent)
+    {
+        if (TryApplyRailPose(
+                rail,
+                DeterministicSimulationUnits.ToFloat(distanceAlongPathUnits),
+                railPoint,
+                facingTangent))
+        {
+            currentRailDistanceUnits = System.Math.Max(0L, distanceAlongPathUnits);
+        }
+    }
+
     public virtual bool TryApplyRailPose(
         Railload rail,
         float distanceAlongPath,
@@ -617,7 +633,10 @@ public class Train : Vehicle
         pathPoint = Vector2.zero;
         tangent = Vector2.zero;
         if (currentRail == null
-            || !currentRail.TrySampleRenderedPath(currentRailDistance, out Vector2 sampledPoint, out tangent))
+            || !currentRail.TrySampleRenderedPath(
+                DeterministicSimulationUnits.ToFloat(currentRailDistanceUnits),
+                out Vector2 sampledPoint,
+                out tangent))
         {
             return false;
         }
@@ -636,14 +655,25 @@ public class Train : Vehicle
         }
 
         rail = currentRail;
-        distanceAlongPath = currentRailDistance;
+        distanceAlongPath = DeterministicSimulationUnits.ToFloat(currentRailDistanceUnits);
         return true;
+    }
+
+    public bool TryGetCurrentRailPoseUnits(
+        out Railload rail,
+        out long distanceAlongPathUnits,
+        out Vector2 pathPoint,
+        out Vector2 tangent)
+    {
+        bool found = TryGetCurrentRailPose(out rail, out _, out pathPoint, out tangent);
+        distanceAlongPathUnits = found ? currentRailDistanceUnits : 0L;
+        return found;
     }
 
     protected void SetCurrentRailSample(Railload rail, float distanceAlongPath, Vector2 point, Vector2 tangent)
     {
         currentRail = rail;
-        currentRailDistance = Mathf.Max(0f, distanceAlongPath);
+        currentRailDistanceUnits = DeterministicSimulationUnits.FromFloat(distanceAlongPath);
         currentRailPoint = point;
         currentRailTangent = tangent;
         ClearCurrentRailConnectionTransition();
@@ -664,11 +694,15 @@ public class Train : Vehicle
         }
 
         currentRailConnectionTargetRail = targetRail;
-        currentRailConnectionTargetDistance = Mathf.Max(0f, targetDistanceAlongPath);
+        currentRailConnectionTargetDistanceUnits = DeterministicSimulationUnits.FromFloat(
+            targetDistanceAlongPath);
         currentRailConnectionTargetPoint = targetPoint;
         currentRailConnectionTargetTangent = targetTangent;
-        currentRailConnectionPathDistance = connectionPathDistance;
-        currentRailConnectionProgress = Mathf.Clamp(connectionProgress, 0f, connectionPathDistance);
+        currentRailConnectionPathDistanceUnits = DeterministicSimulationUnits.FromFloat(
+            connectionPathDistance);
+        currentRailConnectionProgressUnits = System.Math.Min(
+            DeterministicSimulationUnits.FromFloat(Mathf.Max(0f, connectionProgress)),
+            currentRailConnectionPathDistanceUnits);
     }
 
     internal bool TryGetCurrentRailConnectionTransition(
@@ -680,22 +714,25 @@ public class Train : Vehicle
         out float connectionProgress)
     {
         targetRail = currentRailConnectionTargetRail;
-        targetDistanceAlongPath = currentRailConnectionTargetDistance;
+        targetDistanceAlongPath = DeterministicSimulationUnits.ToFloat(
+            currentRailConnectionTargetDistanceUnits);
         targetPoint = currentRailConnectionTargetPoint;
         targetTangent = currentRailConnectionTargetTangent;
-        connectionPathDistance = currentRailConnectionPathDistance;
-        connectionProgress = currentRailConnectionProgress;
-        return targetRail != null && connectionPathDistance > 0f;
+        connectionPathDistance = DeterministicSimulationUnits.ToFloat(
+            currentRailConnectionPathDistanceUnits);
+        connectionProgress = DeterministicSimulationUnits.ToFloat(
+            currentRailConnectionProgressUnits);
+        return targetRail != null && currentRailConnectionPathDistanceUnits > 0L;
     }
 
     internal void ClearCurrentRailConnectionTransition()
     {
         currentRailConnectionTargetRail = null;
-        currentRailConnectionTargetDistance = 0f;
+        currentRailConnectionTargetDistanceUnits = 0L;
         currentRailConnectionTargetPoint = Vector2.zero;
         currentRailConnectionTargetTangent = Vector2.zero;
-        currentRailConnectionPathDistance = 0f;
-        currentRailConnectionProgress = 0f;
+        currentRailConnectionPathDistanceUnits = 0L;
+        currentRailConnectionProgressUnits = 0L;
     }
 
     protected void RefreshRuntimeCoordinate(Vector3 worldPosition)

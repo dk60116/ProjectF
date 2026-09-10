@@ -15,11 +15,119 @@ public interface IMapObjectUpdateTickInterval
     float ManagedUpdateTickIntervalSeconds { get; }
 }
 
+public interface IMapObjectSimulationIdentity
+{
+    long SimulationId { get; }
+}
+
+public interface IMapObjectStagedUpdateTick
+{
+    void PlanManagedUpdateTick(float deltaTime);
+
+    void ApplyManagedUpdateTick();
+}
+
+public static class DeterministicSimulationUnits
+{
+    // Divisible by 60 so common per-second values retain exact sub-tick units.
+    public const long UnitsPerWhole = 60_000_000L;
+
+    public static long FromInt(int value)
+    {
+        return value <= 0
+            ? 0L
+            : Math.Min(long.MaxValue, (long)value * UnitsPerWhole);
+    }
+
+    public static long FromFloat(float value)
+    {
+        if (float.IsNaN(value) || value <= 0f)
+        {
+            return 0L;
+        }
+
+        if (float.IsPositiveInfinity(value))
+        {
+            return long.MaxValue;
+        }
+
+        decimal scaled = decimal.Round(
+            (decimal)value * UnitsPerWhole,
+            0,
+            MidpointRounding.AwayFromZero);
+        return scaled >= long.MaxValue ? long.MaxValue : (long)scaled;
+    }
+
+    public static float ToFloat(long units)
+    {
+        return units <= 0L ? 0f : (float)((double)units / UnitsPerWhole);
+    }
+
+    public static long SecondsToTicks(float seconds)
+    {
+        if (float.IsNaN(seconds) || seconds <= 0f)
+        {
+            return 0L;
+        }
+
+        return Math.Max(
+            1L,
+            (long)decimal.Round(
+                (decimal)seconds * MapObjectTickManager.DefaultSimulationTicksPerSecond,
+                0,
+                MidpointRounding.AwayFromZero));
+    }
+
+    public static float TicksToSeconds(long ticks)
+    {
+        return ticks <= 0L
+            ? 0f
+            : ticks * MapObjectTickManager.FixedSimulationDeltaSeconds;
+    }
+
+    public static long DeltaTimeToTicks(float deltaTime)
+    {
+        return deltaTime <= 0f ? 0L : Math.Max(1L, SecondsToTicks(deltaTime));
+    }
+
+    public static long RateForTicks(float ratePerSecond, long elapsedTicks)
+    {
+        if (ratePerSecond <= 0f || elapsedTicks <= 0L)
+        {
+            return 0L;
+        }
+
+        decimal units = (decimal)ratePerSecond
+                        * UnitsPerWhole
+                        * elapsedTicks
+                        / MapObjectTickManager.DefaultSimulationTicksPerSecond;
+        decimal rounded = decimal.Round(units, 0, MidpointRounding.AwayFromZero);
+        return rounded >= long.MaxValue ? long.MaxValue : (long)rounded;
+    }
+
+    public static long MultiplyRatio(long value, long numerator, long denominator)
+    {
+        if (value <= 0L || numerator <= 0L || denominator <= 0L)
+        {
+            return 0L;
+        }
+
+        if (numerator >= denominator)
+        {
+            return value;
+        }
+
+        return (long)decimal.Truncate((decimal)value * numerator / denominator);
+    }
+}
+
 public sealed class MapObjectTickManager : MonoBehaviour
 {
-    private const float DefaultUpdateTickIntervalSeconds = 1f / 60f;
-    private const int UpdateTickIntervalKeyScale = 10000;
-    private const int AliveValidationFrameInterval = 120;
+    public const int DefaultSimulationTicksPerSecond = 60;
+    public const float FixedSimulationDeltaSeconds = 1f / DefaultSimulationTicksPerSecond;
+    private const float DefaultUpdateTickIntervalSeconds = FixedSimulationDeltaSeconds;
+    private const int AliveValidationTickInterval = 120;
+    private const int DefaultMaximumSimulationStepsPerFrame = 8;
 
     private static MapObjectTickManager instance;
     private static bool applicationQuitting;
@@ -28,6 +136,8 @@ public sealed class MapObjectTickManager : MonoBehaviour
 
     [SerializeField, Min(0.001f)]
     private float updateTickIntervalSeconds = DefaultUpdateTickIntervalSeconds;
+    [SerializeField, Range(1, 64)]
+    private int maximumSimulationStepsPerFrame = DefaultMaximumSimulationStepsPerFrame;
 
     private readonly List<UpdateTickBucket> updateTickBuckets = new List<UpdateTickBucket>(4);
     private readonly Dictionary<int, UpdateTickBucket> updateTickBucketsByIntervalKey =
@@ -40,9 +150,22 @@ public sealed class MapObjectTickManager : MonoBehaviour
         new List<IMapObjectUpdateTick>();
     private readonly List<IMapObjectUpdateTick> activeTickCleanupBuffer =
         new List<IMapObjectUpdateTick>();
-    private int nextAliveValidationFrame;
+    private readonly List<UpdateTickEntry> dueUpdateTickEntries = new List<UpdateTickEntry>(64);
+    private long simulationTick;
+    private long nextAliveValidationTick;
+    private double simulationTimeAccumulator;
     private bool tickingUpdateObjects;
     private bool updateTicksDirty;
+
+    public static long CurrentSimulationTick => instance != null ? instance.simulationTick : 0L;
+    public static double CurrentSimulationTimeSeconds =>
+        CurrentSimulationTick * (double)FixedSimulationDeltaSeconds;
+    public static double SimulationBacklogTicks => instance != null
+        ? Math.Max(0d, instance.simulationTimeAccumulator / FixedSimulationDeltaSeconds)
+        : 0d;
+    public static float SimulationInterpolationAlpha => (float)Math.Min(
+        1d,
+        SimulationBacklogTicks);
 
     public static void RegisterUpdateTick(IMapObjectUpdateTick tick)
     {
@@ -113,9 +236,50 @@ public sealed class MapObjectTickManager : MonoBehaviour
 
     private void Update()
     {
-        bool fullValidationRequested = RequestPeriodicAliveValidation();
-        ReconcileRequestedUpdateTicks(fullValidationRequested);
-        TickUpdateObjects(Time.deltaTime);
+        simulationTimeAccumulator += Math.Max(0d, Time.deltaTime);
+        int maximumSteps = Mathf.Max(1, maximumSimulationStepsPerFrame);
+        int completedSteps = 0;
+        while (simulationTimeAccumulator + 0.000000001d >= FixedSimulationDeltaSeconds
+               && completedSteps < maximumSteps)
+        {
+            simulationTimeAccumulator -= FixedSimulationDeltaSeconds;
+            simulationTick++;
+            bool fullValidationRequested = RequestPeriodicAliveValidation();
+            ReconcileRequestedUpdateTicks(fullValidationRequested);
+            TickUpdateObjects();
+            completedSteps++;
+        }
+    }
+
+    public static void RestoreSimulationTick(long restoredTick)
+    {
+        if (!Application.isPlaying || applicationQuitting)
+        {
+            return;
+        }
+
+        MapObjectTickManager manager = EnsureInstance();
+        manager.simulationTick = Math.Max(0L, restoredTick);
+        manager.simulationTimeAccumulator = 0d;
+        manager.nextAliveValidationTick = manager.simulationTick;
+        manager.ResetUpdateTickBucketState();
+    }
+
+    public static void RefreshSimulationIdentity(IMapObjectUpdateTick tick)
+    {
+        if (tick == null || instance == null || !instance.updateTickSet.Contains(tick))
+        {
+            return;
+        }
+
+        for (int i = 0; i < instance.updateTickBuckets.Count; i++)
+        {
+            UpdateTickBucket bucket = instance.updateTickBuckets[i];
+            if (bucket != null)
+            {
+                bucket.OrderDirty = true;
+            }
+        }
     }
 
     private void OnApplicationQuit()
@@ -167,7 +331,7 @@ public sealed class MapObjectTickManager : MonoBehaviour
             updateTickSet.Add(tick);
             if (updateTickEntriesByTick.TryGetValue(tick, out UpdateTickEntry entry))
             {
-                entry.LastTime = Time.time;
+                entry.ResetSchedule(simulationTick);
             }
 
             enabled = true;
@@ -176,10 +340,11 @@ public sealed class MapObjectTickManager : MonoBehaviour
 
         updateTickSet.Add(tick);
         updateTickEntrySet.Add(tick);
-        UpdateTickBucket bucket = GetOrCreateUpdateTickBucket(ResolveUpdateTickIntervalSeconds(tick));
-        UpdateTickEntry newEntry = new UpdateTickEntry(tick, Time.time);
+        UpdateTickBucket bucket = GetOrCreateUpdateTickBucket(ResolveUpdateTickIntervalTicks(tick));
+        UpdateTickEntry newEntry = new UpdateTickEntry(tick, bucket.IntervalTicks, simulationTick);
         updateTickEntriesByTick[tick] = newEntry;
         bucket.Entries.Add(newEntry);
+        bucket.OrderDirty = true;
         enabled = true;
     }
 
@@ -193,7 +358,7 @@ public sealed class MapObjectTickManager : MonoBehaviour
         updateTicksDirty = true;
     }
 
-    private void TickUpdateObjects(float deltaTime)
+    private void TickUpdateObjects()
     {
         if (updateTicksDirty)
         {
@@ -213,14 +378,19 @@ public sealed class MapObjectTickManager : MonoBehaviour
             return;
         }
 
-        float frameDeltaTime = Mathf.Max(0f, deltaTime);
         tickingUpdateObjects = true;
         try
         {
+            dueUpdateTickEntries.Clear();
             for (int bucketIndex = 0; bucketIndex < updateTickBuckets.Count; bucketIndex++)
             {
-                TickUpdateBucket(updateTickBuckets[bucketIndex], frameDeltaTime, profileTicks);
+                CollectDueUpdateEntries(updateTickBuckets[bucketIndex]);
             }
+
+            dueUpdateTickEntries.Sort(CompareUpdateTickEntries);
+            PlanStagedUpdateEntries();
+            ApplyDueUpdateEntries(profileTicks);
+            dueUpdateTickEntries.Clear();
         }
         finally
         {
@@ -235,7 +405,7 @@ public sealed class MapObjectTickManager : MonoBehaviour
         RefreshEnabledState();
     }
 
-    private void TickUpdateBucket(UpdateTickBucket bucket, float frameDeltaTime, bool profileTicks)
+    private void CollectDueUpdateEntries(UpdateTickBucket bucket)
     {
         if (bucket == null)
         {
@@ -245,40 +415,19 @@ public sealed class MapObjectTickManager : MonoBehaviour
         int count = bucket.Entries.Count;
         if (count <= 0)
         {
-            bucket.Quota = 0f;
-            bucket.Cursor = 0;
             return;
         }
 
-        float safeInterval = Mathf.Max(0.001f, bucket.IntervalSeconds);
-        bucket.Quota += count * frameDeltaTime / safeInterval;
-
-        int ticksToRun = Mathf.Min(count, Mathf.FloorToInt(bucket.Quota));
-        if (ticksToRun <= 0)
+        if (bucket.OrderDirty)
         {
-            return;
-        }
-
-        bucket.Quota -= ticksToRun;
-        bool tickedEveryObject = ticksToRun >= count;
-        float managedDeltaTime = tickedEveryObject
-            ? frameDeltaTime
-            : safeInterval;
-        if (tickedEveryObject && bucket.Quota >= 1f)
-        {
-            bucket.Quota -= Mathf.Floor(bucket.Quota);
+            bucket.Entries.Sort(CompareUpdateTickEntries);
+            bucket.OrderDirty = false;
         }
 
         List<UpdateTickEntry> entries = bucket.Entries;
-        for (int processed = 0; processed < ticksToRun; processed++)
+        for (int entryIndex = 0; entryIndex < count; entryIndex++)
         {
-            if (bucket.Cursor >= entries.Count)
-            {
-                bucket.Cursor = 0;
-            }
-
-            UpdateTickEntry entry = entries[bucket.Cursor];
-            bucket.Cursor++;
+            UpdateTickEntry entry = entries[entryIndex];
             if (entry == null)
             {
                 updateTicksDirty = true;
@@ -297,29 +446,66 @@ public sealed class MapObjectTickManager : MonoBehaviour
                 continue;
             }
 
-            float resolvedDeltaTime = ResolveUpdateTickDeltaTime(entry, managedDeltaTime);
-            if (profileTicks)
+            if (entry.NextDueTick > simulationTick)
             {
-                long startTimestamp = MapObjectTickProfiler.BeginSample();
-                tick.ManagedUpdateTick(resolvedDeltaTime);
-                MapObjectTickProfiler.EndUpdateSample(tick, startTimestamp);
+                continue;
+            }
+
+            long elapsedTicks = Math.Max(1L, simulationTick - entry.LastExecutedTick);
+            entry.PendingDeltaTime = elapsedTicks * FixedSimulationDeltaSeconds;
+            entry.MarkExecuted(simulationTick);
+            dueUpdateTickEntries.Add(entry);
+        }
+    }
+
+    private void PlanStagedUpdateEntries()
+    {
+        for (int i = 0; i < dueUpdateTickEntries.Count; i++)
+        {
+            UpdateTickEntry entry = dueUpdateTickEntries[i];
+            if (entry?.Tick is IMapObjectStagedUpdateTick stagedTick)
+            {
+                stagedTick.PlanManagedUpdateTick(entry.PendingDeltaTime);
+            }
+        }
+    }
+
+    private void ApplyDueUpdateEntries(bool profileTicks)
+    {
+        for (int i = 0; i < dueUpdateTickEntries.Count; i++)
+        {
+            UpdateTickEntry entry = dueUpdateTickEntries[i];
+            IMapObjectUpdateTick tick = entry?.Tick;
+            if (tick == null || updateTicksDirty && !updateTickSet.Contains(tick))
+            {
+                continue;
+            }
+
+            long startTimestamp = profileTicks ? MapObjectTickProfiler.BeginSample() : 0L;
+            if (tick is IMapObjectStagedUpdateTick stagedTick)
+            {
+                stagedTick.ApplyManagedUpdateTick();
             }
             else
             {
-                tick.ManagedUpdateTick(resolvedDeltaTime);
+                tick.ManagedUpdateTick(entry.PendingDeltaTime);
+            }
+
+            if (profileTicks)
+            {
+                MapObjectTickProfiler.EndUpdateSample(tick, startTimestamp);
             }
         }
     }
 
     private bool RequestPeriodicAliveValidation()
     {
-        int frameCount = Time.frameCount;
-        if (frameCount < nextAliveValidationFrame)
+        if (simulationTick < nextAliveValidationTick)
         {
             return false;
         }
 
-        nextAliveValidationFrame = frameCount + AliveValidationFrameInterval;
+        nextAliveValidationTick = simulationTick + AliveValidationTickInterval;
         if (updateTickSet.Count > 0)
         {
             updateTicksDirty = true;
@@ -449,70 +635,86 @@ public sealed class MapObjectTickManager : MonoBehaviour
 
             if (entries.Count <= 0)
             {
-                updateTickBucketsByIntervalKey.Remove(bucket.IntervalKey);
+                updateTickBucketsByIntervalKey.Remove(bucket.IntervalTicks);
                 updateTickBuckets.RemoveAt(bucketIndex);
                 continue;
             }
 
-            if (bucket.Cursor >= entries.Count)
-            {
-                bucket.Cursor %= entries.Count;
-            }
+            bucket.OrderDirty = true;
         }
 
         updateTicksDirty = false;
     }
 
-    private float ResolveUpdateTickDeltaTime(UpdateTickEntry entry, float fallbackDeltaTime)
-    {
-        float now = Time.time;
-        float safeFallback = Mathf.Max(0f, fallbackDeltaTime);
-        if (entry == null)
-        {
-            return safeFallback;
-        }
-
-        float lastTime = entry.LastTime;
-        entry.LastTime = now;
-        float elapsedTime = now - lastTime;
-        return elapsedTime > 0f ? elapsedTime : safeFallback;
-    }
-
     private void RefreshEnabledState()
     {
-        // requestedUpdateTicks is the registration source of truth. Keep the
-        // manager alive long enough to repair a missing runtime entry.
-        enabled = updateTickSet.Count > 0 || requestedUpdateTicks.Count > 0;
+        // The fixed clock must continue advancing even while every simulation target sleeps.
+        enabled = Application.isPlaying && !applicationQuitting;
     }
 
-    private UpdateTickBucket GetOrCreateUpdateTickBucket(float intervalSeconds)
+    private UpdateTickBucket GetOrCreateUpdateTickBucket(int intervalTicks)
     {
-        intervalSeconds = Mathf.Max(0.001f, intervalSeconds);
-        int intervalKey = GetUpdateTickIntervalKey(intervalSeconds);
-        if (updateTickBucketsByIntervalKey.TryGetValue(intervalKey, out UpdateTickBucket bucket))
+        intervalTicks = Mathf.Max(1, intervalTicks);
+        if (updateTickBucketsByIntervalKey.TryGetValue(intervalTicks, out UpdateTickBucket bucket))
         {
             return bucket;
         }
 
-        bucket = new UpdateTickBucket(intervalKey, intervalSeconds);
-        updateTickBucketsByIntervalKey.Add(intervalKey, bucket);
+        bucket = new UpdateTickBucket(intervalTicks);
+        updateTickBucketsByIntervalKey.Add(intervalTicks, bucket);
         updateTickBuckets.Add(bucket);
+        updateTickBuckets.Sort((left, right) => left.IntervalTicks.CompareTo(right.IntervalTicks));
         return bucket;
     }
 
-    private float ResolveUpdateTickIntervalSeconds(IMapObjectUpdateTick tick)
+    private int ResolveUpdateTickIntervalTicks(IMapObjectUpdateTick tick)
     {
+        float intervalSeconds = updateTickIntervalSeconds;
         if (tick is IMapObjectUpdateTickInterval intervalProvider)
         {
-            return Mathf.Max(0.001f, intervalProvider.ManagedUpdateTickIntervalSeconds);
+            intervalSeconds = intervalProvider.ManagedUpdateTickIntervalSeconds;
         }
 
-        return Mathf.Max(0.001f, updateTickIntervalSeconds);
+        return Mathf.Max(1, Mathf.RoundToInt(
+            Mathf.Max(FixedSimulationDeltaSeconds, intervalSeconds)
+            / FixedSimulationDeltaSeconds));
     }
 
-    private static int GetUpdateTickIntervalKey(float intervalSeconds)
+    private static int CompareUpdateTickEntries(UpdateTickEntry left, UpdateTickEntry right)
     {
-        return Mathf.Max(1, Mathf.RoundToInt(intervalSeconds * UpdateTickIntervalKeyScale));
+        if (ReferenceEquals(left, right))
+        {
+            return 0;
+        }
+
+        if (left == null)
+        {
+            return 1;
+        }
+
+        if (right == null)
+        {
+            return -1;
+        }
+
+        long leftId = ResolveSimulationId(left.Tick);
+        long rightId = ResolveSimulationId(right.Tick);
+        int result = leftId.CompareTo(rightId);
+        if (result != 0)
+        {
+            return result;
+        }
+
+        string leftType = left.Tick?.GetType().FullName ?? string.Empty;
+        string rightType = right.Tick?.GetType().FullName ?? string.Empty;
+        return string.CompareOrdinal(leftType, rightType);
+    }
+
+    private static long ResolveSimulationId(IMapObjectUpdateTick tick)
+    {
+        return tick is IMapObjectSimulationIdentity identity
+            ? identity.SimulationId
+            : 0L;
     }
 
     private void ResetUpdateTickBucketState()
@@ -525,8 +727,10 @@ public sealed class MapObjectTickManager : MonoBehaviour
                 continue;
             }
 
-            bucket.Quota = 0f;
-            bucket.Cursor = 0;
+            for (int entryIndex = 0; entryIndex < bucket.Entries.Count; entryIndex++)
+            {
+                bucket.Entries[entryIndex]?.ResetSchedule(simulationTick);
+            }
         }
     }
 
@@ -544,27 +748,40 @@ public sealed class MapObjectTickManager : MonoBehaviour
     private sealed class UpdateTickEntry
     {
         public readonly IMapObjectUpdateTick Tick;
-        public float LastTime;
+        public readonly int IntervalTicks;
+        public long LastExecutedTick;
+        public long NextDueTick;
+        public float PendingDeltaTime;
 
-        public UpdateTickEntry(IMapObjectUpdateTick tick, float lastTime)
+        public UpdateTickEntry(IMapObjectUpdateTick tick, int intervalTicks, long currentTick)
         {
             Tick = tick;
-            LastTime = lastTime;
+            IntervalTicks = Math.Max(1, intervalTicks);
+            ResetSchedule(currentTick);
+        }
+
+        public void ResetSchedule(long currentTick)
+        {
+            LastExecutedTick = currentTick;
+            NextDueTick = currentTick + 1L;
+        }
+
+        public void MarkExecuted(long currentTick)
+        {
+            LastExecutedTick = currentTick;
+            NextDueTick = currentTick + IntervalTicks;
         }
     }
 
     private sealed class UpdateTickBucket
     {
-        public readonly int IntervalKey;
-        public readonly float IntervalSeconds;
+        public readonly int IntervalTicks;
         public readonly List<UpdateTickEntry> Entries = new List<UpdateTickEntry>();
-        public float Quota;
-        public int Cursor;
+        public bool OrderDirty;
 
-        public UpdateTickBucket(int intervalKey, float intervalSeconds)
+        public UpdateTickBucket(int intervalTicks)
         {
-            IntervalKey = intervalKey;
-            IntervalSeconds = intervalSeconds;
+            IntervalTicks = intervalTicks;
         }
     }
 }
@@ -636,6 +853,38 @@ public static class MapObjectTickProfiler
     public static long BeginSample()
     {
         return Stopwatch.GetTimestamp();
+    }
+
+    public static NamedSampleScope SampleNamed(string kind, string typeName, string itemName)
+    {
+        return new NamedSampleScope(kind, typeName, itemName);
+    }
+
+    // A value-type scope avoids closures/allocations and records early returns too.
+    public readonly struct NamedSampleScope : IDisposable
+    {
+        private readonly bool enabled;
+        private readonly long start;
+        private readonly string kind;
+        private readonly string typeName;
+        private readonly string itemName;
+
+        internal NamedSampleScope(string kind, string typeName, string itemName)
+        {
+            enabled = IsEnabled;
+            start = enabled ? BeginSample() : 0L;
+            this.kind = kind;
+            this.typeName = typeName;
+            this.itemName = itemName;
+        }
+
+        public void Dispose()
+        {
+            if (enabled)
+            {
+                EndNamedSample(kind, typeName, itemName, start);
+            }
+        }
     }
 
     public static void EndUpdateSample(object target, long startTimestamp)
