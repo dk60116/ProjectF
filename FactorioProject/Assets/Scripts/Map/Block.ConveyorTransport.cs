@@ -53,6 +53,10 @@ public partial class Block
 
     private void NotifyTransportPortChanged(int lane = -1)
     {
+        // Robot arms register only around their interaction cells. The dictionary
+        // lookup is empty for ordinary belt cells, while an observed slot change
+        // can wake a sleeping pickup or blocked-output arm without periodic scans.
+        RobotArm.WakeAroundCoordinate(coordinate);
         if (transportInputRun != null && (lane < 0 || lane == transportInputRun.InletLane)) transportInputRun.NotifyInputChanged();
         if (transportOutputRun != null && (lane < 0 || lane == transportOutputRun.OutletLane)) transportOutputRun.NotifyOutputChanged();
     }

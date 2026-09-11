@@ -76,7 +76,7 @@ public partial class PlayerController : MonoBehaviour
     private Player player;
     private Joystick joystick;
     private ResourceWrokGauge resourceWorkGauge;
-    private Resource currentTargetResource;
+    private ResourceInstance currentTargetResource;
     private Animal currentKnifeTargetAnimal;
     private Animal pendingKnifeTargetAnimal;
     private Animal currentCorpseHarvestTarget;
@@ -94,7 +94,7 @@ public partial class PlayerController : MonoBehaviour
     private float animalKnifeInteractionTimeout;
     private NooseThrowVisual activeNooseThrowVisual;
     private readonly HashSet<Block> currentFocusedBlocks = new HashSet<Block>();
-    private MapObject closestInteractionFocusTarget;
+    private IMapObjectTarget closestInteractionFocusTarget;
     private Block closestInteractionFocusBlock;
     private readonly List<Block> combinedInteractionFocusBlocks = new List<Block>();
     private Block standaloneInteractionAreaFocusBlock;
@@ -103,9 +103,9 @@ public partial class PlayerController : MonoBehaviour
     private readonly List<Block> nearbyWorkableFocusBlocks = new List<Block>();
     private readonly List<Block> nearbyBoxFocusBlocks = new List<Block>();
     private readonly List<InputOutputModule> standingAreaModuleCandidates = new List<InputOutputModule>(4);
-    private readonly List<MapObject> interactionButtonFocusTargets = new List<MapObject>(8);
+    private readonly List<IMapObjectTarget> interactionButtonFocusTargets = new List<IMapObjectTarget>(8);
     private readonly List<Block> interactionButtonFocusTargetBlocks = new List<Block>(8);
-    private readonly List<Resource> nearbyResourceCandidates = new List<Resource>(16);
+    private readonly List<ResourceInstance> nearbyResourceCandidates = new List<ResourceInstance>(16);
     private readonly HashSet<Block> currentMouseFocusedBlocks = new HashSet<Block>();
     private readonly List<Block> mouseFocusBlocks = new List<Block>();
     private readonly List<Block> mouseFocusRemovalBuffer = new List<Block>();
@@ -128,7 +128,7 @@ public partial class PlayerController : MonoBehaviour
     private readonly HashSet<ConveyorRuntimeRecord> nearbyConveyorRecords = new HashSet<ConveyorRuntimeRecord>();
     private readonly List<InstallationObject> nearbyRuntimeInstallationScratch = new List<InstallationObject>(8);
     private readonly List<Renderer> mapObjectFocusRenderers = new List<Renderer>(16);
-    private readonly Dictionary<Block, MapObject> interactionFocusTargetOverrides = new Dictionary<Block, MapObject>();
+    private readonly Dictionary<Block, IMapObjectTarget> interactionFocusTargetOverrides = new Dictionary<Block, IMapObjectTarget>();
     private readonly List<WorkableObject> nearbyWorkableObjects = new List<WorkableObject>();
     private readonly List<WorkableObject> nearbyWorkableRangeObjects = new List<WorkableObject>();
     private readonly List<BoxObject> nearbyBoxObjects = new List<BoxObject>();
@@ -158,7 +158,7 @@ public partial class PlayerController : MonoBehaviour
     private const float MoveSweepBuffer = 0.01f;
     private const float ConveyorCarrySweepBuffer = 0f;
     private TerrainGenerator cachedTerrainGenerator;
-    private readonly Queue<Resource> pendingHarvestResources = new Queue<Resource>();
+    private readonly Queue<ResourceInstance> pendingHarvestResources = new Queue<ResourceInstance>();
     private bool wasInstallationPlacementActive;
     private InstallationPlacementController cachedInstallationPlacementController;
     private bool hasDefaultBodyLocalPosition;
@@ -172,12 +172,12 @@ public partial class PlayerController : MonoBehaviour
     private Transform interactionPointSnapTarget;
     private Vehicle interactionPointSnapVehicle;
     private Animal interactionPointSnapAnimal;
-    private MapObject mountedPinnedFocusTarget;
+    private IMapObjectTarget mountedPinnedFocusTarget;
     private Block mountedPinnedFocusFallbackBlock;
     private Block temporaryDropFocusBlock;
     private float temporaryDropFocusUntilTime;
-    private MapObject currentMouseFocusedMapObject;
-    private MapObject currentSelectedMapObject;
+    private IMapObjectTarget currentMouseFocusedMapObject;
+    private IMapObjectTarget currentSelectedMapObject;
     private Animal currentMouseFocusedAnimal;
     private PortableObject currentMouseFocusedPortableObject;
     private Camera cachedMouseFocusCamera;
@@ -196,7 +196,7 @@ public partial class PlayerController : MonoBehaviour
 
     private sealed class FocusMarkerGroup
     {
-        public MapObject mapObject;
+        public IMapObjectTarget mapObject;
         public bool isFarmlandGroup;
         public Block markerBlock;
         public int count;
@@ -216,7 +216,7 @@ public partial class PlayerController : MonoBehaviour
             Mathf.Max(1f, maxWorldPosition.x - minWorldPosition.x + 1f),
             Mathf.Max(1f, maxWorldPosition.z - minWorldPosition.z + 1f));
 
-        public void Reset(MapObject targetMapObject, Block block)
+        public void Reset(IMapObjectTarget targetMapObject, Block block)
         {
             mapObject = targetMapObject;
             isFarmlandGroup = false;
@@ -424,7 +424,7 @@ public partial class PlayerController : MonoBehaviour
         }
     }
 
-    public void SetSelectedMapObjectFocus(MapObject mapObject, Block fallbackBlock = null)
+    public void SetSelectedMapObjectFocus(IMapObjectTarget mapObject, Block fallbackBlock = null)
     {
         if (mapObject == null
             && HasGroundActionFocusSelectionOrTarget())
@@ -547,9 +547,9 @@ public partial class PlayerController : MonoBehaviour
         SetSelectedFocusedBlocks(block != null ? selectedFocusBlocks : null);
     }
 
-    private Block ResolveSelectedFocusFallbackBlock(MapObject mapObject)
+    private Block ResolveSelectedFocusFallbackBlock(IMapObjectTarget mapObject)
     {
-        if (mapObject is Resource resource)
+        if (mapObject is ResourceInstance resource)
         {
             return ResolveResourceOwningBlock(resource);
         }
@@ -2161,7 +2161,8 @@ public partial class PlayerController : MonoBehaviour
         Vector3 originOffset,
         bool ignoreLiveAnimals)
     {
-        AnimalAIController animalController = hit.collider != null
+        bool sharedResourceCollider = ResourceTypeWorld.IsSharedCollider(hit.collider);
+        AnimalAIController animalController = hit.collider != null && !sharedResourceCollider
             ? hit.collider.GetComponentInParent<AnimalAIController>()
             : null;
         if (ignoreLiveAnimals
@@ -2185,7 +2186,7 @@ public partial class PlayerController : MonoBehaviour
             return true;
         }
 
-        Pipe pipe = hit.collider != null ? hit.collider.GetComponentInParent<Pipe>() : null;
+        Pipe pipe = hit.collider != null && !sharedResourceCollider ? hit.collider.GetComponentInParent<Pipe>() : null;
         if (pipe == null
             || !TryResolvePipeBridgeBelt(pipe, out ConvayorBelt2F belt2F)
             || belt2F == null)
@@ -2696,7 +2697,7 @@ public partial class PlayerController : MonoBehaviour
 
     private void ResolveCompletedResourceHarvest()
     {
-        Resource harvestedResource = pendingHarvestResources.Dequeue();
+        ResourceInstance harvestedResource = pendingHarvestResources.Dequeue();
         if (harvestedResource == null)
         {
             return;
@@ -2805,7 +2806,7 @@ public partial class PlayerController : MonoBehaviour
             return;
         }
 
-        foreach (Resource resource in pendingHarvestResources)
+        foreach (ResourceInstance resource in pendingHarvestResources)
         {
             resource?.CancelPreparedHarvestStep();
         }
@@ -2844,7 +2845,7 @@ public partial class PlayerController : MonoBehaviour
         }
     }
 
-    private Resource FindNearestResourceInteractionTarget()
+    private ResourceInstance FindNearestResourceInteractionTarget()
     {
         if (!CanPrepareHandForResourceHarvest())
         {
@@ -2868,7 +2869,7 @@ public partial class PlayerController : MonoBehaviour
 
     public bool TryFindNearestBucketFluidSource(
         out Block sourceBlock,
-        out Resource oilSource)
+        out ResourceInstance oilSource)
     {
         sourceBlock = null;
         oilSource = null;
@@ -2938,7 +2939,7 @@ public partial class PlayerController : MonoBehaviour
         return waterBlock != null;
     }
 
-    private Resource FindNearestResourceInteractionTarget(bool oilOnly)
+    private ResourceInstance FindNearestResourceInteractionTarget(bool oilOnly)
     {
         if (player == null)
         {
@@ -2949,10 +2950,10 @@ public partial class PlayerController : MonoBehaviour
         float harvestRange = player.State.HarvestRange;
         float maxDistanceSqr = harvestRange * harvestRange;
         float nearestDistanceSqr = float.MaxValue;
-        Resource nearestResource = null;
+        ResourceInstance nearestResource = null;
 
-        IReadOnlyList<Resource> resources = Resource.ActiveResources;
-        bool usingNearbyResourceCandidates = TryCollectNearbyResourceCandidates(origin, harvestRange, out IReadOnlyList<Resource> nearbyResources);
+        IReadOnlyList<ResourceInstance> resources = ResourceInstance.ActiveResources;
+        bool usingNearbyResourceCandidates = TryCollectNearbyResourceCandidates(origin, harvestRange, out IReadOnlyList<ResourceInstance> nearbyResources);
         if (usingNearbyResourceCandidates)
         {
             resources = nearbyResources;
@@ -2960,11 +2961,11 @@ public partial class PlayerController : MonoBehaviour
 
         for (int i = 0; i < resources.Count; i++)
         {
-            Resource resource = resources[i];
+            ResourceInstance resource = resources[i];
             bool isOil = resource != null
                          && resource.PlacementCategory == ResourceDefinition.PlacementCategory.Oil;
             if (resource == null
-                || !resource.gameObject.activeInHierarchy
+                || !resource.IsRuntimeActive
                 || !resource.AllowsFocus
                 || !resource.CanHarvest
                 || isOil != oilOnly)
@@ -3005,13 +3006,13 @@ public partial class PlayerController : MonoBehaviour
     private bool TryCollectNearbyResourceCandidates(
         Vector3 origin,
         float harvestRange,
-        out IReadOnlyList<Resource> resources)
+        out IReadOnlyList<ResourceInstance> resources)
     {
         Vector2Int center = new Vector2Int(
             Mathf.RoundToInt(origin.x),
             Mathf.RoundToInt(origin.z));
         int searchRadius = Mathf.Max(1, Mathf.CeilToInt(harvestRange + 1f));
-        if (Resource.TryCollectActiveResourcesInCoordinateRange(center, searchRadius, nearbyResourceCandidates))
+        if (ResourceInstance.TryCollectActiveResourcesInCoordinateRange(center, searchRadius, nearbyResourceCandidates))
         {
             resources = nearbyResourceCandidates;
             return true;
@@ -3021,7 +3022,7 @@ public partial class PlayerController : MonoBehaviour
         return false;
     }
 
-    private static Block ResolveResourceOwningBlock(Resource resource)
+    private static Block ResolveResourceOwningBlock(ResourceInstance resource)
     {
         if (resource == null)
         {
@@ -3032,12 +3033,12 @@ public partial class PlayerController : MonoBehaviour
         if (owningBlock == null)
         {
             TerrainGenerator terrain = TerrainGenerator.Active;
-            Vector3 position = resource.transform.position;
+            Vector3 position = resource.WorldPosition;
             terrain?.TryGetLoadedBlock(
                 new Vector2Int(Mathf.RoundToInt(position.x), Mathf.RoundToInt(position.z)),
                 out owningBlock);
         }
-        if (owningBlock != null && owningBlock.MapObject != null && owningBlock.MapObject != resource)
+        if (owningBlock != null && owningBlock.MapObject != null && !ReferenceEquals(owningBlock.MapObject, resource))
         {
             return null;
         }
@@ -3050,7 +3051,7 @@ public partial class PlayerController : MonoBehaviour
         return owningBlock;
     }
 
-    private int GetHarvestPower(Resource resource)
+    private int GetHarvestPower(ResourceInstance resource)
     {
         if (resource == null)
         {
@@ -3085,7 +3086,7 @@ public partial class PlayerController : MonoBehaviour
 
         combinedInteractionFocusBlocks.Clear();
         AppendUniqueBlock(combinedInteractionFocusBlocks, standingConveyorFocusBlock);
-        Resource resourceInteractionTarget = FindNearestResourceInteractionTarget();
+        ResourceInstance resourceInteractionTarget = FindNearestResourceInteractionTarget();
         if (resourceInteractionTarget != null)
         {
             Block resourceBlock = ResolveResourceOwningBlock(resourceInteractionTarget);
@@ -3151,7 +3152,7 @@ public partial class PlayerController : MonoBehaviour
         KeepClosestInteractionFocusTarget(combinedInteractionFocusBlocks);
         if (hasStandingAreaFocusBlock
             && (standingAreaOwnerModule != null
-                ? closestInteractionFocusTarget == standingAreaOwnerModule
+                ? ReferenceEquals(closestInteractionFocusTarget, standingAreaOwnerModule)
                 : closestInteractionFocusBlock == standingAreaFocusBlock))
         {
             BuildStandingAreaAndObjectFocusBlocks(
@@ -3232,7 +3233,7 @@ public partial class PlayerController : MonoBehaviour
         CacheInteractionButtonFocusTarget(ResolveInteractionFocusTarget(block), block);
     }
 
-    private void CacheInteractionButtonFocusTarget(MapObject target, Block fallbackBlock)
+    private void CacheInteractionButtonFocusTarget(IMapObjectTarget target, Block fallbackBlock)
     {
         if (!IsAvailableMapObjectFocusTarget(target, fallbackBlock)
             || interactionButtonFocusTargets.Contains(target))
@@ -3254,11 +3255,11 @@ public partial class PlayerController : MonoBehaviour
         }
 
         Vector3 origin = player.BodyTransform != null ? player.BodyTransform.position : transform.position;
-        MapObject closestTarget = null;
+        IMapObjectTarget closestTarget = null;
         Block closestFallbackBlock = null;
         float closestDistanceSqr = float.MaxValue;
         bool closestIsPrevious = false;
-        int closestStableId = int.MaxValue;
+        long closestStableId = long.MaxValue;
 
         for (int i = 0; i < focusBlocks.Count; i++)
         {
@@ -3268,7 +3269,7 @@ public partial class PlayerController : MonoBehaviour
                 continue;
             }
 
-            MapObject target = ResolveInteractionFocusTarget(block);
+            IMapObjectTarget target = ResolveInteractionFocusTarget(block);
             if (target != null && !IsAvailableMapObjectFocusTarget(target, block))
             {
                 continue;
@@ -3278,7 +3279,8 @@ public partial class PlayerController : MonoBehaviour
             bool isPrevious = target != null
                 ? target == closestInteractionFocusTarget
                 : block == closestInteractionFocusBlock;
-            int stableId = target != null ? target.GetInstanceID() : block.GetInstanceID();
+            long stableId = target is ResourceInstance resourceIdentity ? resourceIdentity.SimulationId
+                : target is MapObject nativeTarget ? nativeTarget.GetInstanceID() : block.GetInstanceID();
             bool tiedDistance = Mathf.Abs(distanceSqr - closestDistanceSqr) <= 0.000001f;
             if (float.IsNaN(distanceSqr) || float.IsInfinity(distanceSqr)
                 || (tiedDistance
@@ -3317,14 +3319,14 @@ public partial class PlayerController : MonoBehaviour
         }
     }
 
-    private MapObject ResolveInteractionFocusTarget(Block block)
+    private IMapObjectTarget ResolveInteractionFocusTarget(Block block)
     {
         if (block == null)
         {
             return null;
         }
 
-        if (interactionFocusTargetOverrides.TryGetValue(block, out MapObject overrideTarget)
+        if (interactionFocusTargetOverrides.TryGetValue(block, out IMapObjectTarget overrideTarget)
             && IsAvailableMapObjectFocusTarget(overrideTarget, block))
         {
             return overrideTarget;
@@ -3351,9 +3353,9 @@ public partial class PlayerController : MonoBehaviour
         return block.Resource;
     }
 
-    private float GetInteractionFocusTargetDistanceSqr(MapObject target, Block block, Vector3 origin)
+    private float GetInteractionFocusTargetDistanceSqr(IMapObjectTarget target, Block block, Vector3 origin)
     {
-        if (target is Resource resource)
+        if (target is ResourceInstance resource)
         {
             return GetResourceFocusSelectionDistanceSqr(resource, origin);
         }
@@ -3558,7 +3560,7 @@ public partial class PlayerController : MonoBehaviour
         return focusedRobotArm != null;
     }
 
-    public bool IsWithinInteractionRange(MapObject mapObject)
+    public bool IsWithinInteractionRange(IMapObjectTarget mapObject)
     {
         if (player == null
             || mapObject == null
@@ -3568,7 +3570,7 @@ public partial class PlayerController : MonoBehaviour
         }
 
         Vector3 origin = player.BodyTransform != null ? player.BodyTransform.position : transform.position;
-        if (mapObject is Resource resource)
+        if (mapObject is ResourceInstance resource)
         {
             if (!CanPrepareHandForResourceHarvest() || !resource.CanHarvest)
             {
@@ -3608,7 +3610,7 @@ public partial class PlayerController : MonoBehaviour
 
     public bool TryGetInteractionButtonFocusTarget(
         int index,
-        out MapObject focusTarget,
+        out IMapObjectTarget focusTarget,
         out float distanceSqr)
     {
         focusTarget = null;
@@ -3621,7 +3623,7 @@ public partial class PlayerController : MonoBehaviour
             return false;
         }
 
-        MapObject candidate = interactionButtonFocusTargets[index];
+        IMapObjectTarget candidate = interactionButtonFocusTargets[index];
         Block fallbackBlock = interactionButtonFocusTargetBlocks[index];
         if (!IsAvailableMapObjectFocusTarget(candidate, fallbackBlock))
         {
@@ -3639,7 +3641,7 @@ public partial class PlayerController : MonoBehaviour
         return distanceSqr < float.MaxValue;
     }
 
-    public bool TryGetFocusedMapObject(out MapObject focusedMapObject)
+    public bool TryGetFocusedMapObject(out IMapObjectTarget focusedMapObject)
     {
         focusedMapObject = null;
         if (currentFocusedBlocks.Count == 0 || player == null)
@@ -3652,14 +3654,14 @@ public partial class PlayerController : MonoBehaviour
 
         foreach (Block block in currentFocusedBlocks)
         {
-            MapObject mapObject = ResolveInteractionFocusTarget(block);
+            IMapObjectTarget mapObject = ResolveInteractionFocusTarget(block);
 
             if (!IsAvailableMapObjectFocusTarget(mapObject, block))
             {
                 continue;
             }
 
-            float distanceSqr = mapObject is Resource resource
+            float distanceSqr = mapObject is ResourceInstance resource
                 ? GetResourceFocusSelectionDistanceSqr(resource, origin)
                 : GetMapObjectFocusSelectionDistanceSqr(mapObject, block, origin);
             if (distanceSqr >= nearestDistanceSqr)
@@ -3674,7 +3676,7 @@ public partial class PlayerController : MonoBehaviour
         return focusedMapObject != null;
     }
 
-    public bool TryGetMouseFocusedMapObject(out MapObject focusedMapObject)
+    public bool TryGetMouseFocusedMapObject(out IMapObjectTarget focusedMapObject)
     {
         RefreshMouseMapObjectFocus();
         focusedMapObject = currentMouseFocusedMapObject;
@@ -3692,7 +3694,7 @@ public partial class PlayerController : MonoBehaviour
     public bool TryResolvePointerFocusTarget(
         Vector2 pointerPosition,
         out Animal focusedAnimal,
-        out MapObject focusedMapObject)
+        out IMapObjectTarget focusedMapObject)
     {
         return TryResolveMouseFocusTargets(
                    pointerPosition,
@@ -3706,7 +3708,7 @@ public partial class PlayerController : MonoBehaviour
     public bool TryResolvePointerFocusTarget(
         Vector2 pointerPosition,
         out Animal focusedAnimal,
-        out MapObject focusedMapObject,
+        out IMapObjectTarget focusedMapObject,
         out PortableObject focusedPortableObject)
     {
         return TryResolvePointerFocusTarget(
@@ -3720,7 +3722,7 @@ public partial class PlayerController : MonoBehaviour
     public bool TryResolvePointerFocusTarget(
         Vector2 pointerPosition,
         out Animal focusedAnimal,
-        out MapObject focusedMapObject,
+        out IMapObjectTarget focusedMapObject,
         out PortableObject focusedPortableObject,
         out Block focusedBlock)
     {
@@ -4219,7 +4221,7 @@ public partial class PlayerController : MonoBehaviour
         CancelActiveCorpseHarvest();
     }
 
-    public bool RequestResourceHarvest(Resource resource)
+    public bool RequestResourceHarvest(ResourceInstance resource)
     {
         if (resource == null
             || !resource.CanHarvest
@@ -4255,7 +4257,7 @@ public partial class PlayerController : MonoBehaviour
         return true;
     }
 
-    private bool QueueResourceHarvestStep(Resource resource)
+    private bool QueueResourceHarvestStep(ResourceInstance resource)
     {
         if (resource == null
             || !resource.CanHarvest
@@ -4312,7 +4314,7 @@ public partial class PlayerController : MonoBehaviour
         return false;
     }
 
-    public bool TryResolveItemFilterTarget(MapObject mapObject, out MapObject filterTarget)
+    public bool TryResolveItemFilterTarget(IMapObjectTarget mapObject, out MapObject filterTarget)
     {
         filterTarget = null;
         if (player == null
@@ -4333,7 +4335,7 @@ public partial class PlayerController : MonoBehaviour
     }
 
     private static bool TryResolveFocusedItemFilterTarget(
-        MapObject mapObject,
+        IMapObjectTarget mapObject,
         List<ItemDefinition> definitions,
         Vector3 origin,
         out MapObject filterTarget)
@@ -4346,7 +4348,7 @@ public partial class PlayerController : MonoBehaviour
 
         if (SupportsItemFilter(mapObject, definitions))
         {
-            filterTarget = mapObject;
+            filterTarget = mapObject.SceneObject;
             return true;
         }
 
@@ -4363,16 +4365,16 @@ public partial class PlayerController : MonoBehaviour
         return false;
     }
 
-    private static bool SupportsItemFilter(MapObject mapObject, List<ItemDefinition> definitions)
+    private static bool SupportsItemFilter(IMapObjectTarget mapObject, List<ItemDefinition> definitions)
     {
-        return mapObject != null
+        return mapObject?.SceneObject != null
                && (IsItemFilterEnabled(mapObject.ResolveItemId(), definitions)
                    || mapObject is Spliterbelt
                    || TryResolveRobotArm(mapObject, out _)
                    || TryResolveProductionMachine(mapObject, out _));
     }
 
-    private static bool TryResolveProductionMachine(MapObject mapObject, out ProductionMachine productionMachine)
+    private static bool TryResolveProductionMachine(IMapObjectTarget mapObject, out ProductionMachine productionMachine)
     {
         productionMachine = null;
         if (mapObject == null)
@@ -4396,7 +4398,7 @@ public partial class PlayerController : MonoBehaviour
         return productionMachine != null;
     }
 
-    private static bool TryResolveRobotArm(MapObject mapObject, out RobotArm robotArm)
+    private static bool TryResolveRobotArm(IMapObjectTarget mapObject, out RobotArm robotArm)
     {
         robotArm = null;
         if (mapObject == null)
@@ -4419,7 +4421,7 @@ public partial class PlayerController : MonoBehaviour
         return robotArm != null;
     }
 
-    private static bool TryResolveFreightCar(MapObject mapObject, out FreightCar freightCar)
+    private static bool TryResolveFreightCar(IMapObjectTarget mapObject, out FreightCar freightCar)
     {
         freightCar = null;
         if (mapObject == null)
@@ -5149,7 +5151,7 @@ public partial class PlayerController : MonoBehaviour
         return focusPoint;
     }
 
-    private float GetMapObjectFocusSelectionDistanceSqr(MapObject mapObject, Block block, Vector3 origin)
+    private float GetMapObjectFocusSelectionDistanceSqr(IMapObjectTarget mapObject, Block block, Vector3 origin)
     {
         // Selection must not change when an outline, animation, or culling changes renderer bounds.
         if (TryGetMatchingConveyorRecord(mapObject, block, out ConveyorRuntimeRecord conveyorRecord))
@@ -5192,7 +5194,7 @@ public partial class PlayerController : MonoBehaviour
         return nearestDistanceSqr;
     }
 
-    private float GetMapObjectFocusDistanceSqr(MapObject mapObject, Block block, Vector3 origin, float focusPadding = 0f)
+    private float GetMapObjectFocusDistanceSqr(IMapObjectTarget mapObject, Block block, Vector3 origin, float focusPadding = 0f)
     {
         Bounds bounds = GetMapObjectFocusBounds(mapObject, block, focusPadding);
         Vector3 closestPoint = bounds.ClosestPoint(origin);
@@ -5203,8 +5205,14 @@ public partial class PlayerController : MonoBehaviour
         return offset.sqrMagnitude;
     }
 
-    private Bounds GetMapObjectFocusBounds(MapObject mapObject, Block block, float focusPadding = 0f)
+    private Bounds GetMapObjectFocusBounds(IMapObjectTarget mapObject, Block block, float focusPadding = 0f)
     {
+        if (mapObject is ResourceInstance resource)
+        {
+            Bounds resourceBounds = resource.PresentationBounds;
+            resourceBounds.Expand(new Vector3(focusPadding * 2f, 0f, focusPadding * 2f));
+            return resourceBounds;
+        }
         if (mapObject is ConveyorBelt)
         {
             return CreateMapObjectStatusFocusBounds(mapObject, block, focusPadding);
@@ -5259,12 +5267,12 @@ public partial class PlayerController : MonoBehaviour
         return CreateMapObjectStatusFocusBounds(mapObject, block, focusPadding);
     }
 
-    private static Bounds CreateMapObjectStatusFocusBounds(MapObject mapObject, Block block, float focusPadding)
+    private static Bounds CreateMapObjectStatusFocusBounds(IMapObjectTarget mapObject, Block block, float focusPadding)
     {
         Vector3 center = block != null
             ? block.WorldPosition
             : mapObject != null
-                ? mapObject.transform.position
+                ? mapObject.WorldPosition
                 : Vector3.zero;
         Vector3 size = Vector3.one;
         if (mapObject != null)
@@ -5288,7 +5296,7 @@ public partial class PlayerController : MonoBehaviour
         return fallbackBounds;
     }
 
-    private static float GetResourceFocusSelectionDistanceSqr(Resource resource, Vector3 origin)
+    private static float GetResourceFocusSelectionDistanceSqr(ResourceInstance resource, Vector3 origin)
     {
         if (resource == null)
         {
@@ -5323,7 +5331,7 @@ public partial class PlayerController : MonoBehaviour
         return false;
     }
 
-    private bool AppendMapObjectFocusBlocks(MapObject mapObject, Block fallbackBlock, List<Block> results)
+    private bool AppendMapObjectFocusBlocks(IMapObjectTarget mapObject, Block fallbackBlock, List<Block> results)
     {
         if (mapObject == null || results == null || !mapObject.AllowsFocus)
         {
@@ -5398,7 +5406,7 @@ public partial class PlayerController : MonoBehaviour
         return appended;
     }
 
-    private bool TryAppendFocusBlock(List<Block> results, Vector2Int coordinate, MapObject targetOverride = null)
+    private bool TryAppendFocusBlock(List<Block> results, Vector2Int coordinate, IMapObjectTarget targetOverride = null)
     {
         if (results == null)
         {
@@ -5422,14 +5430,14 @@ public partial class PlayerController : MonoBehaviour
         return true;
     }
 
-    private void SetInteractionFocusTargetOverride(Block block, MapObject targetOverride)
+    private void SetInteractionFocusTargetOverride(Block block, IMapObjectTarget targetOverride)
     {
         if (block == null || targetOverride == null)
         {
             return;
         }
 
-        if (interactionFocusTargetOverrides.TryGetValue(block, out MapObject existing)
+        if (interactionFocusTargetOverrides.TryGetValue(block, out IMapObjectTarget existing)
             && existing != null
             && existing != targetOverride
             && existing is Vehicle
@@ -5489,7 +5497,7 @@ public partial class PlayerController : MonoBehaviour
         if (!TryResolveMouseFocusTargets(
                 pointerPosition,
                 out Animal animal,
-                out MapObject mapObject,
+                out IMapObjectTarget mapObject,
                 out PortableObject portableObject,
                 out Block fallbackBlock))
         {
@@ -5671,7 +5679,7 @@ public partial class PlayerController : MonoBehaviour
 
         if (!TryResolveMouseFocusedMapObject(
                 pointerPosition,
-                out MapObject mapObject,
+                out IMapObjectTarget mapObject,
                 out Block fallbackBlock))
         {
             ClearMountedPinnedFocus();
@@ -5696,7 +5704,7 @@ public partial class PlayerController : MonoBehaviour
         RefreshMountedPinnedInteractionFocus();
     }
 
-    private bool TryResolveMouseFocusedMapObject(Vector2 pointerPosition, out MapObject mapObject, out Block fallbackBlock)
+    private bool TryResolveMouseFocusedMapObject(Vector2 pointerPosition, out IMapObjectTarget mapObject, out Block fallbackBlock)
     {
         if (!TryResolveMouseFocusTargets(
                 pointerPosition,
@@ -5718,7 +5726,7 @@ public partial class PlayerController : MonoBehaviour
     private bool TryResolveMouseFocusTargets(
         Vector2 pointerPosition,
         out Animal animal,
-        out MapObject mapObject,
+        out IMapObjectTarget mapObject,
         out PortableObject portableObject,
         out Block fallbackBlock)
     {
@@ -5738,7 +5746,7 @@ public partial class PlayerController : MonoBehaviour
         int hitCount = RaycastMouseFocus(ray, Mathf.Max(0f, maxDistance));
         Animal closestAnimal = null;
         float closestAnimalDistance = float.MaxValue;
-        MapObject closestCandidate = null;
+        IMapObjectTarget closestCandidate = null;
         float closestDistance = float.MaxValue;
         for (int i = 0; i < hitCount; i++)
         {
@@ -5749,7 +5757,8 @@ public partial class PlayerController : MonoBehaviour
                 continue;
             }
 
-            Animal animalCandidate = hitCollider.GetComponentInParent<Animal>();
+            Animal animalCandidate = ResourceTypeWorld.IsSharedCollider(hitCollider)
+                ? null : hitCollider.GetComponentInParent<Animal>();
             if (animalCandidate != null
                 && animalCandidate.gameObject.activeInHierarchy
                 && hit.distance < closestAnimalDistance)
@@ -5758,7 +5767,7 @@ public partial class PlayerController : MonoBehaviour
                 closestAnimalDistance = hit.distance;
             }
 
-            MapObject candidate = hitCollider.GetComponentInParent<MapObject>();
+            IMapObjectTarget candidate = ResourceTypeWorld.ResolveColliderTarget(hitCollider);
             if (!IsValidMouseFocusMapObject(candidate))
             {
                 continue;
@@ -5953,21 +5962,23 @@ public partial class PlayerController : MonoBehaviour
         return hitCount;
     }
 
-    private static bool IsValidMouseFocusMapObject(MapObject mapObject)
+    private static bool IsValidMouseFocusMapObject(IMapObjectTarget mapObject)
     {
-        return mapObject != null
-               && mapObject.gameObject.activeInHierarchy
+        return mapObject.IsAlive()
+               && mapObject.IsTargetActive
                && mapObject.AllowsFocus;
     }
 
-    private static bool IsAvailableMapObjectFocusTarget(MapObject mapObject, Block fallbackBlock)
+    private static bool IsAvailableMapObjectFocusTarget(IMapObjectTarget mapObject, Block fallbackBlock)
     {
-        if (mapObject == null || !mapObject.AllowsFocus)
+        if (!mapObject.IsAlive() || !mapObject.AllowsFocus)
         {
             return false;
         }
 
-        if (mapObject.gameObject.activeInHierarchy)
+        if (mapObject is ResourceInstance resource) return resource.IsRuntimeActive;
+
+        if (mapObject.IsTargetActive)
         {
             return true;
         }
@@ -5976,7 +5987,7 @@ public partial class PlayerController : MonoBehaviour
     }
 
     private static bool TryGetMatchingConveyorRecord(
-        MapObject mapObject,
+        IMapObjectTarget mapObject,
         Block fallbackBlock,
         out ConveyorRuntimeRecord record)
     {
@@ -5994,14 +6005,16 @@ public partial class PlayerController : MonoBehaviour
                    out record);
     }
 
-    private static bool IsAvailableMapObjectFocusTarget(MapObject mapObject, HashSet<Block> focusBlocks)
+    private static bool IsAvailableMapObjectFocusTarget(IMapObjectTarget mapObject, HashSet<Block> focusBlocks)
     {
-        if (mapObject == null || !mapObject.AllowsFocus)
+        if (!mapObject.IsAlive() || !mapObject.AllowsFocus)
         {
             return false;
         }
 
-        if (mapObject.gameObject.activeInHierarchy)
+        if (mapObject is ResourceInstance resource) return resource.IsRuntimeActive;
+
+        if (mapObject.IsTargetActive)
         {
             return true;
         }
@@ -6022,7 +6035,7 @@ public partial class PlayerController : MonoBehaviour
         return false;
     }
 
-    private bool TryResolveMouseFocusFallbackBlock(MapObject mapObject, Ray ray, out Block fallbackBlock)
+    private bool TryResolveMouseFocusFallbackBlock(IMapObjectTarget mapObject, Ray ray, out Block fallbackBlock)
     {
         fallbackBlock = null;
         if (mapObject == null)
@@ -6030,7 +6043,7 @@ public partial class PlayerController : MonoBehaviour
             return false;
         }
 
-        if (mapObject is Resource resource && resource.OwningBlock != null)
+        if (mapObject is ResourceInstance resource && resource.OwningBlock != null)
         {
             fallbackBlock = resource.OwningBlock;
             return true;
@@ -6222,7 +6235,7 @@ public partial class PlayerController : MonoBehaviour
 
         installationObject = candidate;
         fallbackBlock = hasConveyorRecord
-                        || candidateBlock != null && candidateBlock.MapObject == candidate
+                        || candidateBlock != null && ReferenceEquals(candidateBlock.MapObject, candidate)
             ? candidateBlock
             : null;
         if (fallbackBlock != null || terrain == null)
@@ -6434,7 +6447,7 @@ public partial class PlayerController : MonoBehaviour
         return false;
     }
 
-    private void SetMouseFocusedBlocks(List<Block> nextBlocks, MapObject nextMapObject = null)
+    private void SetMouseFocusedBlocks(List<Block> nextBlocks, IMapObjectTarget nextMapObject = null)
     {
         currentMouseFocusedMapObject = nextBlocks != null && nextBlocks.Count > 0 ? nextMapObject : null;
         mouseFocusRemovalBuffer.Clear();
@@ -6663,7 +6676,7 @@ public partial class PlayerController : MonoBehaviour
                 continue;
             }
 
-            MapObject focusedMapObject = ResolveInteractionFocusTarget(block);
+            IMapObjectTarget focusedMapObject = ResolveInteractionFocusTarget(block);
             if (focusedMapObject == null)
             {
                 SetBlockFocusVisible(block, focusKind, true);
@@ -6726,7 +6739,7 @@ public partial class PlayerController : MonoBehaviour
         return group;
     }
 
-    private FocusMarkerGroup GetFocusMarkerGroup(MapObject mapObject)
+    private FocusMarkerGroup GetFocusMarkerGroup(IMapObjectTarget mapObject)
     {
         if (mapObject == null)
         {

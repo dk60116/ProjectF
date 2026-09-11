@@ -398,8 +398,6 @@ public class InstallationPlacementController : MonoBehaviour
         InputOutputModule.RectGridBlockType.Output,
         InputOutputModule.RectGridBlockType.DoublePipeOutputItem
     };
-    private static readonly List<Renderer> ResourceRendererScratch = new List<Renderer>(8);
-    private static readonly Dictionary<int, float> ResourceMarkerSurfaceYCache = new Dictionary<int, float>();
     private static readonly Color[] ConnectionGroupTints =
     {
         new Color(0.16f, 0.78f, 1f, 0.9f),
@@ -4940,7 +4938,7 @@ public class InstallationPlacementController : MonoBehaviour
                     ? CaptureExternalFloorObjectState(block)
                     : null;
 
-            if (block.MapObject == editSession.originalInstallation || IsAttachedAreaBox(editSession, block.MapObject))
+            if (ReferenceEquals(block.MapObject, editSession.originalInstallation) || IsAttachedAreaBox(editSession, block.MapObject))
             {
                 block.SetMapObject(null);
             }
@@ -4994,7 +4992,7 @@ public class InstallationPlacementController : MonoBehaviour
                 if (terrain != null
                     && terrain.TryGetLoadedBlock(boxCoordinates[coordinateIndex], out Block block)
                     && block != null
-                    && block.MapObject == boxState.boxObject)
+                    && ReferenceEquals(block.MapObject, boxState.boxObject))
                 {
                     block.SetMapObject(null);
                 }
@@ -5004,7 +5002,7 @@ public class InstallationPlacementController : MonoBehaviour
         }
     }
 
-    private bool IsAttachedAreaBox(InstallationEditSession editSession, MapObject mapObject)
+    private bool IsAttachedAreaBox(InstallationEditSession editSession, IMapObjectTarget mapObject)
     {
         if (editSession?.attachedAreaBoxes == null || !(mapObject is BoxObject boxObject))
         {
@@ -5481,8 +5479,8 @@ public class InstallationPlacementController : MonoBehaviour
                     return false;
                 }
 
-                MapObject occupyingObject = GetBlockingMapObject(block);
-                if (occupyingObject != null && !movingObjects.Contains(occupyingObject))
+                IMapObjectTarget occupyingObject = GetBlockingMapObject(block);
+                if (occupyingObject != null && !movingObjects.Contains(occupyingObject as MapObject))
                 {
                     return false;
                 }
@@ -13990,7 +13988,7 @@ public class InstallationPlacementController : MonoBehaviour
             || !terrain.TryGetLoadedBlockRuntimeProxy(coordinate, out Block block)
             || block == null
             || block.MapObject == null
-            || !block.MapObject.gameObject.activeInHierarchy
+            || !block.MapObject.IsTargetActive
             || !(block.MapObject is InstallationObject installationObject)
             || !installationObject.TryGetPlacementRuntime(
                 out Vector2Int anchorCoordinate,
@@ -14001,8 +13999,8 @@ public class InstallationPlacementController : MonoBehaviour
 
         snapshot = new PlacementSnapshot
         {
-            mapObject = block.MapObject,
-            rotation = block.MapObject.transform.rotation,
+            mapObject = installationObject,
+            rotation = installationObject.transform.rotation,
             anchorCoordinate = anchorCoordinate,
             quarterTurns = quarterTurns,
             storedFluidItemId = installationObject.StoredFluidItemId
@@ -17510,7 +17508,7 @@ public class InstallationPlacementController : MonoBehaviour
         return hasConnection;
     }
 
-    private static bool IsPipeConnectorObject(MapObject mapObject)
+    private static bool IsPipeConnectorObject(IMapObjectTarget mapObject)
     {
         if (mapObject is Pipe || mapObject is Fluidtank || mapObject is Bucket)
         {
@@ -17925,7 +17923,7 @@ public class InstallationPlacementController : MonoBehaviour
         if (terrain == null
             || !terrain.TryGetLoadedBlock(anchorCoordinate, out Block block)
             || block == null
-            || block.MapObject != plan.installedPipe)
+            || !ReferenceEquals(block.MapObject, plan.installedPipe))
         {
             return false;
         }
@@ -18044,7 +18042,7 @@ public class InstallationPlacementController : MonoBehaviour
                     out _)
                 || !terrain.TryGetLoadedBlock(anchorCoordinate, out Block block)
                 || block == null
-                || block.MapObject != plan.installedPipe)
+                || !ReferenceEquals(block.MapObject, plan.installedPipe))
             {
                 return false;
             }
@@ -18856,7 +18854,7 @@ public class InstallationPlacementController : MonoBehaviour
             AddPipeConnectorVariantRefreshCoordinates(
                 coordinates,
                 anchorCoordinate,
-                block.MapObject,
+                installationObject,
                 quarterTurns,
                 true);
         }
@@ -20983,46 +20981,9 @@ public class InstallationPlacementController : MonoBehaviour
     private static bool TryGetMiningResourceMarkerSurfaceY(Block block, out float surfaceY)
     {
         surfaceY = 0f;
-        Resource resource = block != null ? block.Resource : null;
-        if (resource == null || resource.ResolvedHarvestMode != Resource.HarvestMode.Mining)
-        {
-            return false;
-        }
-
-        int resourceInstanceId = resource.GetInstanceID();
-        if (ResourceMarkerSurfaceYCache.TryGetValue(resourceInstanceId, out surfaceY))
-        {
-            return true;
-        }
-
-        ResourceRendererScratch.Clear();
-        resource.GetComponentsInChildren(true, ResourceRendererScratch);
-        bool foundRenderer = false;
-        Bounds bounds = default;
-        for (int i = 0; i < ResourceRendererScratch.Count; i++)
-        {
-            Renderer rendererComponent = ResourceRendererScratch[i];
-            if (rendererComponent == null)
-            {
-                continue;
-            }
-
-            if (!foundRenderer)
-            {
-                bounds = rendererComponent.bounds;
-                foundRenderer = true;
-                continue;
-            }
-
-            bounds.Encapsulate(rendererComponent.bounds);
-        }
-
-        ResourceRendererScratch.Clear();
-
-        surfaceY = foundRenderer
-            ? bounds.max.y
-            : Mathf.Max(block.WorldPosition.y, resource.transform.position.y);
-        ResourceMarkerSurfaceYCache[resourceInstanceId] = surfaceY;
+        ResourceInstance resource = block != null ? block.Resource : null;
+        if (resource == null || !resource.IsRuntimeActive || resource.ResolvedHarvestMode != Resource.HarvestMode.Mining) return false;
+        surfaceY = resource.PresentationBounds.max.y;
         return true;
     }
 
@@ -22011,7 +21972,7 @@ public class InstallationPlacementController : MonoBehaviour
             return false;
         }
 
-        Resource oilResource = oilBlock.Resource;
+        ResourceInstance oilResource = oilBlock.Resource;
         return oilResource != null
                && oilResource.PlacementCategory == ResourceDefinition.PlacementCategory.Oil;
     }
@@ -23607,7 +23568,7 @@ public class InstallationPlacementController : MonoBehaviour
             return isClear;
         }
 
-        MapObject occupyingObject = GetOccupyingObjectForPlacement(block, previewToIgnore);
+        IMapObjectTarget occupyingObject = GetOccupyingObjectForPlacement(block, previewToIgnore);
         bool hasOtherPreview = TryGetInstallPreviewAtCoordinate(
                                    coordinate,
                                    out MapObject existingPreview)
@@ -23650,7 +23611,7 @@ public class InstallationPlacementController : MonoBehaviour
             return false;
         }
 
-        MapObject occupyingObject = GetOccupyingObjectForPlacement(block);
+        IMapObjectTarget occupyingObject = GetOccupyingObjectForPlacement(block);
 
         return occupyingObject == null
                || occupyingObject is Pump
@@ -23671,7 +23632,7 @@ public class InstallationPlacementController : MonoBehaviour
             return false;
         }
 
-        MapObject occupyingObject = GetOccupyingObjectForPlacement(block);
+        IMapObjectTarget occupyingObject = GetOccupyingObjectForPlacement(block);
         if (occupyingObject == null
             || occupyingObject is BoxObject
             || IsResourceAllowedForPlacement(block, occupyingObject, allowedFilter)
@@ -23710,7 +23671,7 @@ public class InstallationPlacementController : MonoBehaviour
             return false;
         }
 
-        MapObject occupyingObject = GetOccupyingObjectForPlacement(block);
+        IMapObjectTarget occupyingObject = GetOccupyingObjectForPlacement(block);
 
         if (IsResourceAllowedForPlacement(block, occupyingObject, allowedFilter))
         {
@@ -25887,7 +25848,7 @@ public class InstallationPlacementController : MonoBehaviour
                 return true;
             }
 
-            MapObject occupyingObject = GetOccupyingObjectForPlacement(block, previewToIgnore);
+            IMapObjectTarget occupyingObject = GetOccupyingObjectForPlacement(block, previewToIgnore);
             if (occupyingObject is Pipe occupyingPipe
                 && occupyingPipe.gameObject.activeInHierarchy)
             {
@@ -28306,7 +28267,7 @@ public class InstallationPlacementController : MonoBehaviour
                 continue;
             }
 
-            MapObject hitMapObject = hit.collider.GetComponentInParent<MapObject>();
+            MapObject hitMapObject = ResourceTypeWorld.ResolveColliderTarget(hit.collider) as MapObject;
             if (hitMapObject != null && installPreviewInstances.Contains(hitMapObject))
             {
                 continue;
@@ -30705,7 +30666,7 @@ public class InstallationPlacementController : MonoBehaviour
             return false;
         }
 
-        MapObject occupyingObject = GetOccupyingObjectForPlacement(clickedBlock);
+        IMapObjectTarget occupyingObject = GetOccupyingObjectForPlacement(clickedBlock);
 
         if (!TryGetPipePlacementAtBlock(clickedBlock, occupyingObject, out Pipe pipe, out Quaternion pipeRotation))
         {
@@ -30827,7 +30788,7 @@ public class InstallationPlacementController : MonoBehaviour
                     continue;
                 }
 
-                MapObject occupyingObject = GetOccupyingObjectForPlacement(pipeBlock);
+                IMapObjectTarget occupyingObject = GetOccupyingObjectForPlacement(pipeBlock);
 
                 if (!TryGetPipePlacementAtBlock(pipeBlock, occupyingObject, out Pipe pipe, out Quaternion pipeRotation)
                     || !TryGetStraightPipeAxis(pipe, pipeRotation, out Vector2Int pipeAxisDirection)
@@ -31885,7 +31846,7 @@ public class InstallationPlacementController : MonoBehaviour
                 continue;
             }
 
-            MapObject occupyingObject = GetOccupyingObjectForPlacement(block, previewToIgnore);
+            IMapObjectTarget occupyingObject = GetOccupyingObjectForPlacement(block, previewToIgnore);
 
             if (TryGetPipePlacementAtBlock(block, occupyingObject, out _, out _))
             {
@@ -32905,7 +32866,7 @@ public class InstallationPlacementController : MonoBehaviour
         {
             if (terrain.TryGetLoadedBlock(occupiedCoordinates[i], out Block block)
                 && block != null
-                && block.MapObject == bucket)
+                && ReferenceEquals(block.MapObject, bucket))
             {
                 block.SetMapObject(null);
             }
@@ -33035,7 +32996,7 @@ public class InstallationPlacementController : MonoBehaviour
             if (terrain != null
                 && terrain.TryGetLoadedBlock(oldCoordinates[i], out Block block)
                 && block != null
-                && block.MapObject == currentObject)
+                && ReferenceEquals(block.MapObject, currentObject))
             {
                 block.SetMapObject(null);
             }
@@ -33336,7 +33297,7 @@ public class InstallationPlacementController : MonoBehaviour
             return true;
         }
 
-        MapObject occupyingObject = GetOccupyingObjectForPlacement(block, previewToIgnore);
+        IMapObjectTarget occupyingObject = GetOccupyingObjectForPlacement(block, previewToIgnore);
 
         if (!TryResolveInstallationObject(footprintSource, out InstallationObject installationObject))
         {
@@ -33811,7 +33772,7 @@ public class InstallationPlacementController : MonoBehaviour
     private bool CanPlaceFluidStorageOnRuntimePipeArea(
         InstallationObject installationObject,
         Block block,
-        MapObject occupyingObject,
+        IMapObjectTarget occupyingObject,
         bool isPumpRuntimeOutputAreaBlock,
         bool isRuntimePipeAreaBlock,
         bool isRectGridAreaBlock,
@@ -33842,7 +33803,7 @@ public class InstallationPlacementController : MonoBehaviour
         MapObject footprintSource,
         InputOutputModule.RectGridBlockType rectGridBlockType,
         Block block,
-        MapObject occupyingObject,
+        IMapObjectTarget occupyingObject,
         Vector2Int? anchorCoordinate,
         int quarterTurns,
         bool isPumpRuntimeOutputAreaBlock,
@@ -33895,7 +33856,7 @@ public class InstallationPlacementController : MonoBehaviour
         MapObject footprintSource,
         InputOutputModule.RectGridBlockType rectGridBlockType,
         Block block,
-        MapObject occupyingObject,
+        IMapObjectTarget occupyingObject,
         InstallationMapFilter allowedFilter,
         Vector2Int? anchorCoordinate,
         int quarterTurns,
@@ -33920,7 +33881,7 @@ public class InstallationPlacementController : MonoBehaviour
         MapObject footprintSource,
         InputOutputModule.RectGridBlockType rectGridBlockType,
         Block block,
-        MapObject occupyingObject,
+        IMapObjectTarget occupyingObject,
         InstallationMapFilter allowedFilter,
         Vector2Int? anchorCoordinate,
         int quarterTurns,
@@ -33950,7 +33911,7 @@ public class InstallationPlacementController : MonoBehaviour
         MapObject footprintSource,
         InputOutputModule.RectGridBlockType rectGridBlockType,
         Block block,
-        MapObject occupyingObject,
+        IMapObjectTarget occupyingObject,
         InstallationMapFilter allowedFilter,
         Vector2Int? anchorCoordinate,
         int quarterTurns,
@@ -33978,7 +33939,7 @@ public class InstallationPlacementController : MonoBehaviour
         MapObject footprintSource,
         InputOutputModule.RectGridBlockType rectGridBlockType,
         Block block,
-        MapObject occupyingObject,
+        IMapObjectTarget occupyingObject,
         InstallationMapFilter allowedFilter,
         Vector2Int? anchorCoordinate,
         int quarterTurns,
@@ -34058,7 +34019,7 @@ public class InstallationPlacementController : MonoBehaviour
         InstallationObject installationObject,
         InputOutputModule.RectGridBlockType rectGridBlockType,
         Block block,
-        MapObject occupyingObject,
+        IMapObjectTarget occupyingObject,
         Vector2Int? anchorCoordinate,
         int quarterTurns,
         bool isPumpRuntimeOutputAreaBlock,
@@ -35264,7 +35225,7 @@ public class InstallationPlacementController : MonoBehaviour
         return pipeConnectionDirections.Count > beforeCount;
     }
 
-    private static bool IsFluidStoragePlacementObject(MapObject mapObject)
+    private static bool IsFluidStoragePlacementObject(IMapObjectTarget mapObject)
     {
         return mapObject is InstallationObject installationObject
                && installationObject.CanStoreFluid
@@ -35387,7 +35348,7 @@ public class InstallationPlacementController : MonoBehaviour
 
     private bool CanPlacePipeOnFixedFluidConnectorArea(
         Block block,
-        MapObject occupyingObject,
+        IMapObjectTarget occupyingObject,
         MapObject footprintSource,
         int quarterTurns)
     {
@@ -35914,7 +35875,7 @@ public class InstallationPlacementController : MonoBehaviour
 
     private bool CanBoilerPipePassOverlapPipe(
         Block block,
-        MapObject occupyingObject,
+        IMapObjectTarget occupyingObject,
         MapObject footprintSource,
         InputOutputModule.RectGridBlockType rectGridBlockType,
         Vector2Int anchorCoordinate,
@@ -35962,7 +35923,7 @@ public class InstallationPlacementController : MonoBehaviour
 
     private bool CanBoilerPipeOutputOverlapPipe(
         Block block,
-        MapObject occupyingObject,
+        IMapObjectTarget occupyingObject,
         MapObject footprintSource,
         InputOutputModule.RectGridBlockType rectGridBlockType,
         Vector2Int anchorCoordinate,
@@ -36064,7 +36025,7 @@ public class InstallationPlacementController : MonoBehaviour
     private bool CanPlacePassthroughOnBelt2FBridgeCenter(
         Block block,
         MapObject footprintSource,
-        MapObject occupyingObject,
+        IMapObjectTarget occupyingObject,
         int quarterTurns)
     {
         if (!IsBelt2FPassthroughPlacementSource(footprintSource)
@@ -36095,7 +36056,7 @@ public class InstallationPlacementController : MonoBehaviour
     private bool CanPlaceBelt2FBlock(
         Block block,
         MapObject footprintSource,
-        MapObject occupyingObject,
+        IMapObjectTarget occupyingObject,
         Vector2Int? anchorCoordinate,
         int quarterTurns,
         bool isInputOutputAreaBlock,
@@ -36144,7 +36105,7 @@ public class InstallationPlacementController : MonoBehaviour
             return false;
         }
 
-        MapObject occupyingObject = GetOccupyingObjectForPlacement(block);
+        IMapObjectTarget occupyingObject = GetOccupyingObjectForPlacement(block);
 
         InstallationMapFilter allowedFilter = TryResolveInstallationObject(footprintSource, out InstallationObject installationObject)
             ? ResolvePlacementMapFilter(footprintSource, installationObject)
@@ -36241,13 +36202,13 @@ public class InstallationPlacementController : MonoBehaviour
             return false;
         }
 
-        MapObject occupyingObject = GetOccupyingObjectForPlacement(block);
+        IMapObjectTarget occupyingObject = GetOccupyingObjectForPlacement(block);
         return IsBaseConveyorBelt(occupyingObject) || occupyingObject is Pipe;
     }
 
-    private static bool IsBaseConveyorBelt(MapObject mapObject)
+    private static bool IsBaseConveyorBelt(IMapObjectTarget mapObject)
     {
-        return mapObject is ConveyorBelt && !(mapObject is Spliterbelt) && !IsBelt2F(mapObject);
+        return mapObject is ConveyorBelt && !(mapObject is Spliterbelt) && !(mapObject is ConvayorBelt2F);
     }
 
     private static bool IsBelt2F(MapObject mapObject)
@@ -36589,7 +36550,7 @@ public class InstallationPlacementController : MonoBehaviour
 
     private bool CanPlaceRectGridAreaBlock(
         Block block,
-        MapObject occupyingObject,
+        IMapObjectTarget occupyingObject,
         MapObject footprintSource,
         InputOutputModule.RectGridBlockType rectGridBlockType,
         Vector2Int anchorCoordinate,
@@ -36675,13 +36636,13 @@ public class InstallationPlacementController : MonoBehaviour
                        quarterTurns);
         }
 
-        return occupyingObject is Resource resource
+        return occupyingObject is ResourceInstance resource
             && IsResourceAllowedByMapFilter(resource, allowedFilter);
     }
 
     private static bool CanSeedPlanterOutputOverlapPlantedResource(
         Block block,
-        MapObject occupyingObject,
+        IMapObjectTarget occupyingObject,
         MapObject footprintSource,
         InputOutputModule.RectGridBlockType rectGridBlockType)
     {
@@ -36692,7 +36653,7 @@ public class InstallationPlacementController : MonoBehaviour
             return false;
         }
 
-        Resource resource = occupyingObject as Resource;
+        ResourceInstance resource = occupyingObject as ResourceInstance;
         if (resource == null && occupyingObject == null)
         {
             resource = block.Resource;
@@ -36700,7 +36661,7 @@ public class InstallationPlacementController : MonoBehaviour
 
         TerrainGenerator terrain = TerrainGenerator.ResolveActive();
         return resource != null
-               && resource.gameObject.activeInHierarchy
+               && resource.IsRuntimeActive
                && terrain != null
                && terrain.IsFarmlandAt(block.Coordinate);
     }
@@ -37290,7 +37251,7 @@ public class InstallationPlacementController : MonoBehaviour
 
     private static bool CanItemOutputAreaOverlapConveyor(
         InputOutputModule.RectGridBlockType candidateBlockType,
-        MapObject occupyingObject,
+        IMapObjectTarget occupyingObject,
         bool isBelt2FBridgeCenter)
     {
         return occupyingObject is ConveyorBelt
@@ -37593,7 +37554,7 @@ public class InstallationPlacementController : MonoBehaviour
         MapObject footprintSource,
         InputOutputModule.RectGridBlockType rectGridBlockType,
         Block block,
-        MapObject occupyingObject,
+        IMapObjectTarget occupyingObject,
         bool isPumpRuntimeOutputAreaBlock,
         InstallationMapFilter allowedFilter,
         Vector2Int? anchorCoordinate,
@@ -37617,7 +37578,7 @@ public class InstallationPlacementController : MonoBehaviour
         MapObject footprintSource,
         InputOutputModule.RectGridBlockType rectGridBlockType,
         Block block,
-        MapObject occupyingObject,
+        IMapObjectTarget occupyingObject,
         bool isPumpRuntimeOutputAreaBlock,
         Vector2Int? anchorCoordinate,
         int quarterTurns)
@@ -37650,7 +37611,7 @@ public class InstallationPlacementController : MonoBehaviour
         MapObject footprintSource,
         InputOutputModule.RectGridBlockType rectGridBlockType,
         Block block,
-        MapObject occupyingObject,
+        IMapObjectTarget occupyingObject,
         bool isPumpRuntimeOutputAreaBlock,
         Vector2Int? anchorCoordinate,
         int quarterTurns)
@@ -37693,7 +37654,7 @@ public class InstallationPlacementController : MonoBehaviour
         MapObject footprintSource,
         InputOutputModule.RectGridBlockType rectGridBlockType,
         Block block,
-        MapObject occupyingObject,
+        IMapObjectTarget occupyingObject,
         InstallationMapFilter allowedFilter,
         Vector2Int? anchorCoordinate,
         int quarterTurns,
@@ -37731,7 +37692,7 @@ public class InstallationPlacementController : MonoBehaviour
         MapObject footprintSource,
         InputOutputModule.RectGridBlockType rectGridBlockType,
         Block block,
-        MapObject occupyingObject,
+        IMapObjectTarget occupyingObject,
         Vector2Int? anchorCoordinate,
         int quarterTurns)
     {
@@ -37762,7 +37723,7 @@ public class InstallationPlacementController : MonoBehaviour
         MapObject footprintSource,
         InputOutputModule.RectGridBlockType rectGridBlockType,
         Block block,
-        MapObject occupyingObject,
+        IMapObjectTarget occupyingObject,
         Vector2Int? anchorCoordinate,
         int quarterTurns)
     {
@@ -37803,7 +37764,7 @@ public class InstallationPlacementController : MonoBehaviour
         MapObject footprintSource,
         InputOutputModule.RectGridBlockType rectGridBlockType,
         Block block,
-        MapObject occupyingObject,
+        IMapObjectTarget occupyingObject,
         Vector2Int? anchorCoordinate,
         int quarterTurns,
         MapObject previewToIgnore)
@@ -37855,7 +37816,7 @@ public class InstallationPlacementController : MonoBehaviour
         MapObject footprintSource,
         InputOutputModule.RectGridBlockType rectGridBlockType,
         Block block,
-        MapObject occupyingObject,
+        IMapObjectTarget occupyingObject,
         Vector2Int? anchorCoordinate,
         int quarterTurns)
     {
@@ -37863,7 +37824,7 @@ public class InstallationPlacementController : MonoBehaviour
         return false;
     }
 
-    private static bool IsBoilerSource(MapObject footprintSource)
+    private static bool IsBoilerSource(IMapObjectTarget footprintSource)
     {
         return footprintSource is Boiler
                || (footprintSource != null
@@ -37879,7 +37840,7 @@ public class InstallationPlacementController : MonoBehaviour
                        || footprintSource.GetComponentInChildren<Sprinkler>(true) != null));
     }
 
-    private static bool IsSteamGeneratorSource(MapObject footprintSource)
+    private static bool IsSteamGeneratorSource(IMapObjectTarget footprintSource)
     {
         return footprintSource is SteamGenerator
                || (footprintSource != null
@@ -38149,7 +38110,7 @@ public class InstallationPlacementController : MonoBehaviour
     private bool SteamGeneratorPipeAreaOverlapsPipeDirection(
         Block block,
         MapObject footprintSource,
-        MapObject occupyingObject,
+        IMapObjectTarget occupyingObject,
         Vector2Int anchorCoordinate,
         int quarterTurns)
     {
@@ -38368,7 +38329,7 @@ public class InstallationPlacementController : MonoBehaviour
             terrain.TryGetLoadedBlock(coordinate, out block);
         }
 
-        MapObject occupyingObject = null;
+        IMapObjectTarget occupyingObject = null;
         if (block != null)
         {
             occupyingObject = GetBlockingMapObject(block);
@@ -38727,7 +38688,7 @@ public class InstallationPlacementController : MonoBehaviour
                                            pumpCoordinate,
                                            out Block pumpBlock)
                                        && pumpBlock != null
-                    ? GetBlockingMapObject(pumpBlock)
+                    ? GetBlockingMapObject(pumpBlock) as MapObject
                     : null;
                 bool hasSavedPumpPlacement = false;
                 Vector2Int savedPumpAnchorCoordinate = Vector2Int.zero;
@@ -38799,7 +38760,7 @@ public class InstallationPlacementController : MonoBehaviour
                                            pumpCoordinate,
                                            out Block pumpBlock)
                                        && pumpBlock != null
-                    ? GetBlockingMapObject(pumpBlock)
+                    ? GetBlockingMapObject(pumpBlock) as MapObject
                     : null;
                 Quaternion pumpRotation = pumpObject != null ? pumpObject.transform.rotation : Quaternion.identity;
                 bool hasSavedPumpPlacement = false;
@@ -38891,7 +38852,7 @@ public class InstallationPlacementController : MonoBehaviour
                                        pumpCoordinate,
                                        out Block pumpBlock)
                                    && pumpBlock != null
-                ? GetBlockingMapObject(pumpBlock)
+                ? GetBlockingMapObject(pumpBlock) as MapObject
                 : null;
             Quaternion pumpRotation = pumpObject != null ? pumpObject.transform.rotation : Quaternion.identity;
             if (pumpObject == null
@@ -39113,7 +39074,7 @@ public class InstallationPlacementController : MonoBehaviour
     private static bool CanPlaceInstallationOnInputOutputAreaBlock(
         InstallationObject installationObject,
         Block block,
-        MapObject occupyingObject,
+        IMapObjectTarget occupyingObject,
         bool isInputOutputAreaBlock,
         bool isNormalInputOutputAreaBlock,
         bool isInputOutputItemAreaBlock,
@@ -39125,7 +39086,7 @@ public class InstallationPlacementController : MonoBehaviour
         }
 
         if (isInputOutputAreaBlock
-            && occupyingObject is Resource occupyingResource
+            && occupyingObject is ResourceInstance occupyingResource
             && IsResourceAllowedByMapFilter(occupyingResource, allowedFilter))
         {
             return true;
@@ -39136,7 +39097,7 @@ public class InstallationPlacementController : MonoBehaviour
         if (allowsItemArea
             && (occupyingObject == null
                 || occupyingObject is InputOutputModule
-                || occupyingObject is Resource))
+                || occupyingObject is ResourceInstance))
         {
             return true;
         }
@@ -39152,40 +39113,30 @@ public class InstallationPlacementController : MonoBehaviour
         }
 
         return isInputOutputItemAreaBlock
-            && occupyingObject is Resource resource
+            && occupyingObject is ResourceInstance resource
             && IsResourceAllowedByMapFilter(resource, InstallationMapFilter.Ore);
+    }
+
+    public static bool IsResourceAllowedByMapFilter(ResourceInstance resource, InstallationMapFilter allowedFilter)
+    {
+        return resource != null && resource.CanHarvest && IsResourceAllowedByMapFilter(resource.Prototype, allowedFilter);
     }
 
     public static bool IsResourceAllowedByMapFilter(Resource resource, InstallationMapFilter allowedFilter)
     {
-        if (resource == null || !resource.CanHarvest)
-        {
-            return false;
-        }
-
-        InstallationMapFilter resourceFilter;
-        switch (resource.ResolvedHarvestMode)
-        {
-            case Resource.HarvestMode.Logging:
-            case Resource.HarvestMode.Cut:
-                resourceFilter = InstallationMapFilter.Tree;
-                break;
-            default:
-                resourceFilter = resource.PlacementCategory == ResourceDefinition.PlacementCategory.Oil
-                    ? InstallationMapFilter.Oil
-                    : InstallationMapFilter.Ore;
-                break;
-        }
-
-        return (allowedFilter & resourceFilter) != 0;
+        if (resource == null) return false;
+        InstallationMapFilter filter = resource.ResolvedHarvestMode == Resource.HarvestMode.Logging
+            || resource.ResolvedHarvestMode == Resource.HarvestMode.Cut ? InstallationMapFilter.Tree
+            : resource.PlacementCategory == ResourceDefinition.PlacementCategory.Oil ? InstallationMapFilter.Oil : InstallationMapFilter.Ore;
+        return (allowedFilter & filter) != 0;
     }
 
     private static bool IsResourceAllowedForPlacement(
         Block block,
-        MapObject occupyingObject,
+        IMapObjectTarget occupyingObject,
         InstallationMapFilter allowedFilter)
     {
-        Resource resource = occupyingObject as Resource;
+        ResourceInstance resource = occupyingObject as ResourceInstance;
         if (resource == null && occupyingObject == null && block != null)
         {
             resource = block.Resource;
@@ -39196,7 +39147,7 @@ public class InstallationPlacementController : MonoBehaviour
 
     private bool IsRailloadAllowedForPlacement(
         Block block,
-        MapObject occupyingObject,
+        IMapObjectTarget occupyingObject,
         InstallationMapFilter allowedFilter)
     {
         if ((allowedFilter & InstallationMapFilter.Railload) == 0)
@@ -39224,7 +39175,7 @@ public class InstallationPlacementController : MonoBehaviour
     }
 
     private static bool IsInstallationObjectAllowedForPlacement(
-        MapObject occupyingObject,
+        IMapObjectTarget occupyingObject,
         InstallationMapFilter allowedFilter)
     {
         if (!(occupyingObject is InstallationObject occupyingInstallation))
@@ -39364,7 +39315,7 @@ public class InstallationPlacementController : MonoBehaviour
 
     private bool IsPipeAllowedForPlacement(
         Block block,
-        MapObject occupyingObject,
+        IMapObjectTarget occupyingObject,
         MapObject footprintSource,
         Vector2Int? anchorCoordinate,
         int quarterTurns,
@@ -39392,7 +39343,7 @@ public class InstallationPlacementController : MonoBehaviour
 
     private bool IsPipeAllowedForPlacement(
         Block block,
-        MapObject occupyingObject,
+        IMapObjectTarget occupyingObject,
         MapObject footprintSource,
         Vector2Int anchorCoordinate,
         InstallationMapFilter allowedFilter)
@@ -39408,7 +39359,7 @@ public class InstallationPlacementController : MonoBehaviour
 
     private bool IsPipeAllowedForAnyBelt2FPlacementRotation(
         Block block,
-        MapObject occupyingObject,
+        IMapObjectTarget occupyingObject,
         MapObject footprintSource,
         InstallationMapFilter allowedFilter)
     {
@@ -39444,7 +39395,7 @@ public class InstallationPlacementController : MonoBehaviour
 
     private bool TryGetPipePlacementAtBlock(
         Block block,
-        MapObject occupyingObject,
+        IMapObjectTarget occupyingObject,
         out Pipe pipe,
         out Quaternion pipeRotation)
     {
@@ -39534,15 +39485,15 @@ public class InstallationPlacementController : MonoBehaviour
         return InputOutputModule.IsInputOutputAreaBlockType(blockType);
     }
 
-    private MapObject GetOccupyingObjectForPlacement(Block block, MapObject previewToIgnore = null)
+    private IMapObjectTarget GetOccupyingObjectForPlacement(Block block, MapObject previewToIgnore = null)
     {
         if (block == null)
         {
             return null;
         }
 
-        MapObject occupyingObject = GetBlockingMapObject(block);
-        if (occupyingObject == previewToIgnore)
+        IMapObjectTarget occupyingObject = GetBlockingMapObject(block);
+        if (ReferenceEquals(occupyingObject, previewToIgnore))
         {
             occupyingObject = null;
         }
@@ -39632,22 +39583,22 @@ public class InstallationPlacementController : MonoBehaviour
         return occupyingInstallation != null;
     }
 
-    private MapObject GetBlockingMapObject(Block block)
+    private IMapObjectTarget GetBlockingMapObject(Block block)
     {
         if (block == null)
         {
             return null;
         }
 
-        MapObject occupyingObject = block.MapObject;
+        IMapObjectTarget occupyingObject = block.MapObject;
         if (occupyingObject == null)
         {
             return null;
         }
 
-        if (!occupyingObject.gameObject.activeInHierarchy)
+        if (!occupyingObject.IsTargetActive)
         {
-            if (occupyingObject is Resource inactiveResource)
+            if (occupyingObject is ResourceInstance inactiveResource)
             {
                 block.ClearResource(inactiveResource);
             }
@@ -39660,7 +39611,7 @@ public class InstallationPlacementController : MonoBehaviour
 
         // Growing plants can be physically present before their current growth stage has
         // any harvest output. Only depleted resources stop occupying their map block.
-        if (occupyingObject is Resource resource && resource.ResourceCount <= 0)
+        if (occupyingObject is ResourceInstance resource && resource.ResourceCount <= 0)
         {
             block.ClearResource(resource);
             return null;

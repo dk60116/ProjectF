@@ -74,11 +74,10 @@ public partial class Block : BaseObject
     [SerializeField]
     private BlockType type;
 
-    [SerializeField, ReadOnly]
-    private MapObject mapObject;
+    // Runtime ownership is restored from BlockStateStore, not Unity component serialization.
+    private IMapObjectTarget mapObject;
     // A harvestable resource can remain under an installation occupying the same cell.
-    [SerializeField, ReadOnly]
-    private Resource resource;
+    private ResourceInstance resource;
     private ConveyorBelt runtimeConveyorOverride;
     private ConveyorRuntimeRecord runtimeConveyorRecord;
     private ConveyorRuntimeRecord runtimeConveyorRecordOverride;
@@ -315,16 +314,6 @@ public partial class Block : BaseObject
         // Initialization is therefore intentionally deferred to Initialize.
     }
 
-    private void RefreshSerializedResourceOwnership()
-    {
-        if (mapObject is Resource mapResource)
-        {
-            resource = mapResource;
-        }
-
-        resource?.SetOwningBlock(this);
-    }
-
     private void OnDestroy()
     {
         if (!Application.isPlaying)
@@ -374,7 +363,7 @@ public partial class Block : BaseObject
         runtimeHandle = handle;
     }
 
-    public void SetMapObject(MapObject value)
+    public void SetMapObject(IMapObjectTarget value)
     {
         ReleaseConveyorTransport();
         ConveyorBelt previousConveyorBelt = mapObject as ConveyorBelt;
@@ -387,12 +376,12 @@ public partial class Block : BaseObject
             runtimeConveyorRecordOverride = null;
         }
 
-        Resource existingResource = resource != null ? resource : mapObject as Resource;
-        if (value is Resource nextResource)
+        ResourceInstance existingResource = resource != null ? resource : mapObject as ResourceInstance;
+        if (value is ResourceInstance nextResource)
         {
             if (existingResource != null && existingResource != nextResource)
             {
-                existingResource.SetOwningBlock(null);
+                existingResource.ReleaseRuntime();
             }
 
             resource = nextResource;
@@ -536,19 +525,11 @@ public partial class Block : BaseObject
         // Installations are owned by TerrainGenerator's live-installation registry
         // and can span chunk boundaries. Only a cell-owned resource is released
         // with its proxy; installation lifetime is handled separately.
-        Resource cellResource = Resource;
-        if (cellResource != null && cellResource.transform != null)
+        ResourceInstance cellResource = Resource;
+        if (cellResource != null)
         {
             ClearResource(cellResource);
-            cellResource.transform.SetParent(null, true);
-            if (Application.isPlaying)
-            {
-                Destroy(cellResource.gameObject);
-            }
-            else
-            {
-                DestroyImmediate(cellResource.gameObject);
-            }
+            cellResource.ReleaseRuntime();
         }
 
         SetMapObject(null);
@@ -626,7 +607,7 @@ public partial class Block : BaseObject
                && component.gameObject.scene.IsValid();
     }
 
-    internal void ClearResource(Resource expectedResource)
+    internal void ClearResource(ResourceInstance expectedResource)
     {
         if (expectedResource == null
             || (resource != expectedResource && mapObject != expectedResource))
@@ -1128,7 +1109,7 @@ public partial class Block : BaseObject
         }
     }
 
-    public bool CanAddFloorObjects(int count, int itemId, Resource harvestedResource = null)
+    public bool CanAddFloorObjects(int count, int itemId, ResourceInstance harvestedResource = null)
     {
         return count <= 0 || GetAvailableFloorCapacity(itemId, harvestedResource) >= count;
     }
@@ -1299,7 +1280,7 @@ public partial class Block : BaseObject
         return false;
     }
 
-    public bool TryAddFloorObjectAnimated(int objectId, Vector3 startWorldPosition, float delay, out PortableObject targetPortableObject, Action onComplete = null, Func<Vector3> startWorldPositionProvider = null, Resource harvestedResource = null)
+    public bool TryAddFloorObjectAnimated(int objectId, Vector3 startWorldPosition, float delay, out PortableObject targetPortableObject, Action onComplete = null, Func<Vector3> startWorldPositionProvider = null, ResourceInstance harvestedResource = null)
     {
         return TryAddFloorObjectAnimatedInternal(
             objectId,
@@ -1316,7 +1297,7 @@ public partial class Block : BaseObject
         int objectId,
         Vector3 startWorldPosition,
         out PortableObject targetPortableObject,
-        Resource harvestedResource)
+        ResourceInstance harvestedResource)
     {
         return TryAddFloorObjectAnimatedInternal(
             objectId,
@@ -1336,7 +1317,7 @@ public partial class Block : BaseObject
         out PortableObject targetPortableObject,
         Action onComplete,
         Func<Vector3> startWorldPositionProvider,
-        Resource harvestedResource,
+        ResourceInstance harvestedResource,
         bool forceHarvestPlacement)
     {
         targetPortableObject = null;
@@ -2550,7 +2531,8 @@ public partial class Block : BaseObject
             return false;
         }
 
-        previewPortableObject = MaterializeConveyorObjectForPickupPreview(previewItemId, laneIndex);
+        // Pickup preview needs only the belt item's id/count. Keeping the
+        // PortableObject virtual prevents outline flashes and renderer churn.
         return true;
     }
 
@@ -4058,7 +4040,7 @@ public partial class Block : BaseObject
     public Vector2Int Coordinate => coordinate;
     public BlockHandle RuntimeHandle => runtimeHandle;
     public BlockType Type => type;
-    public MapObject MapObject => mapObject;
+    public IMapObjectTarget MapObject => mapObject;
     public bool CanReleaseEmptyRuntimeProxy
     {
         get
@@ -4094,7 +4076,7 @@ public partial class Block : BaseObject
                    && conveyorLinearMotionStates.Count == 0;
         }
     }
-    public Resource Resource
+    public ResourceInstance Resource
     {
         get
         {
@@ -4103,7 +4085,7 @@ public partial class Block : BaseObject
                 return resource;
             }
 
-            return mapObject as Resource;
+            return mapObject as ResourceInstance;
         }
     }
     public bool IsRuntimeConveyor => IsConveyorStackingEnabled();
@@ -6545,7 +6527,7 @@ public partial class Block : BaseObject
                && installationObject.CanStoreFluid;
     }
 
-    private static bool IsFluidDirectionMapObject(MapObject candidate)
+    private static bool IsFluidDirectionMapObject(IMapObjectTarget candidate)
     {
         return candidate is Pipe || candidate is Pump;
     }
@@ -7256,7 +7238,7 @@ public partial class Block : BaseObject
         return GetAvailableFloorCapacity(-1);
     }
 
-    private int GetAvailableFloorCapacity(int itemId, Resource harvestedResource = null)
+    private int GetAvailableFloorCapacity(int itemId, ResourceInstance harvestedResource = null)
     {
         EnsureFloorObjectsInitialized();
 
@@ -7360,7 +7342,7 @@ public partial class Block : BaseObject
         return floorObjectDropAnchor;
     }
 
-    private bool BlocksFloorObjectStacking(int itemId = -1, Resource harvestedResource = null)
+    private bool BlocksFloorObjectStacking(int itemId = -1, ResourceInstance harvestedResource = null)
     {
         if (mapObject is InstallationObject installationObject
             && installationObject != null
@@ -7371,11 +7353,10 @@ public partial class Block : BaseObject
         }
 
         // Only the resource being harvested may put its own drops beneath a growing tree.
-        if (mapObject is ProjectF.MapObjects.Tree growingTree
+        if (mapObject is ProjectF.MapObjects.TreeInstance growingTree
             && growingTree != harvestedResource
             && growingTree != null
-            && growingTree.gameObject != null
-            && growingTree.gameObject.activeInHierarchy
+            && growingTree.IsRuntimeActive
             && growingTree.ResourceCount > 0
             && growingTree.CanGrowAnotherLevel
             && !IsFarmlandFertilizerItem(itemId))
@@ -7509,31 +7490,6 @@ public partial class Block : BaseObject
         return portableObject;
     }
 
-    private PortableObject MaterializeConveyorObjectForPickupPreview(int itemId, int laneIndex)
-    {
-        ReleaseConveyorTransport(true);
-        PortableObject portableObject = MaterializeConveyorObjectForTransfer(
-            GetConveyorPortableObjectAtLane(laneIndex),
-            itemId,
-            laneIndex);
-        if (portableObject == null)
-        {
-            return null;
-        }
-
-        bool transferredMotion = TransferConveyorDataMotionToPortable(laneIndex, portableObject);
-        if (conveyorStack[laneIndex] != portableObject || transferredMotion)
-        {
-            conveyorStack[laneIndex] = portableObject;
-            MarkConveyorItemVisualDirty();
-            // Materialization changes the runtime fallback, not the line's
-            // topology. Rebuilding it here used to discard pending line wakes.
-            RefreshConveyorActivityRegistration();
-        }
-
-        return portableObject;
-    }
-
     private bool TransferConveyorDataMotionToPortable(int laneIndex, PortableObject portableObject)
     {
         ConveyorDataMotionState motion = conveyorItemMotionStates[laneIndex];
@@ -7563,8 +7519,8 @@ public partial class Block : BaseObject
             conveyorCornerMotionStates.Remove(portableObject);
         }
 
-        // Preserve the segment and its clock when the pickup outline needs a
-        // real object. The virtual completion must no longer own this item.
+        // Preserve the segment and its clock when a caller transfers virtual
+        // motion to a real object. The virtual completion releases ownership.
         conveyorItemMotionStates[laneIndex] = default;
         return true;
     }
@@ -7589,6 +7545,7 @@ public partial class Block : BaseObject
             return;
         }
 
+        floorObject.SetConveyorOwnership(false);
         DroppedItemPickupGate gate = floorObject.GetComponent<DroppedItemPickupGate>();
         gate?.ClearGate();
 
@@ -7865,6 +7822,12 @@ public partial class Block : BaseObject
         ReleaseConveyorTransport(true);
         TerrainGenerator.Active?.ClearConveyorBlockedLaneWaiter(this, laneIndex);
         IncrementConveyorLaneOccupancyVersion(laneIndex);
+        PortableObject previousPortableObject = conveyorStack[laneIndex];
+        if (previousPortableObject != null && previousPortableObject != portableObject)
+        {
+            previousPortableObject.SetConveyorOwnership(false);
+        }
+
         conveyorItemIds[laneIndex] = itemId;
         conveyorStack[laneIndex] = portableObject;
         conveyorItemMoveFrames[laneIndex] = -1;
@@ -7873,6 +7836,7 @@ public partial class Block : BaseObject
         ClearConveyorLaneMovementHold(laneIndex);
         ClearConveyorLaneBlockedSleep(laneIndex);
         ClearConveyorLaneCycleBlockedSleep(laneIndex);
+        portableObject?.SetConveyorOwnership(true);
         portableObject?.SetSleepAwakeSleeping(IsConveyorItemSleepAwakeSleeping(laneIndex));
         MarkConveyorItemVisualDirty();
         TerrainGenerator.Active?.MarkBeltItemLineDebugDirty(this);
@@ -7999,6 +7963,7 @@ public partial class Block : BaseObject
         ClearConveyorLaneMovementHold(targetLaneIndex);
         ClearConveyorLaneBlockedSleep(targetLaneIndex);
         ClearConveyorLaneCycleBlockedSleep(targetLaneIndex);
+        portableObject?.SetConveyorOwnership(true);
         portableObject?.SetSleepAwakeSleeping(IsConveyorItemSleepAwakeSleeping(targetLaneIndex));
         activeTerrain?.NotifyConveyorLaneVacated(this, sourceLaneIndex);
     }
@@ -8017,6 +7982,7 @@ public partial class Block : BaseObject
         {
             conveyorCornerMotionStates.Remove(portableObject);
             conveyorLinearMotionStates.Remove(portableObject);
+            portableObject.SetConveyorOwnership(false);
             portableObject.SetSleepAwakeSleeping(false);
         }
 

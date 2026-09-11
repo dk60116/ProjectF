@@ -36,6 +36,7 @@ public class PortableObject : MonoBehaviour
     private bool useBatchedRendering;
     private bool suppressVisualRendering;
     private bool isMovingToTarget;
+    private bool isOnConveyor;
     private bool hoverOutlineVisible;
     private bool focusedOutlineVisible;
     private bool pickupOutlineVisible;
@@ -57,6 +58,7 @@ public class PortableObject : MonoBehaviour
 
     public int ItemId => id;
     public bool IsMovingToTarget => isMovingToTarget;
+    public bool IsOnConveyor => isOnConveyor;
     public bool IsUsingBatchedRendering => useBatchedRendering;
     public bool IsVisualRenderingSuppressed => suppressVisualRendering;
     public Block PickupSourceBlock { get; private set; }
@@ -132,6 +134,15 @@ public class PortableObject : MonoBehaviour
     public void SetPickupSourceBlock(Block sourceBlock)
     {
         PickupSourceBlock = sourceBlock;
+    }
+
+    public void SetConveyorOwnership(bool ownedByConveyor)
+    {
+        isOnConveyor = ownedByConveyor;
+        if (ownedByConveyor)
+        {
+            ClearFocusOutlines(true);
+        }
     }
 
     public void SetSleepAwakeSleeping(bool sleeping)
@@ -691,6 +702,7 @@ public class PortableObject : MonoBehaviour
         focusBounds = default;
         if (id < 0
             || isMovingToTarget
+            || isOnConveyor
             || suppressVisualRendering
             || IsFocusExcludedByContainer()
             || !CachedGameObject.activeInHierarchy)
@@ -726,6 +738,12 @@ public class PortableObject : MonoBehaviour
 
     public void SetFocusStack(List<PortableObject> stack)
     {
+        if (isOnConveyor)
+        {
+            ClearFocusOutlines(true);
+            return;
+        }
+
         if (!ReferenceEquals(focusStack, stack))
         {
             ReleaseFocusStackOutlineMembers(true);
@@ -740,6 +758,11 @@ public class PortableObject : MonoBehaviour
 
     public void SetHoverOutline(bool visible)
     {
+        if (visible && isOnConveyor)
+        {
+            return;
+        }
+
         if (hoverOutlineVisible == visible)
         {
             return;
@@ -766,6 +789,11 @@ public class PortableObject : MonoBehaviour
 
     public void SetFocusedOutline(bool visible)
     {
+        if (visible && isOnConveyor)
+        {
+            return;
+        }
+
         if (focusedOutlineVisible == visible)
         {
             return;
@@ -792,6 +820,11 @@ public class PortableObject : MonoBehaviour
 
     public void SetPickupOutline(bool visible)
     {
+        if (visible && isOnConveyor)
+        {
+            return;
+        }
+
         if (pickupOutlineVisible == visible)
         {
             return;
@@ -818,7 +851,7 @@ public class PortableObject : MonoBehaviour
 
     public int CopyOutlineMaskRenderers(Renderer[] destination)
     {
-        if (destination == null || destination.Length == 0)
+        if (isOnConveyor || destination == null || destination.Length == 0)
         {
             return 0;
         }
@@ -1018,6 +1051,7 @@ public class PortableObject : MonoBehaviour
     {
         liveObjects.Remove(this);
         PickupSourceBlock = null;
+        isOnConveyor = false;
         isMovingToTarget = false;
         bodyRendererTemporarilyHidden = false;
         ClearFocusOutlines(false);

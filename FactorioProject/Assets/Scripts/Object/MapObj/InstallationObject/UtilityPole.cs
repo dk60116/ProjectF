@@ -421,6 +421,26 @@ public class UtilityPole : InstallationObject
                && network.ProductionWatts > EnergyEpsilon;
     }
 
+    public static bool IsConnectedToElectricNetwork(InstallationObject participant)
+    {
+        if (participant == null)
+        {
+            return false;
+        }
+
+        EnsureNetworksEvaluated();
+        for (int networkIndex = 0; networkIndex < networks.Count; networkIndex++)
+        {
+            ElectricNetwork network = networks[networkIndex];
+            if (network != null && network.SuppliedInstallations.Contains(participant))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
     public static bool TryGetElectricPowerInfo(
         InstallationObject consumer,
         out float suppliedWatts,

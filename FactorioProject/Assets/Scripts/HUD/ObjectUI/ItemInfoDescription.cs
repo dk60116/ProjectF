@@ -3,7 +3,7 @@ using System.Globalization;
 using TMPro;
 using UnityEngine;
 using UnityEngine.UI;
-using PlantResource = ProjectF.MapObjects.Tree;
+using PlantResource = ProjectF.MapObjects.TreeInstance;
 
 public class ItemInfoDescription : MonoBehaviour
 {
@@ -122,7 +122,7 @@ public class ItemInfoDescription : MonoBehaviour
             definition.energyAmount.ToString("N0", CultureInfo.InvariantCulture) + " / item");
     }
 
-    public void ShowResourceReserves(Resource resource)
+    public void ShowResourceReserves(ResourceInstance resource)
     {
         Clear();
         if (resource is PlantResource plant)
@@ -228,13 +228,16 @@ public class ItemInfoDescription : MonoBehaviour
                   + $"/{requiredGrowthEnergy.ToString("0.#", CultureInfo.InvariantCulture)}");
     }
 
-    public void ShowConveyorBelt(ConveyorBelt conveyorBelt, Resource underlyingResource = null)
+    public void ShowConveyorBelt(
+        ConveyorBelt conveyorBelt,
+        ResourceInstance underlyingResource = null,
+        Block focusedBlock = null)
     {
         BeginObjectDisplay(underlyingResource);
 
         conveyorItemIds.Clear();
         int slotCount = conveyorBelt is ConvayorBelt2F ? Belt2FInfoSlotCount : DefaultConveyorInfoSlotCount;
-        if (!TryCopyDataOnlyConveyorItemIds(conveyorBelt, slotCount))
+        if (!TryCopyDataOnlyConveyorItemIds(conveyorBelt, focusedBlock, slotCount))
         {
             conveyorBelt?.CopyObjectInfoItemIds(conveyorItemIds, slotCount);
         }
@@ -245,7 +248,7 @@ public class ItemInfoDescription : MonoBehaviour
         }
     }
 
-    public void ShowPipe(Pipe pipe, Resource underlyingResource = null)
+    public void ShowPipe(Pipe pipe, ResourceInstance underlyingResource = null)
     {
         BeginObjectDisplay(underlyingResource);
 
@@ -271,7 +274,7 @@ public class ItemInfoDescription : MonoBehaviour
         SetDefaultSign(defaultStatusLineIndex + 1, false, Color.white);
     }
 
-    public void ShowBoxObject(BoxObject boxObject, Resource underlyingResource = null)
+    public void ShowBoxObject(BoxObject boxObject, ResourceInstance underlyingResource = null)
     {
         BeginObjectDisplay(underlyingResource);
 
@@ -286,7 +289,7 @@ public class ItemInfoDescription : MonoBehaviour
         }
     }
 
-    public void ShowHandcart(Handcart handcart, Resource underlyingResource = null)
+    public void ShowHandcart(Handcart handcart, ResourceInstance underlyingResource = null)
     {
         BeginObjectDisplay(underlyingResource);
 
@@ -307,7 +310,7 @@ public class ItemInfoDescription : MonoBehaviour
         }
     }
 
-    public void ShowDesk(Desk desk, Resource underlyingResource = null)
+    public void ShowDesk(Desk desk, ResourceInstance underlyingResource = null)
     {
         BeginObjectDisplay(underlyingResource);
 
@@ -322,7 +325,7 @@ public class ItemInfoDescription : MonoBehaviour
             true);
     }
 
-    public void ShowRobotArm(RobotArm robotArm, Resource underlyingResource = null)
+    public void ShowRobotArm(RobotArm robotArm, ResourceInstance underlyingResource = null)
     {
         BeginObjectDisplay(underlyingResource);
         liveGaugeRobotArm = robotArm;
@@ -340,7 +343,7 @@ public class ItemInfoDescription : MonoBehaviour
         SetDefaultItemSlot(energyUseDisplayed ? 1 : 0, robotArm.HeldItemId, true);
     }
 
-    public void ShowLoggingMachine(LoggingMachine loggingMachine, Resource underlyingResource = null)
+    public void ShowLoggingMachine(LoggingMachine loggingMachine, ResourceInstance underlyingResource = null)
     {
         BeginObjectDisplay(underlyingResource);
         liveGaugeLoggingMachine = loggingMachine;
@@ -359,15 +362,18 @@ public class ItemInfoDescription : MonoBehaviour
         }
     }
 
-    private bool TryCopyDataOnlyConveyorItemIds(ConveyorBelt conveyorBelt, int slotCount)
+    private bool TryCopyDataOnlyConveyorItemIds(
+        ConveyorBelt conveyorBelt,
+        Block focusedBlock,
+        int slotCount)
     {
-        Player player = GameManager.Instance != null ? GameManager.Instance.Player : null;
-        PlayerController playerController = player != null ? player.GetComponent<PlayerController>() : null;
         if (conveyorBelt == null
-            || playerController == null
-            || !playerController.TryGetFocusedConveyorBelt(out _, out Block focusedBlock)
             || focusedBlock == null
-            || !focusedBlock.TryGetRuntimeConveyorRecord(out ConveyorRuntimeRecord record)
+            || ConveyorWorld.Current == null
+            || !ConveyorWorld.Current.TryGetMatchingAtCoordinate(
+                focusedBlock.Coordinate,
+                conveyorBelt,
+                out ConveyorRuntimeRecord record)
             || record == null)
         {
             return false;
@@ -423,7 +429,7 @@ public class ItemInfoDescription : MonoBehaviour
         conveyorItemIds.Add(itemId);
     }
 
-    public void ShowUtilityPole(UtilityPole utilityPole, Resource underlyingResource = null)
+    public void ShowUtilityPole(UtilityPole utilityPole, ResourceInstance underlyingResource = null)
     {
         BeginObjectDisplay(underlyingResource);
         liveGaugeUtilityPole = utilityPole;
@@ -458,7 +464,7 @@ public class ItemInfoDescription : MonoBehaviour
         SetGauge(workGauge, workFill, workText, false, 0f, Color.white, 0f, 0f);
     }
 
-    public void ShowLightObject(LightObject lightObject, Resource underlyingResource = null)
+    public void ShowLightObject(LightObject lightObject, ResourceInstance underlyingResource = null)
     {
         BeginObjectDisplay(underlyingResource);
         liveGaugeLightObject = lightObject;
@@ -477,7 +483,7 @@ public class ItemInfoDescription : MonoBehaviour
         }
     }
 
-    public void ShowRailHandcar(RailHandcar railHandcar, Resource underlyingResource = null)
+    public void ShowRailHandcar(RailHandcar railHandcar, ResourceInstance underlyingResource = null)
     {
         BeginObjectDisplay(underlyingResource);
         liveGaugeRailHandcar = railHandcar;
@@ -493,13 +499,13 @@ public class ItemInfoDescription : MonoBehaviour
         }
     }
 
-    public void ShowInstallationObject(InstallationObject installationObject, Resource underlyingResource = null)
+    public void ShowInstallationObject(InstallationObject installationObject, ResourceInstance underlyingResource = null)
     {
         BeginObjectDisplay(underlyingResource);
         SetFluidStorageDefaultItemSlot(0, installationObject);
     }
 
-    public void ShowFreightCar(FreightCar freightCar, Resource underlyingResource = null)
+    public void ShowFreightCar(FreightCar freightCar, ResourceInstance underlyingResource = null)
     {
         BeginObjectDisplay(underlyingResource);
         liveGaugeFreightCar = freightCar;
@@ -539,7 +545,7 @@ public class ItemInfoDescription : MonoBehaviour
         }
     }
 
-    public void ShowTrainstation(Trainstation trainStation, Resource underlyingResource = null)
+    public void ShowTrainstation(Trainstation trainStation, ResourceInstance underlyingResource = null)
     {
         BeginObjectDisplay(underlyingResource);
         string stationName = trainStation != null ? trainStation.StationName : string.Empty;
@@ -547,7 +553,7 @@ public class ItemInfoDescription : MonoBehaviour
         SetDefaultSign(defaultStatusLineIndex, false, Color.white);
     }
 
-    public void ShowInputOutputModule(InputOutputModule module, Resource underlyingResource = null)
+    public void ShowInputOutputModule(InputOutputModule module, ResourceInstance underlyingResource = null)
     {
         OilDrillingMachine oilDrillingMachine = module as OilDrillingMachine;
         MiningMachine miningMachine = module as MiningMachine;
@@ -648,8 +654,15 @@ public class ItemInfoDescription : MonoBehaviour
             return;
         }
 
-        module.GetObjectInfoStatus(out string statusText, out bool isProducing);
-        SetDefaultStatus(statusText, isProducing);
+        if (steamGenerator != null)
+        {
+            RefreshSteamGeneratorStatus(steamGenerator);
+        }
+        else
+        {
+            module.GetObjectInfoStatus(out string statusText, out bool isProducing);
+            SetDefaultStatus(statusText, isProducing);
+        }
 
         int energyInputItemId = -1;
         if (module.TryGetObjectInfoEnergyInput(
@@ -864,7 +877,7 @@ public class ItemInfoDescription : MonoBehaviour
         SetDefaultSign(defaultStatusLineIndex, !string.IsNullOrEmpty(text), signColor);
     }
 
-    private void BeginObjectDisplay(Resource underlyingResource)
+    private void BeginObjectDisplay(ResourceInstance underlyingResource)
     {
         if (!IsDisplayableUnderlyingResource(underlyingResource))
         {
@@ -924,7 +937,7 @@ public class ItemInfoDescription : MonoBehaviour
             return;
         }
 
-        if (liveGaugePlant != null && liveGaugePlant.gameObject.activeInHierarchy)
+        if (liveGaugePlant != null && liveGaugePlant.IsRuntimeActive)
         {
             float now = Time.unscaledTime;
             if (now >= nextPlantInfoRefreshTime)
@@ -1174,8 +1187,7 @@ public class ItemInfoDescription : MonoBehaviour
         Boiler boiler = module as Boiler;
         if (steamGenerator != null && module.CanStoreFluid)
         {
-            steamGenerator.GetObjectInfoStatus(out string statusText, out bool isProducing);
-            SetDefaultStatus(statusText, isProducing);
+            RefreshSteamGeneratorStatus(steamGenerator);
             SetFluidStorageInputItemSlot(steamGenerator);
             if (showElectricPowerGauge)
             {
@@ -1227,6 +1239,27 @@ public class ItemInfoDescription : MonoBehaviour
             true);
 
         SetWorkProgressGauge(workGauge, workFill, workText, module);
+    }
+
+    private void RefreshSteamGeneratorStatus(SteamGenerator steamGenerator)
+    {
+        if (steamGenerator == null)
+        {
+            return;
+        }
+
+        steamGenerator.GetObjectInfoStatus(out string statusText, out bool isProducing);
+        SetDefaultStatus(statusText, isProducing);
+
+        bool hasOutputState = steamGenerator.TryGetObjectInfoElectricOutputState(
+            out _,
+            out bool isOutputting);
+        int outputStateLineIndex = defaultStatusLineIndex + 1;
+        SetDefaultText(
+            outputStateLineIndex,
+            isOutputting ? "Power output: ON" : "Power output: OFF",
+            hasOutputState);
+        SetDefaultSign(outputStateLineIndex, false, Color.white);
     }
 
     private void RefreshSprinklerInfo(Sprinkler sprinkler)
@@ -1418,7 +1451,7 @@ public class ItemInfoDescription : MonoBehaviour
         SetDefaultSign(index, false, Color.white);
     }
 
-    private static bool UsesLiterResourceUnit(Resource resource)
+    private static bool UsesLiterResourceUnit(ResourceInstance resource)
     {
         return resource != null
                && resource.PlacementCategory == ResourceDefinition.PlacementCategory.Oil;
@@ -1818,7 +1851,7 @@ public class ItemInfoDescription : MonoBehaviour
         }
     }
 
-    private static bool IsDisplayableUnderlyingResource(Resource resource)
+    private static bool IsDisplayableUnderlyingResource(ResourceInstance resource)
     {
         return resource != null && resource.CanHarvest;
     }

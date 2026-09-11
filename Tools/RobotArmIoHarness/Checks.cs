@@ -5,7 +5,8 @@ using System.Text.RegularExpressions;
 using UnityEngine;
 
 public class FakeGameObject { public bool activeInHierarchy = true; }
-public class MapObject
+public interface IMapObjectTarget { }
+public class MapObject : IMapObjectTarget
 {
     public Vector2Int PlacementCenterCell;
     public readonly FakeGameObject gameObject = new();
@@ -32,12 +33,29 @@ public class ConveyorBelt : MapObject { }
 public class ConvayorBelt2F : ConveyorBelt
 {
     public List<Vector2Int> RuntimeOccupiedCoordinates = new();
+    public readonly ConveyorRuntimeRecord Record;
+    public ConvayorBelt2F() { Record = new ConveyorRuntimeRecord(this); }
 }
 public class Spliterbelt : ConveyorBelt { }
 public class Resource : MapObject
 {
     public enum HarvestMode { Mining, Logging }
     public HarvestMode ResolvedHarvestMode;
+}
+public sealed class ResourceInstance : Resource { }
+public sealed class ConveyorRuntimeRecord
+{
+    private readonly ConvayorBelt2F belt;
+    public ConveyorRuntimeRecord(ConvayorBelt2F belt) { this.belt = belt; }
+    public bool IsBelt2F => belt != null;
+    public IReadOnlyList<Vector2Int> OccupiedCoordinates => belt?.RuntimeOccupiedCoordinates;
+    public bool IsBridgeCenter(Vector2Int coordinate) => false;
+}
+public sealed class ConveyorWorld
+{
+    public static ConveyorWorld Current;
+    public bool TryGetBelt2FAtCoordinate(Vector2Int coordinate, out ConveyorRuntimeRecord record)
+    { record = null; return false; }
 }
 public static class InputOutputModuleItemAreaController
 {
@@ -110,7 +128,7 @@ public partial class Block
 {
     public enum BlockType { Ground, Water }
     public MapObject MapObject;
-    public bool ConveyorAccepts = true, CenterAccepts = true;
+    public bool ConveyorAccepts = true, CenterAccepts = true, RuntimeConveyor;
     public int ConveyorInteractionBoundaryRequests;
     public int AvailableCapacity = 1;
     public int ConveyorAdds, CenterAdds;
@@ -137,6 +155,13 @@ public partial class Block
     public int GetAvailableConveyorCapacity() => AvailableCapacity;
     public void EnsureConveyorTransportInteractionBoundary() => ConveyorInteractionBoundaryRequests++;
     public bool CanAddConveyorObjects(int count) => ConveyorAccepts;
+    public bool IsRuntimeConveyor => RuntimeConveyor || MapObject is ConveyorBelt;
+    public bool TryGetRuntimeConveyorRecord(out ConveyorRuntimeRecord record)
+    {
+        if (MapObject is ConvayorBelt2F belt2F) { record = belt2F.Record; return true; }
+        record = null;
+        return false;
+    }
     public bool CanAddInputAreaCenterObjects(int count, int itemId) => CenterAccepts;
     public bool TryAddConveyorObjectAnimatedAtPlacement(int itemId, Vector3 placementReference, Vector3 start,
         float delay, out PortableObject output)
@@ -170,6 +195,9 @@ public partial class RobotArm : InputOutputModule
     private const int WakeRangeCellRadius = 1;
     private readonly List<Vector2Int> registeredWakeCoordinates = new();
     private static readonly Dictionary<Vector2Int, List<RobotArm>> WakeRobotArmsByCoordinate = new();
+    private bool stagedTickPlanned;
+    private bool plannedDropAvailabilityChecked;
+    private bool plannedDropAvailable;
     public void RefreshWake() => RefreshRegisteredWakeCoordinates();
     public int WakeCount;
     private void WakeRuntimeSleep() { WakeCount++; }
@@ -205,6 +233,33 @@ public static partial class Checks
         string robotArmSource = File.ReadAllText(Path.Combine(
             args[0],
             "FactorioProject/Assets/Scripts/Object/MapObj/InstallationObject/RobotArm.cs"));
+        Require(!robotArmSource.Contains("HasNearbyRuntimeInteractionTarget"),
+            "empty arms must sleep after an actual pickup miss instead of polling nearby installations");
+        Require(Regex.IsMatch(
+                robotArmSource,
+                @"if \(ShouldRunRuntimeSleepCheck\(deltaTime\)\)\s*\{\s*using var sleepSample"),
+            "sleep profiling and the full sleep query must run only when the interval gate is due");
+        Require(Regex.Matches(
+                robotArmSource,
+                @"CanPickupOneItemForCurrentPlan\(\)").Count >= 3
+                && Regex.Matches(
+                    robotArmSource,
+                    @"CanPlaceHeldItemForCurrentPlan\(\)").Count >= 3,
+            "sleep and active transfer checks must reuse one pickup/drop availability query per plan tick");
+        Require(Regex.Matches(
+                robotArmSource,
+                @"TryGetLoadedInteractionBlock\(").Count >= 4
+                && Regex.IsMatch(
+                    robotArmSource,
+                    @"TryGetLoadedInteractionBlock\([\s\S]*?EnsureConveyorTransportInteractionBoundary\(\)"),
+            "robot-arm conveyor pickup, drop query, and drop mutation must share observable wake boundaries");
+        string conveyorTransportSource = File.ReadAllText(Path.Combine(
+            args[0],
+            "FactorioProject/Assets/Scripts/Map/Block.ConveyorTransport.cs"));
+        Require(Regex.IsMatch(
+                conveyorTransportSource,
+                @"NotifyTransportPortChanged\(int lane = -1\)[\s\S]*?RobotArm\.WakeAroundCoordinate\(coordinate\)"),
+            "conveyor slot changes must wake arms observing that interaction coordinate");
         Require(Regex.IsMatch(
                 robotArmSource,
                 @"if \(hasLoadedPickupBlock && boxObject == null\)\s*\{\s*int inputAreaItemId"),
@@ -353,6 +408,9 @@ public static partial class Checks
         Require(arm.SleepsWithCargo(), "a full stopped train may sleep until cargo removal wakes the arm");
         arm.DropTrain = null;
         Require(arm.SleepsWithCargo(), "static blocked output must retain event-driven sleep");
+        TerrainGenerator.Active.Blocks[extendedOutput] = new Block { MapObject = new ConveyorBelt() };
+        Require(arm.SleepsWithCargo(),
+            "a blocked conveyor output must sleep until its slot-change wake event");
         arm.isActiveAndEnabled = false; arm.RefreshWake();
         RobotArm.WakeAroundCoordinate(extendedOutput);
         Require(arm.WakeCount == wakeCount + 4, "disabled arms must not receive wake callbacks");
@@ -420,6 +478,23 @@ public static partial class Checks
             "conveyor output must not create an input-area center stack");
         Require(beltBlock.PlacementReference == start && beltBlock.StartPosition == start && beltBlock.AddDelay == .25f,
             "conveyor output must preserve lane-selection reference and animation timing");
+
+        var sharedRuntimeBeltBlock = new Block { RuntimeConveyor = true };
+        outputModule.RuntimeOutputBlock = sharedRuntimeBeltBlock;
+        Require(outputModule.CanAcceptRuntimeOutput(Vector2Int.zero, 17, 1),
+            "machine output must recognize a shared runtime conveyor without a per-cell ConveyorBelt MapObject");
+        Require(InputOutputModule.EmitOutputItem(sharedRuntimeBeltBlock, 17, start, 0f, out _)
+                && sharedRuntimeBeltBlock.ConveyorAdds == 1
+                && sharedRuntimeBeltBlock.CenterAdds == 0,
+            "machine output on a shared runtime conveyor must enter its lanes instead of the output-area center stack");
+
+        var fullSharedRuntimeBeltBlock = new Block { RuntimeConveyor = true, ConveyorAccepts = false };
+        outputModule.RuntimeOutputBlock = fullSharedRuntimeBeltBlock;
+        Require(!outputModule.CanAcceptRuntimeOutput(Vector2Int.zero, 17, 1),
+            "a full shared runtime conveyor must backpressure machine output");
+        Require(!InputOutputModule.EmitOutputItem(fullSharedRuntimeBeltBlock, 17, start, 0f, out _)
+                && fullSharedRuntimeBeltBlock.CenterAdds == 0,
+            "a full shared runtime conveyor must never fall back to an output-area center stack");
 
         var fullBeltBlock = new Block { MapObject = new ConveyorBelt(), ConveyorAccepts = false };
         outputModule.RuntimeOutputBlock = fullBeltBlock;

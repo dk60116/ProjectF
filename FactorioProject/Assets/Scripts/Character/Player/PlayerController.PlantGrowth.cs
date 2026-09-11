@@ -1,6 +1,6 @@
 using System.Collections.Generic;
 using UnityEngine;
-using PlantResource = ProjectF.MapObjects.Tree;
+using PlantResource = ProjectF.MapObjects.TreeInstance;
 
 public partial class PlayerController
 {
@@ -32,11 +32,11 @@ public partial class PlayerController
         float interactionRange = player.State.HarvestRange;
         float maximumDistanceSqr = interactionRange * interactionRange;
         float nearestDistanceSqr = float.MaxValue;
-        IReadOnlyList<Resource> resources = Resource.ActiveResources;
+        IReadOnlyList<ResourceInstance> resources = ResourceInstance.ActiveResources;
         bool usingNearbyCandidates = TryCollectNearbyResourceCandidates(
             origin,
             interactionRange,
-            out IReadOnlyList<Resource> nearbyResources);
+            out IReadOnlyList<ResourceInstance> nearbyResources);
         if (usingNearbyCandidates)
         {
             resources = nearbyResources;
@@ -45,7 +45,7 @@ public partial class PlayerController
         for (int i = 0; i < resources.Count; i++)
         {
             if (!(resources[i] is PlantResource tree)
-                || !tree.gameObject.activeInHierarchy
+                || !tree.IsRuntimeActive
                 || !tree.CanAcceptGrowthWater)
             {
                 continue;

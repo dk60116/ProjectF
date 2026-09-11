@@ -206,12 +206,12 @@ public partial class TerrainGenerator : MonoBehaviour
 
     public bool CanPlantSeed(Block block, ItemDefinition seedDefinition)
     {
-        Resource resource = block != null ? block.Resource : null;
+        ResourceInstance resource = block != null ? block.Resource : null;
         return block != null
                && block.Type == Block.BlockType.Ground
                && farmlandCoordinates.Contains(block.Coordinate)
                && block.MapObject == null
-               && (resource == null || !resource.gameObject.activeInHierarchy)
+               && (resource == null || !resource.IsRuntimeActive)
                && !block.HasDroppedFloorObjects
                && ItemDefinition.IsPlantableSeedDefinition(seedDefinition);
     }
@@ -225,14 +225,14 @@ public partial class TerrainGenerator : MonoBehaviour
 
         EnsureResourceStateStore();
         resourceStateStore?.RemoveResource(block.Coordinate);
-        Resource depletedResource = block.Resource;
-        if (depletedResource != null && !depletedResource.gameObject.activeInHierarchy)
+        ResourceInstance depletedResource = block.Resource;
+        if (depletedResource != null && !depletedResource.IsRuntimeActive)
         {
-            Destroy(depletedResource.gameObject);
+            depletedResource.ReleaseRuntime();
         }
 
         plantedSeedItemIds[block.Coordinate] = seedDefinition.id;
-        Resource spawnedResource = SpawnResourceOnBlock(
+        ResourceInstance spawnedResource = SpawnResourceOnBlock(
             block,
             seedDefinition.seedTargetResource.prefab,
             block.Coordinate);
@@ -321,7 +321,7 @@ public partial class TerrainGenerator : MonoBehaviour
         EnsureResourceStateStore();
         bool hasSavedState = resourceStateStore != null
                              && resourceStateStore.TryGet(coordinate, out _);
-        Resource spawnedResource = SpawnResourceOnBlock(
+        ResourceInstance spawnedResource = SpawnResourceOnBlock(
             block,
             seedDefinition.seedTargetResource.prefab,
             coordinate);
@@ -360,10 +360,10 @@ public partial class TerrainGenerator : MonoBehaviour
     }
 
     private static void InitializePlantedResourceGrowth(
-        Resource resource,
+        ResourceInstance resource,
         bool initializeGrowth)
     {
-        if (initializeGrowth && resource is ProjectF.MapObjects.Tree tree)
+        if (initializeGrowth && resource is ProjectF.MapObjects.TreeInstance tree)
         {
             tree.SetGrowth(ResourceDefinition.MinGrowth);
         }
@@ -371,12 +371,12 @@ public partial class TerrainGenerator : MonoBehaviour
 
     public bool TryToggleFarmland(Block block)
     {
-        Resource resource = block != null ? block.Resource : null;
+        ResourceInstance resource = block != null ? block.Resource : null;
         if (block == null
             || block.Type != Block.BlockType.Ground
             || !IsFarmableGroundBiomeAt(block.Coordinate)
             || block.MapObject != null
-            || (resource != null && resource.gameObject.activeInHierarchy)
+            || (resource != null && resource.IsRuntimeActive)
             || block.HasDroppedFloorObjects)
         {
             return false;
@@ -510,8 +510,8 @@ public partial class TerrainGenerator : MonoBehaviour
         for (int i = 0; i < networkCoordinates.Count; i++)
         {
             if (TryGetLoadedBlock(networkCoordinates[i], out Block block)
-                && block?.Resource is ProjectF.MapObjects.Tree tree
-                && tree.gameObject.activeInHierarchy)
+                && block?.Resource is ProjectF.MapObjects.TreeInstance tree
+                && tree.IsRuntimeActive)
             {
                 tree.RefreshFarmlandFertilizerConsumption();
             }

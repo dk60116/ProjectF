@@ -997,6 +997,7 @@ public sealed class RuntimeItemGiveReceiver : MonoBehaviour
             case ToolCommand.ClearBeltItems:
             case ToolCommand.ClearFloorItems:
             case ToolCommand.ClearInputOutputAreaItems:
+            case ToolCommand.ClearMapObjectItems:
                 request.Result = ClearWorldItems(request.Command);
                 break;
             case ToolCommand.CheckConveyors:
@@ -1672,7 +1673,7 @@ public sealed class RuntimeItemGiveReceiver : MonoBehaviour
 
         if (parts.Length < 2 || !string.Equals(parts[0], "give", StringComparison.OrdinalIgnoreCase))
         {
-            error = "usage: give <itemId> [count] | clear <belt|floor|io> | animalstress [count] | animalcollision [count] | animalthreat [radius] | beltstress [count] | beltline [auto|itemId] [count] | beltitems [count] | beltcheck | save <slot> | load <slot> | reset [slot] [randomSeed] | seed <int> | saveslots | time <status|set|scale|pause|next sunrise|check> | debug <showConveyorSlotDots|showSleepAwake|showBeltItemLine|showBeltSplit|hideBeltItems|hideBelts|disableCameraCulling|showRailLine|showDirections|freeCamera|freeCameraPlayerCulling|showAnimalHerdAreas|animalAIPaused|mapObjectTickProfiling> <true|false> | camera size <minSize> <maxSize> | perf [maxRows] | ping | status";
+            error = "usage: give <itemId> [count] | clear <belt|floor|io|mapobj> | animalstress [count] | animalcollision [count] | animalthreat [radius] | beltstress [count] | beltline [auto|itemId] [count] | beltitems [count] | beltcheck | save <slot> | load <slot> | reset [slot] [randomSeed] | seed <int> | saveslots | time <status|set|scale|pause|next sunrise|check> | debug <showConveyorSlotDots|showSleepAwake|showBeltItemLine|showBeltSplit|hideBeltItems|hideBelts|disableCameraCulling|showRailLine|showDirections|freeCamera|freeCameraPlayerCulling|showAnimalHerdAreas|animalAIPaused|mapObjectTickProfiling> <true|false> | camera size <minSize> <maxSize> | perf [maxRows] | ping | status";
             return false;
         }
 
@@ -1714,6 +1715,10 @@ public sealed class RuntimeItemGiveReceiver : MonoBehaviour
             {
                 target = "io";
             }
+            else if (string.Equals(parts[0], "mapobjitemclear", StringComparison.OrdinalIgnoreCase))
+            {
+                target = "mapobj";
+            }
         }
 
         if (string.Equals(target, "belt", StringComparison.OrdinalIgnoreCase))
@@ -1732,6 +1737,13 @@ public sealed class RuntimeItemGiveReceiver : MonoBehaviour
             || string.Equals(target, "ioarea", StringComparison.OrdinalIgnoreCase))
         {
             command = ToolCommand.ClearInputOutputAreaItems;
+            return true;
+        }
+
+        if (string.Equals(target, "mapobj", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(target, "mapobject", StringComparison.OrdinalIgnoreCase))
+        {
+            command = ToolCommand.ClearMapObjectItems;
             return true;
         }
 
@@ -2098,6 +2110,44 @@ public sealed class RuntimeItemGiveReceiver : MonoBehaviour
         MapObjectTickProfiler.AddRuntimeCounter("Frame", "VSyncCount", QualitySettings.vSyncCount);
         MapObjectTickProfiler.AddRuntimeCounter("Frame", "ScreenRefreshRate", FormatScreenRefreshRate());
         MapObjectTickProfiler.AddRuntimeCounter("Frame", "IsEditor", Application.isEditor);
+        if (MapObjectTickManager.HasSimulationUpsSample)
+        {
+            MapObjectTickProfiler.AddRuntimeCounter(
+                "Simulation",
+                "Ups",
+                MapObjectTickManager.CurrentSimulationUps,
+                "Completed fixed simulation ticks per unscaled real second.");
+        }
+        else
+        {
+            MapObjectTickProfiler.AddRuntimeCounter(
+                "Simulation",
+                "Ups",
+                "warming-up",
+                "The first 0.5 second measurement window has not completed.");
+        }
+
+        MapObjectTickProfiler.AddRuntimeCounter(
+            "Simulation",
+            "TargetUps",
+            MapObjectTickManager.TargetSimulationUps);
+        MapObjectTickProfiler.AddRuntimeCounter(
+            "Simulation",
+            "BacklogTicks",
+            (float)MapObjectTickManager.SimulationBacklogTicks,
+            "Unprocessed fixed ticks accumulated by the render-driven scheduler.");
+        MapObjectTickProfiler.AddRuntimeCounter(
+            "Simulation",
+            "TicksLastFrame",
+            MapObjectTickManager.SimulationTicksLastFrame);
+        MapObjectTickProfiler.AddRuntimeCounter(
+            "Simulation",
+            "MaxTicksPerFrame",
+            MapObjectTickManager.MaximumSimulationStepsPerFrame);
+        MapObjectTickProfiler.AddRuntimeCounter(
+            "Simulation",
+            "Tick",
+            MapObjectTickManager.CurrentSimulationTick);
 
         uint frameTimingCount = FrameTimingManager.GetLatestTimings((uint)frameTimingBuffer.Length, frameTimingBuffer);
         MapObjectTickProfiler.AddRuntimeCounter("FrameTiming", "Samples", (int)frameTimingCount);
@@ -2843,7 +2893,8 @@ public sealed class RuntimeItemGiveReceiver : MonoBehaviour
             BuildFreeBucketExtraTokens(GameManager.Instance),
             BuildAnimalAIExtraTokens(GameManager.Instance),
             BuildMapObjectTickProfilingExtraTokens(GameManager.Instance),
-            BuildPlayerSpeedExtraTokens(),
+            BuildSimulationExtraTokens(),
+            BuildPlayerStateExtraTokens(),
             BuildConveyorWorldExtraTokens(),
             $"sceneGameObjects={sceneGameObjectTotal} activeSceneGameObjects={activeSceneGameObjectTotal} sceneMonoBehaviours={sceneMonoBehaviourTotal} activeSceneMonoBehaviours={activeSceneMonoBehaviourTotal}",
             BuildWorldTimeExtraTokens(ResolveWorldTime()));
@@ -2857,13 +2908,26 @@ public sealed class RuntimeItemGiveReceiver : MonoBehaviour
             : "beltRecords=0 beltHostGameObjects=0 beltBatchEntries=0";
     }
 
-    private string BuildPlayerSpeedExtraTokens()
+    private string BuildPlayerStateExtraTokens()
     {
         float playerSpeed = hasPlayerSpeedSample ? currentPlayerSpeed : -1f;
+        Player player = GameManager.Instance?.Player;
+        if (player == null)
+        {
+            return string.Format(
+                CultureInfo.InvariantCulture,
+                "playerSpeed={0:0.###} playerPositionAvailable=0",
+                playerSpeed);
+        }
+
+        Vector3 playerPosition = player.transform.position;
         return string.Format(
             CultureInfo.InvariantCulture,
-            "playerSpeed={0:0.###}",
-            playerSpeed);
+            "playerSpeed={0:0.###} playerPositionAvailable=1 playerX={1:0.###} playerY={2:0.###} playerZ={3:0.###}",
+            playerSpeed,
+            playerPosition.x,
+            playerPosition.y,
+            playerPosition.z);
     }
 
     private static string BuildCameraSizeExtraTokens(PlayerCamera playerCamera)
@@ -3066,6 +3130,21 @@ public sealed class RuntimeItemGiveReceiver : MonoBehaviour
         activeSceneMonoBehaviourTotal = cachedActiveSceneMonoBehaviourTotal;
     }
 
+    private static string BuildSimulationExtraTokens()
+    {
+        float ups = MapObjectTickManager.HasSimulationUpsSample
+            ? MapObjectTickManager.CurrentSimulationUps
+            : -1f;
+        return string.Format(
+            CultureInfo.InvariantCulture,
+            "ups={0:0.###} targetUps={1:0.###} simulationBacklogTicks={2:0.###} simulationTicksLastFrame={3} maxSimulationTicksPerFrame={4}",
+            ups,
+            MapObjectTickManager.TargetSimulationUps,
+            MapObjectTickManager.SimulationBacklogTicks,
+            MapObjectTickManager.SimulationTicksLastFrame,
+            MapObjectTickManager.MaximumSimulationStepsPerFrame);
+    }
+
     private void CaptureSceneObjectCounts(
         out int gameObjectTotal,
         out int activeGameObjectTotal,
@@ -3260,21 +3339,37 @@ public sealed class RuntimeItemGiveReceiver : MonoBehaviour
         int runtimeCleared;
         int savedCleared;
         string scope;
+        string detail;
         switch (command)
         {
             case ToolCommand.ClearBeltItems:
                 clearedCount = terrain.ClearAllBeltItems(out runtimeCleared, out savedCleared);
                 scope = "belt";
+                detail = $"scope={scope} runtimeCleared={runtimeCleared} savedCleared={savedCleared}";
                 break;
             case ToolCommand.ClearFloorItems:
                 runtimeCleared = terrain.ClearAllDroppedFloorItems(out savedCleared);
                 clearedCount = runtimeCleared;
                 scope = "floor";
+                detail = $"scope={scope} runtimeCleared={runtimeCleared} savedCleared={savedCleared}";
                 break;
-            default:
+            case ToolCommand.ClearInputOutputAreaItems:
                 runtimeCleared = terrain.ClearAllInputOutputAreaItems(out savedCleared);
                 clearedCount = runtimeCleared;
                 scope = "io";
+                detail = $"scope={scope} runtimeCleared={runtimeCleared} savedCleared={savedCleared}";
+                break;
+            default:
+                TerrainGenerator.MapObjectItemClearSummary summary = terrain.ClearAllMapObjectItems();
+                BlockStateStore.MapObjectItemClearResult installation = summary.InstallationResult;
+                runtimeCleared = summary.RuntimeAreaItems;
+                savedCleared = summary.SavedAreaItems;
+                clearedCount = summary.TotalClearedItems;
+                scope = "mapobj";
+                detail = $"scope={scope} runtimeAreaItems={runtimeCleared} savedAreaItems={savedCleared} "
+                    + $"storedItems={installation.StoredItems} robotArmItems={installation.RobotArmItems} "
+                    + $"pendingOutputItems={installation.PendingOutputItems} productionStates={installation.ProductionStates} "
+                    + $"fuelStates={installation.FuelStates} objectsProcessed={installation.ObjectsProcessed}";
                 break;
         }
 
@@ -3287,7 +3382,7 @@ public sealed class RuntimeItemGiveReceiver : MonoBehaviour
             0,
             0,
             $"{scope} items cleared",
-            $"scope={scope} runtimeCleared={runtimeCleared} savedCleared={savedCleared}");
+            detail);
     }
 
     private ToolResult CreateConveyorLine(int itemId, int count)
@@ -5071,6 +5166,7 @@ public sealed class RuntimeItemGiveReceiver : MonoBehaviour
         ClearBeltItems,
         ClearFloorItems,
         ClearInputOutputAreaItems,
+        ClearMapObjectItems,
         CheckConveyors,
         SaveSlot,
         LoadSlot,

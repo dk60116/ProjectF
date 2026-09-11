@@ -1,5 +1,5 @@
 using UnityEngine;
-using PlantResource = ProjectF.MapObjects.Tree;
+using PlantResource = ProjectF.MapObjects.TreeInstance;
 
 public partial class PlayerHUD
 {

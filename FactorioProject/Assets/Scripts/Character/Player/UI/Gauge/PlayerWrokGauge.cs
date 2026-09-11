@@ -40,7 +40,7 @@ public class ResourceWrokGauge : MonoBehaviour
 
     private CanvasGroup canvasGroup;
     private Image backgroundImage;
-    private Resource targetResource;
+    private ResourceInstance targetResource;
     private int cachedChildCount = -1;
     private Tween hideTween;
 
@@ -135,11 +135,11 @@ public class ResourceWrokGauge : MonoBehaviour
         KillAllDotTweens();
     }
 
-    public void Bind(Resource resource)
+    public void Bind(ResourceInstance resource)
     {
         targetResource = resource;
 
-        if (targetResource == null)
+        if (targetResource == null || !targetResource.IsRuntimeActive)
         {
             Hide();
             return;
@@ -170,7 +170,7 @@ public class ResourceWrokGauge : MonoBehaviour
 
     private void Refresh()
     {
-        if (targetResource == null)
+        if (targetResource == null || !targetResource.IsRuntimeActive)
         {
             SetGaugeVisible(false);
             return;

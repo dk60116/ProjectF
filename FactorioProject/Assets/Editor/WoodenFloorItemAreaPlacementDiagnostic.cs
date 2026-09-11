@@ -659,9 +659,9 @@ internal static class WoodenFloorItemAreaPlacementDiagnostic
         return xComparison != 0 ? xComparison : left.Coordinate.y.CompareTo(right.Coordinate.y);
     }
 
-    private static string DescribeObject(MapObject mapObject)
+    private static string DescribeObject(IMapObjectTarget mapObject)
     {
-        return mapObject != null ? $"{mapObject.name}:{mapObject.GetType().Name}" : "none";
+        return mapObject.IsAlive() ? $"{mapObject.ObjectName}:{mapObject.GetType().Name}" : "none";
     }
 
     private static string DescribeBlock(Block block)

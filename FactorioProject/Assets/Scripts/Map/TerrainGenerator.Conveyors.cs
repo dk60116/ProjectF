@@ -4200,9 +4200,12 @@ public partial class TerrainGenerator : MonoBehaviour
     private readonly List<Transform> runtimeCounterTransformScratch = new List<Transform>(512);
     private readonly List<Renderer> runtimeCounterRendererScratch = new List<Renderer>(256);
     private readonly List<Collider> runtimeCounterColliderScratch = new List<Collider>(128);
+    private readonly HashSet<GameObject> runtimeCounterResourceHosts = new HashSet<GameObject>();
 
     public void AppendRuntimeProfilerCounters()
     {
+        runtimeCounterResourceHosts.Clear();
+        ResourceTypeWorld.AppendProfilerCounters();
         int loadedMapObjectCount = 0;
         int loadedInstallationCount = 0;
         int loadedConveyorBeltCount = 0;
@@ -4241,9 +4244,14 @@ public partial class TerrainGenerator : MonoBehaviour
                 continue;
             }
 
-            MapObject mapObject = block.MapObject;
+            IMapObjectTarget mapObject = block.MapObject;
             loadedMapObjectCount++;
-            if (mapObject.gameObject.activeInHierarchy)
+            // Shared resource hosts have one Transform and all colliders of that type.
+            // Scan their native components once, while counting each logical resource above.
+            Component component = mapObject is ResourceInstance resource ? resource.Handle.World : mapObject.SceneObject;
+            if (component == null) continue;
+            if (mapObject is ResourceInstance && !runtimeCounterResourceHosts.Add(component.gameObject)) continue;
+            if (component.gameObject.activeInHierarchy)
             {
                 activeMapObjectRootCount++;
             }
@@ -4266,7 +4274,7 @@ public partial class TerrainGenerator : MonoBehaviour
                     suspendedBeltRootCount++;
                 }
 
-                if (mapObject.gameObject.activeInHierarchy)
+                if (component.gameObject.activeInHierarchy)
                 {
                     activeBeltRootCount++;
                 }
@@ -4277,7 +4285,7 @@ public partial class TerrainGenerator : MonoBehaviour
             }
 
             CountRuntimeComponents(
-                mapObject,
+                component,
                 isBelt,
                 ref transformCount,
                 ref activeTransformCount,
@@ -4348,6 +4356,32 @@ public partial class TerrainGenerator : MonoBehaviour
         MapObjectTickProfiler.AddRuntimeCounter("Render", "EnabledBeltRenderers", enabledBeltRendererCount);
         MapObjectTickProfiler.AddRuntimeCounter("Render", "ActiveEnabledBeltRenderers", activeEnabledBeltRendererCount);
         MapObjectTickProfiler.AddRuntimeCounter("Render", "DisabledBeltRenderers", beltRendererCount - enabledBeltRendererCount);
+
+        TryGetComponent(out RobotArmRenderBatcher robotArmRenderBatcher);
+        MapObjectTickProfiler.AddRuntimeCounter(
+            "RobotArmRender",
+            "RegisteredArms",
+            robotArmRenderBatcher != null ? robotArmRenderBatcher.RegisteredRobotArmCount : 0);
+        MapObjectTickProfiler.AddRuntimeCounter(
+            "RobotArmRender",
+            "VisibleArms",
+            robotArmRenderBatcher != null ? robotArmRenderBatcher.LastVisibleRobotArmCount : 0);
+        MapObjectTickProfiler.AddRuntimeCounter(
+            "RobotArmRender",
+            "CulledArms",
+            robotArmRenderBatcher != null ? robotArmRenderBatcher.LastCulledRobotArmCount : 0);
+        MapObjectTickProfiler.AddRuntimeCounter(
+            "RobotArmRender",
+            "BuiltMatrices",
+            robotArmRenderBatcher != null ? robotArmRenderBatcher.LastBuiltMatrixCount : 0);
+        MapObjectTickProfiler.AddRuntimeCounter(
+            "RobotArmRender",
+            "ActiveBatches",
+            robotArmRenderBatcher != null ? robotArmRenderBatcher.ActiveBatchCount : 0);
+        MapObjectTickProfiler.AddRuntimeCounter(
+            "RobotArmRender",
+            "EstimatedDrawCalls",
+            robotArmRenderBatcher != null ? robotArmRenderBatcher.EstimatedDrawCallCount : 0);
 
         GameManager gameManager = GameManager.Instance;
         MapObjectTickProfiler.AddRuntimeCounter("RenderToggles", "HideBelts", gameManager != null && gameManager.HideBelts);
@@ -4480,7 +4514,7 @@ public partial class TerrainGenerator : MonoBehaviour
     }
 
     private void CountRuntimeComponents(
-        MapObject mapObject,
+        Component mapObject,
         bool isBelt,
         ref int transformCount,
         ref int activeTransformCount,

@@ -199,12 +199,13 @@ public sealed class VirtualObjectRecord
     public int currentGauge;
     public int initialResourceCount;
     public int liveInstanceId;
+    public ResourceHandle liveResourceHandle;
     public readonly List<Vector2Int> occupiedCoordinates = new List<Vector2Int>();
     public VirtualItemStackState itemStack;
     public Resource.ResourceSaveState resourceState;
     public BlockStateStore.InstallationSaveState installationState;
 
-    public bool HasLiveObject => liveInstanceId != 0;
+    public bool HasLiveObject => liveInstanceId != 0 || liveResourceHandle.IsValid;
 
     public VirtualObjectRecord Clone()
     {
@@ -226,6 +227,7 @@ public sealed class VirtualObjectRecord
             currentGauge = currentGauge,
             initialResourceCount = initialResourceCount,
             liveInstanceId = liveInstanceId,
+            liveResourceHandle = liveResourceHandle,
             itemStack = itemStack,
             resourceState = resourceState,
             installationState = installationState != null ? installationState.Clone() : null
@@ -554,7 +556,7 @@ public sealed class VirtualObjectWorld : MonoBehaviour
         Vector2Int coordinate,
         int itemId,
         Resource.ResourceSaveState state,
-        Resource liveResource = null,
+        ResourceInstance liveResource = null,
         VirtualObjectResidency residency = VirtualObjectResidency.Virtual)
     {
         VirtualObjectRecord record = GetOrCreateIndexedRecord(
@@ -564,8 +566,8 @@ public sealed class VirtualObjectWorld : MonoBehaviour
 
         record.residency = liveResource != null ? residency : VirtualObjectResidency.Virtual;
         record.anchorCoordinate = coordinate;
-        record.worldPosition = liveResource != null ? liveResource.transform.position : new Vector3(coordinate.x, 0f, coordinate.y);
-        record.worldRotation = liveResource != null ? liveResource.transform.rotation : Quaternion.identity;
+        record.worldPosition = liveResource != null ? liveResource.WorldPosition : new Vector3(coordinate.x, 0f, coordinate.y);
+        record.worldRotation = Quaternion.identity;
         record.itemId = itemId;
         record.count = Mathf.Max(0, state.resourceCount);
         record.resourceCount = Mathf.Max(0, state.resourceCount);
@@ -574,9 +576,9 @@ public sealed class VirtualObjectWorld : MonoBehaviour
         record.initialResourceCount = Mathf.Max(1, state.initialResourceCount);
         record.resourceState = state;
         EnsureMapObjectHandle(record, itemId, record.id.Value);
-        record.liveInstanceId = liveResource != null && residency != VirtualObjectResidency.Virtual
-            ? liveResource.GetInstanceID()
-            : 0;
+        record.liveInstanceId = 0;
+        record.liveResourceHandle = liveResource != null && residency != VirtualObjectResidency.Virtual
+            ? liveResource.Handle : default;
         ReplaceOccupiedCoordinates(record, coordinate);
         StoreRecord(record);
         return record.id;

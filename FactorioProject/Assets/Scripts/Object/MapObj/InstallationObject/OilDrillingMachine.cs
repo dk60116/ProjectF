@@ -25,7 +25,7 @@ public class OilDrillingMachine : InputOutputModule
     private float pumpjackRodStroke = 0.08f;
 
     private long productionProgressUnits;
-    private Resource cachedOilResource;
+    private ResourceInstance cachedOilResource;
     private bool isExtracting;
     private bool hasPumpjackVisual;
     private float pumpjackPhase;
@@ -64,7 +64,7 @@ public class OilDrillingMachine : InputOutputModule
 
     public bool TryGetObjectInfoResourceReserves(out int reservesLiters)
     {
-        reservesLiters = TryResolveOilResource(out Resource resource)
+        reservesLiters = TryResolveOilResource(out ResourceInstance resource)
             ? resource.RemainingMachineHarvestOutputCount
             : 0;
         return true;
@@ -226,7 +226,7 @@ public class OilDrillingMachine : InputOutputModule
             return "No machine";
         }
 
-        if (!TryResolveOilResource(out Resource resource) || !resource.CanHarvest)
+        if (!TryResolveOilResource(out ResourceInstance resource) || !resource.CanHarvest)
         {
             return "Oil depleted";
         }
@@ -257,7 +257,7 @@ public class OilDrillingMachine : InputOutputModule
 
     private bool ExtractOil(float deltaTime)
     {
-        if (!TryResolveOilResource(out Resource resource)
+        if (!TryResolveOilResource(out ResourceInstance resource)
             || !resource.CanHarvest
             || OilLitersPerSecond <= FluidEpsilon
             || !HasOilOutputSpace(resource))
@@ -297,7 +297,7 @@ public class OilDrillingMachine : InputOutputModule
         return true;
     }
 
-    private void FlushCompletedOil(Resource resource)
+    private void FlushCompletedOil(ResourceInstance resource)
     {
         int harvestCount = 0;
         while (resource != null
@@ -333,7 +333,7 @@ public class OilDrillingMachine : InputOutputModule
         }
     }
 
-    private bool HasOilOutputSpace(Resource resource)
+    private bool HasOilOutputSpace(ResourceInstance resource)
     {
         int oilItemId = ResolveOilItemId();
         int minimumOutputLiters = resource != null ? Mathf.Max(1, resource.GetCount) : 1;
@@ -342,7 +342,7 @@ public class OilDrillingMachine : InputOutputModule
                && availableLiters + FluidEpsilon >= minimumOutputLiters;
     }
 
-    private bool TryResolveOilResource(out Resource resource)
+    private bool TryResolveOilResource(out ResourceInstance resource)
     {
         resource = null;
         if (!TryGetPlacementRuntime(out Vector2Int anchorCoordinate, out int quarterTurns))
@@ -384,7 +384,7 @@ public class OilDrillingMachine : InputOutputModule
             return oilDefinition.id;
         }
 
-        if (TryResolveOilResource(out Resource resource)
+        if (TryResolveOilResource(out ResourceInstance resource)
             && resource.TryPeekMachineHarvestOutput(out int resourceOutputItemId, out _))
         {
             return resourceOutputItemId;

@@ -23,9 +23,10 @@ public class ObjectInfoPanel : MonoBehaviour
     [SerializeField]
     private TextMeshProUGUI stackCountText;
 
-    private Component boundTarget;
-    private Component focusedPanelTarget;
-    private Resource focusedPanelUnderlyingResource;
+    private object boundTarget;
+    private Block boundFocusBlock;
+    private object focusedPanelTarget;
+    private ResourceInstance focusedPanelUnderlyingResource;
     private bool referencesResolved;
     private float nextLayoutRefreshTime;
     private int displayedStackCount = -1;
@@ -44,25 +45,26 @@ public class ObjectInfoPanel : MonoBehaviour
         ResolveReferences();
     }
 
-    public void Bind(Component target)
+    public void Bind(object target, Block focusBlock = null)
     {
         ResolveReferences();
-        if (!(target is MapObject)
+        if (!MapObjectTargetExtensions.IsAliveTarget(target) || (!(target is IMapObjectTarget)
             && !(target is Animal)
             && !(target is PortableObject)
-            && !(target is Block farmlandBlock && IsFarmlandBlock(farmlandBlock)))
+            && !(target is Block farmlandBlock && IsFarmlandBlock(farmlandBlock))))
         {
             Clear();
             return;
         }
 
         boundTarget = target;
+        boundFocusBlock = target is ConveyorBelt ? focusBlock : null;
         if (!gameObject.activeSelf)
         {
             gameObject.SetActive(true);
         }
 
-        Resource underlyingResource = target is MapObject mapObject
+        ResourceInstance underlyingResource = target is IMapObjectTarget mapObject
             ? ResolveUnderlyingResource(mapObject)
             : null;
         RefreshFocusedInfoPanels(target, underlyingResource);
@@ -75,18 +77,18 @@ public class ObjectInfoPanel : MonoBehaviour
 
     public void Refresh()
     {
-        if (boundTarget == null)
+        if (!MapObjectTargetExtensions.IsAliveTarget(boundTarget))
         {
             Clear();
             return;
         }
 
         ResolveReferences();
-        Resource underlyingResource = boundTarget is MapObject mapObject
+        ResourceInstance underlyingResource = boundTarget is IMapObjectTarget mapObject
             ? ResolveUnderlyingResource(mapObject)
             : null;
         RefreshFocusedInfoPanels(boundTarget, underlyingResource);
-        if (boundTarget is RailHandcar || boundTarget is FreightCar || boundTarget is ProjectF.MapObjects.Tree)
+        if (boundTarget is RailHandcar || boundTarget is FreightCar || boundTarget is ProjectF.MapObjects.TreeInstance)
         {
             // Live values and gauges are updated by ItemInfoDescription itself.
             if (boundTarget is FreightCar)
@@ -103,6 +105,7 @@ public class ObjectInfoPanel : MonoBehaviour
     public void Clear()
     {
         boundTarget = null;
+        boundFocusBlock = null;
         nextLayoutRefreshTime = 0f;
         ResolveReferences();
         ClearFocusedInfoPanels();
@@ -114,9 +117,15 @@ public class ObjectInfoPanel : MonoBehaviour
         }
     }
 
-    public bool IsBoundTo(Component target)
+    public bool IsBoundTo(object target)
     {
         return boundTarget == target;
+    }
+
+    public bool IsBoundTo(object target, Block focusBlock)
+    {
+        return boundTarget == target
+               && (!(target is ConveyorBelt) || boundFocusBlock == focusBlock);
     }
 
     private void ResolveReferences()
@@ -142,7 +151,7 @@ public class ObjectInfoPanel : MonoBehaviour
         referencesResolved = true;
     }
 
-    private void RefreshInfoLine(Component target, Resource underlyingResource)
+    private void RefreshInfoLine(object target, ResourceInstance underlyingResource)
     {
         if (target is Animal animal)
         {
@@ -170,8 +179,8 @@ public class ObjectInfoPanel : MonoBehaviour
             return;
         }
 
-        MapObject mapObject = target as MapObject;
-        if (mapObject is Resource resource)
+        IMapObjectTarget mapObject = target as IMapObjectTarget;
+        if (mapObject is ResourceInstance resource)
         {
             ShowResourceInfo(resource);
             return;
@@ -197,7 +206,7 @@ public class ObjectInfoPanel : MonoBehaviour
 
         if (mapObject is ConveyorBelt conveyorBelt)
         {
-            ShowConveyorBeltInfo(conveyorBelt, underlyingResource);
+            ShowConveyorBeltInfo(conveyorBelt, underlyingResource, boundFocusBlock);
             return;
         }
 
@@ -271,7 +280,7 @@ public class ObjectInfoPanel : MonoBehaviour
         CloseInfoLine();
     }
 
-    private void RefreshFocusedInfoPanels(Component target, Resource underlyingResource)
+    private void RefreshFocusedInfoPanels(object target, ResourceInstance underlyingResource)
     {
         SetStackCountDisplay(target is PortableObject focusedPortableObject
             ? Mathf.Max(1, focusedPortableObject.FocusStackCount)
@@ -308,7 +317,7 @@ public class ObjectInfoPanel : MonoBehaviour
             return;
         }
 
-        MapObject mapObject = target as MapObject;
+        IMapObjectTarget mapObject = target as IMapObjectTarget;
         if (mapObject == null)
         {
             return;
@@ -340,11 +349,11 @@ public class ObjectInfoPanel : MonoBehaviour
         }
     }
 
-    private void SetFocusedInfoPanelItem(int index, MapObject mapObject, bool forceVisible)
+    private void SetFocusedInfoPanelItem(int index, IMapObjectTarget mapObject, bool forceVisible)
     {
         ItemSlot slot = GetListItem(focusedObjectSlots, index);
         int itemId = mapObject != null ? mapObject.ResolveItemId() : -1;
-        Resource resource = mapObject as Resource;
+        ResourceInstance resource = mapObject as ResourceInstance;
         Sprite resourceIcon = resource != null && resource.Definition != null
             ? resource.Definition.ResourceIcon
             : null;
@@ -384,7 +393,7 @@ public class ObjectInfoPanel : MonoBehaviour
         }
     }
 
-    private static string ResolveResourceObjectName(Resource resource)
+    private static string ResolveResourceObjectName(ResourceInstance resource)
     {
         if (resource == null)
         {
@@ -396,7 +405,7 @@ public class ObjectInfoPanel : MonoBehaviour
             return resource.ObjectName.Trim();
         }
 
-        string instanceName = resource.gameObject != null ? resource.gameObject.name : null;
+        string instanceName = resource.SourceName;
         return string.IsNullOrWhiteSpace(instanceName)
             ? null
             : instanceName.Replace("(Clone)", string.Empty).Trim();
@@ -631,7 +640,7 @@ public class ObjectInfoPanel : MonoBehaviour
         }
     }
 
-    private void ShowResourceInfo(Resource resource)
+    private void ShowResourceInfo(ResourceInstance resource)
     {
         if (infoLine == null)
         {
@@ -661,7 +670,7 @@ public class ObjectInfoPanel : MonoBehaviour
         infoLine.ShowFarmland(farmlandBlock);
     }
 
-    private void ShowBoxObjectInfo(BoxObject boxObject, Resource underlyingResource)
+    private void ShowBoxObjectInfo(BoxObject boxObject, ResourceInstance underlyingResource)
     {
         if (infoLine == null)
         {
@@ -676,7 +685,7 @@ public class ObjectInfoPanel : MonoBehaviour
         infoLine.ShowBoxObject(boxObject, underlyingResource);
     }
 
-    private void ShowHandcartInfo(Handcart handcart, Resource underlyingResource)
+    private void ShowHandcartInfo(Handcart handcart, ResourceInstance underlyingResource)
     {
         if (infoLine == null)
         {
@@ -691,7 +700,10 @@ public class ObjectInfoPanel : MonoBehaviour
         infoLine.ShowHandcart(handcart, underlyingResource);
     }
 
-    private void ShowConveyorBeltInfo(ConveyorBelt conveyorBelt, Resource underlyingResource)
+    private void ShowConveyorBeltInfo(
+        ConveyorBelt conveyorBelt,
+        ResourceInstance underlyingResource,
+        Block focusedBlock)
     {
         if (infoLine == null)
         {
@@ -703,10 +715,10 @@ public class ObjectInfoPanel : MonoBehaviour
             infoLine.gameObject.SetActive(true);
         }
 
-        infoLine.ShowConveyorBelt(conveyorBelt, underlyingResource);
+        infoLine.ShowConveyorBelt(conveyorBelt, underlyingResource, focusedBlock);
     }
 
-    private void ShowPipeInfo(Pipe pipe, Resource underlyingResource)
+    private void ShowPipeInfo(Pipe pipe, ResourceInstance underlyingResource)
     {
         if (infoLine == null)
         {
@@ -721,7 +733,7 @@ public class ObjectInfoPanel : MonoBehaviour
         infoLine.ShowPipe(pipe, underlyingResource);
     }
 
-    private void ShowRobotArmInfo(RobotArm robotArm, Resource underlyingResource)
+    private void ShowRobotArmInfo(RobotArm robotArm, ResourceInstance underlyingResource)
     {
         if (infoLine == null)
         {
@@ -736,7 +748,7 @@ public class ObjectInfoPanel : MonoBehaviour
         infoLine.ShowRobotArm(robotArm, underlyingResource);
     }
 
-    private void ShowLoggingMachineInfo(LoggingMachine loggingMachine, Resource underlyingResource)
+    private void ShowLoggingMachineInfo(LoggingMachine loggingMachine, ResourceInstance underlyingResource)
     {
         if (infoLine == null)
         {
@@ -751,7 +763,7 @@ public class ObjectInfoPanel : MonoBehaviour
         infoLine.ShowLoggingMachine(loggingMachine, underlyingResource);
     }
 
-    private void ShowUtilityPoleInfo(UtilityPole utilityPole, Resource underlyingResource)
+    private void ShowUtilityPoleInfo(UtilityPole utilityPole, ResourceInstance underlyingResource)
     {
         if (infoLine == null)
         {
@@ -766,7 +778,7 @@ public class ObjectInfoPanel : MonoBehaviour
         infoLine.ShowUtilityPole(utilityPole, underlyingResource);
     }
 
-    private void ShowLightObjectInfo(LightObject lightObject, Resource underlyingResource)
+    private void ShowLightObjectInfo(LightObject lightObject, ResourceInstance underlyingResource)
     {
         if (infoLine == null)
         {
@@ -781,7 +793,7 @@ public class ObjectInfoPanel : MonoBehaviour
         infoLine.ShowLightObject(lightObject, underlyingResource);
     }
 
-    private void ShowRailHandcarInfo(RailHandcar railHandcar, Resource underlyingResource)
+    private void ShowRailHandcarInfo(RailHandcar railHandcar, ResourceInstance underlyingResource)
     {
         if (infoLine == null)
         {
@@ -796,7 +808,7 @@ public class ObjectInfoPanel : MonoBehaviour
         infoLine.ShowRailHandcar(railHandcar, underlyingResource);
     }
 
-    private void ShowTrainstationInfo(Trainstation trainstation, Resource underlyingResource)
+    private void ShowTrainstationInfo(Trainstation trainstation, ResourceInstance underlyingResource)
     {
         if (infoLine == null)
         {
@@ -811,7 +823,7 @@ public class ObjectInfoPanel : MonoBehaviour
         infoLine.ShowTrainstation(trainstation, underlyingResource);
     }
 
-    private void ShowInputOutputModuleInfo(InputOutputModule inputOutputModule, Resource underlyingResource)
+    private void ShowInputOutputModuleInfo(InputOutputModule inputOutputModule, ResourceInstance underlyingResource)
     {
         if (infoLine == null)
         {
@@ -826,7 +838,7 @@ public class ObjectInfoPanel : MonoBehaviour
         infoLine.ShowInputOutputModule(inputOutputModule, underlyingResource);
     }
 
-    private void ShowDeskInfo(Desk desk, Resource underlyingResource)
+    private void ShowDeskInfo(Desk desk, ResourceInstance underlyingResource)
     {
         if (infoLine == null)
         {
@@ -841,7 +853,7 @@ public class ObjectInfoPanel : MonoBehaviour
         infoLine.ShowDesk(desk, underlyingResource);
     }
 
-    private void ShowInstallationObjectInfo(InstallationObject installationObject, Resource underlyingResource)
+    private void ShowInstallationObjectInfo(InstallationObject installationObject, ResourceInstance underlyingResource)
     {
         if (infoLine == null)
         {
@@ -856,9 +868,9 @@ public class ObjectInfoPanel : MonoBehaviour
         infoLine.ShowInstallationObject(installationObject, underlyingResource);
     }
 
-    private static Resource ResolveUnderlyingResource(MapObject mapObject)
+    private static ResourceInstance ResolveUnderlyingResource(IMapObjectTarget mapObject)
     {
-        if (mapObject == null || mapObject is Resource)
+        if (mapObject == null || mapObject is ResourceInstance)
         {
             return null;
         }
@@ -872,7 +884,7 @@ public class ObjectInfoPanel : MonoBehaviour
             for (int i = 0; i < occupiedCoordinates.Count; i++)
             {
                 if (terrain.TryGetLoadedBlock(occupiedCoordinates[i], out Block block)
-                    && TryGetUnderlyingResource(block, mapObject, out Resource resource))
+                    && TryGetUnderlyingResource(block, mapObject, out ResourceInstance resource))
                 {
                     return resource;
                 }
@@ -884,11 +896,11 @@ public class ObjectInfoPanel : MonoBehaviour
             return null;
         }
 
-        Vector3 position = mapObject.transform.position;
+        Vector3 position = mapObject.WorldPosition;
         return terrain.TryGetLoadedBlock(
                    new Vector2Int(Mathf.RoundToInt(position.x), Mathf.RoundToInt(position.z)),
                    out Block positionBlock)
-               && TryGetUnderlyingResource(positionBlock, mapObject, out Resource positionResource)
+               && TryGetUnderlyingResource(positionBlock, mapObject, out ResourceInstance positionResource)
             ? positionResource
             : null;
     }
@@ -901,7 +913,7 @@ public class ObjectInfoPanel : MonoBehaviour
                && terrain.IsFarmlandAt(block.Coordinate);
     }
 
-    private static bool TryGetUnderlyingResource(Block block, MapObject displayedObject, out Resource resource)
+    private static bool TryGetUnderlyingResource(Block block, IMapObjectTarget displayedObject, out ResourceInstance resource)
     {
         resource = null;
         if (block == null)

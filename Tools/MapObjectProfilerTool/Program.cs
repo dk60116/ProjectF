@@ -38,6 +38,7 @@ internal sealed class ProfilerForm : Form
     private readonly Button openTextWindowButton = new Button();
     private readonly Button openBeltTickWindowButton = new Button();
     private readonly Label fpsLabel = new Label();
+    private readonly Label upsLabel = new Label();
     private readonly Label summaryLabel = new Label();
     private readonly Panel chartPanel = new Panel();
     private readonly DataGridView rowsGrid = new DataGridView();
@@ -98,10 +99,15 @@ internal sealed class ProfilerForm : Form
         fpsLabel.AutoSize = true;
         fpsLabel.Font = new Font(Font.FontFamily, 12f, FontStyle.Bold);
         fpsLabel.ForeColor = Color.FromArgb(165, 174, 178);
+        upsLabel.Text = "UPS: --";
+        upsLabel.AutoSize = true;
+        upsLabel.Font = new Font(Font.FontFamily, 12f, FontStyle.Bold);
+        upsLabel.ForeColor = Color.FromArgb(165, 174, 178);
         headerPanel.Controls.Add(titleLabel);
         headerPanel.Controls.Add(descriptionLabel);
+        headerPanel.Controls.Add(upsLabel);
         headerPanel.Controls.Add(fpsLabel);
-        headerPanel.Resize += (_, _) => PositionFpsLabel(headerPanel);
+        headerPanel.Resize += (_, _) => PositionHeaderStats(headerPanel);
         shell.Controls.Add(headerPanel, 0, 0);
 
         FlowLayoutPanel controlPanel = new FlowLayoutPanel
@@ -183,7 +189,7 @@ internal sealed class ProfilerForm : Form
         pollTimer.Tick += async (_, _) => await PollAsync(false);
         Shown += async (_, _) =>
         {
-            PositionFpsLabel(headerPanel);
+            PositionHeaderStats(headerPanel);
             await PollAsync(true);
         };
         FormClosed += (_, _) =>
@@ -318,9 +324,10 @@ internal sealed class ProfilerForm : Form
         };
     }
 
-    private void PositionFpsLabel(Control parent)
+    private void PositionHeaderStats(Control parent)
     {
         fpsLabel.Location = new Point(Math.Max(0, parent.ClientSize.Width - fpsLabel.Width), 8);
+        upsLabel.Location = new Point(Math.Max(0, fpsLabel.Left - upsLabel.Width - 24), 8);
     }
 
     private async Task SetProfilingEnabledAsync(bool enabled)
@@ -421,11 +428,13 @@ internal sealed class ProfilerForm : Form
                 : fps >= 30f
                     ? Color.FromArgb(235, 189, 92)
                     : Color.FromArgb(236, 104, 94);
+            ApplyUpsStatus(response);
         }
         else
         {
             fpsLabel.Text = "FPS: --";
             fpsLabel.ForeColor = Color.FromArgb(165, 174, 178);
+            SetUpsUnavailable("--");
         }
 
         if (TryReadProtocolBool(response, "mapObjectTickProfiling", out bool enabled))
@@ -433,7 +442,40 @@ internal sealed class ProfilerForm : Form
             ApplyRuntimeCheckBox(enabled);
         }
 
-        PositionFpsLabel(fpsLabel.Parent ?? this);
+        PositionHeaderStats(fpsLabel.Parent ?? this);
+    }
+
+    private void ApplyUpsStatus(string response)
+    {
+        if (!TryReadProtocolFloat(response, "ups", out float ups) || ups < 0f)
+        {
+            SetUpsUnavailable("--");
+            return;
+        }
+
+        TryReadProtocolFloat(response, "targetUps", out float targetUps);
+        TryReadProtocolFloat(response, "simulationBacklogTicks", out float backlogTicks);
+        upsLabel.Text = targetUps > 0f
+            ? $"UPS: {ups:0.0} / {targetUps:0.0}  backlog {backlogTicks:0.0}"
+            : $"UPS: {ups:0.0}  paused";
+        if (targetUps <= 0f)
+        {
+            upsLabel.ForeColor = Color.FromArgb(165, 174, 178);
+            return;
+        }
+
+        float targetRatio = ups / targetUps;
+        upsLabel.ForeColor = targetRatio >= 0.985f && backlogTicks < 1.5f
+            ? Color.FromArgb(119, 218, 151)
+            : targetRatio >= 0.9f && backlogTicks < 8f
+                ? Color.FromArgb(235, 189, 92)
+                : Color.FromArgb(236, 104, 94);
+    }
+
+    private void SetUpsUnavailable(string value)
+    {
+        upsLabel.Text = $"UPS: {value}";
+        upsLabel.ForeColor = Color.FromArgb(165, 174, 178);
     }
 
     private void ApplyRuntimeCheckBox(bool enabled)
@@ -497,6 +539,9 @@ internal sealed class ProfilerForm : Form
     {
         fpsLabel.Text = "FPS: offline";
         fpsLabel.ForeColor = Color.FromArgb(236, 104, 94);
+        upsLabel.Text = "UPS: offline";
+        upsLabel.ForeColor = Color.FromArgb(236, 104, 94);
+        PositionHeaderStats(fpsLabel.Parent ?? this);
         ApplyEmptyState($"게임 연결 안 됨: {message}");
     }
 

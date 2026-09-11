@@ -6,8 +6,8 @@ public class MiningMachine : InputOutputModule
     [SerializeField]
     private Transform drill;
 
-    private readonly List<Resource> miningResourceCandidates = new List<Resource>(4);
-    private Resource activeMiningResource;
+    private readonly List<ResourceInstance> miningResourceCandidates = new List<ResourceInstance>(4);
+    private ResourceInstance activeMiningResource;
     private int activeMiningResourceIndex = -1;
     private int nextMiningResourceIndex;
 
@@ -44,7 +44,7 @@ public class MiningMachine : InputOutputModule
         bool foundAny = false;
         for (int i = 0; i < miningCoordinates.Count; i++)
         {
-            if (!TryResolveMiningResource(terrain, miningCoordinates[i], out Resource resource)
+            if (!TryResolveMiningResource(terrain, miningCoordinates[i], out ResourceInstance resource)
                 || !resource.TryPeekMachineHarvestOutput(out int outputItemId, out _)
                 || outputItemId < 0)
             {
@@ -63,7 +63,7 @@ public class MiningMachine : InputOutputModule
         ItemDefinition installedDefinition = ResolveInstalledDefinition();
         if (installedDefinition == null
             || !TryResolveNextMiningResource(
-                out Resource resource,
+                out ResourceInstance resource,
                 out int resourceIndex,
                 out int outputItemId,
                 out int outputCount,
@@ -160,7 +160,7 @@ public class MiningMachine : InputOutputModule
         if (!TryResolveActiveMiningResource(
                 ActiveOutputItemId,
                 ActiveOutputCount,
-                out Resource resource,
+                out ResourceInstance resource,
                 out int resourceIndex)
             || !resource.TryPeekMachineHarvestOutput(out int outputItemId, out int outputCount))
         {
@@ -259,7 +259,7 @@ public class MiningMachine : InputOutputModule
 
         for (int i = 0; i < miningResourceCandidates.Count; i++)
         {
-            Resource resource = miningResourceCandidates[i];
+            ResourceInstance resource = miningResourceCandidates[i];
             if (resource != null)
             {
                 reserves += resource.RemainingMachineHarvestOutputCount;
@@ -270,7 +270,7 @@ public class MiningMachine : InputOutputModule
     }
 
     private bool TryResolveNextMiningResource(
-        out Resource resource,
+        out ResourceInstance resource,
         out int resourceIndex,
         out int outputItemId,
         out int outputCount,
@@ -293,7 +293,7 @@ public class MiningMachine : InputOutputModule
         for (int offset = 0; offset < candidateCount; offset++)
         {
             int candidateIndex = (startIndex + offset) % candidateCount;
-            Resource candidate = miningResourceCandidates[candidateIndex];
+            ResourceInstance candidate = miningResourceCandidates[candidateIndex];
             if (candidate == null
                 || !candidate.TryPeekMachineHarvestOutput(out int candidateOutputItemId, out int candidateOutputCount)
                 || candidateOutputItemId < 0
@@ -330,7 +330,7 @@ public class MiningMachine : InputOutputModule
     private bool TryResolveActiveMiningResource(
         int requiredOutputItemId,
         int requiredOutputCount,
-        out Resource resource,
+        out ResourceInstance resource,
         out int resourceIndex)
     {
         resource = null;
@@ -366,7 +366,7 @@ public class MiningMachine : InputOutputModule
         bool foundAny = false;
         for (int i = 0; i < miningResourceCandidates.Count; i++)
         {
-            Resource resource = miningResourceCandidates[i];
+            ResourceInstance resource = miningResourceCandidates[i];
             if (resource == null
                 || !resource.TryPeekMachineHarvestOutput(out int outputItemId, out _)
                 || outputItemId < 0)
@@ -381,7 +381,7 @@ public class MiningMachine : InputOutputModule
         return foundAny;
     }
 
-    private bool TryCollectMiningResources(List<Resource> resources)
+    private bool TryCollectMiningResources(List<ResourceInstance> resources)
     {
         if (resources == null)
         {
@@ -405,11 +405,11 @@ public class MiningMachine : InputOutputModule
         return resources.Count > 0;
     }
 
-    private bool TryAddMiningResourceAtCoordinate(Vector2Int coordinate, List<Resource> resources)
+    private bool TryAddMiningResourceAtCoordinate(Vector2Int coordinate, List<ResourceInstance> resources)
     {
         if (resources == null
             || !TryGetLoadedBlock(coordinate, out Block block)
-            || !TryResolveMiningResource(block, out Resource resource)
+            || !TryResolveMiningResource(block, out ResourceInstance resource)
             || resources.Contains(resource))
         {
             return false;
@@ -422,7 +422,7 @@ public class MiningMachine : InputOutputModule
     private static bool TryResolveMiningResource(
         TerrainGenerator terrain,
         Vector2Int anchorCoordinate,
-        out Resource resource)
+        out ResourceInstance resource)
     {
         resource = null;
         if (terrain == null
@@ -435,7 +435,7 @@ public class MiningMachine : InputOutputModule
         return TryResolveMiningResource(block, out resource);
     }
 
-    private static bool TryResolveMiningResource(Block block, out Resource resource)
+    private static bool TryResolveMiningResource(Block block, out ResourceInstance resource)
     {
         resource = null;
         if (block == null)
@@ -444,7 +444,7 @@ public class MiningMachine : InputOutputModule
         }
 
         resource = block.Resource;
-        if (resource == null || !resource.CanHarvest || !resource.gameObject.activeInHierarchy)
+        if (resource == null || !resource.CanHarvest || !resource.IsRuntimeActive)
         {
             return false;
         }
@@ -452,12 +452,12 @@ public class MiningMachine : InputOutputModule
         return true;
     }
 
-    private static bool IsSelectableMiningResource(Resource resource)
+    private static bool IsSelectableMiningResource(ResourceInstance resource)
     {
-        return resource != null && resource.CanHarvest && resource.gameObject.activeInHierarchy;
+        return resource != null && resource.CanHarvest && resource.IsRuntimeActive;
     }
 
-    private void SetActiveMiningResourceSelection(Resource resource, int resourceIndex)
+    private void SetActiveMiningResourceSelection(ResourceInstance resource, int resourceIndex)
     {
         activeMiningResource = resource;
         activeMiningResourceIndex = resourceIndex;
@@ -469,7 +469,7 @@ public class MiningMachine : InputOutputModule
         activeMiningResourceIndex = -1;
     }
 
-    private void AdvanceMiningResourceCursor(int consumedResourceIndex, Resource consumedResource)
+    private void AdvanceMiningResourceCursor(int consumedResourceIndex, ResourceInstance consumedResource)
     {
         if (consumedResourceIndex < 0)
         {

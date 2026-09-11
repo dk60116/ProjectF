@@ -2,8 +2,11 @@ using System.Collections;
 using System.Collections.Generic;
 using UnityEngine;
 
-public class MapObject : PropObj
+public class MapObject : PropObj, IMapObjectTarget
 {
+    public MapObject SceneObject => this;
+    public bool IsTargetActive => this != null && gameObject.activeInHierarchy;
+    Vector3 IMapObjectTarget.WorldPosition => transform.position;
     public enum MultiFocusMode
     {
         All = 0,

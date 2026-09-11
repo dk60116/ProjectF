@@ -251,6 +251,31 @@ public class InputOutputModule : InstallationObject,
         public float seedPlanterPlantElapsedSeconds;
         public bool steamGeneratorHasGenerationReserve;
 
+        public void ClearStoredEnergyAndProduction()
+        {
+            storedEnergy = 0f;
+            energyGaugeCapacity = 0f;
+            storedEnergyUnits = 0L;
+            energyGaugeCapacityUnits = 0L;
+            hasActiveCraft = false;
+            waitingForOutput = false;
+            remainingCraftTime = 0f;
+            remainingCraftTicks = 0L;
+            activeCraftConsumedEnergy = 0f;
+            activeCraftConsumedEnergyUnits = 0L;
+            activeRecipeIndex = -1;
+            activeOutputItemId = -1;
+            activeOutputCount = 0;
+            boilerSteamLiterAccumulator = 0f;
+            oilDrillingProgressLiters = 0f;
+            oilDrillingProgressUnits = 0L;
+            sprinklerSprayElapsedSeconds = 0f;
+            seedPlanterPlantElapsedSeconds = 0f;
+            seedPlanterPlantElapsedUnits = 0L;
+            steamGeneratorHasGenerationReserve = false;
+            hasDeterministicUnits = true;
+        }
+
         public PersistentState Clone()
         {
             return new PersistentState
@@ -656,6 +681,16 @@ public class InputOutputModule : InstallationObject,
         cachedTerrain = null;
         cachedBlockStateStore = null;
         WakeRuntimeUpdate();
+    }
+
+    public void ClearStoredEnergyAndProduction()
+    {
+        PersistentState state = CapturePersistentState();
+        state.ClearStoredEnergyAndProduction();
+        plannedModuleCommands = PlannedModuleCommand.None;
+        stagedModuleTickPlanned = false;
+        ApplyPersistentState(state);
+        SetWorkAnimatorState(false, true);
     }
 
     public override void PrepareForPool()
@@ -4832,7 +4867,7 @@ public class InputOutputModule : InstallationObject,
             return false;
         }
 
-        if (outputBlock.MapObject is ConveyorBelt)
+        if (outputBlock.IsRuntimeConveyor)
         {
             return outputBlock.TryAddConveyorObjectAnimatedAtPlacement(
                 outputItemId,
@@ -5108,7 +5143,7 @@ public class InputOutputModule : InstallationObject,
             return false;
         }
 
-        if (!useSavedCenterStack && block != null && block.MapObject is ConveyorBelt)
+        if (!useSavedCenterStack && block != null && block.IsRuntimeConveyor)
         {
             // A producer can sleep while this belt cell is full. Keep its cell at
             // a transport boundary so a later lane vacancy is observable and can

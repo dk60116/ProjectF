@@ -958,7 +958,7 @@ public class BagSlot : ItemSlot, IBeginDragHandler, IDragHandler, IEndDragHandle
             ConsiderBoxPickupCandidate(player, automatic, origin, preferredItemId, box, ref best);
 
         if (TryGetFocusedItemStorage(player, out IPlayerItemStorage storage)
-            && storage != clickedBox && storage != box
+            && !ReferenceEquals(storage, clickedBox) && !ReferenceEquals(storage, box)
             && TryPreviewFocusedItemStorage(storage, player, origin, FocusedPickupRange, preferredItemId,
                 out itemId, out count, out portable))
         {
@@ -2052,7 +2052,7 @@ public class BagSlot : ItemSlot, IBeginDragHandler, IDragHandler, IEndDragHandle
                     continue;
                 }
 
-                MapObject mapObject = block.MapObject;
+                MapObject mapObject = (block.MapObject as MapObject);
                 if (!(mapObject is WorkableObject workableObject) || workableObject == null || !workableObject.gameObject.activeInHierarchy)
                 {
                     continue;
@@ -3752,7 +3752,7 @@ public class BagSlot : ItemSlot, IBeginDragHandler, IDragHandler, IEndDragHandle
         if (player == null
             || playerHud == null
             || !playerHud.TryGetClickedObjectInfoFocusedMapObject(
-                out MapObject focusedMapObject,
+                out IMapObjectTarget focusedMapObject,
                 out Block clickedFallbackBlock))
         {
             return false;
@@ -3787,7 +3787,7 @@ public class BagSlot : ItemSlot, IBeginDragHandler, IDragHandler, IEndDragHandle
         }
 
         if (clickedFallbackBlock != null
-            && clickedFallbackBlock.MapObject == focusedConveyorBelt)
+            && ReferenceEquals(clickedFallbackBlock.MapObject, focusedConveyorBelt))
         {
             focusedConveyorBlock = clickedFallbackBlock;
             return true;
@@ -3808,7 +3808,7 @@ public class BagSlot : ItemSlot, IBeginDragHandler, IDragHandler, IEndDragHandle
         {
             if (!terrain.TryGetLoadedBlock(occupiedCoordinates[i], out Block candidateBlock)
                 || candidateBlock == null
-                || candidateBlock.MapObject != focusedConveyorBelt)
+                || !ReferenceEquals(candidateBlock.MapObject, focusedConveyorBelt))
             {
                 continue;
             }
@@ -3835,7 +3835,7 @@ public class BagSlot : ItemSlot, IBeginDragHandler, IDragHandler, IEndDragHandle
         if (player == null
             || playerHud == null
             || !playerHud.TryGetClickedObjectInfoFocusedMapObject(
-                out MapObject focusedMapObject,
+                out IMapObjectTarget focusedMapObject,
                 out _)
             || focusedMapObject == null)
         {
@@ -3863,7 +3863,7 @@ public class BagSlot : ItemSlot, IBeginDragHandler, IDragHandler, IEndDragHandle
 
         PlayerController playerController = player.GetComponent<PlayerController>();
         if (playerController == null
-            || !playerController.TryGetFocusedMapObject(out MapObject focusedMapObject)
+            || !playerController.TryGetFocusedMapObject(out IMapObjectTarget focusedMapObject)
             || focusedMapObject == null)
         {
             return false;
@@ -3905,7 +3905,7 @@ public class BagSlot : ItemSlot, IBeginDragHandler, IDragHandler, IEndDragHandle
 
         PlayerController playerController = player.GetComponent<PlayerController>();
         if (playerController == null
-            || !playerController.TryGetFocusedMapObject(out MapObject focusedMapObject)
+            || !playerController.TryGetFocusedMapObject(out IMapObjectTarget focusedMapObject)
             || focusedMapObject == null)
         {
             return false;

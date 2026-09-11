@@ -710,6 +710,12 @@ public class SteamTrain : RailHandcar,
             storedBurnEnergyUnits);
     }
 
+    public void ClearBurnEnergyState()
+    {
+        ClearPendingBurnEnergyCost();
+        ApplyBurnEnergyStateUnits(0L, 0L);
+    }
+
     public void ApplyAutoDriveSettings(
         bool enabled,
         string targetAStationName,

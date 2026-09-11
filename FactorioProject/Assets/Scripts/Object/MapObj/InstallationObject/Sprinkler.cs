@@ -1,7 +1,7 @@
 using System.Collections.Generic;
 using ProjectF.MapObjects;
 using UnityEngine;
-using ProjectTree = ProjectF.MapObjects.Tree;
+using ProjectTree = ProjectF.MapObjects.TreeInstance;
 
 public class Sprinkler : InputOutputModule
 {

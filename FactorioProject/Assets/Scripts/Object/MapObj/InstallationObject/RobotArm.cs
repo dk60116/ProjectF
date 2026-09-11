@@ -5,6 +5,8 @@ using UnityEngine.Serialization;
 
 public class RobotArm : InputOutputModule
 {
+    private const float MinimumInstancedRenderCullRadius = 1.5f;
+    private const float InstancedRenderCullPadding = 0.25f;
     private static readonly int PickTriggerHash = Animator.StringToHash("tPick");
     private static readonly int DropTriggerHash = Animator.StringToHash("tDrop");
     private static readonly List<RobotArm> ActiveRobotArms = new List<RobotArm>();
@@ -131,6 +133,9 @@ public class RobotArm : InputOutputModule
     private RobotArmRenderBatcher renderBatcher;
     private RobotArmInstancedRenderPart[] instancedRenderParts;
     private bool instancedRenderingActive;
+    private bool instancedRenderCullingDataInitialized;
+    private float instancedRenderCullRadius = MinimumInstancedRenderCullRadius;
+    private int instancedRenderLayerMask;
     private bool previewRenderingMode;
     private float runtimeSleepCheckTimer;
     private Transform handItemRestParent;
@@ -149,6 +154,10 @@ public class RobotArm : InputOutputModule
     private System.Predicate<int> cachedPickupItemFilter;
     private PlannedTransferCommand plannedTransferCommand;
     private bool stagedTickPlanned;
+    private bool plannedPickupAvailabilityChecked;
+    private bool plannedPickupAvailable;
+    private bool plannedDropAvailabilityChecked;
+    private bool plannedDropAvailable;
 
     public bool HasHeldItem => heldItemId >= 0;
     public int HeldItemId => heldItemId;
@@ -394,6 +403,8 @@ public class RobotArm : InputOutputModule
         EnsureBodyRotationCache();
         if (persistentState == null)
         {
+            plannedTransferCommand = PlannedTransferCommand.None;
+            stagedTickPlanned = false;
             heldItemId = -1;
             pickupTimer = 0f;
             dropRetryTimer = 0f;
@@ -421,6 +432,11 @@ public class RobotArm : InputOutputModule
         RefreshRuntimeSleepState(true);
     }
 
+    public void ClearHeldItemAndTransferState()
+    {
+        ApplyTransferState(null);
+    }
+
     public override void ManagedUpdateTick(float deltaTime)
     {
         PlanManagedUpdateTick(deltaTime);
@@ -431,11 +447,17 @@ public class RobotArm : InputOutputModule
     {
         plannedTransferCommand = PlannedTransferCommand.None;
         stagedTickPlanned = true;
+        plannedPickupAvailabilityChecked = false;
+        plannedDropAvailabilityChecked = false;
         runtimeWakePending = false;
         EnsureBodyRotationCache();
-        using (MapObjectTickProfiler.SampleNamed("Runtime", nameof(RobotArm), "Robot Arm Sleep Check"))
+        if (ShouldRunRuntimeSleepCheck(deltaTime))
         {
-            if (ShouldRunRuntimeSleepCheck(deltaTime) && RefreshRuntimeSleepState())
+            using var sleepSample = MapObjectTickProfiler.SampleNamed(
+                "Runtime",
+                nameof(RobotArm),
+                "Robot Arm Sleep Check");
+            if (RefreshRuntimeSleepState())
             {
                 return;
             }
@@ -693,7 +715,7 @@ public class RobotArm : InputOutputModule
         if (!CanRuntimeSleepInCurrentState())
         {
             runtimeSleepCheckTimer = 0f;
-            return true;
+            return false;
         }
 
         runtimeSleepCheckTimer -= Mathf.Max(0f, deltaTime);
@@ -732,7 +754,10 @@ public class RobotArm : InputOutputModule
             return false;
         }
 
-        return !CanPickupOneItem() && !HasNearbyRuntimeInteractionTarget();
+        // Every supported pickup source publishes a coordinate wake when its item
+        // availability changes. Once this query misses, polling an otherwise idle arm
+        // cannot discover anything that its registered wake coordinates would not.
+        return !CanPickupOneItemForCurrentPlan();
     }
 
     private bool ShouldRuntimeSleepWithHeldItem()
@@ -753,12 +778,7 @@ public class RobotArm : InputOutputModule
             return false;
         }
 
-        if (terrainGenerator.TryGetLoadedBlock(dropCoordinate, out Block dropBlock)
-            && dropBlock != null
-            && IsConveyorBeltMapObject(dropBlock.MapObject))
-        {
-            return false;
-        }
+        terrainGenerator.TryGetLoadedBlock(dropCoordinate, out Block dropBlock);
 
         // Speed can reach zero without crossing a grid cell or changing cargo.
         // Keep the normal drop retry active until that moving target stops.
@@ -768,85 +788,7 @@ public class RobotArm : InputOutputModule
             return false;
         }
 
-        return !CanPlaceHeldItem();
-    }
-
-    private bool HasNearbyRuntimeInteractionTarget()
-    {
-        TerrainGenerator terrainGenerator = ResolveTerrainGenerator();
-        if (terrainGenerator == null || RuntimeOccupiedCoordinates == null || RuntimeOccupiedCoordinates.Count <= 0)
-        {
-            return true;
-        }
-
-        for (int occupiedIndex = 0; occupiedIndex < RuntimeOccupiedCoordinates.Count; occupiedIndex++)
-        {
-            Vector2Int occupiedCoordinate = RuntimeOccupiedCoordinates[occupiedIndex];
-            for (int x = occupiedCoordinate.x - 1; x <= occupiedCoordinate.x + 1; x++)
-            {
-                for (int y = occupiedCoordinate.y - 1; y <= occupiedCoordinate.y + 1; y++)
-                {
-                    Vector2Int coordinate = new Vector2Int(x, y);
-                    if (IsOwnRuntimeCoordinate(coordinate))
-                    {
-                        continue;
-                    }
-
-                    if (!terrainGenerator.TryGetLoadedBlock(coordinate, out Block block) || block == null)
-                    {
-                        continue;
-                    }
-
-                    if (BlockHasRuntimeInteractionTarget(block, coordinate))
-                    {
-                        return true;
-                    }
-                }
-            }
-        }
-
-        return false;
-    }
-
-    private bool BlockHasRuntimeInteractionTarget(Block block, Vector2Int coordinate)
-    {
-        if (block == null)
-        {
-            return false;
-        }
-
-        MapObject blockObject = block.MapObject;
-        if (blockObject != null && blockObject != this)
-        {
-            return true;
-        }
-
-        if (CoordinateAcceptsInputAreaObject(coordinate) || block.GetInputAreaCenterItemId() >= 0)
-        {
-            return true;
-        }
-
-        Vector3 referenceWorldPosition = transform.position;
-        return block.TryGetClosestFloorObjectWorldPosition(referenceWorldPosition, out _)
-               || block.TryGetClosestConveyorObjectWorldPosition(referenceWorldPosition, out _);
-    }
-
-    private bool IsOwnRuntimeCoordinate(Vector2Int coordinate)
-    {
-        if (RuntimeOccupiedCoordinates == null)
-        {
-            return false;
-        }
-
-        for (int i = 0; i < RuntimeOccupiedCoordinates.Count; i++)
-        {
-            if (RuntimeOccupiedCoordinates[i] == coordinate)
-            {
-                return true;
-            }
-        }
-
-        return false;
+        return !CanPlaceHeldItemForCurrentPlan();
     }
 
     private bool IsCoordinateInsideRuntimeSleepWakeRange(Vector2Int coordinate)
@@ -981,19 +923,42 @@ public class RobotArm : InputOutputModule
                && GameManager.Instance.ShowSleepAwake;
     }
 
-    internal void AppendInstancedRenderData(VirtualRenderBatchCollection batches, float batchCellSize)
+    internal bool IsInstancedRenderVisible(ProjectF.Rendering.CameraRenderCulling cameraCulling)
+    {
+        if (!instancedRenderingActive || !isActiveAndEnabled)
+        {
+            return false;
+        }
+
+        EnsureInstancedRenderParts();
+        EnsureInstancedRenderCullingData();
+        if (instancedRenderParts == null
+            || instancedRenderParts.Length <= 0
+            || (cameraCulling != null && !cameraCulling.IsAnyLayerVisible(instancedRenderLayerMask)))
+        {
+            return false;
+        }
+
+        Bounds worldBounds = new Bounds(
+            transform.position,
+            Vector3.one * (instancedRenderCullRadius * 2f));
+        return cameraCulling == null || cameraCulling.Intersects(worldBounds);
+    }
+
+    internal int AppendInstancedRenderData(VirtualRenderBatchCollection batches, float batchCellSize)
     {
         if (!instancedRenderingActive || batches == null || !isActiveAndEnabled)
         {
-            return;
+            return 0;
         }
 
         EnsureInstancedRenderParts();
         if (instancedRenderParts == null || instancedRenderParts.Length <= 0)
         {
-            return;
+            return 0;
         }
 
+        int addedMatrixCount = 0;
         bool useSleepTint = ShouldUseSleepAwakeDarkTint();
         float safeCellSize = Mathf.Max(1f, batchCellSize);
         Vector3 cellPosition = transform.position;
@@ -1035,8 +1000,11 @@ public class RobotArm : InputOutputModule
                     cellX,
                     cellZ);
                 batches.AddMatrix(key, localToWorldMatrix);
+                addedMatrixCount++;
             }
         }
+
+        return addedMatrixCount;
     }
 
     private void EnsureInstancedRenderingRegistered()
@@ -1170,6 +1138,44 @@ public class RobotArm : InputOutputModule
         }
 
         instancedRenderParts = parts.ToArray();
+        instancedRenderCullingDataInitialized = false;
+    }
+
+    private void EnsureInstancedRenderCullingData()
+    {
+        if (instancedRenderCullingDataInitialized)
+        {
+            return;
+        }
+
+        instancedRenderCullingDataInitialized = true;
+        instancedRenderLayerMask = 0;
+        instancedRenderCullRadius = MinimumInstancedRenderCullRadius;
+        if (instancedRenderParts == null)
+        {
+            return;
+        }
+
+        Vector3 rootPosition = transform.position;
+        for (int i = 0; i < instancedRenderParts.Length; i++)
+        {
+            RobotArmInstancedRenderPart part = instancedRenderParts[i];
+            if (!part.IsValid)
+            {
+                continue;
+            }
+
+            if (part.Layer >= 0 && part.Layer <= 31)
+            {
+                instancedRenderLayerMask |= 1 << part.Layer;
+            }
+
+            Bounds rendererBounds = part.Renderer.bounds;
+            float radius = Vector3.Distance(rootPosition, rendererBounds.center)
+                           + rendererBounds.extents.magnitude
+                           + InstancedRenderCullPadding;
+            instancedRenderCullRadius = Mathf.Max(instancedRenderCullRadius, radius);
+        }
     }
 
     private void EnsureSleepAwakeRenderers()
@@ -1222,7 +1228,7 @@ public class RobotArm : InputOutputModule
         }
 
         RotateBodyToward(inputBodyLocalRotation, deltaTime);
-        if (CanPickupOneItem())
+        if (CanPickupOneItemForCurrentPlan())
         {
             PlayPickAnimation();
             state = RobotArmState.WaitingBeforePickupTake;
@@ -1321,7 +1327,7 @@ public class RobotArm : InputOutputModule
         }
 
         waitingForDropRetry = false;
-        if (CanPlaceHeldItem())
+        if (CanPlaceHeldItemForCurrentPlan())
         {
             PlayDropAnimation();
             state = RobotArmState.WaitingBeforeDropPlace;
@@ -1460,6 +1466,22 @@ public class RobotArm : InputOutputModule
         return TryResolvePickupCandidate(out _, out _, out _, out _, out _, out _, out _);
     }
 
+    private bool CanPickupOneItemForCurrentPlan()
+    {
+        if (!stagedTickPlanned)
+        {
+            return CanPickupOneItem();
+        }
+
+        if (!plannedPickupAvailabilityChecked)
+        {
+            plannedPickupAvailable = CanPickupOneItem();
+            plannedPickupAvailabilityChecked = true;
+        }
+
+        return plannedPickupAvailable;
+    }
+
     private bool TryResolvePickupCandidate(
         out Block pickupBlock,
         out BoxObject boxObject,
@@ -1489,7 +1511,11 @@ public class RobotArm : InputOutputModule
             return false;
         }
 
-        bool hasLoadedPickupBlock = terrainGenerator.TryGetLoadedBlock(pickupCoordinate, out pickupBlock) && pickupBlock != null;
+        bool hasLoadedPickupBlock = TryGetLoadedInteractionBlock(
+            terrainGenerator,
+            pickupCoordinate,
+            out pickupBlock);
+
         Vector3 conveyorSelectionReferenceWorldPosition = GetBodyWorldPosition();
         float bestDistanceSqr = float.MaxValue;
 
@@ -1746,9 +1772,11 @@ public class RobotArm : InputOutputModule
         int itemId = heldItemId;
         TerrainGenerator terrainGenerator = ResolveTerrainGenerator();
         Block dropBlock = null;
-        bool hasLoadedDropBlock = terrainGenerator != null
-                                  && terrainGenerator.TryGetLoadedBlock(dropCoordinate, out dropBlock)
-                                  && dropBlock != null;
+        bool hasLoadedDropBlock = TryGetLoadedInteractionBlock(
+            terrainGenerator,
+            dropCoordinate,
+            out dropBlock);
+
         if (ShouldUseSavedDropCoordinate(terrainGenerator, dropCoordinate, dropBlock))
         {
             return TryPlaceHeldItemInSavedCoordinate(dropCoordinate, itemId, true);
@@ -1841,9 +1869,10 @@ public class RobotArm : InputOutputModule
 
         TerrainGenerator terrainGenerator = ResolveTerrainGenerator();
         Block dropBlock = null;
-        bool hasLoadedDropBlock = terrainGenerator != null
-                                  && terrainGenerator.TryGetLoadedBlock(dropCoordinate, out dropBlock)
-                                  && dropBlock != null;
+        bool hasLoadedDropBlock = TryGetLoadedInteractionBlock(
+            terrainGenerator,
+            dropCoordinate,
+            out dropBlock);
         if (ShouldUseSavedDropCoordinate(terrainGenerator, dropCoordinate, dropBlock))
         {
             return TryPlaceHeldItemInSavedCoordinate(dropCoordinate, heldItemId, false);
@@ -1855,6 +1884,46 @@ public class RobotArm : InputOutputModule
         }
 
         return CanPlaceHeldItem(dropBlock, dropCoordinate);
+    }
+
+    private bool CanPlaceHeldItemForCurrentPlan()
+    {
+        if (!stagedTickPlanned)
+        {
+            return CanPlaceHeldItem();
+        }
+
+        if (!plannedDropAvailabilityChecked)
+        {
+            plannedDropAvailable = CanPlaceHeldItem();
+            plannedDropAvailabilityChecked = true;
+        }
+
+        return plannedDropAvailable;
+    }
+
+    private static bool TryGetLoadedInteractionBlock(
+        TerrainGenerator terrainGenerator,
+        Vector2Int coordinate,
+        out Block block)
+    {
+        block = null;
+        if (terrainGenerator == null
+            || !terrainGenerator.TryGetLoadedBlock(coordinate, out block)
+            || block == null)
+        {
+            return false;
+        }
+
+        if (block.IsRuntimeConveyor)
+        {
+            // Continuously owned transport has no per-cell arrival event. Keep the
+            // arm's pickup/output cell as an observable port so occupancy and hold
+            // changes can wake a sleeping arm without periodic neighborhood scans.
+            block.EnsureConveyorTransportInteractionBoundary();
+        }
+
+        return true;
     }
 
     private static bool IsDropSuppressedByPlacementMode()
@@ -2188,8 +2257,8 @@ public class RobotArm : InputOutputModule
             return false;
         }
 
-        MapObject mapObject = dropBlock.MapObject;
-        return mapObject == null || mapObject is Resource;
+        IMapObjectTarget mapObject = dropBlock.MapObject;
+        return mapObject == null || mapObject is ResourceInstance;
     }
 
     private static bool IsSavedFarmlandFertilizerDropTarget(
@@ -2258,7 +2327,7 @@ public class RobotArm : InputOutputModule
 
     private static bool HasBlockingDropMapObject(Block dropBlock)
     {
-        MapObject mapObject = dropBlock != null ? dropBlock.MapObject : null;
+        IMapObjectTarget mapObject = dropBlock != null ? dropBlock.MapObject : null;
         return mapObject != null
                && !IsOreMapObject(mapObject)
                && !IsBoxMapObject(mapObject)
@@ -2266,24 +2335,24 @@ public class RobotArm : InputOutputModule
                && !IsConveyorBeltMapObject(mapObject);
     }
 
-    private static bool IsOreMapObject(MapObject mapObject)
+    private static bool IsOreMapObject(IMapObjectTarget mapObject)
     {
-        return mapObject is Resource resource
+        return mapObject is ResourceInstance resource
                && resource.ResolvedHarvestMode == Resource.HarvestMode.Mining;
     }
 
-    private static bool IsConveyorBeltMapObject(MapObject mapObject)
+    private static bool IsConveyorBeltMapObject(IMapObjectTarget mapObject)
     {
         return mapObject is ConveyorBelt;
     }
 
-    private static bool IsBoxMapObject(MapObject mapObject)
+    private static bool IsBoxMapObject(IMapObjectTarget mapObject)
     {
         return mapObject is BoxObject
                || (mapObject != null && mapObject.TryGetComponent(out BoxObject _));
     }
 
-    private static bool IsFreightCarMapObject(MapObject mapObject)
+    private static bool IsFreightCarMapObject(IMapObjectTarget mapObject)
     {
         return mapObject is FreightCar
                || (mapObject != null && mapObject.TryGetComponent(out FreightCar _));
@@ -2332,7 +2401,7 @@ public class RobotArm : InputOutputModule
         return false;
     }
 
-    private static bool TryResolveFreightCar(MapObject mapObject, out FreightCar freightCar)
+    private static bool TryResolveFreightCar(IMapObjectTarget mapObject, out FreightCar freightCar)
     {
         freightCar = null;
         if (mapObject == null)

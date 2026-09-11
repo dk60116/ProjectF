@@ -1454,14 +1454,14 @@ public partial class TerrainGenerator : MonoBehaviour,
         {
             if (TryGetLoadedBlock(previousAnchorCoordinate, out Block previousBlock)
                 && previousBlock != null
-                && previousBlock.MapObject == installationObject)
+                && ReferenceEquals(previousBlock.MapObject, installationObject))
             {
                 previousBlock.SetMapObject(null);
             }
 
             if (TryGetLoadedBlock(currentAnchorCoordinate, out Block currentBlock)
                 && currentBlock != null
-                && (currentBlock.MapObject == null || currentBlock.MapObject == installationObject))
+                && (currentBlock.MapObject == null || ReferenceEquals(currentBlock.MapObject, installationObject)))
             {
                 currentBlock.SetMapObject(installationObject);
             }
@@ -1704,7 +1704,7 @@ public partial class TerrainGenerator : MonoBehaviour,
                 resourceStateStore.RegisterLiveInstallation(installationObject);
             }
 
-            Resource resource = block.Resource;
+            ResourceInstance resource = block.Resource;
             if (resource != null)
             {
                 resourceStateStore.Save(block.Coordinate, resource);
@@ -2473,7 +2473,7 @@ public partial class TerrainGenerator : MonoBehaviour,
         {
             long maximumResources = (long)chunkCapacity * normalizedChunkSize * normalizedChunkSize;
             int resourceCapacity = (int)Math.Min(int.MaxValue, maximumResources);
-            Resource.EnsureActiveResourceCapacity(resourceCapacity);
+            ResourceInstance.EnsureActiveResourceCapacity(resourceCapacity);
             ResourceBatchRenderer batchRenderer = GetComponent<ResourceBatchRenderer>();
             if (batchRenderer == null)
             {

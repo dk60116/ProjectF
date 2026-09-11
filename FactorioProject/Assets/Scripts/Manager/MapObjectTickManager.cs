@@ -128,6 +128,7 @@ public sealed class MapObjectTickManager : MonoBehaviour
     private const float DefaultUpdateTickIntervalSeconds = FixedSimulationDeltaSeconds;
     private const int AliveValidationTickInterval = 120;
     private const int DefaultMaximumSimulationStepsPerFrame = 8;
+    private const double SimulationUpsSampleIntervalSeconds = 0.5d;
 
     private static MapObjectTickManager instance;
     private static bool applicationQuitting;
@@ -154,6 +155,11 @@ public sealed class MapObjectTickManager : MonoBehaviour
     private long simulationTick;
     private long nextAliveValidationTick;
     private double simulationTimeAccumulator;
+    private double simulationUpsSampleStartTime;
+    private long simulationUpsSampleStartTick;
+    private float currentSimulationUps;
+    private int simulationTicksLastFrame;
+    private bool hasSimulationUpsSample;
     private bool tickingUpdateObjects;
     private bool updateTicksDirty;
 
@@ -166,6 +172,13 @@ public sealed class MapObjectTickManager : MonoBehaviour
     public static float SimulationInterpolationAlpha => (float)Math.Min(
         1d,
         SimulationBacklogTicks);
+    public static bool HasSimulationUpsSample => instance != null && instance.hasSimulationUpsSample;
+    public static float CurrentSimulationUps => instance != null ? instance.currentSimulationUps : 0f;
+    public static float TargetSimulationUps => DefaultSimulationTicksPerSecond * Mathf.Max(0f, Time.timeScale);
+    public static int SimulationTicksLastFrame => instance != null ? instance.simulationTicksLastFrame : 0;
+    public static int MaximumSimulationStepsPerFrame => instance != null
+        ? Mathf.Max(1, instance.maximumSimulationStepsPerFrame)
+        : DefaultMaximumSimulationStepsPerFrame;
 
     public static void RegisterUpdateTick(IMapObjectUpdateTick tick)
     {
@@ -231,6 +244,7 @@ public sealed class MapObjectTickManager : MonoBehaviour
 
         instance = this;
         DontDestroyOnLoad(gameObject);
+        ResetSimulationUpsMeasurement();
         ReconcileRequestedUpdateTicks(true);
     }
 
@@ -249,6 +263,9 @@ public sealed class MapObjectTickManager : MonoBehaviour
             TickUpdateObjects();
             completedSteps++;
         }
+
+        simulationTicksLastFrame = completedSteps;
+        UpdateSimulationUpsMeasurement();
     }
 
     public static void RestoreSimulationTick(long restoredTick)
@@ -262,7 +279,33 @@ public sealed class MapObjectTickManager : MonoBehaviour
         manager.simulationTick = Math.Max(0L, restoredTick);
         manager.simulationTimeAccumulator = 0d;
         manager.nextAliveValidationTick = manager.simulationTick;
+        manager.ResetSimulationUpsMeasurement();
         manager.ResetUpdateTickBucketState();
+    }
+
+    private void ResetSimulationUpsMeasurement()
+    {
+        simulationUpsSampleStartTime = Time.realtimeSinceStartupAsDouble;
+        simulationUpsSampleStartTick = simulationTick;
+        currentSimulationUps = 0f;
+        simulationTicksLastFrame = 0;
+        hasSimulationUpsSample = false;
+    }
+
+    private void UpdateSimulationUpsMeasurement()
+    {
+        double currentTime = Time.realtimeSinceStartupAsDouble;
+        double elapsedSeconds = currentTime - simulationUpsSampleStartTime;
+        if (elapsedSeconds < SimulationUpsSampleIntervalSeconds)
+        {
+            return;
+        }
+
+        long completedTicks = Math.Max(0L, simulationTick - simulationUpsSampleStartTick);
+        currentSimulationUps = (float)(completedTicks / elapsedSeconds);
+        simulationUpsSampleStartTime = currentTime;
+        simulationUpsSampleStartTick = simulationTick;
+        hasSimulationUpsSample = true;
     }
 
     public static void RefreshSimulationIdentity(IMapObjectUpdateTick tick)

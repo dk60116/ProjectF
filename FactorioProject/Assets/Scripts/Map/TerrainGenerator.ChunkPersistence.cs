@@ -13,7 +13,7 @@ public partial class TerrainGenerator : MonoBehaviour
     private readonly HashSet<Vector2Int> chunkInstallationAnchorScratch = new HashSet<Vector2Int>();
     private readonly List<Vector2Int> orderedChunkInstallationAnchorScratch = new List<Vector2Int>();
 
-    public void SaveRuntimeResourceState(Resource resource)
+    public void SaveRuntimeResourceState(ResourceInstance resource)
     {
         if (resource == null || resource.OwningBlock == null)
         {
@@ -24,7 +24,7 @@ public partial class TerrainGenerator : MonoBehaviour
         resourceStateStore?.Save(resource.OwningBlock.Coordinate, resource);
     }
 
-    private Resource SpawnResourceOnBlock(Block block, Resource prefab, Vector2Int worldCoordinate)
+    private ResourceInstance SpawnResourceOnBlock(Block block, Resource prefab, Vector2Int worldCoordinate)
     {
         if (block == null || prefab == null)
         {
@@ -38,9 +38,7 @@ public partial class TerrainGenerator : MonoBehaviour
             return null;
         }
 
-        Resource spawnedResource = Instantiate(prefab, block.RuntimeObjectRoot);
-        spawnedResource.transform.position = block.WorldPosition;
-        spawnedResource.transform.rotation = Quaternion.identity;
+        ResourceInstance spawnedResource = ResourceTypeWorld.Spawn(this, prefab, block.WorldPosition);
         ApplyResourceScaleProfile(spawnedResource, prefab);
         bool isOilResource = IsOilResourcePrefab(prefab);
         int generatedBodyYawStep = GetResourceBodyYawStep(prefab, worldCoordinate);
@@ -52,7 +50,7 @@ public partial class TerrainGenerator : MonoBehaviour
         if (resourceStateStore != null && resourceStateStore.TryGet(worldCoordinate, out Resource.ResourceSaveState savedState))
         {
             spawnedResource.ApplySavedState(savedState);
-            if (spawnedResource is ProjectF.MapObjects.Tree savedTree && !savedState.hasGrowth)
+            if (spawnedResource is ProjectF.MapObjects.TreeInstance savedTree && !savedState.hasGrowth)
             {
                 savedTree.SetGrowth(GetInitialTreeGrowth(prefab, worldCoordinate));
             }
@@ -60,7 +58,7 @@ public partial class TerrainGenerator : MonoBehaviour
         else
         {
             spawnedResource.InitializeRuntimeQuantity(GetInitialResourceCount(prefab, worldCoordinate));
-            if (spawnedResource is ProjectF.MapObjects.Tree spawnedTree)
+            if (spawnedResource is ProjectF.MapObjects.TreeInstance spawnedTree)
             {
                 spawnedTree.SetGrowth(GetInitialTreeGrowth(prefab, worldCoordinate));
             }
@@ -77,7 +75,7 @@ public partial class TerrainGenerator : MonoBehaviour
         return spawnedResource;
     }
 
-    private void ApplyResourceScaleProfile(Resource spawnedResource, Resource prefab)
+    private void ApplyResourceScaleProfile(ResourceInstance spawnedResource, Resource prefab)
     {
         if (spawnedResource == null)
         {
@@ -150,7 +148,7 @@ public partial class TerrainGenerator : MonoBehaviour
                         resourceStateStore.RegisterLiveInstallation(installationObject);
                     }
 
-                    Resource resource = block.Resource;
+                    ResourceInstance resource = block.Resource;
                     if (resource != null)
                     {
                         resourceStateStore.Save(block.Coordinate, resource);
@@ -318,7 +316,7 @@ public partial class TerrainGenerator : MonoBehaviour
             }
 
             if (groundBlock.Type != Block.BlockType.Ground
-                || groundBlock.MapObject != focusedBox
+                || !ReferenceEquals(groundBlock.MapObject, focusedBox)
                 || !groundBlock.CanAddInputAreaCenterObjects(itemCount, itemId))
             {
                 return false;
@@ -362,7 +360,7 @@ public partial class TerrainGenerator : MonoBehaviour
                 }
 
                 if (block.Type != Block.BlockType.Ground
-                    || block.MapObject != focusedBox
+                    || !ReferenceEquals(block.MapObject, focusedBox)
                     || !IsValidFocusedItemAreaBoxDropBlock(block, itemId, itemCount))
                 {
                     continue;
@@ -1276,7 +1274,7 @@ public partial class TerrainGenerator : MonoBehaviour
             || !occupiedCoordinates.Contains(bridgeCenterCoordinate)
             || !loadedBlocks.TryGetValue(bridgeCenterCoordinate, out Block bridgeCenterBlock)
             || bridgeCenterBlock == null
-            || !IsBelt2FBridgeCenterPassthrough(bridgeCenterBlock.MapObject))
+            || !IsBelt2FBridgeCenterPassthrough(bridgeCenterBlock.MapObject as MapObject))
         {
             return;
         }
@@ -1291,7 +1289,7 @@ public partial class TerrainGenerator : MonoBehaviour
         return block != null
                && installedObject is ConvayorBelt2F belt2F
                && belt2F.IsBridgeCenterCoordinate(block.Coordinate)
-               && IsBelt2FBridgeCenterPassthrough(block.MapObject);
+               && IsBelt2FBridgeCenterPassthrough(block.MapObject as MapObject);
     }
 
     private static bool IsBelt2FBridgeCenterPassthrough(MapObject mapObject)

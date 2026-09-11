@@ -13,8 +13,17 @@ public sealed class RobotArmRenderBatcher : MonoBehaviour
     private readonly List<RobotArm> registeredRobotArms = new List<RobotArm>(64);
     private readonly HashSet<RobotArm> registeredRobotArmSet = new HashSet<RobotArm>();
     private readonly VirtualRenderBatchCollection batches = new VirtualRenderBatchCollection();
+    private readonly ProjectF.Rendering.CameraRenderCulling cameraCulling =
+        new ProjectF.Rendering.CameraRenderCulling();
     private Camera mainCamera;
     private bool registeredRobotArmsDirty;
+
+    public int RegisteredRobotArmCount => registeredRobotArmSet.Count;
+    public int LastVisibleRobotArmCount { get; private set; }
+    public int LastCulledRobotArmCount { get; private set; }
+    public int LastBuiltMatrixCount { get; private set; }
+    public int ActiveBatchCount => batches.ActiveBatchCount;
+    public int EstimatedDrawCallCount => batches.EstimatedDrawCallCount;
 
     public static RobotArmRenderBatcher EnsureFor(GameObject host)
     {
@@ -74,6 +83,12 @@ public sealed class RobotArmRenderBatcher : MonoBehaviour
 
         using (RenderMarker.Auto())
         {
+            if (mainCamera == null || !mainCamera.isActiveAndEnabled)
+            {
+                mainCamera = Camera.main;
+            }
+
+            cameraCulling.Update(mainCamera);
             RebuildBatches();
 
             if (registeredRobotArmSet.Count <= 0)
@@ -85,11 +100,6 @@ public sealed class RobotArmRenderBatcher : MonoBehaviour
             if (batches.ActiveBatchCount <= 0)
             {
                 return;
-            }
-
-            if (mainCamera == null)
-            {
-                mainCamera = Camera.main;
             }
 
             using (MapObjectTickProfiler.SampleNamed("Runtime", nameof(RobotArmRenderBatcher), "Robot Arm Render Submit"))
@@ -108,6 +118,9 @@ public sealed class RobotArmRenderBatcher : MonoBehaviour
         }
 
         batches.ClearActiveMatrices();
+        LastVisibleRobotArmCount = 0;
+        LastCulledRobotArmCount = 0;
+        LastBuiltMatrixCount = 0;
         for (int i = 0; i < registeredRobotArms.Count; i++)
         {
             RobotArm robotArm = registeredRobotArms[i];
@@ -123,7 +136,14 @@ public sealed class RobotArmRenderBatcher : MonoBehaviour
                 continue;
             }
 
-            robotArm.AppendInstancedRenderData(batches, BatchCellSize);
+            if (!robotArm.IsInstancedRenderVisible(cameraCulling))
+            {
+                LastCulledRobotArmCount++;
+                continue;
+            }
+
+            LastVisibleRobotArmCount++;
+            LastBuiltMatrixCount += robotArm.AppendInstancedRenderData(batches, BatchCellSize);
         }
 
         if (registeredRobotArmsDirty)
@@ -134,6 +154,9 @@ public sealed class RobotArmRenderBatcher : MonoBehaviour
 
     private void OnDisable()
     {
+        LastVisibleRobotArmCount = 0;
+        LastCulledRobotArmCount = registeredRobotArmSet.Count;
+        LastBuiltMatrixCount = 0;
         batches.SuspendRendering();
     }
 

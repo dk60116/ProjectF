@@ -47,6 +47,7 @@ internal sealed class EditorToolForm : Form
     private readonly Button beltItemClearButton = new Button();
     private readonly Button floorItemClearButton = new Button();
     private readonly Button ioItemClearButton = new Button();
+    private readonly Button mapObjectItemClearButton = new Button();
     private readonly Button animalStress100Button = new Button();
     private readonly Button animalStress500Button = new Button();
     private readonly Button animalThreatButton = new Button();
@@ -93,8 +94,10 @@ internal sealed class EditorToolForm : Form
     private readonly Label statusLabel = new Label();
     private readonly Label catalogLabel = new Label();
     private readonly Label fpsLabel = new Label();
+    private readonly Label upsLabel = new Label();
     private readonly Label playerSpeedLabel = new Label();
     private readonly Label runtimeStatsLabel = new Label();
+    private readonly Label playerPositionLabel = new Label();
     private readonly Label sceneGameObjectCountLabel = new Label();
     private readonly TextBox runtimeStatsTextBox = new TextBox();
     private readonly System.Windows.Forms.Timer statusTimer = new System.Windows.Forms.Timer();
@@ -161,6 +164,11 @@ internal sealed class EditorToolForm : Form
         fpsLabel.Font = new Font(Font.FontFamily, 13f, FontStyle.Bold);
         fpsLabel.ForeColor = Color.FromArgb(176, 177, 158);
         fpsLabel.Anchor = AnchorStyles.Top | AnchorStyles.Right;
+        upsLabel.Text = "UPS: --";
+        upsLabel.AutoSize = true;
+        upsLabel.Font = new Font(Font.FontFamily, 13f, FontStyle.Bold);
+        upsLabel.ForeColor = Color.FromArgb(176, 177, 158);
+        upsLabel.Anchor = AnchorStyles.Top | AnchorStyles.Right;
         playerSpeedLabel.Text = "플레이어 속도: -- m/s";
         playerSpeedLabel.AutoSize = true;
         playerSpeedLabel.Font = new Font(Font.FontFamily, 13f, FontStyle.Bold);
@@ -169,6 +177,7 @@ internal sealed class EditorToolForm : Form
         headerPanel.Controls.Add(titleLabel);
         headerPanel.Controls.Add(descriptionLabel);
         headerPanel.Controls.Add(playerSpeedLabel);
+        headerPanel.Controls.Add(upsLabel);
         headerPanel.Controls.Add(fpsLabel);
         headerPanel.Resize += (_, _) => PositionHeaderStats(headerPanel);
         PositionHeaderStats(headerPanel);
@@ -282,6 +291,11 @@ internal sealed class EditorToolForm : Form
         StyleSecondaryButton(ioItemClearButton, "IO Item Clear");
         ioItemClearButton.Click += async (_, _) => await SendItemClearAsync("io", "IO Item Clear");
 
+        StyleSecondaryButton(mapObjectItemClearButton, "MapObj Item Clear");
+        mapObjectItemClearButton.Width = 150;
+        mapObjectItemClearButton.Click += async (_, _) =>
+            await SendItemClearAsync("mapobj", "MapObj Item Clear");
+
         StyleSecondaryButton(animalStress100Button, "동물 100마리");
         animalStress100Button.Width = 130;
         animalStress100Button.Click += async (_, _) =>
@@ -309,6 +323,7 @@ internal sealed class EditorToolForm : Form
         buttonPanel.Controls.Add(beltItemClearButton);
         buttonPanel.Controls.Add(floorItemClearButton);
         buttonPanel.Controls.Add(ioItemClearButton);
+        buttonPanel.Controls.Add(mapObjectItemClearButton);
         buttonPanel.Controls.Add(animalStress100Button);
         buttonPanel.Controls.Add(animalStress500Button);
         buttonPanel.Controls.Add(animalThreatButton);
@@ -681,16 +696,22 @@ internal sealed class EditorToolForm : Form
         {
             Dock = DockStyle.Fill,
             ColumnCount = 1,
-            RowCount = 3
+            RowCount = 4
         };
-        runtimeStatsLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 28f));
         runtimeStatsLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 26f));
+        runtimeStatsLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 24f));
+        runtimeStatsLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 24f));
         runtimeStatsLayout.RowStyles.Add(new RowStyle(SizeType.Percent, 100f));
 
         runtimeStatsLabel.Text = "Runtime Stats: --";
         runtimeStatsLabel.Dock = DockStyle.Fill;
         runtimeStatsLabel.ForeColor = Color.FromArgb(243, 234, 206);
         runtimeStatsLabel.Font = new Font(Font.FontFamily, 11.5f, FontStyle.Bold);
+
+        playerPositionLabel.Text = "플레이어 좌표: --";
+        playerPositionLabel.Dock = DockStyle.Fill;
+        playerPositionLabel.ForeColor = Color.FromArgb(176, 177, 158);
+        playerPositionLabel.Font = new Font(Font.FontFamily, 10f, FontStyle.Regular);
 
         sceneGameObjectCountLabel.Text = "씬 GameObject: --";
         sceneGameObjectCountLabel.Dock = DockStyle.Fill;
@@ -708,8 +729,9 @@ internal sealed class EditorToolForm : Form
         runtimeStatsTextBox.Text = "설치 오브젝트 종류: --";
 
         runtimeStatsLayout.Controls.Add(runtimeStatsLabel, 0, 0);
-        runtimeStatsLayout.Controls.Add(sceneGameObjectCountLabel, 0, 1);
-        runtimeStatsLayout.Controls.Add(runtimeStatsTextBox, 0, 2);
+        runtimeStatsLayout.Controls.Add(playerPositionLabel, 0, 1);
+        runtimeStatsLayout.Controls.Add(sceneGameObjectCountLabel, 0, 2);
+        runtimeStatsLayout.Controls.Add(runtimeStatsTextBox, 0, 3);
         runtimeStatsCard.Controls.Add(runtimeStatsLayout);
         layout.Controls.Add(runtimeStatsCard, 0, 8);
         layout.SetColumnSpan(runtimeStatsCard, 2);
@@ -833,8 +855,11 @@ internal sealed class EditorToolForm : Form
         fpsLabel.Location = new Point(
             Math.Max(0, parent.ClientSize.Width - fpsLabel.Width),
             8);
+        upsLabel.Location = new Point(
+            Math.Max(0, fpsLabel.Left - upsLabel.Width - 24),
+            8);
         playerSpeedLabel.Location = new Point(
-            Math.Max(0, fpsLabel.Left - playerSpeedLabel.Width - 24),
+            Math.Max(0, upsLabel.Left - playerSpeedLabel.Width - 24),
             8);
     }
 
@@ -1252,6 +1277,7 @@ internal sealed class EditorToolForm : Form
                     : fps >= 30f
                         ? Color.FromArgb(235, 189, 92)
                         : Color.FromArgb(236, 104, 94);
+                ApplyUpsStatus(response);
                 if (TryReadProtocolFloat(response, "playerSpeed", out float playerSpeed)
                     && playerSpeed >= 0f)
                 {
@@ -1263,6 +1289,7 @@ internal sealed class EditorToolForm : Form
                     playerSpeedLabel.Text = "플레이어 속도: -- m/s";
                     playerSpeedLabel.ForeColor = Color.FromArgb(176, 177, 158);
                 }
+                UpdatePlayerPositionFromResponse(response);
                 UpdateRuntimeStatsFromResponse(response);
                 UpdateSaveSlotsFromResponse(response, false);
             }
@@ -1270,8 +1297,10 @@ internal sealed class EditorToolForm : Form
             {
                 fpsLabel.Text = "FPS: --";
                 fpsLabel.ForeColor = Color.FromArgb(176, 177, 158);
+                SetUpsUnavailable("--", Color.FromArgb(176, 177, 158));
                 playerSpeedLabel.Text = "플레이어 속도: -- m/s";
                 playerSpeedLabel.ForeColor = Color.FromArgb(176, 177, 158);
+                SetPlayerPositionUnavailable("--");
                 SetRuntimeStatsUnavailable("상태 응답 없음");
                 SetWorldTimeUnavailable("상태 응답 없음");
             }
@@ -1282,8 +1311,10 @@ internal sealed class EditorToolForm : Form
         {
             fpsLabel.Text = "FPS: offline";
             fpsLabel.ForeColor = Color.FromArgb(236, 104, 94);
+            SetUpsUnavailable("offline", Color.FromArgb(236, 104, 94));
             playerSpeedLabel.Text = "플레이어 속도: offline";
             playerSpeedLabel.ForeColor = Color.FromArgb(236, 104, 94);
+            SetPlayerPositionUnavailable("offline");
             SetRuntimeStatsUnavailable("게임 연결 안 됨");
             SetWorldTimeUnavailable("게임 연결 안 됨");
             PositionHeaderStats(fpsLabel.Parent ?? this);
@@ -1292,6 +1323,61 @@ internal sealed class EditorToolForm : Form
         {
             pollingStatus = false;
         }
+    }
+
+    private void ApplyUpsStatus(string response)
+    {
+        if (!TryReadProtocolFloat(response, "ups", out float ups) || ups < 0f)
+        {
+            SetUpsUnavailable("--", Color.FromArgb(176, 177, 158));
+            return;
+        }
+
+        TryReadProtocolFloat(response, "targetUps", out float targetUps);
+        TryReadProtocolFloat(response, "simulationBacklogTicks", out float backlogTicks);
+        upsLabel.Text = targetUps > 0f
+            ? $"UPS: {ups:0.0} / {targetUps:0.0}  backlog {backlogTicks:0.0}"
+            : $"UPS: {ups:0.0}  paused";
+        if (targetUps <= 0f)
+        {
+            upsLabel.ForeColor = Color.FromArgb(176, 177, 158);
+            return;
+        }
+
+        float targetRatio = ups / targetUps;
+        upsLabel.ForeColor = targetRatio >= 0.985f && backlogTicks < 1.5f
+            ? Color.FromArgb(126, 218, 126)
+            : targetRatio >= 0.9f && backlogTicks < 8f
+                ? Color.FromArgb(235, 189, 92)
+                : Color.FromArgb(236, 104, 94);
+    }
+
+    private void SetUpsUnavailable(string value, Color color)
+    {
+        upsLabel.Text = $"UPS: {value}";
+        upsLabel.ForeColor = color;
+    }
+
+    private void UpdatePlayerPositionFromResponse(string response)
+    {
+        if (TryReadProtocolBool(response, "playerPositionAvailable", out bool available)
+            && available
+            && TryReadProtocolFloat(response, "playerX", out float playerX)
+            && TryReadProtocolFloat(response, "playerY", out float playerY)
+            && TryReadProtocolFloat(response, "playerZ", out float playerZ))
+        {
+            playerPositionLabel.Text = $"플레이어 좌표: X {playerX:0.00}    Y {playerY:0.00}    Z {playerZ:0.00}";
+            playerPositionLabel.ForeColor = Color.FromArgb(126, 218, 126);
+            return;
+        }
+
+        SetPlayerPositionUnavailable("--");
+    }
+
+    private void SetPlayerPositionUnavailable(string value)
+    {
+        playerPositionLabel.Text = $"플레이어 좌표: {value}";
+        playerPositionLabel.ForeColor = Color.FromArgb(176, 177, 158);
     }
 
     private void UpdateRuntimeStatsFromResponse(string response)
@@ -1796,6 +1882,7 @@ internal sealed class EditorToolForm : Form
         beltItemClearButton.Enabled = !busy;
         floorItemClearButton.Enabled = !busy;
         ioItemClearButton.Enabled = !busy;
+        mapObjectItemClearButton.Enabled = !busy;
         animalStress100Button.Enabled = !busy;
         animalStress500Button.Enabled = !busy;
         animalThreatButton.Enabled = !busy;

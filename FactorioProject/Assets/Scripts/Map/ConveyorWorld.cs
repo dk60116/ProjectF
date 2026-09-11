@@ -587,6 +587,7 @@ public sealed class ConveyorWorld : MonoBehaviour, IVirtualRenderBatchOwner
     }
 
     private const string HostName = "ConveyorWorld";
+    private const string SeamTopObjectName = "BeltTop_Seam";
     private const float BatchCellSize = 16f;
     private static readonly int CullShaderId = Shader.PropertyToID("_Cull");
     private static ConveyorWorld current;
@@ -1376,7 +1377,12 @@ public sealed class ConveyorWorld : MonoBehaviour, IVirtualRenderBatchOwner
              currentTransform != null && currentTransform != endpointRoot;
              currentTransform = currentTransform.parent)
         {
-            if (!currentTransform.gameObject.activeSelf)
+            // Seam tops are authored inactive because the legacy GameObject path toggles
+            // them together with their endpoint root. Data-only belts instead decide endpoint
+            // visibility in ShouldRenderPart, so dropping this child here leaves a visible
+            // seam body without its moving belt surface at perpendicular (T) connections.
+            if (!currentTransform.gameObject.activeSelf
+                && currentTransform.name != SeamTopObjectName)
             {
                 return false;
             }

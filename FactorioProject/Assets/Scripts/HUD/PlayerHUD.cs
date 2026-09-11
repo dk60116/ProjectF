@@ -119,15 +119,15 @@ public partial class PlayerHUD : BagSlot
     private bool currentDraftAnimalInteractionDetaches;
     private BoxObject currentInteractionBoxObject;
     private FenceDoor currentInteractionDoorObject;
-    private Resource currentInteractionResource;
-    private MapObject currentInteractionMapObject;
+    private ResourceInstance currentInteractionResource;
+    private IMapObjectTarget currentInteractionMapObject;
     private bool pitchforkGroundInteractionActive;
-    private Component currentObjectInfoTarget;
-    private Component clickedObjectInfoTarget;
+    private object currentObjectInfoTarget;
+    private object clickedObjectInfoTarget;
     private Block clickedObjectInfoFallbackBlock;
     private InputOutputModuleAreaMarkerController currentObjectInfoAreaMarkerController;
     private UtilityPole currentObjectInfoSupplyRangePole;
-    private Component lastYellowObjectInfoFocusTarget;
+    private object lastYellowObjectInfoFocusTarget;
     private bool currentObjectInfoOpenedByYellowFocus;
     private float nextObjectInfoPanelRefreshTime;
     private int lastObservedHandItemId = -2;
@@ -1989,7 +1989,7 @@ public partial class PlayerHUD : BagSlot
             return;
         }
 
-        if (TryGetClickedObjectInfoFocusedMapObject(out MapObject selectedMapObject)
+        if (TryGetClickedObjectInfoFocusedMapObject(out IMapObjectTarget selectedMapObject)
             && CanDisplayClickedMapObjectInteraction(selectedMapObject, playerController)
             && TryActivateMapObjectInteraction(selectedMapObject))
         {
@@ -2160,7 +2160,7 @@ public partial class PlayerHUD : BagSlot
             true);
     }
 
-    private bool TryActivateMapObjectInteraction(MapObject mapObject)
+    private bool TryActivateMapObjectInteraction(IMapObjectTarget mapObject)
     {
         if (!TryResolveMapObjectInteraction(
                 mapObject,
@@ -2177,7 +2177,7 @@ public partial class PlayerHUD : BagSlot
     private bool TryActivateNearestAutomaticMapObjectInteraction(
         PlayerController playerController)
     {
-        MapObject nearestTarget = null;
+        IMapObjectTarget nearestTarget = null;
         InteractionButton nearestButton = null;
         Sprite nearestIcon = null;
         float nearestDistanceSqr = float.MaxValue;
@@ -2187,7 +2187,7 @@ public partial class PlayerHUD : BagSlot
         {
             if (!playerController.TryGetInteractionButtonFocusTarget(
                     i,
-                    out MapObject candidate,
+                    out IMapObjectTarget candidate,
                     out float distanceSqr)
                 || !playerController.IsWithinInteractionRange(candidate)
                 || distanceSqr >= nearestDistanceSqr
@@ -2215,7 +2215,7 @@ public partial class PlayerHUD : BagSlot
     }
 
     private bool TryResolveMapObjectInteraction(
-        MapObject mapObject,
+        IMapObjectTarget mapObject,
         out InteractionButton targetButton,
         out Sprite icon)
     {
@@ -2226,7 +2226,7 @@ public partial class PlayerHUD : BagSlot
             ? currentPlayer.GetComponent<PlayerController>()
             : null;
         if (mapObject == null
-            || !mapObject.gameObject.activeInHierarchy
+            || !mapObject.IsTargetActive
             || !mapObject.AllowsFocus
             || (mapObject is Vehicle vehicle
                 && (currentPlayerController == null
@@ -2263,7 +2263,7 @@ public partial class PlayerHUD : BagSlot
             icon = ResolveInteractionIcon(fenceDoor);
             targetButton = ResolveDoorInteractionButtonForUse();
         }
-        else if (mapObject is Resource resource)
+        else if (mapObject is ResourceInstance resource)
         {
             if (resource.PlacementCategory == ResourceDefinition.PlacementCategory.Oil)
             {
@@ -2293,7 +2293,7 @@ public partial class PlayerHUD : BagSlot
     }
 
     private static bool CanDisplayClickedMapObjectInteraction(
-        MapObject mapObject,
+        IMapObjectTarget mapObject,
         PlayerController playerController)
     {
         if (mapObject == null)
@@ -2306,7 +2306,7 @@ public partial class PlayerHUD : BagSlot
     }
 
     private void ActivateMapObjectInteraction(
-        MapObject mapObject,
+        IMapObjectTarget mapObject,
         InteractionButton targetButton,
         Sprite icon)
     {
@@ -2319,7 +2319,7 @@ public partial class PlayerHUD : BagSlot
         {
             currentInteractionDoorObject = targetDoor;
         }
-        else if (mapObject is Resource targetResource)
+        else if (mapObject is ResourceInstance targetResource)
         {
             currentInteractionResource = targetResource;
         }
@@ -2597,7 +2597,7 @@ public partial class PlayerHUD : BagSlot
                 && playerController.TryResolvePointerFocusTarget(
                     pointerPosition,
                     out Animal clickedAnimal,
-                    out MapObject clickedMapObject,
+                    out IMapObjectTarget clickedMapObject,
                     out PortableObject clickedPortableObject,
                     out Block clickedFallbackBlock))
             {
@@ -2675,7 +2675,7 @@ public partial class PlayerHUD : BagSlot
             // 클릭 선택도 유지해야 공격이 끝난 뒤 Knife 버튼이 다시 표시된다.
             lastYellowObjectInfoFocusTarget = null;
             clickedObjectInfoTarget = knifeFocusAnimal;
-            if (currentObjectInfoTarget != knifeFocusAnimal
+            if (!ReferenceEquals(currentObjectInfoTarget, knifeFocusAnimal)
                 || !objectInfoPanel.IsBoundTo(knifeFocusAnimal)
                 || !objectInfoPanel.gameObject.activeSelf)
             {
@@ -2706,10 +2706,10 @@ public partial class PlayerHUD : BagSlot
         }
 
         PlayerController playerController = ResolvePlayerController();
-        Component focusedTarget = null;
+        object focusedTarget = null;
         if (playerController != null)
         {
-            if (playerController.TryGetFocusedMapObject(out MapObject focusedMapObject))
+            if (playerController.TryGetFocusedMapObject(out IMapObjectTarget focusedMapObject))
             {
                 focusedTarget = focusedMapObject;
             }
@@ -2765,8 +2765,12 @@ public partial class PlayerHUD : BagSlot
             return;
         }
 
+        Block focusBlock = ResolveObjectInfoFocusBlock(
+            currentObjectInfoTarget,
+            currentObjectInfoOpenedByYellowFocus,
+            playerController);
         if (objectInfoPanel != null
-            && objectInfoPanel.IsBoundTo(currentObjectInfoTarget)
+            && objectInfoPanel.IsBoundTo(currentObjectInfoTarget, focusBlock)
             && objectInfoPanel.gameObject.activeSelf)
         {
             float now = Time.unscaledTime;
@@ -2782,7 +2786,7 @@ public partial class PlayerHUD : BagSlot
         BindObjectInfoPanel(currentObjectInfoTarget, currentObjectInfoOpenedByYellowFocus);
     }
 
-    private void BindObjectInfoPanel(Component target, bool openedByYellowFocus)
+    private void BindObjectInfoPanel(object target, bool openedByYellowFocus)
     {
         if (target == null || objectInfoPanel == null)
         {
@@ -2803,18 +2807,49 @@ public partial class PlayerHUD : BagSlot
             lastYellowObjectInfoFocusTarget = null;
         }
 
-        objectInfoPanel.Bind(target);
+        objectInfoPanel.Bind(
+            target,
+            ResolveObjectInfoFocusBlock(
+                target,
+                openedByYellowFocus,
+                ResolvePlayerController()));
         // Bind 시점보다 늦게 대상의 item ID나 아이콘 참조가 확정되는 경우를 위해
         // 다음 프레임에 한 번 더 갱신하고, 이후부터 일반 갱신 주기를 적용한다.
         nextObjectInfoPanelRefreshTime = Time.unscaledTime;
-        SetObjectInfoSupplyRangeVisual(target as MapObject, !openedByYellowFocus);
-        SetObjectInfoAreaMarkerVisibility(target as MapObject, !openedByYellowFocus);
+        SetObjectInfoSupplyRangeVisual(target as IMapObjectTarget, !openedByYellowFocus);
+        SetObjectInfoAreaMarkerVisibility(target as IMapObjectTarget, !openedByYellowFocus);
         SetObjectInfoSelectionFocus(target, !openedByYellowFocus);
         upgradeButton?.Bind(
             target as MapObject,
             !openedByYellowFocus,
             installationPlacementController);
         TrainFilter.MarkRouteSelectionDirty();
+    }
+
+    private Block ResolveObjectInfoFocusBlock(
+        object target,
+        bool openedByYellowFocus,
+        PlayerController playerController)
+    {
+        if (!(target is ConveyorBelt conveyorBelt))
+        {
+            return null;
+        }
+
+        if (!openedByYellowFocus
+            && ReferenceEquals(target, clickedObjectInfoTarget)
+            && clickedObjectInfoFallbackBlock != null)
+        {
+            return clickedObjectInfoFallbackBlock;
+        }
+
+        return playerController != null
+               && playerController.TryGetFocusedConveyorBelt(
+                   out ConveyorBelt focusedConveyorBelt,
+                   out Block focusedBlock)
+               && ReferenceEquals(focusedConveyorBelt, conveyorBelt)
+            ? focusedBlock
+            : null;
     }
 
     public void ReplaceFocusedObjectAfterUpgrade(
@@ -2856,7 +2891,7 @@ public partial class PlayerHUD : BagSlot
         TrainFilter.MarkRouteSelectionDirty();
     }
 
-    private void SetObjectInfoSelectionFocus(Component target, bool requested)
+    private void SetObjectInfoSelectionFocus(object target, bool requested)
     {
         PlayerController playerController = ResolvePlayerController();
         if (playerController == null)
@@ -2885,7 +2920,7 @@ public partial class PlayerHUD : BagSlot
             return;
         }
 
-        MapObject mapObject = requested ? target as MapObject : null;
+        IMapObjectTarget mapObject = requested ? target as IMapObjectTarget : null;
         Block fallbackBlock = requested
                               && ReferenceEquals(target, clickedObjectInfoTarget)
             ? clickedObjectInfoFallbackBlock
@@ -2893,7 +2928,7 @@ public partial class PlayerHUD : BagSlot
         playerController.SetSelectedMapObjectFocus(mapObject, fallbackBlock);
     }
 
-    private void SetObjectInfoAreaMarkerVisibility(MapObject target, bool requested)
+    private void SetObjectInfoAreaMarkerVisibility(IMapObjectTarget target, bool requested)
     {
         InputOutputModuleAreaMarkerController nextController = requested
             ? ResolveAreaMarkerController(target)
@@ -2920,9 +2955,9 @@ public partial class PlayerHUD : BagSlot
         }
     }
 
-    private static InputOutputModuleAreaMarkerController ResolveAreaMarkerController(MapObject target)
+    private static InputOutputModuleAreaMarkerController ResolveAreaMarkerController(IMapObjectTarget target)
     {
-        if (target == null)
+        if (target == null || target is ResourceInstance)
         {
             return null;
         }
@@ -2940,7 +2975,7 @@ public partial class PlayerHUD : BagSlot
             : target.GetComponentInChildren<InputOutputModuleAreaMarkerController>(true);
     }
 
-    private static void SetFocusedTargetOutline(Component target, bool visible)
+    private static void SetFocusedTargetOutline(object target, bool visible)
     {
         if (target is Animal animal)
         {
@@ -2952,7 +2987,7 @@ public partial class PlayerHUD : BagSlot
         }
     }
 
-    private void SetObjectInfoSupplyRangeVisual(MapObject target, bool requested)
+    private void SetObjectInfoSupplyRangeVisual(IMapObjectTarget target, bool requested)
     {
         UtilityPole nextPole = requested ? ResolveUtilityPole(target) : null;
         if (currentObjectInfoSupplyRangePole == nextPole)
@@ -2977,7 +3012,7 @@ public partial class PlayerHUD : BagSlot
         }
     }
 
-    private static UtilityPole ResolveUtilityPole(MapObject target)
+    private static UtilityPole ResolveUtilityPole(IMapObjectTarget target)
     {
         if (target == null)
         {
@@ -3114,7 +3149,7 @@ public partial class PlayerHUD : BagSlot
         return ResolveInteractionIcon(itemId, preferredIconIndex);
     }
 
-    private static Sprite ResolveInteractionIcon(Resource resource)
+    private static Sprite ResolveInteractionIcon(ResourceInstance resource)
     {
         if (resource == null)
         {
@@ -3139,7 +3174,7 @@ public partial class PlayerHUD : BagSlot
         return ResolveInteractionIcon(resource.ResolveItemId(), 0, true);
     }
 
-    private static Sprite ResolveInteractionIcon(MapObject mapObject, int preferredIconIndex = 0)
+    private static Sprite ResolveInteractionIcon(IMapObjectTarget mapObject, int preferredIconIndex = 0)
     {
         if (mapObject == null)
         {
@@ -3156,7 +3191,7 @@ public partial class PlayerHUD : BagSlot
         return ResolveInteractionIcon(mapObject.ResolveItemId(), preferredIconIndex, false);
     }
 
-    private static Sprite ResolveHarvestModeInteractionIcon(Resource resource)
+    private static Sprite ResolveHarvestModeInteractionIcon(ResourceInstance resource)
     {
         if (resource == null)
         {
@@ -3653,7 +3688,7 @@ public partial class PlayerHUD : BagSlot
                 : null;
             if (lightInteractionController != null
                 && lightInteractionController.IsWithinInteractionRange(currentInteractionMapObject)
-                && currentInteractionMapObject.ToggleItemLight())
+                && (currentInteractionMapObject.SceneObject != null && currentInteractionMapObject.SceneObject.ToggleItemLight()))
             {
                 UpdateInteractionButtonState();
                 return;
@@ -3663,7 +3698,7 @@ public partial class PlayerHUD : BagSlot
         }
     }
 
-    private void ShowItemFilter(MapObject target)
+    private void ShowItemFilter(IMapObjectTarget target)
     {
         if (!IsUsableFilterButtonTarget(target))
         {
@@ -3678,7 +3713,7 @@ public partial class PlayerHUD : BagSlot
 
         if (itemFilterUI.gameObject.activeSelf
             && itemFilterUI.TryGetBoundTarget(out MapObject boundTarget)
-            && boundTarget == target)
+            && ReferenceEquals(boundTarget, target))
         {
             itemFilterUI.gameObject.SetActive(false);
             itemFilterUiOpenedFrame = -1;
@@ -3686,7 +3721,7 @@ public partial class PlayerHUD : BagSlot
         }
 
         HideFilterPanelsImmediate();
-        itemFilterUI.Bind(target);
+        itemFilterUI.Bind(target.SceneObject);
         itemFilterUI.gameObject.SetActive(true);
         itemFilterUiOpenedFrame = Time.frameCount;
     }
@@ -3719,7 +3754,7 @@ public partial class PlayerHUD : BagSlot
         itemFilterUiOpenedFrame = Time.frameCount;
     }
 
-    private static bool TryResolveTrainStation(MapObject mapObject, out Trainstation trainStation)
+    private static bool TryResolveTrainStation(IMapObjectTarget mapObject, out Trainstation trainStation)
     {
         trainStation = mapObject as Trainstation;
         if (trainStation != null)
@@ -3737,7 +3772,7 @@ public partial class PlayerHUD : BagSlot
         return trainStation != null && trainStation.gameObject.activeInHierarchy;
     }
 
-    private static bool IsLoggingMachineFilterTarget(MapObject mapObject)
+    private static bool IsLoggingMachineFilterTarget(IMapObjectTarget mapObject)
     {
         if (mapObject is LoggingMachine)
         {
@@ -3870,7 +3905,7 @@ public partial class PlayerHUD : BagSlot
     private bool TryGetClickedSteamTrain(out SteamTrain steamTrain)
     {
         steamTrain = null;
-        return TryGetClickedObjectInfoFocusedMapObject(out MapObject clickedMapObject)
+        return TryGetClickedObjectInfoFocusedMapObject(out IMapObjectTarget clickedMapObject)
                && TryResolveSteamTrain(clickedMapObject, out steamTrain);
     }
 
@@ -3879,7 +3914,7 @@ public partial class PlayerHUD : BagSlot
         filterTarget = null;
         PlayerController playerController = ResolvePlayerController();
         if (playerController == null
-            || !TryGetClickedObjectInfoFocusedMapObject(out MapObject clickedMapObject))
+            || !TryGetClickedObjectInfoFocusedMapObject(out IMapObjectTarget clickedMapObject))
         {
             return false;
         }
@@ -3899,7 +3934,7 @@ public partial class PlayerHUD : BagSlot
         return playerController.TryResolveItemFilterTarget(clickedMapObject, out filterTarget);
     }
 
-    private static bool TryResolveSteamTrain(MapObject mapObject, out SteamTrain steamTrain)
+    private static bool TryResolveSteamTrain(IMapObjectTarget mapObject, out SteamTrain steamTrain)
     {
         steamTrain = mapObject as SteamTrain;
         if (steamTrain != null)
@@ -3917,14 +3952,14 @@ public partial class PlayerHUD : BagSlot
         return steamTrain != null && steamTrain.gameObject.activeInHierarchy;
     }
 
-    private static bool IsUsableFilterButtonTarget(MapObject target)
+    private static bool IsUsableFilterButtonTarget(IMapObjectTarget target)
     {
         return target != null
-               && target.gameObject.activeInHierarchy
+               && target.IsTargetActive
                && target.AllowsFocus;
     }
 
-    private bool TryGetFocusedMapObject(out MapObject focusedMapObject)
+    private bool TryGetFocusedMapObject(out IMapObjectTarget focusedMapObject)
     {
         focusedMapObject = null;
         PlayerController playerController = ResolvePlayerController();
@@ -3937,7 +3972,7 @@ public partial class PlayerHUD : BagSlot
         return TryGetObjectInfoFocusedMapObject(out focusedMapObject);
     }
 
-    public bool TryGetObjectInfoFocusedMapObject(out MapObject focusedMapObject)
+    public bool TryGetObjectInfoFocusedMapObject(out IMapObjectTarget focusedMapObject)
     {
         focusedMapObject = null;
         if (!HasActiveObjectInfoTarget())
@@ -3945,22 +3980,22 @@ public partial class PlayerHUD : BagSlot
             return false;
         }
 
-        focusedMapObject = currentObjectInfoTarget as MapObject;
+        focusedMapObject = currentObjectInfoTarget as IMapObjectTarget;
         return focusedMapObject != null;
     }
 
-    public bool TryGetClickedObjectInfoFocusedMapObject(out MapObject focusedMapObject)
+    public bool TryGetClickedObjectInfoFocusedMapObject(out IMapObjectTarget focusedMapObject)
     {
         return TryGetClickedObjectInfoFocusedMapObject(out focusedMapObject, out _);
     }
 
     public bool TryGetClickedObjectInfoFocusedMapObject(
-        out MapObject focusedMapObject,
+        out IMapObjectTarget focusedMapObject,
         out Block focusedBlock)
     {
         focusedMapObject = null;
         focusedBlock = null;
-        if (!TryGetObjectInfoFocusedMapObject(out MapObject currentTarget)
+        if (!TryGetObjectInfoFocusedMapObject(out IMapObjectTarget currentTarget)
             || !ReferenceEquals(clickedObjectInfoTarget, currentTarget))
         {
             return false;
@@ -4013,7 +4048,7 @@ public partial class PlayerHUD : BagSlot
     }
 
     private bool IsObjectInfoTargetAvailable(
-        Component target,
+        object target,
         PlayerController playerController)
     {
         if (target == null)
@@ -4021,7 +4056,9 @@ public partial class PlayerHUD : BagSlot
             return false;
         }
 
-        if (target.gameObject.activeInHierarchy)
+        if (target is ResourceInstance resource) return resource.IsRuntimeActive;
+
+        if (target is Component component && component != null && component.gameObject.activeInHierarchy)
         {
             return true;
         }
@@ -4044,7 +4081,7 @@ public partial class PlayerHUD : BagSlot
 
         return currentObjectInfoOpenedByYellowFocus
                && playerController != null
-               && playerController.TryGetFocusedMapObject(out MapObject focusedMapObject)
+               && playerController.TryGetFocusedMapObject(out IMapObjectTarget focusedMapObject)
                && ReferenceEquals(focusedMapObject, conveyorBelt);
     }
 

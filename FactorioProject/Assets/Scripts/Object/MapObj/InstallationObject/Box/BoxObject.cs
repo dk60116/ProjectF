@@ -1166,7 +1166,7 @@ public class BoxObject : InputOutputModule
         if (terrainGenerator == null
             || !terrainGenerator.TryGetLoadedBlock(anchorCoordinate, out anchorBlock)
             || anchorBlock == null
-            || anchorBlock.MapObject != this)
+            || !ReferenceEquals(anchorBlock.MapObject, this))
         {
             anchorBlock = null;
             return false;

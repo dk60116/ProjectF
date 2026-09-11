@@ -3458,7 +3458,7 @@ public sealed class AnimalAIController : MonoBehaviour
 
         // 설치물은 Block의 자식이 아니라 Terrain 아래에 생성되고 Block은 참조만 보관한다.
         // 따라서 열린 문처럼 통과 가능한 설치물의 자식 Collider는 MapObject에서 먼저 판정한다.
-        MapObject colliderMapObject = hit.GetComponentInParent<MapObject>();
+        IMapObjectTarget colliderMapObject = ResourceTypeWorld.ResolveColliderTarget(hit);
         if (colliderMapObject != null)
         {
             return colliderMapObject.AllowsAnimalTraversal;

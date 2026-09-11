@@ -165,7 +165,7 @@ public partial class TerrainGenerator
         markerSize = MapMarkerSize.Middle;
         if (loadedBlocks.TryGetValue(coordinate, out Block block) && block != null)
         {
-            Resource resource = block.Resource;
+            ResourceInstance resource = block.Resource;
             if (resource != null)
             {
                 ResourceDefinition definition = resource.Definition;
@@ -234,8 +234,8 @@ public partial class TerrainGenerator
         marker = default;
         if (loadedBlocks.TryGetValue(coordinate, out Block block) && block != null)
         {
-            MapObject mapObject = block.MapObject;
-            if (mapObject != null && !(mapObject is Resource))
+            MapObject mapObject = block.MapObject as MapObject;
+            if (mapObject != null)
             {
                 if (mapObject is Train)
                 {

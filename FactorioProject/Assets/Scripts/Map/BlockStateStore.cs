@@ -353,7 +353,7 @@ public partial class BlockStateStore : MonoBehaviour
     private int savedInstallationItemTotal;
     private VirtualObjectWorld virtualObjectWorld;
 
-    public void Save(Vector2Int worldCoordinate, Resource resource)
+    public void Save(Vector2Int worldCoordinate, ResourceInstance resource)
     {
         if (resource == null)
         {

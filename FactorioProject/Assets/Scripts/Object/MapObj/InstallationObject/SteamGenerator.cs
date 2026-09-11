@@ -337,6 +337,17 @@ public class SteamGenerator : InputOutputModule
         return true;
     }
 
+    public bool TryGetObjectInfoElectricOutputState(
+        out bool hasUtilityPoleConnection,
+        out bool isOutputting)
+    {
+        hasUtilityPoleConnection = UtilityPole.IsConnectedToElectricNetwork(this);
+        isOutputting = hasUtilityPoleConnection
+                       && TryGetAvailableElectricOutputRate(out float availableWatts)
+                       && availableWatts > FluidEpsilon;
+        return TryGetObjectInfoOutputRate(out _, out _);
+    }
+
     public override bool TryGetObjectInfoOutput(
         out int outputItemId,
         out int outputAreaCount,
@@ -386,6 +397,11 @@ public class SteamGenerator : InputOutputModule
         if (StoredFluidItemId >= 0 && !CanProvideFluidItem(inputItemId))
         {
             return "Wrong fluid";
+        }
+
+        if (!UtilityPole.IsConnectedToElectricNetwork(this))
+        {
+            return "No utility pole";
         }
 
         if (!HasAvailableSteamGenerationReserve(inputLitersPerSecond))

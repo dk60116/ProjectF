@@ -18,7 +18,7 @@ public partial class PlayerHUD
             return false;
         }
 
-        if (!playerController.TryFindNearestBucketFluidSource(out _, out Resource oilSource))
+        if (!playerController.TryFindNearestBucketFluidSource(out _, out ResourceInstance oilSource))
         {
             return false;
         }
@@ -62,7 +62,7 @@ public partial class PlayerHUD
             return;
         }
 
-        if (!playerController.TryFindNearestBucketFluidSource(out _, out Resource oilSource))
+        if (!playerController.TryFindNearestBucketFluidSource(out _, out ResourceInstance oilSource))
         {
             return;
         }

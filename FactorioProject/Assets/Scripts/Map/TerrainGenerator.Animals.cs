@@ -1237,7 +1237,7 @@ public partial class TerrainGenerator : MonoBehaviour
             return false;
         }
 
-        MapObject mapObject = block.MapObject;
+        IMapObjectTarget mapObject = block.MapObject;
         return mapObject == null
                || mapObject.AllowsAnimalTraversal;
     }

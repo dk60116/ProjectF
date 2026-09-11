@@ -42,7 +42,7 @@ public class LoggingMachine : InstallationObject,
     [SerializeField, HideInInspector]
     private List<string> enabledTreeDefinitionKeys = new List<string>();
 
-    private Resource activeTree;
+    private ResourceInstance activeTree;
     private Quaternion hingeBaseLocalRotation = Quaternion.identity;
     private Animator workAnimator;
     private bool hingeReferenceInitialized;
@@ -276,7 +276,7 @@ public class LoggingMachine : InstallationObject,
             return;
         }
 
-        if (!TryResolveAdjacentTree(currentDirectionIndex, out Resource tree))
+        if (!TryResolveAdjacentTree(currentDirectionIndex, out ResourceInstance tree))
         {
             activeTree = null;
             consumedWorkEnergyUnits = 0L;
@@ -395,7 +395,7 @@ public class LoggingMachine : InstallationObject,
             : InputOutputModule.ResolveItemDefinition(ResolveItemId());
     }
 
-    private void CompleteTreeHarvest(Resource tree)
+    private void CompleteTreeHarvest(ResourceInstance tree)
     {
         harvestedSeedDrops.Clear();
         SetWorking(false);
@@ -408,11 +408,11 @@ public class LoggingMachine : InstallationObject,
             Vector3 startWorldPosition = tree.FocusPoint;
             int appleItemId = -1;
             int appleCount = 0;
-            bool hasAppleDrop = tree is ProjectF.MapObjects.Tree harvestedTree
+            bool hasAppleDrop = tree is ProjectF.MapObjects.TreeInstance harvestedTree
                                 && harvestedTree.TryGetMachineAppleDrop(
                                     out appleItemId,
                                     out appleCount);
-            if (tree is ProjectF.MapObjects.Tree seedTree)
+            if (tree is ProjectF.MapObjects.TreeInstance seedTree)
                 seedTree.CollectMachineSeedDrops(harvestedSeedDrops);
 
             if (tree.TryHarvestForMachine(out int outputItemId, out int outputCount)
@@ -858,7 +858,7 @@ public class LoggingMachine : InstallationObject,
         return false;
     }
 
-    private bool TryResolveAdjacentTree(int directionIndex, out Resource tree)
+    private bool TryResolveAdjacentTree(int directionIndex, out ResourceInstance tree)
     {
         tree = null;
         TerrainGenerator terrain = TerrainGenerator.ResolveActive();
@@ -880,18 +880,18 @@ public class LoggingMachine : InstallationObject,
         return IsHarvestableTree(tree);
     }
 
-    private bool IsHarvestableTree(Resource resource)
+    private bool IsHarvestableTree(ResourceInstance resource)
     {
         if (resource == null
             || resource.ResolvedHarvestMode != Resource.HarvestMode.Logging
             || !resource.CanHarvest
-            || !resource.gameObject.activeInHierarchy
+            || !resource.IsRuntimeActive
             || !IsTreeTypeEnabled(resource.Definition))
         {
             return false;
         }
 
-        float growth = resource is ProjectF.MapObjects.Tree tree
+        float growth = resource is ProjectF.MapObjects.TreeInstance tree
             ? tree.Growth
             : ResourceDefinition.MaxGrowth;
         return growth >= MinimumGrowth && growth <= MaximumGrowth;

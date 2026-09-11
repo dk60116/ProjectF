@@ -363,11 +363,11 @@ public partial class PlayerController
 
     private bool IsClearGroundActionBlock(Block block)
     {
-        Resource resource = block != null ? block.Resource : null;
+        ResourceInstance resource = block != null ? block.Resource : null;
         if (block == null
             || block.Type != Block.BlockType.Ground
             || block.MapObject != null
-            || (resource != null && resource.gameObject.activeInHierarchy)
+            || (resource != null && resource.IsRuntimeActive)
             || block.HasDroppedFloorObjects)
         {
             return false;
