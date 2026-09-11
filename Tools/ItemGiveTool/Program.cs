@@ -42,6 +42,7 @@ internal sealed class EditorToolForm : Form
     private readonly Button giveButton = new Button();
     private readonly Button giveTenButton = new Button();
     private readonly Button pingButton = new Button();
+    private readonly Button simulationPauseButton = new Button();
     private readonly Button conveyorLineButton = new Button();
     private readonly Button conveyorItemFillButton = new Button();
     private readonly Button beltItemClearButton = new Button();
@@ -106,6 +107,7 @@ internal sealed class EditorToolForm : Form
     private bool pollingStatus;
     private bool applyingRuntimeDebugState;
     private bool worldTimePaused;
+    private bool simulationPaused;
 
     public EditorToolForm()
     {
@@ -274,6 +276,10 @@ internal sealed class EditorToolForm : Form
         StyleSecondaryButton(pingButton, "연결 확인");
         pingButton.Click += async (_, _) => await SendPingAsync();
 
+        StyleSecondaryButton(simulationPauseButton, "Pause Game");
+        simulationPauseButton.Width = 110;
+        simulationPauseButton.Click += async (_, _) => await SendSimulationPauseAsync();
+
         StyleSecondaryButton(conveyorLineButton, "컨베이어 강제 1,000개");
         conveyorLineButton.Width = 190;
         conveyorLineButton.Click += async (_, _) => await SendConveyorLineAsync();
@@ -318,6 +324,7 @@ internal sealed class EditorToolForm : Form
         buttonPanel.Controls.Add(giveButton);
         buttonPanel.Controls.Add(giveTenButton);
         buttonPanel.Controls.Add(pingButton);
+        buttonPanel.Controls.Add(simulationPauseButton);
         buttonPanel.Controls.Add(conveyorLineButton);
         buttonPanel.Controls.Add(conveyorItemFillButton);
         buttonPanel.Controls.Add(beltItemClearButton);
@@ -1224,6 +1231,15 @@ internal sealed class EditorToolForm : Form
             nextPaused ? "World Time Pause" : "World Time Resume");
     }
 
+    private async Task SendSimulationPauseAsync()
+    {
+        bool nextPaused = !simulationPaused;
+        await SendCommandAsync(
+            $"simulation pause {(nextPaused ? 1 : 0)}",
+            nextPaused ? "Simulation Pause" : "Simulation Play");
+        await RefreshStatusAsync();
+    }
+
     private async Task SendWorldTimeScaleAsync(float scale)
     {
         string scaleText = scale.ToString("0.###", CultureInfo.InvariantCulture);
@@ -1382,6 +1398,7 @@ internal sealed class EditorToolForm : Form
 
     private void UpdateRuntimeStatsFromResponse(string response)
     {
+        ApplySimulationState(response);
         ApplyWorldTimeState(response);
 
         if (!TryReadProtocolInt(response, "installTotal", out int installTotal)
@@ -1557,6 +1574,20 @@ internal sealed class EditorToolForm : Form
                 SetNumericValue(worldTimeMinuteInput, minute);
             }
         }
+    }
+
+    private void ApplySimulationState(string response)
+    {
+        if (!TryReadProtocolBool(response, "simulationPaused", out bool paused))
+        {
+            return;
+        }
+
+        simulationPaused = paused;
+        simulationPauseButton.Text = paused ? "Play Game" : "Pause Game";
+        simulationPauseButton.BackColor = paused
+            ? Color.FromArgb(58, 115, 72)
+            : Color.FromArgb(68, 72, 59);
     }
 
     private void SetWorldTimeUnavailable(string message)
@@ -1753,6 +1784,7 @@ internal sealed class EditorToolForm : Form
             AppendLog($"> {command}");
             AppendLog(response);
             UpdateSaveSlotsFromResponse(response, applyResponseSelectedSlot);
+            ApplySimulationState(response);
             ApplyWorldTimeState(response);
             statusLabel.Text = response.StartsWith("ok ", StringComparison.OrdinalIgnoreCase)
                 ? "성공"
@@ -1877,6 +1909,7 @@ internal sealed class EditorToolForm : Form
         giveButton.Enabled = !busy;
         giveTenButton.Enabled = !busy;
         pingButton.Enabled = !busy;
+        simulationPauseButton.Enabled = !busy;
         conveyorLineButton.Enabled = !busy;
         conveyorItemFillButton.Enabled = !busy;
         beltItemClearButton.Enabled = !busy;

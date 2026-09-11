@@ -57,7 +57,7 @@ public partial class RobotArm : InputOutputModule
     private bool CanPickupOneItem() => throw new Exception("Power demand searched inventory");
     private void EnsureBodyRotationCache() { }
     private bool ShouldRunRuntimeSleepCheck(float dt) => false;
-    private bool RefreshRuntimeSleepState() => false;
+    private bool RefreshRuntimeSleepState() { SetRuntimeSleeping(!CanPlaceHeldItem()); return Sleeping; }
     private float ResolvePoweredDeltaTime(float dt) => dt;
     private void ApplyPoweredAnimatorSpeed() { }
     private void Record(float dt) { StateCalls++; Elapsed += dt; }
@@ -65,11 +65,32 @@ public partial class RobotArm : InputOutputModule
     private void TickWaitBeforePickupTake(float dt) => Record(dt);
     private void TickWaitAfterPickupTake(float dt) => Record(dt);
     private void TickTurnToDrop(float dt) => Record(dt);
-    private void TickDrop(float dt) => Record(dt);
-    private void TickWaitBeforeDropPlace(float dt) => Record(dt);
     private void TickWaitAfterDropPlace(float dt) => Record(dt);
     private void TickTurnToPickup(float dt) => Record(dt);
     public override void ManagedUpdateTick(float dt) { runtimeWakePending = false; Record(dt); }
+
+    public sealed class Destination { public bool Available; public int Items; }
+    public Destination Output = new();
+    public bool MovingFreight;
+    public int DropAnimations, TransferAttempts;
+    private float dropRetryInterval = 0.1f, actionTurnDelay = 0.1f;
+    private PlannedTransferCommand plannedTransferCommand;
+    private bool IsMovingFreightCarAtCoordinate(Vector2Int coordinate) => MovingFreight;
+    private bool CanPlaceHeldItem() => Output.Available;
+    private bool CanPlaceHeldItemForCurrentPlan() => CanPlaceHeldItem();
+    private bool TryPlaceHeldItem()
+    {
+        TransferAttempts++;
+        if (!Output.Available) return false;
+        Output.Available = false;
+        Output.Items++;
+        return true;
+    }
+    private void ClearHeldItem() => heldItemId = -1;
+    private void PlayDropAnimation() => DropAnimations++;
+    public void PlanDrop() { plannedTransferCommand = PlannedTransferCommand.None; TickDrop(1f / 60); }
+    public void ApplyDrop() { if (plannedTransferCommand == PlannedTransferCommand.Drop) ApplyPlannedDrop(); plannedTransferCommand = PlannedTransferCommand.None; }
+    public void Normalize() => NormalizeRuntimeState();
 }
 public partial class SchedulingProbe
 {
@@ -164,6 +185,7 @@ public static class Checks
         foreach (bool held in new[] { false, true })
         foreach (bool ports in new[] { false, true })
         {
+            if (state == RobotArm.RobotArmState.WaitingBeforeDropPlace) continue; // Legacy state is checked via normalization below.
             var arm = new RobotArm { state = state, heldItemId = held ? 1 : -1, PortsValid = ports };
             bool expected = held || (state != RobotArm.RobotArmState.WaitingForPickup && state != RobotArm.RobotArmState.WaitingForDrop)
                 || (state == RobotArm.RobotArmState.WaitingForPickup && ports);
@@ -192,6 +214,44 @@ public static class Checks
         Require(MapObjectTickManager.IsUpdateTickRegistered(target), "pooled re-enable accepts wake");
         foreach (int fps in new[] { 30, 60, 113, 144, 240 }) SchedulingProbe.Check(fps);
         SchedulingProbe.CheckStagedOrder();
+        CheckDropContention();
         Console.WriteLine($"PASS: {count} robot-arm demand/wake/tick checks. No engine launched.");
+    }
+
+    private static void CheckDropContention()
+    {
+        var arm = new RobotArm { heldItemId = 1, state = RobotArm.RobotArmState.WaitingForDrop, dropRetryTimer = 0.1f, waitingForDropRetry = true };
+        arm.Sleep();
+        for (int i = 0; i < 1000; i++) { arm.NotifyCoordinate(); arm.NotifyModule(); }
+        Require(arm.Sleeping && arm.DropAnimations == 0 && arm.TransferAttempts == 0, "full belt changes preserve sleep without drop attempts");
+        Require(arm.dropRetryTimer == 0.1f && arm.waitingForDropRetry, "full belt changes preserve retry state");
+
+        arm.Output.Available = true;
+        arm.NotifyCoordinate();
+        Require(!arm.Sleeping, "real gap wakes held arm");
+        arm.PlanDrop();
+        Require(arm.DropAnimations == 0 && arm.heldItemId == 1 && arm.Output.Items == 0, "plan never animates or mutates inventory");
+        arm.ApplyDrop();
+        Require(arm.Output.Items == 1 && arm.heldItemId == -1 && arm.DropAnimations == 1, "gap claimed in same tick before drop animation");
+        Require(arm.state == RobotArm.RobotArmState.WaitingAfterDropPlace && Math.Abs(arm.actionTurnTimer - 0.2f) < 0.0001f, "successful drop retains combined action recovery budget");
+        arm.ApplyDrop();
+        Require(arm.Output.Items == 1 && arm.DropAnimations == 1, "repeated apply cannot duplicate items or animation");
+
+        var shared = new RobotArm.Destination { Available = true };
+        var first = new RobotArm { heldItemId = 1, state = RobotArm.RobotArmState.WaitingForDrop, Output = shared };
+        var second = new RobotArm { heldItemId = 2, state = RobotArm.RobotArmState.WaitingForDrop, Output = shared };
+        first.PlanDrop(); second.PlanDrop(); first.ApplyDrop(); second.ApplyDrop();
+        Require(shared.Items == 1 && first.DropAnimations == 1 && second.DropAnimations == 0, "two arms competing for one gap animate only the successful transfer");
+        Require(second.heldItemId == 2 && second.Sleeping, "losing arm retains item and sleeps immediately");
+        shared.Available = true;
+        second.NotifyCoordinate(); second.PlanDrop(); second.ApplyDrop();
+        Require(shared.Items == 2 && second.heldItemId == -1 && second.DropAnimations == 1, "losing arm resumes at next genuine gap");
+
+        var trainArm = new RobotArm { heldItemId = 1, state = RobotArm.RobotArmState.WaitingForDrop, MovingFreight = true };
+        trainArm.Sleep(); trainArm.NotifyCoordinate();
+        Require(!trainArm.Sleeping, "moving freight retains wake path for stop detection");
+        var restored = new RobotArm { heldItemId = 1, state = RobotArm.RobotArmState.WaitingBeforeDropPlace, actionTurnTimer = 0.1f };
+        restored.Normalize();
+        Require(restored.state == RobotArm.RobotArmState.WaitingForDrop && restored.heldItemId == 1 && restored.actionTurnTimer == 0f, "legacy pre-drop saves restore to idle held-item state");
     }
 }

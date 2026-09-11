@@ -60,6 +60,10 @@ public class MiningMachine : InputOutputModule
 
     protected override void TryStartNextCraft()
     {
+        using var startSample = MapObjectTickProfiler.SampleNamed(
+            "Runtime",
+            nameof(MiningMachine),
+            "Mining Start");
         ItemDefinition installedDefinition = ResolveInstalledDefinition();
         if (installedDefinition == null
             || !TryResolveNextMiningResource(
@@ -152,21 +156,43 @@ public class MiningMachine : InputOutputModule
             return false;
         }
 
-        if (!CanResolveOutputTarget(ActiveOutputItemId, ActiveOutputCount))
+        RuntimeAreaOutputTarget outputTarget;
+        bool usesDistributedSingleItemTargets;
+        using (MapObjectTickProfiler.SampleNamed(
+                   "Runtime",
+                   nameof(MiningMachine),
+                   "Mining Output Query"))
         {
-            return false;
+            if (!TryResolveOutputReservation(
+                    ActiveOutputItemId,
+                    ActiveOutputCount,
+                    out outputTarget,
+                    out usesDistributedSingleItemTargets))
+            {
+                return false;
+            }
         }
 
-        if (!TryResolveActiveMiningResource(
-                ActiveOutputItemId,
-                ActiveOutputCount,
-                out ResourceInstance resource,
-                out int resourceIndex)
-            || !resource.TryPeekMachineHarvestOutput(out int outputItemId, out int outputCount))
+        ResourceInstance resource;
+        int resourceIndex;
+        int outputItemId;
+        int outputCount;
+        using (MapObjectTickProfiler.SampleNamed(
+                   "Runtime",
+                   nameof(MiningMachine),
+                   "Mining Resource Resolve"))
         {
-            ClearActiveMiningResourceSelection();
-            ClearActiveCraft();
-            return false;
+            if (!TryResolveActiveMiningResource(
+                    ActiveOutputItemId,
+                    ActiveOutputCount,
+                    out resource,
+                    out resourceIndex)
+                || !resource.TryPeekMachineHarvestOutput(out outputItemId, out outputCount))
+            {
+                ClearActiveMiningResourceSelection();
+                ClearActiveCraft();
+                return false;
+            }
         }
 
         if (outputItemId != ActiveOutputItemId || outputCount != ActiveOutputCount)
@@ -177,18 +203,37 @@ public class MiningMachine : InputOutputModule
         }
 
         Vector3 startWorldPosition = resource.FocusPoint;
-        if (!resource.TryHarvestForMachine(out int harvestedItemId, out int harvestedCount))
+        int harvestedItemId;
+        int harvestedCount;
+        using (MapObjectTickProfiler.SampleNamed(
+                   "Runtime",
+                   nameof(MiningMachine),
+                   "Mining Harvest"))
         {
-            ClearActiveMiningResourceSelection();
-            ClearActiveCraft();
-            return false;
+            if (!resource.TryHarvestForMachine(out harvestedItemId, out harvestedCount))
+            {
+                ClearActiveMiningResourceSelection();
+                ClearActiveCraft();
+                return false;
+            }
         }
 
-        if (!TryEmitOutputItems(harvestedItemId, harvestedCount, startWorldPosition))
+        using (MapObjectTickProfiler.SampleNamed(
+                   "Runtime",
+                   nameof(MiningMachine),
+                   "Mining Output Emit"))
         {
-            ClearActiveMiningResourceSelection();
-            ClearActiveCraft();
-            return false;
+            if (!TryEmitReservedOutputItems(
+                    harvestedItemId,
+                    harvestedCount,
+                    startWorldPosition,
+                    outputTarget,
+                    usesDistributedSingleItemTargets))
+            {
+                ClearActiveMiningResourceSelection();
+                ClearActiveCraft();
+                return false;
+            }
         }
 
         AdvanceMiningResourceCursor(resourceIndex, resource);
@@ -252,9 +297,15 @@ public class MiningMachine : InputOutputModule
     public bool TryGetObjectInfoResourceReserves(out int reserves)
     {
         reserves = 0;
-        if (!TryCollectMiningResources(miningResourceCandidates))
+        using (MapObjectTickProfiler.SampleNamed(
+                   "Runtime",
+                   nameof(MiningMachine),
+                   "Mining Resource Resolve"))
         {
-            return false;
+            if (!TryCollectMiningResources(miningResourceCandidates))
+            {
+                return false;
+            }
         }
 
         for (int i = 0; i < miningResourceCandidates.Count; i++)
@@ -283,13 +334,22 @@ public class MiningMachine : InputOutputModule
         outputItemId = -1;
         outputCount = 0;
 
-        if (!TryCollectMiningResources(miningResourceCandidates))
+        using (MapObjectTickProfiler.SampleNamed(
+                   "Runtime",
+                   nameof(MiningMachine),
+                   "Mining Resource Resolve"))
         {
-            return false;
+            if (!TryCollectMiningResources(miningResourceCandidates))
+            {
+                return false;
+            }
         }
 
         int candidateCount = miningResourceCandidates.Count;
         int startIndex = NormalizeMiningResourceIndex(nextMiningResourceIndex, candidateCount);
+        int lastQueriedOutputItemId = int.MinValue;
+        int lastQueriedOutputCount = int.MinValue;
+        bool lastOutputQuerySucceeded = false;
         for (int offset = 0; offset < candidateCount; offset++)
         {
             int candidateIndex = (startIndex + offset) % candidateCount;
@@ -312,9 +372,26 @@ public class MiningMachine : InputOutputModule
                 continue;
             }
 
-            if (requireOutputBlock && !CanResolveOutputTarget(candidateOutputItemId, candidateOutputCount))
+            if (requireOutputBlock)
             {
-                continue;
+                if (candidateOutputItemId != lastQueriedOutputItemId
+                    || candidateOutputCount != lastQueriedOutputCount)
+                {
+                    using var outputSample = MapObjectTickProfiler.SampleNamed(
+                        "Runtime",
+                        nameof(MiningMachine),
+                        "Mining Output Query");
+                    lastQueriedOutputItemId = candidateOutputItemId;
+                    lastQueriedOutputCount = candidateOutputCount;
+                    lastOutputQuerySucceeded = CanResolveOutputTarget(
+                        candidateOutputItemId,
+                        candidateOutputCount);
+                }
+
+                if (!lastOutputQuerySucceeded)
+                {
+                    continue;
+                }
             }
 
             resource = candidate;

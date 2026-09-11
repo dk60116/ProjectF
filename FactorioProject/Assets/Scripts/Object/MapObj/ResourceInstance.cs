@@ -51,6 +51,7 @@ public class ResourceInstance : IMapObjectTarget, IMapObjectSimulationIdentity
     private bool useBatchedRendering;
     private ResourceBatchRenderer batchRenderer;
     private bool released;
+    private int activeResourceListIndex = -1;
     private bool sharedBoundsDirty = true;
     private Bounds sharedBounds;
     internal ResourceTypeWorld.CollisionInstance[] SharedColliders;
@@ -88,7 +89,11 @@ public class ResourceInstance : IMapObjectTarget, IMapObjectSimulationIdentity
     }
     internal void Activate()
     {
-        ActiveResourceLookup.Add(this); ActiveResourcesInternal.Add(this);
+        if (ActiveResourceLookup.Add(this))
+        {
+            activeResourceListIndex = ActiveResourcesInternal.Count;
+            ActiveResourcesInternal.Add(this);
+        }
         UpdateBodyScale(); SetBatchedRendering(true);
     }
     public void ReleaseRuntime()
@@ -106,7 +111,8 @@ public class ResourceInstance : IMapObjectTarget, IMapObjectSimulationIdentity
         harvestReservations?.Clear(); rewardBuffer?.Clear();
         owningBlock?.ClearResource(this);
         owningBlock = null;
-        ActiveResourceLookup.Remove(this); ActiveResourcesInternal.Remove(this);
+        ActiveResourceLookup.Remove(this);
+        RemoveFromActiveResourceList();
         released = true;
         sharedWorld.Remove(this);
     }
@@ -371,7 +377,7 @@ public class ResourceInstance : IMapObjectTarget, IMapObjectSimulationIdentity
         if (!CanHarvest) { outputItemId = -1; outputCount = 0; return false; }
         outputItemId = ResolveOutputItemId();
         outputCount = GetCount;
-        return CanHarvest && outputItemId >= 0 && outputCount > 0;
+        return outputItemId >= 0 && outputCount > 0;
     }
 
     public bool TryHarvestForMachine(out int outputItemId, out int outputCount)
@@ -925,6 +931,13 @@ public class ResourceInstance : IMapObjectTarget, IMapObjectSimulationIdentity
 
     private int ResolveOutputItemId()
     {
+        // Construction/load migration resolves the definition name once. Mining
+        // peeks are hot and can use the stable runtime id directly afterwards.
+        if (resourceStatus.outputId >= 0)
+        {
+            return resourceStatus.outputId;
+        }
+
         if (TryResolveDefinitionOutputItem(out int definitionOutputItemId, out string definitionOutputItemName))
         {
             resourceStatus.outputId = definitionOutputItemId;
@@ -939,12 +952,38 @@ public class ResourceInstance : IMapObjectTarget, IMapObjectSimulationIdentity
             return namedOutputItemId;
         }
 
-        if (resourceStatus.outputId >= 0)
+        return ResolveItemId();
+    }
+
+    private void RemoveFromActiveResourceList()
+    {
+        int removeIndex = activeResourceListIndex;
+        if (removeIndex < 0
+            || removeIndex >= ActiveResourcesInternal.Count
+            || ActiveResourcesInternal[removeIndex] != this)
         {
-            return resourceStatus.outputId;
+            removeIndex = ActiveResourcesInternal.IndexOf(this);
         }
 
-        return ResolveItemId();
+        if (removeIndex < 0)
+        {
+            activeResourceListIndex = -1;
+            return;
+        }
+
+        int lastIndex = ActiveResourcesInternal.Count - 1;
+        if (removeIndex != lastIndex)
+        {
+            ResourceInstance movedResource = ActiveResourcesInternal[lastIndex];
+            ActiveResourcesInternal[removeIndex] = movedResource;
+            if (movedResource != null)
+            {
+                movedResource.activeResourceListIndex = removeIndex;
+            }
+        }
+
+        ActiveResourcesInternal.RemoveAt(lastIndex);
+        activeResourceListIndex = -1;
     }
 
     private void MigrateOutputItemNameIfNeeded()

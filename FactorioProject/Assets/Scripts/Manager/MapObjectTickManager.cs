@@ -162,6 +162,8 @@ public sealed class MapObjectTickManager : MonoBehaviour
     private bool hasSimulationUpsSample;
     private bool tickingUpdateObjects;
     private bool updateTicksDirty;
+    private bool simulationPaused;
+    private float resumeTimeScale = 1f;
 
     public static long CurrentSimulationTick => instance != null ? instance.simulationTick : 0L;
     public static double CurrentSimulationTimeSeconds =>
@@ -174,7 +176,10 @@ public sealed class MapObjectTickManager : MonoBehaviour
         SimulationBacklogTicks);
     public static bool HasSimulationUpsSample => instance != null && instance.hasSimulationUpsSample;
     public static float CurrentSimulationUps => instance != null ? instance.currentSimulationUps : 0f;
-    public static float TargetSimulationUps => DefaultSimulationTicksPerSecond * Mathf.Max(0f, Time.timeScale);
+    public static bool SimulationPaused => instance != null && instance.simulationPaused;
+    public static float TargetSimulationUps => SimulationPaused
+        ? 0f
+        : DefaultSimulationTicksPerSecond * Mathf.Max(0f, Time.timeScale);
     public static int SimulationTicksLastFrame => instance != null ? instance.simulationTicksLastFrame : 0;
     public static int MaximumSimulationStepsPerFrame => instance != null
         ? Mathf.Max(1, instance.maximumSimulationStepsPerFrame)
@@ -250,6 +255,20 @@ public sealed class MapObjectTickManager : MonoBehaviour
 
     private void Update()
     {
+        if (simulationPaused)
+        {
+            // Keep the simulation clock and every registered Tick frozen even if another
+            // system changes Unity's time scale while the tool pause is active.
+            if (Time.timeScale != 0f)
+            {
+                Time.timeScale = 0f;
+            }
+
+            simulationTicksLastFrame = 0;
+            UpdateSimulationUpsMeasurement();
+            return;
+        }
+
         simulationTimeAccumulator += Math.Max(0d, Time.deltaTime);
         int maximumSteps = Mathf.Max(1, maximumSimulationStepsPerFrame);
         int completedSteps = 0;
@@ -266,6 +285,52 @@ public sealed class MapObjectTickManager : MonoBehaviour
 
         simulationTicksLastFrame = completedSteps;
         UpdateSimulationUpsMeasurement();
+    }
+
+    public static void SetSimulationPaused(bool paused)
+    {
+        if (!Application.isPlaying || applicationQuitting)
+        {
+            return;
+        }
+
+        EnsureInstance().ApplySimulationPaused(paused);
+    }
+
+    private void ApplySimulationPaused(bool paused)
+    {
+        if (simulationPaused == paused)
+        {
+            if (paused && Time.timeScale != 0f)
+            {
+                Time.timeScale = 0f;
+            }
+
+            return;
+        }
+
+        if (paused)
+        {
+            if (Time.timeScale > 0f)
+            {
+                resumeTimeScale = Time.timeScale;
+            }
+
+            simulationPaused = true;
+            Time.timeScale = 0f;
+            currentSimulationUps = 0f;
+            simulationTicksLastFrame = 0;
+            hasSimulationUpsSample = true;
+        }
+        else
+        {
+            simulationPaused = false;
+            Time.timeScale = resumeTimeScale > 0f ? resumeTimeScale : 1f;
+            ResetSimulationUpsMeasurement();
+        }
+
+        simulationUpsSampleStartTime = Time.realtimeSinceStartupAsDouble;
+        simulationUpsSampleStartTick = simulationTick;
     }
 
     public static void RestoreSimulationTick(long restoredTick)
@@ -334,6 +399,11 @@ public sealed class MapObjectTickManager : MonoBehaviour
     {
         if (instance == this)
         {
+            if (simulationPaused)
+            {
+                Time.timeScale = resumeTimeScale > 0f ? resumeTimeScale : 1f;
+            }
+
             instance = null;
         }
     }

@@ -35,6 +35,7 @@ internal sealed class ProfilerForm : Form
     private readonly NumericUpDown maxRowsInput = new NumericUpDown();
     private readonly CheckBox enableProfilingCheckBox = new CheckBox();
     private readonly Button refreshButton = new Button();
+    private readonly Button simulationPauseButton = new Button();
     private readonly Button openTextWindowButton = new Button();
     private readonly Button openBeltTickWindowButton = new Button();
     private readonly Label fpsLabel = new Label();
@@ -56,6 +57,7 @@ internal sealed class ProfilerForm : Form
     private bool applyingRuntimeState;
     private bool polling;
     private bool beltRowsExpanded;
+    private bool simulationPaused;
 
     public ProfilerForm()
     {
@@ -74,7 +76,7 @@ internal sealed class ProfilerForm : Form
             BackColor = Color.FromArgb(28, 31, 34)
         };
         shell.RowStyles.Add(new RowStyle(SizeType.Absolute, 58f));
-        shell.RowStyles.Add(new RowStyle(SizeType.Absolute, 54f));
+        shell.RowStyles.Add(new RowStyle(SizeType.Absolute, 92f));
         shell.RowStyles.Add(new RowStyle(SizeType.Absolute, 34f));
         shell.RowStyles.Add(new RowStyle(SizeType.Percent, 100f));
         shell.RowStyles.Add(new RowStyle(SizeType.Absolute, 120f));
@@ -114,7 +116,7 @@ internal sealed class ProfilerForm : Form
         {
             Dock = DockStyle.Fill,
             FlowDirection = FlowDirection.LeftToRight,
-            WrapContents = false,
+            WrapContents = true,
             Padding = new Padding(0, 8, 0, 0)
         };
         ConfigureTextInput(hostTextBox, DefaultHost, 130);
@@ -129,6 +131,10 @@ internal sealed class ProfilerForm : Form
 
         StyleButton(refreshButton, "Refresh");
         refreshButton.Click += async (_, _) => await RefreshNowAsync();
+
+        StyleButton(simulationPauseButton, "Pause Game");
+        simulationPauseButton.Width = 104;
+        simulationPauseButton.Click += async (_, _) => await SetSimulationPausedAsync(!simulationPaused);
 
         StyleButton(openTextWindowButton, "Open Text");
         openTextWindowButton.Margin = new Padding(8, 2, 0, 0);
@@ -146,6 +152,7 @@ internal sealed class ProfilerForm : Form
         AddLabeledControl(controlPanel, "Rows", maxRowsInput);
         controlPanel.Controls.Add(enableProfilingCheckBox);
         controlPanel.Controls.Add(refreshButton);
+        controlPanel.Controls.Add(simulationPauseButton);
         controlPanel.Controls.Add(openTextWindowButton);
         controlPanel.Controls.Add(openBeltTickWindowButton);
         shell.Controls.Add(controlPanel, 0, 1);
@@ -365,6 +372,28 @@ internal sealed class ProfilerForm : Form
         await PollAsync(true);
     }
 
+    private async Task SetSimulationPausedAsync(bool paused)
+    {
+        SetBusy(true);
+        try
+        {
+            string command = $"simulation pause {(paused ? 1 : 0)}";
+            string response = await SendProtocolLineAsync(BuildHost(), BuildPort(), command);
+            AppendLog($"> {command}");
+            AppendLog(response);
+            ApplyStatus(response);
+            await PollAsync(true);
+        }
+        catch (Exception exception) when (IsProtocolException(exception))
+        {
+            ApplyOfflineState(exception.Message);
+        }
+        finally
+        {
+            SetBusy(false);
+        }
+    }
+
     private async Task PollAsync(bool logFailure)
     {
         if (polling)
@@ -442,7 +471,21 @@ internal sealed class ProfilerForm : Form
             ApplyRuntimeCheckBox(enabled);
         }
 
+        if (TryReadProtocolBool(response, "simulationPaused", out bool paused))
+        {
+            ApplySimulationPaused(paused);
+        }
+
         PositionHeaderStats(fpsLabel.Parent ?? this);
+    }
+
+    private void ApplySimulationPaused(bool paused)
+    {
+        simulationPaused = paused;
+        simulationPauseButton.Text = paused ? "Play Game" : "Pause Game";
+        simulationPauseButton.BackColor = paused
+            ? Color.FromArgb(58, 115, 72)
+            : Color.FromArgb(55, 61, 65);
     }
 
     private void ApplyUpsStatus(string response)
@@ -1166,6 +1209,7 @@ internal sealed class ProfilerForm : Form
         maxRowsInput.Enabled = !busy;
         enableProfilingCheckBox.Enabled = !busy;
         refreshButton.Enabled = !busy;
+        simulationPauseButton.Enabled = !busy;
         UpdateSnapshotWindowButtonsEnabled(busy);
         Cursor = busy ? Cursors.WaitCursor : Cursors.Default;
     }

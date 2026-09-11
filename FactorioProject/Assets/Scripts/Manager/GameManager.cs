@@ -163,12 +163,15 @@ public class GameManager : MonoBehaviour
     private void Update()
     {
         bool textInputFocused = IsTextInputFocused();
-        if (!textInputFocused && Input.GetKeyDown(KeyCode.Alpha0))
-            Time.timeScale = 0.5f;
-        else if (!textInputFocused && Input.GetKeyDown(KeyCode.Alpha1))
-            Time.timeScale = 1f;
-        else if (!textInputFocused && Input.GetKeyDown(KeyCode.Alpha2))
-            Time.timeScale = 2f;
+        if (!MapObjectTickManager.SimulationPaused)
+        {
+            if (!textInputFocused && Input.GetKeyDown(KeyCode.Alpha0))
+                Time.timeScale = 0.5f;
+            else if (!textInputFocused && Input.GetKeyDown(KeyCode.Alpha1))
+                Time.timeScale = 1f;
+            else if (!textInputFocused && Input.GetKeyDown(KeyCode.Alpha2))
+                Time.timeScale = 2f;
+        }
 
         SyncConveyorSlotDotRuntimeVisibility();
         SyncSleepAwakeRuntimeVisibility();
@@ -949,6 +952,9 @@ public sealed class RuntimeItemGiveReceiver : MonoBehaviour
             case ToolCommand.Status:
                 request.Result = GetStatusResult();
                 break;
+            case ToolCommand.SimulationPause:
+                request.Result = SetSimulationPaused(request.TimeParameters.Paused);
+                break;
             case ToolCommand.TimeStatus:
                 request.Result = GetWorldTimeStatusResult();
                 break;
@@ -1236,7 +1242,7 @@ public sealed class RuntimeItemGiveReceiver : MonoBehaviour
                     out float cameraMaxSize,
                     out int seedValue,
                     out bool randomizeSeed,
-                    out WorldTimeToolParameters timeParameters,
+                    out TimeToolParameters timeParameters,
                     out string error))
             {
                 writer.WriteLine($"error {error}");
@@ -1285,7 +1291,7 @@ public sealed class RuntimeItemGiveReceiver : MonoBehaviour
         out float cameraMaxSize,
         out int seedValue,
         out bool randomizeSeed,
-        out WorldTimeToolParameters timeParameters,
+        out TimeToolParameters timeParameters,
         out string error)
     {
         command = ToolCommand.Give;
@@ -1321,6 +1327,23 @@ public sealed class RuntimeItemGiveReceiver : MonoBehaviour
             command = ToolCommand.Status;
             itemId = 0;
             count = 0;
+            return true;
+        }
+
+        if (parts.Length == 3
+            && string.Equals(parts[0], "simulation", StringComparison.OrdinalIgnoreCase)
+            && string.Equals(parts[1], "pause", StringComparison.OrdinalIgnoreCase))
+        {
+            if (!TryParseProtocolBool(parts[2], out bool simulationPaused))
+            {
+                error = "simulation pause value must be true/false or 1/0";
+                return false;
+            }
+
+            command = ToolCommand.SimulationPause;
+            itemId = 0;
+            count = 0;
+            timeParameters = TimeToolParameters.ForPause(simulationPaused);
             return true;
         }
 
@@ -1673,7 +1696,7 @@ public sealed class RuntimeItemGiveReceiver : MonoBehaviour
 
         if (parts.Length < 2 || !string.Equals(parts[0], "give", StringComparison.OrdinalIgnoreCase))
         {
-            error = "usage: give <itemId> [count] | clear <belt|floor|io|mapobj> | animalstress [count] | animalcollision [count] | animalthreat [radius] | beltstress [count] | beltline [auto|itemId] [count] | beltitems [count] | beltcheck | save <slot> | load <slot> | reset [slot] [randomSeed] | seed <int> | saveslots | time <status|set|scale|pause|next sunrise|check> | debug <showConveyorSlotDots|showSleepAwake|showBeltItemLine|showBeltSplit|hideBeltItems|hideBelts|disableCameraCulling|showRailLine|showDirections|freeCamera|freeCameraPlayerCulling|showAnimalHerdAreas|animalAIPaused|mapObjectTickProfiling> <true|false> | camera size <minSize> <maxSize> | perf [maxRows] | ping | status";
+            error = "usage: give <itemId> [count] | clear <belt|floor|io|mapobj> | animalstress [count] | animalcollision [count] | animalthreat [radius] | beltstress [count] | beltline [auto|itemId] [count] | beltitems [count] | beltcheck | save <slot> | load <slot> | reset [slot] [randomSeed] | seed <int> | saveslots | simulation pause <true|false> | time <status|set|scale|pause|next sunrise|check> | debug <showConveyorSlotDots|showSleepAwake|showBeltItemLine|showBeltSplit|hideBeltItems|hideBelts|disableCameraCulling|showRailLine|showDirections|freeCamera|freeCameraPlayerCulling|showAnimalHerdAreas|animalAIPaused|mapObjectTickProfiling> <true|false> | camera size <minSize> <maxSize> | perf [maxRows] | ping | status";
             return false;
         }
 
@@ -1753,7 +1776,7 @@ public sealed class RuntimeItemGiveReceiver : MonoBehaviour
     private static bool TryParseWorldTimeRequest(
         string[] parts,
         out ToolCommand command,
-        out WorldTimeToolParameters parameters,
+        out TimeToolParameters parameters,
         out string error)
     {
         command = ToolCommand.TimeStatus;
@@ -1793,7 +1816,7 @@ public sealed class RuntimeItemGiveReceiver : MonoBehaviour
             }
 
             command = ToolCommand.TimeSet;
-            parameters = WorldTimeToolParameters.ForTime(hour, minute);
+            parameters = TimeToolParameters.ForTime(hour, minute);
             return true;
         }
 
@@ -1807,7 +1830,7 @@ public sealed class RuntimeItemGiveReceiver : MonoBehaviour
             }
 
             command = ToolCommand.TimeScale;
-            parameters = WorldTimeToolParameters.ForScale(scale);
+            parameters = TimeToolParameters.ForScale(scale);
             return true;
         }
 
@@ -1821,7 +1844,7 @@ public sealed class RuntimeItemGiveReceiver : MonoBehaviour
             }
 
             command = ToolCommand.TimePause;
-            parameters = WorldTimeToolParameters.ForPause(paused);
+            parameters = TimeToolParameters.ForPause(paused);
             return true;
         }
 
@@ -1968,6 +1991,20 @@ public sealed class RuntimeItemGiveReceiver : MonoBehaviour
         return worldTime != null
             ? ToolResult.Success(0, 0, 0, 0, 0, 0, "time status", BuildWorldTimeExtraTokens(worldTime))
             : ToolResult.Error(0, 0, "world time service not found");
+    }
+
+    private static ToolResult SetSimulationPaused(bool paused)
+    {
+        MapObjectTickManager.SetSimulationPaused(paused);
+        return ToolResult.Success(
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            paused ? "simulation paused" : "simulation playing",
+            BuildSimulationExtraTokens());
     }
 
     private ToolResult SetWorldTime(int hour, int minute)
@@ -3132,17 +3169,21 @@ public sealed class RuntimeItemGiveReceiver : MonoBehaviour
 
     private static string BuildSimulationExtraTokens()
     {
-        float ups = MapObjectTickManager.HasSimulationUpsSample
-            ? MapObjectTickManager.CurrentSimulationUps
-            : -1f;
+        float ups = MapObjectTickManager.SimulationPaused
+            ? 0f
+            : MapObjectTickManager.HasSimulationUpsSample
+                ? MapObjectTickManager.CurrentSimulationUps
+                : -1f;
         return string.Format(
             CultureInfo.InvariantCulture,
-            "ups={0:0.###} targetUps={1:0.###} simulationBacklogTicks={2:0.###} simulationTicksLastFrame={3} maxSimulationTicksPerFrame={4}",
+            "ups={0:0.###} targetUps={1:0.###} simulationBacklogTicks={2:0.###} simulationTicksLastFrame={3} maxSimulationTicksPerFrame={4} simulationPaused={5} unityTimeScale={6:0.###}",
             ups,
             MapObjectTickManager.TargetSimulationUps,
             MapObjectTickManager.SimulationBacklogTicks,
             MapObjectTickManager.SimulationTicksLastFrame,
-            MapObjectTickManager.MaximumSimulationStepsPerFrame);
+            MapObjectTickManager.MaximumSimulationStepsPerFrame,
+            MapObjectTickManager.SimulationPaused ? 1 : 0,
+            Time.timeScale);
     }
 
     private void CaptureSceneObjectCounts(
@@ -5148,6 +5189,7 @@ public sealed class RuntimeItemGiveReceiver : MonoBehaviour
         Give,
         Ping,
         Status,
+        SimulationPause,
         TimeStatus,
         TimeSet,
         TimeScale,
@@ -5175,9 +5217,9 @@ public sealed class RuntimeItemGiveReceiver : MonoBehaviour
         PerfSnapshot
     }
 
-    private readonly struct WorldTimeToolParameters
+    private readonly struct TimeToolParameters
     {
-        private WorldTimeToolParameters(int hour, int minute, float scale, bool paused)
+        private TimeToolParameters(int hour, int minute, float scale, bool paused)
         {
             Hour = hour;
             Minute = minute;
@@ -5190,19 +5232,19 @@ public sealed class RuntimeItemGiveReceiver : MonoBehaviour
         public float Scale { get; }
         public bool Paused { get; }
 
-        public static WorldTimeToolParameters ForTime(int hour, int minute)
+        public static TimeToolParameters ForTime(int hour, int minute)
         {
-            return new WorldTimeToolParameters(hour, minute, 1f, false);
+            return new TimeToolParameters(hour, minute, 1f, false);
         }
 
-        public static WorldTimeToolParameters ForScale(float scale)
+        public static TimeToolParameters ForScale(float scale)
         {
-            return new WorldTimeToolParameters(0, 0, scale, false);
+            return new TimeToolParameters(0, 0, scale, false);
         }
 
-        public static WorldTimeToolParameters ForPause(bool paused)
+        public static TimeToolParameters ForPause(bool paused)
         {
-            return new WorldTimeToolParameters(0, 0, 1f, paused);
+            return new TimeToolParameters(0, 0, 1f, paused);
         }
     }
 
@@ -5223,7 +5265,7 @@ public sealed class RuntimeItemGiveReceiver : MonoBehaviour
             float cameraMaxSize,
             int seedValue,
             bool randomizeSeed,
-            WorldTimeToolParameters timeParameters)
+            TimeToolParameters timeParameters)
         {
             Command = command;
             ItemId = itemId;
@@ -5248,7 +5290,7 @@ public sealed class RuntimeItemGiveReceiver : MonoBehaviour
         public float CameraMaxSize { get; }
         public int SeedValue { get; }
         public bool RandomizeSeed { get; }
-        public WorldTimeToolParameters TimeParameters { get; }
+        public TimeToolParameters TimeParameters { get; }
         private ManualResetEventSlim Completion { get; } = new ManualResetEventSlim(false);
         public ToolResult Result { get; set; }
 

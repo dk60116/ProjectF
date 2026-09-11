@@ -399,6 +399,7 @@ public class InputOutputModule : InstallationObject,
     private readonly List<Renderer> cachedEnergyGaugeRenderers = new List<Renderer>();
     private readonly List<Vector2Int> objectInfoInputAreaCoordinates = new List<Vector2Int>();
     private readonly HashSet<Vector2Int> singleItemOutputVisitedCoordinates = new HashSet<Vector2Int>();
+    private readonly HashSet<Vector2Int> runtimeAreaVisitedCoordinates = new HashSet<Vector2Int>();
     private readonly Queue<Vector2Int> connectedFluidSearchQueue = new Queue<Vector2Int>(32);
     private readonly HashSet<Vector2Int> connectedFluidSearchVisited = new HashSet<Vector2Int>();
     private readonly HashSet<InstallationObject> connectedFluidStorageCandidates = new HashSet<InstallationObject>();
@@ -426,6 +427,8 @@ public class InputOutputModule : InstallationObject,
     private bool workAnimatorHasWorkParameter;
     private bool workAnimatorStateInitialized;
     private bool lastWorkAnimatorState;
+    private InputOutputModuleAreaMarkerController cachedAreaMarkerController;
+    private bool areaMarkerControllerResolved;
     private bool runtimeSleeping;
     private readonly List<ItemIoEntry> effectiveInputList = new List<ItemIoEntry>();
     private readonly List<ItemIoEntry> effectiveOutputList = new List<ItemIoEntry>();
@@ -916,6 +919,7 @@ public class InputOutputModule : InstallationObject,
         {
             if (module == null
                 || !module.gameObject.activeInHierarchy
+                || module.waitingForOutput
                 || !module.RequiresElectricOperationalEnergy())
             {
                 continue;
@@ -1807,15 +1811,32 @@ public class InputOutputModule : InstallationObject,
             TryStartNextCraft();
         }
 
+        if (this is MiningMachine)
+        {
+            using var visualSample = MapObjectTickProfiler.SampleNamed(
+                "Runtime",
+                nameof(MiningMachine),
+                "Mining Visuals");
+            UpdateManagedRuntimeVisuals();
+        }
+        else
+        {
+            UpdateManagedRuntimeVisuals();
+        }
+        RefreshRuntimeUpdateSleepState();
+        plannedModuleCommands = PlannedModuleCommand.None;
+        plannedModuleDeltaTime = 0f;
+    }
+
+    private void UpdateManagedRuntimeVisuals()
+    {
         if (ShouldUpdateVisuals)
         {
             UpdateEnergyGaugeVisual();
             RefreshWorkAnimatorState();
         }
+
         UpdateCraftParticleEffectVisual();
-        RefreshRuntimeUpdateSleepState();
-        plannedModuleCommands = PlannedModuleCommand.None;
-        plannedModuleDeltaTime = 0f;
     }
 
     protected virtual bool ShouldKeepRuntimeUpdateTickActive()
@@ -1847,7 +1868,10 @@ public class InputOutputModule : InstallationObject,
             return;
         }
 
-        if (ShouldKeepRuntimeUpdateTickActive() || HasActiveOrPendingCraft())
+        // A completed craft whose output is blocked is woken by mutations at its
+        // registered output coordinates. Keeping it scheduled would only repeat
+        // the same area scan every update interval while nothing has changed.
+        if (ShouldKeepRuntimeUpdateTickActive() || (hasActiveCraft && !waitingForOutput))
         {
             SetRuntimeSleeping(false);
             return;
@@ -2782,6 +2806,8 @@ public class InputOutputModule : InstallationObject,
     protected override void OnEnable()
     {
         base.OnEnable();
+        cachedAreaMarkerController = null;
+        areaMarkerControllerResolved = false;
         effectivePairDataInitialized = false;
         EnsureEffectivePairData();
         activeRuntimeModules.Add(this);
@@ -4080,11 +4106,11 @@ public class InputOutputModule : InstallationObject,
 
         int installedCapacityTotal = 0;
         bool hasInstalledCapacity = false;
-        HashSet<Vector2Int> visitedCoordinates = new HashSet<Vector2Int>();
+        runtimeAreaVisitedCoordinates.Clear();
         for (int i = 0; i < coordinates.Count; i++)
         {
             Vector2Int coordinate = coordinates[i];
-            if (!visitedCoordinates.Add(coordinate))
+            if (!runtimeAreaVisitedCoordinates.Add(coordinate))
             {
                 continue;
             }
@@ -4106,7 +4132,7 @@ public class InputOutputModule : InstallationObject,
         int defaultAreaCapacity = RuntimeAreaMaxObjects;
         ItemDefinition definition = ResolveItemDefinition(itemId);
         return definition != null && definition.oneItem
-            ? Mathf.Min(defaultAreaCapacity, Mathf.Max(1, visitedCoordinates.Count))
+            ? Mathf.Min(defaultAreaCapacity, Mathf.Max(1, runtimeAreaVisitedCoordinates.Count))
             : defaultAreaCapacity;
     }
 
@@ -4734,6 +4760,51 @@ public class InputOutputModule : InstallationObject,
             return false;
         }
 
+        return TryEmitOutputItemsToResolvedTarget(
+            outputItemId,
+            outputCount,
+            startWorldPosition,
+            outputTarget);
+    }
+
+    protected bool TryResolveOutputReservation(
+        int outputItemId,
+        int outputCount,
+        out RuntimeAreaOutputTarget outputTarget,
+        out bool usesDistributedSingleItemTargets)
+    {
+        outputTarget = default;
+        ItemDefinition outputDefinition = ResolveItemDefinition(outputItemId);
+        usesDistributedSingleItemTargets = outputDefinition != null
+                                           && outputDefinition.oneItem
+                                           && outputCount > 1;
+        return usesDistributedSingleItemTargets
+            ? CanDistributeSingleItemStacks(outputItemId, outputCount)
+            : TryResolveOutputTarget(outputItemId, outputCount, out outputTarget);
+    }
+
+    protected bool TryEmitReservedOutputItems(
+        int outputItemId,
+        int outputCount,
+        Vector3 startWorldPosition,
+        RuntimeAreaOutputTarget outputTarget,
+        bool usesDistributedSingleItemTargets)
+    {
+        return usesDistributedSingleItemTargets
+            ? TryEmitSingleItemStacks(outputItemId, outputCount, startWorldPosition, true)
+            : TryEmitOutputItemsToResolvedTarget(
+                outputItemId,
+                outputCount,
+                startWorldPosition,
+                outputTarget);
+    }
+
+    private bool TryEmitOutputItemsToResolvedTarget(
+        int outputItemId,
+        int outputCount,
+        Vector3 startWorldPosition,
+        RuntimeAreaOutputTarget outputTarget)
+    {
         if (outputTarget.useSavedCenterStack)
         {
             BlockStateStore stateStore = ResolveBlockStateStore();
@@ -4751,9 +4822,10 @@ public class InputOutputModule : InstallationObject,
     private bool TryEmitSingleItemStacks(
         int outputItemId,
         int outputCount,
-        Vector3 startWorldPosition)
+        Vector3 startWorldPosition,
+        bool capacityPrevalidated = false)
     {
-        if (!CanDistributeSingleItemStacks(outputItemId, outputCount))
+        if (!capacityPrevalidated && !CanDistributeSingleItemStacks(outputItemId, outputCount))
         {
             return false;
         }
@@ -5244,11 +5316,11 @@ public class InputOutputModule : InstallationObject,
         }
 
         int count = 0;
-        HashSet<Vector2Int> visitedCoordinates = new HashSet<Vector2Int>();
+        runtimeAreaVisitedCoordinates.Clear();
         for (int i = 0; i < coordinates.Count; i++)
         {
             Vector2Int coordinate = coordinates[i];
-            if (!visitedCoordinates.Add(coordinate))
+            if (!runtimeAreaVisitedCoordinates.Add(coordinate))
             {
                 continue;
             }
@@ -5281,11 +5353,11 @@ public class InputOutputModule : InstallationObject,
             return -1;
         }
 
-        HashSet<Vector2Int> visitedCoordinates = new HashSet<Vector2Int>();
+        runtimeAreaVisitedCoordinates.Clear();
         for (int i = 0; i < coordinates.Count; i++)
         {
             Vector2Int coordinate = coordinates[i];
-            if (!visitedCoordinates.Add(coordinate))
+            if (!runtimeAreaVisitedCoordinates.Add(coordinate))
             {
                 continue;
             }
@@ -6318,8 +6390,13 @@ public class InputOutputModule : InstallationObject,
 
     private bool ShouldShowGaugeByAreaMarkerVisibility()
     {
-        InputOutputModuleAreaMarkerController markerController = GetComponent<InputOutputModuleAreaMarkerController>();
-        return markerController == null || markerController.ShouldShowLinkedUi();
+        if (!areaMarkerControllerResolved)
+        {
+            cachedAreaMarkerController = GetComponent<InputOutputModuleAreaMarkerController>();
+            areaMarkerControllerResolved = true;
+        }
+
+        return cachedAreaMarkerController == null || cachedAreaMarkerController.ShouldShowLinkedUi();
     }
 
     private void ReleaseEnergyGaugeVisual()

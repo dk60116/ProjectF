@@ -30,7 +30,7 @@ public class RobotArm : InputOutputModule
         WaitingAfterPickupTake,
         TurningToDrop,
         WaitingForDrop,
-        WaitingBeforeDropPlace,
+        WaitingBeforeDropPlace, // Legacy save state; normalized to WaitingForDrop on restore.
         WaitingAfterDropPlace,
         TurningToPickup
     }
@@ -106,7 +106,7 @@ public class RobotArm : InputOutputModule
     [SerializeField, Min(0.01f)]
     private float dropRetryInterval = 0.1f;
 
-    [SerializeField, Min(0f), Tooltip("Delay between action timing and the actual pickup/drop.")]
+    [SerializeField, Min(0f), Tooltip("Pickup action delay; drop recovery uses twice this delay after a successful transfer.")]
     [FormerlySerializedAs("postActionTurnDelay")]
     private float actionTurnDelay = 0.1f;
 
@@ -491,9 +491,6 @@ public class RobotArm : InputOutputModule
             case RobotArmState.WaitingForDrop:
                 TickDrop(deltaTime);
                 break;
-            case RobotArmState.WaitingBeforeDropPlace:
-                TickWaitBeforeDropPlace(deltaTime);
-                break;
             case RobotArmState.WaitingAfterDropPlace:
                 TickWaitAfterDropPlace(deltaTime);
                 break;
@@ -754,6 +751,15 @@ public class RobotArm : InputOutputModule
             return false;
         }
 
+        if (TryResolvePickupCoordinate(out Vector2Int pickupCoordinate)
+            && IsMovingFreightCarAtCoordinate(pickupCoordinate))
+        {
+            // The consist can finish braking without crossing another grid cell or
+            // changing its cargo. Keep polling until it stops so the arm can observe
+            // the transition from an unavailable moving car to a valid pickup source.
+            return false;
+        }
+
         // Every supported pickup source publishes a coordinate wake when its item
         // availability changes. Once this query misses, polling an otherwise idle arm
         // cannot discover anything that its registered wake coordinates would not.
@@ -772,23 +778,27 @@ public class RobotArm : InputOutputModule
             return false;
         }
 
+        // Speed can reach zero without crossing a grid cell or changing cargo.
+        // Keep the normal drop retry active until that moving target stops.
+        if (IsMovingFreightCarAtCoordinate(dropCoordinate))
+        {
+            return false;
+        }
+
+        return !CanPlaceHeldItemForCurrentPlan();
+    }
+
+    private bool IsMovingFreightCarAtCoordinate(Vector2Int coordinate)
+    {
         TerrainGenerator terrainGenerator = ResolveTerrainGenerator();
         if (terrainGenerator == null)
         {
             return false;
         }
 
-        terrainGenerator.TryGetLoadedBlock(dropCoordinate, out Block dropBlock);
-
-        // Speed can reach zero without crossing a grid cell or changing cargo.
-        // Keep the normal drop retry active until that moving target stops.
-        if (TryGetFreightCarObject(dropBlock, dropCoordinate, out FreightCar freightCar)
-            && freightCar.IsConsistMoving())
-        {
-            return false;
-        }
-
-        return !CanPlaceHeldItemForCurrentPlan();
+        terrainGenerator.TryGetLoadedBlock(coordinate, out Block block);
+        return TryGetFreightCarObject(block, coordinate, out FreightCar freightCar)
+               && freightCar.IsConsistMoving();
     }
 
     private bool IsCoordinateInsideRuntimeSleepWakeRange(Vector2Int coordinate)
@@ -798,6 +808,11 @@ public class RobotArm : InputOutputModule
 
     private void WakeRuntimeSleep()
     {
+        if (ShouldIgnoreUnavailableDropWake())
+        {
+            return;
+        }
+
         // Both the coordinate observer and InputOutputModule can deliver the same
         // change. Coalesce until the next tick, but still repair lost registration.
         bool registered = MapObjectTickManager.IsUpdateTickRegistered(this);
@@ -820,6 +835,25 @@ public class RobotArm : InputOutputModule
         {
             SetUpdateTickRegistered(true);
         }
+    }
+
+    private bool ShouldIgnoreUnavailableDropWake()
+    {
+        if (heldItemId < 0 || state != RobotArmState.WaitingForDrop)
+        {
+            return false;
+        }
+
+        if (!TryResolveDropCoordinate(out Vector2Int dropCoordinate)
+            || IsMovingFreightCarAtCoordinate(dropCoordinate))
+        {
+            return false;
+        }
+
+        // Item motion can publish many changes for the same full destination. A
+        // wake is useful only when the held item can actually enter it; otherwise
+        // preserve both Sleep and the existing retry timer/pose.
+        return !CanPlaceHeldItem();
     }
 
     protected override void WakeRuntimeUpdate()
@@ -1329,36 +1363,18 @@ public class RobotArm : InputOutputModule
         waitingForDropRetry = false;
         if (CanPlaceHeldItemForCurrentPlan())
         {
-            PlayDropAnimation();
-            state = RobotArmState.WaitingBeforeDropPlace;
-            actionTurnTimer = actionTurnDelay;
+            // Commit in this tick's ordered apply phase. Waiting for the animation
+            // first lets the next belt item take this gap before the transfer.
+            plannedTransferCommand = PlannedTransferCommand.Drop;
             return;
         }
 
         BeginDropRetryDelay();
     }
 
-    private void TickWaitBeforeDropPlace(float deltaTime)
-    {
-        if (heldItemId < 0)
-        {
-            waitingForDropRetry = false;
-            dropRetryTimer = 0f;
-            state = RobotArmState.TurningToPickup;
-            return;
-        }
-
-        if (TickTimerStillRunning(ref actionTurnTimer, deltaTime))
-        {
-            return;
-        }
-
-        plannedTransferCommand = PlannedTransferCommand.Drop;
-    }
-
     private void ApplyPlannedDrop()
     {
-        if (state != RobotArmState.WaitingBeforeDropPlace || heldItemId < 0)
+        if (state != RobotArmState.WaitingForDrop || heldItemId < 0)
         {
             return;
         }
@@ -1366,14 +1382,19 @@ public class RobotArm : InputOutputModule
         if (TryPlaceHeldItem())
         {
             dropRetryTimer = 0f;
+            waitingForDropRetry = false;
+            PlayDropAnimation();
             ClearHeldItem();
             state = RobotArmState.WaitingAfterDropPlace;
-            actionTurnTimer = actionTurnDelay;
+            // Preserve the former pre/post-drop action budget after committing.
+            actionTurnTimer = actionTurnDelay * 2f;
             return;
         }
 
         BeginDropRetryDelay();
-        state = RobotArmState.WaitingForDrop;
+        // Another arm may have claimed the same gap earlier in the apply order.
+        // Keep the held item and idle pose, and sleep if the destination is full.
+        RefreshRuntimeSleepState();
     }
 
     private void TickWaitAfterDropPlace(float deltaTime)
@@ -2489,12 +2510,17 @@ public class RobotArm : InputOutputModule
             state = RobotArmState.WaitingForPickup;
         }
 
+        if (state == RobotArmState.WaitingBeforeDropPlace)
+        {
+            state = RobotArmState.WaitingForDrop;
+            actionTurnTimer = 0f;
+        }
+
         if (heldItemId < 0)
         {
             waitingForDropRetry = false;
             dropRetryTimer = 0f;
             if (state == RobotArmState.WaitingForDrop
-                || state == RobotArmState.WaitingBeforeDropPlace
                 || state == RobotArmState.TurningToDrop)
             {
                 state = RobotArmState.TurningToPickup;
@@ -2516,8 +2542,7 @@ public class RobotArm : InputOutputModule
     {
         EnsureBodyRotationCache();
         if (heldItemId >= 0
-            && (state == RobotArmState.WaitingForDrop
-                || state == RobotArmState.WaitingBeforeDropPlace))
+            && state == RobotArmState.WaitingForDrop)
         {
             SetBodyLocalRotation(GetOutputBodyLocalRotation());
             return;
@@ -2615,7 +2640,6 @@ public class RobotArm : InputOutputModule
         return robotArmState == RobotArmState.WaitingBeforePickupTake
                || robotArmState == RobotArmState.WaitingAfterPickupTake
                || robotArmState == RobotArmState.TurningToDrop
-               || robotArmState == RobotArmState.WaitingBeforeDropPlace
                || robotArmState == RobotArmState.WaitingAfterDropPlace
                || robotArmState == RobotArmState.TurningToPickup;
     }

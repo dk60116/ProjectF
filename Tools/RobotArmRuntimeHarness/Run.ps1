@@ -18,7 +18,7 @@ $manager = 'FactorioProject/Assets/Scripts/Manager/MapObjectTickManager.cs'
 $source = "using System; using System.Collections.Generic; using UnityEngine;`n"
 $source += (Member $manager 'public static class DeterministicSimulationUnits') + "`n"
 $source += "public partial class RobotArm {`n"
-foreach ($member in @('public enum RobotArmState', 'public override bool TryGetElectricPowerDemand(', 'private static bool IsActiveTransferState(', 'private void WakeRuntimeSleep(', 'protected override void WakeRuntimeUpdate(', 'private void SetUpdateTickRegistered(')) {
+foreach ($member in @('public enum RobotArmState', 'private enum PlannedTransferCommand', 'public override bool TryGetElectricPowerDemand(', 'private static bool IsActiveTransferState(', 'private void WakeRuntimeSleep(', 'private bool ShouldIgnoreUnavailableDropWake(', 'protected override void WakeRuntimeUpdate(', 'private void SetUpdateTickRegistered(', 'private void TickDrop(', 'private void ApplyPlannedDrop(', 'private void BeginDropRetryDelay(', 'private static bool TickTimerStillRunning(', 'private void NormalizeRuntimeState(')) {
     $source += (Member $arm $member) + "`n"
 }
 $armSource = [IO.File]::ReadAllText((Join-Path $repo $arm))
