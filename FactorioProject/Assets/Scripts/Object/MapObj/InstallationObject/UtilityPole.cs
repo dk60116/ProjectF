@@ -833,7 +833,11 @@ public class UtilityPole : InstallationObject
             membershipChanged = true;
         }
 
-        suppliedConsumerNetworks.Remove(installationObject);
+        if (placementCleared || membershipChanged)
+        {
+            suppliedConsumerNetworks.Remove(installationObject);
+        }
+
         if (membershipChanged)
         {
             networkRuntimeEvaluatedSimulationTick = -1L;

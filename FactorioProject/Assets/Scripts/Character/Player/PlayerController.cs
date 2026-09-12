@@ -4346,6 +4346,12 @@ public partial class PlayerController : MonoBehaviour
             return false;
         }
 
+        if (TryResolveLoggingMachine(mapObject, out LoggingMachine loggingMachine))
+        {
+            filterTarget = loggingMachine;
+            return true;
+        }
+
         if (SupportsItemFilter(mapObject, definitions))
         {
             filterTarget = mapObject.SceneObject;
@@ -4363,6 +4369,25 @@ public partial class PlayerController : MonoBehaviour
         }
 
         return false;
+    }
+
+    private static bool TryResolveLoggingMachine(
+        IMapObjectTarget mapObject,
+        out LoggingMachine loggingMachine)
+    {
+        loggingMachine = mapObject as LoggingMachine;
+        if (loggingMachine != null)
+        {
+            return true;
+        }
+
+        if (mapObject?.SceneObject == null)
+        {
+            return false;
+        }
+
+        loggingMachine = mapObject.SceneObject.GetComponentInParent<LoggingMachine>();
+        return loggingMachine != null;
     }
 
     private static bool SupportsItemFilter(IMapObjectTarget mapObject, List<ItemDefinition> definitions)

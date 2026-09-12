@@ -1511,6 +1511,21 @@ public partial class Block : BaseObject
         targetPortableObject = portableObject;
     }
 
+    public bool PlayTransientItemToFloorAnimation(
+        int itemId,
+        Vector3 startWorldPosition,
+        float delay = 0f)
+    {
+        PlayAbsorbedFarmlandFertilizerAnimation(
+            itemId,
+            startWorldPosition,
+            delay,
+            null,
+            null,
+            out PortableObject portableObject);
+        return portableObject != null;
+    }
+
     private bool TryGetRuntimeConveyorBelt(out ConveyorBelt conveyorBelt)
     {
         conveyorBelt = null;

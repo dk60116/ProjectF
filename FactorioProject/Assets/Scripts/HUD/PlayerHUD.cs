@@ -127,6 +127,7 @@ public partial class PlayerHUD : BagSlot
     private Block clickedObjectInfoFallbackBlock;
     private InputOutputModuleAreaMarkerController currentObjectInfoAreaMarkerController;
     private UtilityPole currentObjectInfoSupplyRangePole;
+    private Sprinkler currentObjectInfoSprinklerRange;
     private object lastYellowObjectInfoFocusTarget;
     private bool currentObjectInfoOpenedByYellowFocus;
     private float nextObjectInfoPanelRefreshTime;
@@ -2817,6 +2818,7 @@ public partial class PlayerHUD : BagSlot
         // 다음 프레임에 한 번 더 갱신하고, 이후부터 일반 갱신 주기를 적용한다.
         nextObjectInfoPanelRefreshTime = Time.unscaledTime;
         SetObjectInfoSupplyRangeVisual(target as IMapObjectTarget, !openedByYellowFocus);
+        SetObjectInfoSprinklerRangeVisual(target as IMapObjectTarget, !openedByYellowFocus);
         SetObjectInfoAreaMarkerVisibility(target as IMapObjectTarget, !openedByYellowFocus);
         SetObjectInfoSelectionFocus(target, !openedByYellowFocus);
         upgradeButton?.Bind(
@@ -2874,6 +2876,7 @@ public partial class PlayerHUD : BagSlot
     {
         SetObjectInfoSelectionFocus(null, false);
         SetObjectInfoAreaMarkerVisibility(null, false);
+        SetObjectInfoSprinklerRangeVisual(null, false);
         SetObjectInfoSupplyRangeVisual(null, false);
         SetFocusedTargetOutline(currentObjectInfoTarget, false);
         currentObjectInfoTarget = null;
@@ -3032,6 +3035,53 @@ public partial class PlayerHUD : BagSlot
         }
 
         return target.GetComponentInChildren<UtilityPole>(true);
+    }
+
+    private void SetObjectInfoSprinklerRangeVisual(IMapObjectTarget target, bool requested)
+    {
+        Sprinkler nextSprinkler = requested ? ResolveSprinkler(target) : null;
+        if (currentObjectInfoSprinklerRange == nextSprinkler)
+        {
+            if (nextSprinkler != null)
+            {
+                nextSprinkler.SetSelectedRangeVisualRequested(true);
+            }
+
+            return;
+        }
+
+        if (currentObjectInfoSprinklerRange != null)
+        {
+            currentObjectInfoSprinklerRange.SetSelectedRangeVisualRequested(false);
+        }
+
+        currentObjectInfoSprinklerRange = nextSprinkler;
+        if (currentObjectInfoSprinklerRange != null)
+        {
+            currentObjectInfoSprinklerRange.SetSelectedRangeVisualRequested(true);
+        }
+    }
+
+    private static Sprinkler ResolveSprinkler(IMapObjectTarget target)
+    {
+        if (target == null)
+        {
+            return null;
+        }
+
+        Sprinkler sprinkler = target as Sprinkler;
+        if (sprinkler != null)
+        {
+            return sprinkler;
+        }
+
+        sprinkler = target.GetComponent<Sprinkler>();
+        if (sprinkler != null)
+        {
+            return sprinkler;
+        }
+
+        return target.GetComponentInChildren<Sprinkler>(true);
     }
 
     private void UpdateItemFilterButtonState()

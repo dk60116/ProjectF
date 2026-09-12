@@ -5,8 +5,8 @@ using UnityEngine;
 [Serializable]
 public sealed class SaveGameData
 {
-    // Version 61 stores authoritative energy, fluid, craft-progress, and rail-distance integers.
-    public const int CurrentVersion = 61;
+    // Version 62 stores Seed Planter input-transfer state so a consumed seed survives save/load.
+    public const int CurrentVersion = 62;
 
     public int version = CurrentVersion;
     public long savedAtUtcTicks;

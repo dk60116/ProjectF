@@ -256,6 +256,9 @@ public static class SaveGameItemIdRemapper
         }
 
         state.activeOutputItemId = RemapItemId(state.activeOutputItemId, itemIdMap);
+        state.seedPlanterLoadedSeedItemId = RemapItemId(
+            state.seedPlanterLoadedSeedItemId,
+            itemIdMap);
     }
 
     private static void RemapPlayer(

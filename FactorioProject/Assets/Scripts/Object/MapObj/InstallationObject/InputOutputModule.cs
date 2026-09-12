@@ -246,6 +246,10 @@ public class InputOutputModule : InstallationObject,
         public long activeCraftConsumedEnergyUnits;
         public long oilDrillingProgressUnits;
         public long seedPlanterPlantElapsedUnits;
+        public bool seedPlanterHasLoadedSeed;
+        public int seedPlanterLoadedSeedItemId = -1;
+        public Vector2Int seedPlanterLoadedSeedInputCoordinate;
+        public long seedPlanterTransferRemainingUnits;
         // Legacy binary save slot; continuous sprinkler watering no longer uses a spray timer.
         public float sprinklerSprayElapsedSeconds;
         public float seedPlanterPlantElapsedSeconds;
@@ -272,6 +276,10 @@ public class InputOutputModule : InstallationObject,
             sprinklerSprayElapsedSeconds = 0f;
             seedPlanterPlantElapsedSeconds = 0f;
             seedPlanterPlantElapsedUnits = 0L;
+            seedPlanterHasLoadedSeed = false;
+            seedPlanterLoadedSeedItemId = -1;
+            seedPlanterLoadedSeedInputCoordinate = default;
+            seedPlanterTransferRemainingUnits = 0L;
             steamGeneratorHasGenerationReserve = false;
             hasDeterministicUnits = true;
         }
@@ -305,6 +313,10 @@ public class InputOutputModule : InstallationObject,
                 activeCraftConsumedEnergyUnits = activeCraftConsumedEnergyUnits,
                 oilDrillingProgressUnits = oilDrillingProgressUnits,
                 seedPlanterPlantElapsedUnits = seedPlanterPlantElapsedUnits,
+                seedPlanterHasLoadedSeed = seedPlanterHasLoadedSeed,
+                seedPlanterLoadedSeedItemId = seedPlanterLoadedSeedItemId,
+                seedPlanterLoadedSeedInputCoordinate = seedPlanterLoadedSeedInputCoordinate,
+                seedPlanterTransferRemainingUnits = seedPlanterTransferRemainingUnits,
                 sprinklerSprayElapsedSeconds = sprinklerSprayElapsedSeconds,
                 seedPlanterPlantElapsedSeconds = seedPlanterPlantElapsedSeconds,
                 steamGeneratorHasGenerationReserve = steamGeneratorHasGenerationReserve
@@ -1583,7 +1595,8 @@ public class InputOutputModule : InstallationObject,
         int requiredCount,
         ISet<Vector2Int> excludedCoordinates,
         out Block block,
-        out Vector2Int coordinate)
+        out Vector2Int coordinate,
+        bool respectBoxMinimumRetainedCount = true)
     {
         block = null;
         coordinate = default;
@@ -1604,7 +1617,10 @@ public class InputOutputModule : InstallationObject,
                 continue;
             }
 
-            if (GetRuntimeInputAreaCenterItemCount(inputArea.coordinate, itemId) < requiredCount)
+            if (GetRuntimeInputAreaCenterItemCount(
+                    inputArea.coordinate,
+                    itemId,
+                    respectBoxMinimumRetainedCount) < requiredCount)
             {
                 continue;
             }
@@ -5506,7 +5522,10 @@ public class InputOutputModule : InstallationObject,
         return hasLoadedBlock || useSavedCenterStack;
     }
 
-    protected int GetRuntimeInputAreaCenterItemCount(Vector2Int coordinate, int itemId = -1)
+    protected int GetRuntimeInputAreaCenterItemCount(
+        Vector2Int coordinate,
+        int itemId = -1,
+        bool respectBoxMinimumRetainedCount = true)
     {
         if (!TryResolveRuntimeAreaBlock(coordinate, out Block block, out bool useSavedCenterStack))
         {
@@ -5516,12 +5535,22 @@ public class InputOutputModule : InstallationObject,
         if (useSavedCenterStack)
         {
             BlockStateStore stateStore = ResolveBlockStateStore();
-            return stateStore != null ? stateStore.GetSavedCenterExtractableItemCount(coordinate, itemId) : 0;
+            if (stateStore == null)
+            {
+                return 0;
+            }
+
+            return respectBoxMinimumRetainedCount
+                ? stateStore.GetSavedCenterExtractableItemCount(coordinate, itemId)
+                : stateStore.GetSavedCenterItemCount(coordinate, itemId);
         }
 
         return block != null && block.Type == Block.BlockType.Ground
             ? Mathf.Max(0, block.GetInputAreaCenterItemCount(itemId)
-                - (block.MapObject is BoxObject box ? box.MinimumRetainedItemCount : 0))
+                - (respectBoxMinimumRetainedCount
+                   && block.MapObject is BoxObject box
+                    ? box.MinimumRetainedItemCount
+                    : 0))
             : 0;
     }
 
@@ -5531,14 +5560,20 @@ public class InputOutputModule : InstallationObject,
         int count,
         Vector3 consumeTargetWorldPosition,
         float moveInterval,
-        bool animateVirtualizedConsumption = false)
+        bool animateVirtualizedConsumption = false,
+        bool respectBoxMinimumRetainedCount = true)
     {
         if (itemId < 0 || count <= 0)
         {
             return 0;
         }
 
-        count = Mathf.Min(count, GetRuntimeInputAreaCenterItemCount(coordinate, itemId));
+        count = Mathf.Min(
+            count,
+            GetRuntimeInputAreaCenterItemCount(
+                coordinate,
+                itemId,
+                respectBoxMinimumRetainedCount));
         if (count <= 0)
         {
             return 0;

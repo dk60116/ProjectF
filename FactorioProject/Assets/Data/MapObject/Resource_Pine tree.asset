@@ -46,6 +46,16 @@ MonoBehaviour:
     minimumGrowth: 10
     maximumGrowth: 10
     dropChance: 1
+  - itemDefinition: {fileID: 11400000, guid: 54e23bd29f0575344993817082d9f96f, type: 2}
+    amount: 1
+    minimumGrowth: 9
+    maximumGrowth: 10
+    dropChance: 1
+  - itemDefinition: {fileID: 11400000, guid: 54e23bd29f0575344993817082d9f96f, type: 2}
+    amount: 1
+    minimumGrowth: 10
+    maximumGrowth: 10
+    dropChance: 1
   defaultResourceCount: 1
   defaultGetCount: 4
   defaultMaxGauge: 10

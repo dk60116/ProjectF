@@ -518,7 +518,6 @@ MonoBehaviour:
     getCount: 4
     maxGauge: 10
     currentGague: 10
-  portableObjects: []
   workPerGaugeDot: 1
   portableMoveInterval: 0.1
   focusOffset: {x: 0, y: 0.5, z: 0}

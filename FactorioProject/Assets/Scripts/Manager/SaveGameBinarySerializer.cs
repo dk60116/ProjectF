@@ -1006,6 +1006,10 @@ public static class SaveGameBinarySerializer
         writer.Write(state.activeCraftConsumedEnergyUnits);
         writer.Write(state.oilDrillingProgressUnits);
         writer.Write(state.seedPlanterPlantElapsedUnits);
+        writer.Write(state.seedPlanterHasLoadedSeed);
+        writer.Write(state.seedPlanterLoadedSeedItemId);
+        WriteVector2Int(writer, state.seedPlanterLoadedSeedInputCoordinate);
+        writer.Write(state.seedPlanterTransferRemainingUnits);
     }
 
     private static InputOutputModule.PersistentState ReadInputOutputState(BinaryReader reader, int version)
@@ -1071,6 +1075,14 @@ public static class SaveGameBinarySerializer
             state.activeCraftConsumedEnergyUnits = reader.ReadInt64();
             state.oilDrillingProgressUnits = reader.ReadInt64();
             state.seedPlanterPlantElapsedUnits = reader.ReadInt64();
+        }
+
+        if (version >= 62)
+        {
+            state.seedPlanterHasLoadedSeed = reader.ReadBoolean();
+            state.seedPlanterLoadedSeedItemId = reader.ReadInt32();
+            state.seedPlanterLoadedSeedInputCoordinate = ReadVector2Int(reader);
+            state.seedPlanterTransferRemainingUnits = reader.ReadInt64();
         }
 
         return state;

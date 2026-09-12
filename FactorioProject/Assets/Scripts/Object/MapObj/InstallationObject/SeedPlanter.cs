@@ -6,6 +6,7 @@ public class SeedPlanter : InputOutputModule
     public enum OperatingState
     {
         Ready,
+        LoadingSeed,
         Planting,
         NoSeeds,
         NoPower,
@@ -14,7 +15,6 @@ public class SeedPlanter : InputOutputModule
     }
 
     private const float DefaultPlantDurationSeconds = 2f;
-    private const float ProgressEpsilon = 0.0001f;
     private static readonly int BaseColorId = Shader.PropertyToID("_BaseColor");
     private static readonly int ColorId = Shader.PropertyToID("_Color");
     private static readonly int EmissionColorId = Shader.PropertyToID("_EmissionColor");
@@ -26,6 +26,10 @@ public class SeedPlanter : InputOutputModule
     [SerializeField] private Renderer warningLightRenderer;
     [SerializeField, Min(0.1f)] private float workAnimationCycleSeconds = 2.5f;
     [SerializeField, HideInInspector] private long plantElapsedUnits;
+    [SerializeField, HideInInspector] private bool hasLoadedSeed;
+    [SerializeField, HideInInspector] private int loadedSeedItemId = -1;
+    [SerializeField, HideInInspector] private Vector2Int loadedSeedInputCoordinate;
+    [SerializeField, HideInInspector] private long seedTransferRemainingUnits;
 
     private MaterialPropertyBlock warningLightPropertyBlock;
     private OperatingState operatingState = OperatingState.Ready;
@@ -76,7 +80,14 @@ public class SeedPlanter : InputOutputModule
 
         requestingPower = false;
         isOperating = false;
-        RefreshSeedInput();
+        if (hasLoadedSeed)
+        {
+            ApplyLoadedSeedAsCurrentInput();
+        }
+        else
+        {
+            RefreshSeedInput();
+        }
 
         if (!Application.isPlaying || deltaTime <= 0f || !TryGetPlacementRuntime(out _, out _))
         {
@@ -90,13 +101,18 @@ public class SeedPlanter : InputOutputModule
             || terrain == null
             || !terrain.IsFarmlandAt(targetCoordinate))
         {
-            plantElapsedUnits = 0L;
+            if (!hasLoadedSeed)
+            {
+                plantElapsedUnits = 0L;
+            }
+
             SetOperatingState(OperatingState.InvalidGround);
             ApplyPlannedBaseModuleTick(deltaTime);
             return;
         }
 
-        if (currentSeedItemId < 0 || currentSeedCount <= 0 || !hasCurrentInputCoordinate)
+        if (!hasLoadedSeed
+            && (currentSeedItemId < 0 || currentSeedCount <= 0 || !hasCurrentInputCoordinate))
         {
             plantElapsedUnits = 0L;
             SetOperatingState(OperatingState.NoSeeds);
@@ -105,10 +121,44 @@ public class SeedPlanter : InputOutputModule
         }
 
         ItemDefinition seedDefinition = ResolveItemDefinition(currentSeedItemId);
+        if (!ItemDefinition.IsPlantableSeedDefinition(seedDefinition))
+        {
+            plantElapsedUnits = 0L;
+            SetOperatingState(OperatingState.NoSeeds);
+            ApplyPlannedBaseModuleTick(deltaTime);
+            return;
+        }
+
         if (!terrain.CanPlantSeedAt(targetCoordinate, seedDefinition))
         {
             plantElapsedUnits = 0L;
             SetOperatingState(OperatingState.TargetOccupied);
+            ApplyPlannedBaseModuleTick(deltaTime);
+            return;
+        }
+
+        if (hasLoadedSeed && seedTransferRemainingUnits > 0L)
+        {
+            long transferDeltaUnits = DeterministicSimulationUnits.RateForTicks(
+                1f,
+                DeterministicSimulationUnits.DeltaTimeToTicks(deltaTime));
+            seedTransferRemainingUnits = System.Math.Max(
+                0L,
+                seedTransferRemainingUnits - transferDeltaUnits);
+            if (seedTransferRemainingUnits > 0L)
+            {
+                SetOperatingState(OperatingState.LoadingSeed);
+                ApplyPlannedBaseModuleTick(deltaTime);
+                return;
+            }
+        }
+
+        long plantDurationUnits = DeterministicSimulationUnits.FromFloat(PlantDurationSeconds);
+        // A restored completed operation needs no additional energy. It must still
+        // own a loaded seed before committing the planting result.
+        if (hasLoadedSeed && plantElapsedUnits >= plantDurationUnits)
+        {
+            CompletePlanting(terrain, targetCoordinate, seedDefinition);
             ApplyPlannedBaseModuleTick(deltaTime);
             return;
         }
@@ -122,16 +172,47 @@ public class SeedPlanter : InputOutputModule
             return;
         }
 
-        long plantDurationUnits = DeterministicSimulationUnits.FromFloat(PlantDurationSeconds);
-        long remainingDurationUnits = System.Math.Max(0L, plantDurationUnits - plantElapsedUnits);
-        long requestedOperationUnits = System.Math.Min(
-            DeterministicSimulationUnits.RateForTicks(
-                1f,
-                DeterministicSimulationUnits.DeltaTimeToTicks(deltaTime)),
-            remainingDurationUnits);
-        float requestedOperationSeconds = DeterministicSimulationUnits.ToFloat(requestedOperationUnits);
-        if (requestedOperationSeconds <= ProgressEpsilon
-            || !TryConsumeOperatingEnergy(requestedOperationSeconds, out _))
+        if (!hasLoadedSeed)
+        {
+            Vector3 planterWorldPosition = ResolveConsumeTargetWorldPosition();
+            int consumed = ConsumeRuntimeInputAreaCenterObjects(
+                currentInputCoordinate,
+                currentSeedItemId,
+                1,
+                planterWorldPosition,
+                InputConsumeMoveInterval,
+                animateVirtualizedConsumption: true,
+                respectBoxMinimumRetainedCount: false);
+            if (consumed != 1)
+            {
+                plantElapsedUnits = 0L;
+                RefreshSeedInput();
+                SetOperatingState(currentSeedCount > 0
+                    ? OperatingState.Ready
+                    : OperatingState.NoSeeds);
+                ApplyPlannedBaseModuleTick(deltaTime);
+                return;
+            }
+
+            hasLoadedSeed = true;
+            loadedSeedItemId = currentSeedItemId;
+            loadedSeedInputCoordinate = currentInputCoordinate;
+            seedTransferRemainingUnits = DeterministicSimulationUnits.FromFloat(
+                PortableObject.MoveToDuration);
+            ApplyLoadedSeedAsCurrentInput();
+            requestingPower = false;
+            SetOperatingState(OperatingState.LoadingSeed);
+            ApplyPlannedBaseModuleTick(deltaTime);
+            return;
+        }
+
+        // Apply supply to a full simulation step, then clamp the accumulated work.
+        // Scaling the remaining work instead approaches completion asymptotically
+        // under partial power and can strand a seed at the final integer units.
+        long requestedOperationUnits = DeterministicSimulationUnits.RateForTicks(
+            1f,
+            DeterministicSimulationUnits.DeltaTimeToTicks(deltaTime));
+        if (!TryConsumeOperatingEnergy(deltaTime, out _))
         {
             SetOperatingState(OperatingState.NoPower);
             ApplyPlannedBaseModuleTick(deltaTime);
@@ -150,49 +231,46 @@ public class SeedPlanter : InputOutputModule
 
         if (plantElapsedUnits >= plantDurationUnits)
         {
-            int seedItemId = currentSeedItemId;
-            Vector2Int inputCoordinate = currentInputCoordinate;
-            Vector3 consumeTargetWorldPosition = ResolveConsumeTargetWorldPosition();
-            int consumed = ConsumeRuntimeInputAreaCenterObjects(
-                inputCoordinate,
-                seedItemId,
-                1,
-                consumeTargetWorldPosition,
-                InputConsumeMoveInterval,
-                true);
-            plantElapsedUnits = 0L;
-            isOperating = false;
-            requestingPower = false;
-            if (consumed == 1)
-            {
-                currentSeedCount = Mathf.Max(0, currentSeedCount - 1);
-                if (!terrain.TryPlantSeedAt(targetCoordinate, seedDefinition))
-                {
-                    if (TryRestoreRuntimeInputAreaCenterObject(
-                            inputCoordinate,
-                            seedItemId,
-                            consumeTargetWorldPosition))
-                    {
-                        currentSeedCount++;
-                    }
-                    else
-                    {
-                        Debug.LogError($"{nameof(SeedPlanter)} failed to restore seed item {seedItemId} after planting failed.", this);
-                    }
-                }
-
-                SetOperatingState(OperatingState.TargetOccupied);
-            }
-            else
-            {
-                RefreshSeedInput();
-                SetOperatingState(currentSeedCount > 0
-                    ? OperatingState.Ready
-                    : OperatingState.NoSeeds);
-            }
+            CompletePlanting(terrain, targetCoordinate, seedDefinition);
         }
 
         ApplyPlannedBaseModuleTick(deltaTime);
+    }
+
+    private void CompletePlanting(
+        TerrainGenerator terrain,
+        Vector2Int targetCoordinate,
+        ItemDefinition seedDefinition)
+    {
+        int seedItemId = loadedSeedItemId;
+        Vector2Int inputCoordinate = loadedSeedInputCoordinate;
+        Vector3 planterWorldPosition = ResolveConsumeTargetWorldPosition();
+        plantElapsedUnits = 0L;
+        isOperating = false;
+        requestingPower = false;
+        if (terrain.TryPlantSeedAt(targetCoordinate, seedDefinition))
+        {
+            PlaySeedDropAnimation(terrain, targetCoordinate, seedItemId, planterWorldPosition);
+            ClearLoadedSeed();
+            SetOperatingState(OperatingState.TargetOccupied);
+        }
+        else
+        {
+            if (TryRestoreRuntimeInputAreaCenterObject(
+                    inputCoordinate,
+                    seedItemId,
+                    planterWorldPosition))
+            {
+                ClearLoadedSeed();
+                RefreshSeedInput();
+            }
+            else
+            {
+                Debug.LogError($"{nameof(SeedPlanter)} failed to restore loaded seed item {seedItemId} after planting failed.", this);
+            }
+
+            SetOperatingState(OperatingState.TargetOccupied);
+        }
     }
 
     internal int ReceiveHarvestedSeeds(Vector2Int harvestedCoordinate, int seedItemId,
@@ -230,6 +308,10 @@ public class SeedPlanter : InputOutputModule
         PersistentState state = base.CapturePersistentState();
         state.seedPlanterPlantElapsedSeconds = PlantElapsedSeconds;
         state.seedPlanterPlantElapsedUnits = plantElapsedUnits;
+        state.seedPlanterHasLoadedSeed = hasLoadedSeed;
+        state.seedPlanterLoadedSeedItemId = loadedSeedItemId;
+        state.seedPlanterLoadedSeedInputCoordinate = loadedSeedInputCoordinate;
+        state.seedPlanterTransferRemainingUnits = seedTransferRemainingUnits;
         return state;
     }
 
@@ -243,7 +325,29 @@ public class SeedPlanter : InputOutputModule
                     ? System.Math.Max(0L, state.seedPlanterPlantElapsedUnits)
                     : DeterministicSimulationUnits.FromFloat(state.seedPlanterPlantElapsedSeconds))
             : 0L;
-        RefreshSeedInput();
+        hasLoadedSeed = state != null
+                        && state.seedPlanterHasLoadedSeed
+                        && state.seedPlanterLoadedSeedItemId >= 0;
+        loadedSeedItemId = hasLoadedSeed ? state.seedPlanterLoadedSeedItemId : -1;
+        loadedSeedInputCoordinate = hasLoadedSeed
+            ? state.seedPlanterLoadedSeedInputCoordinate
+            : default;
+        seedTransferRemainingUnits = hasLoadedSeed
+            ? System.Math.Min(
+                DeterministicSimulationUnits.FromFloat(PortableObject.MoveToDuration),
+                System.Math.Max(0L, state.seedPlanterTransferRemainingUnits))
+            : 0L;
+        if (hasLoadedSeed)
+        {
+            ApplyLoadedSeedAsCurrentInput();
+        }
+        else
+        {
+            RefreshSeedInput();
+        }
+
+        requestingPower = false;
+        isOperating = false;
         SetOperatingState(OperatingState.Ready);
         WakeRuntimeUpdate();
     }
@@ -353,6 +457,8 @@ public class SeedPlanter : InputOutputModule
         isProducing = operatingState == OperatingState.Planting;
         switch (operatingState)
         {
+            case OperatingState.LoadingSeed:
+                return "Loading seed";
             case OperatingState.Planting:
                 return "Planting";
             case OperatingState.NoSeeds:
@@ -372,6 +478,7 @@ public class SeedPlanter : InputOutputModule
     {
         base.OnPlacementRuntimeCleared();
         plantElapsedUnits = 0L;
+        ClearLoadedSeed();
         currentSeedItemId = -1;
         currentSeedCount = 0;
         hasCurrentInputCoordinate = false;
@@ -390,6 +497,44 @@ public class SeedPlanter : InputOutputModule
 
         coordinate = RuntimeOutputCoordinates[0];
         return true;
+    }
+
+    private void ApplyLoadedSeedAsCurrentInput()
+    {
+        currentSeedItemId = loadedSeedItemId;
+        currentSeedCount = hasLoadedSeed ? 1 : 0;
+        currentInputCoordinate = loadedSeedInputCoordinate;
+        hasCurrentInputCoordinate = hasLoadedSeed;
+    }
+
+    private void ClearLoadedSeed()
+    {
+        hasLoadedSeed = false;
+        loadedSeedItemId = -1;
+        loadedSeedInputCoordinate = default;
+        seedTransferRemainingUnits = 0L;
+        currentSeedItemId = -1;
+        currentSeedCount = 0;
+        hasCurrentInputCoordinate = false;
+    }
+
+    private static void PlaySeedDropAnimation(
+        TerrainGenerator terrain,
+        Vector2Int targetCoordinate,
+        int seedItemId,
+        Vector3 planterWorldPosition)
+    {
+        if (terrain == null
+            || seedItemId < 0
+            || !terrain.TryGetLoadedBlock(targetCoordinate, out Block targetBlock)
+            || targetBlock == null)
+        {
+            return;
+        }
+
+        targetBlock.PlayTransientItemToFloorAnimation(
+            seedItemId,
+            planterWorldPosition);
     }
 
     private void RefreshSeedInput()
@@ -412,7 +557,8 @@ public class SeedPlanter : InputOutputModule
                     1,
                     null,
                     out _,
-                    out Vector2Int coordinate))
+                    out Vector2Int coordinate,
+                    respectBoxMinimumRetainedCount: false))
             {
                 continue;
             }
@@ -420,7 +566,10 @@ public class SeedPlanter : InputOutputModule
             currentSeedItemId = definition.id;
             currentInputCoordinate = coordinate;
             hasCurrentInputCoordinate = true;
-            currentSeedCount = GetRuntimeInputAreaCenterItemCount(coordinate, definition.id);
+            currentSeedCount = GetRuntimeInputAreaCenterItemCount(
+                coordinate,
+                definition.id,
+                respectBoxMinimumRetainedCount: false);
             return;
         }
     }
