@@ -950,6 +950,7 @@ public partial class TerrainGenerator : MonoBehaviour,
     private PortableItemRenderer portableItemRenderer;
     private VirtualConveyorBeltRenderer virtualConveyorBeltRenderer;
     private ConveyorWorld conveyorWorld;
+    private PipeWorld pipeWorld;
     private TerrainChunkStreamingScheduler chunkStreamingScheduler;
 
     private readonly List<ResourceEntry> starterTreeCacheEntries = new List<ResourceEntry>();
@@ -989,6 +990,7 @@ public partial class TerrainGenerator : MonoBehaviour,
         loadedBlocks.ConfigureChunkSize(Mathf.Max(4, chunkSize));
         EnsurePortableItemRenderer();
         EnsureConveyorWorld();
+        EnsurePipeWorld();
         EnsureVirtualConveyorBeltRenderer();
     }
 
@@ -1061,6 +1063,7 @@ public partial class TerrainGenerator : MonoBehaviour,
         EnsureResourceStateStore();
         EnsurePortableItemRenderer();
         EnsureConveyorWorld();
+        EnsurePipeWorld();
         EnsureVirtualConveyorBeltRenderer();
 
         SaveManager saveManager = FindFirstObjectByType<SaveManager>();
@@ -1538,6 +1541,8 @@ public partial class TerrainGenerator : MonoBehaviour,
         NormalizeAnimalGenerationSettings();
         EnsureResourceStateStore();
         EnsurePortableItemRenderer();
+        EnsureConveyorWorld();
+        EnsurePipeWorld();
         EnsureVirtualConveyorBeltRenderer();
 
         if (terrainSaveData != null)
@@ -1645,6 +1650,7 @@ public partial class TerrainGenerator : MonoBehaviour,
             if (pendingSavedWorldFinalization)
             {
                 RefreshLoadedConveyorBeltRuntimeViews();
+                RefreshLoadedPipeRuntimeViews();
                 ExpandConveyorItemSaveRunsAfterBeltTopology(pendingWorldMapSaveData);
                 ApplyLoadedConveyorItemSaveStates(pendingWorldMapSaveData);
             }
@@ -1696,6 +1702,7 @@ public partial class TerrainGenerator : MonoBehaviour,
             SaveLoadedBlockFloorObjects(block);
 
             if (!block.TryGetRuntimeConveyorRecord(out _)
+                && !block.TryGetRuntimePipeRecord(out _)
                 && block.MapObject is InstallationObject installationObject
                 && !installationObject.ExcludeFromTerrainPersistence
                 && savedInstallations.Add(installationObject))
@@ -2208,6 +2215,42 @@ public partial class TerrainGenerator : MonoBehaviour,
 
         results.Clear();
         results.AddRange(dynamicConveyorItemVisualBlocks);
+    }
+
+    private void RefreshLoadedPipeRuntimeViews()
+    {
+        if (!Application.isPlaying)
+        {
+            return;
+        }
+
+        HashSet<Pipe> uniquePipes = new HashSet<Pipe>();
+        EnsureResourceStateStore();
+        foreach (KeyValuePair<Vector2Int, Block> pair in loadedBlocks)
+        {
+            Block block = pair.Value;
+            if (block == null
+                || block.TryGetRuntimePipeRecord(out _)
+                || !(block.MapObject is Pipe pipe)
+                || !pipe.gameObject.scene.IsValid()
+                || !uniquePipes.Add(pipe)
+                || !pipe.TryGetPlacementRuntime(out Vector2Int anchorCoordinate, out _)
+                || resourceStateStore == null
+                || !resourceStateStore.TryGetLiveInstallation(
+                    anchorCoordinate,
+                    out InstallationObject liveInstallation,
+                    out BlockStateStore.InstallationSaveState liveState)
+                || !ReferenceEquals(liveInstallation, pipe))
+            {
+                continue;
+            }
+
+            Pipe sourcePrefab = ResolveInstallationSourcePrefab(liveState) as Pipe;
+            if (RegisterDataOnlyPipeInstallation(pipe, sourcePrefab))
+            {
+                ReleaseInstallationObject(pipe, sourcePrefab);
+            }
+        }
     }
 
     internal bool IsConveyorItemVisualBlockTracked(BlockHandle handle)

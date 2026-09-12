@@ -819,6 +819,8 @@ public partial class TerrainGenerator : MonoBehaviour
     {
         if (installationObject is RobotArm arm && ConvertRobotArmPresentation(arm))
         { ReleaseInstallationObject(arm); return; }
+        if (installationObject is Pipe pipe && RegisterDataOnlyPipeInstallation(pipe))
+        { ReleaseInstallationObject(pipe); return; }
         if (installationObject == null || installationObject.ExcludeFromTerrainPersistence)
         {
             return;
@@ -884,7 +886,6 @@ public partial class TerrainGenerator : MonoBehaviour
 
         BindLoadedBlocksToDataOnlyConveyor(record);
         MarkConveyorNetworkDirty();
-        MarkConveyorLineCacheDirty();
         for (int i = 0; i < record.OccupiedCoordinates.Count; i++)
         {
             RobotArm.WakeAroundCoordinate(record.OccupiedCoordinates[i]);
@@ -971,6 +972,132 @@ public partial class TerrainGenerator : MonoBehaviour
         block.BindRuntimeConveyor(record);
     }
 
+    public bool RegisterDataOnlyPipeInstallation(Pipe pipe, Pipe sourcePrefab = null)
+    {
+        if (pipe == null || pipe.ExcludeFromTerrainPersistence)
+        {
+            return false;
+        }
+
+        EnsureResourceStateStore();
+        if (resourceStateStore == null
+            || !resourceStateStore.TryCaptureInstallationState(
+                pipe,
+                out BlockStateStore.InstallationSaveState state))
+        {
+            return false;
+        }
+
+        state.hasWorldPose = true;
+        state.worldPosition = pipe.transform.position;
+        state.worldRotation = pipe.transform.rotation;
+        Pipe prototype = ResolveDataOnlyPipePrototype(state, sourcePrefab);
+        if (prototype == null)
+        {
+            return false;
+        }
+
+        if (!resourceStateStore.RegisterDataOnlyInstallation(
+                state,
+                out BlockStateStore.InstallationSaveState storedState))
+        {
+            return false;
+        }
+
+        PipeRuntimeRecord record = EnsurePipeWorld()?.Register(
+            storedState,
+            prototype,
+            pipe.transform.position,
+            pipe.transform.rotation,
+            pipe.transform.localScale);
+        if (record == null)
+        {
+            return false;
+        }
+
+        BindLoadedBlocksToDataOnlyPipe(record);
+        for (int i = 0; i < record.OccupiedCoordinates.Count; i++)
+        {
+            RobotArm.WakeAroundCoordinate(record.OccupiedCoordinates[i]);
+        }
+
+        return true;
+    }
+
+    internal bool RegisterDataOnlyPipeState(
+        BlockStateStore.InstallationSaveState state,
+        Pipe prototype,
+        Vector3 worldPosition,
+        Quaternion worldRotation,
+        Vector3 worldScale)
+    {
+        if (state == null || !IsPipePrefabAsset(prototype))
+        {
+            return false;
+        }
+
+        EnsureResourceStateStore();
+        state.hasWorldPose = true;
+        state.worldPosition = worldPosition;
+        state.worldRotation = worldRotation;
+        if (resourceStateStore == null
+            || !resourceStateStore.RegisterDataOnlyInstallation(
+                state,
+                out BlockStateStore.InstallationSaveState storedState))
+        {
+            return false;
+        }
+
+        PipeRuntimeRecord record = EnsurePipeWorld()?.Register(
+            storedState,
+            prototype,
+            worldPosition,
+            worldRotation,
+            worldScale);
+        if (record == null)
+        {
+            return false;
+        }
+
+        BindLoadedBlocksToDataOnlyPipe(record);
+        return true;
+    }
+
+    private Pipe ResolveDataOnlyPipePrototype(
+        BlockStateStore.InstallationSaveState state,
+        Pipe sourcePrefab)
+    {
+        Pipe resolvedPrefab = ResolveInstallationSourcePrefab(state) as Pipe;
+        if (IsPipePrefabAsset(resolvedPrefab))
+        {
+            return resolvedPrefab;
+        }
+
+        return IsPipePrefabAsset(sourcePrefab) ? sourcePrefab : null;
+    }
+
+    private static bool IsPipePrefabAsset(Pipe pipe)
+    {
+        return pipe != null && !pipe.gameObject.scene.IsValid();
+    }
+
+    private void BindLoadedBlocksToDataOnlyPipe(PipeRuntimeRecord record)
+    {
+        if (record == null)
+        {
+            return;
+        }
+
+        IReadOnlyList<Vector2Int> coordinates = record.OccupiedCoordinates;
+        for (int i = 0; i < coordinates.Count; i++)
+        {
+            if (loadedBlocks.TryGetValue(coordinates[i], out Block block) && block != null)
+            {
+                block.BindRuntimePipe(record);
+            }
+        }
+    }
+
     public InstallationObject CreateInstallationObject(MapObject sourcePrefab, Transform parent = null)
     {
         if (sourcePrefab == null)
@@ -979,7 +1106,7 @@ public partial class TerrainGenerator : MonoBehaviour
         }
 
         Transform resolvedParent = parent != null ? parent : transform;
-        if (sourcePrefab is ConveyorBelt || sourcePrefab is RobotArm)
+        if (sourcePrefab is ConveyorBelt || sourcePrefab is RobotArm || sourcePrefab is Pipe)
         {
             return Instantiate(sourcePrefab, resolvedParent) as InstallationObject;
         }
@@ -1021,6 +1148,14 @@ public partial class TerrainGenerator : MonoBehaviour
             return;
         }
 
+        if (installationObject is Pipe)
+        {
+            installationObject.gameObject.SetActive(false);
+            if (Application.isPlaying) Destroy(installationObject.gameObject);
+            else DestroyImmediate(installationObject.gameObject);
+            return;
+        }
+
         if (Application.isPlaying)
         {
             InstallationObjectPool resolvedPool = ResolveInstallationObjectPool();
@@ -1043,6 +1178,8 @@ public partial class TerrainGenerator : MonoBehaviour
     {
         if (installationObject is RobotArm arm && ConvertRobotArmPresentation(arm))
         { ReleaseInstallationObject(arm); return; }
+        if (installationObject is Pipe pipe && RegisterDataOnlyPipeInstallation(pipe))
+        { ReleaseInstallationObject(pipe); return; }
         if (installationObject == null || installationObject.ExcludeFromTerrainPersistence)
         {
             return;

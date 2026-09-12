@@ -58,7 +58,7 @@ public class ObjectInfoPanel : MonoBehaviour
         }
 
         boundTarget = target;
-        boundFocusBlock = target is ConveyorBelt ? focusBlock : null;
+        boundFocusBlock = target is ConveyorBelt || target is Pipe ? focusBlock : null;
         if (!gameObject.activeSelf)
         {
             gameObject.SetActive(true);
@@ -125,7 +125,7 @@ public class ObjectInfoPanel : MonoBehaviour
     public bool IsBoundTo(object target, Block focusBlock)
     {
         return boundTarget == target
-               && (!(target is ConveyorBelt) || boundFocusBlock == focusBlock);
+               && (!(target is ConveyorBelt) && !(target is Pipe) || boundFocusBlock == focusBlock);
     }
 
     private void ResolveReferences()
@@ -212,7 +212,7 @@ public class ObjectInfoPanel : MonoBehaviour
 
         if (mapObject is Pipe pipe)
         {
-            ShowPipeInfo(pipe, underlyingResource);
+            ShowPipeInfo(pipe, underlyingResource, boundFocusBlock);
             return;
         }
 
@@ -718,7 +718,7 @@ public class ObjectInfoPanel : MonoBehaviour
         infoLine.ShowConveyorBelt(conveyorBelt, underlyingResource, focusedBlock);
     }
 
-    private void ShowPipeInfo(Pipe pipe, ResourceInstance underlyingResource)
+    private void ShowPipeInfo(Pipe pipe, ResourceInstance underlyingResource, Block focusedBlock)
     {
         if (infoLine == null)
         {
@@ -730,7 +730,7 @@ public class ObjectInfoPanel : MonoBehaviour
             infoLine.gameObject.SetActive(true);
         }
 
-        infoLine.ShowPipe(pipe, underlyingResource);
+        infoLine.ShowPipe(pipe, underlyingResource, focusedBlock);
     }
 
     private void ShowRobotArmInfo(RobotArmInstance robotArm, ResourceInstance underlyingResource)

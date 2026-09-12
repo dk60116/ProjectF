@@ -123,9 +123,12 @@ public partial class PlayerController : MonoBehaviour
     private RaycastHit[] mouseFocusRaycastHits = new RaycastHit[InitialMouseFocusRaycastHitBufferSize];
     private readonly HashSet<InstallationObject> mouseFocusCheckedInstallations = new HashSet<InstallationObject>();
     private readonly HashSet<ConveyorRuntimeRecord> mouseFocusCheckedConveyorRecords = new HashSet<ConveyorRuntimeRecord>();
+    private readonly HashSet<PipeRuntimeRecord> mouseFocusCheckedPipeRecords = new HashSet<PipeRuntimeRecord>();
     private readonly List<InstallationObject> mouseFocusRuntimeInstallationScratch = new List<InstallationObject>(8);
     private readonly HashSet<InstallationObject> nearbyInstallationObjects = new HashSet<InstallationObject>();
     private readonly HashSet<ConveyorRuntimeRecord> nearbyConveyorRecords = new HashSet<ConveyorRuntimeRecord>();
+    private readonly HashSet<PipeRuntimeRecord> nearbyPipeRecords = new HashSet<PipeRuntimeRecord>();
+    private readonly HashSet<RobotArmInstance> nearbyRobotArmInstances = new HashSet<RobotArmInstance>();
     private readonly List<InstallationObject> nearbyRuntimeInstallationScratch = new List<InstallationObject>(8);
     private readonly List<Renderer> mapObjectFocusRenderers = new List<Renderer>(16);
     private readonly Dictionary<Block, IMapObjectTarget> interactionFocusTargetOverrides = new Dictionary<Block, IMapObjectTarget>();
@@ -3512,6 +3515,41 @@ public partial class PlayerController : MonoBehaviour
         return focusedConveyorBelt != null && focusedBlock != null;
     }
 
+    public bool TryGetFocusedPipe(out Pipe focusedPipe, out Block focusedBlock)
+    {
+        focusedPipe = null;
+        focusedBlock = null;
+        if (currentFocusedBlocks.Count == 0 || player == null)
+        {
+            return false;
+        }
+
+        Vector3 origin = player.BodyTransform != null ? player.BodyTransform.position : transform.position;
+        float nearestDistanceSqr = float.MaxValue;
+        foreach (Block block in currentFocusedBlocks)
+        {
+            if (block == null
+                || !block.TryGetRuntimePipeRecord(out PipeRuntimeRecord record)
+                || record == null
+                || !IsAvailableMapObjectFocusTarget(record.Prototype, block))
+            {
+                continue;
+            }
+
+            float distanceSqr = GetMapObjectFocusSelectionDistanceSqr(record.Prototype, block, origin);
+            if (distanceSqr >= nearestDistanceSqr)
+            {
+                continue;
+            }
+
+            nearestDistanceSqr = distanceSqr;
+            focusedPipe = record.Prototype;
+            focusedBlock = block;
+        }
+
+        return focusedPipe != null && focusedBlock != null;
+    }
+
     private bool TryResolveConveyorFocusTarget(Block block, out ConveyorBelt belt)
     {
         belt = ResolveInteractionFocusTarget(block) as ConveyorBelt;
@@ -5040,6 +5078,10 @@ public partial class PlayerController : MonoBehaviour
             Mathf.RoundToInt(origin.z));
         nearbyInstallationObjects.Clear();
         nearbyConveyorRecords.Clear();
+        nearbyPipeRecords.Clear();
+        PipeWorld pipeWorld = PipeWorld.Current;
+        RobotArmWorld robotArmWorld = RobotArmWorld.Current;
+        nearbyRobotArmInstances.Clear();
 
         for (int offsetY = -searchRadius; offsetY <= searchRadius; offsetY++)
         {
@@ -5051,11 +5093,24 @@ public partial class PlayerController : MonoBehaviour
                     continue;
                 }
 
-                if (block.MapObject is RobotArmInstance dataArm && dataArm.IsRuntimeActive && dataArm.AllowsFocus)
+                if (robotArmWorld != null
+                    && robotArmWorld.TryGetAtCoordinate(coordinate, out RobotArmInstance indexedArm))
                 {
-                    float radius = dataArm.Prototype.FocusActivationRadius;
-                    if (radius > 0f && GetMapObjectFocusSelectionDistanceSqr(dataArm, block, origin) <= radius * radius)
-                        AppendMapObjectFocusBlocks(dataArm, block, results);
+                    TryAppendNearbyRobotArmFocus(indexedArm, block, origin, results);
+                }
+                if (block.MapObject is RobotArmInstance boundArm)
+                {
+                    TryAppendNearbyRobotArmFocus(boundArm, block, origin, results);
+                }
+                if (pipeWorld != null
+                    && pipeWorld.TryGetAtCoordinate(coordinate, out PipeRuntimeRecord pipeRecord))
+                {
+                    TryAppendNearbyInstallationFocus(
+                        pipeRecord.Prototype,
+                        block,
+                        origin,
+                        results,
+                        standingConveyorFocusBlock);
                 }
                 TryAppendNearbyInstallationFocus(
                     block.MapObject as InstallationObject,
@@ -5083,6 +5138,29 @@ public partial class PlayerController : MonoBehaviour
         nearbyRuntimeInstallationScratch.Clear();
     }
 
+    private void TryAppendNearbyRobotArmFocus(
+        RobotArmInstance arm,
+        Block block,
+        Vector3 origin,
+        List<Block> results)
+    {
+        if (arm == null
+            || block == null
+            || !arm.IsRuntimeActive
+            || !arm.AllowsFocus
+            || !nearbyRobotArmInstances.Add(arm))
+        {
+            return;
+        }
+
+        float focusRadius = Mathf.Max(0f, arm.Prototype.FocusActivationRadius);
+        if (focusRadius > 0f
+            && GetMapObjectFocusSelectionDistanceSqr(arm, block, origin) <= focusRadius * focusRadius)
+        {
+            AppendMapObjectFocusBlocks(arm, block, results);
+        }
+    }
+
     private void TryAppendNearbyInstallationFocus(
         InstallationObject installationObject,
         Block block,
@@ -5105,6 +5183,16 @@ public partial class PlayerController : MonoBehaviour
                 out ConveyorRuntimeRecord conveyorRecord))
         {
             if (!nearbyConveyorRecords.Add(conveyorRecord))
+            {
+                return;
+            }
+        }
+        else if (TryGetMatchingPipeRecord(
+                     installationObject,
+                     block,
+                     out PipeRuntimeRecord pipeRecord))
+        {
+            if (!nearbyPipeRecords.Add(pipeRecord))
             {
                 return;
             }
@@ -5173,6 +5261,11 @@ public partial class PlayerController : MonoBehaviour
             return GetOccupiedCoordinateDistanceSqr(conveyorRecord.OccupiedCoordinates, origin);
         }
 
+        if (TryGetMatchingPipeRecord(mapObject, block, out PipeRuntimeRecord pipeRecord))
+        {
+            return GetOccupiedCoordinateDistanceSqr(pipeRecord.OccupiedCoordinates, origin);
+        }
+
         if (mapObject is RobotArmInstance dataArm)
             return GetOccupiedCoordinateDistanceSqr(dataArm.RuntimeOccupiedCoordinates, origin);
         if (mapObject is InstallationObject installation)
@@ -5231,7 +5324,7 @@ public partial class PlayerController : MonoBehaviour
             resourceBounds.Expand(new Vector3(focusPadding * 2f, 0f, focusPadding * 2f));
             return resourceBounds;
         }
-        if (mapObject is ConveyorBelt)
+        if (mapObject is ConveyorBelt || mapObject is Pipe)
         {
             return CreateMapObjectStatusFocusBounds(mapObject, block, focusPadding);
         }
@@ -5382,6 +5475,17 @@ public partial class PlayerController : MonoBehaviour
         else if (TryGetMatchingConveyorRecord(mapObject, fallbackBlock, out ConveyorRuntimeRecord conveyorRecord))
         {
             IReadOnlyList<Vector2Int> occupiedCoordinates = conveyorRecord.OccupiedCoordinates;
+            for (int i = 0; i < occupiedCoordinates.Count; i++)
+            {
+                if (TryAppendFocusBlock(results, occupiedCoordinates[i], mapObject))
+                {
+                    appended = true;
+                }
+            }
+        }
+        else if (TryGetMatchingPipeRecord(mapObject, fallbackBlock, out PipeRuntimeRecord pipeRecord))
+        {
+            IReadOnlyList<Vector2Int> occupiedCoordinates = pipeRecord.OccupiedCoordinates;
             for (int i = 0; i < occupiedCoordinates.Count; i++)
             {
                 if (TryAppendFocusBlock(results, occupiedCoordinates[i], mapObject))
@@ -5770,6 +5874,7 @@ public partial class PlayerController : MonoBehaviour
         Animal closestAnimal = null;
         float closestAnimalDistance = float.MaxValue;
         IMapObjectTarget closestCandidate = null;
+        Block closestDataOnlyFallbackBlock = null;
         float closestDistance = float.MaxValue;
         for (int i = 0; i < hitCount; i++)
         {
@@ -5801,6 +5906,30 @@ public partial class PlayerController : MonoBehaviour
             closestDistance = hit.distance;
         }
 
+        PipeWorld pipeWorld = PipeWorld.Current;
+        if (pipeWorld != null
+            && pipeWorld.TryRaycast(
+                ray,
+                Mathf.Max(0f, maxDistance),
+                out PipeRuntimeRecord pipeRecord,
+                out Vector2Int pipeCoordinate,
+                out float pipeDistance)
+            && pipeRecord.Prototype.IsAlive()
+            && pipeRecord.Prototype.AllowsFocus
+            && pipeDistance < closestDistance)
+        {
+            closestCandidate = pipeRecord.Prototype;
+            closestDistance = pipeDistance;
+            TerrainGenerator pipeFocusTerrain = ResolveTerrainGenerator();
+            if (pipeFocusTerrain != null
+                && !pipeFocusTerrain.TryGetLoadedBlockRuntimeProxy(
+                    pipeCoordinate,
+                    out closestDataOnlyFallbackBlock))
+            {
+                pipeFocusTerrain.TryGetLoadedBlock(pipeCoordinate, out closestDataOnlyFallbackBlock);
+            }
+        }
+
         bool hasPortableObject = TryResolvePortableItemStackFocus(
             ray,
             out PortableObject closestPortableObject,
@@ -5822,7 +5951,14 @@ public partial class PlayerController : MonoBehaviour
         if (closestCandidate != null)
         {
             mapObject = closestCandidate;
-            TryResolveMouseFocusFallbackBlock(closestCandidate, ray, out fallbackBlock);
+            if (closestDataOnlyFallbackBlock != null)
+            {
+                fallbackBlock = closestDataOnlyFallbackBlock;
+            }
+            else
+            {
+                TryResolveMouseFocusFallbackBlock(closestCandidate, ray, out fallbackBlock);
+            }
             return true;
         }
 
@@ -6007,7 +6143,8 @@ public partial class PlayerController : MonoBehaviour
             return true;
         }
 
-        return TryGetMatchingConveyorRecord(mapObject, fallbackBlock, out _);
+        return TryGetMatchingConveyorRecord(mapObject, fallbackBlock, out _)
+               || TryGetMatchingPipeRecord(mapObject, fallbackBlock, out _);
     }
 
     private static bool TryGetMatchingConveyorRecord(
@@ -6029,6 +6166,22 @@ public partial class PlayerController : MonoBehaviour
                    out record);
     }
 
+    private static bool TryGetMatchingPipeRecord(
+        IMapObjectTarget mapObject,
+        Block fallbackBlock,
+        out PipeRuntimeRecord record)
+    {
+        record = null;
+        if (!(mapObject is Pipe pipe) || fallbackBlock == null)
+        {
+            return false;
+        }
+
+        PipeWorld world = PipeWorld.Current;
+        return world != null
+               && world.TryGetMatchingAtCoordinate(fallbackBlock.Coordinate, pipe, out record);
+    }
+
     private static bool IsAvailableMapObjectFocusTarget(IMapObjectTarget mapObject, HashSet<Block> focusBlocks)
     {
         if (!mapObject.IsAlive() || !mapObject.AllowsFocus)
@@ -6043,7 +6196,7 @@ public partial class PlayerController : MonoBehaviour
             return true;
         }
 
-        if (!(mapObject is ConveyorBelt) || focusBlocks == null)
+        if (!(mapObject is ConveyorBelt) && !(mapObject is Pipe) || focusBlocks == null)
         {
             return false;
         }
@@ -6111,6 +6264,7 @@ public partial class PlayerController : MonoBehaviour
 
         mouseFocusCheckedInstallations.Clear();
         mouseFocusCheckedConveyorRecords.Clear();
+        mouseFocusCheckedPipeRecords.Clear();
         mouseFocusRuntimeInstallationScratch.Clear();
         if (TryFindMouseFocusInstallationAtSearchCoordinate(
                 coordinate,
@@ -6166,6 +6320,20 @@ public partial class PlayerController : MonoBehaviour
                 out ConveyorRuntimeRecord belt2FRecord)
             && TrySelectMouseFocusInstallation(
                 belt2FRecord.Prototype,
+                candidateBlock,
+                targetCoordinate,
+                terrain,
+                out installationObject,
+                out fallbackBlock))
+        {
+            return true;
+        }
+
+        PipeWorld pipeWorld = PipeWorld.Current;
+        if (pipeWorld != null
+            && pipeWorld.TryGetAtCoordinate(searchCoordinate, out PipeRuntimeRecord pipeRecord)
+            && TrySelectMouseFocusInstallation(
+                pipeRecord.Prototype,
                 candidateBlock,
                 targetCoordinate,
                 terrain,
@@ -6243,10 +6411,19 @@ public partial class PlayerController : MonoBehaviour
             candidate,
             candidateBlock,
             out ConveyorRuntimeRecord conveyorRecord);
+        PipeRuntimeRecord pipeRecord = null;
         if (hasConveyorRecord)
         {
             if (!mouseFocusCheckedConveyorRecords.Add(conveyorRecord)
                 || !conveyorRecord.Covers(targetCoordinate))
+            {
+                return false;
+            }
+        }
+        else if (TryGetMatchingPipeRecord(candidate, candidateBlock, out pipeRecord))
+        {
+            if (!mouseFocusCheckedPipeRecords.Add(pipeRecord)
+                || !pipeRecord.Covers(targetCoordinate))
             {
                 return false;
             }
@@ -6259,6 +6436,7 @@ public partial class PlayerController : MonoBehaviour
 
         installationObject = candidate;
         fallbackBlock = hasConveyorRecord
+                        || pipeRecord != null
                         || candidateBlock != null && ReferenceEquals(candidateBlock.MapObject, candidate)
             ? candidateBlock
             : null;
@@ -6289,6 +6467,7 @@ public partial class PlayerController : MonoBehaviour
     {
         mouseFocusCheckedInstallations.Clear();
         mouseFocusCheckedConveyorRecords.Clear();
+        mouseFocusCheckedPipeRecords.Clear();
         mouseFocusRuntimeInstallationScratch.Clear();
     }
 

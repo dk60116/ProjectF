@@ -99,6 +99,49 @@ public sealed class RobotArmWorld : MonoBehaviour, IMapObjectUpdateTick, IMapObj
         if (!list.Contains(arm)) list.Add(arm);
     }
     public bool TryGet(Vector2Int storageKey, out RobotArmInstance arm) => byKey.TryGetValue(storageKey, out arm);
+    public bool TryGetAtCoordinate(Vector2Int coordinate, out RobotArmInstance arm)
+    {
+        arm = null;
+        if (!observers.TryGetValue(coordinate, out List<RobotArmInstance> candidates))
+        {
+            return false;
+        }
+
+        for (int i = 0; i < candidates.Count; i++)
+        {
+            RobotArmInstance candidate = candidates[i];
+            if (candidate == null
+                || !candidate.IsRuntimeActive
+                || !ContainsCoordinate(candidate.RuntimeOccupiedCoordinates, coordinate)
+                || arm != null && candidate.SimulationId >= arm.SimulationId)
+            {
+                continue;
+            }
+
+            arm = candidate;
+        }
+
+        return arm != null;
+    }
+
+    private static bool ContainsCoordinate(IReadOnlyList<Vector2Int> coordinates, Vector2Int coordinate)
+    {
+        if (coordinates == null)
+        {
+            return false;
+        }
+
+        for (int i = 0; i < coordinates.Count; i++)
+        {
+            if (coordinates[i] == coordinate)
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
     public void Bind(RobotArmInstance arm)
     {
         foreach (var coordinate in arm.Placement.occupiedCoordinates)

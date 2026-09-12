@@ -2936,6 +2936,7 @@ public sealed class RuntimeItemGiveReceiver : MonoBehaviour
             BuildSimulationExtraTokens(),
             BuildPlayerStateExtraTokens(),
             BuildConveyorWorldExtraTokens(),
+            BuildPipeWorldExtraTokens(),
             $"sceneGameObjects={sceneGameObjectTotal} activeSceneGameObjects={activeSceneGameObjectTotal} sceneMonoBehaviours={sceneMonoBehaviourTotal} activeSceneMonoBehaviours={activeSceneMonoBehaviourTotal}",
             BuildWorldTimeExtraTokens(ResolveWorldTime()));
     }
@@ -2946,6 +2947,14 @@ public sealed class RuntimeItemGiveReceiver : MonoBehaviour
         return world != null
             ? $"beltRecords={world.InstalledBeltCount} beltHostGameObjects={world.SceneGameObjectCount} beltBatchEntries={world.BatchEntryCount}"
             : "beltRecords=0 beltHostGameObjects=0 beltBatchEntries=0";
+    }
+
+    private static string BuildPipeWorldExtraTokens()
+    {
+        PipeWorld world = PipeWorld.Current;
+        return world != null
+            ? $"pipeRecords={world.InstalledPipeCount} pipeHostGameObjects={world.SceneGameObjectCount} pipeHostMonoBehaviours={world.SceneMonoBehaviourCount} pipeBodyMatrices={world.BodyInstanceCount} pipeFluidMatrices={world.FluidInstanceCount}"
+            : "pipeRecords=0 pipeHostGameObjects=0 pipeHostMonoBehaviours=0 pipeBodyMatrices=0 pipeFluidMatrices=0";
     }
 
     private string BuildPlayerStateExtraTokens()

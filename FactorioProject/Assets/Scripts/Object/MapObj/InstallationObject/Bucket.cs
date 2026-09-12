@@ -631,7 +631,7 @@ public class Bucket : InstallationObject,
                 continue;
             }
 
-            Quaternion pipeRotation = pipe.transform.rotation;
+            Quaternion pipeRotation = ResolvePipeRotation(pipeCoordinate, pipe);
             for (int directionIndex = 0; directionIndex < FluidCardinalDirections.Length; directionIndex++)
             {
                 Vector2Int direction = FluidCardinalDirections[directionIndex];
@@ -663,7 +663,14 @@ public class Bucket : InstallationObject,
                 }
             }
 
-            if (pipe.TryGetRemoteConnectionCoordinate(pipeCoordinate, out Vector2Int remoteCoordinate)
+            Vector2Int remoteCoordinate;
+            bool hasRemote = PipeWorld.Current != null
+                             && PipeWorld.Current.TryGetAtCoordinate(
+                                 pipeCoordinate,
+                                 out PipeRuntimeRecord runtimeRecord)
+                ? runtimeRecord.TryGetRemoteConnectionCoordinate(pipeCoordinate, out remoteCoordinate)
+                : pipe.TryGetRemoteConnectionCoordinate(pipeCoordinate, out remoteCoordinate);
+            if (hasRemote
                 && connectedPipeSearchVisited.Add(remoteCoordinate))
             {
                 connectedPipeSearchQueue.Enqueue(remoteCoordinate);
@@ -685,13 +692,22 @@ public class Bucket : InstallationObject,
 
         return pipe.HasConnectionTowardsAt(
             coordinate,
-            pipe.transform.rotation,
+            ResolvePipeRotation(coordinate, pipe),
             requiredConnectionDirection);
     }
 
     private bool TryGetPipeAtCoordinate(Vector2Int coordinate, out Pipe pipe)
     {
         pipe = null;
+        TerrainGenerator terrain = TerrainGenerator.Active;
+        if (terrain != null
+            && terrain.TryGetLoadedBlock(coordinate, out Block block)
+            && block != null
+            && block.TryGetRuntimePipe(out pipe, out _))
+        {
+            return true;
+        }
+
         connectedPipeInstallationsScratch.Clear();
         CollectActiveInstallationsAtRuntimeGridCoordinate(
             coordinate,
@@ -709,6 +725,21 @@ public class Bucket : InstallationObject,
 
         connectedPipeInstallationsScratch.Clear();
         return false;
+    }
+
+    private static Quaternion ResolvePipeRotation(Vector2Int coordinate, Pipe pipe)
+    {
+        TerrainGenerator terrain = TerrainGenerator.Active;
+        if (terrain != null
+            && terrain.TryGetLoadedBlock(coordinate, out Block block)
+            && block != null
+            && block.TryGetRuntimePipe(out Pipe runtimePipe, out Quaternion rotation)
+            && ReferenceEquals(runtimePipe, pipe))
+        {
+            return rotation;
+        }
+
+        return pipe != null ? pipe.transform.rotation : Quaternion.identity;
     }
 
     private bool TryGetFluidSourceAtCoordinate(

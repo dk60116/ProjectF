@@ -138,7 +138,6 @@ public class ConvayorBelt2F : ConveyorBelt
         }
 
         terrain.MarkConveyorNetworkDirty();
-        terrain.MarkConveyorLineCacheDirty();
     }
 
     private static void RebuildCoverageLookup()

@@ -14,10 +14,20 @@ function Member([string]$path, [string]$signature) {
     if ($depth -ne 0) { throw "Unbalanced member: $signature" }
     $text.Substring($start, $end - $start)
 }
+function Require-Text([string]$path, [string]$text, [string]$label) {
+    $sourceText = [IO.File]::ReadAllText((Join-Path $repo $path))
+    if (-not $sourceText.Contains($text, [StringComparison]::Ordinal)) {
+        throw "FAIL ${label}: missing '$text'"
+    }
+    Write-Output "PASS $label"
+}
 $author = 'FactorioProject/Assets/Scripts/Object/MapObj/InstallationObject/RobotArm.cs'
 $arm = 'FactorioProject/Assets/Scripts/Object/MapObj/InstallationObject/RobotArmInstance.cs'
 $world = 'FactorioProject/Assets/Scripts/Map/RobotArmWorld.cs'
 $manager = 'FactorioProject/Assets/Scripts/Manager/MapObjectTickManager.cs'
+Require-Text $world 'public bool TryGetAtCoordinate(Vector2Int coordinate, out RobotArmInstance arm)' 'distance focus can query the central arm index'
+Require-Text 'FactorioProject/Assets/Scripts/Character/Player/PlayerController.cs' 'robotArmWorld.TryGetAtCoordinate(coordinate, out RobotArmInstance indexedArm)' 'distance focus does not depend on Block.MapObject binding'
+Require-Text 'FactorioProject/Assets/Scripts/HUD/PlayerHUD.cs' 'if (target is RobotArmInstance robotArm) return robotArm.IsTargetActive;' 'clicked data-only arms remain valid while active'
 $source = "using System; using System.Collections.Generic; using UnityEngine; using RobotArmState = RobotArm.RobotArmState;`n"
 $source += (Member $manager 'public static class DeterministicSimulationUnits') + "`n"
 $source += "public class RobotArm {`n" + (Member $author 'public enum RobotArmState') + "`n" + (Member $author 'public sealed class TransferState') + "`n}`n"
@@ -43,4 +53,3 @@ $unity = 'C:/Program Files/Unity/Hub/Editor/6000.4.0f1/Editor/Data/Managed/Unity
 [IO.File]::WriteAllText((Join-Path $probe 'Probe.csproj'), '<Project Sdk="Microsoft.NET.Sdk"><PropertyGroup><OutputType>Exe</OutputType><TargetFramework>net9.0</TargetFramework><NoWarn>0649</NoWarn></PropertyGroup><ItemGroup><Reference Include="UnityEngine.CoreModule"><HintPath>' + $unity + '</HintPath></Reference></ItemGroup></Project>')
 dotnet run --configuration Release --project (Join-Path $probe 'Probe.csproj')
 exit $LASTEXITCODE
-

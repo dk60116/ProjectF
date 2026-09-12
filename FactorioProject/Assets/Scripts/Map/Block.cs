@@ -81,6 +81,7 @@ public partial class Block : BaseObject
     private ConveyorBelt runtimeConveyorOverride;
     private ConveyorRuntimeRecord runtimeConveyorRecord;
     private ConveyorRuntimeRecord runtimeConveyorRecordOverride;
+    private PipeRuntimeRecord runtimePipeRecord;
 
     [SerializeField]
     private Transform floorObjectDropAnchor;
@@ -376,6 +377,11 @@ public partial class Block : BaseObject
             runtimeConveyorRecordOverride = null;
         }
 
+        if (!(value is Pipe valuePipe) || IsSceneInstance(valuePipe))
+        {
+            runtimePipeRecord = null;
+        }
+
         ResourceInstance existingResource = resource != null ? resource : mapObject as ResourceInstance;
         if (value is ResourceInstance nextResource)
         {
@@ -598,6 +604,61 @@ public partial class Block : BaseObject
         }
 
         record = null;
+        return false;
+    }
+
+    public void BindRuntimePipe(PipeRuntimeRecord record)
+    {
+        if (record == null)
+        {
+            if (runtimePipeRecord != null)
+            {
+                SetMapObject(null);
+            }
+
+            return;
+        }
+
+        runtimePipeRecord = record;
+        SetMapObject(record.Prototype);
+    }
+
+    public bool TryGetRuntimePipeRecord(out PipeRuntimeRecord record)
+    {
+        if (runtimePipeRecord != null && runtimePipeRecord.Covers(coordinate))
+        {
+            record = runtimePipeRecord;
+            return true;
+        }
+
+        PipeWorld world = PipeWorld.Current;
+        if (world != null && world.TryGetAtCoordinate(coordinate, out record))
+        {
+            return true;
+        }
+
+        record = null;
+        return false;
+    }
+
+    public bool TryGetRuntimePipe(out Pipe pipe, out Quaternion rotation)
+    {
+        if (TryGetRuntimePipeRecord(out PipeRuntimeRecord record))
+        {
+            pipe = record.Prototype;
+            rotation = record.WorldRotation;
+            return pipe != null;
+        }
+
+        pipe = mapObject as Pipe;
+        if (pipe != null && pipe.gameObject.activeInHierarchy)
+        {
+            rotation = pipe.transform.rotation;
+            return true;
+        }
+
+        pipe = null;
+        rotation = Quaternion.identity;
         return false;
     }
 
@@ -4067,6 +4128,7 @@ public partial class Block : BaseObject
                 || runtimeConveyorOverride != null
                 || runtimeConveyorRecord != null
                 || runtimeConveyorRecordOverride != null
+                || runtimePipeRecord != null
                 || focus != null
                 || inputAreaCenterAnchor != null
                 || conveyorSlotDotRoot != null
@@ -6372,12 +6434,11 @@ public partial class Block : BaseObject
             FluidSourceSearchNode node = fluidDirectionSourceSearchQueue.Dequeue();
             if (!terrainGenerator.TryGetLoadedBlock(node.coordinate, out Block currentBlock)
                 || currentBlock == null
-                || !(currentBlock.MapObject is Pipe currentPipe))
+                || !currentBlock.TryGetRuntimePipe(out Pipe currentPipe, out Quaternion currentPipeRotation))
             {
                 continue;
             }
 
-            Quaternion currentPipeRotation = currentPipe.transform.rotation;
             for (int i = 0; i < ConveyorNeighborDirections.Length; i++)
             {
                 Vector2Int direction = ConveyorNeighborDirections[i];
@@ -6403,9 +6464,8 @@ public partial class Block : BaseObject
 
                 if (!terrainGenerator.TryGetLoadedBlock(nextCoordinate, out Block nextBlock)
                     || nextBlock == null
-                    || !(nextBlock.MapObject is Pipe nextPipe)
-                    || !nextPipe.gameObject.activeInHierarchy
-                    || !nextPipe.HasConnectionTowardsAt(nextCoordinate, nextPipe.transform.rotation, -direction)
+                    || !nextBlock.TryGetRuntimePipe(out Pipe nextPipe, out Quaternion nextPipeRotation)
+                    || !nextPipe.HasConnectionTowardsAt(nextCoordinate, nextPipeRotation, -direction)
                     || !fluidDirectionSourceSearchVisited.Add(nextCoordinate))
                 {
                     continue;
@@ -6417,9 +6477,11 @@ public partial class Block : BaseObject
                 fluidDirectionSourceSearchQueue.Enqueue(new FluidSourceSearchNode(nextCoordinate, firstDirection));
             }
 
-            if (currentPipe.TryGetRemoteConnectionCoordinate(
-                    node.coordinate,
-                    out Vector2Int remoteCoordinate)
+            Vector2Int remoteCoordinate;
+            bool hasRemote = currentBlock.TryGetRuntimePipeRecord(out PipeRuntimeRecord currentRecord)
+                ? currentRecord.TryGetRemoteConnectionCoordinate(node.coordinate, out remoteCoordinate)
+                : currentPipe.TryGetRemoteConnectionCoordinate(node.coordinate, out remoteCoordinate);
+            if (hasRemote
                 && fluidDirectionSourceSearchVisited.Add(remoteCoordinate))
             {
                 fluidDirectionSourceSearchQueue.Enqueue(
@@ -6477,7 +6539,10 @@ public partial class Block : BaseObject
             return 0;
         }
 
-        Quaternion pipeRotation = pipe.transform.rotation;
+        Quaternion pipeRotation = TryGetRuntimePipe(out Pipe runtimePipe, out Quaternion runtimeRotation)
+            && ReferenceEquals(runtimePipe, pipe)
+            ? runtimeRotation
+            : pipe.transform.rotation;
         for (int i = 0; i < ConveyorNeighborDirections.Length; i++)
         {
             Vector2Int direction = ConveyorNeighborDirections[i];
@@ -6524,13 +6589,12 @@ public partial class Block : BaseObject
             return false;
         }
 
-        if (neighborBlock.MapObject is Pipe neighborPipe)
+        if (neighborBlock.TryGetRuntimePipe(out Pipe neighborPipe, out Quaternion neighborPipeRotation))
         {
-            return neighborPipe.gameObject.activeInHierarchy
-                   && neighborPipe.HasConnectionTowardsAt(
-                       neighborCoordinate,
-                       neighborPipe.transform.rotation,
-                       -direction);
+            return neighborPipe.HasConnectionTowardsAt(
+                neighborCoordinate,
+                neighborPipeRotation,
+                -direction);
         }
 
         if (neighborBlock.MapObject is Pump pump)

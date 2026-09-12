@@ -498,7 +498,7 @@ public class Fluidtank : InstallationObject, IMapObjectUpdateTick, IMapObjectUpd
                     || (pipe != null
                         && !pipe.HasConnectionTowardsAt(
                             coordinate,
-                            pipe.transform.rotation,
+                            ResolvePipeRuntimeRotation(coordinate, pipe),
                             direction)))
                 {
                     continue;
@@ -515,7 +515,7 @@ public class Fluidtank : InstallationObject, IMapObjectUpdateTick, IMapObjectUpd
                     || (nextPipe != null
                         && !nextPipe.HasConnectionTowardsAt(
                             nextCoordinate,
-                            nextPipe.transform.rotation,
+                            ResolvePipeRuntimeRotation(nextCoordinate, nextPipe),
                             -direction)))
                 {
                     continue;
@@ -525,8 +525,15 @@ public class Fluidtank : InstallationObject, IMapObjectUpdateTick, IMapObjectUpd
                 fluidNetworkSearchQueue.Enqueue(nextCoordinate);
             }
 
-            if (pipe != null
-                && pipe.TryGetRemoteConnectionCoordinate(coordinate, out Vector2Int remoteCoordinate)
+            Vector2Int remoteCoordinate = default;
+            bool hasRemote = pipe != null
+                             && PipeWorld.Current != null
+                             && PipeWorld.Current.TryGetAtCoordinate(
+                                 coordinate,
+                                 out PipeRuntimeRecord runtimeRecord)
+                ? runtimeRecord.TryGetRemoteConnectionCoordinate(coordinate, out remoteCoordinate)
+                : pipe != null && pipe.TryGetRemoteConnectionCoordinate(coordinate, out remoteCoordinate);
+            if (hasRemote
                 && fluidNetworkSearchVisited.Add(remoteCoordinate))
             {
                 fluidNetworkSearchQueue.Enqueue(remoteCoordinate);
@@ -544,12 +551,19 @@ public class Fluidtank : InstallationObject, IMapObjectUpdateTick, IMapObjectUpd
     {
         tank = null;
         pipe = null;
+        PipeWorld pipeWorld = PipeWorld.Current;
+        if (pipeWorld != null
+            && pipeWorld.TryGetAtCoordinate(coordinate, out PipeRuntimeRecord pipeRecord))
+        {
+            pipe = pipeRecord.Prototype;
+        }
+
         adjacentInstallationScratch.Clear();
         if (!CollectActiveInstallationsAtRuntimeGridCoordinate(
                 coordinate,
                 adjacentInstallationScratch))
         {
-            return false;
+            return pipe != null;
         }
 
         for (int i = 0; i < adjacentInstallationScratch.Count; i++)
@@ -774,13 +788,20 @@ public class Fluidtank : InstallationObject, IMapObjectUpdateTick, IMapObjectUpd
         neighborTank = null;
         neighborFluidItemId = -1;
         Vector2Int neighborCoordinate = tankCoordinate + directionFromTank;
+        Pipe connectedPipe = null;
+        PipeWorld pipeWorld = PipeWorld.Current;
+        if (pipeWorld != null
+            && pipeWorld.TryGetAtCoordinate(neighborCoordinate, out PipeRuntimeRecord dataPipe)
+            && dataPipe.HasConnectionTowardsAt(neighborCoordinate, -directionFromTank))
+        {
+            connectedPipe = dataPipe.Prototype;
+        }
 
         adjacentInstallationScratch.Clear();
         if (CollectActiveInstallationsAtRuntimeGridCoordinate(
                 neighborCoordinate,
                 adjacentInstallationScratch))
         {
-            Pipe connectedPipe = null;
             for (int i = 0; i < adjacentInstallationScratch.Count; i++)
             {
                 InstallationObject neighbor = adjacentInstallationScratch[i];
@@ -800,7 +821,7 @@ public class Fluidtank : InstallationObject, IMapObjectUpdateTick, IMapObjectUpd
                 if (neighbor is Pipe pipe
                     && pipe.HasConnectionTowardsAt(
                         neighborCoordinate,
-                        pipe.transform.rotation,
+                        ResolvePipeRuntimeRotation(neighborCoordinate, pipe),
                         -directionFromTank))
                 {
                     connectedPipe = pipe;
@@ -808,19 +829,47 @@ public class Fluidtank : InstallationObject, IMapObjectUpdateTick, IMapObjectUpd
             }
 
             adjacentInstallationScratch.Clear();
-            if (connectedPipe != null)
+        }
+
+        if (connectedPipe != null)
+        {
+            PipeWorld world = PipeWorld.Current;
+            if (world != null
+                && world.TryGetAtCoordinate(
+                    neighborCoordinate,
+                    out PipeRuntimeRecord runtimePipe))
+            {
+                runtimePipe.TryGetConnectedFluidItemIdIgnoringStorageCoordinate(
+                    neighborCoordinate,
+                    ignoredStorageCoordinate,
+                    out neighborFluidItemId);
+            }
+            else
             {
                 connectedPipe.TryGetConnectedFluidItemIdIgnoringStorageCoordinate(
                     ignoredStorageCoordinate,
                     out neighborFluidItemId);
-                return true;
             }
+            return true;
         }
 
         return TryGetPipeOutputAreaConnectionFluidItemId(
             tankCoordinate,
             directionFromTank,
             out neighborFluidItemId);
+    }
+
+    private static Quaternion ResolvePipeRuntimeRotation(Vector2Int coordinate, Pipe pipe)
+    {
+        PipeWorld world = PipeWorld.Current;
+        if (world != null
+            && world.TryGetAtCoordinate(coordinate, out PipeRuntimeRecord record)
+            && ReferenceEquals(record.Prototype, pipe))
+        {
+            return record.WorldRotation;
+        }
+
+        return pipe != null ? pipe.transform.rotation : Quaternion.identity;
     }
 
     private bool HasPipeOutputAreaConnection(Vector2Int tankCoordinate, Vector2Int directionFromTank)

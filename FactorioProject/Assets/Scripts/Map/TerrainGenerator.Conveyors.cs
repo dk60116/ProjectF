@@ -1922,6 +1922,16 @@ public partial class TerrainGenerator : MonoBehaviour
 
     public void MarkConveyorNetworkDirty()
     {
+        // Multi-cell installations invalidate several neighboring blocks in one operation.
+        // Once all derived caches are dirty, repeating their full clears only stalls input.
+        if (beltJobsDirty
+            && beltSplitDirty
+            && conveyorNetworkCacheDirty
+            && conveyorLineCacheDirty)
+        {
+            return;
+        }
+
         beltJobsDirty = true;
         beltSplitDirty = true;
         conveyorNetworkCacheDirty = true;
@@ -1939,6 +1949,12 @@ public partial class TerrainGenerator : MonoBehaviour
 
     public void MarkConveyorLineCacheDirty()
     {
+        // Network invalidation already covers these three caches.
+        if (beltJobsDirty && beltSplitDirty && conveyorLineCacheDirty)
+        {
+            return;
+        }
+
         beltJobsDirty = true;
         beltSplitDirty = true;
         conveyorLineCacheDirty = true;
@@ -4361,6 +4377,7 @@ public partial class TerrainGenerator : MonoBehaviour
         MapObjectTickProfiler.AddRuntimeCounter("Render", "DisabledBeltRenderers", beltRendererCount - enabledBeltRendererCount);
 
         RobotArmWorld.AppendProfilerCounters();
+        PipeWorld.AppendProfilerCounters();
         InputOutputModule.AppendFluidOutputNetworkProfilerCounters();
 
         GameManager gameManager = GameManager.Instance;

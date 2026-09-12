@@ -2833,7 +2833,7 @@ public partial class PlayerHUD : BagSlot
         bool openedByYellowFocus,
         PlayerController playerController)
     {
-        if (!(target is ConveyorBelt conveyorBelt))
+        if (!(target is ConveyorBelt) && !(target is Pipe))
         {
             return null;
         }
@@ -2845,12 +2845,25 @@ public partial class PlayerHUD : BagSlot
             return clickedObjectInfoFallbackBlock;
         }
 
-        return playerController != null
-               && playerController.TryGetFocusedConveyorBelt(
-                   out ConveyorBelt focusedConveyorBelt,
-                   out Block focusedBlock)
-               && ReferenceEquals(focusedConveyorBelt, conveyorBelt)
-            ? focusedBlock
+        if (playerController == null)
+        {
+            return null;
+        }
+
+        if (target is ConveyorBelt conveyorBelt)
+        {
+            return playerController.TryGetFocusedConveyorBelt(
+                       out ConveyorBelt focusedConveyorBelt,
+                       out Block focusedBlock)
+                   && ReferenceEquals(focusedConveyorBelt, conveyorBelt)
+                ? focusedBlock
+                : null;
+        }
+
+        Pipe pipe = (Pipe)target;
+        return playerController.TryGetFocusedPipe(out Pipe focusedPipe, out Block pipeFocusBlock)
+               && ReferenceEquals(focusedPipe, pipe)
+            ? pipeFocusBlock
             : null;
     }
 
@@ -4108,32 +4121,42 @@ public partial class PlayerHUD : BagSlot
         }
 
         if (target is ResourceInstance resource) return resource.IsRuntimeActive;
+        if (target is RobotArmInstance robotArm) return robotArm.IsTargetActive;
 
         if (target is Component component && component != null && component.gameObject.activeInHierarchy)
         {
             return true;
         }
 
-        if (!(target is ConveyorBelt conveyorBelt))
-        {
-            return false;
-        }
-
         if (ReferenceEquals(target, clickedObjectInfoTarget)
-            && clickedObjectInfoFallbackBlock != null
-            && ConveyorWorld.Current != null
-            && ConveyorWorld.Current.TryGetMatchingAtCoordinate(
-                clickedObjectInfoFallbackBlock.Coordinate,
-                conveyorBelt,
-                out _))
+            && clickedObjectInfoFallbackBlock != null)
         {
-            return true;
+            if (target is ConveyorBelt conveyorBelt
+                && ConveyorWorld.Current != null
+                && ConveyorWorld.Current.TryGetMatchingAtCoordinate(
+                    clickedObjectInfoFallbackBlock.Coordinate,
+                    conveyorBelt,
+                    out _))
+            {
+                return true;
+            }
+
+            if (target is Pipe pipe
+                && PipeWorld.Current != null
+                && PipeWorld.Current.TryGetMatchingAtCoordinate(
+                    clickedObjectInfoFallbackBlock.Coordinate,
+                    pipe,
+                    out _))
+            {
+                return true;
+            }
         }
 
-        return currentObjectInfoOpenedByYellowFocus
+        return (target is ConveyorBelt || target is Pipe)
+               && currentObjectInfoOpenedByYellowFocus
                && playerController != null
                && playerController.TryGetFocusedMapObject(out IMapObjectTarget focusedMapObject)
-               && ReferenceEquals(focusedMapObject, conveyorBelt);
+               && ReferenceEquals(focusedMapObject, target);
     }
 
     private PlayerController ResolvePlayerController()

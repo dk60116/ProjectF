@@ -10,6 +10,7 @@ public partial class Spliterbelt : ConveyorBelt
     [SerializeField] private Transform splitterBody;
     private int leftWheelChannel;
     private int rightWheelChannel;
+    private bool suppressCoveredBlockRefresh;
 
     protected new void Awake()
     {
@@ -159,6 +160,9 @@ public partial class Spliterbelt : ConveyorBelt
 
     public void RefreshCoveredBlocks()
     {
+        if (suppressCoveredBlockRefresh)
+            return;
+
         TerrainGenerator terrain = TerrainGenerator.Active;
         if (terrain == null)
             return;
@@ -169,7 +173,13 @@ public partial class Spliterbelt : ConveyorBelt
                 block.InvalidateRuntimeConveyorTopology();
         }
         terrain.MarkConveyorNetworkDirty();
-        terrain.MarkConveyorLineCacheDirty();
+    }
+
+    internal void SetEditMaterializationTopologySuppressed(bool suppressed)
+    {
+        // The data record remains authoritative until the edit session detaches it.
+        // Avoid rebuilding the complete belt graph for this short-lived capture proxy.
+        suppressCoveredBlockRefresh = suppressed;
     }
 
     public override void RefreshEndpointVisuals()

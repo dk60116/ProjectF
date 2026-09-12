@@ -598,6 +598,8 @@ public sealed class ConveyorWorld : MonoBehaviour, IVirtualRenderBatchOwner
         new Dictionary<Vector2Int, List<ConveyorRuntimeRecord>>();
     private readonly Dictionary<Vector2Int, BoxCollider> splitterCollidersByStorageKey =
         new Dictionary<Vector2Int, BoxCollider>();
+    private readonly Dictionary<Collider, ConveyorRuntimeRecord> splitterRecordsByCollider =
+        new Dictionary<Collider, ConveyorRuntimeRecord>();
     private readonly List<VirtualRenderBatchEntry> batchEntries = new List<VirtualRenderBatchEntry>(1024);
     private readonly List<AnimatedVisualEntry> animatedVisualEntries = new List<AnimatedVisualEntry>(64);
     private readonly List<Material> materialScratch = new List<Material>(4);
@@ -692,7 +694,17 @@ public sealed class ConveyorWorld : MonoBehaviour, IVirtualRenderBatchOwner
             DestroyRuntimeComponent(collider);
         }
         splitterCollidersByStorageKey.Clear();
+        splitterRecordsByCollider.Clear();
         batchesDirty = true;
+    }
+
+    internal bool TryGetSplitterFromCollider(Collider collider, out ConveyorRuntimeRecord record)
+    {
+        record = null;
+        return collider != null
+               && splitterRecordsByCollider.TryGetValue(collider, out record)
+               && record != null
+               && record.HasValidPrototype;
     }
 
     public bool TryGetAtCoordinate(Vector2Int coordinate, out ConveyorRuntimeRecord record)
@@ -1468,6 +1480,7 @@ public sealed class ConveyorWorld : MonoBehaviour, IVirtualRenderBatchOwner
         collider.isTrigger = sourceCollider.isTrigger;
         collider.sharedMaterial = sourceCollider.sharedMaterial;
         splitterCollidersByStorageKey[record.StorageKey] = collider;
+        splitterRecordsByCollider[collider] = record;
     }
 
     private void RemoveSplitterCollider(Vector2Int storageKey)
@@ -1478,6 +1491,7 @@ public sealed class ConveyorWorld : MonoBehaviour, IVirtualRenderBatchOwner
         }
 
         splitterCollidersByStorageKey.Remove(storageKey);
+        splitterRecordsByCollider.Remove(collider);
         DestroyRuntimeComponent(collider);
     }
 

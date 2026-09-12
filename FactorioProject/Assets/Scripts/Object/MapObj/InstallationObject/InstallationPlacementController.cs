@@ -2149,6 +2149,16 @@ public class InstallationPlacementController : MonoBehaviour
 
         Ray ray = targetCamera.ScreenPointToRay(pointerPosition);
         float maxDistance = targetCamera.farClipPlane > 0f ? targetCamera.farClipPlane : 512f;
+        if (TryGetEditableDataOnlySplitterFromRaycast(
+                ray,
+                maxDistance,
+                out ConveyorRuntimeRecord splitterRecord)
+            && TryMaterializeDataOnlyConveyorForEditing(splitterRecord, out installationObject))
+        {
+            anchorCoordinate = splitterRecord.AnchorCoordinate;
+            return true;
+        }
+
         if (TryGetBlockFromGroundPlane(ray, out Block clickedBlock)
             && clickedBlock != null)
         {
@@ -2169,6 +2179,47 @@ public class InstallationPlacementController : MonoBehaviour
         }
 
         return TryGetEditableInstallationFromRaycast(ray, maxDistance, out installationObject, out anchorCoordinate);
+    }
+
+    private bool TryGetEditableDataOnlySplitterFromRaycast(
+        Ray ray,
+        float maxDistance,
+        out ConveyorRuntimeRecord record)
+    {
+        record = null;
+        ConveyorWorld conveyorWorld = ConveyorWorld.Current;
+        if (conveyorWorld == null)
+        {
+            return false;
+        }
+
+        int hitCount = Physics.RaycastNonAlloc(
+            ray,
+            pointerRaycastHits,
+            Mathf.Max(0f, maxDistance),
+            Physics.DefaultRaycastLayers,
+            QueryTriggerInteraction.Ignore);
+        if (hitCount <= 0)
+        {
+            return false;
+        }
+
+        float bestDistance = float.PositiveInfinity;
+        for (int i = 0; i < hitCount; i++)
+        {
+            RaycastHit hit = pointerRaycastHits[i];
+            if (hit.collider == null
+                || hit.distance >= bestDistance
+                || !conveyorWorld.TryGetSplitterFromCollider(hit.collider, out ConveyorRuntimeRecord candidate))
+            {
+                continue;
+            }
+
+            record = candidate;
+            bestDistance = hit.distance;
+        }
+
+        return record != null;
     }
 
     private bool TryGetEditableTrainAtRailPointer(
@@ -2350,6 +2401,13 @@ public class InstallationPlacementController : MonoBehaviour
                 if (terrain.TryGetLoadedBlock(coordinate, out var occupied)) occupied.SetMapObject(proxy);
             installationObject = proxy;
             anchorCoordinate = dataArm.Placement.anchorCoordinate;
+            return true;
+        }
+
+        if (block.TryGetRuntimePipeRecord(out PipeRuntimeRecord dataPipe)
+            && TryMaterializeDataOnlyPipeForEditing(dataPipe, out installationObject))
+        {
+            anchorCoordinate = dataPipe.IsUnderground ? block.Coordinate : dataPipe.AnchorCoordinate;
             return true;
         }
         installationObject = block.MapObject as InstallationObject;
@@ -6394,7 +6452,7 @@ public class InstallationPlacementController : MonoBehaviour
             if (!placementPlan.attachToFreightCarBoxPoint)
             {
                 placedAnchorCoordinates.Add(installedAnchorCoordinate);
-                if (installedObject is UndergroundPipe
+                if (placementPlan.sourcePrefab is UndergroundPipe
                     && placementPlan.preview is UndergroundPipe undergroundPipePreview
                     && undergroundPipePreview.TryGetPairCoordinates(
                         out Vector2Int firstEndpoint,
@@ -6505,10 +6563,15 @@ public class InstallationPlacementController : MonoBehaviour
             {
                 if (isPipeBlueprintPlacement)
                 {
-                    // Do not infer topology again after installation. The staged
-                    // new pipes already use their visible blueprint variants; apply
-                    // the same captured snapshot to affected installed neighbours.
+                    // Apply captured preview plans to temporary live presentations.
                     ApplyInstalledPipeBlueprintPlans(installedPipeBlueprintPlans);
+                    // Data-only installed pipes have no per-pipe presentation on which a
+                    // preview plan can be stored, so resolve their records after commit.
+                    NormalizePipeVariantsAroundCoordinates(
+                        placedAnchorCoordinates,
+                        true,
+                        null,
+                        null);
                 }
                 else
                 {
@@ -6571,6 +6634,8 @@ public class InstallationPlacementController : MonoBehaviour
                 pipe.RefreshFluidDisplayImmediately();
             }
         }
+
+        Pipe.InvalidateFluidDisplayNetworkCache();
     }
 
     private bool TryCreateInstallPreviewPlacementPlan(
@@ -10404,12 +10469,12 @@ public class InstallationPlacementController : MonoBehaviour
         if (terrain != null
             && terrain.TryGetLoadedBlock(coordinate, out Block block)
             && block != null
-            && block.MapObject is Pipe installedPipe
-            && installedPipe.gameObject.activeInHierarchy)
+            && block.TryGetRuntimePipe(out Pipe installedPipe, out Quaternion installedPipeRotation))
         {
             Pipe pipeToEvaluate = installedPipe;
-            Quaternion pipeRotation = installedPipe.transform.rotation;
-            if (TryGetInstalledPipeVariantPreview(installedPipe, out Pipe variantPreviewPipe, out Quaternion previewRotation))
+            Quaternion pipeRotation = installedPipeRotation;
+            if (installedPipe.gameObject.scene.IsValid()
+                && TryGetInstalledPipeVariantPreview(installedPipe, out Pipe variantPreviewPipe, out Quaternion previewRotation))
             {
                 pipeToEvaluate = variantPreviewPipe;
                 pipeRotation = previewRotation;
@@ -12033,9 +12098,15 @@ public class InstallationPlacementController : MonoBehaviour
         if (terrain != null
             && terrain.TryGetLoadedBlock(coordinate, out Block block)
             && block != null
-            && block.MapObject is Pipe installedPipe
-            && installedPipe.gameObject.activeInHierarchy
-            && installedPipe.TryGetObjectInfoFluidItemId(out fluidItemId)
+            && block.TryGetRuntimePipe(out Pipe installedPipe, out _)
+            && (block.TryGetRuntimePipeRecord(out PipeRuntimeRecord runtimePipe)
+                ? runtimePipe.TryGetObjectInfoFluidInfo(
+                    coordinate,
+                    out fluidItemId,
+                    out _,
+                    out _,
+                    false)
+                : installedPipe.TryGetObjectInfoFluidItemId(out fluidItemId))
             && fluidItemId >= 0)
         {
             return true;
@@ -12261,6 +12332,13 @@ public class InstallationPlacementController : MonoBehaviour
             return false;
         }
 
+        PipeWorld pipeWorld = PipeWorld.Current;
+        if (pipeWorld != null
+            && pipeWorld.TryGetMatchingAtCoordinate(coordinate, pipe, out PipeRuntimeRecord runtimePipe))
+        {
+            return runtimePipe.HasConnectionTowardsAt(coordinate, direction);
+        }
+
         return TryGetManualPipeConnectionMask(
                 pipe,
                 coordinate,
@@ -12326,10 +12404,11 @@ public class InstallationPlacementController : MonoBehaviour
         if (terrain != null
             && terrain.TryGetLoadedBlock(coordinate, out Block block)
             && block != null
-            && block.MapObject is Pipe installedPipe
-            && installedPipe.gameObject.activeInHierarchy)
+            && block.TryGetRuntimePipe(out Pipe installedPipe, out _))
         {
-            return installedPipe.RuntimePlacementSequence;
+            return block.TryGetRuntimePipeRecord(out PipeRuntimeRecord runtimePipe)
+                ? runtimePipe.PlacementSequence
+                : installedPipe.RuntimePlacementSequence;
         }
 
         if (terrain != null
@@ -17651,9 +17730,22 @@ public class InstallationPlacementController : MonoBehaviour
             if (!inspectedCoordinates.Add(coordinate)
                 || !terrain.TryGetLoadedBlock(coordinate, out Block block)
                 || block == null
-                || !(block.MapObject is Pipe pipe)
-                || !pipe.TryGetPlacementRuntime(out Vector2Int pipeAnchorCoordinate, out _)
-                || !terrain.TryGetInstallationStateAtCoordinate(
+                || !block.TryGetRuntimePipe(out Pipe pipe, out Quaternion pipeRotation))
+            {
+                return;
+            }
+
+            Vector2Int pipeAnchorCoordinate;
+            if (block.TryGetRuntimePipeRecord(out PipeRuntimeRecord runtimePipe))
+            {
+                pipeAnchorCoordinate = runtimePipe.AnchorCoordinate;
+            }
+            else if (!pipe.TryGetPlacementRuntime(out pipeAnchorCoordinate, out _))
+            {
+                return;
+            }
+
+            if (!terrain.TryGetInstallationStateAtCoordinate(
                     pipeAnchorCoordinate,
                     out BlockStateStore.InstallationSaveState savedState)
                 || savedState == null)
@@ -17666,7 +17758,7 @@ public class InstallationPlacementController : MonoBehaviour
                 if (CanPipePlacementFluidConnectionsMatch(
                         pipeAnchorCoordinate,
                         pipe,
-                        pipe.transform.rotation,
+                        pipeRotation,
                         null,
                         savedState.pipeConnectionMask))
                 {
@@ -17908,8 +18000,71 @@ public class InstallationPlacementController : MonoBehaviour
         TerrainGenerator terrain = ResolveInstallPreviewTerrain();
         if (terrain == null
             || !terrain.TryGetLoadedBlock(coordinate, out Block block)
-            || block == null
-            || !(block.MapObject is Pipe installedPipe)
+            || block == null)
+        {
+            return false;
+        }
+
+        if (block.TryGetRuntimePipeRecord(out PipeRuntimeRecord runtimePipe))
+        {
+            if (runtimePipe.IsUnderground
+                || runtimePipe.AnchorCoordinate != coordinate
+                || IsProtectedAnchorCoordinate(runtimePipe.AnchorCoordinate, protectedAnchorCoordinates))
+            {
+                return false;
+            }
+
+            Pipe runtimePrototype = runtimePipe.Prototype;
+            Pipe straightPrototype = runtimePrototype.StraightVariantPrefab != null
+                ? runtimePrototype.StraightVariantPrefab
+                : runtimePrototype;
+            int runtimeConnectionMask = runtimePipe.State.pipeConnectionMask >= 0
+                ? runtimePipe.State.pipeConnectionMask
+                : runtimePrototype.GetConnectionMask(runtimePipe.WorldRotation);
+            if (!TryResolvePipePlacementVariantWithCompatibleAdjacency(
+                    straightPrototype,
+                    runtimePipe.AnchorCoordinate,
+                    runtimePipe.QuarterTurns,
+                    previewToIgnore,
+                    runtimeConnectionMask,
+                    out MapObject runtimeDesiredPrefab,
+                    out int runtimeDesiredQuarterTurns)
+                || !(runtimeDesiredPrefab is Pipe desiredRuntimePipe))
+            {
+                return false;
+            }
+
+            runtimeDesiredQuarterTurns = NormalizePlacementQuarterTurnsForObject(
+                desiredRuntimePipe,
+                runtimeDesiredQuarterTurns);
+            Quaternion runtimeDesiredRotation = GetInstalledObjectRotation(
+                desiredRuntimePipe,
+                runtimeDesiredQuarterTurns);
+            Vector3 runtimeDesiredPosition = GetInstalledObjectWorldPosition(
+                runtimePipe.AnchorCoordinate,
+                desiredRuntimePipe,
+                runtimeDesiredQuarterTurns);
+            if (runtimePrototype.VariantKind == desiredRuntimePipe.VariantKind
+                && runtimePipe.QuarterTurns == runtimeDesiredQuarterTurns
+                && Mathf.Abs(Quaternion.Dot(runtimePipe.WorldRotation, runtimeDesiredRotation)) >= 0.9999f
+                && (runtimePipe.WorldPosition - runtimeDesiredPosition).sqrMagnitude <= 0.0001f)
+            {
+                return false;
+            }
+
+            BlockStateStore.InstallationSaveState nextState = runtimePipe.State.Clone();
+            nextState.quarterTurns = runtimeDesiredQuarterTurns;
+            nextState.conveyorVariantKind = desiredRuntimePipe.VariantKindId;
+            nextState.pipeConnectionMask = desiredRuntimePipe.GetConnectionMask(runtimeDesiredRotation);
+            return terrain.RegisterDataOnlyPipeState(
+                nextState,
+                desiredRuntimePipe,
+                runtimeDesiredPosition,
+                runtimeDesiredRotation,
+                runtimePipe.WorldScale);
+        }
+
+        if (!(block.MapObject is Pipe installedPipe)
             || installedPipe == null
             || installedPipe is UndergroundPipe
             || !installedPipe.gameObject.activeInHierarchy
@@ -19340,13 +19495,12 @@ public class InstallationPlacementController : MonoBehaviour
             else if (terrain != null
                      && terrain.TryGetLoadedBlock(coordinate, out Block block)
                      && block != null
-                     && block.MapObject is Pipe installedPipe
-                     && installedPipe != null
-                     && installedPipe.gameObject.activeInHierarchy)
+                     && block.TryGetRuntimePipe(out Pipe installedPipe, out Quaternion installedRotation))
             {
                 pipe = installedPipe;
-                rotation = installedPipe.transform.rotation;
+                rotation = installedRotation;
                 if (useBlueprintState
+                    && installedPipe.gameObject.scene.IsValid()
                     && installedPipeVariantResolutionOverrides.TryGetValue(
                         installedPipe,
                         out InstalledPipeVariantPreviewPlan virtualPlan)
@@ -25888,11 +26042,10 @@ public class InstallationPlacementController : MonoBehaviour
             && terrain.TryGetLoadedBlock(coordinate, out Block block)
             && block != null)
         {
-            if (block.MapObject is Pipe installedPipe
-                && installedPipe.gameObject.activeInHierarchy)
+            if (block.TryGetRuntimePipe(out Pipe installedPipe, out Quaternion installedRotation))
             {
                 pipe = installedPipe;
-                pipeRotation = installedPipe.transform.rotation;
+                pipeRotation = installedRotation;
                 return true;
             }
 
@@ -37270,6 +37423,70 @@ public class InstallationPlacementController : MonoBehaviour
 
         materialized.transform.SetPositionAndRotation(record.WorldPosition, record.WorldRotation);
         materialized.transform.localScale = record.WorldScale;
+        Spliterbelt splitter = materializedBelt as Spliterbelt;
+        splitter?.SetEditMaterializationTopologySuppressed(true);
+        try
+        {
+            ConfigureInstalledObjectRuntime(
+                materialized,
+                record.AnchorCoordinate,
+                record.QuarterTurns,
+                placementSequence: record.PlacementSequence,
+                occupiedCoordinatesOverride: record.OccupiedCoordinates);
+            materialized.ApplyItemFilterMask(
+                record.State.itemFilterMaskWords,
+                record.State.itemFilterMaskInitialized);
+            splitter?.ApplySplitterState(record.State.splitterState);
+        }
+        finally
+        {
+            splitter?.SetEditMaterializationTopologySuppressed(false);
+        }
+
+        IReadOnlyList<Vector2Int> coordinates = record.OccupiedCoordinates;
+        for (int i = 0; i < coordinates.Count; i++)
+        {
+            if (terrain.TryGetLoadedBlock(coordinates[i], out Block block) && block != null)
+            {
+                block.SetMapObject(materialized);
+            }
+        }
+
+        installationObject = materialized;
+        return true;
+    }
+
+    private bool TryMaterializeDataOnlyPipeForEditing(
+        PipeRuntimeRecord record,
+        out InstallationObject installationObject)
+    {
+        installationObject = null;
+        if (record == null || record.Prototype == null)
+        {
+            return false;
+        }
+
+        TerrainGenerator terrain = ResolveInstallPreviewTerrain();
+        if (terrain == null)
+        {
+            return false;
+        }
+
+        InstallationObject materialized = terrain.CreateInstallationObject(
+            record.Prototype,
+            terrain.transform);
+        if (!(materialized is Pipe))
+        {
+            if (materialized != null)
+            {
+                terrain.ReleaseInstallationObject(materialized, record.Prototype);
+            }
+
+            return false;
+        }
+
+        materialized.transform.SetPositionAndRotation(record.WorldPosition, record.WorldRotation);
+        materialized.transform.localScale = record.WorldScale;
         ConfigureInstalledObjectRuntime(
             materialized,
             record.AnchorCoordinate,
@@ -37279,11 +37496,8 @@ public class InstallationPlacementController : MonoBehaviour
         materialized.ApplyItemFilterMask(
             record.State.itemFilterMaskWords,
             record.State.itemFilterMaskInitialized);
-        if (materializedBelt is Spliterbelt splitter)
-        {
-            splitter.ApplySplitterState(record.State.splitterState);
-        }
 
+        PipeWorld.Current?.Remove(record.StorageKey);
         IReadOnlyList<Vector2Int> coordinates = record.OccupiedCoordinates;
         for (int i = 0; i < coordinates.Count; i++)
         {
@@ -39450,6 +39664,11 @@ public class InstallationPlacementController : MonoBehaviour
         pipe = null;
         pipeRotation = Quaternion.identity;
 
+        if (block != null && block.TryGetRuntimePipe(out pipe, out pipeRotation))
+        {
+            return true;
+        }
+
         if (block != null && block.MapObject is Pipe activePipe)
         {
             if (TryGetInstalledPipeVariantPreview(
@@ -40035,6 +40254,12 @@ public class InstallationPlacementController : MonoBehaviour
             && terrain.RegisterDataOnlyConveyorInstallation(
                 conveyorBelt,
                 sourcePrefab as ConveyorBelt))
+        {
+            return true;
+        }
+        if (installationObject is Pipe pipe
+            && terrain != null
+            && terrain.RegisterDataOnlyPipeInstallation(pipe, sourcePrefab as Pipe))
         {
             return true;
         }

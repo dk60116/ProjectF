@@ -248,13 +248,35 @@ public class ItemInfoDescription : MonoBehaviour
         }
     }
 
-    public void ShowPipe(Pipe pipe, ResourceInstance underlyingResource = null)
+    public void ShowPipe(
+        Pipe pipe,
+        ResourceInstance underlyingResource = null,
+        Block focusedBlock = null)
     {
         BeginObjectDisplay(underlyingResource);
 
         float extractionLitersPerSecond = 0f;
-        if (pipe != null && pipe.TryGetObjectInfoFluidInfo(
-                out int fluidItemId, out float temperatureCelsius, out extractionLitersPerSecond))
+        int fluidItemId = -1;
+        float temperatureCelsius = MapClimate.CurrentTemperatureCelsius;
+        bool hasFluid;
+        if (focusedBlock != null
+            && focusedBlock.TryGetRuntimePipeRecord(out PipeRuntimeRecord record))
+        {
+            hasFluid = record.TryGetObjectInfoFluidInfo(
+                focusedBlock.Coordinate,
+                out fluidItemId,
+                out temperatureCelsius,
+                out extractionLitersPerSecond);
+        }
+        else
+        {
+            hasFluid = pipe != null && pipe.TryGetObjectInfoFluidInfo(
+                out fluidItemId,
+                out temperatureCelsius,
+                out extractionLitersPerSecond);
+        }
+
+        if (hasFluid)
         {
             SetDefaultText(
                 defaultStatusLineIndex,

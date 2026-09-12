@@ -140,6 +140,7 @@ public partial class TerrainGenerator : MonoBehaviour
                     SaveLoadedBlockFloorObjects(block);
 
                     if (!block.TryGetRuntimeConveyorRecord(out _)
+                        && !block.TryGetRuntimePipeRecord(out _)
                         && block.MapObject is InstallationObject installationObject
                         && !installationObject.ExcludeFromTerrainPersistence
                         && savedInstallations.Add(installationObject))
@@ -758,7 +759,9 @@ public partial class TerrainGenerator : MonoBehaviour
                 return;
             }
 
-            if (TryRestoreDataOnlyRobotArm(savedState) || TryRestoreDataOnlyConveyor(savedState))
+            if (TryRestoreDataOnlyRobotArm(savedState)
+                || TryRestoreDataOnlyConveyor(savedState)
+                || TryRestoreDataOnlyPipe(savedState))
             {
                 return;
             }
@@ -893,7 +896,79 @@ public partial class TerrainGenerator : MonoBehaviour
 
         BindLoadedBlocksToDataOnlyConveyor(record);
         MarkConveyorNetworkDirty();
-        MarkConveyorLineCacheDirty();
+        return true;
+    }
+
+    private bool TryRestoreDataOnlyPipe(BlockStateStore.InstallationSaveState savedState)
+    {
+        if (savedState == null)
+        {
+            return false;
+        }
+
+        ItemDefinition definition = ResolveInstallationDefinition(savedState);
+        InstallationPlacementController placementController = ResolveInstallationPlacementController();
+        MapObject resolvedSource = ResolveInstallationSourcePrefab(
+            savedState,
+            placementController,
+            definition);
+        if (!(resolvedSource is Pipe pipePrototype))
+        {
+            return false;
+        }
+
+        int quarterTurns = ((savedState.quarterTurns % 4) + 4) % 4;
+        Quaternion rotation = placementController != null
+            ? placementController.GetInstalledObjectRotation(resolvedSource, quarterTurns)
+            : resolvedSource.transform.rotation * Quaternion.Euler(0f, quarterTurns * 90f, 0f);
+        Vector3 position = placementController != null
+            ? placementController.GetInstalledObjectWorldPosition(
+                savedState.anchorCoordinate,
+                resolvedSource,
+                quarterTurns)
+            : new Vector3(savedState.anchorCoordinate.x, transform.position.y, savedState.anchorCoordinate.y);
+        if (savedState.hasWorldPose)
+        {
+            position = savedState.worldPosition;
+            rotation = savedState.worldRotation;
+        }
+
+        if (pipePrototype is UndergroundPipe
+            && savedState.occupiedCoordinates != null
+            && savedState.occupiedCoordinates.Count == 2)
+        {
+            Vector2Int first = savedState.occupiedCoordinates[0];
+            Vector2Int second = savedState.occupiedCoordinates[1];
+            Vector3 tunnelDirection = new Vector3(second.x - first.x, 0f, second.y - first.y);
+            if (tunnelDirection.sqrMagnitude > 0.0001f)
+            {
+                position = new Vector3(first.x, position.y, first.y);
+                rotation = Quaternion.LookRotation(tunnelDirection.normalized, Vector3.up);
+            }
+        }
+
+        savedState.hasWorldPose = true;
+        savedState.worldPosition = position;
+        savedState.worldRotation = rotation;
+        if (!resourceStateStore.RegisterDataOnlyInstallation(
+                savedState,
+                out BlockStateStore.InstallationSaveState storedState))
+        {
+            return false;
+        }
+
+        PipeRuntimeRecord record = EnsurePipeWorld()?.Register(
+            storedState,
+            pipePrototype,
+            position,
+            rotation,
+            resolvedSource.transform.localScale);
+        if (record == null)
+        {
+            return false;
+        }
+
+        BindLoadedBlocksToDataOnlyPipe(record);
         return true;
     }
 
@@ -1767,6 +1842,16 @@ public partial class TerrainGenerator : MonoBehaviour
         }
 
         return conveyorWorld;
+    }
+
+    private PipeWorld EnsurePipeWorld()
+    {
+        if (pipeWorld == null)
+        {
+            pipeWorld = PipeWorld.EnsureFor(this);
+        }
+
+        return pipeWorld;
     }
 
     private static ItemDefinition ResolveInstallationDefinition(int itemId)

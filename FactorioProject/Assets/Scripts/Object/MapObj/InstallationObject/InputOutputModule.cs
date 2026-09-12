@@ -2603,14 +2603,12 @@ public class InputOutputModule : InstallationObject,
         pipeRotation = Quaternion.identity;
         if (!TryGetLoadedBlock(coordinate, out Block block)
             || block == null
-            || !(block.MapObject is Pipe candidatePipe)
-            || !candidatePipe.gameObject.activeInHierarchy)
+            || !block.TryGetRuntimePipe(out Pipe candidatePipe, out pipeRotation))
         {
             return false;
         }
 
         pipe = candidatePipe;
-        pipeRotation = candidatePipe.transform.rotation;
         return true;
     }
 

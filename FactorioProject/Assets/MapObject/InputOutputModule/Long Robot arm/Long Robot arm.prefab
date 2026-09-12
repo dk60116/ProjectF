@@ -437,7 +437,7 @@ MonoBehaviour:
   runtimeOccupiedCoordinates: []
   runtimePlacementSequence: 0
   excludeFromTerrainPersistence: 0
-  storedFluidLiters: 0
+  storedFluidUnits: 0
   storedFluidItemId: -1
   storedFluidTemperatureCelsius: 20
   powerLinePoint: {fileID: 4220946898379902674}
@@ -486,12 +486,12 @@ MonoBehaviour:
   runtimePipeInputCoordinates: []
   runtimeGridCoordinates: []
   runtimeFocusCoordinates: []
-  storedEnergy: 0
-  energyGaugeCapacity: 0
+  storedEnergyUnits: 0
+  energyGaugeCapacityUnits: 0
   hasActiveCraft: 0
   waitingForOutput: 0
-  remainingCraftTime: 0
-  activeCraftConsumedEnergy: 0
+  remainingCraftTicks: 0
+  activeCraftConsumedEnergyUnits: 0
   activeRecipeIndex: -1
   activeOutputItemId: -1
   activeOutputCount: 0
@@ -1073,6 +1073,10 @@ PrefabInstance:
     - target: {fileID: 1178905253237647339, guid: 1bc8dcd90da82634dbcccb9790e06cdf, type: 3}
       propertyPath: m_Name
       value: PortableObject
+      objectReference: {fileID: 0}
+    - target: {fileID: 1178905253237647339, guid: 1bc8dcd90da82634dbcccb9790e06cdf, type: 3}
+      propertyPath: m_IsActive
+      value: 0
       objectReference: {fileID: 0}
     - target: {fileID: 4273124118414507851, guid: 1bc8dcd90da82634dbcccb9790e06cdf, type: 3}
       propertyPath: m_LocalPosition.x

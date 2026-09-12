@@ -284,6 +284,14 @@ public class UndergroundPipe : Pipe
         Vector2Int secondCoordinate,
         UndergroundPipe ignoredPipe)
     {
+        if (PipeWorld.Current != null
+            && PipeWorld.Current.HasOverlappingUndergroundRoute(
+                firstCoordinate,
+                secondCoordinate))
+        {
+            return true;
+        }
+
         for (int i = ActivePipes.Count - 1; i >= 0; i--)
         {
             UndergroundPipe candidate = ActivePipes[i];

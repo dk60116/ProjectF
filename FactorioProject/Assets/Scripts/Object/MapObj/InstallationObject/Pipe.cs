@@ -184,6 +184,38 @@ public class Pipe : InstallationObject
             return false;
         }
 
+        return TryGetObjectInfoFluidInfoAtCoordinate(
+            startCoordinate,
+            out fluidItemId,
+            out temperatureCelsius,
+            out extractionLitersPerSecond,
+            includeExtractionRate,
+            true);
+    }
+
+    internal bool TryGetObjectInfoFluidInfoAtCoordinate(
+        Vector2Int startCoordinate,
+        out int fluidItemId,
+        out float temperatureCelsius,
+        out float extractionLitersPerSecond,
+        bool includeExtractionRate = true,
+        bool allowInstanceCache = false)
+    {
+        fluidItemId = -1;
+        temperatureCelsius = MapClimate.CurrentTemperatureCelsius;
+        extractionLitersPerSecond = 0f;
+        bool canUseInstanceCache = allowInstanceCache;
+        if (includeExtractionRate
+            && canUseInstanceCache
+            && Time.unscaledTime < nextObjectInfoFluidRefreshTime)
+        {
+            fluidItemId = cachedObjectInfoFluidItemId;
+            temperatureCelsius = cachedObjectInfoFluidTemperature;
+            extractionLitersPerSecond = cachedObjectInfoExtractionRate;
+            return fluidItemId >= 0;
+        }
+
+        objectInfoFluidOutputSources.Clear();
         bool foundFluid = TrySearchFluidNetwork(
             startCoordinate,
             false,
@@ -204,7 +236,7 @@ public class Pipe : InstallationObject
         }
 
         objectInfoFluidOutputSources.Clear();
-        if (includeExtractionRate)
+        if (includeExtractionRate && canUseInstanceCache)
         {
             cachedObjectInfoFluidItemId = foundFluid ? fluidItemId : -1;
             cachedObjectInfoFluidTemperature = temperatureCelsius;
@@ -225,6 +257,20 @@ public class Pipe : InstallationObject
             return false;
         }
 
+        return TrySearchFluidNetwork(
+            startCoordinate,
+            false,
+            true,
+            ignoredStorageCoordinate,
+            out fluidItemId,
+            out _);
+    }
+
+    internal bool TryGetConnectedFluidItemIdIgnoringStorageCoordinateAt(
+        Vector2Int startCoordinate,
+        Vector2Int ignoredStorageCoordinate,
+        out int fluidItemId)
+    {
         return TrySearchFluidNetwork(
             startCoordinate,
             false,
@@ -280,6 +326,8 @@ public class Pipe : InstallationObject
 
             Pipe pipe = null;
             Quaternion pipeRotation = Quaternion.identity;
+            PipeRuntimeRecord runtimeRecord = null;
+            PipeWorld.Current?.TryGetAtCoordinate(coordinate, out runtimeRecord);
             bool hasPipe = coordinate == startCoordinate
                 ? TryResolveObjectInfoPipeAtStartCoordinate(startCoordinate, out pipe, out pipeRotation)
                 : TryGetPipeAtCoordinate(terrain, coordinate, out pipe, out pipeRotation);
@@ -296,7 +344,9 @@ public class Pipe : InstallationObject
             for (int i = 0; i < CardinalDirections.Length; i++)
             {
                 Vector2Int direction = CardinalDirections[i];
-                if (!pipe.HasConnectionTowardsAt(coordinate, pipeRotation, direction))
+                if (runtimeRecord != null
+                    ? !runtimeRecord.HasConnectionTowardsAt(coordinate, direction)
+                    : !pipe.HasConnectionTowardsAt(coordinate, pipeRotation, direction))
                 {
                     continue;
                 }
@@ -320,8 +370,13 @@ public class Pipe : InstallationObject
                 }
 
                 bool hasNeighborPipe = TryGetPipeAtCoordinate(terrain, neighborCoordinate, out Pipe neighborPipe, out Quaternion neighborRotation);
-                if (hasNeighborPipe
-                    && neighborPipe.HasConnectionTowardsAt(neighborCoordinate, neighborRotation, -direction))
+                PipeRuntimeRecord neighborRuntimeRecord = null;
+                PipeWorld.Current?.TryGetAtCoordinate(neighborCoordinate, out neighborRuntimeRecord);
+                bool neighborConnects = hasNeighborPipe
+                    && (neighborRuntimeRecord != null
+                        ? neighborRuntimeRecord.HasConnectionTowardsAt(neighborCoordinate, -direction)
+                        : neighborPipe.HasConnectionTowardsAt(neighborCoordinate, neighborRotation, -direction));
+                if (neighborConnects)
                 {
                     EnqueueObjectInfoFluidSearchCoordinate(neighborCoordinate);
                 }
@@ -331,7 +386,11 @@ public class Pipe : InstallationObject
                 }
             }
 
-            if (pipe.TryGetRemoteConnectionCoordinate(coordinate, out Vector2Int remoteCoordinate))
+            Vector2Int remoteCoordinate;
+            bool hasRemoteConnection = runtimeRecord != null
+                ? runtimeRecord.TryGetRemoteConnectionCoordinate(coordinate, out remoteCoordinate)
+                : pipe.TryGetRemoteConnectionCoordinate(coordinate, out remoteCoordinate);
+            if (hasRemoteConnection)
             {
                 EnqueueObjectInfoFluidSearchCoordinate(remoteCoordinate);
             }
@@ -711,8 +770,19 @@ public class Pipe : InstallationObject
         pipeRotation = Quaternion.identity;
         if (terrain == null
             || !terrain.TryGetLoadedBlock(coordinate, out Block block)
-            || block == null
-            || !(block.MapObject is Pipe candidatePipe)
+            || block == null)
+        {
+            return false;
+        }
+
+        if (block.TryGetRuntimePipe(out Pipe runtimePipe, out Quaternion runtimeRotation))
+        {
+            pipe = runtimePipe;
+            pipeRotation = runtimeRotation;
+            return true;
+        }
+
+        if (!(block.MapObject is Pipe candidatePipe)
             || !candidatePipe.gameObject.activeInHierarchy)
         {
             return false;
@@ -845,6 +915,17 @@ public class Pipe : InstallationObject
         return SearchAndCacheFluidDisplayNetwork(startCoordinate, out fluidItemId);
     }
 
+    internal bool TryGetFluidDisplayItemIdAtCoordinate(Vector2Int startCoordinate, out int fluidItemId)
+    {
+        RefreshFluidDisplayNetworkCacheWindow();
+        if (FluidDisplayNetworkItemCache.TryGetValue(startCoordinate, out fluidItemId))
+        {
+            return fluidItemId >= 0;
+        }
+
+        return SearchAndCacheFluidDisplayNetwork(startCoordinate, out fluidItemId);
+    }
+
     private bool SearchAndCacheFluidDisplayNetwork(Vector2Int startCoordinate, out int fluidItemId)
     {
         return TrySearchFluidNetwork(
@@ -868,7 +949,7 @@ public class Pipe : InstallationObject
         fluidDisplayNetworkCacheExpiresAt = currentTime + FluidDisplayRefreshIntervalSeconds;
     }
 
-    private static void InvalidateFluidDisplayNetworkCache()
+    internal static void InvalidateFluidDisplayNetworkCache()
     {
         FluidDisplayNetworkItemCache.Clear();
         fluidDisplayNetworkCacheExpiresAt = 0f;
@@ -977,7 +1058,7 @@ public class Pipe : InstallationObject
         OnFluidDisplayStateChanged(visible, color);
     }
 
-    private static Color ResolveFluidDisplayColor(int fluidItemId)
+    internal static Color ResolveFluidDisplayColor(int fluidItemId)
     {
         ItemDefinition definition = InputOutputModule.ResolveItemDefinition(fluidItemId);
         if (definition != null)

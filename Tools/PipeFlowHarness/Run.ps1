@@ -35,6 +35,7 @@ foreach ($signature in @('private void ProduceWater(', 'private void RefreshWate
 }
 $generated += "}`npublic partial class Pipe {`n"
 $generated += (Read-Member ($base + 'Pipe.cs') 'public bool TryGetObjectInfoFluidInfo(' 2) + "`n"
+$generated += (Read-Member ($base + 'Pipe.cs') 'internal bool TryGetObjectInfoFluidInfoAtCoordinate(') + "`n"
 foreach ($signature in @('private bool TrySearchFluidNetwork(', 'private void EnqueueObjectInfoFluidSearchCoordinate(')) {
     $generated += (Read-Member ($base + 'Pipe.cs') $signature) + "`n"
 }

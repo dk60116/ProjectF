@@ -1149,6 +1149,7 @@ public partial class BlockStateStore : MonoBehaviour
         UnregisterLiveInstallation(storageKey);
         ResolveVirtualObjectWorld()?.RemoveInstallation(storageKey);
         ConveyorWorld.Current?.Remove(storageKey);
+        PipeWorld.Current?.Remove(storageKey);
         RemoveUtilityPoleConnectionReferences(removedAnchor);
     }
 
@@ -1196,6 +1197,7 @@ public partial class BlockStateStore : MonoBehaviour
         liveInstallationStates.Clear();
         liveInstallationAnchorsByCoordinate.Clear();
         ConveyorWorld.Current?.ClearRecords();
+        PipeWorld.Current?.ClearRecords();
         RobotArmWorld.Current?.ClearRecords();
         ResolveVirtualObjectWorld()?.Clear();
     }

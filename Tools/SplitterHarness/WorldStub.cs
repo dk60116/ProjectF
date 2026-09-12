@@ -3,6 +3,38 @@ using System.Collections.Generic;
 using UnityEngine;
 
 // Managed world boundary only: the linked routing and Block integration are production code.
+public struct BeltSplitterState
+{
+    public int NextInput;
+    public int NextOutput;
+    public int WheelMask;
+    public int FilterOutput;
+}
+
+public sealed class ConveyorRuntimeRecord
+{
+    public bool IsSplitter => false;
+    public IReadOnlyList<Vector2Int> OccupiedCoordinates => System.Array.Empty<Vector2Int>();
+    public int GetSplitterAllowedOutputMask(int itemId) => 0;
+    public bool TryGetSplitterChannel(Vector2Int coordinate, out int channel)
+    {
+        channel = -1;
+        return false;
+    }
+    public bool TrySelectSplitterOutput(
+        int input,
+        bool leftReady,
+        bool rightReady,
+        int leftOutputs,
+        int rightOutputs,
+        out int output)
+    {
+        output = -1;
+        return false;
+    }
+    public void CommitSplitterTransfer(int input, int output) { }
+}
+
 public class ConveyorBelt
 {
     private readonly HashSet<int> selected = new HashSet<int>();
@@ -58,6 +90,11 @@ public partial class Block
     private object mapObject;
     private Vector2Int coordinate;
     private readonly TerrainGenerator world;
+    private bool TryGetRuntimeConveyorRecord(out ConveyorRuntimeRecord record)
+    {
+        record = null;
+        return false;
+    }
     public int Input = -1;
     public int Output = -1;
     public bool Ready = true;

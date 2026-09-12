@@ -4181,9 +4181,14 @@ public class SteamTrain : RailHandcar,
                 }
             }
 
-            if (pipe.TryGetRemoteConnectionCoordinate(
-                    coordinate,
-                    out Vector2Int remoteCoordinate))
+            Vector2Int remoteCoordinate;
+            bool hasRemote = PipeWorld.Current != null
+                             && PipeWorld.Current.TryGetAtCoordinate(
+                                 coordinate,
+                                 out PipeRuntimeRecord runtimeRecord)
+                ? runtimeRecord.TryGetRemoteConnectionCoordinate(coordinate, out remoteCoordinate)
+                : pipe.TryGetRemoteConnectionCoordinate(coordinate, out remoteCoordinate);
+            if (hasRemote)
             {
                 EnqueueWaterPipeSearchCoordinate(remoteCoordinate);
             }
@@ -4231,14 +4236,12 @@ public class SteamTrain : RailHandcar,
         if (terrain == null
             || !terrain.TryGetLoadedBlock(coordinate, out Block block)
             || block == null
-            || block.MapObject is not Pipe candidatePipe
-            || !candidatePipe.gameObject.activeInHierarchy)
+            || !block.TryGetRuntimePipe(out Pipe candidatePipe, out pipeRotation))
         {
             return false;
         }
 
         pipe = candidatePipe;
-        pipeRotation = candidatePipe.transform.rotation;
         return true;
     }
 

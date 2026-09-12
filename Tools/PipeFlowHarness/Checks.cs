@@ -110,6 +110,26 @@ public class TerrainGenerator
     public readonly Dictionary<Vector2Int, Pipe> Pipes = new();
     public readonly Dictionary<Vector2Int, int> Fluids = new();
 }
+public sealed class PipeRuntimeRecord
+{
+    public Pipe Prototype;
+    public bool HasConnectionTowardsAt(Vector2Int coordinate, Vector2Int direction) =>
+        Prototype != null && Prototype.HasConnectionTowardsAt(coordinate, default, direction);
+    public bool TryGetRemoteConnectionCoordinate(Vector2Int coordinate, out Vector2Int remote)
+    {
+        remote = default;
+        return Prototype != null && Prototype.TryGetRemoteConnectionCoordinate(coordinate, out remote);
+    }
+}
+public sealed class PipeWorld
+{
+    public static PipeWorld Current => null;
+    public bool TryGetAtCoordinate(Vector2Int coordinate, out PipeRuntimeRecord record)
+    {
+        record = null;
+        return false;
+    }
+}
 public partial class Pipe
 {
     private const int MaxObjectInfoFluidSearchNodes = 256;
