@@ -21,6 +21,7 @@ public partial class BlockStateStore
     public MapObjectItemClearResult ClearMapObjectItems()
     {
         MapObjectItemClearResult result = default;
+        RobotArmWorld.Current?.FlushSaveStates();
         VirtualObjectWorld world = ResolveVirtualObjectWorld();
         mapObjectItemClearLiveKeys.Clear();
 
@@ -73,6 +74,7 @@ public partial class BlockStateStore
         }
 
         mapObjectItemClearItemIds.Clear();
+        RobotArmWorld.Current?.ClearItems();
         mapObjectItemClearLiveKeys.Clear();
         return result;
     }

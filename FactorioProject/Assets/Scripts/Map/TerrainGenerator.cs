@@ -2210,6 +2210,16 @@ public partial class TerrainGenerator : MonoBehaviour,
         results.AddRange(dynamicConveyorItemVisualBlocks);
     }
 
+    internal bool IsConveyorItemVisualBlockTracked(BlockHandle handle)
+    {
+        return handle.IsValid && conveyorItemVisualBlocks.Contains(handle);
+    }
+
+    internal bool IsDynamicConveyorItemVisualBlockTracked(BlockHandle handle)
+    {
+        return handle.IsValid && dynamicConveyorItemVisualBlockIndices.ContainsKey(handle);
+    }
+
     public void CopyConveyorItemVisualDirtyBlocks(List<BlockHandle> results)
     {
         if (results == null)
@@ -2543,8 +2553,7 @@ public partial class TerrainGenerator : MonoBehaviour,
         {
             Block[] existingBlocks = GetChunkRuntimeBlocks(chunkCoordinate);
             SaveChunkResourceStates(existingBlocks);
-            ForgetAnimalRuntimeIds(chunkCoordinate);
-            DestroyAnimalViewsInChunk(chunkCoordinate);
+            // Rebuilding a terrain view preserves live animal state and deterministic IDs.
             RemoveChunkBlocksFromLookup(existingBlocks);
             ReleaseChunkBlockRuntimeProxies(existingBlocks);
             ReleaseChunkSurfaceMeshes(existingChunk);

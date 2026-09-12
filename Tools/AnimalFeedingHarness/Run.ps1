@@ -1,4 +1,4 @@
-$ErrorActionPreference = 'Stop'
+﻿$ErrorActionPreference = 'Stop'
 $repo = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '../..'))
 function Read-Member([string]$file, [string]$signature, [int]$occurrence = 0) {
     $source = [IO.File]::ReadAllText((Join-Path $repo $file))
@@ -17,7 +17,7 @@ function Read-Member([string]$file, [string]$signature, [int]$occurrence = 0) {
     if ($depth -ne 0) { throw "Unbalanced production member: $signature" }
     $source.Substring($start, $end - $start)
 }
-$generated = "using System;`nusing System.IO;`nusing System.Collections.Generic;`npublic partial class AnimalAIController {`n"
+$generated = "using System;`nusing System.IO;`nusing System.Collections.Generic;`nusing ProjectF.Animals;`npublic partial class AnimalAIController {`n"
 $controller = 'FactorioProject/Assets/Scripts/Object/Animal/AnimalAIController.cs'
 foreach ($signature in @('private bool TryTickFeeding(', 'private bool IsWithinDroppedFoodReach(', 'private bool CanReachDroppedFood(', 'private void GetNavigationArea(', 'private void GetExtendedNavigationArea(', 'private bool IsOutsideRoamingArea(')) {
     $generated += (Read-Member $controller $signature) + "`n"
@@ -56,6 +56,11 @@ $probeDir = Join-Path ([IO.Path]::GetTempPath()) ('ProjectF-AnimalFeeding-' + [G
 New-Item -ItemType Directory -Path $probeDir | Out-Null
 Set-Content -LiteralPath (Join-Path $probeDir 'Production.cs') -Value $generated
 Copy-Item -LiteralPath (Join-Path $repo 'FactorioProject/Assets/Scripts/Object/Animal/AnimalGridPathfinder.cs') -Destination (Join-Path $probeDir 'AnimalGridPathfinder.cs')
+Copy-Item -LiteralPath (Join-Path $repo 'FactorioProject/Assets/Scripts/Object/Animal/AnimalAIProfiler.cs') -Destination $probeDir
+foreach ($name in @('AnimalGridPathfinder.Regions.cs', 'AnimalSimulationMath.cs')) {
+    Copy-Item -LiteralPath (Join-Path $repo ('FactorioProject/Assets/Scripts/Object/Animal/' + $name)) -Destination $probeDir
+}
+Copy-Item -LiteralPath (Join-Path $repo 'Tools/AnimalAIOptimizationHarness/ProfilerStubs.cs') -Destination $probeDir
 Copy-Item -LiteralPath (Join-Path $repo 'FactorioProject/Assets/Scripts/Map/Block.AnimalFood.cs') -Destination (Join-Path $probeDir 'Block.AnimalFood.cs')
 Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'GrowthChecks.cs') -Destination (Join-Path $probeDir 'GrowthChecks.cs')
 $checksPath = [Security.SecurityElement]::Escape((Join-Path $PSScriptRoot 'Checks.cs'))

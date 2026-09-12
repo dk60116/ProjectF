@@ -1291,7 +1291,6 @@ public partial class TerrainGenerator : MonoBehaviour
             pair.Value?.RefreshSleepAwakeDebugVisuals(true);
         }
 
-        RobotArm.RefreshAllSleepAwakeDebugVisuals();
     }
 
     private void SyncBeltItemLineRuntimeVisibility()
@@ -1850,6 +1849,9 @@ public partial class TerrainGenerator : MonoBehaviour
 
             dynamicConveyorItemVisualBlockIndices.Add(handle, dynamicConveyorItemVisualBlocks.Count);
             dynamicConveyorItemVisualBlocks.Add(handle);
+            // PortableItemRenderer consumes this journal to update its local
+            // membership and culling index without copying the whole set.
+            conveyorItemVisualDirtyBlocks.Add(handle);
             dynamicConveyorItemVisualBlockSetVersion++;
             return;
         }
@@ -1865,6 +1867,7 @@ public partial class TerrainGenerator : MonoBehaviour
         dynamicConveyorItemVisualBlockIndices[lastHandle] = index;
         dynamicConveyorItemVisualBlocks.RemoveAt(lastIndex);
         dynamicConveyorItemVisualBlockIndices.Remove(handle);
+        conveyorItemVisualDirtyBlocks.Add(handle);
         dynamicConveyorItemVisualBlockSetVersion++;
     }
 
@@ -4357,31 +4360,8 @@ public partial class TerrainGenerator : MonoBehaviour
         MapObjectTickProfiler.AddRuntimeCounter("Render", "ActiveEnabledBeltRenderers", activeEnabledBeltRendererCount);
         MapObjectTickProfiler.AddRuntimeCounter("Render", "DisabledBeltRenderers", beltRendererCount - enabledBeltRendererCount);
 
-        TryGetComponent(out RobotArmRenderBatcher robotArmRenderBatcher);
-        MapObjectTickProfiler.AddRuntimeCounter(
-            "RobotArmRender",
-            "RegisteredArms",
-            robotArmRenderBatcher != null ? robotArmRenderBatcher.RegisteredRobotArmCount : 0);
-        MapObjectTickProfiler.AddRuntimeCounter(
-            "RobotArmRender",
-            "VisibleArms",
-            robotArmRenderBatcher != null ? robotArmRenderBatcher.LastVisibleRobotArmCount : 0);
-        MapObjectTickProfiler.AddRuntimeCounter(
-            "RobotArmRender",
-            "CulledArms",
-            robotArmRenderBatcher != null ? robotArmRenderBatcher.LastCulledRobotArmCount : 0);
-        MapObjectTickProfiler.AddRuntimeCounter(
-            "RobotArmRender",
-            "BuiltMatrices",
-            robotArmRenderBatcher != null ? robotArmRenderBatcher.LastBuiltMatrixCount : 0);
-        MapObjectTickProfiler.AddRuntimeCounter(
-            "RobotArmRender",
-            "ActiveBatches",
-            robotArmRenderBatcher != null ? robotArmRenderBatcher.ActiveBatchCount : 0);
-        MapObjectTickProfiler.AddRuntimeCounter(
-            "RobotArmRender",
-            "EstimatedDrawCalls",
-            robotArmRenderBatcher != null ? robotArmRenderBatcher.EstimatedDrawCallCount : 0);
+        RobotArmWorld.AppendProfilerCounters();
+        InputOutputModule.AppendFluidOutputNetworkProfilerCounters();
 
         GameManager gameManager = GameManager.Instance;
         MapObjectTickProfiler.AddRuntimeCounter("RenderToggles", "HideBelts", gameManager != null && gameManager.HideBelts);
@@ -4431,6 +4411,8 @@ public partial class TerrainGenerator : MonoBehaviour
         MapObjectTickProfiler.AddRuntimeCounter("ConveyorItemRender", "DynamicCullCandidateBlocks", itemRenderer != null ? itemRenderer.DynamicVirtualConveyorCullCandidateBlocks : 0);
         MapObjectTickProfiler.AddRuntimeCounter("ConveyorItemRender", "DynamicCullCacheRefreshes", itemRenderer != null ? itemRenderer.DynamicVirtualConveyorCullCacheRefreshes : 0);
         MapObjectTickProfiler.AddRuntimeCounter("ConveyorItemRender", "DynamicCullCachedBlocks", itemRenderer != null ? itemRenderer.DynamicVirtualConveyorCullCachedBlocks : 0);
+        MapObjectTickProfiler.AddRuntimeCounter("ConveyorItemRender", "DynamicCullSourceChunks", itemRenderer != null ? itemRenderer.DynamicVirtualConveyorCullSourceChunks : 0);
+        MapObjectTickProfiler.AddRuntimeCounter("ConveyorItemRender", "DynamicCullVisibleChunks", itemRenderer != null ? itemRenderer.DynamicVirtualConveyorCullVisibleChunks : 0);
         MapObjectTickProfiler.AddRuntimeCounter("ConveyorItemRender", "DynamicCullLayerSkippedBlocks", itemRenderer != null ? itemRenderer.DynamicVirtualConveyorCullLayerSkippedBlocks : 0);
         MapObjectTickProfiler.AddRuntimeCounter("ConveyorItemRender", "DynamicCullFrustumSkippedBlocks", itemRenderer != null ? itemRenderer.DynamicVirtualConveyorCullFrustumSkippedBlocks : 0);
         MapObjectTickProfiler.AddRuntimeCounter("ConveyorItemRender", "DynamicCullPassedBlocks", itemRenderer != null ? itemRenderer.DynamicVirtualConveyorCullPassedBlocks : 0);
@@ -4442,6 +4424,8 @@ public partial class TerrainGenerator : MonoBehaviour
         MapObjectTickProfiler.AddRuntimeCounter("ConveyorItemRender", "DynamicMatrixRebuilds", itemRenderer != null ? itemRenderer.DynamicVirtualConveyorMatrixRebuilds : 0);
         MapObjectTickProfiler.AddRuntimeCounter("ConveyorItemRender", "DynamicTransformJobItems", itemRenderer != null ? itemRenderer.DynamicVirtualConveyorTransformJobItems : 0);
         MapObjectTickProfiler.AddRuntimeCounter("ConveyorItemRender", "DynamicTransformJobScheduled", itemRenderer != null && itemRenderer.DynamicVirtualConveyorTransformJobScheduled ? 1 : 0);
+        MapObjectTickProfiler.AddRuntimeCounter("ConveyorItemRender", "MembershipChanges", itemRenderer != null ? itemRenderer.VirtualConveyorMembershipChanges : 0);
+        MapObjectTickProfiler.AddRuntimeCounter("ConveyorItemRender", "DynamicMembershipChanges", itemRenderer != null ? itemRenderer.DynamicVirtualConveyorMembershipChanges : 0);
         MapObjectTickProfiler.AddRuntimeCounter("ConveyorItemRender", "DynamicCullBoundsSize", itemRenderer != null ? itemRenderer.DynamicVirtualConveyorCullBoundsSize : 0f);
         MapObjectTickProfiler.AddRuntimeCounter("ConveyorItemRender", "DynamicCullBoundsHeight", itemRenderer != null ? itemRenderer.DynamicVirtualConveyorCullBoundsHeight : 0f);
 

@@ -2334,6 +2334,24 @@ public class InstallationPlacementController : MonoBehaviour
             return true;
         }
 
+        if (block.MapObject is RobotArmInstance dataArm && dataArm.IsRuntimeActive)
+        {
+            TerrainGenerator terrain = ResolveInstallPreviewTerrain();
+            if (terrain == null) return false;
+            var proxy = terrain.CreateInstallationObject(dataArm.Prototype, terrain.transform) as RobotArm;
+            if (proxy == null) return false;
+            proxy.transform.SetPositionAndRotation(dataArm.WorldPosition, dataArm.WorldRotation);
+            ConfigureInstalledObjectRuntime(proxy, dataArm.Placement.anchorCoordinate, dataArm.Placement.quarterTurns,
+                placementSequence: dataArm.SimulationId, occupiedCoordinatesOverride: dataArm.RuntimeOccupiedCoordinates);
+            proxy.ApplyTransferState(dataArm.CaptureTransferState());
+            proxy.ApplyItemFilterMask(dataArm.Placement.itemFilterMaskWords, dataArm.IsItemFilterMaskInitialized);
+            dataArm.World.SuspendForEditing(dataArm);
+            foreach (var coordinate in dataArm.RuntimeOccupiedCoordinates)
+                if (terrain.TryGetLoadedBlock(coordinate, out var occupied)) occupied.SetMapObject(proxy);
+            installationObject = proxy;
+            anchorCoordinate = dataArm.Placement.anchorCoordinate;
+            return true;
+        }
         installationObject = block.MapObject as InstallationObject;
         if (installationObject == null || !installationObject.TryGetPlacementRuntime(out anchorCoordinate, out _))
         {
@@ -3066,7 +3084,6 @@ public class InstallationPlacementController : MonoBehaviour
                 continue;
             }
 
-            robotArm.SetPreviewRenderingMode(true);
             DisablePreviewAnimators(robotArm);
         }
 
@@ -4358,6 +4375,12 @@ public class InstallationPlacementController : MonoBehaviour
                 out InstallationEditSession editSession,
                 selectedCoordinate))
         {
+            if (installationObject is RobotArm armPresentation)
+            {
+                TerrainGenerator terrain = ResolveInstallPreviewTerrain();
+                if (terrain != null && terrain.ConvertRobotArmPresentation(armPresentation))
+                    terrain.ReleaseInstallationObject(armPresentation);
+            }
             return false;
         }
 
@@ -6262,82 +6285,107 @@ public class InstallationPlacementController : MonoBehaviour
             Transform installParent = ResolvePlacementPlanInstallParent(
                 placementPlan,
                 out TerrainGenerator terrain);
-            MapObject installedObject = stagedPipeBlueprintObjects != null
-                ? stagedPipeBlueprintObjects[i]
-                : CreateInstalledObjectInstance(placementPlan.sourcePrefab, installParent, terrain);
-            if (installedObject == null)
-            {
-                continue;
-            }
-
-            installedObject.transform.SetPositionAndRotation(placementPlan.position, placementPlan.rotation);
-            if (placementPlan.attachToFreightCarBoxPoint)
-            {
-                if (!(installedObject is InstallationObject installedLoad)
-                    || placementPlan.freightCarBoxTarget == null
-                    || !placementPlan.freightCarBoxTarget.TryAttachLoadObjectToPoint(
-                        installedLoad,
-                        placementPlan.freightCarBoxPoint))
-                {
-                    ReleaseInstalledObjectInstance(installedObject as InstallationObject, placementPlan.sourcePrefab, terrain);
-                    continue;
-                }
-            }
-
-            if (placementPlan.bindToFootprintBlocks && !(installedObject is ConveyorBelt))
-            {
-                for (int blockIndex = 0; blockIndex < placementPlan.footprintBlocks.Count; blockIndex++)
-                {
-                    Block footprintBlock = placementPlan.footprintBlocks[blockIndex];
-                    PrepareBelt2FBridgeCenterForPassthroughPlacement(footprintBlock, placementPlan.sourcePrefab);
-                    if (installedObject is UndergroundPipe
-                        || ShouldBindInstalledObjectToBlock(
-                            footprintBlock,
-                            placementPlan.anchorBlock.Coordinate,
-                            placementPlan.sourcePrefab,
-                            placementPlan.quarterTurns))
-                    {
-                        footprintBlock.SetMapObject(installedObject);
-                    }
-                }
-            }
-
             Vector2Int installedAnchorCoordinate = placementPlan.hasRuntimeAnchorCoordinate
                 ? placementPlan.runtimeAnchorCoordinate
-                : placementPlan.anchorBlock != null
-                    ? placementPlan.anchorBlock.Coordinate
-                    : RoundWorldPositionToCoordinate(placementPlan.position);
-            if (!placementPlan.attachToFreightCarBoxPoint)
+                : placementPlan.anchorBlock != null ? placementPlan.anchorBlock.Coordinate
+                : RoundWorldPositionToCoordinate(placementPlan.position);
+            bool dataOnlyArm = placementPlan.sourcePrefab is RobotArm
+                && !placementPlan.attachToFreightCarBoxPoint && placementPlan.registerTerrainPersistence;
+            MapObject installedObject = null;
+            if (dataOnlyArm)
             {
-                ConfigureInstalledObjectRuntime(
-                    installedObject,
-                    installedAnchorCoordinate,
-                    placementPlan.quarterTurns,
-                    occupiedCoordinatesOverride: ResolvePlacementPlanRuntimeOccupiedCoordinates(
+                RobotArm prototype = (RobotArm)placementPlan.sourcePrefab;
+                foreach (var footprintBlock in placementPlan.footprintBlocks)
+                    PrepareBelt2FBridgeCenterForPassthroughPlacement(footprintBlock, prototype);
+                var state = new BlockStateStore.InstallationSaveState
+                {
+                    anchorCoordinate = installedAnchorCoordinate,
+                    itemId = placementPlan.preview.ResolveItemId(),
+                    itemName = prototype.ObjectName,
+                    quarterTurns = placementPlan.quarterTurns,
+                    hasWorldPose = true, worldPosition = placementPlan.position, worldRotation = placementPlan.rotation,
+                    occupiedCoordinates = new List<Vector2Int>(ResolveInstalledObjectRuntimeOccupiedCoordinates(
+                        prototype, installedAnchorCoordinate, placementPlan.quarterTurns, null)),
+                    itemFilterMaskInitialized = placementPlan.preview.IsItemFilterMaskInitialized,
+                    itemFilterMaskWords = placementPlan.preview.CaptureItemFilterMaskWords()
+                };
+                if (terrain == null || terrain.RegisterDataOnlyRobotArm(prototype, state) == null) continue;
+            }
+            else
+            {
+                installedObject = stagedPipeBlueprintObjects != null
+                    ? stagedPipeBlueprintObjects[i]
+                    : CreateInstalledObjectInstance(placementPlan.sourcePrefab, installParent, terrain);
+                if (installedObject == null)
+                {
+                    continue;
+                }
+
+                installedObject.transform.SetPositionAndRotation(placementPlan.position, placementPlan.rotation);
+                if (placementPlan.attachToFreightCarBoxPoint)
+                {
+                    if (!(installedObject is InstallationObject installedLoad)
+                        || placementPlan.freightCarBoxTarget == null
+                        || !placementPlan.freightCarBoxTarget.TryAttachLoadObjectToPoint(
+                            installedLoad,
+                            placementPlan.freightCarBoxPoint))
+                    {
+                        ReleaseInstalledObjectInstance(installedObject as InstallationObject, placementPlan.sourcePrefab, terrain);
+                        continue;
+                    }
+                }
+
+                if (placementPlan.bindToFootprintBlocks && !(installedObject is ConveyorBelt))
+                {
+                    for (int blockIndex = 0; blockIndex < placementPlan.footprintBlocks.Count; blockIndex++)
+                    {
+                        Block footprintBlock = placementPlan.footprintBlocks[blockIndex];
+                        PrepareBelt2FBridgeCenterForPassthroughPlacement(footprintBlock, placementPlan.sourcePrefab);
+                        if (installedObject is UndergroundPipe
+                            || ShouldBindInstalledObjectToBlock(
+                                footprintBlock,
+                                placementPlan.anchorBlock.Coordinate,
+                                placementPlan.sourcePrefab,
+                                placementPlan.quarterTurns))
+                        {
+                            footprintBlock.SetMapObject(installedObject);
+                        }
+                    }
+                }
+
+                if (!placementPlan.attachToFreightCarBoxPoint)
+                {
+                    ConfigureInstalledObjectRuntime(
                         installedObject,
                         installedAnchorCoordinate,
-                        placementPlan));
-            }
+                        placementPlan.quarterTurns,
+                        occupiedCoordinatesOverride: ResolvePlacementPlanRuntimeOccupiedCoordinates(
+                            installedObject,
+                            installedAnchorCoordinate,
+                            placementPlan));
+                }
 
-            InitializePlacedTrainRailSample(installedObject, installedAnchorCoordinate, placementPlan);
-            RegisterInstalledHandcartPreview(
-                installedObject as Handcart,
-                placementPlan.preview as Handcart);
-            bool registeredAsDataOnlyConveyor = false;
-            if (placementPlan.registerTerrainPersistence)
-            {
-                registeredAsDataOnlyConveyor = RegisterInstalledObjectPersistence(
-                    installedObject,
-                    placementPlan.sourcePrefab);
-            }
+                InitializePlacedTrainRailSample(installedObject, installedAnchorCoordinate, placementPlan);
+                RegisterInstalledHandcartPreview(
+                    installedObject as Handcart,
+                    placementPlan.preview as Handcart);
+                bool registeredAsDataOnlyConveyor = false;
+                if (placementPlan.registerTerrainPersistence)
+                {
+                    registeredAsDataOnlyConveyor = RegisterInstalledObjectPersistence(
+                        installedObject,
+                        placementPlan.sourcePrefab);
+                }
 
-            if (registeredAsDataOnlyConveyor)
-            {
-                ReleaseInstalledObjectInstance(
-                    installedObject as InstallationObject,
-                    placementPlan.sourcePrefab,
-                    terrain);
-                installedObject = null;
+                if (registeredAsDataOnlyConveyor)
+                {
+                    ReleaseInstalledObjectInstance(
+                        installedObject as InstallationObject,
+                        placementPlan.sourcePrefab,
+                        terrain);
+                    installedObject = null;
+                }
+
             }
 
             RememberLastInstalledRotation(activeInstallDefinition, placementPlan.quarterTurns);
@@ -20629,7 +20677,7 @@ public class InstallationPlacementController : MonoBehaviour
         return component != null;
     }
 
-    private AreaMarkerRenderer ResolveAreaMarkerRenderer()
+    internal AreaMarkerRenderer ResolveAreaMarkerRenderer()
     {
         if (areaMarkerRenderer != null)
         {
@@ -39979,6 +40027,9 @@ public class InstallationPlacementController : MonoBehaviour
         }
 
         TerrainGenerator terrain = ResolveInstallPreviewTerrain();
+        if (installationObject is RobotArm armPresentation && terrain != null
+            && terrain.ConvertRobotArmPresentation(armPresentation, sourcePrefab as RobotArm))
+            return true;
         if (installationObject is ConveyorBelt conveyorBelt
             && terrain != null
             && terrain.RegisterDataOnlyConveyorInstallation(

@@ -758,7 +758,7 @@ public partial class TerrainGenerator : MonoBehaviour
                 return;
             }
 
-            if (TryRestoreDataOnlyConveyor(savedState))
+            if (TryRestoreDataOnlyRobotArm(savedState) || TryRestoreDataOnlyConveyor(savedState))
             {
                 return;
             }

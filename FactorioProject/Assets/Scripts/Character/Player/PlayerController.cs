@@ -3280,6 +3280,7 @@ public partial class PlayerController : MonoBehaviour
                 ? target == closestInteractionFocusTarget
                 : block == closestInteractionFocusBlock;
             long stableId = target is ResourceInstance resourceIdentity ? resourceIdentity.SimulationId
+                : target is RobotArmInstance armIdentity ? armIdentity.SimulationId
                 : target is MapObject nativeTarget ? nativeTarget.GetInstanceID() : block.GetInstanceID();
             bool tiedDistance = Mathf.Abs(distanceSqr - closestDistanceSqr) <= 0.000001f;
             if (float.IsNaN(distanceSqr) || float.IsInfinity(distanceSqr)
@@ -3525,7 +3526,7 @@ public partial class PlayerController : MonoBehaviour
         return belt != null;
     }
 
-    public bool TryGetFocusedRobotArm(out RobotArm focusedRobotArm)
+    public bool TryGetFocusedRobotArm(out RobotArmInstance focusedRobotArm)
     {
         focusedRobotArm = null;
         if (currentFocusedBlocks.Count == 0 || player == null)
@@ -3539,9 +3540,9 @@ public partial class PlayerController : MonoBehaviour
         foreach (Block block in currentFocusedBlocks)
         {
             if (block == null
-                || !TryResolveRobotArm(block.MapObject, out RobotArm robotArm)
+                || !TryResolveRobotArm(block.MapObject, out RobotArmInstance robotArm)
                 || robotArm == null
-                || !robotArm.gameObject.activeInHierarchy
+                || !robotArm.IsRuntimeActive
                 || !robotArm.AllowsFocus)
             {
                 continue;
@@ -3581,12 +3582,13 @@ public partial class PlayerController : MonoBehaviour
             return GetResourceFocusSelectionDistanceSqr(resource, origin) <= harvestRange * harvestRange;
         }
 
-        if (!(mapObject is InstallationObject installationObject))
+        if (!(mapObject is InstallationObject) && !(mapObject is RobotArmInstance))
         {
             return false;
         }
 
-        float interactionRadius = Mathf.Max(0f, installationObject.FocusActivationRadius);
+        float interactionRadius = Mathf.Max(0f, mapObject is RobotArmInstance arm
+            ? arm.Prototype.FocusActivationRadius : ((InstallationObject)mapObject).FocusActivationRadius);
         if (interactionRadius <= 0f)
         {
             return false;
@@ -3596,7 +3598,7 @@ public partial class PlayerController : MonoBehaviour
         foreach (Block block in currentFocusedBlocks)
         {
             if (IsAvailableMapObjectFocusTarget(mapObject, block)
-                && GetMapObjectFocusSelectionDistanceSqr(installationObject, block, origin)
+                && GetMapObjectFocusSelectionDistanceSqr(mapObject, block, origin)
                 <= interactionRadiusSqr)
             {
                 return true;
@@ -4280,7 +4282,7 @@ public partial class PlayerController : MonoBehaviour
         return true;
     }
 
-    public bool TryGetSelectedItemFilterMapObject(out MapObject selectedMapObject)
+    public bool TryGetSelectedItemFilterMapObject(out IMapObjectTarget selectedMapObject)
     {
         selectedMapObject = null;
         if (!IsAvailableMapObjectFocusTarget(currentSelectedMapObject, currentSelectedFocusedBlocks))
@@ -4314,7 +4316,7 @@ public partial class PlayerController : MonoBehaviour
         return false;
     }
 
-    public bool TryResolveItemFilterTarget(IMapObjectTarget mapObject, out MapObject filterTarget)
+    public bool TryResolveItemFilterTarget(IMapObjectTarget mapObject, out IMapObjectTarget filterTarget)
     {
         filterTarget = null;
         if (player == null
@@ -4338,7 +4340,7 @@ public partial class PlayerController : MonoBehaviour
         IMapObjectTarget mapObject,
         List<ItemDefinition> definitions,
         Vector3 origin,
-        out MapObject filterTarget)
+        out IMapObjectTarget filterTarget)
     {
         filterTarget = null;
         if (mapObject == null)
@@ -4354,7 +4356,7 @@ public partial class PlayerController : MonoBehaviour
 
         if (SupportsItemFilter(mapObject, definitions))
         {
-            filterTarget = mapObject.SceneObject;
+            filterTarget = mapObject;
             return true;
         }
 
@@ -4392,7 +4394,7 @@ public partial class PlayerController : MonoBehaviour
 
     private static bool SupportsItemFilter(IMapObjectTarget mapObject, List<ItemDefinition> definitions)
     {
-        return mapObject?.SceneObject != null
+        return mapObject is RobotArmInstance || mapObject?.SceneObject != null
                && (IsItemFilterEnabled(mapObject.ResolveItemId(), definitions)
                    || mapObject is Spliterbelt
                    || TryResolveRobotArm(mapObject, out _)
@@ -4423,28 +4425,8 @@ public partial class PlayerController : MonoBehaviour
         return productionMachine != null;
     }
 
-    private static bool TryResolveRobotArm(IMapObjectTarget mapObject, out RobotArm robotArm)
-    {
-        robotArm = null;
-        if (mapObject == null)
-        {
-            return false;
-        }
-
-        robotArm = mapObject as RobotArm;
-        if (robotArm != null)
-        {
-            return true;
-        }
-
-        if (mapObject.TryGetComponent(out robotArm) && robotArm != null)
-        {
-            return true;
-        }
-
-        robotArm = mapObject.GetComponentInChildren<RobotArm>(true);
-        return robotArm != null;
-    }
+    private static bool TryResolveRobotArm(IMapObjectTarget mapObject, out RobotArmInstance robotArm)
+    { robotArm = mapObject as RobotArmInstance; return robotArm != null && robotArm.IsRuntimeActive; }
 
     private static bool TryResolveFreightCar(IMapObjectTarget mapObject, out FreightCar freightCar)
     {
@@ -5051,6 +5033,7 @@ public partial class PlayerController : MonoBehaviour
 
         Vector3 origin = player.BodyTransform != null ? player.BodyTransform.position : transform.position;
         float globalInstallationPadding = Mathf.Max(0f, InstallationObject.GlobalMaxFocusActivationRadius);
+        if (RobotArmWorld.Current != null) globalInstallationPadding = Mathf.Max(globalInstallationPadding, RobotArmWorld.Current.MaxFocusRadius);
         int searchRadius = Mathf.Max(1, Mathf.CeilToInt(globalInstallationPadding + 2f));
         Vector2Int center = new Vector2Int(
             Mathf.RoundToInt(origin.x),
@@ -5068,6 +5051,12 @@ public partial class PlayerController : MonoBehaviour
                     continue;
                 }
 
+                if (block.MapObject is RobotArmInstance dataArm && dataArm.IsRuntimeActive && dataArm.AllowsFocus)
+                {
+                    float radius = dataArm.Prototype.FocusActivationRadius;
+                    if (radius > 0f && GetMapObjectFocusSelectionDistanceSqr(dataArm, block, origin) <= radius * radius)
+                        AppendMapObjectFocusBlocks(dataArm, block, results);
+                }
                 TryAppendNearbyInstallationFocus(
                     block.MapObject as InstallationObject,
                     block,
@@ -5184,6 +5173,8 @@ public partial class PlayerController : MonoBehaviour
             return GetOccupiedCoordinateDistanceSqr(conveyorRecord.OccupiedCoordinates, origin);
         }
 
+        if (mapObject is RobotArmInstance dataArm)
+            return GetOccupiedCoordinateDistanceSqr(dataArm.RuntimeOccupiedCoordinates, origin);
         if (mapObject is InstallationObject installation)
         {
             IReadOnlyList<Vector2Int> occupied = installation.RuntimeOccupiedCoordinates;
@@ -5232,6 +5223,8 @@ public partial class PlayerController : MonoBehaviour
 
     private Bounds GetMapObjectFocusBounds(IMapObjectTarget mapObject, Block block, float focusPadding = 0f)
     {
+        if (mapObject is RobotArmInstance arm)
+        { Bounds bounds = arm.PresentationBounds; bounds.Expand(focusPadding * 2f); return bounds; }
         if (mapObject is ResourceInstance resource)
         {
             Bounds resourceBounds = resource.PresentationBounds;
@@ -5365,7 +5358,12 @@ public partial class PlayerController : MonoBehaviour
 
         bool appended = false;
 
-        if (mapObject is InputOutputModule inputOutputModule)
+        if (mapObject is RobotArmInstance dataArm)
+        {
+            foreach (var coordinate in dataArm.RuntimeOccupiedCoordinates)
+                appended |= TryAppendFocusBlock(results, coordinate, dataArm);
+        }
+        else if (mapObject is InputOutputModule inputOutputModule)
         {
             IReadOnlyList<Vector2Int> focusCoordinates = inputOutputModule.RuntimeFocusCoordinates;
             if (focusCoordinates != null)
@@ -5792,7 +5790,8 @@ public partial class PlayerController : MonoBehaviour
                 closestAnimalDistance = hit.distance;
             }
 
-            IMapObjectTarget candidate = ResourceTypeWorld.ResolveColliderTarget(hitCollider);
+            IMapObjectTarget candidate = (IMapObjectTarget)RobotArmWorld.ResolveCollider(hitCollider)
+                ?? ResourceTypeWorld.ResolveColliderTarget(hitCollider);
             if (!IsValidMouseFocusMapObject(candidate))
             {
                 continue;

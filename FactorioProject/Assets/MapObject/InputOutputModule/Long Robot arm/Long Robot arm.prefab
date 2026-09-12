@@ -497,12 +497,11 @@ MonoBehaviour:
   activeOutputCount: 0
   body: {fileID: 4176579310449609181}
   handItem: {fileID: 4652641984051879195}
-  useInstancedRendering: 1
+  useLongArmAnimation: 1
   pickupInterval: 1
   bodyTurnSpeedDegreesPerSecond: 360
   dropRetryInterval: 0.1
   actionTurnDelay: 0.5
-  heldItemId: -1
 --- !u!135 &986190605775310727
 SphereCollider:
   m_ObjectHideFlags: 0

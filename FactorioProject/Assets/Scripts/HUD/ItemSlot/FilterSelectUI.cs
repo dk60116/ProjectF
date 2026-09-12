@@ -17,7 +17,7 @@ public partial class FilterSelectUI : MonoBehaviour
 
     private readonly List<ItemDefinition> visibleDefinitions = new List<ItemDefinition>();
     private readonly List<ResourceDefinition> visibleTreeDefinitions = new List<ResourceDefinition>();
-    private MapObject boundTarget;
+    private IMapObjectTarget boundTarget;
     private TerrainGenerator cachedTerrainGenerator;
     private GameObject filterRangeControl;
     private ProjectF.UI.IntegerRangeSlider filterRangeSlider;
@@ -60,7 +60,7 @@ public partial class FilterSelectUI : MonoBehaviour
         Refresh();
     }
 
-    public void Bind(MapObject target)
+    public void Bind(IMapObjectTarget target)
     {
         boundTarget = target;
         Refresh();
@@ -76,7 +76,7 @@ public partial class FilterSelectUI : MonoBehaviour
         RefreshSplitterControls();
     }
 
-    public bool TryGetBoundTarget(out MapObject target)
+    public bool TryGetBoundTarget(out IMapObjectTarget target)
     {
         target = ResolveCurrentTarget();
         return target != null;
@@ -344,7 +344,7 @@ public partial class FilterSelectUI : MonoBehaviour
     }
 
     private static bool TryBuildAreaRestrictedFilter(
-        MapObject target,
+        IMapObjectTarget target,
         ISet<int> allowedItemIds,
         ISet<ItemDefinition.EnergyType> allowedEnergyTypes)
     {
@@ -379,7 +379,7 @@ public partial class FilterSelectUI : MonoBehaviour
     }
 
     private static bool TryBuildProductionTargetFilter(
-        MapObject target,
+        IMapObjectTarget target,
         List<ItemDefinition> definitions,
         List<ItemDefinition> results)
     {
@@ -440,7 +440,7 @@ public partial class FilterSelectUI : MonoBehaviour
 
     private void HandleSlotToggleChanged(int itemId, bool isOn)
     {
-        MapObject target = ResolveCurrentTarget();
+        IMapObjectTarget target = ResolveCurrentTarget();
         if (target == null)
         {
             return;
@@ -504,9 +504,9 @@ public partial class FilterSelectUI : MonoBehaviour
         return Mathf.Max(0, maxItemId + 1);
     }
 
-    private MapObject ResolveCurrentTarget()
+    private IMapObjectTarget ResolveCurrentTarget()
     {
-        if (boundTarget != null && boundTarget.gameObject != null)
+        if (boundTarget.IsAlive())
         {
             return boundTarget;
         }
@@ -515,7 +515,7 @@ public partial class FilterSelectUI : MonoBehaviour
         return boundTarget;
     }
 
-    private static MapObject ResolveSelectedFilterTarget()
+    private static IMapObjectTarget ResolveSelectedFilterTarget()
     {
         if (GameManager.Instance == null || GameManager.Instance.Player == null)
         {
@@ -523,7 +523,7 @@ public partial class FilterSelectUI : MonoBehaviour
         }
 
         PlayerController playerController = GameManager.Instance.Player.GetComponent<PlayerController>();
-        if (playerController == null || !playerController.TryGetSelectedItemFilterMapObject(out MapObject selectedMapObject))
+        if (playerController == null || !playerController.TryGetSelectedItemFilterMapObject(out IMapObjectTarget selectedMapObject))
         {
             return null;
         }
@@ -546,8 +546,9 @@ public partial class FilterSelectUI : MonoBehaviour
                && record.IsSplitter;
     }
 
-    private void PersistTargetFilterState(MapObject target)
+    private void PersistTargetFilterState(IMapObjectTarget target)
     {
+        if (target is RobotArmInstance arm) { arm.Persist(); return; }
         if (!(target is InstallationObject installationObject))
         {
             return;
@@ -573,7 +574,7 @@ public partial class FilterSelectUI : MonoBehaviour
 
     private void SetAllToggles(bool isEnabled)
     {
-        MapObject target = ResolveCurrentTarget();
+        IMapObjectTarget target = ResolveCurrentTarget();
         if (target == null)
         {
             return;
@@ -636,7 +637,7 @@ public partial class FilterSelectUI : MonoBehaviour
         Refresh();
     }
 
-    private bool TryApplyAreaScopedFilterSelection(MapObject target, int changedItemId, bool changedState)
+    private bool TryApplyAreaScopedFilterSelection(IMapObjectTarget target, int changedItemId, bool changedState)
     {
         if (!TryIsAreaScopedTarget(target))
         {
@@ -671,7 +672,7 @@ public partial class FilterSelectUI : MonoBehaviour
         return true;
     }
 
-    private bool TryApplyProductionTargetSelection(MapObject target, int changedItemId, bool changedState)
+    private bool TryApplyProductionTargetSelection(IMapObjectTarget target, int changedItemId, bool changedState)
     {
         if (!TryResolveProductionMachine(target, out ProductionMachine productionMachine))
         {
@@ -693,7 +694,7 @@ public partial class FilterSelectUI : MonoBehaviour
         return true;
     }
 
-    private bool TryApplyProductionTargetBulkSelection(MapObject target, bool isEnabled)
+    private bool TryApplyProductionTargetBulkSelection(IMapObjectTarget target, bool isEnabled)
     {
         if (!TryResolveProductionMachine(target, out ProductionMachine productionMachine))
         {
@@ -720,7 +721,7 @@ public partial class FilterSelectUI : MonoBehaviour
         return true;
     }
 
-    private bool TryApplyAreaScopedBulkSelection(MapObject target, bool isEnabled)
+    private bool TryApplyAreaScopedBulkSelection(IMapObjectTarget target, bool isEnabled)
     {
         if (!TryIsAreaScopedTarget(target))
         {
@@ -752,14 +753,14 @@ public partial class FilterSelectUI : MonoBehaviour
         return true;
     }
 
-    private bool TryIsAreaScopedTarget(MapObject target)
+    private bool TryIsAreaScopedTarget(IMapObjectTarget target)
     {
         HashSet<int> allowedItemIds = new HashSet<int>();
         HashSet<ItemDefinition.EnergyType> allowedEnergyTypes = new HashSet<ItemDefinition.EnergyType>();
         return TryBuildAreaRestrictedFilter(target, allowedItemIds, allowedEnergyTypes);
     }
 
-    private static bool TryResolveProductionMachine(MapObject target, out ProductionMachine productionMachine)
+    private static bool TryResolveProductionMachine(IMapObjectTarget target, out ProductionMachine productionMachine)
     {
         productionMachine = null;
         if (target == null)
@@ -783,7 +784,7 @@ public partial class FilterSelectUI : MonoBehaviour
         return productionMachine != null;
     }
 
-    private static void OverwriteTargetFilterMask(MapObject target, int totalFilterBitCount, ISet<int> enabledItemIds)
+    private static void OverwriteTargetFilterMask(IMapObjectTarget target, int totalFilterBitCount, ISet<int> enabledItemIds)
     {
         if (target == null || totalFilterBitCount <= 0)
         {
@@ -1204,7 +1205,7 @@ public partial class FilterSelectUI : MonoBehaviour
 
     private void HandleFilterRangeChanged(int minimum, int maximum)
     {
-        MapObject target = ResolveCurrentTarget();
+        IMapObjectTarget target = ResolveCurrentTarget();
         if (target is BoxObject boxObject)
         {
             boxObject.SetStorageRange(minimum, maximum);

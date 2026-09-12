@@ -17,7 +17,7 @@ function Read-Member([string]$path, [string]$signature) {
 }
 
 $blockPath = 'FactorioProject/Assets/Scripts/Map/Block.cs'
-$armPath = 'FactorioProject/Assets/Scripts/Object/MapObj/InstallationObject/RobotArm.cs'
+$armPath = 'FactorioProject/Assets/Scripts/Object/MapObj/InstallationObject/RobotArmInstance.cs'
 $arm = [IO.File]::ReadAllText((Join-Path $repo $armPath))
 
 if ($arm -notmatch 'Vector3 conveyorSelectionReferenceWorldPosition = GetBodyWorldPosition\(\);') {

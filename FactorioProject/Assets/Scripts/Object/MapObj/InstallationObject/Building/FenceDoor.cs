@@ -57,6 +57,7 @@ public class FenceDoor : Wall
         }
 
         isOpen = shouldOpen;
+        TerrainGenerator.Active?.InvalidateAnimalNavigation();
         ApplyDoorState(animate && Application.isPlaying);
     }
 

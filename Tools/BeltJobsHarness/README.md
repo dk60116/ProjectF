@@ -55,7 +55,7 @@ Unity Job safety 검사, Burst 기계어 생성, 실제 씬 API와 렌더링, �
 
 ## 게임에서 확인할 항목
 
-프로파일러의 `BeltJobs` 항목에는 그룹/슬롯 수, 가장 큰 그룹, 수면 그룹, 대기 중 입력, 마지막 틱 이동 수, 변경 슬롯, 프레임 처리 틱, 누적 지연과 토폴로지 재구축 횟수가 표시된다. Unity Profiler에서는 `Belt Jobs.Bake`, `Belt Jobs.Tick`, `Belt Jobs.Publish`와 `BeltSimulationJob`을 확인한다.
+MapObject Profiler에는 전체 `Belt Jobs Tick`과 그 안의 `Belt Jobs Schedule`, `Belt Jobs Complete`, `Belt Jobs Publish`가 별도 행으로 표시된다. 부모와 자식 시간은 겹치므로 합산하지 않는다. `BeltJobs` 카운터에는 그룹/슬롯 수, 가장 큰 그룹, 수면 그룹, 대기 중 입력, 마지막 틱 이동 수, 변경 슬롯, 프레임 처리 틱, 누적 지연과 토폴로지 재구축 횟수가 표시된다. Unity Profiler에서는 `Belt Jobs.Bake`, `Belt Jobs.Tick`, `Belt Jobs.Schedule`, `Belt Jobs.Complete`, `Belt Jobs.Publish`와 `BeltSimulationJob`을 확인한다.
 
 1. 직선·커브·합류·분배기·2F 경사/교차에 아이템을 흘려보낸다. 로봇팔 및 OutputArea 입출력도 함께 확인한다.
 2. 출구를 막았다가 아이템을 회수하여 다시 흐르는지 확인한다. 분배기는 한쪽 출구만 막아 반대쪽 배출도 확인한다.

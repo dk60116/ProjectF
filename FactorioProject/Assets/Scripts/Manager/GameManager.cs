@@ -473,7 +473,6 @@ public class GameManager : MonoBehaviour
         sleepAwakeRuntimeStateInitialized = true;
         lastRuntimeShowSleepAwake = showSleepAwake;
         PortableObject.RefreshAllSleepAwakeVisuals();
-        RobotArm.RefreshAllSleepAwakeDebugVisuals();
         TerrainGenerator.Active?.RefreshSleepAwakeRuntimeVisibility();
     }
 
@@ -2115,6 +2114,7 @@ public sealed class RuntimeItemGiveReceiver : MonoBehaviour
         MapObjectTickProfiler.ClearRuntimeCounters();
         AppendFrameRuntimeProfilerCounters();
         TerrainGenerator.Active?.AppendRuntimeProfilerCounters();
+        AnimalAIWorld.Instance?.AppendRuntimeProfilerCounters();
         string json = MapObjectTickProfiler.BuildAndResetSnapshotJson(resolvedMaxRows);
         string encodedJson = Convert.ToBase64String(Encoding.UTF8.GetBytes(json));
         return ToolResult.Success(
@@ -2168,6 +2168,9 @@ public sealed class RuntimeItemGiveReceiver : MonoBehaviour
             "Simulation",
             "TargetUps",
             MapObjectTickManager.TargetSimulationUps);
+        MapObjectTickProfiler.AddRuntimeCounter(
+            "Simulation", "WaitingForWorldLoad", MapObjectTickManager.WaitingForWorldLoad ? 1 : 0,
+            "Fixed ticks resume after all queued chunks and world restoration finish; loading time is discarded.");
         MapObjectTickProfiler.AddRuntimeCounter(
             "Simulation",
             "BacklogTicks",
@@ -3554,7 +3557,7 @@ public sealed class RuntimeItemGiveReceiver : MonoBehaviour
         AnimalAIWorld world = gameManager != null ? gameManager.AnimalAIWorld : null;
         return string.Format(
             CultureInfo.InvariantCulture,
-            "showAnimalHerdAreas={0} animalAIPaused={1} animalTotal={2} animalAIActive={3} animalAIActiveRadius={4:0.###} animalHerdGroups={5} animalSeparationChecks={6} animalCollisionChecks={7} animalCollisionCellChecks={8} animalColliderRadiusMax={9:0.###} animalPhysicsQueries={10} animalPhysicsHits={11} animalAITicks={12} animalAIDue={13} animalAIDeferred={14} animalAIBudget={15} animalAINear={16} animalAIMid={17} animalAIFar={18}",
+            "showAnimalHerdAreas={0} animalAIPaused={1} animalTotal={2} animalAIActive={3} animalAIActiveRadius={4:0.###} animalHerdGroups={5} animalSeparationChecks={6} animalCollisionChecks={7} animalCollisionCellChecks={8} animalColliderRadiusMax={9:0.###} animalAITicks={10} animalAIDue={11} animalAIDeferred={12} animalAIBudget={13} animalAINear={14} animalAIMid={15} animalAIFar={16}",
             gameManager != null && gameManager.ShowAnimalHerdAreas ? 1 : 0,
             world != null && world.Paused ? 1 : 0,
             world != null ? world.ControllerCount : 0,
@@ -3565,8 +3568,6 @@ public sealed class RuntimeItemGiveReceiver : MonoBehaviour
             world != null ? world.AnimalCollisionCandidateChecksLastFrame : 0,
             world != null ? world.AnimalCollisionCellChecksLastFrame : 0,
             world != null ? world.MaximumAnimalColliderRadius : 0f,
-            world != null ? world.ObstaclePhysicsQueriesLastFrame : 0,
-            world != null ? world.ObstaclePhysicsHitsLastFrame : 0,
             world != null ? world.ActiveSimulationTicksLastFrame : 0,
             world != null ? world.SimulationTickCandidatesLastFrame : 0,
             world != null ? world.DeferredSimulationTicksLastFrame : 0,

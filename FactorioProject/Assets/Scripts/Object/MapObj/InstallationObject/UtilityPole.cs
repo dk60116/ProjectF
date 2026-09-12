@@ -2,7 +2,7 @@ using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.Rendering;
 
-public class UtilityPole : InstallationObject
+public partial class UtilityPole : InstallationObject
 {
     private const float EnergyEpsilon = 0.0001f;
     private const string LinePointCenterName = "LinePointCenter";
@@ -712,6 +712,7 @@ public class UtilityPole : InstallationObject
 
     private static void MarkPoleTopologyDirty()
     {
+        InvalidateRobotArmConsumers();
         MarkElectricNetworkDirty();
         poleConnectionsDirty = true;
         previewPoleConnectionsDirty = true;
@@ -3079,6 +3080,7 @@ public class UtilityPole : InstallationObject
         }
 
         networkRuntimeEvaluatedSimulationTick = currentSimulationTick;
+        RefreshRobotArmConsumers();
         using var sample = MapObjectTickProfiler.SampleNamed("Runtime", nameof(UtilityPole), "Electric Network Runtime");
         for (int i = 0; i < networks.Count; i++)
         {
@@ -3089,6 +3091,7 @@ public class UtilityPole : InstallationObject
         // 공급 범위에 걸친 경우에도 현재 공급률이 가장 높은 망을 사용하도록 런타임 값과
         // 소비자 매핑을 같은 시점에 갱신한다.
         RefreshSuppliedConsumerNetworks();
+        AdvanceRobotArmNetworkRuntimeVersion();
     }
 
     private static void RefreshNetworkRuntimeValues(ElectricNetwork network)
@@ -3101,6 +3104,7 @@ public class UtilityPole : InstallationObject
         network.ClearPowerRuntime();
 
         network.RequiredWatts = network.StaticRequiredWatts;
+        if (robotArmDemand.TryGetValue(network, out float armWatts)) network.RequiredWatts += armWatts;
         for (int installationIndex = 0;
              installationIndex < network.OrderedSuppliedInstallations.Count;
              installationIndex++)

@@ -394,6 +394,7 @@ public partial class Block : BaseObject
             mapObject = value != null ? value : resource;
         }
 
+        TerrainGenerator.Active?.InvalidateAnimalNavigation(coordinate);
         bool isConveyor = IsConveyorStackingEnabled();
         bool isFluidDirectionObject = IsFluidDirectionMapObject(mapObject);
         if (isConveyor)
@@ -626,6 +627,7 @@ public partial class Block : BaseObject
         }
 
         expectedResource.SetOwningBlock(null);
+        TerrainGenerator.Active?.InvalidateAnimalNavigation(coordinate);
     }
 
     public bool TryAddFloorObject(int objectId, out PortableObject targetPortableObject)

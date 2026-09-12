@@ -39,19 +39,29 @@ public class Block
         => Vector3.Lerp(TransportLanePosition(lane), target.TransportLanePosition(targetLane), progress);
 }
 
-public class Spliterbelt
+public class ConveyorRuntimeRecord
 {
     public Block Left, Right;
     public bool IsItemFilterMaskInitialized;
     public BeltSplitterState State;
     public List<ulong> Mask = new();
+    public IReadOnlyList<Vector2Int> OccupiedCoordinates => new[] { Left.Coordinate, Right.Coordinate };
+    public bool HasSplitterItemFilter => IsItemFilterMaskInitialized;
+    public IReadOnlyList<ulong> SplitterItemFilterWords => Mask;
     public BeltSplitterState CaptureBeltJobRouting() => State;
     public void ApplyBeltJobRouting(BeltSplitterState state) => State = state;
     public List<ulong> CaptureItemFilterMaskWords() => Mask;
+    public bool TryGetSplitterChannel(Vector2Int cell, out int channel)
+    {
+        channel = GetChannel(cell);
+        return channel >= 0;
+    }
     public bool TryGetChannelCoordinate(int channel, out Vector2Int cell)
     { cell = (channel == 0 ? Left : Right).Coordinate; return true; }
-    public int GetChannel(Vector2Int cell) => cell == Left.Coordinate ? 0 : 1;
+    public int GetChannel(Vector2Int cell) => cell == Left.Coordinate ? 0 : cell == Right.Coordinate ? 1 : -1;
 }
+
+public sealed class Spliterbelt : ConveyorRuntimeRecord { }
 
 public partial class TerrainGenerator : IDisposable
 {
@@ -121,7 +131,12 @@ public partial class TerrainGenerator : IDisposable
     }
 }
 public static class MapObjectTickProfiler
-{ public static void AddRuntimeCounter(string category, string name, object value) { } }
+{
+    public static bool IsEnabled => false;
+    public static long BeginSample() => 0;
+    public static void EndNamedSample(string kind, string typeName, string itemName, long startTimestamp) { }
+    public static void AddRuntimeCounter(string category, string name, object value) { }
+}
 public static class MapObjectTickManager
 {
     public static double SimulationBacklogTicks;

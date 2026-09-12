@@ -25,7 +25,11 @@ public static class MapObjectTickManager
         MidpointRounding.AwayFromZero);
     public static double CurrentSimulationTimeSeconds => Time.timeAsDouble;
 }
-public static class MapClimate { public static float CurrentTemperatureCelsius => 20; }
+public static class MapClimate
+{
+    public static float CurrentTemperatureCelsius => 20;
+    public static float CurrentWaterTemperatureCelsius => 20;
+}
 public readonly record struct Vector2Int(int x, int y)
 {
     public static Vector2Int zero => new(0, 0);
@@ -83,7 +87,15 @@ public partial class Pump : InputOutputModule
     public int RuntimeAreaMaxObjects = 32;
     public float Space;
     public int GroundItems;
-    public void Tick(float dt) => ProduceWater(dt);
+    private readonly InstallationObject pumpStorage = new();
+    public void Tick(float dt)
+    {
+        pumpStorage.AvailableFluidStorageLiters = Space;
+        cachedFluidOutputStorages.Clear();
+        cachedFluidOutputStorages.Add(pumpStorage);
+        ProduceWater(dt);
+        Space = pumpStorage.AvailableFluidStorageLiters;
+    }
     private int ResolveWaterItemId() => 1;
     private bool TryRouteWaterToFluidStorage(float requested, bool commit, out float accepted)
     {

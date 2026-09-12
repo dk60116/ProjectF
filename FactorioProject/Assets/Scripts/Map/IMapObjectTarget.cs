@@ -19,6 +19,14 @@ public interface IMapObjectTarget
 
 public static class MapObjectTargetExtensions
 {
+    public static bool IsItemFilterEnabled(this IMapObjectTarget target, int itemId, int count) =>
+        target is RobotArmInstance arm ? arm.IsItemFilterEnabled(itemId, count) :
+        target?.SceneObject != null && target.SceneObject.IsItemFilterEnabled(itemId, count);
+    public static void SetItemFilterEnabled(this IMapObjectTarget target, int itemId, int count, bool enabled)
+    {
+        if (target is RobotArmInstance arm) arm.SetItemFilterEnabled(itemId, count, enabled);
+        else target?.SceneObject?.SetItemFilterEnabled(itemId, count, enabled);
+    }
     public static T GetComponent<T>(this IMapObjectTarget target) where T : Component => target?.SceneObject != null ? target.SceneObject.GetComponent<T>() : null;
     public static T GetComponentInParent<T>(this IMapObjectTarget target) where T : Component => target?.SceneObject != null ? target.SceneObject.GetComponentInParent<T>() : null;
     public static T GetComponentInChildren<T>(this IMapObjectTarget target, bool includeInactive = false) where T : Component => target?.SceneObject != null ? target.SceneObject.GetComponentInChildren<T>(includeInactive) : null;
@@ -28,7 +36,7 @@ public static class MapObjectTargetExtensions
     { results.Clear(); if (target?.SceneObject != null) target.SceneObject.GetComponentsInChildren(includeInactive, results); }
     // Unity destroyed-object semantics must be explicit at interface/object boundaries.
     public static bool IsAlive(this IMapObjectTarget target) => target is ResourceInstance resource
-        ? resource.IsRuntimeActive : target is MapObject component && component != null;
+        ? resource.IsRuntimeActive : target is RobotArmInstance arm ? arm.IsRuntimeActive : target is MapObject component && component != null;
     public static bool IsAliveTarget(object target) => target is ResourceInstance resource
-        ? resource.IsRuntimeActive : target is Object unityObject && unityObject != null;
+        ? resource.IsRuntimeActive : target is RobotArmInstance arm ? arm.IsRuntimeActive : target is Object unityObject && unityObject != null;
 }

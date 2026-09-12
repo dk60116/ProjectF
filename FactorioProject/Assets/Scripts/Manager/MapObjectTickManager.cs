@@ -163,6 +163,7 @@ public sealed class MapObjectTickManager : MonoBehaviour
     private bool tickingUpdateObjects;
     private bool updateTicksDirty;
     private bool simulationPaused;
+    private bool waitingForWorldLoad;
     private float resumeTimeScale = 1f;
 
     public static long CurrentSimulationTick => instance != null ? instance.simulationTick : 0L;
@@ -177,7 +178,16 @@ public sealed class MapObjectTickManager : MonoBehaviour
     public static bool HasSimulationUpsSample => instance != null && instance.hasSimulationUpsSample;
     public static float CurrentSimulationUps => instance != null ? instance.currentSimulationUps : 0f;
     public static bool SimulationPaused => instance != null && instance.simulationPaused;
-    public static float TargetSimulationUps => SimulationPaused
+    public static bool WaitingForWorldLoad
+    {
+        get
+        {
+            TerrainGenerator terrain = TerrainGenerator.Active;
+            return terrain != null
+                   && (!terrain.IsWorldReadyForPresentation || terrain.IsChunkStreamingBusy);
+        }
+    }
+    public static float TargetSimulationUps => SimulationPaused || WaitingForWorldLoad
         ? 0f
         : DefaultSimulationTicksPerSecond * Mathf.Max(0f, Time.timeScale);
     public static int SimulationTicksLastFrame => instance != null ? instance.simulationTicksLastFrame : 0;
@@ -255,6 +265,18 @@ public sealed class MapObjectTickManager : MonoBehaviour
 
     private void Update()
     {
+        // Streaming/finalization run in TerrainGenerator.Update and coroutines, not this clock.
+        // Discard loading wall time, including the frame in which loading completes.
+        bool worldLoading = WaitingForWorldLoad;
+        if (worldLoading || waitingForWorldLoad)
+        {
+            waitingForWorldLoad = worldLoading;
+            simulationTimeAccumulator = 0d;
+            ResetSimulationUpsMeasurement();
+            hasSimulationUpsSample = true;
+            return;
+        }
+
         if (simulationPaused)
         {
             // Keep the simulation clock and every registered Tick frozen even if another
@@ -273,7 +295,8 @@ public sealed class MapObjectTickManager : MonoBehaviour
         int maximumSteps = Mathf.Max(1, maximumSimulationStepsPerFrame);
         int completedSteps = 0;
         while (simulationTimeAccumulator + 0.000000001d >= FixedSimulationDeltaSeconds
-               && completedSteps < maximumSteps)
+               && completedSteps < maximumSteps
+               && !WaitingForWorldLoad)
         {
             simulationTimeAccumulator -= FixedSimulationDeltaSeconds;
             simulationTick++;
@@ -1025,12 +1048,6 @@ public static class MapObjectTickProfiler
         RecordSample(key, elapsedTicks);
     }
 
-    public static void SetActiveTickCount(int updateCount)
-    {
-        activeUpdateTickCount = Mathf.Max(0, updateCount);
-        RecycleGroupStats(activeUpdateStatsByKey);
-    }
-
     public static void SetActiveUpdateTargets(ICollection<IMapObjectUpdateTick> updateTicks)
     {
         RecycleGroupStats(activeUpdateStatsByKey);
@@ -1268,7 +1285,6 @@ public static class MapObjectTickProfiler
         AppendJsonProperty("frame", Time.frameCount.ToString(CultureInfo.InvariantCulture), true);
         AppendJsonProperty("windowMs", (windowSeconds * 1000f).ToString("0.###", CultureInfo.InvariantCulture), true);
         AppendJsonProperty("activeUpdateTicks", activeUpdateTickCount.ToString(CultureInfo.InvariantCulture), true);
-        AppendJsonProperty("activeLateTicks", "0", true);
         AppendJsonProperty("activeBeltTicks", activeBeltTickCount.ToString(CultureInfo.InvariantCulture), true);
         AppendJsonProperty("activeBeltDataMotions", activeBeltDataMotionCount.ToString(CultureInfo.InvariantCulture), true);
         AppendJsonProperty("activeBeltVisualTicks", activeBeltVisualTickCount.ToString(CultureInfo.InvariantCulture), true);

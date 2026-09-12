@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 namespace UnityEngine { }
 
@@ -64,6 +64,7 @@ public class ItemManager
 public class GameManager { public static GameManager Instance = new(); public ItemManager ItemManger = new(); }
 public partial class Animal
 {
+    private AnimalAIController ResolveAIController() => null;
     public void WakeFromRest() { }
     public bool IsAlive = true;
     public float currentHunger = 40;
@@ -147,6 +148,8 @@ public partial class TerrainGenerator
     public readonly HashSet<Vector2Int> Walls = new();
     public bool CanAnimalMoveTo(Vector3 position, bool loaded) => !Walls.Contains(GetWorldBlockCoordinate(position));
     public bool IsAnimalDrinkLocation(Vector3 position) => false;
+    public long AnimalNavigationRevision;
+    internal bool IsAnimalShoreCell(Vector2Int p) => false;
     private static Vector2Int GetWorldBlockCoordinate(Vector3 position) => new((int)Math.Round(position.x), (int)Math.Round(position.z));
     private bool TryGetLoadedBlock(Vector2Int coordinate, out Block block) { Lookups++; return Blocks.TryGetValue(coordinate, out block); }
 }
@@ -154,6 +157,7 @@ public enum AnimalAIState { Idle, Rest, Eat, Drink, Flee, Wander, Graze, LookAro
 public enum Movement { Arrive, Moving, Failed, FalseArrival, Real }
 public partial class AnimalAIController
 {
+    internal void FlushPendingNeeds() { }
     public Animal animal = new();
     public Transform transform = new();
     public bool IsInteracted => animal.Interacted;
@@ -173,6 +177,7 @@ public partial class AnimalAIController
     private const int MaxNavigationWaypoints = 96;
     private const float MaxExtendedNavigationRadius = 64, ExtendedNavigationMargin = 8;
     private const float FeedingDuration = 1, BlockedFoodRetryDelay = 2;
+    public float feedingDuration = FeedingDuration;
     private const float IntervalBetweenMeals = .5f;
     private const float MaximumRotationDeltaTime = 1f / 30f;
     private const float LocalRoamingSearchRadius = 6;

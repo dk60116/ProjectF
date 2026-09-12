@@ -459,7 +459,6 @@ public class ItemDataEditorWindow : EditorWindow
         public float vehicleMaxSpeed = -1f;
         public float vehicleMass = -1f;
         public bool hasRobotArmRuntimeSettings;
-        public bool robotArmUseInstancedRendering = true;
         public float robotArmPickupInterval = -1f;
         public float robotArmBodyTurnSpeedDegreesPerSecond = -1f;
         public float robotArmDropRetryInterval = -1f;
@@ -4728,9 +4727,6 @@ public class ItemDataEditorWindow : EditorWindow
         }
 
         EditorGUI.BeginChangeCheck();
-        bool useInstancedRendering = EditorGUILayout.Toggle(
-            new GUIContent("Use Instanced Rendering"),
-            robotArm.UsesInstancedRendering);
         float pickupInterval = Mathf.Max(
             0.01f,
             EditorGUILayout.FloatField(
@@ -4760,7 +4756,6 @@ public class ItemDataEditorWindow : EditorWindow
 
         Undo.RecordObject(robotArm, "Edit Robot Arm Settings");
         robotArm.SetEditorSettings(
-            useInstancedRendering,
             pickupInterval,
             bodyTurnSpeed,
             dropRetryInterval,
@@ -7534,7 +7529,6 @@ public class ItemDataEditorWindow : EditorWindow
             if (robotArm != null)
             {
                 entry.hasRobotArmRuntimeSettings = true;
-                entry.robotArmUseInstancedRendering = robotArm.UsesInstancedRendering;
                 entry.robotArmPickupInterval = robotArm.PickupIntervalSeconds;
                 entry.robotArmBodyTurnSpeedDegreesPerSecond = robotArm.BodyTurnSpeedDegreesPerSecond;
                 entry.robotArmDropRetryInterval = robotArm.DropRetryIntervalSeconds;
@@ -8046,7 +8040,6 @@ public class ItemDataEditorWindow : EditorWindow
         ItemDataJsonEntry entry)
     {
         robotArm.SetEditorSettings(
-            entry.robotArmUseInstancedRendering,
             entry.robotArmPickupInterval >= 0f
                 ? entry.robotArmPickupInterval
                 : robotArm.PickupIntervalSeconds,

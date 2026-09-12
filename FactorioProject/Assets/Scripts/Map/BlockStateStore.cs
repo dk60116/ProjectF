@@ -702,6 +702,7 @@ public partial class BlockStateStore : MonoBehaviour
 
     public List<InstallationSaveState> GetInstallationStatesSnapshot()
     {
+        RobotArmWorld.Current?.FlushSaveStates();
         List<InstallationSaveState> snapshot = new List<InstallationSaveState>(savedInstallationStates.Count);
         foreach (KeyValuePair<Vector2Int, InstallationSaveState> pair in savedInstallationStates)
         {
@@ -1130,6 +1131,7 @@ public partial class BlockStateStore : MonoBehaviour
 
     public void RemoveInstallation(Vector2Int storageKey)
     {
+        RobotArmWorld.Current?.Remove(storageKey);
         Vector2Int removedAnchor = storageKey;
         if (liveInstallationStates.TryGetValue(storageKey, out LiveInstallationRecord liveRecord))
         {
@@ -1194,6 +1196,7 @@ public partial class BlockStateStore : MonoBehaviour
         liveInstallationStates.Clear();
         liveInstallationAnchorsByCoordinate.Clear();
         ConveyorWorld.Current?.ClearRecords();
+        RobotArmWorld.Current?.ClearRecords();
         ResolveVirtualObjectWorld()?.Clear();
     }
 
@@ -1205,6 +1208,7 @@ public partial class BlockStateStore : MonoBehaviour
         }
 
         mapSaveData.resources ??= new List<ResourceSaveEntry>();
+        RobotArmWorld.Current?.FlushSaveStates();
         mapSaveData.floorObjects ??= new List<FloorObjectSaveEntry>();
         mapSaveData.installations ??= new List<InstallationSaveEntry>();
         mapSaveData.conveyorItems ??= new List<ConveyorItemBlockSaveEntry>();

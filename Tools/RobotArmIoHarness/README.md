@@ -6,14 +6,13 @@ powershell -NoProfile -ExecutionPolicy Bypass -File Tools/RobotArmIoHarness/Run.
 
 Uses .NET 9 and the installed Unity managed vector assembly without launching Unity.
 Reads the actual robot-arm prefab's InputItem/Object/Output grid. Extracts production
-endpoint resolution, grid-coordinate rotation, wake-coordinate registration, solid
+endpoint resolution, grid-coordinate rotation, solid
 item eligibility, transfer state, and binary transfer-state read/write methods.
 
 Checks all four rotations at positive/negative origins, cached endpoints, reordered
-and extended grids, missing ports, placement clearing, wake registration at distant
-ports, disabling cleanup, exclusion of fluids, and all eight saved transfer phases.
-Wake notifications are dispatched through the production callback, including repeated
-notifications at extended ports and their adjacent cells. Moving freight targets must
+and extended grids, missing ports, placement clearing, exclusion of fluids, and all
+eight saved transfer phases. Exact endpoint subscriptions and coalesced wake notifications
+are checked separately by `Tools/RobotArmEcsHarness`. Moving freight targets must
 keep the drop retry active until they stop, even without a grid-coordinate change;
 full stopped targets retain event-driven sleep.
 The transfer payload retains its existing 26-byte layout; module state and arm
@@ -38,3 +37,6 @@ The harness also verifies that motion anywhere in a connected train consist bloc
 robot-arm pickup from and placement into its freight cars until the consist stops.
 Machine outputs placed over belts are checked as observable transport boundaries. A
 full output belt must wake its sleeping producer when automatic transport vacates a lane.
+It also guards the production cache contracts: block-handle validation, coordinate-local
+freight topology versions, map-object identity checks, versioned electric-network
+selection, and allocation-free reuse of the drop-position callback.

@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.IO;
 
@@ -14,7 +14,6 @@ public partial class Animal
     public float AppliedGrowthScale;
     public bool EatingAnimation;
     public float RemainingEatingAnimationSeconds;
-    internal float GetRemainingEatingAnimationSeconds() => RemainingEatingAnimationSeconds;
     public void SetAIAnimation(float speed, bool isEating, bool drinking, bool resting, bool looking, bool fleeing, bool running, float playbackScale)
         => EatingAnimation = isEating;
     private bool InitializeGrowth() => true;
@@ -63,7 +62,7 @@ public static partial class Checks
     {
         RunArmDeliveryFoodChecks();
         TerrainGenerator.Active = new(); var food = Drop(0); food.Count = 10;
-        var first = new AnimalAIController(); first.Tick(.1f);
+        var first = new AnimalAIController { feedingDuration = 3 }; first.Tick(.1f);
         var others = new AnimalAIController[9];
         for (int i = 0; i < others.Length; i++) { others[i] = new(); others[i].Tick(.1f); }
         Check(food.Count == 9, "ten hungry animals cannot empty one stack in the same tick");
@@ -216,13 +215,13 @@ public static partial class Checks
             "growing animals also wait until hunger reaches fifty percent");
 
         TerrainGenerator.Active = new(); food = Drop(0); food.Count = 4;
-        controller = new(); controller.animal.SetAge(2);
+        controller = new() { feedingDuration = 3 }; controller.animal.SetAge(2);
         controller.Tick(.1f);
         Check(food.Count == 3 && controller.animal.CurrentGrowthFoodEnergy == 25,
             "starting a meal consumes exactly one item and applies exactly one item's growth");
         controller.animal.RemainingEatingAnimationSeconds = 2;
         for (int i = 0; i < 20; i++) controller.Tick(.1f);
-        Check(food.Count == 3, "a long eating animation cannot consume a second item after the old one-second timer");
+        Check(food.Count == 3, "baked clip duration holds the meal without reading playback progress");
         controller.animal.RemainingEatingAnimationSeconds = 0;
         controller.Tick(2.1f);
         controller.Tick(.25f);

@@ -9,14 +9,17 @@ function Member([string]$path, [string]$signature) {
     while ($depth -gt 0) { if ($text[$end] -eq '{') { $depth++ }; if ($text[$end] -eq '}') { $depth-- }; $end++ }
     return $text.Substring($start, $end - $start)
 }
-$arm = 'FactorioProject/Assets/Scripts/Object/MapObj/InstallationObject/RobotArm.cs'
+$author = 'FactorioProject/Assets/Scripts/Object/MapObj/InstallationObject/RobotArm.cs'
+$arm = 'FactorioProject/Assets/Scripts/Object/MapObj/InstallationObject/RobotArmInstance.cs'
 $train = 'FactorioProject/Assets/Scripts/Object/MapObj/InstallationObject/Vehicle/Train.cs'
 $io = 'FactorioProject/Assets/Scripts/Object/MapObj/InstallationObject/InputOutputModule.cs'
 $placement = 'FactorioProject/Assets/Scripts/Object/MapObj/InstallationObject/InstallationPlacementController.cs'
 $terrainItems = 'FactorioProject/Assets/Scripts/Map/TerrainGenerator.Items.cs'
 $serializer = 'FactorioProject/Assets/Scripts/Manager/SaveGameBinarySerializer.cs'
 $source = "using System; using System.IO; using System.Collections.Generic; using UnityEngine; public partial class RobotArm {`n"
-foreach ($member in @('public enum RobotArmState', 'public sealed class TransferState', 'private bool EnsureInteractionCoordinateCache(', 'private bool TryResolvePickupCoordinate(', 'private bool TryResolveDropCoordinate(', 'private void InvalidateInteractionCoordinateCache(', 'public bool TryCollectTransferItemIds(', 'private void RefreshRegisteredWakeCoordinates(', 'private void RegisterWakeCoordinatesAround(', 'private void RegisterWakeCoordinate(', 'private void UnregisterWakeCoordinates(', 'public static void WakeAroundCoordinate(', 'private bool IsCoordinateInsideRuntimeSleepWakeRange(', 'private bool ShouldRuntimeSleepWithHeldItem(', 'private bool CanPlaceHeldItemForCurrentPlan(')) {
+$source += (Member $author 'public bool TryCollectTransferItemIds(') + "`n"
+$source += (Member $author 'public enum RobotArmState') + "`n" + (Member $author 'public sealed class TransferState') + "`n"
+foreach ($member in @('private bool EnsureInteractionCoordinateCache(', 'private bool TryResolvePickupCoordinate(', 'private bool TryResolveDropCoordinate(', 'private void InvalidateInteractionCoordinateCache(', 'private bool IsMovingFreightCarAtCoordinate(', 'private bool ShouldRuntimeSleepWithHeldItem(', 'private bool CanPlaceHeldItemForCurrentPlan(')) {
     $source += (Member $arm $member) + "`n"
 }
 foreach ($member in @('private static bool CanPlaceSingleLineDrop(', 'private static bool CanPlaceSavedSingleLineDrop(', 'private static bool CoordinateAcceptsInputAreaObject(', 'private static bool IsConveyorBeltMapObject(', 'private static bool IsOreMapObject(', 'private static bool ShouldUseSavedDropCoordinate(')) {

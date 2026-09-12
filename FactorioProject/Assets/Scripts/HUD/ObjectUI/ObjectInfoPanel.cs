@@ -216,7 +216,7 @@ public class ObjectInfoPanel : MonoBehaviour
             return;
         }
 
-        if (mapObject is RobotArm robotArm)
+        if (mapObject is RobotArmInstance robotArm)
         {
             ShowRobotArmInfo(robotArm, underlyingResource);
             return;
@@ -733,7 +733,7 @@ public class ObjectInfoPanel : MonoBehaviour
         infoLine.ShowPipe(pipe, underlyingResource);
     }
 
-    private void ShowRobotArmInfo(RobotArm robotArm, ResourceInstance underlyingResource)
+    private void ShowRobotArmInfo(RobotArmInstance robotArm, ResourceInstance underlyingResource)
     {
         if (infoLine == null)
         {

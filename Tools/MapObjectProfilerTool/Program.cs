@@ -28,6 +28,7 @@ internal sealed class ProfilerForm : Form
     private const int TimeoutMilliseconds = 5000;
     private const int GeneratedBeltIconCacheKey = int.MinValue;
     private const int GeneratedEmptyIconCacheKey = int.MinValue + 1;
+    private const int ChartRowHeight = 40;
 
     private readonly TextBox hostTextBox = new TextBox();
     private readonly NumericUpDown portInput = new NumericUpDown();
@@ -49,20 +50,26 @@ internal sealed class ProfilerForm : Form
     private readonly Dictionary<int, Image> iconCache = new Dictionary<int, Image>();
     private readonly List<ProfileRow> profileRows = new List<ProfileRow>();
     private readonly List<ProfileRow> displayRows = new List<ProfileRow>();
-    private const string BeltGroupRowTag = "__belt_group__";
+    private const string BeltTickGroupRowTag = "__belt_tick_group__";
+    private const string BeltRenderGroupRowTag = "__belt_render_group__";
 
     private ProfileSnapshot? lastSnapshot;
     private SnapshotTextForm? snapshotTextForm;
     private SnapshotBeltTickForm? snapshotBeltTickForm;
     private bool applyingRuntimeState;
     private bool polling;
-    private bool beltRowsExpanded;
+    private bool beltTickRowsExpanded;
+    private bool beltRenderRowsExpanded;
     private bool simulationPaused;
+    private bool snapshotFrozenByPause;
+    private int snapshotRequestVersion;
+    private TaskCompletionSource<bool>? activePollCompletion;
 
     public ProfilerForm()
     {
         Text = ToolTitle;
         MinimumSize = new Size(1080, 760);
+        ClientSize = new Size(1420, 900);
         StartPosition = FormStartPosition.CenterScreen;
         Font = new Font("Segoe UI", 10f, FontStyle.Regular, GraphicsUnit.Point);
         BackColor = Color.FromArgb(28, 31, 34);
@@ -167,12 +174,15 @@ internal sealed class ProfilerForm : Form
         {
             Dock = DockStyle.Fill,
             Orientation = Orientation.Horizontal,
-            SplitterDistance = 280,
+            SplitterDistance = 210,
+            FixedPanel = FixedPanel.Panel1,
             BackColor = Color.FromArgb(28, 31, 34)
         };
         chartPanel.Dock = DockStyle.Fill;
+        chartPanel.AutoScroll = true;
         chartPanel.BackColor = Color.FromArgb(34, 38, 41);
         chartPanel.Paint += DrawChart;
+        chartPanel.Scroll += (_, _) => chartPanel.Invalidate();
         split.Panel1.Controls.Add(chartPanel);
 
         ConfigureGrid();
@@ -308,13 +318,25 @@ internal sealed class ProfilerForm : Form
         rowsGrid.Columns.Add(CreateTextColumn("MaxUs", "Max us", 11));
         rowsGrid.CellClick += (_, e) =>
         {
-            if (e.RowIndex < 0 || e.RowIndex >= rowsGrid.Rows.Count
-                || !string.Equals(rowsGrid.Rows[e.RowIndex].Tag as string, BeltGroupRowTag, StringComparison.Ordinal))
+            if (e.RowIndex < 0 || e.RowIndex >= rowsGrid.Rows.Count)
             {
                 return;
             }
 
-            beltRowsExpanded = !beltRowsExpanded;
+            string? tag = rowsGrid.Rows[e.RowIndex].Tag as string;
+            if (string.Equals(tag, BeltTickGroupRowTag, StringComparison.Ordinal))
+            {
+                beltTickRowsExpanded = !beltTickRowsExpanded;
+            }
+            else if (string.Equals(tag, BeltRenderGroupRowTag, StringComparison.Ordinal))
+            {
+                beltRenderRowsExpanded = !beltRenderRowsExpanded;
+            }
+            else
+            {
+                return;
+            }
+
             RebuildDisplayRows();
             RefreshGrid();
             chartPanel.Invalidate();
@@ -344,6 +366,7 @@ internal sealed class ProfilerForm : Form
             return;
         }
 
+        snapshotRequestVersion++;
         SetBusy(true);
         try
         {
@@ -377,12 +400,31 @@ internal sealed class ProfilerForm : Form
         SetBusy(true);
         try
         {
+            bool completedFreshPoll = await WaitForActivePollAsync();
+            snapshotRequestVersion++;
+            if (paused && enableProfilingCheckBox.Checked
+                && (!completedFreshPoll || lastSnapshot == null))
+            {
+                // Close the current measurement window immediately before issuing the
+                // pause command. No paused-frame rendering can enter this snapshot.
+                await FetchAndApplySnapshotAsync(true, true);
+            }
+
             string command = $"simulation pause {(paused ? 1 : 0)}";
             string response = await SendProtocolLineAsync(BuildHost(), BuildPort(), command);
             AppendLog($"> {command}");
             AppendLog(response);
             ApplyStatus(response);
-            await PollAsync(true);
+            if (paused)
+            {
+                snapshotFrozenByPause = lastSnapshot != null;
+                ApplyPauseDisplayState();
+            }
+            else if (!paused)
+            {
+                snapshotFrozenByPause = false;
+                await PollAsync(true);
+            }
         }
         catch (Exception exception) when (IsProtocolException(exception))
         {
@@ -394,6 +436,18 @@ internal sealed class ProfilerForm : Form
         }
     }
 
+    private async Task<bool> WaitForActivePollAsync()
+    {
+        TaskCompletionSource<bool>? completion = activePollCompletion;
+        if (completion == null)
+        {
+            return false;
+        }
+
+        await completion.Task;
+        return true;
+    }
+
     private async Task PollAsync(bool logFailure)
     {
         if (polling)
@@ -402,8 +456,12 @@ internal sealed class ProfilerForm : Form
         }
 
         polling = true;
+        TaskCompletionSource<bool> completion = new TaskCompletionSource<bool>(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+        activePollCompletion = completion;
         try
         {
+            bool wasPaused = simulationPaused;
             string statusResponse = await SendProtocolLineAsync(BuildHost(), BuildPort(), "status");
             ApplyStatus(statusResponse);
             if (!enableProfilingCheckBox.Checked)
@@ -412,23 +470,18 @@ internal sealed class ProfilerForm : Form
                 return;
             }
 
-            int maxRows = Decimal.ToInt32(maxRowsInput.Value);
-            string perfResponse = await SendProtocolLineAsync(BuildHost(), BuildPort(), $"perf {maxRows}");
-            if (!perfResponse.StartsWith("ok ", StringComparison.OrdinalIgnoreCase)
-                || !TryReadProtocolToken(perfResponse, "perfData", out string perfDataToken))
+            if (simulationPaused)
             {
-                if (logFailure)
+                if (!wasPaused)
                 {
-                    AppendLog($"perf failed: {perfResponse}");
+                    snapshotRequestVersion++;
+                    snapshotFrozenByPause = lastSnapshot != null;
                 }
-
-                ApplyEmptyState("측정 응답 없음");
+                ApplyPauseDisplayState();
                 return;
             }
 
-            string json = Encoding.UTF8.GetString(Convert.FromBase64String(perfDataToken));
-            ProfileSnapshot? snapshot = JsonSerializer.Deserialize<ProfileSnapshot>(json);
-            ApplySnapshot(snapshot);
+            await FetchAndApplySnapshotAsync(logFailure, false);
         }
         catch (Exception exception) when (IsProtocolException(exception))
         {
@@ -442,7 +495,47 @@ internal sealed class ProfilerForm : Form
         finally
         {
             polling = false;
+            if (ReferenceEquals(activePollCompletion, completion))
+            {
+                activePollCompletion = null;
+            }
+            completion.TrySetResult(true);
         }
+    }
+
+    private async Task FetchAndApplySnapshotAsync(bool logFailure, bool freezeForPause)
+    {
+        int requestVersion = snapshotRequestVersion;
+        int maxRows = Decimal.ToInt32(maxRowsInput.Value);
+        string perfResponse = await SendProtocolLineAsync(BuildHost(), BuildPort(), $"perf {maxRows}");
+        if (!freezeForPause && requestVersion != snapshotRequestVersion)
+        {
+            return;
+        }
+
+        if (!perfResponse.StartsWith("ok ", StringComparison.OrdinalIgnoreCase)
+            || !TryReadProtocolToken(perfResponse, "perfData", out string perfDataToken))
+        {
+            if (logFailure)
+            {
+                AppendLog($"perf failed: {perfResponse}");
+            }
+
+            if (!freezeForPause || lastSnapshot == null)
+            {
+                ApplyEmptyState("측정 응답 없음");
+            }
+            else
+            {
+                snapshotFrozenByPause = true;
+                ApplyPauseDisplayState();
+            }
+            return;
+        }
+
+        string json = Encoding.UTF8.GetString(Convert.FromBase64String(perfDataToken));
+        ProfileSnapshot? snapshot = JsonSerializer.Deserialize<ProfileSnapshot>(json);
+        ApplySnapshot(snapshot, freezeForPause);
     }
 
     private void ApplyStatus(string response)
@@ -534,8 +627,9 @@ internal sealed class ProfilerForm : Form
         }
     }
 
-    private void ApplySnapshot(ProfileSnapshot? snapshot)
+    private void ApplySnapshot(ProfileSnapshot? snapshot, bool freezeForPause = false)
     {
+        snapshotFrozenByPause = freezeForPause && snapshot != null;
         lastSnapshot = snapshot;
         profileRows.Clear();
         if (snapshot?.Rows != null)
@@ -555,8 +649,12 @@ internal sealed class ProfilerForm : Form
         else
         {
             summaryLabel.Text =
-                $"Window {snapshot.WindowMs:0.#} ms / Frames {snapshot.BeltLoopProfileFrames:N0} / Active Update {snapshot.ActiveUpdateTicks:N0} / Belts {snapshot.ActiveBeltTicks:N0} / Loops/f {snapshot.BeltItemLoopIterations:N1} / Data {snapshot.BeltDataMotionLoopIterations:N1} / Queue {snapshot.BeltActiveLoopIterations:N1} / Line {snapshot.BeltStraightLineBlockLoopIterations:N1} / Visual {snapshot.BeltVisualLoopIterations:N1} / Try {snapshot.BeltTryMoveAttempts:N1}:{snapshot.BeltTryMoveSuccesses:N1} / St {snapshot.BeltStraightMoveAttempts:N1}:{snapshot.BeltStraightMoveSuccesses:N1} / Plan {snapshot.BeltPlanMoveCalls:N1} / Apply {snapshot.BeltPlannedMoveApplications:N1} / Touch {snapshot.BeltTouchedBlockRefreshes:N1} / Wake {snapshot.BeltWakeAroundCalls:N1} / Ref {snapshot.BeltActivityRefreshCalls:N1} / Rows {profileRows.Count:N0}";
+                $"Window {snapshot.WindowMs:0.#} ms / Frames {snapshot.BeltLoopProfileFrames:N0} / Active Update {snapshot.ActiveUpdateTicks:N0} / " +
+                $"TICK [Active {snapshot.ActiveBeltTicks:N0} / Data {snapshot.ActiveBeltDataMotions:N0} / Loops/f {snapshot.BeltItemLoopIterations:N1} / Queue {snapshot.BeltActiveLoopIterations:N1} / Line {snapshot.BeltStraightLineBlockLoopIterations:N1} / Try {snapshot.BeltTryMoveAttempts:N1}:{snapshot.BeltTryMoveSuccesses:N1} / St {snapshot.BeltStraightMoveAttempts:N1}:{snapshot.BeltStraightMoveSuccesses:N1} / Plan {snapshot.BeltPlanMoveCalls:N1} / Apply {snapshot.BeltPlannedMoveApplications:N1} / Touch {snapshot.BeltTouchedBlockRefreshes:N1} / Wake {snapshot.BeltWakeAroundCalls:N1} / Ref {snapshot.BeltActivityRefreshCalls:N1}] / " +
+                $"RENDER [Active {snapshot.ActiveBeltVisualTicks:N0} / Visual/f {snapshot.BeltVisualLoopIterations:N1}] / Rows {profileRows.Count:N0}";
         }
+
+        ApplyPauseDisplayState();
 
         RefreshGrid();
         chartPanel.Invalidate();
@@ -567,6 +665,7 @@ internal sealed class ProfilerForm : Form
 
     private void ApplyEmptyState(string message)
     {
+        snapshotFrozenByPause = false;
         lastSnapshot = null;
         profileRows.Clear();
         displayRows.Clear();
@@ -576,6 +675,25 @@ internal sealed class ProfilerForm : Form
         UpdateSnapshotWindowButtonsEnabled();
         RefreshSnapshotTextWindow();
         RefreshBeltTickWindow();
+    }
+
+    private void ApplyPauseDisplayState()
+    {
+        if (!simulationPaused)
+        {
+            return;
+        }
+
+        if (lastSnapshot == null)
+        {
+            summaryLabel.Text = "PAUSED / 고정할 측정 스냅샷 없음";
+            return;
+        }
+
+        if (snapshotFrozenByPause && !summaryLabel.Text.StartsWith("PAUSED / ", StringComparison.Ordinal))
+        {
+            summaryLabel.Text = $"PAUSED / 마지막 완료 스냅샷 고정 / {summaryLabel.Text}";
+        }
     }
 
     private void ApplyOfflineState(string message)
@@ -598,10 +716,14 @@ internal sealed class ProfilerForm : Form
             for (int i = 0; i < displayRows.Count; i++)
             {
                 ProfileRow row = displayRows[i];
-                bool isBeltGroup = ReferenceEquals(row, beltGroupDisplayRow);
+                bool isBeltTickGroup = ReferenceEquals(row, beltTickGroupDisplayRow);
+                bool isBeltRenderGroup = ReferenceEquals(row, beltRenderGroupDisplayRow);
+                bool isBeltGroup = isBeltTickGroup || isBeltRenderGroup;
                 int rowIndex = rowsGrid.Rows.Add(
                     ResolveRowIcon(row) ?? ResolveEmptyIcon(),
-                    isBeltGroup ? (beltRowsExpanded ? "▼" : "▶") : row.Rank,
+                    isBeltTickGroup ? (beltTickRowsExpanded ? "▼" : "▶")
+                        : isBeltRenderGroup ? (beltRenderRowsExpanded ? "▼" : "▶")
+                        : row.Rank,
                     ResolveRowDisplayName(row),
                     row.Type,
                     row.Kind,
@@ -611,11 +733,17 @@ internal sealed class ProfilerForm : Form
                     row.AvgUs.ToString("0.#", CultureInfo.InvariantCulture),
                     row.MaxUs.ToString("0.#", CultureInfo.InvariantCulture));
                 DataGridViewRow gridRow = rowsGrid.Rows[rowIndex];
-                gridRow.Tag = isBeltGroup ? BeltGroupRowTag : BuildProfileRowTag(row);
+                gridRow.Tag = isBeltTickGroup ? BeltTickGroupRowTag
+                    : isBeltRenderGroup ? BeltRenderGroupRowTag
+                    : BuildProfileRowTag(row);
                 if (isBeltGroup)
                 {
-                    gridRow.DefaultCellStyle.BackColor = Color.FromArgb(52, 58, 50);
-                    gridRow.Cells[2].ToolTipText = "클릭하여 벨트 측정 세부 항목을 열거나 닫습니다.";
+                    gridRow.DefaultCellStyle.BackColor = isBeltRenderGroup
+                        ? Color.FromArgb(40, 61, 62)
+                        : Color.FromArgb(62, 57, 42);
+                    gridRow.Cells[2].ToolTipText = isBeltRenderGroup
+                        ? "클릭하여 벨트 렌더링 세부 항목을 열거나 닫습니다."
+                        : "클릭하여 벨트 틱 계산 세부 항목을 열거나 닫습니다.";
                 }
             }
 
@@ -627,61 +755,114 @@ internal sealed class ProfilerForm : Form
         }
     }
 
-    private ProfileRow? beltGroupDisplayRow;
+    private ProfileRow? beltTickGroupDisplayRow;
+    private ProfileRow? beltRenderGroupDisplayRow;
 
     private void RebuildDisplayRows()
     {
         displayRows.Clear();
-        beltGroupDisplayRow = null;
-        int beltCount = 0, firstBeltIndex = -1, activeCount = 0;
-        long samples = 0;
-        double totalUs = 0.0, maxUs = 0.0;
+        beltTickGroupDisplayRow = null;
+        beltRenderGroupDisplayRow = null;
+        int tickCount = 0, tickFirstIndex = -1, tickActiveCount = 0;
+        int renderCount = 0, renderFirstIndex = -1, renderActiveCount = 0;
+        long tickSamples = 0, renderSamples = 0;
+        double tickTotalUs = 0.0, tickMaxUs = 0.0;
+        double renderTotalUs = 0.0, renderMaxUs = 0.0;
         for (int i = 0; i < profileRows.Count; i++)
         {
             ProfileRow row = profileRows[i];
-            if (!IsBeltRelatedRow(row)) continue;
-            if (firstBeltIndex < 0) firstBeltIndex = i;
-            beltCount++;
-            activeCount += row.ActiveCount;
-            samples += row.Samples;
-            totalUs += row.TotalUs;
-            maxUs = Math.Max(maxUs, row.MaxUs);
-        }
-
-        if (beltCount > 0)
-        {
-            beltGroupDisplayRow = new ProfileRow
+            switch (ClassifyBeltRow(row))
             {
-                Rank = profileRows[firstBeltIndex].Rank,
-                Kind = "Belt",
-                Type = $"{beltCount:N0} metrics",
-                ItemId = -1,
-                ItemName = $"Belt ({beltCount:N0})",
-                ActiveCount = activeCount,
-                Samples = samples,
-                TotalUs = totalUs,
-                AvgUs = samples > 0 ? totalUs / samples : 0.0,
-                MaxUs = maxUs
-            };
+                case BeltRowGroup.Tick:
+                    if (tickFirstIndex < 0) tickFirstIndex = i;
+                    tickCount++;
+                    tickActiveCount += row.ActiveCount;
+                    tickSamples += row.Samples;
+                    tickTotalUs += row.TotalUs;
+                    tickMaxUs = Math.Max(tickMaxUs, row.MaxUs);
+                    break;
+                case BeltRowGroup.Rendering:
+                    if (renderFirstIndex < 0) renderFirstIndex = i;
+                    renderCount++;
+                    renderActiveCount += row.ActiveCount;
+                    renderSamples += row.Samples;
+                    renderTotalUs += row.TotalUs;
+                    renderMaxUs = Math.Max(renderMaxUs, row.MaxUs);
+                    break;
+            }
         }
 
-        bool groupAdded = false;
+        if (tickCount > 0)
+        {
+            beltTickGroupDisplayRow = CreateBeltGroupRow(
+                profileRows[tickFirstIndex].Rank, "Belt Tick", "Belt Tick Calculation",
+                tickCount, tickActiveCount, tickSamples, tickTotalUs, tickMaxUs);
+        }
+        if (renderCount > 0)
+        {
+            beltRenderGroupDisplayRow = CreateBeltGroupRow(
+                profileRows[renderFirstIndex].Rank, "Belt Render", "Belt Rendering",
+                renderCount, renderActiveCount, renderSamples, renderTotalUs, renderMaxUs);
+        }
+
+        bool tickGroupAdded = false, renderGroupAdded = false;
         for (int i = 0; i < profileRows.Count; i++)
         {
             ProfileRow row = profileRows[i];
-            if (!IsBeltRelatedRow(row))
+            BeltRowGroup group = ClassifyBeltRow(row);
+            if (group == BeltRowGroup.None)
             {
                 displayRows.Add(row);
                 continue;
             }
 
-            if (!groupAdded)
+            if (group == BeltRowGroup.Tick)
             {
-                displayRows.Add(beltGroupDisplayRow!);
-                groupAdded = true;
+                if (!tickGroupAdded)
+                {
+                    displayRows.Add(beltTickGroupDisplayRow!);
+                    tickGroupAdded = true;
+                }
+                if (beltTickRowsExpanded) displayRows.Add(row);
+                continue;
             }
-            if (beltRowsExpanded) displayRows.Add(row);
+
+            if (!renderGroupAdded)
+            {
+                displayRows.Add(beltRenderGroupDisplayRow!);
+                renderGroupAdded = true;
+            }
+            if (beltRenderRowsExpanded) displayRows.Add(row);
         }
+
+        chartPanel.AutoScrollMinSize = displayRows.Count > 0
+            ? new Size(0, displayRows.Count * ChartRowHeight + 24)
+            : Size.Empty;
+    }
+
+    private static ProfileRow CreateBeltGroupRow(
+        int rank,
+        string kind,
+        string itemName,
+        int metricCount,
+        int activeCount,
+        long samples,
+        double totalUs,
+        double maxUs)
+    {
+        return new ProfileRow
+        {
+            Rank = rank,
+            Kind = kind,
+            Type = $"{metricCount:N0} metrics",
+            ItemId = -1,
+            ItemName = $"{itemName} ({metricCount:N0})",
+            ActiveCount = activeCount,
+            Samples = samples,
+            TotalUs = totalUs,
+            AvgUs = samples > 0 ? totalUs / samples : 0.0,
+            MaxUs = maxUs
+        };
     }
 
     private readonly struct GridViewportState
@@ -706,7 +887,10 @@ internal sealed class ProfilerForm : Form
     {
         if (rowsGrid.Rows.Count == 0) return;
         int top = FindGridRow(state.TopTag);
-        if (top < 0 && state.TopTag?.StartsWith("belt:", StringComparison.Ordinal) == true) top = FindGridRow(BeltGroupRowTag);
+        if (top < 0 && state.TopTag?.StartsWith("belt-tick:", StringComparison.Ordinal) == true)
+            top = FindGridRow(BeltTickGroupRowTag);
+        if (top < 0 && state.TopTag?.StartsWith("belt-render:", StringComparison.Ordinal) == true)
+            top = FindGridRow(BeltRenderGroupRowTag);
         if (top < 0) top = Math.Clamp(state.TopIndex, 0, rowsGrid.Rows.Count - 1);
         int current = FindGridRow(state.CurrentTag);
         if (current >= 0)
@@ -734,7 +918,15 @@ internal sealed class ProfilerForm : Form
     }
 
     private static string BuildProfileRowTag(ProfileRow row)
-        => $"{(IsBeltRelatedRow(row) ? "belt:" : "row:")}{row.Kind}\u001f{row.Type}\u001f{row.ItemId}\u001f{row.ItemName}";
+    {
+        string prefix = ClassifyBeltRow(row) switch
+        {
+            BeltRowGroup.Tick => "belt-tick:",
+            BeltRowGroup.Rendering => "belt-render:",
+            _ => "row:"
+        };
+        return $"{prefix}{row.Kind}\u001f{row.Type}\u001f{row.ItemId}\u001f{row.ItemName}";
+    }
 
     private void DrawChart(object? sender, PaintEventArgs e)
     {
@@ -750,8 +942,7 @@ internal sealed class ProfilerForm : Form
         }
 
         Rectangle inner = Rectangle.Inflate(bounds, -14, -12);
-        int visibleRows = Math.Min(displayRows.Count, Math.Max(1, inner.Height / 34));
-        int rowHeight = Math.Max(30, inner.Height / visibleRows);
+        int scrollOffsetY = -chartPanel.AutoScrollPosition.Y;
         double maxTotalUs = 1.0;
         for (int i = 0; i < displayRows.Count; i++) maxTotalUs = Math.Max(maxTotalUs, displayRows[i].TotalUs);
 
@@ -760,15 +951,20 @@ internal sealed class ProfilerForm : Form
         using SolidBrush barBackBrush = new SolidBrush(Color.FromArgb(52, 58, 62));
         using SolidBrush updateBrush = new SolidBrush(Color.FromArgb(89, 183, 216));
         using SolidBrush lateBrush = new SolidBrush(Color.FromArgb(177, 132, 224));
-        using SolidBrush beltBrush = new SolidBrush(Color.FromArgb(235, 189, 92));
+        using SolidBrush beltTickBrush = new SolidBrush(Color.FromArgb(235, 189, 92));
+        using SolidBrush beltRenderBrush = new SolidBrush(Color.FromArgb(87, 199, 190));
         using Pen dividerPen = new Pen(Color.FromArgb(55, 62, 66));
         Font graphFont = (Font ?? SystemFonts.MessageBoxFont)!;
 
-        for (int i = 0; i < visibleRows; i++)
+        for (int i = 0; i < displayRows.Count; i++)
         {
             ProfileRow row = displayRows[i];
-            int y = inner.Top + i * rowHeight;
-            Rectangle rowRect = new Rectangle(inner.Left, y, inner.Width, rowHeight - 2);
+            int y = inner.Top + i * ChartRowHeight - scrollOffsetY;
+            Rectangle rowRect = new Rectangle(inner.Left, y, inner.Width, ChartRowHeight - 2);
+            if (rowRect.Bottom < inner.Top || rowRect.Top > inner.Bottom)
+            {
+                continue;
+            }
             Rectangle iconRect = new Rectangle(rowRect.Left, rowRect.Top + 3, 26, 26);
             Image? icon = ResolveRowIcon(row);
             if (icon != null)
@@ -801,7 +997,7 @@ internal sealed class ProfilerForm : Form
             e.Graphics.FillRectangle(barBackBrush, barRect);
             int filledWidth = Math.Max(1, (int)Math.Round(barRect.Width * Math.Clamp(row.TotalUs / maxTotalUs, 0.0, 1.0)));
             e.Graphics.FillRectangle(
-                ResolveRowBrush(row, updateBrush, lateBrush, beltBrush),
+                ResolveRowBrush(row, updateBrush, lateBrush, beltTickBrush, beltRenderBrush),
                 new Rectangle(barRect.Left, barRect.Top, filledWidth, barRect.Height));
 
             string metrics = $"{row.TotalUs / 1000.0:0.###} ms   avg {row.AvgUs:0.#} us   max {row.MaxUs:0.#} us   x{row.Samples:N0}   active {row.ActiveCount:N0}";
@@ -810,11 +1006,20 @@ internal sealed class ProfilerForm : Form
         }
     }
 
-    private static SolidBrush ResolveRowBrush(ProfileRow row, SolidBrush updateBrush, SolidBrush lateBrush, SolidBrush beltBrush)
+    private static SolidBrush ResolveRowBrush(
+        ProfileRow row,
+        SolidBrush updateBrush,
+        SolidBrush lateBrush,
+        SolidBrush beltTickBrush,
+        SolidBrush beltRenderBrush)
     {
-        if (string.Equals(row.Kind, "Belt", StringComparison.OrdinalIgnoreCase))
+        if (string.Equals(row.Kind, "Belt Tick", StringComparison.OrdinalIgnoreCase))
         {
-            return beltBrush;
+            return beltTickBrush;
+        }
+        if (string.Equals(row.Kind, "Belt Render", StringComparison.OrdinalIgnoreCase))
+        {
+            return beltRenderBrush;
         }
 
         return string.Equals(row.Kind, "Late", StringComparison.OrdinalIgnoreCase) ? lateBrush : updateBrush;
@@ -987,6 +1192,33 @@ internal sealed class ProfilerForm : Form
                    || ContainsOrdinalIgnoreCase(row.Type, "Conveyor")
                    || ContainsOrdinalIgnoreCase(row.ItemName, "Belt")
                    || ContainsOrdinalIgnoreCase(row.ItemName, "Conveyor"));
+    }
+
+    private enum BeltRowGroup
+    {
+        None,
+        Tick,
+        Rendering
+    }
+
+    private static BeltRowGroup ClassifyBeltRow(ProfileRow row)
+    {
+        if (!IsBeltRelatedRow(row))
+        {
+            return BeltRowGroup.None;
+        }
+
+        string type = row.Type ?? string.Empty;
+        string itemName = row.ItemName ?? string.Empty;
+        bool rendering = string.Equals(type, "PortableItemRenderer", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(type, "VirtualConveyorBeltRenderer", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(type, "ConveyorVisual", StringComparison.OrdinalIgnoreCase)
+            || ContainsOrdinalIgnoreCase(type, "Render")
+            || ContainsOrdinalIgnoreCase(itemName, "Conveyor Item")
+            || ContainsOrdinalIgnoreCase(itemName, "Virtual Belt")
+            || ContainsOrdinalIgnoreCase(itemName, "Belt Visual")
+            || ContainsOrdinalIgnoreCase(itemName, "Render");
+        return rendering ? BeltRowGroup.Rendering : BeltRowGroup.Tick;
     }
 
     private static bool ContainsOrdinalIgnoreCase(string? value, string pattern)
@@ -1203,6 +1435,15 @@ internal sealed class ProfilerForm : Form
 
     private void SetBusy(bool busy)
     {
+        if (busy)
+        {
+            pollTimer.Stop();
+        }
+        else if (!IsDisposed)
+        {
+            pollTimer.Start();
+        }
+
         hostTextBox.Enabled = !busy;
         portInput.Enabled = !busy;
         intervalInput.Enabled = !busy;
@@ -2169,9 +2410,6 @@ internal sealed class ProfileSnapshot
 
     [JsonPropertyName("activeUpdateTicks")]
     public int ActiveUpdateTicks { get; set; }
-
-    [JsonPropertyName("activeLateTicks")]
-    public int ActiveLateTicks { get; set; }
 
     [JsonPropertyName("activeBeltTicks")]
     public int ActiveBeltTicks { get; set; }

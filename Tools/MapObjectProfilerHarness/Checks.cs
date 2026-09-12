@@ -111,11 +111,6 @@ public static class Checks
         Snapshot();
         MapObjectTickProfiler.SetActiveUpdateTargets(null);
         Snapshot();
-        MapObjectTickProfiler.SetActiveTickCount(-3);
-        Snapshot();
-        MapObjectTickProfiler.SetActiveTickCount(12);
-        Snapshot(0);
-
         var random = new Random(731);
         for (int iteration = 0; iteration < 120; iteration++)
         {

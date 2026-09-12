@@ -132,7 +132,10 @@ public partial class InstallationObject : MapObject, IMapObjectSimulationIdentit
     private static readonly HashSet<InstallationObject> ActiveInstances = new HashSet<InstallationObject>();
     private static readonly Dictionary<Vector2Int, List<InstallationObject>> ActiveInstancesByRuntimeGridCoordinate =
         new Dictionary<Vector2Int, List<InstallationObject>>();
+    private static readonly Dictionary<Vector2Int, ulong> ActiveInstanceVersionsByRuntimeGridCoordinate =
+        new Dictionary<Vector2Int, ulong>();
     private static int activeInstanceVersion;
+    private static ulong nextActiveInstanceCoordinateVersion = 1UL;
     private static float cachedGlobalMaxFocusActivationRadius;
     private static bool globalMaxFocusActivationRadiusDirty = true;
     private static long nextPlacementSequence = 1;
@@ -143,7 +146,9 @@ public partial class InstallationObject : MapObject, IMapObjectSimulationIdentit
         nextPlacementSequence = 1L;
         ActiveInstances.Clear();
         ActiveInstancesByRuntimeGridCoordinate.Clear();
+        ActiveInstanceVersionsByRuntimeGridCoordinate.Clear();
         activeInstanceVersion = 0;
+        nextActiveInstanceCoordinateVersion = 1UL;
     }
 
     [SerializeField]
@@ -329,6 +334,7 @@ public partial class InstallationObject : MapObject, IMapObjectSimulationIdentit
             return false;
         }
 
+        bool removedInvalidInstallation = false;
         for (int i = installations.Count - 1; i >= 0; i--)
         {
             InstallationObject installationObject = installations[i];
@@ -340,13 +346,20 @@ public partial class InstallationObject : MapObject, IMapObjectSimulationIdentit
                 || !installationObject.ContainsRuntimeCoordinate(coordinate))
             {
                 installations.RemoveAt(i);
+                removedInvalidInstallation = true;
             }
         }
 
         if (installations.Count == 0)
         {
             ActiveInstancesByRuntimeGridCoordinate.Remove(coordinate);
+            ActiveInstanceVersionsByRuntimeGridCoordinate.Remove(coordinate);
             return false;
+        }
+
+        if (removedInvalidInstallation)
+        {
+            MarkRuntimeCoordinateInstallationIndexChanged(coordinate);
         }
 
         bool addedAny = false;
@@ -441,6 +454,15 @@ public partial class InstallationObject : MapObject, IMapObjectSimulationIdentit
     }
 
     public static int ActiveInstanceVersion => activeInstanceVersion;
+
+    public static ulong GetActiveInstanceVersionAtRuntimeGridCoordinate(Vector2Int coordinate)
+    {
+        return ActiveInstanceVersionsByRuntimeGridCoordinate.TryGetValue(
+            coordinate,
+            out ulong version)
+            ? version
+            : 0UL;
+    }
 
     public static void CopyActiveInstances(List<InstallationObject> destination)
     {
@@ -1010,6 +1032,7 @@ public partial class InstallationObject : MapObject, IMapObjectSimulationIdentit
             {
                 installations.Add(installationObject);
                 installations.Sort(CompareSimulationOrder);
+                MarkRuntimeCoordinateInstallationIndexChanged(coordinate);
             }
         }
 
@@ -1034,15 +1057,34 @@ public partial class InstallationObject : MapObject, IMapObjectSimulationIdentit
                     continue;
                 }
 
-                installations.Remove(installationObject);
+                bool removed = installations.Remove(installationObject);
                 if (installations.Count == 0)
                 {
                     ActiveInstancesByRuntimeGridCoordinate.Remove(coordinate);
+                    ActiveInstanceVersionsByRuntimeGridCoordinate.Remove(coordinate);
+                }
+                else if (removed)
+                {
+                    MarkRuntimeCoordinateInstallationIndexChanged(coordinate);
                 }
             }
         }
 
         installationObject.runtimeCoordinateIndexRegistered = false;
+    }
+
+    private static void MarkRuntimeCoordinateInstallationIndexChanged(Vector2Int coordinate)
+    {
+        unchecked
+        {
+            ulong version = nextActiveInstanceCoordinateVersion++;
+            if (version == 0UL)
+            {
+                version = nextActiveInstanceCoordinateVersion++;
+            }
+
+            ActiveInstanceVersionsByRuntimeGridCoordinate[coordinate] = version;
+        }
     }
 
     protected Animator ResolveInstallationAnimator()

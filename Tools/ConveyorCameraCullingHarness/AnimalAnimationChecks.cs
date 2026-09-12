@@ -1,4 +1,4 @@
-using UnityEngine;
+﻿using UnityEngine;
 
 namespace UnityEngine
 {
@@ -50,6 +50,7 @@ public partial class AnimalAnimationProbe
 }
 public partial class AnimalControllerProbe
 {
+    private bool behaviorAnimationActivityInitialized;
     public AnimalAnimationProbe animal = new();
     private bool executionActive;
     public bool IsExternallyControlled, waitingForStandUp, movingToActivity, hasTarget;

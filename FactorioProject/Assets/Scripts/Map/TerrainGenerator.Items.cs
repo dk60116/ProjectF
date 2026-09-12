@@ -817,6 +817,8 @@ public partial class TerrainGenerator : MonoBehaviour
 
     public void RegisterLiveInstallationObject(InstallationObject installationObject)
     {
+        if (installationObject is RobotArm arm && ConvertRobotArmPresentation(arm))
+        { ReleaseInstallationObject(arm); return; }
         if (installationObject == null || installationObject.ExcludeFromTerrainPersistence)
         {
             return;
@@ -977,7 +979,7 @@ public partial class TerrainGenerator : MonoBehaviour
         }
 
         Transform resolvedParent = parent != null ? parent : transform;
-        if (sourcePrefab is ConveyorBelt)
+        if (sourcePrefab is ConveyorBelt || sourcePrefab is RobotArm)
         {
             return Instantiate(sourcePrefab, resolvedParent) as InstallationObject;
         }
@@ -994,6 +996,13 @@ public partial class TerrainGenerator : MonoBehaviour
     {
         if (installationObject == null)
         {
+            return;
+        }
+        if (installationObject is RobotArm)
+        {
+            installationObject.gameObject.SetActive(false);
+            if (Application.isPlaying) Destroy(installationObject.gameObject);
+            else DestroyImmediate(installationObject.gameObject);
             return;
         }
 
@@ -1032,6 +1041,8 @@ public partial class TerrainGenerator : MonoBehaviour
 
     public void RegisterInstallationRuntimeState(InstallationObject installationObject)
     {
+        if (installationObject is RobotArm arm && ConvertRobotArmPresentation(arm))
+        { ReleaseInstallationObject(arm); return; }
         if (installationObject == null || installationObject.ExcludeFromTerrainPersistence)
         {
             return;

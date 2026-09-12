@@ -921,7 +921,7 @@ public class BagSlot : ItemSlot, IBeginDragHandler, IDragHandler, IEndDragHandle
         public Block block;
         public BoxObject box;
         public IPlayerItemStorage storage;
-        public RobotArm robotArm;
+        public RobotArmInstance robotArm;
         public PortableObject portable;
         public int itemId;
         public int count;
@@ -968,13 +968,13 @@ public class BagSlot : ItemSlot, IBeginDragHandler, IDragHandler, IEndDragHandle
         }
 
         PlayerController controller = player.GetComponent<PlayerController>();
-        if (controller != null && controller.TryGetFocusedRobotArm(out RobotArm arm)
+        if (controller != null && controller.TryGetFocusedRobotArm(out RobotArmInstance arm)
             && arm != null && arm.HasHeldItem && arm.CanTakeHeldItemFromSlot
             && (preferredItemId < 0 || arm.HeldItemId == preferredItemId))
         {
-            ConsiderPickupCandidate(player, automatic, origin, arm.transform.position,
+            ConsiderPickupCandidate(player, automatic, origin, arm.WorldPosition,
                 new PickupCandidate { source = PickupSource.RobotArm, robotArm = arm,
-                    itemId = arm.HeldItemId, count = 1, portable = arm.HeldPortableObject }, ref best);
+                    itemId = arm.HeldItemId, count = 1 }, ref best);
         }
         return best.source != PickupSource.None;
     }

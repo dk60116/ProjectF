@@ -62,8 +62,8 @@ public readonly record struct VirtualConveyorItemRenderData(int Version);
 public class Block
 {
     public GameObject gameObject = new(); public Vector3 WorldPosition; public int ConveyorItemVisualVersion;
-    public bool Dynamic; public int Appends;
-    public bool HasDynamicVirtualConveyorItemVisuals() => Dynamic;
+    public bool Dynamic; public int Appends, DynamicChecks;
+    public bool HasDynamicVirtualConveyorItemVisuals() { DynamicChecks++; return Dynamic; }
     public void AppendVirtualConveyorItemRenderData(List<VirtualConveyorItemRenderData> items) { Appends++; items.Add(new(ConveyorItemVisualVersion)); }
 }
 public sealed partial class PortableItemRenderer
@@ -72,11 +72,28 @@ public sealed partial class PortableItemRenderer
     private readonly Dictionary<BlockHandle, Block> world = new();
     private readonly HashSet<BlockHandle> activeVirtualConveyorRenderBlockLookup = new();
     private readonly Dictionary<BlockHandle,BlockRenderCache> virtualConveyorBlockRenderCaches = new();
+    private readonly List<BlockHandle> activeDynamicVirtualConveyorRenderBlocks = new();
+    private readonly List<BlockHandle> dynamicVirtualConveyorCullCandidateBlocks = new();
+    private readonly Dictionary<BlockHandle,int> dynamicVirtualConveyorCullCandidateBlockIndices = new();
+    private readonly HashSet<BlockHandle> dynamicVirtualConveyorLayerSkippedBlocks = new();
+    private readonly Dictionary<Vector2Int,DynamicConveyorRenderChunk> dynamicVirtualConveyorRenderChunks = new();
+    private readonly HashSet<Vector2Int> visibleDynamicVirtualConveyorRenderChunks = new();
+    private readonly Dictionary<BlockHandle,DynamicBlockRenderCache> dynamicVirtualConveyorBlockRenderCaches = new();
+    private readonly List<BlockHandle> staleDynamicVirtualConveyorCacheBlocks = new();
+    private int cachedDynamicVirtualConveyorVisualBlockSetVersion;
+    private int cachedDynamicVirtualConveyorCullBlockSetVersion=int.MinValue;
+    private int cachedDynamicVirtualConveyorCullViewVersion=int.MinValue;
+    private int cachedDynamicVirtualConveyorCullCandidateBlocks;
+    private int cachedDynamicVirtualConveyorCullLayerSkippedBlocks;
+    private int cachedDynamicVirtualConveyorCullFrustumSkippedBlocks;
+    private int cachedDynamicVirtualConveyorCullVisibleChunks;
     private readonly List<VirtualConveyorItemRenderData> scratchVirtualConveyorRenderItems = new();
     private class BlockRenderCache { public bool isValid; public int version; public readonly List<VirtualConveyorItemRenderData> entries = new(); }
     private bool TryResolveConveyorBlock(BlockHandle h, out Block b) => world.TryGetValue(h,out b);
     private void RemoveVirtualConveyorBlockBatchEntries(BlockRenderCache cache) => cache.entries.Clear();
     private void AddVirtualConveyorBlockRenderItem(BlockRenderCache cache, VirtualConveyorItemRenderData item) => cache.entries.Add(item);
+    private void RemoveDynamicVirtualConveyorBlockRenderCache(BlockHandle h) => dynamicVirtualConveyorBlockRenderCaches.Remove(h);
+    private sealed class DynamicBlockRenderCache { }
     private void Frame(Camera camera) { if(itemCameraCulling.Update(camera)) RefreshVisibleDeferredConveyorBlocks(); }
     private void Dirty(BlockHandle h) => RefreshVirtualConveyorBlockRenderCache(h,world[h],GetOrCreateVirtualConveyorBlockRenderCache(h));
     public static void Check()
@@ -103,6 +120,40 @@ public sealed partial class PortableItemRenderer
         r.world[b].Dynamic=false; camera.cullingMatrix=Checks.View(0).cullingMatrix; r.Frame(camera); r.Dirty(b);
         r.Frame(null);
         Checks.Require(r.DeferredStaticRenderBlocks==0,"missing camera falls back to current rendering");
+        CheckDynamicChunkCulling();
+    }
+    private static void CheckDynamicChunkCulling()
+    {
+        var r=new PortableItemRenderer(); var camera=Checks.View(0); r.itemCameraCulling.Update(camera);
+        var visible=new BlockHandle(new Vector2Int(0,0),100);
+        r.world[visible]=new Block { WorldPosition=Vector3.zero, Dynamic=true };
+        r.activeDynamicVirtualConveyorRenderBlocks.Add(visible);
+        r.AddDynamicVirtualConveyorRenderChunkMembership(visible,r.world[visible]);
+        for(int i=0;i<100;i++)
+        {
+            var h=new BlockHandle(new Vector2Int(10,0),i+1);
+            r.world[h]=new Block { WorldPosition=new Vector3(100+i*0.01f,0,0), Dynamic=true };
+            r.activeDynamicVirtualConveyorRenderBlocks.Add(h);
+            r.AddDynamicVirtualConveyorRenderChunkMembership(h,r.world[h]);
+        }
+        r.cachedDynamicVirtualConveyorVisualBlockSetVersion=1;
+        Checks.Require(r.RefreshDynamicVirtualConveyorCullCandidateBlocksIfNeeded(),"initial dynamic cull cache builds");
+        Checks.Require(r.dynamicVirtualConveyorCullCandidateBlocks.Count==1,"only visible dynamic block is cached");
+        Checks.Require(r.cachedDynamicVirtualConveyorCullCandidateBlocks==1
+            && r.cachedDynamicVirtualConveyorCullVisibleChunks==1,
+            "dynamic cull counters report fine-tested blocks and visible chunks");
+        int farChecks=0; foreach(var pair in r.world) if(pair.Key.ChunkCoordinate.x==10) farChecks+=pair.Value.DynamicChecks;
+        Checks.Require(farChecks==0,"offscreen dynamic chunk skips every contained block test");
+        Checks.Require(!r.RefreshDynamicVirtualConveyorCullCandidateBlocksIfNeeded(),"unchanged view and membership reuse cull cache");
+        var added=new BlockHandle(new Vector2Int(11,0),200);
+        r.world[added]=new Block { WorldPosition=new Vector3(110,0,0), Dynamic=true };
+        r.activeDynamicVirtualConveyorRenderBlocks.Add(added);
+        r.AddDynamicVirtualConveyorRenderChunkMembership(added,r.world[added]);
+        r.cachedDynamicVirtualConveyorVisualBlockSetVersion=2;
+        r.AddIncrementalDynamicVirtualConveyorCullCandidate(added,r.world[added]);
+        r.cachedDynamicVirtualConveyorCullBlockSetVersion=2;
+        r.RefreshCachedDynamicVirtualConveyorCullCounters();
+        Checks.Require(!r.RefreshDynamicVirtualConveyorCullCandidateBlocksIfNeeded(),"single membership change avoids global cull rebuild");
     }
 }
 public interface IVirtualRenderBatchOwner { }

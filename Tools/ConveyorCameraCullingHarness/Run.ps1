@@ -37,7 +37,23 @@ $batchFile = 'FactorioProject/Assets/Scripts/Map/VirtualRenderBatcher.cs'
 $backendFile = 'FactorioProject/Assets/Scripts/Rendering/VirtualRenderBatchRendererGroupBackend.cs'
 $generated = "using System; using System.Collections.Generic; using UnityEngine; using UnityEngine.Rendering;`n"
 $generated += "public sealed partial class PortableItemRenderer {`n"
-foreach ($signature in @('private void RefreshVirtualConveyorBlockRenderCache(', 'private BlockRenderCache GetOrCreateVirtualConveyorBlockRenderCache(', 'private void RemoveVirtualConveyorBlockRenderCache(', 'private Bounds CreateDynamicVirtualConveyorBlockCullBounds(')) {
+foreach ($signature in @(
+    'private void RefreshVirtualConveyorBlockRenderCache(',
+    'private BlockRenderCache GetOrCreateVirtualConveyorBlockRenderCache(',
+    'private void RemoveVirtualConveyorBlockRenderCache(',
+    'private Bounds CreateDynamicVirtualConveyorBlockCullBounds(',
+    'private void AddDynamicVirtualConveyorRenderChunkMembership(',
+    'private void RemoveDynamicVirtualConveyorRenderChunkMembership(',
+    'private void AddIncrementalDynamicVirtualConveyorCullCandidate(',
+    'private bool RefreshDynamicVirtualConveyorCullCandidateBlocksIfNeeded()',
+    'private void AddDynamicVirtualConveyorCullCandidate(',
+    'private void RemoveDynamicVirtualConveyorCullCandidate(',
+    'private void RefreshCachedDynamicVirtualConveyorCullCounters()',
+    'private void PruneDynamicVirtualConveyorRenderBlockCachesToCullCandidates()',
+    'private void InvalidateDynamicVirtualConveyorCullCandidateCache()',
+    'private DynamicVirtualConveyorCullResult GetDynamicVirtualConveyorBlockCullResult(',
+    'private enum DynamicVirtualConveyorCullResult',
+    'private sealed class DynamicConveyorRenderChunk')) {
     $generated += (Read-Member $itemFile $signature) + "`n"
 }
 $generated += "}`n"
@@ -63,7 +79,7 @@ foreach ($signature in @('private void ResolveCameraBatches(', 'private static B
 }
 $generated += "} public partial class ResourceCameraProbe {`n"
 foreach ($signature in @('private CameraBatch ResolveCameraBatch(', 'private sealed class CameraBatch')) {
-    $generated += (Read-Member 'FactorioProject/Assets/Scripts/Object/MapObj/Resource.cs' $signature) + "`n"
+    $generated += (Read-Member 'FactorioProject/Assets/Scripts/Map/ResourceBatchRenderer.cs' $signature) + "`n"
 }
 $generated += "} public partial class BrgInstanceProbe {`n"
 foreach ($signature in @('private void CollectVisibleInstances(', 'private static ushort ResolveBoundsSplitVisibilityMask(', 'private static bool IntersectsSplit(')) {

@@ -14,6 +14,7 @@ public class InstallationObject
         => ReferenceEquals(left, right) ? 0 : left.simulationId.CompareTo(right.simulationId);
     public FakeGameObject gameObject = new();
     public FakeTransform transform = new();
+    public bool CanStoreFluid => true;
     public float FluidStorageCapacityLiters = 50, StoredFluidLiters;
     public float AvailableFluidStorageLiters => FluidStorageCapacityLiters - StoredFluidLiters;
     public bool CanProvideFluidItem(int id) => id == 1;
@@ -27,6 +28,15 @@ public class InstallationObject
 }
 public partial class InputOutputModule : InstallationObject
 {
+    private sealed class SharedPumpFluidOutputNetwork
+    {
+        internal readonly List<InstallationObject> Storages = new();
+    }
+    private static readonly Dictionary<Vector2Int, SharedPumpFluidOutputNetwork> sharedPumpFluidOutputNetworksByCoordinate = new();
+    private static readonly List<SharedPumpFluidOutputNetwork> sharedPumpFluidOutputNetworks = new();
+    private static int fluidTopologyVersion = 1, sharedPumpFluidOutputTopologyVersion;
+    private static long sharedPumpFluidOutputTopologyBuilds, sharedPumpFluidOutputCacheHits;
+    private static int sharedPumpFluidOutputLastBuildNodes, sharedPumpFluidOutputLastBuildStorages;
     public enum RectGridBlockType { Object = 1, PipeOutput = 7, PipeInput = 11 }
     public struct RectGridBlockPlacement { public int x, y; public RectGridBlockType blockType; }
     public readonly List<RectGridBlockPlacement> RectGridPlacements = new();
@@ -34,6 +44,9 @@ public partial class InputOutputModule : InstallationObject
     public int Rotation;
     public bool Placed = true;
     public readonly HashSet<Vector2Int> Passed = new();
+    protected readonly List<Vector2Int> runtimeOutputCoordinates = new() { Vector2Int.zero };
+    protected readonly List<InstallationObject> cachedFluidOutputStorages = new();
+    private readonly HashSet<Vector2Int> connectedFluidSearchVisited = new();
     protected bool TryGetPlacementRuntime(out Vector2Int anchor, out int rotation)
     { anchor = Anchor; rotation = Rotation; return Placed; }
     public static Vector2Int Rotate(Vector2Int value, int rotation)
@@ -43,6 +56,38 @@ public partial class InputOutputModule : InstallationObject
     private bool ContainsRuntimePipeAreaBlockCoordinate(Vector2Int coordinate) => true;
     private void EnqueueConnectedFluidSearchCoordinate(Vector2Int coordinate) => Passed.Add(coordinate);
     private void EnqueueSteamGeneratorPipePassCoordinates(SteamGenerator generator) => Passed.Add(generator.Anchor);
+    private bool EnsureFluidOutputStorageCache() => cachedFluidOutputStorages.Count > 0;
+    private static bool IsFluidItemId(int id) => id >= 0;
+    protected void RecordFluidNetworkOutput(int id, float liters) { }
+    protected void SetFluidOutputStorages(IEnumerable<InstallationObject> storages)
+    {
+        cachedFluidOutputStorages.Clear();
+        foreach (InstallationObject storage in storages)
+            if (storage != null && !cachedFluidOutputStorages.Contains(storage)) cachedFluidOutputStorages.Add(storage);
+        cachedFluidOutputStorages.Sort(CompareSimulationOrder);
+    }
+    public void PublishSharedNetworkForTest(
+        Vector2Int seed,
+        IEnumerable<Vector2Int> networkCoordinates,
+        IEnumerable<InstallationObject> storages)
+    {
+        runtimeOutputCoordinates[0] = seed;
+        SetFluidOutputStorages(storages);
+        connectedFluidSearchVisited.Clear();
+        foreach (Vector2Int coordinate in networkCoordinates) connectedFluidSearchVisited.Add(coordinate);
+        PublishSharedPumpFluidOutputNetwork();
+    }
+    public bool TryUseSharedNetworkForTest(Vector2Int seed, out int storageCount)
+    {
+        runtimeOutputCoordinates[0] = seed;
+        cachedFluidOutputStorages.Clear();
+        bool found = TryUseSharedPumpFluidOutputNetwork();
+        storageCount = cachedFluidOutputStorages.Count;
+        return found;
+    }
+    public static void AdvanceFluidTopologyForTest() => fluidTopologyVersion++;
+    public static long SharedNetworkBuildsForTest => sharedPumpFluidOutputTopologyBuilds;
+    public static long SharedNetworkHitsForTest => sharedPumpFluidOutputCacheHits;
     public void Traverse(InputOutputModule module, Vector2Int coordinate) => EnqueueFluidStoragePipePassCoordinatesAt(new[] { module }, coordinate);
 }
 public class SteamGenerator : InputOutputModule { }
@@ -77,22 +122,17 @@ public partial class Boiler : InputOutputModule
 }
 public partial class Pump : InputOutputModule
 {
-    private const float FluidEpsilon = .0001f;
-    private readonly Queue<Vector2Int> fluidSearchQueue = new();
-    private readonly HashSet<Vector2Int> fluidSearchVisited = new();
-    private readonly HashSet<InstallationObject> fluidSearchStorageCandidates = new();
-    private static readonly Vector2Int[] CardinalDirections = { Vector2Int.left, Vector2Int.right, Vector2Int.up, Vector2Int.down };
     public readonly List<Vector2Int> RuntimeOutputCoordinates = new();
     public readonly Dictionary<Vector2Int, InstallationObject> Ports = new(), Bodies = new();
-    public bool HasRuntimeOutputCoordinates => RuntimeOutputCoordinates.Count > 0;
-    private Vector2Int localPipeConnectionDirection = Vector2Int.zero;
-    private int ResolveWaterItemId() => 1;
-    private bool TryResolveDirection(Quaternion rotation, Vector2Int local, out Vector2Int direction) { direction = default; return false; }
-    private bool TryGetPipeAtCoordinate(Vector2Int coordinate, out Pipe pipe, out Quaternion rotation) { pipe = null; rotation = default; return false; }
-    private bool TryResolveFluidStorageAtCoordinate(Vector2Int coordinate, int id, bool space, out InstallationObject storage) => Ports.TryGetValue(coordinate, out storage);
-    private bool TryResolveFluidStorageBodyAtCoordinate(Vector2Int coordinate, int id, bool space, out InstallationObject storage) => Bodies.TryGetValue(coordinate, out storage);
-    public float Supply(float liters) { TryRouteWaterToFluidStorage(liters, true, out float accepted); return accepted; }
-    public bool Connects(Vector2Int coordinate, Vector2Int direction) => TryGetFluidNetworkConnectionAtCoordinate(coordinate, direction, 1, out _, out _);
+    public float Supply(float liters)
+    {
+        var storages = new List<InstallationObject>();
+        storages.AddRange(Bodies.Values);
+        storages.AddRange(Ports.Values);
+        SetFluidOutputStorages(storages);
+        TryEmitFluidOutputToConnectedStorages(1, liters, 20f, out float accepted);
+        return accepted;
+    }
 }
 public static class Checks
 {
@@ -100,6 +140,26 @@ public static class Checks
     private static void Require(bool condition, string message) { if (!condition) throw new Exception(message); checks++; }
     public static void Main()
     {
+        var sharedStorage = new InstallationObject();
+        var firstPump = new Pump();
+        var secondPump = new Pump();
+        firstPump.PublishSharedNetworkForTest(
+            new Vector2Int(10, 10),
+            new[] { new Vector2Int(10, 10), new Vector2Int(11, 10) },
+            new[] { sharedStorage });
+        Require(
+            secondPump.TryUseSharedNetworkForTest(new Vector2Int(11, 10), out int sharedStorageCount)
+            && sharedStorageCount == 1,
+            "pumps on one water network reuse one topology result");
+        Require(
+            InputOutputModule.SharedNetworkBuildsForTest == 1
+            && InputOutputModule.SharedNetworkHitsForTest == 1,
+            "shared water network records one build and one reuse");
+        InputOutputModule.AdvanceFluidTopologyForTest();
+        Require(
+            !secondPump.TryUseSharedNetworkForTest(new Vector2Int(11, 10), out _),
+            "water network topology changes invalidate shared results");
+
         for (int rotation = 0; rotation < 4; rotation++)
         for (int count = 2; count <= 3; count++)
         {
@@ -117,8 +177,6 @@ public static class Checks
             Vector2Int entry = origin + InputOutputModule.Rotate(Vector2Int.left, rotation);
             pump.RuntimeOutputCoordinates.Add(entry);
             boilers[0].StoredFluidLiters = 50;
-            Require(pump.Connects(entry, InputOutputModule.Rotate(Vector2Int.left, rotation)), "water inlet must connect from its outside");
-            Require(!pump.Connects(entry, InputOutputModule.Rotate(Vector2Int.up, rotation)), "sideways entry must stay disconnected");
             var network = new InputOutputModule();
             network.Traverse(boilers[0], entry);
             Require(network.Passed.Contains(origin + InputOutputModule.Rotate(Vector2Int.right, rotation)), "connected tank search must cross boiler water ports");

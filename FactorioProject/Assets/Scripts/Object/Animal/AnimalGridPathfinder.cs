@@ -1,8 +1,12 @@
 using System;
 using UnityEngine;
+using ProjectF.Animals;
 
-public static class AnimalGridPathfinder
+public static partial class AnimalGridPathfinder
 {
+    // Monotonic work counters are independent of profiling and wall time.
+    public static long ExpandedNodeCount { get; private set; }
+    public static long WalkableLineSampleCount { get; private set; }
     private const int MaxSearchRadius = 64;
     private const int MaxEscapeSearchRadius = 12;
     private const int StraightCost = 10;
@@ -46,26 +50,30 @@ public static class AnimalGridPathfinder
         float areaRadius,
         bool requireLoadedGround)
     {
+        using var sampleScope = new AnimalAIProfiler.SearchScope(false, true);
         if (terrain == null)
         {
             return true;
         }
 
-        Vector3 delta = end - start;
-        delta.y = 0f;
-        int sampleCount = Mathf.Max(1, Mathf.CeilToInt(delta.magnitude / LineSampleSpacing));
-        float radius = Mathf.Max(1f, areaRadius);
-        float radiusSqr = radius * radius;
-        int previousX = Mathf.RoundToInt(start.x);
-        int previousZ = Mathf.RoundToInt(start.z);
+        long startX = AnimalSimulationMath.Units(start.x), startZ = AnimalSimulationMath.Units(start.z);
+        long dx = AnimalSimulationMath.Units(end.x) - startX, dz = AnimalSimulationMath.Units(end.z) - startZ;
+        long spacing = AnimalSimulationMath.Units(LineSampleSpacing);
+        long length = (long)AnimalSimulationMath.Sqrt((ulong)(dx * dx + dz * dz));
+        int sampleCount = (int)System.Math.Max(1, (length + spacing - 1) / spacing);
+        long radius = AnimalSimulationMath.Units(Mathf.Max(1f, areaRadius));
+        long centerX = AnimalSimulationMath.Units(areaCenter.x), centerZ = AnimalSimulationMath.Units(areaCenter.z);
+        Vector2Int initialCell = AnimalSimulationMath.Cell(start);
+        int previousX = initialCell.x, previousZ = initialCell.y;
         for (int i = 1; i <= sampleCount; i++)
         {
-            Vector3 sample = Vector3.Lerp(start, end, i / (float)sampleCount);
-            int sampleX = Mathf.RoundToInt(sample.x);
-            int sampleZ = Mathf.RoundToInt(sample.z);
-            Vector3 areaOffset = sample - areaCenter;
-            areaOffset.y = 0f;
-            if (areaOffset.sqrMagnitude > radiusSqr
+            WalkableLineSampleCount++;
+            long x = startX + dx * i / sampleCount, z = startZ + dz * i / sampleCount;
+            Vector3 sample = new Vector3(AnimalSimulationMath.Scalar(x), start.y, AnimalSimulationMath.Scalar(z));
+            Vector2Int cell = AnimalSimulationMath.Cell(sample);
+            int sampleX = cell.x, sampleZ = cell.y;
+            long areaX = x - centerX, areaZ = z - centerZ;
+            if (areaX * areaX + areaZ * areaZ > radius * radius
                 || !terrain.CanAnimalMoveTo(sample, requireLoadedGround))
             {
                 return false;
@@ -98,6 +106,7 @@ public static class AnimalGridPathfinder
         bool requireLoadedGround,
         Vector3[] output)
     {
+        using var sample = new AnimalAIProfiler.SearchScope(false);
         if (terrain == null || output == null || output.Length == 0)
         {
             return 0;
@@ -129,6 +138,8 @@ public static class AnimalGridPathfinder
 
         while (heapCount > 0)
         {
+            ExpandedNodeCount++;
+            SchedulingWorkCount++;
             int currentIndex = Pop();
             if (currentIndex == goalIndex)
             {
@@ -189,123 +200,6 @@ public static class AnimalGridPathfinder
         }
 
         return 0;
-    }
-
-    public static int FindReachableTargetPath(
-        TerrainGenerator terrain,
-        Vector3 start,
-        Vector3 areaCenter,
-        float areaRadius,
-        bool requireLoadedGround,
-        bool requireWaterEdge,
-        float minimumDistance,
-        uint selectionSeed,
-        Vector3[] output,
-        out Vector3 destination)
-    {
-        // 목표를 먼저 정하는 A*와 달리 시작점의 연결 영역을 한 번 순회한 뒤
-        // 그 안에서 결정적인 무작위 점수를 사용해 목표와 경로를 함께 선택한다.
-        destination = start;
-        if (terrain == null || output == null || output.Length == 0)
-        {
-            return 0;
-        }
-
-        float searchRadius = BeginGridSearch(areaCenter, areaRadius);
-        int startX = Mathf.RoundToInt(start.x);
-        int startZ = Mathf.RoundToInt(start.z);
-        if (!TryGetIndex(startX, startZ, out int startIndex)
-            || !IsInsideArea(startX, startZ, areaCenter, searchRadius))
-        {
-            return 0;
-        }
-
-        int queueHead = 0;
-        int queueTail = 0;
-        reversePath[queueTail++] = startIndex;
-        visitStamps[startIndex] = searchStamp;
-        parents[startIndex] = -1;
-
-        int selectedIndex = -1;
-        uint selectedScore = 0u;
-        float minimumDistanceSqr = Mathf.Max(0f, minimumDistance);
-        minimumDistanceSqr *= minimumDistanceSqr;
-        while (queueHead < queueTail)
-        {
-            int currentIndex = reversePath[queueHead++];
-            GetCoordinate(currentIndex, out int currentX, out int currentZ);
-            if (currentIndex != startIndex)
-            {
-                float offsetX = currentX - start.x;
-                float offsetZ = currentZ - start.z;
-                Vector3 candidate = new Vector3(currentX, start.y, currentZ);
-                if (offsetX * offsetX + offsetZ * offsetZ >= minimumDistanceSqr
-                    && (!requireWaterEdge || terrain.IsAnimalDrinkLocation(candidate)))
-                {
-                    if (requireWaterEdge)
-                    {
-                        // The queue expands in step order. The first reachable
-                        // shoreline is therefore the nearest drink location; do not
-                        // make an animal cross its whole herd area for a random edge.
-                        selectedIndex = currentIndex;
-                        destination = candidate;
-                        break;
-                    }
-
-                    uint score = HashCoordinate(currentX, currentZ, selectionSeed);
-                    if (selectedIndex < 0 || score > selectedScore)
-                    {
-                        selectedIndex = currentIndex;
-                        selectedScore = score;
-                        destination = candidate;
-                    }
-                }
-            }
-
-            for (int i = 0; i < NeighborX.Length; i++)
-            {
-                int offsetX = NeighborX[i];
-                int offsetZ = NeighborZ[i];
-                int nextX = currentX + offsetX;
-                int nextZ = currentZ + offsetZ;
-                if (!TryGetIndex(nextX, nextZ, out int nextIndex)
-                    || visitStamps[nextIndex] == searchStamp
-                    || !IsInsideArea(nextX, nextZ, areaCenter, searchRadius)
-                    || !IsTraversableStep(
-                        terrain,
-                        currentX,
-                        currentZ,
-                        offsetX,
-                        offsetZ,
-                        start.y,
-                        requireLoadedGround))
-                {
-                    continue;
-                }
-
-                visitStamps[nextIndex] = searchStamp;
-                parents[nextIndex] = currentIndex;
-                reversePath[queueTail++] = nextIndex;
-            }
-        }
-
-        if (selectedIndex < 0)
-        {
-            destination = start;
-            return 0;
-        }
-
-        goalX = Mathf.RoundToInt(destination.x);
-        goalZ = Mathf.RoundToInt(destination.z);
-        return BuildSmoothedPath(
-            terrain,
-            start,
-            destination,
-            areaCenter,
-            searchRadius,
-            requireLoadedGround,
-            selectedIndex,
-            output);
     }
 
     public static bool TryFindNearestWalkable(
@@ -508,29 +402,16 @@ public static class AnimalGridPathfinder
         return searchRadius;
     }
 
-    private static uint HashCoordinate(int x, int z, uint seed)
-    {
-        unchecked
-        {
-            uint value = seed ^ (uint)x * 0x9E3779B9u ^ (uint)z * 0x85EBCA6Bu;
-            value ^= value >> 16;
-            value *= 0x7FEB352Du;
-            value ^= value >> 15;
-            value *= 0x846CA68Bu;
-            value ^= value >> 16;
-            return value;
-        }
-    }
-
     private static bool IsInsideArea(
         int x,
         int z,
         Vector3 areaCenter,
         float areaRadius)
     {
-        float offsetX = x - areaCenter.x;
-        float offsetZ = z - areaCenter.z;
-        return offsetX * offsetX + offsetZ * offsetZ <= areaRadius * areaRadius;
+        long offsetX = x * AnimalSimulationMath.UnitsPerCell - AnimalSimulationMath.Units(areaCenter.x);
+        long offsetZ = z * AnimalSimulationMath.UnitsPerCell - AnimalSimulationMath.Units(areaCenter.z);
+        long radius = AnimalSimulationMath.Units(areaRadius);
+        return offsetX * offsetX + offsetZ * offsetZ <= radius * radius;
     }
 
     private static int Heuristic(int x, int z)
@@ -555,7 +436,8 @@ public static class AnimalGridPathfinder
             return leftScore.CompareTo(rightScore);
         }
 
-        return leftHeuristic.CompareTo(rightHeuristic);
+        int heuristicOrder = leftHeuristic.CompareTo(rightHeuristic);
+        return heuristicOrder != 0 ? heuristicOrder : leftIndex.CompareTo(rightIndex);
     }
 
     private static void Push(int nodeIndex)

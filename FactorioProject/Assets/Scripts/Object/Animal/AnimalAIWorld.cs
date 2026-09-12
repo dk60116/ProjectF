@@ -1,19 +1,21 @@
 using System.Collections.Generic;
 using UnityEngine;
+using ProjectF.Animals;
+using ProjectF.Rendering;
 
 [DisallowMultipleComponent]
-public sealed class AnimalAIWorld : MonoBehaviour, IMapObjectUpdateTick, IMapObjectSimulationIdentity
+public sealed partial class AnimalAIWorld : MonoBehaviour, IMapObjectUpdateTick, IMapObjectSimulationIdentity
 {
-    private const float BackgroundStepInterval = 1f;
     private const float SpatialCellSize = 2f;
     private const float NearActiveDistance = 12f;
     private const float MidActiveDistance = 30f;
     private const float NearTickInterval = 1f / 30f;
     private const float MidTickInterval = 1f / 15f;
-    private const float FarTickInterval = 1f / 8f;
+    private const float FarTickInterval = 8f / 60f;
     private const float DetailedVisualDistance = 8f;
     private const int NormalSimulationTickBudget = 24;
     private const int FleeSimulationTickBonus = 8;
+    private const int PathWorkBudgetPerTick = 2048;
     private const float CrowdOverlapTolerance = 0.0001f;
 
     private struct HerdFrame
@@ -33,8 +35,6 @@ public sealed class AnimalAIWorld : MonoBehaviour, IMapObjectUpdateTick, IMapObj
     private readonly Dictionary<long, HerdFrame> herdFrames = new Dictionary<long, HerdFrame>();
     private readonly Dictionary<Vector2Int, List<AnimalAIController>> controllersBySpatialCell =
         new Dictionary<Vector2Int, List<AnimalAIController>>();
-    private readonly List<List<AnimalAIController>> activeSpatialBuckets =
-        new List<List<AnimalAIController>>();
     private readonly Stack<List<AnimalAIController>> spatialBucketPool =
         new Stack<List<AnimalAIController>>();
     private readonly List<AnimalAIController> dueNormalControllers =
@@ -42,7 +42,11 @@ public sealed class AnimalAIWorld : MonoBehaviour, IMapObjectUpdateTick, IMapObj
     private readonly List<AnimalAIController> dueFleeControllers =
         new List<AnimalAIController>(32);
 
-    private float backgroundAccumulator;
+    private long needsTick;
+    private long pathBudgetStartWork;
+    private readonly CameraRenderCulling presentationCulling = new CameraRenderCulling();
+    private Camera presentationCamera;
+    public long NeedsTick => needsTick;
     private float maximumAnimalColliderRadius = 0.5f;
     private bool paused;
     private bool spatialIndexReady;
@@ -53,10 +57,6 @@ public sealed class AnimalAIWorld : MonoBehaviour, IMapObjectUpdateTick, IMapObj
     private int animalCollisionCandidateChecksLastFrame;
     private int animalCollisionCellChecks;
     private int animalCollisionCellChecksLastFrame;
-    private int obstaclePhysicsQueries;
-    private int obstaclePhysicsQueriesLastFrame;
-    private int obstaclePhysicsHits;
-    private int obstaclePhysicsHitsLastFrame;
     private int activeSimulationTicks;
     private int activeSimulationTicksLastFrame;
     private int simulationTickCandidates;
@@ -79,8 +79,6 @@ public sealed class AnimalAIWorld : MonoBehaviour, IMapObjectUpdateTick, IMapObj
     public int AnimalCollisionCandidateChecksLastFrame => animalCollisionCandidateChecksLastFrame;
     public int AnimalCollisionCellChecksLastFrame => animalCollisionCellChecksLastFrame;
     public float MaximumAnimalColliderRadius => maximumAnimalColliderRadius;
-    public int ObstaclePhysicsQueriesLastFrame => obstaclePhysicsQueriesLastFrame;
-    public int ObstaclePhysicsHitsLastFrame => obstaclePhysicsHitsLastFrame;
     public int ActiveSimulationTicksLastFrame => activeSimulationTicksLastFrame;
     public int SimulationTickCandidatesLastFrame => simulationTickCandidatesLastFrame;
     public int DeferredSimulationTicksLastFrame => deferredSimulationTicksLastFrame;
@@ -100,6 +98,8 @@ public sealed class AnimalAIWorld : MonoBehaviour, IMapObjectUpdateTick, IMapObj
         }
 
         Instance = this;
+        AnimalAIProfiler.Reset();
+        AnimalGridPathfinder.ClearRegionCache();
         for (int i = 0; i < PendingControllers.Count; i++)
         {
             AddController(PendingControllers[i]);
@@ -120,7 +120,8 @@ public sealed class AnimalAIWorld : MonoBehaviour, IMapObjectUpdateTick, IMapObj
 
     private void Update()
     {
-        TickPresentations(Time.deltaTime);
+        if (!MapObjectTickManager.SimulationPaused && !MapObjectTickManager.WaitingForWorldLoad)
+            TickPresentations(Time.deltaTime);
     }
 
     public void ManagedUpdateTick(float deltaTime)
@@ -131,49 +132,44 @@ public sealed class AnimalAIWorld : MonoBehaviour, IMapObjectUpdateTick, IMapObj
             controllerOrderDirty = false;
         }
 
-        RebuildFrameCaches();
+        RefreshSpatialCaches();
+        if (paused) return;
+        needsTick += DeterministicSimulationUnits.DeltaTimeToTicks(deltaTime);
 
+        CollectScheduledTicks(deltaTime);
+        pathBudgetStartWork = AnimalGridPathfinder.SchedulingWorkCount;
+        RunScheduledTicks();
+    }
+
+    private void CollectScheduledTicks(float deltaTime)
+    {
+        using var sample = AnimalAIProfiler.Sample("Animal Scheduling");
         GameManager gameManager = GameManager.Instance;
         Transform playerTransform = gameManager != null && gameManager.Player != null
             ? gameManager.Player.transform
             : null;
         float activeRadius = gameManager != null ? gameManager.AnimalAIActiveRadius : 60f;
         float activeRadiusSqr = activeRadius * activeRadius;
-        bool runBackgroundStep = false;
         dueNormalControllers.Clear();
         dueFleeControllers.Clear();
         nearActiveControllers = 0;
         midActiveControllers = 0;
         farActiveControllers = 0;
 
-        if (!paused)
-        {
-            backgroundAccumulator += deltaTime;
-            if (backgroundAccumulator >= BackgroundStepInterval)
-            {
-                runBackgroundStep = true;
-                backgroundAccumulator = Mathf.Min(backgroundAccumulator, BackgroundStepInterval * 2f);
-            }
-        }
-
-        for (int i = controllers.Count - 1; i >= 0; i--)
+        for (int i = 0; i < controllers.Count; i++)
         {
             AnimalAIController controller = controllers[i];
             if (controller == null)
             {
-                controllers.RemoveAt(i);
+                controllers.RemoveAt(i--);
                 if (!ReferenceEquals(controller, null))
                 {
                     controllerLookup.Remove(controller);
                     RemoveHerdMembership(controller);
+                    MarkSpatialDirty(controller);
                 }
 
                 continue;
-            }
-
-            if (!paused)
-            {
-                controller.TickNeeds(deltaTime);
             }
 
             float playerDistanceSqr = playerTransform != null
@@ -181,13 +177,15 @@ public sealed class AnimalAIWorld : MonoBehaviour, IMapObjectUpdateTick, IMapObj
                     controller.SimulationPosition,
                     playerTransform.position)
                 : float.PositiveInfinity;
-            bool active = !paused
-                          && IsActiveController(controller)
+            bool active = IsActiveController(controller)
                           && playerDistanceSqr <= activeRadiusSqr;
             controller.SetBehaviorExecutionActive(active);
             controller.SetDetailedVisuals(
                 playerTransform == null
                 || playerDistanceSqr <= DetailedVisualDistance * DetailedVisualDistance);
+
+            bool needsUpdated = controller.TickScheduledNeeds(
+                needsTick, !active || playerDistanceSqr > MidActiveDistance * MidActiveDistance);
 
             if (active)
             {
@@ -221,32 +219,35 @@ public sealed class AnimalAIWorld : MonoBehaviour, IMapObjectUpdateTick, IMapObj
                     }
                 }
             }
-            else if (!paused && runBackgroundStep)
+            else if (needsUpdated)
             {
                 // Needs timers advance above, but dormant animals must not enter
                 // pathfinding, collision avoidance, or behavior simulation.
                 controller.TickDormant();
             }
         }
-
-        if (runBackgroundStep)
-        {
-            backgroundAccumulator -= BackgroundStepInterval;
-        }
-
-        RunScheduledTicks();
     }
 
     private void TickPresentations(float deltaTime)
     {
+        using var sample = MapObjectTickProfiler.SampleNamed("AI Render", "AnimalAI", "Animal Presentation");
+        if (presentationCamera == null || !presentationCamera.isActiveAndEnabled)
+            presentationCamera = Camera.main;
+        presentationCulling.Update(presentationCamera);
         for (int i = 0; i < controllers.Count; i++)
         {
-            controllers[i]?.TickPresentation(deltaTime);
+            AnimalAIController controller = controllers[i];
+            if (controller == null || !controller.HasPendingPresentation) continue;
+            bool visible = controller.IsPresentationVisible(presentationCulling);
+            controller.TickCulledPresentation(deltaTime, visible);
+            AnimalAIProfiler.Add(visible ? AnimalAIProfiler.Counter.Presentations
+                : AnimalAIProfiler.Counter.CulledPresentations);
         }
     }
 
     private void LateUpdate()
     {
+        AnimalAIProfiler.CompleteFrame();
         CommitFrameCounter(
             ref separationCandidateChecks,
             ref separationCandidateChecksLastFrame);
@@ -256,10 +257,6 @@ public sealed class AnimalAIWorld : MonoBehaviour, IMapObjectUpdateTick, IMapObj
         CommitFrameCounter(
             ref animalCollisionCellChecks,
             ref animalCollisionCellChecksLastFrame);
-        CommitFrameCounter(
-            ref obstaclePhysicsQueries,
-            ref obstaclePhysicsQueriesLastFrame);
-        CommitFrameCounter(ref obstaclePhysicsHits, ref obstaclePhysicsHitsLastFrame);
         CommitFrameCounter(
             ref activeSimulationTicks,
             ref activeSimulationTicksLastFrame);
@@ -292,9 +289,13 @@ public sealed class AnimalAIWorld : MonoBehaviour, IMapObjectUpdateTick, IMapObj
 
         activeSimulationTicks += processed;
         deferredSimulationTicks += fleeCount + normalCount - processed;
+        int scheduledWork = (int)(AnimalGridPathfinder.SchedulingWorkCount - pathBudgetStartWork);
+        AnimalAIProfiler.Max(AnimalAIProfiler.Counter.PathBudgetMaxWorkPerTick, scheduledWork);
+        if (scheduledWork > PathWorkBudgetPerTick)
+            AnimalAIProfiler.Add(AnimalAIProfiler.Counter.PathBudgetOverruns);
     }
 
-    private static int RunScheduledTicks(
+    private int RunScheduledTicks(
         List<AnimalAIController> candidates,
         int budget,
         ref int cursor)
@@ -315,6 +316,13 @@ public sealed class AnimalAIWorld : MonoBehaviour, IMapObjectUpdateTick, IMapObj
         int processed = 0;
         while (visited < count && processed < budget)
         {
+            // Finish the current animal's query/decision atomically. Never turn budget
+            // exhaustion into "no path" or consume random numbers in a discarded retry.
+            if (AnimalGridPathfinder.SchedulingWorkCount - pathBudgetStartWork >= PathWorkBudgetPerTick)
+            {
+                AnimalAIProfiler.Add(AnimalAIProfiler.Counter.PathBudgetDeferrals, count - visited);
+                break;
+            }
             AnimalAIController controller = candidates[(start + visited) % count];
             if (controller != null && controller.ExecuteScheduledTick())
             {
@@ -372,6 +380,7 @@ public sealed class AnimalAIWorld : MonoBehaviour, IMapObjectUpdateTick, IMapObj
         if (controller != null && Instance != null && Instance.controllerLookup.Contains(controller))
         {
             Instance.controllerOrderDirty = true;
+            Instance.MarkSpatialDirty(controller);
         }
     }
 
@@ -380,6 +389,7 @@ public sealed class AnimalAIWorld : MonoBehaviour, IMapObjectUpdateTick, IMapObj
         paused = value;
         if (paused)
         {
+            nearActiveControllers = midActiveControllers = farActiveControllers = 0;
             for (int i = 0; i < controllers.Count; i++)
             {
                 if (controllers[i] != null)
@@ -507,7 +517,7 @@ public sealed class AnimalAIWorld : MonoBehaviour, IMapObjectUpdateTick, IMapObj
                         continue;
                     }
 
-                    float distance = Mathf.Sqrt(distanceSqr);
+                    float distance = AnimalSimulationMath.Magnitude(offset);
                     result += offset / distance * (1f - distance / radius);
                 }
             }
@@ -559,8 +569,7 @@ public sealed class AnimalAIWorld : MonoBehaviour, IMapObjectUpdateTick, IMapObj
         hash ^= hash << 13;
         hash ^= hash >> 17;
         hash ^= hash << 5;
-        float angle = (hash & 0xFFFFu) * (Mathf.PI * 2f / 65536f);
-        return new Vector3(Mathf.Cos(angle), 0f, Mathf.Sin(angle));
+        return AnimalSimulationMath.Direction((int)(hash & 0xFFFFu));
     }
 
     public bool IsAnimalPositionClearOrEscaping(
@@ -818,11 +827,7 @@ public sealed class AnimalAIWorld : MonoBehaviour, IMapObjectUpdateTick, IMapObj
         return processed;
     }
 
-    public void ReportObstaclePhysicsProbe(int hitCount)
-    {
-        obstaclePhysicsQueries++;
-        obstaclePhysicsHits += Mathf.Max(0, hitCount);
-    }
+
 
     public int ForceThreatPulse(Vector3 center, float radius)
     {
@@ -921,8 +926,8 @@ public sealed class AnimalAIWorld : MonoBehaviour, IMapObjectUpdateTick, IMapObj
             return false;
         }
 
-        // 같은 프레임에 맵을 다시 만들면 파괴 예약된 이전 뷰가 목록에 잠시 남는다.
-        // 새로 등록된 컨트롤러를 우선해 복원 대상이 이전 뷰에 연결되지 않게 한다.
+        // Explicit removals unregister before destroying views. Visibility never
+        // determines whether a simulation identity can be restored.
         for (int i = controllers.Count - 1; i >= 0; i--)
         {
             AnimalAIController candidate = controllers[i];
@@ -930,7 +935,6 @@ public sealed class AnimalAIWorld : MonoBehaviour, IMapObjectUpdateTick, IMapObj
                 ? candidate.TerrainInstance
                 : null;
             if (candidate != null
-                && candidate.gameObject.activeInHierarchy
                 && candidate.IsConfigured
                 && candidate.Animal != null
                 && candidate.Animal.IsAlive
@@ -956,9 +960,11 @@ public sealed class AnimalAIWorld : MonoBehaviour, IMapObjectUpdateTick, IMapObj
         {
             controllers.Add(controller);
             controllerOrderDirty = true;
+            controller.InitializeNeedsSchedule(needsTick);
         }
 
         RefreshHerdMembership(controller);
+        MarkSpatialDirty(controller);
     }
 
     private void RemoveController(AnimalAIController controller)
@@ -974,6 +980,7 @@ public sealed class AnimalAIWorld : MonoBehaviour, IMapObjectUpdateTick, IMapObj
         }
 
         RemoveHerdMembership(controller);
+        MarkSpatialDirty(controller);
     }
 
     private void RefreshHerdMembership(AnimalAIController controller)
@@ -1001,8 +1008,10 @@ public sealed class AnimalAIWorld : MonoBehaviour, IMapObjectUpdateTick, IMapObj
             controllersByHerd.Add(herdId, herdMembers);
         }
 
-        herdMembers.Add(controller);
+        int insert = herdMembers.BinarySearch(controller, ControllerComparer.Instance);
+        herdMembers.Insert(insert < 0 ? ~insert : insert, controller);
         herdIdByController[controller] = herdId;
+        dirtyHerds.Add(herdId);
     }
 
     private void RemoveHerdMembership(AnimalAIController controller)
@@ -1025,90 +1034,11 @@ public sealed class AnimalAIWorld : MonoBehaviour, IMapObjectUpdateTick, IMapObj
         }
 
         herdMembers.Remove(controller);
+        dirtyHerds.Add(herdId);
         if (herdMembers.Count == 0)
         {
             controllersByHerd.Remove(herdId);
         }
-    }
-
-    private void RebuildFrameCaches()
-    {
-        herdFrames.Clear();
-        RecycleSpatialBuckets();
-        maximumAnimalColliderRadius = 0.5f;
-        for (int i = 0; i < controllers.Count; i++)
-        {
-            AnimalAIController controller = controllers[i];
-            if (!IsActiveController(controller))
-            {
-                continue;
-            }
-
-            controller.CaptureCrowdSnapshot();
-        }
-
-        for (int i = 0; i < controllers.Count; i++)
-        {
-            AnimalAIController controller = controllers[i];
-            if (!IsActiveController(controller))
-            {
-                continue;
-            }
-
-            AddToSpatialIndex(controller);
-            maximumAnimalColliderRadius = Mathf.Max(
-                maximumAnimalColliderRadius,
-                controller.AvoidanceColliderRadius);
-            if (controller.IsFleeing)
-            {
-                continue;
-            }
-
-            long herdId = controller.HerdId;
-            if (!herdFrames.TryGetValue(herdId, out HerdFrame frame))
-            {
-                frame = default;
-            }
-
-            frame.positionSum += controller.CrowdSnapshotPosition;
-            frame.count++;
-            herdFrames[herdId] = frame;
-        }
-
-        spatialIndexReady = true;
-    }
-
-    private void RecycleSpatialBuckets()
-    {
-        controllersBySpatialCell.Clear();
-        for (int i = 0; i < activeSpatialBuckets.Count; i++)
-        {
-            List<AnimalAIController> bucket = activeSpatialBuckets[i];
-            bucket.Clear();
-            spatialBucketPool.Push(bucket);
-        }
-
-        activeSpatialBuckets.Clear();
-    }
-
-    private void AddToSpatialIndex(AnimalAIController controller)
-    {
-        Vector3 position = controller.CrowdSnapshotPosition;
-        Vector2Int cell = new Vector2Int(
-            Mathf.FloorToInt(position.x / SpatialCellSize),
-            Mathf.FloorToInt(position.z / SpatialCellSize));
-        if (!controllersBySpatialCell.TryGetValue(
-                cell,
-                out List<AnimalAIController> bucket))
-        {
-            bucket = spatialBucketPool.Count > 0
-                ? spatialBucketPool.Pop()
-                : new List<AnimalAIController>(4);
-            controllersBySpatialCell.Add(cell, bucket);
-            activeSpatialBuckets.Add(bucket);
-        }
-
-        bucket.Add(controller);
     }
 
     private static float HorizontalSqrDistance(Vector3 left, Vector3 right)
@@ -1149,7 +1079,7 @@ public sealed class AnimalAIWorld : MonoBehaviour, IMapObjectUpdateTick, IMapObj
             return;
         }
 
-        Vector3 position = controller.transform.position;
+        Vector3 position = controller.SimulationPosition;
         Vector2Int coordinate = new Vector2Int(
             Mathf.RoundToInt(position.x),
             Mathf.RoundToInt(position.z));
@@ -1165,8 +1095,7 @@ public sealed class AnimalAIWorld : MonoBehaviour, IMapObjectUpdateTick, IMapObj
     private static bool IsActiveController(AnimalAIController controller)
     {
         return controller != null
-               && controller.IsConfigured
-               && controller.gameObject.activeInHierarchy;
+               && controller.IsConfigured;
     }
 
     private static void CommitFrameCounter(ref int current, ref int previous)

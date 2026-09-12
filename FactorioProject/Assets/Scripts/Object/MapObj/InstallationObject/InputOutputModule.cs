@@ -93,6 +93,19 @@ public class InputOutputModule : InstallationObject,
     private static readonly List<InputOutputModule> runtimeWakeScratch
         = new List<InputOutputModule>(16);
     private static int fluidTopologyVersion = 1;
+    private sealed class SharedPumpFluidOutputNetwork
+    {
+        internal readonly List<InstallationObject> Storages = new List<InstallationObject>(8);
+    }
+    private static readonly Dictionary<Vector2Int, SharedPumpFluidOutputNetwork> sharedPumpFluidOutputNetworksByCoordinate
+        = new Dictionary<Vector2Int, SharedPumpFluidOutputNetwork>();
+    private static readonly List<SharedPumpFluidOutputNetwork> sharedPumpFluidOutputNetworks
+        = new List<SharedPumpFluidOutputNetwork>();
+    private static int sharedPumpFluidOutputTopologyVersion;
+    private static long sharedPumpFluidOutputTopologyBuilds;
+    private static long sharedPumpFluidOutputCacheHits;
+    private static int sharedPumpFluidOutputLastBuildNodes;
+    private static int sharedPumpFluidOutputLastBuildStorages;
 
     private delegate bool RuntimeCoordinateValueCollector<T>(
         InputOutputModule module,
@@ -971,6 +984,8 @@ public class InputOutputModule : InstallationObject,
         {
             fluidTopologyVersion = 1;
         }
+
+        EnsureSharedPumpFluidOutputTopologyVersion();
     }
 
     private static void WakeRuntimeModulesAroundInstallation(InstallationObject installationObject)
@@ -2548,6 +2563,17 @@ public class InputOutputModule : InstallationObject,
                 out storage,
                 out bool storageIsPipeArea))
         {
+            if (this is Pump
+                && storage is SteamTrain steamTrain
+                && !steamTrain.CanAcceptWaterFromPipeDirection(
+                    -directionToPrevious,
+                    Pump.ResolveWaterItemId(null),
+                    false))
+            {
+                storage = null;
+                return false;
+            }
+
             if (storage is Fluidtank fluidTank
                 && !fluidTank.HasFluidNetworkConnectionTowards(
                     coordinate,
@@ -5956,6 +5982,12 @@ public class InputOutputModule : InstallationObject,
         }
 
         cachedFluidOutputStorages.Clear();
+        if (TryUseSharedPumpFluidOutputNetwork())
+        {
+            cachedFluidOutputStoragesTopologyVersion = fluidTopologyVersion;
+            return cachedFluidOutputStorages.Count > 0;
+        }
+
         connectedFluidSearchQueue.Clear();
         connectedFluidSearchVisited.Clear();
         connectedFluidStorageCandidates.Clear();
@@ -6029,7 +6061,124 @@ public class InputOutputModule : InstallationObject,
 
         cachedFluidOutputStorages.Sort(CompareSimulationOrder);
         cachedFluidOutputStoragesTopologyVersion = fluidTopologyVersion;
+        PublishSharedPumpFluidOutputNetwork();
         return cachedFluidOutputStorages.Count > 0;
+    }
+
+    private bool TryUseSharedPumpFluidOutputNetwork()
+    {
+        if (!(this is Pump)
+            || runtimeOutputCoordinates == null
+            || runtimeOutputCoordinates.Count != 1)
+        {
+            return false;
+        }
+
+        EnsureSharedPumpFluidOutputTopologyVersion();
+        if (!sharedPumpFluidOutputNetworksByCoordinate.TryGetValue(
+                runtimeOutputCoordinates[0],
+                out SharedPumpFluidOutputNetwork network)
+            || network == null)
+        {
+            return false;
+        }
+
+        cachedFluidOutputStorages.AddRange(network.Storages);
+        sharedPumpFluidOutputCacheHits++;
+        return true;
+    }
+
+    private void PublishSharedPumpFluidOutputNetwork()
+    {
+        if (!(this is Pump)
+            || runtimeOutputCoordinates == null
+            || runtimeOutputCoordinates.Count != 1)
+        {
+            return;
+        }
+
+        EnsureSharedPumpFluidOutputTopologyVersion();
+        SharedPumpFluidOutputNetwork network = null;
+        foreach (Vector2Int coordinate in connectedFluidSearchVisited)
+        {
+            if (sharedPumpFluidOutputNetworksByCoordinate.TryGetValue(
+                    coordinate,
+                    out SharedPumpFluidOutputNetwork existingNetwork))
+            {
+                network = existingNetwork;
+                break;
+            }
+        }
+
+        if (network == null)
+        {
+            network = new SharedPumpFluidOutputNetwork();
+            sharedPumpFluidOutputNetworks.Add(network);
+        }
+
+        for (int i = 0; i < cachedFluidOutputStorages.Count; i++)
+        {
+            InstallationObject storage = cachedFluidOutputStorages[i];
+            if (storage != null && !network.Storages.Contains(storage))
+            {
+                network.Storages.Add(storage);
+            }
+        }
+        network.Storages.Sort(CompareSimulationOrder);
+
+        foreach (Vector2Int coordinate in connectedFluidSearchVisited)
+        {
+            sharedPumpFluidOutputNetworksByCoordinate[coordinate] = network;
+        }
+
+        Vector2Int seedCoordinate = runtimeOutputCoordinates[0];
+        sharedPumpFluidOutputNetworksByCoordinate[seedCoordinate] = network;
+
+        sharedPumpFluidOutputTopologyBuilds++;
+        sharedPumpFluidOutputLastBuildNodes = connectedFluidSearchVisited.Count;
+        sharedPumpFluidOutputLastBuildStorages = cachedFluidOutputStorages.Count;
+    }
+
+    private static void EnsureSharedPumpFluidOutputTopologyVersion()
+    {
+        if (sharedPumpFluidOutputTopologyVersion == fluidTopologyVersion)
+        {
+            return;
+        }
+
+        sharedPumpFluidOutputNetworksByCoordinate.Clear();
+        sharedPumpFluidOutputNetworks.Clear();
+        sharedPumpFluidOutputTopologyVersion = fluidTopologyVersion;
+        sharedPumpFluidOutputLastBuildNodes = 0;
+        sharedPumpFluidOutputLastBuildStorages = 0;
+    }
+
+    public static void AppendFluidOutputNetworkProfilerCounters()
+    {
+        MapObjectTickProfiler.AddRuntimeCounter(
+            "PumpWaterNetwork",
+            "SharedNetworks",
+            sharedPumpFluidOutputNetworks.Count);
+        MapObjectTickProfiler.AddRuntimeCounter(
+            "PumpWaterNetwork",
+            "SharedCoordinates",
+            sharedPumpFluidOutputNetworksByCoordinate.Count);
+        MapObjectTickProfiler.AddRuntimeCounter(
+            "PumpWaterNetwork",
+            "TopologyBuilds",
+            sharedPumpFluidOutputTopologyBuilds);
+        MapObjectTickProfiler.AddRuntimeCounter(
+            "PumpWaterNetwork",
+            "CacheHits",
+            sharedPumpFluidOutputCacheHits);
+        MapObjectTickProfiler.AddRuntimeCounter(
+            "PumpWaterNetwork",
+            "LastBuildNodes",
+            sharedPumpFluidOutputLastBuildNodes);
+        MapObjectTickProfiler.AddRuntimeCounter(
+            "PumpWaterNetwork",
+            "LastBuildStorages",
+            sharedPumpFluidOutputLastBuildStorages);
     }
 
     private bool TrySelectFluidOutputStorageFromCache(

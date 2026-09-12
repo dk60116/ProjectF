@@ -9,6 +9,8 @@ public partial class TerrainGenerator
 {
     private static readonly ProfilerMarker BeltJobsBakeMarker = new ProfilerMarker("Belt Jobs.Bake");
     private static readonly ProfilerMarker BeltJobsTickMarker = new ProfilerMarker("Belt Jobs.Tick");
+    private static readonly ProfilerMarker BeltJobsScheduleMarker = new ProfilerMarker("Belt Jobs.Schedule");
+    private static readonly ProfilerMarker BeltJobsCompleteMarker = new ProfilerMarker("Belt Jobs.Complete");
     private static readonly ProfilerMarker BeltJobsPublishMarker = new ProfilerMarker("Belt Jobs.Publish");
     private BeltSimulationBuffers beltJobBuffers;
     private readonly List<(Block block, int lane)> beltJobNodes = new List<(Block, int)>();
@@ -124,8 +126,36 @@ public partial class TerrainGenerator
             if (beltJobBuffers != null && beltJobRanges.Count > 0)
             {
                 // One job iteration per independent transport group. No Unity objects are captured.
-                JobHandle handle = beltJobBuffers.Job.Schedule(beltJobRanges.Count, 1);
-                handle.Complete();
+                bool profileStages = MapObjectTickProfiler.IsEnabled;
+                JobHandle handle;
+                using (BeltJobsScheduleMarker.Auto())
+                {
+                    long scheduleStart = profileStages ? MapObjectTickProfiler.BeginSample() : 0L;
+                    handle = beltJobBuffers.Job.Schedule(beltJobRanges.Count, 1);
+                    if (profileStages)
+                    {
+                        MapObjectTickProfiler.EndNamedSample(
+                            "Belt",
+                            "BeltJobs",
+                            "Belt Jobs Schedule",
+                            scheduleStart);
+                    }
+                }
+
+                using (BeltJobsCompleteMarker.Auto())
+                {
+                    long completeStart = profileStages ? MapObjectTickProfiler.BeginSample() : 0L;
+                    handle.Complete();
+                    if (profileStages)
+                    {
+                        MapObjectTickProfiler.EndNamedSample(
+                            "Belt",
+                            "BeltJobs",
+                            "Belt Jobs Complete",
+                            completeStart);
+                    }
+                }
+
                 PublishBeltJobChanges();
             }
             beltSimulationTick++;
@@ -357,6 +387,8 @@ public partial class TerrainGenerator
     {
         using (BeltJobsPublishMarker.Auto())
         {
+            bool profileStage = MapObjectTickProfiler.IsEnabled;
+            long publishStart = profileStage ? MapObjectTickProfiler.BeginSample() : 0L;
             beltJobsPublishing = true;
             try
             {
@@ -379,6 +411,14 @@ public partial class TerrainGenerator
             }
             finally { beltJobsPublishing = false; }
             NotifyBeltJobPublishedBlocks();
+            if (profileStage)
+            {
+                MapObjectTickProfiler.EndNamedSample(
+                    "Belt",
+                    "BeltJobs",
+                    "Belt Jobs Publish",
+                    publishStart);
+            }
         }
     }
 

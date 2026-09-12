@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 
 public readonly record struct Vector2(float x, float y);
 public struct Quaternion
@@ -28,6 +28,10 @@ public class AnimalAIWorld
 }
 public partial class AnimalAIController
 {
+    private Vector3 simulationPosition { get => transform.position; set => transform.position = value; }
+    private int simulationYaw;
+    public Quaternion SimulatedRotation => simulationRotation;
+    private Quaternion simulationRotation => Quaternion.Euler(0, ProjectF.Animals.AnimalSimulationMath.Degrees(simulationYaw), 0);
     private enum MovementAvailability { Clear, BlockedByAnimal, BlockedByStaticObstacle }
     private const float AvoidanceExitClearDuration = .3f, BlockedRepathDelay = .3f, RepathCooldown = .5f;
     private const float AbandonBlockedTargetDelay = 1.5f, NavigationProgressEpsilon = .04f, HerdReturnRetryDelay = 5;
@@ -35,6 +39,7 @@ public partial class AnimalAIController
     private int navigationWaypointCount, navigationWaypointIndex;
     private Vector3[] navigationWaypoints;
     private Vector3 navigationGoal, navigationProgressTarget, terrainEscapeTarget, committedAvoidanceDirection;
+    private long navigationRevision;
     private bool navigationPrepared, navigationProgressTracked, herdReturnTargetActive, terrainEscapeActive, hasFleeThreat;
     private float navigationBlockedTime, navigationRepathCooldown, navigationBestDistance, navigationNoProgressTime;
     private float avoidanceDirectClearTime, avoidanceTurnSign = 1, herdReturnRetryCooldown;
@@ -53,9 +58,9 @@ public partial class AnimalAIController
     private Vector3 UpdateSmoothedSeparation(AnimalAIWorld world, float dt) => world?.Separation ?? Vector3.zero;
     private bool MovesCloserToTerrainEscape(Vector3 origin, Vector3 candidate) => false;
     private bool CanUsePredictiveTerrainProbe(Vector3 position) => CanOccupyTerrain(position, true);
-    private MovementAvailability ProbePhysicsPosition(Vector3 origin, Vector3 position, float radius) => PhysicalWalkable(position)
+    private MovementAvailability ProbeOccupancyPosition(Vector3 origin, Vector3 position, float radius) => PhysicalWalkable(position)
         ? MovementAvailability.Clear : MovementAvailability.BlockedByStaticObstacle;
-    private bool IsPhysicsPathClearOrEscaping(Vector3 origin, Vector3 direction, float distance, float radius)
+    private bool IsGridPathClearOrEscaping(Vector3 origin, Vector3 direction, float distance, float radius)
     {
         int samples = Math.Max(1, (int)Math.Ceiling(distance / .05f));
         for (int i = 1; i <= samples; i++)
@@ -124,7 +129,7 @@ public static partial class Checks
         Check(animal.MovementCount == 0 && !animal.hasTarget && animal.RemainingActivity >= 2,
             "fully blocked approach stays still then abandons into idle instead of reversing repeatedly");
         animal = new() { hasTarget = true, Target = new(2, 0, 0), currentState = AnimalAIState.Flee,
-            PhysicalWalkable = p => p.x <= 0 };
+            PhysicalWalkable = p => p.x < 0 || p.sqrMagnitude == 0 };
         Check(animal.ResolveDirect(new(1, 0, 0), false, out var fleeDirection) && fleeDirection.x < 0,
             "fleeing retains reverse escape when forward directions are blocked");
 
@@ -201,13 +206,13 @@ public static partial class Checks
         animal.Tick(.05f); animal.UpdateAnimationForCheck();
         Check(food.Count == 3 && !animal.animal.EatingAnimation && animal.animal.PendingMeals == 0,
             "food behind the animal is not consumed and eating cannot start before turning");
-        Check(Quaternion.Angle(animal.transform.rotation, Quaternion.identity) > 0 && Quaternion.Angle(animal.transform.rotation, desired) > 3,
+        Check(Quaternion.Angle(animal.SimulatedRotation, Quaternion.identity) > 0 && Quaternion.Angle(animal.SimulatedRotation, desired) > 3,
             "animal turns gradually toward nearby food instead of snapping around");
         bool prematureConsumption = false;
         for (int i = 0; i < 90 && food.Count == 3; i++)
         {
             animal.Tick(.05f);
-            prematureConsumption |= food.Count < 3 && Quaternion.Angle(animal.transform.rotation, desired) > .01f;
+            prematureConsumption |= food.Count < 3 && Quaternion.Angle(animal.SimulatedRotation, desired) > .01f;
         }
         animal.UpdateAnimationForCheck();
         Check(!prematureConsumption && food.Count == 2 && animal.animal.EatingAnimation && animal.animal.PendingMeals == 1,
@@ -215,7 +220,7 @@ public static partial class Checks
         Check(animal.MovementCount == 0 && animal.transform.position.sqrMagnitude == 0,
             "turning toward food ignores height and holds the animal's position");
         animal.Tick(.1f);
-        Check(Quaternion.Angle(animal.transform.rotation, desired) < .01f && food.Count == 2,
+        Check(Quaternion.Angle(animal.SimulatedRotation, desired) < .01f && food.Count == 2,
             "meal keeps facing the food without taking another stack item");
         TerrainGenerator.Active = new(); food = Drop(0);
         animal = new(); animal.Tick(.05f);

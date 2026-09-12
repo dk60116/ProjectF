@@ -93,7 +93,7 @@ public partial class PlayerHUD : BagSlot
     [SerializeField]
     private FilterSelectUI itemFilterUI;
     private int itemFilterUiOpenedFrame = -1;
-    private MapObject itemFilterButtonTarget;
+    private IMapObjectTarget itemFilterButtonTarget;
 
     [SerializeField]
     private TrainStationFilter trainStationFilter;
@@ -2933,6 +2933,7 @@ public partial class PlayerHUD : BagSlot
 
     private void SetObjectInfoAreaMarkerVisibility(IMapObjectTarget target, bool requested)
     {
+        RobotArmWorld.Current?.SetSelectedMarkerArm(requested ? target as RobotArmInstance : null);
         InputOutputModuleAreaMarkerController nextController = requested
             ? ResolveAreaMarkerController(target)
             : null;
@@ -3094,7 +3095,7 @@ public partial class PlayerHUD : BagSlot
         bool canInteract = GameManager.Instance != null
                            && GameManager.Instance.Player != null
                            && !GameManager.Instance.PlayerInteractionLocked;
-        MapObject clickedTarget = null;
+        IMapObjectTarget clickedTarget = null;
         bool isVisible = canInteract
                          && TryGetClickedFilterTarget(out clickedTarget);
         itemFilterButtonTarget = isVisible ? clickedTarget : null;
@@ -3762,7 +3763,7 @@ public partial class PlayerHUD : BagSlot
         }
 
         if (itemFilterUI.gameObject.activeSelf
-            && itemFilterUI.TryGetBoundTarget(out MapObject boundTarget)
+            && itemFilterUI.TryGetBoundTarget(out IMapObjectTarget boundTarget)
             && ReferenceEquals(boundTarget, target))
         {
             itemFilterUI.gameObject.SetActive(false);
@@ -3771,7 +3772,7 @@ public partial class PlayerHUD : BagSlot
         }
 
         HideFilterPanelsImmediate();
-        itemFilterUI.Bind(target.SceneObject);
+        itemFilterUI.Bind(target);
         itemFilterUI.gameObject.SetActive(true);
         itemFilterUiOpenedFrame = Time.frameCount;
     }
@@ -3893,7 +3894,7 @@ public partial class PlayerHUD : BagSlot
 
     private void HandleItemFilterButtonClicked()
     {
-        MapObject target = itemFilterButtonTarget;
+        IMapObjectTarget target = itemFilterButtonTarget;
         if (!IsUsableFilterButtonTarget(target)
             && !TryGetClickedFilterTarget(out target))
         {
@@ -3959,7 +3960,7 @@ public partial class PlayerHUD : BagSlot
                && TryResolveSteamTrain(clickedMapObject, out steamTrain);
     }
 
-    private bool TryGetClickedFilterTarget(out MapObject filterTarget)
+    private bool TryGetClickedFilterTarget(out IMapObjectTarget filterTarget)
     {
         filterTarget = null;
         PlayerController playerController = ResolvePlayerController();

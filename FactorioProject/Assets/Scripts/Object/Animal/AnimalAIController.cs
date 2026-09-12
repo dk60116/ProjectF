@@ -1,4 +1,6 @@
 using UnityEngine;
+using ProjectF.Animals;
+using ProjectF.Rendering;
 
 public enum AnimalAIState
 {
@@ -23,7 +25,6 @@ public sealed class AnimalAIController : MonoBehaviour
     }
 
     private const string LiveAnimalLayerName = "Animal";
-    private const int ObstacleBufferCapacity = 16;
     private const int TargetSearchAttempts = 24;
     private const int TargetPathSearchAttempts = 4;
     private const int MaxNavigationWaypoints = 96;
@@ -94,21 +95,20 @@ public sealed class AnimalAIController : MonoBehaviour
         180f
     };
 
-    private readonly Collider[] obstacleBuffer = new Collider[ObstacleBufferCapacity];
-    private readonly RaycastHit[] obstacleSweepBuffer = new RaycastHit[ObstacleBufferCapacity];
-
     private Animal animal;
     private AnimalDefinition definition;
     private TerrainAnimalInstance terrainInstance;
     private AnimalAISettings settings;
     private AnimalAIState currentState;
-    private float stateTimeRemaining;
-    private Vector3 targetPosition;
+    private AnimalTickTimer stateTimeRemaining;
+    private AnimalFixedPosition fixedTarget;
+    private Vector3 targetPosition { get => fixedTarget.Value; set => fixedTarget = new AnimalFixedPosition(value); }
     private bool hasTarget;
     private bool movingToActivity;
     private uint randomState;
     private bool configured;
     private bool executionActive;
+    private bool behaviorAnimationActivityInitialized;
     private bool nooseLeashed;
     private bool draftAttached;
     private Player mountedRider;
@@ -116,9 +116,10 @@ public sealed class AnimalAIController : MonoBehaviour
     private float mountedMaximumSpeed;
     private Vector3 mountedMovementDirection;
     private bool mountedRunAnimationActive;
-    private float scheduledTickAccumulator;
-    private float scheduledRecoveryElapsedTime;
-    private float scheduledTickPhase;
+    private long scheduledTicks;
+    private AnimalNeedsSchedule needsSchedule;
+    private long scheduledRecoveryTicks;
+    private uint scheduledTickPhase;
     private bool scheduledTickPhaseApplied;
     private Vector3 presentationStartPosition;
     private Vector3 presentationTargetPosition;
@@ -127,56 +128,75 @@ public sealed class AnimalAIController : MonoBehaviour
     private float presentationDuration;
     private float presentationElapsed;
     private bool presentationActive;
-    private Vector3 simulationPosition;
-    private Quaternion simulationRotation;
+    private AnimalFixedPosition fixedPosition;
+    private Vector3 simulationPosition { get => fixedPosition.Value; set => fixedPosition = new AnimalFixedPosition(value); }
+    private int simulationYaw;
+    private Quaternion simulationRotation
+    {
+        get => Quaternion.Euler(0f, AnimalSimulationMath.Degrees(simulationYaw), 0f);
+        set => simulationYaw = AnimalSimulationMath.Angle(value.eulerAngles.y);
+    }
     private bool simulationPoseInitialized;
-    private bool waitingForStandUp;
+    private float standUpDuration = 1f;
+    private float feedingDuration = FeedingDuration;
+    private bool standUpPending;
+    private long standUpReadyTick;
+    private bool waitingForStandUp
+    {
+        get => standUpPending;
+        set
+        {
+            if (value && !standUpPending)
+                standUpReadyTick = (AnimalAIWorld.Instance?.NeedsTick ?? 0L) + AnimalSimulationMath.Ticks(standUpDuration);
+            standUpPending = value;
+        }
+    }
+    private bool detailedVisualsInitialized;
+    private bool detailedVisualsVisible;
+    private long fallbackSimulationId;
     private Vector3[] navigationWaypoints;
     private int navigationWaypointCount;
     private int navigationWaypointIndex;
     private Vector3 navigationGoal;
     private bool navigationPrepared;
-    private float navigationBlockedTime;
-    private float navigationRepathCooldown;
+    private long navigationRevision;
+    private AnimalTickTimer navigationBlockedTime;
+    private AnimalTickTimer navigationRepathCooldown;
     private Vector3 navigationProgressTarget;
     private float navigationBestDistance;
-    private float navigationNoProgressTime;
+    private AnimalTickTimer navigationNoProgressTime;
     private bool navigationProgressTracked;
-    private float herdReturnRetryCooldown;
+    private AnimalTickTimer herdReturnRetryCooldown;
     private bool herdReturnTargetActive;
     private bool preferReachableFallbackTarget;
     private bool terrainEscapeActive;
     private Vector3 terrainEscapeTarget;
     private Vector3 fleeThreatPosition;
     private bool hasFleeThreat;
-    private float postAggroHealthRecoveryDelayRemaining = -1f;
+    private AnimalTickTimer postAggroHealthRecoveryDelayRemaining = -1f;
     private int fleeRouteAttemptOffset;
     private int forcedThreatPulseCount;
     private Collider[] animalColliders;
     private int[] originalAnimalColliderLayers;
     private float avoidanceColliderRadius = 0.5f;
     private Vector3 committedAvoidanceDirection;
-    private float avoidanceDirectClearTime;
+    private AnimalTickTimer avoidanceDirectClearTime;
     private float avoidanceTurnSign = 1f;
     private Vector3 smoothedSeparation;
     private Vector3 crowdSnapshotPosition;
     private bool crowdSnapshotValid;
-    private int obstacleLayerMask = Physics.AllLayers;
     private int reachableFallbackTargetCount;
     private int stuckTargetAbandonCount;
     private int herdReturnSuppressionCount;
     private Vector3 saddledFreeRoamCenter;
     private bool saddledFreeRoamCenterInitialized;
     private Vector2Int foodTargetCoordinate;
-    private float foodSearchCooldown;
+    private AnimalTickTimer foodSearchCooldown;
     private TerrainGenerator feedingTerrain;
     internal bool IsConsumingDroppedFood => executionActive && animal != null && animal.IsAlive
         && currentState == AnimalAIState.Eat && !hasTarget && stateTimeRemaining > 0f;
     private System.Func<Vector3, bool, bool> foodReachabilityFilter;
     private Vector3[] foodNavigationScratch;
-
-    private static bool obstacleLayerMaskInitialized;
-    private static int cachedObstacleLayerMask = Physics.AllLayers;
 
     public Animal Animal => animal;
     public AnimalDefinition Definition => definition;
@@ -187,7 +207,7 @@ public sealed class AnimalAIController : MonoBehaviour
     public Vector3 TargetPosition => targetPosition;
     public bool HasTarget => hasTarget;
     public long HerdId => terrainInstance != null ? terrainInstance.HerdId : 0L;
-    public Vector3 HerdAreaCenter => terrainInstance != null ? terrainInstance.HerdCenter : transform.position;
+    public Vector3 HerdAreaCenter => terrainInstance != null ? terrainInstance.HerdCenter : SimulationPosition;
     public float HerdAreaRadius => terrainInstance != null
         ? terrainInstance.HerdRadius
         : settings != null
@@ -207,6 +227,7 @@ public sealed class AnimalAIController : MonoBehaviour
         ? GetEffectiveMoveSpeed()
         : 0f;
     public bool IsFleeing => configured && currentState == AnimalAIState.Flee && hasFleeThreat;
+    internal bool HasPendingPresentation => !IsExternallyControlled && presentationActive;
     public int ForcedThreatPulseCount => forcedThreatPulseCount;
     public int ReachableFallbackTargetCount => reachableFallbackTargetCount;
     public int StuckTargetAbandonCount => stuckTargetAbandonCount;
@@ -263,6 +284,9 @@ public sealed class AnimalAIController : MonoBehaviour
         AnimalAIWorld.Register(this);
     }
 
+    private void OnEnable() => AnimalAIWorld.NotifySpatialChanged(this);
+    private void OnDisable() => AnimalAIWorld.NotifySpatialChanged(this);
+
     private void LateUpdate()
     {
         if (configured && !draftAttached)
@@ -300,6 +324,8 @@ public sealed class AnimalAIController : MonoBehaviour
             ? definition.AISettings
             : new AnimalAISettings();
         settings.Normalize();
+        standUpDuration = animal != null ? animal.GetSimulationAnimationDuration("_LayToIdle", 1f) : 1f;
+        feedingDuration = animal != null ? animal.GetSimulationAnimationDuration("_Eating", FeedingDuration) : FeedingDuration;
 
         if (restoredState != null)
         {
@@ -366,6 +392,9 @@ public sealed class AnimalAIController : MonoBehaviour
         ResetScheduledTick();
         ResetPresentation();
         AnimalAIWorld.Register(this);
+        detailedVisualsInitialized = false;
+        SyncBehaviorAnimationActivity();
+        InitializeNeedsSchedule(AnimalAIWorld.Instance != null ? AnimalAIWorld.Instance.NeedsTick : 0L);
         ApplyAnimation(0f);
         animal?.TryRestorePendingDraftHandcart();
     }
@@ -386,49 +415,43 @@ public sealed class AnimalAIController : MonoBehaviour
 
     public bool QueueScheduledTick(float deltaTime, float interval)
     {
-        if (!configured || !executionActive || IsExternallyControlled || deltaTime <= 0f)
-        {
-            return false;
-        }
-
-        float resolvedInterval = Mathf.Max(0.01f, interval);
+        if (!configured || !executionActive || IsExternallyControlled || deltaTime <= 0f) return false;
+        long intervalTicks = System.Math.Max(1L, AnimalSimulationMath.Ticks(interval));
         if (!scheduledTickPhaseApplied)
         {
-            scheduledTickAccumulator = resolvedInterval * scheduledTickPhase;
+            scheduledTicks = scheduledTickPhase % intervalTicks;
             scheduledTickPhaseApplied = true;
         }
-
-        scheduledTickAccumulator += deltaTime;
-        scheduledRecoveryElapsedTime += deltaTime;
-        if (scheduledTickAccumulator < resolvedInterval)
-        {
-            return false;
-        }
-
-        return true;
+        long elapsed = AnimalSimulationMath.Ticks(deltaTime);
+        scheduledTicks += elapsed;
+        scheduledRecoveryTicks += elapsed;
+        return scheduledTicks >= intervalTicks;
     }
 
     public bool ExecuteScheduledTick()
     {
-        if (!configured || !executionActive || IsExternallyControlled || scheduledTickAccumulator <= 0f)
+        using var sample = AnimalAIProfiler.Sample("Animal Decision and Movement");
+        if (!configured || !executionActive || IsExternallyControlled || scheduledTicks <= 0)
         {
             return false;
         }
 
-        float simulationDelta = Mathf.Min(scheduledTickAccumulator, 0.2f);
-        float recoveryElapsedTime = scheduledRecoveryElapsedTime;
-        scheduledTickAccumulator = 0f;
-        scheduledRecoveryElapsedTime = 0f;
+        float simulationDelta = AnimalSimulationMath.Seconds(System.Math.Min(scheduledTicks, 12L));
+        float recoveryElapsedTime = AnimalSimulationMath.Seconds(scheduledRecoveryTicks);
+        scheduledTicks = 0;
+        scheduledRecoveryTicks = 0;
         EnsureSimulationPoseInitialized();
         Vector3 framePosition = transform.position;
         Quaternion frameRotation = transform.rotation;
-        transform.SetPositionAndRotation(simulationPosition, simulationRotation);
+        bool wasFleeing = IsFleeing;
+        Vector3 previousSimulationPosition = simulationPosition;
         TickSimulation(simulationDelta, recoveryElapsedTime, true);
-        Vector3 nextSimulationPosition = transform.position;
-        Quaternion nextSimulationRotation = transform.rotation;
+        Vector3 nextSimulationPosition = AnimalSimulationMath.Quantize(simulationPosition);
+        Quaternion nextSimulationRotation = simulationRotation;
+        bool spatialChanged = !previousSimulationPosition.Equals(nextSimulationPosition) || wasFleeing != IsFleeing;
         simulationPosition = nextSimulationPosition;
         simulationRotation = nextSimulationRotation;
-        transform.SetPositionAndRotation(framePosition, frameRotation);
+        if (spatialChanged) AnimalAIWorld.NotifySpatialChanged(this);
         if (configured)
         {
             bool poseChanged = (nextSimulationPosition - framePosition).sqrMagnitude
@@ -478,7 +501,31 @@ public sealed class AnimalAIController : MonoBehaviour
 
     public void SetDetailedVisuals(bool visible)
     {
+        if (detailedVisualsInitialized && detailedVisualsVisible == visible) return;
+        detailedVisualsInitialized = true;
+        detailedVisualsVisible = visible;
         animal?.SetDetailedVisuals(visible);
+    }
+
+    internal bool IsPresentationVisible(CameraRenderCulling culling)
+    {
+        if (!culling.Enabled) return true;
+        Bounds bounds = animal != null ? animal.PresentationBounds
+            : new Bounds(transform.position, Vector3.one * 4f);
+        // Test both ends using authoritative pose, so a culled interpolation can reenter view.
+        bounds.Encapsulate(new Bounds(bounds.center + SimulationPosition - transform.position, bounds.size));
+        return culling.IsLayerVisible(animal != null ? animal.PresentationLayer : gameObject.layer)
+               && culling.Intersects(bounds);
+    }
+
+    internal void TickCulledPresentation(float deltaTime, bool visible)
+    {
+        if (visible) TickPresentation(deltaTime);
+        else
+        {
+            SnapToSimulationPose();
+            ResetPresentation();
+        }
     }
 
     public bool TickDormant()
@@ -499,13 +546,14 @@ public sealed class AnimalAIController : MonoBehaviour
         active &= !IsExternallyControlled;
         bool changed = executionActive != active;
         executionActive = active;
-        // Run even for the initial false -> false case (spawn outside the active radius).
-        SyncBehaviorAnimationActivity();
+
         if (!changed)
         {
+            if (!behaviorAnimationActivityInitialized) SyncBehaviorAnimationActivity();
             return;
         }
 
+        SyncBehaviorAnimationActivity();
         if (!active)
         {
             ResetScheduledTick();
@@ -679,9 +727,10 @@ public sealed class AnimalAIController : MonoBehaviour
     public void ApplyExternalControlledPose(Vector3 worldPosition, Quaternion worldRotation)
     {
         transform.SetPositionAndRotation(worldPosition, worldRotation);
-        simulationPosition = worldPosition;
+        simulationPosition = AnimalSimulationMath.Quantize(worldPosition);
         simulationRotation = worldRotation;
         simulationPoseInitialized = true;
+        AnimalAIWorld.NotifySpatialChanged(this);
         ResetPresentation();
     }
 
@@ -708,7 +757,7 @@ public sealed class AnimalAIController : MonoBehaviour
         }
 
         worldMoveDirection.y = 0f;
-        float rawInputMagnitude = worldMoveDirection.magnitude;
+        float rawInputMagnitude = AnimalSimulationMath.Magnitude(worldMoveDirection);
         float inputMagnitude = Mathf.Clamp01(rawInputMagnitude);
         bool hasInput = inputMagnitude > 0.01f;
         float effectiveWalkSpeed = GetEffectiveMoveSpeed();
@@ -784,7 +833,7 @@ public sealed class AnimalAIController : MonoBehaviour
 
         Vector3 movedDirection = simulationPosition - previousPosition;
         movedDirection.y = 0f;
-        float actualMoveDistance = movedDirection.magnitude;
+        float actualMoveDistance = AnimalSimulationMath.Magnitude(movedDirection);
         if (movedDirection.sqrMagnitude > MountedMovementDirectionEpsilonSqr)
         {
             movedDirection /= actualMoveDistance;
@@ -815,7 +864,25 @@ public sealed class AnimalAIController : MonoBehaviour
 
     public void TickNeeds(float deltaTime)
     {
+        using var sample = AnimalAIProfiler.Sample("Animal Needs");
         animal?.TickNeeds(deltaTime);
+        AnimalAIProfiler.Add(AnimalAIProfiler.Counter.NeedsUpdates);
+    }
+
+    internal void InitializeNeedsSchedule(long tick) => needsSchedule.Initialize(tick, SimulationId);
+
+    internal bool TickScheduledNeeds(long tick, bool lowFrequency)
+    {
+        long elapsed = needsSchedule.TakeElapsedTicks(tick, lowFrequency);
+        if (elapsed <= 0L) return false;
+        TickNeeds(elapsed * MapObjectTickManager.FixedSimulationDeltaSeconds);
+        return true;
+    }
+
+    internal void FlushPendingNeeds()
+    {
+        if (AnimalAIWorld.Instance != null)
+            TickScheduledNeeds(AnimalAIWorld.Instance.NeedsTick, false);
     }
 
     private void ResetMountedMovement()
@@ -877,7 +944,7 @@ public sealed class AnimalAIController : MonoBehaviour
 
         Vector3 toTarget = targetPosition - simulationPosition;
         toTarget.y = 0f;
-        float targetDistance = toTarget.magnitude;
+        float targetDistance = AnimalSimulationMath.Magnitude(toTarget);
         float resolvedSlackDistance = Mathf.Max(0.1f, slackDistance);
         if (targetDistance <= resolvedSlackDistance)
         {
@@ -995,11 +1062,11 @@ public sealed class AnimalAIController : MonoBehaviour
 
     private void ResetScheduledTick()
     {
-        scheduledTickAccumulator = 0f;
-        scheduledRecoveryElapsedTime = 0f;
+        scheduledTicks = 0;
+        scheduledRecoveryTicks = 0;
         scheduledTickPhaseApplied = false;
-        uint phaseHash = randomState * 2654435761u;
-        scheduledTickPhase = (phaseHash & 1023u) / 1024f;
+        long id = SimulationId;
+        scheduledTickPhase = unchecked(((uint)id ^ (uint)(id >> 32)) * 2654435761u);
     }
 
     private void BeginPresentation(
@@ -1028,9 +1095,10 @@ public sealed class AnimalAIController : MonoBehaviour
 
     private void InitializeSimulationPose()
     {
-        simulationPosition = transform.position;
+        simulationPosition = AnimalSimulationMath.Quantize(transform.position);
         simulationRotation = transform.rotation;
         simulationPoseInitialized = true;
+        AnimalAIWorld.NotifySpatialChanged(this);
     }
 
     private void EnsureSimulationPoseInitialized()
@@ -1079,7 +1147,6 @@ public sealed class AnimalAIController : MonoBehaviour
                 Mathf.Max(extents.x, extents.z));
         }
 
-        obstacleLayerMask = GetObstacleLayerMask();
         int liveAnimalLayer = LayerMask.NameToLayer(LiveAnimalLayerName);
         if (liveAnimalLayer < 0)
         {
@@ -1111,32 +1178,6 @@ public sealed class AnimalAIController : MonoBehaviour
             {
                 animalCollider.gameObject.layer = originalAnimalColliderLayers[i];
             }
-        }
-    }
-
-    private static int GetObstacleLayerMask()
-    {
-        if (obstacleLayerMaskInitialized)
-        {
-            return cachedObstacleLayerMask;
-        }
-
-        cachedObstacleLayerMask = Physics.AllLayers;
-        ExcludeObstacleLayer(ref cachedObstacleLayerMask, LiveAnimalLayerName);
-        ExcludeObstacleLayer(ref cachedObstacleLayerMask, "TransparentFX");
-        ExcludeObstacleLayer(ref cachedObstacleLayerMask, "Ignore Raycast");
-        ExcludeObstacleLayer(ref cachedObstacleLayerMask, "Water");
-        ExcludeObstacleLayer(ref cachedObstacleLayerMask, "UI");
-        obstacleLayerMaskInitialized = true;
-        return cachedObstacleLayerMask;
-    }
-
-    private static void ExcludeObstacleLayer(ref int mask, string layerName)
-    {
-        int layer = LayerMask.NameToLayer(layerName);
-        if (layer >= 0)
-        {
-            mask &= ~(1 << layer);
         }
     }
 
@@ -1180,7 +1221,7 @@ public sealed class AnimalAIController : MonoBehaviour
                 playerMovement = simulationRotation * Vector3.forward;
             }
 
-            playerMovement.Normalize();
+            playerMovement = AnimalSimulationMath.Normalize(playerMovement);
             pushDirection = new Vector3(
                 -playerMovement.z,
                 0f,
@@ -1192,17 +1233,14 @@ public sealed class AnimalAIController : MonoBehaviour
         }
         else
         {
-            pushDirection.Normalize();
+            pushDirection = AnimalSimulationMath.Normalize(pushDirection);
         }
 
         bool hasAnimalBlockedCandidate = false;
         Vector3 animalBlockedCandidate = Vector3.zero;
         for (int i = 0; i < PlayerPushAngles.Length; i++)
         {
-            Vector3 candidateDirection = Quaternion.Euler(
-                0f,
-                PlayerPushAngles[i],
-                0f) * pushDirection;
+            Vector3 candidateDirection = AnimalSimulationMath.Rotate(pushDirection, PlayerPushAngles[i]);
             Vector3 candidate = origin + candidateDirection * pushDistance;
             candidate.y = origin.y;
             MovementAvailability availability = ProbePlayerPush(
@@ -1242,6 +1280,8 @@ public sealed class AnimalAIController : MonoBehaviour
             return;
         }
 
+        entry.position = SimulationPosition;
+        entry.rotation = simulationRotation;
         entry.herdId = HerdId;
         entry.herdCenter = HerdAreaCenter;
         entry.herdRadius = HerdAreaRadius;
@@ -1274,7 +1314,7 @@ public sealed class AnimalAIController : MonoBehaviour
         herdReturnRetryCooldown = Mathf.Max(0f, herdReturnRetryCooldown - deltaTime);
         foodSearchCooldown = Mathf.Max(0f, foodSearchCooldown - deltaTime);
         // Digestion completes independently of walking, eating, or resting.
-        TryDefecateAt(transform.position);
+        TryDefecateAt(simulationPosition);
         if (currentState == AnimalAIState.Rest && !IsNightTime())
         {
             stateTimeRemaining = 0f;
@@ -1332,7 +1372,6 @@ public sealed class AnimalAIController : MonoBehaviour
             stateTimeRemaining -= deltaTime;
         }
 
-
         ApplyAnimation(moved ? GetEffectiveMoveSpeed() : 0f);
     }
 
@@ -1341,6 +1380,7 @@ public sealed class AnimalAIController : MonoBehaviour
         bool requireLoadedGround,
         out bool moved)
     {
+        using var sample = AnimalAIProfiler.Sample("Animal Feeding");
         moved = false;
         if (animal == null || !animal.IsAlive)
         {
@@ -1350,9 +1390,7 @@ public sealed class AnimalAIController : MonoBehaviour
         if (currentState == AnimalAIState.Eat && !hasTarget && stateTimeRemaining > 0f)
         {
             FaceDroppedFood(deltaTime);
-            stateTimeRemaining = Mathf.Max(
-                stateTimeRemaining - deltaTime,
-                requireLoadedGround ? animal.GetRemainingEatingAnimationSeconds() : 0f);
+            stateTimeRemaining = Mathf.Max(0f, stateTimeRemaining - deltaTime);
             if (stateTimeRemaining <= 0f)
             {
                 ResetToIdleBehavior();
@@ -1389,7 +1427,7 @@ public sealed class AnimalAIController : MonoBehaviour
             }
 
             if (!terrain.TryFindNearestDroppedAnimalFood(
-                    transform.position,
+                    simulationPosition,
                     definition != null
                         ? definition.NeedsSettings.FoodSearchRadius
                         : AnimalNeedsSettings.DefaultFoodSearchRadius,
@@ -1446,7 +1484,7 @@ public sealed class AnimalAIController : MonoBehaviour
             feedingTerrain = terrain;
             hasTarget = false;
             movingToActivity = false;
-            stateTimeRemaining = FeedingDuration;
+            stateTimeRemaining = feedingDuration;
             ResetNavigation();
         }
         else
@@ -1460,25 +1498,22 @@ public sealed class AnimalAIController : MonoBehaviour
 
     private bool FaceDroppedFood(float deltaTime)
     {
-        Vector3 direction = targetPosition - transform.position;
+        Vector3 direction = targetPosition - simulationPosition;
         direction.y = 0f;
         if (direction.sqrMagnitude <= 0.0001f)
         {
             return true;
         }
 
-        Quaternion targetRotation = Quaternion.LookRotation(direction, Vector3.up);
         float turnSpeed = settings != null ? settings.TurnSpeed : 360f;
-        transform.rotation = Quaternion.RotateTowards(
-            transform.rotation,
-            targetRotation,
-            Mathf.Max(90f, turnSpeed) * Mathf.Min(deltaTime, MaximumRotationDeltaTime));
-        if (Quaternion.Angle(transform.rotation, targetRotation) > 3f)
+        int targetYaw = AnimalSimulationMath.Yaw(direction);
+        simulationYaw = AnimalSimulationMath.Turn(simulationYaw, direction, Mathf.Max(90f, turnSpeed), Mathf.Min(deltaTime, MaximumRotationDeltaTime));
+        if (System.Math.Abs(AnimalSimulationMath.AngleDelta(simulationYaw, targetYaw)) > AnimalSimulationMath.Angle(3f))
         {
             return false;
         }
 
-        transform.rotation = targetRotation;
+        simulationYaw = targetYaw;
         return true;
     }
 
@@ -1490,7 +1525,7 @@ public sealed class AnimalAIController : MonoBehaviour
 
     private bool IsWithinDroppedFoodReach(bool requireLoadedGround)
     {
-        Vector3 position = transform.position;
+        Vector3 position = simulationPosition;
         Vector3 offset = targetPosition - position;
         offset.y = 0f;
         float reach = Mathf.Max(settings.ArrivalDistance, GetObstacleRadius() + 0.2f);
@@ -1521,7 +1556,7 @@ public sealed class AnimalAIController : MonoBehaviour
         // Candidate checks must not overwrite the animal's current movement path.
         foodNavigationScratch ??= new Vector3[MaxNavigationWaypoints];
         return AnimalGridPathfinder.FindPath(
-            TerrainGenerator.Active, transform.position, destination,
+            TerrainGenerator.Active, simulationPosition, destination,
             areaCenter, areaRadius, requireLoadedGround, foodNavigationScratch) > 0;
     }
 
@@ -1570,10 +1605,8 @@ public sealed class AnimalAIController : MonoBehaviour
         Vector3 center = SimulationPosition;
         // Spread stationary-animal droppings across nearby blocks without using
         // UnityEngine.Random or allocating temporary collections.
-        float angle = Next01() * Mathf.PI * 2f;
-        float distance = Mathf.Sqrt(Next01()) * DormantDefecationSpreadRadius;
-        center.x += Mathf.Cos(angle) * distance;
-        center.z += Mathf.Sin(angle) * distance;
+        uint angle = NextRandomUInt();
+        center += AnimalSimulationMath.RandomDisk(NextRandomUInt(), angle, DormantDefecationSpreadRadius);
         return center;
     }
 
@@ -1632,45 +1665,29 @@ public sealed class AnimalAIController : MonoBehaviour
         TerrainGenerator terrain = TerrainGenerator.Active;
         if (terrain == null
             || !terrain.TryGetAnimalDrinkDirection(
-                transform.position,
+                simulationPosition,
                 out Vector3 direction)
             || direction.sqrMagnitude <= 0.0001f)
         {
             return;
         }
 
-        Quaternion targetRotation = Quaternion.LookRotation(direction, Vector3.up);
-        transform.rotation = Quaternion.RotateTowards(
-            transform.rotation,
-            targetRotation,
-            settings.TurnSpeed * Mathf.Min(deltaTime, MaximumRotationDeltaTime));
+        simulationYaw = AnimalSimulationMath.Turn(simulationYaw, direction, settings.TurnSpeed, Mathf.Min(deltaTime, MaximumRotationDeltaTime));
     }
 
     private bool WaitForStandUpBeforeMovement(bool useLiveCollision)
     {
-        if (!waitingForStandUp)
-        {
-            return false;
-        }
-
-        if (!useLiveCollision || animal == null)
-        {
-            waitingForStandUp = false;
-            return false;
-        }
-
-        if (!animal.IsReadyForAIMovement())
-        {
-            return true;
-        }
-
+        if (!waitingForStandUp) return false;
+        if ((AnimalAIWorld.Instance?.NeedsTick ?? standUpReadyTick) < standUpReadyTick) return true;
         waitingForStandUp = false;
+        animal?.WakeUp();
         ApplyAnimation(0f);
         return false;
     }
 
     private void BeginNextBehavior(bool requireLoadedGround)
     {
+        using var sample = AnimalAIProfiler.Sample("Animal Behavior Selection");
         bool wasResting = currentState == AnimalAIState.Rest;
         hasFleeThreat = false;
         herdReturnTargetActive = false;
@@ -1685,19 +1702,20 @@ public sealed class AnimalAIController : MonoBehaviour
             animal?.WakeFromRest();
         }
 
+        Vector3 selectedTarget = targetPosition;
         switch (currentState)
         {
             case AnimalAIState.Wander:
-                hasTarget = TryChooseTarget(false, requireLoadedGround, out targetPosition);
+                hasTarget = TryChooseTarget(false, requireLoadedGround, out selectedTarget);
                 break;
             case AnimalAIState.Graze:
-                hasTarget = TryChooseTarget(false, requireLoadedGround, out targetPosition);
+                hasTarget = TryChooseTarget(false, requireLoadedGround, out selectedTarget);
                 movingToActivity = hasTarget;
                 break;
             case AnimalAIState.Drink:
                 hasTarget = TryChooseDrinkTarget(
                     requireLoadedGround,
-                    out targetPosition);
+                    out selectedTarget);
                 movingToActivity = hasTarget;
                 if (!hasTarget)
                 {
@@ -1706,6 +1724,7 @@ public sealed class AnimalAIController : MonoBehaviour
                 }
                 break;
         }
+        targetPosition = selectedTarget;
     }
 
     private bool TryChooseDrinkTarget(
@@ -1713,7 +1732,7 @@ public sealed class AnimalAIController : MonoBehaviour
         out Vector3 result)
     {
         TerrainGenerator terrain = TerrainGenerator.Active;
-        Vector3 position = transform.position;
+        Vector3 position = simulationPosition;
         if (terrain == null)
         {
             result = position;
@@ -1770,7 +1789,7 @@ public sealed class AnimalAIController : MonoBehaviour
             return false;
         }
 
-        Vector3 position = transform.position;
+        Vector3 position = simulationPosition;
         if (!IsOutsideRoamingArea(position))
         {
             herdReturnTargetActive = false;
@@ -1799,8 +1818,9 @@ public sealed class AnimalAIController : MonoBehaviour
                 hasTarget = TryChooseTarget(
                     false,
                     requireLoadedGround,
-                    out targetPosition,
+                    out Vector3 selectedTarget,
                     allowLocalRoaming: false);
+                targetPosition = selectedTarget;
             }
         }
 
@@ -1843,7 +1863,7 @@ public sealed class AnimalAIController : MonoBehaviour
 
         float inset = Mathf.Max(settings.ArrivalDistance * 2f, 0.5f);
         float returnRadius = Mathf.Max(0f, GetRoamingAreaRadius() - inset);
-        Vector3 returnTarget = areaCenter + areaOffset.normalized * returnRadius;
+        Vector3 returnTarget = areaCenter + AnimalSimulationMath.Normalize(areaOffset) * returnRadius;
         returnTarget.y = position.y;
         if (!CanOccupyTerrain(returnTarget, requireLoadedGround))
         {
@@ -1875,11 +1895,12 @@ public sealed class AnimalAIController : MonoBehaviour
 
     private void BeginFlee(Vector3 threatPosition)
     {
+        AnimalAIWorld.NotifySpatialChanged(this);
         bool wasResting = currentState == AnimalAIState.Rest || waitingForStandUp;
         currentState = AnimalAIState.Flee;
         stateTimeRemaining = 0f;
         fleeThreatPosition = threatPosition;
-        fleeThreatPosition.y = transform.position.y;
+        fleeThreatPosition.y = simulationPosition.y;
         hasFleeThreat = true;
         postAggroHealthRecoveryDelayRemaining = PostAggroHealthRecoveryDelay;
         fleeRouteAttemptOffset = 0;
@@ -1896,6 +1917,7 @@ public sealed class AnimalAIController : MonoBehaviour
 
     private void TickFlee(float deltaTime, bool useLiveCollision)
     {
+        using var sample = AnimalAIProfiler.Sample("Animal Movement");
         if (!hasFleeThreat)
         {
             BeginNextBehavior(useLiveCollision);
@@ -1903,7 +1925,7 @@ public sealed class AnimalAIController : MonoBehaviour
             return;
         }
 
-        Vector3 position = transform.position;
+        Vector3 position = simulationPosition;
         Vector3 awayFromThreat = position - fleeThreatPosition;
         awayFromThreat.y = 0f;
         float safeDistance = settings.FleeSafeDistance;
@@ -1917,20 +1939,19 @@ public sealed class AnimalAIController : MonoBehaviour
         Vector3 awayDirection;
         if (awayFromThreat.sqrMagnitude > 0.0001f)
         {
-            awayDirection = awayFromThreat.normalized;
+            awayDirection = AnimalSimulationMath.Normalize(awayFromThreat);
         }
         else
         {
-            awayDirection = -transform.forward;
+            awayDirection = -AnimalSimulationMath.Direction(simulationYaw);
             awayDirection.y = 0f;
             if (awayDirection.sqrMagnitude <= 0.0001f)
             {
-                float angle = Next01() * Mathf.PI * 2f;
-                awayDirection = new Vector3(Mathf.Cos(angle), 0f, Mathf.Sin(angle));
+                awayDirection = AnimalSimulationMath.Direction((int)(NextRandomUInt() & 65535));
             }
             else
             {
-                awayDirection.Normalize();
+                awayDirection = AnimalSimulationMath.Normalize(awayDirection);
             }
         }
 
@@ -1949,17 +1970,17 @@ public sealed class AnimalAIController : MonoBehaviour
         toMovementTarget.y = 0f;
         Vector3 movementDirection = toMovementTarget.sqrMagnitude
                                     > settings.ArrivalDistance * settings.ArrivalDistance
-            ? toMovementTarget.normalized
+            ? AnimalSimulationMath.Normalize(toMovementTarget)
             : awayDirection;
         Vector3 crowdSteering = UpdateSmoothedSeparation(
             AnimalAIWorld.Instance,
             deltaTime) * settings.SeparationWeight;
-        movementDirection += Vector3.ClampMagnitude(
+        movementDirection += AnimalSimulationMath.ClampMagnitude(
             crowdSteering,
             MaximumCrowdSteering);
         if (movementDirection.sqrMagnitude > 0.0001f)
         {
-            movementDirection.Normalize();
+            movementDirection = AnimalSimulationMath.Normalize(movementDirection);
         }
         else
         {
@@ -1982,7 +2003,7 @@ public sealed class AnimalAIController : MonoBehaviour
             navigationBlockedTime = 0f;
             if (IsNavigationProgressStalled(
                     movementTarget,
-                    transform.position,
+                    simulationPosition,
                     deltaTime))
             {
                 TryRepathFlee(awayDirection, useLiveCollision);
@@ -1990,7 +2011,7 @@ public sealed class AnimalAIController : MonoBehaviour
         }
         else if (IsNavigationProgressStalled(
                      movementTarget,
-                     transform.position,
+                     simulationPosition,
                      deltaTime))
         {
             // 로컬 회피가 옆이나 뒤 방향을 계속 선택하면 물리 이동 자체는 성공해도
@@ -2013,10 +2034,10 @@ public sealed class AnimalAIController : MonoBehaviour
         {
             int angleIndex = (fleeRouteAttemptOffset + i) % FleeTargetAngles.Length;
             Vector3 candidateDirection =
-                Quaternion.Euler(0f, FleeTargetAngles[angleIndex], 0f) * awayDirection;
+                AnimalSimulationMath.Rotate(awayDirection, FleeTargetAngles[angleIndex]);
             Vector3 candidate =
                 fleeThreatPosition + candidateDirection * targetDistance;
-            candidate.y = transform.position.y;
+            candidate.y = simulationPosition.y;
             if (!CanOccupyTerrain(candidate, requireLoadedGround))
             {
                 continue;
@@ -2077,14 +2098,14 @@ public sealed class AnimalAIController : MonoBehaviour
         out Vector3 areaCenter,
         out float areaRadius)
     {
-        Vector3 position = transform.position;
+        Vector3 position = simulationPosition;
         areaCenter = (position + destination) * 0.5f;
         areaCenter.y = position.y;
         Vector3 offset = destination - position;
         offset.y = 0f;
         areaRadius = Mathf.Min(
             MaxExtendedNavigationRadius,
-            offset.magnitude * 0.5f + ExtendedNavigationMargin);
+            AnimalSimulationMath.Magnitude(offset) * 0.5f + ExtendedNavigationMargin);
     }
 
     private MovementAvailability MoveFlee(
@@ -2113,7 +2134,7 @@ public sealed class AnimalAIController : MonoBehaviour
             return availability;
         }
 
-        Vector3 candidate = position + direction * moveDistance;
+        Vector3 candidate = AnimalSimulationMath.Advance(position, direction, speed, deltaTime);
         candidate.y = position.y;
         ApplyMovement(candidate, direction, deltaTime);
         navigationBlockedTime = 0f;
@@ -2122,21 +2143,21 @@ public sealed class AnimalAIController : MonoBehaviour
 
     private void UpdateFleeTarget()
     {
-        Vector3 direction = transform.position - fleeThreatPosition;
+        Vector3 direction = simulationPosition - fleeThreatPosition;
         direction.y = 0f;
         if (direction.sqrMagnitude <= 0.0001f)
         {
-            direction = -transform.forward;
+            direction = -AnimalSimulationMath.Direction(simulationYaw);
             direction.y = 0f;
         }
 
         if (direction.sqrMagnitude > 0.0001f)
         {
-            UpdateFleeTarget(direction.normalized);
+            UpdateFleeTarget(AnimalSimulationMath.Normalize(direction));
         }
         else
         {
-            targetPosition = transform.position;
+            targetPosition = simulationPosition;
             hasTarget = false;
         }
     }
@@ -2144,7 +2165,7 @@ public sealed class AnimalAIController : MonoBehaviour
     private void UpdateFleeTarget(Vector3 direction)
     {
         targetPosition = fleeThreatPosition + direction * GetFleeTargetDistance();
-        targetPosition.y = transform.position.y;
+        targetPosition = new Vector3(targetPosition.x, simulationPosition.y, targetPosition.z);
         hasTarget = true;
     }
 
@@ -2238,11 +2259,11 @@ public sealed class AnimalAIController : MonoBehaviour
         float radius = Mathf.Max(1f, GetRoamingAreaRadius() - settings.ArrivalDistance);
         bool originIsWalkable = terrain == null
                                 || terrain.CanAnimalMoveTo(
-                                    transform.position,
+                                    simulationPosition,
                                     requireLoadedGround);
         int pathSearchCount = 0;
         if (allowLocalRoaming && !IsSaddledFreeRoaming
-            && IsOutsideRoamingArea(transform.position))
+            && IsOutsideRoamingArea(simulationPosition))
         {
             // A relocated animal's original herd circle may be outside its pen.
             // Search the current connected area without changing its saved herd home.
@@ -2255,7 +2276,7 @@ public sealed class AnimalAIController : MonoBehaviour
             }
 
             ResetNavigation();
-            result = transform.position;
+            result = simulationPosition;
             return false;
         }
         // Wall로 나뉜 작은 연결 영역에서는 전체 무리 반경의 무작위 후보가
@@ -2274,12 +2295,9 @@ public sealed class AnimalAIController : MonoBehaviour
 
         for (int attempt = 0; attempt < TargetSearchAttempts; attempt++)
         {
-            float angle = Next01() * Mathf.PI * 2f;
-            float distance = Mathf.Sqrt(Next01()) * radius;
-            Vector3 candidate = new Vector3(
-                center.x + Mathf.Cos(angle) * distance,
-                transform.position.y,
-                center.z + Mathf.Sin(angle) * distance);
+            uint angle = NextRandomUInt();
+            Vector3 candidate = center + AnimalSimulationMath.RandomDisk(NextRandomUInt(), angle, radius);
+            candidate.y = simulationPosition.y;
 
             if (terrain != null
                 && (!terrain.CanAnimalMoveTo(candidate, requireLoadedGround)
@@ -2335,7 +2353,7 @@ public sealed class AnimalAIController : MonoBehaviour
         }
 
         ResetNavigation();
-        result = transform.position;
+        result = simulationPosition;
         return false;
     }
 
@@ -2345,7 +2363,7 @@ public sealed class AnimalAIController : MonoBehaviour
         out Vector3 destination,
         bool useLocalArea = false)
     {
-        destination = transform.position;
+        destination = simulationPosition;
         TerrainGenerator terrain = TerrainGenerator.Active;
         if (terrain == null)
         {
@@ -2355,8 +2373,8 @@ public sealed class AnimalAIController : MonoBehaviour
         navigationWaypoints ??= new Vector3[MaxNavigationWaypoints];
         int waypointCount = AnimalGridPathfinder.FindReachableTargetPath(
             terrain,
-            transform.position,
-            useLocalArea ? transform.position : GetRoamingAreaCenter(),
+            simulationPosition,
+            useLocalArea ? simulationPosition : GetRoamingAreaCenter(),
             useLocalArea ? Mathf.Min(LocalRoamingSearchRadius, GetRoamingAreaRadius()) : GetRoamingAreaRadius(),
             requireLoadedGround,
             requireWaterEdge,
@@ -2371,7 +2389,8 @@ public sealed class AnimalAIController : MonoBehaviour
     {
         Vector3 goalOffset = navigationGoal - targetPosition;
         goalOffset.y = 0f;
-        if (navigationPrepared && goalOffset.sqrMagnitude <= 0.0001f)
+        if (navigationPrepared && goalOffset.sqrMagnitude <= 0.0001f
+            && navigationRevision == (TerrainGenerator.Active?.AnimalNavigationRevision ?? 0L))
         {
             return true;
         }
@@ -2405,7 +2424,7 @@ public sealed class AnimalAIController : MonoBehaviour
         return terrain == null
                || AnimalGridPathfinder.HasWalkableLine(
                    terrain,
-                   transform.position,
+                   simulationPosition,
                    destination,
                    areaCenter,
                    areaRadius,
@@ -2434,7 +2453,7 @@ public sealed class AnimalAIController : MonoBehaviour
         if (!IsSaddledFreeRoaming
             && (currentState == AnimalAIState.Drink
                 || currentState == AnimalAIState.Eat
-                || IsOutsideRoamingArea(transform.position)))
+                || IsOutsideRoamingArea(simulationPosition)))
         {
             GetExtendedNavigationArea(destination, out areaCenter, out areaRadius);
             return;
@@ -2480,7 +2499,7 @@ public sealed class AnimalAIController : MonoBehaviour
         navigationWaypoints ??= new Vector3[MaxNavigationWaypoints];
         int waypointCount = AnimalGridPathfinder.FindPath(
             terrain,
-            transform.position,
+            simulationPosition,
             destination,
             areaCenter,
             areaRadius,
@@ -2501,6 +2520,7 @@ public sealed class AnimalAIController : MonoBehaviour
 
         navigationGoal = destination;
         navigationPrepared = true;
+        navigationRevision = TerrainGenerator.Active?.AnimalNavigationRevision ?? 0L;
         navigationWaypointCount = waypointCount;
         navigationWaypointIndex = 0;
         navigationBlockedTime = 0f;
@@ -2511,6 +2531,7 @@ public sealed class AnimalAIController : MonoBehaviour
     {
         navigationGoal = destination;
         navigationPrepared = true;
+        navigationRevision = TerrainGenerator.Active?.AnimalNavigationRevision ?? 0L;
         navigationWaypointCount = 0;
         navigationWaypointIndex = 0;
         navigationBlockedTime = 0f;
@@ -2650,7 +2671,7 @@ public sealed class AnimalAIController : MonoBehaviour
         targetChange.y = 0f;
         Vector3 remaining = movementTarget - candidatePosition;
         remaining.y = 0f;
-        float distance = remaining.magnitude;
+        float distance = AnimalSimulationMath.Magnitude(remaining);
         if (!navigationProgressTracked || targetChange.sqrMagnitude > 0.0001f)
         {
             navigationProgressTracked = true;
@@ -2717,13 +2738,14 @@ public sealed class AnimalAIController : MonoBehaviour
 
     private bool MoveTowardTarget(float deltaTime, bool useLiveCollision)
     {
+        using var sample = AnimalAIProfiler.Sample("Animal Movement");
         if (animal != null && !animal.IsAlive)
         {
             StopForDeath();
             return false;
         }
 
-        Vector3 position = transform.position;
+        Vector3 position = simulationPosition;
         bool escapingTerrain = TryGetTerrainEscapeTarget(
             position,
             useLiveCollision,
@@ -2759,7 +2781,7 @@ public sealed class AnimalAIController : MonoBehaviour
             return false;
         }
 
-        Vector3 desiredDirection = toTarget.normalized;
+        Vector3 desiredDirection = AnimalSimulationMath.Normalize(toTarget);
         Vector3 flockSteering = Vector3.zero;
         AnimalAIWorld world = escapingTerrain ? null : AnimalAIWorld.Instance;
         if (world != null)
@@ -2775,7 +2797,7 @@ public sealed class AnimalAIController : MonoBehaviour
                 cohesion.y = 0f;
                 if (cohesion.sqrMagnitude > 0.01f)
                 {
-                    flockSteering += cohesion.normalized * settings.CohesionWeight;
+                    flockSteering += AnimalSimulationMath.Normalize(cohesion) * settings.CohesionWeight;
                 }
             }
 
@@ -2800,12 +2822,12 @@ public sealed class AnimalAIController : MonoBehaviour
             startedOutsideRoamingArea = areaOffset.sqrMagnitude > areaRadius * areaRadius;
             if (startedOutsideRoamingArea)
             {
-                flockSteering += (-areaOffset.normalized) * 4f;
+                flockSteering += (-AnimalSimulationMath.Normalize(areaOffset)) * 4f;
             }
         }
 
         // Social steering may bend a route, but must never reverse its direction.
-        Vector3 direction = desiredDirection + Vector3.ClampMagnitude(flockSteering, 0.35f);
+        Vector3 direction = desiredDirection + AnimalSimulationMath.ClampMagnitude(flockSteering, 0.35f);
         if (direction.sqrMagnitude <= 0.0001f)
         {
             if (!escapingTerrain
@@ -2820,10 +2842,10 @@ public sealed class AnimalAIController : MonoBehaviour
             return false;
         }
 
-        direction.Normalize();
+        direction = AnimalSimulationMath.Normalize(direction);
         float speed = Mathf.Min(
             GetEffectiveMoveSpeed(),
-            toTarget.magnitude / Mathf.Max(deltaTime, 0.0001f));
+            AnimalSimulationMath.Magnitude(toTarget) / Mathf.Max(deltaTime, 0.0001f));
         MovementAvailability availability = ResolveMovementDirection(
             position,
             direction,
@@ -2865,7 +2887,7 @@ public sealed class AnimalAIController : MonoBehaviour
                 escapingTerrain);
         }
 
-        Vector3 candidate = position + direction * (speed * deltaTime);
+        Vector3 candidate = AnimalSimulationMath.Advance(position, direction, speed, deltaTime);
         candidate.y = position.y;
         if (!escapingTerrain
             && restrictToRoamingArea
@@ -2875,7 +2897,7 @@ public sealed class AnimalAIController : MonoBehaviour
             clampedOffset.y = 0f;
             if (clampedOffset.sqrMagnitude > areaRadius * areaRadius)
             {
-                Vector3 clamped = roamingAreaCenter + clampedOffset.normalized * areaRadius;
+                Vector3 clamped = roamingAreaCenter + AnimalSimulationMath.Normalize(clampedOffset) * areaRadius;
                 candidate.x = clamped.x;
                 candidate.z = clamped.z;
                 if (!CanOccupyTerrain(candidate, useLiveCollision))
@@ -2895,7 +2917,7 @@ public sealed class AnimalAIController : MonoBehaviour
                 if (useLiveCollision)
                 {
                     MovementAvailability boundaryAvailability =
-                        ProbePhysicsPosition(
+                        ProbeOccupancyPosition(
                             position,
                             candidate,
                             GetObstacleRadius());
@@ -2954,14 +2976,10 @@ public sealed class AnimalAIController : MonoBehaviour
         Vector3 direction,
         float deltaTime)
     {
-        transform.position = position;
+        simulationPosition = AnimalSimulationMath.Quantize(position);
         if (settings.TurnSpeed > 0f)
         {
-            Quaternion targetRotation = Quaternion.LookRotation(direction, Vector3.up);
-            transform.rotation = Quaternion.RotateTowards(
-                transform.rotation,
-                targetRotation,
-                settings.TurnSpeed * Mathf.Min(deltaTime, MaximumRotationDeltaTime));
+            simulationYaw = AnimalSimulationMath.Turn(simulationYaw, direction, settings.TurnSpeed, Mathf.Min(deltaTime, MaximumRotationDeltaTime));
         }
     }
 
@@ -2972,12 +2990,12 @@ public sealed class AnimalAIController : MonoBehaviour
         Vector3 target = world != null
             ? world.GetSeparation(this, settings.SeparationRadius)
             : Vector3.zero;
-        float blend = 1f - Mathf.Exp(
-            -SeparationSmoothingRate * Mathf.Max(0f, deltaTime));
+        float blend = Mathf.Clamp01(SeparationSmoothingRate * Mathf.Max(0f, deltaTime));
         smoothedSeparation = Vector3.Lerp(
             smoothedSeparation,
             target,
             blend);
+        smoothedSeparation = AnimalSimulationMath.Quantize(smoothedSeparation);
         if (smoothedSeparation.sqrMagnitude < 0.000001f)
         {
             smoothedSeparation = Vector3.zero;
@@ -3156,10 +3174,7 @@ public sealed class AnimalAIController : MonoBehaviour
                 break;
             }
 
-            Vector3 candidateDirection = Quaternion.Euler(
-                0f,
-                angle * turnSign,
-                0f) * forward;
+            Vector3 candidateDirection = AnimalSimulationMath.Rotate(forward, angle * turnSign);
             if (!CanUseAvoidanceDirection(forward, candidateDirection, allowTerrainEscape))
             {
                 continue;
@@ -3193,7 +3208,7 @@ public sealed class AnimalAIController : MonoBehaviour
 
     private void CommitAvoidance(Vector3 direction, float turnSign)
     {
-        committedAvoidanceDirection = direction.normalized;
+        committedAvoidanceDirection = AnimalSimulationMath.Normalize(direction);
         avoidanceTurnSign = turnSign >= 0f ? 1f : -1f;
         avoidanceDirectClearTime = 0f;
     }
@@ -3211,6 +3226,7 @@ public sealed class AnimalAIController : MonoBehaviour
         bool useLiveCollision,
         bool allowTerrainEscape)
     {
+        AnimalAIProfiler.Add(AnimalAIProfiler.Counter.AvoidanceProbes);
         Vector3 candidate = origin + direction * moveDistance;
         candidate.y = origin.y;
         bool originIsWalkable = CanOccupyTerrain(origin, useLiveCollision);
@@ -3229,7 +3245,7 @@ public sealed class AnimalAIController : MonoBehaviour
         }
 
         float radius = GetObstacleRadius();
-        MovementAvailability positionAvailability = ProbePhysicsPosition(
+        MovementAvailability positionAvailability = ProbeOccupancyPosition(
             origin,
             candidate,
             radius);
@@ -3248,11 +3264,11 @@ public sealed class AnimalAIController : MonoBehaviour
             Vector3 remaining = waypoint - origin;
             remaining.y = 0f;
             // A wall beyond the destination does not block reaching the destination.
-            probeDistance = Mathf.Min(probeDistance, Mathf.Max(moveDistance, remaining.magnitude));
+            probeDistance = Mathf.Min(probeDistance, Mathf.Max(moveDistance, AnimalSimulationMath.Magnitude(remaining)));
         }
         Vector3 probe = origin + direction * probeDistance;
         probe.y = origin.y;
-        if (!IsPhysicsPathClearOrEscaping(origin, direction, probeDistance, radius)
+        if (!IsGridPathClearOrEscaping(origin, direction, probeDistance, radius)
             || !CanUsePredictiveTerrainProbe(probe))
         {
             return MovementAvailability.BlockedByStaticObstacle;
@@ -3273,12 +3289,12 @@ public sealed class AnimalAIController : MonoBehaviour
         }
 
         float radius = GetObstacleRadius();
-        MovementAvailability positionAvailability = ProbePhysicsPosition(
+        MovementAvailability positionAvailability = ProbeOccupancyPosition(
             origin,
             candidate,
             radius);
         if (positionAvailability == MovementAvailability.BlockedByStaticObstacle
-            || !IsPhysicsPathClearOrEscaping(
+            || !IsGridPathClearOrEscaping(
                 origin,
                 direction,
                 distance,
@@ -3292,59 +3308,27 @@ public sealed class AnimalAIController : MonoBehaviour
 
     private void ApplyPlayerPush(Vector3 position)
     {
-        simulationPosition = position;
-        crowdSnapshotPosition = position;
-        crowdSnapshotValid = true;
+        simulationPosition = AnimalSimulationMath.Quantize(position);
+        AnimalAIWorld.NotifySpatialChanged(this);
         navigationBlockedTime = 0f;
         ResetPresentation();
         transform.SetPositionAndRotation(simulationPosition, simulationRotation);
         animal?.MarkTerrainInteraction();
     }
 
-    private bool IsPhysicsPathClearOrEscaping(
-        Vector3 origin,
-        Vector3 direction,
-        float distance,
-        float radius)
+    private bool IsGridPathClearOrEscaping(Vector3 origin, Vector3 direction, float distance, float radius)
     {
-        if (!gameObject.activeInHierarchy || distance <= 0f)
+        TerrainGenerator terrain = TerrainGenerator.Active;
+        if (terrain == null || distance <= 0f) return true;
+        direction = AnimalSimulationMath.Normalize(direction);
+        int samples = Mathf.Max(1, Mathf.CeilToInt(distance * 8f));
+        Vector3 previous = origin;
+        for (int i = 1; i <= samples; i++)
         {
-            return true;
+            Vector3 next = AnimalSimulationMath.Quantize(origin + direction * (distance * i / samples));
+            if (!terrain.IsAnimalObstaclePositionClear(previous, next, radius, true)) return false;
+            previous = next;
         }
-
-        Vector3 normalizedDirection = direction;
-        normalizedDirection.y = 0f;
-        if (normalizedDirection.sqrMagnitude <= 0.0001f)
-        {
-            return true;
-        }
-
-        normalizedDirection.Normalize();
-        Vector3 destination = origin + normalizedDirection * distance;
-        destination.y = origin.y;
-        Vector3 probeOrigin = origin + Vector3.up * radius;
-        int hitCount = Physics.SphereCastNonAlloc(
-            probeOrigin,
-            radius,
-            normalizedDirection,
-            obstacleSweepBuffer,
-            distance,
-            obstacleLayerMask,
-            QueryTriggerInteraction.Ignore);
-        AnimalAIWorld.Instance?.ReportObstaclePhysicsProbe(hitCount);
-        for (int i = 0; i < hitCount; i++)
-        {
-            Collider hit = obstacleSweepBuffer[i].collider;
-            obstacleSweepBuffer[i] = default;
-            if (ShouldIgnoreObstacle(hit)
-                || IsMovingOutOfOverlap(hit, origin, destination, radius))
-            {
-                continue;
-            }
-
-            return false;
-        }
-
         return true;
     }
 
@@ -3388,122 +3372,15 @@ public sealed class AnimalAIController : MonoBehaviour
         return true;
     }
 
-    private MovementAvailability ProbePhysicsPosition(
-        Vector3 origin,
-        Vector3 position,
-        float radius,
-        bool allowEscape = true)
+    private MovementAvailability ProbeOccupancyPosition(Vector3 origin, Vector3 position, float radius, bool allowEscape = true)
     {
-        if (!gameObject.activeInHierarchy)
-        {
-            return MovementAvailability.Clear;
-        }
-
-        AnimalAIWorld world = AnimalAIWorld.Instance;
-        int layerMask = Physics.AllLayers;
-        bool blockedByAnimal = false;
-        if (world != null && world.HasSpatialIndex)
-        {
-            blockedByAnimal = !world.IsAnimalPositionClearOrEscaping(
-                this,
-                origin,
-                position,
-                radius,
-                allowEscape);
-
-            layerMask = obstacleLayerMask;
-        }
-
-        Vector3 probePosition = position + Vector3.up * radius;
-        int hitCount = Physics.OverlapSphereNonAlloc(
-            probePosition,
-            radius,
-            obstacleBuffer,
-            layerMask,
-            QueryTriggerInteraction.Ignore);
-        world?.ReportObstaclePhysicsProbe(hitCount);
-        for (int i = 0; i < hitCount; i++)
-        {
-            Collider hit = obstacleBuffer[i];
-            obstacleBuffer[i] = null;
-            if (ShouldIgnoreObstacle(hit))
-            {
-                continue;
-            }
-
-            if (allowEscape && IsMovingOutOfOverlap(hit, origin, position, radius))
-            {
-                continue;
-            }
-
+        TerrainGenerator terrain = TerrainGenerator.Active;
+        if (terrain != null && !terrain.IsAnimalObstaclePositionClear(origin, position, radius, allowEscape))
             return MovementAvailability.BlockedByStaticObstacle;
-        }
-
-        return blockedByAnimal
-            ? MovementAvailability.BlockedByAnimal
-            : MovementAvailability.Clear;
-    }
-
-    private bool ShouldIgnoreObstacle(Collider hit)
-    {
-        if (hit == null
-            || hit.transform.IsChildOf(transform)
-            || transform.IsChildOf(hit.transform)
-            || mountedRider != null
-               && (hit.transform.IsChildOf(mountedRider.transform)
-                   || mountedRider.transform.IsChildOf(hit.transform)))
-        {
-            return true;
-        }
-
-        // 설치물은 Block의 자식이 아니라 Terrain 아래에 생성되고 Block은 참조만 보관한다.
-        // 따라서 열린 문처럼 통과 가능한 설치물의 자식 Collider는 MapObject에서 먼저 판정한다.
-        IMapObjectTarget colliderMapObject = ResourceTypeWorld.ResolveColliderTarget(hit);
-        if (colliderMapObject != null)
-        {
-            return colliderMapObject.AllowsAnimalTraversal;
-        }
-
-        return false;
-    }
-
-    private static bool IsMovingOutOfOverlap(
-        Collider obstacle,
-        Vector3 origin,
-        Vector3 candidate,
-        float radius)
-    {
-        Vector3 originProbe = origin + Vector3.up * radius;
-        Vector3 candidateProbe = candidate + Vector3.up * radius;
-        Vector3 originClosest = obstacle.ClosestPoint(originProbe);
-        Vector3 candidateClosest = obstacle.ClosestPoint(candidateProbe);
-        float originDistanceSqr = (originClosest - originProbe).sqrMagnitude;
-        float candidateDistanceSqr = (candidateClosest - candidateProbe).sqrMagnitude;
-        float radiusSqr = radius * radius;
-
-        if (originDistanceSqr >= radiusSqr)
-        {
-            return false;
-        }
-
-        if (candidateDistanceSqr > originDistanceSqr + 0.000001f)
-        {
-            return true;
-        }
-
-        // Collider 내부에서는 ClosestPoint가 입력 위치와 같아 거리 비교가 불가능하다.
-        // 이 경우 Bounds 중심에서 멀어지는 방향만 임시로 허용해 탈출시킨다.
-        if (originDistanceSqr <= 0.000001f && candidateDistanceSqr <= 0.000001f)
-        {
-            Vector3 outward = originProbe - obstacle.bounds.center;
-            outward.y = 0f;
-            Vector3 movement = candidateProbe - originProbe;
-            movement.y = 0f;
-            return outward.sqrMagnitude > 0.0001f
-                   && Vector3.Dot(movement, outward) > 0f;
-        }
-
-        return false;
+        AnimalAIWorld world = AnimalAIWorld.Instance;
+        return world != null && world.HasSpatialIndex
+            && !world.IsAnimalPositionClearOrEscaping(this, origin, position, radius, allowEscape)
+            ? MovementAvailability.BlockedByAnimal : MovementAvailability.Clear;
     }
 
     private float GetObstacleRadius()
@@ -3538,6 +3415,7 @@ public sealed class AnimalAIController : MonoBehaviour
 
     private void SyncBehaviorAnimationActivity()
     {
+        behaviorAnimationActivityInitialized = true;
         // Rider/leash/draft movement is independent of the AI scheduler's pause/radius.
         animal?.SetBehaviorAnimationActive(executionActive || IsExternallyControlled);
     }
@@ -3611,6 +3489,7 @@ public sealed class AnimalAIController : MonoBehaviour
             return terrainInstance.DeterministicId;
         }
 
+        if (fallbackSimulationId != 0L) return fallbackSimulationId;
         Vector3 position = transform.position;
         int x = Mathf.RoundToInt(position.x * 1000f);
         int z = Mathf.RoundToInt(position.z * 1000f);
@@ -3621,7 +3500,8 @@ public sealed class AnimalAIController : MonoBehaviour
             value = (value ^ (uint)x) * 1099511628211UL;
             value = (value ^ (uint)z) * 1099511628211UL;
             value = (value ^ (uint)definitionId) * 1099511628211UL;
-            return (long)value;
+            fallbackSimulationId = (long)value;
+            return fallbackSimulationId;
         }
     }
 

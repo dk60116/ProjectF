@@ -63,7 +63,7 @@ public class ItemInfoDescription : MonoBehaviour
     private float nextPlantInfoRefreshTime;
     private PlantResource liveGaugePlant;
     private LoggingMachine liveGaugeLoggingMachine;
-    private RobotArm liveGaugeRobotArm;
+    private RobotArmInstance liveGaugeRobotArm;
     private UtilityPole liveGaugeUtilityPole;
     private LightObject liveGaugeLightObject;
     private InputOutputModule liveGaugeModule;
@@ -325,7 +325,7 @@ public class ItemInfoDescription : MonoBehaviour
             true);
     }
 
-    public void ShowRobotArm(RobotArm robotArm, ResourceInstance underlyingResource = null)
+    public void ShowRobotArm(RobotArmInstance robotArm, ResourceInstance underlyingResource = null)
     {
         BeginObjectDisplay(underlyingResource);
         liveGaugeRobotArm = robotArm;
@@ -988,7 +988,7 @@ public class ItemInfoDescription : MonoBehaviour
             return;
         }
 
-        if (liveGaugeRobotArm != null && liveGaugeRobotArm.gameObject.activeInHierarchy)
+        if (liveGaugeRobotArm != null && liveGaugeRobotArm.IsRuntimeActive)
         {
             liveGaugeRobotArm.GetObjectInfoStatus(
                 out string statusText,
@@ -1706,10 +1706,10 @@ public class ItemInfoDescription : MonoBehaviour
         GameObject root,
         Image fill,
         TextMeshProUGUI text,
-        InstallationObject consumer)
+        IMapObjectTarget consumer)
     {
         if (consumer == null
-            || !UtilityPole.TryGetElectricPowerInfo(
+            || !TryGetTargetElectricPowerInfo(
                 consumer,
                 out float suppliedWatts,
                 out float requiredWatts))
@@ -1742,6 +1742,12 @@ public class ItemInfoDescription : MonoBehaviour
     private void SetFluidStorageGauge(InstallationObject installationObject)
     {
         SetFluidStorageGauge(energyGauge, energyFill, energyText, installationObject);
+    }
+
+    private static bool TryGetTargetElectricPowerInfo(IMapObjectTarget target, out float supplied, out float required)
+    {
+        if (target is RobotArmInstance arm) return UtilityPole.TryGetElectricPowerInfo(arm, out supplied, out required);
+        return UtilityPole.TryGetElectricPowerInfo(target as InstallationObject, out supplied, out required);
     }
 
     private void SetFluidStorageGauge(

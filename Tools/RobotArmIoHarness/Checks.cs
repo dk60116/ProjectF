@@ -180,6 +180,7 @@ public partial class Block
 }
 public partial class RobotArm : InputOutputModule
 {
+    private InputOutputModule Prototype => this;
     public static bool AllowsStackFallback(Block block) => CanPlaceSingleLineDrop(block, Vector2Int.zero);
     public static bool AllowsSavedStackFallback(BlockStateStore store) => CanPlaceSavedSingleLineDrop(store, Vector2Int.zero);
     public static bool UsesSavedDrop(TerrainGenerator terrain, Block block) => ShouldUseSavedDropCoordinate(terrain, Vector2Int.zero, block);
@@ -192,24 +193,21 @@ public partial class RobotArm : InputOutputModule
     public bool Placed = true;
     public bool isActiveAndEnabled = true;
     public List<Vector2Int> RuntimeOccupiedCoordinates = new();
-    private const int WakeRangeCellRadius = 1;
-    private readonly List<Vector2Int> registeredWakeCoordinates = new();
-    private static readonly Dictionary<Vector2Int, List<RobotArm>> WakeRobotArmsByCoordinate = new();
     private bool stagedTickPlanned;
     private bool plannedDropAvailabilityChecked;
     private bool plannedDropAvailable;
-    public void RefreshWake() => RefreshRegisteredWakeCoordinates();
-    public int WakeCount;
-    private void WakeRuntimeSleep() { WakeCount++; }
     private RobotArmState state = RobotArmState.WaitingForDrop;
     public FreightCar DropTrain;
     public bool DropHasRoom;
     public bool SleepsWithCargo() => ShouldRuntimeSleepWithHeldItem();
     private TerrainGenerator ResolveTerrainGenerator() => TerrainGenerator.Active;
-    private bool TryGetFreightCarObject(Block block, Vector2Int coordinate, out FreightCar car)
+    private bool TryResolveInteractionFreightCar(
+        TerrainGenerator terrainGenerator,
+        Vector2Int coordinate,
+        out FreightCar car)
     { car = DropTrain; return car != null; }
+    private void InvalidateInteractionTargetCaches() { }
     private bool CanPlaceHeldItem() => DropHasRoom && (DropTrain == null || !DropTrain.IsConsistMoving());
-    public bool WakesAt(Vector2Int point) => registeredWakeCoordinates.Contains(point);
     private bool TryGetPlacementRuntime(out Vector2Int anchor, out int rotation) { anchor = Anchor; rotation = Rotation; return Placed; }
     public bool Coordinates(out Vector2Int input, out Vector2Int output)
     {
@@ -232,7 +230,10 @@ public static partial class Checks
         CheckNearestBelt2FDrop();
         string robotArmSource = File.ReadAllText(Path.Combine(
             args[0],
-            "FactorioProject/Assets/Scripts/Object/MapObj/InstallationObject/RobotArm.cs"));
+            "FactorioProject/Assets/Scripts/Object/MapObj/InstallationObject/RobotArmInstance.cs"));
+        robotArmSource += File.ReadAllText(Path.Combine(
+            args[0],
+            "FactorioProject/Assets/Scripts/Object/MapObj/InstallationObject/RobotArmInstance.InteractionCache.cs"));
         Require(!robotArmSource.Contains("HasNearbyRuntimeInteractionTarget"),
             "empty arms must sleep after an actual pickup miss instead of polling nearby installations");
         Require(Regex.IsMatch(
@@ -248,11 +249,43 @@ public static partial class Checks
             "sleep and active transfer checks must reuse one pickup/drop availability query per plan tick");
         Require(Regex.Matches(
                 robotArmSource,
-                @"TryGetLoadedInteractionBlock\(").Count >= 4
+                @"TryResolve(?:Pickup|Drop)InteractionTargets\(").Count >= 4
                 && Regex.IsMatch(
                     robotArmSource,
                     @"TryGetLoadedInteractionBlock\([\s\S]*?EnsureConveyorTransportInteractionBoundary\(\)"),
-            "robot-arm conveyor pickup, drop query, and drop mutation must share observable wake boundaries");
+            "robot-arm conveyor pickup, drop query, and drop mutation must share cached observable wake boundaries");
+        Require(Regex.IsMatch(
+                robotArmSource,
+                @"TryResolveLoadedBlock\(cache\.BlockHandle")
+                && robotArmSource.Contains(
+                    "InstallationObject.GetActiveInstanceVersionAtRuntimeGridCoordinate")
+                && robotArmSource.Contains("ReferenceEquals(cache.MapObject, mapObject)"),
+            "interaction targets must validate block handles, placement versions, and map-object identity");
+        Require(robotArmSource.Contains("DropTransferStartProvider")
+                && !robotArmSource.Contains("() => dropStartWorldPosition"),
+            "drop transfers must reuse a cached position provider without per-transfer closures");
+        string robotArmPowerSource = File.ReadAllText(Path.Combine(
+            args[0],
+            "FactorioProject/Assets/Scripts/Object/MapObj/InstallationObject/UtilityPole.RobotArms.cs"));
+        string utilityPoleSource = File.ReadAllText(Path.Combine(
+            args[0],
+            "FactorioProject/Assets/Scripts/Object/MapObj/InstallationObject/UtilityPole.cs"));
+        Require(robotArmPowerSource.Contains("binding.Networks.Count == 1")
+                && robotArmPowerSource.Contains(
+                    "binding.EvaluatedRuntimeVersion == robotArmNetworkRuntimeVersion"),
+            "robot-arm power binding must use a single-network fast path and runtime-version cache");
+        Require(robotArmPowerSource.Contains("TryConsumeRobotArmElectricity(")
+                && utilityPoleSource.Contains("AdvanceRobotArmNetworkRuntimeVersion();"),
+            "power consumption must reuse the known demand and invalidate same-tick network selections");
+        string installationObjectSource = File.ReadAllText(Path.Combine(
+            args[0],
+            "FactorioProject/Assets/Scripts/Object/MapObj/InstallationObject/InstallationObject.cs"));
+        Require(installationObjectSource.Contains(
+                    "GetActiveInstanceVersionAtRuntimeGridCoordinate")
+                && Regex.Matches(
+                    installationObjectSource,
+                    @"MarkRuntimeCoordinateInstallationIndexChanged\(coordinate\)").Count >= 3,
+            "freight target invalidation must use coordinate-local installation index versions");
         string conveyorTransportSource = File.ReadAllText(Path.Combine(
             args[0],
             "FactorioProject/Assets/Scripts/Map/Block.ConveyorTransport.cs"));
@@ -363,7 +396,7 @@ public static partial class Checks
                  })
         {
             string robotArmItemData = File.ReadAllText(Path.Combine(args[0], robotArmItemDataPath));
-            Require(Regex.IsMatch(robotArmItemData, @"(?m)^  keepIoAreaItemsInPlaceWhileEditing: 1$"),
+            Require(Regex.IsMatch(robotArmItemData, @"(?m)^  keepIoAreaItemsInPlaceWhileEditing: 1\r?$"),
                 "every current robot arm ItemData asset must preserve IO area items while editing");
         }
         foreach (var origin in new[] { Vector2Int.zero, new Vector2Int(-13, 25) })
@@ -383,19 +416,6 @@ public static partial class Checks
         arm.AnchorCell = new(2, 1); arm.Anchor = new(10, 20); arm.Rotation = 0; arm.RuntimePlacementSequence++;
         Require(arm.Coordinates(out var extendedInput, out var extendedOutput) && extendedInput == new Vector2Int(8, 20)
             && extendedOutput == new Vector2Int(12, 20), "custom grid must replace legacy forward/footprint endpoint inference");
-        arm.RuntimeOccupiedCoordinates.Add(arm.Anchor); arm.RefreshWake();
-        Require(arm.WakesAt(extendedInput) && arm.WakesAt(extendedOutput)
-            && arm.WakesAt(extendedInput + Vector2Int.left), "distant standard IO ports and adjacent belt cells must wake sleeping arms");
-        int wakeCount = arm.WakeCount;
-        RobotArm.WakeAroundCoordinate(extendedInput);
-        RobotArm.WakeAroundCoordinate(extendedOutput);
-        RobotArm.WakeAroundCoordinate(extendedInput + Vector2Int.left);
-        RobotArm.WakeAroundCoordinate(extendedOutput);
-        Require(arm.WakeCount == wakeCount + 4,
-            "distant port notifications must actually wake the arm repeatedly without deleting its registration");
-        RobotArm.WakeAroundCoordinate(new Vector2Int(500, 500));
-        Require(arm.WakeCount == wakeCount + 4, "unrelated coordinates must not wake the arm");
-
         var arrivalTrain = new FreightCar { CurrentVehicleSignedSpeed = 0.5f };
         arm.DropTrain = arrivalTrain;
         arm.DropHasRoom = true;
@@ -411,10 +431,6 @@ public static partial class Checks
         TerrainGenerator.Active.Blocks[extendedOutput] = new Block { MapObject = new ConveyorBelt() };
         Require(arm.SleepsWithCargo(),
             "a blocked conveyor output must sleep until its slot-change wake event");
-        arm.isActiveAndEnabled = false; arm.RefreshWake();
-        RobotArm.WakeAroundCoordinate(extendedOutput);
-        Require(arm.WakeCount == wakeCount + 4, "disabled arms must not receive wake callbacks");
-        Require(!arm.WakesAt(extendedInput) && !arm.WakesAt(extendedOutput), "disabling an arm must remove IO wake registrations");
         arm.ClearPlacement();
         Require(!arm.Coordinates(out _, out _), "clearing placement must invalidate cached endpoints");
         arm.Placed = true; arm.RuntimePlacementSequence++; arm.RectGridPlacements.RemoveAt(0);

@@ -16,7 +16,6 @@ public class Animal : MonoBehaviour
     private const int WakeAnimationState = 17;
     private const float MinimumAttackAge = 4f;
     private const float MinimumSaddleAge = 7f;
-    private const float StandUpCompletionNormalizedTime = 0.95f;
     private const float LocomotionTransitionDuration = 0.12f;
     private static readonly int SpeedHash = Animator.StringToHash("Speed");
     private static readonly int LocomotionPlaybackHash =
@@ -40,7 +39,6 @@ public class Animal : MonoBehaviour
     private static readonly int DeathStateHash = Animator.StringToHash("Death");
     private static readonly int LieDownStateHash = Animator.StringToHash("IdlleToLay");
     private static readonly int SleepStateHash = Animator.StringToHash("Sleep");
-    private static readonly int StandUpStateHash = Animator.StringToHash("LayToIdle");
     private static readonly int BaseColorHash = Shader.PropertyToID("_BaseColor");
     private static readonly int ColorHash = Shader.PropertyToID("_Color");
 
@@ -409,6 +407,7 @@ public class Animal : MonoBehaviour
             return;
         }
 
+        ResolveAIController()?.FlushPendingNeeds();
         EnsureHealthInitialized();
         entry.hasHealth = true;
         entry.currentHealth = currentHealth;
@@ -1092,6 +1091,10 @@ public class Animal : MonoBehaviour
         }
     }
 
+    internal Bounds PresentationBounds => dinoRenderer != null
+        ? dinoRenderer.bounds : new Bounds(transform.position, Vector3.one * 4f);
+    internal int PresentationLayer => dinoRenderer != null ? dinoRenderer.gameObject.layer : gameObject.layer;
+
     private void OnDisable()
     {
         SetBehaviorAnimationActive(true);
@@ -1119,6 +1122,20 @@ public class Animal : MonoBehaviour
         }
     }
 
+    internal float GetSimulationAnimationDuration(string suffix, float fallback)
+    {
+        // Read immutable clip data once during AI configuration. Playback progress,
+        // culling and animation events must never decide the simulation completion tick.
+        if (anim == null) anim = GetComponent<Animator>();
+        if (anim == null || anim.runtimeAnimatorController == null) return fallback;
+        AnimationClip[] clips = anim.runtimeAnimatorController.animationClips;
+        float duration = 0f;
+        for (int i = 0; i < clips.Length; i++)
+            if (clips[i] != null && clips[i].name.EndsWith(suffix, System.StringComparison.OrdinalIgnoreCase))
+                duration = Mathf.Max(duration, clips[i].length);
+        return duration > 0f ? duration : fallback;
+    }
+
     internal void TickNeeds(float deltaTime)
     {
         if (deltaTime <= 0f || !IsAlive)
@@ -1140,31 +1157,11 @@ public class Animal : MonoBehaviour
         }
     }
 
-    internal float GetRemainingEatingAnimationSeconds()
-    {
-        if (anim == null || !anim.isActiveAndEnabled || anim.runtimeAnimatorController == null
-            || anim.speed <= 0f)
-        {
-            return 0f;
-        }
 
-        AnimatorStateInfo state = anim.GetCurrentAnimatorStateInfo(0);
-        if (anim.IsInTransition(0))
-        {
-            AnimatorStateInfo next = anim.GetNextAnimatorStateInfo(0);
-            if (next.shortNameHash == EatingStateHash)
-            {
-                state = next;
-            }
-        }
-
-        return state.shortNameHash == EatingStateHash
-            ? Mathf.Max(0f, 1f - state.normalizedTime) * state.length / anim.speed
-            : 0f;
-    }
 
     internal bool ConsumeDroppedFood(ItemDefinition foodDefinition)
     {
+        ResolveAIController()?.FlushPendingNeeds();
         if (!IsAlive || !ItemDefinition.IsFoodEnergyItemDefinition(foodDefinition)
             || foodDefinition.energyAmount <= 0f)
         {
@@ -1614,57 +1611,7 @@ public class Animal : MonoBehaviour
         SwitchAnimation(0);
     }
 
-    public bool IsReadyForAIMovement()
-    {
-        if (anim == null)
-        {
-            anim = GetComponent<Animator>();
-        }
 
-        if (anim == null
-            || !anim.isActiveAndEnabled
-            || !anim.isInitialized
-            || anim.layerCount == 0)
-        {
-            return true;
-        }
-
-        AnimatorStateInfo currentState = anim.GetCurrentAnimatorStateInfo(0);
-        if (wakeFromRestRequested)
-        {
-            if (currentState.shortNameHash == StandUpStateHash
-                && currentState.normalizedTime >= StandUpCompletionNormalizedTime
-                && !anim.IsInTransition(0))
-            {
-                WakeUp();
-                return false;
-            }
-
-            bool currentIsWakeAnimation = IsRestAnimationState(currentState.shortNameHash);
-            bool nextIsWakeAnimation = anim.IsInTransition(0)
-                                       && IsRestAnimationState(
-                                           anim.GetNextAnimatorStateInfo(0).shortNameHash);
-            if (currentIsWakeAnimation || nextIsWakeAnimation)
-            {
-                return false;
-            }
-
-            WakeUp();
-        }
-
-        if (IsRestAnimationState(currentState.shortNameHash))
-        {
-            return false;
-        }
-
-        if (!anim.IsInTransition(0))
-        {
-            return true;
-        }
-
-        AnimatorStateInfo nextState = anim.GetNextAnimatorStateInfo(0);
-        return !IsRestAnimationState(nextState.shortNameHash);
-    }
 
     public void SetHerdDebugColor(Color color, bool visible)
     {
@@ -1827,11 +1774,7 @@ public class Animal : MonoBehaviour
         return state == 0 || state == WalkAnimationState || state == FleeAnimationState;
     }
 
-    private static bool IsRestAnimationState(int stateHash)
-    {
-        return IsRestPoseAnimationState(stateHash)
-               || stateHash == StandUpStateHash;
-    }
+
 
     private static bool IsRestPoseAnimationState(int stateHash)
     {

@@ -913,34 +913,9 @@ public partial class TerrainGenerator : MonoBehaviour
         }
     }
 
-    private void ForgetAnimalRuntimeIds(Vector2Int chunkCoordinate)
-    {
-        List<TerrainAnimalInstance> instances = CollectTerrainAnimalInstances();
-        for (int i = 0; i < instances.Count; i++)
-        {
-            if (instances[i] != null
-                && !pinnedAnimalInstances.Contains(instances[i])
-                && GetAnimalChunkCoordinate(instances[i].transform.position) == chunkCoordinate)
-            {
-                loadedAnimalIds.Remove(instances[i].DeterministicId);
-            }
-        }
-    }
 
-    private void DestroyAnimalViewsInChunk(Vector2Int chunkCoordinate)
-    {
-        List<TerrainAnimalInstance> instances = CollectTerrainAnimalInstances();
-        for (int i = 0; i < instances.Count; i++)
-        {
-            TerrainAnimalInstance instance = instances[i];
-            if (instance != null
-                && !pinnedAnimalInstances.Contains(instance)
-                && GetAnimalChunkCoordinate(instance.transform.position) == chunkCoordinate)
-            {
-                DestroyAnimalObject(instance.gameObject);
-            }
-        }
-    }
+
+
 
     private void DestroyAllTerrainAnimalViews()
     {
@@ -967,6 +942,10 @@ public partial class TerrainGenerator : MonoBehaviour
 
     private void ClearAnimalPersistentState()
     {
+        foreach (RectInt footprint in animalCollisionStressFootprints) ChangeAnimalNavigationObstacle(footprint, false);
+        animalCollisionStressFootprints.Clear();
+        if (animalCollisionStressRoot != null) DestroyAnimalObject(animalCollisionStressRoot);
+        animalCollisionStressRoot = null;
         CancelChunkAnimalSpawnWork();
         animalSaveOverrides.Clear();
         animalSaveOverridesByChunk.Clear();
@@ -1216,31 +1195,7 @@ public partial class TerrainGenerator : MonoBehaviour
         return entry;
     }
 
-    public bool CanAnimalMoveTo(Vector3 worldPosition, bool requireLoadedBlock)
-    {
-        Vector2Int coordinate = new Vector2Int(
-            Mathf.RoundToInt(worldPosition.x),
-            Mathf.RoundToInt(worldPosition.z));
-        if (!IsCoordinateInsideMapBounds(coordinate)
-            || GetTileBiome(coordinate) == TerrainBiome.Water)
-        {
-            return false;
-        }
 
-        if (!TryGetLoadedBlock(coordinate, out Block block) || block == null)
-        {
-            return !requireLoadedBlock;
-        }
-
-        if (!block.gameObject.activeInHierarchy)
-        {
-            return false;
-        }
-
-        IMapObjectTarget mapObject = block.MapObject;
-        return mapObject == null
-               || mapObject.AllowsAnimalTraversal;
-    }
 
     public bool IsAnimalDrinkLocation(Vector3 worldPosition)
     {
@@ -1458,12 +1413,16 @@ public partial class TerrainGenerator : MonoBehaviour
             return 0;
         }
 
+        foreach (RectInt footprint in animalCollisionStressFootprints) ChangeAnimalNavigationObstacle(footprint, false);
+        animalCollisionStressFootprints.Clear();
         if (animalCollisionStressRoot != null)
         {
             DestroyAnimalObject(animalCollisionStressRoot);
         }
 
         Vector3 center = player.transform.position;
+        center.x = Mathf.RoundToInt(center.x);
+        center.z = Mathf.RoundToInt(center.z);
         animalCollisionStressRoot = new GameObject("Animal Collision Stress Harness");
         animalCollisionStressRoot.transform.SetParent(transform, true);
         animalCollisionStressRoot.transform.position = center;
@@ -1478,34 +1437,32 @@ public partial class TerrainGenerator : MonoBehaviour
             animalCollisionStressRoot.transform,
             "East Wall",
             new Vector3(3f, 1f, 0f),
-            new Vector3(0.75f, 2f, 4.5f),
+            new Vector3(1f, 2f, 5f),
             obstacleLayer);
         CreateAnimalCollisionStressWall(
             animalCollisionStressRoot.transform,
             "West Wall",
             new Vector3(-3f, 1f, 0f),
-            new Vector3(0.75f, 2f, 4.5f),
+            new Vector3(1f, 2f, 5f),
             obstacleLayer);
         CreateAnimalCollisionStressWall(
             animalCollisionStressRoot.transform,
             "North Wall",
             new Vector3(0f, 1f, 3f),
-            new Vector3(4.5f, 2f, 0.75f),
+            new Vector3(5f, 2f, 1f),
             obstacleLayer);
         CreateAnimalCollisionStressWall(
             animalCollisionStressRoot.transform,
             "South Wall",
             new Vector3(0f, 1f, -3f),
-            new Vector3(4.5f, 2f, 0.75f),
+            new Vector3(5f, 2f, 1f),
             obstacleLayer);
-        Physics.SyncTransforms();
-
         int created = CreateAnimalAIStressTest(requestedCount);
         AnimalAIWorld.Instance?.ForceThreatPulse(center, 6f);
         return created;
     }
 
-    private static void CreateAnimalCollisionStressWall(
+    private void CreateAnimalCollisionStressWall(
         Transform parent,
         string wallName,
         Vector3 localPosition,
@@ -1518,10 +1475,16 @@ public partial class TerrainGenerator : MonoBehaviour
         wall.transform.SetParent(parent, false);
         wall.transform.localPosition = localPosition;
         wall.transform.localScale = localScale;
+        Vector3 center = parent.position + localPosition;
+        int width = Mathf.RoundToInt(localScale.x), height = Mathf.RoundToInt(localScale.z);
+        RectInt footprint = new RectInt(Mathf.RoundToInt(center.x) - width / 2, Mathf.RoundToInt(center.z) - height / 2, width, height);
+        ChangeAnimalNavigationObstacle(footprint, true);
+        animalCollisionStressFootprints.Add(footprint);
     }
 
     private int animalHarnessSpawnSequence;
     private GameObject animalCollisionStressRoot;
+    private readonly List<RectInt> animalCollisionStressFootprints = new List<RectInt>(4);
 
     private long BuildAnimalHerdId(
         Vector2Int chunkCoordinate,
@@ -1580,6 +1543,7 @@ public partial class TerrainGenerator : MonoBehaviour
             return;
         }
 
+        AnimalAIWorld.Unregister(target.GetComponent<AnimalAIController>());
         target.SetActive(false);
         if (Application.isPlaying)
         {

@@ -18,16 +18,23 @@ function Read-Member([string]$file, [string]$signature, [int]$occurrence = 1) {
     $source.Substring($start, $end - $start)
 }
 $base = 'FactorioProject/Assets/Scripts/Object/MapObj/InstallationObject/'
-$generated = "using System.Collections.Generic; using UnityEngine; public partial class Pump {`n"
-foreach ($member in @('private bool TryRouteWaterToFluidStorage(', 'private void EnqueueFluidSearchCoordinate(', 'private bool TryGetFluidNetworkConnectionAtCoordinate(', 'private void ConsiderFluidStorageCandidate(', 'private bool TryUseFluidStorage(')) {
-    $generated += (Read-Member ($base + 'Pump.cs') $member) + "`n"
+$generated = "using System.Collections.Generic; using UnityEngine; public partial class InputOutputModule {`n"
+foreach ($member in @(
+    'protected bool TryEmitFluidOutputToConnectedStorages(',
+    'private bool TrySelectFluidOutputStorageWithAnySpaceFromCache(',
+    'private bool CanUseFluidOutputStorageWithAnySpace(',
+    'private static float GetFluidStorageFillRatio(',
+    'private bool TryUseSharedPumpFluidOutputNetwork(',
+    'private void PublishSharedPumpFluidOutputNetwork(',
+    'private static void EnsureSharedPumpFluidOutputTopologyVersion(',
+    'private bool EnqueueFluidStoragePipePassCoordinatesAt(')) {
+    $generated += (Read-Member ($base + 'InputOutputModule.cs') $member) + "`n"
 }
 $generated += "} public partial class Boiler {`n"
 foreach ($member in @('public bool TryGetRuntimeWaterPass(', 'private bool IsWaterStorageFull(', 'private bool TryHeatWater(')) {
     $generated += (Read-Member ($base + 'Boiler.cs') $member) + "`n"
 }
-$generated += "} public partial class InputOutputModule {`n"
-$generated += (Read-Member ($base + 'InputOutputModule.cs') 'private bool EnqueueFluidStoragePipePassCoordinatesAt(') + "`n}"
+$generated += "}"
 $probeDir = Join-Path $env:TEMP ('ProjectF-BoilerWaterPass-' + [Guid]::NewGuid().ToString('N'))
 New-Item -ItemType Directory -Path $probeDir | Out-Null
 Set-Content -LiteralPath (Join-Path $probeDir 'Production.cs') -Value $generated

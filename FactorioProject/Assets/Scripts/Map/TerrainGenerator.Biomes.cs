@@ -436,6 +436,7 @@ public partial class TerrainGenerator : MonoBehaviour
 
     private void InvalidateTerrainBiomeDataCaches()
     {
+        InvalidateAnimalNavigation();
         tileBiomeCache.Clear();
         rawWaterCache.Clear();
         directWaterBlockCache.Clear();

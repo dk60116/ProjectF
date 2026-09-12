@@ -19,6 +19,7 @@ public sealed class AreaMarkerRenderer : MonoBehaviour
     private Material sourceMaterial;
     private bool staticDirty = true;
     private bool movingDirty = true;
+    private RobotArmWorld lastArmWorld;
 
     public int RegisteredMarkerCount { get; private set; }
     public int VisibleMarkerCount { get; private set; }
@@ -80,8 +81,12 @@ public sealed class AreaMarkerRenderer : MonoBehaviour
         using (UpdateMarker.Auto())
         {
             AreaMarkerVisibilityContext context = AreaMarkerVisibilityContext.Capture();
+            RobotArmWorld arms = RobotArmWorld.Current;
+            if (!ReferenceEquals(lastArmWorld, arms)) { lastArmWorld = arms; staticDirty = true; }
+            if (arms != null && arms.RefreshAreaMarkers(context)) staticDirty = true;
             RegisteredMarkerCount = 0;
             VisibleMarkerCount = 0;
+            if (arms != null) { RegisteredMarkerCount += arms.Count * 2; VisibleMarkerCount += arms.VisibleMarkerCount; }
             for (int i = owners.Count - 1; i >= 0; i--)
             {
                 InputOutputModuleAreaMarkerController owner = owners[i];
@@ -134,6 +139,7 @@ public sealed class AreaMarkerRenderer : MonoBehaviour
             if (owner != null && owner.IsVisible && IsDirty(owner.UsesMovingBatches)) owner.AppendMarkers(this);
         }
         emptyBatches.Clear();
+        if (staticDirty) RobotArmWorld.Current?.AppendAreaMarkers(this);
         foreach (KeyValuePair<BatchKey, MarkerBatch> pair in batches)
         {
             if (!IsDirty(pair.Key.Moving)) continue;
