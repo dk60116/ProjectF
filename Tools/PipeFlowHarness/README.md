@@ -7,10 +7,13 @@ powershell -NoProfile -ExecutionPolicy Bypass -File Tools/PipeFlowHarness/Run.ps
 Requires .NET 9; does not launch Unity. Uses the production rolling output meter,
 pump production, standard fluid output, endpoint collection, pipe traversal, and
 InfoPanel data query methods. Checks actual accepted liters, blocked output,
-ground-item exclusion, one-second expiry, multiple producers, deduplication,
+ground-item exclusion, one-second expiry, additive pump pressure, multiple
+producers, measured consumer demand, consumer deduplication, zero clamping,
 connector direction, underground routing, and panel query caching.
 
 World/registry lookup, storage acceptance, clock, and Unity types are managed test
 doubles. In-game connectivity, rendering, and UI layout still need engine verification.
-The displayed rate is the connected pipe network's recent incoming output, not
-a simulated per-segment flow split (the game transfers fluid directly to storage).
+The displayed pressure is the connected pumps' configured capacity plus the
+measured output of other fluid producers, minus the measured consumption of
+connected machines. Actual accepted flow remains separately metered; the game
+transfers fluid directly to storage rather than simulating a per-segment flow split.

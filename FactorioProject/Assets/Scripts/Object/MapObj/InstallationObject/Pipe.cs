@@ -55,6 +55,7 @@ public class Pipe : InstallationObject
     private readonly HashSet<Vector2Int> objectInfoFluidSearchVisited = new HashSet<Vector2Int>();
     private readonly HashSet<int> objectInfoFluidItemIds = new HashSet<int>();
     private readonly HashSet<InputOutputModule> objectInfoFluidOutputSources = new HashSet<InputOutputModule>();
+    private readonly HashSet<InputOutputModule> objectInfoFluidPressureConsumers = new HashSet<InputOutputModule>();
     private readonly List<InstallationObject> objectInfoFluidStorageScratch = new List<InstallationObject>(4);
 
     [SerializeField]
@@ -69,7 +70,7 @@ public class Pipe : InstallationObject
     private float nextObjectInfoFluidRefreshTime = float.NegativeInfinity;
     private int cachedObjectInfoFluidItemId = -1;
     private float cachedObjectInfoFluidTemperature;
-    private float cachedObjectInfoExtractionRate;
+    private float cachedObjectInfoPressureRate;
     private static float fluidDisplayNetworkCacheExpiresAt;
 
     public Pipe StraightVariantPrefab => straightVariantPrefab != null ? straightVariantPrefab : this;
@@ -164,17 +165,17 @@ public class Pipe : InstallationObject
     public bool TryGetObjectInfoFluidInfo(
         out int fluidItemId,
         out float temperatureCelsius,
-        out float extractionLitersPerSecond,
-        bool includeExtractionRate = true)
+        out float pressureLitersPerSecond,
+        bool includePressure = true)
     {
         fluidItemId = -1;
         temperatureCelsius = MapClimate.CurrentTemperatureCelsius;
-        extractionLitersPerSecond = 0f;
-        if (includeExtractionRate && Time.unscaledTime < nextObjectInfoFluidRefreshTime)
+        pressureLitersPerSecond = 0f;
+        if (includePressure && Time.unscaledTime < nextObjectInfoFluidRefreshTime)
         {
             fluidItemId = cachedObjectInfoFluidItemId;
             temperatureCelsius = cachedObjectInfoFluidTemperature;
-            extractionLitersPerSecond = cachedObjectInfoExtractionRate;
+            pressureLitersPerSecond = cachedObjectInfoPressureRate;
             return fluidItemId >= 0;
         }
 
@@ -188,8 +189,8 @@ public class Pipe : InstallationObject
             startCoordinate,
             out fluidItemId,
             out temperatureCelsius,
-            out extractionLitersPerSecond,
-            includeExtractionRate,
+            out pressureLitersPerSecond,
+            includePressure,
             true);
     }
 
@@ -197,25 +198,26 @@ public class Pipe : InstallationObject
         Vector2Int startCoordinate,
         out int fluidItemId,
         out float temperatureCelsius,
-        out float extractionLitersPerSecond,
-        bool includeExtractionRate = true,
+        out float pressureLitersPerSecond,
+        bool includePressure = true,
         bool allowInstanceCache = false)
     {
         fluidItemId = -1;
         temperatureCelsius = MapClimate.CurrentTemperatureCelsius;
-        extractionLitersPerSecond = 0f;
+        pressureLitersPerSecond = 0f;
         bool canUseInstanceCache = allowInstanceCache;
-        if (includeExtractionRate
+        if (includePressure
             && canUseInstanceCache
             && Time.unscaledTime < nextObjectInfoFluidRefreshTime)
         {
             fluidItemId = cachedObjectInfoFluidItemId;
             temperatureCelsius = cachedObjectInfoFluidTemperature;
-            extractionLitersPerSecond = cachedObjectInfoExtractionRate;
+            pressureLitersPerSecond = cachedObjectInfoPressureRate;
             return fluidItemId >= 0;
         }
 
         objectInfoFluidOutputSources.Clear();
+        objectInfoFluidPressureConsumers.Clear();
         bool foundFluid = TrySearchFluidNetwork(
             startCoordinate,
             false,
@@ -223,24 +225,37 @@ public class Pipe : InstallationObject
             Vector2Int.zero,
             out fluidItemId,
             out temperatureCelsius,
-            includeExtractionRate ? objectInfoFluidOutputSources : null);
-        if (includeExtractionRate && foundFluid)
+            includePressure ? objectInfoFluidOutputSources : null,
+            includePressure ? objectInfoFluidPressureConsumers : null);
+        if (includePressure && foundFluid)
         {
             foreach (InputOutputModule source in objectInfoFluidOutputSources)
             {
                 if (source != null)
                 {
-                    extractionLitersPerSecond += source.GetObjectInfoFluidOutputLitersPerSecond(fluidItemId);
+                    pressureLitersPerSecond += source.GetObjectInfoFluidPressureLitersPerSecond(fluidItemId);
                 }
             }
+
+            foreach (InputOutputModule consumer in objectInfoFluidPressureConsumers)
+            {
+                if (consumer != null)
+                {
+                    pressureLitersPerSecond -=
+                        consumer.GetObjectInfoFluidPressureConsumptionLitersPerSecond(fluidItemId);
+                }
+            }
+
+            pressureLitersPerSecond = Mathf.Max(0f, pressureLitersPerSecond);
         }
 
         objectInfoFluidOutputSources.Clear();
-        if (includeExtractionRate && canUseInstanceCache)
+        objectInfoFluidPressureConsumers.Clear();
+        if (includePressure && canUseInstanceCache)
         {
             cachedObjectInfoFluidItemId = foundFluid ? fluidItemId : -1;
             cachedObjectInfoFluidTemperature = temperatureCelsius;
-            cachedObjectInfoExtractionRate = extractionLitersPerSecond;
+            cachedObjectInfoPressureRate = pressureLitersPerSecond;
             nextObjectInfoFluidRefreshTime = Time.unscaledTime + FluidDisplayRefreshIntervalSeconds;
         }
 
@@ -287,7 +302,8 @@ public class Pipe : InstallationObject
         Vector2Int ignoredStorageCoordinate,
         out int fluidItemId,
         out float temperatureCelsius,
-        ISet<InputOutputModule> outputSources = null)
+        ISet<InputOutputModule> outputSources = null,
+        ISet<InputOutputModule> pressureConsumers = null)
     {
         fluidItemId = -1;
         temperatureCelsius = MapClimate.CurrentTemperatureCelsius;
@@ -301,8 +317,9 @@ public class Pipe : InstallationObject
         int mobileStorageFallbackFluidItemId = -1;
         float mobileStorageFallbackTemperatureCelsius = MapClimate.CurrentTemperatureCelsius;
         int searchedNodeCount = 0;
+        bool collectPressureEndpoints = outputSources != null || pressureConsumers != null;
         while (objectInfoFluidSearchQueue.Count > 0
-               && (outputSources != null || searchedNodeCount < MaxObjectInfoFluidSearchNodes))
+               && (collectPressureEndpoints || searchedNodeCount < MaxObjectInfoFluidSearchNodes))
         {
             Vector2Int coordinate = objectInfoFluidSearchQueue.Dequeue();
             searchedNodeCount++;
@@ -318,7 +335,7 @@ public class Pipe : InstallationObject
                     out temperatureCelsius))
             {
                 foundFluid = true;
-                if (!cacheDisplayNetwork && outputSources == null)
+                if (!cacheDisplayNetwork && !collectPressureEndpoints)
                 {
                     return true;
                 }
@@ -339,6 +356,13 @@ public class Pipe : InstallationObject
             if (outputSources != null)
             {
                 InputOutputModule.AppendFluidOutputSourcesAtCoordinate(coordinate, Vector2Int.zero, outputSources);
+            }
+            if (pressureConsumers != null)
+            {
+                InputOutputModule.AppendFluidPressureConsumersAtCoordinate(
+                    coordinate,
+                    Vector2Int.zero,
+                    pressureConsumers);
             }
 
             for (int i = 0; i < CardinalDirections.Length; i++)
@@ -363,7 +387,7 @@ public class Pipe : InstallationObject
                         out temperatureCelsius))
                 {
                     foundFluid = true;
-                    if (!cacheDisplayNetwork && outputSources == null)
+                    if (!cacheDisplayNetwork && !collectPressureEndpoints)
                     {
                         return true;
                     }
@@ -383,6 +407,13 @@ public class Pipe : InstallationObject
                 else if (!hasNeighborPipe && outputSources != null)
                 {
                     InputOutputModule.AppendFluidOutputSourcesAtCoordinate(neighborCoordinate, -direction, outputSources);
+                }
+                if (!hasNeighborPipe && pressureConsumers != null)
+                {
+                    InputOutputModule.AppendFluidPressureConsumersAtCoordinate(
+                        neighborCoordinate,
+                        -direction,
+                        pressureConsumers);
                 }
             }
 

@@ -47,7 +47,9 @@ foreach ($signature in @(
     'private void AddConnectedFluidStorageCacheCandidate(',
     'private void EnqueueConnectedFluidSearchCoordinate(',
     'private bool TryGetConnectedFluidNodeAtCoordinate(',
-    'private bool CanFluidSearchLeaveCoordinate(')) {
+    'private bool CanFluidSearchLeaveCoordinate(',
+    'private static bool HasConnectedPipeConnectionTowards(',
+    'private static bool TryGetConnectedPipeRemoteCoordinate(')) {
     $generated += (Read-Member ($base + 'InputOutputModule.cs') $signature) + "`n"
 }
 $generated += "}`npublic partial class ItemInfoDescription {`n"

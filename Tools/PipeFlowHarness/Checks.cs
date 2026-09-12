@@ -51,15 +51,19 @@ public class InstallationObject
 public partial class InputOutputModule
 {
     private FluidOutputRateMeter fluidOutputRateMeter;
+    private FluidOutputRateMeter fluidConsumptionRateMeter;
     public bool isActiveAndEnabled = true;
     public Vector2Int OutputDirection = new(-1, 0);
     public readonly List<Vector2Int> runtimeOutputCoordinates = new() { new(0, 0) };
+    public readonly List<Vector2Int> runtimePipeInputCoordinates = new();
     public readonly List<InstallationObject> cachedFluidOutputStorages = new();
     public static readonly Dictionary<Vector2Int, HashSet<InputOutputModule>> registeredRuntimeAreaCoordinates = new();
     public void Report(int id, float liters) => RecordFluidNetworkOutput(id, liters);
+    public void Consume(int id, float liters) => RecordFluidNetworkConsumption(id, liters);
     public float Emit(int id, float liters) { TryEmitFluidOutputToConnectedStorages(id, liters, 20, out var actual); return actual; }
     public void ResetMeter() => fluidOutputRateMeter?.Reset();
     private bool ContainsRuntimeOutputCoordinate(Vector2Int coordinate) => runtimeOutputCoordinates.Contains(coordinate);
+    private bool ContainsRuntimeFluidPressureInputCoordinate(Vector2Int coordinate) => runtimePipeInputCoordinates.Contains(coordinate);
     private bool TryGetRuntimePipeAreaExternalDirection(Vector2Int coordinate, out Vector2Int direction) { direction = OutputDirection; return direction != Vector2Int.zero; }
     private static bool IsFluidItemId(int id) => id >= 0;
     private bool EnsureFluidOutputStorageCache() => cachedFluidOutputStorages.Count > 0;
@@ -71,6 +75,13 @@ public partial class InputOutputModule
     public static void Register(InputOutputModule module, Vector2Int coordinate)
     {
         module.runtimeOutputCoordinates.Add(coordinate);
+        if (!registeredRuntimeAreaCoordinates.TryGetValue(coordinate, out var set))
+            registeredRuntimeAreaCoordinates[coordinate] = set = new();
+        set.Add(module);
+    }
+    public static void RegisterConsumer(InputOutputModule module, Vector2Int coordinate)
+    {
+        module.runtimePipeInputCoordinates.Add(coordinate);
         if (!registeredRuntimeAreaCoordinates.TryGetValue(coordinate, out var set))
             registeredRuntimeAreaCoordinates[coordinate] = set = new();
         set.Add(module);
@@ -136,8 +147,9 @@ public partial class Pipe
     private const float FluidDisplayRefreshIntervalSeconds = .2f;
     private float nextObjectInfoFluidRefreshTime = float.NegativeInfinity;
     private int cachedObjectInfoFluidItemId;
-    private float cachedObjectInfoFluidTemperature, cachedObjectInfoExtractionRate;
+    private float cachedObjectInfoFluidTemperature, cachedObjectInfoPressureRate;
     private readonly HashSet<InputOutputModule> objectInfoFluidOutputSources = new();
+    private readonly HashSet<InputOutputModule> objectInfoFluidPressureConsumers = new();
     private readonly Queue<Vector2Int> objectInfoFluidSearchQueue = new();
     private readonly HashSet<Vector2Int> objectInfoFluidSearchVisited = new();
     private static readonly Dictionary<Vector2Int, int> FluidDisplayNetworkItemCache = new();
@@ -207,25 +219,34 @@ public static class Checks
         TerrainGenerator.Active.Fluids[new(0, 0)] = 1;
         InputOutputModule.Register(source, new(0, 0)); InputOutputModule.Register(source, new(1, 0));
         InputOutputModule.Register(pump, new(1, 1));
-        Check(Near(Rate(pipe), 5), "all connected producers sum without duplicates around a loop");
+        Check(Near(Rate(pipe), 13), "pipe pressure includes configured pump capacity and measured non-pump flow");
+        var secondPump = new Pump { WaterLitersPerSecond = 7 };
+        InputOutputModule.Register(secondPump, new(0, 1)); pipe.Invalidate();
+        Check(Near(Rate(pipe), 20), "multiple connected pumps add their full pressure capacity");
+        var consumer = new InputOutputModule(); consumer.Consume(1, 6);
+        InputOutputModule.RegisterConsumer(consumer, new(0, 0));
+        InputOutputModule.RegisterConsumer(consumer, new(1, 0)); pipe.Invalidate();
+        Check(Near(Rate(pipe), 14), "active fluid consumers reduce pressure once even across multiple input cells");
         Rate(pipe);
-        Check(pipe.Searches == 1, "focused panel reuses short-lived network result");
+        Check(pipe.Searches == 3, "focused panel reuses short-lived network result");
         var detached = new InputOutputModule(); detached.Report(1, 100);
         TerrainGenerator.Active.Pipes[new(-1, 0)] = new Pipe();
         TerrainGenerator.Active.Pipes[new(-1, 0)].BlockedDirections.Add(new(1, 0));
         InputOutputModule.Register(detached, new(-1, 0)); pipe.Invalidate();
-        Check(Near(Rate(pipe), 5), "neighbor pipe with blocked reciprocal connector is excluded");
+        Check(Near(Rate(pipe), 14), "neighbor pipe with blocked reciprocal connector is excluded");
         var endpoint = new InputOutputModule { OutputDirection = new(0, -1) }; endpoint.Report(1, 4);
         InputOutputModule.Register(endpoint, new(0, 2)); pipe.Invalidate();
-        Check(Near(Rate(pipe), 9), "direct output endpoint facing pipe is included");
+        Check(Near(Rate(pipe), 18), "direct output endpoint facing pipe is included");
         endpoint.OutputDirection = new(0, 1); pipe.Invalidate();
-        Check(Near(Rate(pipe), 5), "direct output endpoint facing away is excluded");
+        Check(Near(Rate(pipe), 14), "direct output endpoint facing away is excluded");
         pipe.Remote = new(300, 0);
         TerrainGenerator.Active.Pipes[new(300, 0)] = new Pipe();
         InputOutputModule.Register(endpoint, new(300, 0)); pipe.Invalidate();
-        Check(Near(Rate(pipe), 9), "underground remote output is included");
+        Check(Near(Rate(pipe), 18), "underground remote output is included");
         Time.timeAsDouble = 6.2;
-        Check(Near(Rate(pipe), 0), "panel becomes zero when all producers stop");
+        Check(Near(Rate(pipe), 17), "pump pressure remains while measured non-pump flow expires");
+        consumer.Consume(1, 30); pipe.Invalidate();
+        Check(Near(Rate(pipe), 0), "consumer demand clamps displayed pressure at zero");
         Console.WriteLine($"{passed} pipe flow checks passed.");
     }
 }

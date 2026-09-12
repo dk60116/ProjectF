@@ -64,7 +64,7 @@ public readonly record struct Vector2Int(int x, int y)
     public static Vector2Int operator +(Vector2Int a, Vector2Int b) => new(a.x + b.x, a.y + b.y);
     public static Vector2Int operator -(Vector2Int a) => new(-a.x, -a.y);
 }
-public struct Quaternion { }
+public struct Quaternion { public static Quaternion identity => default; }
 public class Pipe : InstallationObject
 {
     public Vector2Int? Remote;
@@ -73,6 +73,18 @@ public class Pipe : InstallationObject
     {
         remote = Remote ?? default;
         return Remote.HasValue;
+    }
+}
+public sealed class PipeRuntimeRecord
+{
+    public Pipe Prototype;
+    public Quaternion WorldRotation;
+    public bool HasConnectionTowardsAt(Vector2Int coordinate, Vector2Int direction)
+        => Prototype != null && Prototype.HasConnectionTowardsAt(coordinate, WorldRotation, direction);
+    public bool TryGetRemoteConnectionCoordinate(Vector2Int coordinate, out Vector2Int remote)
+    {
+        remote = default;
+        return Prototype != null && Prototype.TryGetRemoteConnectionCoordinate(coordinate, out remote);
     }
 }
 public class Fluidtank : InstallationObject
@@ -94,6 +106,7 @@ public partial class InputOutputModule : InstallationObject
     public readonly Dictionary<Vector2Int, InstallationObject> Nodes = new();
     public bool UseGraph;
     public int CacheBuilds;
+    public float ReportedConsumption;
     protected virtual bool UsesConnectedTankNetworkStorage => false;
     public IReadOnlyList<InstallationObject> Sources => GetConnectedFluidSourceStorages();
     private void CollectRuntimePipeAreaCoordinates(List<Vector2Int> coordinates)
@@ -112,10 +125,16 @@ public partial class InputOutputModule : InstallationObject
     private void EnqueueFluidStoragePipePassCoordinatesAt(Vector2Int coordinate)
         => EnqueueConnectedFluidSearchCoordinate(coordinate);
     private static bool ContainsCoordinate(List<Vector2Int> list, Vector2Int coordinate) => list.Contains(coordinate);
-    private bool TryGetConnectedPipeAtCoordinate(Vector2Int coordinate, out Pipe pipe, out Quaternion rotation)
+    private bool TryGetConnectedPipeAtCoordinate(
+        Vector2Int coordinate,
+        out Pipe pipe,
+        out Quaternion rotation,
+        out PipeRuntimeRecord pipeRecord)
     {
         Nodes.TryGetValue(coordinate, out var node);
-        pipe = node as Pipe; rotation = default;
+        pipe = node as Pipe;
+        rotation = default;
+        pipeRecord = null;
         return pipe != null;
     }
     private bool TryResolveConnectedFluidSearchStorageAtCoordinate(Vector2Int coordinate, out InstallationObject storage, out bool storageIsPipeArea)
@@ -127,6 +146,8 @@ public partial class InputOutputModule : InstallationObject
     }
     private static bool CanFluidStorageConnectToDirection(InstallationObject storage, Vector2Int coordinate, Vector2Int direction) => false;
     private bool TryGetRuntimePipeAreaExternalDirection(Vector2Int coordinate, out Vector2Int direction) { direction = default; return false; }
+    protected void RecordFluidNetworkConsumption(int fluidItemId, float consumedLiters)
+        => ReportedConsumption += consumedLiters;
     protected virtual bool ShouldAutoPullFluidFromConnectedStorage() => true;
     protected virtual string ResolveObjectInfoStatus(out bool producing) { producing = false; return ""; }
     private float plannedDeltaTime;
@@ -142,6 +163,15 @@ public partial class InputOutputModule : InstallationObject
         return true;
     }
     protected void ApplyPlannedBaseModuleTick(float deltaTime) { }
+}
+public class Pump : InputOutputModule
+{
+    public static int ResolveWaterItemId(object _) => 1;
+}
+public class SteamTrain : InstallationObject
+{
+    public bool CanAcceptWaterFromPipeDirection(Vector2Int direction, int waterItemId, bool requireStopped)
+        => true;
 }
 
 public partial class ItemInfoDescription
@@ -207,6 +237,7 @@ public static class Checks
         Check(s.Status == "Ready", "status uses tank water with empty local storage");
         Check(!s.AutoPull, "water is not reserved in the local reservoir by automatic equalization");
         Check(s.Spray(30) && Near(tank.StoredFluidLiters, 30) && Near(s.StoredFluidLiters, 0), "low fill ratio tank supplies a whole spray directly");
+        Check(Near(s.ReportedConsumption, 30), "successful spray reports actual water consumption for network pressure");
         Check(tank.Changes == 1, "withdrawal notifies the actual storage owner");
         s.GetWaterStorageInfo(out stored, out _);
         Check(Near(stored, 30) && s.CacheBuilds == 1, "amounts stay live without rebuilding topology");

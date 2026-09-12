@@ -17,6 +17,13 @@ function Read-Member([string]$file, [string]$signature, [int]$occurrence = 1) {
     if ($depth -ne 0) { throw "Unbalanced production member: $signature" }
     $source.Substring($start, $end - $start)
 }
+function Require-Text([string]$file, [string]$text, [string]$label) {
+    $source = [IO.File]::ReadAllText((Join-Path $repo $file))
+    if ($source.IndexOf($text, [StringComparison]::Ordinal) -lt 0) {
+        throw "FAIL ${label}: missing '$text'"
+    }
+    Write-Output "PASS $label"
+}
 $base = 'FactorioProject/Assets/Scripts/Object/MapObj/InstallationObject/'
 $manager = 'FactorioProject/Assets/Scripts/Manager/MapObjectTickManager.cs'
 $generated = "using System; using System.Collections.Generic;`n"
@@ -25,12 +32,20 @@ $generated += "public partial class InputOutputModule {`n"
 foreach ($signature in @(
     'protected void RecordFluidNetworkOutput(',
     'public float GetObjectInfoFluidOutputLitersPerSecond(',
+    'public virtual float GetObjectInfoFluidPressureLitersPerSecond(',
+    'protected void RecordFluidNetworkConsumption(',
+    'public float GetObjectInfoFluidPressureConsumptionLitersPerSecond(',
     'public static void AppendFluidOutputSourcesAtCoordinate(',
+    'public static void AppendFluidPressureConsumersAtCoordinate(',
     'protected bool TryEmitFluidOutputToConnectedStorages(')) {
     $generated += (Read-Member ($base + 'InputOutputModule.cs') $signature) + "`n"
 }
 $generated += "}`npublic partial class Pump {`n"
-foreach ($signature in @('private void ProduceWater(', 'private void RefreshWaterOutputBudget(')) {
+foreach ($signature in @(
+    'public bool TryGetObjectInfoOutputRate(',
+    'public override float GetObjectInfoFluidPressureLitersPerSecond(',
+    'private void ProduceWater(',
+    'private void RefreshWaterOutputBudget(')) {
     $generated += (Read-Member ($base + 'Pump.cs') $signature) + "`n"
 }
 $generated += "}`npublic partial class Pipe {`n"
@@ -40,6 +55,12 @@ foreach ($signature in @('private bool TrySearchFluidNetwork(', 'private void En
     $generated += (Read-Member ($base + 'Pipe.cs') $signature) + "`n"
 }
 $generated += "}`n"
+$boilerFile = $base + 'Boiler.cs'
+$sprinklerFile = $base + 'Sprinkler.cs'
+$steamGeneratorFile = $base + 'SteamGenerator.cs'
+Require-Text $boilerFile 'RecordFluidNetworkConsumption(' 'boiler reports actual water consumption to pipe pressure'
+Require-Text $sprinklerFile 'RecordFluidNetworkConsumption(' 'sprinkler reports actual water consumption to pipe pressure'
+Require-Text $steamGeneratorFile 'RecordFluidNetworkConsumption(' 'steam generator reports actual steam consumption to pipe pressure'
 $probeDir = Join-Path ([IO.Path]::GetTempPath()) ('ProjectF-PipeFlow-' + [Guid]::NewGuid().ToString('N'))
 New-Item -ItemType Directory -Path $probeDir | Out-Null
 Set-Content -LiteralPath (Join-Path $probeDir 'Production.cs') -Value $generated

@@ -456,6 +456,7 @@ public class SteamGenerator : InputOutputModule
             return false;
         }
 
+        RecordFluidNetworkConsumption(inputItemId, consumedLiters);
         SetSteamGenerationReserve(true);
         return true;
     }

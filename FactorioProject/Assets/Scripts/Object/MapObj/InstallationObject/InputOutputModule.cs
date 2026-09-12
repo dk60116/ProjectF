@@ -19,6 +19,7 @@ public class InputOutputModule : InstallationObject,
     public static event System.Action<InputOutputModule> RuntimePipeTopologyChanged;
 
     private ProjectF.FluidTransport.FluidOutputRateMeter fluidOutputRateMeter;
+    private ProjectF.FluidTransport.FluidOutputRateMeter fluidConsumptionRateMeter;
 
     protected void RecordFluidNetworkOutput(int fluidItemId, float acceptedLiters)
     {
@@ -38,6 +39,34 @@ public class InputOutputModule : InstallationObject,
     {
         return isActiveAndEnabled && fluidOutputRateMeter != null
             ? fluidOutputRateMeter.GetLitersPerSecond(
+                fluidItemId,
+                MapObjectTickManager.CurrentSimulationTimeSeconds)
+            : 0f;
+    }
+
+    public virtual float GetObjectInfoFluidPressureLitersPerSecond(int fluidItemId)
+    {
+        return GetObjectInfoFluidOutputLitersPerSecond(fluidItemId);
+    }
+
+    protected void RecordFluidNetworkConsumption(int fluidItemId, float consumedLiters)
+    {
+        if (consumedLiters <= 0f)
+        {
+            return;
+        }
+
+        fluidConsumptionRateMeter ??= new ProjectF.FluidTransport.FluidOutputRateMeter();
+        fluidConsumptionRateMeter.Record(
+            fluidItemId,
+            consumedLiters,
+            MapObjectTickManager.CurrentSimulationTimeSeconds);
+    }
+
+    public float GetObjectInfoFluidPressureConsumptionLitersPerSecond(int fluidItemId)
+    {
+        return isActiveAndEnabled && fluidConsumptionRateMeter != null
+            ? fluidConsumptionRateMeter.GetLitersPerSecond(
                 fluidItemId,
                 MapObjectTickManager.CurrentSimulationTimeSeconds)
             : 0f;
@@ -71,6 +100,37 @@ public class InputOutputModule : InstallationObject,
             }
 
             sources.Add(module);
+        }
+    }
+
+    public static void AppendFluidPressureConsumersAtCoordinate(
+        Vector2Int coordinate,
+        Vector2Int directionToPipe,
+        ISet<InputOutputModule> consumers)
+    {
+        if (consumers == null
+            || !registeredRuntimeAreaCoordinates.TryGetValue(
+                coordinate,
+                out HashSet<InputOutputModule> modules))
+        {
+            return;
+        }
+
+        foreach (InputOutputModule module in modules)
+        {
+            if (module == null
+                || !module.isActiveAndEnabled
+                || !module.ContainsRuntimeFluidPressureInputCoordinate(coordinate)
+                || (directionToPipe != Vector2Int.zero
+                    && (!module.TryGetRuntimePipeAreaExternalDirection(
+                            coordinate,
+                            out Vector2Int externalDirection)
+                        || externalDirection != directionToPipe)))
+            {
+                continue;
+            }
+
+            consumers.Add(module);
         }
     }
 
@@ -724,6 +784,7 @@ public class InputOutputModule : InstallationObject,
     public override void PrepareForPool()
     {
         fluidOutputRateMeter?.Reset();
+        fluidConsumptionRateMeter?.Reset();
         SetRuntimeUpdateTickRegistered(false);
         runtimeSleeping = false;
         UnregisterRuntimeGridCoordinates();
@@ -986,6 +1047,32 @@ public class InputOutputModule : InstallationObject,
         }
 
         EnsureSharedPumpFluidOutputTopologyVersion();
+    }
+
+    internal static void NotifyRuntimePipeTopologyChanged(IReadOnlyList<Vector2Int> coordinates)
+    {
+        InvalidateFluidTopologyCache();
+        WakeRuntimeModulesAtCoordinates(coordinates);
+
+        // A pipe added at the far end of an existing route can connect a sleeping
+        // producer without touching one of its registered area coordinates.
+        runtimeWakeScratch.Clear();
+        foreach (InputOutputModule module in activeRuntimeModules)
+        {
+            if (module != null
+                && module.gameObject.activeInHierarchy
+                && module.HasRuntimePipeTopologyCoordinates())
+            {
+                runtimeWakeScratch.Add(module);
+            }
+        }
+
+        for (int i = 0; i < runtimeWakeScratch.Count; i++)
+        {
+            runtimeWakeScratch[i]?.WakeRuntimeUpdate();
+        }
+
+        runtimeWakeScratch.Clear();
     }
 
     private static void WakeRuntimeModulesAroundInstallation(InstallationObject installationObject)
@@ -2179,7 +2266,11 @@ public class InputOutputModule : InstallationObject,
             Vector2Int coordinate = connectedFluidSearchQueue.Dequeue();
             EnqueueFluidStoragePipePassCoordinatesAt(coordinate);
             bool isSeedCoordinate = ContainsCoordinate(connectedFluidSeedCoordinates, coordinate);
-            bool hasPipe = TryGetConnectedPipeAtCoordinate(coordinate, out Pipe pipe, out Quaternion pipeRotation);
+            bool hasPipe = TryGetConnectedPipeAtCoordinate(
+                coordinate,
+                out Pipe pipe,
+                out Quaternion pipeRotation,
+                out PipeRuntimeRecord pipeRecord);
             TryResolveConnectedFluidSearchStorageAtCoordinate(
                 coordinate,
                 out InstallationObject fluidStorage,
@@ -2198,7 +2289,13 @@ public class InputOutputModule : InstallationObject,
             for (int directionIndex = 0; directionIndex < FluidCardinalDirections.Length; directionIndex++)
             {
                 Vector2Int direction = FluidCardinalDirections[directionIndex];
-                if (hasPipe && !pipe.HasConnectionTowardsAt(coordinate, pipeRotation, direction))
+                if (hasPipe
+                    && !HasConnectedPipeConnectionTowards(
+                        pipe,
+                        pipeRecord,
+                        coordinate,
+                        pipeRotation,
+                        direction))
                 {
                     continue;
                 }
@@ -2235,7 +2332,11 @@ public class InputOutputModule : InstallationObject,
             }
 
             if (hasPipe
-                && pipe.TryGetRemoteConnectionCoordinate(coordinate, out Vector2Int remoteCoordinate))
+                && TryGetConnectedPipeRemoteCoordinate(
+                    pipe,
+                    pipeRecord,
+                    coordinate,
+                    out Vector2Int remoteCoordinate))
             {
                 EnqueueConnectedFluidSearchCoordinate(remoteCoordinate);
             }
@@ -2540,9 +2641,18 @@ public class InputOutputModule : InstallationObject,
         storage = null;
         canContinueRoute = false;
 
-        if (TryGetConnectedPipeAtCoordinate(coordinate, out Pipe pipe, out Quaternion pipeRotation))
+        if (TryGetConnectedPipeAtCoordinate(
+                coordinate,
+                out Pipe pipe,
+                out Quaternion pipeRotation,
+                out PipeRuntimeRecord pipeRecord))
         {
-            if (!pipe.HasConnectionTowardsAt(coordinate, pipeRotation, directionToPrevious))
+            if (!HasConnectedPipeConnectionTowards(
+                    pipe,
+                    pipeRecord,
+                    coordinate,
+                    pipeRotation,
+                    directionToPrevious))
             {
                 return false;
             }
@@ -2597,19 +2707,59 @@ public class InputOutputModule : InstallationObject,
         return false;
     }
 
-    private bool TryGetConnectedPipeAtCoordinate(Vector2Int coordinate, out Pipe pipe, out Quaternion pipeRotation)
+    private bool TryGetConnectedPipeAtCoordinate(
+        Vector2Int coordinate,
+        out Pipe pipe,
+        out Quaternion pipeRotation,
+        out PipeRuntimeRecord pipeRecord)
     {
         pipe = null;
         pipeRotation = Quaternion.identity;
+        pipeRecord = null;
         if (!TryGetLoadedBlock(coordinate, out Block block)
-            || block == null
-            || !block.TryGetRuntimePipe(out Pipe candidatePipe, out pipeRotation))
+            || block == null)
+        {
+            return false;
+        }
+
+        if (block.TryGetRuntimePipeRecord(out pipeRecord))
+        {
+            pipe = pipeRecord.Prototype;
+            pipeRotation = pipeRecord.WorldRotation;
+            return pipe != null;
+        }
+
+        if (!block.TryGetRuntimePipe(out Pipe candidatePipe, out pipeRotation))
         {
             return false;
         }
 
         pipe = candidatePipe;
         return true;
+    }
+
+    private static bool HasConnectedPipeConnectionTowards(
+        Pipe pipe,
+        PipeRuntimeRecord pipeRecord,
+        Vector2Int coordinate,
+        Quaternion pipeRotation,
+        Vector2Int direction)
+    {
+        return pipeRecord != null
+            ? pipeRecord.HasConnectionTowardsAt(coordinate, direction)
+            : pipe != null && pipe.HasConnectionTowardsAt(coordinate, pipeRotation, direction);
+    }
+
+    private static bool TryGetConnectedPipeRemoteCoordinate(
+        Pipe pipe,
+        PipeRuntimeRecord pipeRecord,
+        Vector2Int coordinate,
+        out Vector2Int remoteCoordinate)
+    {
+        remoteCoordinate = default;
+        return pipeRecord != null
+            ? pipeRecord.TryGetRemoteConnectionCoordinate(coordinate, out remoteCoordinate)
+            : pipe != null && pipe.TryGetRemoteConnectionCoordinate(coordinate, out remoteCoordinate);
     }
 
     private bool TryResolveConnectedFluidStorageAtCoordinate(
@@ -2783,6 +2933,17 @@ public class InputOutputModule : InstallationObject,
         Vector2Int coordinate,
         out InstallationObject storage)
     {
+        // Trains are moving installations and deliberately are not written to
+        // Block.MapObject. A ready water-pipe dock registers its current grid
+        // coordinate separately so the pipe search can still resolve the tank.
+        if (SteamTrain.TryGetWaterPipeReceiverAtCoordinate(
+                coordinate,
+                out SteamTrain waterReceiver))
+        {
+            storage = waterReceiver;
+            return true;
+        }
+
         storage = null;
         if (!TryGetLoadedBlock(coordinate, out Block block)
             || block == null
@@ -2864,6 +3025,7 @@ public class InputOutputModule : InstallationObject,
     protected override void OnDisable()
     {
         fluidOutputRateMeter?.Reset();
+        fluidConsumptionRateMeter?.Reset();
         bool hadRuntimePipeTopologyCoordinates = HasRuntimePipeTopologyCoordinates();
         SetWorkAnimatorState(false, true);
         StopCraftParticleEffectVisual(true);
@@ -3035,6 +3197,13 @@ public class InputOutputModule : InstallationObject,
     private bool ContainsRuntimePipeInputCoordinate(Vector2Int coordinate)
     {
         return ContainsCoordinate(runtimePipeInputCoordinates, coordinate);
+    }
+
+    private bool ContainsRuntimeFluidPressureInputCoordinate(Vector2Int coordinate)
+    {
+        return ContainsRuntimePipeInputCoordinate(coordinate)
+               || ContainsRuntimeRectGridBlockType(coordinate, RectGridBlockType.PipeInputItem)
+               || ContainsRuntimeRectGridBlockType(coordinate, RectGridBlockType.PipeInputEnergy);
     }
 
     protected virtual bool AppendOutputItemIds(ISet<int> outputItemIds)
@@ -6002,7 +6171,11 @@ public class InputOutputModule : InstallationObject,
             AddFluidOutputStorageCacheCandidatesAtCoordinate(coordinate);
 
             bool isOutputSeed = ContainsCoordinate(runtimeOutputCoordinates, coordinate);
-            bool hasPipe = TryGetConnectedPipeAtCoordinate(coordinate, out Pipe pipe, out Quaternion pipeRotation);
+            bool hasPipe = TryGetConnectedPipeAtCoordinate(
+                coordinate,
+                out Pipe pipe,
+                out Quaternion pipeRotation,
+                out PipeRuntimeRecord pipeRecord);
             TryResolveConnectedFluidSearchStorageAtCoordinate(
                 coordinate,
                 out InstallationObject fluidStorage,
@@ -6016,7 +6189,13 @@ public class InputOutputModule : InstallationObject,
             for (int directionIndex = 0; directionIndex < FluidCardinalDirections.Length; directionIndex++)
             {
                 Vector2Int direction = FluidCardinalDirections[directionIndex];
-                if (hasPipe && !pipe.HasConnectionTowardsAt(coordinate, pipeRotation, direction))
+                if (hasPipe
+                    && !HasConnectedPipeConnectionTowards(
+                        pipe,
+                        pipeRecord,
+                        coordinate,
+                        pipeRotation,
+                        direction))
                 {
                     continue;
                 }
@@ -6051,7 +6230,11 @@ public class InputOutputModule : InstallationObject,
             }
 
             if (hasPipe
-                && pipe.TryGetRemoteConnectionCoordinate(coordinate, out Vector2Int remoteCoordinate))
+                && TryGetConnectedPipeRemoteCoordinate(
+                    pipe,
+                    pipeRecord,
+                    coordinate,
+                    out Vector2Int remoteCoordinate))
             {
                 EnqueueConnectedFluidSearchCoordinate(remoteCoordinate);
             }

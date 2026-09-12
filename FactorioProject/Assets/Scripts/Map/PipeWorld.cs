@@ -119,15 +119,15 @@ public sealed class PipeRuntimeRecord
         Vector2Int coordinate,
         out int fluidItemId,
         out float temperatureCelsius,
-        out float extractionLitersPerSecond,
-        bool includeExtractionRate = true)
+        out float pressureLitersPerSecond,
+        bool includePressure = true)
     {
         return Prototype.TryGetObjectInfoFluidInfoAtCoordinate(
             coordinate,
             out fluidItemId,
             out temperatureCelsius,
-            out extractionLitersPerSecond,
-            includeExtractionRate);
+            out pressureLitersPerSecond,
+            includePressure);
     }
 
     public bool TryGetConnectedFluidItemIdIgnoringStorageCoordinate(
@@ -460,6 +460,7 @@ public sealed class PipeWorld : MonoBehaviour
             visualParts);
         recordsByStorageKey.Add(storageKey, record);
         AddCoordinateMappings(record);
+        InputOutputModule.NotifyRuntimePipeTopologyChanged(record.OccupiedCoordinates);
         Pipe.InvalidateFluidDisplayNetworkCache();
         bodyDirty = true;
         fluidDirty = true;
@@ -476,6 +477,7 @@ public sealed class PipeWorld : MonoBehaviour
 
         recordsByStorageKey.Remove(storageKey);
         RemoveCoordinateMappings(record);
+        InputOutputModule.NotifyRuntimePipeTopologyChanged(record.OccupiedCoordinates);
         Pipe.InvalidateFluidDisplayNetworkCache();
         bodyDirty = true;
         fluidDirty = true;
@@ -487,6 +489,7 @@ public sealed class PipeWorld : MonoBehaviour
     {
         recordsByStorageKey.Clear();
         recordsByCoordinate.Clear();
+        InputOutputModule.NotifyRuntimePipeTopologyChanged(null);
         Pipe.InvalidateFluidDisplayNetworkCache();
         bodyDirty = true;
         fluidDirty = true;

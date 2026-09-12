@@ -8,6 +8,8 @@ public class SteamTrain : RailHandcar,
 {
     private static readonly List<AutoDriveRoutePlanner.RouteSegment> SharedDebugRouteSegmentScratch =
         new List<AutoDriveRoutePlanner.RouteSegment>(32);
+    private static readonly Dictionary<Vector2Int, List<SteamTrain>> WaterPipeReceiversByCoordinate =
+        new Dictionary<Vector2Int, List<SteamTrain>>();
     private static ulong nextAutoDriveControllerRevision;
 
     public readonly struct AutoDriveDebugRouteSegment
@@ -127,6 +129,10 @@ public class SteamTrain : RailHandcar,
     private bool waterPipeTargetActive;
     private bool waterPipeAnimating;
     private bool waterPipeTransferReady;
+    private bool waterPipeReceiverRegistered;
+    private Vector2Int registeredWaterPipeReceiverCoordinate;
+    private Vector2Int registeredWaterPipeCoordinate;
+    private Vector2Int registeredWaterPipeDirectionFromTrainToPipe;
     private bool autoDriveEnabled;
     private string autoDriveTargetAStationName = string.Empty;
     private string autoDriveTargetBStationName = string.Empty;
@@ -238,6 +244,59 @@ public class SteamTrain : RailHandcar,
                 ? storedFluidItemId
                 : ResolveWaterItemId();
         }
+    }
+
+    [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.SubsystemRegistration)]
+    private static void ResetWaterPipeReceiverRegistry()
+    {
+        WaterPipeReceiversByCoordinate.Clear();
+    }
+
+    internal static bool TryGetWaterPipeReceiverAtCoordinate(
+        Vector2Int coordinate,
+        out SteamTrain receiver)
+    {
+        receiver = null;
+        if (!WaterPipeReceiversByCoordinate.TryGetValue(
+                coordinate,
+                out List<SteamTrain> candidates))
+        {
+            return false;
+        }
+
+        for (int i = candidates.Count - 1; i >= 0; i--)
+        {
+            SteamTrain candidate = candidates[i];
+            if (candidate == null
+                || !candidate.waterPipeReceiverRegistered
+                || candidate.registeredWaterPipeReceiverCoordinate != coordinate)
+            {
+                candidates.RemoveAt(i);
+            }
+        }
+
+        if (candidates.Count <= 0)
+        {
+            WaterPipeReceiversByCoordinate.Remove(coordinate);
+            return false;
+        }
+
+        for (int i = 0; i < candidates.Count; i++)
+        {
+            SteamTrain candidate = candidates[i];
+            if (!candidate.isActiveAndEnabled
+                || !candidate.gameObject.activeInHierarchy
+                || !candidate.waterPipeTargetActive
+                || !candidate.waterPipeTransferReady)
+            {
+                continue;
+            }
+
+            receiver = candidate;
+            return true;
+        }
+
+        return false;
     }
 
     public bool TryGetAutoDriveDebugRouteSegments(List<AutoDriveDebugRouteSegment> result)
@@ -1367,8 +1426,11 @@ public class SteamTrain : RailHandcar,
                && TryGetActivePipeAtCoordinate(
                    lockedWaterPipeDockCoordinate,
                    out Pipe pipe,
-                   out Quaternion pipeRotation)
-               && pipe.HasConnectionTowardsAt(
+                   out Quaternion pipeRotation,
+                   out PipeRuntimeRecord pipeRecord)
+               && HasActivePipeConnectionTowards(
+                   pipe,
+                   pipeRecord,
                    lockedWaterPipeDockCoordinate,
                    pipeRotation,
                    -lockedWaterPipeDockDirectionFromTrainToPipe)
@@ -1463,7 +1525,11 @@ public class SteamTrain : RailHandcar,
             for (int offsetX = -searchCells; offsetX <= searchCells; offsetX++)
             {
                 Vector2Int candidatePipeCoordinate = centerCoordinate + new Vector2Int(offsetX, offsetY);
-                if (!TryGetActivePipeAtCoordinate(candidatePipeCoordinate, out Pipe pipe, out Quaternion pipeRotation))
+                if (!TryGetActivePipeAtCoordinate(
+                        candidatePipeCoordinate,
+                        out Pipe pipe,
+                        out Quaternion pipeRotation,
+                        out PipeRuntimeRecord pipeRecord))
                 {
                     continue;
                 }
@@ -1473,7 +1539,9 @@ public class SteamTrain : RailHandcar,
                 for (int directionIndex = 0; directionIndex < CardinalDirections.Length; directionIndex++)
                 {
                     Vector2Int directionFromPipeToTrain = CardinalDirections[directionIndex];
-                    if (!pipe.HasConnectionTowardsAt(
+                    if (!HasActivePipeConnectionTowards(
+                            pipe,
+                            pipeRecord,
                             candidatePipeCoordinate,
                             pipeRotation,
                             directionFromPipeToTrain))
@@ -4132,7 +4200,11 @@ public class SteamTrain : RailHandcar,
             Vector2Int coordinate = waterPipeSearchQueue.Dequeue();
             searchedNodeCount++;
 
-            if (!TryGetActivePipeAtCoordinate(coordinate, out Pipe pipe, out Quaternion pipeRotation))
+            if (!TryGetActivePipeAtCoordinate(
+                    coordinate,
+                    out Pipe pipe,
+                    out Quaternion pipeRotation,
+                    out PipeRuntimeRecord pipeRecord))
             {
                 continue;
             }
@@ -4152,7 +4224,12 @@ public class SteamTrain : RailHandcar,
             for (int directionIndex = 0; directionIndex < CardinalDirections.Length; directionIndex++)
             {
                 Vector2Int direction = CardinalDirections[directionIndex];
-                if (!pipe.HasConnectionTowardsAt(coordinate, pipeRotation, direction))
+                if (!HasActivePipeConnectionTowards(
+                        pipe,
+                        pipeRecord,
+                        coordinate,
+                        pipeRotation,
+                        direction))
                 {
                     continue;
                 }
@@ -4171,8 +4248,11 @@ public class SteamTrain : RailHandcar,
                 if (TryGetActivePipeAtCoordinate(
                         nextCoordinate,
                         out Pipe nextPipe,
-                        out Quaternion nextPipeRotation)
-                    && nextPipe.HasConnectionTowardsAt(
+                        out Quaternion nextPipeRotation,
+                        out PipeRuntimeRecord nextPipeRecord)
+                    && HasActivePipeConnectionTowards(
+                        nextPipe,
+                        nextPipeRecord,
                         nextCoordinate,
                         nextPipeRotation,
                         -direction))
@@ -4181,14 +4261,11 @@ public class SteamTrain : RailHandcar,
                 }
             }
 
-            Vector2Int remoteCoordinate;
-            bool hasRemote = PipeWorld.Current != null
-                             && PipeWorld.Current.TryGetAtCoordinate(
-                                 coordinate,
-                                 out PipeRuntimeRecord runtimeRecord)
-                ? runtimeRecord.TryGetRemoteConnectionCoordinate(coordinate, out remoteCoordinate)
-                : pipe.TryGetRemoteConnectionCoordinate(coordinate, out remoteCoordinate);
-            if (hasRemote)
+            if (TryGetActivePipeRemoteCoordinate(
+                    pipe,
+                    pipeRecord,
+                    coordinate,
+                    out Vector2Int remoteCoordinate))
             {
                 EnqueueWaterPipeSearchCoordinate(remoteCoordinate);
             }
@@ -4228,21 +4305,58 @@ public class SteamTrain : RailHandcar,
     private bool TryGetActivePipeAtCoordinate(
         Vector2Int coordinate,
         out Pipe pipe,
-        out Quaternion pipeRotation)
+        out Quaternion pipeRotation,
+        out PipeRuntimeRecord pipeRecord)
     {
         pipe = null;
         pipeRotation = Quaternion.identity;
+        pipeRecord = null;
         TerrainGenerator terrain = TerrainGenerator.Active;
         if (terrain == null
             || !terrain.TryGetLoadedBlock(coordinate, out Block block)
-            || block == null
-            || !block.TryGetRuntimePipe(out Pipe candidatePipe, out pipeRotation))
+            || block == null)
+        {
+            return false;
+        }
+
+        if (block.TryGetRuntimePipeRecord(out pipeRecord))
+        {
+            pipe = pipeRecord.Prototype;
+            pipeRotation = pipeRecord.WorldRotation;
+            return pipe != null;
+        }
+
+        if (!block.TryGetRuntimePipe(out Pipe candidatePipe, out pipeRotation))
         {
             return false;
         }
 
         pipe = candidatePipe;
-        return true;
+        return pipe != null;
+    }
+
+    private static bool HasActivePipeConnectionTowards(
+        Pipe pipe,
+        PipeRuntimeRecord pipeRecord,
+        Vector2Int coordinate,
+        Quaternion pipeRotation,
+        Vector2Int direction)
+    {
+        return pipeRecord != null
+            ? pipeRecord.HasConnectionTowardsAt(coordinate, direction)
+            : pipe != null && pipe.HasConnectionTowardsAt(coordinate, pipeRotation, direction);
+    }
+
+    private static bool TryGetActivePipeRemoteCoordinate(
+        Pipe pipe,
+        PipeRuntimeRecord pipeRecord,
+        Vector2Int coordinate,
+        out Vector2Int remoteCoordinate)
+    {
+        remoteCoordinate = default;
+        return pipeRecord != null
+            ? pipeRecord.TryGetRemoteConnectionCoordinate(coordinate, out remoteCoordinate)
+            : pipe != null && pipe.TryGetRemoteConnectionCoordinate(coordinate, out remoteCoordinate);
     }
 
     private static bool IsUsableBurnEnergyItem(int itemId)
@@ -4313,7 +4427,19 @@ public class SteamTrain : RailHandcar,
 
     private void SetWaterPipeDockTarget(Vector2Int directionFromTrainToPipe, bool transferReady)
     {
-        if (waterPipe == null || directionFromTrainToPipe == Vector2Int.zero)
+        if (directionFromTrainToPipe == Vector2Int.zero)
+        {
+            return;
+        }
+
+        waterPipeTargetActive = true;
+        waterPipeTransferReady = transferReady;
+        activeWaterPipeDirectionFromTrainToPipe = directionFromTrainToPipe;
+        RefreshWaterPipeReceiverRegistration();
+
+        // The authored child is visual-only. A missing visual reference must not
+        // disable the functional water connection.
+        if (waterPipe == null)
         {
             return;
         }
@@ -4340,9 +4466,6 @@ public class SteamTrain : RailHandcar,
             Quaternion.Inverse(transform.rotation)
             * Quaternion.LookRotation(worldDirection, Vector3.up)
             * Quaternion.Euler(0f, 90f, 0f);
-        waterPipeTargetActive = true;
-        waterPipeTransferReady = transferReady;
-        activeWaterPipeDirectionFromTrainToPipe = directionFromTrainToPipe;
         waterPipeAnimating = true;
         if (!waterPipe.gameObject.activeSelf)
         {
@@ -4352,19 +4475,19 @@ public class SteamTrain : RailHandcar,
 
     private void RequestWaterPipeRetract()
     {
-        if (waterPipe == null)
-        {
-            ClearWaterPipeDockLock();
-            return;
-        }
-
         ClearWaterPipeDockLock();
-        CaptureWaterPipeDefaults();
-        waterPipeTargetLocalPosition = waterPipeDefaultLocalPosition;
-        waterPipeTargetLocalRotation = waterPipeDefaultLocalRotation;
         waterPipeTargetActive = false;
         waterPipeTransferReady = false;
         activeWaterPipeDirectionFromTrainToPipe = Vector2Int.zero;
+        RefreshWaterPipeReceiverRegistration();
+        if (waterPipe == null)
+        {
+            return;
+        }
+
+        CaptureWaterPipeDefaults();
+        waterPipeTargetLocalPosition = waterPipeDefaultLocalPosition;
+        waterPipeTargetLocalRotation = waterPipeDefaultLocalRotation;
         if (waterPipe.gameObject.activeSelf)
         {
             waterPipeAnimating = true;
@@ -4373,26 +4496,111 @@ public class SteamTrain : RailHandcar,
 
     private void ResetWaterPipeImmediate(bool active)
     {
+        ClearWaterPipeDockLock();
+        waterPipeTargetActive = active;
+        waterPipeTransferReady = false;
+        activeWaterPipeDirectionFromTrainToPipe = Vector2Int.zero;
+        RefreshWaterPipeReceiverRegistration();
+        waterPipeAnimating = false;
         if (waterPipe == null)
         {
-            ClearWaterPipeDockLock();
             return;
         }
 
-        ClearWaterPipeDockLock();
         CaptureWaterPipeDefaults();
         waterPipe.localPosition = waterPipeDefaultLocalPosition;
         waterPipe.localRotation = waterPipeDefaultLocalRotation;
         waterPipeTargetLocalPosition = waterPipeDefaultLocalPosition;
         waterPipeTargetLocalRotation = waterPipeDefaultLocalRotation;
-        waterPipeTargetActive = active;
-        waterPipeTransferReady = false;
-        activeWaterPipeDirectionFromTrainToPipe = Vector2Int.zero;
-        waterPipeAnimating = false;
         if (waterPipe.gameObject.activeSelf != active)
         {
             waterPipe.gameObject.SetActive(active);
         }
+    }
+
+    private void RefreshWaterPipeReceiverRegistration()
+    {
+        bool shouldRegister = waterPipeTargetActive
+                              && waterPipeTransferReady
+                              && waterPipeDockLockActive
+                              && activeWaterPipeDirectionFromTrainToPipe != Vector2Int.zero;
+        Vector2Int receiverCoordinate = shouldRegister
+            ? lockedWaterPipeDockCoordinate - activeWaterPipeDirectionFromTrainToPipe
+            : Vector2Int.zero;
+
+        if (waterPipeReceiverRegistered
+            && (!shouldRegister
+                || registeredWaterPipeReceiverCoordinate != receiverCoordinate
+                || registeredWaterPipeCoordinate != lockedWaterPipeDockCoordinate
+                || registeredWaterPipeDirectionFromTrainToPipe != activeWaterPipeDirectionFromTrainToPipe))
+        {
+            UnregisterWaterPipeReceiver();
+        }
+
+        if (shouldRegister && !waterPipeReceiverRegistered)
+        {
+            RegisterWaterPipeReceiver(receiverCoordinate);
+        }
+    }
+
+    private void RegisterWaterPipeReceiver(Vector2Int coordinate)
+    {
+        if (!WaterPipeReceiversByCoordinate.TryGetValue(
+                coordinate,
+                out List<SteamTrain> receivers))
+        {
+            receivers = new List<SteamTrain>(1);
+            WaterPipeReceiversByCoordinate.Add(coordinate, receivers);
+        }
+
+        int insertIndex = receivers.Count;
+        for (int i = 0; i < receivers.Count; i++)
+        {
+            SteamTrain existing = receivers[i];
+            if (existing == this)
+            {
+                waterPipeReceiverRegistered = true;
+                registeredWaterPipeReceiverCoordinate = coordinate;
+                registeredWaterPipeCoordinate = lockedWaterPipeDockCoordinate;
+                registeredWaterPipeDirectionFromTrainToPipe = activeWaterPipeDirectionFromTrainToPipe;
+                InputOutputModule.NotifyRuntimePipeTopologyChanged(null);
+                return;
+            }
+
+            if (existing == null || RuntimePlacementSequence < existing.RuntimePlacementSequence)
+            {
+                insertIndex = i;
+                break;
+            }
+        }
+
+        receivers.Insert(insertIndex, this);
+        waterPipeReceiverRegistered = true;
+        registeredWaterPipeReceiverCoordinate = coordinate;
+        registeredWaterPipeCoordinate = lockedWaterPipeDockCoordinate;
+        registeredWaterPipeDirectionFromTrainToPipe = activeWaterPipeDirectionFromTrainToPipe;
+        InputOutputModule.NotifyRuntimePipeTopologyChanged(null);
+    }
+
+    private void UnregisterWaterPipeReceiver()
+    {
+        Vector2Int coordinate = registeredWaterPipeReceiverCoordinate;
+        if (WaterPipeReceiversByCoordinate.TryGetValue(
+                coordinate,
+                out List<SteamTrain> receivers))
+        {
+            receivers.Remove(this);
+            if (receivers.Count <= 0)
+            {
+                WaterPipeReceiversByCoordinate.Remove(coordinate);
+            }
+        }
+
+        waterPipeReceiverRegistered = false;
+        registeredWaterPipeReceiverCoordinate = Vector2Int.zero;
+        registeredWaterPipeCoordinate = Vector2Int.zero;
+        registeredWaterPipeDirectionFromTrainToPipe = Vector2Int.zero;
+        InputOutputModule.NotifyRuntimePipeTopologyChanged(null);
     }
 
     private void UpdateWaterPipeVisual(float deltaTime)

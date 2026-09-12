@@ -685,6 +685,10 @@ public class Boiler : InputOutputModule
             SetStoredFluidTemperatureCelsius(waterTemperatureCelsius);
         }
 
+        RecordFluidNetworkConsumption(
+            inputItemId,
+            Mathf.Max(0f, acceptedLiters) * waterLitersPerSteamLiter);
+
         availableSteamOutputUnits = System.Math.Max(
             0L,
             availableSteamOutputUnits - DeterministicSimulationUnits.FromFloat(acceptedLiters));

@@ -22,6 +22,8 @@ $focus = Read-Source 'FactorioProject/Assets/Scripts/Character/Player/PlayerCont
 $playerHud = Read-Source 'FactorioProject/Assets/Scripts/HUD/PlayerHUD.cs'
 $objectInfoPanel = Read-Source 'FactorioProject/Assets/Scripts/HUD/ObjectUI/ObjectInfoPanel.cs'
 $underground = Read-Source 'FactorioProject/Assets/Scripts/Object/MapObj/InstallationObject/UndergroundPipe.cs'
+$inputOutput = Read-Source 'FactorioProject/Assets/Scripts/Object/MapObj/InstallationObject/InputOutputModule.cs'
+$steamTrain = Read-Source 'FactorioProject/Assets/Scripts/Object/MapObj/InstallationObject/Vehicle/SteamTrain.cs'
 
 Require-Text $pipeWorld 'private const string HostName = "PipeWorld";' 'all installed pipes share the PipeWorld host'
 Require-Text $pipeWorld 'Dictionary<Vector2Int, PipeRuntimeRecord> recordsByStorageKey' 'installed pipe state is data-only'
@@ -42,5 +44,13 @@ Require-Text $focus 'public bool TryGetFocusedPipe(out Pipe focusedPipe, out Blo
 Require-Text $playerHud 'PipeWorld.Current.TryGetMatchingAtCoordinate(' 'clicked pipe targets remain valid while their record exists'
 Require-Text $objectInfoPanel 'target is ConveyorBelt || target is Pipe ? focusBlock : null' 'pipe info panels retain the selected endpoint block'
 Require-Text $underground 'PipeWorld.Current.HasOverlappingUndergroundRoute' 'underground collision checks include data-only routes'
+Require-Text $pipeWorld 'InputOutputModule.NotifyRuntimePipeTopologyChanged(record.OccupiedCoordinates);' 'pipe record changes invalidate cached fluid routes'
+Require-Text $inputOutput 'foreach (InputOutputModule module in activeRuntimeModules)' 'pipe changes wake sleeping fluid producers across the changed network'
+Require-Text $inputOutput 'pipeRecord.HasConnectionTowardsAt(coordinate, direction)' 'fluid traversal uses data-only pipe connection rules'
+Require-Text $inputOutput 'pipeRecord.TryGetRemoteConnectionCoordinate(coordinate, out remoteCoordinate)' 'fluid traversal crosses data-only underground pipe endpoints'
+Require-Text $inputOutput 'SteamTrain.TryGetWaterPipeReceiverAtCoordinate(' 'fluid traversal resolves moving train water receivers outside Block.MapObject'
+Require-Text $steamTrain 'WaterPipeReceiversByCoordinate' 'ready train docks publish their current receiver coordinate'
+Require-Text $steamTrain 'InputOutputModule.NotifyRuntimePipeTopologyChanged(null);' 'train docking changes invalidate sleeping pump routes'
+Require-Text $steamTrain 'pipeRecord.HasConnectionTowardsAt(coordinate, direction)' 'train water-source search uses data-only pipe connection rules'
 
-Write-Output '19 pipe ECS integration checks passed.'
+Write-Output '27 pipe ECS integration checks passed.'

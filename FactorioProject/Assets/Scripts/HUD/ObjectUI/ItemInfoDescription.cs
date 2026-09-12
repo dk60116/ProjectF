@@ -255,7 +255,7 @@ public class ItemInfoDescription : MonoBehaviour
     {
         BeginObjectDisplay(underlyingResource);
 
-        float extractionLitersPerSecond = 0f;
+        float pressureLitersPerSecond = 0f;
         int fluidItemId = -1;
         float temperatureCelsius = MapClimate.CurrentTemperatureCelsius;
         bool hasFluid;
@@ -266,14 +266,14 @@ public class ItemInfoDescription : MonoBehaviour
                 focusedBlock.Coordinate,
                 out fluidItemId,
                 out temperatureCelsius,
-                out extractionLitersPerSecond);
+                out pressureLitersPerSecond);
         }
         else
         {
             hasFluid = pipe != null && pipe.TryGetObjectInfoFluidInfo(
                 out fluidItemId,
                 out temperatureCelsius,
-                out extractionLitersPerSecond);
+                out pressureLitersPerSecond);
         }
 
         if (hasFluid)
@@ -292,7 +292,7 @@ public class ItemInfoDescription : MonoBehaviour
         }
 
         SetDefaultText(defaultStatusLineIndex + 1,
-            $"Extraction: {FormatGaugeNumber(extractionLitersPerSecond, true)} L/s", true);
+            $"Pressure: {FormatGaugeNumber(pressureLitersPerSecond, true)} L/s", true);
         SetDefaultSign(defaultStatusLineIndex + 1, false, Color.white);
     }
 

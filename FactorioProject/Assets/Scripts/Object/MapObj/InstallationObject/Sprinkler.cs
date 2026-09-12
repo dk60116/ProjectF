@@ -280,7 +280,13 @@ public class Sprinkler : InputOutputModule
             }
         }
 
-        return remainingLiters <= WaterEpsilon;
+        bool consumedRequiredWater = remainingLiters <= WaterEpsilon;
+        if (consumedRequiredWater)
+        {
+            RecordFluidNetworkConsumption(waterItemId, requiredLiters);
+        }
+
+        return consumedRequiredWater;
     }
 
     protected override bool ShouldKeepRuntimeUpdateTickActive()

@@ -37,6 +37,15 @@ public class Pump : InputOutputModule
         return outputItemId >= 0;
     }
 
+    public override float GetObjectInfoFluidPressureLitersPerSecond(int fluidItemId)
+    {
+        return isActiveAndEnabled
+               && TryGetObjectInfoOutputRate(out int outputItemId, out float litersPerSecond)
+               && outputItemId == fluidItemId
+            ? Mathf.Max(0f, litersPerSecond)
+            : 0f;
+    }
+
     public override float GetStoredFluidTemperatureCelsius(int fluidItemId)
     {
         return fluidItemId >= 0 && fluidItemId == ResolveWaterItemId()
