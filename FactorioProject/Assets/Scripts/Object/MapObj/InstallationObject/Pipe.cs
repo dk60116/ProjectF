@@ -477,7 +477,12 @@ public class Pipe : InstallationObject
                     : pipe.TryGetRemoteConnectionCoordinate(coordinate, out remoteCoordinate));
             if (hasRemoteConnection)
             {
-                EnqueueObjectInfoFluidSearchCoordinate(remoteCoordinate, pipeDistance);
+                EnqueueObjectInfoFluidSearchCoordinate(
+                    remoteCoordinate,
+                    AddRemoteTraversalPipeDistance(
+                        pipeDistance,
+                        coordinate,
+                        remoteCoordinate));
             }
         }
 
@@ -632,6 +637,18 @@ public class Pipe : InstallationObject
     {
         remoteCoordinate = default;
         return false;
+    }
+
+    public static int AddRemoteTraversalPipeDistance(
+        int currentPipeDistance,
+        Vector2Int coordinate,
+        Vector2Int remoteCoordinate)
+    {
+        long installedLength = System.Math.Abs((long)remoteCoordinate.x - coordinate.x)
+                               + System.Math.Abs((long)remoteCoordinate.y - coordinate.y);
+        long totalDistance = System.Math.Max(0L, currentPipeDistance)
+                             + System.Math.Max(1L, installedLength);
+        return totalDistance >= int.MaxValue ? int.MaxValue : (int)totalDistance;
     }
 
     public int GetConnectionMask(Quaternion rotation)

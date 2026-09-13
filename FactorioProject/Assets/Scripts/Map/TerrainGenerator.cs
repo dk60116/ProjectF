@@ -10,7 +10,8 @@ using UnityEditor;
 public partial class TerrainGenerator : MonoBehaviour,
     IMapObjectUpdateTick,
     IMapObjectUpdateTickInterval,
-    IMapObjectSimulationIdentity
+    IMapObjectSimulationIdentity,
+    IMapObjectStagedUpdateTick
 {
     private const float MinOreBodyScaleRatioLimit = 0.5f;
     private const float MaxOreBodyScaleRatioLimit = 1f;
@@ -1099,24 +1100,53 @@ public partial class TerrainGenerator : MonoBehaviour,
         }
     }
 
+    private bool managedUpdateTickPlanned;
+
     public void ManagedUpdateTick(float deltaTime)
     {
+        PlanManagedUpdateTick(deltaTime);
+        ApplyManagedUpdateTick();
+    }
+
+    public void PlanManagedUpdateTick(float deltaTime)
+    {
+        managedUpdateTickPlanned = false;
         if (!Application.isPlaying || !hasGeneratedChunks || !worldReadyForPresentation)
         {
             return;
         }
 
-        TickFarmlandFertilizerAbsorption();
-        bool profileBeltTicks = RefreshBeltTickProfilerFrameState();
-        long beltJobsStart = profileBeltTicks ? MapObjectTickProfiler.BeginSample() : 0L;
-        TickManagedBeltSimulation();
-        if (profileBeltTicks)
+        managedUpdateTickPlanned = true;
+        ScheduleFluidSimulationShadow();
+    }
+
+    public void ApplyManagedUpdateTick()
+    {
+        if (!managedUpdateTickPlanned)
         {
-            MapObjectTickProfiler.EndNamedSample(
-                "Belt",
-                "BeltJobs",
-                "Belt Jobs Tick",
-                beltJobsStart);
+            CompleteFluidSimulationShadow();
+            return;
+        }
+
+        managedUpdateTickPlanned = false;
+        try
+        {
+            TickFarmlandFertilizerAbsorption();
+            bool profileBeltTicks = RefreshBeltTickProfilerFrameState();
+            long beltJobsStart = profileBeltTicks ? MapObjectTickProfiler.BeginSample() : 0L;
+            TickManagedBeltSimulation();
+            if (profileBeltTicks)
+            {
+                MapObjectTickProfiler.EndNamedSample(
+                    "Belt",
+                    "BeltJobs",
+                    "Belt Jobs Tick",
+                    beltJobsStart);
+            }
+        }
+        finally
+        {
+            CompleteFluidSimulationShadow();
         }
     }
 

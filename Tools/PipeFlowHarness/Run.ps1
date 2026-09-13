@@ -50,6 +50,7 @@ foreach ($signature in @(
     $generated += (Read-Member ($base + 'Pump.cs') $signature) + "`n"
 }
 $generated += "}`npublic partial class Pipe {`n"
+$generated += (Read-Member ($base + 'Pipe.cs') 'public static int AddRemoteTraversalPipeDistance(') + "`n"
 $generated += (Read-Member ($base + 'Pipe.cs') 'public bool TryGetObjectInfoFluidInfo(' 2) + "`n"
 $generated += (Read-Member ($base + 'Pipe.cs') 'internal bool TryGetObjectInfoFluidInfoAtCoordinate(') + "`n"
 foreach ($signature in @(
@@ -66,6 +67,8 @@ $steamGeneratorFile = $base + 'SteamGenerator.cs'
 Require-Text $boilerFile 'RecordFluidNetworkConsumption(' 'boiler reports actual water consumption to pipe pressure'
 Require-Text $sprinklerFile 'RecordFluidNetworkConsumption(' 'sprinkler reports actual water consumption to pipe pressure'
 Require-Text $steamGeneratorFile 'RecordFluidNetworkConsumption(' 'steam generator reports actual steam consumption to pipe pressure'
+Require-Text ($base + 'InputOutputModule.cs') 'Pipe.AddRemoteTraversalPipeDistance(' 'storage transport counts underground installed length'
+Require-Text ($base + 'Fluid tank.cs') 'Pipe.AddRemoteTraversalPipeDistance(' 'tank equalization counts underground installed length'
 $probeDir = Join-Path ([IO.Path]::GetTempPath()) ('ProjectF-PipeFlow-' + [Guid]::NewGuid().ToString('N'))
 New-Item -ItemType Directory -Path $probeDir | Out-Null
 Set-Content -LiteralPath (Join-Path $probeDir 'Production.cs') -Value $generated

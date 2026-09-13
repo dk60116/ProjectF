@@ -4379,6 +4379,7 @@ public partial class TerrainGenerator : MonoBehaviour
 
         RobotArmWorld.AppendProfilerCounters();
         PipeWorld.AppendProfilerCounters();
+        AppendFluidJobRuntimeProfilerCounters();
 
         GameManager gameManager = GameManager.Instance;
         MapObjectTickProfiler.AddRuntimeCounter("RenderToggles", "HideBelts", gameManager != null && gameManager.HideBelts);

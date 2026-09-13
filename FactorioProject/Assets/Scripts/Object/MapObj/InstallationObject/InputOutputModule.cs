@@ -2380,7 +2380,10 @@ public class InputOutputModule : InstallationObject,
             {
                 EnqueueConnectedFluidSearchCoordinate(
                     remoteCoordinate,
-                    connectedFluidSearchCurrentPipeCount);
+                    Pipe.AddRemoteTraversalPipeDistance(
+                        connectedFluidSearchCurrentPipeCount,
+                        coordinate,
+                        remoteCoordinate));
             }
         }
 
@@ -6350,7 +6353,10 @@ public class InputOutputModule : InstallationObject,
             {
                 EnqueueConnectedFluidSearchCoordinate(
                     remoteCoordinate,
-                    connectedFluidSearchCurrentPipeCount);
+                    Pipe.AddRemoteTraversalPipeDistance(
+                        connectedFluidSearchCurrentPipeCount,
+                        coordinate,
+                        remoteCoordinate));
             }
         }
 

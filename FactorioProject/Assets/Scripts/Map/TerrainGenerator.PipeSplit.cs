@@ -258,6 +258,7 @@ public partial class TerrainGenerator
 
     private void ClearPipeSplitState()
     {
+        ClearFluidSimulationJobState();
         ReleasePipeSplitMeshes();
         pipeSplitRecords.Clear();
         pipeSplitIndices.Clear();

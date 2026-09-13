@@ -1476,9 +1476,7 @@ internal sealed class ProfilerForm : Form
         }
 
         RefreshSnapshotTextWindow();
-        snapshotTextForm.Show(this);
-        snapshotTextForm.BringToFront();
-        snapshotTextForm.Focus();
+        ShowOrActivateToolWindow(snapshotTextForm);
         AppendLog("Profile snapshot opened in text window");
     }
 
@@ -1508,10 +1506,23 @@ internal sealed class ProfilerForm : Form
         }
 
         RefreshBeltTickWindow();
-        snapshotBeltTickForm.Show(this);
-        snapshotBeltTickForm.BringToFront();
-        snapshotBeltTickForm.Focus();
+        ShowOrActivateToolWindow(snapshotBeltTickForm);
         AppendLog("Belt tick profile opened in graph window");
+    }
+
+    private void ShowOrActivateToolWindow(Form toolWindow)
+    {
+        if (!toolWindow.Visible)
+        {
+            toolWindow.Show(this);
+        }
+        else if (toolWindow.WindowState == FormWindowState.Minimized)
+        {
+            toolWindow.WindowState = FormWindowState.Normal;
+        }
+
+        toolWindow.BringToFront();
+        toolWindow.Activate();
     }
 
     private void RefreshBeltTickWindow()

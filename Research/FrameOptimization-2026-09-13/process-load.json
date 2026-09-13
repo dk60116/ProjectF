@@ -1,0 +1,90 @@
+{
+  "WallMs": 21470.4194,
+  "ProcessCorePercent": 173.13064224539556,
+  "TopThreads": [
+    {
+      "Id": 567032,
+      "CorePercent": 97.51789012561161,
+      "Name": "unavailable"
+    },
+    {
+      "Id": 568680,
+      "CorePercent": 16.883694409807383,
+      "Name": "unavailable"
+    },
+    {
+      "Id": 574876,
+      "CorePercent": 7.49577812159552,
+      "Name": "unavailable"
+    },
+    {
+      "Id": 573648,
+      "CorePercent": 7.2046799421160825,
+      "Name": "unavailable"
+    },
+    {
+      "Id": 575640,
+      "CorePercent": 6.695258128027066,
+      "Name": "unavailable"
+    },
+    {
+      "Id": 565444,
+      "CorePercent": 6.622483583157207,
+      "Name": "unavailable"
+    },
+    {
+      "Id": 573396,
+      "CorePercent": 5.094218140890159,
+      "Name": "unavailable"
+    },
+    {
+      "Id": 575740,
+      "CorePercent": 4.075374512712127,
+      "Name": "unavailable"
+    },
+    {
+      "Id": 575556,
+      "CorePercent": 4.002599967842268,
+      "Name": "unavailable"
+    },
+    {
+      "Id": 576220,
+      "CorePercent": 2.8382072499245172,
+      "Name": "unavailable"
+    }
+  ],
+  "GameGpu3D": [
+    {
+      "Name": "pid_571032_luid_0x00000000_0x000144E1_phys_0_eng_0_engtype_3D",
+      "UtilizationPercentage": 46
+    },
+    {
+      "Name": "pid_571032_luid_0x00000000_0x000144E1_phys_0_eng_0_engtype_3D",
+      "UtilizationPercentage": 52
+    },
+    {
+      "Name": "pid_571032_luid_0x00000000_0x000144E1_phys_0_eng_0_engtype_3D",
+      "UtilizationPercentage": 53
+    },
+    {
+      "Name": "pid_571032_luid_0x00000000_0x000144E1_phys_0_eng_0_engtype_3D",
+      "UtilizationPercentage": 40
+    },
+    {
+      "Name": "pid_571032_luid_0x00000000_0x000144E1_phys_0_eng_0_engtype_3D",
+      "UtilizationPercentage": 48
+    },
+    {
+      "Name": "pid_571032_luid_0x00000000_0x000144E1_phys_0_eng_0_engtype_3D",
+      "UtilizationPercentage": 45
+    },
+    {
+      "Name": "pid_571032_luid_0x00000000_0x000144E1_phys_0_eng_0_engtype_3D",
+      "UtilizationPercentage": 25
+    },
+    {
+      "Name": "pid_571032_luid_0x00000000_0x000144E1_phys_0_eng_0_engtype_3D",
+      "UtilizationPercentage": 49
+    }
+  ]
+}

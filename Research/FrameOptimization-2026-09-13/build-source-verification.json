@@ -1,0 +1,54 @@
+[
+  {
+    "Path": "C:\\Git\\ProjectF\\FactorioProject\\Assets\\Scripts\\Map\\TerrainGenerator.Conveyors.cs",
+    "Equal": true
+  },
+  {
+    "Path": "C:\\Git\\ProjectF\\FactorioProject\\Assets\\Scripts\\Map\\TerrainGenerator.FluidJobs.cs",
+    "Equal": true
+  },
+  {
+    "Path": "C:\\Git\\ProjectF\\FactorioProject\\Assets\\Scripts\\Manager\\GameManager.cs",
+    "Equal": true
+  },
+  {
+    "Path": "C:\\Git\\ProjectF\\FactorioProject\\Assets\\Scripts\\Manager\\MapObjectTickManager.cs",
+    "Equal": true
+  },
+  {
+    "Path": "C:\\Git\\ProjectF\\FactorioProject\\Assets\\Scripts\\Map\\PipeWorld.cs",
+    "Equal": true
+  },
+  {
+    "Path": "C:\\Git\\ProjectF\\FactorioProject\\Assets\\Scripts\\Map\\PortableItemRenderer.cs",
+    "Equal": true
+  },
+  {
+    "Path": "C:\\Git\\ProjectF\\FactorioProject\\Assets\\Scripts\\Map\\ResourceBatchRenderer.cs",
+    "Equal": true
+  },
+  {
+    "Path": "C:\\Git\\ProjectF\\FactorioProject\\Assets\\Scripts\\Map\\RobotArmWorld.cs",
+    "Equal": true
+  },
+  {
+    "Path": "C:\\Git\\ProjectF\\FactorioProject\\Assets\\Scripts\\Object\\Animal\\AnimalAIWorld.cs",
+    "Equal": true
+  },
+  {
+    "Path": "C:\\Git\\ProjectF\\FactorioProject\\Assets\\Scripts\\Object\\MapObj\\InstallationObject\\InputOutputModule.cs",
+    "Equal": true
+  },
+  {
+    "Path": "C:\\Git\\ProjectF\\FactorioProject\\Assets\\Scripts\\Object\\MapObj\\InstallationObject\\MiningMachine.cs",
+    "Equal": true
+  },
+  {
+    "Path": "C:\\Git\\ProjectF\\FactorioProject\\Assets\\Scripts\\Object\\MapObj\\InstallationObject\\RobotArm.cs",
+    "Equal": true
+  },
+  {
+    "Path": "C:\\Git\\ProjectF\\FactorioProject\\Assets\\Scripts\\Rendering\\TerrainWorldRenderer.cs",
+    "Equal": true
+  }
+]

@@ -1,0 +1,2400 @@
+{
+  "enabled": true,
+  "frame": 19797,
+  "windowMs": 384.338,
+  "activeUpdateTicks": 99,
+  "activeBeltTicks": 0,
+  "activeBeltDataMotions": 0,
+  "activeBeltVisualTicks": 0,
+  "beltLoopProfileFrames": 21,
+  "beltItemLoopIterations": 0,
+  "beltDataMotionLoopIterations": 0,
+  "beltActiveLoopIterations": 0,
+  "beltStraightLineBlockLoopIterations": 0,
+  "beltVisualLoopIterations": 0,
+  "beltTryMoveAttempts": 0,
+  "beltTryMoveSuccesses": 0,
+  "beltStraightMoveAttempts": 0,
+  "beltStraightMoveSuccesses": 0,
+  "beltPlanMoveCalls": 0,
+  "beltPlannedMoveApplications": 0,
+  "beltTouchedBlockRefreshes": 0,
+  "beltWakeAroundCalls": 0,
+  "beltActivityRefreshCalls": 1.905,
+  "runtimeCounterCount": 271,
+  "runtimeCounters": [
+    {
+      "group": "Frame",
+      "name": "Fps",
+      "value": "60.173",
+      "note": ""
+    },
+    {
+      "group": "Frame",
+      "name": "FrameMs",
+      "value": "16.619",
+      "note": ""
+    },
+    {
+      "group": "Frame",
+      "name": "UnscaledDeltaMs",
+      "value": "15.969",
+      "note": ""
+    },
+    {
+      "group": "Frame",
+      "name": "SmoothDeltaMs",
+      "value": "15.799",
+      "note": ""
+    },
+    {
+      "group": "Frame",
+      "name": "TimeScale",
+      "value": "1",
+      "note": ""
+    },
+    {
+      "group": "Frame",
+      "name": "TargetFrameRate",
+      "value": "-1",
+      "note": ""
+    },
+    {
+      "group": "Frame",
+      "name": "VSyncCount",
+      "value": "0",
+      "note": ""
+    },
+    {
+      "group": "Frame",
+      "name": "ScreenRefreshRate",
+      "value": "59.94",
+      "note": ""
+    },
+    {
+      "group": "Frame",
+      "name": "IsEditor",
+      "value": "0",
+      "note": ""
+    },
+    {
+      "group": "Simulation",
+      "name": "Ups",
+      "value": "59.717",
+      "note": "Completed fixed simulation ticks per unscaled real second."
+    },
+    {
+      "group": "Simulation",
+      "name": "TargetUps",
+      "value": "60",
+      "note": ""
+    },
+    {
+      "group": "Simulation",
+      "name": "WaitingForWorldLoad",
+      "value": "0",
+      "note": "Fixed ticks resume after all queued chunks and world restoration finish; loading time is discarded."
+    },
+    {
+      "group": "Simulation",
+      "name": "BacklogTicks",
+      "value": "0.527",
+      "note": "Unprocessed fixed ticks accumulated by the render-driven scheduler."
+    },
+    {
+      "group": "Simulation",
+      "name": "TicksLastFrame",
+      "value": "1",
+      "note": ""
+    },
+    {
+      "group": "Simulation",
+      "name": "MaxTicksPerFrame",
+      "value": "8",
+      "note": ""
+    },
+    {
+      "group": "Simulation",
+      "name": "Tick",
+      "value": "935755",
+      "note": ""
+    },
+    {
+      "group": "FrameTiming",
+      "name": "Samples",
+      "value": "0",
+      "note": ""
+    },
+    {
+      "group": "FrameTiming",
+      "name": "CpuFrameMs",
+      "value": "n/a",
+      "note": ""
+    },
+    {
+      "group": "FrameTiming",
+      "name": "CpuMainThreadMs",
+      "value": "n/a",
+      "note": ""
+    },
+    {
+      "group": "FrameTiming",
+      "name": "CpuRenderThreadMs",
+      "value": "n/a",
+      "note": ""
+    },
+    {
+      "group": "FrameTiming",
+      "name": "CpuPresentWaitMs",
+      "value": "n/a",
+      "note": ""
+    },
+    {
+      "group": "FrameTiming",
+      "name": "GpuFrameMs",
+      "value": "n/a",
+      "note": ""
+    },
+    {
+      "group": "Memory",
+      "name": "ManagedHeapMB",
+      "value": "298.406",
+      "note": ""
+    },
+    {
+      "group": "Memory",
+      "name": "UnityAllocatedMB",
+      "value": "282.192",
+      "note": ""
+    },
+    {
+      "group": "Memory",
+      "name": "UnityReservedMB",
+      "value": "393.902",
+      "note": ""
+    },
+    {
+      "group": "Memory",
+      "name": "UnityUnusedReservedMB",
+      "value": "111.711",
+      "note": ""
+    },
+    {
+      "group": "GC",
+      "name": "Gen0Total",
+      "value": "274",
+      "note": ""
+    },
+    {
+      "group": "GC",
+      "name": "Gen1Total",
+      "value": "274",
+      "note": ""
+    },
+    {
+      "group": "GC",
+      "name": "Gen2Total",
+      "value": "274",
+      "note": ""
+    },
+    {
+      "group": "GC",
+      "name": "Gen0Delta",
+      "value": "0",
+      "note": ""
+    },
+    {
+      "group": "GC",
+      "name": "Gen1Delta",
+      "value": "0",
+      "note": ""
+    },
+    {
+      "group": "GC",
+      "name": "Gen2Delta",
+      "value": "0",
+      "note": ""
+    },
+    {
+      "group": "ProfilerRecorder",
+      "name": "AvailableCounters",
+      "value": "217",
+      "note": ""
+    },
+    {
+      "group": "ProfilerRecorder",
+      "name": "ActiveRecorders",
+      "value": "11",
+      "note": ""
+    },
+    {
+      "group": "ProfilerRecorder",
+      "name": "MissingRecorders",
+      "value": "6",
+      "note": ""
+    },
+    {
+      "group": "ProfilerRecorder",
+      "name": "RelevantAvailable",
+      "value": "VSync/WaitForTargetFPS, Internal/Main Thread, Render/FrameTime.GPU, GC/GC.Collect, Render/Gfx.WaitForRenderThread, Render/Gfx.WaitForPresentOnGfxThread, Memory/System Used Memory, Memory/System Total Used Memory, Memory/App Resident Memory, Memory/App Committed Memory, Memory/Total Used Memory, Memory/Total Reserved Memory, Memory/GC Used Memory...",
+      "note": ""
+    },
+    {
+      "group": "ProfilerCPU",
+      "name": "MainThreadMs",
+      "value": "19.251",
+      "note": "last=15.968 samples=82 source=Internal/Main Thread"
+    },
+    {
+      "group": "ProfilerCPU",
+      "name": "WaitForTargetFpsMs",
+      "value": "0",
+      "note": "last=0 samples=82 source=VSync/WaitForTargetFPS"
+    },
+    {
+      "group": "ProfilerCPU",
+      "name": "GfxWaitForPresentMs",
+      "value": "0.002",
+      "note": "last=0.003 samples=82 source=Render/Gfx.WaitForPresentOnGfxThread"
+    },
+    {
+      "group": "ProfilerGPU",
+      "name": "FrameGpuMs",
+      "value": "0",
+      "note": "last=0 samples=81 source=Render/FrameTime.GPU"
+    },
+    {
+      "group": "ProfilerRender",
+      "name": "SetPassCalls",
+      "value": "90",
+      "note": "last=90 samples=82 source=Render/SetPass Calls Count"
+    },
+    {
+      "group": "ProfilerRender",
+      "name": "Triangles",
+      "value": "1055377.049",
+      "note": "last=1055383 samples=82 source=Render/Triangles Count"
+    },
+    {
+      "group": "ProfilerRender",
+      "name": "Vertices",
+      "value": "1636895.098",
+      "note": "last=1636907 samples=82 source=Render/Vertices Count"
+    },
+    {
+      "group": "ProfilerRender",
+      "name": "ShadowCasters",
+      "value": "159.512",
+      "note": "last=160 samples=82 source=Render/Shadow Casters Count"
+    },
+    {
+      "group": "ProfilerGC",
+      "name": "GcCollectMs",
+      "value": "0",
+      "note": "last=0 samples=82 source=GC/GC.Collect"
+    },
+    {
+      "group": "ProfilerMemory",
+      "name": "GcUsedMB",
+      "value": "295.541",
+      "note": "last=298.406 samples=82 source=Memory/GC Used Memory"
+    },
+    {
+      "group": "ProfilerMemory",
+      "name": "TotalUsedMB",
+      "value": "578.546",
+      "note": "last=581.353 samples=82 source=Memory/Total Used Memory"
+    },
+    {
+      "group": "RenderStats",
+      "name": "EditorStats",
+      "value": "unavailable",
+      "note": "UNITY_EDITOR only"
+    },
+    {
+      "group": "ResourceWorld",
+      "name": "TypeGameObjects",
+      "value": "9",
+      "note": ""
+    },
+    {
+      "group": "ResourceWorld",
+      "name": "ResourceInstances",
+      "value": "17560",
+      "note": ""
+    },
+    {
+      "group": "ResourceWorld",
+      "name": "RemainingResourceUnits",
+      "value": "1889434",
+      "note": ""
+    },
+    {
+      "group": "World",
+      "name": "LoadedChunks",
+      "value": "1310",
+      "note": ""
+    },
+    {
+      "group": "World",
+      "name": "ChunkGameObjects",
+      "value": "64",
+      "note": ""
+    },
+    {
+      "group": "World",
+      "name": "DedicatedBlockGameObjects",
+      "value": "0",
+      "note": ""
+    },
+    {
+      "group": "World",
+      "name": "BlockHostGameObjects",
+      "value": "1",
+      "note": ""
+    },
+    {
+      "group": "World",
+      "name": "BlockComponents",
+      "value": "34656",
+      "note": ""
+    },
+    {
+      "group": "World",
+      "name": "ChunkSurfaceMeshes",
+      "value": "1310",
+      "note": ""
+    },
+    {
+      "group": "World",
+      "name": "LoadedBlocks",
+      "value": "34656",
+      "note": ""
+    },
+    {
+      "group": "World",
+      "name": "BlockSimulationStates",
+      "value": "21598",
+      "note": ""
+    },
+    {
+      "group": "World",
+      "name": "RegisteredBlockCells",
+      "value": "83840",
+      "note": ""
+    },
+    {
+      "group": "World",
+      "name": "DataOnlyBlockCells",
+      "value": "49184",
+      "note": ""
+    },
+    {
+      "group": "World",
+      "name": "BlockDataChunks",
+      "value": "1310",
+      "note": ""
+    },
+    {
+      "group": "World",
+      "name": "LoadedMapObjects",
+      "value": "19910",
+      "note": ""
+    },
+    {
+      "group": "World",
+      "name": "LoadedInstallations",
+      "value": "2462",
+      "note": ""
+    },
+    {
+      "group": "World",
+      "name": "LoadedConveyorBelts",
+      "value": "1701",
+      "note": ""
+    },
+    {
+      "group": "View",
+      "name": "ActiveBlockRoots",
+      "value": "1",
+      "note": ""
+    },
+    {
+      "group": "View",
+      "name": "InactiveBlockRoots",
+      "value": "0",
+      "note": ""
+    },
+    {
+      "group": "View",
+      "name": "ActiveMapObjectRoots",
+      "value": "763",
+      "note": ""
+    },
+    {
+      "group": "View",
+      "name": "InactiveMapObjectRoots",
+      "value": "1708",
+      "note": ""
+    },
+    {
+      "group": "View",
+      "name": "ActiveBeltRoots",
+      "value": "0",
+      "note": ""
+    },
+    {
+      "group": "View",
+      "name": "InactiveBeltRoots",
+      "value": "1701",
+      "note": ""
+    },
+    {
+      "group": "View",
+      "name": "SuspendedBeltRoots",
+      "value": "0",
+      "note": ""
+    },
+    {
+      "group": "View",
+      "name": "MapObjectTransforms",
+      "value": "27708",
+      "note": ""
+    },
+    {
+      "group": "View",
+      "name": "ActiveMapObjectTransforms",
+      "value": "4850",
+      "note": ""
+    },
+    {
+      "group": "View",
+      "name": "InactiveMapObjectTransforms",
+      "value": "22858",
+      "note": ""
+    },
+    {
+      "group": "View",
+      "name": "BeltTransforms",
+      "value": "22823",
+      "note": ""
+    },
+    {
+      "group": "View",
+      "name": "ActiveBeltTransforms",
+      "value": "0",
+      "note": ""
+    },
+    {
+      "group": "View",
+      "name": "InactiveBeltTransforms",
+      "value": "22823",
+      "note": ""
+    },
+    {
+      "group": "Render",
+      "name": "MapObjectRenderers",
+      "value": "21981",
+      "note": ""
+    },
+    {
+      "group": "Render",
+      "name": "EnabledMapObjectRenderers",
+      "value": "21680",
+      "note": ""
+    },
+    {
+      "group": "Render",
+      "name": "ActiveEnabledMapObjectRenderers",
+      "value": "2713",
+      "note": ""
+    },
+    {
+      "group": "Render",
+      "name": "DisabledMapObjectRenderers",
+      "value": "301",
+      "note": ""
+    },
+    {
+      "group": "Render",
+      "name": "BeltRenderers",
+      "value": "18946",
+      "note": ""
+    },
+    {
+      "group": "Render",
+      "name": "EnabledBeltRenderers",
+      "value": "18946",
+      "note": ""
+    },
+    {
+      "group": "Render",
+      "name": "ActiveEnabledBeltRenderers",
+      "value": "0",
+      "note": ""
+    },
+    {
+      "group": "Render",
+      "name": "DisabledBeltRenderers",
+      "value": "0",
+      "note": ""
+    },
+    {
+      "group": "RobotArmWorld",
+      "name": "GameObjects",
+      "value": "1",
+      "note": ""
+    },
+    {
+      "group": "RobotArmWorld",
+      "name": "MonoBehaviours",
+      "value": "1",
+      "note": ""
+    },
+    {
+      "group": "RobotArmWorld",
+      "name": "Entities",
+      "value": "200",
+      "note": ""
+    },
+    {
+      "group": "RobotArmWorld",
+      "name": "Visible",
+      "value": "19",
+      "note": ""
+    },
+    {
+      "group": "RobotArmWorld",
+      "name": "Matrices",
+      "value": "145",
+      "note": ""
+    },
+    {
+      "group": "RobotArmTargetCache",
+      "name": "BlockHits",
+      "value": "75083",
+      "note": ""
+    },
+    {
+      "group": "RobotArmTargetCache",
+      "name": "BlockMisses",
+      "value": "284",
+      "note": ""
+    },
+    {
+      "group": "RobotArmTargetCache",
+      "name": "TargetHits",
+      "value": "75010",
+      "note": ""
+    },
+    {
+      "group": "RobotArmTargetCache",
+      "name": "TargetMisses",
+      "value": "335",
+      "note": ""
+    },
+    {
+      "group": "RobotArmTargetCache",
+      "name": "FreightHits",
+      "value": "74958",
+      "note": ""
+    },
+    {
+      "group": "RobotArmTargetCache",
+      "name": "FreightMisses",
+      "value": "398",
+      "note": ""
+    },
+    {
+      "group": "RobotArmPower",
+      "name": "Bindings",
+      "value": "200",
+      "note": ""
+    },
+    {
+      "group": "RobotArmPower",
+      "name": "SingleNetworkBindings",
+      "value": "200",
+      "note": "Common path resolves without scanning candidate networks."
+    },
+    {
+      "group": "RobotArmPower",
+      "name": "BindingCacheHits",
+      "value": "170665",
+      "note": ""
+    },
+    {
+      "group": "RobotArmPower",
+      "name": "BindingCacheMisses",
+      "value": "0",
+      "note": ""
+    },
+    {
+      "group": "PipeWorld",
+      "name": "GameObjects",
+      "value": "1",
+      "note": ""
+    },
+    {
+      "group": "PipeWorld",
+      "name": "MonoBehaviours",
+      "value": "1",
+      "note": ""
+    },
+    {
+      "group": "PipeWorld",
+      "name": "Entities",
+      "value": "69",
+      "note": ""
+    },
+    {
+      "group": "PipeWorld",
+      "name": "BodyMatrices",
+      "value": "260",
+      "note": ""
+    },
+    {
+      "group": "PipeWorld",
+      "name": "FluidMatrices",
+      "value": "70",
+      "note": ""
+    },
+    {
+      "group": "PipeWorld",
+      "name": "EstimatedDrawCalls",
+      "value": "92",
+      "note": ""
+    },
+    {
+      "group": "FluidJobs",
+      "name": "ShadowMode",
+      "value": "1",
+      "note": ""
+    },
+    {
+      "group": "FluidJobs",
+      "name": "Authoritative",
+      "value": "0",
+      "note": ""
+    },
+    {
+      "group": "FluidJobs",
+      "name": "Networks",
+      "value": "10",
+      "note": ""
+    },
+    {
+      "group": "FluidJobs",
+      "name": "Pipes",
+      "value": "69",
+      "note": ""
+    },
+    {
+      "group": "FluidJobs",
+      "name": "Edges",
+      "value": "120",
+      "note": ""
+    },
+    {
+      "group": "FluidJobs",
+      "name": "TopologyRebuilds",
+      "value": "1",
+      "note": ""
+    },
+    {
+      "group": "FluidJobs",
+      "name": "LastCompletedTick",
+      "value": "935755",
+      "note": ""
+    },
+    {
+      "group": "FluidJobs",
+      "name": "Checksum",
+      "value": "727FAB7CB94084EC",
+      "note": ""
+    },
+    {
+      "group": "RenderToggles",
+      "name": "HideBelts",
+      "value": "0",
+      "note": ""
+    },
+    {
+      "group": "RenderToggles",
+      "name": "HideBeltItems",
+      "value": "0",
+      "note": ""
+    },
+    {
+      "group": "RenderToggles",
+      "name": "DisableCameraCulling",
+      "value": "0",
+      "note": ""
+    },
+    {
+      "group": "RenderToggles",
+      "name": "FreeCameraPlayerCulling",
+      "value": "0",
+      "note": ""
+    },
+    {
+      "group": "Render",
+      "name": "RenderedChunkSurfaces",
+      "value": "40",
+      "note": ""
+    },
+    {
+      "group": "Render",
+      "name": "CulledChunkSurfaces",
+      "value": "1270",
+      "note": ""
+    },
+    {
+      "group": "Physics",
+      "name": "MapObjectColliders",
+      "value": "15698",
+      "note": ""
+    },
+    {
+      "group": "Physics",
+      "name": "EnabledMapObjectColliders",
+      "value": "15698",
+      "note": ""
+    },
+    {
+      "group": "Physics",
+      "name": "DisabledMapObjectColliders",
+      "value": "0",
+      "note": ""
+    },
+    {
+      "group": "Physics",
+      "name": "BeltColliders",
+      "value": "68",
+      "note": ""
+    },
+    {
+      "group": "Physics",
+      "name": "EnabledBeltColliders",
+      "value": "68",
+      "note": ""
+    },
+    {
+      "group": "Conveyor",
+      "name": "LoadedConveyorItems",
+      "value": "3027",
+      "note": ""
+    },
+    {
+      "group": "Conveyor",
+      "name": "TotalConveyorItems",
+      "value": "3027",
+      "note": ""
+    },
+    {
+      "group": "Conveyor",
+      "name": "ActiveConveyors",
+      "value": "0",
+      "note": ""
+    },
+    {
+      "group": "Conveyor",
+      "name": "DataMotionBlocks",
+      "value": "0",
+      "note": ""
+    },
+    {
+      "group": "Conveyor",
+      "name": "ItemVisualBlocks",
+      "value": "1502",
+      "note": ""
+    },
+    {
+      "group": "Conveyor",
+      "name": "DirtyItemVisualBlocks",
+      "value": "0",
+      "note": ""
+    },
+    {
+      "group": "Conveyor",
+      "name": "DynamicItemVisualBlocks",
+      "value": "114",
+      "note": ""
+    },
+    {
+      "group": "Conveyor",
+      "name": "SlotDotVisualBlocks",
+      "value": "0",
+      "note": ""
+    },
+    {
+      "group": "Conveyor",
+      "name": "DirectionVisualBlocks",
+      "value": "0",
+      "note": ""
+    },
+    {
+      "group": "ConveyorItemRender",
+      "name": "ItemBatchCellSize",
+      "value": "64",
+      "note": ""
+    },
+    {
+      "group": "ConveyorItemRender",
+      "name": "PortableBrgBatches",
+      "value": "0",
+      "note": ""
+    },
+    {
+      "group": "ConveyorItemRender",
+      "name": "StaticBatches",
+      "value": "3",
+      "note": ""
+    },
+    {
+      "group": "ConveyorItemRender",
+      "name": "StaticBrgBatches",
+      "value": "0",
+      "note": ""
+    },
+    {
+      "group": "ConveyorItemRender",
+      "name": "StaticInstances",
+      "value": "117",
+      "note": ""
+    },
+    {
+      "group": "ConveyorItemRender",
+      "name": "GpuMotionInstances",
+      "value": "0",
+      "note": ""
+    },
+    {
+      "group": "ConveyorItemRender",
+      "name": "StaticDrawCalls",
+      "value": "3",
+      "note": ""
+    },
+    {
+      "group": "ConveyorItemRender",
+      "name": "DynamicBatches",
+      "value": "3",
+      "note": ""
+    },
+    {
+      "group": "ConveyorItemRender",
+      "name": "DynamicBrgBatches",
+      "value": "0",
+      "note": ""
+    },
+    {
+      "group": "ConveyorItemRender",
+      "name": "DynamicInstances",
+      "value": "63",
+      "note": ""
+    },
+    {
+      "group": "ConveyorItemRender",
+      "name": "DynamicDrawCalls",
+      "value": "3",
+      "note": ""
+    },
+    {
+      "group": "ConveyorItemRender",
+      "name": "ActiveRenderBlocks",
+      "value": "1502",
+      "note": ""
+    },
+    {
+      "group": "ConveyorItemRender",
+      "name": "DynamicRenderBlocks",
+      "value": "114",
+      "note": ""
+    },
+    {
+      "group": "ConveyorItemRender",
+      "name": "DirtyRenderBlocks",
+      "value": "0",
+      "note": ""
+    },
+    {
+      "group": "ConveyorItemRender",
+      "name": "CachedRenderBlocks",
+      "value": "1388",
+      "note": ""
+    },
+    {
+      "group": "ConveyorItemRender",
+      "name": "DeferredOffscreenBlocks",
+      "value": "1332",
+      "note": ""
+    },
+    {
+      "group": "ConveyorItemRender",
+      "name": "StaticCacheRebuilds",
+      "value": "0",
+      "note": ""
+    },
+    {
+      "group": "ConveyorItemRender",
+      "name": "CachedDynamicRenderBlocks",
+      "value": "33",
+      "note": ""
+    },
+    {
+      "group": "ConveyorItemRender",
+      "name": "CachedItemRenderAssets",
+      "value": "3",
+      "note": ""
+    },
+    {
+      "group": "ConveyorItemRender",
+      "name": "DynamicCullSourceBlocks",
+      "value": "114",
+      "note": ""
+    },
+    {
+      "group": "ConveyorItemRender",
+      "name": "DynamicCullCandidateBlocks",
+      "value": "33",
+      "note": ""
+    },
+    {
+      "group": "ConveyorItemRender",
+      "name": "DynamicCullCacheRefreshes",
+      "value": "0",
+      "note": ""
+    },
+    {
+      "group": "ConveyorItemRender",
+      "name": "DynamicCullCachedBlocks",
+      "value": "33",
+      "note": ""
+    },
+    {
+      "group": "ConveyorItemRender",
+      "name": "DynamicCullSourceChunks",
+      "value": "30",
+      "note": ""
+    },
+    {
+      "group": "ConveyorItemRender",
+      "name": "DynamicCullVisibleChunks",
+      "value": "6",
+      "note": ""
+    },
+    {
+      "group": "ConveyorItemRender",
+      "name": "DynamicCullLayerSkippedBlocks",
+      "value": "0",
+      "note": ""
+    },
+    {
+      "group": "ConveyorItemRender",
+      "name": "DynamicCullFrustumSkippedBlocks",
+      "value": "81",
+      "note": ""
+    },
+    {
+      "group": "ConveyorItemRender",
+      "name": "DynamicCullPassedBlocks",
+      "value": "33",
+      "note": ""
+    },
+    {
+      "group": "ConveyorItemRender",
+      "name": "DynamicRenderedItems",
+      "value": "63",
+      "note": ""
+    },
+    {
+      "group": "ConveyorItemRender",
+      "name": "DynamicKeyCacheHits",
+      "value": "63",
+      "note": ""
+    },
+    {
+      "group": "ConveyorItemRender",
+      "name": "DynamicKeyCacheMisses",
+      "value": "0",
+      "note": ""
+    },
+    {
+      "group": "ConveyorItemRender",
+      "name": "DynamicKeyRebuilds",
+      "value": "0",
+      "note": ""
+    },
+    {
+      "group": "ConveyorItemRender",
+      "name": "DynamicMatrixUpdates",
+      "value": "63",
+      "note": ""
+    },
+    {
+      "group": "ConveyorItemRender",
+      "name": "DynamicMatrixRebuilds",
+      "value": "0",
+      "note": ""
+    },
+    {
+      "group": "ConveyorItemRender",
+      "name": "DynamicTransformJobItems",
+      "value": "63",
+      "note": ""
+    },
+    {
+      "group": "ConveyorItemRender",
+      "name": "DynamicTransformJobScheduled",
+      "value": "0",
+      "note": ""
+    },
+    {
+      "group": "ConveyorItemRender",
+      "name": "MembershipChanges",
+      "value": "0",
+      "note": ""
+    },
+    {
+      "group": "ConveyorItemRender",
+      "name": "DynamicMembershipChanges",
+      "value": "0",
+      "note": ""
+    },
+    {
+      "group": "ConveyorItemRender",
+      "name": "DynamicCullBoundsSize",
+      "value": "2.25",
+      "note": ""
+    },
+    {
+      "group": "ConveyorItemRender",
+      "name": "DynamicCullBoundsHeight",
+      "value": "2.5",
+      "note": ""
+    },
+    {
+      "group": "ConveyorLoad",
+      "name": "SavedBlocks",
+      "value": "1434",
+      "note": ""
+    },
+    {
+      "group": "ConveyorLoad",
+      "name": "SavedLanes",
+      "value": "2877",
+      "note": ""
+    },
+    {
+      "group": "ConveyorLoad",
+      "name": "LoadedBlocks",
+      "value": "1434",
+      "note": ""
+    },
+    {
+      "group": "ConveyorLoad",
+      "name": "PendingBlocks",
+      "value": "0",
+      "note": ""
+    },
+    {
+      "group": "ConveyorLoad",
+      "name": "PendingLanes",
+      "value": "0",
+      "note": ""
+    },
+    {
+      "group": "ConveyorLoad",
+      "name": "NotRuntimeBlocks",
+      "value": "0",
+      "note": ""
+    },
+    {
+      "group": "ConveyorLoad",
+      "name": "ZeroLaneBlocks",
+      "value": "0",
+      "note": ""
+    },
+    {
+      "group": "ConveyorLoad",
+      "name": "AppliedLanes",
+      "value": "2877",
+      "note": ""
+    },
+    {
+      "group": "ConveyorLoad",
+      "name": "FallbackBlocks",
+      "value": "0",
+      "note": ""
+    },
+    {
+      "group": "ConveyorLoad",
+      "name": "ActualFailedBlocks",
+      "value": "0",
+      "note": ""
+    },
+    {
+      "group": "ConveyorLoad",
+      "name": "ActualFailedLanes",
+      "value": "0",
+      "note": ""
+    },
+    {
+      "group": "ConveyorStateSave",
+      "name": "SaveConveyorItemsCalls",
+      "value": "0",
+      "note": ""
+    },
+    {
+      "group": "ConveyorStateSave",
+      "name": "SavedItems",
+      "value": "0",
+      "note": ""
+    },
+    {
+      "group": "ConveyorStateSave",
+      "name": "ClearedNonConveyorBlocks",
+      "value": "0",
+      "note": ""
+    },
+    {
+      "group": "BeltJobs",
+      "name": "Groups",
+      "value": "41",
+      "note": ""
+    },
+    {
+      "group": "BeltJobs",
+      "name": "Lanes",
+      "value": "3519",
+      "note": ""
+    },
+    {
+      "group": "BeltJobs",
+      "name": "LargestGroupLanes",
+      "value": "454",
+      "note": ""
+    },
+    {
+      "group": "BeltJobs",
+      "name": "SleepingGroups",
+      "value": "32",
+      "note": ""
+    },
+    {
+      "group": "BeltJobs",
+      "name": "ActiveGroups",
+      "value": "9",
+      "note": ""
+    },
+    {
+      "group": "BeltJobs",
+      "name": "PendingWrites",
+      "value": "0",
+      "note": ""
+    },
+    {
+      "group": "BeltJobs",
+      "name": "LastTickTransfers",
+      "value": "1",
+      "note": ""
+    },
+    {
+      "group": "BeltJobs",
+      "name": "LastTickChangedLanes",
+      "value": "2",
+      "note": ""
+    },
+    {
+      "group": "BeltJobs",
+      "name": "FrameTicks",
+      "value": "1",
+      "note": ""
+    },
+    {
+      "group": "BeltJobs",
+      "name": "BacklogTicks",
+      "value": "0.527",
+      "note": ""
+    },
+    {
+      "group": "BeltJobs",
+      "name": "TopologyRebuilds",
+      "value": "1",
+      "note": ""
+    },
+    {
+      "group": "ConveyorCache",
+      "name": "LineCacheDirty",
+      "value": "1",
+      "note": ""
+    },
+    {
+      "group": "ConveyorCache",
+      "name": "NetworkCacheDirty",
+      "value": "1",
+      "note": ""
+    },
+    {
+      "group": "ConveyorCache",
+      "name": "Lines",
+      "value": "0",
+      "note": ""
+    },
+    {
+      "group": "ConveyorCache",
+      "name": "LineSlots",
+      "value": "0",
+      "note": ""
+    },
+    {
+      "group": "ConveyorCache",
+      "name": "CornerGroups",
+      "value": "0",
+      "note": ""
+    },
+    {
+      "group": "ConveyorCache",
+      "name": "CornerGroupSlots",
+      "value": "0",
+      "note": ""
+    },
+    {
+      "group": "ConveyorCache",
+      "name": "Networks",
+      "value": "0",
+      "note": ""
+    },
+    {
+      "group": "ConveyorCache",
+      "name": "NetworkIds",
+      "value": "0",
+      "note": ""
+    },
+    {
+      "group": "ConveyorCache",
+      "name": "NetworkSleeping",
+      "value": "0",
+      "note": ""
+    },
+    {
+      "group": "ConveyorCache",
+      "name": "NetworkActive",
+      "value": "0",
+      "note": ""
+    },
+    {
+      "group": "ConveyorCache",
+      "name": "NetworkRetries",
+      "value": "0",
+      "note": ""
+    },
+    {
+      "group": "ConveyorCache",
+      "name": "NextLineRetryMs",
+      "value": "inf",
+      "note": ""
+    },
+    {
+      "group": "Virtualization",
+      "name": "VirtualBeltRegistered",
+      "value": "0",
+      "note": ""
+    },
+    {
+      "group": "Virtualization",
+      "name": "VirtualBeltCorners",
+      "value": "0",
+      "note": ""
+    },
+    {
+      "group": "Virtualization",
+      "name": "VirtualBeltSourceHidden",
+      "value": "0",
+      "note": ""
+    },
+    {
+      "group": "Virtualization",
+      "name": "VirtualBeltSourceHiddenObjects",
+      "value": "0",
+      "note": ""
+    },
+    {
+      "group": "Virtualization",
+      "name": "VirtualBeltEffectiveBatchCellSize",
+      "value": "16",
+      "note": ""
+    },
+    {
+      "group": "Virtualization",
+      "name": "VirtualBeltBatches",
+      "value": "0",
+      "note": ""
+    },
+    {
+      "group": "Virtualization",
+      "name": "VirtualBeltBrgBatches",
+      "value": "0",
+      "note": ""
+    },
+    {
+      "group": "Virtualization",
+      "name": "VirtualBeltEntries",
+      "value": "0",
+      "note": ""
+    },
+    {
+      "group": "Virtualization",
+      "name": "VirtualBeltDedicatedTopEntries",
+      "value": "0",
+      "note": ""
+    },
+    {
+      "group": "Virtualization",
+      "name": "VirtualBeltTrackedTransformEntries",
+      "value": "0",
+      "note": ""
+    },
+    {
+      "group": "Virtualization",
+      "name": "VirtualBeltTrackedTransformUpdates",
+      "value": "0",
+      "note": ""
+    },
+    {
+      "group": "Virtualization",
+      "name": "VirtualBeltTrackedTransformReads",
+      "value": "0",
+      "note": ""
+    },
+    {
+      "group": "Virtualization",
+      "name": "VirtualBeltCulledTrackedBelts",
+      "value": "0",
+      "note": ""
+    },
+    {
+      "group": "Virtualization",
+      "name": "VirtualBeltInstances",
+      "value": "0",
+      "note": ""
+    },
+    {
+      "group": "Virtualization",
+      "name": "VirtualBeltDrawCalls",
+      "value": "0",
+      "note": ""
+    },
+    {
+      "group": "VirtualBelt",
+      "name": "NativeRendererTotal",
+      "value": "0",
+      "note": ""
+    },
+    {
+      "group": "VirtualBelt",
+      "name": "NativeRendererEnabled",
+      "value": "0",
+      "note": ""
+    },
+    {
+      "group": "VirtualBelt",
+      "name": "NativeRendererActiveEnabled",
+      "value": "0",
+      "note": ""
+    },
+    {
+      "group": "VirtualBelt",
+      "name": "NativeRendererSuppressed",
+      "value": "0",
+      "note": ""
+    },
+    {
+      "group": "VirtualBelt",
+      "name": "NativeSourceSuppressionEnabled",
+      "value": "1",
+      "note": ""
+    },
+    {
+      "group": "VirtualBelt",
+      "name": "NativeSourceObjectHidingEnabled",
+      "value": "1",
+      "note": ""
+    },
+    {
+      "group": "VirtualBelt",
+      "name": "SourceViewHiddenBelts",
+      "value": "0",
+      "note": ""
+    },
+    {
+      "group": "VirtualBelt",
+      "name": "SourceViewHiddenObjects",
+      "value": "0",
+      "note": ""
+    },
+    {
+      "group": "VirtualBelt",
+      "name": "VirtualizedBelts",
+      "value": "0",
+      "note": ""
+    },
+    {
+      "group": "AnimalAI",
+      "name": "Total",
+      "value": "180",
+      "note": "World counts are current; work counters cover the last completed render frame. AI Detail timings overlap their parents."
+    },
+    {
+      "group": "AnimalAI",
+      "name": "Active",
+      "value": "11",
+      "note": ""
+    },
+    {
+      "group": "AnimalAI",
+      "name": "Dormant",
+      "value": "169",
+      "note": ""
+    },
+    {
+      "group": "AnimalAI",
+      "name": "Near",
+      "value": "0",
+      "note": ""
+    },
+    {
+      "group": "AnimalAI",
+      "name": "Mid",
+      "value": "8",
+      "note": ""
+    },
+    {
+      "group": "AnimalAI",
+      "name": "Far",
+      "value": "3",
+      "note": ""
+    },
+    {
+      "group": "AnimalAI",
+      "name": "SpatialCells",
+      "value": "146",
+      "note": ""
+    },
+    {
+      "group": "AnimalAI",
+      "name": "Herds",
+      "value": "43",
+      "note": ""
+    },
+    {
+      "group": "AnimalAI",
+      "name": "Ticks",
+      "value": "3",
+      "note": ""
+    },
+    {
+      "group": "AnimalAI",
+      "name": "Due",
+      "value": "3",
+      "note": ""
+    },
+    {
+      "group": "AnimalAI",
+      "name": "Deferred",
+      "value": "0",
+      "note": ""
+    },
+    {
+      "group": "AnimalAI",
+      "name": "SeparationChecks",
+      "value": "2",
+      "note": ""
+    },
+    {
+      "group": "AnimalAI",
+      "name": "CollisionChecks",
+      "value": "4",
+      "note": ""
+    },
+    {
+      "group": "AnimalAI",
+      "name": "CollisionCells",
+      "value": "8",
+      "note": ""
+    },
+    {
+      "group": "AnimalAI",
+      "name": "PathWorkBudget",
+      "value": "2048",
+      "note": "Cache-independent logical work limit. Queries finish atomically; cold/warm caches schedule the same animals."
+    },
+    {
+      "group": "AnimalAI",
+      "name": "SpatialUpdates",
+      "value": "1",
+      "note": ""
+    },
+    {
+      "group": "AnimalAI",
+      "name": "SpatialCellChanges",
+      "value": "0",
+      "note": ""
+    },
+    {
+      "group": "AnimalAI",
+      "name": "HerdRefreshes",
+      "value": "1",
+      "note": ""
+    },
+    {
+      "group": "AnimalAI",
+      "name": "NeedsUpdates",
+      "value": "12",
+      "note": ""
+    },
+    {
+      "group": "AnimalAI",
+      "name": "AStarCalls",
+      "value": "0",
+      "note": ""
+    },
+    {
+      "group": "AnimalAI",
+      "name": "ReachableCalls",
+      "value": "0",
+      "note": ""
+    },
+    {
+      "group": "AnimalAI",
+      "name": "PathNodes",
+      "value": "0",
+      "note": ""
+    },
+    {
+      "group": "AnimalAI",
+      "name": "LineChecks",
+      "value": "0",
+      "note": ""
+    },
+    {
+      "group": "AnimalAI",
+      "name": "LineSamples",
+      "value": "0",
+      "note": ""
+    },
+    {
+      "group": "AnimalAI",
+      "name": "AvoidanceProbes",
+      "value": "2",
+      "note": ""
+    },
+    {
+      "group": "AnimalAI",
+      "name": "Presentations",
+      "value": "4",
+      "note": ""
+    },
+    {
+      "group": "AnimalAI",
+      "name": "CulledPresentations",
+      "value": "0",
+      "note": ""
+    },
+    {
+      "group": "AnimalAI",
+      "name": "PathBudgetDeferrals",
+      "value": "0",
+      "note": ""
+    },
+    {
+      "group": "AnimalAI",
+      "name": "PathBudgetOverruns",
+      "value": "0",
+      "note": ""
+    },
+    {
+      "group": "AnimalAI",
+      "name": "PathBudgetMaxWorkPerTick",
+      "value": "0",
+      "note": ""
+    },
+    {
+      "group": "AnimalAI",
+      "name": "WalkableCacheHits",
+      "value": "69",
+      "note": ""
+    },
+    {
+      "group": "AnimalAI",
+      "name": "WalkableCacheMisses",
+      "value": "0",
+      "note": ""
+    },
+    {
+      "group": "AnimalAI",
+      "name": "RegionCacheHits",
+      "value": "0",
+      "note": ""
+    },
+    {
+      "group": "AnimalAI",
+      "name": "RegionCacheBuilds",
+      "value": "0",
+      "note": ""
+    },
+    {
+      "group": "AnimalAI",
+      "name": "GridCollisionQueries",
+      "value": "19",
+      "note": ""
+    }
+  ],
+  "rowCount": 62,
+  "rows": [
+    {
+      "rank": 1,
+      "kind": "Runtime",
+      "type": "PortableItemRenderer",
+      "itemId": -1,
+      "itemName": "Conveyor Item Render",
+      "activeCount": 0,
+      "samples": 23,
+      "totalUs": 9201.3,
+      "avgUs": 400.057,
+      "maxUs": 683.1
+    },
+    {
+      "rank": 2,
+      "kind": "Runtime",
+      "type": "PortableItemRenderer",
+      "itemId": -1,
+      "itemName": "Conveyor Item Rebuild Dynamic",
+      "activeCount": 0,
+      "samples": 23,
+      "totalUs": 8480.5,
+      "avgUs": 368.717,
+      "maxUs": 623
+    },
+    {
+      "rank": 3,
+      "kind": "Update",
+      "type": "SteamTrain",
+      "itemId": 104,
+      "itemName": "Steam train",
+      "activeCount": 2,
+      "samples": 46,
+      "totalUs": 6281.1,
+      "avgUs": 136.546,
+      "maxUs": 353.8
+    },
+    {
+      "rank": 4,
+      "kind": "Runtime",
+      "type": "PortableItemRenderer",
+      "itemId": -1,
+      "itemName": "Conveyor Item Dynamic AppendData",
+      "activeCount": 0,
+      "samples": 23,
+      "totalUs": 5548.5,
+      "avgUs": 241.239,
+      "maxUs": 393.7
+    },
+    {
+      "rank": 5,
+      "kind": "Update",
+      "type": "Pump",
+      "itemId": 53,
+      "itemName": "Water pump",
+      "activeCount": 14,
+      "samples": 56,
+      "totalUs": 4742.3,
+      "avgUs": 84.684,
+      "maxUs": 420.2
+    },
+    {
+      "rank": 6,
+      "kind": "Update",
+      "type": "Boiler",
+      "itemId": 55,
+      "itemName": "Boiler",
+      "activeCount": 11,
+      "samples": 44,
+      "totalUs": 4678.4,
+      "avgUs": 106.327,
+      "maxUs": 269.8
+    },
+    {
+      "rank": 7,
+      "kind": "Update",
+      "type": "AnimalAIWorld",
+      "itemId": -1,
+      "itemName": "AnimalAIWorld",
+      "activeCount": 1,
+      "samples": 23,
+      "totalUs": 4052.1,
+      "avgUs": 176.178,
+      "maxUs": 525.8
+    },
+    {
+      "rank": 8,
+      "kind": "Runtime",
+      "type": "Pipe",
+      "itemId": -1,
+      "itemName": "Pipe Render Build",
+      "activeCount": 0,
+      "samples": 23,
+      "totalUs": 3974.9,
+      "avgUs": 172.822,
+      "maxUs": 2030.3
+    },
+    {
+      "rank": 9,
+      "kind": "Runtime",
+      "type": "RobotArm",
+      "itemId": -1,
+      "itemName": "Robot Arm Entity Plan",
+      "activeCount": 0,
+      "samples": 23,
+      "totalUs": 3674.1,
+      "avgUs": 159.743,
+      "maxUs": 614.6
+    },
+    {
+      "rank": 10,
+      "kind": "Update",
+      "type": "MiningMachine",
+      "itemId": 48,
+      "itemName": "Electric mining machine",
+      "activeCount": 14,
+      "samples": 60,
+      "totalUs": 3344.9,
+      "avgUs": 55.748,
+      "maxUs": 1104.3
+    },
+    {
+      "rank": 11,
+      "kind": "Runtime",
+      "type": "RobotArm",
+      "itemId": -1,
+      "itemName": "Robot Arm Render Build",
+      "activeCount": 0,
+      "samples": 23,
+      "totalUs": 3289,
+      "avgUs": 143,
+      "maxUs": 196.2
+    },
+    {
+      "rank": 12,
+      "kind": "Runtime",
+      "type": "MiningMachine",
+      "itemId": -1,
+      "itemName": "Mining Output Query",
+      "activeCount": 0,
+      "samples": 4,
+      "totalUs": 3072.2,
+      "avgUs": 768.05,
+      "maxUs": 1094.4
+    },
+    {
+      "rank": 13,
+      "kind": "Runtime",
+      "type": "RobotArm",
+      "itemId": -1,
+      "itemName": "Robot Arm Sleep Check",
+      "activeCount": 0,
+      "samples": 67,
+      "totalUs": 2861.3,
+      "avgUs": 42.706,
+      "maxUs": 501
+    },
+    {
+      "rank": 14,
+      "kind": "AI Detail",
+      "type": "AnimalAI",
+      "itemId": -1,
+      "itemName": "Animal Decision and Movement",
+      "activeCount": 0,
+      "samples": 53,
+      "totalUs": 2236.5,
+      "avgUs": 42.198,
+      "maxUs": 432.8
+    },
+    {
+      "rank": 15,
+      "kind": "Update",
+      "type": "TerrainGenerator",
+      "itemId": -1,
+      "itemName": "TerrainGenerator",
+      "activeCount": 1,
+      "samples": 23,
+      "totalUs": 2223.9,
+      "avgUs": 96.691,
+      "maxUs": 268.4
+    },
+    {
+      "rank": 16,
+      "kind": "Runtime",
+      "type": "UtilityPole",
+      "itemId": -1,
+      "itemName": "Electric Network Runtime",
+      "activeCount": 0,
+      "samples": 23,
+      "totalUs": 2175.9,
+      "avgUs": 94.604,
+      "maxUs": 131.5
+    },
+    {
+      "rank": 17,
+      "kind": "Belt",
+      "type": "BeltJobs",
+      "itemId": -1,
+      "itemName": "Belt Jobs Tick",
+      "activeCount": 0,
+      "samples": 23,
+      "totalUs": 2015.7,
+      "avgUs": 87.639,
+      "maxUs": 263.6
+    },
+    {
+      "rank": 18,
+      "kind": "Runtime",
+      "type": "RobotArm",
+      "itemId": -1,
+      "itemName": "Robot Arm Pickup Query",
+      "activeCount": 0,
+      "samples": 64,
+      "totalUs": 1524.4,
+      "avgUs": 23.819,
+      "maxUs": 57.9
+    },
+    {
+      "rank": 19,
+      "kind": "Runtime",
+      "type": "MiningMachine",
+      "itemId": -1,
+      "itemName": "Mining Start",
+      "activeCount": 0,
+      "samples": 2,
+      "totalUs": 1367.5,
+      "avgUs": 683.75,
+      "maxUs": 713.5
+    },
+    {
+      "rank": 20,
+      "kind": "Runtime",
+      "type": "PortableItemRenderer",
+      "itemId": -1,
+      "itemName": "Conveyor Item Dynamic Cull",
+      "activeCount": 0,
+      "samples": 23,
+      "totalUs": 1327.1,
+      "avgUs": 57.7,
+      "maxUs": 197.4
+    },
+    {
+      "rank": 21,
+      "kind": "AI Detail",
+      "type": "AnimalAI",
+      "itemId": -1,
+      "itemName": "Animal Scheduling",
+      "activeCount": 0,
+      "samples": 23,
+      "totalUs": 1232,
+      "avgUs": 53.565,
+      "maxUs": 74.9
+    },
+    {
+      "rank": 22,
+      "kind": "AI Detail",
+      "type": "AnimalAI",
+      "itemId": -1,
+      "itemName": "Animal Movement",
+      "activeCount": 0,
+      "samples": 31,
+      "totalUs": 1041.8,
+      "avgUs": 33.606,
+      "maxUs": 70.2
+    },
+    {
+      "rank": 23,
+      "kind": "Belt",
+      "type": "BeltJobs",
+      "itemId": -1,
+      "itemName": "Belt Jobs Complete",
+      "activeCount": 0,
+      "samples": 23,
+      "totalUs": 1000.7,
+      "avgUs": 43.509,
+      "maxUs": 82.5
+    },
+    {
+      "rank": 24,
+      "kind": "Runtime",
+      "type": "Pipe",
+      "itemId": -1,
+      "itemName": "Pipe Render Submit",
+      "activeCount": 0,
+      "samples": 23,
+      "totalUs": 987.1,
+      "avgUs": 42.917,
+      "maxUs": 69.3
+    },
+    {
+      "rank": 25,
+      "kind": "Runtime",
+      "type": "RobotArm",
+      "itemId": -1,
+      "itemName": "Robot Arm Drop Query",
+      "activeCount": 0,
+      "samples": 3,
+      "totalUs": 982.2,
+      "avgUs": 327.4,
+      "maxUs": 485
+    },
+    {
+      "rank": 26,
+      "kind": "Update",
+      "type": "SteamGenerator",
+      "itemId": 56,
+      "itemName": "Steam generator",
+      "activeCount": 29,
+      "samples": 116,
+      "totalUs": 969.4,
+      "avgUs": 8.357,
+      "maxUs": 38.9
+    },
+    {
+      "rank": 27,
+      "kind": "Runtime",
+      "type": "RobotArm",
+      "itemId": -1,
+      "itemName": "Robot Arm Render Submit",
+      "activeCount": 0,
+      "samples": 23,
+      "totalUs": 945.7,
+      "avgUs": 41.117,
+      "maxUs": 61.4
+    },
+    {
+      "rank": 28,
+      "kind": "Belt",
+      "type": "BeltJobs",
+      "itemId": -1,
+      "itemName": "Belt Jobs Publish",
+      "activeCount": 0,
+      "samples": 23,
+      "totalUs": 786.4,
+      "avgUs": 34.191,
+      "maxUs": 180.7
+    },
+    {
+      "rank": 29,
+      "kind": "Runtime",
+      "type": "PortableItemRenderer",
+      "itemId": -1,
+      "itemName": "Conveyor Item Dynamic SyncMatrix",
+      "activeCount": 0,
+      "samples": 23,
+      "totalUs": 736.3,
+      "avgUs": 32.013,
+      "maxUs": 53.6
+    },
+    {
+      "rank": 30,
+      "kind": "AI Detail",
+      "type": "AnimalAI",
+      "itemId": -1,
+      "itemName": "Animal Feeding",
+      "activeCount": 0,
+      "samples": 53,
+      "totalUs": 733.6,
+      "avgUs": 13.842,
+      "maxUs": 381.4
+    },
+    {
+      "rank": 31,
+      "kind": "Runtime",
+      "type": "PortableItemRenderer",
+      "itemId": -1,
+      "itemName": "Conveyor Item Rebuild",
+      "activeCount": 0,
+      "samples": 23,
+      "totalUs": 713.2,
+      "avgUs": 31.009,
+      "maxUs": 141.4
+    },
+    {
+      "rank": 32,
+      "kind": "AI Render",
+      "type": "AnimalAI",
+      "itemId": -1,
+      "itemName": "Animal Presentation",
+      "activeCount": 0,
+      "samples": 23,
+      "totalUs": 709.8,
+      "avgUs": 30.861,
+      "maxUs": 61.2
+    },
+    {
+      "rank": 33,
+      "kind": "Runtime",
+      "type": "RobotArm",
+      "itemId": -1,
+      "itemName": "Robot Arm Power",
+      "activeCount": 0,
+      "samples": 204,
+      "totalUs": 581.6,
+      "avgUs": 2.851,
+      "maxUs": 15.6
+    },
+    {
+      "rank": 34,
+      "kind": "Update",
+      "type": "InputOutputModule",
+      "itemId": 30,
+      "itemName": "Funance",
+      "activeCount": 14,
+      "samples": 56,
+      "totalUs": 536.7,
+      "avgUs": 9.584,
+      "maxUs": 51.6
+    },
+    {
+      "rank": 35,
+      "kind": "AI Detail",
+      "type": "AnimalAI",
+      "itemId": -1,
+      "itemName": "Animal Grid Collision",
+      "activeCount": 0,
+      "samples": 526,
+      "totalUs": 520.4,
+      "avgUs": 0.989,
+      "maxUs": 7.3
+    },
+    {
+      "rank": 36,
+      "kind": "AI Detail",
+      "type": "AnimalAI",
+      "itemId": -1,
+      "itemName": "Animal Spatial Cache",
+      "activeCount": 0,
+      "samples": 23,
+      "totalUs": 460.2,
+      "avgUs": 20.009,
+      "maxUs": 32.3
+    },
+    {
+      "rank": 37,
+      "kind": "Runtime",
+      "type": "PortableItemRenderer",
+      "itemId": -1,
+      "itemName": "Conveyor Item Render Static",
+      "activeCount": 0,
+      "samples": 23,
+      "totalUs": 396.6,
+      "avgUs": 17.243,
+      "maxUs": 39.9
+    },
+    {
+      "rank": 38,
+      "kind": "Update",
+      "type": "WorldTimeService",
+      "itemId": -1,
+      "itemName": "WorldTimeService",
+      "activeCount": 1,
+      "samples": 23,
+      "totalUs": 390,
+      "avgUs": 16.957,
+      "maxUs": 21.5
+    },
+    {
+      "rank": 39,
+      "kind": "Runtime",
+      "type": "PortableItemRenderer",
+      "itemId": -1,
+      "itemName": "Conveyor Item Dynamic Cache",
+      "activeCount": 0,
+      "samples": 23,
+      "totalUs": 355.8,
+      "avgUs": 15.47,
+      "maxUs": 30.7
+    },
+    {
+      "rank": 40,
+      "kind": "Runtime",
+      "type": "InstallationPlacementController",
+      "itemId": -1,
+      "itemName": "Installation Placement Update",
+      "activeCount": 0,
+      "samples": 23,
+      "totalUs": 341.1,
+      "avgUs": 14.83,
+      "maxUs": 23.7
+    },
+    {
+      "rank": 41,
+      "kind": "Update",
+      "type": "Sprinkler",
+      "itemId": 57,
+      "itemName": "Sprinkler",
+      "activeCount": 1,
+      "samples": 2,
+      "totalUs": 282.9,
+      "avgUs": 141.45,
+      "maxUs": 187.5
+    },
+    {
+      "rank": 42,
+      "kind": "Runtime",
+      "type": "PortableItemRenderer",
+      "itemId": -1,
+      "itemName": "Conveyor Item Render Dynamic",
+      "activeCount": 0,
+      "samples": 23,
+      "totalUs": 235.9,
+      "avgUs": 10.257,
+      "maxUs": 21
+    },
+    {
+      "rank": 43,
+      "kind": "Runtime",
+      "type": "PortableItemRenderer",
+      "itemId": -1,
+      "itemName": "Conveyor Item Dynamic ScheduleMatrices",
+      "activeCount": 0,
+      "samples": 23,
+      "totalUs": 233.8,
+      "avgUs": 10.165,
+      "maxUs": 24
+    },
+    {
+      "rank": 44,
+      "kind": "Runtime",
+      "type": "PortableItemRenderer",
+      "itemId": -1,
+      "itemName": "Conveyor Item Refresh Dirty Cache",
+      "activeCount": 0,
+      "samples": 23,
+      "totalUs": 174.1,
+      "avgUs": 7.57,
+      "maxUs": 68.1
+    },
+    {
+      "rank": 45,
+      "kind": "Runtime",
+      "type": "PortableItemRenderer",
+      "itemId": -1,
+      "itemName": "Conveyor Item Refresh Dynamic Set",
+      "activeCount": 0,
+      "samples": 23,
+      "totalUs": 170.3,
+      "avgUs": 7.404,
+      "maxUs": 76.7
+    },
+    {
+      "rank": 46,
+      "kind": "AI Detail",
+      "type": "AnimalAI",
+      "itemId": -1,
+      "itemName": "Animal Needs",
+      "activeCount": 0,
+      "samples": 242,
+      "totalUs": 157.3,
+      "avgUs": 0.65,
+      "maxUs": 4.5
+    },
+    {
+      "rank": 47,
+      "kind": "Runtime",
+      "type": "PortableItemRenderer",
+      "itemId": -1,
+      "itemName": "Conveyor Item Refresh Active Set",
+      "activeCount": 0,
+      "samples": 23,
+      "totalUs": 153.6,
+      "avgUs": 6.678,
+      "maxUs": 37.6
+    },
+    {
+      "rank": 48,
+      "kind": "Fluid",
+      "type": "FluidJobs",
+      "itemId": -1,
+      "itemName": "Fluid Jobs Shadow Schedule",
+      "activeCount": 0,
+      "samples": 23,
+      "totalUs": 131,
+      "avgUs": 5.696,
+      "maxUs": 9.6
+    },
+    {
+      "rank": 49,
+      "kind": "Update",
+      "type": "RobotArmWorld",
+      "itemId": -1,
+      "itemName": "RobotArmWorld",
+      "activeCount": 1,
+      "samples": 23,
+      "totalUs": 122.2,
+      "avgUs": 5.313,
+      "maxUs": 8.6
+    },
+    {
+      "rank": 50,
+      "kind": "Runtime",
+      "type": "RobotArm",
+      "itemId": -1,
+      "itemName": "Robot Arm State Tick",
+      "activeCount": 0,
+      "samples": 185,
+      "totalUs": 112.6,
+      "avgUs": 0.609,
+      "maxUs": 7.3
+    },
+    {
+      "rank": 51,
+      "kind": "Update",
+      "type": "SeedPlanter",
+      "itemId": 64,
+      "itemName": "Seed Planter",
+      "activeCount": 4,
+      "samples": 16,
+      "totalUs": 101.3,
+      "avgUs": 6.331,
+      "maxUs": 19.2
+    },
+    {
+      "rank": 52,
+      "kind": "Belt",
+      "type": "BeltJobs",
+      "itemId": -1,
+      "itemName": "Belt Jobs Schedule",
+      "activeCount": 0,
+      "samples": 23,
+      "totalUs": 88,
+      "avgUs": 3.826,
+      "maxUs": 7.9
+    },
+    {
+      "rank": 53,
+      "kind": "Runtime",
+      "type": "RobotArm",
+      "itemId": -1,
+      "itemName": "Robot Arm Entity Apply",
+      "activeCount": 0,
+      "samples": 23,
+      "totalUs": 80.6,
+      "avgUs": 3.504,
+      "maxUs": 6
+    },
+    {
+      "rank": 54,
+      "kind": "Runtime",
+      "type": "MiningMachine",
+      "itemId": -1,
+      "itemName": "Mining Visuals",
+      "activeCount": 0,
+      "samples": 60,
+      "totalUs": 56.8,
+      "avgUs": 0.947,
+      "maxUs": 5.1
+    },
+    {
+      "rank": 55,
+      "kind": "Runtime",
+      "type": "InstallationPlacementController",
+      "itemId": -1,
+      "itemName": "Installation Placement LateUpdate",
+      "activeCount": 0,
+      "samples": 23,
+      "totalUs": 46.1,
+      "avgUs": 2.004,
+      "maxUs": 3
+    },
+    {
+      "rank": 56,
+      "kind": "Update",
+      "type": "LoggingMachine",
+      "itemId": 63,
+      "itemName": "Logging machine",
+      "activeCount": 1,
+      "samples": 4,
+      "totalUs": 42.2,
+      "avgUs": 10.55,
+      "maxUs": 12.1
+    },
+    {
+      "rank": 57,
+      "kind": "Runtime",
+      "type": "PortableItemRenderer",
+      "itemId": -1,
+      "itemName": "Conveyor Item Dynamic TrimCache",
+      "activeCount": 0,
+      "samples": 23,
+      "totalUs": 35.4,
+      "avgUs": 1.539,
+      "maxUs": 12.7
+    },
+    {
+      "rank": 58,
+      "kind": "Fluid",
+      "type": "FluidJobs",
+      "itemId": -1,
+      "itemName": "Fluid Jobs Shadow Complete",
+      "activeCount": 0,
+      "samples": 23,
+      "totalUs": 22.4,
+      "avgUs": 0.974,
+      "maxUs": 1.5
+    },
+    {
+      "rank": 59,
+      "kind": "Runtime",
+      "type": "MiningMachine",
+      "itemId": -1,
+      "itemName": "Mining Resource Resolve",
+      "activeCount": 0,
+      "samples": 2,
+      "totalUs": 21,
+      "avgUs": 10.5,
+      "maxUs": 17.2
+    },
+    {
+      "rank": 60,
+      "kind": "Update",
+      "type": "ProductionMachine",
+      "itemId": 61,
+      "itemName": "Production machine (Mk1)",
+      "activeCount": 1,
+      "samples": 4,
+      "totalUs": 19.4,
+      "avgUs": 4.85,
+      "maxUs": 5.3
+    },
+    {
+      "rank": 61,
+      "kind": "Update",
+      "type": "TreeInstance",
+      "itemId": -1,
+      "itemName": "TreeInstance",
+      "activeCount": 4,
+      "samples": 8,
+      "totalUs": 12.2,
+      "avgUs": 1.525,
+      "maxUs": 4.3
+    },
+    {
+      "rank": 62,
+      "kind": "Runtime",
+      "type": "PortableItemRenderer",
+      "itemId": -1,
+      "itemName": "Conveyor Item Dynamic CompleteMatrices",
+      "activeCount": 0,
+      "samples": 20,
+      "totalUs": 5,
+      "avgUs": 0.25,
+      "maxUs": 0.4
+    }
+  ]
+}

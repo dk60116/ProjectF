@@ -252,6 +252,18 @@ public static class Checks
         var blockedByDistancePump = new Pump { Space = 20, OutputPipeDistance = 100 };
         blockedByDistancePump.Tick(1);
         Check(Near(blockedByDistancePump.Space, 20), "one hundred pipes stop actual pump transport");
+        Check(Pipe.AddRemoteTraversalPipeDistance(0, new(4, 9), new(12, 9)) == 8,
+            "underground traversal uses endpoint tile distance");
+        Check(Pipe.AddRemoteTraversalPipeDistance(7, new(-3, 2), new(-3, -8)) == 17,
+            "underground traversal adds installed length to existing distance");
+        var undergroundPressurePump = new Pump
+        {
+            Space = 20,
+            OutputPipeDistance = Pipe.AddRemoteTraversalPipeDistance(0, new(0, 0), new(8, 0))
+        };
+        undergroundPressurePump.Tick(1);
+        Check(Near(undergroundPressurePump.Space, 10.8f),
+            "underground installed length reduces actual transported volume");
 
         Time.timeAsDouble = 5;
         source.ResetMeter(); source.Report(1, 3); pump.Report(1, 2);
@@ -283,10 +295,10 @@ public static class Checks
         Check(Near(Rate(pipe), 17.69f), "direct output endpoint facing pipe is included");
         endpoint.OutputDirection = new(0, 1); pipe.Invalidate();
         Check(Near(Rate(pipe), 13.73f), "direct output endpoint facing away is excluded");
-        pipe.Remote = new(300, 0);
-        TerrainGenerator.Active.Pipes[new(300, 0)] = new Pipe();
-        InputOutputModule.Register(endpoint, new(300, 0)); pipe.Invalidate();
-        Check(Near(Rate(pipe), 17.73f), "underground remote output is included without extra distance");
+        pipe.Remote = new(3, 0);
+        TerrainGenerator.Active.Pipes[new(3, 0)] = new Pipe();
+        InputOutputModule.Register(endpoint, new(3, 0)); pipe.Invalidate();
+        Check(Near(Rate(pipe), 17.61f), "underground remote output loses pressure by installed length");
         Time.timeAsDouble = 6.2;
         Check(Near(Rate(pipe), 16.73f), "pump pressure remains while measured non-pump flow expires");
         consumer.Consume(1, 30); pipe.Invalidate();

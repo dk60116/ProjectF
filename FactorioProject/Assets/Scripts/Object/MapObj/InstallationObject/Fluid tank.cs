@@ -579,7 +579,12 @@ public class Fluidtank : InstallationObject, IMapObjectUpdateTick, IMapObjectUpd
                 : pipe != null && pipe.TryGetRemoteConnectionCoordinate(coordinate, out remoteCoordinate);
             if (hasRemote)
             {
-                EnqueueFluidNetworkSearchCoordinate(remoteCoordinate, pipeCount);
+                EnqueueFluidNetworkSearchCoordinate(
+                    remoteCoordinate,
+                    Pipe.AddRemoteTraversalPipeDistance(
+                        pipeCount,
+                        coordinate,
+                        remoteCoordinate));
             }
         }
 
