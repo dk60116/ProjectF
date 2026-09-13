@@ -37,6 +37,7 @@ foreach ($signature in @(
     'public float GetObjectInfoFluidPressureConsumptionLitersPerSecond(',
     'public static void AppendFluidOutputSourcesAtCoordinate(',
     'public static void AppendFluidPressureConsumersAtCoordinate(',
+    'protected float ResolveFluidOutputTransportRetention(',
     'protected bool TryEmitFluidOutputToConnectedStorages(')) {
     $generated += (Read-Member ($base + 'InputOutputModule.cs') $signature) + "`n"
 }
@@ -51,7 +52,11 @@ foreach ($signature in @(
 $generated += "}`npublic partial class Pipe {`n"
 $generated += (Read-Member ($base + 'Pipe.cs') 'public bool TryGetObjectInfoFluidInfo(' 2) + "`n"
 $generated += (Read-Member ($base + 'Pipe.cs') 'internal bool TryGetObjectInfoFluidInfoAtCoordinate(') + "`n"
-foreach ($signature in @('private bool TrySearchFluidNetwork(', 'private void EnqueueObjectInfoFluidSearchCoordinate(')) {
+foreach ($signature in @(
+    'private bool TrySearchFluidNetwork(',
+    'private void AppendObjectInfoFluidOutputSourcesAtCoordinate(',
+    'private bool HasFixedFluidTankAtPipeNetworkCoordinate(',
+    'private void EnqueueObjectInfoFluidSearchCoordinate(')) {
     $generated += (Read-Member ($base + 'Pipe.cs') $signature) + "`n"
 }
 $generated += "}`n"

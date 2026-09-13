@@ -62,6 +62,15 @@ public class OilDrillingMachine : InputOutputModule
         return outputItemId >= 0;
     }
 
+    public override float GetObjectInfoFluidPressureLitersPerSecond(int fluidItemId)
+    {
+        return isActiveAndEnabled
+               && TryGetObjectInfoOutputRate(out int outputItemId, out float litersPerSecond)
+               && outputItemId == fluidItemId
+            ? Mathf.Max(0f, litersPerSecond)
+            : 0f;
+    }
+
     public bool TryGetObjectInfoResourceReserves(out int reservesLiters)
     {
         reservesLiters = TryResolveOilResource(out ResourceInstance resource)
@@ -257,9 +266,12 @@ public class OilDrillingMachine : InputOutputModule
 
     private bool ExtractOil(float deltaTime)
     {
+        int oilItemId = ResolveOilItemId();
+        float effectiveOilLitersPerSecond = OilLitersPerSecond
+                                            * ResolveFluidOutputTransportRetention(oilItemId);
         if (!TryResolveOilResource(out ResourceInstance resource)
             || !resource.CanHarvest
-            || OilLitersPerSecond <= FluidEpsilon
+            || effectiveOilLitersPerSecond <= FluidEpsilon
             || !HasOilOutputSpace(resource))
         {
             return false;
@@ -285,7 +297,7 @@ public class OilDrillingMachine : InputOutputModule
         }
 
         long producedUnits = DeterministicSimulationUnits.RateForTicks(
-            OilLitersPerSecond,
+            effectiveOilLitersPerSecond,
             DeterministicSimulationUnits.DeltaTimeToTicks(deltaTime));
         productionProgressUnits += requestedEnergyUnits > 0L
             ? DeterministicSimulationUnits.MultiplyRatio(

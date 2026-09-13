@@ -60,7 +60,7 @@ MapObject Profiler에는 전체 `Belt Jobs Tick`과 그 안의 `Belt Jobs Schedu
 1. 직선·커브·합류·분배기·2F 경사/교차에 아이템을 흘려보낸다. 로봇팔 및 OutputArea 입출력도 함께 확인한다.
 2. 출구를 막았다가 아이템을 회수하여 다시 흐르는지 확인한다. 분배기는 한쪽 출구만 막아 반대쪽 배출도 확인한다.
 3. 아이템이 이동하는 중간에 벨트를 추가·회전·철거하고 저장/로드한다.
-4. Show Belt Split 색과 `BeltJobs.Groups`를 비교한다. 한 개의 거대한 연결 그룹은 한 작업이므로 여러 코어로 내부 분할되지 않는다.
+4. Show Belt Pipe Split 색과 `BeltJobs.Groups`를 비교한다. 한 개의 거대한 연결 그룹은 한 작업이므로 여러 코어로 내부 분할되지 않는다.
 5. 같은 장면에서 전체 프레임 시간과 계산/반영/렌더링 시간을 비교한다. 이 변경만으로 특정 FPS 향상을 보장하지 않는다.
 
 읽기/쓰기 범위 제한 해제는 각 그룹에 배정한 배열 구간에만 적용한다. 관련 API 계약: [Unity NativeDisableParallelForRestriction](https://docs.unity3d.com/cn/6000.0/ScriptReference/Unity.Collections.NativeDisableParallelForRestrictionAttribute.html).

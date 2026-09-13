@@ -40,7 +40,20 @@ public struct Vector3 { }
 public struct Quaternion { public static Quaternion identity => default; }
 public class InstallationObject
 {
+    protected const float FluidPressureLossPerPipe = .01f;
     public float AvailableFluidStorageLiters;
+    protected static float CalculateFluidPressureRetention(int pipeDistance)
+    {
+        int clampedDistance = Math.Max(0, pipeDistance);
+        return clampedDistance >= 100 ? 0 : (100 - clampedDistance) * FluidPressureLossPerPipe;
+    }
+    protected bool CollectActiveInstallationsAtRuntimeGridCoordinate(Vector2Int coordinate, List<InstallationObject> results)
+    {
+        results.Clear();
+        if (TerrainGenerator.Active.Tanks.TryGetValue(coordinate, out Fluidtank tank))
+            results.Add(tank);
+        return results.Count > 0;
+    }
     public bool TryAddFluidLiters(int id, float liters, float temperature, out float accepted)
     {
         accepted = Math.Min(liters, AvailableFluidStorageLiters);
@@ -48,7 +61,7 @@ public class InstallationObject
         return accepted > 0;
     }
 }
-public partial class InputOutputModule
+public partial class InputOutputModule : InstallationObject
 {
     private FluidOutputRateMeter fluidOutputRateMeter;
     private FluidOutputRateMeter fluidConsumptionRateMeter;
@@ -57,11 +70,14 @@ public partial class InputOutputModule
     public readonly List<Vector2Int> runtimeOutputCoordinates = new() { new(0, 0) };
     public readonly List<Vector2Int> runtimePipeInputCoordinates = new();
     public readonly List<InstallationObject> cachedFluidOutputStorages = new();
+    private readonly Dictionary<InstallationObject, int> cachedFluidOutputStoragePipeDistances = new();
     public static readonly Dictionary<Vector2Int, HashSet<InputOutputModule>> registeredRuntimeAreaCoordinates = new();
     public void Report(int id, float liters) => RecordFluidNetworkOutput(id, liters);
     public void Consume(int id, float liters) => RecordFluidNetworkConsumption(id, liters);
     public float Emit(int id, float liters) { TryEmitFluidOutputToConnectedStorages(id, liters, 20, out var actual); return actual; }
     public void ResetMeter() => fluidOutputRateMeter?.Reset();
+    public void SetOutputPipeDistance(InstallationObject storage, int distance) =>
+        cachedFluidOutputStoragePipeDistances[storage] = distance;
     private bool ContainsRuntimeOutputCoordinate(Vector2Int coordinate) => runtimeOutputCoordinates.Contains(coordinate);
     private bool ContainsRuntimeFluidPressureInputCoordinate(Vector2Int coordinate) => runtimePipeInputCoordinates.Contains(coordinate);
     private bool TryGetRuntimePipeAreaExternalDirection(Vector2Int coordinate, out Vector2Int direction) { direction = OutputDirection; return direction != Vector2Int.zero; }
@@ -96,6 +112,7 @@ public partial class Pump : InputOutputModule
     public float WaterLitersPerSecond = 10;
     public bool HasRuntimeOutputCoordinates = true;
     public int RuntimeAreaMaxObjects = 32;
+    public int OutputPipeDistance;
     public float Space;
     public int GroundItems;
     private readonly InstallationObject pumpStorage = new();
@@ -104,6 +121,7 @@ public partial class Pump : InputOutputModule
         pumpStorage.AvailableFluidStorageLiters = Space;
         cachedFluidOutputStorages.Clear();
         cachedFluidOutputStorages.Add(pumpStorage);
+        SetOutputPipeDistance(pumpStorage, OutputPipeDistance);
         ProduceWater(dt);
         Space = pumpStorage.AvailableFluidStorageLiters;
     }
@@ -119,7 +137,13 @@ public class TerrainGenerator
 {
     public static TerrainGenerator Active = new();
     public readonly Dictionary<Vector2Int, Pipe> Pipes = new();
+    public readonly Dictionary<Vector2Int, Fluidtank> Tanks = new();
     public readonly Dictionary<Vector2Int, int> Fluids = new();
+}
+public sealed class Fluidtank : InstallationObject
+{
+    public bool isActiveAndEnabled = true;
+    public bool IsFlatCarMounted;
 }
 public sealed class PipeRuntimeRecord
 {
@@ -141,17 +165,31 @@ public sealed class PipeWorld
         return false;
     }
 }
-public partial class Pipe
+public partial class Pipe : InstallationObject
 {
     private const int MaxObjectInfoFluidSearchNodes = 256;
     private const float FluidDisplayRefreshIntervalSeconds = .2f;
+    private readonly struct ObjectInfoFluidSearchNode
+    {
+        public readonly Vector2Int Coordinate;
+        public readonly int PipeDistance;
+        public ObjectInfoFluidSearchNode(Vector2Int coordinate, int pipeDistance)
+        {
+            Coordinate = coordinate;
+            PipeDistance = pipeDistance;
+        }
+    }
     private float nextObjectInfoFluidRefreshTime = float.NegativeInfinity;
     private int cachedObjectInfoFluidItemId;
     private float cachedObjectInfoFluidTemperature, cachedObjectInfoPressureRate;
     private readonly HashSet<InputOutputModule> objectInfoFluidOutputSources = new();
+    private readonly HashSet<InputOutputModule> objectInfoFluidOutputSourceScratch = new();
+    private readonly Dictionary<InputOutputModule, int> objectInfoFluidOutputSourcePipeDistances = new();
     private readonly HashSet<InputOutputModule> objectInfoFluidPressureConsumers = new();
-    private readonly Queue<Vector2Int> objectInfoFluidSearchQueue = new();
+    private readonly Queue<ObjectInfoFluidSearchNode> objectInfoFluidSearchQueue = new();
     private readonly HashSet<Vector2Int> objectInfoFluidSearchVisited = new();
+    private readonly Dictionary<Vector2Int, int> objectInfoFluidSearchPipeDistances = new();
+    private readonly List<InstallationObject> objectInfoFluidStorageScratch = new();
     private static readonly Dictionary<Vector2Int, int> FluidDisplayNetworkItemCache = new();
     private static readonly Vector2Int[] CardinalDirections = { new(1, 0), new(-1, 0), new(0, 1), new(0, -1) };
     public readonly HashSet<Vector2Int> BlockedDirections = new();
@@ -208,6 +246,12 @@ public static class Checks
         Check(Near(pump.GetObjectInfoFluidOutputLitersPerSecond(1), 2) && pump.GroundItems == 3, "pump meters storage delivery and excludes ground item output");
         Time.timeAsDouble = 1.1;
         Check(Near(pump.GetObjectInfoFluidOutputLitersPerSecond(1), 0), "blocked pump output reaches zero");
+        var halfPressurePump = new Pump { Space = 20, OutputPipeDistance = 50 };
+        halfPressurePump.Tick(1);
+        Check(Near(halfPressurePump.Space, 15), "fifty pipes limit actual pump transport to fifty percent");
+        var blockedByDistancePump = new Pump { Space = 20, OutputPipeDistance = 100 };
+        blockedByDistancePump.Tick(1);
+        Check(Near(blockedByDistancePump.Space, 20), "one hundred pipes stop actual pump transport");
 
         Time.timeAsDouble = 5;
         source.ResetMeter(); source.Report(1, 3); pump.Report(1, 2);
@@ -219,34 +263,67 @@ public static class Checks
         TerrainGenerator.Active.Fluids[new(0, 0)] = 1;
         InputOutputModule.Register(source, new(0, 0)); InputOutputModule.Register(source, new(1, 0));
         InputOutputModule.Register(pump, new(1, 1));
-        Check(Near(Rate(pipe), 13), "pipe pressure includes configured pump capacity and measured non-pump flow");
+        Check(Near(Rate(pipe), 12.8f), "pipe pressure attenuates each source by its shortest pipe distance");
         var secondPump = new Pump { WaterLitersPerSecond = 7 };
         InputOutputModule.Register(secondPump, new(0, 1)); pipe.Invalidate();
-        Check(Near(Rate(pipe), 20), "multiple connected pumps add their full pressure capacity");
+        Check(Near(Rate(pipe), 19.73f), "multiple connected pumps attenuate independently");
         var consumer = new InputOutputModule(); consumer.Consume(1, 6);
         InputOutputModule.RegisterConsumer(consumer, new(0, 0));
         InputOutputModule.RegisterConsumer(consumer, new(1, 0)); pipe.Invalidate();
-        Check(Near(Rate(pipe), 14), "active fluid consumers reduce pressure once even across multiple input cells");
+        Check(Near(Rate(pipe), 13.73f), "active fluid consumers reduce pressure once even across multiple input cells");
         Rate(pipe);
         Check(pipe.Searches == 3, "focused panel reuses short-lived network result");
         var detached = new InputOutputModule(); detached.Report(1, 100);
         TerrainGenerator.Active.Pipes[new(-1, 0)] = new Pipe();
         TerrainGenerator.Active.Pipes[new(-1, 0)].BlockedDirections.Add(new(1, 0));
         InputOutputModule.Register(detached, new(-1, 0)); pipe.Invalidate();
-        Check(Near(Rate(pipe), 14), "neighbor pipe with blocked reciprocal connector is excluded");
+        Check(Near(Rate(pipe), 13.73f), "neighbor pipe with blocked reciprocal connector is excluded");
         var endpoint = new InputOutputModule { OutputDirection = new(0, -1) }; endpoint.Report(1, 4);
         InputOutputModule.Register(endpoint, new(0, 2)); pipe.Invalidate();
-        Check(Near(Rate(pipe), 18), "direct output endpoint facing pipe is included");
+        Check(Near(Rate(pipe), 17.69f), "direct output endpoint facing pipe is included");
         endpoint.OutputDirection = new(0, 1); pipe.Invalidate();
-        Check(Near(Rate(pipe), 14), "direct output endpoint facing away is excluded");
+        Check(Near(Rate(pipe), 13.73f), "direct output endpoint facing away is excluded");
         pipe.Remote = new(300, 0);
         TerrainGenerator.Active.Pipes[new(300, 0)] = new Pipe();
         InputOutputModule.Register(endpoint, new(300, 0)); pipe.Invalidate();
-        Check(Near(Rate(pipe), 18), "underground remote output is included");
+        Check(Near(Rate(pipe), 17.73f), "underground remote output is included without extra distance");
         Time.timeAsDouble = 6.2;
-        Check(Near(Rate(pipe), 17), "pump pressure remains while measured non-pump flow expires");
+        Check(Near(Rate(pipe), 16.73f), "pump pressure remains while measured non-pump flow expires");
         consumer.Consume(1, 30); pipe.Invalidate();
         Check(Near(Rate(pipe), 0), "consumer demand clamps displayed pressure at zero");
+
+        Time.timeAsDouble = 8;
+        var distanceSource = new InputOutputModule();
+        distanceSource.Report(1, 100);
+        var sourcePipe = new Pipe { Anchor = new(200, 0) };
+        var onePipeAway = new Pipe { Anchor = new(201, 0) };
+        var twoPipesAway = new Pipe { Anchor = new(202, 0) };
+        TerrainGenerator.Active.Pipes[new(200, 0)] = sourcePipe;
+        TerrainGenerator.Active.Pipes[new(201, 0)] = onePipeAway;
+        TerrainGenerator.Active.Pipes[new(202, 0)] = twoPipesAway;
+        TerrainGenerator.Active.Fluids[new(200, 0)] = 1;
+        InputOutputModule.Register(distanceSource, new(200, 0));
+        Check(Near(Rate(sourcePipe), 100), "source pipe retains full pressure");
+        Check(Near(Rate(onePipeAway), 99), "one distant pipe loses one percent pressure");
+        Check(Near(Rate(twoPipesAway), 98), "two distant pipes lose two percent pressure");
+
+        var tankBridgeSource = new InputOutputModule();
+        tankBridgeSource.Report(1, 9);
+        var tankBridgePipe = new Pipe { Anchor = new(100, 0) };
+        TerrainGenerator.Active.Pipes[new(100, 0)] = tankBridgePipe;
+        TerrainGenerator.Active.Tanks[new(101, 0)] = new Fluidtank();
+        TerrainGenerator.Active.Pipes[new(102, 0)] = new Pipe();
+        TerrainGenerator.Active.Fluids[new(100, 0)] = 1;
+        InputOutputModule.Register(tankBridgeSource, new(102, 0));
+        Check(Near(Rate(tankBridgePipe), 8.91f), "tank bridge does not add distance beyond connected pipes");
+
+        var mobileTankPipe = new Pipe { Anchor = new(110, 0) };
+        TerrainGenerator.Active.Pipes[new(110, 0)] = mobileTankPipe;
+        TerrainGenerator.Active.Tanks[new(111, 0)] = new Fluidtank { IsFlatCarMounted = true };
+        TerrainGenerator.Active.Pipes[new(112, 0)] = new Pipe();
+        TerrainGenerator.Active.Fluids[new(110, 0)] = 1;
+        InputOutputModule.Register(tankBridgeSource, new(112, 0));
+        Check(Near(Rate(mobileTankPipe), 0), "mobile train tank remains a network endpoint");
         Console.WriteLine($"{passed} pipe flow checks passed.");
     }
 }

@@ -88,20 +88,27 @@ public partial class TerrainGenerator
         return x != 0 ? x : a.Coordinate.y.CompareTo(b.Coordinate.y);
     }
 
-    private void DrawBeltSplitGroups()
+    private void DrawBeltPipeSplitGroups()
     {
-        if (GameManager.Instance == null || !GameManager.Instance.ShowBeltSplit) return;
-        EnsureBeltSplitGroups();
+        if (GameManager.Instance == null || !GameManager.Instance.ShowBeltPipeSplit) return;
         if (beltSplitMaterial == null)
         {
             Material template = Resources.Load<Material>("Materials/AreaMarkerLateRender");
             if (template == null) return;
-            beltSplitMaterial = new Material(template) { name = "Belt Split", hideFlags = HideFlags.HideAndDontSave };
+            beltSplitMaterial = new Material(template) { name = "Belt Pipe Split", hideFlags = HideFlags.HideAndDontSave };
             beltSplitMaterial.SetFloat("_ZTest", (float)CompareFunction.LessEqual);
         }
-        if (beltSplitVisualsDirty) RebuildBeltSplitMeshes();
         conveyorDebugCameraCulling.Update(Camera.main);
         if (!conveyorDebugCameraCulling.IsLayerVisible(gameObject.layer)) return;
+
+        DrawBeltSplitGroups();
+        DrawPipeSplitGroups();
+    }
+
+    private void DrawBeltSplitGroups()
+    {
+        EnsureBeltSplitGroups();
+        if (beltSplitVisualsDirty) RebuildBeltSplitMeshes();
         foreach (Mesh mesh in beltSplitMeshes.Values)
             if (conveyorDebugCameraCulling.Intersects(mesh.bounds))
                 Graphics.DrawMesh(mesh, Matrix4x4.identity, beltSplitMaterial, gameObject.layer,
@@ -140,7 +147,15 @@ public partial class TerrainGenerator
                 var node = beltSplitLanes[index];
                 node.block.AppendBeltSplitVisualSegments(node.lane, beltSplitSegments);
                 for (int j = 0; j < beltSplitSegments.Count; j += 2)
-                    AddBeltSplitStrip(beltSplitSegments[j], beltSplitSegments[j + 1], color);
+                    AddBeltPipeSplitStrip(
+                        beltSplitVertices,
+                        beltSplitColors,
+                        beltSplitTriangles,
+                        beltSplitSegments[j],
+                        beltSplitSegments[j + 1],
+                        color,
+                        0.23f,
+                        0.18f);
             }
             Mesh mesh = new Mesh { name = "Belt Split " + chunk.Key, hideFlags = HideFlags.HideAndDontSave };
             mesh.SetVertices(beltSplitVertices);
@@ -152,20 +167,28 @@ public partial class TerrainGenerator
         beltSplitVisualsDirty = false;
     }
 
-    private void AddBeltSplitStrip(Vector3 from, Vector3 to, Color32 color)
+    private static void AddBeltPipeSplitStrip(
+        List<Vector3> vertices,
+        List<Color32> colors,
+        List<int> triangles,
+        Vector3 from,
+        Vector3 to,
+        Color32 color,
+        float halfWidth,
+        float endExtension)
     {
         Vector3 direction = (to - from).normalized;
-        Vector3 side = Vector3.Cross(Vector3.up, direction).normalized * 0.23f;
-        from += Vector3.up * 0.055f - direction * 0.18f;
-        to += Vector3.up * 0.055f + direction * 0.18f;
-        int start = beltSplitVertices.Count;
-        beltSplitVertices.Add(from - side);
-        beltSplitVertices.Add(from + side);
-        beltSplitVertices.Add(to + side);
-        beltSplitVertices.Add(to - side);
-        for (int i = 0; i < 4; i++) beltSplitColors.Add(color);
-        beltSplitTriangles.Add(start); beltSplitTriangles.Add(start + 1); beltSplitTriangles.Add(start + 2);
-        beltSplitTriangles.Add(start); beltSplitTriangles.Add(start + 2); beltSplitTriangles.Add(start + 3);
+        Vector3 side = Vector3.Cross(Vector3.up, direction).normalized * halfWidth;
+        from += Vector3.up * 0.055f - direction * endExtension;
+        to += Vector3.up * 0.055f + direction * endExtension;
+        int start = vertices.Count;
+        vertices.Add(from - side);
+        vertices.Add(from + side);
+        vertices.Add(to + side);
+        vertices.Add(to - side);
+        for (int i = 0; i < 4; i++) colors.Add(color);
+        triangles.Add(start); triangles.Add(start + 1); triangles.Add(start + 2);
+        triangles.Add(start); triangles.Add(start + 2); triangles.Add(start + 3);
     }
 
     private void ReleaseBeltSplitMeshes()

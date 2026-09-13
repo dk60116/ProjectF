@@ -108,6 +108,15 @@ public interface IPlayerItemStoragePortablePreview
 public partial class InstallationObject : MapObject, IMapObjectSimulationIdentity
 {
     protected const float ConnectedFluidStorageTransferLitersPerSecond = 50f;
+    protected const float FluidPressureLossPerPipe = 0.01f;
+
+    protected static float CalculateFluidPressureRetention(int pipeDistance)
+    {
+        int clampedDistance = Mathf.Max(0, pipeDistance);
+        return clampedDistance >= 100
+            ? 0f
+            : (100 - clampedDistance) * FluidPressureLossPerPipe;
+    }
 
     public const InstallationMapFilter DefaultMapFilter =
         InstallationMapFilter.Ground

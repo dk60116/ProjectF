@@ -14,6 +14,16 @@ namespace UnityEngine
     }
 }
 public sealed class Spliterbelt { public Block Left, Right; }
+public sealed class ConveyorRuntimeRecord
+{
+    public bool TryGetOutputDirection(out UnityEngine.Vector2Int direction)
+    {
+        direction = default;
+        return false;
+    }
+
+    public bool Covers(UnityEngine.Vector2Int coordinate) => false;
+}
 public sealed class ConvayorBelt2F
 {
     public sealed class Transform { public int rotation; }
@@ -41,9 +51,15 @@ public partial class Block
     public bool SideReceive, Corner, StorageAvailable;
     private bool TryGetNextConveyorBlock(out Block next) { next = Next; return next != null; }
     private bool TryGetRuntimeSplitter(out Spliterbelt splitter) { splitter = Splitter; return splitter != null; }
+    private bool TryGetRuntimeSplitterRecord(out ConveyorRuntimeRecord record) { record = null; return false; }
     private bool TryGetSplitterChannels(Spliterbelt splitter, out Block left, out Block right)
     { left = splitter.Left; right = splitter.Right; return left != null && right != null; }
+    private bool TryGetSplitterChannels(ConveyorRuntimeRecord splitter, out Block left, out Block right)
+    { left = right = null; return false; }
+    private bool TryGetBelt2FBridgeCenterRecord(out ConveyorRuntimeRecord record) { record = null; return false; }
     private bool TryGetBelt2FBridgeCenterBelt(out ConvayorBelt2F bridge) { bridge = CenterBridge; return bridge != null; }
+    private bool TryGetConveyorItemBelt2FRecord(int lane, out ConveyorRuntimeRecord record)
+    { record = null; return false; }
     private bool TryGetConveyorItemBelt2F(int lane, out ConvayorBelt2F bridge)
     { bridge = CenterBridge != null ? (IsBelt2FBridgeLaneIndex(lane) ? CenterBridge : null) : Bridge; return bridge != null; }
     private bool TryResolveOwningTerrainGenerator(out TerrainGenerator terrain) { terrain = Terrain; return terrain != null; }

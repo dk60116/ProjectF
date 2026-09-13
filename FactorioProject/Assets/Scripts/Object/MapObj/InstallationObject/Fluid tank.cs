@@ -46,8 +46,24 @@ public class Fluidtank : InstallationObject, IMapObjectUpdateTick, IMapObjectUpd
     private readonly List<InputOutputModule> adjacentModuleScratch = new List<InputOutputModule>(2);
     private readonly HashSet<int> adjacentOutputFluidItemIdsScratch = new HashSet<int>();
     private readonly List<Fluidtank> connectedTankCache = new List<Fluidtank>(4);
-    private readonly Queue<Vector2Int> fluidNetworkSearchQueue = new Queue<Vector2Int>();
-    private readonly HashSet<Vector2Int> fluidNetworkSearchVisited = new HashSet<Vector2Int>();
+    private readonly struct FluidNetworkSearchNode
+    {
+        public readonly Vector2Int Coordinate;
+        public readonly int PipeCount;
+
+        public FluidNetworkSearchNode(Vector2Int coordinate, int pipeCount)
+        {
+            Coordinate = coordinate;
+            PipeCount = pipeCount;
+        }
+    }
+
+    private readonly Queue<FluidNetworkSearchNode> fluidNetworkSearchQueue =
+        new Queue<FluidNetworkSearchNode>();
+    private readonly Dictionary<Vector2Int, int> fluidNetworkSearchPipeCounts =
+        new Dictionary<Vector2Int, int>();
+    private readonly Dictionary<Fluidtank, int> connectedTankPipeDistances =
+        new Dictionary<Fluidtank, int>();
     private readonly List<Vector3> defaultPipeLocalPositions = new List<Vector3>(4);
     private readonly List<bool> mountedPipeTargetActiveStates = new List<bool>(4);
     private int connectedTankCacheTopologyVersion;
@@ -313,8 +329,15 @@ public class Fluidtank : InstallationObject, IMapObjectUpdateTick, IMapObjectUpd
         }
 
         int fluidItemId = sourceTank.StoredFluidItemId;
+        int sourcePipeDistance = connectedTankPipeDistances.TryGetValue(
+            sourceTank,
+            out int recordedDistance)
+            ? recordedDistance
+            : 0;
         float transferLiters = Mathf.Min(
-            ConnectedFluidStorageTransferLitersPerSecond * deltaTime,
+            ConnectedFluidStorageTransferLitersPerSecond
+            * CalculateFluidPressureRetention(sourcePipeDistance)
+            * deltaTime,
             AvailableFluidStorageLiters,
             sourceTank.StoredFluidLiters,
             CalculateFluidEqualizationTransferLiters(sourceTank, this));
@@ -466,8 +489,9 @@ public class Fluidtank : InstallationObject, IMapObjectUpdateTick, IMapObjectUpd
         }
 
         connectedTankCache.Clear();
+        connectedTankPipeDistances.Clear();
         fluidNetworkSearchQueue.Clear();
-        fluidNetworkSearchVisited.Clear();
+        fluidNetworkSearchPipeCounts.Clear();
 
         if (!TryGetPlacementRuntime(out Vector2Int anchorCoordinate, out _))
         {
@@ -475,19 +499,39 @@ public class Fluidtank : InstallationObject, IMapObjectUpdateTick, IMapObjectUpd
             return false;
         }
 
-        fluidNetworkSearchVisited.Add(anchorCoordinate);
-        fluidNetworkSearchQueue.Enqueue(anchorCoordinate);
+        EnqueueFluidNetworkSearchCoordinate(anchorCoordinate, 0);
         while (fluidNetworkSearchQueue.Count > 0)
         {
-            Vector2Int coordinate = fluidNetworkSearchQueue.Dequeue();
+            FluidNetworkSearchNode searchNode = fluidNetworkSearchQueue.Dequeue();
+            Vector2Int coordinate = searchNode.Coordinate;
+            if (!fluidNetworkSearchPipeCounts.TryGetValue(
+                    coordinate,
+                    out int pipeCount)
+                || pipeCount != searchNode.PipeCount)
+            {
+                continue;
+            }
+
             if (!TryResolveFluidNetworkNode(coordinate, out Fluidtank tank, out Pipe pipe))
             {
                 continue;
             }
 
-            if (tank != null && tank != this && !connectedTankCache.Contains(tank))
+            if (tank != null && tank != this)
             {
-                connectedTankCache.Add(tank);
+                if (!connectedTankCache.Contains(tank))
+                {
+                    connectedTankCache.Add(tank);
+                }
+
+                int pipeDistance = Mathf.Max(0, pipeCount - 1);
+                if (!connectedTankPipeDistances.TryGetValue(
+                        tank,
+                        out int previousDistance)
+                    || pipeDistance < previousDistance)
+                {
+                    connectedTankPipeDistances[tank] = pipeDistance;
+                }
             }
 
             for (int directionIndex = 0; directionIndex < FluidCardinalDirections.Length; directionIndex++)
@@ -505,8 +549,7 @@ public class Fluidtank : InstallationObject, IMapObjectUpdateTick, IMapObjectUpd
                 }
 
                 Vector2Int nextCoordinate = coordinate + direction;
-                if (fluidNetworkSearchVisited.Contains(nextCoordinate)
-                    || !TryResolveFluidNetworkNode(
+                if (!TryResolveFluidNetworkNode(
                         nextCoordinate,
                         out Fluidtank nextTank,
                         out Pipe nextPipe)
@@ -521,8 +564,9 @@ public class Fluidtank : InstallationObject, IMapObjectUpdateTick, IMapObjectUpd
                     continue;
                 }
 
-                fluidNetworkSearchVisited.Add(nextCoordinate);
-                fluidNetworkSearchQueue.Enqueue(nextCoordinate);
+                EnqueueFluidNetworkSearchCoordinate(
+                    nextCoordinate,
+                    pipeCount + (nextPipe != null ? 1 : 0));
             }
 
             Vector2Int remoteCoordinate = default;
@@ -533,15 +577,28 @@ public class Fluidtank : InstallationObject, IMapObjectUpdateTick, IMapObjectUpd
                                  out PipeRuntimeRecord runtimeRecord)
                 ? runtimeRecord.TryGetRemoteConnectionCoordinate(coordinate, out remoteCoordinate)
                 : pipe != null && pipe.TryGetRemoteConnectionCoordinate(coordinate, out remoteCoordinate);
-            if (hasRemote
-                && fluidNetworkSearchVisited.Add(remoteCoordinate))
+            if (hasRemote)
             {
-                fluidNetworkSearchQueue.Enqueue(remoteCoordinate);
+                EnqueueFluidNetworkSearchCoordinate(remoteCoordinate, pipeCount);
             }
         }
 
         connectedTankCacheTopologyVersion = fluidNetworkTopologyVersion;
         return connectedTankCache.Count > 0;
+    }
+
+    private void EnqueueFluidNetworkSearchCoordinate(Vector2Int coordinate, int pipeCount)
+    {
+        if (fluidNetworkSearchPipeCounts.TryGetValue(
+                coordinate,
+                out int previousPipeCount)
+            && previousPipeCount <= pipeCount)
+        {
+            return;
+        }
+
+        fluidNetworkSearchPipeCounts[coordinate] = pipeCount;
+        fluidNetworkSearchQueue.Enqueue(new FluidNetworkSearchNode(coordinate, pipeCount));
     }
 
     private bool TryResolveFluidNetworkNode(

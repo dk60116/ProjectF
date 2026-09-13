@@ -9,6 +9,13 @@ using UnityEngine.Rendering;
 /// </summary>
 public sealed class PipeRuntimeRecord
 {
+    private static readonly Vector2Int[] SplitDirections =
+    {
+        Vector2Int.up,
+        Vector2Int.right,
+        Vector2Int.down,
+        Vector2Int.left
+    };
     private readonly Vector2Int[] occupiedCoordinates;
     private readonly Bounds[] focusBounds;
 
@@ -184,6 +191,45 @@ public sealed class PipeRuntimeRecord
         {
             minimumY = Mathf.Min(minimumY, focusBounds[i].min.y);
             maximumY = Mathf.Max(maximumY, focusBounds[i].max.y);
+        }
+    }
+
+    internal void AppendSplitVisualSegments(Vector2Int coordinate, List<Vector3> endpoints)
+    {
+        if (endpoints == null || !Covers(coordinate))
+        {
+            return;
+        }
+
+        int endpointIndex = 0;
+        if (IsUnderground
+            && TryGetPairCoordinates(out Vector2Int first, out Vector2Int second)
+            && coordinate == second)
+        {
+            endpointIndex = 1;
+        }
+
+        float y = endpointIndex < focusBounds.Length
+            ? focusBounds[endpointIndex].max.y + 0.025f
+            : WorldPosition.y + 0.5f;
+        Vector3 center = new Vector3(coordinate.x, y, coordinate.y);
+        int initialCount = endpoints.Count;
+        for (int i = 0; i < SplitDirections.Length; i++)
+        {
+            Vector2Int direction = SplitDirections[i];
+            if (!HasConnectionTowardsAt(coordinate, direction))
+            {
+                continue;
+            }
+
+            endpoints.Add(center);
+            endpoints.Add(center + new Vector3(direction.x * 0.44f, 0f, direction.y * 0.44f));
+        }
+
+        if (endpoints.Count == initialCount)
+        {
+            endpoints.Add(center + Vector3.left * 0.12f);
+            endpoints.Add(center + Vector3.right * 0.12f);
         }
     }
 
@@ -377,6 +423,7 @@ public sealed class PipeWorld : MonoBehaviour
     private float minimumFocusY;
     private float maximumFocusY;
     private bool focusHeightDirty = true;
+    private int topologyVersion = 1;
 
     public static PipeWorld Current => current;
     public int InstalledPipeCount => recordsByStorageKey.Count;
@@ -386,6 +433,7 @@ public sealed class PipeWorld : MonoBehaviour
     public int FluidInstanceCount => fluidOwner.Entries.Count;
     public int EstimatedDrawCallCount =>
         bodyBatches.EstimatedDrawCallCount + fluidBatches.EstimatedDrawCallCount;
+    internal int TopologyVersion => topologyVersion;
 
     public static void AppendProfilerCounters()
     {
@@ -465,6 +513,7 @@ public sealed class PipeWorld : MonoBehaviour
         bodyDirty = true;
         fluidDirty = true;
         focusHeightDirty = true;
+        IncrementTopologyVersion();
         return record;
     }
 
@@ -482,6 +531,7 @@ public sealed class PipeWorld : MonoBehaviour
         bodyDirty = true;
         fluidDirty = true;
         focusHeightDirty = true;
+        IncrementTopologyVersion();
         return true;
     }
 
@@ -494,6 +544,36 @@ public sealed class PipeWorld : MonoBehaviour
         bodyDirty = true;
         fluidDirty = true;
         focusHeightDirty = true;
+        IncrementTopologyVersion();
+    }
+
+    internal void CopyRecords(List<PipeRuntimeRecord> results)
+    {
+        if (results == null)
+        {
+            throw new ArgumentNullException(nameof(results));
+        }
+
+        results.Clear();
+        foreach (PipeRuntimeRecord record in recordsByStorageKey.Values)
+        {
+            if (record != null && record.HasValidPrototype)
+            {
+                results.Add(record);
+            }
+        }
+    }
+
+    private void IncrementTopologyVersion()
+    {
+        unchecked
+        {
+            topologyVersion++;
+            if (topologyVersion == 0)
+            {
+                topologyVersion = 1;
+            }
+        }
     }
 
     public bool TryGetAtCoordinate(Vector2Int coordinate, out PipeRuntimeRecord record)

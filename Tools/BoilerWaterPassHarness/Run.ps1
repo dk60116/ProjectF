@@ -24,9 +24,6 @@ foreach ($member in @(
     'private bool TrySelectFluidOutputStorageWithAnySpaceFromCache(',
     'private bool CanUseFluidOutputStorageWithAnySpace(',
     'private static float GetFluidStorageFillRatio(',
-    'private bool TryUseSharedPumpFluidOutputNetwork(',
-    'private void PublishSharedPumpFluidOutputNetwork(',
-    'private static void EnsureSharedPumpFluidOutputTopologyVersion(',
     'private bool EnqueueFluidStoragePipePassCoordinatesAt(')) {
     $generated += (Read-Member ($base + 'InputOutputModule.cs') $member) + "`n"
 }

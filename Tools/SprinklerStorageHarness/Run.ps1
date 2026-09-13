@@ -48,6 +48,7 @@ foreach ($signature in @(
     'private void EnqueueConnectedFluidSearchCoordinate(',
     'private bool TryGetConnectedFluidNodeAtCoordinate(',
     'private bool CanFluidSearchLeaveCoordinate(',
+    'private static bool IsFixedFluidTank(',
     'private static bool HasConnectedPipeConnectionTowards(',
     'private static bool TryGetConnectedPipeRemoteCoordinate(')) {
     $generated += (Read-Member ($base + 'InputOutputModule.cs') $signature) + "`n"

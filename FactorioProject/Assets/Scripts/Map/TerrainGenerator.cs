@@ -1149,7 +1149,7 @@ public partial class TerrainGenerator : MonoBehaviour,
             }
         }
 
-        DrawBeltSplitGroups();
+        DrawBeltPipeSplitGroups();
 
         using (RenderChunkSurfacesMarker.Auto())
         {

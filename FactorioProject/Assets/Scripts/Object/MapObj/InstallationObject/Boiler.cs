@@ -43,6 +43,15 @@ public class Boiler : InputOutputModule
         return outputItemId >= 0;
     }
 
+    public override float GetObjectInfoFluidPressureLitersPerSecond(int fluidItemId)
+    {
+        return isActiveAndEnabled
+               && TryGetObjectInfoOutputRate(out int outputItemId, out float litersPerSecond)
+               && outputItemId == fluidItemId
+            ? Mathf.Max(0f, litersPerSecond)
+            : 0f;
+    }
+
     public override float GetStoredFluidTemperatureCelsius(int fluidItemId)
     {
         if (IsBoilerOutputFluidItem(fluidItemId))
@@ -631,13 +640,15 @@ public class Boiler : InputOutputModule
         // Steam is a per-second flow, not an internal backlog. If the connected
         // engines cannot accept this tick's steam, the boiler throttles instead
         // of saving unsent steam and dumping it later when more engines connect.
+        float effectiveOutputLitersPerSecond = outputLitersPerSecond
+                                               * ResolveFluidOutputTransportRetention(outputItemId);
         long requestedUnits = DeterministicSimulationUnits.RateForTicks(
-            outputLitersPerSecond,
+            effectiveOutputLitersPerSecond,
             DeterministicSimulationUnits.DeltaTimeToTicks(deltaTime));
         float requestedLiters = DeterministicSimulationUnits.ToFloat(requestedUnits);
         float waterLitersPerSteamLiter = (float)inputLitersPerSecond / outputLitersPerSecond;
         float maxSteamLitersFromWater = StoredFluidLiters / waterLitersPerSteamLiter;
-        RefreshSteamOutputBudget(outputLitersPerSecond, deltaTime);
+        RefreshSteamOutputBudget(effectiveOutputLitersPerSecond, deltaTime);
         float maxLitersToEmit = Mathf.Min(
             requestedLiters,
             Mathf.Min(
@@ -697,7 +708,7 @@ public class Boiler : InputOutputModule
     }
 
     private void RefreshSteamOutputBudget(
-        int outputLitersPerSecond,
+        float outputLitersPerSecond,
         float initialAvailableSeconds)
     {
         float outputRate = Mathf.Max(0f, outputLitersPerSecond);

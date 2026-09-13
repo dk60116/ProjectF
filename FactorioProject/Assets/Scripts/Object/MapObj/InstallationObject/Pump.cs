@@ -148,6 +148,10 @@ public class Pump : InputOutputModule
     {
         int waterItemId = ResolveWaterItemId();
         float litersPerSecond = WaterLitersPerSecond;
+        if (waterItemId >= 0 && litersPerSecond > 0f)
+        {
+            litersPerSecond *= ResolveFluidOutputTransportRetention(waterItemId);
+        }
         if (waterItemId < 0 || litersPerSecond <= 0f || !HasRuntimeOutputCoordinates)
         {
             waterAccumulatorUnits = 0L;

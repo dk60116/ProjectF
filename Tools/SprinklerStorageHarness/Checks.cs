@@ -4,6 +4,7 @@ using System.Collections.Generic;
 public static class Mathf
 {
     public static float Max(float a, float b) => Math.Max(a, b);
+    public static int Max(int a, int b) => Math.Max(a, b);
     public static float Min(float a, float b) => Math.Min(a, b);
     public static float Clamp(float value, float min, float max) => Math.Clamp(value, min, max);
 }
@@ -90,16 +91,26 @@ public sealed class PipeRuntimeRecord
 public class Fluidtank : InstallationObject
 {
     public HashSet<Vector2Int> BlockedDirections = new();
+    public bool IsFlatCarMounted;
     public bool HasFluidNetworkConnectionTowards(Vector2Int coordinate, Vector2Int direction) => !BlockedDirections.Contains(direction);
 }
 public partial class InputOutputModule : InstallationObject
 {
+    private readonly struct ConnectedFluidSearchNode
+    {
+        public readonly Vector2Int Coordinate;
+        public readonly int PipeCount;
+        public ConnectedFluidSearchNode(Vector2Int coordinate, int pipeCount)
+        { Coordinate = coordinate; PipeCount = pipeCount; }
+    }
     protected readonly List<InstallationObject> cachedConnectedFluidSourceStorages = new();
+    private readonly Dictionary<InstallationObject, int> cachedConnectedFluidSourcePipeDistances = new();
     public readonly List<InstallationObject> Connections = new();
     public int TopologyVersion { get => fluidTopologyVersion; set => fluidTopologyVersion = value; }
     private int fluidTopologyVersion, cachedConnectedFluidSourceStoragesTopologyVersion = -1;
-    private readonly Queue<Vector2Int> connectedFluidSearchQueue = new();
-    private readonly HashSet<Vector2Int> connectedFluidSearchVisited = new();
+    private readonly Queue<ConnectedFluidSearchNode> connectedFluidSearchQueue = new();
+    private readonly Dictionary<Vector2Int, int> connectedFluidSearchPipeCounts = new();
+    private int connectedFluidSearchCurrentPipeCount;
     private readonly HashSet<InstallationObject> connectedFluidStorageCandidates = new();
     private readonly List<Vector2Int> connectedFluidSeedCoordinates = new();
     private static readonly Vector2Int[] FluidCardinalDirections = { new(1, 0), new(-1, 0), new(0, 1), new(0, -1) };
@@ -109,6 +120,13 @@ public partial class InputOutputModule : InstallationObject
     public float ReportedConsumption;
     protected virtual bool UsesConnectedTankNetworkStorage => false;
     public IReadOnlyList<InstallationObject> Sources => GetConnectedFluidSourceStorages();
+    public int GetSourcePipeDistance(InstallationObject storage)
+    {
+        _ = Sources;
+        return cachedConnectedFluidSourcePipeDistances.TryGetValue(storage, out int distance)
+            ? distance
+            : -1;
+    }
     private void CollectRuntimePipeAreaCoordinates(List<Vector2Int> coordinates)
     {
         CacheBuilds++;
@@ -123,7 +141,7 @@ public partial class InputOutputModule : InstallationObject
     }
     private void EnqueueSteamGeneratorPipePassCoordinatesAt(Vector2Int coordinate) { }
     private void EnqueueFluidStoragePipePassCoordinatesAt(Vector2Int coordinate)
-        => EnqueueConnectedFluidSearchCoordinate(coordinate);
+        => EnqueueConnectedFluidSearchCoordinate(coordinate, connectedFluidSearchCurrentPipeCount);
     private static bool ContainsCoordinate(List<Vector2Int> list, Vector2Int coordinate) => list.Contains(coordinate);
     private bool TryGetConnectedPipeAtCoordinate(
         Vector2Int coordinate,
@@ -309,7 +327,15 @@ public static class Checks
         Check(Near(stored, 40) && Near(capacity, 500), "underground pipe endpoint after a tank reaches the remote tank");
         var ordinaryModule = new InputOutputModule { UseGraph = true };
         foreach (var node in network.Nodes) ordinaryModule.Nodes.Add(node.Key, node.Value);
-        Check(ordinaryModule.Sources.Count == 1, "ordinary modules keep their existing transfer boundary");
+        Check(ordinaryModule.Sources.Count == 2, "ordinary fluid modules traverse connected fixed tanks");
+        var distanceModule = new InputOutputModule { UseGraph = true };
+        var distanceStorage = Tank(10);
+        distanceModule.Nodes[Vector2Int.zero] = new Pipe();
+        distanceModule.Nodes[new(1, 0)] = new Pipe();
+        distanceModule.Nodes[new(2, 0)] = distanceStorage;
+        Check(
+            distanceModule.GetSourcePipeDistance(distanceStorage) == 1,
+            "source cache records one percent distance after the source-side pipe");
         Check(ItemInfoDescription.Display(new Fluidtank(), 10, 300) == "10.0 / 300.0 L", "ordinary tank formatting remains unchanged");
 
         TerrainGenerator.Active = new();

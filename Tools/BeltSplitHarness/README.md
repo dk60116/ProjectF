@@ -16,8 +16,8 @@ removal/rebuild, world reset and a 100,000-vertex chain. Regression scenarios co
 Engine geometry/lookup methods are stubbed. Actual scene placement, material
 rendering and frame time require Unity verification.
 
-In play mode, enable **GameManager > Show Belt Split** or **EditorTool > Show Belt
-Split**. Connected transport paths share a translucent color. Install/remove the
+In play mode, enable **GameManager > Show Belt Pipe Split** or **EditorTool > Show Belt
+Pipe Split**. Connected belt paths and pipe networks share a translucent color per group. Install/remove the
 middle of a chain, attach both splitter outputs, and cross a 2F bridge over a ground
 belt: the crossing alone must not merge the two colors. Empty/full/stopped belts
 retain their group. Check the toggle in both directions and confirm item movement.

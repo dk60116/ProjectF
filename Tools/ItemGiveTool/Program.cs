@@ -61,7 +61,7 @@ internal sealed class EditorToolForm : Form
     private readonly CheckBox showConveyorSlotDotsCheckBox = new CheckBox();
     private readonly CheckBox showSleepAwakeCheckBox = new CheckBox();
     private readonly CheckBox showBeltItemLineCheckBox = new CheckBox();
-    private readonly CheckBox showBeltSplitCheckBox = new CheckBox();
+    private readonly CheckBox showBeltPipeSplitCheckBox = new CheckBox();
     private readonly CheckBox hideBeltItemsCheckBox = new CheckBox();
     private readonly CheckBox hideBeltsCheckBox = new CheckBox();
     private readonly CheckBox disableCameraCullingCheckBox = new CheckBox();
@@ -540,9 +540,12 @@ internal sealed class EditorToolForm : Form
                 showBeltItemLineCheckBox.Checked,
                 "Show Belt Item Line");
 
-        StyleDebugCheckBox(showBeltSplitCheckBox, "Show Belt Split");
-        showBeltSplitCheckBox.CheckedChanged += async (_, _) =>
-            await SendDebugToggleAsync("showBeltSplit", showBeltSplitCheckBox.Checked, "Show Belt Split");
+        StyleDebugCheckBox(showBeltPipeSplitCheckBox, "Show Belt Pipe Split");
+        showBeltPipeSplitCheckBox.CheckedChanged += async (_, _) =>
+            await SendDebugToggleAsync(
+                "showBeltPipeSplit",
+                showBeltPipeSplitCheckBox.Checked,
+                "Show Belt Pipe Split");
 
         StyleDebugCheckBox(hideBeltItemsCheckBox, "Hide Belt Item");
         hideBeltItemsCheckBox.CheckedChanged += async (_, _) =>
@@ -631,7 +634,7 @@ internal sealed class EditorToolForm : Form
         debugTogglePanel.Controls.Add(showConveyorSlotDotsCheckBox);
         debugTogglePanel.Controls.Add(showSleepAwakeCheckBox);
         debugTogglePanel.Controls.Add(showBeltItemLineCheckBox);
-        debugTogglePanel.Controls.Add(showBeltSplitCheckBox);
+        debugTogglePanel.Controls.Add(showBeltPipeSplitCheckBox);
         debugTogglePanel.Controls.Add(hideBeltItemsCheckBox);
         debugTogglePanel.Controls.Add(hideBeltsCheckBox);
         debugTogglePanel.Controls.Add(disableCameraCullingCheckBox);
@@ -1453,9 +1456,9 @@ internal sealed class EditorToolForm : Form
             ApplyRuntimeCheckBoxState(showSleepAwakeCheckBox, showSleepAwake);
         }
 
-        if (TryReadProtocolBool(response, "showBeltSplit", out bool showBeltSplit))
+        if (TryReadProtocolBool(response, "showBeltPipeSplit", out bool showBeltPipeSplit))
         {
-            ApplyRuntimeCheckBoxState(showBeltSplitCheckBox, showBeltSplit);
+            ApplyRuntimeCheckBoxState(showBeltPipeSplitCheckBox, showBeltPipeSplit);
         }
 
         if (TryReadProtocolBool(response, "showBeltItemLine", out bool showBeltItemLine))
@@ -1928,7 +1931,7 @@ internal sealed class EditorToolForm : Form
         showConveyorSlotDotsCheckBox.Enabled = !busy;
         showSleepAwakeCheckBox.Enabled = !busy;
         showBeltItemLineCheckBox.Enabled = !busy;
-        showBeltSplitCheckBox.Enabled = !busy;
+        showBeltPipeSplitCheckBox.Enabled = !busy;
         hideBeltItemsCheckBox.Enabled = !busy;
         hideBeltsCheckBox.Enabled = !busy;
         disableCameraCullingCheckBox.Enabled = !busy;

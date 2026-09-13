@@ -153,19 +153,6 @@ public class InputOutputModule : InstallationObject,
     private static readonly List<InputOutputModule> runtimeWakeScratch
         = new List<InputOutputModule>(16);
     private static int fluidTopologyVersion = 1;
-    private sealed class SharedPumpFluidOutputNetwork
-    {
-        internal readonly List<InstallationObject> Storages = new List<InstallationObject>(8);
-    }
-    private static readonly Dictionary<Vector2Int, SharedPumpFluidOutputNetwork> sharedPumpFluidOutputNetworksByCoordinate
-        = new Dictionary<Vector2Int, SharedPumpFluidOutputNetwork>();
-    private static readonly List<SharedPumpFluidOutputNetwork> sharedPumpFluidOutputNetworks
-        = new List<SharedPumpFluidOutputNetwork>();
-    private static int sharedPumpFluidOutputTopologyVersion;
-    private static long sharedPumpFluidOutputTopologyBuilds;
-    private static long sharedPumpFluidOutputCacheHits;
-    private static int sharedPumpFluidOutputLastBuildNodes;
-    private static int sharedPumpFluidOutputLastBuildStorages;
 
     private delegate bool RuntimeCoordinateValueCollector<T>(
         InputOutputModule module,
@@ -485,13 +472,31 @@ public class InputOutputModule : InstallationObject,
     private readonly List<Vector2Int> objectInfoInputAreaCoordinates = new List<Vector2Int>();
     private readonly HashSet<Vector2Int> singleItemOutputVisitedCoordinates = new HashSet<Vector2Int>();
     private readonly HashSet<Vector2Int> runtimeAreaVisitedCoordinates = new HashSet<Vector2Int>();
-    private readonly Queue<Vector2Int> connectedFluidSearchQueue = new Queue<Vector2Int>(32);
-    private readonly HashSet<Vector2Int> connectedFluidSearchVisited = new HashSet<Vector2Int>();
+    private readonly struct ConnectedFluidSearchNode
+    {
+        public readonly Vector2Int Coordinate;
+        public readonly int PipeCount;
+
+        public ConnectedFluidSearchNode(Vector2Int coordinate, int pipeCount)
+        {
+            Coordinate = coordinate;
+            PipeCount = pipeCount;
+        }
+    }
+
+    private readonly Queue<ConnectedFluidSearchNode> connectedFluidSearchQueue =
+        new Queue<ConnectedFluidSearchNode>(32);
+    private readonly Dictionary<Vector2Int, int> connectedFluidSearchPipeCounts =
+        new Dictionary<Vector2Int, int>();
     private readonly HashSet<InstallationObject> connectedFluidStorageCandidates = new HashSet<InstallationObject>();
     private readonly List<Vector2Int> connectedFluidSeedCoordinates = new List<Vector2Int>(8);
     private readonly List<InstallationObject> cachedConnectedFluidSourceStorages = new List<InstallationObject>(8);
+    private readonly Dictionary<InstallationObject, int> cachedConnectedFluidSourcePipeDistances =
+        new Dictionary<InstallationObject, int>();
     private int cachedConnectedFluidSourceStoragesTopologyVersion;
     private readonly List<InstallationObject> cachedFluidOutputStorages = new List<InstallationObject>(8);
+    private readonly Dictionary<InstallationObject, int> cachedFluidOutputStoragePipeDistances =
+        new Dictionary<InstallationObject, int>();
     private int cachedFluidOutputStoragesTopologyVersion;
     private InstallationObject cachedConnectedFluidSource;
     private int cachedConnectedFluidSourceItemId = int.MinValue;
@@ -499,6 +504,7 @@ public class InputOutputModule : InstallationObject,
     private InstallationObject cachedFluidOutputStorage;
     private int cachedFluidOutputItemId = int.MinValue;
     private int cachedFluidOutputTopologyVersion;
+    private int connectedFluidSearchCurrentPipeCount;
     private bool energyGaugeRenderersResolved;
     private bool energyGaugeWorldPositionResolved;
     private Vector3 cachedEnergyGaugeWorldPosition;
@@ -1045,8 +1051,6 @@ public class InputOutputModule : InstallationObject,
         {
             fluidTopologyVersion = 1;
         }
-
-        EnsureSharedPumpFluidOutputTopologyVersion();
     }
 
     internal static void NotifyRuntimePipeTopologyChanged(IReadOnlyList<Vector2Int> coordinates)
@@ -2113,16 +2117,29 @@ public class InputOutputModule : InstallationObject,
         int maxAttempts = Mathf.Max(1, activeRuntimeModules.Count);
         for (int attempt = 0; attempt < maxAttempts; attempt++)
         {
-            float remainingLiters = Mathf.Min(
-                maxTransferLiters - acceptedLiters,
-                AvailableFluidStorageLiters);
-            if (remainingLiters <= 0.0001f)
+            if (maxTransferLiters - acceptedLiters <= 0.0001f
+                || AvailableFluidStorageLiters <= 0.0001f)
             {
                 break;
             }
 
             if (!TryFindConnectedFluidSource(requiredFluidItemId, out InstallationObject sourceStorage)
                 || sourceStorage == null)
+            {
+                break;
+            }
+
+            int sourcePipeDistance = cachedConnectedFluidSourcePipeDistances.TryGetValue(
+                sourceStorage,
+                out int recordedDistance)
+                ? recordedDistance
+                : 0;
+            float transportLimit = maxTransferLiters
+                                   * CalculateFluidPressureRetention(sourcePipeDistance);
+            float remainingLiters = Mathf.Min(
+                transportLimit - acceptedLiters,
+                AvailableFluidStorageLiters);
+            if (remainingLiters <= 0.0001f)
             {
                 break;
             }
@@ -2244,8 +2261,9 @@ public class InputOutputModule : InstallationObject,
         }
 
         cachedConnectedFluidSourceStorages.Clear();
+        cachedConnectedFluidSourcePipeDistances.Clear();
         connectedFluidSearchQueue.Clear();
-        connectedFluidSearchVisited.Clear();
+        connectedFluidSearchPipeCounts.Clear();
         connectedFluidStorageCandidates.Clear();
         connectedFluidSeedCoordinates.Clear();
 
@@ -2258,12 +2276,24 @@ public class InputOutputModule : InstallationObject,
 
         for (int i = 0; i < connectedFluidSeedCoordinates.Count; i++)
         {
-            EnqueueConnectedFluidSearchCoordinate(connectedFluidSeedCoordinates[i]);
+            Vector2Int seedCoordinate = connectedFluidSeedCoordinates[i];
+            EnqueueConnectedFluidSearchCoordinate(
+                seedCoordinate,
+                TryGetConnectedPipeAtCoordinate(seedCoordinate, out _, out _, out _) ? 1 : 0);
         }
 
         while (connectedFluidSearchQueue.Count > 0)
         {
-            Vector2Int coordinate = connectedFluidSearchQueue.Dequeue();
+            ConnectedFluidSearchNode searchNode = connectedFluidSearchQueue.Dequeue();
+            Vector2Int coordinate = searchNode.Coordinate;
+            if (!connectedFluidSearchPipeCounts.TryGetValue(
+                    coordinate,
+                    out connectedFluidSearchCurrentPipeCount)
+                || connectedFluidSearchCurrentPipeCount != searchNode.PipeCount)
+            {
+                continue;
+            }
+
             EnqueueFluidStoragePipePassCoordinatesAt(coordinate);
             bool isSeedCoordinate = ContainsCoordinate(connectedFluidSeedCoordinates, coordinate);
             bool hasPipe = TryGetConnectedPipeAtCoordinate(
@@ -2278,9 +2308,12 @@ public class InputOutputModule : InstallationObject,
 
             AddConnectedFluidStorageCacheCandidate(
                 fluidStorage,
-                cachedConnectedFluidSourceStorages);
+                cachedConnectedFluidSourceStorages,
+                cachedConnectedFluidSourcePipeDistances,
+                Mathf.Max(0, connectedFluidSearchCurrentPipeCount - 1));
 
             if (!isSeedCoordinate && !hasPipe && !storageIsPipeArea
+                && !IsFixedFluidTank(fluidStorage)
                 && !(UsesConnectedTankNetworkStorage && fluidStorage is Fluidtank))
             {
                 continue;
@@ -2316,18 +2349,25 @@ public class InputOutputModule : InstallationObject,
                         nextCoordinate,
                         -direction,
                         out InstallationObject nextStorage,
-                        out bool canContinueRoute))
+                        out bool canContinueRoute,
+                        out bool nextNodeIsPipe))
                 {
                     continue;
                 }
 
                 AddConnectedFluidStorageCacheCandidate(
                     nextStorage,
-                    cachedConnectedFluidSourceStorages);
+                    cachedConnectedFluidSourceStorages,
+                    cachedConnectedFluidSourcePipeDistances,
+                    Mathf.Max(
+                        0,
+                        connectedFluidSearchCurrentPipeCount + (nextNodeIsPipe ? 1 : 0) - 1));
 
                 if (canContinueRoute || UsesConnectedTankNetworkStorage && nextStorage is Fluidtank)
                 {
-                    EnqueueConnectedFluidSearchCoordinate(nextCoordinate);
+                    EnqueueConnectedFluidSearchCoordinate(
+                        nextCoordinate,
+                        connectedFluidSearchCurrentPipeCount + (nextNodeIsPipe ? 1 : 0));
                 }
             }
 
@@ -2338,7 +2378,9 @@ public class InputOutputModule : InstallationObject,
                     coordinate,
                     out Vector2Int remoteCoordinate))
             {
-                EnqueueConnectedFluidSearchCoordinate(remoteCoordinate);
+                EnqueueConnectedFluidSearchCoordinate(
+                    remoteCoordinate,
+                    connectedFluidSearchCurrentPipeCount);
             }
         }
 
@@ -2392,7 +2434,9 @@ public class InputOutputModule : InstallationObject,
                 && boiler.gameObject.activeInHierarchy
                 && boiler.TryGetRuntimeWaterPass(coordinate, out Vector2Int otherCoordinate, out _))
             {
-                EnqueueConnectedFluidSearchCoordinate(otherCoordinate);
+                EnqueueConnectedFluidSearchCoordinate(
+                    otherCoordinate,
+                    connectedFluidSearchCurrentPipeCount);
                 foundPipeArea = true;
                 continue;
             }
@@ -2421,8 +2465,12 @@ public class InputOutputModule : InstallationObject,
             return;
         }
 
-        EnqueueConnectedFluidSearchCoordinate(inputCoordinate);
-        EnqueueConnectedFluidSearchCoordinate(tailCoordinate);
+        EnqueueConnectedFluidSearchCoordinate(
+            inputCoordinate,
+            connectedFluidSearchCurrentPipeCount);
+        EnqueueConnectedFluidSearchCoordinate(
+            tailCoordinate,
+            connectedFluidSearchCurrentPipeCount);
     }
 
     private bool TrySelectConnectedFluidSourceFromCache(
@@ -2455,18 +2503,29 @@ public class InputOutputModule : InstallationObject,
 
     private void AddConnectedFluidStorageCacheCandidate(
         InstallationObject storage,
-        List<InstallationObject> targetStorages)
+        List<InstallationObject> targetStorages,
+        Dictionary<InstallationObject, int> targetPipeDistances,
+        int pipeDistance)
     {
         if (storage == null
             || storage == this
             || !storage.CanStoreFluid
-            || targetStorages == null
-            || !connectedFluidStorageCandidates.Add(storage))
+            || targetStorages == null)
         {
             return;
         }
 
-        targetStorages.Add(storage);
+        if (connectedFluidStorageCandidates.Add(storage))
+        {
+            targetStorages.Add(storage);
+        }
+
+        if (targetPipeDistances != null
+            && (!targetPipeDistances.TryGetValue(storage, out int previousDistance)
+                || pipeDistance < previousDistance))
+        {
+            targetPipeDistances[storage] = pipeDistance;
+        }
     }
 
     protected virtual int ResolvePreferredFluidInputItemId()
@@ -2636,10 +2695,12 @@ public class InputOutputModule : InstallationObject,
         Vector2Int coordinate,
         Vector2Int directionToPrevious,
         out InstallationObject storage,
-        out bool canContinueRoute)
+        out bool canContinueRoute,
+        out bool isPipeNode)
     {
         storage = null;
         canContinueRoute = false;
+        isPipeNode = false;
 
         if (TryGetConnectedPipeAtCoordinate(
                 coordinate,
@@ -2665,6 +2726,7 @@ public class InputOutputModule : InstallationObject,
             }
 
             canContinueRoute = true;
+            isPipeNode = true;
             return true;
         }
 
@@ -2700,7 +2762,7 @@ public class InputOutputModule : InstallationObject,
                 return false;
             }
 
-            canContinueRoute = storageIsPipeArea;
+            canContinueRoute = storageIsPipeArea || IsFixedFluidTank(storage);
             return true;
         }
 
@@ -2983,12 +3045,24 @@ public class InputOutputModule : InstallationObject,
         return false;
     }
 
-    private void EnqueueConnectedFluidSearchCoordinate(Vector2Int coordinate)
+    private void EnqueueConnectedFluidSearchCoordinate(Vector2Int coordinate, int pipeCount)
     {
-        if (connectedFluidSearchVisited.Add(coordinate))
+        if (connectedFluidSearchPipeCounts.TryGetValue(
+                coordinate,
+                out int previousPipeCount)
+            && previousPipeCount <= pipeCount)
         {
-            connectedFluidSearchQueue.Enqueue(coordinate);
+            return;
         }
+
+        connectedFluidSearchPipeCounts[coordinate] = pipeCount;
+        connectedFluidSearchQueue.Enqueue(
+            new ConnectedFluidSearchNode(coordinate, pipeCount));
+    }
+
+    private static bool IsFixedFluidTank(InstallationObject storage)
+    {
+        return storage is Fluidtank fluidTank && !fluidTank.IsFlatCarMounted;
     }
 
     private static float GetFluidStorageFillRatio(InstallationObject storage)
@@ -6085,6 +6159,26 @@ public class InputOutputModule : InstallationObject,
         return availableLiters > 0.0001f;
     }
 
+    protected float ResolveFluidOutputTransportRetention(int fluidItemId)
+    {
+        if (!IsFluidItemId(fluidItemId)
+            || runtimeOutputCoordinates == null
+            || runtimeOutputCoordinates.Count <= 0
+            || !EnsureFluidOutputStorageCache()
+            || !TrySelectFluidOutputStorageWithAnySpaceFromCache(
+                fluidItemId,
+                out InstallationObject targetStorage)
+            || targetStorage == null
+            || !cachedFluidOutputStoragePipeDistances.TryGetValue(
+                targetStorage,
+                out int pipeDistance))
+        {
+            return 1f;
+        }
+
+        return CalculateFluidPressureRetention(pipeDistance);
+    }
+
     protected bool TryEmitFluidOutputToConnectedStorages(
         int fluidItemId,
         float requestedLiters,
@@ -6149,26 +6243,36 @@ public class InputOutputModule : InstallationObject,
         }
 
         cachedFluidOutputStorages.Clear();
-        if (TryUseSharedPumpFluidOutputNetwork())
-        {
-            cachedFluidOutputStoragesTopologyVersion = fluidTopologyVersion;
-            return cachedFluidOutputStorages.Count > 0;
-        }
+        cachedFluidOutputStoragePipeDistances.Clear();
 
         connectedFluidSearchQueue.Clear();
-        connectedFluidSearchVisited.Clear();
+        connectedFluidSearchPipeCounts.Clear();
         connectedFluidStorageCandidates.Clear();
 
         for (int i = 0; i < runtimeOutputCoordinates.Count; i++)
         {
-            EnqueueConnectedFluidSearchCoordinate(runtimeOutputCoordinates[i]);
+            Vector2Int seedCoordinate = runtimeOutputCoordinates[i];
+            EnqueueConnectedFluidSearchCoordinate(
+                seedCoordinate,
+                TryGetConnectedPipeAtCoordinate(seedCoordinate, out _, out _, out _) ? 1 : 0);
         }
 
         while (connectedFluidSearchQueue.Count > 0)
         {
-            Vector2Int coordinate = connectedFluidSearchQueue.Dequeue();
+            ConnectedFluidSearchNode searchNode = connectedFluidSearchQueue.Dequeue();
+            Vector2Int coordinate = searchNode.Coordinate;
+            if (!connectedFluidSearchPipeCounts.TryGetValue(
+                    coordinate,
+                    out connectedFluidSearchCurrentPipeCount)
+                || connectedFluidSearchCurrentPipeCount != searchNode.PipeCount)
+            {
+                continue;
+            }
+
             EnqueueFluidStoragePipePassCoordinatesAt(coordinate);
-            AddFluidOutputStorageCacheCandidatesAtCoordinate(coordinate);
+            AddFluidOutputStorageCacheCandidatesAtCoordinate(
+                coordinate,
+                Mathf.Max(0, connectedFluidSearchCurrentPipeCount - 1));
 
             bool isOutputSeed = ContainsCoordinate(runtimeOutputCoordinates, coordinate);
             bool hasPipe = TryGetConnectedPipeAtCoordinate(
@@ -6181,7 +6285,10 @@ public class InputOutputModule : InstallationObject,
                 out InstallationObject fluidStorage,
                 out bool storageIsPipeArea);
 
-            if (!isOutputSeed && !hasPipe && !storageIsPipeArea)
+            if (!isOutputSeed
+                && !hasPipe
+                && !storageIsPipeArea
+                && !IsFixedFluidTank(fluidStorage))
             {
                 continue;
             }
@@ -6216,16 +6323,21 @@ public class InputOutputModule : InstallationObject,
                         nextCoordinate,
                         -direction,
                         out InstallationObject nextStorage,
-                        out bool canContinueRoute))
+                        out bool canContinueRoute,
+                        out bool nextNodeIsPipe))
                 {
                     continue;
                 }
 
-                AddFluidOutputStorageCacheCandidate(nextStorage);
+                int nextPipeCount = connectedFluidSearchCurrentPipeCount
+                                    + (nextNodeIsPipe ? 1 : 0);
+                AddFluidOutputStorageCacheCandidate(
+                    nextStorage,
+                    Mathf.Max(0, nextPipeCount - 1));
 
                 if (canContinueRoute)
                 {
-                    EnqueueConnectedFluidSearchCoordinate(nextCoordinate);
+                    EnqueueConnectedFluidSearchCoordinate(nextCoordinate, nextPipeCount);
                 }
             }
 
@@ -6236,130 +6348,15 @@ public class InputOutputModule : InstallationObject,
                     coordinate,
                     out Vector2Int remoteCoordinate))
             {
-                EnqueueConnectedFluidSearchCoordinate(remoteCoordinate);
+                EnqueueConnectedFluidSearchCoordinate(
+                    remoteCoordinate,
+                    connectedFluidSearchCurrentPipeCount);
             }
         }
 
         cachedFluidOutputStorages.Sort(CompareSimulationOrder);
         cachedFluidOutputStoragesTopologyVersion = fluidTopologyVersion;
-        PublishSharedPumpFluidOutputNetwork();
         return cachedFluidOutputStorages.Count > 0;
-    }
-
-    private bool TryUseSharedPumpFluidOutputNetwork()
-    {
-        if (!(this is Pump)
-            || runtimeOutputCoordinates == null
-            || runtimeOutputCoordinates.Count != 1)
-        {
-            return false;
-        }
-
-        EnsureSharedPumpFluidOutputTopologyVersion();
-        if (!sharedPumpFluidOutputNetworksByCoordinate.TryGetValue(
-                runtimeOutputCoordinates[0],
-                out SharedPumpFluidOutputNetwork network)
-            || network == null)
-        {
-            return false;
-        }
-
-        cachedFluidOutputStorages.AddRange(network.Storages);
-        sharedPumpFluidOutputCacheHits++;
-        return true;
-    }
-
-    private void PublishSharedPumpFluidOutputNetwork()
-    {
-        if (!(this is Pump)
-            || runtimeOutputCoordinates == null
-            || runtimeOutputCoordinates.Count != 1)
-        {
-            return;
-        }
-
-        EnsureSharedPumpFluidOutputTopologyVersion();
-        SharedPumpFluidOutputNetwork network = null;
-        foreach (Vector2Int coordinate in connectedFluidSearchVisited)
-        {
-            if (sharedPumpFluidOutputNetworksByCoordinate.TryGetValue(
-                    coordinate,
-                    out SharedPumpFluidOutputNetwork existingNetwork))
-            {
-                network = existingNetwork;
-                break;
-            }
-        }
-
-        if (network == null)
-        {
-            network = new SharedPumpFluidOutputNetwork();
-            sharedPumpFluidOutputNetworks.Add(network);
-        }
-
-        for (int i = 0; i < cachedFluidOutputStorages.Count; i++)
-        {
-            InstallationObject storage = cachedFluidOutputStorages[i];
-            if (storage != null && !network.Storages.Contains(storage))
-            {
-                network.Storages.Add(storage);
-            }
-        }
-        network.Storages.Sort(CompareSimulationOrder);
-
-        foreach (Vector2Int coordinate in connectedFluidSearchVisited)
-        {
-            sharedPumpFluidOutputNetworksByCoordinate[coordinate] = network;
-        }
-
-        Vector2Int seedCoordinate = runtimeOutputCoordinates[0];
-        sharedPumpFluidOutputNetworksByCoordinate[seedCoordinate] = network;
-
-        sharedPumpFluidOutputTopologyBuilds++;
-        sharedPumpFluidOutputLastBuildNodes = connectedFluidSearchVisited.Count;
-        sharedPumpFluidOutputLastBuildStorages = cachedFluidOutputStorages.Count;
-    }
-
-    private static void EnsureSharedPumpFluidOutputTopologyVersion()
-    {
-        if (sharedPumpFluidOutputTopologyVersion == fluidTopologyVersion)
-        {
-            return;
-        }
-
-        sharedPumpFluidOutputNetworksByCoordinate.Clear();
-        sharedPumpFluidOutputNetworks.Clear();
-        sharedPumpFluidOutputTopologyVersion = fluidTopologyVersion;
-        sharedPumpFluidOutputLastBuildNodes = 0;
-        sharedPumpFluidOutputLastBuildStorages = 0;
-    }
-
-    public static void AppendFluidOutputNetworkProfilerCounters()
-    {
-        MapObjectTickProfiler.AddRuntimeCounter(
-            "PumpWaterNetwork",
-            "SharedNetworks",
-            sharedPumpFluidOutputNetworks.Count);
-        MapObjectTickProfiler.AddRuntimeCounter(
-            "PumpWaterNetwork",
-            "SharedCoordinates",
-            sharedPumpFluidOutputNetworksByCoordinate.Count);
-        MapObjectTickProfiler.AddRuntimeCounter(
-            "PumpWaterNetwork",
-            "TopologyBuilds",
-            sharedPumpFluidOutputTopologyBuilds);
-        MapObjectTickProfiler.AddRuntimeCounter(
-            "PumpWaterNetwork",
-            "CacheHits",
-            sharedPumpFluidOutputCacheHits);
-        MapObjectTickProfiler.AddRuntimeCounter(
-            "PumpWaterNetwork",
-            "LastBuildNodes",
-            sharedPumpFluidOutputLastBuildNodes);
-        MapObjectTickProfiler.AddRuntimeCounter(
-            "PumpWaterNetwork",
-            "LastBuildStorages",
-            sharedPumpFluidOutputLastBuildStorages);
     }
 
     private bool TrySelectFluidOutputStorageFromCache(
@@ -6417,13 +6414,15 @@ public class InputOutputModule : InstallationObject,
         return targetStorage != null;
     }
 
-    private void AddFluidOutputStorageCacheCandidatesAtCoordinate(Vector2Int coordinate)
+    private void AddFluidOutputStorageCacheCandidatesAtCoordinate(
+        Vector2Int coordinate,
+        int pipeDistance)
     {
         if (TryResolveConnectedFluidStorageBodyAtCoordinate(
                 coordinate,
                 out InstallationObject bodyStorage))
         {
-            AddFluidOutputStorageCacheCandidate(bodyStorage);
+            AddFluidOutputStorageCacheCandidate(bodyStorage, pipeDistance);
         }
 
         if (TryResolveConnectedFluidStorageAtCoordinate(
@@ -6431,21 +6430,33 @@ public class InputOutputModule : InstallationObject,
                 null,
                 out InstallationObject areaStorage))
         {
-            AddFluidOutputStorageCacheCandidate(areaStorage);
+            AddFluidOutputStorageCacheCandidate(areaStorage, pipeDistance);
         }
     }
 
-    private void AddFluidOutputStorageCacheCandidate(InstallationObject storage)
+    private void AddFluidOutputStorageCacheCandidate(
+        InstallationObject storage,
+        int pipeDistance)
     {
         if (storage == null
             || storage == this
-            || !storage.CanStoreFluid
-            || !connectedFluidStorageCandidates.Add(storage))
+            || !storage.CanStoreFluid)
         {
             return;
         }
 
-        cachedFluidOutputStorages.Add(storage);
+        if (connectedFluidStorageCandidates.Add(storage))
+        {
+            cachedFluidOutputStorages.Add(storage);
+        }
+
+        if (!cachedFluidOutputStoragePipeDistances.TryGetValue(
+                storage,
+                out int previousDistance)
+            || pipeDistance < previousDistance)
+        {
+            cachedFluidOutputStoragePipeDistances[storage] = pipeDistance;
+        }
     }
 
     private bool CanUseFluidOutputStorage(InstallationObject storage, int fluidItemId, float fluidLiters)

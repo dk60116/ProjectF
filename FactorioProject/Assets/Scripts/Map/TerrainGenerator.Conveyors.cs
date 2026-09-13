@@ -172,6 +172,7 @@ public partial class TerrainGenerator : MonoBehaviour
     {
         ClearBeltJobs();
         ClearBeltSplitState();
+        ClearPipeSplitState();
         // Export while the old registry and lane layout still exist. Any wake
         // produced by export is then discarded with the rest of this state.
         ReleaseAllConveyorTransport();
@@ -4378,7 +4379,6 @@ public partial class TerrainGenerator : MonoBehaviour
 
         RobotArmWorld.AppendProfilerCounters();
         PipeWorld.AppendProfilerCounters();
-        InputOutputModule.AppendFluidOutputNetworkProfilerCounters();
 
         GameManager gameManager = GameManager.Instance;
         MapObjectTickProfiler.AddRuntimeCounter("RenderToggles", "HideBelts", gameManager != null && gameManager.HideBelts);
