@@ -187,11 +187,32 @@ public static class Checks
         arm.Output.Available = true;
         world.Wake(output);
         world.PlanManagedUpdateTick(1f / 60);
-        Require(arm.Animations == 0 && arm.Output.Items == 0, "planning does not mutate inventories or animate drop");
+        Require(arm.Animations == 1 && arm.Output.Items == 0
+                && arm.heldItemId == 1
+                && arm.state == RobotArmState.WaitingBeforeDropPlace,
+            "available output starts the bow while retaining the held item");
         world.ApplyManagedUpdateTick();
-        Require(arm.Output.Items == 1 && arm.heldItemId == -1 && arm.Animations == 1, "a genuine gap commits before drop animation in the same tick");
+        Require(arm.Output.Items == 0 && arm.heldItemId == 1,
+            "apply cannot place an item before the bow delay");
+        for (int i = 0; i < 10; i++) world.Tick();
+        Require(arm.Output.Items == 1 && arm.heldItemId == -1 && arm.Animations == 1,
+            "the item commits after the bow in the ordered apply phase");
         world.ApplyManagedUpdateTick();
         Require(arm.Output.Items == 1 && arm.Animations == 1, "repeated apply cannot duplicate a transfer");
+
+        var playerTake = new RobotArmInstance
+        {
+            SimulationId = 2,
+            heldItemId = -1,
+            state = RobotArmState.TurningToPickup,
+            runtimeSleeping = true
+        };
+        var playerTakeWorld = new RobotArmWorld();
+        playerTakeWorld.Add(playerTake, input, output);
+        playerTake.WakeRuntimeSleep();
+        playerTakeWorld.Tick();
+        Require(!playerTake.runtimeSleeping && !playerTake.runtimeWakePending && playerTake.ReadyForTick,
+            "taking a held item wakes the arm for its return-to-pickup state");
 
         var shared = new RobotArmInstance.Destination { Available = true };
         var first = new RobotArmInstance { SimulationId = 10, Output = shared };
@@ -199,9 +220,14 @@ public static class Checks
         var race = new RobotArmWorld();
         race.Add(second, input, output); race.Add(first, input, output);
         race.Wake(output); race.Tick();
+        Require(shared.Items == 0 && first.Animations == 1 && second.Animations == 1,
+            "contending arms both bow before attempting the shared slot");
+        for (int i = 0; i < 10; i++) race.Tick();
         Require(shared.Items == 1 && first.heldItemId == -1 && second.heldItemId == 2, "stable ID order wins a shared slot despite reverse registration");
-        Require(first.Animations == 1 && second.Animations == 0 && second.runtimeSleeping, "contention loser retains cargo and Sleep without nodding");
+        Require(first.Animations == 1 && second.Animations == 1 && second.runtimeSleeping,
+            "contention loser retains cargo and sleeps after the claimed gap closes");
         shared.Available = true; race.Wake(output); race.Tick();
+        for (int i = 0; i < 10; i++) race.Tick();
         Require(shared.Items == 2 && second.heldItemId == -1, "contention loser resumes at the next vacancy");
 
         var empty = new RobotArmInstance { heldItemId = -1, state = RobotArmState.WaitingForPickup };
@@ -228,7 +254,8 @@ public static class Checks
         }
         var restored = new RobotArmInstance { heldItemId = 1, state = RobotArmState.WaitingBeforeDropPlace, actionTurnTimer = .1f };
         restored.Normalize();
-        Require(restored.state == RobotArmState.WaitingForDrop && restored.actionTurnTimer == 0f, "legacy pre-drop save normalizes without losing cargo");
+        Require(restored.state == RobotArmState.WaitingForDrop && restored.actionTurnTimer == 0f,
+            "interrupted pre-drop save restarts from a stable output pose without losing cargo");
         var dto = new RobotArm.TransferState { heldItemId = 3, pickupTimer = .2f, turnTimer = .123f };
         var copy = dto.Clone(); copy.heldItemId = 9;
         Require(dto.heldItemId == 3 && copy.turnTimer == .123f, "save DTO is independent and retains turn progress");

@@ -105,6 +105,31 @@ static class Checks
         Check(a.Owner.VisualTicks == 1 && c.Owner.VisualTicks == 1 && b.Owner.VisualTicks == 0,
             "single manager dispatches registered owners only");
         Check(manager.RegisteredCount == 2 && manager.VisibleCount == 2, "manager counters reflect dispatch");
+
+        var managerCulling = (CameraRenderCulling)typeof(WorldVisualUpdateManager)
+            .GetField("culling", BindingFlags.Instance | BindingFlags.NonPublic).GetValue(manager);
+        managerCulling.InView = false;
+        Time.frameCount++;
+        typeof(WorldVisualUpdateManager).GetMethod("LateUpdate", BindingFlags.Instance | BindingFlags.NonPublic)
+            .Invoke(manager, null);
+        Check(manager.CulledCount == 2, "visible targets cull without delay");
+        int hiddenTicks = a.Owner.VisualTicks + c.Owner.VisualTicks;
+        Time.frameCount++;
+        typeof(WorldVisualUpdateManager).GetMethod("LateUpdate", BindingFlags.Instance | BindingFlags.NonPublic)
+            .Invoke(manager, null);
+        Check(a.Owner.VisualTicks + c.Owner.VisualTicks == hiddenTicks
+              && manager.LastDeferredCulledCount == 2,
+            "hidden targets defer redundant matrix/frustum work");
+        managerCulling.InView = true;
+        for (int frame = 0; frame < 4; frame++)
+        {
+            Time.frameCount++;
+            typeof(WorldVisualUpdateManager).GetMethod("LateUpdate", BindingFlags.Instance | BindingFlags.NonPublic)
+                .Invoke(manager, null);
+        }
+        Check(manager.VisibleCount == 2 && a.Visible && c.Visible,
+            "staggered hidden targets return within bounded interval");
+
         a.Owner.isActiveAndEnabled = false;
         typeof(WorldVisualUpdateManager).GetMethod("LateUpdate", BindingFlags.Instance | BindingFlags.NonPublic)
             .Invoke(manager, null);
@@ -140,6 +165,12 @@ public class InstallationObject : MonoBehaviour
 public static class VirtualRenderBatchCollection
 {
     internal static Bounds CalculateWorldBounds(Bounds bounds, Matrix4x4 matrix) => bounds;
+}
+public static class MapObjectTickProfiler
+{
+    public static Scope SampleNamed(string kind, string type, string item) => default;
+    public static void AddRuntimeCounter(string group, string name, int value) { }
+    public readonly struct Scope : IDisposable { public void Dispose() { } }
 }
 namespace ProjectF.Rendering
 {
@@ -186,7 +217,7 @@ namespace UnityEngine
     }
     public class Camera { public static Camera main = new Camera(); }
     public static class Application { public static bool isPlaying = true; }
-    public static class Time { public static float deltaTime = 0.1f; }
+    public static class Time { public static float deltaTime = 0.1f; public static int frameCount; }
     public static class Physics { public static Vector3 gravity = new Vector3(0f, -9.81f, 0f); }
     public struct Vector3
     {

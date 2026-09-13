@@ -13,8 +13,12 @@ MonoBehaviour:
   m_Name: Item_96_Apple seed
   m_EditorClassIdentifier: Assembly-CSharp::ItemDefinition
   itemName: Apple seed
-  id: 95
+  id: 96
   mapObject: {fileID: 0}
+  mapObjectArchetype: {fileID: 0}
+  useMapColor: 0
+  mapColor: {r: 1, g: 1, b: 1, a: 1}
+  mapMarkerSize: 1
   portableMesh: {fileID: 4300000, guid: 918cfc7cf328437ea6dfda82e63f3c00, type: 2}
   portableMat: {fileID: 2100000, guid: d11d2428fcf248069658e1b40616ce36, type: 2}
   icon: {fileID: 21300000, guid: c9e5105f6c694243a52e222846e2df4a, type: 3}

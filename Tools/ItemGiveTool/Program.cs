@@ -273,6 +273,17 @@ internal sealed class EditorToolForm : Form
         StylePrimaryButton(giveTenButton, "Give 10");
         giveTenButton.Click += async (_, _) => await SendGiveAsync(10);
 
+        Button refreshCountsButton = new Button();
+        StyleSecondaryButton(refreshCountsButton, "Refresh Counts");
+        refreshCountsButton.Width = 140;
+        refreshCountsButton.Click += async (_, _) =>
+        {
+            refreshCountsButton.Enabled = false;
+            try { await SendCommandAsync("counts", "Refresh Counts"); await RefreshStatusAsync(); }
+            finally { refreshCountsButton.Enabled = true; }
+        };
+        buttonPanel.Controls.Add(refreshCountsButton);
+
         StyleSecondaryButton(pingButton, "연결 확인");
         pingButton.Click += async (_, _) => await SendPingAsync();
 
@@ -1420,7 +1431,7 @@ internal sealed class EditorToolForm : Form
             "beltHostGameObjects",
             out int beltHostGameObjects);
         runtimeStatsLabel.Text =
-            $"Runtime Stats: 설치 {installTotal:N0}개    벨트 아이템 {beltItems:N0}개    동물 {animalAIActive:N0}/{animalTotal:N0}";
+            $"Runtime Stats: 설치 {(installTotal >= 0 ? installTotal.ToString("N0") : "--")}개    벨트 아이템 {beltItems:N0}개    동물 {animalAIActive:N0}/{animalTotal:N0}";
         if (hasBeltRecords && hasBeltHostGameObjects)
         {
             runtimeStatsLabel.Text +=
@@ -1434,8 +1445,8 @@ internal sealed class EditorToolForm : Form
             TryReadProtocolInt(response, "sceneMonoBehaviours", out int sceneMonoBehaviours);
         bool hasActiveSceneMonoBehaviourTotal =
             TryReadProtocolInt(response, "activeSceneMonoBehaviours", out int activeSceneMonoBehaviours);
-        bool hasSceneGameObjectCounts = hasSceneGameObjectTotal && hasActiveSceneGameObjectTotal;
-        bool hasSceneMonoBehaviourCounts = hasSceneMonoBehaviourTotal && hasActiveSceneMonoBehaviourTotal;
+        bool hasSceneGameObjectCounts = hasSceneGameObjectTotal && hasActiveSceneGameObjectTotal && sceneGameObjects >= 0;
+        bool hasSceneMonoBehaviourCounts = hasSceneMonoBehaviourTotal && hasActiveSceneMonoBehaviourTotal && sceneMonoBehaviours >= 0;
         sceneGameObjectCountLabel.Text = hasSceneGameObjectCounts
             ? $"씬 GameObject: {sceneGameObjects:N0}개 (활성 {activeSceneGameObjects:N0}개)"
             : "씬 GameObject: --";
@@ -1444,7 +1455,12 @@ internal sealed class EditorToolForm : Form
             sceneGameObjectCountLabel.Text +=
                 $"    MonoBehaviour: {sceneMonoBehaviours:N0}개 (활성 {activeSceneMonoBehaviours:N0}개)";
         }
-        runtimeStatsTextBox.Text = FormatInstallTypeCounts(installTypes);
+        if (TryReadProtocolFloat(response, "worldStatsAgeSeconds", out float countsAge))
+        {
+            sceneGameObjectCountLabel.Text += countsAge >= 0
+                ? $"    [조사 {countsAge:0}초 전 · Refresh Counts]" : "    [Refresh Counts로 조사]";
+        }
+        runtimeStatsTextBox.Text = installTotal >= 0 ? FormatInstallTypeCounts(installTypes) : "Refresh Counts로 설치물·GO·MB 갯수를 갱신해";
 
         if (TryReadProtocolBool(response, "showConveyorSlotDots", out bool showConveyorSlotDots))
         {

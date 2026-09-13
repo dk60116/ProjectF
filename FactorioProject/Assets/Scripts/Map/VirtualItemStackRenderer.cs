@@ -65,6 +65,10 @@ public sealed class VirtualItemStackRenderer : MonoBehaviour
 
     private void LateUpdate()
     {
+        using var sample = MapObjectTickProfiler.SampleNamed(
+            "Render",
+            "Ground Item Render",
+            "Ground Item Render (inclusive)");
         ResolveDependencies();
         if (virtualWorld == null || itemManager == null)
         {

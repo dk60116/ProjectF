@@ -8,6 +8,7 @@ internal static class ProductionMachineRecipeAutoFill
 {
     private const string ProductionMachineMk1Name = "Production machine (Mk1)";
     private const string ProductionMachineMk2Name = "Production machine (MK2)";
+    private const string ProductionMachineMk3Name = "Production machine (MK3)";
     private const int CurrentCraftingTreeFileVersion = 5;
     private const int ItemNameCraftingTreeFileVersion = 5;
     private const int ItemIdCraftingTreeFileVersion = 4;
@@ -72,6 +73,25 @@ internal static class ProductionMachineRecipeAutoFill
         }
     }
 
+    private readonly struct MachineTier
+    {
+        public readonly string name;
+        public readonly int maxIngredientTypes;
+
+        public MachineTier(string name, int maxIngredientTypes)
+        {
+            this.name = name;
+            this.maxIngredientTypes = maxIngredientTypes;
+        }
+    }
+
+    private static readonly MachineTier[] MachineTiers =
+    {
+        new MachineTier(ProductionMachineMk1Name, 1),
+        new MachineTier(ProductionMachineMk2Name, 2),
+        new MachineTier(ProductionMachineMk3Name, 3)
+    };
+
     public static int SyncProductionMachines(ItemManager itemManager)
     {
         List<ItemDefinition> definitions = CollectDefinitions(itemManager);
@@ -81,23 +101,77 @@ internal static class ProductionMachineRecipeAutoFill
         }
 
         int syncedRecipeCount = 0;
-        ProductionMachine mk1 = FindProductionMachine(definitions, ProductionMachineMk1Name);
-        if (mk1 != null)
+        for (int i = 0; i < MachineTiers.Length; i++)
         {
-            List<RecipeEntry> recipes = BuildInputRecipes(definitions, 1);
-            ApplyRecipes(mk1, recipes);
-            syncedRecipeCount += recipes.Count;
-        }
+            MachineTier tier = MachineTiers[i];
+            ProductionMachine productionMachine = FindProductionMachine(definitions, tier.name);
+            if (productionMachine == null)
+            {
+                continue;
+            }
 
-        ProductionMachine mk2 = FindProductionMachine(definitions, ProductionMachineMk2Name);
-        if (mk2 != null)
-        {
-            List<RecipeEntry> recipes = BuildInputRecipes(definitions, 2);
-            ApplyRecipes(mk2, recipes);
+            List<RecipeEntry> recipes = BuildInputRecipes(definitions, tier.maxIngredientTypes);
+            ApplyRecipes(productionMachine, recipes);
             syncedRecipeCount += recipes.Count;
         }
 
         return syncedRecipeCount;
+    }
+
+    public static int SyncProductionMachine(ItemManager itemManager, ItemDefinition definition)
+    {
+        if (definition == null)
+        {
+            return 0;
+        }
+
+        List<ItemDefinition> definitions = CollectDefinitions(itemManager);
+        if (definitions.Count == 0)
+        {
+            return 0;
+        }
+
+        ProductionMachine productionMachine = ResolveProductionMachine(definition.mapObject);
+        if (productionMachine == null
+            || !TryGetMaximumIngredientTypes(definition, productionMachine, out int maxIngredientTypes))
+        {
+            return 0;
+        }
+
+        List<RecipeEntry> recipes = BuildInputRecipes(definitions, maxIngredientTypes);
+        ApplyRecipes(productionMachine, recipes);
+        return recipes.Count;
+    }
+
+    private static bool TryGetMaximumIngredientTypes(
+        ItemDefinition definition,
+        ProductionMachine productionMachine,
+        out int maxIngredientTypes)
+    {
+        string definitionName = GetDefinitionDisplayName(definition);
+        GameObject prefabRoot = productionMachine.transform.root != null
+            ? productionMachine.transform.root.gameObject
+            : productionMachine.gameObject;
+        string prefabName = prefabRoot != null ? prefabRoot.name : productionMachine.name;
+
+        for (int i = 0; i < MachineTiers.Length; i++)
+        {
+            MachineTier tier = MachineTiers[i];
+            if (MachineNameMatches(definitionName, prefabName, tier.name))
+            {
+                maxIngredientTypes = tier.maxIngredientTypes;
+                return true;
+            }
+        }
+
+        maxIngredientTypes = 0;
+        return false;
+    }
+
+    private static bool MachineNameMatches(string definitionName, string prefabName, string expectedName)
+    {
+        return string.Equals(definitionName, expectedName, StringComparison.OrdinalIgnoreCase)
+               || string.Equals(prefabName, expectedName, StringComparison.OrdinalIgnoreCase);
     }
 
     private static List<ItemDefinition> CollectDefinitions(ItemManager itemManager)

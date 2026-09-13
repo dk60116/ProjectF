@@ -4222,10 +4222,15 @@ public partial class TerrainGenerator : MonoBehaviour
     private readonly List<Collider> runtimeCounterColliderScratch = new List<Collider>(128);
     private readonly HashSet<GameObject> runtimeCounterResourceHosts = new HashSet<GameObject>();
 
-    public void AppendRuntimeProfilerCounters()
+    private readonly List<MapObjectRuntimeCounter> runtimeProfilerCensus = new List<MapObjectRuntimeCounter>(32);
+    private float runtimeProfilerCensusTime = float.NegativeInfinity;
+
+    // Explicit diagnostic census: recurring perf/status polls never traverse hierarchies.
+    public void CaptureRuntimeProfilerCensus()
     {
+        using var sample = MapObjectTickProfiler.SampleNamed("Diagnostics", "World Census", "World Census");
+        runtimeProfilerCensus.Clear();
         runtimeCounterResourceHosts.Clear();
-        ResourceTypeWorld.AppendProfilerCounters();
         int loadedMapObjectCount = 0;
         int loadedInstallationCount = 0;
         int loadedConveyorBeltCount = 0;
@@ -4324,6 +4329,78 @@ public partial class TerrainGenerator : MonoBehaviour
         }
 
 
+        AddRuntimeCensusCounter("World", "LoadedMapObjects", loadedMapObjectCount);
+        AddRuntimeCensusCounter("World", "LoadedInstallations", loadedInstallationCount);
+        AddRuntimeCensusCounter("World", "LoadedConveyorBelts", loadedConveyorBeltCount);
+        AddRuntimeCensusCounter("View", "ActiveBlockRoots", activeBlockRootCount);
+        AddRuntimeCensusCounter("View", "InactiveBlockRoots", inactiveBlockRootCount);
+        AddRuntimeCensusCounter("View", "ActiveMapObjectRoots", activeMapObjectRootCount);
+        AddRuntimeCensusCounter("View", "InactiveMapObjectRoots", inactiveMapObjectRootCount);
+        AddRuntimeCensusCounter("View", "ActiveBeltRoots", activeBeltRootCount);
+        AddRuntimeCensusCounter("View", "InactiveBeltRoots", inactiveBeltRootCount);
+        AddRuntimeCensusCounter("View", "SuspendedBeltRoots", suspendedBeltRootCount);
+        AddRuntimeCensusCounter("View", "MapObjectTransforms", transformCount);
+        AddRuntimeCensusCounter("View", "ActiveMapObjectTransforms", activeTransformCount);
+        AddRuntimeCensusCounter("View", "InactiveMapObjectTransforms", transformCount - activeTransformCount);
+        AddRuntimeCensusCounter("View", "BeltTransforms", beltTransformCount);
+        AddRuntimeCensusCounter("View", "ActiveBeltTransforms", activeBeltTransformCount);
+        AddRuntimeCensusCounter("View", "InactiveBeltTransforms", beltTransformCount - activeBeltTransformCount);
+        AddRuntimeCensusCounter("Render", "MapObjectRenderers", rendererCount);
+        AddRuntimeCensusCounter("Render", "EnabledMapObjectRenderers", enabledRendererCount);
+        AddRuntimeCensusCounter("Render", "ActiveEnabledMapObjectRenderers", activeEnabledRendererCount);
+        AddRuntimeCensusCounter("Render", "DisabledMapObjectRenderers", rendererCount - enabledRendererCount);
+        AddRuntimeCensusCounter("Render", "BeltRenderers", beltRendererCount);
+        AddRuntimeCensusCounter("Render", "EnabledBeltRenderers", enabledBeltRendererCount);
+        AddRuntimeCensusCounter("Render", "ActiveEnabledBeltRenderers", activeEnabledBeltRendererCount);
+        AddRuntimeCensusCounter("Render", "DisabledBeltRenderers", beltRendererCount - enabledBeltRendererCount);
+        AddRuntimeCensusCounter("Physics", "MapObjectColliders", colliderCount);
+        AddRuntimeCensusCounter("Physics", "EnabledMapObjectColliders", enabledColliderCount);
+        AddRuntimeCensusCounter("Physics", "DisabledMapObjectColliders", colliderCount - enabledColliderCount);
+        AddRuntimeCensusCounter("Physics", "BeltColliders", beltColliderCount);
+        AddRuntimeCensusCounter("Physics", "EnabledBeltColliders", enabledBeltColliderCount);
+        runtimeProfilerCensusTime = Time.unscaledTime;
+    }
+
+    private void AddRuntimeCensusCounter(string group, string name, int value)
+    {
+        runtimeProfilerCensus.Add(new MapObjectRuntimeCounter(group, name, value.ToString(System.Globalization.CultureInfo.InvariantCulture)));
+    }
+
+    public void AppendRuntimeProfilerCounters()
+    {
+        float censusAge = float.IsNegativeInfinity(runtimeProfilerCensusTime) ? -1f : Time.unscaledTime - runtimeProfilerCensusTime;
+        MapObjectTickProfiler.AddRuntimeCounter("Census", "AgeSeconds", censusAge, "Refresh Counts updates cached hierarchy counts");
+        foreach (MapObjectRuntimeCounter counter in runtimeProfilerCensus)
+            MapObjectTickProfiler.AddRuntimeCounter(counter.Group, counter.Name, counter.Value, "cached census; see Census/AgeSeconds");
+        ResourceTypeWorld.AppendProfilerCounters();
+        ConveyorWorld.AppendProfilerCounters();
+        ProjectF.Rendering.WorldVisualUpdateManager.AppendProfilerCounters();
+        ProjectF.MapObjects.StaticMapObjectBatchRenderer staticRenderer =
+            GameManager.Instance != null ? GameManager.Instance.StaticMapObjectRenderer : null;
+        MapObjectTickProfiler.AddRuntimeCounter(
+            "StaticInstallationRender",
+            "Types",
+            staticRenderer != null ? staticRenderer.ActiveTypeCount : 0);
+        MapObjectTickProfiler.AddRuntimeCounter(
+            "StaticInstallationRender",
+            "UnsupportedTypes",
+            staticRenderer != null ? staticRenderer.UnsupportedActiveTypeCount : 0);
+        MapObjectTickProfiler.AddRuntimeCounter(
+            "StaticInstallationRender",
+            "Instances",
+            staticRenderer != null ? staticRenderer.ActiveInstanceCount : 0);
+        MapObjectTickProfiler.AddRuntimeCounter(
+            "StaticInstallationRender",
+            "Batches",
+            staticRenderer != null ? staticRenderer.ActiveBatchCount : 0);
+        MapObjectTickProfiler.AddRuntimeCounter(
+            "StaticInstallationRender",
+            "Matrices",
+            staticRenderer != null ? staticRenderer.ActiveMatrixCount : 0);
+        MapObjectTickProfiler.AddRuntimeCounter(
+            "StaticInstallationRender",
+            "EstimatedDrawCalls",
+            staticRenderer != null ? staticRenderer.EstimatedDrawCallCount : 0);
         MapObjectTickProfiler.AddRuntimeCounter("World", "LoadedChunks", loadedChunks.Count);
         MapObjectTickProfiler.AddRuntimeCounter(
             "World",
@@ -4350,32 +4427,6 @@ public partial class TerrainGenerator : MonoBehaviour
             "DataOnlyBlockCells",
             Mathf.Max(0, loadedBlocks.RegisteredCellCount - loadedBlocks.Count));
         MapObjectTickProfiler.AddRuntimeCounter("World", "BlockDataChunks", loadedBlocks.ChunkCount);
-        MapObjectTickProfiler.AddRuntimeCounter("World", "LoadedMapObjects", loadedMapObjectCount);
-        MapObjectTickProfiler.AddRuntimeCounter("World", "LoadedInstallations", loadedInstallationCount);
-        MapObjectTickProfiler.AddRuntimeCounter("World", "LoadedConveyorBelts", loadedConveyorBeltCount);
-
-        MapObjectTickProfiler.AddRuntimeCounter("View", "ActiveBlockRoots", activeBlockRootCount);
-        MapObjectTickProfiler.AddRuntimeCounter("View", "InactiveBlockRoots", inactiveBlockRootCount);
-        MapObjectTickProfiler.AddRuntimeCounter("View", "ActiveMapObjectRoots", activeMapObjectRootCount);
-        MapObjectTickProfiler.AddRuntimeCounter("View", "InactiveMapObjectRoots", inactiveMapObjectRootCount);
-        MapObjectTickProfiler.AddRuntimeCounter("View", "ActiveBeltRoots", activeBeltRootCount);
-        MapObjectTickProfiler.AddRuntimeCounter("View", "InactiveBeltRoots", inactiveBeltRootCount);
-        MapObjectTickProfiler.AddRuntimeCounter("View", "SuspendedBeltRoots", suspendedBeltRootCount);
-        MapObjectTickProfiler.AddRuntimeCounter("View", "MapObjectTransforms", transformCount);
-        MapObjectTickProfiler.AddRuntimeCounter("View", "ActiveMapObjectTransforms", activeTransformCount);
-        MapObjectTickProfiler.AddRuntimeCounter("View", "InactiveMapObjectTransforms", transformCount - activeTransformCount);
-        MapObjectTickProfiler.AddRuntimeCounter("View", "BeltTransforms", beltTransformCount);
-        MapObjectTickProfiler.AddRuntimeCounter("View", "ActiveBeltTransforms", activeBeltTransformCount);
-        MapObjectTickProfiler.AddRuntimeCounter("View", "InactiveBeltTransforms", beltTransformCount - activeBeltTransformCount);
-
-        MapObjectTickProfiler.AddRuntimeCounter("Render", "MapObjectRenderers", rendererCount);
-        MapObjectTickProfiler.AddRuntimeCounter("Render", "EnabledMapObjectRenderers", enabledRendererCount);
-        MapObjectTickProfiler.AddRuntimeCounter("Render", "ActiveEnabledMapObjectRenderers", activeEnabledRendererCount);
-        MapObjectTickProfiler.AddRuntimeCounter("Render", "DisabledMapObjectRenderers", rendererCount - enabledRendererCount);
-        MapObjectTickProfiler.AddRuntimeCounter("Render", "BeltRenderers", beltRendererCount);
-        MapObjectTickProfiler.AddRuntimeCounter("Render", "EnabledBeltRenderers", enabledBeltRendererCount);
-        MapObjectTickProfiler.AddRuntimeCounter("Render", "ActiveEnabledBeltRenderers", activeEnabledBeltRendererCount);
-        MapObjectTickProfiler.AddRuntimeCounter("Render", "DisabledBeltRenderers", beltRendererCount - enabledBeltRendererCount);
 
         RobotArmWorld.AppendProfilerCounters();
         PipeWorld.AppendProfilerCounters();
@@ -4388,12 +4439,6 @@ public partial class TerrainGenerator : MonoBehaviour
         MapObjectTickProfiler.AddRuntimeCounter("RenderToggles", "FreeCameraPlayerCulling", gameManager != null && gameManager.FreeCamera && gameManager.FreeCameraPlayerCulling);
         MapObjectTickProfiler.AddRuntimeCounter("Render", "RenderedChunkSurfaces", LastRenderedChunkSurfaces);
         MapObjectTickProfiler.AddRuntimeCounter("Render", "CulledChunkSurfaces", LastCulledChunkSurfaces);
-
-        MapObjectTickProfiler.AddRuntimeCounter("Physics", "MapObjectColliders", colliderCount);
-        MapObjectTickProfiler.AddRuntimeCounter("Physics", "EnabledMapObjectColliders", enabledColliderCount);
-        MapObjectTickProfiler.AddRuntimeCounter("Physics", "DisabledMapObjectColliders", colliderCount - enabledColliderCount);
-        MapObjectTickProfiler.AddRuntimeCounter("Physics", "BeltColliders", beltColliderCount);
-        MapObjectTickProfiler.AddRuntimeCounter("Physics", "EnabledBeltColliders", enabledBeltColliderCount);
 
         MapObjectTickProfiler.AddRuntimeCounter("Conveyor", "LoadedConveyorItems", GetLoadedConveyorItemCount());
         MapObjectTickProfiler.AddRuntimeCounter("Conveyor", "TotalConveyorItems", GetConveyorItemCount());

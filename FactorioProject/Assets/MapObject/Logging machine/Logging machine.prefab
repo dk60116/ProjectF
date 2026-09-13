@@ -263,7 +263,7 @@ MonoBehaviour:
   m_EditorClassIdentifier: Assembly-CSharp::LoggingMachine
   id: 0
   objectName: Logging machine
-  objId: 63
+  objId: 64
   itemDefinition: {fileID: 11400000, guid: 355b51bd6602a584481abc0b5a11aae8, type: 2}
   portableObj: {fileID: 0}
   mapStatus:
@@ -285,7 +285,7 @@ MonoBehaviour:
   runtimeOccupiedCoordinates: []
   runtimePlacementSequence: 0
   excludeFromTerrainPersistence: 0
-  storedFluidLiters: 0
+  storedFluidUnits: 0
   storedFluidItemId: -1
   storedFluidTemperatureCelsius: 20
   powerLinePoint: {fileID: 6578272425882862723}
@@ -294,6 +294,7 @@ MonoBehaviour:
   hingeRotationDegreesPerSecond: 180
   emptyDirectionHoldSeconds: 0.25
   minimumGrowth: 10
+  maximumGrowth: 10
   treeFilterInitialized: 0
   enabledTreeDefinitionKeys: []
 --- !u!135 &986190605775310727

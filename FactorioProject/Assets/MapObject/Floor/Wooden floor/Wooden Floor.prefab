@@ -206,7 +206,7 @@ MonoBehaviour:
   m_EditorClassIdentifier: Assembly-CSharp::Floor
   id: 0
   objectName: Wooden floor
-  objId: 66
+  objId: 67
   itemDefinition: {fileID: 11400000, guid: 5184d5acd736fa943a532c1ee9009150, type: 2}
   portableObj: {fileID: 0}
   mapStatus:
@@ -228,7 +228,7 @@ MonoBehaviour:
   runtimeOccupiedCoordinates: []
   runtimePlacementSequence: 0
   excludeFromTerrainPersistence: 0
-  storedFluidLiters: 0
+  storedFluidUnits: 0
   storedFluidItemId: -1
   storedFluidTemperatureCelsius: 20
   powerLinePoint: {fileID: 0}

@@ -15,6 +15,10 @@ MonoBehaviour:
   itemName: Nail
   id: 31
   mapObject: {fileID: 0}
+  mapObjectArchetype: {fileID: 0}
+  useMapColor: 0
+  mapColor: {r: 1, g: 1, b: 1, a: 1}
+  mapMarkerSize: 1
   portableMesh: {fileID: 4300000, guid: 2e0e9e1573ee1714182b19fbe1b8ff62, type: 2}
   portableMat: {fileID: 2100000, guid: f8dcf2a2c290e6545b35da5512403502, type: 2}
   icon: {fileID: 21300000, guid: 8765f545aba38a440a200d53e1e83f73, type: 3}

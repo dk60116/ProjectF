@@ -132,6 +132,10 @@ public class PlayerCamera : MonoBehaviour
 
     private void LateUpdate()
     {
+        using var sample = MapObjectTickProfiler.SampleNamed(
+            "Frame",
+            "Player Camera",
+            "Player Camera LateUpdate");
         ItemLightController.UpdateDisplayLightGlobals(ResolveDisplayLightingFocusPosition());
 
         if (freeCameraEnabled)

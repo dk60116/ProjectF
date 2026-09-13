@@ -51,6 +51,10 @@ public class UIManager : MonoBehaviour
 
     private void LateUpdate()
     {
+        using var sample = MapObjectTickProfiler.SampleNamed(
+            "Frame",
+            "World UI",
+            "World UI Gauge Update");
         RefreshActiveWorldGaugePositions();
     }
 

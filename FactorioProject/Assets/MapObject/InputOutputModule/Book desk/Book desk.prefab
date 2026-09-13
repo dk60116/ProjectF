@@ -81,7 +81,7 @@ MonoBehaviour:
   m_EditorClassIdentifier: Assembly-CSharp::Desk
   id: 0
   objectName: Book desk
-  objId: 86
+  objId: 87
   itemDefinition: {fileID: 11400000, guid: 9b769dd46a0b9fe4f91ace461114fcd2, type: 2}
   portableObj: {fileID: 0}
   mapStatus:
@@ -103,7 +103,7 @@ MonoBehaviour:
   runtimeOccupiedCoordinates: []
   runtimePlacementSequence: 0
   excludeFromTerrainPersistence: 0
-  storedFluidLiters: 0
+  storedFluidUnits: 0
   storedFluidItemId: -1
   storedFluidTemperatureCelsius: 20
   powerLinePoint: {fileID: 0}

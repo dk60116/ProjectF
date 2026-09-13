@@ -173,7 +173,7 @@ MonoBehaviour:
   m_EditorClassIdentifier: Assembly-CSharp::Handcart
   id: 0
   objectName: Handcart
-  objId: 99
+  objId: 100
   itemDefinition: {fileID: 11400000, guid: e50f8db30407552438483841405afcb2, type: 2}
   portableObj: {fileID: 0}
   mapStatus:
@@ -195,7 +195,7 @@ MonoBehaviour:
   runtimeOccupiedCoordinates: []
   runtimePlacementSequence: 0
   excludeFromTerrainPersistence: 0
-  storedFluidLiters: 0
+  storedFluidUnits: 0
   storedFluidItemId: -1
   storedFluidTemperatureCelsius: 20
   powerLinePoint: {fileID: 0}

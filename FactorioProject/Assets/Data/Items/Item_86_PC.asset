@@ -15,6 +15,10 @@ MonoBehaviour:
   itemName: PC
   id: 42
   mapObject: {fileID: 0}
+  mapObjectArchetype: {fileID: 0}
+  useMapColor: 0
+  mapColor: {r: 1, g: 1, b: 1, a: 1}
+  mapMarkerSize: 1
   portableMesh: {fileID: 0}
   portableMat: {fileID: 0}
   icon: {fileID: 21300000, guid: 830a31673ce526a4bba4622f264e32fd, type: 3}

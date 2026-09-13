@@ -1,0 +1,4 @@
+PASS: named scopes record early returns, allocate 0 bytes after warmup, and skip disabled profiling.
+PASS: independent render/tick counts at 30 and 100 FPS, pause, duplicate reads, disabled capture.
+PASS: cold/recurring status performs no scene or world census; explicit refresh, live belt totals and world invalidation.
+PASS: 127 byte-identical baseline snapshots; 1000 active-group refreshes allocated 0 bytes.

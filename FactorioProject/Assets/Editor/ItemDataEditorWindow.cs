@@ -6705,6 +6705,7 @@ public class ItemDataEditorWindow : EditorWindow
         string errorMessage = string.Empty;
         Exception rebuildException = null;
         bool rebuilt = false;
+        int productionMachineRecipeCount = 0;
         try
         {
             DisplayItemRebuildProgress($"[{definition.id}] {displayName} 리빌드 준비 중...", 0.05f);
@@ -6715,6 +6716,10 @@ public class ItemDataEditorWindow : EditorWindow
             rebuilt = itemManager.RebuildItemDefinitionFromAssets(definition, out errorMessage);
             if (rebuilt)
             {
+                DisplayItemRebuildProgress("생산 기계 레시피 동기화 중...", 0.6f);
+                productionMachineRecipeCount =
+                    ProductionMachineRecipeAutoFill.SyncProductionMachine(itemManager, definition);
+                itemManager.MarkEditorDirty();
                 DisplayItemRebuildProgress("변경된 에셋 저장 중...", 0.7f);
                 AssetDatabase.SaveAssets();
                 DisplayItemRebuildProgress("에셋 데이터베이스 새로고침 중...", 0.85f);
@@ -6753,7 +6758,10 @@ public class ItemDataEditorWindow : EditorWindow
             return;
         }
 
-        ShowNotification(new GUIContent($"[{definition.id}] {displayName} rebuilt."));
+        string recipeSummary = productionMachineRecipeCount > 0
+            ? $" Recipes: {productionMachineRecipeCount}."
+            : string.Empty;
+        ShowNotification(new GUIContent($"[{definition.id}] {displayName} rebuilt.{recipeSummary}"));
     }
 
     private delegate bool TryCreateDocumentAssets(

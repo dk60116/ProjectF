@@ -13,7 +13,7 @@ MonoBehaviour:
   m_Name: Item_98_Logging machine
   m_EditorClassIdentifier: Assembly-CSharp::ItemDefinition
   itemName: Logging machine
-  id: 63
+  id: 64
   mapObject: {fileID: 7230047334803947904, guid: 528a9b942febb9d4a84b27f77dfba70f, type: 3}
   mapObjectArchetype: {fileID: 11400000, guid: 44a522768f8c21243ad4f5888c7cd6f4, type: 2}
   useMapColor: 1

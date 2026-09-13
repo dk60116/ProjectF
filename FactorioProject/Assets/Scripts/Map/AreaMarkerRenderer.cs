@@ -77,6 +77,10 @@ public sealed class AreaMarkerRenderer : MonoBehaviour
 
     private void LateUpdate()
     {
+        using var sample = MapObjectTickProfiler.SampleNamed(
+            "Render",
+            "Area Markers",
+            "Area Marker Render (inclusive)");
         if (!InitializeTemplate()) return;
         using (UpdateMarker.Auto())
         {

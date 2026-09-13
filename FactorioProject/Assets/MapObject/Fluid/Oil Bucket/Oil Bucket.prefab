@@ -278,7 +278,7 @@ MonoBehaviour:
   m_EditorClassIdentifier: Assembly-CSharp::Bucket
   id: 0
   objectName: Oil Bucket
-  objId: 107
+  objId: 108
   itemDefinition: {fileID: 11400000, guid: 639f657a2950b1444bd7dbb5bee0719a, type: 2}
   portableObj: {fileID: 0}
   mapStatus:
@@ -300,7 +300,7 @@ MonoBehaviour:
   runtimeOccupiedCoordinates: []
   runtimePlacementSequence: 0
   excludeFromTerrainPersistence: 0
-  storedFluidLiters: 0
+  storedFluidUnits: 0
   storedFluidItemId: -1
   storedFluidTemperatureCelsius: 20
   powerLinePoint: {fileID: 0}

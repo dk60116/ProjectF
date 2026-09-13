@@ -92,6 +92,7 @@ public class ResourceBatchRenderer : MonoBehaviour
 
     protected void LateUpdate()
     {
+        using var sample = MapObjectTickProfiler.SampleNamed("Render", "Resource Render", "Resource Render (inclusive)");
         if (registeredResources.Count <= 0)
         {
             if (activeBatchKeys.Count > 0)

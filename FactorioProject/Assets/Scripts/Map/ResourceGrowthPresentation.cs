@@ -13,51 +13,107 @@ internal sealed class ResourceGrowthPresentation : IDisposable
     private readonly Vector4[] data = new Vector4[Capacity];
     private readonly Vector4[] requirements = new Vector4[Capacity];
     private readonly Plane[] planes = new Plane[6];
+    private readonly List<ResourceTypeWorld.GrowthBucket> visibleBuckets =
+        new List<ResourceTypeWorld.GrowthBucket>(64);
     private readonly MaterialPropertyBlock properties = new MaterialPropertyBlock();
     private Camera camera;
     private Mesh quad;
     private Material gaugeMaterial, traceMaterial;
 
-    internal void Render(HashSet<ResourceInstance> resources, int layer)
+    internal int LastVisibleBucketCount { get; private set; }
+    internal int LastCandidateCount { get; private set; }
+
+    internal void Render(
+        Dictionary<Vector2Int, ResourceTypeWorld.GrowthBucket> buckets,
+        int layer)
     {
         if (camera == null || !camera.isActiveAndEnabled) camera = Camera.main;
         if (camera == null || !EnsureMaterials()) return;
         GeometryUtility.CalculateFrustumPlanes(camera, planes);
+        visibleBuckets.Clear();
+        LastCandidateCount = 0;
+        foreach (ResourceTypeWorld.GrowthBucket bucket in buckets.Values)
+        {
+            if (bucket == null || bucket.Resources.Count <= 0 || !bucket.HasBounds
+                || !GeometryUtility.TestPlanesAABB(planes, bucket.Bounds))
+            {
+                continue;
+            }
+
+            visibleBuckets.Add(bucket);
+            LastCandidateCount += bucket.Resources.Count;
+        }
+        LastVisibleBucketCount = visibleBuckets.Count;
+
         for (int pass = 0; pass < 2; pass++)
         {
             int count = 0;
             bool trace = pass == 0;
-            foreach (ResourceInstance resource in resources)
+            for (int bucketIndex = 0; bucketIndex < visibleBuckets.Count; bucketIndex++)
             {
-                if (!(resource is ProjectF.MapObjects.TreeInstance tree) || !tree.IsRuntimeActive || tree.ResourceCount <= 0) continue;
-                if (trace ? tree.Growth > 0.0001f
-                    : tree.Definition == null || !tree.Definition.HasGrowthSchedule || !tree.CanGrowAnotherLevel) continue;
-                Vector3 position = trace ? tree.WorldPosition + Vector3.up * 0.012f
-                    : tree.FocusPoint + Vector3.up * 0.3f;
-                if (!GeometryUtility.TestPlanesAABB(planes, new Bounds(position, Vector3.one))) continue;
-                matrices[count] = Matrix4x4.TRS(position, trace ? Quaternion.Euler(90f, 0f, 0f) : Quaternion.identity,
-                    Vector3.one * (trace ? 0.5f : 0.288f));
-                bool met = tree.AreCurrentGrowthRequirementsMet;
-                if (trace) data[count] = new Vector4(0f, 0f, 0f, -1f);
-                else
+                foreach (ResourceInstance resource in visibleBuckets[bucketIndex].Resources)
                 {
-                    Vector3 target = new Vector3(
-                        Ratio(tree.CurrentGrowthWaterLiters, tree.RequiredGrowthWaterLiters),
-                        Ratio(tree.CurrentGrowthFertilizerAmount, tree.RequiredGrowthFertilizerAmount),
-                        met ? Ratio(tree.GrowthElapsedSeconds, tree.Definition.GrowthDurationPerLevelSeconds) : 0f);
-                    Vector3 fill = tree.SharedGaugeFill;
-                    float lerp = 1f - Mathf.Exp(-8f * Mathf.Max(0f, Time.deltaTime));
-                    for (int axis = 0; axis < 3; axis++)
-                        fill[axis] = target[axis] <= fill[axis] ? target[axis] : Mathf.Lerp(fill[axis], target[axis], lerp);
-                    tree.SharedGaugeFill = fill;
-                    data[count] = new Vector4(fill.x, fill.y, fill.z, met ? 1f : 0f);
-                }
-                requirements[count] = new Vector4(tree.RequiredGrowthWaterLiters > 0.0001f ? 1f : 0f,
-                    tree.RequiredGrowthFertilizerAmount > 0.0001f ? 1f : 0f, 0f, 0f);
-                if (++count == Capacity)
-                {
-                    Draw(count, trace, layer);
-                    count = 0;
+                    if (!(resource is ProjectF.MapObjects.TreeInstance tree)
+                        || !tree.IsRuntimeActive
+                        || tree.ResourceCount <= 0)
+                    {
+                        continue;
+                    }
+
+                    if (trace ? tree.Growth > 0.0001f
+                        : tree.Definition == null
+                          || !tree.Definition.HasGrowthSchedule
+                          || !tree.CanGrowAnotherLevel)
+                    {
+                        continue;
+                    }
+
+                    Vector3 position = trace
+                        ? tree.WorldPosition + Vector3.up * 0.012f
+                        : tree.FocusPoint + Vector3.up * 0.3f;
+                    if (!GeometryUtility.TestPlanesAABB(planes, new Bounds(position, Vector3.one)))
+                    {
+                        continue;
+                    }
+
+                    matrices[count] = Matrix4x4.TRS(
+                        position,
+                        trace ? Quaternion.Euler(90f, 0f, 0f) : Quaternion.identity,
+                        Vector3.one * (trace ? 0.5f : 0.288f));
+                    bool met = tree.AreCurrentGrowthRequirementsMet;
+                    if (trace)
+                    {
+                        data[count] = new Vector4(0f, 0f, 0f, -1f);
+                    }
+                    else
+                    {
+                        Vector3 target = new Vector3(
+                            Ratio(tree.CurrentGrowthWaterLiters, tree.RequiredGrowthWaterLiters),
+                            Ratio(tree.CurrentGrowthFertilizerAmount, tree.RequiredGrowthFertilizerAmount),
+                            met ? Ratio(tree.GrowthElapsedSeconds, tree.Definition.GrowthDurationPerLevelSeconds) : 0f);
+                        Vector3 fill = tree.SharedGaugeFill;
+                        float lerp = 1f - Mathf.Exp(-8f * Mathf.Max(0f, Time.deltaTime));
+                        for (int axis = 0; axis < 3; axis++)
+                        {
+                            fill[axis] = target[axis] <= fill[axis]
+                                ? target[axis]
+                                : Mathf.Lerp(fill[axis], target[axis], lerp);
+                        }
+
+                        tree.SharedGaugeFill = fill;
+                        data[count] = new Vector4(fill.x, fill.y, fill.z, met ? 1f : 0f);
+                    }
+
+                    requirements[count] = new Vector4(
+                        tree.RequiredGrowthWaterLiters > 0.0001f ? 1f : 0f,
+                        tree.RequiredGrowthFertilizerAmount > 0.0001f ? 1f : 0f,
+                        0f,
+                        0f);
+                    if (++count == Capacity)
+                    {
+                        Draw(count, trace, layer);
+                        count = 0;
+                    }
                 }
             }
             if (count > 0) Draw(count, trace, layer);

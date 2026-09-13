@@ -1281,7 +1281,7 @@ public class InputOutputModule : InstallationObject,
 
     public static bool TryGetOutputItemIdsAtRuntimeGridCoordinate(Vector2Int coordinate, ISet<int> outputItemIds)
     {
-        return TryGetRuntimeCoordinateValues(coordinate, outputItemIds, TryAppendRuntimeOutputItemIds);
+        return TryGetRuntimeCoordinateValues(coordinate, outputItemIds, TryAppendRuntimeOutputItemIdsCollector);
     }
 
     public static bool TryGetFluidOutputInfoAtRuntimeGridCoordinate(
@@ -1314,62 +1314,35 @@ public class InputOutputModule : InstallationObject,
 
     public static bool TryGetInputItemIdsAtRuntimeGridCoordinate(Vector2Int coordinate, ISet<int> inputItemIds)
     {
-        return TryGetRuntimeCoordinateValues(coordinate, inputItemIds, TryAppendRuntimeInputItemIds);
+        return TryGetRuntimeCoordinateValues(coordinate, inputItemIds, TryAppendRuntimeInputItemIdsCollector);
     }
 
     public static bool TryGetAcceptedInputItemIdsAtRuntimeGridCoordinate(Vector2Int coordinate, ISet<int> inputItemIds)
     {
-        return TryGetRuntimeCoordinateValues(coordinate, inputItemIds, TryAppendAcceptedRuntimeInputItemIds);
+        return TryGetRuntimeCoordinateValues(coordinate, inputItemIds, TryAppendAcceptedRuntimeInputItemIdsCollector);
     }
 
     public static bool TryGetInputEnergyTypesAtRuntimeGridCoordinate(
         Vector2Int coordinate,
         ISet<ItemDefinition.EnergyType> energyTypes)
     {
-        return TryGetRuntimeCoordinateValues(coordinate, energyTypes, TryAppendRuntimeInputEnergyTypes);
+        return TryGetRuntimeCoordinateValues(coordinate, energyTypes, TryAppendRuntimeInputEnergyTypesCollector);
     }
+
+    private static readonly RuntimeCoordinateValueCollector<int> TryAppendRuntimeOutputItemIdsCollector = TryAppendRuntimeOutputItemIds;
+    private static readonly RuntimeCoordinateValueCollector<int> TryAppendRuntimeInputItemIdsCollector = TryAppendRuntimeInputItemIds;
+    private static readonly RuntimeCoordinateValueCollector<int> TryAppendAcceptedRuntimeInputItemIdsCollector = TryAppendAcceptedRuntimeInputItemIds;
+    private static readonly RuntimeCoordinateValueCollector<ItemDefinition.EnergyType> TryAppendRuntimeInputEnergyTypesCollector = TryAppendRuntimeInputEnergyTypes;
 
     private static bool TryGetRuntimeCoordinateValues<T>(
         Vector2Int coordinate,
         ISet<T> values,
         RuntimeCoordinateValueCollector<T> collectValues)
     {
-        if (values == null || collectValues == null)
-        {
-            return false;
-        }
-
-        HashSet<InputOutputModule> visitedModules = new HashSet<InputOutputModule>();
-        bool foundAny = false;
-        if (registeredRuntimeGridCoordinates.TryGetValue(coordinate, out HashSet<InputOutputModule> modules)
-            && modules != null
-            && modules.Count > 0)
-        {
-            foundAny |= AppendRuntimeCoordinateValues(
-                modules,
-                coordinate,
-                values,
-                visitedModules,
-                collectValues);
-        }
-
-        foundAny |= AppendRuntimeCoordinateValues(
-            activeRuntimeModules,
-            coordinate,
-            values,
-            visitedModules,
-            collectValues);
-        return foundAny;
-    }
-
-    private static bool AppendRuntimeCoordinateValues<T>(
-        IEnumerable<InputOutputModule> modules,
-        Vector2Int coordinate,
-        ISet<T> values,
-        ISet<InputOutputModule> visitedModules,
-        RuntimeCoordinateValueCollector<T> collectValues)
-    {
-        if (modules == null || values == null || collectValues == null)
+        // Input/output areas can lie outside the installation's occupied grid.
+        // Their own registry is maintained on placement, restore, edit and pooling.
+        if (values == null || collectValues == null
+            || !registeredRuntimeAreaCoordinates.TryGetValue(coordinate, out HashSet<InputOutputModule> modules))
         {
             return false;
         }
@@ -1378,8 +1351,7 @@ public class InputOutputModule : InstallationObject,
         foreach (InputOutputModule module in modules)
         {
             if (module == null
-                || !module.gameObject.activeInHierarchy
-                || (visitedModules != null && !visitedModules.Add(module)))
+                || !module.gameObject.activeInHierarchy)
             {
                 continue;
             }
@@ -1481,7 +1453,7 @@ public class InputOutputModule : InstallationObject,
             return false;
         }
 
-        HashSet<int> outputItemIds = new HashSet<int>();
+        using var outputItemsLease = UnityEngine.Pool.HashSetPool<int>.Get(out var outputItemIds);
         return TryGetOutputItemIdsAtRuntimeGridCoordinate(coordinate, outputItemIds)
             && outputItemIds.Contains(itemId)
             && CanAddItemToRuntimeIoOverlapCoordinate(coordinate, itemId);
@@ -1505,7 +1477,7 @@ public class InputOutputModule : InstallationObject,
             return box.AcceptsItem(itemId);
         }
 
-        HashSet<int> allowedItemIds = new HashSet<int>();
+        using var allowedItemsLease = UnityEngine.Pool.HashSetPool<int>.Get(out var allowedItemIds);
         return !TryGetRuntimeIoOverlapAllowedItemIds(coordinate, allowedItemIds)
             || allowedItemIds.Contains(itemId);
     }
@@ -1517,18 +1489,18 @@ public class InputOutputModule : InstallationObject,
             return false;
         }
 
-        HashSet<int> outputItemIds = new HashSet<int>();
+        using var outputItemsLease = UnityEngine.Pool.HashSetPool<int>.Get(out var outputItemIds);
         if (!TryGetOutputItemIdsAtRuntimeGridCoordinate(coordinate, outputItemIds)
             || outputItemIds.Count <= 0)
         {
             return false;
         }
 
-        HashSet<int> inputItemIds = new HashSet<int>();
+        using var inputItemsLease = UnityEngine.Pool.HashSetPool<int>.Get(out var inputItemIds);
         bool hasInputItemArea = InputOutputModuleItemAreaController.TryGetAcceptedItemIds(coordinate, inputItemIds);
         hasInputItemArea |= TryGetAcceptedInputItemIdsAtRuntimeGridCoordinate(coordinate, inputItemIds);
 
-        HashSet<ItemDefinition.EnergyType> inputEnergyTypes = new HashSet<ItemDefinition.EnergyType>();
+        using var inputEnergyLease = UnityEngine.Pool.HashSetPool<ItemDefinition.EnergyType>.Get(out var inputEnergyTypes);
         bool hasInputEnergyArea = InputOutputModuleEnergyAreaController.TryGetAcceptedEnergyTypes(coordinate, inputEnergyTypes);
         hasInputEnergyArea |= TryGetInputEnergyTypesAtRuntimeGridCoordinate(coordinate, inputEnergyTypes);
 

@@ -7,6 +7,9 @@ namespace ProjectF.Rendering
     [DefaultExecutionOrder(850), DisallowMultipleComponent]
     public sealed class WorldVisualUpdateManager : MonoBehaviour
     {
+        // Visible machines animate every frame. Hidden machines only need a bounded
+        // visibility recheck; Unity still owns renderer frustum culling meanwhile.
+        private const int CulledRecheckIntervalFrames = 4;
         private static WorldVisualUpdateManager instance;
         private readonly List<InstallationVisualState> targets = new List<InstallationVisualState>();
         private readonly CameraRenderCulling culling = new CameraRenderCulling();
@@ -14,6 +17,32 @@ namespace ProjectF.Rendering
         public int RegisteredCount => targets.Count;
         public int VisibleCount { get; private set; }
         public int CulledCount { get; private set; }
+        public int LastTickedCount { get; private set; }
+        public int LastDeferredCulledCount { get; private set; }
+
+        public static void AppendProfilerCounters()
+        {
+            MapObjectTickProfiler.AddRuntimeCounter(
+                "InstallationVisuals",
+                "Registered",
+                instance != null ? instance.RegisteredCount : 0);
+            MapObjectTickProfiler.AddRuntimeCounter(
+                "InstallationVisuals",
+                "Visible",
+                instance != null ? instance.VisibleCount : 0);
+            MapObjectTickProfiler.AddRuntimeCounter(
+                "InstallationVisuals",
+                "Culled",
+                instance != null ? instance.CulledCount : 0);
+            MapObjectTickProfiler.AddRuntimeCounter(
+                "InstallationVisuals",
+                "Ticked",
+                instance != null ? instance.LastTickedCount : 0);
+            MapObjectTickProfiler.AddRuntimeCounter(
+                "InstallationVisuals",
+                "DeferredCulled",
+                instance != null ? instance.LastDeferredCulledCount : 0);
+        }
 
         internal static void Register(InstallationVisualState target)
         {
@@ -48,9 +77,16 @@ namespace ProjectF.Rendering
 
         private void LateUpdate()
         {
+            using var sample = MapObjectTickProfiler.SampleNamed(
+                "Render",
+                "Installation Visuals",
+                "Installation Visual Update");
             culling.Update(Camera.main);
             VisibleCount = 0;
             CulledCount = 0;
+            LastTickedCount = 0;
+            LastDeferredCulledCount = 0;
+            int recheckPhase = Time.frameCount % CulledRecheckIntervalFrames;
             for (int i = targets.Count - 1; i >= 0; i--)
             {
                 InstallationVisualState target = targets[i];
@@ -59,10 +95,24 @@ namespace ProjectF.Rendering
                     Unregister(target);
                     continue;
                 }
-                target.Tick(culling, Time.deltaTime);
+
+                bool shouldTick = target.Visible
+                    || !culling.Enabled
+                    || i % CulledRecheckIntervalFrames == recheckPhase;
+                if (shouldTick)
+                {
+                    target.Tick(culling, Time.deltaTime);
+                    LastTickedCount++;
+                }
+                else
+                {
+                    LastDeferredCulledCount++;
+                }
+
                 if (target.Visible) VisibleCount++;
                 else CulledCount++;
             }
+
         }
 
         private void OnDisable()

@@ -1078,6 +1078,7 @@ public partial class TerrainGenerator : MonoBehaviour,
 
     private void Update()
     {
+        using var sample = MapObjectTickProfiler.SampleNamed("World", "Terrain Update", "Terrain Update (inclusive)");
         if (!Application.isPlaying || !hasGeneratedChunks)
         {
             return;
@@ -1182,6 +1183,7 @@ public partial class TerrainGenerator : MonoBehaviour,
         DrawBeltPipeSplitGroups();
 
         using (RenderChunkSurfacesMarker.Auto())
+        using (MapObjectTickProfiler.SampleNamed("Render", "Terrain Surfaces", "Terrain Surfaces"))
         {
             RenderLoadedChunkSurfaces();
         }

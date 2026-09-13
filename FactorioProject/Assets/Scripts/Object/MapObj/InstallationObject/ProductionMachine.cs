@@ -4,7 +4,7 @@ using UnityEngine;
 
 public class ProductionMachine : InputOutputModule
 {
-    private const int MaximumProductionIngredientTypes = 2;
+    private const int LegacyMaximumProductionIngredientTypes = 2;
 
     [SerializeField]
     private List<SpriteRenderer> targetIconDisplays;
@@ -17,11 +17,28 @@ public class ProductionMachine : InputOutputModule
     private readonly List<Vector2Int> resolvedProductionInputCoordinates = new List<Vector2Int>();
     private readonly HashSet<Vector2Int> resolvedProductionInputCoordinateSet = new HashSet<Vector2Int>();
     private readonly HashSet<int> productionIngredientItemIds = new HashSet<int>();
+    private int maximumProductionIngredientTypes = LegacyMaximumProductionIngredientTypes;
 
     protected override void OnEnable()
     {
         base.OnEnable();
+        maximumProductionIngredientTypes = ResolveMaximumProductionIngredientTypes();
         RefreshProductionTargetIconDisplays();
+    }
+
+    private int ResolveMaximumProductionIngredientTypes()
+    {
+        IReadOnlyList<RectGridBlockPlacement> placements = RectGridPlacements;
+        int inputAreaCount = 0;
+        for (int i = 0; i < placements.Count; i++)
+        {
+            if (IsInputItemBlockType(placements[i].blockType))
+            {
+                inputAreaCount++;
+            }
+        }
+
+        return inputAreaCount > 0 ? inputAreaCount : LegacyMaximumProductionIngredientTypes;
     }
 
     public bool TryCollectProductionTargetItemIds(ICollection<int> itemIds)
@@ -509,7 +526,7 @@ public class ProductionMachine : InputOutputModule
             || outputIndex < 0
             || !TryGetProductionIngredients(outputItemId, ingredients)
             || ingredients.Count <= 0
-            || ingredients.Count > MaximumProductionIngredientTypes)
+            || ingredients.Count > maximumProductionIngredientTypes)
         {
             return false;
         }

@@ -419,6 +419,9 @@ public sealed partial class RobotArmInstance : IMapObjectTarget, IMapObjectSimul
             case RobotArmState.WaitingForDrop:
                 TickDrop(deltaTime);
                 break;
+            case RobotArmState.WaitingBeforeDropPlace:
+                TickWaitBeforeDropPlace(deltaTime);
+                break;
             case RobotArmState.WaitingAfterDropPlace:
                 TickWaitAfterDropPlace(deltaTime);
                 break;
@@ -467,7 +470,10 @@ public sealed partial class RobotArmInstance : IMapObjectTarget, IMapObjectSimul
 
         if (!CanRuntimeSleepInCurrentState())
         {
-            runtimeSleepCheckTimer = 0f;
+            // An external mutation can move a sleeping arm into a transfer state.
+            // The pending wake admits this tick; clear Sleep here so it remains
+            // scheduled while returning to the pickup side.
+            SetRuntimeSleeping(false);
             return false;
         }
 
@@ -694,18 +700,37 @@ public sealed partial class RobotArmInstance : IMapObjectTarget, IMapObjectSimul
         waitingForDropRetry = false;
         if (CanPlaceHeldItemForCurrentPlan())
         {
-            // Commit in this tick's ordered apply phase. Waiting for the animation
-            // first lets the next belt item take this gap before the transfer.
-            plannedTransferCommand = PlannedTransferCommand.Drop;
+            PlayDropAnimation();
+            state = RobotArmState.WaitingBeforeDropPlace;
+            actionTurnTimer = actionTurnDelay;
             return;
         }
 
         BeginDropRetryDelay();
     }
 
+    private void TickWaitBeforeDropPlace(float deltaTime)
+    {
+        if (heldItemId < 0)
+        {
+            actionTurnTimer = 0f;
+            state = RobotArmState.TurningToPickup;
+            return;
+        }
+
+        if (TickTimerStillRunning(ref actionTurnTimer, deltaTime))
+        {
+            return;
+        }
+
+        // The hand has reached the destination. Inventory mutation remains in the
+        // ordered apply phase so simultaneous arms resolve deterministically.
+        plannedTransferCommand = PlannedTransferCommand.Drop;
+    }
+
     private void ApplyPlannedDrop()
     {
-        if (state != RobotArmState.WaitingForDrop || heldItemId < 0)
+        if (state != RobotArmState.WaitingBeforeDropPlace || heldItemId < 0)
         {
             return;
         }
@@ -714,14 +739,13 @@ public sealed partial class RobotArmInstance : IMapObjectTarget, IMapObjectSimul
         {
             dropRetryTimer = 0f;
             waitingForDropRetry = false;
-            PlayDropAnimation();
             ClearHeldItem();
             state = RobotArmState.WaitingAfterDropPlace;
-            // Preserve the former pre/post-drop action budget after committing.
-            actionTurnTimer = actionTurnDelay * 2f;
+            actionTurnTimer = actionTurnDelay;
             return;
         }
 
+        state = RobotArmState.WaitingForDrop;
         BeginDropRetryDelay();
         // Another arm may have claimed the same gap earlier in the apply order.
         // Keep the held item and idle pose, and sleep if the destination is full.
@@ -1733,6 +1757,8 @@ public sealed partial class RobotArmInstance : IMapObjectTarget, IMapObjectSimul
 
         if (state == RobotArmState.WaitingBeforeDropPlace)
         {
+            // Animation presentation is not serialized. Restart an interrupted
+            // pre-drop action from its stable output pose after loading.
             state = RobotArmState.WaitingForDrop;
             actionTurnTimer = 0f;
         }
@@ -1832,6 +1858,7 @@ public sealed partial class RobotArmInstance : IMapObjectTarget, IMapObjectSimul
         return robotArmState == RobotArmState.WaitingBeforePickupTake
                || robotArmState == RobotArmState.WaitingAfterPickupTake
                || robotArmState == RobotArmState.TurningToDrop
+               || robotArmState == RobotArmState.WaitingBeforeDropPlace
                || robotArmState == RobotArmState.WaitingAfterDropPlace
                || robotArmState == RobotArmState.TurningToPickup;
     }

@@ -1185,6 +1185,10 @@ public partial class PlayerController : MonoBehaviour
 
     private void Update()
     {
+        using var sample = MapObjectTickProfiler.SampleNamed(
+            "Frame",
+            "Player Controller",
+            "Player Update");
         if (interactionPointSnapTarget == null && interactionPointSnapAnimal != null)
         {
             interactionPointSnapAnimal.NotifyRiderDismounted(player);
@@ -1422,6 +1426,10 @@ public partial class PlayerController : MonoBehaviour
 
     private void FixedUpdate()
     {
+        using var sample = MapObjectTickProfiler.SampleNamed(
+            "Frame",
+            "Player Controller",
+            "Player FixedUpdate");
         if (interactionPointSnapTarget != null)
         {
             ApplyInteractionPointSnap();
@@ -1527,6 +1535,10 @@ public partial class PlayerController : MonoBehaviour
 
     private void LateUpdate()
     {
+        using var sample = MapObjectTickProfiler.SampleNamed(
+            "Frame",
+            "Player Controller",
+            "Player LateUpdate");
         if (interactionPointSnapTarget != null)
         {
             ApplyInteractionPointSnap();

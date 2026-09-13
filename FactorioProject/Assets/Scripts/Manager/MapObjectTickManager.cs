@@ -265,6 +265,8 @@ public sealed class MapObjectTickManager : MonoBehaviour
 
     private void Update()
     {
+        MapObjectTickProfiler.RecordRenderFrame();
+        using var sample = MapObjectTickProfiler.SampleNamed("Simulation", "Simulation Frame", "Simulation Frame (inclusive)");
         // Streaming/finalization run in TerrainGenerator.Update and coroutines, not this clock.
         // Discard loading wall time, including the frame in which loading completes.
         bool worldLoading = WaitingForWorldLoad;
@@ -306,6 +308,7 @@ public sealed class MapObjectTickManager : MonoBehaviour
             completedSteps++;
         }
 
+        MapObjectTickProfiler.RecordSimulationTicks(completedSteps);
         simulationTicksLastFrame = completedSteps;
         UpdateSimulationUpsMeasurement();
     }
@@ -972,6 +975,9 @@ public static class MapObjectTickProfiler
     private static long beltTouchedBlockRefreshes;
     private static long beltWakeAroundCalls;
     private static long beltActivityRefreshCalls;
+    private static int renderFrameCount;
+    private static int lastRenderFrame = -1;
+    private static int completedSimulationTickCount;
     private static int beltLoopProfileFrameCount;
     private static int beltLoopProfileLastFrame = -1;
     private static bool beltFrameProfilingEnabled;
@@ -984,6 +990,18 @@ public static class MapObjectTickProfiler
             GameManager gameManager = GameManager.Instance;
             return gameManager != null && gameManager.MapObjectTickProfilingEnabled;
         }
+    }
+
+    public static void RecordRenderFrame()
+    {
+        if (!IsEnabled || lastRenderFrame == Time.frameCount) return;
+        lastRenderFrame = Time.frameCount;
+        renderFrameCount++;
+    }
+
+    public static void RecordSimulationTicks(int completedTicks)
+    {
+        if (IsEnabled) completedSimulationTickCount += Mathf.Max(0, completedTicks);
     }
 
     public static long BeginSample()
@@ -1242,6 +1260,9 @@ public static class MapObjectTickProfiler
         beltTouchedBlockRefreshes = 0L;
         beltWakeAroundCalls = 0L;
         beltActivityRefreshCalls = 0L;
+        lastRenderFrame = -1;
+        renderFrameCount = 0;
+        completedSimulationTickCount = 0;
         beltLoopProfileFrameCount = 0;
         beltLoopProfileLastFrame = -1;
         beltFrameProfilingEnabled = false;
@@ -1283,6 +1304,8 @@ public static class MapObjectTickProfiler
         jsonBuilder.Append('{');
         AppendJsonProperty("enabled", enabled ? "true" : "false", false);
         AppendJsonProperty("frame", Time.frameCount.ToString(CultureInfo.InvariantCulture), true);
+        AppendJsonProperty("renderFrames", renderFrameCount.ToString(CultureInfo.InvariantCulture), true);
+        AppendJsonProperty("simulationTicks", completedSimulationTickCount.ToString(CultureInfo.InvariantCulture), true);
         AppendJsonProperty("windowMs", (windowSeconds * 1000f).ToString("0.###", CultureInfo.InvariantCulture), true);
         AppendJsonProperty("activeUpdateTicks", activeUpdateTickCount.ToString(CultureInfo.InvariantCulture), true);
         AppendJsonProperty("activeBeltTicks", activeBeltTickCount.ToString(CultureInfo.InvariantCulture), true);
@@ -1377,6 +1400,8 @@ public static class MapObjectTickProfiler
         beltTouchedBlockRefreshes = 0L;
         beltWakeAroundCalls = 0L;
         beltActivityRefreshCalls = 0L;
+        renderFrameCount = 0;
+        completedSimulationTickCount = 0;
         beltLoopProfileFrameCount = 0;
         beltLoopProfileLastFrame = -1;
         beltFrameProfilingEnabled = false;

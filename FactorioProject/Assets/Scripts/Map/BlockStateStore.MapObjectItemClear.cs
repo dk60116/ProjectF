@@ -83,7 +83,8 @@ public partial class BlockStateStore
         InstallationObject installationObject,
         ref MapObjectItemClearResult result)
     {
-        if (installationObject is IPersistentInstallationItemStorage itemStorage)
+        if (installationObject is IPersistentInstallationItemStorage itemStorage
+            && !PreservesStoredItemDuringMapObjectClear(installationObject))
         {
             if (itemStorage.PersistentStoredItemId >= 0)
             {
@@ -140,9 +141,10 @@ public partial class BlockStateStore
             return;
         }
 
+        bool preserveStoredItem = PreservesStoredItemDuringMapObjectClear(state);
         if (countBeforeClear)
         {
-            if (state.storedInstallationItemId >= 0)
+            if (!preserveStoredItem && state.storedInstallationItemId >= 0)
             {
                 result.StoredItems++;
             }
@@ -163,7 +165,10 @@ public partial class BlockStateStore
             }
         }
 
-        state.storedInstallationItemId = -1;
+        if (!preserveStoredItem)
+        {
+            state.storedInstallationItemId = -1;
+        }
         state.storedInstallationItemIds ??= new List<int>();
         state.storedInstallationItemIds.Clear();
         state.robotArmState = null;
@@ -176,6 +181,24 @@ public partial class BlockStateStore
             state.steamTrainBurnEnergyGaugeCapacityUnits = 0L;
             state.hasDeterministicUnits = true;
         }
+    }
+
+    private static bool PreservesStoredItemDuringMapObjectClear(
+        InstallationObject installationObject)
+    {
+        return installationObject is Desk;
+    }
+
+    private static bool PreservesStoredItemDuringMapObjectClear(
+        InstallationSaveState state)
+    {
+        if (state == null || state.itemId < 0)
+        {
+            return false;
+        }
+
+        ItemDefinition definition = InputOutputModule.ResolveItemDefinition(state.itemId);
+        return definition != null && definition.mapObject is Desk;
     }
 
     private static void CountInputOutputState(

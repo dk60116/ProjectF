@@ -197,7 +197,7 @@ MonoBehaviour:
   m_EditorClassIdentifier: 
   id: 0
   objectName: Brick Wall
-  objId: 70
+  objId: 71
   itemDefinition: {fileID: 11400000, guid: 7795dfaf3b2a492cae3ffb24dfc67efb, type: 2}
   portableObj: {fileID: 0}
   mapStatus:
@@ -219,7 +219,7 @@ MonoBehaviour:
   runtimeOccupiedCoordinates: []
   runtimePlacementSequence: 0
   excludeFromTerrainPersistence: 0
-  storedFluidLiters: 0
+  storedFluidUnits: 0
   storedFluidItemId: -1
   storedFluidTemperatureCelsius: 20
   powerLinePoint: {fileID: 0}

@@ -36,6 +36,7 @@ internal sealed class ProfilerForm : Form
     private readonly NumericUpDown maxRowsInput = new NumericUpDown();
     private readonly CheckBox enableProfilingCheckBox = new CheckBox();
     private readonly Button refreshButton = new Button();
+    private readonly Button refreshCountsButton = new Button();
     private readonly Button simulationPauseButton = new Button();
     private readonly Button openTextWindowButton = new Button();
     private readonly Button openBeltTickWindowButton = new Button();
@@ -84,7 +85,7 @@ internal sealed class ProfilerForm : Form
         };
         shell.RowStyles.Add(new RowStyle(SizeType.Absolute, 58f));
         shell.RowStyles.Add(new RowStyle(SizeType.Absolute, 92f));
-        shell.RowStyles.Add(new RowStyle(SizeType.Absolute, 34f));
+        shell.RowStyles.Add(new RowStyle(SizeType.Absolute, 78f));
         shell.RowStyles.Add(new RowStyle(SizeType.Percent, 100f));
         shell.RowStyles.Add(new RowStyle(SizeType.Absolute, 120f));
 
@@ -99,7 +100,7 @@ internal sealed class ProfilerForm : Form
         };
         Label descriptionLabel = new Label
         {
-            Text = "MapObject Tick 비용을 타입/아이템별로 측정합니다.",
+            Text = "프레임·시뮬레이션·렌더링 비용 / 상위·하위 구간은 겹치므로 합산하지 마세요.",
             AutoSize = true,
             ForeColor = Color.FromArgb(165, 174, 178),
             Location = new Point(2, 36)
@@ -136,6 +137,10 @@ internal sealed class ProfilerForm : Form
         StyleCheckBox(enableProfilingCheckBox, "Measure");
         enableProfilingCheckBox.CheckedChanged += async (_, _) => await SetProfilingEnabledAsync(enableProfilingCheckBox.Checked);
 
+        StyleButton(refreshCountsButton, "Refresh Counts");
+        refreshCountsButton.Width = 130;
+        refreshCountsButton.Click += async (_, _) => await RefreshCountsAsync();
+
         StyleButton(refreshButton, "Refresh");
         refreshButton.Click += async (_, _) => await RefreshNowAsync();
 
@@ -159,6 +164,7 @@ internal sealed class ProfilerForm : Form
         AddLabeledControl(controlPanel, "Rows", maxRowsInput);
         controlPanel.Controls.Add(enableProfilingCheckBox);
         controlPanel.Controls.Add(refreshButton);
+        controlPanel.Controls.Add(refreshCountsButton);
         controlPanel.Controls.Add(simulationPauseButton);
         controlPanel.Controls.Add(openTextWindowButton);
         controlPanel.Controls.Add(openBeltTickWindowButton);
@@ -313,6 +319,7 @@ internal sealed class ProfilerForm : Form
         rowsGrid.Columns.Add(CreateTextColumn("Kind", "Tick", 8));
         rowsGrid.Columns.Add(CreateTextColumn("Active", "Active", 10));
         rowsGrid.Columns.Add(CreateTextColumn("Samples", "Samples", 11));
+        rowsGrid.Columns.Add(CreateTextColumn("FrameMs", "ms/frame", 11));
         rowsGrid.Columns.Add(CreateTextColumn("TotalMs", "Total ms", 11));
         rowsGrid.Columns.Add(CreateTextColumn("AvgUs", "Avg us", 11));
         rowsGrid.Columns.Add(CreateTextColumn("MaxUs", "Max us", 11));
@@ -387,6 +394,45 @@ internal sealed class ProfilerForm : Form
         finally
         {
             SetBusy(false);
+        }
+    }
+
+    private static string FormatSnapshotCount(int? value) => value?.ToString("N0") ?? "n/a";
+
+    private static string FrameMetric(ProfileSnapshot snapshot, string group, string name)
+    {
+        return TryGetRuntimeCounterNumber(snapshot, group, name, out double value) && value >= 0 && (group != "ProfilerGPU" || value > 0)
+            ? $"{value:0.##} ms" : "n/a";
+    }
+
+    private static string CensusAge(ProfileSnapshot snapshot) =>
+        TryGetRuntimeCounterNumber(snapshot, "Census", "AgeSeconds", out double age) && age >= 0
+            ? $"{age:0}s ago" : "Refresh Counts";
+
+    private string RowFrameMilliseconds(ProfileRow row) => lastSnapshot?.RenderFrames > 0
+        ? (row.TotalUs / 1000.0 / lastSnapshot.RenderFrames.Value).ToString("0.###", CultureInfo.InvariantCulture)
+        : "n/a";
+
+    private async Task RefreshCountsAsync()
+    {
+        SetBusy(true);
+        refreshCountsButton.Enabled = false;
+        try
+        {
+            await WaitForActivePollAsync();
+            string response = await SendProtocolLineAsync(BuildHost(), BuildPort(), "counts");
+            AppendLog(response);
+            // Keep a paused snapshot intact, including its census and frame values.
+            if (!simulationPaused) await PollAsync(true);
+        }
+        catch (Exception exception) when (exception is SocketException || exception is IOException || exception is TimeoutException)
+        {
+            AppendLog(exception.Message);
+        }
+        finally
+        {
+            SetBusy(false);
+            refreshCountsButton.Enabled = true;
         }
     }
 
@@ -649,9 +695,9 @@ internal sealed class ProfilerForm : Form
         else
         {
             summaryLabel.Text =
-                $"Window {snapshot.WindowMs:0.#} ms / Frames {snapshot.BeltLoopProfileFrames:N0} / Active Update {snapshot.ActiveUpdateTicks:N0} / " +
-                $"TICK [Active {snapshot.ActiveBeltTicks:N0} / Data {snapshot.ActiveBeltDataMotions:N0} / Loops/f {snapshot.BeltItemLoopIterations:N1} / Queue {snapshot.BeltActiveLoopIterations:N1} / Line {snapshot.BeltStraightLineBlockLoopIterations:N1} / Try {snapshot.BeltTryMoveAttempts:N1}:{snapshot.BeltTryMoveSuccesses:N1} / St {snapshot.BeltStraightMoveAttempts:N1}:{snapshot.BeltStraightMoveSuccesses:N1} / Plan {snapshot.BeltPlanMoveCalls:N1} / Apply {snapshot.BeltPlannedMoveApplications:N1} / Touch {snapshot.BeltTouchedBlockRefreshes:N1} / Wake {snapshot.BeltWakeAroundCalls:N1} / Ref {snapshot.BeltActivityRefreshCalls:N1}] / " +
-                $"RENDER [Active {snapshot.ActiveBeltVisualTicks:N0} / Visual/f {snapshot.BeltVisualLoopIterations:N1}] / Rows {profileRows.Count:N0}";
+                $"Window {snapshot.WindowMs:0.#} ms / Render frames {FormatSnapshotCount(snapshot.RenderFrames)} / Simulation ticks {FormatSnapshotCount(snapshot.SimulationTicks)} / Belt sampled frames {snapshot.BeltLoopProfileFrames:N0}\n" +
+                $"CPU main {FrameMetric(snapshot, "ProfilerCPU", "MainThreadMs")} / Render thread {FrameMetric(snapshot, "ProfilerCPU", "RenderThreadMs")} / GPU {FrameMetric(snapshot, "ProfilerGPU", "FrameGpuMs")} / Present wait {FrameMetric(snapshot, "ProfilerCPU", "GfxWaitForPresentMs")}\n" +
+                $"Scripts {FrameMetric(snapshot, "ProfilerCPU", "ScriptsUpdateMs")} / Physics {FrameMetric(snapshot, "ProfilerCPU", "PhysicsMs")} / Animation {FrameMetric(snapshot, "ProfilerCPU", "AnimationMs")} / UI {FrameMetric(snapshot, "ProfilerCPU", "CanvasUpdateMs")} / Census {CensusAge(snapshot)}";
         }
 
         ApplyPauseDisplayState();
@@ -729,6 +775,7 @@ internal sealed class ProfilerForm : Form
                     row.Kind,
                     row.ActiveCount.ToString("N0", CultureInfo.InvariantCulture),
                     row.Samples.ToString("N0", CultureInfo.InvariantCulture),
+                    RowFrameMilliseconds(row),
                     (row.TotalUs / 1000.0).ToString("0.###", CultureInfo.InvariantCulture),
                     row.AvgUs.ToString("0.#", CultureInfo.InvariantCulture),
                     row.MaxUs.ToString("0.#", CultureInfo.InvariantCulture));
@@ -1000,7 +1047,7 @@ internal sealed class ProfilerForm : Form
                 ResolveRowBrush(row, updateBrush, lateBrush, beltTickBrush, beltRenderBrush),
                 new Rectangle(barRect.Left, barRect.Top, filledWidth, barRect.Height));
 
-            string metrics = $"{row.TotalUs / 1000.0:0.###} ms   avg {row.AvgUs:0.#} us   max {row.MaxUs:0.#} us   x{row.Samples:N0}   active {row.ActiveCount:N0}";
+            string metrics = $"{RowFrameMilliseconds(row)} ms/f   avg {row.AvgUs:0.#} us   max {row.MaxUs:0.#} us   x{row.Samples:N0}   active {row.ActiveCount:N0}";
             e.Graphics.DrawString(metrics, graphFont, dimBrush, metricRect, textFormat);
             e.Graphics.DrawLine(dividerPen, rowRect.Left, rowRect.Bottom, rowRect.Right, rowRect.Bottom);
         }
@@ -1450,6 +1497,7 @@ internal sealed class ProfilerForm : Form
         maxRowsInput.Enabled = !busy;
         enableProfilingCheckBox.Enabled = !busy;
         refreshButton.Enabled = !busy;
+        refreshCountsButton.Enabled = !busy;
         simulationPauseButton.Enabled = !busy;
         UpdateSnapshotWindowButtonsEnabled(busy);
         Cursor = busy ? Cursors.WaitCursor : Cursors.Default;
@@ -1672,6 +1720,9 @@ internal sealed class ProfilerForm : Form
         builder.AppendLine($"Enabled\t{snapshot.Enabled}");
         builder.AppendLine($"Frame\t{snapshot.Frame}");
         builder.AppendLine($"WindowMs\t{snapshot.WindowMs.ToString("0.###", CultureInfo.InvariantCulture)}");
+        builder.AppendLine($"RenderFrames\t{FormatSnapshotCount(snapshot.RenderFrames)}");
+        builder.AppendLine($"SimulationTicks\t{FormatSnapshotCount(snapshot.SimulationTicks)}");
+        builder.AppendLine("TimingNote\tInclusive scopes overlap. ms/frame uses renderFrames. Engine recorder windows may differ.");
         builder.AppendLine($"BeltLoopProfileFrames\t{snapshot.BeltLoopProfileFrames.ToString(CultureInfo.InvariantCulture)}");
         builder.AppendLine($"ActiveUpdateTicks\t{snapshot.ActiveUpdateTicks.ToString(CultureInfo.InvariantCulture)}");
         builder.AppendLine($"ActiveBeltTicks\t{snapshot.ActiveBeltTicks.ToString(CultureInfo.InvariantCulture)}");
@@ -1710,7 +1761,7 @@ internal sealed class ProfilerForm : Form
 
         builder.AppendLine();
         builder.AppendLine("Rows");
-        builder.AppendLine("Rank\tKind\tItem\tType\tItemId\tActive\tSamples\tTotalMs\tAvgUs\tMaxUs");
+        builder.AppendLine("Rank\tKind\tItem\tType\tItemId\tActive\tSamples\tTotalMs\tAvgUs\tMaxUs\tMsPerRenderFrame");
         for (int i = 0; i < profileRows.Count; i++)
         {
             ProfileRow row = profileRows[i];
@@ -1723,7 +1774,10 @@ internal sealed class ProfilerForm : Form
             builder.Append(row.Samples.ToString(CultureInfo.InvariantCulture)).Append('\t');
             builder.Append((row.TotalUs / 1000.0).ToString("0.###", CultureInfo.InvariantCulture)).Append('\t');
             builder.Append(row.AvgUs.ToString("0.###", CultureInfo.InvariantCulture)).Append('\t');
-            builder.AppendLine(row.MaxUs.ToString("0.###", CultureInfo.InvariantCulture));
+            builder.Append(row.MaxUs.ToString("0.###", CultureInfo.InvariantCulture)).Append('\t');
+            builder.AppendLine(snapshot.RenderFrames > 0
+                ? (row.TotalUs / 1000.0 / snapshot.RenderFrames.Value).ToString("0.###", CultureInfo.InvariantCulture)
+                : "n/a");
         }
 
         return builder.ToString();
@@ -2415,6 +2469,12 @@ internal sealed class ProfileSnapshot
 
     [JsonPropertyName("frame")]
     public int Frame { get; set; }
+
+    [JsonPropertyName("renderFrames")]
+    public int? RenderFrames { get; set; }
+
+    [JsonPropertyName("simulationTicks")]
+    public int? SimulationTicks { get; set; }
 
     [JsonPropertyName("windowMs")]
     public double WindowMs { get; set; }

@@ -612,6 +612,33 @@ public sealed class ConveyorWorld : MonoBehaviour, IVirtualRenderBatchOwner
     public int InstalledBeltCount => recordsByStorageKey.Count;
     public int SceneGameObjectCount => 1;
     public int BatchEntryCount => batchEntries.Count;
+    public int ActiveBatchCount => batches.ActiveBatchCount;
+    public int ActiveMatrixCount => batches.ActiveMatrixCount;
+    public int EstimatedDrawCallCount => batches.EstimatedDrawCallCount;
+
+    public static void AppendProfilerCounters()
+    {
+        MapObjectTickProfiler.AddRuntimeCounter(
+            "ConveyorBodyRender",
+            "Records",
+            current != null ? current.InstalledBeltCount : 0);
+        MapObjectTickProfiler.AddRuntimeCounter(
+            "ConveyorBodyRender",
+            "Batches",
+            current != null ? current.ActiveBatchCount : 0);
+        MapObjectTickProfiler.AddRuntimeCounter(
+            "ConveyorBodyRender",
+            "Matrices",
+            current != null ? current.ActiveMatrixCount : 0);
+        MapObjectTickProfiler.AddRuntimeCounter(
+            "ConveyorBodyRender",
+            "EstimatedDrawCalls",
+            current != null ? current.EstimatedDrawCallCount : 0);
+        MapObjectTickProfiler.AddRuntimeCounter(
+            "ConveyorBodyRender",
+            "AnimatedParts",
+            current != null ? current.animatedVisualEntries.Count : 0);
+    }
 
     public static ConveyorWorld EnsureFor(TerrainGenerator terrain)
     {
@@ -827,12 +854,28 @@ public sealed class ConveyorWorld : MonoBehaviour, IVirtualRenderBatchOwner
 
     private void LateUpdate()
     {
+        using var sample = MapObjectTickProfiler.SampleNamed(
+            "Render",
+            "Conveyor Body Render",
+            "Conveyor Body Render (inclusive)");
         if (batchesDirty)
         {
-            RebuildBatches();
+            using (MapObjectTickProfiler.SampleNamed(
+                       "Render",
+                       "Conveyor Body Render",
+                       "Conveyor Body Rebuild"))
+            {
+                RebuildBatches();
+            }
         }
 
-        UpdateAnimatedPartMatrices();
+        using (MapObjectTickProfiler.SampleNamed(
+                   "Render",
+                   "Conveyor Body Render",
+                   "Conveyor Animated Parts"))
+        {
+            UpdateAnimatedPartMatrices();
+        }
 
         if (GameManager.Instance != null && GameManager.Instance.HideBelts)
         {
@@ -845,7 +888,13 @@ public sealed class ConveyorWorld : MonoBehaviour, IVirtualRenderBatchOwner
             mainCamera = Camera.main;
         }
 
-        batches.RenderBatches(mainCamera);
+        using (MapObjectTickProfiler.SampleNamed(
+                   "Render",
+                   "Conveyor Body Render",
+                   "Conveyor Body Submit"))
+        {
+            batches.RenderBatches(mainCamera);
+        }
     }
 
     private void RebuildBatches()

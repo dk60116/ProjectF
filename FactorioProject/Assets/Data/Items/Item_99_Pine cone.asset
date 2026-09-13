@@ -13,8 +13,12 @@ MonoBehaviour:
   m_Name: Item_99_Pine cone
   m_EditorClassIdentifier: Assembly-CSharp::ItemDefinition
   itemName: Pine cone
-  id: 94
+  id: 95
   mapObject: {fileID: 0}
+  mapObjectArchetype: {fileID: 0}
+  useMapColor: 0
+  mapColor: {r: 1, g: 1, b: 1, a: 1}
+  mapMarkerSize: 1
   portableMesh: {fileID: 4300000, guid: 00e315507a984ce4b9483daa07491361, type: 2}
   portableMat: {fileID: 2100000, guid: 7d5742b5754fb3e498873f7811b4d89a, type: 2}
   icon: {fileID: 21300000, guid: cdf221a6c1684933a51d8163af389c16, type: 3}

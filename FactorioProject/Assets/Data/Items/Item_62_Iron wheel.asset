@@ -13,8 +13,12 @@ MonoBehaviour:
   m_Name: Item_62_Iron wheel
   m_EditorClassIdentifier: Assembly-CSharp::ItemDefinition
   itemName: Iron wheel
-  id: 98
+  id: 99
   mapObject: {fileID: 0}
+  mapObjectArchetype: {fileID: 0}
+  useMapColor: 0
+  mapColor: {r: 1, g: 1, b: 1, a: 1}
+  mapMarkerSize: 1
   portableMesh: {fileID: 4300000, guid: 2a5347a55d1f97842aae2067f837f850, type: 2}
   portableMat: {fileID: 2100000, guid: 17a38530f2fece544bd8bcf26b55fd6b, type: 2}
   icon: {fileID: 21300000, guid: 86de92086ee6a144a9c254e64f42b8f6, type: 3}

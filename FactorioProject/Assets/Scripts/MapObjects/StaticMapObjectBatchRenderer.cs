@@ -92,6 +92,10 @@ namespace ProjectF.MapObjects
 
         private void LateUpdate()
         {
+            using var sample = MapObjectTickProfiler.SampleNamed(
+                "Render",
+                "Static Installation Render",
+                "Static Installation Render (inclusive)");
             ResolveDependencies();
             if (virtualWorld == null || itemManager == null)
             {

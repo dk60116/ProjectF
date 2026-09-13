@@ -705,7 +705,6 @@ public sealed class RuntimeItemGiveReceiver : MonoBehaviour
     private const int RequestTimeoutMilliseconds = 30000;
     private const int MaxRequestsPerFrame = 4;
     private const int MaxRequestsPerFrameDuringChunkStreaming = 1;
-    private const float StatusWorldStatsRefreshInterval = 1f;
     private const float StatusSaveSlotRefreshInterval = 5f;
     private const float PlayerSpeedSampleInterval = 0.2f;
     private const float PlayerTeleportDistanceThreshold = 5f;
@@ -753,13 +752,14 @@ public sealed class RuntimeItemGiveReceiver : MonoBehaviour
     private float currentPlayerSpeed;
     private bool hasPlayerSpeedSample;
     private float cachedStatusWorldStatsTime = float.NegativeInfinity;
-    private int cachedInstalledObjectTotal;
+    private int cachedInstalledObjectTotal = -1;
     private int cachedConveyorItemTotal;
-    private int cachedSceneGameObjectTotal;
-    private int cachedActiveSceneGameObjectTotal;
-    private int cachedSceneMonoBehaviourTotal;
-    private int cachedActiveSceneMonoBehaviourTotal;
+    private int cachedSceneGameObjectTotal = -1;
+    private int cachedActiveSceneGameObjectTotal = -1;
+    private int cachedSceneMonoBehaviourTotal = -1;
+    private int cachedActiveSceneMonoBehaviourTotal = -1;
     private string cachedInstallationTypeCounts = "-";
+    private TerrainGenerator cachedCensusTerrain;
     private float cachedSaveSlotsStatusTime = float.NegativeInfinity;
     private int cachedSaveSlotsSelectedSlotIndex = -1;
     private string cachedSaveSlotsExtraTokens = string.Empty;
@@ -769,6 +769,7 @@ public sealed class RuntimeItemGiveReceiver : MonoBehaviour
     private int lastGen0CollectionCount;
     private int lastGen1CollectionCount;
     private int lastGen2CollectionCount;
+    private readonly List<RuntimeProfilerRecorderSpec> unavailableRuntimeProfilerRecorders = new List<RuntimeProfilerRecorderSpec>();
     private bool runtimeProfilerRecordersInitialized;
     private int availableRuntimeProfilerRecorderCount;
     private string availableRuntimeProfilerRecorderRelevantNames = string.Empty;
@@ -777,15 +778,52 @@ public sealed class RuntimeItemGiveReceiver : MonoBehaviour
 
     private static readonly RuntimeProfilerRecorderSpec[] RuntimeProfilerRecorderSpecs =
     {
+        new RuntimeProfilerRecorderSpec("ProfilerCPU", "PlayerLoopMs",
+            RuntimeProfilerRecorderUnit.NanosecondsToMilliseconds,
+            RuntimeProfilerRecorderCandidate.CustomCategory("Internal", "PlayerLoop"),
+            RuntimeProfilerRecorderCandidate.Internal("PlayerLoop")),
+        new RuntimeProfilerRecorderSpec("ProfilerCPU", "ScriptsUpdateMs",
+            RuntimeProfilerRecorderUnit.NanosecondsToMilliseconds,
+            RuntimeProfilerRecorderCandidate.CustomCategory("Scripts", "BehaviourUpdate"),
+            RuntimeProfilerRecorderCandidate.Internal("BehaviourUpdate")),
+        new RuntimeProfilerRecorderSpec("ProfilerCPU", "ScriptsLateUpdateMs",
+            RuntimeProfilerRecorderUnit.NanosecondsToMilliseconds,
+            RuntimeProfilerRecorderCandidate.CustomCategory("Scripts", "BehaviourLateUpdate"),
+            RuntimeProfilerRecorderCandidate.Internal("BehaviourLateUpdate")),
+        new RuntimeProfilerRecorderSpec("ProfilerCPU", "PhysicsMs",
+            RuntimeProfilerRecorderUnit.NanosecondsToMilliseconds,
+            RuntimeProfilerRecorderCandidate.CustomCategory("Physics", "Physics.Simulate"),
+            RuntimeProfilerRecorderCandidate.Internal("Physics.Simulate")),
+        new RuntimeProfilerRecorderSpec("ProfilerCPU", "AnimationMs",
+            RuntimeProfilerRecorderUnit.NanosecondsToMilliseconds,
+            RuntimeProfilerRecorderCandidate.CustomCategory("Animation", "Animation.Update"),
+            RuntimeProfilerRecorderCandidate.Internal("Animation.Update")),
+        new RuntimeProfilerRecorderSpec("ProfilerCPU", "AnimatorMs",
+            RuntimeProfilerRecorderUnit.NanosecondsToMilliseconds,
+            RuntimeProfilerRecorderCandidate.CustomCategory("Animation", "Animator.Update"),
+            RuntimeProfilerRecorderCandidate.Internal("Animator.Update")),
+        new RuntimeProfilerRecorderSpec("ProfilerCPU", "CanvasUpdateMs",
+            RuntimeProfilerRecorderUnit.NanosecondsToMilliseconds,
+            RuntimeProfilerRecorderCandidate.CustomCategory("Gui", "Canvas.SendWillRenderCanvases"),
+            RuntimeProfilerRecorderCandidate.Internal("Canvas.SendWillRenderCanvases")),
+        new RuntimeProfilerRecorderSpec("ProfilerCPU", "CanvasBuildMs",
+            RuntimeProfilerRecorderUnit.NanosecondsToMilliseconds,
+            RuntimeProfilerRecorderCandidate.CustomCategory("Gui", "Canvas.BuildBatch"),
+            RuntimeProfilerRecorderCandidate.Internal("Canvas.BuildBatch")),
+
         new RuntimeProfilerRecorderSpec(
             "ProfilerCPU",
             "MainThreadMs",
             RuntimeProfilerRecorderUnit.NanosecondsToMilliseconds,
+            RuntimeProfilerRecorderCandidate.Internal("CPU Main Thread Frame Time"),
+            RuntimeProfilerRecorderCandidate.Render("CPU Main Thread Frame Time"),
             RuntimeProfilerRecorderCandidate.Internal("Main Thread")),
         new RuntimeProfilerRecorderSpec(
             "ProfilerCPU",
             "RenderThreadMs",
             RuntimeProfilerRecorderUnit.NanosecondsToMilliseconds,
+            RuntimeProfilerRecorderCandidate.Internal("CPU Render Thread Frame Time"),
+            RuntimeProfilerRecorderCandidate.Render("CPU Render Thread Frame Time"),
             RuntimeProfilerRecorderCandidate.Internal("Render Thread")),
         new RuntimeProfilerRecorderSpec(
             "ProfilerCPU",
@@ -818,6 +856,8 @@ public sealed class RuntimeItemGiveReceiver : MonoBehaviour
             "ProfilerGPU",
             "FrameGpuMs",
             RuntimeProfilerRecorderUnit.NanosecondsToMilliseconds,
+            RuntimeProfilerRecorderCandidate.Internal("GPU Frame Time"),
+            RuntimeProfilerRecorderCandidate.Render("GPU Frame Time"),
             RuntimeProfilerRecorderCandidate.Render("FrameTime.GPU")),
         new RuntimeProfilerRecorderSpec(
             "ProfilerRender",
@@ -915,6 +955,8 @@ public sealed class RuntimeItemGiveReceiver : MonoBehaviour
 
     private void Update()
     {
+        using var sample = MapObjectTickProfiler.SampleNamed("Diagnostics", "Tool Requests", "Tool Requests");
+        MapObjectTickProfiler.RecordRenderFrame();
         UpdateFrameStats();
         UpdatePlayerSpeed();
 
@@ -948,6 +990,9 @@ public sealed class RuntimeItemGiveReceiver : MonoBehaviour
         {
             case ToolCommand.Ping:
                 request.Result = ToolResult.Ping();
+                break;
+            case ToolCommand.RefreshCounts:
+                request.Result = GetStatusResult(true);
                 break;
             case ToolCommand.Status:
                 request.Result = GetStatusResult();
@@ -1032,7 +1077,15 @@ public sealed class RuntimeItemGiveReceiver : MonoBehaviour
 
     private void UpdateFrameStats()
     {
-        FrameTimingManager.CaptureFrameTimings();
+        if (MapObjectTickProfiler.IsEnabled)
+        {
+            EnsureRuntimeProfilerRecorders();
+            FrameTimingManager.CaptureFrameTimings();
+        }
+        else if (runtimeProfilerRecordersInitialized)
+        {
+            DisposeRuntimeProfilerRecorders();
+        }
 
         float deltaTime = Time.unscaledDeltaTime;
         if (deltaTime <= 0f)
@@ -1317,6 +1370,14 @@ public sealed class RuntimeItemGiveReceiver : MonoBehaviour
         if (parts.Length == 1 && string.Equals(parts[0], "ping", StringComparison.OrdinalIgnoreCase))
         {
             command = ToolCommand.Ping;
+            itemId = 0;
+            count = 0;
+            return true;
+        }
+
+        if (parts.Length == 1 && string.Equals(parts[0], "counts", StringComparison.OrdinalIgnoreCase))
+        {
+            command = ToolCommand.RefreshCounts;
             itemId = 0;
             count = 0;
             return true;
@@ -1696,7 +1757,7 @@ public sealed class RuntimeItemGiveReceiver : MonoBehaviour
 
         if (parts.Length < 2 || !string.Equals(parts[0], "give", StringComparison.OrdinalIgnoreCase))
         {
-            error = "usage: give <itemId> [count] | clear <belt|floor|io|mapobj> | animalstress [count] | animalcollision [count] | animalthreat [radius] | beltstress [count] | beltline [auto|itemId] [count] | beltitems [count] | beltcheck | save <slot> | load <slot> | reset [slot] [randomSeed] | seed <int> | saveslots | simulation pause <true|false> | time <status|set|scale|pause|next sunrise|check> | debug <showConveyorSlotDots|showSleepAwake|showBeltItemLine|showBeltPipeSplit|hideBeltItems|hideBelts|disableCameraCulling|showRailLine|showDirections|freeCamera|freeCameraPlayerCulling|showAnimalHerdAreas|animalAIPaused|mapObjectTickProfiling> <true|false> | camera size <minSize> <maxSize> | perf [maxRows] | ping | status";
+            error = "usage: give <itemId> [count] | clear <belt|floor|io|mapobj> | animalstress [count] | animalcollision [count] | animalthreat [radius] | beltstress [count] | beltline [auto|itemId] [count] | beltitems [count] | beltcheck | save <slot> | load <slot> | reset [slot] [randomSeed] | seed <int> | saveslots | simulation pause <true|false> | time <status|set|scale|pause|next sunrise|check> | debug <showConveyorSlotDots|showSleepAwake|showBeltItemLine|showBeltPipeSplit|hideBeltItems|hideBelts|disableCameraCulling|showRailLine|showDirections|freeCamera|freeCameraPlayerCulling|showAnimalHerdAreas|animalAIPaused|mapObjectTickProfiling> <true|false> | camera size <minSize> <maxSize> | perf [maxRows] | ping | status | counts";
             return false;
         }
 
@@ -1930,7 +1991,7 @@ public sealed class RuntimeItemGiveReceiver : MonoBehaviour
         }
     }
 
-    private ToolResult GetStatusResult()
+    private ToolResult GetStatusResult(bool refreshCounts = false)
     {
         float fps = currentFps;
         float frameMs = currentFrameMs;
@@ -1942,9 +2003,11 @@ public sealed class RuntimeItemGiveReceiver : MonoBehaviour
 
         TerrainGenerator terrain = TerrainGenerator.ResolveActive();
         bool isChunkStreamingBusy = terrain != null && terrain.IsChunkStreamingBusy;
+        if (refreshCounts && isChunkStreamingBusy)
+            return ToolResult.Error(0, 0, "counts unavailable while chunks are loading");
         CaptureWorldStats(
             terrain,
-            isChunkStreamingBusy,
+            refreshCounts,
             out int installedObjectTotal,
             out int conveyorItemTotal,
             out string installationTypeCounts,
@@ -1969,6 +2032,8 @@ public sealed class RuntimeItemGiveReceiver : MonoBehaviour
             activeSceneGameObjectTotal,
             sceneMonoBehaviourTotal,
             activeSceneMonoBehaviourTotal);
+        float censusAge = float.IsNegativeInfinity(cachedStatusWorldStatsTime) ? -1f : Time.unscaledTime - cachedStatusWorldStatsTime;
+        extraTokens += " worldStatsAgeSeconds=" + censusAge.ToString("0.###", CultureInfo.InvariantCulture);
         return ToolResult.Status(
             fps,
             frameMs,
@@ -2110,6 +2175,7 @@ public sealed class RuntimeItemGiveReceiver : MonoBehaviour
 
     private ToolResult GetPerfSnapshotResult(int maxRows)
     {
+        using var sample = MapObjectTickProfiler.SampleNamed("Diagnostics", "Perf Snapshot", "Perf Snapshot (inclusive)");
         int resolvedMaxRows = Mathf.Max(1, maxRows);
         EnsureRuntimeProfilerRecorders();
         MapObjectTickProfiler.ClearRuntimeCounters();
@@ -2288,7 +2354,7 @@ public sealed class RuntimeItemGiveReceiver : MonoBehaviour
 
     private void EnsureRuntimeProfilerRecorders()
     {
-        if (runtimeProfilerRecordersInitialized)
+        if (runtimeProfilerRecordersInitialized || !MapObjectTickProfiler.IsEnabled)
         {
             return;
         }
@@ -2302,6 +2368,10 @@ public sealed class RuntimeItemGiveReceiver : MonoBehaviour
             {
                 runtimeProfilerRecorders.Add(recorder);
             }
+            else
+            {
+                unavailableRuntimeProfilerRecorders.Add(RuntimeProfilerRecorderSpecs[i]);
+            }
         }
     }
 
@@ -2313,6 +2383,7 @@ public sealed class RuntimeItemGiveReceiver : MonoBehaviour
         }
 
         runtimeProfilerRecorders.Clear();
+        unavailableRuntimeProfilerRecorders.Clear();
         runtimeProfilerRecorderHandles.Clear();
         runtimeProfilerRecorderHandlesByKey.Clear();
         availableRuntimeProfilerRecorderCount = 0;
@@ -2399,7 +2470,9 @@ public sealed class RuntimeItemGiveReceiver : MonoBehaviour
                 return true;
             }
 
-            if (allowDirectFallback
+            // Frame timing counters can activate collection when the recorder attaches,
+            // even with Frame Timing Stats disabled in release player settings.
+            if ((allowDirectFallback || candidate.CounterName.EndsWith("Frame Time", StringComparison.Ordinal))
                 && TryStartRuntimeProfilerRecorder(spec, candidate, out runtimeRecorder))
             {
                 return true;
@@ -2482,6 +2555,9 @@ public sealed class RuntimeItemGiveReceiver : MonoBehaviour
 
     private void AppendProfilerRecorderRuntimeCounters()
     {
+        foreach (RuntimeProfilerRecorderSpec spec in unavailableRuntimeProfilerRecorders)
+            MapObjectTickProfiler.AddRuntimeCounter(spec.Group, spec.Name, "n/a", "marker unavailable in this player/build");
+
         MapObjectTickProfiler.AddRuntimeCounter("ProfilerRecorder", "AvailableCounters", availableRuntimeProfilerRecorderCount);
         MapObjectTickProfiler.AddRuntimeCounter("ProfilerRecorder", "ActiveRecorders", runtimeProfilerRecorders.Count);
         MapObjectTickProfiler.AddRuntimeCounter(
@@ -3116,7 +3192,7 @@ public sealed class RuntimeItemGiveReceiver : MonoBehaviour
 
     private void CaptureWorldStats(
         TerrainGenerator terrain,
-        bool allowStaleCache,
+        bool refreshCounts,
         out int installedObjectTotal,
         out int conveyorItemTotal,
         out string installationTypeCounts,
@@ -3125,52 +3201,26 @@ public sealed class RuntimeItemGiveReceiver : MonoBehaviour
         out int sceneMonoBehaviourTotal,
         out int activeSceneMonoBehaviourTotal)
     {
-        float now = Time.unscaledTime;
-        if (allowStaleCache
-            || (!float.IsNegativeInfinity(cachedStatusWorldStatsTime)
-                && now - cachedStatusWorldStatsTime < StatusWorldStatsRefreshInterval))
+        if (!ReferenceEquals(cachedCensusTerrain, terrain))
         {
-            installedObjectTotal = cachedInstalledObjectTotal;
-            conveyorItemTotal = terrain != null
-                ? terrain.GetConveyorItemCount()
-                : cachedConveyorItemTotal;
-            cachedConveyorItemTotal = conveyorItemTotal;
-            installationTypeCounts = cachedInstallationTypeCounts;
-            sceneGameObjectTotal = cachedSceneGameObjectTotal;
-            activeSceneGameObjectTotal = cachedActiveSceneGameObjectTotal;
-            sceneMonoBehaviourTotal = cachedSceneMonoBehaviourTotal;
-            activeSceneMonoBehaviourTotal = cachedActiveSceneMonoBehaviourTotal;
-            return;
-        }
-
-        CaptureSceneObjectCounts(
-            out cachedSceneGameObjectTotal,
-            out cachedActiveSceneGameObjectTotal,
-            out cachedSceneMonoBehaviourTotal,
-            out cachedActiveSceneMonoBehaviourTotal);
-
-        if (terrain == null)
-        {
-            installationCountsByItemId.Clear();
-            cachedInstalledObjectTotal = 0;
-            cachedConveyorItemTotal = 0;
+            cachedCensusTerrain = terrain;
+            cachedStatusWorldStatsTime = float.NegativeInfinity;
+            cachedInstalledObjectTotal = cachedSceneGameObjectTotal = cachedActiveSceneGameObjectTotal = -1;
+            cachedSceneMonoBehaviourTotal = cachedActiveSceneMonoBehaviourTotal = -1;
             cachedInstallationTypeCounts = "-";
-            cachedStatusWorldStatsTime = now;
-            installedObjectTotal = cachedInstalledObjectTotal;
-            conveyorItemTotal = cachedConveyorItemTotal;
-            installationTypeCounts = cachedInstallationTypeCounts;
-            sceneGameObjectTotal = cachedSceneGameObjectTotal;
-            activeSceneGameObjectTotal = cachedActiveSceneGameObjectTotal;
-            sceneMonoBehaviourTotal = cachedSceneMonoBehaviourTotal;
-            activeSceneMonoBehaviourTotal = cachedActiveSceneMonoBehaviourTotal;
-            return;
         }
-
-        cachedInstalledObjectTotal = terrain.GetInstallationItemCounts(installationCountsByItemId);
-        cachedConveyorItemTotal = terrain.GetConveyorItemCount();
-        cachedInstallationTypeCounts = BuildInstallationTypeCountToken(installationCountsByItemId);
-        cachedStatusWorldStatsTime = now;
-
+        if (refreshCounts)
+        {
+            using var sample = MapObjectTickProfiler.SampleNamed("Diagnostics", "Scene Census", "Scene Census");
+            CaptureSceneObjectCounts(out cachedSceneGameObjectTotal, out cachedActiveSceneGameObjectTotal,
+                out cachedSceneMonoBehaviourTotal, out cachedActiveSceneMonoBehaviourTotal);
+            installationCountsByItemId.Clear();
+            cachedInstalledObjectTotal = terrain != null ? terrain.GetInstallationItemCounts(installationCountsByItemId) : 0;
+            cachedInstallationTypeCounts = BuildInstallationTypeCountToken(installationCountsByItemId);
+            terrain?.CaptureRuntimeProfilerCensus();
+            cachedStatusWorldStatsTime = Time.unscaledTime;
+        }
+        cachedConveyorItemTotal = terrain != null ? terrain.GetConveyorItemCount() : 0;
         installedObjectTotal = cachedInstalledObjectTotal;
         conveyorItemTotal = cachedConveyorItemTotal;
         installationTypeCounts = cachedInstallationTypeCounts;
@@ -5200,6 +5250,7 @@ public sealed class RuntimeItemGiveReceiver : MonoBehaviour
         Give,
         Ping,
         Status,
+        RefreshCounts,
         SimulationPause,
         TimeStatus,
         TimeSet,

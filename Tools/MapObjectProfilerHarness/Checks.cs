@@ -151,7 +151,7 @@ public static class Checks
         if (expected.Count != snapshots.Count) throw new Exception("Snapshot count differs.");
         for (int i = 0; i < snapshots.Count; i++)
         {
-            if (expected[i] != snapshots[i]) throw new Exception($"Snapshot {i} differs. Expected:\n{expected[i]}\nActual:\n{snapshots[i]}");
+            if (expected[i] != snapshots[i].Replace("\"renderFrames\":0,\"simulationTicks\":0,", "")) throw new Exception($"Snapshot {i} differs. Expected:\n{expected[i]}\nActual:\n{snapshots[i]}");
         }
         GameManager.Instance.MapObjectTickProfilingEnabled = true;
         MapObjectTickProfiler.Reset();
@@ -162,6 +162,8 @@ public static class Checks
         long allocated = GC.GetAllocatedBytesForCurrentThread() - allocatedBefore;
         if (allocated != 0) throw new Exception($"Steady active-group collection allocated {allocated} bytes.");
         CheckNamedScopes();
+        CheckFrameCounts();
+        WorldStatsChecks.Run();
         Console.WriteLine($"PASS: {snapshots.Count} byte-identical baseline snapshots; 1000 active-group refreshes allocated {allocated} bytes.");
         return 0;
     }
@@ -197,4 +199,43 @@ public static class Checks
         }
         Console.WriteLine("PASS: named scopes record early returns, allocate 0 bytes after warmup, and skip disabled profiling.");
     }
+    private static void CheckFrameCounts()
+    {
+        GameManager.Instance.MapObjectTickProfilingEnabled = true;
+        MapObjectTickProfiler.Reset();
+        for (int i = 0; i < 30; i++)
+        {
+            Time.frameCount++;
+            MapObjectTickProfiler.RecordRenderFrame();
+            MapObjectTickProfiler.RecordRenderFrame(); // Duplicate calls cannot double count.
+            MapObjectTickProfiler.RecordSimulationTicks(2);
+        }
+        AssertFrameCounts(30, 60);
+        AssertFrameCounts(0, 0); // Reading twice without a rendered frame has no denominator.
+        for (int i = 0; i < 100; i++)
+        {
+            Time.frameCount++;
+            MapObjectTickProfiler.RecordRenderFrame();
+            MapObjectTickProfiler.RecordSimulationTicks(i % 5 < 3 ? 1 : 0);
+        }
+        AssertFrameCounts(100, 60);
+        Time.frameCount++;
+        MapObjectTickProfiler.RecordRenderFrame(); // Pause: rendering continues without any tick.
+        AssertFrameCounts(1, 0);
+        GameManager.Instance.MapObjectTickProfilingEnabled = false;
+        Time.frameCount++;
+        MapObjectTickProfiler.RecordRenderFrame();
+        MapObjectTickProfiler.RecordSimulationTicks(10);
+        AssertFrameCounts(0, 0);
+        Console.WriteLine("PASS: independent render/tick counts at 30 and 100 FPS, pause, duplicate reads, disabled capture.");
+    }
+
+    private static void AssertFrameCounts(int frames, int ticks)
+    {
+        using var json = JsonDocument.Parse(MapObjectTickProfiler.BuildAndResetSnapshotJson());
+        if (json.RootElement.GetProperty("renderFrames").GetInt32() != frames
+            || json.RootElement.GetProperty("simulationTicks").GetInt32() != ticks)
+            throw new Exception("Render frame / simulation tick denominator differs");
+    }
+
 }

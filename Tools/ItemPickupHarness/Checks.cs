@@ -28,7 +28,7 @@ static class Checks
         Check(slot.Selected() == "Box", "closer box item wins");
         slot.Click(); Check(slot.Picked == "Box", "box dispatch agrees with selection");
         slot.clickedBox = null;
-        slot.player.Controller.Arm = new RobotArm();
+        slot.player.Controller.Arm = new RobotArmInstance();
         Check(slot.Selected() == "Ground", "empty focused robot arm no longer blocks pickup");
         slot.player.Controller.Arm.HeldPortableObject = Item(0.05f);
         slot.player.Controller.Arm.CanTakeHeldItemFromSlot = false;
@@ -131,12 +131,13 @@ public class BoxObject : MapObject, IPlayerItemStorage
 {
     public bool TryPreviewContainedObjectPickup(Player p,Vector3 o,float r,int pref,out int id,out int count,out PortableObject obj) => Preview(pref,out id,out count,out obj);
 }
-public class RobotArm : MapObject
+public class RobotArmInstance : MapObject
 {
     public PortableObject HeldPortableObject;
     public bool HasHeldItem => HeldPortableObject!=null;
     public bool CanTakeHeldItemFromSlot=true;
     public int HeldItemId => HeldPortableObject?.ItemId??-1;
+    public Vector3 WorldPosition => HeldPortableObject != null ? HeldPortableObject.transform.position : transform.position;
     public int Takes;
     public bool TryTakeHeldItemToBag(object bag,int slot) { Takes++; return true; }
 }
@@ -147,8 +148,8 @@ public class Player : MapObject
 }
 public class PlayerController
 {
-    public RobotArm Arm;
-    public bool TryGetFocusedRobotArm(out RobotArm arm) { arm=Arm; return arm!=null; }
+    public RobotArmInstance Arm;
+    public bool TryGetFocusedRobotArm(out RobotArmInstance arm) { arm=Arm; return arm!=null; }
 }
 public class TerrainGenerator { }
 namespace UnityEngine

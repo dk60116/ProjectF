@@ -15,6 +15,10 @@ MonoBehaviour:
   itemName: Water
   id: 1
   mapObject: {fileID: 0}
+  mapObjectArchetype: {fileID: 0}
+  useMapColor: 0
+  mapColor: {r: 1, g: 1, b: 1, a: 1}
+  mapMarkerSize: 1
   portableMesh: {fileID: 0}
   portableMat: {fileID: 0}
   icon: {fileID: 21300000, guid: 9db5a52bf14d6444398759c739b11413, type: 3}

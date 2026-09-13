@@ -13,8 +13,12 @@ MonoBehaviour:
   m_Name: Item_82_Manual - Underground Pipe
   m_EditorClassIdentifier: Assembly-CSharp::ItemDefinition
   itemName: Manual - Underground Pipe
-  id: 72
+  id: 73
   mapObject: {fileID: 0}
+  mapObjectArchetype: {fileID: 0}
+  useMapColor: 0
+  mapColor: {r: 1, g: 1, b: 1, a: 1}
+  mapMarkerSize: 1
   portableMesh: {fileID: 4300000, guid: 704414c09807d2949ab2384a7e169790, type: 2}
   portableMat: {fileID: 2100000, guid: 54a1aebe4cd51d347b8d3ec31cae9d3a, type: 2}
   icon: {fileID: 21300000, guid: 3cb3d9ad3a6e5da42b94c4d17446da9a, type: 3}

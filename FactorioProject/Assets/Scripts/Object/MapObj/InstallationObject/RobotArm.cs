@@ -12,7 +12,7 @@ public class RobotArm : InputOutputModule
         WaitingAfterPickupTake,
         TurningToDrop,
         WaitingForDrop,
-        WaitingBeforeDropPlace, // Legacy save state; normalized to WaitingForDrop on restore.
+        WaitingBeforeDropPlace,
         WaitingAfterDropPlace,
         TurningToPickup
     }
@@ -63,7 +63,7 @@ public class RobotArm : InputOutputModule
     [SerializeField, Min(0.01f)]
     private float dropRetryInterval = 0.1f;
 
-    [SerializeField, Min(0f), Tooltip("Pickup action delay; drop recovery uses twice this delay after a successful transfer.")]
+    [SerializeField, Min(0f), Tooltip("Pickup action delay; drop waits once before placement and once after placement.")]
     [FormerlySerializedAs("postActionTurnDelay")]
     private float actionTurnDelay = 0.1f;
 

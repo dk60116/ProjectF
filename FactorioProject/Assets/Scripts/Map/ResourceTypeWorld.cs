@@ -6,10 +6,13 @@ using UnityEngine.Rendering;
 // One scene host per resource prefab; independent state lives in generation-checked array slots.
 public sealed partial class ResourceTypeWorld : MonoBehaviour
 {
+    private const float GrowthBucketSize = 16f;
     private static readonly Dictionary<(TerrainGenerator Terrain, Resource Prefab), ResourceTypeWorld> Hosts =
         new Dictionary<(TerrainGenerator, Resource), ResourceTypeWorld>();
     private static readonly Dictionary<Collider, ResourceInstance> ColliderOwners = new Dictionary<Collider, ResourceInstance>();
     private readonly HashSet<ResourceInstance> instances = new HashSet<ResourceInstance>();
+    private readonly Dictionary<Vector2Int, GrowthBucket> growthBuckets =
+        new Dictionary<Vector2Int, GrowthBucket>();
     private readonly List<Part> parts = new List<Part>();
     private readonly List<ColliderPart> colliderParts = new List<ColliderPart>();
     private Resource prototype;
@@ -19,6 +22,28 @@ public sealed partial class ResourceTypeWorld : MonoBehaviour
     private Quaternion bodyRotation;
     private Vector3 bodyScale;
     private ResourceGrowthPresentation growthPresentation;
+
+    internal sealed class GrowthBucket
+    {
+        internal readonly HashSet<ResourceInstance> Resources = new HashSet<ResourceInstance>();
+        internal Bounds Bounds;
+        internal bool HasBounds;
+
+        internal void Add(ResourceInstance resource)
+        {
+            Resources.Add(resource);
+            Bounds pointBounds = new Bounds(resource.WorldPosition, Vector3.one * 2f);
+            if (!HasBounds)
+            {
+                Bounds = pointBounds;
+                HasBounds = true;
+            }
+            else
+            {
+                Bounds.Encapsulate(pointBounds);
+            }
+        }
+    }
 
     internal readonly struct Part
     {
@@ -71,12 +96,19 @@ public sealed partial class ResourceTypeWorld : MonoBehaviour
 
     internal static void AppendProfilerCounters()
     {
-        int hostCount = 0, instanceCount = 0;
+        int hostCount = 0, instanceCount = 0, growthBucketCount = 0;
+        int growthVisibleBucketCount = 0, growthCandidateCount = 0;
         long remainingUnits = 0;
         foreach (ResourceTypeWorld host in Hosts.Values)
         {
             if (host == null) continue;
             hostCount++;
+            growthBucketCount += host.growthBuckets.Count;
+            if (host.growthPresentation != null)
+            {
+                growthVisibleBucketCount += host.growthPresentation.LastVisibleBucketCount;
+                growthCandidateCount += host.growthPresentation.LastCandidateCount;
+            }
             foreach (ResourceInstance resource in host.instances)
             {
                 if (resource == null || !resource.IsRuntimeActive) continue;
@@ -87,6 +119,9 @@ public sealed partial class ResourceTypeWorld : MonoBehaviour
         MapObjectTickProfiler.AddRuntimeCounter("ResourceWorld", "TypeGameObjects", hostCount);
         MapObjectTickProfiler.AddRuntimeCounter("ResourceWorld", "ResourceInstances", instanceCount);
         MapObjectTickProfiler.AddRuntimeCounter("ResourceWorld", "RemainingResourceUnits", remainingUnits);
+        MapObjectTickProfiler.AddRuntimeCounter("ResourceGrowth", "Buckets", growthBucketCount);
+        MapObjectTickProfiler.AddRuntimeCounter("ResourceGrowth", "VisibleBuckets", growthVisibleBucketCount);
+        MapObjectTickProfiler.AddRuntimeCounter("ResourceGrowth", "Candidates", growthCandidateCount);
     }
 
     public static ResourceInstance Spawn(TerrainGenerator terrain, Resource prefab, Vector3 position)
@@ -110,6 +145,7 @@ public sealed partial class ResourceTypeWorld : MonoBehaviour
             ? new ProjectF.MapObjects.TreeInstance(host, handle) : new ResourceInstance(host, handle);
         host.slots[handle.Index] = resource;
         host.instances.Add(resource);
+        host.AddGrowthResource(resource);
         resource.Activate();
         return resource;
     }
@@ -257,6 +293,7 @@ public sealed partial class ResourceTypeWorld : MonoBehaviour
     internal void Remove(ResourceInstance resource)
     {
         instances.Remove(resource);
+        RemoveGrowthResource(resource);
         Free(resource.Handle);
         if (resource.SharedColliders == null) return;
         foreach (CollisionInstance instance in resource.SharedColliders)
@@ -294,11 +331,65 @@ public sealed partial class ResourceTypeWorld : MonoBehaviour
             first.ReleaseRuntime();
         }
         instances.Clear();
+        growthBuckets.Clear();
     }
 
     private void LateUpdate()
     {
-        growthPresentation?.Render(instances, gameObject.layer);
+        if (growthPresentation == null)
+        {
+            return;
+        }
+
+        using var sample = MapObjectTickProfiler.SampleNamed(
+            "Render",
+            "Resource Growth",
+            "Resource Growth Presentation");
+        growthPresentation.Render(growthBuckets, gameObject.layer);
+    }
+
+    private void AddGrowthResource(ResourceInstance resource)
+    {
+        if (growthPresentation == null || resource == null)
+        {
+            return;
+        }
+
+        Vector2Int key = ResolveGrowthBucketKey(resource.WorldPosition);
+        if (!growthBuckets.TryGetValue(key, out GrowthBucket bucket))
+        {
+            bucket = new GrowthBucket();
+            growthBuckets.Add(key, bucket);
+        }
+
+        bucket.Add(resource);
+    }
+
+    private void RemoveGrowthResource(ResourceInstance resource)
+    {
+        if (growthPresentation == null || resource == null)
+        {
+            return;
+        }
+
+        Vector2Int key = ResolveGrowthBucketKey(resource.WorldPosition);
+        if (!growthBuckets.TryGetValue(key, out GrowthBucket bucket)
+            || !bucket.Resources.Remove(resource))
+        {
+            return;
+        }
+
+        if (bucket.Resources.Count <= 0)
+        {
+            growthBuckets.Remove(key);
+        }
+    }
+
+    private static Vector2Int ResolveGrowthBucketKey(Vector3 position)
+    {
+        return new Vector2Int(
+            Mathf.FloorToInt(position.x / GrowthBucketSize),
+            Mathf.FloorToInt(position.z / GrowthBucketSize));
     }
 
     private static bool IsAuthoredActive(Transform node, Transform root)
