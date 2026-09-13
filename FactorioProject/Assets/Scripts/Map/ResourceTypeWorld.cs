@@ -99,10 +99,12 @@ public sealed partial class ResourceTypeWorld : MonoBehaviour
         int hostCount = 0, instanceCount = 0, growthBucketCount = 0;
         int growthVisibleBucketCount = 0, growthCandidateCount = 0;
         long remainingUnits = 0;
+        ResourceBatchRenderer sharedBatchRenderer = null;
         foreach (ResourceTypeWorld host in Hosts.Values)
         {
             if (host == null) continue;
             hostCount++;
+            sharedBatchRenderer ??= host.BatchRenderer;
             growthBucketCount += host.growthBuckets.Count;
             if (host.growthPresentation != null)
             {
@@ -122,6 +124,50 @@ public sealed partial class ResourceTypeWorld : MonoBehaviour
         MapObjectTickProfiler.AddRuntimeCounter("ResourceGrowth", "Buckets", growthBucketCount);
         MapObjectTickProfiler.AddRuntimeCounter("ResourceGrowth", "VisibleBuckets", growthVisibleBucketCount);
         MapObjectTickProfiler.AddRuntimeCounter("ResourceGrowth", "Candidates", growthCandidateCount);
+        MapObjectTickProfiler.AddRuntimeCounter(
+            "ResourceRender",
+            "Registered",
+            sharedBatchRenderer != null ? sharedBatchRenderer.RegisteredResourceCount : 0);
+        MapObjectTickProfiler.AddRuntimeCounter(
+            "ResourceRender",
+            "Batches",
+            sharedBatchRenderer != null ? sharedBatchRenderer.ActiveBatchCount : 0);
+        MapObjectTickProfiler.AddRuntimeCounter(
+            "ResourceRender",
+            "Matrices",
+            sharedBatchRenderer != null ? sharedBatchRenderer.ActiveMatrixCount : 0);
+        MapObjectTickProfiler.AddRuntimeCounter(
+            "ResourceRender",
+            "VisibleBatches",
+            sharedBatchRenderer != null ? sharedBatchRenderer.LastVisibleBatchCount : 0);
+        MapObjectTickProfiler.AddRuntimeCounter(
+            "ResourceRender",
+            "CulledBatches",
+            sharedBatchRenderer != null ? sharedBatchRenderer.LastCulledBatchCount : 0);
+        MapObjectTickProfiler.AddRuntimeCounter(
+            "ResourceRender",
+            "SubmittedMatrices",
+            sharedBatchRenderer != null ? sharedBatchRenderer.LastSubmittedMatrixCount : 0);
+        MapObjectTickProfiler.AddRuntimeCounter(
+            "ResourceRender",
+            "DrawCalls",
+            sharedBatchRenderer != null ? sharedBatchRenderer.LastDrawCallCount : 0);
+        MapObjectTickProfiler.AddRuntimeCounter(
+            "ResourceRender",
+            "PendingAdds",
+            sharedBatchRenderer != null ? sharedBatchRenderer.PendingAddCount : 0);
+        MapObjectTickProfiler.AddRuntimeCounter(
+            "ResourceRender",
+            "DirtyResources",
+            sharedBatchRenderer != null ? sharedBatchRenderer.DirtyResourceCount : 0);
+        MapObjectTickProfiler.AddRuntimeCounter(
+            "ResourceRender",
+            "LastPendingAdds",
+            sharedBatchRenderer != null ? sharedBatchRenderer.LastPendingAdds : 0);
+        MapObjectTickProfiler.AddRuntimeCounter(
+            "ResourceRender",
+            "LastIncrementalUpdates",
+            sharedBatchRenderer != null ? sharedBatchRenderer.LastDirtyResourceUpdates : 0);
     }
 
     public static ResourceInstance Spawn(TerrainGenerator terrain, Resource prefab, Vector3 position)

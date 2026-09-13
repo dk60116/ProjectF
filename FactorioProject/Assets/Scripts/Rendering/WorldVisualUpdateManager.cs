@@ -18,6 +18,7 @@ namespace ProjectF.Rendering
         public int VisibleCount { get; private set; }
         public int CulledCount { get; private set; }
         public int LastTickedCount { get; private set; }
+        public int LastVisualUpdateCount { get; private set; }
         public int LastDeferredCulledCount { get; private set; }
 
         public static void AppendProfilerCounters()
@@ -38,6 +39,10 @@ namespace ProjectF.Rendering
                 "InstallationVisuals",
                 "Ticked",
                 instance != null ? instance.LastTickedCount : 0);
+            MapObjectTickProfiler.AddRuntimeCounter(
+                "InstallationVisuals",
+                "VisualUpdates",
+                instance != null ? instance.LastVisualUpdateCount : 0);
             MapObjectTickProfiler.AddRuntimeCounter(
                 "InstallationVisuals",
                 "DeferredCulled",
@@ -85,6 +90,7 @@ namespace ProjectF.Rendering
             VisibleCount = 0;
             CulledCount = 0;
             LastTickedCount = 0;
+            LastVisualUpdateCount = 0;
             LastDeferredCulledCount = 0;
             int recheckPhase = Time.frameCount % CulledRecheckIntervalFrames;
             for (int i = targets.Count - 1; i >= 0; i--)
@@ -101,7 +107,10 @@ namespace ProjectF.Rendering
                     || i % CulledRecheckIntervalFrames == recheckPhase;
                 if (shouldTick)
                 {
-                    target.Tick(culling, Time.deltaTime);
+                    if (target.Tick(culling, Time.deltaTime))
+                    {
+                        LastVisualUpdateCount++;
+                    }
                     LastTickedCount++;
                 }
                 else

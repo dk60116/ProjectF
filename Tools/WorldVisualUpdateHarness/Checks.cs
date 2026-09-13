@@ -104,7 +104,9 @@ static class Checks
             .Invoke(manager, null);
         Check(a.Owner.VisualTicks == 1 && c.Owner.VisualTicks == 1 && b.Owner.VisualTicks == 0,
             "single manager dispatches registered owners only");
-        Check(manager.RegisteredCount == 2 && manager.VisibleCount == 2, "manager counters reflect dispatch");
+        Check(manager.RegisteredCount == 2 && manager.VisibleCount == 2
+              && manager.LastVisualUpdateCount == 2,
+            "manager counters reflect visible script-animation dispatch");
 
         var managerCulling = (CameraRenderCulling)typeof(WorldVisualUpdateManager)
             .GetField("culling", BindingFlags.Instance | BindingFlags.NonPublic).GetValue(manager);
@@ -112,7 +114,8 @@ static class Checks
         Time.frameCount++;
         typeof(WorldVisualUpdateManager).GetMethod("LateUpdate", BindingFlags.Instance | BindingFlags.NonPublic)
             .Invoke(manager, null);
-        Check(manager.CulledCount == 2, "visible targets cull without delay");
+        Check(manager.CulledCount == 2 && manager.LastVisualUpdateCount == 0,
+            "visible targets cull script animation without delay");
         int hiddenTicks = a.Owner.VisualTicks + c.Owner.VisualTicks;
         Time.frameCount++;
         typeof(WorldVisualUpdateManager).GetMethod("LateUpdate", BindingFlags.Instance | BindingFlags.NonPublic)

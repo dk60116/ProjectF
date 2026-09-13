@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using ProjectF.Conveyors;
+using ProjectF.Rendering;
 using UnityEngine;
 using UnityEngine.Rendering;
 
@@ -47,6 +48,15 @@ public sealed class ConveyorRuntimeRecord
         WorldRotation = worldRotation;
         WorldScale = worldScale;
         VisualParts = visualParts ?? Array.Empty<ConveyorWorld.VisualPart>();
+        ResolveVisualCullingData(
+            VisualParts,
+            worldPosition,
+            worldRotation,
+            worldScale,
+            out Bounds visualCullBounds,
+            out int visualLayerMask);
+        VisualCullBounds = visualCullBounds;
+        VisualLayerMask = visualLayerMask;
         occupiedCoordinates = State.occupiedCoordinates != null && State.occupiedCoordinates.Count > 0
             ? State.occupiedCoordinates.ToArray()
             : new[] { AnchorCoordinate };
@@ -76,6 +86,8 @@ public sealed class ConveyorRuntimeRecord
     public bool IsCorner => Prototype.IsCornerVariant;
     public float Speed => Prototype.ConveyorSpeed;
     public bool HasValidPrototype => Prototype != null;
+    public Bounds VisualCullBounds { get; }
+    public int VisualLayerMask { get; }
     public IReadOnlyList<Vector2Int> OccupiedCoordinates => occupiedCoordinates;
     internal ConveyorWorld.VisualPart[] VisualParts { get; }
 
@@ -492,6 +504,60 @@ public sealed class ConveyorRuntimeRecord
             _ => offset
         };
     }
+
+    private static void ResolveVisualCullingData(
+        ConveyorWorld.VisualPart[] visualParts,
+        Vector3 worldPosition,
+        Quaternion worldRotation,
+        Vector3 worldScale,
+        out Bounds visualCullBounds,
+        out int visualLayerMask)
+    {
+        Matrix4x4 rootMatrix = Matrix4x4.TRS(worldPosition, worldRotation, worldScale);
+        visualCullBounds = new Bounds(worldPosition, Vector3.one * 4f);
+        visualLayerMask = 0;
+        bool hasMeshBounds = false;
+        for (int i = 0; i < visualParts.Length; i++)
+        {
+            ConveyorWorld.VisualPart part = visualParts[i];
+            if (part.Layer >= 0 && part.Layer < 32)
+            {
+                visualLayerMask |= 1 << part.Layer;
+            }
+
+            if (part.Mesh == null)
+            {
+                continue;
+            }
+
+            Bounds partBounds = VirtualRenderBatchCollection.CalculateWorldBounds(
+                part.Mesh,
+                rootMatrix * part.LocalToRoot);
+            if (!hasMeshBounds)
+            {
+                visualCullBounds = partBounds;
+                hasMeshBounds = true;
+            }
+            else
+            {
+                visualCullBounds.Encapsulate(partBounds);
+            }
+        }
+
+        if (visualLayerMask == 0)
+        {
+            visualLayerMask = 1;
+        }
+
+        // A conservative sphere around the installation covers rotating wheels at every angle.
+        visualCullBounds.Encapsulate(worldPosition);
+        float radius = (visualCullBounds.center - worldPosition).magnitude
+                       + visualCullBounds.extents.magnitude
+                       + 0.5f;
+        visualCullBounds = new Bounds(
+            worldPosition,
+            Vector3.one * Mathf.Max(4f, radius * 2f));
+    }
 }
 
 /// <summary>
@@ -605,6 +671,7 @@ public sealed class ConveyorWorld : MonoBehaviour, IVirtualRenderBatchOwner
     private readonly List<Material> materialScratch = new List<Material>(4);
     private readonly Dictionary<Material, Material> mirroredMaterials = new Dictionary<Material, Material>();
     private readonly VirtualRenderBatchCollection batches = new VirtualRenderBatchCollection();
+    private readonly CameraRenderCulling animatedPartCulling = new CameraRenderCulling();
     private Camera mainCamera;
     private bool batchesDirty = true;
 
@@ -615,6 +682,15 @@ public sealed class ConveyorWorld : MonoBehaviour, IVirtualRenderBatchOwner
     public int ActiveBatchCount => batches.ActiveBatchCount;
     public int ActiveMatrixCount => batches.ActiveMatrixCount;
     public int EstimatedDrawCallCount => batches.EstimatedDrawCallCount;
+    public int LastVisibleBatchCount => batches.LastVisibleBatchCount;
+    public int LastCulledBatchCount => batches.LastCulledBatchCount;
+    public int LastSubmittedMatrixCount => batches.LastLegacySubmittedMatrixCount;
+    public int LastDrawCallCount => batches.LastLegacyDrawCallCount;
+    public int LastBatchRendererGroupBatchCount => batches.LastBatchRendererGroupBatchCount;
+    public int LastBatchRendererGroupMatrixCount => batches.LastBatchRendererGroupMatrixCount;
+    public int LastVisibleAnimatedRecordCount { get; private set; }
+    public int LastCulledAnimatedRecordCount { get; private set; }
+    public int LastUpdatedAnimatedPartCount { get; private set; }
 
     public static void AppendProfilerCounters()
     {
@@ -638,6 +714,42 @@ public sealed class ConveyorWorld : MonoBehaviour, IVirtualRenderBatchOwner
             "ConveyorBodyRender",
             "AnimatedParts",
             current != null ? current.animatedVisualEntries.Count : 0);
+        MapObjectTickProfiler.AddRuntimeCounter(
+            "ConveyorBodyRender",
+            "VisibleAnimatedBelts",
+            current != null ? current.LastVisibleAnimatedRecordCount : 0);
+        MapObjectTickProfiler.AddRuntimeCounter(
+            "ConveyorBodyRender",
+            "CulledAnimatedBelts",
+            current != null ? current.LastCulledAnimatedRecordCount : 0);
+        MapObjectTickProfiler.AddRuntimeCounter(
+            "ConveyorBodyRender",
+            "UpdatedAnimatedParts",
+            current != null ? current.LastUpdatedAnimatedPartCount : 0);
+        MapObjectTickProfiler.AddRuntimeCounter(
+            "ConveyorBodyRender",
+            "VisibleBatches",
+            current != null ? current.LastVisibleBatchCount : 0);
+        MapObjectTickProfiler.AddRuntimeCounter(
+            "ConveyorBodyRender",
+            "CulledBatches",
+            current != null ? current.LastCulledBatchCount : 0);
+        MapObjectTickProfiler.AddRuntimeCounter(
+            "ConveyorBodyRender",
+            "LegacySubmittedMatrices",
+            current != null ? current.LastSubmittedMatrixCount : 0);
+        MapObjectTickProfiler.AddRuntimeCounter(
+            "ConveyorBodyRender",
+            "LegacyDrawCalls",
+            current != null ? current.LastDrawCallCount : 0);
+        MapObjectTickProfiler.AddRuntimeCounter(
+            "ConveyorBodyRender",
+            "BrgBatches",
+            current != null ? current.LastBatchRendererGroupBatchCount : 0);
+        MapObjectTickProfiler.AddRuntimeCounter(
+            "ConveyorBodyRender",
+            "BrgMatrices",
+            current != null ? current.LastBatchRendererGroupMatrixCount : 0);
     }
 
     public static ConveyorWorld EnsureFor(TerrainGenerator terrain)
@@ -869,16 +981,11 @@ public sealed class ConveyorWorld : MonoBehaviour, IVirtualRenderBatchOwner
             }
         }
 
-        using (MapObjectTickProfiler.SampleNamed(
-                   "Render",
-                   "Conveyor Body Render",
-                   "Conveyor Animated Parts"))
-        {
-            UpdateAnimatedPartMatrices();
-        }
-
         if (GameManager.Instance != null && GameManager.Instance.HideBelts)
         {
+            LastVisibleAnimatedRecordCount = 0;
+            LastCulledAnimatedRecordCount = 0;
+            LastUpdatedAnimatedPartCount = 0;
             batches.SuspendRendering();
             return;
         }
@@ -886,6 +993,14 @@ public sealed class ConveyorWorld : MonoBehaviour, IVirtualRenderBatchOwner
         if (mainCamera == null || !mainCamera.isActiveAndEnabled)
         {
             mainCamera = Camera.main;
+        }
+
+        using (MapObjectTickProfiler.SampleNamed(
+                   "Render",
+                   "Conveyor Body Render",
+                   "Conveyor Animated Parts"))
+        {
+            UpdateAnimatedPartMatrices(mainCamera);
         }
 
         using (MapObjectTickProfiler.SampleNamed(
@@ -1190,33 +1305,53 @@ public sealed class ConveyorWorld : MonoBehaviour, IVirtualRenderBatchOwner
         return endSeam ? part.EndSeamLocalToRoot : part.LocalToRoot;
     }
 
-    private void UpdateAnimatedPartMatrices()
+    private void UpdateAnimatedPartMatrices(Camera renderCamera)
     {
+        LastVisibleAnimatedRecordCount = 0;
+        LastCulledAnimatedRecordCount = 0;
+        LastUpdatedAnimatedPartCount = 0;
         if (animatedVisualEntries.Count == 0)
         {
             return;
         }
 
+        animatedPartCulling.Update(renderCamera);
         float now = Time.time;
         float deltaTime = Time.deltaTime;
         ConveyorRuntimeRecord previousRecord = null;
+        bool recordVisible = false;
         float leftAngle = 0f;
         float rightAngle = 0f;
+        Matrix4x4 root = Matrix4x4.identity;
         for (int i = 0; i < animatedVisualEntries.Count; i++)
         {
             AnimatedVisualEntry entry = animatedVisualEntries[i];
             if (!ReferenceEquals(previousRecord, entry.Record))
             {
                 previousRecord = entry.Record;
+                recordVisible = animatedPartCulling.IsAnyLayerVisible(entry.Record.VisualLayerMask)
+                                && animatedPartCulling.Intersects(entry.Record.VisualCullBounds);
+                if (!recordVisible)
+                {
+                    LastCulledAnimatedRecordCount++;
+                    continue;
+                }
+
+                LastVisibleAnimatedRecordCount++;
                 leftAngle = entry.Record.TickSplitterWheel(0, now, deltaTime);
                 rightAngle = entry.Record.TickSplitterWheel(1, now, deltaTime);
+                root = Matrix4x4.TRS(
+                    entry.Record.WorldPosition,
+                    entry.Record.WorldRotation,
+                    entry.Record.WorldScale);
+            }
+
+            if (!recordVisible)
+            {
+                continue;
             }
 
             float angle = entry.Part.WheelChannel == 0 ? leftAngle : rightAngle;
-            Matrix4x4 root = Matrix4x4.TRS(
-                entry.Record.WorldPosition,
-                entry.Record.WorldRotation,
-                entry.Record.WorldScale);
             Matrix4x4 matrix = root
                                * entry.Part.WheelPivotToRoot
                                * Matrix4x4.Rotate(Quaternion.AngleAxis(angle, Vector3.right))
@@ -1226,6 +1361,7 @@ public sealed class ConveyorWorld : MonoBehaviour, IVirtualRenderBatchOwner
                 entry.BatchEntryIndex,
                 batchEntries[entry.BatchEntryIndex].BatchKey,
                 matrix);
+            LastUpdatedAnimatedPartCount++;
         }
     }
 

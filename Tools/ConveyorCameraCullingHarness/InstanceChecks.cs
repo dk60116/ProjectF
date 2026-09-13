@@ -61,7 +61,6 @@ public partial class VirtualRenderBatchCollection
 public partial class ResourceCameraProbe
 {
     private sealed class BatchKey { public Mesh Mesh = new Mesh(); }
-    private readonly Dictionary<BatchKey, CameraBatch> cameraBatches = new();
     private readonly CameraRenderCulling cameraCulling = new();
     public static void Check()
     {
@@ -69,21 +68,26 @@ public partial class ResourceCameraProbe
         var camera = Checks.View(0);
         probe.cameraCulling.Update(camera);
         var key = new BatchKey();
-        var matrices = new List<Matrix4x4> { Checks.Pose(0), Checks.Pose(100) };
-        CameraBatch cache = probe.ResolveCameraBatch(key, matrices);
+        var batch = new BatchData();
+        batch.Matrices.Add(Checks.Pose(0));
+        batch.Matrices.Add(Checks.Pose(100));
+        batch.MarkDataDirty();
+        CameraBatch cache = probe.ResolveCameraBatch(key, batch);
         Checks.Require(cache.Visible.Count == 1 && cache.Hidden.Count == 1,
             "tree/resource boundary batch separates color-visible instances from offscreen shadow casters");
-        Checks.Require(probe.ResolveCameraBatch(key, matrices) == cache, "resource culling reuses cache");
-        matrices.Add(Checks.Pose(1));
-        cache = probe.ResolveCameraBatch(key, matrices);
-        Checks.Require(cache.Visible.Count == 2, "incremental resource addition invalidates cached count");
-        matrices[0] = Checks.Pose(100);
-        cache.SourceCount = -1; // ClearActiveBatches invalidates before a same-count rebuild.
-        cache = probe.ResolveCameraBatch(key, matrices);
-        Checks.Require(cache.Visible.Count == 1 && cache.Hidden.Count == 2, "same-count resource rebuild refreshes culling");
+        Checks.Require(probe.ResolveCameraBatch(key, batch) == cache, "resource culling reuses cache");
+        batch.Matrices.Add(Checks.Pose(1));
+        batch.MarkDataDirty();
+        cache = probe.ResolveCameraBatch(key, batch);
+        Checks.Require(cache.Visible.Count == 2, "incremental resource addition invalidates cached data");
+        batch.Matrices[0] = Checks.Pose(100);
+        batch.MarkDataDirty();
+        cache = probe.ResolveCameraBatch(key, batch);
+        Checks.Require(cache.Visible.Count == 1 && cache.Hidden.Count == 2,
+            "same-count resource update refreshes culling");
         camera.cullingMatrix = Checks.View(100).cullingMatrix;
         probe.cameraCulling.Update(camera);
-        cache = probe.ResolveCameraBatch(key, matrices);
+        cache = probe.ResolveCameraBatch(key, batch);
         Checks.Require(cache.Visible.Count == 2 && cache.Hidden.Count == 1, "resource visibility follows camera");
     }
 }

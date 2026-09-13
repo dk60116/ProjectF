@@ -35,7 +35,7 @@ namespace ProjectF.Rendering
 
         internal InstallationVisualState(InstallationObject owner) { Owner = owner; }
 
-        internal void Tick(CameraRenderCulling culling, float deltaTime)
+        internal bool Tick(CameraRenderCulling culling, float deltaTime)
         {
             Capture();
             Matrix4x4 matrix = Owner.transform.localToWorldMatrix;
@@ -47,7 +47,12 @@ namespace ProjectF.Rendering
             }
             SetVisible(culling.IsAnyLayerVisible(layerMask) && culling.Intersects(worldBounds));
             if (Visible)
+            {
                 Owner.RunManagedVisualUpdate(deltaTime);
+                return true;
+            }
+
+            return false;
         }
 
         private void Capture()

@@ -192,6 +192,13 @@ public sealed class VirtualRenderBatchCollection
             ? batchRendererGroupBackend.ActiveBatchCount
             : 0;
 
+    public int LastVisibleBatchCount { get; private set; }
+    public int LastCulledBatchCount { get; private set; }
+    public int LastLegacySubmittedMatrixCount { get; private set; }
+    public int LastLegacyDrawCallCount { get; private set; }
+    public int LastBatchRendererGroupBatchCount { get; private set; }
+    public int LastBatchRendererGroupMatrixCount { get; private set; }
+
     public void Clear()
     {
         DisposeBatchRendererGroupBackend();
@@ -354,6 +361,11 @@ public sealed class VirtualRenderBatchCollection
             return false;
         }
 
+        if (batchCache.Matrices[entry.MatrixIndex].Equals(matrix))
+        {
+            return true;
+        }
+
         batchCache.Matrices[entry.MatrixIndex] = matrix;
         batchCache.MarkBoundsDirty();
         batchCache.MarkDataDirty();
@@ -377,6 +389,12 @@ public sealed class VirtualRenderBatchCollection
 
     public void RenderBatches(Camera renderCamera = null)
     {
+        LastVisibleBatchCount = 0;
+        LastCulledBatchCount = 0;
+        LastLegacySubmittedMatrixCount = 0;
+        LastLegacyDrawCallCount = 0;
+        LastBatchRendererGroupBatchCount = 0;
+        LastBatchRendererGroupMatrixCount = 0;
         if (renderCamera == null)
         {
             renderCamera = Camera.main;
@@ -399,22 +417,40 @@ public sealed class VirtualRenderBatchCollection
             }
 
             Bounds worldBounds = ResolveWorldBounds(key, batchCache);
+            bool visibleToCamera = cameraCulling.IsLayerVisible(key.Layer)
+                                   && cameraCulling.Intersects(worldBounds);
             // Skip CPU uploads too, not only the final draw submission.
             if (key.ShadowCastingMode == ShadowCastingMode.Off
-                && (!cameraCulling.IsLayerVisible(key.Layer) || !cameraCulling.Intersects(worldBounds)))
+                && !visibleToCamera)
             {
+                LastCulledBatchCount++;
                 backend?.Deactivate(key, keepAllocated: true);
                 continue;
             }
-            if (backend == null
-                || !backend.TrySyncBatch(
+
+            bool renderedByBackend = backend != null
+                                     && backend.TrySyncBatch(
                     key,
                     batchCache.Matrices,
                     batchCache.InstanceUvData,
                     worldBounds,
-                    batchCache.DataVersion))
+                    batchCache.DataVersion);
+            if (!renderedByBackend)
             {
                 hasLegacyBatches = true;
+            }
+            else
+            {
+                LastBatchRendererGroupBatchCount++;
+                LastBatchRendererGroupMatrixCount += batchCache.Matrices.Count;
+                if (visibleToCamera)
+                {
+                    LastVisibleBatchCount++;
+                }
+                else
+                {
+                    LastCulledBatchCount++;
+                }
             }
         }
 
@@ -440,9 +476,14 @@ public sealed class VirtualRenderBatchCollection
             Bounds worldBounds = ResolveWorldBounds(key, batchCache);
             if (!cameraCulling.IsLayerVisible(key.Layer) || !cameraCulling.Intersects(worldBounds))
             {
+                if (key.ShadowCastingMode != ShadowCastingMode.Off)
+                {
+                    LastCulledBatchCount++;
+                }
                 continue;
             }
 
+            LastVisibleBatchCount++;
             bool previousInvertCulling = GL.invertCulling;
             if (previousInvertCulling != key.InvertCulling)
             {
@@ -479,6 +520,7 @@ public sealed class VirtualRenderBatchCollection
         List<Matrix4x4> matrices = batchCache.Matrices;
         int remaining = matrices.Count;
         int startIndex = 0;
+        LastLegacySubmittedMatrixCount += remaining;
         while (remaining > 0)
         {
             int drawCount = Mathf.Min(MaxInstancesPerDraw, remaining);
@@ -496,6 +538,7 @@ public sealed class VirtualRenderBatchCollection
                     drawCount)
             };
             Graphics.RenderMeshInstanced(renderParams, key.Mesh, key.SubmeshIndex, matrices, drawCount, startIndex);
+            LastLegacyDrawCallCount++;
             startIndex += drawCount;
             remaining -= drawCount;
         }

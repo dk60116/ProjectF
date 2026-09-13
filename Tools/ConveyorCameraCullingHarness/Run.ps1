@@ -35,7 +35,7 @@ $itemFile = 'FactorioProject/Assets/Scripts/Map/PortableItemRenderer.cs'
 $beltFile = 'FactorioProject/Assets/Scripts/Map/VirtualConveyorBeltRenderer.cs'
 $batchFile = 'FactorioProject/Assets/Scripts/Map/VirtualRenderBatcher.cs'
 $backendFile = 'FactorioProject/Assets/Scripts/Rendering/VirtualRenderBatchRendererGroupBackend.cs'
-$generated = "using System; using System.Collections.Generic; using UnityEngine; using UnityEngine.Rendering;`n"
+$generated = "using System; using System.Collections.Generic; using UnityEngine; using UnityEngine.Rendering; public class ResourceInstance {}`n"
 $generated += "public sealed partial class PortableItemRenderer {`n"
 foreach ($signature in @(
     'private void RefreshVirtualConveyorBlockRenderCache(',
@@ -81,6 +81,8 @@ $generated += "} public partial class ResourceCameraProbe {`n"
 foreach ($signature in @('private CameraBatch ResolveCameraBatch(', 'private sealed class CameraBatch')) {
     $generated += (Read-Member 'FactorioProject/Assets/Scripts/Map/ResourceBatchRenderer.cs' $signature) + "`n"
 }
+$generated += (Read-Member 'FactorioProject/Assets/Scripts/Map/ResourceBatchRenderer.cs' 'private sealed class BatchData') + "`n"
+$generated += (Read-Member 'FactorioProject/Assets/Scripts/Map/ResourceBatchRenderer.cs' 'private readonly struct BatchMatrixOwner') + "`n"
 $generated += "} public partial class BrgInstanceProbe {`n"
 foreach ($signature in @('private void CollectVisibleInstances(', 'private static ushort ResolveBoundsSplitVisibilityMask(', 'private static bool IntersectsSplit(')) {
     $generated += (Read-Member $backendFile $signature) + "`n"
