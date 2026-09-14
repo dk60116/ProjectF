@@ -25,6 +25,7 @@ internal sealed class EditorToolForm : Form
     private const int DefaultPort = 50877;
     private const int TimeoutMilliseconds = 5000;
     private const int ConveyorStressTestTimeoutMilliseconds = 35000;
+    private const int ProfilingCloneTimeoutMilliseconds = 120000;
     private const int ConveyorStressTestCount = 1000;
     private const int ConveyorItemStressTestCount = 500;
     private const int AnimalStressTestSmallCount = 100;
@@ -45,6 +46,7 @@ internal sealed class EditorToolForm : Form
     private readonly Button simulationPauseButton = new Button();
     private readonly Button conveyorLineButton = new Button();
     private readonly Button conveyorItemFillButton = new Button();
+    private readonly Button profilingAreaCloneButton = new Button();
     private readonly Button beltItemClearButton = new Button();
     private readonly Button floorItemClearButton = new Button();
     private readonly Button ioItemClearButton = new Button();
@@ -134,7 +136,7 @@ internal sealed class EditorToolForm : Form
         layout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100f));
         layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 72f));
         layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 284f));
-        layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 152f));
+        layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 160f));
         layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 68f));
         layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 44f));
         layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 96f));
@@ -154,7 +156,7 @@ internal sealed class EditorToolForm : Form
 
         Label descriptionLabel = new Label
         {
-            Text = "아이템 지급, 컨베이어·동물 AI 부하 테스트, 저장/로드, 런타임 디버그를 조작합니다.",
+            Text = "아이템 지급, 공장 영역 복제 부하 테스트, 저장/로드, 런타임 디버그를 조작합니다.",
             AutoSize = true,
             ForeColor = Color.FromArgb(176, 177, 158),
             Location = new Point(2, 42)
@@ -299,6 +301,10 @@ internal sealed class EditorToolForm : Form
         conveyorItemFillButton.Width = 190;
         conveyorItemFillButton.Click += async (_, _) => await SendConveyorItemFillAsync();
 
+        StyleSecondaryButton(profilingAreaCloneButton, "설치 영역 전체 복제");
+        profilingAreaCloneButton.Width = 190;
+        profilingAreaCloneButton.Click += async (_, _) => await SendProfilingAreaCloneAsync();
+
         StyleSecondaryButton(beltItemClearButton, "Belt Item Clear");
         beltItemClearButton.Click += async (_, _) => await SendItemClearAsync("belt", "Belt Item Clear");
 
@@ -338,6 +344,7 @@ internal sealed class EditorToolForm : Form
         buttonPanel.Controls.Add(simulationPauseButton);
         buttonPanel.Controls.Add(conveyorLineButton);
         buttonPanel.Controls.Add(conveyorItemFillButton);
+        buttonPanel.Controls.Add(profilingAreaCloneButton);
         buttonPanel.Controls.Add(beltItemClearButton);
         buttonPanel.Controls.Add(floorItemClearButton);
         buttonPanel.Controls.Add(ioItemClearButton);
@@ -1130,6 +1137,14 @@ internal sealed class EditorToolForm : Form
             $"Conveyor item fill random, count={ConveyorItemStressTestCount}",
             timeoutMilliseconds: ConveyorStressTestTimeoutMilliseconds);
         await RefreshStatusAsync();
+    }
+
+    private async Task SendProfilingAreaCloneAsync()
+    {
+        await SendCommandAsync(
+            "profileclone",
+            "설치 영역 전체 복제",
+            timeoutMilliseconds: ProfilingCloneTimeoutMilliseconds);
     }
 
     private async Task SendItemClearAsync(string scope, string displayName)
@@ -1931,6 +1946,7 @@ internal sealed class EditorToolForm : Form
         simulationPauseButton.Enabled = !busy;
         conveyorLineButton.Enabled = !busy;
         conveyorItemFillButton.Enabled = !busy;
+        profilingAreaCloneButton.Enabled = !busy;
         beltItemClearButton.Enabled = !busy;
         floorItemClearButton.Enabled = !busy;
         ioItemClearButton.Enabled = !busy;

@@ -44,8 +44,17 @@ public partial class Block : BaseObject
 
     private void NotifyRuntimeItemStackChanged()
     {
-        RobotArm.WakeAroundCoordinate(coordinate);
-        InputOutputModule.WakeRuntimeModulesAtCoordinate(coordinate);
+        NotifyRuntimeItemStackChanged(true);
+    }
+
+    private void NotifyRuntimeItemStackChanged(bool wakeRuntimeDependents)
+    {
+        if (wakeRuntimeDependents)
+        {
+            RobotArm.WakeAroundCoordinate(coordinate);
+            InputOutputModule.WakeRuntimeModulesAtCoordinate(coordinate);
+        }
+
         RuntimeItemStackChanged?.Invoke(this);
     }
     private const float ConveyorContinuousMotionEpsilon = 0.0001f;
@@ -448,9 +457,9 @@ public partial class Block : BaseObject
             TerrainGenerator.Active?.RefreshBeltDirectionRuntimeVisibility();
         }
 
-        if (!isConveyor)
+        if (!isConveyor && runtimeSimulationState != null)
         {
-            conveyorRuntimeArrays = null;
+            runtimeSimulationState.conveyorRuntimeArrays = null;
         }
 
         NotifyRuntimeItemStackChanged();
@@ -515,7 +524,7 @@ public partial class Block : BaseObject
         conveyorSuccessorCacheDirty = true;
     }
 
-    public void PrepareForRuntimeRelease()
+    public void PrepareForRuntimeRelease(bool releaseResource = true)
     {
         SetFocusVisible(false);
         SetMouseFocusVisible(false);
@@ -535,8 +544,24 @@ public partial class Block : BaseObject
         ResourceInstance cellResource = Resource;
         if (cellResource != null)
         {
-            ClearResource(cellResource);
-            cellResource.ReleaseRuntime();
+            if (releaseResource)
+            {
+                ClearResource(cellResource);
+                cellResource.ReleaseRuntime();
+            }
+            else
+            {
+                cellResource.DetachOwningBlockPreservingCoordinate(this);
+                if (resource == cellResource)
+                {
+                    resource = null;
+                }
+
+                if (ReferenceEquals(mapObject, cellResource))
+                {
+                    mapObject = null;
+                }
+            }
         }
 
         SetMapObject(null);
@@ -4119,6 +4144,39 @@ public partial class Block : BaseObject
     public BlockHandle RuntimeHandle => runtimeHandle;
     public BlockType Type => type;
     public IMapObjectTarget MapObject => mapObject;
+    internal bool CanReleaseResourceOnlyRuntimeProxy
+    {
+        get
+        {
+            ResourceInstance cellResource = Resource;
+            if (cellResource == null
+                || (mapObject != null && !ReferenceEquals(mapObject, cellResource))
+                || runtimeConveyorOverride != null
+                || runtimeConveyorRecord != null
+                || runtimeConveyorRecordOverride != null
+                || runtimePipeRecord != null
+                || focus != null
+                || inputAreaCenterAnchor != null
+                || conveyorSlotDotRoot != null
+                || inputAreaCenterStack.Count > 0)
+            {
+                return false;
+            }
+
+            for (int i = 0; i < floorStacks.Count; i++)
+            {
+                if (floorStacks[i] != null && floorStacks[i].Count > 0)
+                {
+                    return false;
+                }
+            }
+
+            return (runtimeSimulationState == null
+                    || (!runtimeSimulationState.HasConveyorItems && !OwnsConveyorTransport))
+                   && conveyorCornerMotionStates.Count == 0
+                   && conveyorLinearMotionStates.Count == 0;
+        }
+    }
     public bool CanReleaseEmptyRuntimeProxy
     {
         get
@@ -7198,6 +7256,17 @@ public partial class Block : BaseObject
     private void ResetFloorObjects(bool notifyRuntime = true, bool releaseToPool = true)
     {
         ReleaseConveyorTransport();
+        if (floorStacks.Count == 0
+            && inputAreaCenterStack.Count == 0
+            && conveyorStack.Count == 0
+            && conveyorCornerMotionStates.Count == 0
+            && conveyorLinearMotionStates.Count == 0
+            && (runtimeSimulationState == null
+                || !runtimeSimulationState.HasConveyorLaneStorage))
+        {
+            return;
+        }
+
         EnsureFloorObjectsInitialized();
         if (floorObjectPool == null)
         {
@@ -7941,8 +8010,13 @@ public partial class Block : BaseObject
 
     private void IncrementConveyorLaneOccupancyVersion(int laneIndex)
     {
+        IncrementConveyorLaneOccupancyVersion(laneIndex, true);
+    }
+
+    private void IncrementConveyorLaneOccupancyVersion(int laneIndex, bool notifyTransportPort)
+    {
         QueueBeltJobWrite(laneIndex, true);
-        NotifyTransportPortChanged(laneIndex);
+        if (notifyTransportPort) NotifyTransportPortChanged(laneIndex);
         if (laneIndex < 0 || laneIndex >= ConveyorStackLaneLimit)
         {
             return;

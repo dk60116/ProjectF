@@ -17,6 +17,7 @@ public partial class TerrainGenerator : MonoBehaviour
     private bool TryGetResourcePrefab(Vector2Int worldCoordinate, out Resource prefab)
     {
         prefab = null;
+        worldCoordinate = ResolveProfilingCloneTerrainSource(worldCoordinate);
 
         if (keepStartSafeZoneClearOfResources && IsStartSafeZoneCoordinate(worldCoordinate))
         {
@@ -335,6 +336,7 @@ public partial class TerrainGenerator : MonoBehaviour
 
     private int GetInitialResourceCount(Resource prefab, Vector2Int worldCoordinate)
     {
+        worldCoordinate = ResolveProfilingCloneTerrainSource(worldCoordinate);
         if (prefab == null)
         {
             return 1;
@@ -375,6 +377,7 @@ public partial class TerrainGenerator : MonoBehaviour
 
     private float GetInitialTreeGrowth(Resource prefab, Vector2Int worldCoordinate)
     {
+        worldCoordinate = ResolveProfilingCloneTerrainSource(worldCoordinate);
         ResourceDefinition definition = prefab != null ? prefab.Definition : null;
         int minimumGrowth = definition != null
             ? Mathf.Clamp(
@@ -431,6 +434,7 @@ public partial class TerrainGenerator : MonoBehaviour
 
     private int GetResourceBodyYawStep(Resource prefab, Vector2Int worldCoordinate)
     {
+        worldCoordinate = ResolveProfilingCloneTerrainSource(worldCoordinate);
         if (IsOilResourcePrefab(prefab))
         {
             return GetGeneratedOilSurfaceYawStep(seed, worldCoordinate);

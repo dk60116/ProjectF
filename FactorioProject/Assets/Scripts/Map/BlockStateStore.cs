@@ -339,6 +339,9 @@ public partial class BlockStateStore : MonoBehaviour
     private readonly Dictionary<Vector2Int, int> savedResourceItemIds = new Dictionary<Vector2Int, int>();
     private readonly Dictionary<Vector2Int, FloorObjectSaveState> savedFloorObjectStates = new Dictionary<Vector2Int, FloorObjectSaveState>();
     private readonly Dictionary<Vector2Int, InstallationSaveState> savedInstallationStates = new Dictionary<Vector2Int, InstallationSaveState>();
+    private readonly Dictionary<(long placementSequence, int itemId), Vector2Int>
+        savedInstallationStorageKeysByPlacement =
+            new Dictionary<(long placementSequence, int itemId), Vector2Int>();
     private readonly Dictionary<Vector2Int, Vector2Int> savedInstallationAnchorsByCoordinate = new Dictionary<Vector2Int, Vector2Int>();
     private readonly Dictionary<Vector2Int, HashSet<Vector2Int>> savedInstallationStorageKeysByOccupiedCoordinate =
         new Dictionary<Vector2Int, HashSet<Vector2Int>>();
@@ -347,6 +350,9 @@ public partial class BlockStateStore : MonoBehaviour
     private readonly Dictionary<Vector2Int, HashSet<Vector2Int>> savedInstallationStorageKeysByInteractionCoordinate =
         new Dictionary<Vector2Int, HashSet<Vector2Int>>();
     private readonly Dictionary<Vector2Int, LiveInstallationRecord> liveInstallationStates = new Dictionary<Vector2Int, LiveInstallationRecord>();
+    private readonly Dictionary<(long placementSequence, int itemId), Vector2Int>
+        liveInstallationStorageKeysByPlacement =
+            new Dictionary<(long placementSequence, int itemId), Vector2Int>();
     private readonly Dictionary<Vector2Int, Vector2Int> liveInstallationAnchorsByCoordinate = new Dictionary<Vector2Int, Vector2Int>();
     private readonly Dictionary<int, int> savedInstallationCountsByItemId = new Dictionary<int, int>();
     private readonly Dictionary<int, int> savedInstallationStoredItemCountsByItemId = new Dictionary<int, int>();
@@ -565,6 +571,10 @@ public partial class BlockStateStore : MonoBehaviour
         if (liveInstallationStates.TryGetValue(storageKey, out LiveInstallationRecord existingRecord))
         {
             UnregisterLiveCoordinateMappings(existingRecord.state, storageKey);
+            UnregisterInstallationPlacementKey(
+                liveInstallationStorageKeysByPlacement,
+                existingRecord.state,
+                storageKey);
             existingRecord.installationObject?.BindRuntimeMapObjectHandle(default);
         }
 
@@ -579,6 +589,10 @@ public partial class BlockStateStore : MonoBehaviour
             state = storedState.Clone(),
             handle = handle
         };
+        RegisterInstallationPlacementKey(
+            liveInstallationStorageKeysByPlacement,
+            storedState,
+            storageKey);
         RegisterLiveCoordinateMappings(storedState, storageKey);
     }
 
@@ -818,6 +832,10 @@ public partial class BlockStateStore : MonoBehaviour
             record.installationObject,
             record.state);
         UnregisterLiveCoordinateMappings(record.state, storageKey);
+        UnregisterInstallationPlacementKey(
+            liveInstallationStorageKeysByPlacement,
+            record.state,
+            storageKey);
         liveInstallationStates.Remove(storageKey);
 
         VirtualObjectWorld world = ResolveVirtualObjectWorld();
@@ -1116,6 +1134,10 @@ public partial class BlockStateStore : MonoBehaviour
         }
 
         UnregisterLiveCoordinateMappings(record.state, storageKey);
+        UnregisterInstallationPlacementKey(
+            liveInstallationStorageKeysByPlacement,
+            record.state,
+            storageKey);
         liveInstallationStates.Remove(storageKey);
 
         VirtualObjectWorld world = ResolveVirtualObjectWorld();
@@ -1143,6 +1165,10 @@ public partial class BlockStateStore : MonoBehaviour
             removedAnchor = savedState.anchorCoordinate;
             AdjustSavedInstallationCount(savedState, -1);
             UnregisterSavedCoordinateMappings(savedState, storageKey);
+            UnregisterInstallationPlacementKey(
+                savedInstallationStorageKeysByPlacement,
+                savedState,
+                storageKey);
             savedInstallationStates.Remove(storageKey);
         }
 
@@ -1187,6 +1213,7 @@ public partial class BlockStateStore : MonoBehaviour
         savedFloorObjectStates.Clear();
         savedConveyorItemStates.Clear();
         savedInstallationStates.Clear();
+        savedInstallationStorageKeysByPlacement.Clear();
         savedInstallationCountsByItemId.Clear();
         savedInstallationStoredItemCountsByItemId.Clear();
         savedInstallationItemTotal = 0;
@@ -1195,6 +1222,7 @@ public partial class BlockStateStore : MonoBehaviour
         savedPipeInstallationStorageKeysByOccupiedCoordinate.Clear();
         savedInstallationStorageKeysByInteractionCoordinate.Clear();
         liveInstallationStates.Clear();
+        liveInstallationStorageKeysByPlacement.Clear();
         liveInstallationAnchorsByCoordinate.Clear();
         ConveyorWorld.Current?.ClearRecords();
         PipeWorld.Current?.ClearRecords();
@@ -1218,12 +1246,13 @@ public partial class BlockStateStore : MonoBehaviour
         mapSaveData.floorObjects.Clear();
         mapSaveData.installations.Clear();
         mapSaveData.conveyorItems.Clear();
+        EnsureListCapacity(mapSaveData.resources, savedStates.Count);
+        EnsureListCapacity(mapSaveData.floorObjects, savedFloorObjectStates.Count);
+        EnsureListCapacity(mapSaveData.installations, savedInstallationStates.Count);
+        EnsureListCapacity(mapSaveData.conveyorItems, savedConveyorItemStates.Count);
 
-        List<KeyValuePair<Vector2Int, Resource.ResourceSaveState>> savedStateSnapshot =
-            new List<KeyValuePair<Vector2Int, Resource.ResourceSaveState>>(savedStates);
-        for (int i = 0; i < savedStateSnapshot.Count; i++)
+        foreach (KeyValuePair<Vector2Int, Resource.ResourceSaveState> pair in savedStates)
         {
-            KeyValuePair<Vector2Int, Resource.ResourceSaveState> pair = savedStateSnapshot[i];
             savedResourceItemIds.TryGetValue(pair.Key, out int itemId);
             mapSaveData.resources.Add(new ResourceSaveEntry
             {
@@ -1233,11 +1262,8 @@ public partial class BlockStateStore : MonoBehaviour
             });
         }
 
-        List<KeyValuePair<Vector2Int, FloorObjectSaveState>> savedFloorObjectSnapshot =
-            new List<KeyValuePair<Vector2Int, FloorObjectSaveState>>(savedFloorObjectStates);
-        for (int i = 0; i < savedFloorObjectSnapshot.Count; i++)
+        foreach (KeyValuePair<Vector2Int, FloorObjectSaveState> pair in savedFloorObjectStates)
         {
-            KeyValuePair<Vector2Int, FloorObjectSaveState> pair = savedFloorObjectSnapshot[i];
             if (pair.Value == null)
             {
                 continue;
@@ -1250,11 +1276,8 @@ public partial class BlockStateStore : MonoBehaviour
             });
         }
 
-        List<KeyValuePair<Vector2Int, ConveyorItemBlockState>> savedConveyorItemSnapshot =
-            new List<KeyValuePair<Vector2Int, ConveyorItemBlockState>>(savedConveyorItemStates);
-        for (int i = 0; i < savedConveyorItemSnapshot.Count; i++)
+        foreach (KeyValuePair<Vector2Int, ConveyorItemBlockState> pair in savedConveyorItemStates)
         {
-            KeyValuePair<Vector2Int, ConveyorItemBlockState> pair = savedConveyorItemSnapshot[i];
             ConveyorItemBlockState state = pair.Value;
             if (state == null || state.lanes.Count <= 0)
             {
@@ -1268,11 +1291,8 @@ public partial class BlockStateStore : MonoBehaviour
             });
         }
 
-        List<KeyValuePair<Vector2Int, InstallationSaveState>> savedInstallationSnapshot =
-            new List<KeyValuePair<Vector2Int, InstallationSaveState>>(savedInstallationStates);
-        for (int i = 0; i < savedInstallationSnapshot.Count; i++)
+        foreach (KeyValuePair<Vector2Int, InstallationSaveState> pair in savedInstallationStates)
         {
-            KeyValuePair<Vector2Int, InstallationSaveState> pair = savedInstallationSnapshot[i];
             if (pair.Value == null)
             {
                 continue;
@@ -1297,6 +1317,14 @@ public partial class BlockStateStore : MonoBehaviour
 
         SaveGameConveyorItemBackfill.BackfillFromFloorObjects(mapSaveData);
         VirtualObjectWorld world = ResolveVirtualObjectWorld();
+        int resourceCount = mapSaveData.resources?.Count ?? 0;
+        savedStates.EnsureCapacity(resourceCount);
+        savedResourceItemIds.EnsureCapacity(resourceCount);
+        savedFloorObjectStates.EnsureCapacity(mapSaveData.floorObjects?.Count ?? 0);
+        int installationCount = mapSaveData.installations?.Count ?? 0;
+        savedInstallationStates.EnsureCapacity(installationCount);
+        savedInstallationStorageKeysByPlacement.EnsureCapacity(installationCount);
+        savedConveyorItemStates.EnsureCapacity(mapSaveData.conveyorItems?.Count ?? 0);
 
         if (mapSaveData.resources != null)
         {
@@ -1801,9 +1829,17 @@ public partial class BlockStateStore : MonoBehaviour
         {
             AdjustSavedInstallationCount(existingState, -1);
             UnregisterSavedCoordinateMappings(existingState, storageKey);
+            UnregisterInstallationPlacementKey(
+                savedInstallationStorageKeysByPlacement,
+                existingState,
+                storageKey);
         }
 
         savedInstallationStates[storageKey] = storedState;
+        RegisterInstallationPlacementKey(
+            savedInstallationStorageKeysByPlacement,
+            storedState,
+            storageKey);
         AdjustSavedInstallationCount(storedState, 1);
         RegisterSavedCoordinateMappings(storedState, storageKey);
         ResolveVirtualObjectWorld()?.UpsertInstallation(storedState);
@@ -1817,37 +1853,34 @@ public partial class BlockStateStore : MonoBehaviour
             return;
         }
 
-        List<Vector2Int> duplicateKeys = null;
-        foreach (KeyValuePair<Vector2Int, InstallationSaveState> pair in savedInstallationStates)
-        {
-            if (pair.Key == newStorageKey || !InstallationStatesRepresentSamePlacement(pair.Value, state))
-            {
-                continue;
-            }
-
-            duplicateKeys ??= new List<Vector2Int>();
-            duplicateKeys.Add(pair.Key);
-        }
-
-        if (duplicateKeys == null)
+        (long placementSequence, int itemId) placementKey =
+            (state.placementSequence, state.itemId);
+        if (!savedInstallationStorageKeysByPlacement.TryGetValue(
+                placementKey,
+                out Vector2Int duplicateKey)
+            || duplicateKey == newStorageKey)
         {
             return;
         }
 
-        VirtualObjectWorld world = ResolveVirtualObjectWorld();
-        for (int i = 0; i < duplicateKeys.Count; i++)
+        if (!savedInstallationStates.TryGetValue(
+                duplicateKey,
+                out InstallationSaveState duplicateState)
+            || !InstallationStatesRepresentSamePlacement(duplicateState, state))
         {
-            Vector2Int duplicateKey = duplicateKeys[i];
-            if (!savedInstallationStates.TryGetValue(duplicateKey, out InstallationSaveState duplicateState))
-            {
-                continue;
-            }
-
-            AdjustSavedInstallationCount(duplicateState, -1);
-            UnregisterSavedCoordinateMappings(duplicateState, duplicateKey);
-            savedInstallationStates.Remove(duplicateKey);
-            world?.RemoveInstallation(duplicateKey);
+            savedInstallationStorageKeysByPlacement.Remove(placementKey);
+            return;
         }
+
+        VirtualObjectWorld world = ResolveVirtualObjectWorld();
+        AdjustSavedInstallationCount(duplicateState, -1);
+        UnregisterSavedCoordinateMappings(duplicateState, duplicateKey);
+        UnregisterInstallationPlacementKey(
+            savedInstallationStorageKeysByPlacement,
+            duplicateState,
+            duplicateKey);
+        savedInstallationStates.Remove(duplicateKey);
+        world?.RemoveInstallation(duplicateKey);
     }
 
     private void ApplyInstallationSaveStates(IReadOnlyList<InstallationSaveEntry> entries)
@@ -1907,57 +1940,132 @@ public partial class BlockStateStore : MonoBehaviour
         InstallationSaveState state,
         Vector2Int newStorageKey)
     {
-        if ((installationObject == null && (state == null || state.placementSequence <= 0))
-            || liveInstallationStates.Count <= 0)
+        if (liveInstallationStates.Count <= 0)
         {
             return;
         }
 
-        List<Vector2Int> duplicateKeys = null;
+        if (state != null && state.placementSequence > 0)
+        {
+            RemoveIndexedLiveInstallationRecord(state, newStorageKey);
+            return;
+        }
+
+        // Legacy states can lack a placement sequence. Keep the old object-identity
+        // fallback for that rare path without scanning during normal registrations.
+        if (installationObject == null)
+        {
+            return;
+        }
+
+        Vector2Int duplicateKey = default;
+        LiveInstallationRecord duplicateRecord = null;
         foreach (KeyValuePair<Vector2Int, LiveInstallationRecord> pair in liveInstallationStates)
         {
-            if (pair.Key == newStorageKey || pair.Value == null)
+            if (pair.Key == newStorageKey
+                || pair.Value == null
+                || !ReferenceEquals(pair.Value.installationObject, installationObject))
             {
                 continue;
             }
 
-            bool sameObject = installationObject != null
-                              && ReferenceEquals(pair.Value.installationObject, installationObject);
-            bool samePlacement = InstallationStatesRepresentSamePlacement(pair.Value.state, state);
-            if (!sameObject && !samePlacement)
-            {
-                continue;
-            }
-
-            duplicateKeys ??= new List<Vector2Int>();
-            duplicateKeys.Add(pair.Key);
+            duplicateKey = pair.Key;
+            duplicateRecord = pair.Value;
+            break;
         }
 
-        if (duplicateKeys == null)
+        if (duplicateRecord != null)
+        {
+            RemoveLiveInstallationRecord(duplicateKey, duplicateRecord);
+        }
+    }
+
+    private void RemoveIndexedLiveInstallationRecord(
+        InstallationSaveState state,
+        Vector2Int newStorageKey)
+    {
+        (long placementSequence, int itemId) placementKey =
+            (state.placementSequence, state.itemId);
+        if (!liveInstallationStorageKeysByPlacement.TryGetValue(
+                placementKey,
+                out Vector2Int duplicateKey)
+            || duplicateKey == newStorageKey)
         {
             return;
         }
 
-        VirtualObjectWorld world = ResolveVirtualObjectWorld();
-        for (int i = 0; i < duplicateKeys.Count; i++)
+        if (!liveInstallationStates.TryGetValue(
+                duplicateKey,
+                out LiveInstallationRecord duplicateRecord)
+            || duplicateRecord == null
+            || !InstallationStatesRepresentSamePlacement(duplicateRecord.state, state))
         {
-            Vector2Int duplicateKey = duplicateKeys[i];
-            if (!liveInstallationStates.TryGetValue(duplicateKey, out LiveInstallationRecord duplicateRecord))
-            {
-                continue;
-            }
+            liveInstallationStorageKeysByPlacement.Remove(placementKey);
+            return;
+        }
 
-            duplicateRecord?.installationObject?.BindRuntimeMapObjectHandle(default);
-            UnregisterLiveCoordinateMappings(duplicateRecord.state, duplicateKey);
-            liveInstallationStates.Remove(duplicateKey);
-            if (savedInstallationStates.TryGetValue(duplicateKey, out InstallationSaveState savedState))
-            {
-                world?.UpsertInstallation(savedState);
-            }
-            else
-            {
-                world?.RemoveInstallation(duplicateKey);
-            }
+        RemoveLiveInstallationRecord(duplicateKey, duplicateRecord);
+    }
+
+    private void RemoveLiveInstallationRecord(
+        Vector2Int storageKey,
+        LiveInstallationRecord liveRecord)
+    {
+        VirtualObjectWorld world = ResolveVirtualObjectWorld();
+        liveRecord.installationObject?.BindRuntimeMapObjectHandle(default);
+        UnregisterLiveCoordinateMappings(liveRecord.state, storageKey);
+        UnregisterInstallationPlacementKey(
+            liveInstallationStorageKeysByPlacement,
+            liveRecord.state,
+            storageKey);
+        liveInstallationStates.Remove(storageKey);
+        if (savedInstallationStates.TryGetValue(storageKey, out InstallationSaveState savedState))
+        {
+            world?.UpsertInstallation(savedState);
+        }
+        else
+        {
+            world?.RemoveInstallation(storageKey);
+        }
+    }
+
+    private static void EnsureListCapacity<T>(List<T> values, int capacity)
+    {
+        if (values != null && capacity > values.Capacity)
+        {
+            values.Capacity = capacity;
+        }
+    }
+
+    private static void RegisterInstallationPlacementKey(
+        Dictionary<(long placementSequence, int itemId), Vector2Int> storageKeysByPlacement,
+        InstallationSaveState state,
+        Vector2Int storageKey)
+    {
+        if (storageKeysByPlacement == null || state == null || state.placementSequence <= 0)
+        {
+            return;
+        }
+
+        storageKeysByPlacement[(state.placementSequence, state.itemId)] = storageKey;
+    }
+
+    private static void UnregisterInstallationPlacementKey(
+        Dictionary<(long placementSequence, int itemId), Vector2Int> storageKeysByPlacement,
+        InstallationSaveState state,
+        Vector2Int storageKey)
+    {
+        if (storageKeysByPlacement == null || state == null || state.placementSequence <= 0)
+        {
+            return;
+        }
+
+        (long placementSequence, int itemId) placementKey =
+            (state.placementSequence, state.itemId);
+        if (storageKeysByPlacement.TryGetValue(placementKey, out Vector2Int indexedStorageKey)
+            && indexedStorageKey == storageKey)
+        {
+            storageKeysByPlacement.Remove(placementKey);
         }
     }
 

@@ -33,6 +33,46 @@ namespace ProjectF.Fluids
         public int DisplayedFluidItemId;
     }
 
+    public struct FluidPipeDisplaySource
+    {
+        public int ItemId;
+        public int Priority;
+    }
+
+    /// <summary>
+    /// Resolves one display item per connected pipe network. Direct endpoint candidates are
+    /// gathered on the main thread, then reduced in stable pipe order so every machine gets
+    /// the same result for the same topology and fluid state.
+    /// </summary>
+    [BurstCompile]
+    public struct FluidDisplayResolveJob : IJobParallelFor
+    {
+        [ReadOnly] public NativeArray<FluidNetworkRange> Networks;
+        [ReadOnly] public NativeArray<FluidPipeDisplaySource> Sources;
+        public NativeArray<int> NetworkDisplayItemIds;
+
+        public void Execute(int index)
+        {
+            FluidNetworkRange network = Networks[index];
+            int resolvedItemId = -1;
+            int resolvedPriority = 0;
+            int end = network.PipeStart + network.PipeCount;
+            for (int pipeIndex = network.PipeStart; pipeIndex < end; pipeIndex++)
+            {
+                FluidPipeDisplaySource source = Sources[pipeIndex];
+                if (source.ItemId < 0 || source.Priority <= resolvedPriority)
+                {
+                    continue;
+                }
+
+                resolvedItemId = source.ItemId;
+                resolvedPriority = source.Priority;
+            }
+
+            NetworkDisplayItemIds[index] = resolvedItemId;
+        }
+    }
+
     /// <summary>
     /// First-stage Burst kernel for the fluid simulation migration. Each iteration owns one
     /// connected pipe network and produces a deterministic checksum of its native mirror.

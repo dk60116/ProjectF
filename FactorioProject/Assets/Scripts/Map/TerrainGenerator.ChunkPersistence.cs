@@ -12,16 +12,98 @@ public partial class TerrainGenerator : MonoBehaviour
 {
     private readonly HashSet<Vector2Int> chunkInstallationAnchorScratch = new HashSet<Vector2Int>();
     private readonly List<Vector2Int> orderedChunkInstallationAnchorScratch = new List<Vector2Int>();
+    private readonly List<ResourceInstance> detachedChunkResourceScratch = new List<ResourceInstance>();
 
     public void SaveRuntimeResourceState(ResourceInstance resource)
     {
-        if (resource == null || resource.OwningBlock == null)
+        if (resource == null || !resource.TryGetOwningCoordinate(out Vector2Int coordinate))
         {
             return;
         }
 
         EnsureResourceStateStore();
-        resourceStateStore?.Save(resource.OwningBlock.Coordinate, resource);
+        resourceStateStore?.Save(coordinate, resource);
+    }
+
+    private void SaveAndReleaseDetachedResourcesInChunk(Vector2Int chunkCoordinate)
+    {
+        int normalizedChunkSize = Mathf.Max(1, chunkSize);
+        Vector2Int minCoordinate = chunkCoordinate * normalizedChunkSize;
+        Vector2Int maxCoordinate = minCoordinate + new Vector2Int(normalizedChunkSize, normalizedChunkSize);
+        ResourceInstance.CollectActiveResourcesInBounds(
+            this,
+            minCoordinate,
+            maxCoordinate,
+            detachedChunkResourceScratch,
+            true);
+        EnsureResourceStateStore();
+        for (int i = 0; i < detachedChunkResourceScratch.Count; i++)
+        {
+            ResourceInstance resource = detachedChunkResourceScratch[i];
+            if (resource == null || !resource.TryGetOwningCoordinate(out Vector2Int coordinate))
+            {
+                continue;
+            }
+
+            resourceStateStore?.Save(coordinate, resource);
+            resource.ReleaseRuntime();
+        }
+
+        detachedChunkResourceScratch.Clear();
+    }
+
+    private void SaveAndReleaseAllDetachedResources(bool saveState)
+    {
+        ResourceInstance.CollectActiveResourcesForTerrain(
+            this,
+            detachedChunkResourceScratch,
+            true);
+        if (saveState)
+        {
+            EnsureResourceStateStore();
+        }
+
+        for (int i = 0; i < detachedChunkResourceScratch.Count; i++)
+        {
+            ResourceInstance resource = detachedChunkResourceScratch[i];
+            if (resource == null)
+            {
+                continue;
+            }
+
+            if (saveState && resource.TryGetOwningCoordinate(out Vector2Int coordinate))
+            {
+                resourceStateStore?.Save(coordinate, resource);
+            }
+
+            resource.ReleaseRuntime();
+        }
+
+        detachedChunkResourceScratch.Clear();
+    }
+
+    private void SaveAllRuntimeResourcesToStore()
+    {
+        EnsureResourceStateStore();
+        if (resourceStateStore == null)
+        {
+            return;
+        }
+
+        ResourceInstance.CollectActiveResourcesForTerrain(
+            this,
+            detachedChunkResourceScratch,
+            false);
+        for (int i = 0; i < detachedChunkResourceScratch.Count; i++)
+        {
+            ResourceInstance resource = detachedChunkResourceScratch[i];
+            if (resource != null && resource.TryGetOwningCoordinate(out Vector2Int coordinate))
+            {
+                resourceStateStore.Save(coordinate, resource);
+            }
+        }
+
+        detachedChunkResourceScratch.Clear();
     }
 
     private ResourceInstance SpawnResourceOnBlock(Block block, Resource prefab, Vector2Int worldCoordinate)
@@ -145,7 +227,6 @@ public partial class TerrainGenerator : MonoBehaviour
                         && !installationObject.ExcludeFromTerrainPersistence
                         && savedInstallations.Add(installationObject))
                     {
-                        resourceStateStore.SaveInstallation(installationObject);
                         resourceStateStore.RegisterLiveInstallation(installationObject);
                     }
 
@@ -1438,6 +1519,8 @@ public partial class TerrainGenerator : MonoBehaviour
         public int mapMaxExclusiveX;
         public int mapMaxExclusiveY;
         public TerrainBiome[] biomeGrid;
+        [NonSerialized]
+        public Vector2Int[] terrainSampleCoordinateGrid;
         public bool[] blockedWaterGrid;
         public bool[] oilGrid;
         public float generatedSurfaceYOffset;

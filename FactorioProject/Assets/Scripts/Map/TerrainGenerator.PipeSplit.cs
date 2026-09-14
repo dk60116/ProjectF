@@ -29,6 +29,8 @@ public partial class TerrainGenerator
     private readonly List<PipeRuntimeRecord> pipeSplitRecords = new List<PipeRuntimeRecord>();
     private readonly Dictionary<PipeRuntimeRecord, int> pipeSplitIndices =
         new Dictionary<PipeRuntimeRecord, int>();
+    private readonly Dictionary<Fluidtank, int> pipeSplitFixedTankFirstPipe =
+        new Dictionary<Fluidtank, int>();
     private readonly List<PipeSplitVisualNode> pipeSplitVisualNodes = new List<PipeSplitVisualNode>();
     private readonly List<Vector3> pipeSplitSegments = new List<Vector3>(8);
     private readonly List<Vector3> pipeSplitVertices = new List<Vector3>();
@@ -38,7 +40,9 @@ public partial class TerrainGenerator
     private readonly Dictionary<Vector2Int, List<int>> pipeSplitChunkNodes =
         new Dictionary<Vector2Int, List<int>>();
     private PipeWorld pipeSplitWorld;
-    private int pipeSplitTopologyVersion = -1;
+    private int pipeSplitSourceTopologyVersion = -1;
+    private int pipeSplitEndpointTopologyVersion = -1;
+    private int pipeSplitTopologyVersion;
     private bool pipeSplitVisualsDirty = true;
 
     public int PipeSplitGroupCount
@@ -82,15 +86,28 @@ public partial class TerrainGenerator
     {
         PipeWorld world = PipeWorld.Current;
         int topologyVersion = world != null ? world.TopologyVersion : 0;
-        if (ReferenceEquals(pipeSplitWorld, world) && pipeSplitTopologyVersion == topologyVersion)
+        int endpointTopologyVersion = InputOutputModule.FluidTopologyVersion;
+        if (ReferenceEquals(pipeSplitWorld, world)
+            && pipeSplitSourceTopologyVersion == topologyVersion
+            && pipeSplitEndpointTopologyVersion == endpointTopologyVersion)
         {
             return;
         }
 
         pipeSplitWorld = world;
-        pipeSplitTopologyVersion = topologyVersion;
+        pipeSplitSourceTopologyVersion = topologyVersion;
+        pipeSplitEndpointTopologyVersion = endpointTopologyVersion;
+        unchecked
+        {
+            pipeSplitTopologyVersion++;
+            if (pipeSplitTopologyVersion == 0)
+            {
+                pipeSplitTopologyVersion = 1;
+            }
+        }
         pipeSplitRecords.Clear();
         pipeSplitIndices.Clear();
+        pipeSplitFixedTankFirstPipe.Clear();
         pipeSplitVisualNodes.Clear();
         if (world == null)
         {
@@ -120,13 +137,20 @@ public partial class TerrainGenerator
             for (int coordinateIndex = 0; coordinateIndex < coordinates.Count; coordinateIndex++)
             {
                 Vector2Int coordinate = coordinates[coordinateIndex];
+                ConnectPipeSplitThroughFixedTank(record, i, coordinate);
                 for (int directionIndex = 0; directionIndex < PipeSplitDirections.Length; directionIndex++)
                 {
                     Vector2Int direction = PipeSplitDirections[directionIndex];
-                    if (!record.HasConnectionTowardsAt(coordinate, direction)
-                        || !world.TryGetAtCoordinate(coordinate + direction, out PipeRuntimeRecord neighbor)
+                    if (!record.HasConnectionTowardsAt(coordinate, direction))
+                    {
+                        continue;
+                    }
+
+                    Vector2Int neighborCoordinate = coordinate + direction;
+                    ConnectPipeSplitThroughFixedTank(record, i, neighborCoordinate);
+                    if (!world.TryGetAtCoordinate(neighborCoordinate, out PipeRuntimeRecord neighbor)
                         || ReferenceEquals(record, neighbor)
-                        || !neighbor.HasConnectionTowardsAt(coordinate + direction, -direction)
+                        || !neighbor.HasConnectionTowardsAt(neighborCoordinate, -direction)
                         || !pipeSplitIndices.TryGetValue(neighbor, out int neighborIndex))
                     {
                         continue;
@@ -138,6 +162,29 @@ public partial class TerrainGenerator
         }
 
         pipeSplitVisualsDirty = true;
+    }
+
+    private void ConnectPipeSplitThroughFixedTank(
+        PipeRuntimeRecord record,
+        int recordIndex,
+        Vector2Int coordinate)
+    {
+        if (record == null
+            || !record.HasValidPrototype
+            || !record.Prototype.TryGetFixedFluidTankAtPipeNetworkCoordinate(
+                coordinate,
+                out Fluidtank fixedTank))
+        {
+            return;
+        }
+
+        if (pipeSplitFixedTankFirstPipe.TryGetValue(fixedTank, out int firstPipeIndex))
+        {
+            pipeSplitGraph.Connect(firstPipeIndex, recordIndex);
+            return;
+        }
+
+        pipeSplitFixedTankFirstPipe.Add(fixedTank, recordIndex);
     }
 
     private static int ComparePipeSplitRecords(PipeRuntimeRecord a, PipeRuntimeRecord b)
@@ -262,11 +309,14 @@ public partial class TerrainGenerator
         ReleasePipeSplitMeshes();
         pipeSplitRecords.Clear();
         pipeSplitIndices.Clear();
+        pipeSplitFixedTankFirstPipe.Clear();
         pipeSplitVisualNodes.Clear();
         pipeSplitSegments.Clear();
         pipeSplitGraph.Reset(0);
         pipeSplitWorld = null;
-        pipeSplitTopologyVersion = -1;
+        pipeSplitSourceTopologyVersion = -1;
+        pipeSplitEndpointTopologyVersion = -1;
+        pipeSplitTopologyVersion = 0;
         pipeSplitVisualsDirty = true;
     }
 }

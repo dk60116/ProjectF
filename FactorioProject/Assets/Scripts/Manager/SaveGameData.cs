@@ -191,6 +191,17 @@ public static class SaveGameConveyorItemBackfill
         }
 
         map.conveyorItems ??= new List<ConveyorItemBlockSaveEntry>();
+        Dictionary<Vector2Int, int> entryIndicesByCoordinate =
+            new Dictionary<Vector2Int, int>(map.conveyorItems.Count);
+        for (int i = 0; i < map.conveyorItems.Count; i++)
+        {
+            ConveyorItemBlockSaveEntry entry = map.conveyorItems[i];
+            if (entry != null && !entryIndicesByCoordinate.ContainsKey(entry.coordinate))
+            {
+                entryIndicesByCoordinate.Add(entry.coordinate, i);
+            }
+        }
+
         for (int i = 0; i < map.floorObjects.Count; i++)
         {
             FloorObjectSaveEntry floorEntry = map.floorObjects[i];
@@ -199,9 +210,9 @@ public static class SaveGameConveyorItemBackfill
                 continue;
             }
 
-            int existingIndex = FindConveyorItemEntryIndex(map.conveyorItems, conveyorEntry.coordinate);
-            if (existingIndex < 0)
+            if (!entryIndicesByCoordinate.TryGetValue(conveyorEntry.coordinate, out int existingIndex))
             {
+                entryIndicesByCoordinate.Add(conveyorEntry.coordinate, map.conveyorItems.Count);
                 map.conveyorItems.Add(conveyorEntry);
                 continue;
             }
@@ -267,27 +278,6 @@ public static class SaveGameConveyorItemBackfill
             lanes = lanes
         };
         return true;
-    }
-
-    public static int FindConveyorItemEntryIndex(
-        List<ConveyorItemBlockSaveEntry> entries,
-        Vector2Int coordinate)
-    {
-        if (entries == null)
-        {
-            return -1;
-        }
-
-        for (int i = 0; i < entries.Count; i++)
-        {
-            ConveyorItemBlockSaveEntry entry = entries[i];
-            if (entry != null && entry.coordinate == coordinate)
-            {
-                return i;
-            }
-        }
-
-        return -1;
     }
 
     public static void StripConveyorItemsFromFloorObjects(MapSaveData map)

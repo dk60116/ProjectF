@@ -891,6 +891,10 @@ public partial class InstallationObject : MapObject, IMapObjectSimulationIdentit
         int currentFluidItemId,
         float currentStoredLiters)
     {
+        if (previousFluidItemId != currentFluidItemId)
+        {
+            Pipe.InvalidateFluidDisplayNetworkCache();
+        }
     }
 
     private void NotifyStoredFluidChanged(int previousFluidItemId, float previousStoredLiters)

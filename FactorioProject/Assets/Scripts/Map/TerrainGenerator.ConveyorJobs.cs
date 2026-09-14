@@ -26,12 +26,15 @@ public partial class TerrainGenerator
     private readonly Dictionary<(Block block, int lane), (Block block, int lane)> beltJobRebuildOrigins = new Dictionary<(Block, int), (Block, int)>();
     private readonly Dictionary<(Block block, int lane), (Block block, int lane)> beltJobRebuildCursors = new Dictionary<(Block, int), (Block, int)>();
     private readonly Dictionary<(Block block, int lane), BeltPendingWrite> beltJobPending = new Dictionary<(Block, int), BeltPendingWrite>();
-    private readonly List<(Block block, int lane)> beltJobPendingOrder = new List<(Block, int)>();
+    private readonly List<int> beltJobPendingIndices = new List<int>();
+    private readonly List<(Block block, int lane)> beltJobUnindexedPending = new List<(Block, int)>();
+    private readonly List<(Block block, int lane)> beltJobBuildOrder = new List<(Block, int)>();
     private readonly HashSet<Block> beltJobPublishedBlocks = new HashSet<Block>();
     private readonly List<Block> beltJobPublishedOrder = new List<Block>();
     private bool beltJobsDirty = true, beltJobsPublishing;
     private long beltSimulationTick;
     private int beltJobRebuildCount, beltJobLastTickMoves, beltJobLastTickChanged, beltJobLastFrameTicks;
+    private int beltJobLastPendingApplied, beltJobLastPendingDiscarded, beltJobLastPublishedBlocks;
     private int beltJobLastRenderedFrame = -1;
     private readonly List<(long tick, Action callback)> beltPlacementCompletions = new List<(long, Action)>();
     private readonly List<Action> beltPlacementReadyCallbacks = new List<Action>();
@@ -93,11 +96,25 @@ public partial class TerrainGenerator
     {
         if (beltJobsPublishing || block == null || lane < 0 || lane >= Block.ConveyorCellItemUnit) return;
         var key = (block, lane);
-        beltJobPending.TryGetValue(key, out BeltPendingWrite pending);
+        bool alreadyPending = beltJobPending.TryGetValue(key, out BeltPendingWrite pending);
         if (replace) { pending.Hold = 0; pending.Restore = null; }
         pending.Replace |= replace;
         pending.Hold = Math.Max(pending.Hold, hold);
         beltJobPending[key] = pending;
+        if (!alreadyPending) TrackBeltJobPending(key);
+    }
+
+    private void SetBeltJobPending((Block block, int lane) key, BeltPendingWrite pending)
+    {
+        bool alreadyPending = beltJobPending.ContainsKey(key);
+        beltJobPending[key] = pending;
+        if (!alreadyPending) TrackBeltJobPending(key);
+    }
+
+    private void TrackBeltJobPending((Block block, int lane) key)
+    {
+        if (beltJobIndices.TryGetValue(key, out int index)) beltJobPendingIndices.Add(index);
+        else beltJobUnindexedPending.Add(key);
     }
 
     private void TickManagedBeltSimulation()
@@ -120,9 +137,10 @@ public partial class TerrainGenerator
         if (!Application.isPlaying || !worldReadyForPresentation || IsConveyorRuntimeRefreshDeferred) return;
         using (BeltJobsTickMarker.Auto())
         {
+            beltJobLastTickMoves = beltJobLastTickChanged = 0;
+            beltJobLastPendingApplied = beltJobLastPendingDiscarded = beltJobLastPublishedBlocks = 0;
             EnsureBeltJobs();
             FlushBeltJobWrites();
-            beltJobLastTickMoves = beltJobLastTickChanged = 0;
             if (beltJobBuffers != null && beltJobRanges.Count > 0)
             {
                 // One job iteration per independent transport group. No Unity objects are captured.
@@ -180,21 +198,29 @@ public partial class TerrainGenerator
     private void FlushBeltJobWrites()
     {
         if (beltJobBuffers == null || beltJobPending.Count == 0) return;
-        beltJobPendingOrder.Clear();
-        foreach (var entry in beltJobPending) beltJobPendingOrder.Add(entry.Key);
-        beltJobPendingOrder.Sort(CompareBeltJobKeys);
+        PromoteOrDiscardUnindexedBeltJobWrites();
+        if (beltJobPendingIndices.Count == 0) return;
+
+        // Job indices are baked in stable group/coordinate/lane order. Sorting the
+        // small dirty set by index preserves determinism without sorting every lane.
+        beltJobPendingIndices.Sort();
         beltJobsPublishing = true;
         try
         {
-            foreach (var key in beltJobPendingOrder)
+            for (int pendingIndex = 0; pendingIndex < beltJobPendingIndices.Count; pendingIndex++)
             {
-                if (key.block == null) { beltJobPending.Remove(key); continue; }
-                if (!beltJobIndices.TryGetValue(key, out int index))
+                int index = beltJobPendingIndices[pendingIndex];
+                if ((uint)index >= (uint)beltJobNodes.Count)
                 {
-                    if (!key.block.IsRuntimeConveyor) beltJobPending.Remove(key);
                     continue;
                 }
-                BeltPendingWrite request = beltJobPending[key];
+
+                var key = beltJobNodes[index];
+                if (key.block == null || !beltJobPending.TryGetValue(key, out BeltPendingWrite request))
+                {
+                    continue;
+                }
+
                 BeltLaneState state = request.Restore != null ? RestoreBeltJobLane(index, request.Restore)
                     : key.block.CaptureBeltJobInput(key.lane, beltJobBuffers.Lanes[index], request.Replace, request.Hold);
                 beltJobBuffers.Lanes[index] = state;
@@ -203,11 +229,49 @@ public partial class TerrainGenerator
                 key.block.PublishBeltJobLane(key.lane, state);
                 beltJobPublishedBlocks.Add(key.block);
                 beltJobPending.Remove(key);
+                beltJobLastPendingApplied++;
             }
         }
         finally { beltJobsPublishing = false; }
-        beltJobPendingOrder.Clear();
+        beltJobPendingIndices.Clear();
         NotifyBeltJobPublishedBlocks();
+    }
+
+    private void PromoteOrDiscardUnindexedBeltJobWrites()
+    {
+        int retainedCount = 0;
+        for (int i = 0; i < beltJobUnindexedPending.Count; i++)
+        {
+            var key = beltJobUnindexedPending[i];
+            if (!beltJobPending.ContainsKey(key)) continue;
+            if (key.block != null && beltJobIndices.TryGetValue(key, out int index))
+            {
+                beltJobPendingIndices.Add(index);
+                continue;
+            }
+
+            if (beltJobsDirty && key.block != null && key.block.IsRuntimeConveyor)
+            {
+                // A newly placed or reconnected lane can receive a hold/restore
+                // before its new topology index exists. Preserve it for the bake.
+                beltJobUnindexedPending[retainedCount++] = key;
+                continue;
+            }
+
+            // A write made while topology was dirty is already present in the
+            // managed Block state captured by the bake, except for holds/restores
+            // retained above. A lane omitted by the completed topology has no native
+            // destination and must not remain pending forever.
+            beltJobPending.Remove(key);
+            beltJobLastPendingDiscarded++;
+        }
+
+        if (retainedCount < beltJobUnindexedPending.Count)
+        {
+            beltJobUnindexedPending.RemoveRange(
+                retainedCount,
+                beltJobUnindexedPending.Count - retainedCount);
+        }
     }
 
     private void EnsureBeltJobs()
@@ -239,21 +303,21 @@ public partial class TerrainGenerator
             beltJobNodes.Clear(); beltJobIndices.Clear(); beltJobGroupIds.Clear(); beltJobRanges.Clear();
             beltJobSplitters.Clear(); beltJobSplitterIndices.Clear(); beltJobFilterWords.Clear(); beltJobSplitterBuild.Clear();
             EnsureBeltSplitGroups();
-            beltJobPendingOrder.Clear();
-            beltJobPendingOrder.AddRange(beltSplitLanes);
+            beltJobBuildOrder.Clear();
+            beltJobBuildOrder.AddRange(beltSplitLanes);
             foreach (Block block in beltSplitBlocks)
                 for (int lane = 0; lane < Block.ConveyorCellItemUnit; lane++)
                     if (!beltSplitIndices.ContainsKey((block, lane)) && block.HasBeltJobStoredItem(lane))
-                        beltJobPendingOrder.Add((block, lane));
+                        beltJobBuildOrder.Add((block, lane));
             // Native storage is laid out group-first, then by stable coordinate/lane order.
-            beltJobPendingOrder.Sort((a, b) =>
+            beltJobBuildOrder.Sort((a, b) =>
             {
                 int rootA = GetBeltJobRoot(a);
                 int rootB = GetBeltJobRoot(b);
                 return rootA != rootB ? rootA.CompareTo(rootB) : CompareBeltJobKeys(a, b);
             });
             int lastRoot = -1;
-            foreach (var key in beltJobPendingOrder)
+            foreach (var key in beltJobBuildOrder)
             {
                 int root = GetBeltJobRoot(key);
                 if (root != lastRoot)
@@ -265,7 +329,7 @@ public partial class TerrainGenerator
                 BeltGroupRange range = beltJobRanges[group]; range.Count++; beltJobRanges[group] = range;
                 beltJobIndices.Add(key, beltJobNodes.Count); beltJobNodes.Add(key); beltJobGroupIds.Add(group);
             }
-            beltJobPendingOrder.Clear();
+            beltJobBuildOrder.Clear();
             foreach (Block block in beltSplitBlocks) block.PrepareBeltJobStorage();
             for (int g = 0; g < beltJobRanges.Count; g++)
             {
@@ -389,6 +453,7 @@ public partial class TerrainGenerator
         {
             bool profileStage = MapObjectTickProfiler.IsEnabled;
             long publishStart = profileStage ? MapObjectTickProfiler.BeginSample() : 0L;
+            long mirrorStart = profileStage ? MapObjectTickProfiler.BeginSample() : 0L;
             beltJobsPublishing = true;
             try
             {
@@ -410,9 +475,24 @@ public partial class TerrainGenerator
                 }
             }
             finally { beltJobsPublishing = false; }
+            if (profileStage)
+            {
+                MapObjectTickProfiler.EndNamedSample(
+                    "Belt",
+                    "BeltJobs",
+                    "Belt Jobs Publish Mirrors",
+                    mirrorStart);
+            }
+
+            long notifyStart = profileStage ? MapObjectTickProfiler.BeginSample() : 0L;
             NotifyBeltJobPublishedBlocks();
             if (profileStage)
             {
+                MapObjectTickProfiler.EndNamedSample(
+                    "Belt",
+                    "BeltJobs",
+                    "Belt Jobs Publish Observers",
+                    notifyStart);
                 MapObjectTickProfiler.EndNamedSample(
                     "Belt",
                     "BeltJobs",
@@ -424,12 +504,17 @@ public partial class TerrainGenerator
 
     private void NotifyBeltJobPublishedBlocks()
     {
+        if (beltJobPublishedBlocks.Count == 0) return;
+
         // All slot mirrors are committed before any observer can inspect them.
         beltJobPublishedOrder.Clear();
         foreach (Block block in beltJobPublishedBlocks) if (block != null) beltJobPublishedOrder.Add(block);
         beltJobPublishedBlocks.Clear();
         beltJobPublishedOrder.Sort(CompareBeltSplitBlocks);
-        foreach (Block block in beltJobPublishedOrder) block.NotifyBeltJobPublished();
+        beltJobLastPublishedBlocks += beltJobPublishedOrder.Count;
+        RobotArmWorld.Current?.Wake(beltJobPublishedOrder);
+        InputOutputModule.WakeRuntimeModulesForChangedBlocks(beltJobPublishedOrder);
+        foreach (Block block in beltJobPublishedOrder) block.NotifyBeltJobPublished(false);
         beltJobPublishedOrder.Clear();
     }
 
@@ -477,12 +562,14 @@ public partial class TerrainGenerator
         beltJobBuffers?.Dispose(); beltJobBuffers = null;
         beltJobNodes.Clear(); beltJobIndices.Clear(); beltJobGroupIds.Clear(); beltJobRanges.Clear();
         beltJobSplitters.Clear(); beltJobSplitterIndices.Clear(); beltJobFilterWords.Clear(); beltJobSplitterBuild.Clear();
-        beltJobPending.Clear(); beltJobPendingOrder.Clear(); beltJobPublishedBlocks.Clear();
+        beltJobPending.Clear(); beltJobPendingIndices.Clear(); beltJobUnindexedPending.Clear();
+        beltJobBuildOrder.Clear(); beltJobPublishedBlocks.Clear();
         beltJobPublishedOrder.Clear();
         beltJobRebuildStates.Clear(); beltJobRebuildOrigins.Clear(); beltJobRebuildCursors.Clear();
         beltSimulationTick = 0; beltJobsDirty = true;
         beltJobLastRenderedFrame = -1;
         beltJobRebuildCount = beltJobLastTickMoves = beltJobLastTickChanged = beltJobLastFrameTicks = 0;
+        beltJobLastPendingApplied = beltJobLastPendingDiscarded = beltJobLastPublishedBlocks = 0;
         beltPlacementCompletions.Clear(); beltPlacementReadyCallbacks.Clear();
     }
 
@@ -500,6 +587,9 @@ public partial class TerrainGenerator
         MapObjectTickProfiler.AddRuntimeCounter("BeltJobs", "SleepingGroups", sleeping);
         MapObjectTickProfiler.AddRuntimeCounter("BeltJobs", "ActiveGroups", beltJobRanges.Count - sleeping);
         MapObjectTickProfiler.AddRuntimeCounter("BeltJobs", "PendingWrites", beltJobPending.Count);
+        MapObjectTickProfiler.AddRuntimeCounter("BeltJobs", "LastTickPendingWritesApplied", beltJobLastPendingApplied);
+        MapObjectTickProfiler.AddRuntimeCounter("BeltJobs", "LastTickPendingWritesDiscarded", beltJobLastPendingDiscarded);
+        MapObjectTickProfiler.AddRuntimeCounter("BeltJobs", "LastTickPublishedBlocks", beltJobLastPublishedBlocks);
         MapObjectTickProfiler.AddRuntimeCounter("BeltJobs", "LastTickTransfers", beltJobLastTickMoves);
         MapObjectTickProfiler.AddRuntimeCounter("BeltJobs", "LastTickChangedLanes", beltJobLastTickChanged);
         MapObjectTickProfiler.AddRuntimeCounter("BeltJobs", "FrameTicks", beltJobLastFrameTicks);

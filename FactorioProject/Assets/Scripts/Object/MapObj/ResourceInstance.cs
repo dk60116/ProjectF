@@ -46,6 +46,8 @@ public class ResourceInstance : IMapObjectTarget, IMapObjectSimulationIdentity
     }
     private List<HarvestRoutine> coroutines;
     private Block owningBlock;
+    private bool hasOwningCoordinate;
+    private Vector2Int owningCoordinate;
     private bool activeResourceCoordinateRegistered;
     private Vector2Int activeResourceCoordinate;
     private bool useBatchedRendering;
@@ -65,7 +67,10 @@ public class ResourceInstance : IMapObjectTarget, IMapObjectSimulationIdentity
     public MapObject SceneObject => null;
     public bool IsTargetActive => IsRuntimeActive;
     public Vector3 WorldPosition => released ? sharedBounds.center : State.Position;
-    public bool IsRuntimeActive => !released && Handle.IsValid && sharedWorld.isActiveAndEnabled && owningBlock != null;
+    public bool IsRuntimeActive => !released
+                                   && Handle.IsValid
+                                   && sharedWorld.isActiveAndEnabled
+                                   && hasOwningCoordinate;
     public bool AllowsFocus => Prototype.AllowsFocus;
     public MapObject.MultiFocusMode FocusMode => Prototype.FocusMode;
     public MapObject.MapObjectStatus Status => Prototype.Status;
@@ -111,6 +116,8 @@ public class ResourceInstance : IMapObjectTarget, IMapObjectSimulationIdentity
         harvestReservations?.Clear(); rewardBuffer?.Clear();
         owningBlock?.ClearResource(this);
         owningBlock = null;
+        hasOwningCoordinate = false;
+        owningCoordinate = default;
         ActiveResourceLookup.Remove(this);
         RemoveFromActiveResourceList();
         released = true;
@@ -158,15 +165,22 @@ public class ResourceInstance : IMapObjectTarget, IMapObjectSimulationIdentity
     }
 
     public Block OwningBlock => owningBlock;
+    public TerrainGenerator OwningTerrain => sharedWorld != null ? sharedWorld.Terrain : null;
+    public Vector2Int OwningCoordinate => hasOwningCoordinate
+        ? owningCoordinate
+        : new Vector2Int(
+            Mathf.RoundToInt(WorldPosition.x),
+            Mathf.RoundToInt(WorldPosition.z));
+    public bool TryGetOwningCoordinate(out Vector2Int coordinate)
+    {
+        coordinate = OwningCoordinate;
+        return hasOwningCoordinate;
+    }
     public long SimulationId
     {
         get
         {
-            Vector2Int coordinate = owningBlock != null
-                ? owningBlock.Coordinate
-                : new Vector2Int(
-                    Mathf.RoundToInt(WorldPosition.x),
-                    Mathf.RoundToInt(WorldPosition.z));
+            Vector2Int coordinate = OwningCoordinate;
             return unchecked(((long)coordinate.x << 32) | (uint)coordinate.y);
         }
     }
@@ -706,11 +720,7 @@ public class ResourceInstance : IMapObjectTarget, IMapObjectSimulationIdentity
 
     private int BuildHarvestDropSeed(int depletionOrdinal)
     {
-        Vector2Int coordinate = owningBlock != null
-            ? owningBlock.Coordinate
-            : new Vector2Int(
-                Mathf.RoundToInt(WorldPosition.x),
-                Mathf.RoundToInt(WorldPosition.z));
+        Vector2Int coordinate = OwningCoordinate;
         unchecked
         {
             int seed = 23;
@@ -1244,7 +1254,11 @@ public class ResourceInstance : IMapObjectTarget, IMapObjectSimulationIdentity
     public void SetOwningBlock(Block block)
     {
         if (released) return;
-        if (owningBlock == block)
+        bool keepCoordinate = block != null;
+        Vector2Int nextCoordinate = keepCoordinate ? block.Coordinate : default;
+        if (owningBlock == block
+            && hasOwningCoordinate == keepCoordinate
+            && (!keepCoordinate || owningCoordinate == nextCoordinate))
         {
             RegisterActiveResourceCoordinate();
             OnOwningBlockChanged(block);
@@ -1253,6 +1267,8 @@ public class ResourceInstance : IMapObjectTarget, IMapObjectSimulationIdentity
 
         UnregisterActiveResourceCoordinate();
         owningBlock = block;
+        hasOwningCoordinate = keepCoordinate;
+        owningCoordinate = nextCoordinate;
         RegisterActiveResourceCoordinate();
         if (this is IMapObjectUpdateTick updateTick)
         {
@@ -1261,6 +1277,130 @@ public class ResourceInstance : IMapObjectTarget, IMapObjectSimulationIdentity
 
         OnOwningBlockChanged(block);
         MarkBatchRenderDataDirty();
+    }
+
+    internal void DetachOwningBlockPreservingCoordinate(Block expectedBlock)
+    {
+        if (released || owningBlock == null || owningBlock != expectedBlock)
+        {
+            return;
+        }
+
+        UnregisterActiveResourceCoordinate();
+        owningCoordinate = owningBlock.Coordinate;
+        hasOwningCoordinate = true;
+        owningBlock = null;
+        RegisterActiveResourceCoordinate();
+        if (this is IMapObjectUpdateTick updateTick)
+        {
+            MapObjectTickManager.RefreshSimulationIdentity(updateTick);
+        }
+
+        OnOwningBlockChanged(null);
+        MarkBatchRenderDataDirty();
+    }
+
+    public static bool TryGetActiveResourceAtCoordinate(
+        TerrainGenerator terrain,
+        Vector2Int coordinate,
+        out ResourceInstance resource)
+    {
+        resource = null;
+        if (terrain == null
+            || !ActiveResourcesByCoordinate.TryGetValue(coordinate, out List<ResourceInstance> resources)
+            || resources == null)
+        {
+            return false;
+        }
+
+        for (int i = resources.Count - 1; i >= 0; i--)
+        {
+            ResourceInstance candidate = resources[i];
+            if (!IsActiveResourceCoordinateEntryValid(candidate, coordinate))
+            {
+                resources.RemoveAt(i);
+                RefreshStaleCoordinateEntry(candidate, coordinate);
+                continue;
+            }
+
+            if (candidate.OwningTerrain == terrain)
+            {
+                resource = candidate;
+                return true;
+            }
+        }
+
+        if (resources.Count <= 0)
+        {
+            ActiveResourcesByCoordinate.Remove(coordinate);
+        }
+
+        return false;
+    }
+
+    public static void CollectActiveResourcesForTerrain(
+        TerrainGenerator terrain,
+        List<ResourceInstance> results,
+        bool detachedOnly)
+    {
+        if (results == null)
+        {
+            return;
+        }
+
+        results.Clear();
+        if (terrain == null)
+        {
+            return;
+        }
+
+        for (int i = 0; i < ActiveResourcesInternal.Count; i++)
+        {
+            ResourceInstance resource = ActiveResourcesInternal[i];
+            if (resource == null
+                || !resource.IsRuntimeActive
+                || resource.OwningTerrain != terrain
+                || (detachedOnly && resource.owningBlock != null))
+            {
+                continue;
+            }
+
+            results.Add(resource);
+        }
+    }
+
+    public static void CollectActiveResourcesInBounds(
+        TerrainGenerator terrain,
+        Vector2Int minInclusive,
+        Vector2Int maxExclusive,
+        List<ResourceInstance> results,
+        bool detachedOnly)
+    {
+        if (results == null)
+        {
+            return;
+        }
+
+        results.Clear();
+        if (terrain == null)
+        {
+            return;
+        }
+
+        for (int y = minInclusive.y; y < maxExclusive.y; y++)
+        {
+            for (int x = minInclusive.x; x < maxExclusive.x; x++)
+            {
+                Vector2Int coordinate = new Vector2Int(x, y);
+                if (!TryGetActiveResourceAtCoordinate(terrain, coordinate, out ResourceInstance resource)
+                    || (detachedOnly && resource.owningBlock != null))
+                {
+                    continue;
+                }
+
+                results.Add(resource);
+            }
+        }
     }
 
     protected virtual void OnOwningBlockChanged(Block block)
@@ -1336,8 +1476,8 @@ public class ResourceInstance : IMapObjectTarget, IMapObjectSimulationIdentity
         return resource != null
                && resource.activeResourceCoordinateRegistered
                && resource.activeResourceCoordinate == coordinate
-               && resource.owningBlock != null
-               && resource.owningBlock.Coordinate == coordinate
+               && resource.hasOwningCoordinate
+               && resource.owningCoordinate == coordinate
                && resource.IsRuntimeActive;
     }
 
@@ -1362,7 +1502,7 @@ public class ResourceInstance : IMapObjectTarget, IMapObjectSimulationIdentity
             return;
         }
 
-        Vector2Int coordinate = owningBlock.Coordinate;
+        Vector2Int coordinate = owningCoordinate;
         if (activeResourceCoordinateRegistered && activeResourceCoordinate == coordinate)
         {
             return;
@@ -1410,7 +1550,7 @@ public class ResourceInstance : IMapObjectTarget, IMapObjectSimulationIdentity
     {
         return Application.isPlaying
                && IsRuntimeActive
-               && owningBlock != null;
+               && hasOwningCoordinate;
     }
 
     public bool TryGetBatchRenderData(

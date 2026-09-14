@@ -96,7 +96,8 @@ public sealed partial class ResourceTypeWorld : MonoBehaviour
 
     internal static void AppendProfilerCounters()
     {
-        int hostCount = 0, instanceCount = 0, growthBucketCount = 0;
+        int hostCount = 0, instanceCount = 0, attachedBlockCount = 0, dataOnlyCoordinateCount = 0;
+        int growthBucketCount = 0;
         int growthVisibleBucketCount = 0, growthCandidateCount = 0;
         long remainingUnits = 0;
         ResourceBatchRenderer sharedBatchRenderer = null;
@@ -115,11 +116,15 @@ public sealed partial class ResourceTypeWorld : MonoBehaviour
             {
                 if (resource == null || !resource.IsRuntimeActive) continue;
                 instanceCount++;
+                if (resource.OwningBlock != null) attachedBlockCount++;
+                else dataOnlyCoordinateCount++;
                 remainingUnits += resource.ResourceCount;
             }
         }
         MapObjectTickProfiler.AddRuntimeCounter("ResourceWorld", "TypeGameObjects", hostCount);
         MapObjectTickProfiler.AddRuntimeCounter("ResourceWorld", "ResourceInstances", instanceCount);
+        MapObjectTickProfiler.AddRuntimeCounter("ResourceWorld", "AttachedBlockProxies", attachedBlockCount);
+        MapObjectTickProfiler.AddRuntimeCounter("ResourceWorld", "DataOnlyCoordinates", dataOnlyCoordinateCount);
         MapObjectTickProfiler.AddRuntimeCounter("ResourceWorld", "RemainingResourceUnits", remainingUnits);
         MapObjectTickProfiler.AddRuntimeCounter("ResourceGrowth", "Buckets", growthBucketCount);
         MapObjectTickProfiler.AddRuntimeCounter("ResourceGrowth", "VisibleBuckets", growthVisibleBucketCount);

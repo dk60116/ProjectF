@@ -33,7 +33,7 @@ public class Block
         return state;
     }
     public void PublishBeltJobLane(int lane, BeltLaneState state) => Items[lane] = state;
-    public void NotifyBeltJobPublished() => OnPublished?.Invoke();
+    public void NotifyBeltJobPublished(bool notifyTransportObservers = true) => OnPublished?.Invoke();
     public Vector3 TransportLanePosition(int lane) => new(Coordinate.x, lane, Coordinate.y);
     public Vector3 EvaluateBeltJobSegment(int lane, Block target, int targetLane, float progress)
         => Vector3.Lerp(TransportLanePosition(lane), target.TransportLanePosition(targetLane), progress);
@@ -136,6 +136,15 @@ public static class MapObjectTickProfiler
     public static long BeginSample() => 0;
     public static void EndNamedSample(string kind, string typeName, string itemName, long startTimestamp) { }
     public static void AddRuntimeCounter(string category, string name, object value) { }
+}
+public sealed class RobotArmWorld
+{
+    public static RobotArmWorld Current { get; } = new();
+    public void Wake(IReadOnlyList<Block> changedBlocks) { }
+}
+public static class InputOutputModule
+{
+    public static void WakeRuntimeModulesForChangedBlocks(IReadOnlyList<Block> changedBlocks) { }
 }
 public static class MapObjectTickManager
 {

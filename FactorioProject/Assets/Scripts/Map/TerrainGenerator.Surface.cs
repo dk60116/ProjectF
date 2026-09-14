@@ -393,6 +393,9 @@ public partial class TerrainGenerator : MonoBehaviour
         input.mapMaxExclusiveX = GetMapMaxExclusiveCoordinate();
         input.mapMaxExclusiveY = GetMapMaxExclusiveCoordinate();
         input.biomeGrid = EnsureArrayCapacity(input.biomeGrid, gridLength);
+        input.terrainSampleCoordinateGrid = EnsureArrayCapacity(
+            input.terrainSampleCoordinateGrid,
+            gridLength);
         input.blockedWaterGrid = EnsureArrayCapacity(input.blockedWaterGrid, gridLength);
         input.oilGrid = EnsureArrayCapacity(input.oilGrid, gridLength);
         input.generatedSurfaceYOffset = generatedSurfaceYOffset;
@@ -414,6 +417,8 @@ public partial class TerrainGenerator : MonoBehaviour
                 int index = x + (y * gridSize);
                 Vector2Int coordinate = new Vector2Int(worldX, worldY);
                 input.biomeGrid[index] = GetTileBiome(coordinate);
+                input.terrainSampleCoordinateGrid[index] =
+                    ResolveProfilingCloneTerrainSource(coordinate);
                 input.blockedWaterGrid[index] = IsBlockedForWater(coordinate);
                 input.oilGrid[index] = IsCoordinateInsideMapBounds(coordinate)
                                        && IsGeneratedOilCoordinate(coordinate);
@@ -1225,7 +1230,10 @@ public partial class TerrainGenerator : MonoBehaviour
         }
 
         Vector2 delta = worldPosition - new Vector2(oilCoordinate.x, oilCoordinate.y);
-        float shapeRotation = GetGeneratedOilSurfaceRotationRadians(input.seed, oilCoordinate);
+        Vector2Int sampleCoordinate = GetTerrainSampleCoordinateFromSnapshot(
+            input,
+            oilCoordinate);
+        float shapeRotation = GetGeneratedOilSurfaceRotationRadians(input.seed, sampleCoordinate);
         return EvaluateOilPitDepth(delta, shapeRotation);
     }
 
@@ -1255,6 +1263,7 @@ public partial class TerrainGenerator : MonoBehaviour
 
     private static Vector2 GetBiomeBlendJitterFromSnapshot(ChunkSurfaceWorkerInput input, Vector2Int worldCoordinate)
     {
+        worldCoordinate = GetTerrainSampleCoordinateFromSnapshot(input, worldCoordinate);
         float jitterX = Mathf.Lerp(
             -input.terrainBlendJitter,
             input.terrainBlendJitter,
@@ -1264,6 +1273,24 @@ public partial class TerrainGenerator : MonoBehaviour
             input.terrainBlendJitter,
             Hash01WithSeed(input.seed, worldCoordinate.x, worldCoordinate.y, 8819));
         return new Vector2(jitterX, jitterY);
+    }
+
+    private static Vector2Int GetTerrainSampleCoordinateFromSnapshot(
+        ChunkSurfaceWorkerInput input,
+        Vector2Int worldCoordinate)
+    {
+        int localX = worldCoordinate.x - input.biomeGridMinX;
+        int localY = worldCoordinate.y - input.biomeGridMinY;
+        if (input.terrainSampleCoordinateGrid == null
+            || localX < 0
+            || localY < 0
+            || localX >= input.biomeGridWidth
+            || localY >= input.biomeGridHeight)
+        {
+            return worldCoordinate;
+        }
+
+        return input.terrainSampleCoordinateGrid[localX + (localY * input.biomeGridWidth)];
     }
 
     private static float Hash01WithSeed(int seedValue, int x, int y, int salt)

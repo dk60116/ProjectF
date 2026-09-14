@@ -1,6 +1,7 @@
 using System;
 using System.Collections;
 using System.IO;
+using System.Threading.Tasks;
 using UnityEngine;
 using UnityEngine.SceneManagement;
 
@@ -33,6 +34,17 @@ public class SaveManager : MonoBehaviour
     private string cachedSaveDirectory;
     private bool startupLoadCompleted;
     private bool sceneReloadRequested;
+    private Coroutine activeSaveCoroutine;
+    private Task activeSaveWriteTask;
+    private Coroutine activeLoadCoroutine;
+    private Task<SaveGameData> activeLoadReadTask;
+    private bool saveTickPauseActive;
+
+    public bool IsSaving => activeSaveCoroutine != null
+                            || (activeSaveWriteTask != null && !activeSaveWriteTask.IsCompleted);
+    public bool IsLoading => sceneReloadRequested
+                             || activeLoadCoroutine != null
+                             || (activeLoadReadTask != null && !activeLoadReadTask.IsCompleted);
 
     public int SelectedSlotIndex
     {
@@ -78,8 +90,8 @@ public class SaveManager : MonoBehaviour
 
         if (loadRecentSlotOnStart)
         {
-            LoadSlotImmediate(
-                NormalizeSlotIndex(PlayerPrefs.GetInt(RecentSlotPlayerPrefsKey, 0)));
+            int recentSlot = NormalizeSlotIndex(PlayerPrefs.GetInt(RecentSlotPlayerPrefsKey, 0));
+            yield return LoadStartupSlotRoutine(recentSlot);
         }
 
         startupLoadCompleted = true;
@@ -105,6 +117,12 @@ public class SaveManager : MonoBehaviour
         slotIndex = NormalizeSlotIndex(slotIndex);
         SelectedSlotIndex = slotIndex;
 
+        if (IsSaving || IsLoading)
+        {
+            Debug.LogWarning("[SaveManager] 저장 또는 불러오기가 진행 중이어서 새 저장 요청을 건너뜁니다.");
+            return false;
+        }
+
         TerrainGenerator terrain = TerrainGenerator.ResolveActive();
         Player player = ResolvePlayer();
         if (terrain == null)
@@ -113,28 +131,23 @@ public class SaveManager : MonoBehaviour
             return false;
         }
 
-        ProjectF.Conveyors.BeltSimulationSnapshot beltSnapshot = terrain.CaptureBeltSimulationSnapshot();
-        SaveGameData data = new SaveGameData
+        if (!Application.isPlaying)
         {
-            version = SaveGameData.CurrentVersion,
-            savedAtUtcTicks = DateTime.UtcNow.Ticks,
-            itemCatalog = SaveGameItemIdRemapper.CaptureItemCatalog(GameManager.Instance?.ItemManger?.ItemDefinitions),
-            terrain = terrain.CaptureTerrainSaveState(),
-            worldTime = GameManager.Instance?.WorldTime?.CaptureSaveState() ?? new WorldTimeSaveData(),
-            map = terrain.CaptureMapSaveState(),
-            player = player != null ? player.CaptureSaveState() : new PlayerSaveData(),
-            beltSimulation = beltSnapshot,
-            simulationTick = MapObjectTickManager.CurrentSimulationTick,
-            nextInstallationSimulationId = InstallationObject.NextSimulationId
-        };
+            return SaveSlotImmediate(slotIndex, terrain, player);
+        }
 
+        activeSaveCoroutine = StartCoroutine(SaveSlotRoutine(slotIndex, terrain, player));
+        return true;
+    }
+
+    private bool SaveSlotImmediate(int slotIndex, TerrainGenerator terrain, Player player)
+    {
         string path = GetSlotPath(slotIndex);
         try
         {
+            SaveGameData data = CaptureSaveData(terrain, player);
             SaveGameBinarySerializer.WriteToFile(path, data);
-            SetCachedSaveFileExists(slotIndex, true);
-            SetRecentSlot(slotIndex);
-            Debug.Log($"[SaveManager] Slot {slotIndex + 1} 저장 완료: {path}");
+            CompleteSuccessfulSave(slotIndex, path);
             return true;
         }
         catch (Exception exception)
@@ -144,8 +157,148 @@ public class SaveManager : MonoBehaviour
         }
     }
 
+    private IEnumerator SaveSlotRoutine(int slotIndex, TerrainGenerator terrain, Player player)
+    {
+        try
+        {
+            // Let the current frame present the saving state before snapshot work starts.
+            yield return null;
+
+            SaveGameData data = null;
+            Exception captureException = null;
+            BeginSaveTickPause();
+            try
+            {
+                data = CaptureSaveData(terrain, player);
+            }
+            catch (Exception exception)
+            {
+                captureException = exception;
+            }
+            finally
+            {
+                // The detached snapshot no longer needs the live simulation to stay paused.
+                EndSaveTickPause();
+            }
+
+            if (captureException != null)
+            {
+                Debug.LogError($"[SaveManager] Slot {slotIndex + 1} 상태 수집 실패: {captureException}");
+                yield break;
+            }
+
+            // The snapshot is detached from live Unity objects. Compression and disk I/O
+            // can therefore run off the main thread while frames continue rendering.
+            string path = GetSlotPath(slotIndex);
+            Exception taskStartException = null;
+            try
+            {
+                activeSaveWriteTask = Task.Run(() => SaveGameBinarySerializer.WriteToFile(path, data));
+            }
+            catch (Exception exception)
+            {
+                taskStartException = exception;
+            }
+
+            if (taskStartException != null)
+            {
+                Debug.LogError($"[SaveManager] Slot {slotIndex + 1} 저장 작업 시작 실패: {taskStartException}");
+                yield break;
+            }
+
+            while (!activeSaveWriteTask.IsCompleted)
+            {
+                yield return null;
+            }
+
+            if (activeSaveWriteTask.IsFaulted)
+            {
+                Exception writeException = activeSaveWriteTask.Exception?.GetBaseException();
+                Debug.LogError($"[SaveManager] Slot {slotIndex + 1} 저장 실패: {writeException}");
+            }
+            else if (activeSaveWriteTask.IsCanceled)
+            {
+                Debug.LogWarning($"[SaveManager] Slot {slotIndex + 1} 저장이 취소되었습니다.");
+            }
+            else
+            {
+                CompleteSuccessfulSave(slotIndex, path);
+            }
+        }
+        finally
+        {
+            FinishSaveOperation();
+        }
+    }
+
+    private static SaveGameData CaptureSaveData(TerrainGenerator terrain, Player player)
+    {
+        return new SaveGameData
+        {
+            version = SaveGameData.CurrentVersion,
+            savedAtUtcTicks = DateTime.UtcNow.Ticks,
+            itemCatalog = SaveGameItemIdRemapper.CaptureItemCatalog(
+                GameManager.Instance?.ItemManger?.ItemDefinitions),
+            terrain = terrain.CaptureTerrainSaveState(),
+            worldTime = GameManager.Instance?.WorldTime?.CaptureSaveState() ?? new WorldTimeSaveData(),
+            map = terrain.CaptureMapSaveState(),
+            player = player != null ? player.CaptureSaveState() : new PlayerSaveData(),
+            beltSimulation = terrain.CaptureBeltSimulationSnapshot(),
+            simulationTick = MapObjectTickManager.CurrentSimulationTick,
+            nextInstallationSimulationId = InstallationObject.NextSimulationId
+        };
+    }
+
+    private void CompleteSuccessfulSave(int slotIndex, string path)
+    {
+        SetCachedSaveFileExists(slotIndex, true);
+        SetRecentSlot(slotIndex);
+        Debug.Log($"[SaveManager] Slot {slotIndex + 1} 저장 완료: {path}");
+    }
+
+    private void BeginSaveTickPause()
+    {
+        if (saveTickPauseActive)
+        {
+            return;
+        }
+
+        saveTickPauseActive = true;
+        MapObjectTickManager.BeginSaveTickPause();
+    }
+
+    private void FinishSaveOperation()
+    {
+        EndSaveTickPause();
+
+        activeSaveWriteTask = null;
+        activeSaveCoroutine = null;
+    }
+
+    private void EndSaveTickPause()
+    {
+        if (!saveTickPauseActive)
+        {
+            return;
+        }
+
+        saveTickPauseActive = false;
+        MapObjectTickManager.EndSaveTickPause();
+    }
+
+    private void OnDestroy()
+    {
+        EndSaveTickPause();
+    }
+
     public bool LoadSlot(int slotIndex)
     {
+        if (IsSaving || IsLoading)
+        {
+            Debug.LogWarning("[SaveManager] 저장 또는 불러오기가 끝나기 전에는 슬롯을 불러올 수 없습니다.");
+            return false;
+        }
+
         slotIndex = NormalizeSlotIndex(slotIndex);
         SelectedSlotIndex = slotIndex;
 
@@ -187,28 +340,69 @@ public class SaveManager : MonoBehaviour
         }
     }
 
+    private IEnumerator LoadStartupSlotRoutine(int slotIndex)
+    {
+        slotIndex = NormalizeSlotIndex(slotIndex);
+        SelectedSlotIndex = slotIndex;
+        string path = GetSlotPath(slotIndex);
+        if (!HasSaveFile(slotIndex))
+        {
+            StartNewMap(slotIndex);
+            yield break;
+        }
+
+        Exception taskStartException = null;
+        try
+        {
+            activeLoadReadTask = Task.Run(() => SaveGameBinarySerializer.ReadFromFile(path));
+        }
+        catch (Exception exception)
+        {
+            taskStartException = exception;
+        }
+
+        if (taskStartException != null)
+        {
+            Debug.LogError($"[SaveManager] Slot {slotIndex + 1} 로드 작업 시작 실패: {taskStartException}");
+            activeLoadReadTask = null;
+            yield break;
+        }
+
+        while (!activeLoadReadTask.IsCompleted)
+        {
+            yield return null;
+        }
+
+        Task<SaveGameData> completedTask = activeLoadReadTask;
+        activeLoadReadTask = null;
+        if (completedTask.IsFaulted)
+        {
+            Exception readException = completedTask.Exception?.GetBaseException();
+            Debug.LogError($"[SaveManager] Slot {slotIndex + 1} 로드 실패: {readException}");
+            yield break;
+        }
+
+        if (completedTask.IsCanceled)
+        {
+            Debug.LogWarning($"[SaveManager] Slot {slotIndex + 1} 로드가 취소되었습니다.");
+            yield break;
+        }
+
+        SaveGameData data = completedTask.Result;
+        if (data == null)
+        {
+            StartNewMap(slotIndex);
+            yield break;
+        }
+
+        ApplyLoadedSlotData(slotIndex, data, path);
+    }
+
     private bool ReloadSceneForSlot(int slotIndex)
     {
         if (sceneReloadRequested)
         {
             return false;
-        }
-
-        string path = GetSlotPath(slotIndex);
-        SaveGameData data = null;
-        bool startNewMap = !HasSaveFile(slotIndex);
-        if (!startNewMap)
-        {
-            try
-            {
-                data = SaveGameBinarySerializer.ReadFromFile(path);
-                startNewMap = data == null;
-            }
-            catch (Exception exception)
-            {
-                Debug.LogError($"[SaveManager] Slot {slotIndex + 1} 로드 실패: {exception}");
-                return false;
-            }
         }
 
         Scene activeScene = SceneManager.GetActiveScene();
@@ -218,33 +412,124 @@ public class SaveManager : MonoBehaviour
             return false;
         }
 
+        string path = GetSlotPath(slotIndex);
+        bool startNewMap = !HasSaveFile(slotIndex);
+        sceneReloadRequested = true;
+        if (!startNewMap)
+        {
+            activeLoadCoroutine = StartCoroutine(ReloadSceneForSlotRoutine(
+                slotIndex,
+                path,
+                activeScene.buildIndex,
+                activeScene.name));
+            return true;
+        }
+
+        return StartSceneReloadForSlot(
+            slotIndex,
+            null,
+            true,
+            activeScene.buildIndex,
+            activeScene.name);
+    }
+
+    private IEnumerator ReloadSceneForSlotRoutine(
+        int slotIndex,
+        string path,
+        int sceneBuildIndex,
+        string sceneName)
+    {
+        Exception taskStartException = null;
+        try
+        {
+            activeLoadReadTask = Task.Run(() => SaveGameBinarySerializer.ReadFromFile(path));
+        }
+        catch (Exception exception)
+        {
+            taskStartException = exception;
+        }
+
+        if (taskStartException != null)
+        {
+            Debug.LogError($"[SaveManager] Slot {slotIndex + 1} 로드 작업 시작 실패: {taskStartException}");
+            ResetActiveLoadState();
+            yield break;
+        }
+
+        // Ensure StartCoroutine returns before this routine clears its tracked handle.
+        yield return null;
+        while (!activeLoadReadTask.IsCompleted)
+        {
+            yield return null;
+        }
+
+        Task<SaveGameData> completedTask = activeLoadReadTask;
+        activeLoadReadTask = null;
+        activeLoadCoroutine = null;
+        if (completedTask.IsFaulted)
+        {
+            Exception readException = completedTask.Exception?.GetBaseException();
+            Debug.LogError($"[SaveManager] Slot {slotIndex + 1} 로드 실패: {readException}");
+            ResetActiveLoadState();
+            yield break;
+        }
+
+        if (completedTask.IsCanceled)
+        {
+            Debug.LogWarning($"[SaveManager] Slot {slotIndex + 1} 로드가 취소되었습니다.");
+            ResetActiveLoadState();
+            yield break;
+        }
+
+        SaveGameData data = completedTask.Result;
+        StartSceneReloadForSlot(
+            slotIndex,
+            data,
+            data == null,
+            sceneBuildIndex,
+            sceneName);
+    }
+
+    private bool StartSceneReloadForSlot(
+        int slotIndex,
+        SaveGameData data,
+        bool startNewMap,
+        int sceneBuildIndex,
+        string sceneName)
+    {
         pendingRuntimeLoadSlot = slotIndex;
         pendingRuntimeLoadData = data;
         pendingRuntimeStartNewMap = startNewMap;
-        sceneReloadRequested = true;
 
         bool reloadStarted;
-        if (activeScene.buildIndex >= 0)
+        if (sceneBuildIndex >= 0)
         {
-            reloadStarted = GameSceneLoadingScreen.TryLoadSceneAsync(activeScene.buildIndex);
+            reloadStarted = GameSceneLoadingScreen.TryLoadSceneAsync(sceneBuildIndex);
         }
         else
         {
-            reloadStarted = GameSceneLoadingScreen.TryLoadSceneAsync(activeScene.name);
+            reloadStarted = GameSceneLoadingScreen.TryLoadSceneAsync(sceneName);
         }
 
         if (!reloadStarted)
         {
-            pendingRuntimeLoadSlot = -1;
-            pendingRuntimeLoadData = null;
-            pendingRuntimeStartNewMap = false;
-            sceneReloadRequested = false;
+            ResetActiveLoadState();
             Debug.LogError("[SaveManager] 활성 씬 재로드 요청을 생성하지 못했습니다.");
             return false;
         }
 
         SetRecentSlot(slotIndex);
         return true;
+    }
+
+    private void ResetActiveLoadState()
+    {
+        pendingRuntimeLoadSlot = -1;
+        pendingRuntimeLoadData = null;
+        pendingRuntimeStartNewMap = false;
+        sceneReloadRequested = false;
+        activeLoadCoroutine = null;
+        activeLoadReadTask = null;
     }
 
     private bool ApplyLoadedSlotData(int slotIndex, SaveGameData data, string path)
@@ -295,6 +580,12 @@ public class SaveManager : MonoBehaviour
 
     public bool ResetSlot(int slotIndex)
     {
+        if (IsSaving || IsLoading)
+        {
+            Debug.LogWarning("[SaveManager] 저장 또는 불러오기가 끝나기 전에는 슬롯을 초기화할 수 없습니다.");
+            return false;
+        }
+
         slotIndex = NormalizeSlotIndex(slotIndex);
         SelectedSlotIndex = slotIndex;
 
@@ -338,6 +629,12 @@ public class SaveManager : MonoBehaviour
 
     public void StartNewMap(int slotIndex, bool randomizeSeed)
     {
+        if (IsSaving || IsLoading)
+        {
+            Debug.LogWarning("[SaveManager] 저장 또는 불러오기가 끝나기 전에는 새 맵을 시작할 수 없습니다.");
+            return;
+        }
+
         slotIndex = NormalizeSlotIndex(slotIndex);
         SelectedSlotIndex = slotIndex;
         EnsureDefaultPlayerState();

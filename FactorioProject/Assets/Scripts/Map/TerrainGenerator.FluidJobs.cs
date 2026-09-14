@@ -10,6 +10,8 @@ public partial class TerrainGenerator
     private static readonly ProfilerMarker FluidJobsBakeMarker = new ProfilerMarker("Fluid Jobs.Bake");
     private static readonly ProfilerMarker FluidJobsScheduleMarker = new ProfilerMarker("Fluid Jobs.Schedule");
     private static readonly ProfilerMarker FluidJobsCompleteMarker = new ProfilerMarker("Fluid Jobs.Complete");
+    private static readonly ProfilerMarker FluidDisplayResolveMarker =
+        new ProfilerMarker("Fluid Jobs.Resolve Display");
 
     private FluidSimulationBuffers fluidJobBuffers;
     private readonly List<PipeRuntimeRecord> fluidJobRecordOrder = new List<PipeRuntimeRecord>();
@@ -28,10 +30,107 @@ public partial class TerrainGenerator
     private bool fluidShadowJobScheduled;
     private ulong fluidShadowChecksum;
     private long fluidShadowCompletedTick = -1L;
+    private int fluidJobResolvedDisplayStateVersion = -1;
+    private int fluidJobDisplayResolveCount;
+    private int fluidJobLastChangedDisplayPipeCount;
 
     public int FluidJobNetworkCount => fluidJobNetworkBuild.Count;
     public int FluidJobPipeCount => fluidJobRecordOrder.Count;
     public ulong FluidShadowChecksum => fluidShadowChecksum;
+
+    internal bool TryRefreshFluidJobDisplayStates(
+        PipeWorld world,
+        List<PipeRuntimeRecord> changedRecords)
+    {
+        if (changedRecords == null)
+        {
+            return false;
+        }
+
+        changedRecords.Clear();
+        EnsureFluidSimulationBuffers();
+        if (!ReferenceEquals(fluidJobPipeWorld, world))
+        {
+            return false;
+        }
+
+        int displayStateVersion = Pipe.FluidDisplayStateVersion;
+        if (fluidJobResolvedDisplayStateVersion == displayStateVersion)
+        {
+            return true;
+        }
+
+        CompleteFluidSimulationShadow();
+        if (fluidJobBuffers == null || fluidJobNetworkBuild.Count <= 0)
+        {
+            fluidJobResolvedDisplayStateVersion = displayStateVersion;
+            fluidJobLastChangedDisplayPipeCount = 0;
+            return true;
+        }
+
+        using (FluidDisplayResolveMarker.Auto())
+        {
+            long start = MapObjectTickProfiler.IsEnabled ? MapObjectTickProfiler.BeginSample() : 0L;
+            for (int i = 0; i < fluidJobRecordOrder.Count; i++)
+            {
+                PipeRuntimeRecord record = fluidJobRecordOrder[i];
+                int itemId = -1;
+                int priority = 0;
+                bool foundSource = record != null
+                                   && record.HasValidPrototype
+                                   && record.Prototype.TryGetDirectFluidDisplaySource(
+                                       record,
+                                       out itemId,
+                                       out priority);
+                fluidJobBuffers.DisplaySources[i] = new FluidPipeDisplaySource
+                {
+                    ItemId = foundSource ? itemId : -1,
+                    Priority = foundSource ? priority : 0
+                };
+            }
+
+            JobHandle resolveHandle = fluidJobBuffers.DisplayResolveJob.Schedule(
+                fluidJobNetworkBuild.Count,
+                1);
+            resolveHandle.Complete();
+
+            for (int networkIndex = 0; networkIndex < fluidJobNetworkBuild.Count; networkIndex++)
+            {
+                int displayItemId = fluidJobBuffers.NetworkDisplayItemIds[networkIndex];
+                FluidNetworkRange range = fluidJobNetworkBuild[networkIndex];
+                int end = range.PipeStart + range.PipeCount;
+                for (int pipeIndex = range.PipeStart; pipeIndex < end; pipeIndex++)
+                {
+                    PipeRuntimeRecord record = fluidJobRecordOrder[pipeIndex];
+                    fluidJobBuffers.States[pipeIndex] = new FluidPipeState
+                    {
+                        DisplayedFluidItemId = displayItemId
+                    };
+                    if (record == null || record.DisplayedFluidItemId == displayItemId)
+                    {
+                        continue;
+                    }
+
+                    record.DisplayedFluidItemId = displayItemId;
+                    changedRecords.Add(record);
+                }
+            }
+
+            fluidJobResolvedDisplayStateVersion = displayStateVersion;
+            fluidJobDisplayResolveCount++;
+            fluidJobLastChangedDisplayPipeCount = changedRecords.Count;
+            if (MapObjectTickProfiler.IsEnabled)
+            {
+                MapObjectTickProfiler.EndNamedSample(
+                    "Fluid",
+                    "FluidJobs",
+                    "Fluid Jobs Display Resolve",
+                    start);
+            }
+        }
+
+        return true;
+    }
 
     private void ScheduleFluidSimulationShadow()
     {
@@ -133,6 +232,7 @@ public partial class TerrainGenerator
         fluidJobPipeWorld = pipeSplitWorld;
         fluidJobTopologyVersion = pipeSplitTopologyVersion;
         fluidShadowChecksum = 0UL;
+        fluidJobResolvedDisplayStateVersion = -1;
 
         if (pipeSplitWorld == null || pipeSplitRecords.Count <= 0)
         {
@@ -310,10 +410,19 @@ public partial class TerrainGenerator
     {
         MapObjectTickProfiler.AddRuntimeCounter("FluidJobs", "ShadowMode", true);
         MapObjectTickProfiler.AddRuntimeCounter("FluidJobs", "Authoritative", false);
+        MapObjectTickProfiler.AddRuntimeCounter("FluidJobs", "DisplayAuthoritative", true);
         MapObjectTickProfiler.AddRuntimeCounter("FluidJobs", "Networks", FluidJobNetworkCount);
         MapObjectTickProfiler.AddRuntimeCounter("FluidJobs", "Pipes", FluidJobPipeCount);
         MapObjectTickProfiler.AddRuntimeCounter("FluidJobs", "Edges", fluidJobEdgeBuild.Count);
         MapObjectTickProfiler.AddRuntimeCounter("FluidJobs", "TopologyRebuilds", fluidJobRebuildCount);
+        MapObjectTickProfiler.AddRuntimeCounter(
+            "FluidJobs",
+            "DisplayResolves",
+            fluidJobDisplayResolveCount);
+        MapObjectTickProfiler.AddRuntimeCounter(
+            "FluidJobs",
+            "LastChangedDisplayPipes",
+            fluidJobLastChangedDisplayPipeCount);
         MapObjectTickProfiler.AddRuntimeCounter(
             "FluidJobs",
             "LastCompletedTick",
@@ -339,6 +448,8 @@ public partial class TerrainGenerator
         fluidJobCoordinateScratch.Clear();
         fluidJobPipeWorld = null;
         fluidJobTopologyVersion = -1;
+        fluidJobResolvedDisplayStateVersion = -1;
+        fluidJobLastChangedDisplayPipeCount = 0;
         fluidShadowChecksum = 0UL;
         fluidShadowCompletedTick = -1L;
     }

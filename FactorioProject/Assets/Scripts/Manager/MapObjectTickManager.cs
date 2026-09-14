@@ -163,6 +163,7 @@ public sealed class MapObjectTickManager : MonoBehaviour
     private bool tickingUpdateObjects;
     private bool updateTicksDirty;
     private bool simulationPaused;
+    private int saveTickPauseDepth;
     private bool waitingForWorldLoad;
     private float resumeTimeScale = 1f;
 
@@ -177,7 +178,7 @@ public sealed class MapObjectTickManager : MonoBehaviour
         SimulationBacklogTicks);
     public static bool HasSimulationUpsSample => instance != null && instance.hasSimulationUpsSample;
     public static float CurrentSimulationUps => instance != null ? instance.currentSimulationUps : 0f;
-    public static bool SimulationPaused => instance != null && instance.simulationPaused;
+    public static bool SimulationPaused => instance != null && instance.IsSimulationTickPaused;
     public static bool WaitingForWorldLoad
     {
         get
@@ -279,11 +280,11 @@ public sealed class MapObjectTickManager : MonoBehaviour
             return;
         }
 
-        if (simulationPaused)
+        if (IsSimulationTickPaused)
         {
-            // Keep the simulation clock and every registered Tick frozen even if another
-            // system changes Unity's time scale while the tool pause is active.
-            if (Time.timeScale != 0f)
+            // A manual pause freezes Unity time. Save pause only freezes deterministic
+            // simulation so rendering, UI, and input frames can continue.
+            if (simulationPaused && Time.timeScale != 0f)
             {
                 Time.timeScale = 0f;
             }
@@ -322,6 +323,38 @@ public sealed class MapObjectTickManager : MonoBehaviour
 
         EnsureInstance().ApplySimulationPaused(paused);
     }
+
+    public static void BeginSaveTickPause()
+    {
+        if (!Application.isPlaying || applicationQuitting)
+        {
+            return;
+        }
+
+        MapObjectTickManager manager = EnsureInstance();
+        manager.saveTickPauseDepth++;
+        manager.simulationTimeAccumulator = 0d;
+        manager.currentSimulationUps = 0f;
+        manager.simulationTicksLastFrame = 0;
+        manager.hasSimulationUpsSample = true;
+    }
+
+    public static void EndSaveTickPause()
+    {
+        if (instance == null || instance.saveTickPauseDepth <= 0)
+        {
+            return;
+        }
+
+        instance.saveTickPauseDepth--;
+        if (instance.saveTickPauseDepth == 0 && !instance.simulationPaused)
+        {
+            instance.simulationTimeAccumulator = 0d;
+            instance.ResetSimulationUpsMeasurement();
+        }
+    }
+
+    private bool IsSimulationTickPaused => simulationPaused || saveTickPauseDepth > 0;
 
     private void ApplySimulationPaused(bool paused)
     {
@@ -945,6 +978,9 @@ public static class MapObjectTickProfiler
 {
     private const double MicrosecondsPerSecond = 1000000.0;
     private const int DefaultSnapshotMaxRows = 64;
+    private const int FineDurationBucketCount = 256;
+    private const int CoarseDurationBucketCount = 256;
+    private const int DurationHistogramBucketCount = FineDurationBucketCount + CoarseDurationBucketCount;
 
     private static readonly Dictionary<ProfilerGroupKey, GroupStats> groupStatsByKey =
         new Dictionary<ProfilerGroupKey, GroupStats>(128);
@@ -1365,6 +1401,8 @@ public static class MapObjectTickProfiler
             double totalUs = stats.TotalStopwatchTicks * stopwatchTickToMicroseconds;
             double maxUs = stats.MaxStopwatchTicks * stopwatchTickToMicroseconds;
             double avgUs = stats.SampleCount > 0 ? totalUs / stats.SampleCount : 0.0;
+            double p95Us = ResolveDurationPercentileUs(stats, 0.95, maxUs);
+            double p99Us = ResolveDurationPercentileUs(stats, 0.99, maxUs);
 
             jsonBuilder.Append('{');
             AppendJsonProperty("rank", (i + 1).ToString(CultureInfo.InvariantCulture), false);
@@ -1376,6 +1414,8 @@ public static class MapObjectTickProfiler
             AppendJsonProperty("samples", stats.SampleCount.ToString(CultureInfo.InvariantCulture), true);
             AppendJsonProperty("totalUs", totalUs.ToString("0.###", CultureInfo.InvariantCulture), true);
             AppendJsonProperty("avgUs", avgUs.ToString("0.###", CultureInfo.InvariantCulture), true);
+            AppendJsonProperty("p95Us", p95Us.ToString("0.###", CultureInfo.InvariantCulture), true);
+            AppendJsonProperty("p99Us", p99Us.ToString("0.###", CultureInfo.InvariantCulture), true);
             AppendJsonProperty("maxUs", maxUs.ToString("0.###", CultureInfo.InvariantCulture), true);
             jsonBuilder.Append('}');
         }
@@ -1460,6 +1500,7 @@ public static class MapObjectTickProfiler
 
         stats.SampleCount++;
         stats.TotalStopwatchTicks += elapsedTicks;
+        stats.RecordDuration(elapsedTicks * stopwatchTickToMicroseconds);
         if (elapsedTicks > stats.MaxStopwatchTicks)
         {
             stats.MaxStopwatchTicks = elapsedTicks;
@@ -1477,7 +1518,43 @@ public static class MapObjectTickProfiler
         stats.SampleCount = 0L;
         stats.TotalStopwatchTicks = 0L;
         stats.MaxStopwatchTicks = 0L;
+        stats.ResetDurationHistogram();
         return stats;
+    }
+
+    private static double ResolveDurationPercentileUs(GroupStats stats, double percentile, double maxUs)
+    {
+        if (stats == null || stats.SampleCount <= 0 || stats.DurationHistogram == null)
+        {
+            return 0.0;
+        }
+
+        long targetCount = Math.Max(1L, (long)Math.Ceiling(stats.SampleCount * percentile));
+        long cumulativeCount = 0L;
+        int[] histogram = stats.DurationHistogram;
+        for (int i = 0; i < histogram.Length; i++)
+        {
+            cumulativeCount += histogram[i];
+            if (cumulativeCount < targetCount)
+            {
+                continue;
+            }
+
+            if (i < FineDurationBucketCount)
+            {
+                return Math.Min(maxUs, i + 1.0);
+            }
+
+            if (i >= DurationHistogramBucketCount - 1)
+            {
+                return maxUs;
+            }
+
+            int coarseIndex = i - FineDurationBucketCount;
+            return Math.Min(maxUs, FineDurationBucketCount + ((coarseIndex + 1) * 1000.0));
+        }
+
+        return maxUs;
     }
 
     private static void RecycleGroupStats(Dictionary<ProfilerGroupKey, GroupStats> groups)
@@ -1640,6 +1717,36 @@ public static class MapObjectTickProfiler
         public long SampleCount;
         public long TotalStopwatchTicks;
         public long MaxStopwatchTicks;
+        public int[] DurationHistogram;
+
+        public void RecordDuration(double microseconds)
+        {
+            DurationHistogram ??= new int[DurationHistogramBucketCount];
+            int bucketIndex;
+            if (microseconds < FineDurationBucketCount)
+            {
+                bucketIndex = Mathf.Clamp((int)microseconds, 0, FineDurationBucketCount - 1);
+            }
+            else
+            {
+                int coarseIndex = (int)((microseconds - FineDurationBucketCount) / 1000.0);
+                bucketIndex = FineDurationBucketCount
+                              + Mathf.Clamp(coarseIndex, 0, CoarseDurationBucketCount - 1);
+            }
+
+            if (DurationHistogram[bucketIndex] < int.MaxValue)
+            {
+                DurationHistogram[bucketIndex]++;
+            }
+        }
+
+        public void ResetDurationHistogram()
+        {
+            if (DurationHistogram != null)
+            {
+                Array.Clear(DurationHistogram, 0, DurationHistogram.Length);
+            }
+        }
     }
 
     private readonly struct ProfilerGroupKey : IEquatable<ProfilerGroupKey>

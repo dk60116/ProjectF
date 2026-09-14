@@ -8,6 +8,8 @@ namespace ProjectF.Fluids
         internal NativeArray<FluidNetworkRange> Networks;
         internal NativeArray<FluidPipeTopology> Pipes;
         internal NativeArray<FluidPipeState> States;
+        internal NativeArray<FluidPipeDisplaySource> DisplaySources;
+        internal NativeArray<int> NetworkDisplayItemIds;
         internal NativeArray<FluidPipeCoordinate> Coordinates;
         internal NativeArray<int> Edges;
         internal NativeArray<ulong> Checksums;
@@ -23,6 +25,8 @@ namespace ProjectF.Fluids
                 Networks = Allocate<FluidNetworkRange>(networkCount);
                 Pipes = Allocate<FluidPipeTopology>(pipeCount);
                 States = Allocate<FluidPipeState>(pipeCount);
+                DisplaySources = Allocate<FluidPipeDisplaySource>(pipeCount);
+                NetworkDisplayItemIds = Allocate<int>(networkCount);
                 Coordinates = Allocate<FluidPipeCoordinate>(coordinateCount);
                 Edges = Allocate<int>(edgeCount);
                 Checksums = Allocate<ulong>(networkCount);
@@ -44,11 +48,20 @@ namespace ProjectF.Fluids
             Checksums = Checksums
         };
 
+        internal FluidDisplayResolveJob DisplayResolveJob => new FluidDisplayResolveJob
+        {
+            Networks = Networks,
+            Sources = DisplaySources,
+            NetworkDisplayItemIds = NetworkDisplayItemIds
+        };
+
         public void Dispose()
         {
             Release(ref Networks);
             Release(ref Pipes);
             Release(ref States);
+            Release(ref DisplaySources);
+            Release(ref NetworkDisplayItemIds);
             Release(ref Coordinates);
             Release(ref Edges);
             Release(ref Checksums);

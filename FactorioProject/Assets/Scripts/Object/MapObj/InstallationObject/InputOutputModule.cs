@@ -152,7 +152,10 @@ public class InputOutputModule : InstallationObject,
         = new HashSet<InputOutputModule>();
     private static readonly List<InputOutputModule> runtimeWakeScratch
         = new List<InputOutputModule>(16);
+    private static readonly HashSet<InputOutputModule> runtimeWakeSet
+        = new HashSet<InputOutputModule>();
     private static int fluidTopologyVersion = 1;
+    internal static int FluidTopologyVersion => fluidTopologyVersion;
 
     private delegate bool RuntimeCoordinateValueCollector<T>(
         InputOutputModule module,
@@ -977,6 +980,26 @@ public class InputOutputModule : InstallationObject,
     private static void WakeRuntimeModulesAtCoordinate(Vector2Int coordinate, bool outputOnly)
     {
         runtimeWakeScratch.Clear();
+        runtimeWakeSet.Clear();
+        CollectRuntimeModulesAtCoordinate(coordinate, outputOnly);
+        WakeCollectedRuntimeModules();
+    }
+
+    internal static void WakeRuntimeModulesForChangedBlocks(IReadOnlyList<Block> changedBlocks)
+    {
+        runtimeWakeScratch.Clear();
+        runtimeWakeSet.Clear();
+        for (int i = 0; changedBlocks != null && i < changedBlocks.Count; i++)
+        {
+            Block block = changedBlocks[i];
+            if (block != null) CollectRuntimeModulesAtCoordinate(block.Coordinate, false);
+        }
+
+        WakeCollectedRuntimeModules();
+    }
+
+    private static void CollectRuntimeModulesAtCoordinate(Vector2Int coordinate, bool outputOnly)
+    {
         if (registeredRuntimeAreaCoordinates.TryGetValue(coordinate, out HashSet<InputOutputModule> modules)
             && modules != null
             && modules.Count > 0)
@@ -987,7 +1010,7 @@ public class InputOutputModule : InstallationObject,
                     || !module.gameObject.activeInHierarchy
                     || !module.ContainsRuntimeAreaCoordinate(coordinate)
                     || (outputOnly && !module.ContainsRuntimeOutputCoordinate(coordinate))
-                    || runtimeWakeScratch.Contains(module))
+                    || !runtimeWakeSet.Add(module))
                 {
                     continue;
                 }
@@ -995,13 +1018,17 @@ public class InputOutputModule : InstallationObject,
                 runtimeWakeScratch.Add(module);
             }
         }
+    }
 
+    private static void WakeCollectedRuntimeModules()
+    {
         for (int i = 0; i < runtimeWakeScratch.Count; i++)
         {
             runtimeWakeScratch[i]?.WakeRuntimeUpdate();
         }
 
         runtimeWakeScratch.Clear();
+        runtimeWakeSet.Clear();
     }
 
     public static void WakeElectricRuntimeModules()
@@ -1051,6 +1078,8 @@ public class InputOutputModule : InstallationObject,
         {
             fluidTopologyVersion = 1;
         }
+
+        Pipe.InvalidateFluidDisplayNetworkCache();
     }
 
     internal static void NotifyRuntimePipeTopologyChanged(IReadOnlyList<Vector2Int> coordinates)

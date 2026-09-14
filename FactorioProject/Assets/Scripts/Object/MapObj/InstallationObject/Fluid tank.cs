@@ -96,6 +96,10 @@ public class Fluidtank : InstallationObject, IMapObjectUpdateTick, IMapObjectUpd
         isFlatCarMountedPresentation = mounted;
         ApplyFlatCarMountedPipePresentationImmediate(mounted);
         RefreshPipeVisuals();
+        if (Application.isPlaying)
+        {
+            InputOutputModule.NotifyRuntimePipeTopologyChanged(RuntimeOccupiedCoordinates);
+        }
     }
 
     private void CacheDefaultPipeLocalPositions()

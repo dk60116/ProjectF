@@ -1039,6 +1039,9 @@ public sealed class RuntimeItemGiveReceiver : MonoBehaviour
             case ToolCommand.CreateAnimalCollisionStressTest:
                 request.Result = CreateAnimalCollisionStressTest(request.Count);
                 break;
+            case ToolCommand.CloneProfilingArea:
+                request.Result = CloneProfilingArea();
+                break;
             case ToolCommand.ForceAnimalThreat:
                 request.Result = ForceAnimalThreat(request.Count);
                 break;
@@ -1386,6 +1389,16 @@ public sealed class RuntimeItemGiveReceiver : MonoBehaviour
         if (parts.Length == 1 && string.Equals(parts[0], "status", StringComparison.OrdinalIgnoreCase))
         {
             command = ToolCommand.Status;
+            itemId = 0;
+            count = 0;
+            return true;
+        }
+
+        if (parts.Length == 1
+            && (string.Equals(parts[0], "profileclone", StringComparison.OrdinalIgnoreCase)
+                || string.Equals(parts[0], "clonearea", StringComparison.OrdinalIgnoreCase)))
+        {
+            command = ToolCommand.CloneProfilingArea;
             itemId = 0;
             count = 0;
             return true;
@@ -1757,7 +1770,7 @@ public sealed class RuntimeItemGiveReceiver : MonoBehaviour
 
         if (parts.Length < 2 || !string.Equals(parts[0], "give", StringComparison.OrdinalIgnoreCase))
         {
-            error = "usage: give <itemId> [count] | clear <belt|floor|io|mapobj> | animalstress [count] | animalcollision [count] | animalthreat [radius] | beltstress [count] | beltline [auto|itemId] [count] | beltitems [count] | beltcheck | save <slot> | load <slot> | reset [slot] [randomSeed] | seed <int> | saveslots | simulation pause <true|false> | time <status|set|scale|pause|next sunrise|check> | debug <showConveyorSlotDots|showSleepAwake|showBeltItemLine|showBeltPipeSplit|hideBeltItems|hideBelts|disableCameraCulling|showRailLine|showDirections|freeCamera|freeCameraPlayerCulling|showAnimalHerdAreas|animalAIPaused|mapObjectTickProfiling> <true|false> | camera size <minSize> <maxSize> | perf [maxRows] | ping | status | counts";
+            error = "usage: give <itemId> [count] | clear <belt|floor|io|mapobj> | profileclone | animalstress [count] | animalcollision [count] | animalthreat [radius] | beltstress [count] | beltline [auto|itemId] [count] | beltitems [count] | beltcheck | save <slot> | load <slot> | reset [slot] [randomSeed] | seed <int> | saveslots | simulation pause <true|false> | time <status|set|scale|pause|next sunrise|check> | debug <showConveyorSlotDots|showSleepAwake|showBeltItemLine|showBeltPipeSplit|hideBeltItems|hideBelts|disableCameraCulling|showRailLine|showDirections|freeCamera|freeCameraPlayerCulling|showAnimalHerdAreas|animalAIPaused|mapObjectTickProfiling> <true|false> | camera size <minSize> <maxSize> | perf [maxRows] | ping | status | counts";
             return false;
         }
 
@@ -2865,12 +2878,12 @@ public sealed class RuntimeItemGiveReceiver : MonoBehaviour
         }
 
         int normalizedSlotIndex = Mathf.Clamp(slotIndex, 0, SaveManager.SlotCount - 1);
-        bool saved = saveManager.SaveSlot(normalizedSlotIndex);
+        bool saveStarted = saveManager.SaveSlot(normalizedSlotIndex);
         InvalidateSaveSlotStatusCache();
         string extraTokens = BuildSaveSlotsExtraTokens(saveManager, true);
-        return saved
-            ? ToolResult.Success(0, 0, 0, 0, 0, 0, $"saved slot {normalizedSlotIndex + 1}", extraTokens)
-            : ToolResult.Error(0, 0, $"failed to save slot {normalizedSlotIndex + 1}", extraTokens);
+        return saveStarted
+            ? ToolResult.Success(0, 0, 0, 0, 0, 0, $"saving slot {normalizedSlotIndex + 1}", extraTokens)
+            : ToolResult.Error(0, 0, $"failed to start save slot {normalizedSlotIndex + 1}", extraTokens);
     }
 
     private ToolResult LoadSlot(int slotIndex)
@@ -3749,6 +3762,44 @@ public sealed class RuntimeItemGiveReceiver : MonoBehaviour
             ? $"animalstress spawned={created}"
             : $"animalstress incomplete spawned={created} requested={count}";
         return ToolResult.Success(-1, count, created, 0, 0, 0, message);
+    }
+
+    private static ToolResult CloneProfilingArea()
+    {
+        TerrainGenerator terrain = TerrainGenerator.ResolveActive();
+        if (terrain == null)
+        {
+            return ToolResult.Error(0, 0, "terrain not found");
+        }
+
+        if (!terrain.TryCloneInstalledAreaForProfiling(
+                out ProfilingAreaCloneReport report,
+                out string error))
+        {
+            return ToolResult.Error(0, 0, error);
+        }
+
+        string message =
+            $"profileclone queued installations={report.InstallationCount} offset={report.Offset.x},{report.Offset.y}";
+        string extraTokens =
+            $"cloneSourceMin={report.SourceMinimum.x},{report.SourceMinimum.y} "
+            + $"cloneSourceMax={report.SourceMaximum.x},{report.SourceMaximum.y} "
+            + $"cloneTargetMin={report.DestinationMinimum.x},{report.DestinationMinimum.y} "
+            + $"cloneOffset={report.Offset.x},{report.Offset.y} "
+            + $"cloneInstallations={report.InstallationCount} "
+            + $"cloneResources={report.ResourceCount} "
+            + $"cloneFloorStacks={report.FloorItemStackCount} "
+            + $"cloneBeltItems={report.ConveyorItemCount} "
+            + $"cloneTerrainTiles={report.TerrainTileCount}";
+        return ToolResult.Success(
+            0,
+            report.InstallationCount,
+            report.InstallationCount,
+            0,
+            0,
+            0,
+            message,
+            extraTokens);
     }
 
     private static ToolResult CreateAnimalCollisionStressTest(int count)
@@ -5265,6 +5316,7 @@ public sealed class RuntimeItemGiveReceiver : MonoBehaviour
         CreateConveyorStressTest,
         CreateAnimalStressTest,
         CreateAnimalCollisionStressTest,
+        CloneProfilingArea,
         ForceAnimalThreat,
         FillConveyorItems,
         ClearBeltItems,

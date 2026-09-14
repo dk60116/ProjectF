@@ -90,6 +90,7 @@ public class Pipe : InstallationObject
     private float cachedObjectInfoFluidTemperature;
     private float cachedObjectInfoPressureRate;
     private static float fluidDisplayNetworkCacheExpiresAt;
+    private static int fluidDisplayStateVersion = 1;
 
     public Pipe StraightVariantPrefab => straightVariantPrefab != null ? straightVariantPrefab : this;
     public Pipe CornerVariantPrefab => cornerVariantPrefab;
@@ -100,6 +101,7 @@ public class Pipe : InstallationObject
     public bool IsCornerVariant => variantKind == PipeVariantKind.Corner;
     public bool IsTeeVariant => variantKind == PipeVariantKind.Tee;
     public bool IsCrossVariant => variantKind == PipeVariantKind.Cross;
+    internal static int FluidDisplayStateVersion => fluidDisplayStateVersion;
 
     protected override void OnEnable()
     {
@@ -535,6 +537,14 @@ public class Pipe : InstallationObject
 
     private bool HasFixedFluidTankAtPipeNetworkCoordinate(Vector2Int coordinate)
     {
+        return TryGetFixedFluidTankAtPipeNetworkCoordinate(coordinate, out _);
+    }
+
+    internal bool TryGetFixedFluidTankAtPipeNetworkCoordinate(
+        Vector2Int coordinate,
+        out Fluidtank fixedTank)
+    {
+        fixedTank = null;
         objectInfoFluidStorageScratch.Clear();
         if (!CollectActiveInstallationsAtRuntimeGridCoordinate(
                 coordinate,
@@ -549,6 +559,7 @@ public class Pipe : InstallationObject
                 && candidate.isActiveAndEnabled
                 && !candidate.IsFlatCarMounted)
             {
+                fixedTank = candidate;
                 objectInfoFluidStorageScratch.Clear();
                 return true;
             }
@@ -1098,6 +1109,68 @@ public class Pipe : InstallationObject
             out _);
     }
 
+    internal bool TryGetDirectFluidDisplaySource(
+        PipeRuntimeRecord record,
+        out int fluidItemId,
+        out int priority)
+    {
+        fluidItemId = -1;
+        priority = 0;
+        if (record == null)
+        {
+            return false;
+        }
+
+        bool foundMobileStorageFallbackFluid = false;
+        int mobileStorageFallbackFluidItemId = -1;
+        float mobileStorageFallbackTemperatureCelsius = MapClimate.CurrentTemperatureCelsius;
+        IReadOnlyList<Vector2Int> coordinates = record.OccupiedCoordinates;
+        for (int coordinateIndex = 0; coordinateIndex < coordinates.Count; coordinateIndex++)
+        {
+            Vector2Int coordinate = coordinates[coordinateIndex];
+            if (TryGetAuthoritativeFluidInfoAtPipeNetworkCoordinate(
+                    coordinate,
+                    ref foundMobileStorageFallbackFluid,
+                    ref mobileStorageFallbackFluidItemId,
+                    ref mobileStorageFallbackTemperatureCelsius,
+                    out fluidItemId,
+                    out _))
+            {
+                priority = 2;
+                return true;
+            }
+
+            for (int directionIndex = 0; directionIndex < CardinalDirections.Length; directionIndex++)
+            {
+                Vector2Int direction = CardinalDirections[directionIndex];
+                if (!record.HasConnectionTowardsAt(coordinate, direction)
+                    || !TryGetAuthoritativeFluidInfoAtPipeNetworkCoordinate(
+                        coordinate + direction,
+                        ref foundMobileStorageFallbackFluid,
+                        ref mobileStorageFallbackFluidItemId,
+                        ref mobileStorageFallbackTemperatureCelsius,
+                        out fluidItemId,
+                        out _))
+                {
+                    continue;
+                }
+
+                priority = 2;
+                return true;
+            }
+        }
+
+        if (!foundMobileStorageFallbackFluid)
+        {
+            fluidItemId = -1;
+            return false;
+        }
+
+        fluidItemId = mobileStorageFallbackFluidItemId;
+        priority = 1;
+        return fluidItemId >= 0;
+    }
+
     private static void RefreshFluidDisplayNetworkCacheWindow()
     {
         float currentTime = Time.unscaledTime;
@@ -1114,6 +1187,14 @@ public class Pipe : InstallationObject
     {
         FluidDisplayNetworkItemCache.Clear();
         fluidDisplayNetworkCacheExpiresAt = 0f;
+        unchecked
+        {
+            fluidDisplayStateVersion++;
+            if (fluidDisplayStateVersion == 0)
+            {
+                fluidDisplayStateVersion = 1;
+            }
+        }
     }
 
     private MeshRenderer ResolveFluidDisplayRenderer()

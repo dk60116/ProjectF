@@ -118,13 +118,15 @@ public partial class Block
             hasOrigin = (state.GateBits & 16) != 0, autoPickupBlocked = (state.GateBits & 32) != 0,
             dropOrigin = new Vector3(state.DropX, state.DropY, state.DropZ), exitRadius = state.ExitRadius
         };
-        if (before != state.ItemId) IncrementConveyorLaneOccupancyVersion(lane);
-        MarkConveyorItemVisualDirty();
+        if (before != state.ItemId) IncrementConveyorLaneOccupancyVersion(lane, false);
     }
 
-    internal void NotifyBeltJobPublished()
+    internal void NotifyBeltJobPublished(bool wakeRuntimeDependents = true)
     {
-        NotifyRuntimeItemStackChanged();
+        // Several lanes in the same block can change during one native tick.
+        // Rebuild its visual/activity mirrors once after every lane is committed.
+        MarkConveyorItemVisualDirty();
+        NotifyRuntimeItemStackChanged(wakeRuntimeDependents);
         RefreshConveyorActivityRegistration(false, false);
     }
 

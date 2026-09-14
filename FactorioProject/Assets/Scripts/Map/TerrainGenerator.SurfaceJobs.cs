@@ -149,6 +149,7 @@ public partial class TerrainGenerator
     private sealed class TerrainSurfaceBuildJobState : IDisposable
     {
         private NativeArray<TerrainBiome> biomeGrid;
+        private NativeArray<Vector2Int> terrainSampleCoordinateGrid;
         private NativeArray<byte> blockedWaterGrid;
         private NativeArray<byte> oilGrid;
         private NativeArray<float> contourScores;
@@ -202,6 +203,7 @@ public partial class TerrainGenerator
             int estimatedTriangleCapacity = Math.Max(96, estimatedCellCount * 3);
 
             EnsureNativeArrayCapacity(ref biomeGrid, gridLength);
+            EnsureNativeArrayCapacity(ref terrainSampleCoordinateGrid, gridLength);
             EnsureNativeArrayCapacity(ref blockedWaterGrid, gridLength);
             EnsureNativeArrayCapacity(ref oilGrid, gridLength);
             EnsureNativeArrayCapacity(ref contourScores, scoreCount);
@@ -226,6 +228,7 @@ public partial class TerrainGenerator
             for (int i = 0; i < gridLength; i++)
             {
                 biomeGrid[i] = input.biomeGrid[i];
+                terrainSampleCoordinateGrid[i] = input.terrainSampleCoordinateGrid[i];
                 blockedWaterGrid[i] = input.blockedWaterGrid[i] ? (byte)1 : (byte)0;
                 oilGrid[i] = input.oilGrid[i] ? (byte)1 : (byte)0;
             }
@@ -233,6 +236,7 @@ public partial class TerrainGenerator
             job = new BuildTerrainSurfaceJob
             {
                 BiomeGrid = biomeGrid,
+                TerrainSampleCoordinateGrid = terrainSampleCoordinateGrid,
                 BlockedWaterGrid = blockedWaterGrid,
                 OilGrid = oilGrid,
                 ContourScores = contourScores,
@@ -436,6 +440,7 @@ public partial class TerrainGenerator
             DisposeWritableMeshData();
 
             DisposeIfCreated(ref biomeGrid);
+            DisposeIfCreated(ref terrainSampleCoordinateGrid);
             DisposeIfCreated(ref blockedWaterGrid);
             DisposeIfCreated(ref oilGrid);
             DisposeIfCreated(ref contourScores);
@@ -702,6 +707,7 @@ public partial class TerrainGenerator
     private struct BuildTerrainSurfaceJob : IJob
     {
         [ReadOnly] public NativeArray<TerrainBiome> BiomeGrid;
+        [ReadOnly] public NativeArray<Vector2Int> TerrainSampleCoordinateGrid;
         [ReadOnly] public NativeArray<byte> BlockedWaterGrid;
         [ReadOnly] public NativeArray<byte> OilGrid;
         public NativeArray<float> ContourScores;
@@ -1378,7 +1384,8 @@ public partial class TerrainGenerator
             }
 
             Vector2 delta = worldPosition - new Vector2(oilCoordinate.x, oilCoordinate.y);
-            float shapeRotation = GetGeneratedOilSurfaceRotationRadians(Seed, oilCoordinate);
+            Vector2Int sampleCoordinate = GetTerrainSampleCoordinate(oilCoordinate);
+            float shapeRotation = GetGeneratedOilSurfaceRotationRadians(Seed, sampleCoordinate);
             return EvaluateOilPitDepth(delta, shapeRotation);
         }
 
@@ -1409,6 +1416,7 @@ public partial class TerrainGenerator
 
         private Vector2 GetBiomeBlendJitter(Vector2Int worldCoordinate)
         {
+            worldCoordinate = GetTerrainSampleCoordinate(worldCoordinate);
             float jitterX = Mathf.Lerp(
                 -TerrainBlendJitter,
                 TerrainBlendJitter,
@@ -1418,6 +1426,21 @@ public partial class TerrainGenerator
                 TerrainBlendJitter,
                 Hash01WithSeed(Seed, worldCoordinate.x, worldCoordinate.y, 8819));
             return new Vector2(jitterX, jitterY);
+        }
+
+        private Vector2Int GetTerrainSampleCoordinate(Vector2Int worldCoordinate)
+        {
+            int localX = worldCoordinate.x - BiomeGridMinX;
+            int localY = worldCoordinate.y - BiomeGridMinY;
+            if (localX < 0
+                || localY < 0
+                || localX >= BiomeGridWidth
+                || localY >= BiomeGridHeight)
+            {
+                return worldCoordinate;
+            }
+
+            return TerrainSampleCoordinateGrid[localX + (localY * BiomeGridWidth)];
         }
 
         private bool IsSurfaceSampleInsideMapBounds(Vector2 sampleWorldPosition)

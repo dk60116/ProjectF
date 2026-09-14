@@ -44,7 +44,9 @@ public partial class TerrainGenerator
 
     internal void QueueBeltJobRestore(Block block, int lane, BeltSavedLane checkpoint)
     {
-        beltJobPending[(block, lane)] = new BeltPendingWrite { Replace = true, Restore = checkpoint };
+        SetBeltJobPending(
+            (block, lane),
+            new BeltPendingWrite { Replace = true, Restore = checkpoint });
     }
 
     private BeltLaneState RestoreBeltJobLane(int index, BeltSavedLane checkpoint)
@@ -65,6 +67,8 @@ public partial class TerrainGenerator
         if (snapshot == null) return;
         EnsureBeltJobs();
         beltJobPending.Clear();
+        beltJobPendingIndices.Clear();
+        beltJobUnindexedPending.Clear();
         beltSimulationTick = snapshot.Tick;
         foreach (BeltSavedLane checkpoint in snapshot.Lanes)
         {

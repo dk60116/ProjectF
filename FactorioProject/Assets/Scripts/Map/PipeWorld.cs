@@ -7,7 +7,7 @@ using UnityEngine.Rendering;
 /// Data-only runtime representation of an installed pipe. Pipe prefabs remain immutable
 /// definitions; installed pipes do not keep a scene GameObject or MonoBehaviour.
 /// </summary>
-public sealed class PipeRuntimeRecord
+public sealed class PipeRuntimeRecord : IVirtualRenderBatchOwner
 {
     private static readonly Vector2Int[] SplitDirections =
     {
@@ -18,6 +18,8 @@ public sealed class PipeRuntimeRecord
     };
     private readonly Vector2Int[] occupiedCoordinates;
     private readonly Bounds[] focusBounds;
+    private readonly List<VirtualRenderBatchEntry> fluidBatchEntries =
+        new List<VirtualRenderBatchEntry>(2);
 
     internal PipeRuntimeRecord(
         BlockStateStore.InstallationSaveState state,
@@ -59,6 +61,20 @@ public sealed class PipeRuntimeRecord
     public bool IsUnderground => Prototype is UndergroundPipe;
     internal PipeWorld.VisualPart[] VisualParts { get; }
     internal int DisplayedFluidItemId { get; set; } = -1;
+    internal List<VirtualRenderBatchEntry> FluidBatchEntries => fluidBatchEntries;
+    public int BatchEntryCount => fluidBatchEntries.Count;
+
+    public void UpdateBatchEntryMatrixIndex(int entryIndex, int matrixIndex)
+    {
+        if ((uint)entryIndex >= (uint)fluidBatchEntries.Count)
+        {
+            return;
+        }
+
+        VirtualRenderBatchEntry entry = fluidBatchEntries[entryIndex];
+        entry.MatrixIndex = matrixIndex;
+        fluidBatchEntries[entryIndex] = entry;
+    }
 
     public bool Covers(Vector2Int coordinate)
     {
@@ -396,7 +412,6 @@ public sealed class PipeWorld : MonoBehaviour
 
     private const string HostName = "PipeWorld";
     private const float BatchCellSize = 16f;
-    private const float FluidRefreshInterval = 0.2f;
     private static readonly int BaseColorShaderId = Shader.PropertyToID("_BaseColor");
     private static readonly int ColorShaderId = Shader.PropertyToID("_Color");
     private static readonly int EmissionColorShaderId = Shader.PropertyToID("_EmissionColor");
@@ -415,11 +430,12 @@ public sealed class PipeWorld : MonoBehaviour
     private readonly VirtualRenderBatchCollection bodyBatches = new VirtualRenderBatchCollection();
     private readonly VirtualRenderBatchCollection fluidBatches = new VirtualRenderBatchCollection();
     private readonly BatchOwner bodyOwner = new BatchOwner();
-    private readonly BatchOwner fluidOwner = new BatchOwner();
+    private readonly List<PipeRuntimeRecord> changedFluidRecords = new List<PipeRuntimeRecord>();
     private Camera mainCamera;
     private bool bodyDirty = true;
-    private bool fluidDirty = true;
-    private float nextFluidRefreshTime;
+    private int fluidInstanceCount;
+    private int fluidDisplayBatchUpdateCount;
+    private int lastFluidDisplayBatchUpdateCount;
     private float minimumFocusY;
     private float maximumFocusY;
     private bool focusHeightDirty = true;
@@ -430,7 +446,7 @@ public sealed class PipeWorld : MonoBehaviour
     public int SceneGameObjectCount => 1;
     public int SceneMonoBehaviourCount => 1;
     public int BodyInstanceCount => bodyOwner.Entries.Count;
-    public int FluidInstanceCount => fluidOwner.Entries.Count;
+    public int FluidInstanceCount => fluidInstanceCount;
     public int EstimatedDrawCallCount =>
         bodyBatches.EstimatedDrawCallCount + fluidBatches.EstimatedDrawCallCount;
     internal int TopologyVersion => topologyVersion;
@@ -448,6 +464,14 @@ public sealed class PipeWorld : MonoBehaviour
         MapObjectTickProfiler.AddRuntimeCounter("PipeWorld", "Entities", world.InstalledPipeCount);
         MapObjectTickProfiler.AddRuntimeCounter("PipeWorld", "BodyMatrices", world.BodyInstanceCount);
         MapObjectTickProfiler.AddRuntimeCounter("PipeWorld", "FluidMatrices", world.FluidInstanceCount);
+        MapObjectTickProfiler.AddRuntimeCounter(
+            "PipeWorld",
+            "FluidDisplayBatchUpdates",
+            world.fluidDisplayBatchUpdateCount);
+        MapObjectTickProfiler.AddRuntimeCounter(
+            "PipeWorld",
+            "LastFluidDisplayBatchUpdates",
+            world.lastFluidDisplayBatchUpdateCount);
         MapObjectTickProfiler.AddRuntimeCounter("PipeWorld", "EstimatedDrawCalls", world.EstimatedDrawCallCount);
     }
 
@@ -509,9 +533,7 @@ public sealed class PipeWorld : MonoBehaviour
         recordsByStorageKey.Add(storageKey, record);
         AddCoordinateMappings(record);
         InputOutputModule.NotifyRuntimePipeTopologyChanged(record.OccupiedCoordinates);
-        Pipe.InvalidateFluidDisplayNetworkCache();
         bodyDirty = true;
-        fluidDirty = true;
         focusHeightDirty = true;
         IncrementTopologyVersion();
         return record;
@@ -524,12 +546,11 @@ public sealed class PipeWorld : MonoBehaviour
             return false;
         }
 
+        RemoveFluidRecordBatches(record);
         recordsByStorageKey.Remove(storageKey);
         RemoveCoordinateMappings(record);
         InputOutputModule.NotifyRuntimePipeTopologyChanged(record.OccupiedCoordinates);
-        Pipe.InvalidateFluidDisplayNetworkCache();
         bodyDirty = true;
-        fluidDirty = true;
         focusHeightDirty = true;
         IncrementTopologyVersion();
         return true;
@@ -537,12 +558,17 @@ public sealed class PipeWorld : MonoBehaviour
 
     public void ClearRecords()
     {
+        fluidBatches.Clear();
+        foreach (PipeRuntimeRecord record in recordsByStorageKey.Values)
+        {
+            record?.FluidBatchEntries.Clear();
+        }
+
+        fluidInstanceCount = 0;
         recordsByStorageKey.Clear();
         recordsByCoordinate.Clear();
         InputOutputModule.NotifyRuntimePipeTopologyChanged(null);
-        Pipe.InvalidateFluidDisplayNetworkCache();
         bodyDirty = true;
-        fluidDirty = true;
         focusHeightDirty = true;
         IncrementTopologyVersion();
     }
@@ -736,16 +762,7 @@ public sealed class PipeWorld : MonoBehaviour
                 RebuildBodyBatches();
             }
 
-            if (Time.unscaledTime >= nextFluidRefreshTime)
-            {
-                nextFluidRefreshTime = Time.unscaledTime + FluidRefreshInterval;
-                RefreshFluidRecords();
-            }
-
-            if (fluidDirty)
-            {
-                RebuildFluidBatches();
-            }
+            RefreshFluidRecords();
         }
 
         if (mainCamera == null || !mainCamera.isActiveAndEnabled)
@@ -767,21 +784,7 @@ public sealed class PipeWorld : MonoBehaviour
         bodyOwner.Entries.Clear();
         foreach (PipeRuntimeRecord record in recordsByStorageKey.Values)
         {
-            AddRecordParts(record, false, bodyBatches, bodyOwner);
-        }
-    }
-
-    private void RebuildFluidBatches()
-    {
-        fluidDirty = false;
-        fluidBatches.Clear();
-        fluidOwner.Entries.Clear();
-        foreach (PipeRuntimeRecord record in recordsByStorageKey.Values)
-        {
-            if (record.DisplayedFluidItemId >= 0)
-            {
-                AddRecordParts(record, true, fluidBatches, fluidOwner);
-            }
+            AddRecordParts(record, false, bodyBatches, bodyOwner, bodyOwner.Entries);
         }
     }
 
@@ -789,7 +792,8 @@ public sealed class PipeWorld : MonoBehaviour
         PipeRuntimeRecord record,
         bool fluid,
         VirtualRenderBatchCollection batches,
-        BatchOwner owner)
+        IVirtualRenderBatchOwner owner,
+        List<VirtualRenderBatchEntry> ownerEntries)
     {
         if (record == null || !record.HasValidPrototype)
         {
@@ -835,27 +839,67 @@ public sealed class PipeWorld : MonoBehaviour
                     batchCellX: Mathf.FloorToInt(position.x / BatchCellSize),
                     batchCellZ: Mathf.FloorToInt(position.z / BatchCellSize),
                     renderingLayerMask: part.RenderingLayerMask);
-                batches.AddOwnedMatrix(owner, owner.Entries, key, matrix);
+                batches.AddOwnedMatrix(owner, ownerEntries, key, matrix);
             }
         }
     }
 
     private void RefreshFluidRecords()
     {
-        foreach (PipeRuntimeRecord record in recordsByStorageKey.Values)
+        TerrainGenerator terrain = TerrainGenerator.Active;
+        if (terrain == null
+            || !terrain.TryRefreshFluidJobDisplayStates(this, changedFluidRecords))
         {
-            int nextItemId = record.Prototype.TryGetFluidDisplayItemIdAtCoordinate(
-                record.AnchorCoordinate,
-                out int fluidItemId)
-                ? fluidItemId
-                : -1;
-            if (record.DisplayedFluidItemId == nextItemId)
-            {
-                continue;
-            }
+            lastFluidDisplayBatchUpdateCount = 0;
+            changedFluidRecords.Clear();
+            return;
+        }
 
-            record.DisplayedFluidItemId = nextItemId;
-            fluidDirty = true;
+        lastFluidDisplayBatchUpdateCount = changedFluidRecords.Count;
+        for (int i = 0; i < changedFluidRecords.Count; i++)
+        {
+            RefreshFluidRecordBatch(changedFluidRecords[i]);
+        }
+
+        fluidDisplayBatchUpdateCount += changedFluidRecords.Count;
+
+        changedFluidRecords.Clear();
+    }
+
+    private void RefreshFluidRecordBatch(PipeRuntimeRecord record)
+    {
+        if (record == null)
+        {
+            return;
+        }
+
+        RemoveFluidRecordBatches(record);
+        if (record.DisplayedFluidItemId < 0)
+        {
+            return;
+        }
+
+        AddRecordParts(
+            record,
+            true,
+            fluidBatches,
+            record,
+            record.FluidBatchEntries);
+        fluidInstanceCount += record.FluidBatchEntries.Count;
+    }
+
+    private void RemoveFluidRecordBatches(PipeRuntimeRecord record)
+    {
+        if (record == null || record.FluidBatchEntries.Count <= 0)
+        {
+            return;
+        }
+
+        fluidInstanceCount -= record.FluidBatchEntries.Count;
+        fluidBatches.RemoveOwnedEntries(record.FluidBatchEntries);
+        if (fluidInstanceCount < 0)
+        {
+            fluidInstanceCount = 0;
         }
     }
 

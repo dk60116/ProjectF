@@ -22,7 +22,8 @@ public partial class TerrainGenerator : MonoBehaviour
             return cachedBiome;
         }
 
-        TerrainBiome biome = ResolveTileBiome(worldCoordinate);
+        TerrainBiome biome = ResolveTileBiome(
+            ResolveProfilingCloneTerrainSource(worldCoordinate));
         tileBiomeCache[worldCoordinate] = biome;
         return biome;
     }
@@ -429,6 +430,7 @@ public partial class TerrainGenerator : MonoBehaviour
 
     private Vector2 GetBiomeBlendJitter(Vector2Int worldCoordinate)
     {
+        worldCoordinate = ResolveProfilingCloneTerrainSource(worldCoordinate);
         float jitterX = Mathf.Lerp(-terrainBlendJitter, terrainBlendJitter, Hash01(worldCoordinate.x, worldCoordinate.y, 8801));
         float jitterY = Mathf.Lerp(-terrainBlendJitter, terrainBlendJitter, Hash01(worldCoordinate.x, worldCoordinate.y, 8819));
         return new Vector2(jitterX, jitterY);

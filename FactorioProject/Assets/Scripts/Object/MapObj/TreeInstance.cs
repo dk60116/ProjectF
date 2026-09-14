@@ -292,11 +292,10 @@ namespace ProjectF.MapObjects
                 return false;
             }
 
-            Block owningBlock = OwningBlock;
             TerrainGenerator terrainGenerator = Handle.World.Terrain;
-            if (owningBlock == null
+            if (!TryGetOwningCoordinate(out Vector2Int owningCoordinate)
                 || terrainGenerator == null
-                || !terrainGenerator.IsFarmlandAt(owningBlock.Coordinate))
+                || !terrainGenerator.IsFarmlandAt(owningCoordinate))
             {
                 return false;
             }
@@ -304,7 +303,7 @@ namespace ProjectF.MapObjects
             float requestedAmount = RequiredGrowthFertilizerAmount
                                     - CurrentGrowthFertilizerAmount;
             if (!terrainGenerator.TryConsumeFarmlandFertilizer(
-                    owningBlock.Coordinate,
+                    owningCoordinate,
                     requestedAmount,
                     out float consumedAmount)
                 || consumedAmount <= GrowthRequirementEpsilon)

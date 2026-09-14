@@ -15,6 +15,8 @@ public sealed class RobotArmWorld : MonoBehaviour, IMapObjectUpdateTick, IMapObj
     private readonly Dictionary<Vector2Int, List<RobotArmInstance>> observers = new Dictionary<Vector2Int, List<RobotArmInstance>>();
     private readonly List<RobotArmInstance> ordered = new List<RobotArmInstance>();
     private readonly List<RobotArmInstance> planned = new List<RobotArmInstance>();
+    private readonly HashSet<RobotArmInstance> wakeBatchSet = new HashSet<RobotArmInstance>();
+    private readonly List<RobotArmInstance> wakeBatch = new List<RobotArmInstance>();
     private readonly Dictionary<Collider, RobotArmInstance> colliderOwners = new Dictionary<Collider, RobotArmInstance>();
     private readonly Dictionary<RobotArmInstance, SphereCollider> colliders = new Dictionary<RobotArmInstance, SphereCollider>();
     private readonly Dictionary<RobotArm, RobotArmRenderTemplate> templates = new Dictionary<RobotArm, RobotArmRenderTemplate>();
@@ -172,6 +174,25 @@ public sealed class RobotArmWorld : MonoBehaviour, IMapObjectUpdateTick, IMapObj
     {
         if (!observers.TryGetValue(coordinate, out var list)) return;
         for (int i = 0; i < list.Count; i++) list[i].WakeRuntimeSleep();
+    }
+    internal void Wake(IReadOnlyList<Block> changedBlocks)
+    {
+        wakeBatchSet.Clear();
+        wakeBatch.Clear();
+        for (int blockIndex = 0; changedBlocks != null && blockIndex < changedBlocks.Count; blockIndex++)
+        {
+            Block block = changedBlocks[blockIndex];
+            if (block == null || !observers.TryGetValue(block.Coordinate, out var list)) continue;
+            for (int observerIndex = 0; observerIndex < list.Count; observerIndex++)
+            {
+                RobotArmInstance arm = list[observerIndex];
+                if (arm != null && wakeBatchSet.Add(arm)) wakeBatch.Add(arm);
+            }
+        }
+
+        for (int i = 0; i < wakeBatch.Count; i++) wakeBatch[i].WakeRuntimeSleep();
+        wakeBatch.Clear();
+        wakeBatchSet.Clear();
     }
     private void Unobserve(Vector2Int coordinate, RobotArmInstance arm)
     {

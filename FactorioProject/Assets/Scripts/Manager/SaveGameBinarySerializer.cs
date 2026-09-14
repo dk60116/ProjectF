@@ -54,17 +54,8 @@ public static class SaveGameBinarySerializer
             return null;
         }
 
-        byte[] payload;
-        using (FileStream fileStream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read))
-        using (GZipStream gzipStream = new GZipStream(fileStream, CompressionMode.Decompress))
-        using (MemoryStream memoryStream = new MemoryStream())
-        {
-            gzipStream.CopyTo(memoryStream);
-            payload = memoryStream.ToArray();
-        }
-
-        if (TryReadFromPayload(
-                payload,
+        if (TryReadFromFile(
+                path,
                 SaveReadCompatibilityMode.Current,
                 out SaveGameData data,
                 out Exception currentException))
@@ -72,10 +63,10 @@ public static class SaveGameBinarySerializer
             return data;
         }
 
-        if (TryPeekSaveVersion(payload, out int version)
+        if (TryPeekSaveVersion(path, out int version)
             && version == 18
-            && TryReadFromPayload(
-                payload,
+            && TryReadFromFile(
+                path,
                 SaveReadCompatibilityMode.LegacyV18AutoDriveInstallationFields,
                 out data,
                 out _))
@@ -86,8 +77,8 @@ public static class SaveGameBinarySerializer
         throw currentException;
     }
 
-    private static bool TryReadFromPayload(
-        byte[] payload,
+    private static bool TryReadFromFile(
+        string path,
         SaveReadCompatibilityMode compatibilityMode,
         out SaveGameData data,
         out Exception exception)
@@ -97,8 +88,15 @@ public static class SaveGameBinarySerializer
 
         try
         {
-            using (MemoryStream memoryStream = new MemoryStream(payload, false))
-            using (BinaryReader reader = new BinaryReader(memoryStream, Encoding.UTF8))
+            using (FileStream fileStream = new FileStream(
+                       path,
+                       FileMode.Open,
+                       FileAccess.Read,
+                       FileShare.Read,
+                       65536,
+                       FileOptions.SequentialScan))
+            using (GZipStream gzipStream = new GZipStream(fileStream, CompressionMode.Decompress))
+            using (BinaryReader reader = new BinaryReader(gzipStream, Encoding.UTF8))
             {
                 string magic = reader.ReadString();
                 if (!string.Equals(magic, Magic, StringComparison.Ordinal))
@@ -113,10 +111,9 @@ public static class SaveGameBinarySerializer
                 }
 
                 data = ReadSaveGameData(reader, version, compatibilityMode);
-                if (memoryStream.Position != memoryStream.Length)
+                if (gzipStream.ReadByte() >= 0)
                 {
-                    throw new InvalidDataException(
-                        $"Save file contains {memoryStream.Length - memoryStream.Position} unread bytes.");
+                    throw new InvalidDataException("Save file contains unread bytes.");
                 }
 
                 return true;
@@ -130,18 +127,25 @@ public static class SaveGameBinarySerializer
         }
     }
 
-    private static bool TryPeekSaveVersion(byte[] payload, out int version)
+    private static bool TryPeekSaveVersion(string path, out int version)
     {
         version = 0;
-        if (payload == null || payload.Length <= 0)
+        if (string.IsNullOrEmpty(path) || !File.Exists(path))
         {
             return false;
         }
 
         try
         {
-            using (MemoryStream memoryStream = new MemoryStream(payload, false))
-            using (BinaryReader reader = new BinaryReader(memoryStream, Encoding.UTF8))
+            using (FileStream fileStream = new FileStream(
+                       path,
+                       FileMode.Open,
+                       FileAccess.Read,
+                       FileShare.Read,
+                       4096,
+                       FileOptions.SequentialScan))
+            using (GZipStream gzipStream = new GZipStream(fileStream, CompressionMode.Decompress))
+            using (BinaryReader reader = new BinaryReader(gzipStream, Encoding.UTF8))
             {
                 string magic = reader.ReadString();
                 if (!string.Equals(magic, Magic, StringComparison.Ordinal))
@@ -263,7 +267,7 @@ public static class SaveGameBinarySerializer
     {
         worldTime ??= new WorldTimeSaveData();
         writer.Write(worldTime.hasTime);
-        writer.Write(Mathf.Max(1, worldTime.dayIndex));
+        writer.Write(Math.Max(1, worldTime.dayIndex));
         writer.Write(worldTime.secondsOfDay);
     }
 
@@ -272,7 +276,7 @@ public static class SaveGameBinarySerializer
         return new WorldTimeSaveData
         {
             hasTime = reader.ReadBoolean(),
-            dayIndex = Mathf.Max(1, reader.ReadInt32()),
+            dayIndex = Math.Max(1, reader.ReadInt32()),
             secondsOfDay = reader.ReadDouble()
         };
     }
@@ -433,7 +437,7 @@ public static class SaveGameBinarySerializer
     {
         entry ??= new FarmlandFertilizerSaveEntry();
         WriteVector2Int(writer, entry.coordinate);
-        writer.Write(Mathf.Max(0f, entry.fertilizerEnergy));
+        writer.Write(Math.Max(0f, entry.fertilizerEnergy));
         writer.Write(Math.Max(0L, entry.fertilizerEnergyUnits));
     }
 
@@ -444,7 +448,7 @@ public static class SaveGameBinarySerializer
         FarmlandFertilizerSaveEntry entry = new FarmlandFertilizerSaveEntry
         {
             coordinate = ReadVector2Int(reader),
-            fertilizerEnergy = Mathf.Max(0f, reader.ReadSingle())
+            fertilizerEnergy = Math.Max(0f, reader.ReadSingle())
         };
         entry.fertilizerEnergyUnits = version >= 61
             ? Math.Max(0L, reader.ReadInt64())
@@ -569,10 +573,10 @@ public static class SaveGameBinarySerializer
             if (version < 54)
             {
                 float legacyRemaining = reader.ReadSingle();
-                int legacyMeals = Mathf.Clamp(reader.ReadInt32(), 0, 32);
+                int legacyMeals = Math.Clamp(reader.ReadInt32(), 0, 32);
                 for (int i = 0; i < legacyMeals; i++)
                 {
-                    entry.pendingDefecations.Add(Mathf.Clamp(
+                    entry.pendingDefecations.Add(Math.Clamp(
                         legacyRemaining, 0f, AnimalNeedsSettings.DefaultFoodDigestionSeconds));
                 }
             }
@@ -828,7 +832,7 @@ public static class SaveGameBinarySerializer
         }
         else
         {
-            state.storedFluidTemperatureCelsius = MapClimate.CurrentTemperatureCelsius;
+            state.storedFluidTemperatureCelsius = MapClimate.DefaultCurrentTemperatureCelsius;
         }
 
         if (version >= 13)
@@ -1149,7 +1153,7 @@ public static class SaveGameBinarySerializer
         writer.Write(entry.startLaneIndex);
         WriteVector2Int(writer, entry.endCoordinate);
         writer.Write(entry.endLaneIndex);
-        writer.Write(Mathf.Max(0, entry.itemCount));
+        writer.Write(Math.Max(0, entry.itemCount));
         WriteList(writer, entry.itemRuns, WriteConveyorItemTypeRunEntry);
     }
 
@@ -1172,7 +1176,7 @@ public static class SaveGameBinarySerializer
     {
         entry ??= new ConveyorItemTypeRunSaveEntry();
         writer.Write(entry.itemId);
-        writer.Write(Mathf.Max(0, entry.count));
+        writer.Write(Math.Max(0, entry.count));
     }
 
     private static ConveyorItemTypeRunSaveEntry ReadConveyorItemTypeRunEntry(BinaryReader reader)

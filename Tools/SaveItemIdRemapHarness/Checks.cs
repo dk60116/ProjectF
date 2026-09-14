@@ -16,7 +16,13 @@ public static class ItemDefinitionLookup
         => ResolveByStableName(definitions, name);
 }
 public class SaveItemCatalogEntry { public int itemId; public string itemName; }
-public class SaveGameData { public List<SaveItemCatalogEntry> itemCatalog = new(); public MapSaveData map = new(); public PlayerSaveData player = new(); }
+public class SaveGameData
+{
+    public List<SaveItemCatalogEntry> itemCatalog = new();
+    public MapSaveData map = new();
+    public PlayerSaveData player = new();
+    public ProjectF.Conveyors.BeltSimulationSnapshot beltSimulation;
+}
 public class MapSaveData
 {
     public List<ResourceSaveEntry> resources = new();
@@ -29,7 +35,11 @@ public class MapSaveData
 public class ResourceSaveEntry { public int itemId; }
 public class FloorObjectSaveEntry { public List<int> itemIds = new(); }
 public class PlantedResourceSaveEntry { public int seedItemId; }
-public class ConveyorItemLaneSaveState { public int itemId; }
+public class ConveyorItemLaneSaveState
+{
+    public int itemId;
+    public ProjectF.Conveyors.BeltSavedLane nativeBeltState;
+}
 public class ConveyorItemBlockSaveEntry { public List<ConveyorItemLaneSaveState> lanes = new(); }
 public class ConveyorItemTypeRunSaveEntry { public int itemId, count; }
 public class ConveyorItemRunSaveEntry { public List<ConveyorItemTypeRunSaveEntry> itemRuns = new(); }
@@ -51,7 +61,18 @@ public class RobotArm { public class TransferState { public int heldItemId; } }
 public class InputOutputModule
 {
     public struct PersistentInputItemAreaState { public int itemId; }
-    public class PersistentState { public int activeOutputItemId; public List<PersistentInputItemAreaState> inputItemAreas = new(); }
+    public class PersistentState
+    {
+        public int activeOutputItemId;
+        public int seedPlanterLoadedSeedItemId;
+        public List<PersistentInputItemAreaState> inputItemAreas = new();
+    }
+}
+namespace ProjectF.Conveyors
+{
+    public struct BeltLaneState { public int ItemId; }
+    public class BeltSavedLane { public BeltLaneState State; }
+    public class BeltSimulationSnapshot { public List<BeltSavedLane> Lanes = new(); }
 }
 public class PlayerSaveData
 {
@@ -77,10 +98,20 @@ static class Checks
             itemId = 27, itemName = "Sturdy wooden box", itemFilterMaskInitialized = true,
             itemFilterMaskWords = new() { 1UL << 51, 0 },
             robotArmState = new() { heldItemId = 51 },
-            inputOutputState = new() { activeOutputItemId = 51, inputItemAreas = new() { new() { itemId = 51 } } }
+            inputOutputState = new() {
+                activeOutputItemId = 51,
+                seedPlanterLoadedSeedItemId = 51,
+                inputItemAreas = new() { new() { itemId = 51 } }
+            }
         } });
         data.player.bagSlots.Add(new() { itemId = 51 });
         data.map.conveyorItemRuns.Add(new() { itemRuns = new() { new() { itemId = 51, count = 3 } } });
+        data.map.conveyorItems.Add(new() { lanes = new() {
+            new() { itemId = 51, nativeBeltState = new() { State = new() { ItemId = 51 } } }
+        } });
+        data.beltSimulation = new() { Lanes = new() {
+            new() { State = new() { ItemId = 51 } }
+        } };
         return data;
     }
     static void Verify(SaveGameData data, int expectedId)
@@ -90,10 +121,15 @@ static class Checks
         Require(data.map.floorObjects[0].itemIds[0] == -1000000001, "Stack sentinel must remain unchanged");
         Require(Allowed(state.itemFilterMaskWords, expectedId), "Box filter must retain the item's identity");
         Require(state.inputOutputState.activeOutputItemId == expectedId, "Pending machine output must retain its identity");
+        Require(state.inputOutputState.seedPlanterLoadedSeedItemId == expectedId, "Loaded seed must retain its identity");
         Require(state.inputOutputState.inputItemAreas[0].itemId == expectedId, "Next machine input must retain its identity");
         Require(state.robotArmState.heldItemId == expectedId, "Held arm item must retain its identity");
         Require(data.player.bagSlots[0].itemId == expectedId, "Inventory item must retain its identity");
         Require(data.map.conveyorItemRuns[0].itemRuns[0].itemId == expectedId, "Belt run item must retain its identity");
+        Require(data.map.conveyorItems[0].lanes[0].nativeBeltState.State.ItemId == expectedId,
+            "Native belt lane item must retain its identity");
+        Require(data.beltSimulation.Lanes[0].State.ItemId == expectedId,
+            "Belt simulation item must retain its identity");
     }
     static void Main()
     {

@@ -1466,7 +1466,6 @@ public partial class TerrainGenerator : MonoBehaviour,
             EnsureTrainStationIdentityAssigned(trainStation);
         }
 
-        resourceStateStore.SaveInstallation(installationObject);
         resourceStateStore.RegisterLiveInstallation(installationObject);
         if (installationObject is Trainstation || installationObject is Railload)
         {
@@ -1557,7 +1556,6 @@ public partial class TerrainGenerator : MonoBehaviour,
 
         CaptureAnimalSaveStates(mapSaveData);
         CaptureFarmlandSaveState(mapSaveData);
-        SaveGameConveyorItemBackfill.BackfillFromFloorObjects(mapSaveData);
         CaptureConveyorItemSaveRuns(mapSaveData);
         SaveGameConveyorItemBackfill.StripConveyorItemsFromFloorObjects(mapSaveData);
         return mapSaveData;
@@ -1568,6 +1566,7 @@ public partial class TerrainGenerator : MonoBehaviour,
         MapSaveData mapSaveData,
         Action onWorldReady = null)
     {
+        ClearProfilingCloneTerrainSourcesForRegularLoad();
         NormalizeTerrainBoundsSettings();
         NormalizeResourceGenerationSettings();
         NormalizeAnimalGenerationSettings();
@@ -1595,7 +1594,6 @@ public partial class TerrainGenerator : MonoBehaviour,
         ClearLoadedChunks(false, true);
         ApplyFarmlandSaveState(mapSaveData);
         ApplyAnimalSaveStates(mapSaveData);
-        SaveGameConveyorItemBackfill.BackfillFromFloorObjects(mapSaveData);
         resourceStateStore?.ApplySaveState(mapSaveData);
 
         BeginWorldFinalization(true, mapSaveData, onWorldReady);
@@ -1720,11 +1718,8 @@ public partial class TerrainGenerator : MonoBehaviour,
         }
 
         HashSet<InstallationObject> savedInstallations = new HashSet<InstallationObject>();
-        List<KeyValuePair<Vector2Int, Block>> loadedBlockSnapshot =
-            new List<KeyValuePair<Vector2Int, Block>>(loadedBlocks);
-        for (int i = 0; i < loadedBlockSnapshot.Count; i++)
+        foreach (KeyValuePair<Vector2Int, Block> pair in loadedBlocks)
         {
-            KeyValuePair<Vector2Int, Block> pair = loadedBlockSnapshot[i];
             Block block = pair.Value;
             if (block == null)
             {
@@ -1739,17 +1734,12 @@ public partial class TerrainGenerator : MonoBehaviour,
                 && !installationObject.ExcludeFromTerrainPersistence
                 && savedInstallations.Add(installationObject))
             {
-                resourceStateStore.SaveInstallation(installationObject);
                 resourceStateStore.RegisterLiveInstallation(installationObject);
             }
 
-            ResourceInstance resource = block.Resource;
-            if (resource != null)
-            {
-                resourceStateStore.Save(block.Coordinate, resource);
-            }
         }
 
+        SaveAllRuntimeResourcesToStore();
         SaveActiveRuntimeInstallations(savedInstallations, null);
     }
 
@@ -1777,7 +1767,6 @@ public partial class TerrainGenerator : MonoBehaviour,
             }
 
             savedInstallations?.Add(installationObject);
-            resourceStateStore.SaveInstallation(installationObject);
             resourceStateStore.RegisterLiveInstallation(installationObject);
         }
     }
@@ -1820,12 +1809,19 @@ public partial class TerrainGenerator : MonoBehaviour,
         }
 
         mapSaveData.conveyorItems ??= new List<ConveyorItemBlockSaveEntry>();
-
-        List<KeyValuePair<Vector2Int, Block>> loadedBlockSnapshot =
-            new List<KeyValuePair<Vector2Int, Block>>(loadedBlocks);
-        for (int i = 0; i < loadedBlockSnapshot.Count; i++)
+        Dictionary<Vector2Int, ConveyorItemBlockSaveEntry> entriesByCoordinate =
+            new Dictionary<Vector2Int, ConveyorItemBlockSaveEntry>(mapSaveData.conveyorItems.Count);
+        for (int i = 0; i < mapSaveData.conveyorItems.Count; i++)
         {
-            KeyValuePair<Vector2Int, Block> pair = loadedBlockSnapshot[i];
+            ConveyorItemBlockSaveEntry existingEntry = mapSaveData.conveyorItems[i];
+            if (existingEntry != null && !entriesByCoordinate.ContainsKey(existingEntry.coordinate))
+            {
+                entriesByCoordinate.Add(existingEntry.coordinate, existingEntry);
+            }
+        }
+
+        foreach (KeyValuePair<Vector2Int, Block> pair in loadedBlocks)
+        {
             Block block = pair.Value;
             if (block == null || !block.IsRuntimeConveyor)
             {
@@ -1837,25 +1833,31 @@ public partial class TerrainGenerator : MonoBehaviour,
                 coordinate = pair.Key
             };
             block.CaptureConveyorItemSaveStates(entry.lanes);
-            int existingEntryIndex = SaveGameConveyorItemBackfill.FindConveyorItemEntryIndex(
-                mapSaveData.conveyorItems,
-                pair.Key);
+            entriesByCoordinate.TryGetValue(pair.Key, out ConveyorItemBlockSaveEntry existingEntry);
             if (entry.lanes.Count > 0)
             {
-                if (existingEntryIndex >= 0)
+                if (existingEntry != null)
                 {
-                    mapSaveData.conveyorItems[existingEntryIndex] = entry;
+                    existingEntry.lanes = entry.lanes;
                 }
                 else
                 {
                     mapSaveData.conveyorItems.Add(entry);
+                    entriesByCoordinate.Add(pair.Key, entry);
                 }
             }
-            else if (existingEntryIndex >= 0)
+            else if (existingEntry != null)
             {
-                mapSaveData.conveyorItems.RemoveAt(existingEntryIndex);
+                existingEntry.lanes?.Clear();
             }
         }
+
+        mapSaveData.conveyorItems.RemoveAll(IsEmptyConveyorItemSaveEntry);
+    }
+
+    private static bool IsEmptyConveyorItemSaveEntry(ConveyorItemBlockSaveEntry entry)
+    {
+        return entry == null || entry.lanes == null || entry.lanes.Count <= 0;
     }
 
     private void ApplyLoadedConveyorItemSaveStates(MapSaveData mapSaveData)
@@ -2310,6 +2312,7 @@ public partial class TerrainGenerator : MonoBehaviour,
 
     public void Generate()
     {
+        ClearProfilingCloneTerrainSources();
         BeginWorldFinalization(false, null, null);
         NormalizeTerrainBoundsSettings();
         NormalizeResourceGenerationSettings();
@@ -2389,6 +2392,7 @@ public partial class TerrainGenerator : MonoBehaviour,
 
     public void SetSeed(int value)
     {
+        ClearProfilingCloneTerrainSources();
         seed = value;
         hasSeedInitialized = true;
         InvalidateTerrainGenerationCaches();
@@ -2627,6 +2631,7 @@ public partial class TerrainGenerator : MonoBehaviour,
         if (loadedChunks.TryGetValue(chunkCoordinate, out ChunkRuntimeData existingChunk))
         {
             Block[] existingBlocks = GetChunkRuntimeBlocks(chunkCoordinate);
+            SaveAndReleaseDetachedResourcesInChunk(chunkCoordinate);
             SaveChunkResourceStates(existingBlocks);
             // Rebuilding a terrain view preserves live animal state and deterministic IDs.
             RemoveChunkBlocksFromLookup(existingBlocks);
@@ -3132,6 +3137,7 @@ public partial class TerrainGenerator : MonoBehaviour,
             SaveChunkResourceStates(loadedBlockSnapshot);
         }
 
+        SaveAndReleaseAllDetachedResources(preserveRuntimeState);
         RemoveChunkBlocksFromLookup(loadedBlockSnapshot);
         ReleaseChunkBlockRuntimeProxies(loadedBlockSnapshot);
         DestroyAllTerrainAnimalViews();
@@ -3274,6 +3280,10 @@ public partial class TerrainGenerator : MonoBehaviour,
         }
 
         RefreshFarmlandVisual(block);
+        if (ResourceInstance.TryGetActiveResourceAtCoordinate(this, coordinate, out ResourceInstance resource))
+        {
+            block.SetMapObject(resource);
+        }
         return true;
     }
 
@@ -3289,15 +3299,25 @@ public partial class TerrainGenerator : MonoBehaviour,
     {
         using (ReleaseEmptyChunkRuntimeProxyMarker.Auto())
         {
-            if (block == null || !block.CanReleaseEmptyRuntimeProxy)
+            if (block == null)
+            {
+                return;
+            }
+
+            bool preserveResource = block.CanReleaseResourceOnlyRuntimeProxy;
+            if (!preserveResource && !block.CanReleaseEmptyRuntimeProxy)
             {
                 return;
             }
 
             BlockHandle handle = block.RuntimeHandle;
             loadedBlocks.Remove(block.Coordinate);
-            ReleaseFarmlandVisual(block.Coordinate);
-            block.PrepareForRuntimeRelease();
+            if (!preserveResource)
+            {
+                ReleaseFarmlandVisual(block.Coordinate);
+            }
+
+            block.PrepareForRuntimeRelease(!preserveResource);
             if (block.HasRuntimeSimulationState)
             {
                 loadedBlocks.RemoveRuntimeSimulationState(handle);

@@ -129,7 +129,7 @@ internal sealed class ProfilerForm : Form
         };
         ConfigureTextInput(hostTextBox, DefaultHost, 130);
         ConfigureNumberInput(portInput, 1, 65535, DefaultPort, 76);
-        ConfigureNumberInput(intervalInput, 100, 10000, 1000, 86);
+        ConfigureNumberInput(intervalInput, 1000, 60000, 10000, 86);
         ConfigureNumberInput(maxRowsInput, 1, 256, 64, 70);
         intervalInput.Increment = 100;
         intervalInput.ValueChanged += (_, _) => pollTimer.Interval = Decimal.ToInt32(intervalInput.Value);
@@ -160,7 +160,7 @@ internal sealed class ProfilerForm : Form
 
         AddLabeledControl(controlPanel, "Host", hostTextBox);
         AddLabeledControl(controlPanel, "Port", portInput);
-        AddLabeledControl(controlPanel, "Interval ms", intervalInput);
+        AddLabeledControl(controlPanel, "Window ms", intervalInput);
         AddLabeledControl(controlPanel, "Rows", maxRowsInput);
         controlPanel.Controls.Add(enableProfilingCheckBox);
         controlPanel.Controls.Add(refreshButton);
@@ -322,6 +322,8 @@ internal sealed class ProfilerForm : Form
         rowsGrid.Columns.Add(CreateTextColumn("FrameMs", "ms/frame", 11));
         rowsGrid.Columns.Add(CreateTextColumn("TotalMs", "Total ms", 11));
         rowsGrid.Columns.Add(CreateTextColumn("AvgUs", "Avg us", 11));
+        rowsGrid.Columns.Add(CreateTextColumn("P95Us", "P95 us", 11));
+        rowsGrid.Columns.Add(CreateTextColumn("P99Us", "P99 us", 11));
         rowsGrid.Columns.Add(CreateTextColumn("MaxUs", "Max us", 11));
         rowsGrid.CellClick += (_, e) =>
         {
@@ -778,6 +780,8 @@ internal sealed class ProfilerForm : Form
                     RowFrameMilliseconds(row),
                     (row.TotalUs / 1000.0).ToString("0.###", CultureInfo.InvariantCulture),
                     row.AvgUs.ToString("0.#", CultureInfo.InvariantCulture),
+                    row.P95Us.ToString("0.#", CultureInfo.InvariantCulture),
+                    row.P99Us.ToString("0.#", CultureInfo.InvariantCulture),
                     row.MaxUs.ToString("0.#", CultureInfo.InvariantCulture));
                 DataGridViewRow gridRow = rowsGrid.Rows[rowIndex];
                 gridRow.Tag = isBeltTickGroup ? BeltTickGroupRowTag
@@ -813,8 +817,8 @@ internal sealed class ProfilerForm : Form
         int tickCount = 0, tickFirstIndex = -1, tickActiveCount = 0;
         int renderCount = 0, renderFirstIndex = -1, renderActiveCount = 0;
         long tickSamples = 0, renderSamples = 0;
-        double tickTotalUs = 0.0, tickMaxUs = 0.0;
-        double renderTotalUs = 0.0, renderMaxUs = 0.0;
+        double tickTotalUs = 0.0, tickP95Us = 0.0, tickP99Us = 0.0, tickMaxUs = 0.0;
+        double renderTotalUs = 0.0, renderP95Us = 0.0, renderP99Us = 0.0, renderMaxUs = 0.0;
         for (int i = 0; i < profileRows.Count; i++)
         {
             ProfileRow row = profileRows[i];
@@ -826,6 +830,8 @@ internal sealed class ProfilerForm : Form
                     tickActiveCount += row.ActiveCount;
                     tickSamples += row.Samples;
                     tickTotalUs += row.TotalUs;
+                    tickP95Us = Math.Max(tickP95Us, row.P95Us);
+                    tickP99Us = Math.Max(tickP99Us, row.P99Us);
                     tickMaxUs = Math.Max(tickMaxUs, row.MaxUs);
                     break;
                 case BeltRowGroup.Rendering:
@@ -834,6 +840,8 @@ internal sealed class ProfilerForm : Form
                     renderActiveCount += row.ActiveCount;
                     renderSamples += row.Samples;
                     renderTotalUs += row.TotalUs;
+                    renderP95Us = Math.Max(renderP95Us, row.P95Us);
+                    renderP99Us = Math.Max(renderP99Us, row.P99Us);
                     renderMaxUs = Math.Max(renderMaxUs, row.MaxUs);
                     break;
             }
@@ -843,13 +851,13 @@ internal sealed class ProfilerForm : Form
         {
             beltTickGroupDisplayRow = CreateBeltGroupRow(
                 profileRows[tickFirstIndex].Rank, "Belt Tick", "Belt Tick Calculation",
-                tickCount, tickActiveCount, tickSamples, tickTotalUs, tickMaxUs);
+                tickCount, tickActiveCount, tickSamples, tickTotalUs, tickP95Us, tickP99Us, tickMaxUs);
         }
         if (renderCount > 0)
         {
             beltRenderGroupDisplayRow = CreateBeltGroupRow(
                 profileRows[renderFirstIndex].Rank, "Belt Render", "Belt Rendering",
-                renderCount, renderActiveCount, renderSamples, renderTotalUs, renderMaxUs);
+                renderCount, renderActiveCount, renderSamples, renderTotalUs, renderP95Us, renderP99Us, renderMaxUs);
         }
 
         bool tickGroupAdded = false, renderGroupAdded = false;
@@ -895,6 +903,8 @@ internal sealed class ProfilerForm : Form
         int activeCount,
         long samples,
         double totalUs,
+        double p95Us,
+        double p99Us,
         double maxUs)
     {
         return new ProfileRow
@@ -908,6 +918,8 @@ internal sealed class ProfilerForm : Form
             Samples = samples,
             TotalUs = totalUs,
             AvgUs = samples > 0 ? totalUs / samples : 0.0,
+            P95Us = p95Us,
+            P99Us = p99Us,
             MaxUs = maxUs
         };
     }
@@ -1761,7 +1773,7 @@ internal sealed class ProfilerForm : Form
 
         builder.AppendLine();
         builder.AppendLine("Rows");
-        builder.AppendLine("Rank\tKind\tItem\tType\tItemId\tActive\tSamples\tTotalMs\tAvgUs\tMaxUs\tMsPerRenderFrame");
+        builder.AppendLine("Rank\tKind\tItem\tType\tItemId\tActive\tSamples\tTotalMs\tAvgUs\tP95Us\tP99Us\tMaxUs\tMsPerRenderFrame");
         for (int i = 0; i < profileRows.Count; i++)
         {
             ProfileRow row = profileRows[i];
@@ -1774,6 +1786,8 @@ internal sealed class ProfilerForm : Form
             builder.Append(row.Samples.ToString(CultureInfo.InvariantCulture)).Append('\t');
             builder.Append((row.TotalUs / 1000.0).ToString("0.###", CultureInfo.InvariantCulture)).Append('\t');
             builder.Append(row.AvgUs.ToString("0.###", CultureInfo.InvariantCulture)).Append('\t');
+            builder.Append(row.P95Us.ToString("0.###", CultureInfo.InvariantCulture)).Append('\t');
+            builder.Append(row.P99Us.ToString("0.###", CultureInfo.InvariantCulture)).Append('\t');
             builder.Append(row.MaxUs.ToString("0.###", CultureInfo.InvariantCulture)).Append('\t');
             builder.AppendLine(snapshot.RenderFrames > 0
                 ? (row.TotalUs / 1000.0 / snapshot.RenderFrames.Value).ToString("0.###", CultureInfo.InvariantCulture)
@@ -2592,6 +2606,12 @@ internal sealed class ProfileRow
 
     [JsonPropertyName("avgUs")]
     public double AvgUs { get; set; }
+
+    [JsonPropertyName("p95Us")]
+    public double P95Us { get; set; }
+
+    [JsonPropertyName("p99Us")]
+    public double P99Us { get; set; }
 
     [JsonPropertyName("maxUs")]
     public double MaxUs { get; set; }
