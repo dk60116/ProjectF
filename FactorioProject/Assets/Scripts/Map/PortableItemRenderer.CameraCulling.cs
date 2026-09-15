@@ -52,7 +52,7 @@ public sealed partial class PortableItemRenderer
             foreach (BlockHandle handle in chunk.Blocks)
             {
                 if (!TryResolveConveyorBlock(handle, out Block block)
-                    || (itemCameraCulling.IsLayerVisible(block.gameObject.layer)
+                    || (itemCameraCulling.IsLayerVisible(block.RuntimeLayer)
                         && itemCameraCulling.Intersects(CreateDynamicVirtualConveyorBlockCullBounds(block))))
                     visibleDeferredConveyorBlocks.Add(handle);
             }

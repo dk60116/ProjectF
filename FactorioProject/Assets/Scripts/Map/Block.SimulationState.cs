@@ -219,10 +219,9 @@ internal sealed class BlockRuntimeSimulationState
 }
 
 /// <summary>
-/// Compatibility facade for cell interaction and rendering. Authoritative belt
+/// Managed entity facade for cell interaction and rendering. Authoritative belt
 /// lane identity, retry state and data-only motion are owned by BlockDataStore.
-/// Keeping those values outside the Component prevents a rendered item view from
-/// becoming the source of truth for whether a belt lane contains an item.
+/// Presentation objects never become the source of truth for lane contents.
 /// </summary>
 public partial class Block
 {
@@ -248,9 +247,8 @@ public partial class Block
                 return runtimeSimulationState;
             }
 
-            // Standalone/editor-created Block components do not have a store
-            // handle. Preserve their old behaviour without making them part of
-            // the runtime world's authoritative state.
+            // Standalone diagnostics do not have a store handle. Keep isolated
+            // state without making them part of the runtime world.
             runtimeSimulationState = new BlockRuntimeSimulationState();
             return runtimeSimulationState;
         }
@@ -289,9 +287,8 @@ public partial class Block
         return elapsedTime;
     }
 
-    // These forwarding properties deliberately preserve the existing conveyor
-    // implementation while moving ownership out of the MonoBehaviour. They are
-    // temporary compatibility boundaries for the later handle-only simulation.
+    // These forwarding properties preserve the conveyor API while all mutable
+    // simulation state stays in the handle-owned ECS component.
     private List<int> conveyorItemIds => SimulationState.ConveyorItemIds;
     private List<int> conveyorItemMoveFrames => SimulationState.ConveyorItemMoveFrames;
     private List<ConveyorDataMotionState> conveyorItemMotionStates =>

@@ -36,7 +36,12 @@ namespace ProjectF.Diagnostics
             SceneManager.MoveGameObjectToScene(fixture, scene);
             try
             {
-                fixture.AddComponent<Block>().ValidateConveyorMotionTransfer(fixture.AddComponent<PortableObject>());
+                new Block().ValidateConveyorMotionTransfer(PortableObject.Create(
+                    fixture.transform.position,
+                    fixture.transform.rotation,
+                    fixture.transform.lossyScale,
+                    fixture.layer,
+                    fixture.name));
             }
             finally
             {

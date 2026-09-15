@@ -1,4 +1,5 @@
 using System;
+using System.Collections;
 using System.Collections.Generic;
 using UnityEngine;
 #if UNITY_EDITOR
@@ -412,7 +413,7 @@ public partial class TerrainGenerator : MonoBehaviour
     private bool CanSpawnAnimalOnBlock(Block block)
     {
         return block != null
-               && block.gameObject.activeInHierarchy
+               && block.IsRuntimeActive
                && block.MapObject == null
                && GetTileBiome(block.Coordinate) != TerrainBiome.Water;
     }
@@ -425,7 +426,7 @@ public partial class TerrainGenerator : MonoBehaviour
         }
 
         return !loadedBlocks.TryGetValue(coordinate, out Block block)
-               || (block != null && block.gameObject.activeInHierarchy && block.MapObject == null);
+               || (block != null && block.IsRuntimeActive && block.MapObject == null);
     }
 
     private bool TryTakeAnimalSpawnCoordinate(
@@ -696,12 +697,41 @@ public partial class TerrainGenerator : MonoBehaviour
 
     private void CaptureAnimalSaveStates(MapSaveData mapSaveData)
     {
-        if (mapSaveData == null)
+        IEnumerator capture = CaptureAnimalSaveStatesIncremental(mapSaveData, int.MaxValue);
+        while (capture.MoveNext()) { }
+    }
+
+    private IEnumerator CaptureAnimalSaveStatesIncremental(
+        MapSaveData mapSaveData,
+        int entriesPerFrame)
+    {
+        if (mapSaveData == null) yield break;
+
+        entriesPerFrame = Mathf.Max(1, entriesPerFrame);
+        int processed = 0;
+        // The shared scratch list is used by runtime queries too. Keep a stable local
+        // snapshot because this iterator yields while rendering and UI continue.
+        List<TerrainAnimalInstance> instances =
+            new List<TerrainAnimalInstance>(CollectTerrainAnimalInstances());
+        for (int i = 0; i < instances.Count; i++)
         {
-            return;
+            TerrainAnimalInstance instance = instances[i];
+            if (instance != null
+                && instance.gameObject.activeSelf
+                && instance.HasInteracted
+                && instance.DeterministicId != 0L)
+            {
+                Animal animal = instance.GetComponentInChildren<Animal>(true);
+                SetAnimalSaveOverride(CreateAnimalSaveEntry(instance, animal, false));
+            }
+
+            if (++processed >= entriesPerFrame)
+            {
+                processed = 0;
+                yield return null;
+            }
         }
 
-        RefreshAnimalOverridesFromRuntime();
         if (mapSaveData.animals == null)
         {
             mapSaveData.animals = new List<AnimalSaveEntry>();
@@ -711,6 +741,11 @@ public partial class TerrainGenerator : MonoBehaviour
         foreach (KeyValuePair<long, AnimalSaveEntry> pair in animalSaveOverrides)
         {
             mapSaveData.animals.Add(CloneAnimalSaveEntry(pair.Value));
+            if (++processed >= entriesPerFrame)
+            {
+                processed = 0;
+                yield return null;
+            }
         }
     }
 

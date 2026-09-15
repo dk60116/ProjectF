@@ -6,11 +6,24 @@ using UnityEngine.Rendering;
 /// <summary>One renderer on the placement controller; markers are data, never GameObjects.</summary>
 public sealed class AreaMarkerRenderer : MonoBehaviour
 {
+    public static AreaMarkerRenderer Current { get; private set; }
     private const int ChunkSize = 32;
     private static readonly ProfilerMarker UpdateMarker = new ProfilerMarker("AreaMarker.Visibility");
     private static readonly ProfilerMarker RebuildMarker = new ProfilerMarker("AreaMarker.RebuildMeshes");
     private static readonly ProfilerMarker DrawMarker = new ProfilerMarker("AreaMarker.SubmitBatches");
     private readonly List<InputOutputModuleAreaMarkerController> owners = new List<InputOutputModuleAreaMarkerController>();
+    private readonly Dictionary<InputOutputModuleAreaMarkerController, OwnerRegistration> ownerRegistrations =
+        new Dictionary<InputOutputModuleAreaMarkerController, OwnerRegistration>();
+    private readonly Dictionary<Vector2Int, List<InputOutputModuleAreaMarkerController>> ownersByCell =
+        new Dictionary<Vector2Int, List<InputOutputModuleAreaMarkerController>>();
+    private readonly HashSet<InputOutputModuleAreaMarkerController> continuousVisibilityOwners =
+        new HashSet<InputOutputModuleAreaMarkerController>();
+    private readonly HashSet<InputOutputModuleAreaMarkerController> visibleOwners =
+        new HashSet<InputOutputModuleAreaMarkerController>();
+    private readonly HashSet<InputOutputModuleAreaMarkerController> visibilityCandidateSet =
+        new HashSet<InputOutputModuleAreaMarkerController>();
+    private readonly List<InputOutputModuleAreaMarkerController> visibilityCandidates =
+        new List<InputOutputModuleAreaMarkerController>();
     private readonly Dictionary<Sprite, SpriteGeometry> sprites = new Dictionary<Sprite, SpriteGeometry>();
     private readonly Dictionary<MaterialKey, Material> materials = new Dictionary<MaterialKey, Material>();
     private readonly Dictionary<BatchKey, MarkerBatch> batches = new Dictionary<BatchKey, MarkerBatch>();
@@ -20,22 +33,82 @@ public sealed class AreaMarkerRenderer : MonoBehaviour
     private bool staticDirty = true;
     private bool movingDirty = true;
     private RobotArmWorld lastArmWorld;
+    private int registeredOwnerMarkerCount;
+    private int visibleOwnerMarkerCount;
+    private float maximumIndexedVisibleRange;
+    private bool maximumIndexedVisibleRangeDirty;
 
     public int RegisteredMarkerCount { get; private set; }
     public int VisibleMarkerCount { get; private set; }
+    public int VisibilityCandidateOwnerCount { get; private set; }
+    public int IndexedOwnerCellCount => ownersByCell.Count;
     public int BatchCount => batches.Count;
     public int MeshRebuildCount { get; private set; }
 
+    private void Awake()
+    {
+        Current = this;
+    }
+
+    public static void AppendProfilerCounters()
+    {
+        AreaMarkerRenderer renderer = Current;
+        MapObjectTickProfiler.AddRuntimeCounter("AreaMarker", "RegisteredMarkers",
+            renderer != null ? renderer.RegisteredMarkerCount : 0);
+        MapObjectTickProfiler.AddRuntimeCounter("AreaMarker", "VisibleMarkers",
+            renderer != null ? renderer.VisibleMarkerCount : 0);
+        MapObjectTickProfiler.AddRuntimeCounter("AreaMarker", "VisibilityCandidateOwners",
+            renderer != null ? renderer.VisibilityCandidateOwnerCount : 0);
+        MapObjectTickProfiler.AddRuntimeCounter("AreaMarker", "IndexedOwnerCells",
+            renderer != null ? renderer.IndexedOwnerCellCount : 0);
+        MapObjectTickProfiler.AddRuntimeCounter("AreaMarker", "Batches",
+            renderer != null ? renderer.BatchCount : 0);
+    }
+
     internal void Register(InputOutputModuleAreaMarkerController owner)
     {
-        if (owners.Contains(owner)) return;
+        if (owner == null || ownerRegistrations.ContainsKey(owner)) return;
         owners.Add(owner);
+        OwnerRegistration registration = new OwnerRegistration(
+            GetChunk(owner.VisibilityWorldPosition),
+            owner.MarkerCount,
+            owner.UsesMovingBatches);
+        ownerRegistrations.Add(owner, registration);
+        registeredOwnerMarkerCount += registration.MarkerCount;
+        if (!registration.Moving)
+        {
+            AddOwnerToCell(registration.Cell, owner);
+            maximumIndexedVisibleRange = Mathf.Max(maximumIndexedVisibleRange, owner.VisibleRange);
+        }
+        if (owner.RequiresContinuousVisibilityRefresh) continuousVisibilityOwners.Add(owner);
         MarkDirty(owner.UsesMovingBatches);
     }
 
     internal void Unregister(InputOutputModuleAreaMarkerController owner)
     {
-        if (owners.Remove(owner)) MarkDirty(owner.UsesMovingBatches);
+        if (ReferenceEquals(owner, null)
+            || !ownerRegistrations.TryGetValue(owner, out OwnerRegistration registration)) return;
+        owners.Remove(owner);
+        ownerRegistrations.Remove(owner);
+        continuousVisibilityOwners.Remove(owner);
+        visibilityCandidateSet.Remove(owner);
+        visibleOwners.Remove(owner);
+        registeredOwnerMarkerCount = Mathf.Max(0, registeredOwnerMarkerCount - registration.MarkerCount);
+        if (registration.Visible)
+            visibleOwnerMarkerCount = Mathf.Max(0, visibleOwnerMarkerCount - registration.MarkerCount);
+        if (!registration.Moving)
+        {
+            RemoveOwnerFromCell(registration.Cell, owner);
+            if (owner.VisibleRange >= maximumIndexedVisibleRange) maximumIndexedVisibleRangeDirty = true;
+        }
+        MarkDirty(registration.Moving);
+    }
+
+    internal void NotifyVisibilityOverrideChanged(InputOutputModuleAreaMarkerController owner)
+    {
+        if (owner == null || !ownerRegistrations.ContainsKey(owner)) return;
+        if (owner.RequiresContinuousVisibilityRefresh) continuousVisibilityOwners.Add(owner);
+        else continuousVisibilityOwners.Remove(owner);
     }
 
     private void MarkDirty(bool moving)
@@ -88,22 +161,16 @@ public sealed class AreaMarkerRenderer : MonoBehaviour
             RobotArmWorld arms = RobotArmWorld.Current;
             if (!ReferenceEquals(lastArmWorld, arms)) { lastArmWorld = arms; staticDirty = true; }
             if (arms != null && arms.RefreshAreaMarkers(context)) staticDirty = true;
-            RegisteredMarkerCount = 0;
-            VisibleMarkerCount = 0;
-            if (arms != null) { RegisteredMarkerCount += arms.Count * 2; VisibleMarkerCount += arms.VisibleMarkerCount; }
-            for (int i = owners.Count - 1; i >= 0; i--)
+            RemoveInvalidOwners();
+            BuildVisibilityCandidates(context);
+            for (int i = 0; i < visibilityCandidates.Count; i++)
             {
-                InputOutputModuleAreaMarkerController owner = owners[i];
-                if (owner == null)
-                {
-                    owners.RemoveAt(i);
-                    staticDirty = movingDirty = true;
-                    continue;
-                }
-                if (owner.RefreshVisibility(context)) MarkDirty(owner.UsesMovingBatches);
-                RegisteredMarkerCount += owner.MarkerCount;
-                if (owner.IsVisible) VisibleMarkerCount += owner.MarkerCount;
+                RefreshOwnerVisibility(visibilityCandidates[i], context);
             }
+            VisibilityCandidateOwnerCount = visibilityCandidates.Count
+                + (arms != null ? arms.MarkerVisibilityCandidateCount : 0);
+            RegisteredMarkerCount = registeredOwnerMarkerCount + (arms != null ? arms.Count * 2 : 0);
+            VisibleMarkerCount = visibleOwnerMarkerCount + (arms != null ? arms.VisibleMarkerCount : 0);
         }
 
         if (staticDirty || movingDirty)
@@ -129,6 +196,122 @@ public sealed class AreaMarkerRenderer : MonoBehaviour
                 Graphics.RenderMesh(parameters, batch.Mesh, 0, Matrix4x4.identity);
             }
         }
+    }
+
+    private void BuildVisibilityCandidates(in AreaMarkerVisibilityContext context)
+    {
+        visibilityCandidateSet.Clear();
+        visibilityCandidates.Clear();
+        if (context.ShowAll)
+        {
+            for (int i = 0; i < owners.Count; i++) AddVisibilityCandidate(owners[i]);
+            return;
+        }
+
+        foreach (InputOutputModuleAreaMarkerController owner in visibleOwners)
+            AddVisibilityCandidate(owner);
+        foreach (InputOutputModuleAreaMarkerController owner in continuousVisibilityOwners)
+            AddVisibilityCandidate(owner);
+        if (!context.HasPlayer || ownersByCell.Count == 0) return;
+
+        RefreshMaximumIndexedVisibleRange();
+        Vector2Int center = GetChunk(context.PlayerPosition);
+        int radius = Mathf.CeilToInt(Mathf.Max(0f, maximumIndexedVisibleRange) / ChunkSize);
+        for (int z = center.y - radius; z <= center.y + radius; z++)
+        {
+            for (int x = center.x - radius; x <= center.x + radius; x++)
+            {
+                if (!ownersByCell.TryGetValue(
+                        new Vector2Int(x, z),
+                        out List<InputOutputModuleAreaMarkerController> cellOwners)) continue;
+                for (int i = 0; i < cellOwners.Count; i++) AddVisibilityCandidate(cellOwners[i]);
+            }
+        }
+    }
+
+    private void AddVisibilityCandidate(InputOutputModuleAreaMarkerController owner)
+    {
+        if (owner != null && visibilityCandidateSet.Add(owner)) visibilityCandidates.Add(owner);
+    }
+
+    private void RefreshOwnerVisibility(
+        InputOutputModuleAreaMarkerController owner,
+        in AreaMarkerVisibilityContext context)
+    {
+        if (owner == null || !ownerRegistrations.TryGetValue(owner, out OwnerRegistration registration)) return;
+        bool wasVisible = owner.IsVisible;
+        if (owner.RefreshVisibility(context)) MarkDirty(registration.Moving);
+        if (wasVisible == owner.IsVisible) return;
+        registration.Visible = owner.IsVisible;
+        ownerRegistrations[owner] = registration;
+        if (owner.IsVisible)
+        {
+            visibleOwners.Add(owner);
+            visibleOwnerMarkerCount += registration.MarkerCount;
+        }
+        else
+        {
+            visibleOwners.Remove(owner);
+            visibleOwnerMarkerCount = Mathf.Max(0, visibleOwnerMarkerCount - registration.MarkerCount);
+        }
+    }
+
+    private void RemoveInvalidOwners()
+    {
+        for (int i = owners.Count - 1; i >= 0; i--)
+        {
+            InputOutputModuleAreaMarkerController owner = owners[i];
+            if (owner != null) continue;
+            if (ownerRegistrations.TryGetValue(owner, out OwnerRegistration registration))
+            {
+                ownerRegistrations.Remove(owner);
+                registeredOwnerMarkerCount = Mathf.Max(0, registeredOwnerMarkerCount - registration.MarkerCount);
+                if (registration.Visible)
+                    visibleOwnerMarkerCount = Mathf.Max(0, visibleOwnerMarkerCount - registration.MarkerCount);
+                if (!registration.Moving) RemoveOwnerFromCell(registration.Cell, owner);
+            }
+            owners.RemoveAt(i);
+            continuousVisibilityOwners.Remove(owner);
+            visibleOwners.Remove(owner);
+            staticDirty = movingDirty = true;
+            maximumIndexedVisibleRangeDirty = true;
+        }
+    }
+
+    private void AddOwnerToCell(Vector2Int cell, InputOutputModuleAreaMarkerController owner)
+    {
+        if (!ownersByCell.TryGetValue(cell, out List<InputOutputModuleAreaMarkerController> cellOwners))
+        {
+            cellOwners = new List<InputOutputModuleAreaMarkerController>(4);
+            ownersByCell.Add(cell, cellOwners);
+        }
+        cellOwners.Add(owner);
+    }
+
+    private void RemoveOwnerFromCell(Vector2Int cell, InputOutputModuleAreaMarkerController owner)
+    {
+        if (!ownersByCell.TryGetValue(cell, out List<InputOutputModuleAreaMarkerController> cellOwners)) return;
+        cellOwners.Remove(owner);
+        if (cellOwners.Count == 0) ownersByCell.Remove(cell);
+    }
+
+    private void RefreshMaximumIndexedVisibleRange()
+    {
+        if (!maximumIndexedVisibleRangeDirty) return;
+        maximumIndexedVisibleRange = 0f;
+        foreach (KeyValuePair<InputOutputModuleAreaMarkerController, OwnerRegistration> pair in ownerRegistrations)
+        {
+            if (!pair.Value.Moving && pair.Key != null)
+                maximumIndexedVisibleRange = Mathf.Max(maximumIndexedVisibleRange, pair.Key.VisibleRange);
+        }
+        maximumIndexedVisibleRangeDirty = false;
+    }
+
+    private static Vector2Int GetChunk(Vector3 position)
+    {
+        return new Vector2Int(
+            Mathf.FloorToInt(position.x / ChunkSize),
+            Mathf.FloorToInt(position.z / ChunkSize));
     }
 
     private void RebuildMeshes()
@@ -211,12 +394,19 @@ public sealed class AreaMarkerRenderer : MonoBehaviour
 
     private void OnDestroy()
     {
+        if (Current == this) Current = null;
         foreach (MarkerBatch batch in batches.Values) batch.Dispose();
         foreach (Material material in materials.Values) ReleaseResource(material);
         batches.Clear();
         materials.Clear();
         sprites.Clear();
         owners.Clear();
+        ownerRegistrations.Clear();
+        ownersByCell.Clear();
+        continuousVisibilityOwners.Clear();
+        visibleOwners.Clear();
+        visibilityCandidateSet.Clear();
+        visibilityCandidates.Clear();
     }
 
     private static void ReleaseResource(Object resource)
@@ -235,6 +425,22 @@ public sealed class AreaMarkerRenderer : MonoBehaviour
         public Vector3 Scale;
         public bool FlipX, FlipY;
         public int SortingOrder, Layer;
+    }
+
+    private struct OwnerRegistration
+    {
+        public readonly Vector2Int Cell;
+        public readonly int MarkerCount;
+        public readonly bool Moving;
+        public bool Visible;
+
+        public OwnerRegistration(Vector2Int cell, int markerCount, bool moving)
+        {
+            Cell = cell;
+            MarkerCount = markerCount;
+            Moving = moving;
+            Visible = false;
+        }
     }
 
     private sealed class SpriteGeometry

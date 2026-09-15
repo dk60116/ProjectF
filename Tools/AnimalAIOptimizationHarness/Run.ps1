@@ -19,6 +19,7 @@ foreach ($file in @('AnimalAIWorld.cs', 'AnimalAIWorld.Spatial.cs', 'AnimalGridP
     Copy-Item -LiteralPath (Join-Path $repo ('FactorioProject/Assets/Scripts/Object/Animal/' + $file)) -Destination $tempDirectory
 }
 $generated = "using UnityEngine; using ProjectF.Animals; using System;`npublic partial class MapObjectTickManager {`n"
+Copy-Item -LiteralPath (Join-Path $repo 'FactorioProject/Assets/Scripts/Simulation/Presentation/AnimalAIWorldView.cs') -Destination $tempDirectory
 $manager = 'FactorioProject/Assets/Scripts/Manager/MapObjectTickManager.cs'
 foreach ($sig in @('private void Update()', 'public static bool WaitingForWorldLoad', 'private void ResetSimulationUpsMeasurement()', 'private void UpdateSimulationUpsMeasurement()')) {
     $generated += (Read-Member $manager $sig) + "`n"
@@ -45,6 +46,9 @@ foreach ($sig in @('public void SetBehaviorExecutionActive(', 'private void Sync
 $generated += "}`n"
 Copy-Item -LiteralPath (Join-Path $repo 'Tools/ConveyorCameraCullingHarness/AnimalAnimationChecks.cs') -Destination $tempDirectory
 [IO.File]::WriteAllText((Join-Path $tempDirectory 'Extracted.cs'), $generated)
+foreach ($coreFile in @('SimulationTickContracts.cs', 'SimulationTickWorld.cs')) {
+    Copy-Item -LiteralPath (Join-Path $repo ('FactorioProject/Assets/Scripts/Simulation/Core/' + $coreFile)) -Destination $tempDirectory
+}
 foreach ($file in @('Checks.cs', 'Stubs.cs', 'ProfilerStubs.cs', 'NavigationChecks.cs', 'ActorScheduleProbe.cs')) {
     Copy-Item -LiteralPath (Join-Path $PSScriptRoot $file) -Destination $tempDirectory
 }

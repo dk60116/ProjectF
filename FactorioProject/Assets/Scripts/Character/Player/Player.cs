@@ -77,7 +77,9 @@ public class Player : Character
     [SerializeField, Min(1)]
     private int bagLevel = 1;
 
+    [FormerlySerializedAs("handStack")]
     [SerializeField]
+    private List<PortableObjectTemplate> handStackTemplates;
     private List<PortableObject> handStack;
     [SerializeField, Min(0f)]
     private float handToBagPortableMoveInterval = 0.1f;
@@ -141,6 +143,18 @@ public class Player : Character
         }
 
         handStackInitialized = true;
+        if (handStackTemplates != null)
+        {
+            for (int i = 0; i < handStackTemplates.Count; i++)
+            {
+                PortableObjectTemplate template = handStackTemplates[i];
+                if (template != null)
+                {
+                    handStack.Add(template.CreateEntity(true));
+                }
+            }
+        }
+
         for (int i = 0; i < handStack.Count; i++)
         {
             PortableObject portableObject = handStack[i];
@@ -149,9 +163,9 @@ public class Player : Character
                 continue;
             }
 
-            if (portableObject.gameObject.activeSelf)
+            if (portableObject.IsActive)
             {
-                portableObject.gameObject.SetActive(false);
+                portableObject.SetCachedActive(false);
             }
         }
     }
@@ -196,8 +210,8 @@ public class Player : Character
                 continue;
             }
 
-            Transform portableTransform = portableObject.transform;
-            return portableTransform.parent != null ? portableTransform.parent : portableTransform;
+            Transform parent = portableObject.PresentationParent;
+            return parent != null ? parent : portableObject.PresentationTransform;
         }
 
         return null;
@@ -457,7 +471,7 @@ public class Player : Character
         {
             PortableObject portableObject = handStack[i];
             if (portableObject == null
-                || !portableObject.gameObject.activeSelf
+                || !portableObject.IsActive
                 || portableObject.IsVisualRenderingSuppressed)
             {
                 continue;
@@ -523,7 +537,7 @@ public class Player : Character
                 PortableObject portableObject = handStack[i];
                 if (portableObject != null
                     && portableObject.ItemId == heldPitchforkItemId
-                    && portableObject.gameObject.activeSelf)
+                    && portableObject.IsActive)
                 {
                     nextHiddenPortable = portableObject;
                     break;
@@ -927,7 +941,7 @@ public class Player : Character
         {
             PortableObject portableObject = handStack[i];
             if (portableObject != null
-                && portableObject.gameObject.activeSelf
+                && portableObject.IsActive
                 && !portableObject.IsVisualRenderingSuppressed
                 && !IsPitchforkDefinition(ResolveItemDefinition(portableObject.ItemId)))
             {
@@ -1328,8 +1342,8 @@ public class Player : Character
             objectId,
             target,
             sourceWorldPosition,
-            target.transform.rotation,
-            target.transform.lossyScale,
+            target.WorldRotation,
+            target.WorldScale,
             reservation,
             "PickupMove");
         return true;
@@ -1394,7 +1408,7 @@ public class Player : Character
                 continue;
             }
 
-            if (portableObject.gameObject.activeSelf)
+            if (portableObject.IsActive)
             {
                 continue;
             }
@@ -1404,10 +1418,10 @@ public class Player : Character
                 continue;
             }
 
-            portableObject.gameObject.SetActive(true);
+            portableObject.SetCachedActive(true);
             if (!portableObject.SetItem(objectId))
             {
-                portableObject.gameObject.SetActive(false);
+                portableObject.SetCachedActive(false);
                 continue;
             }
 
@@ -1466,7 +1480,7 @@ public class Player : Character
                 continue;
             }
 
-            if (portableObject.gameObject.activeSelf || reservedHandStack.Contains(portableObject))
+            if (portableObject.IsActive || reservedHandStack.Contains(portableObject))
             {
                 continue;
             }
@@ -1476,7 +1490,7 @@ public class Player : Character
                 continue;
             }
 
-            portableObject.gameObject.SetActive(false);
+            portableObject.SetCachedActive(false);
             reservedHandStack.Add(portableObject);
             targetPortableObject = portableObject;
             return true;
@@ -1493,9 +1507,9 @@ public class Player : Character
         }
 
         reservedHandStack.Remove(targetPortableObject);
-        if (!targetPortableObject.gameObject.activeSelf)
+        if (!targetPortableObject.IsActive)
         {
-            targetPortableObject.gameObject.SetActive(true);
+            targetPortableObject.SetCachedActive(true);
         }
 
         if (handBag != null)
@@ -1514,9 +1528,9 @@ public class Player : Character
         }
 
         reservedHandStack.Remove(targetPortableObject);
-        if (targetPortableObject.gameObject.activeSelf)
+        if (targetPortableObject.IsActive)
         {
-            targetPortableObject.gameObject.SetActive(false);
+            targetPortableObject.SetCachedActive(false);
         }
 
         if (handBag != null)
@@ -1556,7 +1570,7 @@ public class Player : Character
         for (int i = 0; i < handStack.Count; i++)
         {
             PortableObject portableObject = handStack[i];
-            if (portableObject == null || !portableObject.gameObject.activeSelf)
+            if (portableObject == null || !portableObject.IsActive)
             {
                 continue;
             }
@@ -1605,7 +1619,7 @@ public class Player : Character
                 continue;
             }
 
-            if (portableObject.gameObject.activeSelf || reservedHandStack.Contains(portableObject))
+            if (portableObject.IsActive || reservedHandStack.Contains(portableObject))
             {
                 continue;
             }
@@ -1724,7 +1738,7 @@ public class Player : Character
         {
             PortableObject portableObject = handStack[i];
             if (portableObject != null
-                && (portableObject.gameObject.activeSelf || reservedHandStack.Contains(portableObject)))
+                && (portableObject.IsActive || reservedHandStack.Contains(portableObject)))
             {
                 occupiedCount++;
             }
@@ -1827,7 +1841,7 @@ public class Player : Character
                 ? sourcePortableObjects[Mathf.Clamp(sourcePortableObjects.Count - 1 - i, 0, sourcePortableObjects.Count - 1)]
                 : null;
             Vector3 startPosition = sourcePortableObject != null
-                ? sourcePortableObject.transform.position
+                ? sourcePortableObject.WorldPosition
                 : (BodyTransform != null ? BodyTransform.position : transform.position);
             pendingMoves.Add(new PortableMoveData(
                 sourcePortableObject,
@@ -1860,8 +1874,8 @@ public class Player : Character
             moveData.itemId,
             template,
             startPosition,
-            template != null ? template.transform.rotation : Quaternion.identity,
-            template != null ? template.transform.lossyScale : Vector3.one,
+            template != null ? template.WorldRotation : Quaternion.identity,
+            template != null ? template.WorldScale : Vector3.one,
             moveData.reservation,
             "HandToBagMove",
             moveData.delay,
@@ -1874,7 +1888,7 @@ public class Player : Character
     private static Vector3 ResolvePortableMoveStartPosition(PortableMoveData moveData)
     {
         return moveData.sourcePortableObject != null
-            ? moveData.sourcePortableObject.transform.position
+            ? moveData.sourcePortableObject.WorldPosition
             : moveData.startPosition;
     }
 
@@ -1927,7 +1941,7 @@ public class Player : Character
                 continue;
             }
 
-            bool isActive = includeActiveObjects && portableObject.gameObject.activeSelf;
+            bool isActive = includeActiveObjects && portableObject.IsActive;
             bool isReserved = includeReservedObjects && reservedHandStack.Contains(portableObject);
             if (!isActive && !isReserved)
             {

@@ -32,6 +32,8 @@ namespace ProjectF.MapObjects
         public int ActiveBatchCount => batches.ActiveBatchCount;
         public int ActiveMatrixCount => batches.ActiveMatrixCount;
         public int EstimatedDrawCallCount => batches.EstimatedDrawCallCount;
+        public int LastCandidateBatchCount => batches.LastCandidateBatchCount;
+        public int LastCandidateCellCount => batches.LastCandidateCellCount;
 
         public void Configure(int typeItemId, MapObjectArchetype typeArchetype, float cellSize)
         {
@@ -89,7 +91,7 @@ namespace ProjectF.MapObjects
 
                 slotsByHandle.Add(handle, slot);
             }
-            else if (slot.Source != source)
+            else if (!slot.RequiresSource || slot.Source != source)
             {
                 RestoreSourceRenderers(slot);
                 slot = CaptureSource(source, handle);
@@ -116,6 +118,49 @@ namespace ProjectF.MapObjects
             return true;
         }
 
+        public bool SynchronizeRecord(VirtualObjectRecord record)
+        {
+            MapObjectHandle handle = record != null ? record.mapObjectHandle : default;
+            if (released
+                || record == null
+                || record.kind != VirtualObjectKind.Installation
+                || record.HasAttachedView
+                || !handle.IsValid
+                || handle.TypeId != itemId
+                || archetype == null
+                || archetype.SourcePrefab == null)
+            {
+                return false;
+            }
+
+            if (!slotsByHandle.TryGetValue(handle, out InstanceSlot slot)
+                || slot.RequiresSource)
+            {
+                if (slot != null)
+                {
+                    RestoreSourceRenderers(slot);
+                }
+
+                slot = new InstanceSlot(handle, null, default, Array.Empty<SourceRendererState>(), false);
+                slotsByHandle[handle] = slot;
+            }
+
+            Vector3 rootScale = archetype.SourcePrefab.transform.localScale;
+            Matrix4x4 rootMatrix = Matrix4x4.TRS(
+                record.worldPosition,
+                record.worldRotation,
+                rootScale);
+            if (!AppendInstanceMatrices(rootMatrix, record.worldPosition))
+            {
+                slotsByHandle.Remove(handle);
+                return false;
+            }
+
+            slot.RootMatrix = rootMatrix;
+            slot.LastSeenStamp = synchronizationStamp;
+            return true;
+        }
+
         public void CompleteSynchronization()
         {
             if (released)
@@ -126,7 +171,8 @@ namespace ProjectF.MapObjects
             staleHandles.Clear();
             foreach (KeyValuePair<MapObjectHandle, InstanceSlot> pair in slotsByHandle)
             {
-                if (pair.Value.Source == null || pair.Value.LastSeenStamp != synchronizationStamp)
+                if ((pair.Value.RequiresSource && pair.Value.Source == null)
+                    || pair.Value.LastSeenStamp != synchronizationStamp)
                 {
                     RestoreSourceRenderers(pair.Value);
                     staleHandles.Add(pair.Key);
@@ -168,7 +214,7 @@ namespace ProjectF.MapObjects
         {
             if (!released)
             {
-                batches.RenderBatches(camera);
+                batches.RenderBatches(camera, batchCellSize);
             }
         }
 
@@ -214,7 +260,9 @@ namespace ProjectF.MapObjects
             }
 
             // These types already have specialized data-oriented render systems.
-            if (sourceInstallation is ConveyorBelt || sourceInstallation is RobotArm)
+            if (sourceInstallation is ConveyorBelt
+                || sourceInstallation is Pipe
+                || sourceInstallation is RobotArm)
             {
                 return false;
             }
@@ -323,7 +371,12 @@ namespace ProjectF.MapObjects
                     renderer.forceRenderingOff);
             }
 
-            return new InstanceSlot(handle, source, source.transform.localToWorldMatrix, rendererStates);
+            return new InstanceSlot(
+                handle,
+                source,
+                source.transform.localToWorldMatrix,
+                rendererStates,
+                true);
         }
 
         private static bool IsOwnedRenderer(InstallationObject source, MeshRenderer renderer)
@@ -443,16 +496,19 @@ namespace ProjectF.MapObjects
                 MapObjectHandle handle,
                 InstallationObject source,
                 Matrix4x4 rootMatrix,
-                SourceRendererState[] rendererStates)
+                SourceRendererState[] rendererStates,
+                bool requiresSource)
             {
                 Handle = handle;
                 Source = source;
                 RootMatrix = rootMatrix;
                 RendererStates = rendererStates;
+                RequiresSource = requiresSource;
             }
 
             public readonly MapObjectHandle Handle;
             public readonly SourceRendererState[] RendererStates;
+            public readonly bool RequiresSource;
             public InstallationObject Source;
             public Matrix4x4 RootMatrix;
             public int LastSeenStamp;

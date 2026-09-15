@@ -12,6 +12,11 @@ namespace ProjectF.Rendering
         private bool initialized;
         private static Camera playerViewCamera;
         private static Matrix4x4 playerViewMatrix;
+        private static int cachedBoundsFrame = -1;
+        private static Matrix4x4 cachedBoundsMatrix;
+        private static Vector2 cachedBoundsMinimum;
+        private static Vector2 cachedBoundsMaximum;
+        private static bool cachedBoundsValid;
 
         internal static void SetPlayerView(Camera owner, Matrix4x4 matrix)
         {
@@ -66,6 +71,98 @@ namespace ProjectF.Rendering
         public bool IsAnyLayerVisible(int mask) => !Enabled || (layerMask & mask) != 0;
 
         public bool Intersects(Bounds bounds) => !Enabled || GeometryUtility.TestPlanesAABB(planes, bounds);
+
+        // Returns a conservative XZ cell range for the current frustum. Render systems use
+        // this shared result to query their spatial dictionaries instead of scanning every
+        // off-screen batch. Exact plane/AABB testing still runs on the returned candidates.
+        public bool TryGetVisibleCellRange(
+            float cellSize,
+            int paddingCells,
+            out Vector2Int minimum,
+            out Vector2Int maximum)
+        {
+            minimum = default;
+            maximum = default;
+            if (!Enabled || cellSize <= 0f || !TryGetVisibleWorldBounds(out Vector2 worldMinimum, out Vector2 worldMaximum))
+            {
+                return false;
+            }
+
+            float normalizedCellSize = Mathf.Max(0.01f, cellSize);
+            int padding = Mathf.Max(0, paddingCells);
+            minimum = new Vector2Int(
+                Mathf.FloorToInt(worldMinimum.x / normalizedCellSize) - padding,
+                Mathf.FloorToInt(worldMinimum.y / normalizedCellSize) - padding);
+            maximum = new Vector2Int(
+                Mathf.FloorToInt(worldMaximum.x / normalizedCellSize) + padding,
+                Mathf.FloorToInt(worldMaximum.y / normalizedCellSize) + padding);
+            return minimum.x <= maximum.x && minimum.y <= maximum.y;
+        }
+
+        public static long GetCellCount(Vector2Int minimum, Vector2Int maximum)
+        {
+            long width = (long)maximum.x - minimum.x + 1L;
+            long height = (long)maximum.y - minimum.y + 1L;
+            return width > 0L && height > 0L ? width * height : long.MaxValue;
+        }
+
+        private bool TryGetVisibleWorldBounds(out Vector2 minimum, out Vector2 maximum)
+        {
+            int frame = Time.frameCount;
+            if (cachedBoundsFrame != frame || !cachedBoundsMatrix.Equals(cullingMatrix))
+            {
+                cachedBoundsFrame = frame;
+                cachedBoundsMatrix = cullingMatrix;
+                cachedBoundsValid = CalculateVisibleWorldBounds(
+                    cullingMatrix,
+                    out cachedBoundsMinimum,
+                    out cachedBoundsMaximum);
+            }
+
+            minimum = cachedBoundsMinimum;
+            maximum = cachedBoundsMaximum;
+            return cachedBoundsValid;
+        }
+
+        private static bool CalculateVisibleWorldBounds(
+            Matrix4x4 matrix,
+            out Vector2 minimum,
+            out Vector2 maximum)
+        {
+            minimum = new Vector2(float.PositiveInfinity, float.PositiveInfinity);
+            maximum = new Vector2(float.NegativeInfinity, float.NegativeInfinity);
+            Matrix4x4 inverse = matrix.inverse;
+            for (int z = 0; z < 2; z++)
+            {
+                float clipZ = z == 0 ? -1f : 1f;
+                for (int y = 0; y < 2; y++)
+                {
+                    float clipY = y == 0 ? -1f : 1f;
+                    for (int x = 0; x < 2; x++)
+                    {
+                        float clipX = x == 0 ? -1f : 1f;
+                        Vector4 world = inverse * new Vector4(clipX, clipY, clipZ, 1f);
+                        if (Mathf.Abs(world.w) <= 0.000001f)
+                        {
+                            return false;
+                        }
+
+                        float worldX = world.x / world.w;
+                        float worldZ = world.z / world.w;
+                        if (float.IsNaN(worldX) || float.IsInfinity(worldX)
+                            || float.IsNaN(worldZ) || float.IsInfinity(worldZ))
+                        {
+                            return false;
+                        }
+
+                        minimum = Vector2.Min(minimum, new Vector2(worldX, worldZ));
+                        maximum = Vector2.Max(maximum, new Vector2(worldX, worldZ));
+                    }
+                }
+            }
+
+            return minimum.x <= maximum.x && minimum.y <= maximum.y;
+        }
 
         // Fully visible batches need no per-instance scan. Only boundary batches are compacted.
         public bool Contains(Bounds bounds)

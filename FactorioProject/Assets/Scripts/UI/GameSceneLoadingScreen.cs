@@ -1,4 +1,5 @@
 using System.Collections;
+using ProjectF.Simulation;
 using UnityEngine;
 using UnityEngine.SceneManagement;
 using UnityEngine.UI;
@@ -11,9 +12,11 @@ public sealed class GameSceneLoadingScreen : MonoBehaviour
 
     private static GameSceneLoadingScreen active;
 
+    private readonly LatestSceneLoadRequest sceneRequests = new LatestSceneLoadRequest();
     private RectTransform fillRect;
     private float displayedProgress;
-    private bool loadStarted;
+    private Coroutine requestRoutine;
+    private bool waitForCurrentWorldReady;
 
     [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.SubsystemRegistration)]
     private static void ResetStaticState()
@@ -41,12 +44,17 @@ public sealed class GameSceneLoadingScreen : MonoBehaviour
     {
         if (buildIndex < 0
             || !Application.CanStreamedLevelBeLoaded(buildIndex)
-            || !TryCreate(out GameSceneLoadingScreen screen))
+            || !TryGetOrCreate(out GameSceneLoadingScreen screen, out bool reused))
         {
             return false;
         }
 
-        screen.StartCoroutine(screen.LoadSceneRoutine(buildIndex, null));
+        if (reused)
+        {
+            SaveManager.DiscardPendingRuntimeLoadForSceneReplacement();
+        }
+
+        screen.EnqueueSceneLoad(buildIndex, null);
         return true;
     }
 
@@ -54,32 +62,41 @@ public sealed class GameSceneLoadingScreen : MonoBehaviour
     {
         if (string.IsNullOrWhiteSpace(sceneName)
             || !Application.CanStreamedLevelBeLoaded(sceneName)
-            || !TryCreate(out GameSceneLoadingScreen screen))
+            || !TryGetOrCreate(out GameSceneLoadingScreen screen, out bool reused))
         {
             return false;
         }
 
-        screen.StartCoroutine(screen.LoadSceneRoutine(-1, sceneName));
+        if (reused)
+        {
+            SaveManager.DiscardPendingRuntimeLoadForSceneReplacement();
+        }
+
+        screen.EnqueueSceneLoad(-1, sceneName);
         return true;
     }
 
     public static bool TryShowUntilWorldReady()
     {
-        if (!TryCreate(out GameSceneLoadingScreen screen))
+        if (!TryGetOrCreate(out GameSceneLoadingScreen screen, out bool reused)
+            || reused)
         {
             return false;
         }
 
-        screen.StartCoroutine(screen.WaitForWorldReadyRoutine(0f));
+        screen.BeginWorldReadyWait();
         return true;
     }
 
-    private static bool TryCreate(out GameSceneLoadingScreen screen)
+    private static bool TryGetOrCreate(
+        out GameSceneLoadingScreen screen,
+        out bool reused)
     {
         if (active != null)
         {
-            screen = null;
-            return false;
+            screen = active;
+            reused = true;
+            return true;
         }
 
         GameObject root = new GameObject(
@@ -91,6 +108,7 @@ public sealed class GameSceneLoadingScreen : MonoBehaviour
         DontDestroyOnLoad(root);
         screen = root.AddComponent<GameSceneLoadingScreen>();
         active = screen;
+        reused = false;
         return true;
     }
 
@@ -109,58 +127,128 @@ public sealed class GameSceneLoadingScreen : MonoBehaviour
 
     private void OnDestroy()
     {
+        requestRoutine = null;
+        sceneRequests.Clear();
         if (active == this)
         {
             active = null;
         }
     }
 
-    private IEnumerator LoadSceneRoutine(int buildIndex, string sceneName)
+    private void EnqueueSceneLoad(int buildIndex, string sceneName)
     {
-        if (loadStarted)
+        if (buildIndex >= 0)
         {
-            yield break;
+            sceneRequests.Enqueue(buildIndex);
+        }
+        else
+        {
+            sceneRequests.Enqueue(sceneName);
         }
 
-        loadStarted = true;
+        waitForCurrentWorldReady = false;
+        EnsureRequestRoutine();
+    }
 
-        // Give the loading canvas one complete frame before starting scene IO.
+    private void BeginWorldReadyWait()
+    {
+        waitForCurrentWorldReady = true;
+        EnsureRequestRoutine();
+    }
+
+    private void EnsureRequestRoutine()
+    {
+        if (requestRoutine == null)
+        {
+            requestRoutine = StartCoroutine(ProcessRequestsRoutine());
+        }
+    }
+
+    private IEnumerator ProcessRequestsRoutine()
+    {
+        // Give a newly-created loading canvas one complete frame before starting scene IO.
         yield return null;
 
-        AsyncOperation operation = buildIndex >= 0
-            ? SceneManager.LoadSceneAsync(buildIndex, LoadSceneMode.Single)
-            : SceneManager.LoadSceneAsync(sceneName, LoadSceneMode.Single);
-        if (operation == null)
+        while (true)
         {
-            Debug.LogError("[LoadingScreen] 씬 로드 요청을 생성하지 못했습니다.");
+            if (sceneRequests.TryTake(out SceneLoadRequest request))
+            {
+                waitForCurrentWorldReady = false;
+                SetProgress(0f);
+                AsyncOperation operation = request.UsesBuildIndex
+                    ? SceneManager.LoadSceneAsync(request.BuildIndex, LoadSceneMode.Single)
+                    : SceneManager.LoadSceneAsync(request.SceneName, LoadSceneMode.Single);
+                if (operation == null)
+                {
+                    Debug.LogError("[LoadingScreen] 씬 로드 요청을 생성하지 못했습니다.");
+                    if (sceneRequests.HasPending)
+                    {
+                        continue;
+                    }
+
+                    requestRoutine = null;
+                    Destroy(gameObject);
+                    yield break;
+                }
+
+                // Unity cannot cancel a LoadSceneAsync operation after it starts. Keep the
+                // newest replacement queued and run it as soon as this operation completes.
+                while (!operation.isDone)
+                {
+                    float sceneProgress = Mathf.Clamp01(operation.progress / 0.9f);
+                    SetDisplayedProgress(sceneProgress * SceneProgressWeight);
+                    yield return null;
+                }
+
+                waitForCurrentWorldReady =
+                    SceneManager.GetActiveScene().name == GameSceneName;
+            }
+
+            if (sceneRequests.HasPending)
+            {
+                continue;
+            }
+
+            if (waitForCurrentWorldReady)
+            {
+                bool worldReady = false;
+                while (!worldReady && !sceneRequests.HasPending)
+                {
+                    Scene activeScene = SceneManager.GetActiveScene();
+                    if (activeScene.IsValid() && activeScene.name != GameSceneName)
+                    {
+                        // A caller bypassed this helper and loaded another scene directly.
+                        // Treat that active scene as the new owner instead of leaving the
+                        // persistent loading overlay waiting forever for GameScene.
+                        waitForCurrentWorldReady = false;
+                        break;
+                    }
+
+                    TryGetGameWorldLoadState(out float worldProgress, out worldReady);
+                    SetDisplayedProgress(
+                        SceneProgressWeight
+                        + ((1f - SceneProgressWeight) * worldProgress));
+                    yield return null;
+                }
+
+                if (sceneRequests.HasPending)
+                {
+                    continue;
+                }
+            }
+
+            SetProgress(1f);
+            yield return null;
+            if (sceneRequests.HasPending)
+            {
+                SetProgress(0f);
+                continue;
+            }
+
+            requestRoutine = null;
             Destroy(gameObject);
             yield break;
         }
-
-        while (!operation.isDone)
-        {
-            float sceneProgress = Mathf.Clamp01(operation.progress / 0.9f);
-            SetDisplayedProgress(sceneProgress * SceneProgressWeight);
-            yield return null;
-        }
-
-        yield return WaitForWorldReadyRoutine(SceneProgressWeight);
-    }
-
-    private IEnumerator WaitForWorldReadyRoutine(float completedSceneWeight)
-    {
-        bool worldReady = false;
-        while (!worldReady)
-        {
-            TryGetGameWorldLoadState(out float worldProgress, out worldReady);
-            SetDisplayedProgress(
-                completedSceneWeight + ((1f - completedSceneWeight) * worldProgress));
-            yield return null;
-        }
-
-        SetProgress(1f);
-        yield return null;
-        Destroy(gameObject);
     }
 
     private static void TryGetGameWorldLoadState(out float progress, out bool ready)

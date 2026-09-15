@@ -49,7 +49,9 @@ internal sealed class RobotArmRenderTemplate
             var filter = t.GetComponent<MeshFilter>();
             bool active = true;
             for (var a = t; a != null && a != source.transform; a = a.parent) active &= a.gameObject.activeSelf;
-            if (r != null && filter != null && r.enabled && active && t.GetComponentInParent<PortableObject>() == null)
+            if (r != null && filter != null && r.enabled && active
+                && t.GetComponentInParent<PortableObjectTemplate>() == null
+                && t.GetComponentInParent<PortableObjectView>() == null)
             {
                 n.Mesh = filter.sharedMesh; n.Materials = r.sharedMaterials; n.Shadows = r.shadowCastingMode; n.ReceiveShadows = r.receiveShadows;
                 LayerMask |= 1 << n.Layer;

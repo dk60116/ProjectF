@@ -88,11 +88,7 @@ public sealed class VirtualItemStackRenderer : MonoBehaviour
     {
         if (virtualWorld == null)
         {
-            virtualWorld = GetComponent<VirtualObjectWorld>();
-            if (virtualWorld == null)
-            {
-                virtualWorld = VirtualObjectWorld.Current;
-            }
+            virtualWorld = VirtualObjectWorld.Current;
         }
 
         if (itemManager == null && GameManager.Instance != null)
@@ -326,7 +322,7 @@ public sealed class VirtualItemStackRenderer : MonoBehaviour
 
     private void RenderBatches()
     {
-        batches.RenderBatches(mainCamera);
+        batches.RenderBatches(mainCamera, batchCellSize);
     }
 
     private static int GetBatchCell(float worldCoordinate, float cellSize)

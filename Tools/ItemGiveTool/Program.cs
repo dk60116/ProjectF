@@ -1438,6 +1438,7 @@ internal sealed class EditorToolForm : Form
         }
 
         TryReadProtocolToken(response, "installTypes", out string installTypes);
+        bool hasMapObjectTotal = TryReadProtocolInt(response, "mapObjectTotal", out int mapObjectTotal);
         TryReadProtocolInt(response, "animalTotal", out int animalTotal);
         TryReadProtocolInt(response, "animalAIActive", out int animalAIActive);
         bool hasBeltRecords = TryReadProtocolInt(response, "beltRecords", out int beltRecords);
@@ -1446,7 +1447,7 @@ internal sealed class EditorToolForm : Form
             "beltHostGameObjects",
             out int beltHostGameObjects);
         runtimeStatsLabel.Text =
-            $"Runtime Stats: 설치 {(installTotal >= 0 ? installTotal.ToString("N0") : "--")}개    벨트 아이템 {beltItems:N0}개    동물 {animalAIActive:N0}/{animalTotal:N0}";
+            $"Runtime Stats: 전체 MapObject {(hasMapObjectTotal && mapObjectTotal >= 0 ? mapObjectTotal.ToString("N0") : "--")}개    벨트 아이템 {beltItems:N0}개    동물 {animalAIActive:N0}/{animalTotal:N0}";
         if (hasBeltRecords && hasBeltHostGameObjects)
         {
             runtimeStatsLabel.Text +=

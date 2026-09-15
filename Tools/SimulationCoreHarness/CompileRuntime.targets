@@ -1,0 +1,10 @@
+<Project>
+  <ItemGroup>
+    <Compile Include="$(MSBuildProjectDirectory)\Assets\Scripts\Simulation\**\*.cs" Exclude="$(MSBuildProjectDirectory)\Assets\Scripts\Simulation\Core\**\*.cs;@(Compile)" />
+    <Compile Include="$(MSBuildProjectDirectory)\Assets\Scripts\Map\BlockTemplate.cs" Exclude="@(Compile)" />
+    <Compile Remove="$(MSBuildProjectDirectory)\Assets\Scripts\Map\BlockPool.cs" />
+    <Reference Include="ProjectF.Simulation.Core" Condition="!Exists('$(MSBuildProjectDirectory)\Temp\bin\Debug\ProjectF.Simulation.Core.dll')">
+      <HintPath>$(MSBuildThisFileDirectory)bin\Release\netstandard2.1\ProjectF.Simulation.Core.dll</HintPath>
+    </Reference>
+  </ItemGroup>
+</Project>

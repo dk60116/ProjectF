@@ -66,7 +66,7 @@ public sealed class PortableBucketWaterVisual : MonoBehaviour
         EnsureSurface(
             bucket,
             body.transform,
-            TryGetComponent(out PortableObject _),
+            TryGetComponent(out PortableObjectView _) || TryGetComponent(out PortableObjectTemplate _),
             animateInstalledFill,
             fillRatio,
             fluidItemId);

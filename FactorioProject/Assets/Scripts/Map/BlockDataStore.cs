@@ -8,7 +8,7 @@ public enum BlockCellFlags : byte
 {
     None = 0,
     Registered = 1 << 0,
-    HasRuntimeProxy = 1 << 1
+    HasEntity = 1 << 1
 }
 
 public readonly struct BlockHandle : IEquatable<BlockHandle>
@@ -63,24 +63,24 @@ public readonly struct BlockCellData
     public Block.BlockType Type { get; }
     public BlockCellFlags Flags { get; }
     public bool IsRegistered => (Flags & BlockCellFlags.Registered) != 0;
-    public bool HasRuntimeProxy => (Flags & BlockCellFlags.HasRuntimeProxy) != 0;
+    public bool HasEntity => (Flags & BlockCellFlags.HasEntity) != 0;
 }
 
 /// <summary>
-/// Chunk-contiguous cell storage. Stateful cells may have a Block component
-/// proxy hosted by one of a bounded number of TerrainGenerator-owned shards;
-/// no cell owns a GameObject or Transform.
+/// Chunk-contiguous block ECS storage. Registered cell metadata, sparse managed
+/// entities and simulation components share the same generation-checked handle.
+/// No cell owns a GameObject, Transform or MonoBehaviour.
 /// </summary>
 public sealed class BlockDataStore : IEnumerable<KeyValuePair<Vector2Int, Block>>
 {
-    // A transport line keeps these in slot order. Binding changes invalidate
-    // references even when the removed Block still retains its old handle.
-    internal struct RuntimeProxyCache
+    // A transport line keeps these in slot order. Entity binding changes
+    // invalidate references even when a removed entity retains its old handle.
+    internal struct EntityCache
     {
         internal BlockDataStore Owner;
         internal BlockHandle Handle;
         internal ulong Version;
-        internal Block Proxy;
+        internal Block Entity;
     }
 
     internal sealed class ChunkData
@@ -93,9 +93,9 @@ public sealed class BlockDataStore : IEnumerable<KeyValuePair<Vector2Int, Block>
         // reference per cell. Stateful cells are keyed by their chunk-local index.
         public readonly Dictionary<int, BlockRuntimeSimulationState> RuntimeSimulationStates =
             new Dictionary<int, BlockRuntimeSimulationState>();
-        public readonly Dictionary<int, Block> RuntimeProxies = new Dictionary<int, Block>();
+        public readonly Dictionary<int, Block> Entities = new Dictionary<int, Block>();
         public int RegisteredCellCount;
-        public int RuntimeProxyCount;
+        public int EntityCount;
 
         public ChunkData(Vector2Int coordinate, int chunkSize, uint generation)
         {
@@ -117,9 +117,9 @@ public sealed class BlockDataStore : IEnumerable<KeyValuePair<Vector2Int, Block>
         new Dictionary<Vector2Int, ChunkData>();
     private int chunkSize;
     private int registeredCellCount;
-    private int runtimeProxyCount;
+    private int entityCount;
     private int runtimeSimulationStateCount;
-    private ulong runtimeProxyVersion;
+    private ulong entityVersion;
     private uint nextChunkGeneration = 1;
     private bool hasRegisteredBounds;
     private bool registeredBoundsDirty;
@@ -129,9 +129,9 @@ public sealed class BlockDataStore : IEnumerable<KeyValuePair<Vector2Int, Block>
     public int ChunkSize => chunkSize;
     public int ChunkCount => chunks.Count;
     public int RegisteredCellCount => registeredCellCount;
-    public int Count => runtimeProxyCount;
+    public int Count => entityCount;
     public int RuntimeSimulationStateCount => runtimeSimulationStateCount;
-    internal ulong RuntimeProxyVersion => runtimeProxyVersion;
+    internal ulong EntityVersion => entityVersion;
 
     public void EnsureChunkCapacity(int capacity)
     {
@@ -173,10 +173,10 @@ public sealed class BlockDataStore : IEnumerable<KeyValuePair<Vector2Int, Block>
         }
 
         registeredCellCount -= chunk.RegisteredCellCount;
-        runtimeProxyCount -= chunk.RuntimeProxyCount;
+        entityCount -= chunk.EntityCount;
         runtimeSimulationStateCount -= chunk.RuntimeSimulationStates.Count;
         chunks.Remove(chunkCoordinate);
-        unchecked { runtimeProxyVersion++; }
+        unchecked { entityVersion++; }
         if (chunk.RegisteredCellCount > 0)
         {
             registeredBoundsDirty = true;
@@ -337,7 +337,7 @@ public sealed class BlockDataStore : IEnumerable<KeyValuePair<Vector2Int, Block>
         registeredBoundsDirty = false;
     }
 
-    public bool BindRuntimeProxy(Vector2Int coordinate, Block block, out BlockHandle handle)
+    public bool BindEntity(Vector2Int coordinate, Block block, out BlockHandle handle)
     {
         handle = default;
         if (block == null)
@@ -347,27 +347,27 @@ public sealed class BlockDataStore : IEnumerable<KeyValuePair<Vector2Int, Block>
 
         RegisterCell(coordinate, block.Type, out handle);
         ChunkData chunk = chunks[handle.ChunkCoordinate];
-        Block previous = GetRuntimeProxy(chunk, handle.LocalIndex);
+        Block previous = GetEntity(chunk, handle.LocalIndex);
         if (previous == block)
         {
             return true;
         }
 
-        if ((chunk.Cells[handle.LocalIndex].Flags & BlockCellFlags.HasRuntimeProxy) == 0)
+        if ((chunk.Cells[handle.LocalIndex].Flags & BlockCellFlags.HasEntity) == 0)
         {
-            chunk.RuntimeProxyCount++;
-            runtimeProxyCount++;
+            chunk.EntityCount++;
+            entityCount++;
         }
 
-        chunk.RuntimeProxies[handle.LocalIndex] = block;
-        chunk.Cells[handle.LocalIndex].Flags |= BlockCellFlags.HasRuntimeProxy;
-        unchecked { runtimeProxyVersion++; }
+        chunk.Entities[handle.LocalIndex] = block;
+        chunk.Cells[handle.LocalIndex].Flags |= BlockCellFlags.HasEntity;
+        unchecked { entityVersion++; }
         return true;
     }
 
     /// <summary>
     /// Gets or creates the simulation state owned by the cell storage. Its lifetime
-    /// follows the chunk/cell rather than the temporary Block component facade.
+    /// follows the chunk/cell and is independent of presentation objects.
     /// </summary>
     internal bool TryGetOrCreateRuntimeSimulationState(
         BlockHandle handle,
@@ -406,18 +406,18 @@ public sealed class BlockDataStore : IEnumerable<KeyValuePair<Vector2Int, Block>
     {
         block = null;
         if (!TryGetChunkAndLocalIndex(coordinate, out ChunkData chunk, out int localIndex)
-            || (chunk.Cells[localIndex].Flags & BlockCellFlags.HasRuntimeProxy) == 0)
+            || (chunk.Cells[localIndex].Flags & BlockCellFlags.HasEntity) == 0)
         {
             return false;
         }
 
-        block = GetRuntimeProxy(chunk, localIndex);
+        block = GetEntity(chunk, localIndex);
         if (block != null)
         {
             return true;
         }
 
-        ClearRuntimeProxy(chunk, localIndex);
+        ClearEntity(chunk, localIndex);
         return false;
     }
 
@@ -425,41 +425,41 @@ public sealed class BlockDataStore : IEnumerable<KeyValuePair<Vector2Int, Block>
     {
         block = null;
         if (!TryResolveHandle(handle, out ChunkData chunk)
-            || (chunk.Cells[handle.LocalIndex].Flags & BlockCellFlags.HasRuntimeProxy) == 0)
+            || (chunk.Cells[handle.LocalIndex].Flags & BlockCellFlags.HasEntity) == 0)
         {
             return false;
         }
 
-        block = GetRuntimeProxy(chunk, handle.LocalIndex);
+        block = GetEntity(chunk, handle.LocalIndex);
         if (block != null)
         {
             return true;
         }
 
-        ClearRuntimeProxy(chunk, handle.LocalIndex);
+        ClearEntity(chunk, handle.LocalIndex);
         return false;
     }
 
-    internal bool TryGetValue(BlockHandle handle, ref RuntimeProxyCache cache, out Block block)
+    internal bool TryGetValue(BlockHandle handle, ref EntityCache cache, out Block block)
     {
         if (ReferenceEquals(cache.Owner, this)
-            && cache.Version == runtimeProxyVersion
+            && cache.Version == entityVersion
             && cache.Handle == handle
-            && cache.Proxy != null)
+            && cache.Entity != null)
         {
-            block = cache.Proxy;
+            block = cache.Entity;
             return true;
         }
 
-        // Do not cache misses or Unity's destroyed-object null. The original
-        // lookup must still clean stale proxy flags and counts in that case.
+        // Do not cache misses. The original lookup still cleans stale entity
+        // flags and counts when storage was changed out of band.
         bool found = TryGetValue(handle, out block);
-        cache = new RuntimeProxyCache
+        cache = new EntityCache
         {
             Owner = this,
             Handle = handle,
-            Version = runtimeProxyVersion,
-            Proxy = block
+            Version = entityVersion,
+            Entity = block
         };
         return found;
     }
@@ -467,26 +467,26 @@ public sealed class BlockDataStore : IEnumerable<KeyValuePair<Vector2Int, Block>
     public bool Remove(Vector2Int coordinate)
     {
         if (!TryGetChunkAndLocalIndex(coordinate, out ChunkData chunk, out int localIndex)
-            || (chunk.Cells[localIndex].Flags & BlockCellFlags.HasRuntimeProxy) == 0)
+            || (chunk.Cells[localIndex].Flags & BlockCellFlags.HasEntity) == 0)
         {
             return false;
         }
 
-        ClearRuntimeProxy(chunk, localIndex);
+        ClearEntity(chunk, localIndex);
         return true;
     }
 
-    public void CompactRuntimeProxyStorage(Vector2Int chunkCoordinate)
+    public void CompactEntityStorage(Vector2Int chunkCoordinate)
     {
         if (!chunks.TryGetValue(chunkCoordinate, out ChunkData chunk))
         {
             return;
         }
 
-        chunk.RuntimeProxies.TrimExcess();
+        chunk.Entities.TrimExcess();
     }
 
-    public void CopyRuntimeProxies(Vector2Int chunkCoordinate, List<Block> results)
+    public void CopyEntities(Vector2Int chunkCoordinate, List<Block> results)
     {
         if (results == null)
         {
@@ -499,7 +499,7 @@ public sealed class BlockDataStore : IEnumerable<KeyValuePair<Vector2Int, Block>
             return;
         }
 
-        foreach (KeyValuePair<int, Block> pair in chunk.RuntimeProxies)
+        foreach (KeyValuePair<int, Block> pair in chunk.Entities)
         {
             if (pair.Value != null)
             {
@@ -537,9 +537,9 @@ public sealed class BlockDataStore : IEnumerable<KeyValuePair<Vector2Int, Block>
     public void Clear()
     {
         chunks.Clear();
-        unchecked { runtimeProxyVersion++; }
+        unchecked { entityVersion++; }
         registeredCellCount = 0;
-        runtimeProxyCount = 0;
+        entityCount = 0;
         runtimeSimulationStateCount = 0;
         hasRegisteredBounds = false;
         registeredBoundsDirty = false;
@@ -639,23 +639,23 @@ public sealed class BlockDataStore : IEnumerable<KeyValuePair<Vector2Int, Block>
         }
     }
 
-    private void ClearRuntimeProxy(ChunkData chunk, int localIndex)
+    private void ClearEntity(ChunkData chunk, int localIndex)
     {
-        if ((chunk.Cells[localIndex].Flags & BlockCellFlags.HasRuntimeProxy) == 0)
+        if ((chunk.Cells[localIndex].Flags & BlockCellFlags.HasEntity) == 0)
         {
             return;
         }
 
-        chunk.RuntimeProxies.Remove(localIndex);
-        chunk.Cells[localIndex].Flags &= ~BlockCellFlags.HasRuntimeProxy;
-        chunk.RuntimeProxyCount--;
-        runtimeProxyCount--;
-        unchecked { runtimeProxyVersion++; }
+        chunk.Entities.Remove(localIndex);
+        chunk.Cells[localIndex].Flags &= ~BlockCellFlags.HasEntity;
+        chunk.EntityCount--;
+        entityCount--;
+        unchecked { entityVersion++; }
     }
 
-    private static Block GetRuntimeProxy(ChunkData chunk, int localIndex)
+    private static Block GetEntity(ChunkData chunk, int localIndex)
     {
-        return chunk.RuntimeProxies.TryGetValue(localIndex, out Block block)
+        return chunk.Entities.TryGetValue(localIndex, out Block block)
             ? block
             : null;
     }
@@ -665,7 +665,7 @@ public sealed class BlockDataStore : IEnumerable<KeyValuePair<Vector2Int, Block>
         private Dictionary<Vector2Int, ChunkData>.Enumerator chunkEnumerator;
         private readonly int chunkSize;
         private ChunkData currentChunk;
-        private Dictionary<int, Block>.Enumerator runtimeProxyEnumerator;
+        private Dictionary<int, Block>.Enumerator entityEnumerator;
         private KeyValuePair<Vector2Int, Block> current;
 
         internal Enumerator(Dictionary<Vector2Int, ChunkData> chunks, int chunkSize)
@@ -673,7 +673,7 @@ public sealed class BlockDataStore : IEnumerable<KeyValuePair<Vector2Int, Block>
             chunkEnumerator = chunks.GetEnumerator();
             this.chunkSize = chunkSize;
             currentChunk = null;
-            runtimeProxyEnumerator = default;
+            entityEnumerator = default;
             current = default;
         }
 
@@ -686,9 +686,9 @@ public sealed class BlockDataStore : IEnumerable<KeyValuePair<Vector2Int, Block>
             {
                 if (currentChunk != null)
                 {
-                    while (runtimeProxyEnumerator.MoveNext())
+                    while (entityEnumerator.MoveNext())
                     {
-                        KeyValuePair<int, Block> pair = runtimeProxyEnumerator.Current;
+                        KeyValuePair<int, Block> pair = entityEnumerator.Current;
                         if (pair.Value == null)
                         {
                             continue;
@@ -709,7 +709,7 @@ public sealed class BlockDataStore : IEnumerable<KeyValuePair<Vector2Int, Block>
                 }
 
                 currentChunk = chunkEnumerator.Current.Value;
-                runtimeProxyEnumerator = currentChunk.RuntimeProxies.GetEnumerator();
+                entityEnumerator = currentChunk.Entities.GetEnumerator();
             }
         }
 
@@ -720,7 +720,7 @@ public sealed class BlockDataStore : IEnumerable<KeyValuePair<Vector2Int, Block>
 
         public void Dispose()
         {
-            runtimeProxyEnumerator.Dispose();
+            entityEnumerator.Dispose();
             chunkEnumerator.Dispose();
         }
     }

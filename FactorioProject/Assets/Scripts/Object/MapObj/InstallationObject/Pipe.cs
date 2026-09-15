@@ -779,11 +779,9 @@ public class Pipe : InstallationObject
         fluidItemId = -1;
         temperatureCelsius = MapClimate.CurrentTemperatureCelsius;
         isMobileStorageFallbackFluid = false;
-        if (InputOutputModule.TryGetRuntimePipeFluidStorageAtCoordinate(
+        if (InputOutputModule.TryGetRuntimePipeDisplayFluidStorageAtCoordinate(
                 coordinate,
-                null,
-                false,
-                storage => CanDisplayStoredFluidAtCoordinate(storage, coordinate),
+                this,
                 out InstallationObject areaStorage)
             && areaStorage != null
             && areaStorage.StoredFluidItemId >= 0)
@@ -913,7 +911,7 @@ public class Pipe : InstallationObject
         return false;
     }
 
-    private bool CanDisplayStoredFluidAtCoordinate(InstallationObject storage, Vector2Int coordinate)
+    internal bool CanDisplayStoredFluidAtCoordinate(InstallationObject storage, Vector2Int coordinate)
     {
         if (storage == null || storage.StoredFluidItemId < 0)
         {
@@ -1195,6 +1193,13 @@ public class Pipe : InstallationObject
                 fluidDisplayStateVersion = 1;
             }
         }
+    }
+
+    internal static void InvalidateFluidDisplayNetworkCache(InstallationObject source)
+    {
+        FluidDisplayNetworkItemCache.Clear();
+        fluidDisplayNetworkCacheExpiresAt = 0f;
+        TerrainGenerator.Active?.InvalidateFluidJobDisplayNetworks(source);
     }
 
     private MeshRenderer ResolveFluidDisplayRenderer()

@@ -1,30 +1,32 @@
-using ProjectF.Attributes;
 using UnityEngine;
 
-public class DroppedItemPickupGate : MonoBehaviour
+/// <summary>
+/// Portable-item pickup rules stored beside the portable ECS entity.
+/// This is deliberately not a scene component.
+/// </summary>
+public sealed class DroppedItemPickupGate
 {
-    [SerializeField, ReadOnly]
     private bool requiresExit;
 
-    [SerializeField, ReadOnly]
     private bool hasExited;
 
-    [SerializeField, ReadOnly, Min(0f)]
     private float exitRadius = 0.5f;
 
-    [SerializeField, ReadOnly]
     private bool isSettled = true;
 
-    [SerializeField, ReadOnly]
     private Vector3 dropOrigin;
 
-    [SerializeField, ReadOnly]
     private bool hasOrigin;
 
-    [SerializeField, ReadOnly]
     private bool autoPickupBlocked;
 
     private bool preserveStateOnDisable;
+    private readonly PortableObject owner;
+
+    internal DroppedItemPickupGate(PortableObject owner)
+    {
+        this.owner = owner;
+    }
 
     public void MarkDropped(float radius = 0.5f, bool settled = true, Vector3 origin = default)
     {
@@ -43,7 +45,7 @@ public class DroppedItemPickupGate : MonoBehaviour
             return;
         }
 
-        Vector3 origin = hasOrigin ? dropOrigin : transform.position;
+        Vector3 origin = hasOrigin || owner == null ? dropOrigin : owner.WorldPosition;
         Vector3 offset = playerPosition - origin;
         offset.y = 0f;
         float distanceSqr = offset.sqrMagnitude;
@@ -114,7 +116,7 @@ public class DroppedItemPickupGate : MonoBehaviour
         preserveStateOnDisable = false;
     }
 
-    private void OnDisable()
+    internal void OnOwnerDisabled()
     {
         if (preserveStateOnDisable)
         {

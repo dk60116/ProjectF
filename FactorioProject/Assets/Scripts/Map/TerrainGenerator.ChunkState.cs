@@ -1,3 +1,4 @@
+using System.Collections;
 using System.Collections.Generic;
 using UnityEngine;
 
@@ -62,22 +63,35 @@ public partial class TerrainGenerator
 
     private void CaptureConveyorItemSaveRuns(MapSaveData mapSaveData)
     {
-        if (mapSaveData == null)
-        {
-            return;
-        }
+        IEnumerator capture = CaptureConveyorItemSaveRunsIncremental(mapSaveData, int.MaxValue);
+        while (capture.MoveNext()) { }
+    }
 
+    private IEnumerator CaptureConveyorItemSaveRunsIncremental(
+        MapSaveData mapSaveData,
+        int entriesPerFrame)
+    {
+        if (mapSaveData == null) yield break;
+
+        entriesPerFrame = Mathf.Max(1, entriesPerFrame);
+        int processed = 0;
         mapSaveData.conveyorItemRuns ??= new List<ConveyorItemRunSaveEntry>();
         mapSaveData.conveyorItemRuns.Clear();
         if (mapSaveData.conveyorItems == null || mapSaveData.conveyorItems.Count <= 0)
         {
-            return;
+            yield break;
         }
 
         Dictionary<ConveyorLaneCoordinateKey, ConveyorItemLaneSaveState> occupiedItems =
             new Dictionary<ConveyorLaneCoordinateKey, ConveyorItemLaneSaveState>();
         for (int blockIndex = 0; blockIndex < mapSaveData.conveyorItems.Count; blockIndex++)
         {
+            if (++processed >= entriesPerFrame)
+            {
+                processed = 0;
+                yield return null;
+            }
+
             ConveyorItemBlockSaveEntry entry = mapSaveData.conveyorItems[blockIndex];
             if (entry?.lanes == null
                 || !loadedBlocks.TryGetValue(entry.coordinate, out Block block)
@@ -111,7 +125,7 @@ public partial class TerrainGenerator
 
         if (occupiedItems.Count <= 0)
         {
-            return;
+            yield break;
         }
 
         Dictionary<ConveyorLaneCoordinateKey, ConveyorLaneCoordinateKey> successors =
@@ -121,10 +135,21 @@ public partial class TerrainGenerator
         foreach (KeyValuePair<ConveyorLaneCoordinateKey, ConveyorItemLaneSaveState> pair in occupiedItems)
         {
             predecessorCounts[pair.Key] = 0;
+            if (++processed >= entriesPerFrame)
+            {
+                processed = 0;
+                yield return null;
+            }
         }
 
         foreach (KeyValuePair<ConveyorLaneCoordinateKey, ConveyorItemLaneSaveState> pair in occupiedItems)
         {
+            if (++processed >= entriesPerFrame)
+            {
+                processed = 0;
+                yield return null;
+            }
+
             ConveyorLaneCoordinateKey sourceKey = pair.Key;
             if (!loadedBlocks.TryGetValue(sourceKey.coordinate, out Block sourceBlock)
                 || sourceBlock == null
@@ -151,6 +176,7 @@ public partial class TerrainGenerator
         List<ConveyorLaneCoordinateKey> orderedKeys =
             new List<ConveyorLaneCoordinateKey>(occupiedItems.Keys);
         orderedKeys.Sort(CompareConveyorSaveLaneKeys);
+        yield return null;
         HashSet<ConveyorLaneCoordinateKey> compressedKeys =
             new HashSet<ConveyorLaneCoordinateKey>();
 
@@ -159,42 +185,61 @@ public partial class TerrainGenerator
             ConveyorLaneCoordinateKey key = orderedKeys[i];
             if (predecessorCounts[key] != 1)
             {
-                CaptureConveyorItemSaveRun(
+                IEnumerator runCapture = CaptureConveyorItemSaveRunIncremental(
                     key,
                     occupiedItems,
                     successors,
                     predecessorCounts,
                     compressedKeys,
-                    mapSaveData.conveyorItemRuns);
+                    mapSaveData.conveyorItemRuns,
+                    entriesPerFrame);
+                while (runCapture.MoveNext()) yield return runCapture.Current;
+            }
+            if (++processed >= entriesPerFrame)
+            {
+                processed = 0;
+                yield return null;
             }
         }
 
         // 닫힌 순환 벨트는 모든 칸의 선행자가 하나이므로 위 시작점 탐색에 걸리지 않는다.
         for (int i = 0; i < orderedKeys.Count; i++)
         {
-            CaptureConveyorItemSaveRun(
+            IEnumerator runCapture = CaptureConveyorItemSaveRunIncremental(
                 orderedKeys[i],
                 occupiedItems,
                 successors,
                 predecessorCounts,
                 compressedKeys,
-                mapSaveData.conveyorItemRuns);
+                mapSaveData.conveyorItemRuns,
+                entriesPerFrame);
+            while (runCapture.MoveNext()) yield return runCapture.Current;
+            if (++processed >= entriesPerFrame)
+            {
+                processed = 0;
+                yield return null;
+            }
         }
 
-        RemoveCompressedConveyorItemStates(mapSaveData.conveyorItems, compressedKeys);
+        IEnumerator removeCapture = RemoveCompressedConveyorItemStatesIncremental(
+            mapSaveData.conveyorItems,
+            compressedKeys,
+            entriesPerFrame);
+        while (removeCapture.MoveNext()) yield return removeCapture.Current;
     }
 
-    private static void CaptureConveyorItemSaveRun(
+    private static IEnumerator CaptureConveyorItemSaveRunIncremental(
         ConveyorLaneCoordinateKey startKey,
         IReadOnlyDictionary<ConveyorLaneCoordinateKey, ConveyorItemLaneSaveState> occupiedItems,
         IReadOnlyDictionary<ConveyorLaneCoordinateKey, ConveyorLaneCoordinateKey> successors,
         IReadOnlyDictionary<ConveyorLaneCoordinateKey, int> predecessorCounts,
         ISet<ConveyorLaneCoordinateKey> compressedKeys,
-        ICollection<ConveyorItemRunSaveEntry> output)
+        ICollection<ConveyorItemRunSaveEntry> output,
+        int entriesPerFrame)
     {
         if (compressedKeys.Contains(startKey) || !occupiedItems.ContainsKey(startKey))
         {
-            return;
+            yield break;
         }
 
         ConveyorItemRunSaveEntry run = new ConveyorItemRunSaveEntry
@@ -203,6 +248,7 @@ public partial class TerrainGenerator
             startLaneIndex = startKey.laneIndex
         };
         ConveyorLaneCoordinateKey currentKey = startKey;
+        int processed = 0;
         while (!compressedKeys.Contains(currentKey)
                && occupiedItems.TryGetValue(currentKey, out ConveyorItemLaneSaveState laneState))
         {
@@ -211,6 +257,12 @@ public partial class TerrainGenerator
             run.endLaneIndex = currentKey.laneIndex;
             run.itemCount++;
             AppendConveyorItemTypeRun(run.itemRuns, laneState.itemId);
+
+            if (++processed >= entriesPerFrame)
+            {
+                processed = 0;
+                yield return null;
+            }
 
             if (!successors.TryGetValue(currentKey, out ConveyorLaneCoordinateKey nextKey)
                 || predecessorCounts[nextKey] != 1
@@ -246,10 +298,12 @@ public partial class TerrainGenerator
         });
     }
 
-    private static void RemoveCompressedConveyorItemStates(
+    private static IEnumerator RemoveCompressedConveyorItemStatesIncremental(
         List<ConveyorItemBlockSaveEntry> blockEntries,
-        ISet<ConveyorLaneCoordinateKey> compressedKeys)
+        ISet<ConveyorLaneCoordinateKey> compressedKeys,
+        int entriesPerFrame)
     {
+        int processed = 0;
         for (int blockIndex = blockEntries.Count - 1; blockIndex >= 0; blockIndex--)
         {
             ConveyorItemBlockSaveEntry entry = blockEntries[blockIndex];
@@ -266,6 +320,11 @@ public partial class TerrainGenerator
                         new ConveyorLaneCoordinateKey(entry.coordinate, lane.laneIndex)))
                 {
                     entry.lanes.RemoveAt(laneIndex);
+                }
+                if (++processed >= entriesPerFrame)
+                {
+                    processed = 0;
+                    yield return null;
                 }
             }
 

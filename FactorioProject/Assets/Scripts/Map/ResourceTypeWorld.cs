@@ -16,7 +16,7 @@ public sealed partial class ResourceTypeWorld : MonoBehaviour
     private readonly List<Part> parts = new List<Part>();
     private readonly List<ColliderPart> colliderParts = new List<ColliderPart>();
     private Resource prototype;
-    internal PortableObject PortableTemplate { get; private set; }
+    internal PortableObjectTemplate PortableTemplate { get; private set; }
     private Vector3 rootScale;
     private Vector3 bodyPosition;
     private Quaternion bodyRotation;
@@ -151,6 +151,14 @@ public sealed partial class ResourceTypeWorld : MonoBehaviour
             sharedBatchRenderer != null ? sharedBatchRenderer.LastCulledBatchCount : 0);
         MapObjectTickProfiler.AddRuntimeCounter(
             "ResourceRender",
+            "CandidateBatches",
+            sharedBatchRenderer != null ? sharedBatchRenderer.LastCandidateBatchCount : 0);
+        MapObjectTickProfiler.AddRuntimeCounter(
+            "ResourceRender",
+            "CandidateCells",
+            sharedBatchRenderer != null ? sharedBatchRenderer.LastCandidateCellCount : 0);
+        MapObjectTickProfiler.AddRuntimeCounter(
+            "ResourceRender",
             "SubmittedMatrices",
             sharedBatchRenderer != null ? sharedBatchRenderer.LastSubmittedMatrixCount : 0);
         MapObjectTickProfiler.AddRuntimeCounter(
@@ -209,7 +217,7 @@ public sealed partial class ResourceTypeWorld : MonoBehaviour
         BatchRenderer = terrain.GetComponent<ResourceBatchRenderer>();
         if (BatchRenderer == null) BatchRenderer = terrain.gameObject.AddComponent<ResourceBatchRenderer>();
         if (source is ProjectF.MapObjects.Tree) growthPresentation = new ResourceGrowthPresentation();
-        PortableTemplate = source.GetComponentInChildren<PortableObject>(true);
+        PortableTemplate = source.GetComponentInChildren<PortableObjectTemplate>(true);
         Transform root = source.transform;
         Transform body = root.Find("Body") ?? root;
         Transform extra = root.Find("_ResourceBodyExtraRenderers");
@@ -220,7 +228,7 @@ public sealed partial class ResourceTypeWorld : MonoBehaviour
         foreach (MeshRenderer renderer in source.GetComponentsInChildren<MeshRenderer>(true))
         {
             MeshFilter filter = renderer.GetComponent<MeshFilter>();
-            if (filter == null || filter.sharedMesh == null || renderer.GetComponentInParent<PortableObject>() != null)
+            if (filter == null || filter.sharedMesh == null || renderer.GetComponentInParent<PortableObjectTemplate>() != null)
                 continue;
             bool apple = HasAppleAncestor(renderer.transform, root);
             if (!apple && !IsAuthoredActive(renderer.transform, root)) continue;
@@ -233,7 +241,7 @@ public sealed partial class ResourceTypeWorld : MonoBehaviour
         foreach (Collider collider in source.GetComponentsInChildren<Collider>(true))
         {
             if (!collider.enabled || !IsAuthoredActive(collider.transform, root)
-                || collider.GetComponentInParent<PortableObject>() != null) continue;
+                || collider.GetComponentInParent<PortableObjectTemplate>() != null) continue;
             Transform partRoot = collider.transform.IsChildOf(body) ? body
                 : extra != null && collider.transform.IsChildOf(extra) ? extra : root;
             bool followsBody = partRoot == body || partRoot == extra;

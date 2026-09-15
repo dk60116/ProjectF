@@ -559,22 +559,12 @@ public partial class InstallationObject : MapObject, IMapObjectSimulationIdentit
 
     protected virtual void OnPlacementRuntimeChanged()
     {
-        if (this is IMapObjectUpdateTick updateTick)
-        {
-            MapObjectTickManager.RefreshSimulationIdentity(updateTick);
-        }
-
         activeInstanceVersion++;
         PlacementRuntimeChanged?.Invoke(this);
     }
 
     protected virtual void OnPlacementRuntimeCleared()
     {
-        if (this is IMapObjectUpdateTick updateTick)
-        {
-            MapObjectTickManager.RefreshSimulationIdentity(updateTick);
-        }
-
         activeInstanceVersion++;
         PlacementRuntimeCleared?.Invoke(this);
     }
@@ -893,7 +883,7 @@ public partial class InstallationObject : MapObject, IMapObjectSimulationIdentit
     {
         if (previousFluidItemId != currentFluidItemId)
         {
-            Pipe.InvalidateFluidDisplayNetworkCache();
+            Pipe.InvalidateFluidDisplayNetworkCache(this);
         }
     }
 

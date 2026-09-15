@@ -5,6 +5,8 @@ using System.Collections.Generic;
 public static class MapObjectTickProfiler
 {
     public static bool IsEnabled = true;
+    public static void RecordRenderFrame() { }
+    public static void RecordSimulationTicks(int count) { }
     public static readonly Dictionary<string, long> Counters = new();
     public static readonly HashSet<string> Samples = new();
     public static NamedSampleScope SampleNamed(string kind, string type, string name)

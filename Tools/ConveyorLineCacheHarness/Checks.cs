@@ -1,39 +1,30 @@
 using System;
 using System.Collections.Generic;
-using System.Runtime.CompilerServices;
 using UnityEngine;
 
 internal static class HarnessMetrics { internal static long HandleLookups; }
 // Ownership is outside this resolver-only harness; the world harness runs the actual transport.
 namespace ProjectF.Conveyors { internal sealed class ConveyorTransportRun { } }
 public sealed class BlockRuntimeSimulationState { }
-public sealed class Block : UnityEngine.Object
+public sealed class Block
 {
     public enum BlockType : byte { Empty, Ground, Conveyor }
     public BlockType Type = BlockType.Conveyor;
-    public readonly GameObject gameObject = new GameObject();
+    public bool IsAlive = true;
+    public bool WorldActive = true;
+    public bool IsRuntimeActive => IsAlive && WorldActive;
+    public static bool operator ==(Block left, Block right)
+    {
+        bool leftInvalid = ReferenceEquals(left, null) || !left.IsAlive;
+        bool rightInvalid = ReferenceEquals(right, null) || !right.IsAlive;
+        return leftInvalid || rightInvalid ? leftInvalid == rightInvalid : ReferenceEquals(left, right);
+    }
+    public static bool operator !=(Block left, Block right) => !(left == right);
+    public override bool Equals(object value) => ReferenceEquals(this, value);
+    public override int GetHashCode() => base.GetHashCode();
 }
 namespace UnityEngine
 {
-    public class Object
-    {
-        public bool Destroyed;
-        public static bool operator ==(Object a, Object b)
-        {
-            bool aNull = ReferenceEquals(a, null) || a.Destroyed;
-            bool bNull = ReferenceEquals(b, null) || b.Destroyed;
-            return aNull || bNull ? aNull == bNull : ReferenceEquals(a, b);
-        }
-        public static bool operator !=(Object a, Object b) => !(a == b);
-        public override bool Equals(object value) => ReferenceEquals(this, value);
-        public override int GetHashCode() => RuntimeHelpers.GetHashCode(this);
-    }
-    public sealed class GameObject
-    {
-        public bool activeSelf = true;
-        public GameObject Parent;
-        public bool activeInHierarchy => activeSelf && (Parent == null || Parent.activeInHierarchy);
-    }
     public readonly struct Vector2Int : IEquatable<Vector2Int>
     {
         public readonly int x, y;
@@ -79,8 +70,8 @@ internal sealed class StorePair
     }
     internal BlockHandle Bind(Vector2Int coordinate, Block block)
     {
-        bool oldResult = Legacy.BindRuntimeProxy(coordinate, block, out BlockHandle oldHandle);
-        bool newResult = Current.BindRuntimeProxy(coordinate, block, out BlockHandle newHandle);
+        bool oldResult = Legacy.BindEntity(coordinate, block, out BlockHandle oldHandle);
+        bool newResult = Current.BindEntity(coordinate, block, out BlockHandle newHandle);
         Checks.Require(oldResult == newResult && oldHandle == newHandle, "bind result/handle");
         return newHandle;
     }
@@ -126,41 +117,36 @@ internal static class Checks
         BlockHandle handle = pair.Bind(at, first);
         var line = CurrentResolver.Line(handle);
         CompareTwice(pair, line, "cold/hot negative-coordinate");
-        Require(line.runtimeBlocks.Length == 1, "production lazy array allocation");
+        Require(line.entityCache.Length == 1, "production lazy array allocation");
         pair.Compare(null, 0, "null line");
         pair.Compare(line, -1, "negative slot");
         pair.Compare(line, 1, "slot outside line");
         pair.Compare(CurrentResolver.Line(), 0, "empty line");
         pair.Compare(CurrentResolver.Line(default(BlockHandle)), 0, "invalid handle");
 
-        first.gameObject.activeSelf = false;
-        CompareTwice(pair, line, "inactive self preserves non-null out");
-        first.gameObject.activeSelf = true;
-        CompareTwice(pair, line, "reactivated self");
-        first.gameObject.Parent = new GameObject { Parent = new GameObject() };
-        first.gameObject.Parent.Parent.activeSelf = false;
-        CompareTwice(pair, line, "disabled grandparent");
-        first.gameObject.Parent.Parent.activeSelf = true;
-        CompareTwice(pair, line, "enabled grandparent");
+        first.WorldActive = false;
+        CompareTwice(pair, line, "inactive world preserves non-null out");
+        first.WorldActive = true;
+        CompareTwice(pair, line, "reactivated world");
 
         long before = HarnessMetrics.HandleLookups;
         pair.Bind(at, first);
         bool rebound = pair.CurrentResolver.Resolve(line, 0, out Block same);
         Require(rebound && ReferenceEquals(same, first) && HarnessMetrics.HandleLookups == before,
-            "same proxy binding keeps hot cache");
+            "same entity binding keeps hot cache");
 
         var replacement = new Block();
         Require(pair.Bind(at, replacement) == handle, "same cell replacement retains handle");
-        CompareTwice(pair, line, "replaced proxy");
+        CompareTwice(pair, line, "replaced entity");
         pair.Remove(at);
-        CompareTwice(pair, line, "removed proxy with retained registered handle");
+        CompareTwice(pair, line, "removed entity with retained registered handle");
         Require(pair.Bind(at, first) == handle, "rebound removed cell retains handle");
         CompareTwice(pair, line, "rebound removed cell");
-        first.Destroyed = true;
-        CompareTwice(pair, line, "destroyed fake-null cleans proxy count and preserves first out");
-        Require(pair.Current.Count == 0, "destroyed proxy removed from storage");
+        first.IsAlive = false;
+        CompareTwice(pair, line, "dead entity invalidates cache and storage");
+        Require(pair.Current.Count == 0, "dead entity leaves storage");
         pair.Bind(at, replacement);
-        CompareTwice(pair, line, "replacement after fake-null cleanup");
+        CompareTwice(pair, line, "replacement after dead-entity cleanup");
 
         pair.Unload(handle.ChunkCoordinate);
         CompareTwice(pair, line, "unloaded chunk stale handle");
@@ -177,11 +163,11 @@ internal static class Checks
         CompareTwice(pair, line, "same slot index replaced handle");
         line.blockHandles.Add(reloaded);
         pair.Compare(line, 1, "expanded line allocates correct cache length");
-        Require(line.runtimeBlocks.Length == 2, "resized array matches expanded line");
+        Require(line.entityCache.Length == 2, "resized array matches expanded line");
         line.blockHandles.RemoveAt(1);
         CompareTwice(pair, line, "shrunk line");
-        Require(line.runtimeBlocks.Length == 1, "resized array matches shrunk line");
-        line.runtimeBlocks = Array.Empty<BlockDataStore.RuntimeProxyCache>();
+        Require(line.entityCache.Length == 1, "resized array matches shrunk line");
+        line.entityCache = Array.Empty<BlockDataStore.EntityCache>();
         CompareTwice(pair, line, "empty cache array");
 
         before = HarnessMetrics.HandleLookups;
@@ -193,16 +179,16 @@ internal static class Checks
         CompareTwice(pair, line, "clear all storage");
         otherHandle = pair.Bind(otherAt, otherBlock);
         line.blockHandles[0] = otherHandle;
-        CompareTwice(pair, line, "new proxy after clear");
+        CompareTwice(pair, line, "new entity after clear");
         pair.Legacy.ConfigureChunkSize(8); pair.Current.ConfigureChunkSize(8);
         CompareTwice(pair, line, "reconfigure chunk size clears cached storage");
         line.blockHandles[0] = pair.Bind(otherAt, otherBlock);
-        CompareTwice(pair, line, "proxy after reconfigure");
+        CompareTwice(pair, line, "entity after reconfigure");
 
         pair.Legacy.RegisterCell(new Vector2Int(100, 100), Block.BlockType.Ground, out BlockHandle legacyMissing);
         pair.Current.RegisterCell(new Vector2Int(100, 100), Block.BlockType.Ground, out BlockHandle currentMissing);
         Require(legacyMissing == currentMissing, "registered cells have matching handles");
-        CompareTwice(pair, CurrentResolver.Line(currentMissing), "registered cell without proxy");
+        CompareTwice(pair, CurrentResolver.Line(currentMissing), "registered cell without entity");
         CompareTwice(pair, CurrentResolver.Line(new BlockHandle(new Vector2Int(999, 999), 0, 1)), "unregistered chunk");
 
         CheckOwnerIsolation();
@@ -224,7 +210,7 @@ internal static class Checks
         var aLine = CurrentResolver.Line(aHandle);
         var bLine = CurrentResolver.Line(bHandle);
         a.Compare(aLine, 0, "owner A cache prepared");
-        bLine.runtimeBlocks = aLine.runtimeBlocks;
+        bLine.entityCache = aLine.entityCache;
         CompareTwice(b, bLine, "cache imported from other owner");
         CompareTwice(a, aLine, "shared cache written by other owner");
         a.CurrentResolver.Resolve(aLine, 0, out _);
@@ -268,7 +254,7 @@ internal static class Checks
                 if (pair.CurrentResolver.Resolve(line, slot, out Block block) && !ReferenceEquals(block, null)) resolved++;
         long allocated = GC.GetAllocatedBytesForCurrentThread() - allocationBefore;
         long cacheCalls = HarnessMetrics.HandleLookups - initial;
-        Require(resolved == 10000, "stable sweep resolves all proxies");
+        Require(resolved == 10000, "stable sweep resolves all entities");
         Require(legacyCalls == 10000 && cacheCalls == 0, "stable sweep eliminates dictionary resolver calls");
         Require(allocated == 0, "stable sweep allocates no managed heap bytes");
         Console.WriteLine($"Stable 100 slots x 100 passes: uncached handle lookups {legacyCalls} -> {cacheCalls}; warm allocations {allocated} bytes.");
@@ -297,16 +283,14 @@ internal static class Checks
                     blocks[index] = new Block();
                     line.blockHandles[index] = pair.Bind(positions[index], blocks[index]);
                     break;
-                case 2: blocks[index].gameObject.activeSelf = !blocks[index].gameObject.activeSelf; break;
-                case 3: blocks[index].Destroyed = true; break;
+                case 2: blocks[index].WorldActive = !blocks[index].WorldActive; break;
+                case 3: blocks[index].IsAlive = false; break;
                 case 4: pair.Unload(line.blockHandles[index].ChunkCoordinate); break;
                 case 5:
                     pair.Legacy.Clear();
                     pair.Current.Clear();
                     break;
-                case 6:
-                    blocks[index].gameObject.Parent = new GameObject { activeSelf = random.Next(2) == 0 };
-                    break;
+                case 6: blocks[index].WorldActive = random.Next(2) == 0; break;
             }
             for (int slot = 0; slot < positions.Length; slot++) pair.Compare(line, slot, "mixed lifecycle");
         }

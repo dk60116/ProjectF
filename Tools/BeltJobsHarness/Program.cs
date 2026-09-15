@@ -189,9 +189,24 @@ using (var host = new TerrainGenerator())
     a.Edges[0].Add((b, 0)); b.Edges[0].Add((c, 0));
     host.Add(c); host.Add(a); host.Add(b); // Deliberately noncanonical scene creation order.
     host.Frame(0); host.Put(a, 0, 11);
-    Require(a.Items[0].ItemId == 11 && host.Read(a).ItemId < 0, "insertion reserves the facade before changing native state");
+    Require(a.Items[0].ItemId == 11 && host.Read(a).ItemId < 0 && host.ReadEffective(a).ItemId == 11,
+        "queued insertion is synchronously visible without committing a managed mirror");
     host.StepBeltSimulation();
-    Require(host.Read(b).ItemId == 11 && a.Items[0].ItemId < 0 && b.Items[0].ItemId == 11, "tick publishes committed item movement");
+    Require(host.Read(b).ItemId == 11 && a.Items[0].ItemId < 0 && b.Items[0].ItemId < 0,
+        "native movement does not rebuild managed lane mirrors");
+    host.SetGate(b, 0, 33);
+    Require(host.ReadEffective(b).ItemId == 11 && host.ReadEffective(b).GateBits == 33,
+        "pending gate overlay is synchronously readable");
+    host.StepBeltSimulation();
+    Require(host.Read(b).ItemId == 11 && host.Read(b).GateBits == 33,
+        "gate-only command preserves native item identity");
+    host.Hold(b, 0, tick * 12);
+    Require(host.ReadEffective(b).ItemId == 11 && host.ReadEffective(b).GateBits == 33
+            && host.ReadEffective(b).Remaining == tick * 12,
+        "pending hold overlay is synchronously readable");
+    host.StepBeltSimulation();
+    Require(host.Read(b).ItemId == 11 && host.Read(b).GateBits == 33 && host.Read(b).Remaining >= tick * 11,
+        "hold-only command preserves native item and gate state");
     long remaining = host.Read(b).Remaining;
     host.Dirty(); host.Frame(0);
     Require(host.Read(b).Remaining == remaining && host.Read(b).ItemId == 11, "topology rebuild retains exact progress");
@@ -265,4 +280,25 @@ using (var slow = new TerrainGenerator())
     for (int i = 0; i < 10; i++) slow.Frame(0.1f);
     Require(fast.Committed() == slow.Committed(), "render frame rate does not change the state after the same number of fixed ticks");
 }
-Console.WriteLine($"PASS: {checks} deterministic belt kernel and host checks; serial/reverse/parallel states match.");
+using (var host = new TerrainGenerator())
+{
+    var oldView = new Block(40);
+    host.Add(oldView); host.Put(oldView, 0, 73, tick * 10); host.StepBeltSimulation();
+    var before = host.Read(oldView);
+    host.Remove(oldView);
+    var replacement = new Block(40);
+    host.Add(replacement); host.Frame(0);
+    Require(host.Read(replacement).Equals(before), "replacing a Block adapter retains the coordinate lane's native checkpoint");
+    Require(replacement.Items[0].ItemId < 0, "rebound view stays adapter-only without recreating a managed lane mirror");
+    Require(oldView.BeltJobIndex(0) == -1, "old Block adapter is unbound after reconstruction");
+}
+using (var host = new TerrainGenerator())
+{
+    var detached = new Block(50);
+    host.Add(detached); host.Put(detached, 1, 81); host.StepBeltSimulation();
+    host.Dirty(); host.Frame(0);
+    Require(host.BeltJobLaneCount == 2 && host.Read(detached, 1).ItemId == 81,
+        "topology rebuild retains an occupied lane that no longer belongs to the connection graph");
+}
+checks += WorldChecks.Run();
+Console.WriteLine($"PASS: {checks} deterministic belt kernel, host and viewless world checks; serial/reverse/parallel states match.");

@@ -293,14 +293,14 @@ public class Fluidtank : InstallationObject, IMapObjectUpdateTick, IMapObjectUpd
         }
 
         InvalidateFluidNetworkTopology();
-        MapObjectTickManager.RegisterUpdateTick(this);
+        FacilitySimulationWorld.Register(this, true);
         RefreshAllPipeVisuals();
         RefreshFluidColor();
     }
 
     protected override void OnDisable()
     {
-        MapObjectTickManager.UnregisterUpdateTick(this);
+        FacilitySimulationWorld.Unregister(this);
         ActiveFluidTanks.Remove(this);
         if (ActiveFluidTanks.Count == 0)
         {

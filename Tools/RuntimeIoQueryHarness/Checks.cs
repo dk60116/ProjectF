@@ -17,6 +17,7 @@ public sealed class BoxObject
     public bool AcceptsItem(int itemId) => itemId == Allowed;
 }
 public sealed class Block { public object MapObject; }
+public static class MapClimate { public static float CurrentTemperatureCelsius => 20f; }
 public sealed class TerrainGenerator
 {
     public static TerrainGenerator Active = new TerrainGenerator();
@@ -39,11 +40,13 @@ public static class InputOutputModuleEnergyAreaController
 public partial class InputOutputModule
 {
     private static readonly Dictionary<Vector2Int, HashSet<InputOutputModule>> registeredRuntimeAreaCoordinates = new();
+    private static readonly Dictionary<Vector2Int, HashSet<InputOutputModule>> registeredRuntimeFluidOutputCoordinates = new();
     public readonly ModuleObject gameObject = new();
     private readonly List<Vector2Int> runtimeInputEnergyCoordinates = new();
     private readonly List<Vector2Int> runtimeOutputCoordinates = new();
     private readonly List<Vector2Int> runtimePipeInputCoordinates = new();
     private readonly List<Area> runtimeInputItemAreas = new();
+    private readonly HashSet<int> runtimeFluidOutputItemIdScratch = new();
     private sealed class Area { public Vector2Int coordinate; }
     public readonly List<int> Output = new();
     public readonly List<int> Accepted = new();
@@ -61,9 +64,21 @@ public partial class InputOutputModule
         if (energy) runtimeInputEnergyCoordinates.Add(coordinate);
         RegisterRuntimeAreaCoordinates();
         RegisterRuntimeAreaCoordinates(); // Restore/OnEnable can register the same bindings.
+        if (output)
+        {
+            if (!registeredRuntimeFluidOutputCoordinates.TryGetValue(coordinate, out var modules))
+                registeredRuntimeFluidOutputCoordinates.Add(coordinate, modules = new());
+            modules.Add(this);
+        }
     }
     public void Remove()
     {
+        foreach (Vector2Int coordinate in runtimeOutputCoordinates)
+        {
+            if (!registeredRuntimeFluidOutputCoordinates.TryGetValue(coordinate, out var modules)) continue;
+            modules.Remove(this);
+            if (modules.Count == 0) registeredRuntimeFluidOutputCoordinates.Remove(coordinate);
+        }
         UnregisterRuntimeAreaCoordinates();
         runtimeOutputCoordinates.Clear();
         runtimeInputItemAreas.Clear();
@@ -77,6 +92,8 @@ public partial class InputOutputModule
         foreach (int id in Output) result.Add(id);
         return Output.Count > 0;
     }
+    private static bool IsFluidItemId(int itemId) => itemId >= 0;
+    public float GetStoredFluidTemperatureCelsius(int itemId) => 20f;
     private bool AppendRuntimeInputItemIdsAtCoordinate(Vector2Int coordinate, ISet<int> result) => AppendAcceptedRuntimeInputItemIdsAtCoordinate(coordinate, result);
     private bool AppendAcceptedRuntimeInputItemIdsAtCoordinate(Vector2Int coordinate, ISet<int> result)
     {
@@ -111,6 +128,15 @@ public static class Checks
         Require(InputOutputModule.CanAddItemToRuntimeIoOverlapCoordinate(cell, 1), "matching overlap rejected");
         Require(!InputOutputModule.CanAddItemToRuntimeIoOverlapCoordinate(cell, 2), "nonmatching overlap accepted");
         foreach (var module in irrelevant) Require(module.OutputReads == 0, "unrelated module scanned");
+        producer.OutputReads = 0;
+        Require(InputOutputModule.TryGetFluidOutputInfoAtRuntimeGridCoordinate(
+                cell,
+                out int fluidItemId,
+                out float fluidTemperature)
+            && fluidItemId == 1
+            && fluidTemperature == 20f,
+            "indexed fluid output lookup failed");
+        foreach (var module in irrelevant) Require(module.OutputReads == 0, "fluid lookup scanned unrelated module");
         consumer.Accepted.Clear(); consumer.Accepted.Add(2);
         Require(!InputOutputModule.CanAddItemToRuntimeIoOverlapCoordinate(cell, 1), "stale recipe filter");
         Require(InputOutputModule.CanAddItemToRuntimeIoOverlapCoordinate(cell, 2), "changed recipe rejected");
@@ -150,8 +176,15 @@ public static class Checks
         for (int i = 0; i < 10000; i++) InputOutputModule.CanAddItemToRuntimeIoOverlapCoordinate(cell, 2);
         long allocated = GC.GetAllocatedBytesForCurrentThread() - before;
         Require(allocated == 0, $"steady queries allocated {allocated} bytes");
+        for (int i = 0; i < 1000; i++)
+            InputOutputModule.TryGetFluidOutputInfoAtRuntimeGridCoordinate(cell, out _, out _);
+        before = GC.GetAllocatedBytesForCurrentThread();
+        for (int i = 0; i < 10000; i++)
+            InputOutputModule.TryGetFluidOutputInfoAtRuntimeGridCoordinate(cell, out _, out _);
+        allocated = GC.GetAllocatedBytesForCurrentThread() - before;
+        Require(allocated == 0, $"steady fluid output queries allocated {allocated} bytes");
         producer.Remove(); ids.Clear();
         Require(!InputOutputModule.TryGetOutputItemIdsAtRuntimeGridCoordinate(cell, ids), "pooled producer still registered");
-        Console.WriteLine("PASS: 10,000 unrelated modules untouched; overlap/filter/fuel/box/disable/edit/restore/remove/reentrant queries; 10,000 queries allocated 0 bytes.");
+        Console.WriteLine("PASS: 10,000 unrelated modules untouched; indexed fluid output; overlap/filter/fuel/box/disable/edit/restore/remove/reentrant queries; general and fluid queries allocated 0 bytes.");
     }
 }

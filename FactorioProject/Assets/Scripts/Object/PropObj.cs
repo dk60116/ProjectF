@@ -12,14 +12,15 @@ public class PropObj : BaseObject
     [SerializeField]
     private ItemDefinition itemDefinition;
 
-    [SerializeField, ReadOnly]
+    [System.NonSerialized]
     protected PortableObject portableObj;
 
     private ItemLightController itemLightController;
 
     protected void Awake()
     {
-        portableObj = GetComponentInChildren<PortableObject>(true);
+        PortableObjectTemplate template = GetComponentInChildren<PortableObjectTemplate>(true);
+        portableObj = template != null ? template.CreateEntity(true) : null;
 
         if (portableObj != null)
         {

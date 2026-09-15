@@ -29,6 +29,11 @@ public class ResourceBatchRenderer : MonoBehaviour
         new Dictionary<ResourceInstance, List<ResourceBatchEntry>>();
     private readonly Dictionary<BatchKey, BatchData> batchesByKey = new Dictionary<BatchKey, BatchData>();
     private readonly List<BatchKey> activeBatchKeys = new List<BatchKey>();
+    private readonly Dictionary<Vector2Int, List<BatchKey>> batchKeysByCell =
+        new Dictionary<Vector2Int, List<BatchKey>>();
+    private readonly Dictionary<Vector2Int, List<BatchKey>> globalBatchKeysByCell =
+        new Dictionary<Vector2Int, List<BatchKey>>();
+    private readonly List<BatchKey> visibleBatchCandidates = new List<BatchKey>();
     private readonly ProjectF.Rendering.CameraRenderCulling cameraCulling = new ProjectF.Rendering.CameraRenderCulling();
     private Camera mainCamera;
     private int activeMatrixCount;
@@ -42,6 +47,8 @@ public class ResourceBatchRenderer : MonoBehaviour
     public int LastDirtyResourceUpdates { get; private set; }
     public int LastVisibleBatchCount { get; private set; }
     public int LastCulledBatchCount { get; private set; }
+    public int LastCandidateBatchCount { get; private set; }
+    public int LastCandidateCellCount { get; private set; }
     public int LastSubmittedMatrixCount { get; private set; }
     public int LastDrawCallCount { get; private set; }
 
@@ -113,6 +120,8 @@ public class ResourceBatchRenderer : MonoBehaviour
         LastPendingAdds = 0;
         LastVisibleBatchCount = 0;
         LastCulledBatchCount = 0;
+        LastCandidateBatchCount = 0;
+        LastCandidateCellCount = 0;
         LastSubmittedMatrixCount = 0;
         LastDrawCallCount = 0;
         if (registeredResources.Count <= 0)
@@ -185,6 +194,9 @@ public class ResourceBatchRenderer : MonoBehaviour
         batchesByKey.Clear();
         entriesByResource.Clear();
         activeBatchKeys.Clear();
+        batchKeysByCell.Clear();
+        globalBatchKeysByCell.Clear();
+        visibleBatchCandidates.Clear();
         activeMatrixCount = 0;
     }
 
@@ -358,6 +370,7 @@ public class ResourceBatchRenderer : MonoBehaviour
             batch = new BatchData();
             batchesByKey.Add(key, batch);
             activeBatchKeys.Add(key);
+            AddBatchKeyToCellIndex(key);
         }
 
         Bounds matrixBounds = VirtualRenderBatchCollection.CalculateWorldBounds(mesh, localToWorldMatrix);
@@ -428,6 +441,7 @@ public class ResourceBatchRenderer : MonoBehaviour
             {
                 batchesByKey.Remove(entry.Key);
                 activeBatchKeys.Remove(entry.Key);
+                RemoveBatchKeyFromCellIndex(entry.Key);
             }
         }
 
@@ -444,9 +458,22 @@ public class ResourceBatchRenderer : MonoBehaviour
             mainCamera = Camera.main;
         cameraCulling.Update(mainCamera);
 
-        for (int batchIndex = 0; batchIndex < activeBatchKeys.Count; batchIndex++)
+        List<BatchKey> renderCandidates = activeBatchKeys;
+        if (TryBuildVisibleBatchCandidates())
         {
-            BatchKey key = activeBatchKeys[batchIndex];
+            renderCandidates = visibleBatchCandidates;
+            LastCulledBatchCount = Mathf.Max(
+                0,
+                activeBatchKeys.Count - visibleBatchCandidates.Count);
+        }
+        else
+        {
+            LastCandidateBatchCount = activeBatchKeys.Count;
+        }
+
+        for (int batchIndex = 0; batchIndex < renderCandidates.Count; batchIndex++)
+        {
+            BatchKey key = renderCandidates[batchIndex];
             if (!batchesByKey.TryGetValue(key, out BatchData batch)
                 || batch.Matrices.Count <= 0)
             {
@@ -471,6 +498,92 @@ public class ResourceBatchRenderer : MonoBehaviour
                 continue;
             }
             DrawResourceBatch(key, batch.Matrices, batchBounds, key.ShadowCastingMode);
+        }
+    }
+
+    private bool TryBuildVisibleBatchCandidates()
+    {
+        visibleBatchCandidates.Clear();
+        float normalCellSize = ResolveBatchCellSize(false);
+        float globalCellSize = ResolveBatchCellSize(true);
+        if (!cameraCulling.TryGetVisibleCellRange(
+                normalCellSize,
+                1,
+                out Vector2Int normalMinimum,
+                out Vector2Int normalMaximum)
+            || !cameraCulling.TryGetVisibleCellRange(
+                globalCellSize,
+                1,
+                out Vector2Int globalMinimum,
+                out Vector2Int globalMaximum))
+        {
+            return false;
+        }
+
+        long candidateCellCount =
+            ProjectF.Rendering.CameraRenderCulling.GetCellCount(normalMinimum, normalMaximum)
+            + ProjectF.Rendering.CameraRenderCulling.GetCellCount(globalMinimum, globalMaximum);
+        LastCandidateCellCount = candidateCellCount <= int.MaxValue
+            ? (int)candidateCellCount
+            : int.MaxValue;
+        if (candidateCellCount >= (long)Mathf.Max(1, activeBatchKeys.Count) * 2L)
+        {
+            return false;
+        }
+
+        AppendCellCandidates(batchKeysByCell, normalMinimum, normalMaximum);
+        AppendCellCandidates(globalBatchKeysByCell, globalMinimum, globalMaximum);
+        LastCandidateBatchCount = visibleBatchCandidates.Count;
+        return true;
+    }
+
+    private void AppendCellCandidates(
+        Dictionary<Vector2Int, List<BatchKey>> index,
+        Vector2Int minimum,
+        Vector2Int maximum)
+    {
+        for (int y = minimum.y; y <= maximum.y; y++)
+        {
+            for (int x = minimum.x; x <= maximum.x; x++)
+            {
+                if (index.TryGetValue(new Vector2Int(x, y), out List<BatchKey> keys))
+                {
+                    visibleBatchCandidates.AddRange(keys);
+                }
+            }
+        }
+    }
+
+    private void AddBatchKeyToCellIndex(BatchKey key)
+    {
+        Dictionary<Vector2Int, List<BatchKey>> index = key.UseGlobalBatch
+            ? globalBatchKeysByCell
+            : batchKeysByCell;
+        Vector2Int cell = new Vector2Int(key.CellX, key.CellZ);
+        if (!index.TryGetValue(cell, out List<BatchKey> keys))
+        {
+            keys = new List<BatchKey>(2);
+            index.Add(cell, keys);
+        }
+
+        keys.Add(key);
+    }
+
+    private void RemoveBatchKeyFromCellIndex(BatchKey key)
+    {
+        Dictionary<Vector2Int, List<BatchKey>> index = key.UseGlobalBatch
+            ? globalBatchKeysByCell
+            : batchKeysByCell;
+        Vector2Int cell = new Vector2Int(key.CellX, key.CellZ);
+        if (!index.TryGetValue(cell, out List<BatchKey> keys))
+        {
+            return;
+        }
+
+        keys.Remove(key);
+        if (keys.Count == 0)
+        {
+            index.Remove(cell);
         }
     }
 

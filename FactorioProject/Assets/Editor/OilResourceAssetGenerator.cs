@@ -172,28 +172,26 @@ internal static class OilResourceAssetGenerator
     private static bool TryValidateOilTerrain(Resource resource, out string measurements)
     {
         measurements = string.Empty;
-        Block block = resource != null ? resource.GetComponentInParent<Block>() : null;
-        Transform chunkRoot = block != null ? block.transform.parent : null;
-        MeshFilter terrainFilter = chunkRoot != null
-            ? chunkRoot.Find("GeneratedSurface")?.GetComponent<MeshFilter>()
+        MeshFilter terrainFilter = resource != null
+            ? FindGeneratedSurfaceFilter(resource.transform)
             : null;
         MeshFilter oilFilter = resource != null
             ? FindOilSurfaceTransform(resource.transform)?.GetComponent<MeshFilter>()
             : null;
-        if (block == null
+        if (resource == null
             || terrainFilter == null
             || terrainFilter.sharedMesh == null
             || oilFilter == null
             || oilFilter.sharedMesh == null)
         {
             measurements =
-                $"cell hierarchy incomplete (block={block != null}, terrainFilter={terrainFilter != null}, "
+                $"cell hierarchy incomplete (resource={resource != null}, terrainFilter={terrainFilter != null}, "
                 + $"terrainMesh={terrainFilter != null && terrainFilter.sharedMesh != null}, "
                 + $"oilFilter={oilFilter != null}, oilMesh={oilFilter != null && oilFilter.sharedMesh != null})";
             return false;
         }
 
-        Vector3 center = block.transform.position;
+        Vector3 center = resource.transform.position;
         float centerMinimumY = float.MaxValue;
         float centerMaximumY = float.MinValue;
         float rimMaximumY = float.MinValue;
@@ -276,8 +274,11 @@ internal static class OilResourceAssetGenerator
         }
 
         float oilClearance = oilSurfaceY - maximumTerrainYOverOil;
+        Vector2Int coordinate = new Vector2Int(
+            Mathf.RoundToInt(center.x),
+            Mathf.RoundToInt(center.z));
         measurements =
-            $"cell {block.Coordinate}, ground center {centerMinimumY:F3}..{centerMaximumY:F3}, "
+            $"cell {coordinate}, ground center {centerMinimumY:F3}..{centerMaximumY:F3}, "
             + $"rim max {rimMaximumY:F3}, oil surface {oilSurfaceY:F3}, "
             + $"plane center XZ offset {oilCenterOffsetXZ:F3}, "
             + $"plane size {oilBounds.size.x:F3}x{oilBounds.size.z:F3}, tilt {oilPlaneTilt:F3}, "
@@ -485,6 +486,20 @@ internal static class OilResourceAssetGenerator
         }
 
         Debug.Log("Oil Resource visual validation passed: the prefab contains one flat, irregular circular liquid patch.");
+    }
+
+    private static MeshFilter FindGeneratedSurfaceFilter(Transform start)
+    {
+        for (Transform current = start; current != null; current = current.parent)
+        {
+            Transform surface = current.Find("GeneratedSurface");
+            if (surface != null && surface.TryGetComponent(out MeshFilter filter))
+            {
+                return filter;
+            }
+        }
+
+        return null;
     }
 
     private static Transform FindOilSurfaceTransform(Transform root)

@@ -21,6 +21,10 @@ public partial class TerrainGenerator
     private readonly List<FluidPipeTopology> fluidJobPipeBuild = new List<FluidPipeTopology>();
     private readonly List<FluidPipeCoordinate> fluidJobCoordinateBuild = new List<FluidPipeCoordinate>();
     private readonly List<int> fluidJobEdgeBuild = new List<int>();
+    private readonly List<int> fluidJobNetworkIndexByPipe = new List<int>();
+    private readonly Dictionary<Vector2Int, List<int>> fluidJobSourceCoordinateNetworks =
+        new Dictionary<Vector2Int, List<int>>();
+    private readonly List<Vector2Int> fluidJobDirtySourceCoordinateScratch = new List<Vector2Int>(8);
     private readonly List<int> fluidJobEdgeScratch = new List<int>(4);
     private readonly List<Vector2Int> fluidJobCoordinateScratch = new List<Vector2Int>(2);
     private PipeWorld fluidJobPipeWorld;
@@ -33,6 +37,12 @@ public partial class TerrainGenerator
     private int fluidJobResolvedDisplayStateVersion = -1;
     private int fluidJobDisplayResolveCount;
     private int fluidJobLastChangedDisplayPipeCount;
+    private bool[] fluidJobDirtyDisplayNetworks = Array.Empty<bool>();
+    private int fluidJobDirtyDisplayNetworkCount;
+    private int fluidJobDisplayDirtySignalCount;
+    private int fluidJobFullDisplayResolveCount;
+    private int fluidJobLastResolvedDisplayNetworkCount;
+    private int fluidJobLastDisplaySourceQueryCount;
 
     public int FluidJobNetworkCount => fluidJobNetworkBuild.Count;
     public int FluidJobPipeCount => fluidJobRecordOrder.Count;
@@ -55,7 +65,13 @@ public partial class TerrainGenerator
         }
 
         int displayStateVersion = Pipe.FluidDisplayStateVersion;
-        if (fluidJobResolvedDisplayStateVersion == displayStateVersion)
+        bool fullResolve = fluidJobResolvedDisplayStateVersion != displayStateVersion;
+        if (fullResolve)
+        {
+            MarkAllFluidJobDisplayNetworksDirty();
+        }
+
+        if (fluidJobDirtyDisplayNetworkCount <= 0)
         {
             return true;
         }
@@ -65,60 +81,99 @@ public partial class TerrainGenerator
         {
             fluidJobResolvedDisplayStateVersion = displayStateVersion;
             fluidJobLastChangedDisplayPipeCount = 0;
+            fluidJobLastResolvedDisplayNetworkCount = 0;
+            fluidJobLastDisplaySourceQueryCount = 0;
+            ClearFluidJobDirtyDisplayNetworks();
             return true;
         }
 
         using (FluidDisplayResolveMarker.Auto())
         {
             long start = MapObjectTickProfiler.IsEnabled ? MapObjectTickProfiler.BeginSample() : 0L;
-            for (int i = 0; i < fluidJobRecordOrder.Count; i++)
+            int sourceQueryCount = 0;
+            using (MapObjectTickProfiler.SampleNamed(
+                       "Fluid",
+                       "FluidJobs",
+                       "Fluid Jobs Display Source Gather"))
             {
-                PipeRuntimeRecord record = fluidJobRecordOrder[i];
-                int itemId = -1;
-                int priority = 0;
-                bool foundSource = record != null
-                                   && record.HasValidPrototype
-                                   && record.Prototype.TryGetDirectFluidDisplaySource(
-                                       record,
-                                       out itemId,
-                                       out priority);
-                fluidJobBuffers.DisplaySources[i] = new FluidPipeDisplaySource
+                for (int i = 0; i < fluidJobRecordOrder.Count; i++)
                 {
-                    ItemId = foundSource ? itemId : -1,
-                    Priority = foundSource ? priority : 0
-                };
-            }
-
-            JobHandle resolveHandle = fluidJobBuffers.DisplayResolveJob.Schedule(
-                fluidJobNetworkBuild.Count,
-                1);
-            resolveHandle.Complete();
-
-            for (int networkIndex = 0; networkIndex < fluidJobNetworkBuild.Count; networkIndex++)
-            {
-                int displayItemId = fluidJobBuffers.NetworkDisplayItemIds[networkIndex];
-                FluidNetworkRange range = fluidJobNetworkBuild[networkIndex];
-                int end = range.PipeStart + range.PipeCount;
-                for (int pipeIndex = range.PipeStart; pipeIndex < end; pipeIndex++)
-                {
-                    PipeRuntimeRecord record = fluidJobRecordOrder[pipeIndex];
-                    fluidJobBuffers.States[pipeIndex] = new FluidPipeState
-                    {
-                        DisplayedFluidItemId = displayItemId
-                    };
-                    if (record == null || record.DisplayedFluidItemId == displayItemId)
+                    int networkIndex = fluidJobNetworkIndexByPipe[i];
+                    if (!fluidJobDirtyDisplayNetworks[networkIndex])
                     {
                         continue;
                     }
 
-                    record.DisplayedFluidItemId = displayItemId;
-                    changedRecords.Add(record);
+                    PipeRuntimeRecord record = fluidJobRecordOrder[i];
+                    int itemId = -1;
+                    int priority = 0;
+                    bool foundSource = record != null
+                                       && record.HasValidPrototype
+                                       && record.Prototype.TryGetDirectFluidDisplaySource(
+                                           record,
+                                           out itemId,
+                                           out priority);
+                    fluidJobBuffers.DisplaySources[i] = new FluidPipeDisplaySource
+                    {
+                        ItemId = foundSource ? itemId : -1,
+                        Priority = foundSource ? priority : 0
+                    };
+                    sourceQueryCount++;
+                }
+            }
+
+            // This kernel normally owns only a few dozen networks. Running it through Burst
+            // avoids scheduling and immediately waiting on a tiny worker job on the render thread.
+            using (MapObjectTickProfiler.SampleNamed(
+                       "Fluid",
+                       "FluidJobs",
+                       "Fluid Jobs Display Execute"))
+            {
+                fluidJobBuffers.DisplayResolveJob.Run(fluidJobNetworkBuild.Count);
+            }
+
+            int resolvedNetworkCount = 0;
+            using (MapObjectTickProfiler.SampleNamed(
+                       "Fluid",
+                       "FluidJobs",
+                       "Fluid Jobs Display Apply"))
+            {
+                for (int networkIndex = 0; networkIndex < fluidJobNetworkBuild.Count; networkIndex++)
+                {
+                    if (!fluidJobDirtyDisplayNetworks[networkIndex])
+                    {
+                        continue;
+                    }
+
+                    resolvedNetworkCount++;
+                    int displayItemId = fluidJobBuffers.NetworkDisplayItemIds[networkIndex];
+                    FluidNetworkRange range = fluidJobNetworkBuild[networkIndex];
+                    int end = range.PipeStart + range.PipeCount;
+                    for (int pipeIndex = range.PipeStart; pipeIndex < end; pipeIndex++)
+                    {
+                        PipeRuntimeRecord record = fluidJobRecordOrder[pipeIndex];
+                        fluidJobBuffers.States[pipeIndex] = new FluidPipeState
+                        {
+                            DisplayedFluidItemId = displayItemId
+                        };
+                        if (record == null || record.DisplayedFluidItemId == displayItemId)
+                        {
+                            continue;
+                        }
+
+                        record.DisplayedFluidItemId = displayItemId;
+                        changedRecords.Add(record);
+                    }
                 }
             }
 
             fluidJobResolvedDisplayStateVersion = displayStateVersion;
             fluidJobDisplayResolveCount++;
+            if (fullResolve) fluidJobFullDisplayResolveCount++;
             fluidJobLastChangedDisplayPipeCount = changedRecords.Count;
+            fluidJobLastResolvedDisplayNetworkCount = resolvedNetworkCount;
+            fluidJobLastDisplaySourceQueryCount = sourceQueryCount;
+            ClearFluidJobDirtyDisplayNetworks();
             if (MapObjectTickProfiler.IsEnabled)
             {
                 MapObjectTickProfiler.EndNamedSample(
@@ -130,6 +185,115 @@ public partial class TerrainGenerator
         }
 
         return true;
+    }
+
+    internal void InvalidateFluidJobDisplayNetworks(InstallationObject source)
+    {
+        fluidJobDisplayDirtySignalCount++;
+        if (source == null || fluidJobBuffers == null)
+        {
+            fluidJobResolvedDisplayStateVersion = -1;
+            return;
+        }
+
+        fluidJobDirtySourceCoordinateScratch.Clear();
+        if (source is InputOutputModule module)
+        {
+            module.AppendRuntimeFluidDisplaySourceCoordinates(fluidJobDirtySourceCoordinateScratch);
+        }
+        else
+        {
+            IReadOnlyList<Vector2Int> occupiedCoordinates = source.RuntimeOccupiedCoordinates;
+            for (int i = 0; occupiedCoordinates != null && i < occupiedCoordinates.Count; i++)
+            {
+                Vector2Int coordinate = occupiedCoordinates[i];
+                if (!fluidJobDirtySourceCoordinateScratch.Contains(coordinate))
+                {
+                    fluidJobDirtySourceCoordinateScratch.Add(coordinate);
+                }
+            }
+        }
+
+        for (int coordinateIndex = 0;
+             coordinateIndex < fluidJobDirtySourceCoordinateScratch.Count;
+             coordinateIndex++)
+        {
+            Vector2Int coordinate = fluidJobDirtySourceCoordinateScratch[coordinateIndex];
+            if (!fluidJobSourceCoordinateNetworks.TryGetValue(
+                    coordinate,
+                    out List<int> networkIndices))
+            {
+                continue;
+            }
+
+            for (int networkIndex = 0; networkIndex < networkIndices.Count; networkIndex++)
+            {
+                MarkFluidJobDisplayNetworkDirty(networkIndices[networkIndex]);
+            }
+        }
+
+        fluidJobDirtySourceCoordinateScratch.Clear();
+    }
+
+    private void MarkAllFluidJobDisplayNetworksDirty()
+    {
+        int networkCount = fluidJobNetworkBuild.Count;
+        EnsureFluidJobDirtyDisplayNetworkCapacity(networkCount);
+        for (int i = 0; i < networkCount; i++)
+        {
+            MarkFluidJobDisplayNetworkDirty(i);
+        }
+    }
+
+    private void MarkFluidJobDisplayNetworkDirty(int networkIndex)
+    {
+        if ((uint)networkIndex >= (uint)fluidJobDirtyDisplayNetworks.Length
+            || fluidJobDirtyDisplayNetworks[networkIndex])
+        {
+            return;
+        }
+
+        fluidJobDirtyDisplayNetworks[networkIndex] = true;
+        fluidJobDirtyDisplayNetworkCount++;
+    }
+
+    private void EnsureFluidJobDirtyDisplayNetworkCapacity(int networkCount)
+    {
+        if (fluidJobDirtyDisplayNetworks.Length == networkCount)
+        {
+            return;
+        }
+
+        fluidJobDirtyDisplayNetworks = networkCount > 0
+            ? new bool[networkCount]
+            : Array.Empty<bool>();
+        fluidJobDirtyDisplayNetworkCount = 0;
+    }
+
+    private void ClearFluidJobDirtyDisplayNetworks()
+    {
+        if (fluidJobDirtyDisplayNetworkCount > 0)
+        {
+            Array.Clear(fluidJobDirtyDisplayNetworks, 0, fluidJobDirtyDisplayNetworks.Length);
+        }
+
+        fluidJobDirtyDisplayNetworkCount = 0;
+    }
+
+    private void RegisterFluidJobDisplaySourceCoordinate(Vector2Int coordinate, int networkIndex)
+    {
+        if (!fluidJobSourceCoordinateNetworks.TryGetValue(
+                coordinate,
+                out List<int> networkIndices))
+        {
+            networkIndices = new List<int>(1);
+            fluidJobSourceCoordinateNetworks.Add(coordinate, networkIndices);
+        }
+
+        if (!networkIndices.Contains(networkIndex))
+        {
+            networkIndices.Add(networkIndex);
+        }
     }
 
     private void ScheduleFluidSimulationShadow()
@@ -229,6 +393,11 @@ public partial class TerrainGenerator
         fluidJobPipeBuild.Clear();
         fluidJobCoordinateBuild.Clear();
         fluidJobEdgeBuild.Clear();
+        fluidJobNetworkIndexByPipe.Clear();
+        fluidJobSourceCoordinateNetworks.Clear();
+        fluidJobDirtySourceCoordinateScratch.Clear();
+        fluidJobDirtyDisplayNetworks = Array.Empty<bool>();
+        fluidJobDirtyDisplayNetworkCount = 0;
         fluidJobPipeWorld = pipeSplitWorld;
         fluidJobTopologyVersion = pipeSplitTopologyVersion;
         fluidShadowChecksum = 0UL;
@@ -262,6 +431,7 @@ public partial class TerrainGenerator
             }
 
             int networkIndex = fluidJobNetworkBuild.Count - 1;
+            fluidJobNetworkIndexByPipe.Add(networkIndex);
             FluidNetworkRange range = fluidJobNetworkBuild[networkIndex];
             range.PipeCount++;
             fluidJobNetworkBuild[networkIndex] = range;
@@ -270,7 +440,21 @@ public partial class TerrainGenerator
             IReadOnlyList<Vector2Int> occupiedCoordinates = record.OccupiedCoordinates;
             for (int coordinateIndex = 0; coordinateIndex < occupiedCoordinates.Count; coordinateIndex++)
             {
-                fluidJobCoordinateScratch.Add(occupiedCoordinates[coordinateIndex]);
+                Vector2Int coordinate = occupiedCoordinates[coordinateIndex];
+                fluidJobCoordinateScratch.Add(coordinate);
+                RegisterFluidJobDisplaySourceCoordinate(coordinate, networkIndex);
+                for (int directionIndex = 0;
+                     directionIndex < PipeSplitDirections.Length;
+                     directionIndex++)
+                {
+                    Vector2Int direction = PipeSplitDirections[directionIndex];
+                    if (record.HasConnectionTowardsAt(coordinate, direction))
+                    {
+                        RegisterFluidJobDisplaySourceCoordinate(
+                            coordinate + direction,
+                            networkIndex);
+                    }
+                }
             }
 
             fluidJobCoordinateScratch.Sort(CompareFluidCoordinates);
@@ -334,6 +518,8 @@ public partial class TerrainGenerator
             fluidJobPipeBuild.Count,
             fluidJobCoordinateBuild.Count,
             fluidJobEdgeBuild.Count);
+        EnsureFluidJobDirtyDisplayNetworkCapacity(fluidJobNetworkBuild.Count);
+        MarkAllFluidJobDisplayNetworksDirty();
         for (int i = 0; i < fluidJobNetworkBuild.Count; i++)
         {
             fluidJobBuffers.Networks[i] = fluidJobNetworkBuild[i];
@@ -425,6 +611,38 @@ public partial class TerrainGenerator
             fluidJobLastChangedDisplayPipeCount);
         MapObjectTickProfiler.AddRuntimeCounter(
             "FluidJobs",
+            "DirtyDisplayNetworks",
+            fluidJobDirtyDisplayNetworkCount);
+        MapObjectTickProfiler.AddRuntimeCounter(
+            "FluidJobs",
+            "DisplayDirtySignals",
+            fluidJobDisplayDirtySignalCount);
+        MapObjectTickProfiler.AddRuntimeCounter(
+            "FluidJobs",
+            "FullDisplayResolves",
+            fluidJobFullDisplayResolveCount);
+        MapObjectTickProfiler.AddRuntimeCounter(
+            "FluidJobs",
+            "LastResolvedDisplayNetworks",
+            fluidJobLastResolvedDisplayNetworkCount);
+        MapObjectTickProfiler.AddRuntimeCounter(
+            "FluidJobs",
+            "LastDisplaySourceQueries",
+            fluidJobLastDisplaySourceQueryCount);
+        MapObjectTickProfiler.AddRuntimeCounter(
+            "FluidJobs",
+            "IndexedDisplaySourceCoordinates",
+            fluidJobSourceCoordinateNetworks.Count);
+        MapObjectTickProfiler.AddRuntimeCounter(
+            "FluidJobs",
+            "IndexedFluidOutputCoordinates",
+            InputOutputModule.RuntimeFluidOutputCoordinateCount);
+        MapObjectTickProfiler.AddRuntimeCounter(
+            "FluidJobs",
+            "IndexedFluidStorageCoordinates",
+            InputOutputModule.RuntimeFluidStorageCoordinateCount);
+        MapObjectTickProfiler.AddRuntimeCounter(
+            "FluidJobs",
             "LastCompletedTick",
             fluidShadowCompletedTick);
         MapObjectTickProfiler.AddRuntimeCounter(
@@ -444,12 +662,19 @@ public partial class TerrainGenerator
         fluidJobPipeBuild.Clear();
         fluidJobCoordinateBuild.Clear();
         fluidJobEdgeBuild.Clear();
+        fluidJobNetworkIndexByPipe.Clear();
+        fluidJobSourceCoordinateNetworks.Clear();
+        fluidJobDirtySourceCoordinateScratch.Clear();
         fluidJobEdgeScratch.Clear();
         fluidJobCoordinateScratch.Clear();
+        fluidJobDirtyDisplayNetworks = Array.Empty<bool>();
+        fluidJobDirtyDisplayNetworkCount = 0;
         fluidJobPipeWorld = null;
         fluidJobTopologyVersion = -1;
         fluidJobResolvedDisplayStateVersion = -1;
         fluidJobLastChangedDisplayPipeCount = 0;
+        fluidJobLastResolvedDisplayNetworkCount = 0;
+        fluidJobLastDisplaySourceQueryCount = 0;
         fluidShadowChecksum = 0UL;
         fluidShadowCompletedTick = -1L;
     }

@@ -10,10 +10,9 @@ namespace ProjectF.Editor.MapObjects
         [MenuItem("Tools/ProjectF/Diagnostics/Validate Map Object Handles")]
         private static void Validate()
         {
-            GameObject host = new GameObject("__MapObjectHandleValidation");
+            VirtualObjectWorld world = new VirtualObjectWorld();
             try
             {
-                VirtualObjectWorld world = host.AddComponent<VirtualObjectWorld>();
                 BlockStateStore.InstallationSaveState state = CreateState(25, 1001L);
 
                 MapObjectHandle initial = world.UpsertInstallationHandle(state);
@@ -56,7 +55,7 @@ namespace ProjectF.Editor.MapObjects
             }
             finally
             {
-                UnityEngine.Object.DestroyImmediate(host);
+                world.Dispose();
             }
         }
 

@@ -1,39 +1,33 @@
 using System;
 using System.Globalization;
 using UnityEngine;
+using ProjectF.Simulation;
 
 [DisallowMultipleComponent]
-public sealed class WorldTimeService : MonoBehaviour,
-    IMapObjectUpdateTick,
-    IMapObjectUpdateTickInterval,
-    IMapObjectSimulationIdentity
+public sealed class WorldTimeService : MonoBehaviour
 {
-    public const int HoursPerDay = 24;
-    public const int MinutesPerHour = 60;
-    public const int SecondsPerMinute = 60;
-    public const int SunriseHour = 6;
-    public const int SunsetHour = 18;
-    public const int DefaultStartHour = 8;
-    public const float DefaultRealSecondsPerDay = 24f * 60f;
-    public const double GameSecondsPerHour = MinutesPerHour * SecondsPerMinute;
-    public const double GameSecondsPerDay = HoursPerDay * GameSecondsPerHour;
-
-    private const float MinimumTimeScale = 0.01f;
-    private const float MaximumTimeScale = 1000f;
+    public const int HoursPerDay = WorldClock.HoursPerDay;
+    public const int MinutesPerHour = WorldClock.MinutesPerHour;
+    public const int SecondsPerMinute = WorldClock.SecondsPerMinute;
+    public const int SunriseHour = WorldClock.SunriseHour;
+    public const int SunsetHour = WorldClock.SunsetHour;
+    public const int DefaultStartHour = WorldClock.DefaultStartHour;
+    public const float DefaultRealSecondsPerDay = WorldClock.DefaultRealSecondsPerDay;
+    public const double GameSecondsPerHour = WorldClock.GameSecondsPerHour;
+    public const double GameSecondsPerDay = WorldClock.GameSecondsPerDay;
     private const float DefaultLightTransitionMinutes = 30f;
     private const float NightWaterBrightness = 0.06f;
-    private static readonly int WorldWaterBrightnessId =
-        Shader.PropertyToID("_WorldWaterBrightness");
+    private static readonly int WorldWaterBrightnessId = Shader.PropertyToID("_WorldWaterBrightness");
+    private readonly WorldClock clock = new WorldClock();
 
     public static WorldTimeService Active { get; private set; }
     public static event Action<WorldTimeService> ActiveChanged;
     public static event Action<float, float, bool> GlobalTimeStateChanged;
     public static event Action<bool> GlobalDayStateChanged;
-
-    public event Action<int> DayStarted;
-    public event Action<int> Sunrise;
-    public event Action<int> Sunset;
-    public event Action<int, int> SeasonStarted;
+    public event Action<int> DayStarted { add => clock.DayStarted += value; remove => clock.DayStarted -= value; }
+    public event Action<int> Sunrise { add => clock.Sunrise += value; remove => clock.Sunrise -= value; }
+    public event Action<int> Sunset { add => clock.Sunset += value; remove => clock.Sunset -= value; }
+    public event Action<int, int> SeasonStarted { add => clock.SeasonStarted += value; remove => clock.SeasonStarted -= value; }
 
     [Header("Clock")]
     [SerializeField, Min(1f)]
@@ -59,43 +53,29 @@ public sealed class WorldTimeService : MonoBehaviour,
     [SerializeField, Min(0f)]
     private float lightTransitionMinutes = DefaultLightTransitionMinutes;
 
-    private double elapsedGameSeconds;
-    private double elapsedPlantGrowthDaylightSeconds;
-    private float worldTimeScale = 1f;
-    private bool paused;
-    private bool lightingDefaultsCaptured;
-    private bool dayStateBroadcastInitialized;
-    private bool lastBroadcastDayState;
+    private bool lightingDefaultsCaptured, dayStateBroadcastInitialized, lastBroadcastDayState;
     private float defaultAmbientIntensity = 1f;
     private Quaternion defaultLightRotation = Quaternion.identity;
-
-    public int DayIndex => Mathf.Max(1, (int)Math.Floor(elapsedGameSeconds / GameSecondsPerDay) + 1);
-    public double SecondsOfDay => NormalizeSecondsOfDay(elapsedGameSeconds);
-    public int Hour => Mathf.Clamp((int)(SecondsOfDay / GameSecondsPerHour), 0, HoursPerDay - 1);
-    public int Minute => Mathf.Clamp(
-        (int)((SecondsOfDay % GameSecondsPerHour) / SecondsPerMinute),
-        0,
-        MinutesPerHour - 1);
-    public float NormalizedDayTime => (float)(SecondsOfDay / GameSecondsPerDay);
-    public bool IsDay => IsDayAtSeconds(SecondsOfDay);
-    public double PlantGrowthDaylightSeconds => Math.Max(0d, elapsedPlantGrowthDaylightSeconds);
-    public float DaylightFactor => ResolveDaylightFactor(SecondsOfDay, lightTransitionMinutes);
-    public bool Paused => paused;
-    public float TimeScale => worldTimeScale;
-    public float RealSecondsPerDay => Mathf.Max(1f, realSecondsPerDay);
-    public int DaysPerSeason => Mathf.Max(1, daysPerSeason);
-    public int SeasonIndex => ((DayIndex - 1) / DaysPerSeason) % 4;
-    public int DayOfSeason => ((DayIndex - 1) % DaysPerSeason) + 1;
-    public int YearIndex => ((DayIndex - 1) / (DaysPerSeason * 4)) + 1;
+    public WorldClock Simulation => clock;
+    public int DayIndex => clock.DayIndex;
+    public double SecondsOfDay => clock.SecondsOfDay;
+    public int Hour => clock.Hour;
+    public int Minute => clock.Minute;
+    public float NormalizedDayTime => clock.NormalizedDayTime;
+    public bool IsDay => clock.IsDay;
+    public double PlantGrowthDaylightSeconds => clock.PlantGrowthDaylightSeconds;
+    public float DaylightFactor => WorldClock.ResolveDaylightFactor(SecondsOfDay, lightTransitionMinutes);
+    public bool Paused => clock.Paused;
+    public float TimeScale => clock.TimeScale;
+    public float RealSecondsPerDay => clock.RealSecondsPerDay;
+    public int DaysPerSeason => clock.DaysPerSeason;
+    public int SeasonIndex => clock.SeasonIndex;
+    public int DayOfSeason => clock.DayOfSeason;
+    public int YearIndex => clock.YearIndex;
     public float LatitudeDegrees => Mathf.Clamp(latitudeDegrees, -90f, 90f);
-    public long SimulationId => long.MinValue + 1L;
-    public float ManagedUpdateTickIntervalSeconds => MapObjectTickManager.FixedSimulationDeltaSeconds;
-    public string ClockText => string.Format(
-        CultureInfo.InvariantCulture,
-        "Day {0} {1:00}:{2:00}",
-        DayIndex,
-        Hour,
-        Minute);
+    public long SimulationId => clock.SimulationId;
+    public float ManagedUpdateTickIntervalSeconds => clock.ManagedUpdateTickIntervalSeconds;
+    public string ClockText => string.Format(CultureInfo.InvariantCulture, "Day {0} {1:00}:{2:00}", DayIndex, Hour, Minute);
 
     public static WorldTimeService EnsureFor(GameObject owner)
     {
@@ -115,123 +95,48 @@ public sealed class WorldTimeService : MonoBehaviour,
 
     private void Awake()
     {
-        if (Active != null && Active != this)
-        {
-            Destroy(this);
-            return;
-        }
-
+        if (Active != null && Active != this) { Destroy(this); return; }
         Active = this;
         NormalizeSettings();
-        if (elapsedGameSeconds <= 0d)
-        {
-            elapsedGameSeconds = DefaultStartHour * GameSecondsPerHour;
-        }
-
+        clock.Changed += ApplyEnvironment;
         CaptureLightingDefaults();
         ApplyEnvironment();
         ActiveChanged?.Invoke(this);
     }
-
     private void OnEnable()
     {
-        if (Active == null)
-        {
-            Active = this;
-            ActiveChanged?.Invoke(this);
-        }
-
+        if (Active != this) return;
         NormalizeSettings();
         CaptureLightingDefaults();
         ApplyEnvironment();
-        MapObjectTickManager.RegisterUpdateTick(this);
+        // Register the data clock, never the lighting component as a Tick target.
+        MapObjectTickManager.RegisterUpdateTick(clock);
     }
-
     private void OnDisable()
     {
-        MapObjectTickManager.UnregisterUpdateTick(this);
-        if (Active != this)
-        {
-            return;
-        }
-
+        // Presentation disable is not a calendar pause. Explicit SetPaused controls that.
+        if (Active == this) Shader.SetGlobalFloat(WorldWaterBrightnessId, 1f);
+    }
+    private void OnDestroy()
+    {
+        clock.Changed -= ApplyEnvironment;
+        MapObjectTickManager.UnregisterUpdateTick(clock);
+        if (Active != this) return;
         Active = null;
         Shader.SetGlobalFloat(WorldWaterBrightnessId, 1f);
         ActiveChanged?.Invoke(null);
     }
 
-    public void ManagedUpdateTick(float deltaTime)
-    {
-        if (!paused && worldTimeScale > 0f && deltaTime > 0f)
-        {
-            if (IsDay)
-            {
-                elapsedPlantGrowthDaylightSeconds += deltaTime;
-            }
-
-            double gameSecondsPerRealSecond = GameSecondsPerDay / RealSecondsPerDay;
-            AdvanceGameSeconds(
-                deltaTime * gameSecondsPerRealSecond * worldTimeScale,
-                true);
-            return;
-        }
-
-        ApplyEnvironment();
-    }
-
-    public void ResetToDefault()
-    {
-        int previousSeason = SeasonIndex;
-        elapsedGameSeconds = DefaultStartHour * GameSecondsPerHour;
-        elapsedPlantGrowthDaylightSeconds = 0d;
-        worldTimeScale = 1f;
-        paused = false;
-        ApplyEnvironment();
-        if (SeasonIndex != previousSeason)
-        {
-            SeasonStarted?.Invoke(YearIndex, SeasonIndex);
-        }
-    }
-
-    public void SetPaused(bool value)
-    {
-        paused = value;
-        ApplyEnvironment();
-    }
-
-    public void SetTimeScale(float value)
-    {
-        if (float.IsNaN(value) || float.IsInfinity(value))
-        {
-            value = 1f;
-        }
-
-        worldTimeScale = Mathf.Clamp(value, MinimumTimeScale, MaximumTimeScale);
-    }
-
-    public bool TrySetTimeOfDay(int hour, int minute)
-    {
-        if (hour < 0 || hour >= HoursPerDay || minute < 0 || minute >= MinutesPerHour)
-        {
-            return false;
-        }
-
-        SetTime(DayIndex, hour, minute);
-        return true;
-    }
-
-    public void SetTime(int dayIndex, int hour, int minute)
-    {
-        int normalizedDay = Mathf.Max(1, dayIndex);
-        int normalizedHour = Mathf.Clamp(hour, 0, HoursPerDay - 1);
-        int normalizedMinute = Mathf.Clamp(minute, 0, MinutesPerHour - 1);
-        elapsedGameSeconds =
-            ((normalizedDay - 1d) * GameSecondsPerDay)
-            + (normalizedHour * GameSecondsPerHour)
-            + (normalizedMinute * SecondsPerMinute);
-        ApplyEnvironment();
-    }
-
+    public void ResetToDefault() => clock.ResetToDefault();
+    public void SetPaused(bool value) => clock.SetPaused(value);
+    public void SetTimeScale(float value) => clock.SetTimeScale(value);
+    public bool TrySetTimeOfDay(int hour, int minute) => clock.TrySetTimeOfDay(hour, minute);
+    public void SetTime(int dayIndex, int hour, int minute) => clock.SetTime(dayIndex, hour, minute);
+    public void AdvanceToNextSunrise() => clock.AdvanceToNextSunrise();
+    public void AdvanceGameSeconds(double seconds, bool raiseBoundaryEvents) => clock.AdvanceGameSeconds(seconds, raiseBoundaryEvents);
+    public static bool IsDayAtSeconds(double seconds) => WorldClock.IsDayAtSeconds(seconds);
+    public static float ResolveDaylightFactor(double seconds, float minutes) => WorldClock.ResolveDaylightFactor(seconds, minutes);
+    private static double NormalizeSecondsOfDay(double value) => WorldClock.NormalizeSecondsOfDay(value);
     public void RefreshEnvironmentBindings()
     {
         directionalLight = null;
@@ -239,41 +144,6 @@ public sealed class WorldTimeService : MonoBehaviour,
         CaptureLightingDefaults();
         ApplyEnvironment();
     }
-
-    public void AdvanceToNextSunrise()
-    {
-        double sunriseSeconds = SunriseHour * GameSecondsPerHour;
-        double currentSeconds = SecondsOfDay;
-        double delta = currentSeconds < sunriseSeconds
-            ? sunriseSeconds - currentSeconds
-            : (GameSecondsPerDay - currentSeconds) + sunriseSeconds;
-        AdvanceGameSeconds(delta, true);
-    }
-
-    public void AdvanceGameSeconds(double gameSeconds, bool raiseBoundaryEvents)
-    {
-        if (double.IsNaN(gameSeconds) || double.IsInfinity(gameSeconds) || gameSeconds <= 0d)
-        {
-            ApplyEnvironment();
-            return;
-        }
-
-        double previousElapsed = elapsedGameSeconds;
-        int previousSeason = SeasonIndex;
-        elapsedGameSeconds = Math.Max(0d, elapsedGameSeconds + gameSeconds);
-
-        if (raiseBoundaryEvents)
-        {
-            RaiseBoundaryEvents(previousElapsed, elapsedGameSeconds);
-            if (SeasonIndex != previousSeason)
-            {
-                SeasonStarted?.Invoke(YearIndex, SeasonIndex);
-            }
-        }
-
-        ApplyEnvironment();
-    }
-
     public WorldTimeSaveData CaptureSaveState()
     {
         return new WorldTimeSaveData
@@ -282,31 +152,11 @@ public sealed class WorldTimeService : MonoBehaviour,
             secondsOfDay = SecondsOfDay
         };
     }
-
     public void ApplySaveState(WorldTimeSaveData state)
     {
-        if (state == null || !state.hasTime)
-        {
-            ResetToDefault();
-            return;
-        }
-
-        int normalizedDay = Mathf.Max(1, state.dayIndex);
-        double normalizedSeconds = NormalizeSecondsOfDay(state.secondsOfDay);
-        elapsedGameSeconds = ((normalizedDay - 1d) * GameSecondsPerDay) + normalizedSeconds;
-        elapsedPlantGrowthDaylightSeconds = 0d;
-        worldTimeScale = 1f;
-        paused = false;
-        ApplyEnvironment();
+        if (state == null || !state.hasTime) { clock.ResetToDefault(); return; }
+        clock.RestoreCalendar(state.dayIndex, state.secondsOfDay);
     }
-
-    public static bool IsDayAtSeconds(double secondsOfDay)
-    {
-        double normalized = NormalizeSecondsOfDay(secondsOfDay);
-        return normalized >= SunriseHour * GameSecondsPerHour
-               && normalized < SunsetHour * GameSecondsPerHour;
-    }
-
     public bool TryValidateState(out string firstIssue)
     {
         if (DayIndex < 1)
@@ -327,7 +177,7 @@ public sealed class WorldTimeService : MonoBehaviour,
             return false;
         }
 
-        if (worldTimeScale < MinimumTimeScale || worldTimeScale > MaximumTimeScale)
+        if (clock.TimeScale < WorldClock.MinimumTimeScale || clock.TimeScale > WorldClock.MaximumTimeScale)
         {
             firstIssue = "invalid_time_scale";
             return false;
@@ -336,7 +186,6 @@ public sealed class WorldTimeService : MonoBehaviour,
         firstIssue = string.Empty;
         return true;
     }
-
     public static bool RunCalculationSelfCheck(out string firstIssue)
     {
         if (!IsDayAtSeconds(SunriseHour * GameSecondsPerHour))
@@ -365,92 +214,15 @@ public sealed class WorldTimeService : MonoBehaviour,
         firstIssue = string.Empty;
         return true;
     }
-
-    public static float ResolveDaylightFactor(double secondsOfDay, float transitionMinutes)
-    {
-        double normalized = NormalizeSecondsOfDay(secondsOfDay);
-        double sunrise = SunriseHour * GameSecondsPerHour;
-        double sunset = SunsetHour * GameSecondsPerHour;
-        double transitionSeconds = Math.Max(0d, transitionMinutes * SecondsPerMinute);
-        if (transitionSeconds <= 0.001d)
-        {
-            return IsDayAtSeconds(normalized) ? 1f : 0f;
-        }
-
-        if (normalized < sunrise || normalized >= sunset)
-        {
-            return 0f;
-        }
-
-        double sunriseEnd = Math.Min(sunset, sunrise + transitionSeconds);
-        if (normalized < sunriseEnd)
-        {
-            return Mathf.SmoothStep(0f, 1f, (float)((normalized - sunrise) / transitionSeconds));
-        }
-
-        double sunsetStart = Math.Max(sunrise, sunset - transitionSeconds);
-        if (normalized >= sunsetStart)
-        {
-            return Mathf.SmoothStep(1f, 0f, (float)((normalized - sunsetStart) / transitionSeconds));
-        }
-
-        return 1f;
-    }
-
-    private void RaiseBoundaryEvents(double previousElapsed, double currentElapsed)
-    {
-        if (currentElapsed <= previousElapsed)
-        {
-            return;
-        }
-
-        long firstDayOffset = Math.Max(0L, (long)Math.Floor(previousElapsed / GameSecondsPerDay));
-        long lastDayOffset = Math.Max(firstDayOffset, (long)Math.Floor(currentElapsed / GameSecondsPerDay));
-        for (long dayOffset = firstDayOffset; dayOffset <= lastDayOffset; dayOffset++)
-        {
-            double dayStart = dayOffset * GameSecondsPerDay;
-            int eventDayIndex = dayOffset >= int.MaxValue
-                ? int.MaxValue
-                : (int)dayOffset + 1;
-            double sunriseBoundary = dayStart + (SunriseHour * GameSecondsPerHour);
-            if (WasBoundaryCrossed(previousElapsed, currentElapsed, sunriseBoundary))
-            {
-                Sunrise?.Invoke(eventDayIndex);
-            }
-
-            double sunsetBoundary = dayStart + (SunsetHour * GameSecondsPerHour);
-            if (WasBoundaryCrossed(previousElapsed, currentElapsed, sunsetBoundary))
-            {
-                Sunset?.Invoke(eventDayIndex);
-            }
-
-            double nextDayStart = dayStart + GameSecondsPerDay;
-            if (WasBoundaryCrossed(previousElapsed, currentElapsed, nextDayStart))
-            {
-                int nextDayIndex = eventDayIndex >= int.MaxValue
-                    ? int.MaxValue
-                    : eventDayIndex + 1;
-                DayStarted?.Invoke(nextDayIndex);
-            }
-        }
-    }
-
-    private static bool WasBoundaryCrossed(
-        double previousElapsed,
-        double currentElapsed,
-        double boundary)
-    {
-        return boundary > previousElapsed && boundary <= currentElapsed;
-    }
-
     private void ApplyEnvironment()
     {
         float daylightFactor = DaylightFactor;
         bool isDay = IsDay;
-        Shader.SetGlobalFloat(
-            WorldWaterBrightnessId,
-            Mathf.Lerp(NightWaterBrightness, 1f, daylightFactor));
-        ApplyLighting(daylightFactor);
+        if (isActiveAndEnabled)
+        {
+            Shader.SetGlobalFloat(WorldWaterBrightnessId, Mathf.Lerp(NightWaterBrightness, 1f, daylightFactor));
+            ApplyLighting(daylightFactor);
+        }
         GlobalTimeStateChanged?.Invoke(NormalizedDayTime, daylightFactor, isDay);
         if (!dayStateBroadcastInitialized || lastBroadcastDayState != isDay)
         {
@@ -459,7 +231,6 @@ public sealed class WorldTimeService : MonoBehaviour,
             GlobalDayStateChanged?.Invoke(isDay);
         }
     }
-
     private void ApplyLighting(float daylightFactor)
     {
         CaptureLightingDefaults();
@@ -486,7 +257,6 @@ public sealed class WorldTimeService : MonoBehaviour,
         RenderSettings.ambientIntensity =
             defaultAmbientIntensity * Mathf.Lerp(nightAmbientMultiplier, 1f, daylightFactor);
     }
-
     private void CaptureLightingDefaults()
     {
         if (lightingDefaultsCaptured && directionalLight != null)
@@ -520,7 +290,6 @@ public sealed class WorldTimeService : MonoBehaviour,
             : Quaternion.identity;
         lightingDefaultsCaptured = true;
     }
-
     private void NormalizeSettings()
     {
         realSecondsPerDay = Mathf.Max(1f, realSecondsPerDay);
@@ -530,20 +299,8 @@ public sealed class WorldTimeService : MonoBehaviour,
         nightLightIntensity = Mathf.Max(0f, nightLightIntensity);
         nightAmbientMultiplier = Mathf.Clamp01(nightAmbientMultiplier);
         lightTransitionMinutes = Mathf.Max(0f, lightTransitionMinutes);
-        worldTimeScale = Mathf.Clamp(worldTimeScale, MinimumTimeScale, MaximumTimeScale);
+        clock.Configure(realSecondsPerDay, daysPerSeason);
     }
-
-    private static double NormalizeSecondsOfDay(double value)
-    {
-        if (double.IsNaN(value) || double.IsInfinity(value))
-        {
-            return DefaultStartHour * GameSecondsPerHour;
-        }
-
-        double normalized = value % GameSecondsPerDay;
-        return normalized < 0d ? normalized + GameSecondsPerDay : normalized;
-    }
-
 #if UNITY_EDITOR
     private void OnValidate()
     {

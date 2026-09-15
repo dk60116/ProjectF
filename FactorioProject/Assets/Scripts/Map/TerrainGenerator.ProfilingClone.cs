@@ -1,4 +1,5 @@
 using System;
+using System.Collections;
 using System.Collections.Generic;
 using ProjectF.Conveyors;
 using UnityEngine;
@@ -43,12 +44,12 @@ public partial class TerrainGenerator : MonoBehaviour
     private const int ProfilingCloneTerrainPadding = 2;
     private const int ProfilingCloneAreaGap = 2;
 
-    // Runtime-only terrain indirection keeps the profiling clone's biome, water,
-    // and procedural resource choice equal to its source without duplicating a
-    // full terrain save format. A regular map load or new map clears it.
+    // Tile lookup remains direct at runtime. The compact region list is the
+    // persistent source of truth used to rebuild this cache after loading.
     private readonly Dictionary<Vector2Int, Vector2Int> profilingCloneTerrainSources =
         new Dictionary<Vector2Int, Vector2Int>();
-    private bool preserveProfilingCloneTerrainSourcesForNextLoad;
+    private readonly List<TerrainCloneRegionSaveEntry> profilingCloneTerrainRegions =
+        new List<TerrainCloneRegionSaveEntry>();
 
     public bool TryCloneInstalledAreaForProfiling(
         out ProfilingAreaCloneReport report,
@@ -220,11 +221,11 @@ public partial class TerrainGenerator : MonoBehaviour
         }
 
         int terrainTileCount = ApplyProfilingCloneTerrainMapping(
+            mapState,
             sourceMinimum,
             sourceMaximum,
             offset);
         AddProfilingCloneActiveChunks(terrainState, destinationMinimum, destinationMaximum);
-        preserveProfilingCloneTerrainSourcesForNextLoad = true;
         LoadFromSaveState(terrainState, mapState);
 
         report = new ProfilingAreaCloneReport(
@@ -260,18 +261,84 @@ public partial class TerrainGenerator : MonoBehaviour
     private void ClearProfilingCloneTerrainSources()
     {
         profilingCloneTerrainSources.Clear();
-        preserveProfilingCloneTerrainSourcesForNextLoad = false;
+        profilingCloneTerrainRegions.Clear();
     }
 
-    private void ClearProfilingCloneTerrainSourcesForRegularLoad()
+    private void CaptureProfilingCloneTerrainRegions(MapSaveData mapSaveData)
     {
-        if (preserveProfilingCloneTerrainSourcesForNextLoad)
+        IEnumerator capture = CaptureProfilingCloneTerrainRegionsIncremental(
+            mapSaveData,
+            int.MaxValue);
+        while (capture.MoveNext()) { }
+    }
+
+    private IEnumerator CaptureProfilingCloneTerrainRegionsIncremental(
+        MapSaveData mapSaveData,
+        int entriesPerFrame)
+    {
+        if (mapSaveData == null)
         {
-            preserveProfilingCloneTerrainSourcesForNextLoad = false;
-            return;
+            yield break;
         }
 
+        entriesPerFrame = Mathf.Max(1, entriesPerFrame);
+        mapSaveData.terrainCloneRegions ??= new List<TerrainCloneRegionSaveEntry>();
+        mapSaveData.terrainCloneRegions.Clear();
+        if (mapSaveData.terrainCloneRegions.Capacity < profilingCloneTerrainRegions.Count)
+        {
+            mapSaveData.terrainCloneRegions.Capacity = profilingCloneTerrainRegions.Count;
+        }
+
+        for (int i = 0; i < profilingCloneTerrainRegions.Count; i++)
+        {
+            TerrainCloneRegionSaveEntry source = profilingCloneTerrainRegions[i];
+            mapSaveData.terrainCloneRegions.Add(CloneProfilingTerrainRegion(source));
+            if ((i + 1) % entriesPerFrame == 0)
+            {
+                yield return null;
+            }
+        }
+    }
+
+    private void RestoreProfilingCloneTerrainRegions(MapSaveData mapSaveData)
+    {
         profilingCloneTerrainSources.Clear();
+        profilingCloneTerrainRegions.Clear();
+        IReadOnlyList<TerrainCloneRegionSaveEntry> savedRegions =
+            mapSaveData?.terrainCloneRegions;
+        for (int i = 0; savedRegions != null && i < savedRegions.Count; i++)
+        {
+            TerrainCloneRegionSaveEntry savedRegion = savedRegions[i];
+            if (!IsValidProfilingTerrainRegion(savedRegion))
+            {
+                continue;
+            }
+
+            TerrainCloneRegionSaveEntry region = CloneProfilingTerrainRegion(savedRegion);
+            profilingCloneTerrainRegions.Add(region);
+            ApplyProfilingCloneTerrainMapping(region);
+        }
+    }
+
+    private static TerrainCloneRegionSaveEntry CloneProfilingTerrainRegion(
+        TerrainCloneRegionSaveEntry source)
+    {
+        return source == null
+            ? null
+            : new TerrainCloneRegionSaveEntry
+            {
+                sourceMinimum = source.sourceMinimum,
+                sourceMaximum = source.sourceMaximum,
+                offset = source.offset
+            };
+    }
+
+    private static bool IsValidProfilingTerrainRegion(TerrainCloneRegionSaveEntry region)
+    {
+        return region != null
+               && region.sourceMinimum.x <= region.sourceMaximum.x
+               && region.sourceMinimum.y <= region.sourceMaximum.y
+               && region.offset != Vector2Int.zero;
     }
 
     private static bool TryGetProfilingCloneSourceBounds(
@@ -444,10 +511,28 @@ public partial class TerrainGenerator : MonoBehaviour
     }
 
     private int ApplyProfilingCloneTerrainMapping(
+        MapSaveData mapState,
         Vector2Int sourceMinimum,
         Vector2Int sourceMaximum,
         Vector2Int offset)
     {
+        TerrainCloneRegionSaveEntry region = new TerrainCloneRegionSaveEntry
+        {
+            sourceMinimum = sourceMinimum,
+            sourceMaximum = sourceMaximum,
+            offset = offset
+        };
+        profilingCloneTerrainRegions.Add(region);
+        mapState.terrainCloneRegions ??= new List<TerrainCloneRegionSaveEntry>();
+        mapState.terrainCloneRegions.Add(CloneProfilingTerrainRegion(region));
+        return ApplyProfilingCloneTerrainMapping(region);
+    }
+
+    private int ApplyProfilingCloneTerrainMapping(TerrainCloneRegionSaveEntry region)
+    {
+        Vector2Int sourceMinimum = region.sourceMinimum;
+        Vector2Int sourceMaximum = region.sourceMaximum;
+        Vector2Int offset = region.offset;
         int width = sourceMaximum.x - sourceMinimum.x + 1;
         int height = sourceMaximum.y - sourceMinimum.y + 1;
         profilingCloneTerrainSources.EnsureCapacity(

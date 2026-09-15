@@ -3225,7 +3225,8 @@ public class InstallationPlacementController : MonoBehaviour
     {
         return renderer != null
                && renderer.GetComponentInParent<RobotArm>(true) != null
-               && renderer.GetComponentInParent<PortableObject>(true) == null;
+               && renderer.GetComponentInParent<PortableObjectTemplate>(true) == null
+               && renderer.GetComponentInParent<PortableObjectView>(true) == null;
     }
 
     private Color ResolveInstallPreviewTint(MapObject preview)
@@ -4237,8 +4238,8 @@ public class InstallationPlacementController : MonoBehaviour
             itemId,
             targetPortableObject,
             startPosition,
-            targetPortableObject.transform.rotation,
-            targetPortableObject.transform.lossyScale,
+            targetPortableObject.WorldRotation,
+            targetPortableObject.WorldScale,
             reservation,
             "PackedMove",
             Mathf.Max(0f, delay),
@@ -14112,7 +14113,7 @@ public class InstallationPlacementController : MonoBehaviour
         snapshot = null;
         TerrainGenerator terrain = ResolveInstallPreviewTerrain();
         if (terrain == null
-            || !terrain.TryGetLoadedBlockRuntimeProxy(coordinate, out Block block)
+            || !terrain.TryGetLoadedBlockEntity(coordinate, out Block block)
             || block == null
             || block.MapObject == null
             || !block.MapObject.IsTargetActive
@@ -22969,7 +22970,7 @@ public class InstallationPlacementController : MonoBehaviour
                     {
                         canPlace = true;
                     }
-                    else if (terrain.TryGetLoadedBlockRuntimeProxy(coordinate, out Block block)
+                    else if (terrain.TryGetLoadedBlockEntity(coordinate, out Block block)
                              && block != null)
                     {
                         canPlace = CanPlaceActiveDefinitionFromGridCoordinate(
@@ -23664,7 +23665,7 @@ public class InstallationPlacementController : MonoBehaviour
             }
 
             bool cellCanPlace;
-            if (terrain.TryGetLoadedBlockRuntimeProxy(coordinate, out Block footprintBlock)
+            if (terrain.TryGetLoadedBlockEntity(coordinate, out Block footprintBlock)
                 && footprintBlock != null)
             {
                 cellCanPlace = IsInstallGridSimpleClearCell(
@@ -32028,7 +32029,7 @@ public class InstallationPlacementController : MonoBehaviour
                 placement.x - objectAnchorCell.x,
                 placement.y - objectAnchorCell.y);
             Vector2Int coordinate = anchorCoordinate + RotateFootprintOffset(localOffset, quarterTurns);
-            if (!terrain.TryGetLoadedBlockRuntimeProxy(coordinate, out Block block)
+            if (!terrain.TryGetLoadedBlockEntity(coordinate, out Block block)
                 || block == null)
             {
                 if (!HasInstallGridPlacementContextAtCoordinate(coordinate, previewToIgnore))
@@ -38946,7 +38947,7 @@ public class InstallationPlacementController : MonoBehaviour
             for (int y = -2; y <= 2; y++)
             {
                 Vector2Int pumpCoordinate = coordinate + new Vector2Int(x, y);
-                MapObject pumpObject = terrain.TryGetLoadedBlockRuntimeProxy(
+                MapObject pumpObject = terrain.TryGetLoadedBlockEntity(
                                            pumpCoordinate,
                                            out Block pumpBlock)
                                        && pumpBlock != null
@@ -39018,7 +39019,7 @@ public class InstallationPlacementController : MonoBehaviour
             for (int y = -2; y <= 2; y++)
             {
                 Vector2Int pumpCoordinate = coordinate + new Vector2Int(x, y);
-                MapObject pumpObject = terrain.TryGetLoadedBlockRuntimeProxy(
+                MapObject pumpObject = terrain.TryGetLoadedBlockEntity(
                                            pumpCoordinate,
                                            out Block pumpBlock)
                                        && pumpBlock != null
@@ -39110,7 +39111,7 @@ public class InstallationPlacementController : MonoBehaviour
         {
             Vector2Int directionFromPump = PipeCardinalDirections[i];
             Vector2Int pumpCoordinate = coordinate - directionFromPump;
-            MapObject pumpObject = terrain.TryGetLoadedBlockRuntimeProxy(
+            MapObject pumpObject = terrain.TryGetLoadedBlockEntity(
                                        pumpCoordinate,
                                        out Block pumpBlock)
                                    && pumpBlock != null
@@ -40362,10 +40363,9 @@ public class InstallationPlacementController : MonoBehaviour
             return;
         }
 
-        PortableObject movingPortableObject = Instantiate(
-            sourcePortableObject,
-            sourcePortableObject.transform.position,
-            sourcePortableObject.transform.rotation);
+        PortableObject movingPortableObject = sourcePortableObject.Clone(
+            sourcePortableObject.WorldPosition,
+            sourcePortableObject.WorldRotation);
         if (movingPortableObject == null)
         {
             RevealInstalledObjectAfterPlacement(installedObject, installedTransform, originalScale, rendererStates, delay);
@@ -40373,32 +40373,32 @@ public class InstallationPlacementController : MonoBehaviour
         }
 
         movingPortableObject.name = $"{sourcePortableObject.name}_InstallMove";
-        movingPortableObject.transform.SetParent(null, true);
-        movingPortableObject.transform.position = sourcePortableObject.transform.position;
-        movingPortableObject.transform.localScale = sourcePortableObject.transform.lossyScale;
-        if (!movingPortableObject.gameObject.activeSelf)
+        movingPortableObject.SetCachedParent(null, true);
+        movingPortableObject.SetWorldPose(sourcePortableObject.WorldPosition, sourcePortableObject.WorldRotation);
+        movingPortableObject.SetWorldScale(sourcePortableObject.WorldScale);
+        if (!movingPortableObject.IsActive)
         {
-            movingPortableObject.gameObject.SetActive(true);
+            movingPortableObject.SetCachedActive(true);
         }
 
         if (!movingPortableObject.SetItem(itemId))
         {
-            Destroy(movingPortableObject.gameObject);
+            movingPortableObject.Dispose();
             RevealInstalledObjectAfterPlacement(installedObject, installedTransform, originalScale, rendererStates, delay);
             return;
         }
 
-        Vector3 startPosition = sourcePortableObject.transform.position;
-        Vector3 targetPosition = installedTransform != null ? installedTransform.position : movingPortableObject.transform.position;
+        Vector3 startPosition = sourcePortableObject.WorldPosition;
+        Vector3 targetPosition = installedTransform != null ? installedTransform.position : movingPortableObject.WorldPosition;
         movingPortableObject.MoveTo(
             () => installedTransform != null ? installedTransform.position : targetPosition,
             Mathf.Max(0f, delay),
-            () => sourcePortableObject != null ? sourcePortableObject.transform.position : startPosition,
+            () => sourcePortableObject != null ? sourcePortableObject.WorldPosition : startPosition,
             () =>
             {
                 if (movingPortableObject != null)
                 {
-                    Destroy(movingPortableObject.gameObject);
+                    movingPortableObject.Dispose();
                 }
 
                 if (installedObject != null && installedTransform != null)

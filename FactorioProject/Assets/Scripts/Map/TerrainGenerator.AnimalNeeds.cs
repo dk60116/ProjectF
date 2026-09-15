@@ -155,8 +155,7 @@ public partial class TerrainGenerator
             {
                 if (temporaryDropping == null)
                 {
-                    temporaryDropping = portableObject.gameObject
-                        .AddComponent<AnimalTemporaryDropping>();
+                    temporaryDropping = portableObject.GetOrAddTemporaryDropping();
                 }
 
                 temporaryDropping.SetExpiration(
@@ -239,15 +238,20 @@ public partial class TerrainGenerator
     }
 }
 
-[DisallowMultipleComponent]
-public sealed class AnimalTemporaryDropping : MonoBehaviour,
+public sealed class AnimalTemporaryDropping :
     IMapObjectUpdateTick,
     IMapObjectSimulationIdentity
 {
+    private readonly PortableObject owner;
     private Block owningBlock;
     private PortableObject portableObject;
     private float timeRemaining;
     private bool expirationActive;
+    internal AnimalTemporaryDropping(PortableObject owner)
+    {
+        this.owner = owner;
+    }
+
     public bool IsTemporary => expirationActive;
     public long SimulationId
     {
@@ -256,8 +260,8 @@ public sealed class AnimalTemporaryDropping : MonoBehaviour,
             Vector2Int coordinate = owningBlock != null
                 ? owningBlock.Coordinate
                 : new Vector2Int(
-                    Mathf.RoundToInt(transform.position.x),
-                    Mathf.RoundToInt(transform.position.z));
+                    Mathf.RoundToInt(owner != null ? owner.WorldPosition.x : 0f),
+                    Mathf.RoundToInt(owner != null ? owner.WorldPosition.z : 0f));
             return unchecked(((long)coordinate.x << 32) | (uint)coordinate.y);
         }
     }
@@ -311,7 +315,7 @@ public sealed class AnimalTemporaryDropping : MonoBehaviour,
         block?.TryRemoveFloorObject(target);
     }
 
-    private void OnDisable()
+    internal void OnOwnerDisabled()
     {
         ClearExpiration();
     }

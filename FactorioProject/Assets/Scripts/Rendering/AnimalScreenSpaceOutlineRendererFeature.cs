@@ -318,9 +318,10 @@ public sealed class AnimalScreenSpaceOutlineRendererFeature : ScriptableRenderer
 
         private void EnsureMaskRendererCapacity(Renderer renderer)
         {
-            PortableObject portableObject = renderer != null
-                ? renderer.GetComponentInParent<PortableObject>()
+            PortableObjectView portableView = renderer != null
+                ? renderer.GetComponentInParent<PortableObjectView>()
                 : null;
+            PortableObject portableObject = portableView != null ? portableView.Owner : null;
             int requiredCapacity = portableObject != null
                 ? portableObject.FocusStackCount
                 : 1;
@@ -364,7 +365,8 @@ public sealed class AnimalScreenSpaceOutlineRendererFeature : ScriptableRenderer
                 }
             }
 
-            PortableObject portableObject = renderer.GetComponentInParent<PortableObject>();
+            PortableObjectView portableView = renderer.GetComponentInParent<PortableObjectView>();
+            PortableObject portableObject = portableView != null ? portableView.Owner : null;
             if (portableObject != null)
             {
                 int portableRendererCount = portableObject.CopyOutlineMaskRenderers(destination);

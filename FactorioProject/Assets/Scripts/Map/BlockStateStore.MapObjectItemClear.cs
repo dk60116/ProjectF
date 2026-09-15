@@ -42,13 +42,14 @@ public partial class BlockStateStore
             {
                 AssignInstallationStorageKey(refreshedState, pair.Key);
                 InstallationSaveState savedState = refreshedState.Clone();
-                InstallationSaveState liveState = refreshedState.Clone();
+                InstallationSaveState liveState = savedState;
                 savedInstallationStates[pair.Key] = savedState;
                 liveRecord.state = liveState;
-                liveRecord.handle = world?.UpsertInstallationHandle(
+                liveRecord.handle = world?.AttachInstallationView(
                     liveState,
-                    VirtualObjectResidency.Live,
-                    installationObject) ?? default;
+                    installationObject.GetInstanceID(),
+                    installationObject.transform.position,
+                    installationObject.transform.rotation) ?? default;
                 installationObject.BindRuntimeMapObjectHandle(liveRecord.handle);
                 continue;
             }
@@ -57,7 +58,11 @@ public partial class BlockStateStore
             if (savedInstallationStates.TryGetValue(pair.Key, out InstallationSaveState savedFallback))
             {
                 ClearSavedMapObjectItems(savedFallback, false, ref result);
-                world?.UpsertInstallation(savedFallback, VirtualObjectResidency.Live, installationObject);
+                world?.AttachInstallationView(
+                    savedFallback,
+                    installationObject.GetInstanceID(),
+                    installationObject.transform.position,
+                    installationObject.transform.rotation);
             }
         }
 

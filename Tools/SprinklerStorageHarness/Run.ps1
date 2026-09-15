@@ -15,9 +15,9 @@ function Read-Member([string]$file, [string]$signature) {
     $source.Substring($start, $end - $start)
 }
 $base = 'FactorioProject/Assets/Scripts/Object/MapObj/InstallationObject/'
-$manager = 'FactorioProject/Assets/Scripts/Manager/MapObjectTickManager.cs'
+$manager = 'FactorioProject/Assets/Scripts/Simulation/Core/SimulationTickContracts.cs'
 $generated = "using System; using System.Collections.Generic;`n"
-$generated += (Read-Member $manager 'public static class DeterministicSimulationUnits') + "`n"
+$generated += (Read-Member $manager 'public static class DeterministicSimulationUnits').Replace('ProjectF.Simulation.SimulationTickWorld.', 'MapObjectTickManager.') + "`n"
 $generated += "public partial class Sprinkler {`n"
 foreach ($signature in @(
     'public override void ApplyManagedUpdateTick()',
@@ -53,6 +53,8 @@ foreach ($signature in @(
     'private static bool TryGetConnectedPipeRemoteCoordinate(')) {
     $generated += (Read-Member ($base + 'InputOutputModule.cs') $signature) + "`n"
 }
+$generated += "}`npublic partial class Pipe {`n"
+$generated += (Read-Member ($base + 'Pipe.cs') 'public static int AddRemoteTraversalPipeDistance(') + "`n"
 $generated += "}`npublic partial class ItemInfoDescription {`n"
 $uiFile = 'FactorioProject/Assets/Scripts/HUD/ObjectUI/ItemInfoDescription.cs'
 $generated += (Read-Member $uiFile 'private static string FormatFluidStorageText(') + "`n}"

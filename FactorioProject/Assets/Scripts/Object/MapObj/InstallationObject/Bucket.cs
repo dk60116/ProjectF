@@ -82,7 +82,7 @@ public class Bucket : InstallationObject,
             PlacementRuntimeCleared += HandleFluidTopologyChanged;
             ResetFluidInputBudget(true);
             InvalidateConnectedFluidSource();
-            MapObjectTickManager.RegisterUpdateTick(this);
+            FacilitySimulationWorld.Register(this, true);
             RefreshInstalledFluidVisual();
         }
     }
@@ -94,14 +94,14 @@ public class Bucket : InstallationObject,
         bucketConversionPending = false;
         InvalidateConnectedFluidSource();
         ResetFluidInputBudget(false);
-        MapObjectTickManager.UnregisterUpdateTick(this);
+        FacilitySimulationWorld.Unregister(this);
         base.OnDisable();
     }
 
     public override void PrepareForPool()
     {
         bucketConversionPending = false;
-        MapObjectTickManager.UnregisterUpdateTick(this);
+        FacilitySimulationWorld.Unregister(this);
         installedBody = null;
         installedFluidVisual = null;
         cachedWaterItemId = int.MinValue;
@@ -147,7 +147,7 @@ public class Bucket : InstallationObject,
         if (!isActiveAndEnabled || !TryGetPlacementRuntime(out _, out _))
         {
             bucketConversionPending = false;
-            MapObjectTickManager.UnregisterUpdateTick(this);
+            FacilitySimulationWorld.SetScheduled(this, false);
             return;
         }
 
@@ -164,13 +164,13 @@ public class Bucket : InstallationObject,
             }
 
             bucketConversionPending = false;
-            MapObjectTickManager.UnregisterUpdateTick(this);
+            FacilitySimulationWorld.SetScheduled(this, false);
             return;
         }
 
         if (!IsEmptyBucketDefinition(ResolveBucketDefinition()))
         {
-            MapObjectTickManager.UnregisterUpdateTick(this);
+            FacilitySimulationWorld.SetScheduled(this, false);
         }
     }
 
@@ -454,7 +454,7 @@ public class Bucket : InstallationObject,
         }
 
         bucketConversionPending = true;
-        MapObjectTickManager.RegisterUpdateTick(this);
+        FacilitySimulationWorld.SetScheduled(this, true);
     }
 
     private void RefreshInstalledFluidVisual()
@@ -535,7 +535,7 @@ public class Bucket : InstallationObject,
                 ResetFluidInputBudget(true);
             }
 
-            MapObjectTickManager.RegisterUpdateTick(this);
+            FacilitySimulationWorld.SetScheduled(this, true);
         }
     }
 

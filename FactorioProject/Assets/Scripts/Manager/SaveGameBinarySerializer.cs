@@ -29,22 +29,29 @@ public static class SaveGameBinarySerializer
             Directory.CreateDirectory(directory);
         }
 
-        string tempPath = $"{path}.tmp";
-        using (FileStream fileStream = new FileStream(tempPath, FileMode.Create, FileAccess.Write, FileShare.None))
-        using (GZipStream gzipStream = new GZipStream(fileStream, System.IO.Compression.CompressionLevel.Fastest))
-        using (BinaryWriter writer = new BinaryWriter(gzipStream, Encoding.UTF8))
+        // Same-directory rename/replace publishes a complete file; never delete the old slot first.
+        string tempPath = $"{path}.{Guid.NewGuid():N}.tmp";
+        try
         {
-            writer.Write(Magic);
-            writer.Write(SaveGameData.CurrentVersion);
-            WriteSaveGameData(writer, data);
-        }
+            using (FileStream fileStream = new FileStream(tempPath, FileMode.CreateNew, FileAccess.Write, FileShare.None, 65536))
+            {
+                using (GZipStream gzipStream = new GZipStream(fileStream, System.IO.Compression.CompressionLevel.Fastest, true))
+                using (BinaryWriter writer = new BinaryWriter(gzipStream, Encoding.UTF8))
+                {
+                    writer.Write(Magic);
+                    writer.Write(SaveGameData.CurrentVersion);
+                    WriteSaveGameData(writer, data);
+                }
+                fileStream.Flush(true);
+            }
 
-        if (File.Exists(path))
+            if (File.Exists(path)) File.Replace(tempPath, path, null);
+            else File.Move(tempPath, path);
+        }
+        finally
         {
-            File.Delete(path);
+            if (File.Exists(tempPath)) File.Delete(tempPath);
         }
-
-        File.Move(tempPath, path);
     }
 
     public static SaveGameData ReadFromFile(string path)
@@ -373,6 +380,52 @@ public static class SaveGameBinarySerializer
         return true;
     }
 
+    public static bool RunTerrainCloneRegionRoundTripSelfCheck(out string firstIssue)
+    {
+        MapSaveData expected = new MapSaveData
+        {
+            terrainCloneRegions = new List<TerrainCloneRegionSaveEntry>
+            {
+                new TerrainCloneRegionSaveEntry
+                {
+                    sourceMinimum = new Vector2Int(-37, 11),
+                    sourceMaximum = new Vector2Int(84, 92),
+                    offset = new Vector2Int(128, -16)
+                }
+            }
+        };
+
+        using MemoryStream stream = new MemoryStream();
+        using (BinaryWriter writer = new BinaryWriter(stream, Encoding.UTF8, true))
+        {
+            WriteMap(writer, expected);
+        }
+
+        stream.Position = 0L;
+        MapSaveData actual;
+        using (BinaryReader reader = new BinaryReader(stream, Encoding.UTF8, true))
+        {
+            actual = ReadMap(reader, SaveGameData.CurrentVersion, SaveReadCompatibilityMode.Current);
+        }
+
+        TerrainCloneRegionSaveEntry actualRegion =
+            actual.terrainCloneRegions?.Count == 1
+                ? actual.terrainCloneRegions[0]
+                : null;
+        TerrainCloneRegionSaveEntry expectedRegion = expected.terrainCloneRegions[0];
+        if (actualRegion == null
+            || actualRegion.sourceMinimum != expectedRegion.sourceMinimum
+            || actualRegion.sourceMaximum != expectedRegion.sourceMaximum
+            || actualRegion.offset != expectedRegion.offset)
+        {
+            firstIssue = "terrain_clone_region_save_roundtrip_mismatch";
+            return false;
+        }
+
+        firstIssue = string.Empty;
+        return true;
+    }
+
     private static void WriteMap(BinaryWriter writer, MapSaveData map)
     {
         map ??= new MapSaveData();
@@ -386,6 +439,7 @@ public static class SaveGameBinarySerializer
         WriteList(writer, map.plantedResources, WritePlantedResourceEntry);
         WriteList(writer, map.farmlandFertilizer, WriteFarmlandFertilizerEntry);
         WriteList(writer, map.conveyorItemRuns, WriteConveyorItemRunEntry);
+        WriteList(writer, map.terrainCloneRegions, WriteTerrainCloneRegionEntry);
     }
 
     private static MapSaveData ReadMap(
@@ -428,7 +482,34 @@ public static class SaveGameBinarySerializer
             map.conveyorItemRuns = ReadList(reader, () => ReadConveyorItemRunEntry(reader));
         }
 
+        if (version >= 63)
+        {
+            map.terrainCloneRegions = ReadList(
+                reader,
+                () => ReadTerrainCloneRegionEntry(reader));
+        }
+
         return map;
+    }
+
+    private static void WriteTerrainCloneRegionEntry(
+        BinaryWriter writer,
+        TerrainCloneRegionSaveEntry entry)
+    {
+        entry ??= new TerrainCloneRegionSaveEntry();
+        WriteVector2Int(writer, entry.sourceMinimum);
+        WriteVector2Int(writer, entry.sourceMaximum);
+        WriteVector2Int(writer, entry.offset);
+    }
+
+    private static TerrainCloneRegionSaveEntry ReadTerrainCloneRegionEntry(BinaryReader reader)
+    {
+        return new TerrainCloneRegionSaveEntry
+        {
+            sourceMinimum = ReadVector2Int(reader),
+            sourceMaximum = ReadVector2Int(reader),
+            offset = ReadVector2Int(reader)
+        };
     }
 
     private static void WriteFarmlandFertilizerEntry(

@@ -1,12 +1,14 @@
 using System;
+using System.Collections;
 using System.Collections.Generic;
 using UnityEngine;
 
 [Serializable]
 public sealed class SaveGameData
 {
-    // Version 62 stores Seed Planter input-transfer state so a consumed seed survives save/load.
-    public const int CurrentVersion = 62;
+    // Version 63 persists cloned terrain regions so water, biome and procedural
+    // resource selection survive a save/load round trip.
+    public const int CurrentVersion = 63;
 
     public int version = CurrentVersion;
     public long savedAtUtcTicks;
@@ -57,6 +59,16 @@ public sealed class MapSaveData
         new List<FarmlandFertilizerSaveEntry>();
     public List<PlantedResourceSaveEntry> plantedResources =
         new List<PlantedResourceSaveEntry>();
+    public List<TerrainCloneRegionSaveEntry> terrainCloneRegions =
+        new List<TerrainCloneRegionSaveEntry>();
+}
+
+[Serializable]
+public sealed class TerrainCloneRegionSaveEntry
+{
+    public Vector2Int sourceMinimum;
+    public Vector2Int sourceMaximum;
+    public Vector2Int offset;
 }
 
 [Serializable]
@@ -185,11 +197,21 @@ public static class SaveGameConveyorItemBackfill
 {
     public static void BackfillFromFloorObjects(MapSaveData map)
     {
+        IEnumerator backfill = BackfillFromFloorObjectsIncremental(map, int.MaxValue);
+        while (backfill.MoveNext()) { }
+    }
+
+    public static IEnumerator BackfillFromFloorObjectsIncremental(
+        MapSaveData map,
+        int entriesPerFrame)
+    {
         if (map?.floorObjects == null || map.floorObjects.Count <= 0)
         {
-            return;
+            yield break;
         }
 
+        entriesPerFrame = Mathf.Max(1, entriesPerFrame);
+        int processed = 0;
         map.conveyorItems ??= new List<ConveyorItemBlockSaveEntry>();
         Dictionary<Vector2Int, int> entryIndicesByCoordinate =
             new Dictionary<Vector2Int, int>(map.conveyorItems.Count);
@@ -200,27 +222,38 @@ public static class SaveGameConveyorItemBackfill
             {
                 entryIndicesByCoordinate.Add(entry.coordinate, i);
             }
+
+            if (++processed >= entriesPerFrame)
+            {
+                processed = 0;
+                yield return null;
+            }
         }
 
         for (int i = 0; i < map.floorObjects.Count; i++)
         {
             FloorObjectSaveEntry floorEntry = map.floorObjects[i];
-            if (!TryCreateConveyorItemEntry(floorEntry, out ConveyorItemBlockSaveEntry conveyorEntry))
+            if (TryCreateConveyorItemEntry(floorEntry, out ConveyorItemBlockSaveEntry conveyorEntry))
             {
-                continue;
+                if (!entryIndicesByCoordinate.TryGetValue(conveyorEntry.coordinate, out int existingIndex))
+                {
+                    entryIndicesByCoordinate.Add(conveyorEntry.coordinate, map.conveyorItems.Count);
+                    map.conveyorItems.Add(conveyorEntry);
+                }
+                else
+                {
+                    ConveyorItemBlockSaveEntry existingEntry = map.conveyorItems[existingIndex];
+                    if (existingEntry == null || existingEntry.lanes == null || existingEntry.lanes.Count <= 0)
+                    {
+                        map.conveyorItems[existingIndex] = conveyorEntry;
+                    }
+                }
             }
 
-            if (!entryIndicesByCoordinate.TryGetValue(conveyorEntry.coordinate, out int existingIndex))
+            if (++processed >= entriesPerFrame)
             {
-                entryIndicesByCoordinate.Add(conveyorEntry.coordinate, map.conveyorItems.Count);
-                map.conveyorItems.Add(conveyorEntry);
-                continue;
-            }
-
-            ConveyorItemBlockSaveEntry existingEntry = map.conveyorItems[existingIndex];
-            if (existingEntry == null || existingEntry.lanes == null || existingEntry.lanes.Count <= 0)
-            {
-                map.conveyorItems[existingIndex] = conveyorEntry;
+                processed = 0;
+                yield return null;
             }
         }
     }
@@ -282,13 +315,29 @@ public static class SaveGameConveyorItemBackfill
 
     public static void StripConveyorItemsFromFloorObjects(MapSaveData map)
     {
+        IEnumerator strip = StripConveyorItemsFromFloorObjectsIncremental(map, int.MaxValue);
+        while (strip.MoveNext()) { }
+    }
+
+    public static IEnumerator StripConveyorItemsFromFloorObjectsIncremental(
+        MapSaveData map,
+        int entriesPerFrame)
+    {
         if (map?.floorObjects == null)
         {
-            return;
+            yield break;
         }
 
+        entriesPerFrame = Mathf.Max(1, entriesPerFrame);
+        int processed = 0;
         for (int entryIndex = map.floorObjects.Count - 1; entryIndex >= 0; entryIndex--)
         {
+            if (++processed >= entriesPerFrame)
+            {
+                processed = 0;
+                yield return null;
+            }
+
             FloorObjectSaveEntry entry = map.floorObjects[entryIndex];
             List<int> source = entry?.itemIds;
             if (source == null || source.Count <= 0)
@@ -337,6 +386,7 @@ public static class SaveGameConveyorItemBackfill
             {
                 entry.itemIds = compacted;
             }
+
         }
     }
 }

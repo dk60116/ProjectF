@@ -68,6 +68,8 @@ public sealed class VirtualConveyorBeltRenderer : MonoBehaviour
 
     public int RegisteredBeltCount => beltRenderCaches.Count;
     public int ActiveBatchCount => batches.ActiveBatchCount;
+    public int LastCandidateBatchCount => batches.LastCandidateBatchCount;
+    public int LastCandidateCellCount => batches.LastCandidateCellCount;
     public int ActiveInstanceCount => batches.ActiveMatrixCount;
     public int EstimatedDrawCallCount => batches.EstimatedDrawCallCount;
     public int ActiveBatchRendererGroupBatchCount =>
@@ -654,7 +656,7 @@ public sealed class VirtualConveyorBeltRenderer : MonoBehaviour
 
     private void RenderBatches()
     {
-        batches.RenderBatches(mainCamera);
+        batches.RenderBatches(mainCamera, EffectiveBatchCellSize);
     }
 
     private static bool IsBeltRenderingHidden()

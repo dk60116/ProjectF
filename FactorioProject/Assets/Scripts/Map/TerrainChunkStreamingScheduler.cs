@@ -13,11 +13,16 @@ internal sealed class TerrainChunkStreamingScheduler
     private readonly Func<Vector2Int, int, bool, IEnumerator> createGenerateChunkRoutine;
     private readonly ProfilerMarker generateStepMarker;
     private readonly Action cleanupGenerationTransientState;
+    private readonly Func<float> frameBudgetMilliseconds;
+    private readonly Action<Exception> onGenerationFailed;
+    private int budgetFrame = -1;
+    private double frameStartedAt;
     private readonly Queue<ChunkGenerationRequest> pendingChunkGenerations = new Queue<ChunkGenerationRequest>();
     private readonly HashSet<Vector2Int> pendingChunkGenerationCoordinates = new HashSet<Vector2Int>();
     private readonly HashSet<Vector2Int> activeChunkGenerationCoordinates = new HashSet<Vector2Int>();
 
     private Coroutine chunkGenerationCoroutine;
+    private IEnumerator generationRoutine;
     private int totalGenerationCount;
     private int completedGenerationCount;
 
@@ -27,6 +32,19 @@ internal sealed class TerrainChunkStreamingScheduler
         || chunkGenerationCoroutine != null;
 
     public int PendingCount => pendingChunkGenerations.Count;
+    public bool HasFrameBudget
+    {
+        get
+        {
+            if (budgetFrame != Time.frameCount)
+            {
+                budgetFrame = Time.frameCount;
+                frameStartedAt = Time.realtimeSinceStartupAsDouble;
+            }
+            return (Time.realtimeSinceStartupAsDouble - frameStartedAt) * 1000d
+                < Mathf.Max(0.25f, frameBudgetMilliseconds());
+        }
+    }
     public int TotalGenerationCount => totalGenerationCount;
     public int CompletedGenerationCount => completedGenerationCount;
     public float GenerationProgress => totalGenerationCount > 0
@@ -40,7 +58,9 @@ internal sealed class TerrainChunkStreamingScheduler
         Action<Vector2Int, int> generateChunkImmediate,
         Func<Vector2Int, int, bool, IEnumerator> createGenerateChunkRoutine,
         ProfilerMarker generateStepMarker,
-        Action cleanupGenerationTransientState)
+        Action cleanupGenerationTransientState,
+        Func<float> frameBudgetMilliseconds,
+        Action<Exception> onGenerationFailed)
     {
         this.owner = owner;
         this.isChunkLoaded = isChunkLoaded;
@@ -49,6 +69,8 @@ internal sealed class TerrainChunkStreamingScheduler
         this.createGenerateChunkRoutine = createGenerateChunkRoutine;
         this.generateStepMarker = generateStepMarker;
         this.cleanupGenerationTransientState = cleanupGenerationTransientState;
+        this.frameBudgetMilliseconds = frameBudgetMilliseconds;
+        this.onGenerationFailed = onGenerationFailed;
     }
 
     public bool IsGenerationActive(Vector2Int chunkCoordinate)
@@ -91,7 +113,8 @@ internal sealed class TerrainChunkStreamingScheduler
 
         if (chunkGenerationCoroutine == null)
         {
-            chunkGenerationCoroutine = owner.StartCoroutine(ProcessGenerationQueue());
+            generationRoutine = ProcessGenerationQueue();
+            chunkGenerationCoroutine = owner.StartCoroutine(generationRoutine);
         }
     }
 
@@ -108,14 +131,16 @@ internal sealed class TerrainChunkStreamingScheduler
             }
 
             activeChunkGenerationCoordinates.Add(request.coordinate);
+            bool completed = false;
             try
             {
                 generateChunkImmediate(request.coordinate, request.chunkSize);
+                completed = true;
             }
+            catch (Exception exception) { onGenerationFailed?.Invoke(exception); throw; }
             finally
             {
-                cleanupGenerationTransientState?.Invoke();
-                MarkGenerationComplete(request.coordinate);
+                FinishGeneration(request.coordinate, null, completed);
             }
         }
     }
@@ -135,75 +160,107 @@ internal sealed class TerrainChunkStreamingScheduler
         activeChunkGenerationCoordinates.Clear();
         totalGenerationCount = 0;
         completedGenerationCount = 0;
+        budgetFrame = -1;
 
-        if (chunkGenerationCoroutine != null)
+        IEnumerator stoppedRoutine = generationRoutine;
+        generationRoutine = null;
+        try
         {
-            owner.StopCoroutine(chunkGenerationCoroutine);
-            chunkGenerationCoroutine = null;
+            if (chunkGenerationCoroutine != null) owner.StopCoroutine(chunkGenerationCoroutine);
         }
-
+        finally
+        {
+            chunkGenerationCoroutine = null;
+            // Own iterator cleanup explicitly; do not depend on the coroutine driver
+            // to dispose a suspended installation batch or surface job.
+            (stoppedRoutine as IDisposable)?.Dispose();
+        }
     }
 
     private IEnumerator ProcessGenerationQueue()
     {
         yield return null;
 
-        while (pendingChunkGenerations.Count > 0)
+        try
         {
-            ChunkGenerationRequest request = pendingChunkGenerations.Dequeue();
-            pendingChunkGenerationCoordinates.Remove(request.coordinate);
-            if (!shouldGenerateChunk(request.coordinate))
+            while (pendingChunkGenerations.Count > 0)
             {
-                completedGenerationCount++;
-                continue;
-            }
-
-            activeChunkGenerationCoordinates.Add(request.coordinate);
-            IEnumerator chunkRoutine;
-            using (generateStepMarker.Auto())
-            {
-                chunkRoutine = createGenerateChunkRoutine(request.coordinate, request.chunkSize, true);
-            }
-            try
-            {
-                while (true)
+                // Includes every chunk and every resumed stage in this frame, not a fresh
+                // budget per chunk. A single indivisible operation can still exceed the budget.
+                if (!HasFrameBudget) yield return null;
+                _ = HasFrameBudget;
+                ChunkGenerationRequest request = pendingChunkGenerations.Dequeue();
+                pendingChunkGenerationCoordinates.Remove(request.coordinate);
+                if (!shouldGenerateChunk(request.coordinate))
                 {
-                    bool hasNext;
-                    object current = null;
-                    using (generateStepMarker.Auto())
+                    completedGenerationCount++;
+                    continue;
+                }
+
+                activeChunkGenerationCoordinates.Add(request.coordinate);
+                IEnumerator chunkRoutine = null;
+                bool completed = false;
+                try
+                {
+                    using (generateStepMarker.Auto()) { chunkRoutine = CreateChunkRoutine(request); }
+                    while (true)
                     {
-                        hasNext = chunkRoutine.MoveNext();
-                        if (hasNext)
+                        _ = HasFrameBudget;
+                        bool hasNext;
+                        object current = null;
+                        using (generateStepMarker.Auto())
                         {
-                            current = chunkRoutine.Current;
+                            hasNext = AdvanceChunkRoutine(chunkRoutine);
+                            if (hasNext)
+                            {
+                                current = chunkRoutine.Current;
+                            }
                         }
-                    }
 
-                    if (!hasNext)
-                    {
-                        break;
-                    }
+                        if (!hasNext)
+                        {
+                            completed = true;
+                            break;
+                        }
 
-                    yield return current;
+                        yield return current;
+                    }
+                }
+                finally
+                {
+                    FinishGeneration(request.coordinate, chunkRoutine, completed);
                 }
             }
-            finally
-            {
-                (chunkRoutine as IDisposable)?.Dispose();
-                cleanupGenerationTransientState?.Invoke();
-                MarkGenerationComplete(request.coordinate);
-            }
-
-            // Do not start the next chunk in the same frame that just finished
-            // restoration and mesh upload for the previous one. Those phases are
-            // intentionally isolated so their costs cannot stack in one frame.
-            if (pendingChunkGenerations.Count > 0)
-            {
-                yield return null;
-            }
         }
+        finally { chunkGenerationCoroutine = null; generationRoutine = null; }
+    }
 
-        chunkGenerationCoroutine = null;
+    private void FinishGeneration(Vector2Int coordinate, IEnumerator routine, bool completed)
+    {
+        try
+        {
+            try { (routine as IDisposable)?.Dispose(); }
+            finally { cleanupGenerationTransientState?.Invoke(); }
+        }
+        catch (Exception exception) { completed = false; onGenerationFailed?.Invoke(exception); throw; }
+        finally
+        {
+            if (completed) MarkGenerationComplete(coordinate);
+            else activeChunkGenerationCoordinates.Remove(coordinate);
+        }
+    }
+
+    private bool AdvanceChunkRoutine(IEnumerator routine)
+    {
+        // Iterator exception handling cannot surround yield returns with a catch.
+        try { return routine.MoveNext(); }
+        catch (Exception exception) { onGenerationFailed?.Invoke(exception); throw; }
+    }
+
+    private IEnumerator CreateChunkRoutine(ChunkGenerationRequest request)
+    {
+        try { return createGenerateChunkRoutine(request.coordinate, request.chunkSize, true); }
+        catch (Exception exception) { onGenerationFailed?.Invoke(exception); throw; }
     }
 
     private readonly struct ChunkGenerationRequest

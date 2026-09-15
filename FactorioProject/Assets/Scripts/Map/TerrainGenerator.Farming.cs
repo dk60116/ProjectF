@@ -1,4 +1,5 @@
 using System;
+using System.Collections;
 using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.Rendering;
@@ -859,35 +860,51 @@ public partial class TerrainGenerator : MonoBehaviour
 
     private void CaptureFarmlandSaveState(MapSaveData mapSaveData)
     {
-        if (mapSaveData == null)
-        {
-            return;
-        }
+        IEnumerator capture = CaptureFarmlandSaveStateIncremental(mapSaveData, int.MaxValue);
+        while (capture.MoveNext()) { }
+    }
 
+    private IEnumerator CaptureFarmlandSaveStateIncremental(
+        MapSaveData mapSaveData,
+        int entriesPerFrame)
+    {
+        if (mapSaveData == null) yield break;
+
+        entriesPerFrame = Mathf.Max(1, entriesPerFrame);
+        int processed = 0;
         mapSaveData.farmlandCoordinates.Clear();
         foreach (Vector2Int coordinate in farmlandCoordinates)
         {
             mapSaveData.farmlandCoordinates.Add(coordinate);
+            if (++processed >= entriesPerFrame)
+            {
+                processed = 0;
+                yield return null;
+            }
         }
 
         mapSaveData.farmlandFertilizer ??= new List<FarmlandFertilizerSaveEntry>();
         mapSaveData.farmlandFertilizer.Clear();
         foreach (KeyValuePair<Vector2Int, long> pair in farmlandFertilizerEnergyByCoordinate)
         {
-            if (pair.Value <= 0L
-                || !farmlandCoordinates.Contains(pair.Key))
+            if (pair.Value > 0L
+                && farmlandCoordinates.Contains(pair.Key))
             {
-                continue;
+                mapSaveData.farmlandFertilizer.Add(new FarmlandFertilizerSaveEntry
+                {
+                    coordinate = pair.Key,
+                    fertilizerEnergyUnits = Math.Min(
+                        DeterministicSimulationUnits.FromFloat(FarmlandFertilizerCapacityPerTile),
+                        pair.Value),
+                    fertilizerEnergy = DeterministicSimulationUnits.ToFloat(pair.Value)
+                });
             }
 
-            mapSaveData.farmlandFertilizer.Add(new FarmlandFertilizerSaveEntry
+            if (++processed >= entriesPerFrame)
             {
-                coordinate = pair.Key,
-                fertilizerEnergyUnits = Math.Min(
-                    DeterministicSimulationUnits.FromFloat(FarmlandFertilizerCapacityPerTile),
-                    pair.Value),
-                fertilizerEnergy = DeterministicSimulationUnits.ToFloat(pair.Value)
-            });
+                processed = 0;
+                yield return null;
+            }
         }
 
         mapSaveData.plantedResources ??= new List<PlantedResourceSaveEntry>();
@@ -899,6 +916,11 @@ public partial class TerrainGenerator : MonoBehaviour
                 coordinate = pair.Key,
                 seedItemId = pair.Value
             });
+            if (++processed >= entriesPerFrame)
+            {
+                processed = 0;
+                yield return null;
+            }
         }
     }
 

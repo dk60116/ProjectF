@@ -112,13 +112,13 @@ public class Desk : InstallationObject, IPlayerMapObjectInteraction, IPersistent
 
         PortableObject sourcePortableObject = sourceBag.GetTopObject(slotIndex);
         Vector3 startPosition = sourcePortableObject != null
-            ? sourcePortableObject.transform.position
+            ? sourcePortableObject.WorldPosition
             : player.transform.position;
         Quaternion startRotation = sourcePortableObject != null
-            ? sourcePortableObject.transform.rotation
+            ? sourcePortableObject.WorldRotation
             : Quaternion.identity;
         Vector3 startScale = sourcePortableObject != null
-            ? sourcePortableObject.transform.lossyScale
+            ? sourcePortableObject.WorldScale
             : Vector3.one;
 
         if (!sourceBag.TryRemoveOneAtSlot(slotIndex, out int removedItemId, false)
@@ -151,13 +151,13 @@ public class Desk : InstallationObject, IPlayerMapObjectInteraction, IPersistent
         Transform sourcePoint = ResolveManualPoint();
         PortableObject sourcePortableObject = manualVisual;
         Vector3 startPosition = sourcePortableObject != null
-            ? sourcePortableObject.transform.position
+            ? sourcePortableObject.WorldPosition
             : sourcePoint != null ? sourcePoint.position : transform.position;
         Quaternion startRotation = sourcePortableObject != null
-            ? sourcePortableObject.transform.rotation
+            ? sourcePortableObject.WorldRotation
             : sourcePoint != null ? sourcePoint.rotation : transform.rotation;
         Vector3 startScale = sourcePortableObject != null
-            ? sourcePortableObject.transform.lossyScale
+            ? sourcePortableObject.WorldScale
             : Vector3.one;
 
         if (!PlayerItemStorageUtility.TryReserveHand(
@@ -324,19 +324,19 @@ public class Desk : InstallationObject, IPlayerMapObjectInteraction, IPersistent
         Quaternion startRotation,
         Vector3 startScale)
     {
-        PortableObject movingPortableObject = Instantiate(template, startPosition, startRotation);
+        PortableObject movingPortableObject = template.Clone(startPosition, startRotation);
         if (movingPortableObject == null)
         {
             return null;
         }
 
         movingPortableObject.name = $"{template.name}_ManualMove";
-        movingPortableObject.transform.SetParent(null, true);
-        movingPortableObject.transform.position = startPosition;
-        movingPortableObject.transform.localScale = startScale;
-        if (!movingPortableObject.gameObject.activeSelf)
+        movingPortableObject.SetCachedParent(null, true);
+        movingPortableObject.SetWorldPose(startPosition, startRotation);
+        movingPortableObject.SetWorldScale(startScale);
+        if (!movingPortableObject.IsActive)
         {
-            movingPortableObject.gameObject.SetActive(true);
+            movingPortableObject.SetCachedActive(true);
         }
 
         if (movingPortableObject.SetItem(itemId))
@@ -344,7 +344,7 @@ public class Desk : InstallationObject, IPlayerMapObjectInteraction, IPersistent
             return movingPortableObject;
         }
 
-        Destroy(movingPortableObject.gameObject);
+        movingPortableObject.Dispose();
         return null;
     }
 
@@ -399,7 +399,7 @@ public class Desk : InstallationObject, IPlayerMapObjectInteraction, IPersistent
     {
         if (movingPortableObject != null)
         {
-            Destroy(movingPortableObject.gameObject);
+            movingPortableObject.Dispose();
         }
     }
 
@@ -454,21 +454,28 @@ public class Desk : InstallationObject, IPlayerMapObjectInteraction, IPersistent
 
         if (manualVisual == null)
         {
-            manualVisual = targetPoint.GetComponentInChildren<PortableObject>(true);
+            PortableObjectView view = targetPoint.GetComponentInChildren<PortableObjectView>(true);
+            manualVisual = view != null ? view.Owner : null;
         }
 
         if (manualVisual == null)
         {
-            GameObject visualObject = new GameObject("Manual Visual");
-            visualObject.SetActive(false);
-            visualObject.layer = gameObject.layer;
-            visualObject.transform.SetParent(targetPoint, false);
-            visualObject.AddComponent<MeshFilter>();
-            visualObject.AddComponent<MeshRenderer>();
-            manualVisual = visualObject.AddComponent<PortableObject>();
+            PortableObjectTemplate template = targetPoint.GetComponentInChildren<PortableObjectTemplate>(true);
+            manualVisual = template != null ? template.CreateEntity(true) : null;
         }
 
-        Transform visualTransform = manualVisual.transform;
+        if (manualVisual == null)
+        {
+            manualVisual = PortableObject.Create(
+                targetPoint.position,
+                targetPoint.rotation,
+                Vector3.one,
+                gameObject.layer,
+                "Manual Visual");
+            manualVisual.SetCachedActive(false);
+        }
+
+        Transform visualTransform = manualVisual.PresentationTransform;
         visualTransform.SetParent(targetPoint, false);
         visualTransform.localPosition = Vector3.zero;
         visualTransform.localRotation = Quaternion.identity;

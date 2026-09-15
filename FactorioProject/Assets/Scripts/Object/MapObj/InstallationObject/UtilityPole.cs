@@ -532,13 +532,7 @@ public partial class UtilityPole : InstallationObject
             return false;
         }
 
-        long productionUnits = DeterministicSimulationUnits.FromFloat(network.ProductionWatts);
-        long demandUnits = DeterministicSimulationUnits.FromFloat(
-            Mathf.Max(requestedWatts, network.RequiredWatts));
-        consumedEnergyUnits = DeterministicSimulationUnits.MultiplyRatio(
-            requestedEnergyUnits,
-            productionUnits,
-            demandUnits);
+        consumedEnergyUnits = network.Power.GrantEnergy(requestedEnergyUnits, requestedWatts);
         return consumedEnergyUnits > 0L;
     }
 
@@ -566,20 +560,7 @@ public partial class UtilityPole : InstallationObject
             return false;
         }
 
-        float effectiveDemandWatts = network.RequiredWatts;
-        float clampedRequestedWatts = Mathf.Max(0f, requestedWatts);
-        if (TryGetElectricPowerRequirement(consumer, out _))
-        {
-            effectiveDemandWatts = Mathf.Max(effectiveDemandWatts, clampedRequestedWatts);
-        }
-        else
-        {
-            effectiveDemandWatts += clampedRequestedWatts;
-        }
-
-        supplyRatio = effectiveDemandWatts > EnergyEpsilon
-            ? Mathf.Clamp01(network.ProductionWatts / effectiveDemandWatts)
-            : 1f;
+        supplyRatio = network.Power.GetConsumerRatio(requestedWatts, TryGetElectricPowerRequirement(consumer, out _));
         return true;
     }
 
@@ -2799,6 +2780,11 @@ public partial class UtilityPole : InstallationObject
         RefreshNetworkRuntimeValues();
     }
 
+    internal static void PrepareSimulationPowerTick()
+    {
+        EnsureNetworksEvaluated();
+    }
+
     private static void RebuildNetworks()
     {
         EnsurePoleConnectionsEvaluated();
@@ -3137,15 +3123,6 @@ public partial class UtilityPole : InstallationObject
                 network.ProductionWatts += generatorWatts;
             }
         }
-
-        if (!network.HasPowerSource)
-        {
-            network.SupplyRatio = 0f;
-            return;
-        }
-        network.SupplyRatio = network.RequiredWatts > EnergyEpsilon
-            ? Mathf.Clamp01(network.ProductionWatts / network.RequiredWatts)
-            : (network.ProductionWatts > EnergyEpsilon ? 1f : 0f);
     }
 
     private static bool IsElectricNetworkParticipant(InstallationObject installationObject)
@@ -3378,10 +3355,11 @@ public partial class UtilityPole : InstallationObject
             new List<InstallationObject>();
         public readonly List<SteamGenerator> PowerSources = new List<SteamGenerator>();
         public float StaticRequiredWatts;
-        public float ProductionWatts;
-        public float RequiredWatts;
-        public float SupplyRatio;
-        public bool HasPowerSource;
+        public ProjectF.Simulation.PowerSupplySnapshot Power;
+        public float ProductionWatts { get => Power.ProductionWatts; set => Power.ProductionWatts = value; }
+        public float RequiredWatts { get => Power.RequiredWatts; set => Power.RequiredWatts = value; }
+        public float SupplyRatio => Power.SupplyRatio;
+        public bool HasPowerSource { get => Power.HasPowerSource; set => Power.HasPowerSource = value; }
 
         public void ClearTopologyRuntime()
         {
@@ -3394,10 +3372,7 @@ public partial class UtilityPole : InstallationObject
 
         public void ClearPowerRuntime()
         {
-            ProductionWatts = 0f;
-            RequiredWatts = 0f;
-            SupplyRatio = 0f;
-            HasPowerSource = false;
+            Power = default;
         }
     }
 }

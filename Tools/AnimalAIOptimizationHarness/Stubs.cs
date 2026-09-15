@@ -8,8 +8,11 @@ namespace UnityEngine
     public sealed class DisallowMultipleComponent : Attribute { }
     public class GameObject
     {
+        public GameObject(string name = null) { }
+        public Transform transform = new();
         public bool activeInHierarchy = true;
         public int layer;
+        public void SetActive(bool value) => activeInHierarchy = value;
         public T GetComponent<T>() where T : class => null;
         public T AddComponent<T>() where T : new() => new T();
     }
@@ -18,7 +21,9 @@ namespace UnityEngine
         public GameObject gameObject = new();
         public Transform transform = new();
         protected static void Destroy(object value) { }
+        protected static void DestroyImmediate(object value) { }
     }
+    public static class Application { public static bool isPlaying = true; }
     public static class Time
     {
         public static float deltaTime = 1f / 60f, timeScale = 1;
@@ -80,18 +85,13 @@ namespace UnityEngine
         public Vector3 position;
         public Quaternion rotation;
         public int Writes;
+        public void SetParent(Transform parent, bool worldPositionStays) { }
         public void SetPositionAndRotation(Vector3 p, Quaternion q) { position = p; rotation = q; Writes++; }
     }
 }
 namespace ProjectF.Rendering
 {
     public class CameraRenderCulling { public void Update(Camera c) { } }
-}
-public interface IMapObjectUpdateTick { void ManagedUpdateTick(float dt); }
-public interface IMapObjectSimulationIdentity { long SimulationId { get; } }
-public static class DeterministicSimulationUnits
-{
-    public static long DeltaTimeToTicks(float dt) => (long)MathF.Round(dt * 60);
 }
 public class Player { public Transform transform = new(); }
 public class GameManager { public static GameManager Instance = new(); public Player Player = new(); public float AnimalAIActiveRadius = 60; }
@@ -155,15 +155,18 @@ public partial class AnimalAIController : MonoBehaviour
     private void SnapToSimulationPose() => transform.SetPositionAndRotation(SimulationPosition, default);
     private void ResetPresentation() => presentationActive = false;
 }
-public partial class MapObjectTickManager
+public partial class MapObjectTickManager : ProjectF.Simulation.ISimulationTickObserver
 {
     public const float FixedSimulationDeltaSeconds = 1f / 60f;
     public static bool SimulationPaused;
     public static void RegisterUpdateTick(object o) { }
     public static void UnregisterUpdateTick(object o) { }
     private bool simulationPaused, waitingForWorldLoad, hasSimulationUpsSample;
+    private bool IsSimulationTickPaused => simulationPaused;
     private double simulationTimeAccumulator, simulationUpsSampleStartTime;
-    private long simulationTick, simulationUpsSampleStartTick;
+    private readonly ProjectF.Simulation.SimulationTickWorld simulation = new();
+    private long simulationTick => simulation.CurrentTick;
+    private long simulationUpsSampleStartTick;
     private int simulationTicksLastFrame, maximumSimulationStepsPerFrame = 8;
     private float currentSimulationUps;
     private const double SimulationUpsSampleIntervalSeconds = .5;
@@ -174,7 +177,16 @@ public partial class MapObjectTickManager
     public void Pause(bool value) { simulationPaused = value; Time.timeScale = value ? 0 : 1; }
     private bool RequestPeriodicAliveValidation() => false;
     private void ReconcileRequestedUpdateTicks(bool full) { }
-    private void TickUpdateObjects() => Executions++;
+    void ProjectF.Simulation.ISimulationTickObserver.OnActiveTargets(System.Collections.Generic.ICollection<IMapObjectUpdateTick> targets) { }
+    long ProjectF.Simulation.ISimulationTickObserver.BeginSample() => 0;
+    void ProjectF.Simulation.ISimulationTickObserver.EndSample(IMapObjectUpdateTick target, long started) { }
+    private sealed class ExecutionProbe : IMapObjectUpdateTick
+    {
+        private readonly MapObjectTickManager owner;
+        internal ExecutionProbe(MapObjectTickManager owner) => this.owner = owner;
+        public void ManagedUpdateTick(float dt) => owner.Executions++;
+    }
+    public MapObjectTickManager() { simulation.Register(new ExecutionProbe(this)); }
 }
 public sealed partial class AnimalAIWorld
 {
@@ -183,7 +195,7 @@ public sealed partial class AnimalAIWorld
     public void RemoveForCheck(AnimalAIController c) => RemoveController(c);
     public void DirtyForCheck(AnimalAIController c) => MarkSpatialDirty(c);
     public void RefreshForCheck() => RefreshSpatialCaches();
-    public void CompleteForCheck() => LateUpdate();
+    public void CompleteForCheck() => CompletePresentationFrame();
     public void SelectForCheck() => Instance = this;
     public int CellCountForCheck => controllersBySpatialCell.Count;
     public int IndexedForCheck => spatialEntries.Count;

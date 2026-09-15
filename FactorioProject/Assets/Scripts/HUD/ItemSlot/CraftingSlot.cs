@@ -400,6 +400,11 @@ public class CraftingSlot : ItemSlot, IPointerEnterHandler, IPointerExitHandler
 
     private void HandleCreateClicked()
     {
+        if (SaveManager.GameplayInputBlocked)
+        {
+            return;
+        }
+
         int craftItemId = ItemId;
         if (craftItemId < 0 || !HasItem)
         {

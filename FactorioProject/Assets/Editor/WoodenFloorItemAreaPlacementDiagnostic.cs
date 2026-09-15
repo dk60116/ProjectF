@@ -21,10 +21,15 @@ internal static class WoodenFloorItemAreaPlacementDiagnostic
 
         InstallationPlacementController placementController =
             UnityEngine.Object.FindAnyObjectByType<InstallationPlacementController>();
+        TerrainGenerator terrainGenerator = UnityEngine.Object.FindAnyObjectByType<TerrainGenerator>();
         ItemDefinition woodenFloorDefinition = FindWoodenFloorDefinition();
-        if (placementController == null || woodenFloorDefinition == null || woodenFloorDefinition.mapObject == null)
+        if (placementController == null
+            || terrainGenerator == null
+            || woodenFloorDefinition == null
+            || woodenFloorDefinition.mapObject == null)
         {
             report.AppendLine($"Missing runtime data: controller={placementController != null}, "
+                              + $"terrain={terrainGenerator != null}, "
                               + $"definition={woodenFloorDefinition != null}, "
                               + $"mapObject={woodenFloorDefinition != null && woodenFloorDefinition.mapObject != null}");
             WriteReport(report);
@@ -68,8 +73,9 @@ internal static class WoodenFloorItemAreaPlacementDiagnostic
             woodenFloorDefinition.mapObject,
             previewOverlapMethod);
 
-        Block[] blocks = UnityEngine.Object.FindObjectsByType<Block>(FindObjectsInactive.Exclude);
-        Array.Sort(blocks, CompareBlockCoordinates);
+        List<Block> blocks = new List<Block>();
+        terrainGenerator.CopyLoadedBlocks(blocks);
+        blocks.Sort(CompareBlockCoordinates);
 
         int checkedAreaCount = 0;
         int failedCoreCount = 0;
@@ -79,7 +85,7 @@ internal static class WoodenFloorItemAreaPlacementDiagnostic
         activeDefinitionField?.SetValue(placementController, woodenFloorDefinition);
         try
         {
-            for (int i = 0; i < blocks.Length; i++)
+            for (int i = 0; i < blocks.Count; i++)
             {
                 Block block = blocks[i];
                 if (block == null)

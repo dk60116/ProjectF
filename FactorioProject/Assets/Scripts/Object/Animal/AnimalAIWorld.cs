@@ -1,10 +1,8 @@
+using System;
 using System.Collections.Generic;
 using UnityEngine;
 using ProjectF.Animals;
-using ProjectF.Rendering;
-
-[DisallowMultipleComponent]
-public sealed partial class AnimalAIWorld : MonoBehaviour, IMapObjectUpdateTick, IMapObjectSimulationIdentity
+public sealed partial class AnimalAIWorld : IDisposable, IMapObjectUpdateTick, IMapObjectSimulationIdentity
 {
     private const float SpatialCellSize = 2f;
     private const float NearActiveDistance = 12f;
@@ -44,8 +42,10 @@ public sealed partial class AnimalAIWorld : MonoBehaviour, IMapObjectUpdateTick,
 
     private long needsTick;
     private long pathBudgetStartWork;
-    private readonly CameraRenderCulling presentationCulling = new CameraRenderCulling();
-    private Camera presentationCamera;
+    private AnimalAIWorldView view;
+    private bool disposed;
+    internal IReadOnlyList<AnimalAIController> Controllers => controllers;
+    public bool HasView => view != null;
     public long NeedsTick => needsTick;
     private float maximumAnimalColliderRadius = 0.5f;
     private bool paused;
@@ -89,14 +89,8 @@ public sealed partial class AnimalAIWorld : MonoBehaviour, IMapObjectUpdateTick,
     public bool HasSpatialIndex => spatialIndexReady;
     public long SimulationId => long.MinValue + 2L;
 
-    private void Awake()
+    private void Initialize()
     {
-        if (Instance != null && Instance != this)
-        {
-            Destroy(this);
-            return;
-        }
-
         Instance = this;
         AnimalAIProfiler.Reset();
         AnimalGridPathfinder.ClearRegionCache();
@@ -109,23 +103,52 @@ public sealed partial class AnimalAIWorld : MonoBehaviour, IMapObjectUpdateTick,
         MapObjectTickManager.RegisterUpdateTick(this);
     }
 
-    private void OnDestroy()
+    public void Dispose()
     {
+        if (disposed) return;
+        disposed = true;
         MapObjectTickManager.UnregisterUpdateTick(this);
+        DetachView();
+        controllers.Clear();
+        controllerLookup.Clear();
+        controllersByHerd.Clear();
+        herdIdByController.Clear();
+        herdFrames.Clear();
+        controllersBySpatialCell.Clear();
+        spatialBucketPool.Clear();
+        spatialEntries.Clear();
+        spatialDirtySet.Clear();
+        spatialDirty.Clear();
+        dirtyHerds.Clear();
+        dueNormalControllers.Clear();
+        dueFleeControllers.Clear();
+        spatialIndexReady = false;
         if (Instance == this)
         {
             Instance = null;
         }
     }
 
-    private void Update()
+    public void AttachView(Transform parent)
     {
-        if (!MapObjectTickManager.SimulationPaused && !MapObjectTickManager.WaitingForWorldLoad)
-            TickPresentations(Time.deltaTime);
+        if (disposed) throw new ObjectDisposedException(nameof(AnimalAIWorld));
+        if (view == null && parent != null) view = AnimalAIWorldView.Create(this, parent);
+    }
+
+    public void DetachView()
+    {
+        if (view == null) return;
+        var previous = view; view = null; previous.Release();
+    }
+
+    internal void OnViewDestroyed(AnimalAIWorldView previous)
+    {
+        if (ReferenceEquals(view, previous)) view = null;
     }
 
     public void ManagedUpdateTick(float deltaTime)
     {
+        if (disposed) return;
         if (controllerOrderDirty)
         {
             controllers.Sort(CompareControllers);
@@ -228,24 +251,7 @@ public sealed partial class AnimalAIWorld : MonoBehaviour, IMapObjectUpdateTick,
         }
     }
 
-    private void TickPresentations(float deltaTime)
-    {
-        using var sample = MapObjectTickProfiler.SampleNamed("AI Render", "AnimalAI", "Animal Presentation");
-        if (presentationCamera == null || !presentationCamera.isActiveAndEnabled)
-            presentationCamera = Camera.main;
-        presentationCulling.Update(presentationCamera);
-        for (int i = 0; i < controllers.Count; i++)
-        {
-            AnimalAIController controller = controllers[i];
-            if (controller == null || !controller.HasPendingPresentation) continue;
-            bool visible = controller.IsPresentationVisible(presentationCulling);
-            controller.TickCulledPresentation(deltaTime, visible);
-            AnimalAIProfiler.Add(visible ? AnimalAIProfiler.Counter.Presentations
-                : AnimalAIProfiler.Counter.CulledPresentations);
-        }
-    }
-
-    private void LateUpdate()
+    internal void CompletePresentationFrame()
     {
         AnimalAIProfiler.CompleteFrame();
         CommitFrameCounter(
@@ -336,20 +342,16 @@ public sealed partial class AnimalAIWorld : MonoBehaviour, IMapObjectUpdateTick,
         return processed;
     }
 
-    public static AnimalAIWorld EnsureFor(GameObject owner)
+    public static AnimalAIWorld Ensure()
     {
         if (Instance != null)
         {
             return Instance;
         }
 
-        if (owner == null)
-        {
-            return null;
-        }
-
-        AnimalAIWorld world = owner.GetComponent<AnimalAIWorld>();
-        return world != null ? world : owner.AddComponent<AnimalAIWorld>();
+        var world = new AnimalAIWorld();
+        world.Initialize();
+        return world;
     }
 
     public static void Register(AnimalAIController controller)

@@ -84,12 +84,20 @@ public partial class TerrainGenerator : MonoBehaviour
 
     private void SaveAllRuntimeResourcesToStore()
     {
+        IEnumerator save = SaveAllRuntimeResourcesToStoreIncremental(int.MaxValue);
+        while (save.MoveNext()) { }
+    }
+
+    private IEnumerator SaveAllRuntimeResourcesToStoreIncremental(int entriesPerFrame)
+    {
         EnsureResourceStateStore();
         if (resourceStateStore == null)
         {
-            return;
+            yield break;
         }
 
+        entriesPerFrame = Mathf.Max(1, entriesPerFrame);
+        int processed = 0;
         ResourceInstance.CollectActiveResourcesForTerrain(
             this,
             detachedChunkResourceScratch,
@@ -100,6 +108,12 @@ public partial class TerrainGenerator : MonoBehaviour
             if (resource != null && resource.TryGetOwningCoordinate(out Vector2Int coordinate))
             {
                 resourceStateStore.Save(coordinate, resource);
+            }
+
+            if (++processed >= entriesPerFrame)
+            {
+                processed = 0;
+                yield return null;
             }
         }
 
@@ -640,11 +654,7 @@ public partial class TerrainGenerator : MonoBehaviour
             return;
         }
 
-        DroppedItemPickupGate gate = droppedObject.GetComponent<DroppedItemPickupGate>();
-        if (gate == null)
-        {
-            gate = droppedObject.gameObject.AddComponent<DroppedItemPickupGate>();
-        }
+        DroppedItemPickupGate gate = droppedObject.GetOrAddPickupGate();
 
         gate.MarkDropped(0.5f, settled, origin);
     }
@@ -1564,15 +1574,15 @@ public partial class TerrainGenerator : MonoBehaviour
         return Mathf.Max(1, chunkGenerationBlocksPerFrame);
     }
 
-    private void ReleaseChunkBlockRuntimeProxies(Block[] chunkBlocks)
+    private void ReleaseChunkBlockEntities(Block[] chunkBlocks)
     {
-        IEnumerator routine = ReleaseChunkBlockRuntimeProxiesRoutine(chunkBlocks, false);
+        IEnumerator routine = ReleaseChunkBlockEntitiesRoutine(chunkBlocks, false);
         while (routine.MoveNext())
         {
         }
     }
 
-    private IEnumerator ReleaseChunkBlockRuntimeProxiesRoutine(Block[] chunkBlocks, bool allowYield)
+    private IEnumerator ReleaseChunkBlockEntitiesRoutine(Block[] chunkBlocks, bool allowYield)
     {
         using (ReleaseChunkBlocksMarker.Auto())
         {
@@ -1591,7 +1601,6 @@ public partial class TerrainGenerator : MonoBehaviour
                 {
                     ReleaseFarmlandVisual(block.Coordinate);
                     block.PrepareForRuntimeRelease();
-                    UnityEngine.Object.DestroyImmediate(block);
                 }
             }
 
@@ -1600,7 +1609,7 @@ public partial class TerrainGenerator : MonoBehaviour
 
         int blocksSinceYield = 0;
         int blockBudget = GetChunkProcessingStepBudget();
-        suppressedBlockProxyMaterializationDepth++;
+        suppressedBlockEntityCreationDepth++;
         try
         {
             for (int i = 0; i < chunkBlocks.Length; i++)
@@ -1612,7 +1621,6 @@ public partial class TerrainGenerator : MonoBehaviour
                     {
                         ReleaseFarmlandVisual(block.Coordinate);
                         block.PrepareForRuntimeRelease();
-                        UnityEngine.Object.Destroy(block);
                     }
                 }
 
@@ -1625,7 +1633,7 @@ public partial class TerrainGenerator : MonoBehaviour
         }
         finally
         {
-            suppressedBlockProxyMaterializationDepth--;
+            suppressedBlockEntityCreationDepth--;
         }
     }
 
@@ -1636,7 +1644,7 @@ public partial class TerrainGenerator : MonoBehaviour
                && resourceStateStore.TryGetInstallationAnchorAtCoordinate(worldCoordinate, out _);
     }
 
-    private bool RequiresInitialBlockRuntimeProxy(
+    private bool RequiresInitialBlockEntity(
         Vector2Int worldCoordinate,
         out Resource generatedResourcePrefab)
     {
@@ -1891,8 +1899,10 @@ public partial class TerrainGenerator : MonoBehaviour
         }
 
         ConveyorWorld world = EnsureConveyorWorld();
+        world?.AttachView();
+        GameObject viewHost = world?.View != null ? world.View.gameObject : gameObject;
         VirtualConveyorBeltRenderer legacyRenderer = GetComponent<VirtualConveyorBeltRenderer>();
-        if (legacyRenderer != null && (world == null || legacyRenderer.gameObject != world.gameObject))
+        if (legacyRenderer != null && legacyRenderer.gameObject != viewHost)
         {
             legacyRenderer.Clear(false);
             if (Application.isPlaying)
@@ -1905,13 +1915,10 @@ public partial class TerrainGenerator : MonoBehaviour
             }
         }
 
-        virtualConveyorBeltRenderer = world != null
-            ? world.GetComponent<VirtualConveyorBeltRenderer>()
-            : null;
+        virtualConveyorBeltRenderer = viewHost.GetComponent<VirtualConveyorBeltRenderer>();
         if (virtualConveyorBeltRenderer == null)
         {
-            virtualConveyorBeltRenderer = (world != null ? world.gameObject : gameObject)
-                .AddComponent<VirtualConveyorBeltRenderer>();
+            virtualConveyorBeltRenderer = viewHost.AddComponent<VirtualConveyorBeltRenderer>();
         }
 
         return virtualConveyorBeltRenderer;

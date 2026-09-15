@@ -25,7 +25,37 @@ public static partial class Checks
         NavigationChecks();
         ActorClockChecks();
         AnimalAnimationChecks.Check();
+        WorldViewLifetimeChecks();
         Console.WriteLine($"PASS {passed} animal optimization checks.");
+    }
+
+    private static void WorldViewLifetimeChecks()
+    {
+        AnimalAIWorld.Instance?.Dispose();
+        var host = new GameObject("test world host");
+        var world = AnimalAIWorld.Ensure();
+        world.AttachView(host.transform);
+        var controller = Animal(71, 0, 0); controller.Due = true;
+        world.AttachForCheck(controller);
+        using var scheduler = new ProjectF.Simulation.SimulationTickWorld();
+        scheduler.Register(world);
+        Require(world.HasView, "managed world accepts an optional animal presentation view");
+        scheduler.Step();
+        long before = world.NeedsTick;
+        int executions = controller.Executions;
+        world.DetachView();
+        scheduler.Step();
+        Require(!world.HasView && world.NeedsTick == before + 1 && controller.Executions > executions,
+            "detaching the world view preserves real scheduler membership and controller execution");
+        world.AttachView(host.transform);
+        Require(world.HasView && world.ControllerCount == 1 && world.NeedsTick == before + 1,
+            "reattaching the world view does not reset AI state");
+        world.Dispose(); world.Dispose();
+        Require(AnimalAIWorld.Instance == null && !world.HasView, "managed world disposal is idempotent");
+        before = world.NeedsTick;
+        scheduler.Step();
+        Require(world.ControllerCount == 0 && world.NeedsTick == before,
+            "disposed AI world releases controller references and ignores stale tick calls");
     }
 
     private static void SpatialChecks()

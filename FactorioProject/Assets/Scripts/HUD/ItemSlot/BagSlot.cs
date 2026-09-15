@@ -142,7 +142,7 @@ public class BagSlot : ItemSlot, IBeginDragHandler, IDragHandler, IEndDragHandle
                 return;
             }
 
-            Transform targetTransform = portableObject.transform;
+            Transform targetTransform = portableObject.PresentationTransform;
             targetTransform.SetParent(parent, false);
             if (parent != null)
             {
@@ -164,7 +164,7 @@ public class BagSlot : ItemSlot, IBeginDragHandler, IDragHandler, IEndDragHandle
 
         public PortableMoveAnchor(PortableObject portableObject)
         {
-            Transform targetTransform = portableObject != null ? portableObject.transform : null;
+            Transform targetTransform = portableObject != null ? portableObject.PresentationTransform : null;
             parent = targetTransform != null ? targetTransform.parent : null;
             localPosition = targetTransform != null ? targetTransform.localPosition : Vector3.zero;
             worldPosition = targetTransform != null ? targetTransform.position : Vector3.zero;
@@ -1005,7 +1005,7 @@ public class BagSlot : ItemSlot, IBeginDragHandler, IDragHandler, IEndDragHandle
         if (candidate.itemId < 0 || candidate.count <= 0
             || (!automatic && !CanPreviewAcceptPickupItem(player, candidate.itemId)))
             return;
-        Vector3 offset = (candidate.portable != null ? candidate.portable.transform.position : sourcePosition) - origin;
+        Vector3 offset = (candidate.portable != null ? candidate.portable.WorldPosition : sourcePosition) - origin;
         offset.y = 0f;
         candidate.distanceSqr = offset.sqrMagnitude;
         if (best.source == PickupSource.None || candidate.distanceSqr < best.distanceSqr)
@@ -1076,7 +1076,8 @@ public class BagSlot : ItemSlot, IBeginDragHandler, IDragHandler, IEndDragHandle
 
     private bool CanDragItem()
     {
-        return CanDragDrop
+        return !IsInventoryUiLocked()
+               && CanDragDrop
                && boundBag != null
                && slotIndex >= 0
                && id >= 0
@@ -3001,11 +3002,12 @@ public class BagSlot : ItemSlot, IBeginDragHandler, IDragHandler, IEndDragHandle
         }
 
         CancelPortableMoveVisual(portableObject);
-        Transform originalParent = portableObject.transform.parent;
-        int originalSiblingIndex = portableObject.transform.GetSiblingIndex();
-        Vector3 originalLocalPosition = portableObject.transform.localPosition;
-        Quaternion originalLocalRotation = portableObject.transform.localRotation;
-        Vector3 originalLocalScale = portableObject.transform.localScale;
+        Transform presentation = portableObject.PresentationTransform;
+        Transform originalParent = presentation.parent;
+        int originalSiblingIndex = presentation.GetSiblingIndex();
+        Vector3 originalLocalPosition = presentation.localPosition;
+        Quaternion originalLocalRotation = presentation.localRotation;
+        Vector3 originalLocalScale = presentation.localScale;
         activePortableMoveVisualStates[portableObject] = new PortableMoveVisualState(
             originalParent,
             originalSiblingIndex,
@@ -3015,11 +3017,11 @@ public class BagSlot : ItemSlot, IBeginDragHandler, IDragHandler, IEndDragHandle
         portableObject.MoveCancelled -= RestorePortableMoveVisual;
         portableObject.MoveCancelled += RestorePortableMoveVisual;
 
-        portableObject.transform.SetParent(null, true);
-        portableObject.transform.position = startAnchor.ResolveWorldPosition();
-        if (!portableObject.gameObject.activeSelf)
+        portableObject.SetCachedParent(null, true);
+        portableObject.SetWorldPosition(startAnchor.ResolveWorldPosition());
+        if (!portableObject.IsActive)
         {
-            portableObject.gameObject.SetActive(true);
+            portableObject.SetCachedActive(true);
         }
 
         portableObject.MoveTo(
@@ -4005,7 +4007,8 @@ public class BagSlot : ItemSlot, IBeginDragHandler, IDragHandler, IEndDragHandle
 
     protected bool IsInventoryUiLocked()
     {
-        return GameManager.Instance != null && GameManager.Instance.PlayerInteractionLocked;
+        return SaveManager.GameplayInputBlocked
+               || (GameManager.Instance != null && GameManager.Instance.PlayerInteractionLocked);
     }
 
     protected bool IsInventoryEditLocked()

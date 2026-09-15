@@ -1,6 +1,7 @@
 using System;
 using System.Collections;
 using System.IO;
+using System.Threading;
 using System.Threading.Tasks;
 using UnityEngine;
 using UnityEngine.SceneManagement;
@@ -11,10 +12,13 @@ public class SaveManager : MonoBehaviour
 
     private const string RecentSlotPlayerPrefsKey = "ProjectF.SaveManager.RecentSlot";
     private const string SaveFileExtension = ".pfsave";
+    private const int SaveSnapshotEntriesPerFrame = 64;
+    private const int SaveSnapshotBeltLanesPerFrame = 128;
 
     private static SaveGameData pendingRuntimeLoadData;
     private static int pendingRuntimeLoadSlot = -1;
     private static bool pendingRuntimeStartNewMap;
+    private static int runtimeSaveInputBlockDepth;
 
     [Header("Inspector")]
     [SerializeField]
@@ -39,10 +43,13 @@ public class SaveManager : MonoBehaviour
     private Coroutine activeLoadCoroutine;
     private Task<SaveGameData> activeLoadReadTask;
     private bool saveTickPauseActive;
+    private bool saveInputBlockActive;
 
     public bool IsSaving => activeSaveCoroutine != null
                             || (activeSaveWriteTask != null && !activeSaveWriteTask.IsCompleted);
+    public static bool GameplayInputBlocked => runtimeSaveInputBlockDepth > 0;
     public bool IsLoading => sceneReloadRequested
+                             || (TerrainGenerator.Active != null && TerrainGenerator.Active.IsWorldRestorePending)
                              || activeLoadCoroutine != null
                              || (activeLoadReadTask != null && !activeLoadReadTask.IsCompleted);
 
@@ -58,6 +65,14 @@ public class SaveManager : MonoBehaviour
 
     [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.SubsystemRegistration)]
     private static void ResetRuntimeLoadState()
+    {
+        pendingRuntimeLoadData = null;
+        pendingRuntimeLoadSlot = -1;
+        pendingRuntimeStartNewMap = false;
+        runtimeSaveInputBlockDepth = 0;
+    }
+
+    internal static void DiscardPendingRuntimeLoadForSceneReplacement()
     {
         pendingRuntimeLoadData = null;
         pendingRuntimeLoadSlot = -1;
@@ -136,7 +151,31 @@ public class SaveManager : MonoBehaviour
             return SaveSlotImmediate(slotIndex, terrain, player);
         }
 
-        activeSaveCoroutine = StartCoroutine(SaveSlotRoutine(slotIndex, terrain, player));
+        if (!terrain.IsWorldReadyForPresentation || terrain.IsChunkStreamingBusy)
+        {
+            Debug.LogWarning("[SaveManager] 월드 복원 또는 청크 처리가 끝나기 전에는 저장할 수 없습니다.");
+            return false;
+        }
+
+        BeginSaveInputBlock();
+        try
+        {
+            activeSaveCoroutine = StartCoroutine(SaveSlotRoutine(slotIndex, terrain, player));
+        }
+        catch (Exception exception)
+        {
+            EndSaveInputBlock();
+            Debug.LogError($"[SaveManager] Slot {slotIndex + 1} 저장 코루틴 시작 실패: {exception}");
+            return false;
+        }
+
+        if (activeSaveCoroutine == null)
+        {
+            EndSaveInputBlock();
+            Debug.LogError($"[SaveManager] Slot {slotIndex + 1} 저장 코루틴을 생성하지 못했습니다.");
+            return false;
+        }
+
         return true;
     }
 
@@ -167,19 +206,36 @@ public class SaveManager : MonoBehaviour
             SaveGameData data = null;
             Exception captureException = null;
             BeginSaveTickPause();
-            try
+            IEnumerator captureRoutine = CaptureSaveDataIncremental(
+                terrain,
+                player,
+                captured => data = captured);
+            while (captureException == null)
             {
-                data = CaptureSaveData(terrain, player);
+                bool hasNext = false;
+                object yielded = null;
+                try
+                {
+                    hasNext = captureRoutine.MoveNext();
+                    if (hasNext) yielded = captureRoutine.Current;
+                }
+                catch (Exception exception)
+                {
+                    captureException = exception;
+                }
+
+                if (!hasNext) break;
+                yield return yielded;
             }
-            catch (Exception exception)
+            (captureRoutine as IDisposable)?.Dispose();
+
+            if (captureException == null && data == null)
             {
-                captureException = exception;
+                captureException = new InvalidOperationException("Save snapshot capture did not complete.");
             }
-            finally
-            {
-                // The detached snapshot no longer needs the live simulation to stay paused.
-                EndSaveTickPause();
-            }
+
+            // The detached snapshot no longer needs the live simulation to stay paused.
+            EndSaveTickPause();
 
             if (captureException != null)
             {
@@ -193,7 +249,11 @@ public class SaveManager : MonoBehaviour
             Exception taskStartException = null;
             try
             {
-                activeSaveWriteTask = Task.Run(() => SaveGameBinarySerializer.WriteToFile(path, data));
+                activeSaveWriteTask = Task.Factory.StartNew(
+                    () => WriteSaveSnapshotOnBackgroundThread(path, data),
+                    CancellationToken.None,
+                    TaskCreationOptions.LongRunning,
+                    TaskScheduler.Default);
             }
             catch (Exception exception)
             {
@@ -233,6 +293,15 @@ public class SaveManager : MonoBehaviour
 
     private static SaveGameData CaptureSaveData(TerrainGenerator terrain, Player player)
     {
+        if (terrain == null || (Application.isPlaying
+            && (!terrain.IsWorldReadyForPresentation || terrain.IsChunkStreamingBusy)))
+            throw new InvalidOperationException("Cannot capture an incomplete or streaming world.");
+        if (!MapObjectTickManager.CanCaptureCheckpoint)
+            throw new InvalidOperationException("Cannot save inside a simulation tick or with unapplied commands.");
+
+        // Finish native topology/pending writes before map DTOs read occupied lanes.
+        // Capture stays synchronous: no frame callback may mutate live state between sections.
+        var beltSnapshot = terrain.CaptureBeltSimulationSnapshot();
         return new SaveGameData
         {
             version = SaveGameData.CurrentVersion,
@@ -243,10 +312,55 @@ public class SaveManager : MonoBehaviour
             worldTime = GameManager.Instance?.WorldTime?.CaptureSaveState() ?? new WorldTimeSaveData(),
             map = terrain.CaptureMapSaveState(),
             player = player != null ? player.CaptureSaveState() : new PlayerSaveData(),
-            beltSimulation = terrain.CaptureBeltSimulationSnapshot(),
+            beltSimulation = beltSnapshot,
             simulationTick = MapObjectTickManager.CurrentSimulationTick,
             nextInstallationSimulationId = InstallationObject.NextSimulationId
         };
+    }
+
+    private static IEnumerator CaptureSaveDataIncremental(
+        TerrainGenerator terrain,
+        Player player,
+        Action<SaveGameData> completed)
+    {
+        if (terrain == null || !terrain.IsWorldReadyForPresentation || terrain.IsChunkStreamingBusy)
+            throw new InvalidOperationException("Cannot capture an incomplete or streaming world.");
+        if (!MapObjectTickManager.CanCaptureCheckpoint)
+            throw new InvalidOperationException("Cannot save inside a simulation tick or with unapplied commands.");
+
+        ProjectF.Conveyors.BeltSimulationSnapshot beltSnapshot = null;
+        IEnumerator beltCapture = terrain.CaptureBeltSimulationSnapshotIncremental(
+            snapshot => beltSnapshot = snapshot,
+            SaveSnapshotBeltLanesPerFrame);
+        while (beltCapture.MoveNext())
+        {
+            yield return beltCapture.Current;
+        }
+
+        MapSaveData mapSaveData = new MapSaveData();
+        IEnumerator mapCapture = terrain.CaptureMapSaveStateIncremental(
+            mapSaveData,
+            SaveSnapshotEntriesPerFrame);
+        while (mapCapture.MoveNext())
+        {
+            yield return mapCapture.Current;
+        }
+
+        SaveGameData data = new SaveGameData
+        {
+            version = SaveGameData.CurrentVersion,
+            savedAtUtcTicks = DateTime.UtcNow.Ticks,
+            itemCatalog = SaveGameItemIdRemapper.CaptureItemCatalog(
+                GameManager.Instance?.ItemManger?.ItemDefinitions),
+            terrain = terrain.CaptureTerrainSaveState(),
+            worldTime = GameManager.Instance?.WorldTime?.CaptureSaveState() ?? new WorldTimeSaveData(),
+            map = mapSaveData,
+            player = player != null ? player.CaptureSaveState() : new PlayerSaveData(),
+            beltSimulation = beltSnapshot,
+            simulationTick = MapObjectTickManager.CurrentSimulationTick,
+            nextInstallationSimulationId = InstallationObject.NextSimulationId
+        };
+        completed?.Invoke(data);
     }
 
     private void CompleteSuccessfulSave(int slotIndex, string path)
@@ -254,6 +368,43 @@ public class SaveManager : MonoBehaviour
         SetCachedSaveFileExists(slotIndex, true);
         SetRecentSlot(slotIndex);
         Debug.Log($"[SaveManager] Slot {slotIndex + 1} 저장 완료: {path}");
+    }
+
+    private static void WriteSaveSnapshotOnBackgroundThread(string path, SaveGameData data)
+    {
+        Thread thread = Thread.CurrentThread;
+        System.Threading.ThreadPriority originalPriority = System.Threading.ThreadPriority.Normal;
+        bool priorityChanged = false;
+        try
+        {
+            originalPriority = thread.Priority;
+            thread.Priority = System.Threading.ThreadPriority.BelowNormal;
+            priorityChanged = true;
+        }
+        catch (Exception)
+        {
+            // Some Unity targets do not expose OS thread priorities. Saving remains valid
+            // there; only the scheduling preference is unavailable.
+        }
+
+        try
+        {
+            SaveGameBinarySerializer.WriteToFile(path, data);
+        }
+        finally
+        {
+            if (priorityChanged)
+            {
+                try
+                {
+                    thread.Priority = originalPriority;
+                }
+                catch (Exception)
+                {
+                    // The task is already complete, so failure to restore priority is harmless.
+                }
+            }
+        }
     }
 
     private void BeginSaveTickPause()
@@ -270,9 +421,32 @@ public class SaveManager : MonoBehaviour
     private void FinishSaveOperation()
     {
         EndSaveTickPause();
+        EndSaveInputBlock();
 
         activeSaveWriteTask = null;
         activeSaveCoroutine = null;
+    }
+
+    private void BeginSaveInputBlock()
+    {
+        if (saveInputBlockActive)
+        {
+            return;
+        }
+
+        saveInputBlockActive = true;
+        runtimeSaveInputBlockDepth++;
+    }
+
+    private void EndSaveInputBlock()
+    {
+        if (!saveInputBlockActive)
+        {
+            return;
+        }
+
+        saveInputBlockActive = false;
+        runtimeSaveInputBlockDepth = Mathf.Max(0, runtimeSaveInputBlockDepth - 1);
     }
 
     private void EndSaveTickPause()
@@ -289,6 +463,7 @@ public class SaveManager : MonoBehaviour
     private void OnDestroy()
     {
         EndSaveTickPause();
+        EndSaveInputBlock();
     }
 
     public bool LoadSlot(int slotIndex)
@@ -497,10 +672,6 @@ public class SaveManager : MonoBehaviour
         int sceneBuildIndex,
         string sceneName)
     {
-        pendingRuntimeLoadSlot = slotIndex;
-        pendingRuntimeLoadData = data;
-        pendingRuntimeStartNewMap = startNewMap;
-
         bool reloadStarted;
         if (sceneBuildIndex >= 0)
         {
@@ -518,6 +689,12 @@ public class SaveManager : MonoBehaviour
             return false;
         }
 
+        // TryLoadSceneAsync can replace an older active screen and discard its pending
+        // slot payload. Publish this request only after the screen accepted it so the new
+        // payload cannot be mistaken for the superseded load.
+        pendingRuntimeLoadSlot = slotIndex;
+        pendingRuntimeLoadData = data;
+        pendingRuntimeStartNewMap = startNewMap;
         SetRecentSlot(slotIndex);
         return true;
     }
@@ -544,9 +721,11 @@ public class SaveManager : MonoBehaviour
             SaveGameItemIdRemapper.RemapToCurrentDefinitions(
                 data,
                 GameManager.Instance?.ItemManger?.ItemDefinitions);
-            ApplySaveData(data);
-            SetRecentSlot(slotIndex);
-            Debug.Log($"[SaveManager] Slot {slotIndex + 1} 로드 완료: {path}");
+            ApplySaveData(data, () =>
+            {
+                SetRecentSlot(slotIndex);
+                Debug.Log($"[SaveManager] Slot {slotIndex + 1} 최종 상태 복원 완료: {path}");
+            });
             return true;
         }
         catch (Exception exception)
@@ -722,7 +901,7 @@ public class SaveManager : MonoBehaviour
         return Path.Combine(GetSaveDirectory(), $"slot_{NormalizeSlotIndex(slotIndex) + 1:00}{SaveFileExtension}");
     }
 
-    private void ApplySaveData(SaveGameData data)
+    private void ApplySaveData(SaveGameData data, Action onRestored)
     {
         if (data == null)
         {
@@ -755,11 +934,13 @@ public class SaveManager : MonoBehaviour
                 {
                     terrain.RestoreBeltSimulationSnapshot(data.beltSimulation);
                     CompletePlayerLoad(player, data.player);
+                    onRestored?.Invoke();
                 });
             return;
         }
 
         CompletePlayerLoad(player, data.player);
+        onRestored?.Invoke();
     }
 
     private void CompletePlayerLoad(Player player, PlayerSaveData playerSaveData)

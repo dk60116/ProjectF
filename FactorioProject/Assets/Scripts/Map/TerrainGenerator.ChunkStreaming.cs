@@ -52,7 +52,9 @@ public partial class TerrainGenerator : MonoBehaviour
             GenerateChunk,
             GenerateChunkRoutine,
             GenerateChunkCoroutineStepMarker,
-            CleanupChunkGenerationTransientState);
+            CleanupChunkGenerationTransientState,
+            () => pendingWorldFinalization ? initialWorldLoadFrameBudgetMilliseconds : chunkGenerationFrameTimeBudgetMilliseconds,
+            FailWorldRestoration);
 
         return chunkStreamingScheduler;
     }

@@ -17,7 +17,7 @@ public class FreightCar : Train,
     [SerializeField]
     private List<Transform> boxPointList;
     [SerializeField]
-    private PortableObject itemObjectPrefab;
+    private PortableObjectTemplate itemObjectPrefab;
     [SerializeField, Min(1)]
     private int maxItemsPerPoint = 10;
     [SerializeField, Min(0.001f)]
@@ -851,13 +851,12 @@ public class FreightCar : Train,
         }
 
         portableObject.SetBatchedRendering(false);
-        portableObject.transform.SetParent(itemPoint, true);
-        portableObject.transform.position = startWorldPositionProvider != null
-            ? startWorldPositionProvider()
-            : startWorldPosition;
-        portableObject.transform.rotation = itemPoint.rotation;
-        portableObject.transform.localScale = Vector3.one;
-        portableObject.gameObject.SetActive(true);
+        portableObject.SetCachedParent(itemPoint, true);
+        portableObject.SetWorldPose(
+            startWorldPositionProvider != null ? startWorldPositionProvider() : startWorldPosition,
+            itemPoint.rotation);
+        portableObject.SetWorldScale(itemPoint.lossyScale);
+        portableObject.SetCachedActive(true);
 
         int objectIndex = stack.Count;
         Vector3 finalLocalPosition = new Vector3(0f, objectIndex * Mathf.Max(0.001f, itemStackVerticalSpacing), 0f);
@@ -877,11 +876,8 @@ public class FreightCar : Train,
                     return;
                 }
 
-                portableObject.transform.SetParent(itemPoint, false);
-                portableObject.transform.localPosition = finalLocalPosition;
-                portableObject.transform.localRotation = Quaternion.identity;
-                portableObject.transform.localScale = Vector3.one;
-                portableObject.gameObject.SetActive(true);
+                portableObject.SetLocalPose(itemPoint, finalLocalPosition, Quaternion.identity, Vector3.one);
+                portableObject.SetCachedActive(true);
                 portableObject.SetBatchedRendering(false);
                 portableObject.GetOrAddPickupGate()?.MarkSettled();
             },
@@ -915,14 +911,12 @@ public class FreightCar : Train,
         int objectIndex = stack.Count;
         portableObject.CancelMove();
         portableObject.SetBatchedRendering(false);
-        portableObject.transform.SetParent(itemPoint, false);
-        portableObject.transform.localPosition = new Vector3(
-            0f,
-            objectIndex * Mathf.Max(0.001f, itemStackVerticalSpacing),
-            0f);
-        portableObject.transform.localRotation = Quaternion.identity;
-        portableObject.transform.localScale = Vector3.one;
-        portableObject.gameObject.SetActive(true);
+        portableObject.SetLocalPose(
+            itemPoint,
+            new Vector3(0f, objectIndex * Mathf.Max(0.001f, itemStackVerticalSpacing), 0f),
+            Quaternion.identity,
+            Vector3.one);
+        portableObject.SetCachedActive(true);
         portableObject.GetOrAddPickupGate()?.MarkSettled();
         stack.Add(portableObject);
         return true;
@@ -1123,7 +1117,7 @@ public class FreightCar : Train,
                     break;
                 }
 
-                Vector3 worldPosition = portableObject.transform.position;
+                Vector3 worldPosition = portableObject.WorldPosition;
                 Vector3 offset = worldPosition - referenceWorldPosition;
                 offset.y = 0f;
                 float distanceSqr = offset.sqrMagnitude;
@@ -1235,7 +1229,7 @@ public class FreightCar : Train,
                 continue;
             }
 
-            Vector3 offset = portableObject.transform.position - playerPosition;
+            Vector3 offset = portableObject.WorldPosition - playerPosition;
             offset.y = 0f;
             float distanceSqr = offset.sqrMagnitude;
             if (distanceSqr > pickupRadiusSqr
@@ -1535,30 +1529,35 @@ public class FreightCar : Train,
     private PortableObject CreateItemPortableObject(int itemId)
     {
         PortableObject portableObject = itemObjectPrefab != null
-            ? Instantiate(itemObjectPrefab)
+            ? PortableObject.Create(itemObjectPrefab)
             : CreateGeneratedPortableObject(itemId);
         if (portableObject == null)
         {
             return null;
         }
 
-        portableObject.gameObject.layer = gameObject.layer;
+        portableObject.Layer = gameObject.layer;
         if (!portableObject.SetItem(itemId))
         {
             PlayerItemStorageUtility.DestroyPortableObject(portableObject);
             return null;
         }
 
+        _ = portableObject.PresentationGameObject;
+
         return portableObject;
     }
 
     private PortableObject CreateGeneratedPortableObject(int itemId)
     {
-        GameObject itemObject = new GameObject($"FreightCarItem_{itemId}");
-        itemObject.transform.SetParent(transform, false);
-        itemObject.AddComponent<MeshFilter>();
-        itemObject.AddComponent<MeshRenderer>();
-        return itemObject.AddComponent<PortableObject>();
+        PortableObject entity = PortableObject.Create(
+            transform.position,
+            transform.rotation,
+            Vector3.one,
+            gameObject.layer,
+            $"FreightCarItem_{itemId}");
+        entity.SetCachedParent(transform, true);
+        return entity;
     }
 
     private static bool IsStackCompatible(List<PortableObject> stack, int itemId)
@@ -1647,10 +1646,10 @@ public class FreightCar : Train,
 
         portableObject.CancelMove();
         portableObject.SetBatchedRendering(false);
-        portableObject.transform.SetParent(null, true);
-        if (!portableObject.gameObject.activeSelf)
+        portableObject.SetCachedParent(null, true);
+        if (!portableObject.IsActive)
         {
-            portableObject.gameObject.SetActive(true);
+            portableObject.SetCachedActive(true);
         }
     }
 

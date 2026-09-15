@@ -49,7 +49,7 @@ public class RobotArm : InputOutputModule
     private Transform body;
 
     [SerializeField]
-    private PortableObject handItem;
+    private PortableObjectTemplate handItem;
 
     [SerializeField]
     private bool useLongArmAnimation;

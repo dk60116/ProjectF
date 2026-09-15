@@ -31,7 +31,8 @@ public class Vehicle : InstallationObject
     [SerializeField]
     private bool invertWheelRotation;
 
-    private float currentVehicleSignedSpeed;
+    private ProjectF.Simulation.VehicleMotionState vehicleMotion;
+    private float currentVehicleSignedSpeed { get => vehicleMotion.SignedSpeed; set => vehicleMotion.SignedSpeed = value; }
     private float pendingWheelVisualDistance;
     protected override bool UsesManagedVisualUpdates => true;
     private readonly Vector2Int[] runtimeCoordinateBuffer = new Vector2Int[1];
@@ -111,50 +112,13 @@ public class Vehicle : InstallationObject
         float decelerationPerSecond,
         bool clampToMaxSpeed = true)
     {
-        float normalizedDeltaTime = Mathf.Max(0f, deltaTime);
-        float normalizedInputAxis = Mathf.Clamp(inputAxis, -1f, 1f);
-        bool hasInput = Mathf.Abs(normalizedInputAxis) > 0.001f;
-        float resolvedMaxSpeed = Mathf.Max(0.01f, maxSpeed);
-        float targetSpeed = hasInput
-            ? normalizedInputAxis * resolvedMaxSpeed
-            : 0f;
-
-        bool accelerating = hasInput
-                            && (Mathf.Abs(currentVehicleSignedSpeed) <= 0.0001f
-                                || Mathf.Sign(currentVehicleSignedSpeed)
-                                   == Mathf.Sign(targetSpeed)
-                                   && Mathf.Abs(targetSpeed)
-                                   > Mathf.Abs(currentVehicleSignedSpeed));
-        float speedChangePerSecond = accelerating
-            ? Mathf.Max(0.01f, accelerationPerSecond)
-            : Mathf.Max(0.01f, decelerationPerSecond);
-
-        currentVehicleSignedSpeed = Mathf.MoveTowards(
-            currentVehicleSignedSpeed,
-            targetSpeed,
-            speedChangePerSecond * normalizedDeltaTime);
-        if (!hasInput && Mathf.Abs(currentVehicleSignedSpeed) <= 0.0001f)
-        {
-            currentVehicleSignedSpeed = 0f;
-        }
-
-        if (clampToMaxSpeed)
-        {
-            ClampCurrentVehicleSignedSpeed(resolvedMaxSpeed);
-        }
-
-        return currentVehicleSignedSpeed;
+        return vehicleMotion.Advance(inputAxis, deltaTime, maxSpeed,
+            accelerationPerSecond, decelerationPerSecond, clampToMaxSpeed);
     }
 
     protected void ClampCurrentVehicleSignedSpeed(float maxAbsSpeed)
     {
-        float resolvedMaxSpeed = Mathf.Max(0.01f, maxAbsSpeed);
-        if (Mathf.Abs(currentVehicleSignedSpeed) <= resolvedMaxSpeed)
-        {
-            return;
-        }
-
-        currentVehicleSignedSpeed = Mathf.Sign(currentVehicleSignedSpeed) * resolvedMaxSpeed;
+        vehicleMotion.Clamp(maxAbsSpeed);
     }
 
     protected void ResetVehicleMotion()

@@ -151,6 +151,17 @@ using (FluidSimulationBuffers reverse = CreateFixture())
     Require(serialDisplay.SequenceEqual(reverseDisplay), "network worker order changed display resolution");
     Require(serialDisplay.SequenceEqual(new[] { 8, -1, 11 }),
         "display resolution did not prefer the first authoritative source per stable network order");
+
+    FluidPipeDisplaySource dirtySource = serial.DisplaySources[0];
+    dirtySource.ItemId = 15;
+    dirtySource.Priority = 3;
+    serial.DisplaySources[0] = dirtySource;
+    FluidDisplayResolveJob dirtyNetworkJob = serial.DisplayResolveJob;
+    dirtyNetworkJob.Execute(0);
+    Require(serial.NetworkDisplayItemIds[0] == 15,
+        "dirty network did not resolve its changed source");
+    Require(serial.NetworkDisplayItemIds[1] == -1 && serial.NetworkDisplayItemIds[2] == 11,
+        "dirty network resolution changed an independent network");
 }
 
 FluidSimulationBuffers disposed = CreateFixture();

@@ -193,6 +193,35 @@ internal static class Program
         write.Invoke(null, new object[] { secondWriter, loaded }); secondWriter.Flush();
         if (!System.Linq.Enumerable.SequenceEqual(stream.ToArray(), output.ToArray()))
             throw new Exception("Native belt save is not byte identical after round-trip");
-        Console.WriteLine("PASS: production v61 save preserves shared and belt clocks, deterministic units, stable installation ID allocation, occupied lanes and empty-lane merge cursors; bytes match after round-trip.");
+        Console.WriteLine("PASS: production save preserves shared and belt clocks, deterministic units, stable installation ID allocation, occupied lanes and empty-lane merge cursors; bytes match after round-trip.");
+        CheckPublishedFile(save, write, stream.ToArray());
+    }
+
+    private static void CheckPublishedFile(SaveGameData save, MethodInfo writePayload, byte[] expectedPayload)
+    {
+        string path = Path.Combine(Path.GetTempPath(), "ProjectF-SavePublication-" + Guid.NewGuid().ToString("N") + ".pfsave");
+        long originalTick = save.simulationTick;
+        try
+        {
+            SaveGameBinarySerializer.WriteToFile(path, save);
+            SaveGameData loaded = SaveGameBinarySerializer.ReadFromFile(path);
+            using var payload = new MemoryStream();
+            using var writer = new BinaryWriter(payload);
+            writePayload.Invoke(null, new object[] { writer, loaded }); writer.Flush();
+            if (!System.Linq.Enumerable.SequenceEqual(expectedPayload, payload.ToArray()))
+                throw new Exception("Published compressed file changed the production DTO payload");
+
+            save.simulationTick++;
+            SaveGameBinarySerializer.WriteToFile(path, save);
+            loaded = SaveGameBinarySerializer.ReadFromFile(path);
+            if (loaded.simulationTick != originalTick + 1 || loaded.nextInstallationSimulationId != save.nextInstallationSimulationId)
+                throw new Exception("Atomic replacement failed to publish the next checkpoint");
+            Console.WriteLine("PASS: actual compressed-file creation/replacement/read preserves the production DTO payload and next checkpoint. Temporary test file only.");
+        }
+        finally
+        {
+            save.simulationTick = originalTick;
+            File.Delete(path);
+        }
     }
 }

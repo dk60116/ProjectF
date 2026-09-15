@@ -1,8 +1,8 @@
 # Fluid Jobs Harness
 
 Runs the production fluid topology checksum kernel against managed stand-ins for Unity's
-native containers. It checks worker-order determinism, isolation between connected networks,
-topology/state coverage, and persistent-buffer disposal.
+native containers. It checks worker-order determinism, dirty-network isolation, topology/state
+coverage, display-source priority, and persistent-buffer disposal.
 
 ```powershell
 dotnet run --project Tools/FluidJobsHarness/FluidJobsHarness.csproj -c Release

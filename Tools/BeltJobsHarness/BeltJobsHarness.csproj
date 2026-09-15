@@ -5,6 +5,7 @@
     <ImplicitUsings>enable</ImplicitUsings>
   </PropertyGroup>
   <ItemGroup>
+    <Compile Include="../../FactorioProject/Assets/Scripts/Simulation/Logistics/BeltSimulationWorld.cs" Link="BeltSimulationWorld.cs" />
     <Compile Include="../../FactorioProject/Assets/Scripts/Map/BeltSimulationJob.cs" Link="BeltSimulationJob.cs" />
     <Compile Include="../../FactorioProject/Assets/Scripts/Map/BeltSimulationBuffers.cs" Link="BeltSimulationBuffers.cs" />
     <Compile Include="../../FactorioProject/Assets/Scripts/Map/BeltSimulationMath.cs" Link="BeltSimulationMath.cs" />

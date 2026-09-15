@@ -6,9 +6,6 @@ using ProjectF.Runtime;
 
 // World IO and power supply are doubles. Wake/plan/apply/sleep/demand/scheduling/slot storage are production code.
 public static class Application { public static bool isPlaying = true; }
-public interface IMapObjectUpdateTick { void ManagedUpdateTick(float dt); }
-public interface IMapObjectStagedUpdateTick { void PlanManagedUpdateTick(float dt); void ApplyManagedUpdateTick(); }
-public interface IMapObjectSimulationIdentity { long SimulationId { get; } }
 public static class MapObjectTickManager { public const int DefaultSimulationTicksPerSecond = 60; public const float FixedSimulationDeltaSeconds = 1f / 60f; }
 public static class MapObjectTickProfiler
 {
@@ -91,21 +88,14 @@ public sealed class TickProbe : IMapObjectUpdateTick
 }
 public partial class SchedulingProbe
 {
-    private const float FixedSimulationDeltaSeconds = 1f / 60f;
-    private bool updateTicksDirty;
-    private long simulationTick;
-    private readonly HashSet<IMapObjectUpdateTick> updateTickSet = new();
-    private readonly List<UpdateTickEntry> dueUpdateTickEntries = new(64);
     public static void Check(int fps)
     {
-        var probe = new SchedulingProbe();
+        using var probe = new ProjectF.Simulation.SimulationTickWorld();
         var arms = new List<TickProbe>();
-        var bucket = new UpdateTickBucket(1);
         for (int i = 0; i < 34; i++)
         {
             var arm = new TickProbe(); arms.Add(arm);
-            probe.updateTickSet.Add(arm);
-            bucket.Entries.Add(new UpdateTickEntry(arm, 1, 0));
+            probe.Register(arm);
         }
         double accumulator = 0;
         for (int f = 1; f <= fps * 5; f++)
@@ -114,12 +104,7 @@ public partial class SchedulingProbe
             while (accumulator + 0.000000001d >= 1d / 60d)
             {
                 accumulator -= 1d / 60d;
-                probe.simulationTick++;
-                probe.CollectDueUpdateEntries(bucket);
-                probe.dueUpdateTickEntries.Sort(CompareUpdateTickEntries);
-                probe.PlanStagedUpdateEntries();
-                probe.ApplyDueUpdateEntries(false);
-                probe.dueUpdateTickEntries.Clear();
+                probe.Step();
             }
         }
         int total = 0;
@@ -135,19 +120,11 @@ public partial class SchedulingProbe
 
     public static void CheckStagedOrder()
     {
-        var probe = new SchedulingProbe { simulationTick = 1 };
+        using var probe = new ProjectF.Simulation.SimulationTickWorld();
         var log = new List<string>();
-        var bucket = new UpdateTickBucket(1);
         var high = new StagedProbeTick(20, log);
         var low = new StagedProbeTick(10, log);
-        probe.updateTickSet.Add(high);
-        probe.updateTickSet.Add(low);
-        bucket.Entries.Add(new UpdateTickEntry(high, 1, 0));
-        bucket.Entries.Add(new UpdateTickEntry(low, 1, 0));
-        probe.CollectDueUpdateEntries(bucket);
-        probe.dueUpdateTickEntries.Sort(CompareUpdateTickEntries);
-        probe.PlanStagedUpdateEntries();
-        probe.ApplyDueUpdateEntries(false);
+        probe.Register(high); probe.Register(low); probe.Step();
         Checks.Require(
             string.Join(",", log) == "P10,P20,A10,A20",
             "all plans precede stable SimulationId apply order");

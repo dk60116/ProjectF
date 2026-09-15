@@ -8,7 +8,7 @@ public partial class Block
         Vector3 referencePosition, Predicate<int> itemFilter, out Vector3 worldPosition)
     {
         bool found = TryFindAnimalFoodStack(referencePosition, itemFilter, out _, out PortableObject food);
-        worldPosition = found ? food.transform.position : WorldPosition;
+        worldPosition = found ? food.WorldPosition : WorldPosition;
         return found;
     }
 
@@ -23,7 +23,7 @@ public partial class Block
 
         // The selected pile may have been taken by an arm while the animal approached.
         // Do not consume a different nearby pile without approaching and facing it first.
-        Vector3 offset = food.transform.position - foodPosition;
+        Vector3 offset = food.WorldPosition - foodPosition;
         offset.y = 0f;
         if (offset.sqrMagnitude > 0.0025f)
         {
@@ -64,7 +64,7 @@ public partial class Block
                 continue;
             }
 
-            Vector3 offset = food.transform.position - referencePosition;
+            Vector3 offset = food.WorldPosition - referencePosition;
             offset.y = 0f;
             float distanceSqr = offset.sqrMagnitude;
             if (distanceSqr >= bestDistanceSqr)

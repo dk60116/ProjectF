@@ -32,7 +32,6 @@ public partial class TerrainGenerator : MonoBehaviour,
     private const float GeneratedOilPitDepth = 0.20f;
     private const int GeneratedSurfaceBiomeMargin = 4;
     private const int ChunkCapacityGrowthHeadroom = 64;
-    private const int BlockRuntimeProxyHostCount = 64;
     public const float GeneratedOilPitInnerRadius =
         GeneratedOilSurfaceRadius + GeneratedOilPitInnerMargin;
     public const float GeneratedOilPitOuterRadius =
@@ -55,14 +54,14 @@ public partial class TerrainGenerator : MonoBehaviour,
     private static readonly ProfilerMarker ReleaseChunkBlocksMarker = new ProfilerMarker("TerrainGenerator.ReleaseChunkBlocks");
     private static readonly ProfilerMarker CleanupInstallationsMarker = new ProfilerMarker("TerrainGenerator.CleanupInstallations");
     private static readonly ProfilerMarker GenerateChunkCoroutineStepMarker = new ProfilerMarker("TerrainGenerator.GenerateChunkCoroutineStep");
-    private static readonly ProfilerMarker EvaluateChunkRuntimeProxyMarker = new ProfilerMarker("TerrainGenerator.EvaluateChunkRuntimeProxy");
-    private static readonly ProfilerMarker GenerateChunkRuntimeProxyMarker = new ProfilerMarker("TerrainGenerator.GenerateChunkRuntimeProxy");
+    private static readonly ProfilerMarker EvaluateChunkEntityMarker = new ProfilerMarker("TerrainGenerator.EvaluateChunkEntity");
+    private static readonly ProfilerMarker GenerateChunkEntityMarker = new ProfilerMarker("TerrainGenerator.GenerateChunkEntity");
     private static readonly ProfilerMarker SpawnChunkResourceMarker = new ProfilerMarker("TerrainGenerator.SpawnChunkResource");
     private static readonly ProfilerMarker RestoreChunkBlockStateMarker = new ProfilerMarker("TerrainGenerator.RestoreChunkBlockState");
     private static readonly ProfilerMarker SpawnChunkAnimalStepMarker = new ProfilerMarker("TerrainGenerator.SpawnChunkAnimalStep");
     private static readonly ProfilerMarker FinalizeChunkRuntimeViewMarker = new ProfilerMarker("TerrainGenerator.FinalizeChunkRuntimeView");
     private static readonly ProfilerMarker RestoreChunkConveyorItemsMarker = new ProfilerMarker("TerrainGenerator.RestoreChunkConveyorItems");
-    private static readonly ProfilerMarker ReleaseEmptyChunkRuntimeProxyMarker = new ProfilerMarker("TerrainGenerator.ReleaseEmptyChunkRuntimeProxy");
+    private static readonly ProfilerMarker ReleaseEmptyChunkEntityMarker = new ProfilerMarker("TerrainGenerator.ReleaseEmptyChunkEntity");
     private static readonly ProfilerMarker RestoreSavedInstallationMarker = new ProfilerMarker("TerrainGenerator.RestoreSavedInstallation");
     private static readonly ProfilerMarker InstantiateSavedInstallationMarker = new ProfilerMarker("TerrainGenerator.InstantiateSavedInstallation");
     private static readonly ProfilerMarker BindLoadedInstallationBlocksMarker = new ProfilerMarker("TerrainGenerator.BindLoadedInstallationBlocks");
@@ -215,14 +214,13 @@ public partial class TerrainGenerator : MonoBehaviour,
         public bool isCycle;
         public bool simulationCacheValid;
         public readonly List<BlockHandle> blockHandles = new List<BlockHandle>();
-        public BlockDataStore.RuntimeProxyCache[] runtimeBlocks = Array.Empty<BlockDataStore.RuntimeProxyCache>();
+        public BlockDataStore.EntityCache[] entityCache = Array.Empty<BlockDataStore.EntityCache>();
         public int[] frontLaneIndices = Array.Empty<int>();
         public int[] backLaneIndices = Array.Empty<int>();
         public float[] withinPathLengths = Array.Empty<float>();
         public float[] nextPathLengths = Array.Empty<float>();
         public List<ProjectF.Conveyors.ConveyorTransportRun> transportRuns;
         public List<int> transportLegacySlots;
-        public ulong transportProxyVersion;
         public float transportRetryTime;
 
         public ConveyorLine(int id)
@@ -376,7 +374,7 @@ public partial class TerrainGenerator : MonoBehaviour,
         [SerializeField]
         private Block.BlockType type;
 
-        public Block normal;
+        public BlockTemplate normal;
 
         public Block.BlockType Type => type;
     }
@@ -456,6 +454,8 @@ public partial class TerrainGenerator : MonoBehaviour,
 
     [SerializeField, Min(0.25f)]
     private float chunkGenerationFrameTimeBudgetMilliseconds = 3f;
+    [SerializeField, Min(0.25f)]
+    private float initialWorldLoadFrameBudgetMilliseconds = 8f;
 
     [Header("Chunk Streaming Diagnostics")]
     [Tooltip("Measures per-stage managed allocations and active time for each generated chunk.")]
@@ -762,9 +762,7 @@ public partial class TerrainGenerator : MonoBehaviour,
     private readonly Dictionary<Vector2Int, ChunkRuntimeData> loadedChunks =
         new Dictionary<Vector2Int, ChunkRuntimeData>();
     private readonly BlockDataStore loadedBlocks = new BlockDataStore();
-    private readonly GameObject[] blockRuntimeProxyHosts = new GameObject[BlockRuntimeProxyHostCount];
-    private int createdBlockRuntimeProxyHostCount;
-    private int suppressedBlockProxyMaterializationDepth;
+    private int suppressedBlockEntityCreationDepth;
     private readonly List<Vector2Int> chunksToGenerateScratch = new List<Vector2Int>();
     private ChunkSurfaceBuildData reusableChunkSurfaceBuildData;
     private ChunkSurfaceWorkerInput reusableChunkSurfaceWorkerInput;
@@ -892,8 +890,9 @@ public partial class TerrainGenerator : MonoBehaviour,
     private bool hasGeneratedChunks;
     private bool hasSeedInitialized;
     private bool deferConveyorItemRestoreUntilBeltTopologyReady;
-    private bool worldReadyForPresentation;
-    private bool pendingWorldFinalization;
+    private readonly ProjectF.Simulation.WorldRestoreProgress worldRestore = new ProjectF.Simulation.WorldRestoreProgress();
+    private bool worldReadyForPresentation => worldRestore.IsReady;
+    private bool pendingWorldFinalization => worldRestore.IsPending;
     private bool pendingSavedWorldFinalization;
     private MapSaveData pendingWorldMapSaveData;
     private Action pendingWorldReadyCallback;
@@ -1090,6 +1089,13 @@ public partial class TerrainGenerator : MonoBehaviour,
             return;
         }
 
+        // Save capture yields across frames. Keep chunk membership stable while UI and
+        // rendering continue, otherwise player movement could invalidate map iterators.
+        if (MapObjectTickManager.SaveSnapshotCapturePaused)
+        {
+            return;
+        }
+
         EnsureBeltSplitGroups();
 
         if (ShouldRefreshTrackedChunks())
@@ -1230,12 +1236,15 @@ public partial class TerrainGenerator : MonoBehaviour,
 
     private bool HasExceededChunkGenerationFrameBudget(double stepStartTime)
     {
+        if (pendingWorldFinalization) return !EnsureChunkStreamingScheduler().HasFrameBudget;
         return (Time.realtimeSinceStartupAsDouble - stepStartTime) * 1000.0
                >= Mathf.Max(0.25f, chunkGenerationFrameTimeBudgetMilliseconds);
     }
 
     private void OnDisable()
     {
+        if (worldRestore.IsPending)
+            FailWorldRestoration(new OperationCanceledException("World restoration was interrupted by terrain host disable."));
         MapObjectTickManager.UnregisterUpdateTick(this);
 #if UNITY_EDITOR
         SceneView.duringSceneGui -= RenderEditorChunkSurfaces;
@@ -1252,6 +1261,9 @@ public partial class TerrainGenerator : MonoBehaviour,
 
     private void OnDestroy()
     {
+        if (RobotArmWorld.Current?.Terrain == this) RobotArmWorld.Current.Dispose();
+        if (PipeWorld.Current?.Owner == this) PipeWorld.Current.Dispose();
+        if (ConveyorWorld.Current?.Owner == this) ConveyorWorld.Current.Dispose();
         DisposeActiveSurfaceBuildJob();
         CleanupChunkGenerationTransientState();
         foreach (KeyValuePair<Vector2Int, ChunkRuntimeData> pair in loadedChunks)
@@ -1266,10 +1278,13 @@ public partial class TerrainGenerator : MonoBehaviour,
     public bool VirtualizeConveyorItems => true;
     public bool VirtualizeConveyorBelts => true;
     public bool IsWorldReadyForPresentation => worldReadyForPresentation;
+    public bool IsWorldRestorePending => worldRestore.IsPending;
+    public ProjectF.Simulation.WorldRestorePhase WorldLoadingPhase => worldRestore.Phase;
+    public string WorldLoadingError => worldRestore.Failure?.Message;
     public float WorldLoadingProgress => worldReadyForPresentation
         ? 1f
         : hasGeneratedChunks && chunkStreamingScheduler != null
-            ? chunkStreamingScheduler.GenerationProgress
+            ? chunkStreamingScheduler.GenerationProgress * 0.95f
             : 0f;
     public int WorldLoadingCompletedChunks =>
         chunkStreamingScheduler?.CompletedGenerationCount ?? 0;
@@ -1558,7 +1573,79 @@ public partial class TerrainGenerator : MonoBehaviour,
         CaptureFarmlandSaveState(mapSaveData);
         CaptureConveyorItemSaveRuns(mapSaveData);
         SaveGameConveyorItemBackfill.StripConveyorItemsFromFloorObjects(mapSaveData);
+        CaptureProfilingCloneTerrainRegions(mapSaveData);
         return mapSaveData;
+    }
+
+    public IEnumerator CaptureMapSaveStateIncremental(
+        MapSaveData mapSaveData,
+        int entriesPerFrame = 512)
+    {
+        if (mapSaveData == null) yield break;
+
+        EnsureResourceStateStore();
+        if (resourceStateStore != null)
+        {
+            // Tick remains paused for the whole iterator, but yielding lets rendering,
+            // loading UI and input frames continue between detached DTO batches.
+            IEnumerator flushRoutine = FlushLoadedRuntimeStateToStoreIncremental(entriesPerFrame);
+            while (flushRoutine.MoveNext())
+            {
+                yield return flushRoutine.Current;
+            }
+
+            IEnumerator storeCapture = resourceStateStore.CaptureSaveStateIncremental(
+                mapSaveData,
+                entriesPerFrame);
+            while (storeCapture.MoveNext())
+            {
+                yield return storeCapture.Current;
+            }
+
+            IEnumerator conveyorCapture = CaptureLoadedConveyorItemSaveStatesIncremental(
+                mapSaveData,
+                entriesPerFrame);
+            while (conveyorCapture.MoveNext())
+            {
+                yield return conveyorCapture.Current;
+            }
+        }
+
+        IEnumerator animalCapture = CaptureAnimalSaveStatesIncremental(
+            mapSaveData,
+            entriesPerFrame);
+        while (animalCapture.MoveNext())
+        {
+            yield return animalCapture.Current;
+        }
+        IEnumerator farmlandCapture = CaptureFarmlandSaveStateIncremental(
+            mapSaveData,
+            entriesPerFrame);
+        while (farmlandCapture.MoveNext())
+        {
+            yield return farmlandCapture.Current;
+        }
+        IEnumerator runCapture = CaptureConveyorItemSaveRunsIncremental(
+            mapSaveData,
+            entriesPerFrame);
+        while (runCapture.MoveNext())
+        {
+            yield return runCapture.Current;
+        }
+        IEnumerator stripConveyors =
+            SaveGameConveyorItemBackfill.StripConveyorItemsFromFloorObjectsIncremental(
+                mapSaveData,
+                entriesPerFrame);
+        while (stripConveyors.MoveNext())
+        {
+            yield return stripConveyors.Current;
+        }
+        IEnumerator terrainCloneCapture =
+            CaptureProfilingCloneTerrainRegionsIncremental(mapSaveData, entriesPerFrame);
+        while (terrainCloneCapture.MoveNext())
+        {
+            yield return terrainCloneCapture.Current;
+        }
     }
 
     public void LoadFromSaveState(
@@ -1566,7 +1653,14 @@ public partial class TerrainGenerator : MonoBehaviour,
         MapSaveData mapSaveData,
         Action onWorldReady = null)
     {
-        ClearProfilingCloneTerrainSourcesForRegularLoad();
+        BeginWorldFinalization(true, mapSaveData, onWorldReady);
+        try { LoadSavedWorldRecordsAndChunks(terrainSaveData, mapSaveData); }
+        catch (Exception exception) { FailWorldRestoration(exception); throw; }
+    }
+
+    private void LoadSavedWorldRecordsAndChunks(TerrainSaveData terrainSaveData, MapSaveData mapSaveData)
+    {
+        RestoreProfilingCloneTerrainRegions(mapSaveData);
         NormalizeTerrainBoundsSettings();
         NormalizeResourceGenerationSettings();
         NormalizeAnimalGenerationSettings();
@@ -1596,7 +1690,7 @@ public partial class TerrainGenerator : MonoBehaviour,
         ApplyAnimalSaveStates(mapSaveData);
         resourceStateStore?.ApplySaveState(mapSaveData);
 
-        BeginWorldFinalization(true, mapSaveData, onWorldReady);
+        worldRestore.RecordsRestored();
         deferConveyorItemRestoreUntilBeltTopologyReady = true;
         currentCenterChunk = GetCenterChunkCoordinate();
         hasGeneratedChunks = true;
@@ -1657,26 +1751,26 @@ public partial class TerrainGenerator : MonoBehaviour,
         Action onWorldReady)
     {
         deferConveyorItemRestoreUntilBeltTopologyReady = false;
-        pendingWorldFinalization = true;
+        worldRestore.Begin();
         pendingSavedWorldFinalization = restoreSavedWorld;
         pendingWorldMapSaveData = mapSaveData;
         pendingWorldReadyCallback = onWorldReady;
-        worldReadyForPresentation = false;
     }
 
     private void TryFinalizePendingWorldLoad()
     {
-        if (!pendingWorldFinalization
-            || IsChunkStreamingBusy
-            || loadedChunks.Count <= 0)
+        if (worldRestore.Phase != ProjectF.Simulation.WorldRestorePhase.Chunks
+            || IsChunkStreamingBusy)
         {
             return;
         }
 
         Action readyCallback = pendingWorldReadyCallback;
-        bool finalized = false;
         try
         {
+            if (loadedChunks.Count <= 0)
+                throw new InvalidOperationException("World restoration produced no chunks.");
+            worldRestore.BeginConnections();
             if (pendingSavedWorldFinalization)
             {
                 RefreshLoadedConveyorBeltRuntimeViews();
@@ -1694,53 +1788,93 @@ public partial class TerrainGenerator : MonoBehaviour,
                 RebuildAuthoritativeConveyorItemTotal();
             }
 
-            finalized = true;
+            // Belt checkpoints and mounted-player/animal references are part of readiness.
+            worldRestore.Complete(readyCallback);
         }
+        catch (Exception exception) { FailWorldRestoration(exception); throw; }
         finally
         {
-            deferConveyorItemRestoreUntilBeltTopologyReady = false;
-            pendingWorldFinalization = false;
-            pendingSavedWorldFinalization = false;
-            pendingWorldMapSaveData = null;
-            pendingWorldReadyCallback = null;
-            worldReadyForPresentation = finalized;
+            ClearWorldRestoreReferences();
         }
+    }
 
-        readyCallback?.Invoke();
+    private void FailWorldRestoration(Exception exception)
+    {
+        worldRestore.Fail(exception);
+        ClearWorldRestoreReferences();
+    }
+
+    private void ClearWorldRestoreReferences()
+    {
+        deferConveyorItemRestoreUntilBeltTopologyReady = false;
+        pendingSavedWorldFinalization = false;
+        pendingWorldMapSaveData = null;
+        pendingWorldReadyCallback = null;
     }
 
     public void FlushLoadedRuntimeStateToStore()
     {
-        EnsureResourceStateStore();
-        if (resourceStateStore == null)
-        {
-            return;
-        }
+        IEnumerator flush = FlushLoadedRuntimeStateToStoreIncremental(int.MaxValue);
+        while (flush.MoveNext()) { }
+    }
 
+    private IEnumerator FlushLoadedRuntimeStateToStoreIncremental(int entriesPerFrame)
+    {
+        EnsureResourceStateStore();
+        if (resourceStateStore == null) yield break;
+
+        entriesPerFrame = Mathf.Max(1, entriesPerFrame);
+        int processed = 0;
         HashSet<InstallationObject> savedInstallations = new HashSet<InstallationObject>();
         foreach (KeyValuePair<Vector2Int, Block> pair in loadedBlocks)
         {
             Block block = pair.Value;
-            if (block == null)
+            if (block != null)
             {
-                continue;
+                SaveLoadedBlockFloorObjects(block);
+                if (!block.TryGetRuntimeConveyorRecord(out _)
+                    && !block.TryGetRuntimePipeRecord(out _)
+                    && block.MapObject is InstallationObject installationObject
+                    && !installationObject.ExcludeFromTerrainPersistence
+                    && savedInstallations.Add(installationObject))
+                {
+                    resourceStateStore.RegisterLiveInstallation(installationObject);
+                }
             }
 
-            SaveLoadedBlockFloorObjects(block);
-
-            if (!block.TryGetRuntimeConveyorRecord(out _)
-                && !block.TryGetRuntimePipeRecord(out _)
-                && block.MapObject is InstallationObject installationObject
-                && !installationObject.ExcludeFromTerrainPersistence
-                && savedInstallations.Add(installationObject))
+            if (++processed >= entriesPerFrame)
             {
+                processed = 0;
+                yield return null;
+            }
+        }
+
+        IEnumerator resourceCapture = SaveAllRuntimeResourcesToStoreIncremental(entriesPerFrame);
+        while (resourceCapture.MoveNext())
+        {
+            yield return resourceCapture.Current;
+        }
+
+        List<InstallationObject> activeInstallations = new List<InstallationObject>();
+        InstallationObject.CopyActiveInstances(activeInstallations);
+        for (int i = 0; i < activeInstallations.Count; i++)
+        {
+            InstallationObject installationObject = activeInstallations[i];
+            if (installationObject != null
+                && !savedInstallations.Contains(installationObject)
+                && !installationObject.ExcludeFromTerrainPersistence
+                && installationObject.TryGetPlacementRuntime(out _, out _))
+            {
+                savedInstallations.Add(installationObject);
                 resourceStateStore.RegisterLiveInstallation(installationObject);
             }
 
+            if (++processed >= entriesPerFrame)
+            {
+                processed = 0;
+                yield return null;
+            }
         }
-
-        SaveAllRuntimeResourcesToStore();
-        SaveActiveRuntimeInstallations(savedInstallations, null);
     }
 
     private void SaveActiveRuntimeInstallations(
@@ -1753,8 +1887,9 @@ public partial class TerrainGenerator : MonoBehaviour,
             return;
         }
 
-        InstallationObject[] activeInstallations = FindObjectsOfType<InstallationObject>(false);
-        for (int i = 0; i < activeInstallations.Length; i++)
+        List<InstallationObject> activeInstallations = new List<InstallationObject>();
+        InstallationObject.CopyActiveInstances(activeInstallations);
+        for (int i = 0; i < activeInstallations.Count; i++)
         {
             InstallationObject installationObject = activeInstallations[i];
             if (installationObject == null
@@ -1803,11 +1938,18 @@ public partial class TerrainGenerator : MonoBehaviour,
 
     private void CaptureLoadedConveyorItemSaveStates(MapSaveData mapSaveData)
     {
-        if (mapSaveData == null)
-        {
-            return;
-        }
+        IEnumerator capture = CaptureLoadedConveyorItemSaveStatesIncremental(mapSaveData, int.MaxValue);
+        while (capture.MoveNext()) { }
+    }
 
+    private IEnumerator CaptureLoadedConveyorItemSaveStatesIncremental(
+        MapSaveData mapSaveData,
+        int entriesPerFrame)
+    {
+        if (mapSaveData == null) yield break;
+
+        entriesPerFrame = Mathf.Max(1, entriesPerFrame);
+        int processed = 0;
         mapSaveData.conveyorItems ??= new List<ConveyorItemBlockSaveEntry>();
         Dictionary<Vector2Int, ConveyorItemBlockSaveEntry> entriesByCoordinate =
             new Dictionary<Vector2Int, ConveyorItemBlockSaveEntry>(mapSaveData.conveyorItems.Count);
@@ -1818,41 +1960,52 @@ public partial class TerrainGenerator : MonoBehaviour,
             {
                 entriesByCoordinate.Add(existingEntry.coordinate, existingEntry);
             }
+            if (++processed >= entriesPerFrame)
+            {
+                processed = 0;
+                yield return null;
+            }
         }
 
         foreach (KeyValuePair<Vector2Int, Block> pair in loadedBlocks)
         {
             Block block = pair.Value;
-            if (block == null || !block.IsRuntimeConveyor)
+            if (block != null && block.IsRuntimeConveyor)
             {
-                continue;
+                ConveyorItemBlockSaveEntry entry = new ConveyorItemBlockSaveEntry { coordinate = pair.Key };
+                block.CaptureConveyorItemSaveStates(entry.lanes);
+                entriesByCoordinate.TryGetValue(pair.Key, out ConveyorItemBlockSaveEntry existingEntry);
+                if (entry.lanes.Count > 0)
+                {
+                    if (existingEntry != null) existingEntry.lanes = entry.lanes;
+                    else
+                    {
+                        mapSaveData.conveyorItems.Add(entry);
+                        entriesByCoordinate.Add(pair.Key, entry);
+                    }
+                }
+                else if (existingEntry != null) existingEntry.lanes?.Clear();
             }
 
-            ConveyorItemBlockSaveEntry entry = new ConveyorItemBlockSaveEntry
+            if (++processed >= entriesPerFrame)
             {
-                coordinate = pair.Key
-            };
-            block.CaptureConveyorItemSaveStates(entry.lanes);
-            entriesByCoordinate.TryGetValue(pair.Key, out ConveyorItemBlockSaveEntry existingEntry);
-            if (entry.lanes.Count > 0)
-            {
-                if (existingEntry != null)
-                {
-                    existingEntry.lanes = entry.lanes;
-                }
-                else
-                {
-                    mapSaveData.conveyorItems.Add(entry);
-                    entriesByCoordinate.Add(pair.Key, entry);
-                }
-            }
-            else if (existingEntry != null)
-            {
-                existingEntry.lanes?.Clear();
+                processed = 0;
+                yield return null;
             }
         }
 
-        mapSaveData.conveyorItems.RemoveAll(IsEmptyConveyorItemSaveEntry);
+        for (int i = mapSaveData.conveyorItems.Count - 1; i >= 0; i--)
+        {
+            if (IsEmptyConveyorItemSaveEntry(mapSaveData.conveyorItems[i]))
+            {
+                mapSaveData.conveyorItems.RemoveAt(i);
+            }
+            if (++processed >= entriesPerFrame)
+            {
+                processed = 0;
+                yield return null;
+            }
+        }
     }
 
     private static bool IsEmptyConveyorItemSaveEntry(ConveyorItemBlockSaveEntry entry)
@@ -2312,53 +2465,63 @@ public partial class TerrainGenerator : MonoBehaviour,
 
     public void Generate()
     {
-        ClearProfilingCloneTerrainSources();
-        BeginWorldFinalization(false, null, null);
-        NormalizeTerrainBoundsSettings();
-        NormalizeResourceGenerationSettings();
-        NormalizeAnimalGenerationSettings();
-        EnsureResourceStateStore();
-        InitializeSeedForGeneration();
-        InvalidateTerrainGenerationCaches();
-        ClearPendingChunkGenerations();
-        ClearLoadedChunks(false, true);
-        ClearAnimalPersistentState();
-        ClearFarmlandPersistentState();
-        resourceStateStore?.ClearStates();
-
-        currentCenterChunk = GetCenterChunkCoordinate();
-        hasGeneratedChunks = true;
-        RefreshChunks(currentCenterChunk, true);
-        if (!Application.isPlaying)
+        try
         {
-            TryFinalizePendingWorldLoad();
+            ClearProfilingCloneTerrainSources();
+            BeginWorldFinalization(false, null, null);
+            NormalizeTerrainBoundsSettings();
+            NormalizeResourceGenerationSettings();
+            NormalizeAnimalGenerationSettings();
+            EnsureResourceStateStore();
+            InitializeSeedForGeneration();
+            InvalidateTerrainGenerationCaches();
+            ClearPendingChunkGenerations();
+            ClearLoadedChunks(false, true);
+            ClearAnimalPersistentState();
+            ClearFarmlandPersistentState();
+            resourceStateStore?.ClearStates();
+
+            worldRestore.RecordsRestored();
+            currentCenterChunk = GetCenterChunkCoordinate();
+            hasGeneratedChunks = true;
+            RefreshChunks(currentCenterChunk, true);
+            if (!Application.isPlaying)
+            {
+                TryFinalizePendingWorldLoad();
+            }
         }
+        catch (Exception exception) { FailWorldRestoration(exception); throw; }
     }
 
     public void ResetChunks()
     {
-        if (!hasGeneratedChunks)
+        try
         {
-            Generate();
-            return;
-        }
+            if (!hasGeneratedChunks)
+            {
+                Generate();
+                return;
+            }
 
-        BeginWorldFinalization(false, null, null);
-        NormalizeTerrainBoundsSettings();
-        NormalizeResourceGenerationSettings();
-        NormalizeAnimalGenerationSettings();
-        EnsureResourceStateStore();
-        InvalidateTerrainGenerationCaches();
-        ClearPendingChunkGenerations();
-        ClearLoadedChunks();
+            BeginWorldFinalization(false, null, null);
+            NormalizeTerrainBoundsSettings();
+            NormalizeResourceGenerationSettings();
+            NormalizeAnimalGenerationSettings();
+            EnsureResourceStateStore();
+            InvalidateTerrainGenerationCaches();
+            ClearPendingChunkGenerations();
+            ClearLoadedChunks();
 
-        currentCenterChunk = GetCenterChunkCoordinate();
-        hasGeneratedChunks = true;
-        RefreshChunks(currentCenterChunk, true);
-        if (!Application.isPlaying)
-        {
-            TryFinalizePendingWorldLoad();
+            worldRestore.RecordsRestored();
+            currentCenterChunk = GetCenterChunkCoordinate();
+            hasGeneratedChunks = true;
+            RefreshChunks(currentCenterChunk, true);
+            if (!Application.isPlaying)
+            {
+                TryFinalizePendingWorldLoad();
+            }
         }
+        catch (Exception exception) { FailWorldRestoration(exception); throw; }
     }
 
 #if UNITY_EDITOR
@@ -2610,12 +2773,9 @@ public partial class TerrainGenerator : MonoBehaviour,
 
     private IEnumerator GenerateChunkRoutine(Vector2Int chunkCoordinate, int normalizedChunkSize, bool allowYield)
     {
-        // Initial world loading already has a full-screen progress view. Avoid applying the
-        // conservative in-game streaming budget to every restoration stage, otherwise a
-        // modest load radius can take hundreds of frames before the first world is ready.
-        // Surface generation still yields while its Unity Job is running, so rendering and
-        // the progress UI continue to update. Normal runtime streaming keeps its old budget.
-        bool spreadMainThreadWorkAcrossFrames = allowYield && !pendingWorldFinalization;
+        // Initial restoration uses a shared time budget, not one frame per object/chunk.
+        // Runtime streaming additionally keeps its conservative per-stage item limits.
+        bool spreadMainThreadWorkAcrossFrames = allowYield;
 
         if (!DoesChunkIntersectMapBounds(chunkCoordinate, normalizedChunkSize))
         {
@@ -2635,7 +2795,7 @@ public partial class TerrainGenerator : MonoBehaviour,
             SaveChunkResourceStates(existingBlocks);
             // Rebuilding a terrain view preserves live animal state and deterministic IDs.
             RemoveChunkBlocksFromLookup(existingBlocks);
-            ReleaseChunkBlockRuntimeProxies(existingBlocks);
+            ReleaseChunkBlockEntities(existingBlocks);
             ReleaseChunkSurfaceMeshes(existingChunk);
             loadedChunks.Remove(chunkCoordinate);
             loadedBlocks.UnregisterChunk(chunkCoordinate);
@@ -2679,23 +2839,23 @@ public partial class TerrainGenerator : MonoBehaviour,
                 }
 
                 loadedBlocks.RegisterCell(worldCoordinate, Block.BlockType.Ground, out _);
-                bool requiresRuntimeProxy;
+                bool requiresEntity;
                 Resource generatedResourcePrefab;
-                using (EvaluateChunkRuntimeProxyMarker.Auto())
+                using (EvaluateChunkEntityMarker.Auto())
                 {
-                    requiresRuntimeProxy = RequiresInitialBlockRuntimeProxy(
+                    requiresEntity = RequiresInitialBlockEntity(
                         worldCoordinate,
                         out generatedResourcePrefab);
                 }
-                if (!requiresRuntimeProxy)
+                if (!requiresEntity)
                 {
                     if (spreadMainThreadWorkAcrossFrames
-                        && (++blocksSinceYield >= blockBudget
+                        && ((!pendingWorldFinalization && ++blocksSinceYield >= blockBudget)
                             || HasExceededChunkGenerationFrameBudget(blockStepStartTime)))
                     {
                         blocksSinceYield = 0;
                         EndChunkGenerationDiagnosticStage(
-                            ChunkGenerationDiagnosticStage.RuntimeProxyGeneration,
+                            ChunkGenerationDiagnosticStage.EntityGeneration,
                             diagnosticAllocatedBytesAtStart,
                             diagnosticStageStartTime);
                         yield return null;
@@ -2708,7 +2868,7 @@ public partial class TerrainGenerator : MonoBehaviour,
                 }
 
                 Block block;
-                using (GenerateChunkRuntimeProxyMarker.Auto())
+                using (GenerateChunkEntityMarker.Auto())
                 {
                     block = CreateBlock(
                         groundSet,
@@ -2737,12 +2897,12 @@ public partial class TerrainGenerator : MonoBehaviour,
                 }
 
                 if (spreadMainThreadWorkAcrossFrames
-                    && (++blocksSinceYield >= blockBudget
+                    && ((!pendingWorldFinalization && ++blocksSinceYield >= blockBudget)
                         || HasExceededChunkGenerationFrameBudget(blockStepStartTime)))
                 {
                     blocksSinceYield = 0;
                     EndChunkGenerationDiagnosticStage(
-                        ChunkGenerationDiagnosticStage.RuntimeProxyGeneration,
+                        ChunkGenerationDiagnosticStage.EntityGeneration,
                         diagnosticAllocatedBytesAtStart,
                         diagnosticStageStartTime);
                     yield return null;
@@ -2754,11 +2914,11 @@ public partial class TerrainGenerator : MonoBehaviour,
         }
 
         EndChunkGenerationDiagnosticStage(
-            ChunkGenerationDiagnosticStage.RuntimeProxyGeneration,
+            ChunkGenerationDiagnosticStage.EntityGeneration,
             diagnosticAllocatedBytesAtStart,
             diagnosticStageStartTime);
 
-        if (spreadMainThreadWorkAcrossFrames)
+        if (spreadMainThreadWorkAcrossFrames && !pendingWorldFinalization)
         {
             yield return null;
         }
@@ -2790,7 +2950,7 @@ public partial class TerrainGenerator : MonoBehaviour,
                         diagnosticStageStartTime);
                     restoresSinceYield++;
                     if (spreadMainThreadWorkAcrossFrames
-                        && (restoresSinceYield >= restoreBudget
+                        && ((!pendingWorldFinalization && restoresSinceYield >= restoreBudget)
                             || HasExceededChunkGenerationFrameBudget(restoreStepStartTime)))
                     {
                         restoresSinceYield = 0;
@@ -2837,7 +2997,7 @@ public partial class TerrainGenerator : MonoBehaviour,
                     diagnosticAllocatedBytesAtStart,
                     diagnosticStageStartTime);
                 if (spreadMainThreadWorkAcrossFrames
-                    && (++blocksSinceYield >= blockBudget
+                    && ((!pendingWorldFinalization && ++blocksSinceYield >= blockBudget)
                         || HasExceededChunkGenerationFrameBudget(blockStepStartTime)))
                 {
                     blocksSinceYield = 0;
@@ -2904,7 +3064,7 @@ public partial class TerrainGenerator : MonoBehaviour,
                 diagnosticAllocatedBytesAtStart,
                 diagnosticStageStartTime);
             if (spreadMainThreadWorkAcrossFrames
-                && (++blocksSinceYield >= blockBudget
+                && ((!pendingWorldFinalization && ++blocksSinceYield >= blockBudget)
                     || HasExceededChunkGenerationFrameBudget(blockStepStartTime)))
             {
                 blocksSinceYield = 0;
@@ -2928,7 +3088,7 @@ public partial class TerrainGenerator : MonoBehaviour,
                     diagnosticAllocatedBytesAtStart,
                     diagnosticStageStartTime);
                 if (spreadMainThreadWorkAcrossFrames
-                    && (++blocksSinceYield >= blockBudget
+                    && ((!pendingWorldFinalization && ++blocksSinceYield >= blockBudget)
                         || HasExceededChunkGenerationFrameBudget(blockStepStartTime)))
                 {
                     blocksSinceYield = 0;
@@ -2944,13 +3104,13 @@ public partial class TerrainGenerator : MonoBehaviour,
         {
             diagnosticAllocatedBytesAtStart = BeginChunkGenerationDiagnosticStage(
                 out diagnosticStageStartTime);
-            ReleaseEmptyChunkBlockRuntimeProxy(chunkBlocks[i]);
+            ReleaseEmptyChunkBlockEntity(chunkBlocks[i]);
             EndChunkGenerationDiagnosticStage(
-                ChunkGenerationDiagnosticStage.EmptyProxyRelease,
+                ChunkGenerationDiagnosticStage.EmptyEntityRelease,
                 diagnosticAllocatedBytesAtStart,
                 diagnosticStageStartTime);
             if (spreadMainThreadWorkAcrossFrames
-                && (++blocksSinceYield >= blockBudget
+                && ((!pendingWorldFinalization && ++blocksSinceYield >= blockBudget)
                     || HasExceededChunkGenerationFrameBudget(blockStepStartTime)))
             {
                 blocksSinceYield = 0;
@@ -2961,9 +3121,9 @@ public partial class TerrainGenerator : MonoBehaviour,
 
         diagnosticAllocatedBytesAtStart = BeginChunkGenerationDiagnosticStage(
             out diagnosticStageStartTime);
-        loadedBlocks.CompactRuntimeProxyStorage(chunkCoordinate);
+        loadedBlocks.CompactEntityStorage(chunkCoordinate);
         EndChunkGenerationDiagnosticStage(
-            ChunkGenerationDiagnosticStage.EmptyProxyRelease,
+            ChunkGenerationDiagnosticStage.EmptyEntityRelease,
             diagnosticAllocatedBytesAtStart,
             diagnosticStageStartTime);
 
@@ -2982,6 +3142,7 @@ public partial class TerrainGenerator : MonoBehaviour,
                 diagnosticStageStartTime);
             while (!surfaceJob.IsCompleted)
             {
+                if (!allowYield || (pendingWorldFinalization && EnsureChunkStreamingScheduler().HasFrameBudget)) break;
                 yield return null;
             }
 
@@ -3017,6 +3178,7 @@ public partial class TerrainGenerator : MonoBehaviour,
                 {
                     while (!surfaceJob.IsMeshDataReady)
                     {
+                        if (!allowYield || (pendingWorldFinalization && EnsureChunkStreamingScheduler().HasFrameBudget)) break;
                         yield return null;
                     }
 
@@ -3052,7 +3214,7 @@ public partial class TerrainGenerator : MonoBehaviour,
             chunkSurface = BuildCurvedChunkSurface(origin, normalizedChunkSize);
         }
 
-        if (spreadMainThreadWorkAcrossFrames)
+        if (spreadMainThreadWorkAcrossFrames && !pendingWorldFinalization)
         {
             yield return null;
         }
@@ -3087,7 +3249,7 @@ public partial class TerrainGenerator : MonoBehaviour,
             }
         }
 
-        if (spreadMainThreadWorkAcrossFrames)
+        if (spreadMainThreadWorkAcrossFrames && !pendingWorldFinalization)
         {
             yield return null;
         }
@@ -3139,7 +3301,7 @@ public partial class TerrainGenerator : MonoBehaviour,
 
         SaveAndReleaseAllDetachedResources(preserveRuntimeState);
         RemoveChunkBlocksFromLookup(loadedBlockSnapshot);
-        ReleaseChunkBlockRuntimeProxies(loadedBlockSnapshot);
+        ReleaseChunkBlockEntities(loadedBlockSnapshot);
         DestroyAllTerrainAnimalViews();
 
         foreach (KeyValuePair<Vector2Int, ChunkRuntimeData> pair in loadedChunks)
@@ -3211,57 +3373,30 @@ public partial class TerrainGenerator : MonoBehaviour,
         Vector2Int coordinate)
     {
         GameObject prefab = SelectBlockPrefab(blockSet);
-        if (prefab == null || !prefab.TryGetComponent(out Block template))
+        if (prefab == null || !prefab.TryGetComponent(out BlockTemplate template))
         {
             return null;
         }
 
-        // Register the cell before creating the compatibility component so any
-        // later simulation-state access resolves through a generation-checked
-        // handle. Empty cells never allocate a simulation-state object.
+        // A Block is a managed entity. The generation-checked handle owns its
+        // lifetime and no GameObject/MonoBehaviour is created per coordinate.
         loadedBlocks.RegisterCell(coordinate, blockType, out BlockHandle handle);
 
-        GameObject proxyHost = GetOrCreateBlockRuntimeProxyHost(handle.ChunkCoordinate);
-        Block block = proxyHost.AddComponent<Block>();
-        block.hideFlags = HideFlags.HideInInspector | HideFlags.DontSave;
+        Block block = new Block();
         block.ConfigureRuntimeTemplate(template);
         block.BindRuntimeHandle(handle);
         block.Initialize(this, coordinate, blockType);
-        if (loadedBlocks.BindRuntimeProxy(coordinate, block, out BlockHandle boundHandle))
+        if (loadedBlocks.BindEntity(coordinate, block, out BlockHandle boundHandle))
         {
             block.BindRuntimeHandle(boundHandle);
         }
         return block;
     }
 
-    private GameObject GetOrCreateBlockRuntimeProxyHost(Vector2Int chunkCoordinate)
-    {
-        int hostIndex;
-        unchecked
-        {
-            int chunkHash = (chunkCoordinate.x * 73856093) ^ (chunkCoordinate.y * 19349663);
-            hostIndex = chunkHash & (BlockRuntimeProxyHostCount - 1);
-        }
-
-        GameObject host = blockRuntimeProxyHosts[hostIndex];
-        if (host != null)
-        {
-            return host;
-        }
-
-        host = new GameObject($"Block Runtime Proxies {hostIndex:00}");
-        host.hideFlags = HideFlags.HideAndDontSave;
-        host.layer = gameObject.layer;
-        host.transform.SetParent(transform, false);
-        blockRuntimeProxyHosts[hostIndex] = host;
-        createdBlockRuntimeProxyHostCount++;
-        return host;
-    }
-
-    private bool TryMaterializeBlockRuntimeProxy(Vector2Int coordinate, out Block block)
+    private bool TryMaterializeBlockEntity(Vector2Int coordinate, out Block block)
     {
         block = null;
-        if (suppressedBlockProxyMaterializationDepth > 0
+        if (suppressedBlockEntityCreationDepth > 0
             || !loadedBlocks.TryGetCell(coordinate, out BlockCellData cellData)
             || !loadedBlocks.TryGetHandle(coordinate, out BlockHandle handle)
             || !loadedChunks.ContainsKey(handle.ChunkCoordinate)
@@ -3289,23 +3424,23 @@ public partial class TerrainGenerator : MonoBehaviour,
 
     private Block[] GetChunkRuntimeBlocks(Vector2Int chunkCoordinate)
     {
-        loadedBlocks.CopyRuntimeProxies(chunkCoordinate, chunkRuntimeBlockScratch);
+        loadedBlocks.CopyEntities(chunkCoordinate, chunkRuntimeBlockScratch);
         return chunkRuntimeBlockScratch.Count > 0
             ? chunkRuntimeBlockScratch.ToArray()
             : Array.Empty<Block>();
     }
 
-    private void ReleaseEmptyChunkBlockRuntimeProxy(Block block)
+    private void ReleaseEmptyChunkBlockEntity(Block block)
     {
-        using (ReleaseEmptyChunkRuntimeProxyMarker.Auto())
+        using (ReleaseEmptyChunkEntityMarker.Auto())
         {
             if (block == null)
             {
                 return;
             }
 
-            bool preserveResource = block.CanReleaseResourceOnlyRuntimeProxy;
-            if (!preserveResource && !block.CanReleaseEmptyRuntimeProxy)
+            bool preserveResource = block.CanReleaseResourceOnlyEntity;
+            if (!preserveResource && !block.CanReleaseEmptyEntity)
             {
                 return;
             }
@@ -3324,14 +3459,6 @@ public partial class TerrainGenerator : MonoBehaviour,
             }
 
             block.DetachRuntimeSimulationState();
-            if (Application.isPlaying)
-            {
-                Destroy(block);
-            }
-            else
-            {
-                DestroyImmediate(block);
-            }
         }
     }
 

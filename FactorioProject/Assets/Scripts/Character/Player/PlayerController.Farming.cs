@@ -189,7 +189,7 @@ public partial class PlayerController
     {
         TerrainGenerator terrain = ResolveTerrainGenerator();
         return block != null
-               && block.gameObject.activeInHierarchy
+               && block.IsRuntimeActive
                && terrain != null
                && terrain.IsFarmlandAt(block.Coordinate);
     }
@@ -279,7 +279,8 @@ public partial class PlayerController
 
     public bool RequestSeedPlanting(ItemDefinition seedDefinition)
     {
-        if (interactionPointSnapTarget != null
+        if (IsPlayerInputLocked()
+            || interactionPointSnapTarget != null
             || player == null
             || !TryGetSeedGroundInteractionBlock(
                 out Block targetBlock,

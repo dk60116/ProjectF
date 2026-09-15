@@ -25,9 +25,9 @@ function Require-Text([string]$file, [string]$text, [string]$label) {
     Write-Output "PASS $label"
 }
 $base = 'FactorioProject/Assets/Scripts/Object/MapObj/InstallationObject/'
-$manager = 'FactorioProject/Assets/Scripts/Manager/MapObjectTickManager.cs'
+$manager = 'FactorioProject/Assets/Scripts/Simulation/Core/SimulationTickContracts.cs'
 $generated = "using System; using System.Collections.Generic;`n"
-$generated += (Read-Member $manager 'public static class DeterministicSimulationUnits') + "`n"
+$generated += (Read-Member $manager 'public static class DeterministicSimulationUnits').Replace('ProjectF.Simulation.SimulationTickWorld.', 'MapObjectTickManager.') + "`n"
 $generated += "public partial class InputOutputModule {`n"
 foreach ($signature in @(
     'protected void RecordFluidNetworkOutput(',
@@ -57,6 +57,7 @@ foreach ($signature in @(
     'private bool TrySearchFluidNetwork(',
     'private void AppendObjectInfoFluidOutputSourcesAtCoordinate(',
     'private bool HasFixedFluidTankAtPipeNetworkCoordinate(',
+    'internal bool TryGetFixedFluidTankAtPipeNetworkCoordinate(',
     'private void EnqueueObjectInfoFluidSearchCoordinate(')) {
     $generated += (Read-Member ($base + 'Pipe.cs') $signature) + "`n"
 }

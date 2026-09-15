@@ -1,6 +1,6 @@
 using ConveyorLine = CurrentResolver.ConveyorLine;
 
-// Frozen from TerrainGenerator.Conveyors.cs before the runtime-proxy cache.
+// Frozen from TerrainGenerator.Conveyors.cs before the entity cache.
 internal sealed class LegacyResolver
 {
     private readonly BlockDataStore loadedBlocks;
@@ -12,7 +12,7 @@ internal sealed class LegacyResolver
         return handle.IsValid
             && loadedBlocks.TryGetValue(handle, out block)
             && block != null
-            && block.gameObject.activeInHierarchy;
+            && block.IsRuntimeActive;
     }
 
     private bool TryResolveConveyorLineBlock(

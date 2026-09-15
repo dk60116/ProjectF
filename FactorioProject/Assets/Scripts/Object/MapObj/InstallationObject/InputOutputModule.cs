@@ -82,8 +82,9 @@ public class InputOutputModule : InstallationObject,
             return;
         }
 
-        // Output areas are registered here even when no standalone pipe occupies the cell.
-        if (!registeredRuntimeAreaCoordinates.TryGetValue(coordinate, out HashSet<InputOutputModule> modules))
+        if (!registeredRuntimeFluidOutputCoordinates.TryGetValue(
+                coordinate,
+                out HashSet<InputOutputModule> modules))
         {
             return;
         }
@@ -148,6 +149,10 @@ public class InputOutputModule : InstallationObject,
         = new Dictionary<Vector2Int, HashSet<InputOutputModule>>();
     private static readonly Dictionary<Vector2Int, HashSet<InputOutputModule>> registeredRuntimeAreaCoordinates
         = new Dictionary<Vector2Int, HashSet<InputOutputModule>>();
+    private static readonly Dictionary<Vector2Int, HashSet<InputOutputModule>> registeredRuntimeFluidOutputCoordinates
+        = new Dictionary<Vector2Int, HashSet<InputOutputModule>>();
+    private static readonly Dictionary<Vector2Int, HashSet<InputOutputModule>> registeredRuntimeFluidStorageCoordinates
+        = new Dictionary<Vector2Int, HashSet<InputOutputModule>>();
     private static readonly HashSet<InputOutputModule> activeRuntimeModules
         = new HashSet<InputOutputModule>();
     private static readonly List<InputOutputModule> runtimeWakeScratch
@@ -156,6 +161,8 @@ public class InputOutputModule : InstallationObject,
         = new HashSet<InputOutputModule>();
     private static int fluidTopologyVersion = 1;
     internal static int FluidTopologyVersion => fluidTopologyVersion;
+    internal static int RuntimeFluidOutputCoordinateCount => registeredRuntimeFluidOutputCoordinates.Count;
+    internal static int RuntimeFluidStorageCoordinateCount => registeredRuntimeFluidStorageCoordinates.Count;
 
     private delegate bool RuntimeCoordinateValueCollector<T>(
         InputOutputModule module,
@@ -175,6 +182,8 @@ public class InputOutputModule : InstallationObject,
     }
 
     public virtual float ManagedUpdateTickIntervalSeconds => DefaultManagedUpdateTickIntervalSeconds;
+    internal bool RequiresFacilityPowerEvaluation =>
+        RequiresElectricOperationalEnergy() || this is SteamGenerator;
 
     public enum RectGridBlockType
     {
@@ -450,20 +459,16 @@ public class InputOutputModule : InstallationObject,
     private long storedEnergyUnits;
     [SerializeField]
     private long energyGaugeCapacityUnits;
+    // Runtime fields are consolidated here. PersistentState remains the explicit file-format boundary.
     [SerializeField]
-    private bool hasActiveCraft;
-    [SerializeField]
-    private bool waitingForOutput;
-    [SerializeField]
-    private long remainingCraftTicks;
-    [SerializeField]
-    private long activeCraftConsumedEnergyUnits;
-    [SerializeField]
-    private int activeRecipeIndex = -1;
-    [SerializeField]
-    private int activeOutputItemId = -1;
-    [SerializeField]
-    private int activeOutputCount;
+    private ProjectF.Simulation.ProductionProcess production = ProjectF.Simulation.ProductionProcess.Empty;
+    private bool hasActiveCraft { get => production.Active; set => production.Active = value; }
+    private bool waitingForOutput { get => production.WaitingForOutput; set => production.WaitingForOutput = value; }
+    private long remainingCraftTicks { get => production.RemainingTicks; set => production.RemainingTicks = value; }
+    private long activeCraftConsumedEnergyUnits { get => production.ConsumedEnergyUnits; set => production.ConsumedEnergyUnits = value; }
+    private int activeRecipeIndex { get => production.RecipeIndex; set => production.RecipeIndex = value; }
+    private int activeOutputItemId { get => production.OutputItemId; set => production.OutputItemId = value; }
+    private int activeOutputCount { get => production.OutputCount; set => production.OutputCount = value; }
 
     private TerrainGenerator cachedTerrain;
     private BlockStateStore cachedBlockStateStore;
@@ -475,6 +480,9 @@ public class InputOutputModule : InstallationObject,
     private readonly List<Vector2Int> objectInfoInputAreaCoordinates = new List<Vector2Int>();
     private readonly HashSet<Vector2Int> singleItemOutputVisitedCoordinates = new HashSet<Vector2Int>();
     private readonly HashSet<Vector2Int> runtimeAreaVisitedCoordinates = new HashSet<Vector2Int>();
+    private readonly List<Vector2Int> runtimeFluidOutputIndexCoordinates = new List<Vector2Int>(4);
+    private readonly List<Vector2Int> runtimeFluidStorageIndexCoordinates = new List<Vector2Int>(4);
+    private readonly HashSet<int> runtimeFluidOutputItemIdScratch = new HashSet<int>();
     private readonly struct ConnectedFluidSearchNode
     {
         public readonly Vector2Int Coordinate;
@@ -632,6 +640,7 @@ public class InputOutputModule : InstallationObject,
         IReadOnlyList<Vector2Int> outputCoordinates,
         IReadOnlyList<Vector2Int> pipeInputCoordinates)
     {
+        UnregisterRuntimeFluidSpatialCoordinates();
         UnregisterRuntimeAreaCoordinates();
         runtimeInputEnergyCoordinates.Clear();
         runtimeInputItemAreas.Clear();
@@ -658,6 +667,7 @@ public class InputOutputModule : InstallationObject,
 
         ExpandRuntimeInputItemAreasForAdditionalItemIds();
         RegisterRuntimeAreaCoordinates();
+        RegisterRuntimeFluidSpatialCoordinates();
         cachedTerrain = null;
         cachedBlockStateStore = null;
         WakeRuntimeUpdate();
@@ -665,11 +675,13 @@ public class InputOutputModule : InstallationObject,
 
     public void ConfigureRuntimeGridCoordinates(IReadOnlyList<Vector2Int> coordinates)
     {
+        UnregisterRuntimeFluidSpatialCoordinates();
         UnregisterRuntimeGridCoordinates();
         runtimeGridCoordinates.Clear();
 
         AddUniqueCoordinates(coordinates, runtimeGridCoordinates);
         RegisterRuntimeGridCoordinates();
+        RegisterRuntimeFluidSpatialCoordinates();
         WakeRuntimeUpdate();
         RuntimePipeTopologyChanged?.Invoke(this);
     }
@@ -722,6 +734,7 @@ public class InputOutputModule : InstallationObject,
             return;
         }
 
+        UnregisterRuntimeFluidSpatialCoordinates();
         UnregisterRuntimeAreaCoordinates();
         runtimeInputEnergyCoordinates.Clear();
         runtimeInputItemAreas.Clear();
@@ -794,8 +807,9 @@ public class InputOutputModule : InstallationObject,
     {
         fluidOutputRateMeter?.Reset();
         fluidConsumptionRateMeter?.Reset();
-        SetRuntimeUpdateTickRegistered(false);
+        FacilitySimulationWorld.Unregister(this);
         runtimeSleeping = false;
+        UnregisterRuntimeFluidSpatialCoordinates();
         UnregisterRuntimeGridCoordinates();
         UnregisterRuntimeAreaCoordinates();
         ReleaseEnergyGaugeVisual();
@@ -1157,30 +1171,36 @@ public class InputOutputModule : InstallationObject,
         System.Predicate<InstallationObject> storageFilter,
         out InstallationObject storage)
     {
-        storage = null;
-        if (TryGetRuntimePipeFluidStorageAtCoordinate(
-                registeredRuntimeAreaCoordinates.TryGetValue(coordinate, out HashSet<InputOutputModule> areaModules)
-                    ? areaModules
-                    : null,
-                coordinate,
-                excludedModule,
-                requireStorageSpace,
-                storageFilter,
-                null,
-                out storage))
-        {
-            return true;
-        }
-
         return TryGetRuntimePipeFluidStorageAtCoordinate(
-            registeredRuntimeGridCoordinates.TryGetValue(coordinate, out HashSet<InputOutputModule> gridModules)
-                ? gridModules
+            registeredRuntimeFluidStorageCoordinates.TryGetValue(
+                coordinate,
+                out HashSet<InputOutputModule> storageModules)
+                ? storageModules
                 : null,
             coordinate,
             excludedModule,
             requireStorageSpace,
             storageFilter,
             null,
+            out storage);
+    }
+
+    internal static bool TryGetRuntimePipeDisplayFluidStorageAtCoordinate(
+        Vector2Int coordinate,
+        Pipe displayPipe,
+        out InstallationObject storage)
+    {
+        return TryGetRuntimePipeFluidStorageAtCoordinate(
+            registeredRuntimeFluidStorageCoordinates.TryGetValue(
+                coordinate,
+                out HashSet<InputOutputModule> storageModules)
+                ? storageModules
+                : null,
+            coordinate,
+            null,
+            false,
+            null,
+            displayPipe,
             out storage);
     }
 
@@ -1208,12 +1228,12 @@ public class InputOutputModule : InstallationObject,
     }
 
     private static bool TryGetRuntimePipeFluidStorageAtCoordinate(
-        IEnumerable<InputOutputModule> modules,
+        HashSet<InputOutputModule> modules,
         Vector2Int coordinate,
         InputOutputModule excludedModule,
         bool requireStorageSpace,
         System.Predicate<InstallationObject> storageFilter,
-        ISet<InputOutputModule> visitedModules,
+        Pipe displayPipe,
         out InstallationObject storage)
     {
         storage = null;
@@ -1230,7 +1250,8 @@ public class InputOutputModule : InstallationObject,
                 || !candidate.ContainsRuntimePipeAreaBlockCoordinate(coordinate)
                 || !candidate.CanStoreFluid
                 || (requireStorageSpace && !candidate.HasFluidStorageSpace)
-                || (visitedModules != null && !visitedModules.Add(candidate)))
+                || (displayPipe != null
+                    && !displayPipe.CanDisplayStoredFluidAtCoordinate(candidate, coordinate)))
             {
                 continue;
             }
@@ -1321,22 +1342,16 @@ public class InputOutputModule : InstallationObject,
         fluidItemId = -1;
         temperatureCelsius = MapClimate.CurrentTemperatureCelsius;
 
-        HashSet<InputOutputModule> visitedModules = new HashSet<InputOutputModule>();
-        if (registeredRuntimeGridCoordinates.TryGetValue(coordinate, out HashSet<InputOutputModule> modules)
-            && TryGetFluidOutputInfoAtRuntimeGridCoordinate(
-                modules,
+        if (!registeredRuntimeFluidOutputCoordinates.TryGetValue(
                 coordinate,
-                visitedModules,
-                out fluidItemId,
-                out temperatureCelsius))
+                out HashSet<InputOutputModule> modules))
         {
-            return true;
+            return false;
         }
 
         return TryGetFluidOutputInfoAtRuntimeGridCoordinate(
-            activeRuntimeModules,
+            modules,
             coordinate,
-            visitedModules,
             out fluidItemId,
             out temperatureCelsius);
     }
@@ -1392,9 +1407,8 @@ public class InputOutputModule : InstallationObject,
     }
 
     private static bool TryGetFluidOutputInfoAtRuntimeGridCoordinate(
-        IEnumerable<InputOutputModule> modules,
+        HashSet<InputOutputModule> modules,
         Vector2Int coordinate,
-        ISet<InputOutputModule> visitedModules,
         out int fluidItemId,
         out float temperatureCelsius)
     {
@@ -1405,24 +1419,22 @@ public class InputOutputModule : InstallationObject,
             return false;
         }
 
-        HashSet<int> outputItemIds = new HashSet<int>();
         foreach (InputOutputModule module in modules)
         {
             if (module == null
                 || !module.gameObject.activeInHierarchy
-                || (visitedModules != null && !visitedModules.Add(module))
                 || !module.ContainsRuntimeOutputCoordinate(coordinate))
             {
                 continue;
             }
 
-            outputItemIds.Clear();
-            if (!module.AppendOutputItemIds(outputItemIds))
+            module.runtimeFluidOutputItemIdScratch.Clear();
+            if (!module.AppendOutputItemIds(module.runtimeFluidOutputItemIdScratch))
             {
                 continue;
             }
 
-            foreach (int itemId in outputItemIds)
+            foreach (int itemId in module.runtimeFluidOutputItemIdScratch)
             {
                 if (!IsFluidItemId(itemId))
                 {
@@ -2062,19 +2074,7 @@ public class InputOutputModule : InstallationObject,
         }
 
         runtimeSleeping = sleeping;
-        SetRuntimeUpdateTickRegistered(!runtimeSleeping && isActiveAndEnabled);
-    }
-
-    private void SetRuntimeUpdateTickRegistered(bool registered)
-    {
-        if (registered)
-        {
-            MapObjectTickManager.RegisterUpdateTick(this);
-        }
-        else
-        {
-            MapObjectTickManager.UnregisterUpdateTick(this);
-        }
+        FacilitySimulationWorld.SetScheduled(this, !runtimeSleeping && isActiveAndEnabled);
     }
 
     private void PullFluidFromConnectedStorage(float deltaTime)
@@ -2651,6 +2651,17 @@ public class InputOutputModule : InstallationObject,
         }
     }
 
+    internal void AppendRuntimeFluidDisplaySourceCoordinates(List<Vector2Int> coordinates)
+    {
+        if (coordinates == null)
+        {
+            return;
+        }
+
+        AddUniqueCoordinates(runtimeFluidOutputIndexCoordinates, coordinates);
+        AddUniqueCoordinates(runtimeFluidStorageIndexCoordinates, coordinates);
+    }
+
     private static void AddRuntimeFluidStoragePipeNodeCoordinates(
         IReadOnlyList<Vector2Int> source,
         List<Vector2Int> target)
@@ -3090,8 +3101,10 @@ public class InputOutputModule : InstallationObject,
         effectivePairDataInitialized = false;
         EnsureEffectivePairData();
         activeRuntimeModules.Add(this);
+        FacilitySimulationWorld.Register(this);
         RegisterRuntimeGridCoordinates();
         RegisterRuntimeAreaCoordinates();
+        RegisterRuntimeFluidSpatialCoordinates();
         WakeRuntimeUpdate();
         RefreshWorkAnimatorState(true);
         if (HasRuntimePipeTopologyCoordinates())
@@ -3107,8 +3120,9 @@ public class InputOutputModule : InstallationObject,
         bool hadRuntimePipeTopologyCoordinates = HasRuntimePipeTopologyCoordinates();
         SetWorkAnimatorState(false, true);
         StopCraftParticleEffectVisual(true);
-        SetRuntimeUpdateTickRegistered(false);
+        FacilitySimulationWorld.Unregister(this);
         runtimeSleeping = false;
+        UnregisterRuntimeFluidSpatialCoordinates();
         UnregisterRuntimeGridCoordinates();
         UnregisterRuntimeAreaCoordinates();
         activeRuntimeModules.Remove(this);
@@ -3131,13 +3145,21 @@ public class InputOutputModule : InstallationObject,
     {
         InvalidateEnergyGaugeWorldPosition();
         base.OnPlacementRuntimeChanged();
+        RegisterRuntimeFluidSpatialCoordinates();
         WakeRuntimeUpdate();
+    }
+
+    protected override void OnPlacementRuntimeCleared()
+    {
+        UnregisterRuntimeFluidSpatialCoordinates();
+        base.OnPlacementRuntimeCleared();
     }
 
     private void OnDestroy()
     {
-        SetRuntimeUpdateTickRegistered(false);
+        FacilitySimulationWorld.Unregister(this);
         runtimeSleeping = false;
+        UnregisterRuntimeFluidSpatialCoordinates();
         UnregisterRuntimeGridCoordinates();
         UnregisterRuntimeAreaCoordinates();
         activeRuntimeModules.Remove(this);
@@ -4893,35 +4915,22 @@ public class InputOutputModule : InstallationObject,
         }
 
         ItemDefinition installedDefinition = ResolveInstalledDefinition();
-        if (RequiresOperationalEnergy(installedDefinition))
+        bool energyRequired = RequiresOperationalEnergy(installedDefinition);
+        long acceptedEnergyUnits = 0;
+        if (energyRequired)
         {
             if (!TryConsumeOperatingEnergy(deltaTime, out float consumedEnergy))
             {
                 return;
             }
 
-            activeCraftConsumedEnergyUnits += DeterministicSimulationUnits.FromFloat(consumedEnergy);
-            remainingCraftTicks = ResolveRemainingEnergyCraftTicks(
-                installedDefinition,
-                activeCraftConsumedEnergyUnits);
-            if (activeCraftConsumedEnergyUnits < ResolveCompleteEnergyUnits(installedDefinition))
-            {
-                return;
-            }
+            acceptedEnergyUnits = DeterministicSimulationUnits.FromFloat(consumedEnergy);
         }
-        else
-        {
-            remainingCraftTicks = Math.Max(
-                0L,
-                remainingCraftTicks - DeterministicSimulationUnits.DeltaTimeToTicks(deltaTime));
-            if (remainingCraftTicks > 0L)
-            {
-                return;
-            }
-        }
-
-        waitingForOutput = true;
-        TryCompleteActiveCraft();
+        long completeEnergy = energyRequired ? ResolveCompleteEnergyUnits(installedDefinition) : 0;
+        long energyRate = energyRequired ? DeterministicSimulationUnits.FromFloat(
+            Mathf.Max(0.0001f, ItemDefinition.ResolveUseEnergyRatePerSecond(installedDefinition))) : 0;
+        if (production.Advance(DeterministicSimulationUnits.DeltaTimeToTicks(deltaTime),
+            energyRequired, acceptedEnergyUnits, completeEnergy, energyRate)) TryCompleteActiveCraft();
     }
 
     protected virtual void TryStartNextCraft()
@@ -6634,35 +6643,6 @@ public class InputOutputModule : InstallationObject,
         return Mathf.Max(0.1f, ResolveCompleteEnergy(installedDefinition) / energyRate);
     }
 
-    private long ResolveRemainingEnergyCraftTicks(
-        ItemDefinition installedDefinition,
-        long consumedEnergyUnits)
-    {
-        if (!RequiresOperationalEnergy(installedDefinition))
-        {
-            return Math.Max(0L, remainingCraftTicks);
-        }
-
-        float energyRate = Mathf.Max(0.0001f, ItemDefinition.ResolveUseEnergyRatePerSecond(installedDefinition));
-        long energyRateUnits = DeterministicSimulationUnits.FromFloat(energyRate);
-        long remainingEnergyUnits = Math.Max(
-            0L,
-            ResolveCompleteEnergyUnits(installedDefinition) - Math.Max(0L, consumedEnergyUnits));
-        if (energyRateUnits <= 0L || remainingEnergyUnits <= 0L)
-        {
-            return 0L;
-        }
-
-        return Math.Max(
-            1L,
-            (long)decimal.Round(
-                (decimal)remainingEnergyUnits
-                * MapObjectTickManager.DefaultSimulationTicksPerSecond
-                / energyRateUnits,
-                0,
-                MidpointRounding.AwayFromZero));
-    }
-
     private long ResolveConsumedEnergyUnitsFromRemainingTicks(
         ItemDefinition installedDefinition,
         long savedRemainingCraftTicks)
@@ -6687,7 +6667,7 @@ public class InputOutputModule : InstallationObject,
     {
         if (portableObj != null)
         {
-            return portableObj.transform.position;
+            return portableObj.WorldPosition;
         }
 
         return transform.position;
@@ -7145,15 +7125,9 @@ public class InputOutputModule : InstallationObject,
             return;
         }
 
-        hasActiveCraft = true;
-        waitingForOutput = false;
-        remainingCraftTicks = DeterministicSimulationUnits.SecondsToTicks(
-            ResolveInitialCraftDuration(installedDefinition));
-        activeCraftConsumedEnergyUnits = 0L;
+        production.Begin(recipeIndex, outputItemId, outputCount,
+            DeterministicSimulationUnits.SecondsToTicks(ResolveInitialCraftDuration(installedDefinition)));
         lastOperationalEnergySupplyRatio = 1f;
-        activeRecipeIndex = recipeIndex;
-        activeOutputItemId = outputItemId;
-        activeOutputCount = outputCount;
         WakeRuntimeUpdate();
     }
 
@@ -7196,14 +7170,8 @@ public class InputOutputModule : InstallationObject,
 
     protected void ClearActiveCraft()
     {
-        hasActiveCraft = false;
-        waitingForOutput = false;
-        remainingCraftTicks = 0L;
-        activeCraftConsumedEnergyUnits = 0L;
+        production.Clear();
         lastOperationalEnergySupplyRatio = 1f;
-        activeRecipeIndex = -1;
-        activeOutputItemId = -1;
-        activeOutputCount = 0;
         if (storedEnergyUnits <= 0L)
         {
             energyGaugeCapacityUnits = 0L;
@@ -7408,6 +7376,56 @@ public class InputOutputModule : InstallationObject,
         UnregisterRuntimeAreaCoordinates(runtimePipeInputCoordinates);
     }
 
+    private void RegisterRuntimeFluidSpatialCoordinates()
+    {
+        UnregisterRuntimeFluidSpatialCoordinates();
+
+        AddUniqueCoordinates(runtimeOutputCoordinates, runtimeFluidOutputIndexCoordinates);
+        if (CanStoreFluid)
+        {
+            CollectRuntimePipeAreaCoordinates(runtimeFluidStorageIndexCoordinates);
+        }
+
+        for (int i = 0; i < runtimeFluidOutputIndexCoordinates.Count; i++)
+        {
+            RegisterRuntimeSpatialCoordinate(
+                registeredRuntimeFluidOutputCoordinates,
+                runtimeFluidOutputIndexCoordinates[i],
+                this);
+        }
+
+        for (int i = 0; i < runtimeFluidStorageIndexCoordinates.Count; i++)
+        {
+            RegisterRuntimeSpatialCoordinate(
+                registeredRuntimeFluidStorageCoordinates,
+                runtimeFluidStorageIndexCoordinates[i],
+                this);
+        }
+    }
+
+    private void UnregisterRuntimeFluidSpatialCoordinates()
+    {
+        for (int i = 0; i < runtimeFluidOutputIndexCoordinates.Count; i++)
+        {
+            UnregisterRuntimeSpatialCoordinate(
+                registeredRuntimeFluidOutputCoordinates,
+                runtimeFluidOutputIndexCoordinates[i],
+                this);
+        }
+
+        for (int i = 0; i < runtimeFluidStorageIndexCoordinates.Count; i++)
+        {
+            UnregisterRuntimeSpatialCoordinate(
+                registeredRuntimeFluidStorageCoordinates,
+                runtimeFluidStorageIndexCoordinates[i],
+                this);
+        }
+
+        runtimeFluidOutputIndexCoordinates.Clear();
+        runtimeFluidStorageIndexCoordinates.Clear();
+        runtimeFluidOutputItemIdScratch.Clear();
+    }
+
     private void UnregisterRuntimeAreaCoordinates(IReadOnlyList<Vector2Int> coordinates)
     {
         if (coordinates == null || coordinates.Count <= 0)
@@ -7454,6 +7472,37 @@ public class InputOutputModule : InstallationObject,
         if (modules.Add(module))
         {
             InvalidateFluidTopologyCache();
+        }
+    }
+
+    private static void RegisterRuntimeSpatialCoordinate(
+        Dictionary<Vector2Int, HashSet<InputOutputModule>> registry,
+        Vector2Int coordinate,
+        InputOutputModule module)
+    {
+        if (!registry.TryGetValue(coordinate, out HashSet<InputOutputModule> modules))
+        {
+            modules = new HashSet<InputOutputModule>();
+            registry.Add(coordinate, modules);
+        }
+
+        modules.Add(module);
+    }
+
+    private static void UnregisterRuntimeSpatialCoordinate(
+        Dictionary<Vector2Int, HashSet<InputOutputModule>> registry,
+        Vector2Int coordinate,
+        InputOutputModule module)
+    {
+        if (!registry.TryGetValue(coordinate, out HashSet<InputOutputModule> modules)
+            || !modules.Remove(module))
+        {
+            return;
+        }
+
+        if (modules.Count == 0)
+        {
+            registry.Remove(coordinate);
         }
     }
 

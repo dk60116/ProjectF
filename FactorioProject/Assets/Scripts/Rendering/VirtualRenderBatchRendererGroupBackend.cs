@@ -49,6 +49,7 @@ internal sealed class VirtualRenderBatchRendererGroupBackend : IDisposable
 
     private BatchRendererGroup rendererGroup;
     private int syncGeneration;
+    private bool retainUnsyncedBatches;
     private bool initializationFailed;
 
     public static bool IsSupported =>
@@ -128,8 +129,9 @@ internal sealed class VirtualRenderBatchRendererGroupBackend : IDisposable
         return isCompatible;
     }
 
-    public void BeginSync()
+    public void BeginSync(bool retainUnsyncedBatches = false)
     {
+        this.retainUnsyncedBatches = retainUnsyncedBatches;
         unchecked
         {
             syncGeneration++;
@@ -191,7 +193,13 @@ internal sealed class VirtualRenderBatchRendererGroupBackend : IDisposable
             BrgBatchState state = states[i];
             if (state.LastSyncGeneration != syncGeneration)
             {
-                staleKeys.Add(state.Key);
+                // Spatial render candidates intentionally omit off-screen batches. Keep their
+                // GPU allocation dormant so camera motion does not recreate buffers. Explicit
+                // removal sets InstanceCount to zero and still releases the state here.
+                if (!retainUnsyncedBatches || state.InstanceCount <= 0)
+                {
+                    staleKeys.Add(state.Key);
+                }
                 continue;
             }
 
@@ -667,7 +675,9 @@ internal sealed class VirtualRenderBatchRendererGroupBackend : IDisposable
         BrgBatchState state,
         BatchCullingContext cullingContext)
     {
-        if (!state.HasBatch || state.InstanceCount <= 0)
+        if (!state.HasBatch
+            || state.InstanceCount <= 0
+            || state.LastSyncGeneration != syncGeneration)
         {
             return 0;
         }

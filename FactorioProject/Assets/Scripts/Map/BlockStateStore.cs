@@ -1,4 +1,5 @@
 using System;
+using System.Collections;
 using System.Collections.Generic;
 using ProjectF.MapObjects;
 using UnityEngine;
@@ -539,8 +540,7 @@ public partial class BlockStateStore : MonoBehaviour
         storedState = registeredState.Clone();
         ResolveVirtualObjectWorld()?.UpsertInstallationHandle(
             registeredState,
-            VirtualObjectResidency.Live,
-            null);
+            VirtualObjectResidency.Virtual);
         return true;
     }
 
@@ -578,15 +578,16 @@ public partial class BlockStateStore : MonoBehaviour
             existingRecord.installationObject?.BindRuntimeMapObjectHandle(default);
         }
 
-        MapObjectHandle handle = ResolveVirtualObjectWorld()?.UpsertInstallationHandle(
+        MapObjectHandle handle = ResolveVirtualObjectWorld()?.AttachInstallationView(
             storedState,
-            VirtualObjectResidency.Live,
-            installationObject) ?? default;
+            installationObject.GetInstanceID(),
+            installationObject.transform.position,
+            installationObject.transform.rotation) ?? default;
         installationObject.BindRuntimeMapObjectHandle(handle);
         liveInstallationStates[storageKey] = new LiveInstallationRecord
         {
             installationObject = installationObject,
-            state = storedState.Clone(),
+            state = storedState,
             handle = handle
         };
         RegisterInstallationPlacementKey(
@@ -631,14 +632,15 @@ public partial class BlockStateStore : MonoBehaviour
         SetInstallationWorldPose(liveRecord.state, worldPosition, worldRotation);
         if (savedInstallationStates.TryGetValue(storageKey, out InstallationSaveState savedState)
             && savedState != null
+            && !ReferenceEquals(savedState, liveRecord.state)
             && savedState.placementSequence == installationObject.RuntimePlacementSequence)
         {
             SetInstallationWorldPose(savedState, worldPosition, worldRotation);
         }
 
-        ResolveVirtualObjectWorld()?.UpdateLiveInstallationWorldPose(
+        ResolveVirtualObjectWorld()?.UpdateAttachedInstallationViewPose(
             storageKey,
-            installationObject,
+            installationObject.GetInstanceID(),
             worldPosition,
             worldRotation);
         return true;
@@ -1094,6 +1096,11 @@ public partial class BlockStateStore : MonoBehaviour
             }
 
             savedState.utilityPoleConnectionsInitialized = true;
+            if (ReferenceEquals(savedState, liveState))
+            {
+                continue;
+            }
+
             if (savedState.utilityPoleConnectedAnchors == null)
             {
                 savedState.utilityPoleConnectedAnchors = new List<Vector2Int>();
@@ -1232,11 +1239,15 @@ public partial class BlockStateStore : MonoBehaviour
 
     public void CaptureSaveState(MapSaveData mapSaveData)
     {
-        if (mapSaveData == null)
-        {
-            return;
-        }
+        IEnumerator capture = CaptureSaveStateIncremental(mapSaveData, int.MaxValue);
+        while (capture.MoveNext()) { }
+    }
 
+    public IEnumerator CaptureSaveStateIncremental(MapSaveData mapSaveData, int entriesPerFrame = 512)
+    {
+        if (mapSaveData == null) yield break;
+
+        entriesPerFrame = Mathf.Max(1, entriesPerFrame);
         mapSaveData.resources ??= new List<ResourceSaveEntry>();
         RobotArmWorld.Current?.FlushSaveStates();
         mapSaveData.floorObjects ??= new List<FloorObjectSaveEntry>();
@@ -1251,6 +1262,7 @@ public partial class BlockStateStore : MonoBehaviour
         EnsureListCapacity(mapSaveData.installations, savedInstallationStates.Count);
         EnsureListCapacity(mapSaveData.conveyorItems, savedConveyorItemStates.Count);
 
+        int processed = 0;
         foreach (KeyValuePair<Vector2Int, Resource.ResourceSaveState> pair in savedStates)
         {
             savedResourceItemIds.TryGetValue(pair.Key, out int itemId);
@@ -1260,51 +1272,68 @@ public partial class BlockStateStore : MonoBehaviour
                 itemId = itemId,
                 state = pair.Value
             });
+            if (++processed >= entriesPerFrame)
+            {
+                processed = 0;
+                yield return null;
+            }
         }
 
         foreach (KeyValuePair<Vector2Int, FloorObjectSaveState> pair in savedFloorObjectStates)
         {
-            if (pair.Value == null)
+            if (pair.Value != null)
             {
-                continue;
+                mapSaveData.floorObjects.Add(new FloorObjectSaveEntry
+                {
+                    coordinate = pair.Key,
+                    itemIds = pair.Value.ToSerializedList()
+                });
             }
-
-            mapSaveData.floorObjects.Add(new FloorObjectSaveEntry
+            if (++processed >= entriesPerFrame)
             {
-                coordinate = pair.Key,
-                itemIds = pair.Value.ToSerializedList()
-            });
+                processed = 0;
+                yield return null;
+            }
         }
 
         foreach (KeyValuePair<Vector2Int, ConveyorItemBlockState> pair in savedConveyorItemStates)
         {
             ConveyorItemBlockState state = pair.Value;
-            if (state == null || state.lanes.Count <= 0)
+            if (state != null && state.lanes.Count > 0)
             {
-                continue;
+                mapSaveData.conveyorItems.Add(new ConveyorItemBlockSaveEntry
+                {
+                    coordinate = pair.Key,
+                    lanes = CloneConveyorLaneStates(state.lanes, state.useExtendedLaneIndices)
+                });
             }
-
-            mapSaveData.conveyorItems.Add(new ConveyorItemBlockSaveEntry
+            if (++processed >= entriesPerFrame)
             {
-                coordinate = pair.Key,
-                lanes = CloneConveyorLaneStates(state.lanes, state.useExtendedLaneIndices)
-            });
+                processed = 0;
+                yield return null;
+            }
         }
 
         foreach (KeyValuePair<Vector2Int, InstallationSaveState> pair in savedInstallationStates)
         {
-            if (pair.Value == null)
+            if (pair.Value != null)
             {
-                continue;
+                mapSaveData.installations.Add(new InstallationSaveEntry { state = pair.Value.Clone() });
             }
-
-            mapSaveData.installations.Add(new InstallationSaveEntry
+            if (++processed >= entriesPerFrame)
             {
-                state = pair.Value.Clone()
-            });
+                processed = 0;
+                yield return null;
+            }
         }
 
-        SaveGameConveyorItemBackfill.BackfillFromFloorObjects(mapSaveData);
+        IEnumerator backfill = SaveGameConveyorItemBackfill.BackfillFromFloorObjectsIncremental(
+            mapSaveData,
+            entriesPerFrame);
+        while (backfill.MoveNext())
+        {
+            yield return backfill.Current;
+        }
     }
 
     public void ApplySaveState(MapSaveData mapSaveData)
@@ -1836,13 +1865,40 @@ public partial class BlockStateStore : MonoBehaviour
         }
 
         savedInstallationStates[storageKey] = storedState;
+        if (liveInstallationStates.TryGetValue(storageKey, out LiveInstallationRecord liveRecord)
+            && liveRecord != null)
+        {
+            UnregisterLiveCoordinateMappings(liveRecord.state, storageKey);
+            UnregisterInstallationPlacementKey(
+                liveInstallationStorageKeysByPlacement,
+                liveRecord.state,
+                storageKey);
+            liveRecord.state = storedState;
+            RegisterInstallationPlacementKey(
+                liveInstallationStorageKeysByPlacement,
+                storedState,
+                storageKey);
+            RegisterLiveCoordinateMappings(storedState, storageKey);
+        }
         RegisterInstallationPlacementKey(
             savedInstallationStorageKeysByPlacement,
             storedState,
             storageKey);
         AdjustSavedInstallationCount(storedState, 1);
         RegisterSavedCoordinateMappings(storedState, storageKey);
-        ResolveVirtualObjectWorld()?.UpsertInstallation(storedState);
+        VirtualObjectWorld world = ResolveVirtualObjectWorld();
+        if (liveRecord?.installationObject != null)
+        {
+            world?.AttachInstallationView(
+                storedState,
+                liveRecord.installationObject.GetInstanceID(),
+                liveRecord.installationObject.transform.position,
+                liveRecord.installationObject.transform.rotation);
+        }
+        else
+        {
+            world?.UpsertInstallation(storedState);
+        }
         return true;
     }
 
@@ -2343,7 +2399,7 @@ public partial class BlockStateStore : MonoBehaviour
             return virtualObjectWorld;
         }
 
-        virtualObjectWorld = VirtualObjectWorld.EnsureFor(gameObject);
+        virtualObjectWorld = VirtualObjectWorld.Ensure();
         return virtualObjectWorld;
     }
 

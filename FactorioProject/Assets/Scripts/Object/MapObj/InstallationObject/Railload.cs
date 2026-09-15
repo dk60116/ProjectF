@@ -1101,6 +1101,15 @@ public class Railload : InstallationObject
         return found;
     }
 
+    private readonly struct RailPointSource : ProjectF.Simulation.IRailPathPoints
+    {
+        private readonly IReadOnlyList<Vector2> points;
+        public RailPointSource(IReadOnlyList<Vector2> points) { this.points = points; }
+        public int Count => points?.Count ?? 0;
+        public ProjectF.Simulation.RailPoint GetPoint(int index)
+            => new ProjectF.Simulation.RailPoint(points[index].x, points[index].y);
+    }
+
     private static bool TrySamplePathAtDistance(
         IReadOnlyList<Vector2> pathPoints,
         IReadOnlyList<float> cumulativeDistances,
@@ -1109,68 +1118,11 @@ public class Railload : InstallationObject
         out Vector2 pathPoint,
         out Vector2 tangent)
     {
-        pathPoint = Vector2.zero;
-        tangent = Vector2.zero;
-        if (pathPoints == null
-            || cumulativeDistances == null
-            || pathPoints.Count < 2
-            || cumulativeDistances.Count != pathPoints.Count)
-        {
-            return false;
-        }
-
-        float targetDistance = Mathf.Clamp(distanceAlongPath, 0f, Mathf.Max(0f, pathLength));
-        int endIndex = FindCumulativeDistanceLowerBound(cumulativeDistances, targetDistance);
-        endIndex = Mathf.Clamp(endIndex, 1, pathPoints.Count - 1);
-        int startIndex = endIndex - 1;
-        float segmentLength = cumulativeDistances[endIndex] - cumulativeDistances[startIndex];
-        while (segmentLength <= 0.0001f && endIndex > 1)
-        {
-            endIndex--;
-            startIndex--;
-            segmentLength = cumulativeDistances[endIndex] - cumulativeDistances[startIndex];
-        }
-
-        while (segmentLength <= 0.0001f && endIndex + 1 < pathPoints.Count)
-        {
-            startIndex = endIndex;
-            endIndex++;
-            segmentLength = cumulativeDistances[endIndex] - cumulativeDistances[startIndex];
-        }
-
-        if (segmentLength <= 0.0001f)
-        {
-            return false;
-        }
-
-        Vector2 segment = pathPoints[endIndex] - pathPoints[startIndex];
-        float t = Mathf.Clamp01(
-            (targetDistance - cumulativeDistances[startIndex]) / segmentLength);
-        pathPoint = Vector2.Lerp(pathPoints[startIndex], pathPoints[endIndex], t);
-        tangent = segment / segmentLength;
-        return true;
-    }
-
-    private static int FindCumulativeDistanceLowerBound(
-        IReadOnlyList<float> cumulativeDistances,
-        float targetDistance)
-    {
-        int low = 0;
-        int high = cumulativeDistances.Count;
-        while (low < high)
-        {
-            int middle = low + ((high - low) >> 1);
-            if (cumulativeDistances[middle] < targetDistance)
-            {
-                low = middle + 1;
-            }
-            else
-            {
-                high = middle;
-            }
-        }
-
-        return low;
+        bool found = ProjectF.Simulation.RailPathSampling.TrySample(new RailPointSource(pathPoints),
+            cumulativeDistances, pathLength, distanceAlongPath, out var point, out var direction);
+        pathPoint = new Vector2(point.X, point.Y);
+        tangent = new Vector2(direction.X, direction.Y);
+        return found;
     }
 
     private static bool TryFindNearestPointAndTangentOnCoordinatePath(

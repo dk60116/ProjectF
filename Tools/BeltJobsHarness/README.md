@@ -3,6 +3,7 @@
 ## 적용 구조
 
 - `BeltSimulationJob`: 실제 이동, 막힘 전파, 합류 우선순위, 분배기 필터와 교대 배출, 순환 라인 이동을 계산한다.
+- `BeltSimulationWorld`: Block 참조 없는 좌표/레인 ID 색인, 계산 버퍼, Job 완료와 Tick 확정, 데이터 입출력과 레인 체크포인트를 소유해.
 - `TerrainGenerator.ConveyorJobs`: 기존 Belt Split 그룹을 좌표와 슬롯 순서로 정렬하여 영구 `NativeArray`를 구성한다. 독립 그룹 하나가 `IJobParallelFor`의 작업 단위다.
 - `Block.ConveyorJobs`: 기존 설치·플레이어·로봇팔·I/O API의 슬롯 예약과 계산 결과 표시를 연결한다.
 - `TerrainGenerator.ConveyorJobs.Save`와 `BeltSimulationSnapshot`: 고정 틱, 남은 이동 시간, 이동 출발점과 합류 커서를 저장한다. 세이브 버전은 59다. 분배기 교대 상태는 기존 설치물 저장 필드를 사용한다.
@@ -52,6 +53,16 @@ dotnet run --project Tools/SplitterSaveHarness -c Release
 `BeltJobsHarness`는 실제 계산 커널과 호스트의 구축·입출력 반영·저장 복원 코드를 연결한다. 엔진 할당/스케줄링/씬 객체만 스텁으로 대체한다. 512슬롯의 16개 그룹을 실제 .NET 병렬 실행, 직렬 실행, 역순 실행으로 비교한다. 막힘, 가득 찬 순환 벨트, 합류 교대, 분배기 필터, 막힌 출구의 대체 배출, 외부 삽입 지연, 토폴로지 재구축, 저장 후 연속 계산도 검사한다.
 
 Unity Job safety 검사, Burst 기계어 생성, 실제 씬 API와 렌더링, 실제 성능은 별도 실행 확인 대상이다.
+
+## Tick / View 분리 확장 검사 (2026-09-14)
+
+게임 호스트의 레인 키·재구성 상태·대기 쓰기도 `BeltLaneId`로 바꿨어. Block 배열은 기존 IO와 기하/표현을 연결하는 어댑터로만 남아 있어. 아직 `EnsureBeltSplitGroups`와 경로 굽기는 Block을 필요로 하므로 전체 청크를 건너뛰는 로드를 켜면 안 돼.
+
+새 `WorldChecks`는 Block/씬 객체 없이 만든 16레인 공정에서 데이터 삽입·이동·회수, 좌표 체크포인트 복원, 70틱 후 전 상태/커서 일치를 검사해. 중복 삽입·회수와 이동 대기, 잘못된 작업 소유권, Tick 확정 전 저장/IO 거부도 확인해. 기존 게임 호스트 검사에는 같은 좌표의 Block 어댑터 교체 후 아이템/진행률 유지와 재결합 검사를 추가했어.
+
+Job 완료만으로 Tick을 증가시키지 않아. 기존 호스트의 결과 반영이 끝난 뒤 `CommitStep`으로 확정해야 해. 코어만 구동할 때는 `Step`을 사용해.
+
+코어가 새 asmdef로 분리돼, Unity에서 csproj를 재생성하지 않는 전체 컴파일은 `Tools/SimulationCoreHarness/README.md`의 별도 코어 DLL과 targets 명령을 사용해.
 
 ## 게임에서 확인할 항목
 

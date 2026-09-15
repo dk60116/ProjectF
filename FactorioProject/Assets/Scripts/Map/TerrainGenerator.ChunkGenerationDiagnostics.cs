@@ -8,13 +8,13 @@ public partial class TerrainGenerator
     private enum ChunkGenerationDiagnosticStage
     {
         Preparation,
-        RuntimeProxyGeneration,
+        EntityGeneration,
         InstallationRestore,
         BlockStateRestore,
         AnimalSpawn,
         RuntimeViewRefresh,
         ConveyorItemRestore,
-        EmptyProxyRelease,
+        EmptyEntityRelease,
         SurfaceBuildSchedule,
         SurfaceBuildComplete,
         SurfaceMeshDataSchedule,

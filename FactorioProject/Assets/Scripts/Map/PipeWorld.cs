@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.Rendering;
+using ProjectF.Simulation;
 
 /// <summary>
 /// Data-only runtime representation of an installed pipe. Pipe prefabs remain immutable
@@ -18,6 +19,7 @@ public sealed class PipeRuntimeRecord : IVirtualRenderBatchOwner
     };
     private readonly Vector2Int[] occupiedCoordinates;
     private readonly Bounds[] focusBounds;
+    private readonly PipeConnections connections;
     private readonly List<VirtualRenderBatchEntry> fluidBatchEntries =
         new List<VirtualRenderBatchEntry>(2);
 
@@ -43,6 +45,23 @@ public sealed class PipeRuntimeRecord : IVirtualRenderBatchOwner
         occupiedCoordinates = State.occupiedCoordinates != null && State.occupiedCoordinates.Count > 0
             ? State.occupiedCoordinates.ToArray()
             : new[] { AnchorCoordinate };
+        IsUnderground = prototype is UndergroundPipe;
+        var endpoints = new PipeEndpoint[occupiedCoordinates.Length];
+        for (int i = 0; i < endpoints.Length; i++)
+        {
+            Vector2Int coordinate = occupiedCoordinates[i];
+            byte mask = 0;
+            for (int d = 0; d < SplitDirections.Length; d++)
+            {
+                Vector2Int direction = SplitDirections[d];
+                bool connected = IsUnderground
+                    ? TryGetUndergroundOutwardDirection(coordinate, out var outward) && outward == direction
+                    : prototype.HasConnectionTowardsAt(coordinate, worldRotation, direction);
+                if (connected) mask |= (byte)(1 << d);
+            }
+            endpoints[i] = new PipeEndpoint(new GridCell(coordinate.x, coordinate.y), mask);
+        }
+        connections = new PipeConnections(endpoints, IsUnderground && TryGetPairCoordinates(out _, out _));
         focusBounds = BuildFocusBounds();
     }
 
@@ -58,7 +77,7 @@ public sealed class PipeRuntimeRecord : IVirtualRenderBatchOwner
     public Vector3 WorldScale { get; }
     public IReadOnlyList<Vector2Int> OccupiedCoordinates => occupiedCoordinates;
     public bool HasValidPrototype => Prototype != null;
-    public bool IsUnderground => Prototype is UndergroundPipe;
+    public bool IsUnderground { get; }
     internal PipeWorld.VisualPart[] VisualParts { get; }
     internal int DisplayedFluidItemId { get; set; } = -1;
     internal List<VirtualRenderBatchEntry> FluidBatchEntries => fluidBatchEntries;
@@ -91,36 +110,14 @@ public sealed class PipeRuntimeRecord : IVirtualRenderBatchOwner
 
     public bool HasConnectionTowardsAt(Vector2Int coordinate, Vector2Int direction)
     {
-        if (!IsUnderground)
-        {
-            return Prototype.HasConnectionTowardsAt(coordinate, WorldRotation, direction);
-        }
-
-        return TryGetUndergroundOutwardDirection(coordinate, out Vector2Int outward)
-               && outward == direction;
+        return connections.HasConnection(new GridCell(coordinate.x, coordinate.y), direction.x, direction.y);
     }
 
     public bool TryGetRemoteConnectionCoordinate(Vector2Int coordinate, out Vector2Int remoteCoordinate)
     {
-        remoteCoordinate = default;
-        if (!TryGetPairCoordinates(out Vector2Int first, out Vector2Int second))
-        {
-            return false;
-        }
-
-        if (coordinate == first)
-        {
-            remoteCoordinate = second;
-            return true;
-        }
-
-        if (coordinate == second)
-        {
-            remoteCoordinate = first;
-            return true;
-        }
-
-        return false;
+        bool found = connections.TryGetRemote(new GridCell(coordinate.x, coordinate.y), out var remote);
+        remoteCoordinate = new Vector2Int(remote.X, remote.Y);
+        return found;
     }
 
     public bool TryGetPairCoordinates(out Vector2Int first, out Vector2Int second)
@@ -335,11 +332,10 @@ public sealed class PipeRuntimeRecord : IVirtualRenderBatchOwner
 }
 
 /// <summary>
-/// The single scene component that owns all installed pipe records and renders their child
-/// meshes in instanced batches.
+/// Runtime registry for installed pipes. Record lifetime is independent of PipeWorldView.
+/// Fluid IO adapters and rendering caches are still engine-facing.
 /// </summary>
-[DisallowMultipleComponent, DefaultExecutionOrder(999)]
-public sealed class PipeWorld : MonoBehaviour
+public sealed class PipeWorld : IDisposable
 {
     internal readonly struct VisualPart
     {
@@ -416,6 +412,9 @@ public sealed class PipeWorld : MonoBehaviour
     private static readonly int ColorShaderId = Shader.PropertyToID("_Color");
     private static readonly int EmissionColorShaderId = Shader.PropertyToID("_EmissionColor");
     private static PipeWorld current;
+    internal TerrainGenerator Owner { get; private set; }
+    private PipeWorldView view;
+    private bool disposed;
 
     private readonly Dictionary<Vector2Int, PipeRuntimeRecord> recordsByStorageKey =
         new Dictionary<Vector2Int, PipeRuntimeRecord>();
@@ -443,12 +442,16 @@ public sealed class PipeWorld : MonoBehaviour
 
     public static PipeWorld Current => current;
     public int InstalledPipeCount => recordsByStorageKey.Count;
-    public int SceneGameObjectCount => 1;
-    public int SceneMonoBehaviourCount => 1;
+    public int SceneGameObjectCount => view != null ? 1 : 0;
+    public int SceneMonoBehaviourCount => view != null ? 1 : 0;
     public int BodyInstanceCount => bodyOwner.Entries.Count;
     public int FluidInstanceCount => fluidInstanceCount;
     public int EstimatedDrawCallCount =>
         bodyBatches.EstimatedDrawCallCount + fluidBatches.EstimatedDrawCallCount;
+    public int LastCandidateBatchCount =>
+        bodyBatches.LastCandidateBatchCount + fluidBatches.LastCandidateBatchCount;
+    public int LastCandidateCellCount =>
+        bodyBatches.LastCandidateCellCount + fluidBatches.LastCandidateCellCount;
     internal int TopologyVersion => topologyVersion;
 
     public static void AppendProfilerCounters()
@@ -473,34 +476,40 @@ public sealed class PipeWorld : MonoBehaviour
             "LastFluidDisplayBatchUpdates",
             world.lastFluidDisplayBatchUpdateCount);
         MapObjectTickProfiler.AddRuntimeCounter("PipeWorld", "EstimatedDrawCalls", world.EstimatedDrawCallCount);
+        MapObjectTickProfiler.AddRuntimeCounter("PipeWorld", "CandidateBatches", world.LastCandidateBatchCount);
+        MapObjectTickProfiler.AddRuntimeCounter("PipeWorld", "CandidateCells", world.LastCandidateCellCount);
     }
 
     public static PipeWorld EnsureFor(TerrainGenerator terrain)
     {
-        if (terrain == null)
-        {
-            return null;
-        }
-
-        if (current != null && current.transform.parent == terrain.transform)
-        {
-            return current;
-        }
-
-        Transform child = terrain.transform.Find(HostName);
-        GameObject host = child != null ? child.gameObject : new GameObject(HostName);
-        if (child == null)
-        {
-            host.transform.SetParent(terrain.transform, false);
-        }
-
-        current = host.GetComponent<PipeWorld>();
-        if (current == null)
-        {
-            current = host.AddComponent<PipeWorld>();
-        }
-
+        if (terrain == null) return null;
+        if (current != null && current.Owner == terrain) return current;
+        current?.Dispose();
+        current = new PipeWorld { Owner = terrain };
+        current.AttachView();
         return current;
+    }
+
+    public void AttachView()
+    {
+        if (disposed) throw new ObjectDisposedException(nameof(PipeWorld));
+        if (view == null) view = PipeWorldView.Create(this, Owner.transform, HostName);
+    }
+
+    public void DetachView()
+    {
+        if (view == null) return;
+        var previous = view; view = null; previous.Release();
+    }
+
+    internal void OnViewDestroyed(PipeWorldView previous)
+    {
+        if (ReferenceEquals(view, previous)) view = null;
+    }
+
+    internal void SuspendRendering()
+    {
+        bodyBatches.SuspendRendering(); fluidBatches.SuspendRendering();
     }
 
     public PipeRuntimeRecord Register(
@@ -731,13 +740,12 @@ public sealed class PipeWorld : MonoBehaviour
         return false;
     }
 
-    private void Awake()
+    public void Dispose()
     {
-        current = this;
-    }
-
-    private void OnDestroy()
-    {
+        if (disposed) return;
+        disposed = true;
+        ClearRecords();
+        DetachView();
         if (current == this)
         {
             current = null;
@@ -753,7 +761,7 @@ public sealed class PipeWorld : MonoBehaviour
         fluidMaterials.Clear();
     }
 
-    private void LateUpdate()
+    internal void Render()
     {
         using (MapObjectTickProfiler.SampleNamed("Runtime", nameof(Pipe), "Pipe Render Build"))
         {
@@ -772,8 +780,8 @@ public sealed class PipeWorld : MonoBehaviour
 
         using (MapObjectTickProfiler.SampleNamed("Runtime", nameof(Pipe), "Pipe Render Submit"))
         {
-            bodyBatches.RenderBatches(mainCamera);
-            fluidBatches.RenderBatches(mainCamera);
+            bodyBatches.RenderBatches(mainCamera, BatchCellSize);
+            fluidBatches.RenderBatches(mainCamera, BatchCellSize);
         }
     }
 
@@ -1023,8 +1031,8 @@ public sealed class PipeWorld : MonoBehaviour
 
         if (minimumFocusY == float.MaxValue)
         {
-            minimumFocusY = transform.position.y;
-            maximumFocusY = transform.position.y;
+            minimumFocusY = Owner != null ? Owner.transform.position.y : 0f;
+            maximumFocusY = Owner != null ? Owner.transform.position.y : 0f;
         }
     }
 
@@ -1056,6 +1064,6 @@ public sealed class PipeWorld : MonoBehaviour
             return;
         }
 
-        if (Application.isPlaying) Destroy(target); else DestroyImmediate(target);
+        if (Application.isPlaying) UnityEngine.Object.Destroy(target); else UnityEngine.Object.DestroyImmediate(target);
     }
 }

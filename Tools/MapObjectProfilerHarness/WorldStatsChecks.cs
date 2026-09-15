@@ -4,7 +4,7 @@ using UnityEngine;
 
 public sealed class TerrainGenerator
 {
-    public int Items = 10, Installations = 5, CensusCalls, InstallationQueries;
+    public int Items = 10, Installations = 5, MapObjects = 9, CensusCalls, InstallationQueries;
     public int GetConveyorItemCount() => Items;
     public int GetInstallationItemCounts(Dictionary<int, int> counts)
     {
@@ -12,13 +12,18 @@ public sealed class TerrainGenerator
         counts.Add(1, Installations);
         return Installations;
     }
-    public void CaptureRuntimeProfilerCensus() => CensusCalls++;
+    public int CaptureRuntimeProfilerCensus()
+    {
+        CensusCalls++;
+        return MapObjects;
+    }
 }
 
 public partial class RuntimeItemGiveReceiver
 {
     private TerrainGenerator cachedCensusTerrain;
     private float cachedStatusWorldStatsTime = float.NegativeInfinity;
+    private int cachedLoadedMapObjectTotal = -1;
     private int cachedInstalledObjectTotal = -1, cachedConveyorItemTotal;
     private int cachedSceneGameObjectTotal = -1, cachedActiveSceneGameObjectTotal = -1;
     private int cachedSceneMonoBehaviourTotal = -1, cachedActiveSceneMonoBehaviourTotal = -1;
@@ -31,10 +36,10 @@ public partial class RuntimeItemGiveReceiver
         SceneScans++;
         go = 20000; activeGo = 10000; mb = 48000; activeMb = 12000;
     }
-    public (int Installations, int Items, int Go, int Mb) Poll(TerrainGenerator terrain, bool refresh = false)
+    public (int MapObjects, int Installations, int Items, int Go, int Mb) Poll(TerrainGenerator terrain, bool refresh = false)
     {
         CaptureWorldStats(terrain, refresh, out int installations, out int items, out _, out int go, out _, out int mb, out _);
-        return (installations, items, go, mb);
+        return (cachedLoadedMapObjectTotal, installations, items, go, mb);
     }
 }
 
@@ -45,20 +50,21 @@ public static class WorldStatsChecks
         var receiver = new RuntimeItemGiveReceiver();
         var terrain = new TerrainGenerator();
         var cold = receiver.Poll(terrain);
-        Require(cold.Go == -1 && cold.Mb == -1 && cold.Items == 10, "cold counts must be unavailable, live belt items must remain visible");
+        Require(cold.MapObjects == -1 && cold.Go == -1 && cold.Mb == -1 && cold.Items == 10, "cold counts must be unavailable, live belt items must remain visible");
         for (int i = 0; i < 100; i++) { Time.unscaledTime += 1; receiver.Poll(terrain); }
         Require(receiver.SceneScans == 0 && terrain.CensusCalls == 0 && terrain.InstallationQueries == 0, "status triggered a census");
         var refreshed = receiver.Poll(terrain, true);
-        Require(refreshed == (5, 10, 20000, 48000), "explicit counts differ");
-        terrain.Items = 12; terrain.Installations = 6;
+        Require(refreshed == (9, 5, 10, 20000, 48000), "explicit counts differ");
+        terrain.Items = 12; terrain.Installations = 6; terrain.MapObjects = 11;
         for (int i = 0; i < 100; i++) receiver.Poll(terrain);
         var cached = receiver.Poll(terrain);
-        Require(cached.Installations == 5 && cached.Items == 12, "cached census and live belt items mixed");
+        Require(cached.MapObjects == 9 && cached.Installations == 5 && cached.Items == 12, "cached census and live belt items mixed");
         Require(receiver.SceneScans == 1 && terrain.CensusCalls == 1 && terrain.InstallationQueries == 1, "recurring poll repeated a census");
-        Require(receiver.Poll(terrain, true).Installations == 6, "manual refresh stayed stale");
+        var refreshedAgain = receiver.Poll(terrain, true);
+        Require(refreshedAgain.MapObjects == 11 && refreshedAgain.Installations == 6, "manual refresh stayed stale");
         var replacement = new TerrainGenerator();
         var switched = receiver.Poll(replacement);
-        Require(switched.Go == -1 && switched.Installations == -1 && replacement.CensusCalls == 0, "different world reused old census");
+        Require(switched.MapObjects == -1 && switched.Go == -1 && switched.Installations == -1 && replacement.CensusCalls == 0, "different world reused old census");
         Require(receiver.Poll(null).Items == 0, "no-world belt count stayed stale");
         Console.WriteLine("PASS: cold/recurring status performs no scene or world census; explicit refresh, live belt totals and world invalidation.");
     }

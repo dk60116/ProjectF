@@ -26,13 +26,21 @@ public class Block
     public void AppendBeltJobConnections(int lane, List<(Block block, int lane)> targets)
         => targets.AddRange(Edges[lane].Where(e => e.block.IsRuntimeConveyor));
     public long GetBeltJobDuration(int lane, Block target, int targetLane) => RuntimeConveyorSpeed > 0 ? Travel : 0;
-    public BeltLaneState CaptureBeltJobInput(int lane, BeltLaneState previous, bool replace, long hold)
+    public BeltLaneState CaptureBeltJobInput(
+        int lane,
+        BeltLaneState previous,
+        bool replace,
+        long hold,
+        bool updatePickupGate)
     {
         BeltLaneState state = replace ? Items[lane] : previous;
+        if (state.ItemId < 0) return state;
         if (hold > state.Remaining) state.Remaining = state.Duration = hold;
+        if (replace || updatePickupGate) state.GateBits = Items[lane].GateBits;
         return state;
     }
-    public void PublishBeltJobLane(int lane, BeltLaneState state) => Items[lane] = state;
+    public void ReleaseBeltJobLegacyLaneView(int lane) => Items[lane] = BeltLaneState.Empty;
+    public void RecordBeltJobLaneChange(int lane, bool occupancyMayHaveChanged) { }
     public void NotifyBeltJobPublished(bool notifyTransportObservers = true) => OnPublished?.Invoke();
     public Vector3 TransportLanePosition(int lane) => new(Coordinate.x, lane, Coordinate.y);
     public Vector3 EvaluateBeltJobSegment(int lane, Block target, int targetLane, float progress)
@@ -93,9 +101,20 @@ public partial class TerrainGenerator : IDisposable
     public void Put(Block block, int lane, int id, long hold = 0)
     {
         block.Items[lane] = id < 0 ? BeltLaneState.Empty : new BeltLaneState { ItemId = id, Origin = -1, GateBits = 8 };
-        QueueBeltJobWrite(block, lane, true, hold);
+        QueueBeltJobWrite(block, lane, true, hold, false);
     }
-    public BeltLaneState Read(Block block, int lane = 0) => beltJobBuffers.Lanes[beltJobIndices[(block, lane)]];
+    public void Hold(Block block, int lane, long hold)
+        => QueueBeltJobWrite(block, lane, false, hold, false);
+    public void SetGate(Block block, int lane, byte gateBits)
+    {
+        BeltLaneState staged = block.Items[lane];
+        staged.GateBits = gateBits;
+        block.Items[lane] = staged;
+        QueueBeltJobWrite(block, lane, false, 0, true);
+    }
+    public BeltLaneState Read(Block block, int lane = 0) => beltJobBuffers.Lanes[beltJobIndices[BeltId(block, lane)]];
+    public BeltLaneState ReadEffective(Block block, int lane = 0)
+        => TryReadBeltJobLane(block, lane, out BeltLaneState state) ? state : block.Items[lane];
     public string Committed()
     {
         var result = new System.Text.StringBuilder();
@@ -103,7 +122,7 @@ public partial class TerrainGenerator : IDisposable
         for (int i = 0; i < beltJobNodes.Count; i++)
         {
             var node = beltJobNodes[i]; var state = beltJobBuffers.Lanes[i];
-            result.Append($"{node.block.Coordinate.x},{node.lane}:{state.ItemId}:{state.Remaining}:{state.Duration}:{state.Origin}:{beltJobBuffers.MergeCursor[i]}|");
+            result.Append($"{node.X},{node.Lane}:{state.ItemId}:{state.Remaining}:{state.Duration}:{state.Origin}:{beltJobBuffers.MergeCursor[i]}|");
         }
         return result.ToString();
     }

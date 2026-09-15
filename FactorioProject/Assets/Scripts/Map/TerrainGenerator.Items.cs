@@ -741,17 +741,17 @@ public partial class TerrainGenerator : MonoBehaviour
             }
         }
 
-        return TryMaterializeBlockRuntimeProxy(coordinate, out block);
+        return TryMaterializeBlockEntity(coordinate, out block);
     }
 
-    public bool TryGetLoadedBlockRuntimeProxy(Vector2Int coordinate, out Block block)
+    public bool TryGetLoadedBlockEntity(Vector2Int coordinate, out Block block)
     {
         return loadedBlocks.TryGetValue(coordinate, out block);
     }
 
     public int LoadedBlockDataCellCount => loadedBlocks.RegisteredCellCount;
 
-    public int LoadedBlockRuntimeProxyCount => loadedBlocks.Count;
+    public int LoadedBlockEntityCount => loadedBlocks.Count;
 
     public int LoadedBlockSimulationStateCount => loadedBlocks.RuntimeSimulationStateCount;
 

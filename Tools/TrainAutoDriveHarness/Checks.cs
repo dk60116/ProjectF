@@ -172,8 +172,8 @@ public partial class SteamTrain
     static readonly Trainstation StationB = new() { StationName = "B", Distance = 20 };
     bool HasAnyAutoDriveTarget => true;
     public bool HasFuel = true;
-    long pendingBurnEnergyCostUnits, pendingWaterCostUnits;
-    int pendingBurnEnergyFrame, pendingWaterFrame, fuelRequests;
+    long spentFuelUnits, spentWaterUnits;
+    int fuelRequests;
     bool testDock;
     Vector2 testDockDirection;
     float testDockDistance;
@@ -181,10 +181,8 @@ public partial class SteamTrain
     public bool HasWaterDock;
     public float WaterDockDelta;
     public bool WaterPipeReady;
-    void ClearPendingBurnEnergyCost() { pendingBurnEnergyCostUnits = 0; }
-    void ClearPendingWaterCost() { pendingWaterCostUnits = 0; }
-    void SpendStoredBurnEnergyUnits(long amount) { }
-    void SpendStoredWaterUnits(long amount) { }
+    void SpendStoredBurnEnergyUnits(long amount) { spentFuelUnits += amount; }
+    void SpendStoredWaterUnits(long amount) { spentWaterUnits += amount; }
     void RequestWaterPipeRetract() { WaterPipeReady = false; }
     void SetWaterPipeDockTarget(Vector2Int direction, bool ready) { WaterPipeReady = ready; }
     bool TryResolveWaterPipeDockSample(
@@ -485,6 +483,18 @@ public partial class SteamTrain
     static void Main()
     {
         AutoDriveRoutePlanner.CheckGraph();
+        var manual = Engine(4, Vector2.right);
+        manual.TestRequiresWater = true;
+        manual.HandleMountedInput(Vector3.right, 1, .1f, null);
+        long firstManualFuel = manual.spentFuelUnits, firstManualWater = manual.spentWaterUnits;
+        Check(firstManualFuel > 0 && firstManualWater > 0, "Manual movement commits fuel and water without any render callback");
+        manual.HandleMountedInput(Vector3.right, 1, .1f, null);
+        Check(manual.spentFuelUnits == firstManualFuel * 2 && manual.spentWaterUnits == firstManualWater * 2,
+            "Two accepted manual movements before a render frame cannot overwrite the first resource charge");
+        manual.TestHasWater = false;
+        manual.HandleMountedInput(Vector3.right, 1, .1f, null);
+        Check(manual.spentFuelUnits == firstManualFuel * 2 && manual.spentWaterUnits == firstManualWater * 2,
+            "Rejected movement cannot consume fuel or water");
         RunDepartureResumeChecks();
         RunTrainInfoChecks();
         RunFuelFreightSeparationChecks();
@@ -518,7 +528,7 @@ public partial class SteamTrain
         left.HandleMountedInput(Vector3.left, 1, .1f, new Player());
         right.TickAutoDrive(.1f, null);
         Check(right.PoweredMoves == 1 && left.PoweredMoves == 0, "Mounted input and repeated manager calls must not drive twice in one simulation tick");
-        Check(right.pendingBurnEnergyCostUnits == 0, "Automatic fuel cost must commit inside its simulation tick");
+        Check(right.spentFuelUnits > 0, "Automatic fuel cost must commit inside its simulation tick without LateUpdate");
 
         Time.frameCount++;
         right.SeedStraightPath(left, wagon, right);

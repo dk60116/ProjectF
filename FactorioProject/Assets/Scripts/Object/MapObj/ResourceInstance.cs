@@ -815,21 +815,22 @@ public class ResourceInstance : IMapObjectTarget, IMapObjectSimulationIdentity
 
     private PortableObject CreateHarvestPortableVisual(int objectId, Vector3 worldPosition)
     {
-        PortableObject template = ResolveHarvestPortableTemplate();
+        PortableObjectTemplate template = ResolveHarvestPortableTemplate();
         PortableObject visual;
 
         if (template != null)
         {
-            visual = UnityEngine.Object.Instantiate(template);
+            visual = PortableObject.Create(template);
             visual.name = $"{template.name}_HarvestTemp";
         }
         else
         {
-            GameObject visualObject = new GameObject($"HarvestPortable_{objectId}");
-            visualObject.layer = sharedWorld.gameObject.layer;
-            visualObject.AddComponent<MeshFilter>();
-            visualObject.AddComponent<MeshRenderer>();
-            visual = visualObject.AddComponent<PortableObject>();
+            visual = PortableObject.Create(
+                worldPosition,
+                Quaternion.identity,
+                Vector3.one,
+                sharedWorld.gameObject.layer,
+                $"HarvestPortable_{objectId}");
         }
 
         if (visual == null)
@@ -837,11 +838,10 @@ public class ResourceInstance : IMapObjectTarget, IMapObjectSimulationIdentity
             return null;
         }
 
-        visual.transform.SetParent(null, true);
-        visual.transform.position = worldPosition;
-        visual.transform.rotation = Quaternion.identity;
-        visual.transform.localScale = Vector3.one;
-        visual.gameObject.SetActive(true);
+        visual.SetCachedParent(null, true);
+        visual.SetWorldPose(worldPosition, Quaternion.identity);
+        visual.SetWorldScale(Vector3.one);
+        visual.SetCachedActive(true);
 
         if (!visual.SetItem(objectId))
         {
@@ -852,7 +852,7 @@ public class ResourceInstance : IMapObjectTarget, IMapObjectSimulationIdentity
         return visual;
     }
 
-    private PortableObject ResolveHarvestPortableTemplate() { return sharedWorld.PortableTemplate; }
+    private PortableObjectTemplate ResolveHarvestPortableTemplate() { return sharedWorld.PortableTemplate; }
 
     private bool TryDropHarvestRewardToGround(Player player, int objectId, Vector3 startWorldPosition, bool hideAfterSequence)
     {
@@ -1270,11 +1270,6 @@ public class ResourceInstance : IMapObjectTarget, IMapObjectSimulationIdentity
         hasOwningCoordinate = keepCoordinate;
         owningCoordinate = nextCoordinate;
         RegisterActiveResourceCoordinate();
-        if (this is IMapObjectUpdateTick updateTick)
-        {
-            MapObjectTickManager.RefreshSimulationIdentity(updateTick);
-        }
-
         OnOwningBlockChanged(block);
         MarkBatchRenderDataDirty();
     }
@@ -1291,11 +1286,6 @@ public class ResourceInstance : IMapObjectTarget, IMapObjectSimulationIdentity
         hasOwningCoordinate = true;
         owningBlock = null;
         RegisterActiveResourceCoordinate();
-        if (this is IMapObjectUpdateTick updateTick)
-        {
-            MapObjectTickManager.RefreshSimulationIdentity(updateTick);
-        }
-
         OnOwningBlockChanged(null);
         MarkBatchRenderDataDirty();
     }

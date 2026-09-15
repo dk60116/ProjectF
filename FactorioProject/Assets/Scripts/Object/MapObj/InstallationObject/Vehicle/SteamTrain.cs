@@ -117,10 +117,6 @@ public class SteamTrain : RailHandcar,
     private bool autoDriveTickPlanned;
     private long storedBurnEnergyUnits;
     private long burnEnergyGaugeCapacityUnits;
-    private long pendingBurnEnergyCostUnits;
-    private int pendingBurnEnergyFrame = -1;
-    private long pendingWaterCostUnits;
-    private int pendingWaterFrame = -1;
     private Vector3 waterPipeDefaultLocalPosition;
     private Quaternion waterPipeDefaultLocalRotation = Quaternion.identity;
     private Vector3 waterPipeTargetLocalPosition;
@@ -461,8 +457,6 @@ public class SteamTrain : RailHandcar,
         lastManualDriveSimulationTick = -1L;
         autoDriveSimulationTick = -1L;
         autoDriveMountedPlayer = null;
-        ClearPendingBurnEnergyCost();
-        ClearPendingWaterCost();
         ResetWaterPipeImmediate(false);
         base.OnDisable();
     }
@@ -474,8 +468,6 @@ public class SteamTrain : RailHandcar,
         hasLastMovementParticlePosition = false;
         lastDrivenInputFrame = -1;
         lastManualDriveSimulationTick = -1L;
-        ClearPendingBurnEnergyCost();
-        ClearPendingWaterCost();
         storedBurnEnergyUnits = 0L;
         burnEnergyGaugeCapacityUnits = 0L;
         autoDriveSimulationTick = -1L;
@@ -503,15 +495,12 @@ public class SteamTrain : RailHandcar,
             return;
         }
 
-        ClearPendingBurnEnergyCost();
-        ClearPendingWaterCost();
         lastManualDriveSimulationTick = MapObjectTickManager.CurrentSimulationTick;
         HandleResolvedDriveMotion(
             worldMoveDirection,
             moveSpeed,
             deltaTime,
-            mountedPlayer,
-            false);
+            mountedPlayer);
     }
 
     public override void NotifyPlayerDismounted(Player dismountedPlayer)
@@ -559,8 +548,6 @@ public class SteamTrain : RailHandcar,
         }
 
         autoDriveSimulationTick = currentSimulationTick;
-        ClearPendingBurnEnergyCost();
-        ClearPendingWaterCost();
         if (!HasCompleteAutoDriveTargets())
         {
             autoDriveEnabled = false;
@@ -592,8 +579,7 @@ public class SteamTrain : RailHandcar,
             moveDirection,
             0f,
             deltaTime,
-            mountedPlayer,
-            true);
+            mountedPlayer);
         if (outcome != DriveMotionOutcome.Applied)
         {
             SetAutoDriveStatus(
@@ -624,8 +610,7 @@ public class SteamTrain : RailHandcar,
         Vector3 resolvedMoveDirection,
         float moveSpeed,
         float deltaTime,
-        Player mountedPlayer,
-        bool commitResourceCostsImmediately)
+        Player mountedPlayer)
     {
         if (resolvedMoveDirection.sqrMagnitude > 0.0001f)
         {
@@ -650,27 +635,12 @@ public class SteamTrain : RailHandcar,
 
         lastDrivenInputFrame = Time.frameCount;
         base.HandleMountedInput(resolvedMoveDirection, moveSpeed, deltaTime);
-        if (commitResourceCostsImmediately)
+        // Commit accepted movement's costs here. Rendering/LateUpdate must never
+        // decide whether manual or automatic driving consumed fuel and water.
+        if (CurrentVehicleSpeed > BurnEnergyDrivingSpeedThreshold)
         {
-            if (CurrentVehicleSpeed > BurnEnergyDrivingSpeedThreshold)
-            {
-                SpendStoredBurnEnergyUnits(DeterministicSimulationUnits.FromFloat(burnEnergyCost));
-                SpendStoredWaterUnits(DeterministicSimulationUnits.FromFloat(waterCost));
-            }
-        }
-        else
-        {
-            if (burnEnergyCost > BurnEnergyEpsilon)
-            {
-                pendingBurnEnergyCostUnits = DeterministicSimulationUnits.FromFloat(burnEnergyCost);
-                pendingBurnEnergyFrame = Time.frameCount;
-            }
-
-            if (waterCost > WaterEpsilon)
-            {
-                pendingWaterCostUnits = DeterministicSimulationUnits.FromFloat(waterCost);
-                pendingWaterFrame = Time.frameCount;
-            }
+            SpendStoredBurnEnergyUnits(DeterministicSimulationUnits.FromFloat(burnEnergyCost));
+            SpendStoredWaterUnits(DeterministicSimulationUnits.FromFloat(waterCost));
         }
 
         return DriveMotionOutcome.Applied;
@@ -692,19 +662,6 @@ public class SteamTrain : RailHandcar,
             GetPlanarDistanceSqr(lastMovementParticlePosition, currentPosition)
             > MovementParticleMinDistanceSqr;
         bool isDrivenAndMoving = isDrivenThisFrame && hasMovedSinceLastFrame;
-        if (isDrivenThisFrame
-            && pendingBurnEnergyFrame == Time.frameCount
-            && CurrentVehicleSpeed > BurnEnergyDrivingSpeedThreshold)
-        {
-            SpendStoredBurnEnergyUnits(pendingBurnEnergyCostUnits);
-        }
-
-        if (isDrivenThisFrame
-            && pendingWaterFrame == Time.frameCount
-            && CurrentVehicleSpeed > BurnEnergyDrivingSpeedThreshold)
-        {
-            SpendStoredWaterUnits(pendingWaterCostUnits);
-        }
 
         if (waterPipeTargetActive
             && waterPipeTransferReady
@@ -722,8 +679,6 @@ public class SteamTrain : RailHandcar,
             RefreshAlignedWaterPipeDock();
         }
 
-        ClearPendingBurnEnergyCost();
-        ClearPendingWaterCost();
         SetMovementParticleActive(isDrivenAndMoving);
         lastMovementParticlePosition = currentPosition;
     }
@@ -771,7 +726,6 @@ public class SteamTrain : RailHandcar,
 
     public void ClearBurnEnergyState()
     {
-        ClearPendingBurnEnergyCost();
         ApplyBurnEnergyStateUnits(0L, 0L);
     }
 
@@ -1210,7 +1164,7 @@ public class SteamTrain : RailHandcar,
 
             TryGetTopPortableObjectInSlot(bag, slotIndex, out PortableObject sourcePortableObject);
             Vector3 startPosition = sourcePortableObject != null
-                ? sourcePortableObject.transform.position
+                ? sourcePortableObject.WorldPosition
                 : transform.position;
             if (!bag.TryRemoveItemsAtSlot(
                     slotIndex,
@@ -4657,18 +4611,17 @@ public class SteamTrain : RailHandcar,
             return;
         }
 
-        Transform movingTransform = movingPortableObject.transform;
         movingPortableObject.name = $"{movingPortableObject.name}_BurnEnergyMove";
-        movingTransform.SetParent(null, true);
-        movingTransform.position = startPosition;
+        movingPortableObject.SetCachedParent(null, true);
+        movingPortableObject.SetWorldPosition(startPosition);
         if (sourcePortableObject != null)
         {
-            movingTransform.localScale = sourcePortableObject.transform.lossyScale;
+            movingPortableObject.SetWorldScale(sourcePortableObject.WorldScale);
         }
 
-        if (!movingPortableObject.gameObject.activeSelf)
+        if (!movingPortableObject.IsActive)
         {
-            movingPortableObject.gameObject.SetActive(true);
+            movingPortableObject.SetCachedActive(true);
         }
 
         if (!movingPortableObject.SetItem(itemId))
@@ -4694,17 +4647,18 @@ public class SteamTrain : RailHandcar,
         PortableObject movingPortableObject = null;
         if (sourcePortableObject != null)
         {
-            movingPortableObject = Instantiate(
-                sourcePortableObject,
+            movingPortableObject = sourcePortableObject.Clone(
                 startPosition,
-                sourcePortableObject.transform.rotation);
+                sourcePortableObject.WorldRotation);
         }
         else
         {
-            GameObject itemObject = new GameObject($"SteamTrainBurnEnergyMove_{itemId}");
-            itemObject.AddComponent<MeshFilter>();
-            itemObject.AddComponent<MeshRenderer>();
-            movingPortableObject = itemObject.AddComponent<PortableObject>();
+            movingPortableObject = PortableObject.Create(
+                startPosition,
+                Quaternion.identity,
+                Vector3.one,
+                gameObject.layer,
+                $"SteamTrainBurnEnergyMove_{itemId}");
         }
 
         if (movingPortableObject == null)
@@ -4712,12 +4666,12 @@ public class SteamTrain : RailHandcar,
             return null;
         }
 
-        movingPortableObject.gameObject.layer = gameObject.layer;
-        movingPortableObject.transform.SetParent(null, true);
-        movingPortableObject.transform.position = startPosition;
-        if (!movingPortableObject.gameObject.activeSelf)
+        movingPortableObject.Layer = gameObject.layer;
+        movingPortableObject.SetCachedParent(null, true);
+        movingPortableObject.SetWorldPosition(startPosition);
+        if (!movingPortableObject.IsActive)
         {
-            movingPortableObject.gameObject.SetActive(true);
+            movingPortableObject.SetCachedActive(true);
         }
 
         if (!movingPortableObject.SetItem(itemId))
@@ -4746,26 +4700,7 @@ public class SteamTrain : RailHandcar,
             return;
         }
 
-        portableObject.CancelMove();
-        if (Application.isPlaying)
-        {
-            Destroy(portableObject.gameObject);
-            return;
-        }
-
-        DestroyImmediate(portableObject.gameObject);
-    }
-
-    private void ClearPendingBurnEnergyCost()
-    {
-        pendingBurnEnergyCostUnits = 0L;
-        pendingBurnEnergyFrame = -1;
-    }
-
-    private void ClearPendingWaterCost()
-    {
-        pendingWaterCostUnits = 0L;
-        pendingWaterFrame = -1;
+        portableObject.Dispose();
     }
 
     private void ResetMovementParticleState()

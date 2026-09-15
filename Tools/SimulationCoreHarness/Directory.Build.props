@@ -1,0 +1,5 @@
+<Project>
+  <PropertyGroup Condition="'$(MSBuildProjectName)' == 'SimulationCore'">
+    <BaseIntermediateOutputPath>obj/Core/</BaseIntermediateOutputPath>
+  </PropertyGroup>
+</Project>

@@ -176,13 +176,13 @@ public static class HandcartDrivingValidation
             pickupHandObject.transform.SetParent(pickupPlayerObject.transform, false);
             pickupHandObject.AddComponent<MeshFilter>();
             pickupHandObject.AddComponent<MeshRenderer>();
-            PortableObject pickupHandPortableObject = pickupHandObject.AddComponent<PortableObject>();
+            PortableObjectTemplate pickupHandPortableTemplate = pickupHandObject.AddComponent<PortableObjectTemplate>();
             pickupHandObject.SetActive(false);
             SerializedObject serializedPickupPlayer = new SerializedObject(pickupPlayer);
-            SerializedProperty handStackProperty = serializedPickupPlayer.FindProperty("handStack");
-            Require(handStackProperty != null, "Player handStack 필드를 찾을 수 없습니다.");
+            SerializedProperty handStackProperty = serializedPickupPlayer.FindProperty("handStackTemplates");
+            Require(handStackProperty != null, "Player handStackTemplates 필드를 찾을 수 없습니다.");
             handStackProperty.arraySize = 1;
-            handStackProperty.GetArrayElementAtIndex(0).objectReferenceValue = pickupHandPortableObject;
+            handStackProperty.GetArrayElementAtIndex(0).objectReferenceValue = pickupHandPortableTemplate;
             serializedPickupPlayer.ApplyModifiedPropertiesWithoutUndo();
             Require(
                 handcart.TryPreviewPickupItems(

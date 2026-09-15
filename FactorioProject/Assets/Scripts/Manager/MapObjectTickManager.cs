@@ -5,125 +5,9 @@ using System.Globalization;
 using System.Text;
 using UnityEngine;
 
-public interface IMapObjectUpdateTick
+public sealed class MapObjectTickManager : MonoBehaviour, ProjectF.Simulation.ISimulationTickObserver
 {
-    void ManagedUpdateTick(float deltaTime);
-}
-
-public interface IMapObjectUpdateTickInterval
-{
-    float ManagedUpdateTickIntervalSeconds { get; }
-}
-
-public interface IMapObjectSimulationIdentity
-{
-    long SimulationId { get; }
-}
-
-public interface IMapObjectStagedUpdateTick
-{
-    void PlanManagedUpdateTick(float deltaTime);
-
-    void ApplyManagedUpdateTick();
-}
-
-public static class DeterministicSimulationUnits
-{
-    // Divisible by 60 so common per-second values retain exact sub-tick units.
-    public const long UnitsPerWhole = 60_000_000L;
-
-    public static long FromInt(int value)
-    {
-        return value <= 0
-            ? 0L
-            : Math.Min(long.MaxValue, (long)value * UnitsPerWhole);
-    }
-
-    public static long FromFloat(float value)
-    {
-        if (float.IsNaN(value) || value <= 0f)
-        {
-            return 0L;
-        }
-
-        if (float.IsPositiveInfinity(value))
-        {
-            return long.MaxValue;
-        }
-
-        decimal scaled = decimal.Round(
-            (decimal)value * UnitsPerWhole,
-            0,
-            MidpointRounding.AwayFromZero);
-        return scaled >= long.MaxValue ? long.MaxValue : (long)scaled;
-    }
-
-    public static float ToFloat(long units)
-    {
-        return units <= 0L ? 0f : (float)((double)units / UnitsPerWhole);
-    }
-
-    public static long SecondsToTicks(float seconds)
-    {
-        if (float.IsNaN(seconds) || seconds <= 0f)
-        {
-            return 0L;
-        }
-
-        return Math.Max(
-            1L,
-            (long)decimal.Round(
-                (decimal)seconds * MapObjectTickManager.DefaultSimulationTicksPerSecond,
-                0,
-                MidpointRounding.AwayFromZero));
-    }
-
-    public static float TicksToSeconds(long ticks)
-    {
-        return ticks <= 0L
-            ? 0f
-            : ticks * MapObjectTickManager.FixedSimulationDeltaSeconds;
-    }
-
-    public static long DeltaTimeToTicks(float deltaTime)
-    {
-        return deltaTime <= 0f ? 0L : Math.Max(1L, SecondsToTicks(deltaTime));
-    }
-
-    public static long RateForTicks(float ratePerSecond, long elapsedTicks)
-    {
-        if (ratePerSecond <= 0f || elapsedTicks <= 0L)
-        {
-            return 0L;
-        }
-
-        decimal units = (decimal)ratePerSecond
-                        * UnitsPerWhole
-                        * elapsedTicks
-                        / MapObjectTickManager.DefaultSimulationTicksPerSecond;
-        decimal rounded = decimal.Round(units, 0, MidpointRounding.AwayFromZero);
-        return rounded >= long.MaxValue ? long.MaxValue : (long)rounded;
-    }
-
-    public static long MultiplyRatio(long value, long numerator, long denominator)
-    {
-        if (value <= 0L || numerator <= 0L || denominator <= 0L)
-        {
-            return 0L;
-        }
-
-        if (numerator >= denominator)
-        {
-            return value;
-        }
-
-        return (long)decimal.Truncate((decimal)value * numerator / denominator);
-    }
-}
-
-public sealed class MapObjectTickManager : MonoBehaviour
-{
-    public const int DefaultSimulationTicksPerSecond = 60;
+    public const int DefaultSimulationTicksPerSecond = ProjectF.Simulation.SimulationTickWorld.DefaultSimulationTicksPerSecond;
     public const float FixedSimulationDeltaSeconds = 1f / DefaultSimulationTicksPerSecond;
     private const float DefaultUpdateTickIntervalSeconds = FixedSimulationDeltaSeconds;
     private const int AliveValidationTickInterval = 120;
@@ -140,19 +24,9 @@ public sealed class MapObjectTickManager : MonoBehaviour
     [SerializeField, Range(1, 64)]
     private int maximumSimulationStepsPerFrame = DefaultMaximumSimulationStepsPerFrame;
 
-    private readonly List<UpdateTickBucket> updateTickBuckets = new List<UpdateTickBucket>(4);
-    private readonly Dictionary<int, UpdateTickBucket> updateTickBucketsByIntervalKey =
-        new Dictionary<int, UpdateTickBucket>(4);
-    private readonly HashSet<IMapObjectUpdateTick> updateTickSet = new HashSet<IMapObjectUpdateTick>();
-    private readonly HashSet<IMapObjectUpdateTick> updateTickEntrySet = new HashSet<IMapObjectUpdateTick>();
-    private readonly Dictionary<IMapObjectUpdateTick, UpdateTickEntry> updateTickEntriesByTick =
-        new Dictionary<IMapObjectUpdateTick, UpdateTickEntry>();
-    private readonly List<IMapObjectUpdateTick> requestedTickCleanupBuffer =
-        new List<IMapObjectUpdateTick>();
-    private readonly List<IMapObjectUpdateTick> activeTickCleanupBuffer =
-        new List<IMapObjectUpdateTick>();
-    private readonly List<UpdateTickEntry> dueUpdateTickEntries = new List<UpdateTickEntry>(64);
-    private long simulationTick;
+    private readonly ProjectF.Simulation.SimulationTickWorld simulation = new ProjectF.Simulation.SimulationTickWorld();
+    private readonly List<IMapObjectUpdateTick> requestedTickCleanupBuffer = new List<IMapObjectUpdateTick>();
+    private long simulationTick => simulation.CurrentTick;
     private long nextAliveValidationTick;
     private double simulationTimeAccumulator;
     private double simulationUpsSampleStartTime;
@@ -160,14 +34,13 @@ public sealed class MapObjectTickManager : MonoBehaviour
     private float currentSimulationUps;
     private int simulationTicksLastFrame;
     private bool hasSimulationUpsSample;
-    private bool tickingUpdateObjects;
-    private bool updateTicksDirty;
     private bool simulationPaused;
     private int saveTickPauseDepth;
     private bool waitingForWorldLoad;
     private float resumeTimeScale = 1f;
 
     public static long CurrentSimulationTick => instance != null ? instance.simulationTick : 0L;
+    public static bool CanCaptureCheckpoint => instance == null || instance.simulation.CanCaptureCheckpoint;
     public static double CurrentSimulationTimeSeconds =>
         CurrentSimulationTick * (double)FixedSimulationDeltaSeconds;
     public static double SimulationBacklogTicks => instance != null
@@ -179,6 +52,7 @@ public sealed class MapObjectTickManager : MonoBehaviour
     public static bool HasSimulationUpsSample => instance != null && instance.hasSimulationUpsSample;
     public static float CurrentSimulationUps => instance != null ? instance.currentSimulationUps : 0f;
     public static bool SimulationPaused => instance != null && instance.IsSimulationTickPaused;
+    public static bool SaveSnapshotCapturePaused => instance != null && instance.saveTickPauseDepth > 0;
     public static bool WaitingForWorldLoad
     {
         get
@@ -204,7 +78,9 @@ public sealed class MapObjectTickManager : MonoBehaviour
         }
 
         requestedUpdateTicks.Add(tick);
-        EnsureInstance().AddUpdateTick(tick);
+        MapObjectTickManager manager = EnsureInstance();
+        manager.simulation.DefaultIntervalSeconds = manager.updateTickIntervalSeconds;
+        manager.simulation.Register(tick);
     }
 
     public static void UnregisterUpdateTick(IMapObjectUpdateTick tick)
@@ -217,7 +93,7 @@ public sealed class MapObjectTickManager : MonoBehaviour
         requestedUpdateTicks.Remove(tick);
         if (instance != null)
         {
-            instance.RemoveUpdateTick(tick);
+            instance.simulation.Unregister(tick);
         }
     }
 
@@ -226,7 +102,7 @@ public sealed class MapObjectTickManager : MonoBehaviour
         return tick != null
                && requestedUpdateTicks.Contains(tick)
                && instance != null
-               && instance.HasExecutableUpdateTick(tick);
+               && instance.simulation.Contains(tick);
     }
 
     [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.SubsystemRegistration)]
@@ -260,6 +136,7 @@ public sealed class MapObjectTickManager : MonoBehaviour
 
         instance = this;
         DontDestroyOnLoad(gameObject);
+        simulation.DefaultIntervalSeconds = updateTickIntervalSeconds;
         ResetSimulationUpsMeasurement();
         ReconcileRequestedUpdateTicks(true);
     }
@@ -302,10 +179,10 @@ public sealed class MapObjectTickManager : MonoBehaviour
                && !WaitingForWorldLoad)
         {
             simulationTimeAccumulator -= FixedSimulationDeltaSeconds;
-            simulationTick++;
             bool fullValidationRequested = RequestPeriodicAliveValidation();
             ReconcileRequestedUpdateTicks(fullValidationRequested);
-            TickUpdateObjects();
+            simulation.Observer = MapObjectTickProfiler.IsEnabled ? this : null;
+            simulation.Step();
             completedSteps++;
         }
 
@@ -400,11 +277,11 @@ public sealed class MapObjectTickManager : MonoBehaviour
         }
 
         MapObjectTickManager manager = EnsureInstance();
-        manager.simulationTick = Math.Max(0L, restoredTick);
+        manager.simulation.RestoreTick(restoredTick);
+        FacilitySimulationWorld.RestoreSimulationTick(manager.simulationTick);
         manager.simulationTimeAccumulator = 0d;
         manager.nextAliveValidationTick = manager.simulationTick;
         manager.ResetSimulationUpsMeasurement();
-        manager.ResetUpdateTickBucketState();
     }
 
     private void ResetSimulationUpsMeasurement()
@@ -432,23 +309,6 @@ public sealed class MapObjectTickManager : MonoBehaviour
         hasSimulationUpsSample = true;
     }
 
-    public static void RefreshSimulationIdentity(IMapObjectUpdateTick tick)
-    {
-        if (tick == null || instance == null || !instance.updateTickSet.Contains(tick))
-        {
-            return;
-        }
-
-        for (int i = 0; i < instance.updateTickBuckets.Count; i++)
-        {
-            UpdateTickBucket bucket = instance.updateTickBuckets[i];
-            if (bucket != null)
-            {
-                bucket.OrderDirty = true;
-            }
-        }
-    }
-
     private void OnApplicationQuit()
     {
         applicationQuitting = true;
@@ -463,448 +323,40 @@ public sealed class MapObjectTickManager : MonoBehaviour
                 Time.timeScale = resumeTimeScale > 0f ? resumeTimeScale : 1f;
             }
 
+            simulation.Dispose();
             instance = null;
-        }
-    }
-
-    private void AddUpdateTick(IMapObjectUpdateTick tick)
-    {
-        if (updateTicksDirty && !tickingUpdateObjects)
-        {
-            CompactUpdateTicks();
-        }
-
-        if (tick == null)
-        {
-            return;
-        }
-
-        if (updateTickSet.Contains(tick))
-        {
-            if (HasExecutableUpdateTick(tick))
-            {
-                return;
-            }
-
-            // The active marker can survive after its bucket entry is lost.
-            // Remove the incomplete registration so it can be rebuilt below.
-            updateTickSet.Remove(tick);
-            updateTicksDirty = true;
-            if (tickingUpdateObjects)
-            {
-                return;
-            }
-
-            CompactUpdateTicks();
-        }
-
-        if (updateTickEntrySet.Contains(tick))
-        {
-            updateTickSet.Add(tick);
-            if (updateTickEntriesByTick.TryGetValue(tick, out UpdateTickEntry entry))
-            {
-                entry.ResetSchedule(simulationTick);
-            }
-
-            enabled = true;
-            return;
-        }
-
-        updateTickSet.Add(tick);
-        updateTickEntrySet.Add(tick);
-        UpdateTickBucket bucket = GetOrCreateUpdateTickBucket(ResolveUpdateTickIntervalTicks(tick));
-        UpdateTickEntry newEntry = new UpdateTickEntry(tick, bucket.IntervalTicks, simulationTick);
-        updateTickEntriesByTick[tick] = newEntry;
-        bucket.Entries.Add(newEntry);
-        bucket.OrderDirty = true;
-        enabled = true;
-    }
-
-    private void RemoveUpdateTick(IMapObjectUpdateTick tick)
-    {
-        if (tick == null || !updateTickSet.Remove(tick))
-        {
-            return;
-        }
-
-        updateTicksDirty = true;
-    }
-
-    private void TickUpdateObjects()
-    {
-        if (updateTicksDirty)
-        {
-            CompactUpdateTicks();
-        }
-
-        int count = updateTickSet.Count;
-        bool profileTicks = MapObjectTickProfiler.IsEnabled;
-        if (profileTicks)
-        {
-            MapObjectTickProfiler.SetActiveUpdateTargets(updateTickSet);
-        }
-        if (count <= 0)
-        {
-            ResetUpdateTickBucketState();
-            RefreshEnabledState();
-            return;
-        }
-
-        tickingUpdateObjects = true;
-        try
-        {
-            dueUpdateTickEntries.Clear();
-            for (int bucketIndex = 0; bucketIndex < updateTickBuckets.Count; bucketIndex++)
-            {
-                CollectDueUpdateEntries(updateTickBuckets[bucketIndex]);
-            }
-
-            dueUpdateTickEntries.Sort(CompareUpdateTickEntries);
-            PlanStagedUpdateEntries();
-            ApplyDueUpdateEntries(profileTicks);
-            dueUpdateTickEntries.Clear();
-        }
-        finally
-        {
-            tickingUpdateObjects = false;
-        }
-
-        if (updateTicksDirty)
-        {
-            CompactUpdateTicks();
-        }
-
-        RefreshEnabledState();
-    }
-
-    private void CollectDueUpdateEntries(UpdateTickBucket bucket)
-    {
-        if (bucket == null)
-        {
-            return;
-        }
-
-        int count = bucket.Entries.Count;
-        if (count <= 0)
-        {
-            return;
-        }
-
-        if (bucket.OrderDirty)
-        {
-            bucket.Entries.Sort(CompareUpdateTickEntries);
-            bucket.OrderDirty = false;
-        }
-
-        List<UpdateTickEntry> entries = bucket.Entries;
-        for (int entryIndex = 0; entryIndex < count; entryIndex++)
-        {
-            UpdateTickEntry entry = entries[entryIndex];
-            if (entry == null)
-            {
-                updateTicksDirty = true;
-                continue;
-            }
-
-            IMapObjectUpdateTick tick = entry.Tick;
-            if (tick == null)
-            {
-                updateTicksDirty = true;
-                continue;
-            }
-
-            if (updateTicksDirty && !updateTickSet.Contains(tick))
-            {
-                continue;
-            }
-
-            if (entry.NextDueTick > simulationTick)
-            {
-                continue;
-            }
-
-            long elapsedTicks = Math.Max(1L, simulationTick - entry.LastExecutedTick);
-            entry.PendingDeltaTime = elapsedTicks * FixedSimulationDeltaSeconds;
-            entry.MarkExecuted(simulationTick);
-            dueUpdateTickEntries.Add(entry);
-        }
-    }
-
-    private void PlanStagedUpdateEntries()
-    {
-        for (int i = 0; i < dueUpdateTickEntries.Count; i++)
-        {
-            UpdateTickEntry entry = dueUpdateTickEntries[i];
-            if (entry?.Tick is IMapObjectStagedUpdateTick stagedTick)
-            {
-                stagedTick.PlanManagedUpdateTick(entry.PendingDeltaTime);
-            }
-        }
-    }
-
-    private void ApplyDueUpdateEntries(bool profileTicks)
-    {
-        for (int i = 0; i < dueUpdateTickEntries.Count; i++)
-        {
-            UpdateTickEntry entry = dueUpdateTickEntries[i];
-            IMapObjectUpdateTick tick = entry?.Tick;
-            if (tick == null || updateTicksDirty && !updateTickSet.Contains(tick))
-            {
-                continue;
-            }
-
-            long startTimestamp = profileTicks ? MapObjectTickProfiler.BeginSample() : 0L;
-            if (tick is IMapObjectStagedUpdateTick stagedTick)
-            {
-                stagedTick.ApplyManagedUpdateTick();
-            }
-            else
-            {
-                tick.ManagedUpdateTick(entry.PendingDeltaTime);
-            }
-
-            if (profileTicks)
-            {
-                MapObjectTickProfiler.EndUpdateSample(tick, startTimestamp);
-            }
         }
     }
 
     private bool RequestPeriodicAliveValidation()
     {
-        if (simulationTick < nextAliveValidationTick)
-        {
-            return false;
-        }
-
+        if (simulationTick < nextAliveValidationTick) return false;
         nextAliveValidationTick = simulationTick + AliveValidationTickInterval;
-        if (updateTickSet.Count > 0)
-        {
-            updateTicksDirty = true;
-        }
-
         return true;
     }
 
     private void ReconcileRequestedUpdateTicks(bool forceFullValidation)
     {
-        if (!forceFullValidation && RegistrationCountsMatch())
-        {
-            return;
-        }
-
+        if (!forceFullValidation && requestedUpdateTicks.Count == simulation.RegisteredCount) return;
         requestedTickCleanupBuffer.Clear();
         foreach (IMapObjectUpdateTick tick in requestedUpdateTicks)
         {
-            if (!IsTickAlive(tick))
-            {
-                requestedTickCleanupBuffer.Add(tick);
-                continue;
-            }
-
-            if (!HasExecutableUpdateTick(tick))
-            {
-                AddUpdateTick(tick);
-            }
+            if (!IsTickAlive(tick)) requestedTickCleanupBuffer.Add(tick);
+            else if (!simulation.Contains(tick)) simulation.Register(tick);
         }
-
-        for (int i = 0; i < requestedTickCleanupBuffer.Count; i++)
+        foreach (IMapObjectUpdateTick tick in requestedTickCleanupBuffer)
         {
-            IMapObjectUpdateTick tick = requestedTickCleanupBuffer[i];
             requestedUpdateTicks.Remove(tick);
-            RemoveUpdateTick(tick);
+            simulation.Unregister(tick);
         }
-
         requestedTickCleanupBuffer.Clear();
-        if (!forceFullValidation && RegistrationCountsMatch())
-        {
-            return;
-        }
-
-        activeTickCleanupBuffer.Clear();
-        foreach (IMapObjectUpdateTick tick in updateTickSet)
-        {
-            if (!IsTickAlive(tick) || !requestedUpdateTicks.Contains(tick))
-            {
-                activeTickCleanupBuffer.Add(tick);
-            }
-        }
-
-        for (int i = 0; i < activeTickCleanupBuffer.Count; i++)
-        {
-            RemoveUpdateTick(activeTickCleanupBuffer[i]);
-        }
-
-        activeTickCleanupBuffer.Clear();
-        if (updateTickEntrySet.Count != updateTickSet.Count
-            || updateTickEntriesByTick.Count != updateTickSet.Count)
-        {
-            updateTicksDirty = true;
-        }
     }
 
-    private bool RegistrationCountsMatch()
-    {
-        int requestedCount = requestedUpdateTicks.Count;
-        return requestedCount == updateTickSet.Count
-               && requestedCount == updateTickEntrySet.Count
-               && requestedCount == updateTickEntriesByTick.Count;
-    }
-
-    private bool HasExecutableUpdateTick(IMapObjectUpdateTick tick)
-    {
-        return tick != null
-               && updateTickSet.Contains(tick)
-               && updateTickEntrySet.Contains(tick)
-               && updateTickEntriesByTick.TryGetValue(tick, out UpdateTickEntry entry)
-               && entry != null
-               && ReferenceEquals(entry.Tick, tick);
-    }
-
-    private void CompactUpdateTicks()
-    {
-        updateTickEntrySet.Clear();
-        updateTickEntriesByTick.Clear();
-        for (int bucketIndex = updateTickBuckets.Count - 1; bucketIndex >= 0; bucketIndex--)
-        {
-            UpdateTickBucket bucket = updateTickBuckets[bucketIndex];
-            if (bucket == null)
-            {
-                updateTickBuckets.RemoveAt(bucketIndex);
-                continue;
-            }
-
-            List<UpdateTickEntry> entries = bucket.Entries;
-            int writeIndex = 0;
-            for (int readIndex = 0; readIndex < entries.Count; readIndex++)
-            {
-                UpdateTickEntry entry = entries[readIndex];
-                IMapObjectUpdateTick tick = entry != null ? entry.Tick : null;
-                if (!IsTickAlive(tick) || !updateTickSet.Contains(tick))
-                {
-                    if (tick != null)
-                    {
-                        updateTickSet.Remove(tick);
-                    }
-
-                    continue;
-                }
-
-                if (!updateTickEntrySet.Add(tick))
-                {
-                    continue;
-                }
-
-                updateTickEntriesByTick[tick] = entry;
-                entries[writeIndex] = entry;
-                writeIndex++;
-            }
-
-            if (writeIndex < entries.Count)
-            {
-                entries.RemoveRange(writeIndex, entries.Count - writeIndex);
-            }
-
-            if (entries.Count <= 0)
-            {
-                updateTickBucketsByIntervalKey.Remove(bucket.IntervalTicks);
-                updateTickBuckets.RemoveAt(bucketIndex);
-                continue;
-            }
-
-            bucket.OrderDirty = true;
-        }
-
-        updateTicksDirty = false;
-    }
-
-    private void RefreshEnabledState()
-    {
-        // The fixed clock must continue advancing even while every simulation target sleeps.
-        enabled = Application.isPlaying && !applicationQuitting;
-    }
-
-    private UpdateTickBucket GetOrCreateUpdateTickBucket(int intervalTicks)
-    {
-        intervalTicks = Mathf.Max(1, intervalTicks);
-        if (updateTickBucketsByIntervalKey.TryGetValue(intervalTicks, out UpdateTickBucket bucket))
-        {
-            return bucket;
-        }
-
-        bucket = new UpdateTickBucket(intervalTicks);
-        updateTickBucketsByIntervalKey.Add(intervalTicks, bucket);
-        updateTickBuckets.Add(bucket);
-        updateTickBuckets.Sort((left, right) => left.IntervalTicks.CompareTo(right.IntervalTicks));
-        return bucket;
-    }
-
-    private int ResolveUpdateTickIntervalTicks(IMapObjectUpdateTick tick)
-    {
-        float intervalSeconds = updateTickIntervalSeconds;
-        if (tick is IMapObjectUpdateTickInterval intervalProvider)
-        {
-            intervalSeconds = intervalProvider.ManagedUpdateTickIntervalSeconds;
-        }
-
-        return Mathf.Max(1, Mathf.RoundToInt(
-            Mathf.Max(FixedSimulationDeltaSeconds, intervalSeconds)
-            / FixedSimulationDeltaSeconds));
-    }
-
-    private static int CompareUpdateTickEntries(UpdateTickEntry left, UpdateTickEntry right)
-    {
-        if (ReferenceEquals(left, right))
-        {
-            return 0;
-        }
-
-        if (left == null)
-        {
-            return 1;
-        }
-
-        if (right == null)
-        {
-            return -1;
-        }
-
-        long leftId = ResolveSimulationId(left.Tick);
-        long rightId = ResolveSimulationId(right.Tick);
-        int result = leftId.CompareTo(rightId);
-        if (result != 0)
-        {
-            return result;
-        }
-
-        string leftType = left.Tick?.GetType().FullName ?? string.Empty;
-        string rightType = right.Tick?.GetType().FullName ?? string.Empty;
-        return string.CompareOrdinal(leftType, rightType);
-    }
-
-    private static long ResolveSimulationId(IMapObjectUpdateTick tick)
-    {
-        return tick is IMapObjectSimulationIdentity identity
-            ? identity.SimulationId
-            : 0L;
-    }
-
-    private void ResetUpdateTickBucketState()
-    {
-        for (int i = 0; i < updateTickBuckets.Count; i++)
-        {
-            UpdateTickBucket bucket = updateTickBuckets[i];
-            if (bucket == null)
-            {
-                continue;
-            }
-
-            for (int entryIndex = 0; entryIndex < bucket.Entries.Count; entryIndex++)
-            {
-                bucket.Entries[entryIndex]?.ResetSchedule(simulationTick);
-            }
-        }
-    }
+    void ProjectF.Simulation.ISimulationTickObserver.OnActiveTargets(ICollection<IMapObjectUpdateTick> targets)
+        => MapObjectTickProfiler.SetActiveUpdateTargets(targets);
+    long ProjectF.Simulation.ISimulationTickObserver.BeginSample() => MapObjectTickProfiler.BeginSample();
+    void ProjectF.Simulation.ISimulationTickObserver.EndSample(IMapObjectUpdateTick target, long started)
+        => MapObjectTickProfiler.EndUpdateSample(target, started);
 
     private static bool IsTickAlive(object tick)
     {
@@ -917,45 +369,6 @@ public sealed class MapObjectTickManager : MonoBehaviour
         return ReferenceEquals(unityObject, null) || unityObject != null;
     }
 
-    private sealed class UpdateTickEntry
-    {
-        public readonly IMapObjectUpdateTick Tick;
-        public readonly int IntervalTicks;
-        public long LastExecutedTick;
-        public long NextDueTick;
-        public float PendingDeltaTime;
-
-        public UpdateTickEntry(IMapObjectUpdateTick tick, int intervalTicks, long currentTick)
-        {
-            Tick = tick;
-            IntervalTicks = Math.Max(1, intervalTicks);
-            ResetSchedule(currentTick);
-        }
-
-        public void ResetSchedule(long currentTick)
-        {
-            LastExecutedTick = currentTick;
-            NextDueTick = currentTick + 1L;
-        }
-
-        public void MarkExecuted(long currentTick)
-        {
-            LastExecutedTick = currentTick;
-            NextDueTick = currentTick + IntervalTicks;
-        }
-    }
-
-    private sealed class UpdateTickBucket
-    {
-        public readonly int IntervalTicks;
-        public readonly List<UpdateTickEntry> Entries = new List<UpdateTickEntry>();
-        public bool OrderDirty;
-
-        public UpdateTickBucket(int intervalTicks)
-        {
-            IntervalTicks = intervalTicks;
-        }
-    }
 }
 
 public readonly struct MapObjectRuntimeCounter

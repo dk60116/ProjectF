@@ -3,10 +3,11 @@ using System.Collections.Generic;
 using UnityEngine;
 using ProjectF.Runtime;
 
-// One scene object owns every installed arm, including long arms.
-[DisallowMultipleComponent, DefaultExecutionOrder(1000)]
-public sealed class RobotArmWorld : MonoBehaviour, IMapObjectUpdateTick, IMapObjectUpdateTickInterval, IMapObjectStagedUpdateTick, IMapObjectSimulationIdentity
+// Runtime lifetime belongs to the world; its optional view never owns arm ticks.
+public sealed class RobotArmWorld : IDisposable, IMapObjectUpdateTick, IMapObjectUpdateTickInterval, IMapObjectStagedUpdateTick, IMapObjectSimulationIdentity
 {
+    private const int MarkerChunkSize = 32;
+    private const float MarkerVisibleRange = 5f;
     public static RobotArmWorld Current { get; private set; }
     internal TerrainGenerator Terrain { get; private set; }
     internal BlockStateStore StateStore { get; private set; }
@@ -14,16 +15,16 @@ public sealed class RobotArmWorld : MonoBehaviour, IMapObjectUpdateTick, IMapObj
     private readonly Dictionary<Vector2Int, RobotArmInstance> byKey = new Dictionary<Vector2Int, RobotArmInstance>();
     private readonly Dictionary<Vector2Int, List<RobotArmInstance>> observers = new Dictionary<Vector2Int, List<RobotArmInstance>>();
     private readonly List<RobotArmInstance> ordered = new List<RobotArmInstance>();
+    private readonly Dictionary<Vector2Int, List<RobotArmInstance>> markerArmsByCell =
+        new Dictionary<Vector2Int, List<RobotArmInstance>>();
+    private readonly HashSet<RobotArmInstance> visibleMarkerArms = new HashSet<RobotArmInstance>();
+    private readonly HashSet<RobotArmInstance> markerCandidateSet = new HashSet<RobotArmInstance>();
+    private readonly List<RobotArmInstance> markerCandidates = new List<RobotArmInstance>();
     private readonly List<RobotArmInstance> planned = new List<RobotArmInstance>();
     private readonly HashSet<RobotArmInstance> wakeBatchSet = new HashSet<RobotArmInstance>();
     private readonly List<RobotArmInstance> wakeBatch = new List<RobotArmInstance>();
-    private readonly Dictionary<Collider, RobotArmInstance> colliderOwners = new Dictionary<Collider, RobotArmInstance>();
-    private readonly Dictionary<RobotArmInstance, SphereCollider> colliders = new Dictionary<RobotArmInstance, SphereCollider>();
     private readonly Dictionary<RobotArm, RobotArmRenderTemplate> templates = new Dictionary<RobotArm, RobotArmRenderTemplate>();
-    private readonly VirtualRenderBatchCollection batches = new VirtualRenderBatchCollection();
-    private readonly ProjectF.Rendering.CameraRenderCulling culling = new ProjectF.Rendering.CameraRenderCulling();
     private bool orderDirty;
-    private Camera renderCamera;
     private RobotArmInstance selectedMarkerArm;
     private bool markersDirty = true;
     private long interactionBlockCacheHits;
@@ -33,25 +34,58 @@ public sealed class RobotArmWorld : MonoBehaviour, IMapObjectUpdateTick, IMapObj
     private long interactionFreightCacheHits;
     private long interactionFreightCacheMisses;
     public int VisibleMarkerCount { get; private set; }
+    public int MarkerVisibilityCandidateCount { get; private set; }
     public long SimulationId => long.MaxValue - 20;
     public float ManagedUpdateTickIntervalSeconds => MapObjectTickManager.FixedSimulationDeltaSeconds;
     public IReadOnlyList<RobotArmInstance> Instances => ordered;
     public int Count => byKey.Count;
     public float MaxFocusRadius { get; private set; }
-    public int VisibleCount { get; private set; }
-    public int MatrixCount { get; private set; }
+    private RobotArmWorldView view;
+    private bool disposed;
+    public int VisibleCount => view != null ? view.VisibleCount : 0;
+    public int MatrixCount => view != null ? view.MatrixCount : 0;
+    public bool HasView => view != null;
     public static RobotArmWorld Ensure(TerrainGenerator terrain)
     {
         if (terrain == null) return null;
         if (Current != null && Current.Terrain == terrain) return Current;
-        var root = new GameObject("RobotArmWorld");
-        root.transform.SetParent(terrain.transform, false);
-        root.transform.SetPositionAndRotation(Vector3.zero, Quaternion.identity);
-        var world = root.AddComponent<RobotArmWorld>();
-        world.Terrain = terrain;
-        world.StateStore = terrain.GetComponent<BlockStateStore>();
+        Current?.Dispose();
+        var world = new RobotArmWorld { Terrain = terrain, StateStore = terrain.GetComponent<BlockStateStore>() };
         Current = world;
+        MapObjectTickManager.RegisterUpdateTick(world);
+        world.AttachView();
         return world;
+    }
+
+    public void AttachView()
+    {
+        if (disposed) throw new ObjectDisposedException(nameof(RobotArmWorld));
+        if (view != null) return;
+        view = RobotArmWorldView.Create(this, Terrain.transform);
+        foreach (var arm in ordered) view.Bind(arm);
+    }
+
+    public void DetachView()
+    {
+        if (view == null) return;
+        var previous = view;
+        view = null;
+        previous.Release();
+    }
+
+    internal void OnViewDestroyed(RobotArmWorldView previous)
+    {
+        if (ReferenceEquals(view, previous)) view = null;
+    }
+
+    public void Dispose()
+    {
+        if (disposed) return;
+        MapObjectTickManager.UnregisterUpdateTick(this);
+        ClearRecords();
+        DetachView();
+        disposed = true;
+        if (ReferenceEquals(Current, this)) Current = null;
     }
     internal bool IsValid(int index, uint generation) => states.Contains(index, generation);
     internal ref RobotArmRuntimeState GetState(int index, uint generation) => ref states.Get(index, generation);
@@ -85,10 +119,11 @@ public sealed class RobotArmWorld : MonoBehaviour, IMapObjectUpdateTick, IMapObj
         byKey.Add(key, arm);
         MaxFocusRadius = Mathf.Max(MaxFocusRadius, prototype.FocusActivationRadius);
         ordered.Add(arm);
+        AddMarkerArm(arm);
         orderDirty = true;
         markersDirty = true;
         arm.ApplyTransferState(placement.robotArmState);
-        CreateCollider(arm);
+        view?.Bind(arm);
         if (arm.TryResolveEndpoints(out var input, out var output)) { Observe(input, arm); Observe(output, arm); }
         foreach (var coordinate in placement.occupiedCoordinates) Observe(coordinate, arm);
         Bind(arm);
@@ -155,6 +190,7 @@ public sealed class RobotArmWorld : MonoBehaviour, IMapObjectUpdateTick, IMapObj
         byKey.Remove(storageKey);
         markersDirty = true;
         ordered.Remove(arm);
+        RemoveMarkerArm(arm);
         if (arm.TryResolveEndpoints(out var input, out var output)) { Unobserve(input, arm); Unobserve(output, arm); }
         foreach (var coordinate in arm.RuntimeOccupiedCoordinates) Unobserve(coordinate, arm);
         ReleaseEntity(arm);
@@ -166,8 +202,7 @@ public sealed class RobotArmWorld : MonoBehaviour, IMapObjectUpdateTick, IMapObj
         foreach (var coordinate in arm.RuntimeOccupiedCoordinates)
             if (Terrain.TryGetLoadedBlock(coordinate, out var block) && block != null && ReferenceEquals(block.MapObject, arm))
                 block.SetMapObject(null);
-        if (colliders.TryGetValue(arm, out var collider))
-        { collider.enabled = false; colliderOwners.Remove(collider); colliders.Remove(arm); Destroy(collider); }
+        view?.Unbind(arm);
         states.Release(arm.Index, arm.Generation);
     }
     public void Wake(Vector2Int coordinate)
@@ -200,21 +235,92 @@ public sealed class RobotArmWorld : MonoBehaviour, IMapObjectUpdateTick, IMapObj
         list.Remove(arm);
         if (list.Count == 0) observers.Remove(coordinate);
     }
+
+    private void AddMarkerArm(RobotArmInstance arm)
+    {
+        Vector2Int cell = GetMarkerCell(arm.WorldPosition);
+        if (!markerArmsByCell.TryGetValue(cell, out List<RobotArmInstance> arms))
+        {
+            arms = new List<RobotArmInstance>(4);
+            markerArmsByCell.Add(cell, arms);
+        }
+        arms.Add(arm);
+    }
+
+    private void RemoveMarkerArm(RobotArmInstance arm)
+    {
+        Vector2Int cell = GetMarkerCell(arm.WorldPosition);
+        if (markerArmsByCell.TryGetValue(cell, out List<RobotArmInstance> arms))
+        {
+            arms.Remove(arm);
+            if (arms.Count == 0) markerArmsByCell.Remove(cell);
+        }
+        visibleMarkerArms.Remove(arm);
+        markerCandidateSet.Remove(arm);
+    }
+
+    private void BuildMarkerCandidates(in AreaMarkerVisibilityContext context)
+    {
+        markerCandidateSet.Clear();
+        markerCandidates.Clear();
+        if (context.ShowAll)
+        {
+            for (int i = 0; i < ordered.Count; i++) AddMarkerCandidate(ordered[i]);
+            return;
+        }
+
+        foreach (RobotArmInstance arm in visibleMarkerArms) AddMarkerCandidate(arm);
+        AddMarkerCandidate(selectedMarkerArm);
+        if (!context.HasPlayer) return;
+
+        Vector2Int center = GetMarkerCell(context.PlayerPosition);
+        int radius = Mathf.CeilToInt(MarkerVisibleRange / MarkerChunkSize);
+        for (int z = center.y - radius; z <= center.y + radius; z++)
+        {
+            for (int x = center.x - radius; x <= center.x + radius; x++)
+            {
+                if (!markerArmsByCell.TryGetValue(new Vector2Int(x, z), out List<RobotArmInstance> arms)) continue;
+                for (int i = 0; i < arms.Count; i++) AddMarkerCandidate(arms[i]);
+            }
+        }
+    }
+
+    private void AddMarkerCandidate(RobotArmInstance arm)
+    {
+        if (arm != null && markerCandidateSet.Add(arm)) markerCandidates.Add(arm);
+    }
+
+    private static Vector2Int GetMarkerCell(Vector3 position)
+    {
+        return new Vector2Int(
+            Mathf.FloorToInt(position.x / MarkerChunkSize),
+            Mathf.FloorToInt(position.z / MarkerChunkSize));
+    }
+
     public void WakeAll() { foreach (var arm in ordered) arm.WakeRuntimeSleep(); }
-    public void SetSelectedMarkerArm(RobotArmInstance arm) { selectedMarkerArm = arm; }
+    public void SetSelectedMarkerArm(RobotArmInstance arm)
+    {
+        if (ReferenceEquals(selectedMarkerArm, arm)) return;
+        selectedMarkerArm = arm;
+        markersDirty = true;
+    }
     internal bool RefreshAreaMarkers(in AreaMarkerVisibilityContext context)
     {
         bool changed = markersDirty;
         markersDirty = false;
-        VisibleMarkerCount = 0;
-        foreach (var arm in ordered)
+        BuildMarkerCandidates(context);
+        for (int i = 0; i < markerCandidates.Count; i++)
         {
-            bool visible = AreaMarkerVisibilityContext.ShouldShow(5f, false, arm == selectedMarkerArm,
+            RobotArmInstance arm = markerCandidates[i];
+            bool visible = AreaMarkerVisibilityContext.ShouldShow(MarkerVisibleRange, false, arm == selectedMarkerArm,
                 context.ShowAll, context.HasPlayer, context.PlayerPosition, arm.WorldPosition);
             changed |= arm.MarkersVisible != visible;
             arm.MarkersVisible = visible;
-            if (visible) VisibleMarkerCount += 2;
+            if (visible) visibleMarkerArms.Add(arm);
+            else visibleMarkerArms.Remove(arm);
         }
+        MarkerVisibilityCandidateCount = markerCandidates.Count;
+        VisibleMarkerCount = visibleMarkerArms.Count * 2;
         return changed;
     }
     internal void AppendAreaMarkers(AreaMarkerRenderer renderer)
@@ -232,34 +338,22 @@ public sealed class RobotArmWorld : MonoBehaviour, IMapObjectUpdateTick, IMapObj
             renderer.Append(outputRequest, Matrix4x4.Translate(outputPosition), 0, false, false);
         }
     }
-    private void CreateCollider(RobotArmInstance arm)
-    {
-        SphereCollider source = arm.Prototype.GetComponent<SphereCollider>();
-        if (source == null || !source.enabled) return;
-        gameObject.layer = arm.Prototype.gameObject.layer;
-        Matrix4x4 local = transform.worldToLocalMatrix * Matrix4x4.TRS(arm.WorldPosition, arm.WorldRotation, arm.Prototype.transform.localScale);
-        SphereCollider collider = gameObject.AddComponent<SphereCollider>();
-        collider.center = local.MultiplyPoint3x4(source.center);
-        Vector3 scale = local.lossyScale;
-        collider.radius = source.radius * Mathf.Max(Mathf.Abs(scale.x), Mathf.Abs(scale.y), Mathf.Abs(scale.z));
-        collider.sharedMaterial = source.sharedMaterial;
-        collider.isTrigger = source.isTrigger;
-        colliderOwners.Add(collider, arm);
-        colliders.Add(arm, collider);
-    }
     internal static RobotArmInstance ResolveCollider(Collider collider) =>
-        Current != null && collider != null && Current.colliderOwners.TryGetValue(collider, out var arm) ? arm : null;
+        Current?.view != null ? Current.view.ResolveCollider(collider) : null;
     internal void SuspendForEditing(RobotArmInstance arm)
     { arm.Persist(); Remove(arm.Placement.hasStorageKey ? arm.Placement.storageKey : arm.Placement.anchorCoordinate); }
     public void ClearRecords()
     {
         foreach (var arm in ordered) ReleaseEntity(arm);
         byKey.Clear(); ordered.Clear(); observers.Clear(); planned.Clear();
+        markerArmsByCell.Clear(); visibleMarkerArms.Clear();
+        markerCandidateSet.Clear(); markerCandidates.Clear();
         selectedMarkerArm = null; MaxFocusRadius = 0f; markersDirty = true;
+        VisibleMarkerCount = MarkerVisibilityCandidateCount = 0;
         interactionBlockCacheHits = interactionBlockCacheMisses = 0L;
         interactionTargetCacheHits = interactionTargetCacheMisses = 0L;
         interactionFreightCacheHits = interactionFreightCacheMisses = 0L;
-        batches.ClearActiveMatrices();
+        view?.ClearPresentation();
         UtilityPole.InvalidateRobotArmConsumers();
     }
     public void ClearItems() { foreach (var arm in ordered) arm.ClearHeldItemAndTransferState(); FlushSaveStates(); }
@@ -301,37 +395,12 @@ public sealed class RobotArmWorld : MonoBehaviour, IMapObjectUpdateTick, IMapObj
         }
         planned.Clear();
     }
-    private void OnEnable() { MapObjectTickManager.RegisterUpdateTick(this); }
-    private void OnDisable() { MapObjectTickManager.UnregisterUpdateTick(this); batches.SuspendRendering(); }
-    private void OnDestroy()
-    {
-        if (Current == this) Current = null;
-        UtilityPole.InvalidateRobotArmConsumers();
-        batches.Dispose();
-    }
-    private void LateUpdate()
-    {
-        if (renderCamera == null || !renderCamera.isActiveAndEnabled) renderCamera = Camera.main;
-        culling.Update(renderCamera);
-        batches.ClearActiveMatrices();
-        VisibleCount = MatrixCount = 0;
-        using (MapObjectTickProfiler.SampleNamed("Runtime", nameof(RobotArm), "Robot Arm Render Build"))
-        {
-            foreach (var arm in ordered)
-            {
-                if (!culling.IsAnyLayerVisible(arm.Template.LayerMask) || !culling.Intersects(arm.CullBounds)) continue;
-                VisibleCount++;
-                MatrixCount += arm.Template.Append(arm, batches);
-            }
-        }
-        using (MapObjectTickProfiler.SampleNamed("Runtime", nameof(RobotArm), "Robot Arm Render Submit"))
-            batches.RenderBatches(renderCamera);
-    }
+
     public static void AppendProfilerCounters()
     {
         if (Current == null) return;
-        MapObjectTickProfiler.AddRuntimeCounter("RobotArmWorld", "GameObjects", 1);
-        MapObjectTickProfiler.AddRuntimeCounter("RobotArmWorld", "MonoBehaviours", 1);
+        MapObjectTickProfiler.AddRuntimeCounter("RobotArmWorld", "GameObjects", Current.HasView ? 1 : 0);
+        MapObjectTickProfiler.AddRuntimeCounter("RobotArmWorld", "MonoBehaviours", Current.HasView ? 1 : 0);
         MapObjectTickProfiler.AddRuntimeCounter("RobotArmWorld", "Entities", Current.Count);
         MapObjectTickProfiler.AddRuntimeCounter("RobotArmWorld", "Visible", Current.VisibleCount);
         MapObjectTickProfiler.AddRuntimeCounter("RobotArmWorld", "Matrices", Current.MatrixCount);

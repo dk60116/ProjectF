@@ -11,6 +11,7 @@ public partial class TerrainGenerator : MonoBehaviour
     private readonly ProjectF.Rendering.CameraRenderCulling surfaceCameraCulling = new ProjectF.Rendering.CameraRenderCulling();
     public int LastRenderedChunkSurfaces { get; private set; }
     public int LastCulledChunkSurfaces { get; private set; }
+    public int LastSurfaceCandidateChunks { get; private set; }
 
     private void ApplyChunkBiomeSurface(ChunkRuntimeData chunk, ChunkSurfaceBuildData chunkSurface)
     {
@@ -97,6 +98,7 @@ public partial class TerrainGenerator : MonoBehaviour
     {
         LastRenderedChunkSurfaces = 0;
         LastCulledChunkSurfaces = 0;
+        LastSurfaceCandidateChunks = 0;
         if (loadedChunks.Count == 0)
         {
             return;
@@ -106,10 +108,42 @@ public partial class TerrainGenerator : MonoBehaviour
         Material[] surfaceMaterials = GetGeneratedSurfaceMaterials();
         Material foamMaterial = GetGeneratedSurfaceFoamMaterial();
 
+        int normalizedChunkSize = Mathf.Max(1, chunkSize);
+        if (surfaceCameraCulling.TryGetVisibleCellRange(
+                normalizedChunkSize,
+                1,
+                out Vector2Int minimumChunk,
+                out Vector2Int maximumChunk)
+            && ProjectF.Rendering.CameraRenderCulling.GetCellCount(minimumChunk, maximumChunk)
+               < loadedChunks.Count)
+        {
+            int candidateCount = 0;
+            for (int y = minimumChunk.y; y <= maximumChunk.y; y++)
+            {
+                for (int x = minimumChunk.x; x <= maximumChunk.x; x++)
+                {
+                    if (!loadedChunks.TryGetValue(new Vector2Int(x, y), out ChunkRuntimeData chunk))
+                    {
+                        continue;
+                    }
+
+                    candidateCount++;
+                    RenderChunkSurface(chunk, surfaceMaterials, foamMaterial, renderCamera);
+                }
+            }
+
+            // Chunks outside the conservative frustum cell range are known culled without
+            // invoking GeometryUtility for every retained simulation chunk.
+            LastCulledChunkSurfaces += Mathf.Max(0, loadedChunks.Count - candidateCount);
+            LastSurfaceCandidateChunks = candidateCount;
+            return;
+        }
+
         foreach (KeyValuePair<Vector2Int, ChunkRuntimeData> pair in loadedChunks)
         {
             RenderChunkSurface(pair.Value, surfaceMaterials, foamMaterial, renderCamera);
         }
+        LastSurfaceCandidateChunks = loadedChunks.Count;
     }
 
     private void RenderChunkSurface(

@@ -1,11 +1,17 @@
-using ProjectF.Attributes;
 using ProjectF.Conveyors;
 using System;
 using System.Collections.Generic;
+using System.Threading;
 using UnityEngine;
 
-public partial class Block : BaseObject
+/// <summary>
+/// Managed block entity stored by BlockDataStore. This is deliberately not a
+/// MonoBehaviour: engine presentation is reached through explicit services and
+/// the authoritative entity lifetime follows its chunk handle.
+/// </summary>
+public partial class Block
 {
+    private static int nextRuntimeIdentity;
     public enum BlockType { Ground }
     public const int ConveyorCellItemUnit = 4;
     public const int InputAreaCenterStackStateSentinel = -1000000001;
@@ -76,14 +82,16 @@ public partial class Block : BaseObject
         new Vector2(-0.35000002f, 0f)
     };
 
-    [SerializeField, ReadOnly]
     private Vector2Int coordinate;
     private BlockHandle runtimeHandle;
 
-    [SerializeField]
+    private readonly int runtimeIdentity = AllocateRuntimeIdentity();
+    private bool isAlive;
+    private string objectName;
+
     private BlockType type;
 
-    // Runtime ownership is restored from BlockStateStore, not Unity component serialization.
+    // Runtime ownership is restored from BlockStateStore, not authoring-template serialization.
     private IMapObjectTarget mapObject;
     // A harvestable resource can remain under an installation occupying the same cell.
     private ResourceInstance resource;
@@ -92,22 +100,16 @@ public partial class Block : BaseObject
     private ConveyorRuntimeRecord runtimeConveyorRecordOverride;
     private PipeRuntimeRecord runtimePipeRecord;
 
-    [SerializeField]
     private Transform floorObjectDropAnchor;
 
-    [SerializeField]
-    private PortableObject floorObjectPrefab;
+    private PortableObjectTemplate floorObjectPrefab;
 
-    [SerializeField, Min(1)]
     private int maxFloorObjectsPerStack = 10;
 
-    [SerializeField, Min(0.01f)]
     private float floorObjectVerticalSpacing = 0.05f;
 
-    [SerializeField, Min(1)]
     private int inputAreaCenterMaxObjects = 10;
 
-    [SerializeField]
     private MapFocus focusPrefab;
 
     private MapFocus focus;
@@ -164,23 +166,57 @@ public partial class Block : BaseObject
     private bool inputAreaCenterObjectsVisible = true;
 
     /// <summary>
-    /// Runtime blocks are lightweight components hosted by TerrainGenerator-owned
-    /// proxy shards. Their shared Transform is not a cell position; spatial code
-    /// must use this value.
+    /// Presentation objects are owned by TerrainGenerator, never by the entity.
+    /// Spatial code must use WorldPosition rather than this service root.
     /// </summary>
     public Vector3 WorldPosition => new Vector3(coordinate.x, 0f, coordinate.y);
+    public string ObjectName => objectName;
+    public int RuntimeIdentity => runtimeIdentity;
+    public bool IsAlive => isAlive;
+    public int RuntimeLayer => cachedTerrainGenerator != null
+        ? cachedTerrainGenerator.gameObject.layer
+        : 0;
+    public bool IsRuntimeActive => isAlive
+                                   && cachedTerrainGenerator != null
+                                   && cachedTerrainGenerator.isActiveAndEnabled;
     public Transform RuntimeObjectRoot
     {
         get
         {
             if (cachedTerrainGenerator == null)
             {
-                cachedTerrainGenerator = GetComponentInParent<TerrainGenerator>();
+                cachedTerrainGenerator = TerrainGenerator.Active;
             }
 
-            return cachedTerrainGenerator != null ? cachedTerrainGenerator.transform : transform;
+            return cachedTerrainGenerator != null ? cachedTerrainGenerator.transform : null;
         }
     }
+
+    private static int AllocateRuntimeIdentity()
+    {
+        int value = Interlocked.Increment(ref nextRuntimeIdentity);
+        if (value != 0)
+        {
+            return value;
+        }
+
+        return Interlocked.Increment(ref nextRuntimeIdentity);
+    }
+
+    public static bool operator ==(Block left, Block right)
+    {
+        bool leftInvalid = ReferenceEquals(left, null) || !left.isAlive;
+        bool rightInvalid = ReferenceEquals(right, null) || !right.isAlive;
+        return leftInvalid || rightInvalid
+            ? leftInvalid == rightInvalid
+            : ReferenceEquals(left, right);
+    }
+
+    public static bool operator !=(Block left, Block right) => !(left == right);
+
+    public override bool Equals(object value) => ReferenceEquals(this, value);
+
+    public override int GetHashCode() => runtimeIdentity;
 
     private Vector3 BlockLocalToWorld(Vector3 localPosition)
     {
@@ -192,7 +228,7 @@ public partial class Block : BaseObject
         return worldPosition - WorldPosition;
     }
 
-    internal void ConfigureRuntimeTemplate(Block template)
+    internal void ConfigureRuntimeTemplate(BlockTemplate template)
     {
         if (template == null)
         {
@@ -200,11 +236,11 @@ public partial class Block : BaseObject
         }
 
         floorObjectDropAnchor = null;
-        floorObjectPrefab = template.floorObjectPrefab;
-        maxFloorObjectsPerStack = template.maxFloorObjectsPerStack;
-        floorObjectVerticalSpacing = template.floorObjectVerticalSpacing;
-        inputAreaCenterMaxObjects = template.inputAreaCenterMaxObjects;
-        focusPrefab = template.focusPrefab;
+        floorObjectPrefab = template.FloorObjectPrefab;
+        maxFloorObjectsPerStack = template.MaxFloorObjectsPerStack;
+        floorObjectVerticalSpacing = template.FloorObjectVerticalSpacing;
+        inputAreaCenterMaxObjects = template.InputAreaCenterMaxObjects;
+        focusPrefab = template.FocusPrefab;
     }
 
     private struct ConveyorCornerMotionState
@@ -318,32 +354,9 @@ public partial class Block : BaseObject
         public readonly ConveyorCornerContinuation cornerContinuation;
     }
 
-    private void Awake()
-    {
-        // Runtime proxy components are configured after AddComponent returns.
-        // Initialization is therefore intentionally deferred to Initialize.
-    }
-
-    private void OnDestroy()
-    {
-        if (!Application.isPlaying)
-        {
-            return;
-        }
-
-        TerrainGenerator.Active?.SetConveyorDotVisualActive(this, false);
-
-        if (floorObjectPool == null)
-        {
-            return;
-        }
-
-        ResetFloorObjects(false, false);
-    }
-
     public void Initialize(Vector2Int blockCoordinate, BlockType blockType)
     {
-        Initialize(GetComponentInParent<TerrainGenerator>(), blockCoordinate, blockType);
+        Initialize(TerrainGenerator.Active, blockCoordinate, blockType);
     }
 
     internal void Initialize(
@@ -351,6 +364,7 @@ public partial class Block : BaseObject
         Vector2Int blockCoordinate,
         BlockType blockType)
     {
+        isAlive = true;
         childReferencesCached = false;
         cachedTerrainGenerator = terrainGenerator;
         CacheChildReferences();
@@ -359,9 +373,9 @@ public partial class Block : BaseObject
         objectName = $"{blockType}_{blockCoordinate.x}_{blockCoordinate.y}";
         inputAreaCenterVisibilityRequests.Clear();
         inputAreaCenterObjectsVisible = true;
-        // A freshly added component already has the invalid conveyor-cache
-        // defaults. Deferring the first invalidation until a conveyor is attached
-        // avoids allocating simulation state for empty terrain cells.
+        // A new entity already has invalid conveyor-cache defaults. Deferring the
+        // first invalidation until a conveyor is attached avoids allocating
+        // simulation state for empty terrain cells.
         SetFocusVisible(false);
         SetMouseFocusVisible(false);
         SetSelectionFocusVisible(false);
@@ -540,7 +554,7 @@ public partial class Block : BaseObject
 
         // Installations are owned by TerrainGenerator's live-installation registry
         // and can span chunk boundaries. Only a cell-owned resource is released
-        // with its proxy; installation lifetime is handled separately.
+        // with its entity; installation lifetime is handled separately.
         ResourceInstance cellResource = Resource;
         if (cellResource != null)
         {
@@ -571,6 +585,8 @@ public partial class Block : BaseObject
         objectName = string.Empty;
         floorObjectDropAnchor = null;
         childReferencesCached = false;
+        cachedTerrainGenerator = null;
+        isAlive = false;
     }
 
     private static void DestroyRuntimeAnchor(ref Transform runtimeAnchor)
@@ -584,11 +600,11 @@ public partial class Block : BaseObject
 
         if (Application.isPlaying)
         {
-            Destroy(target.gameObject);
+            UnityEngine.Object.Destroy(target.gameObject);
         }
         else
         {
-            DestroyImmediate(target.gameObject);
+            UnityEngine.Object.DestroyImmediate(target.gameObject);
         }
     }
 
@@ -930,7 +946,7 @@ public partial class Block : BaseObject
             return false;
         }
 
-        worldPosition = topObject.transform.position;
+        worldPosition = topObject.WorldPosition;
         return true;
     }
 
@@ -1096,11 +1112,10 @@ public partial class Block : BaseObject
         }
 
         portableObject.SetBatchedRendering(false);
-        portableObject.transform.SetParent(inputAreaCenterAnchor, true);
-        portableObject.transform.position = inputAreaCenterAnchor.position;
-        portableObject.transform.rotation = Quaternion.identity;
-        portableObject.transform.localScale = Vector3.one;
-        portableObject.gameObject.SetActive(true);
+        portableObject.SetCachedParent(inputAreaCenterAnchor, true);
+        portableObject.SetWorldPose(inputAreaCenterAnchor.position, Quaternion.identity);
+        portableObject.SetWorldScale(Vector3.one);
+        portableObject.SetCachedActive(true);
         portableObject.MoveTo(
             targetWorldPosition,
             Mathf.Max(0f, delay),
@@ -1151,11 +1166,12 @@ public partial class Block : BaseObject
         }
 
         portableObject.SetBatchedRendering(false);
-        portableObject.transform.SetParent(inputAreaCenterAnchor, true);
-        portableObject.transform.position = startWorldPositionProvider != null ? startWorldPositionProvider() : startWorldPosition;
-        portableObject.transform.rotation = Quaternion.identity;
-        portableObject.transform.localScale = Vector3.one;
-        portableObject.gameObject.SetActive(inputAreaCenterObjectsVisible);
+        portableObject.SetCachedParent(inputAreaCenterAnchor, true);
+        portableObject.SetWorldPose(
+            startWorldPositionProvider != null ? startWorldPositionProvider() : startWorldPosition,
+            Quaternion.identity);
+        portableObject.SetWorldScale(Vector3.one);
+        portableObject.SetCachedActive(inputAreaCenterObjectsVisible);
 
         int objectIndex = inputAreaCenterStack.Count;
         Vector3 finalLocalPosition = new Vector3(0f, objectIndex * InputAreaCenterVerticalSpacing, 0f);
@@ -1453,11 +1469,12 @@ public partial class Block : BaseObject
         }
 
         portableObject.SetBatchedRendering(false);
-        portableObject.transform.SetParent(anchor, true);
-        portableObject.transform.position = startWorldPositionProvider != null ? startWorldPositionProvider() : startWorldPosition;
-        portableObject.transform.rotation = Quaternion.identity;
-        portableObject.transform.localScale = Vector3.one;
-        portableObject.gameObject.SetActive(true);
+        portableObject.SetCachedParent(anchor, true);
+        portableObject.SetWorldPose(
+            startWorldPositionProvider != null ? startWorldPositionProvider() : startWorldPosition,
+            Quaternion.identity);
+        portableObject.SetWorldScale(Vector3.one);
+        portableObject.SetCachedActive(true);
 
         int objectIndex = stack.Count;
         Vector3 finalWorldPosition = GetFloorObjectWorldPosition(anchor, objectIndex);
@@ -1473,11 +1490,12 @@ public partial class Block : BaseObject
                 return;
             }
 
-            portableObject.transform.SetParent(anchor, true);
-            portableObject.transform.position = GetFloorObjectWorldPosition(anchor, objectIndex);
-            portableObject.transform.localRotation = Quaternion.identity;
-            portableObject.transform.localScale = Vector3.one;
-            portableObject.gameObject.SetActive(true);
+            portableObject.SetCachedParent(anchor, true);
+            portableObject.SetWorldPose(
+                GetFloorObjectWorldPosition(anchor, objectIndex),
+                anchor != null ? anchor.rotation : Quaternion.identity);
+            portableObject.SetWorldScale(anchor != null ? anchor.lossyScale : Vector3.one);
+            portableObject.SetCachedActive(true);
             portableObject.SetBatchedRendering(true);
             gate?.MarkSettled();
             onComplete?.Invoke();
@@ -1571,13 +1589,12 @@ public partial class Block : BaseObject
         }
 
         portableObject.SetBatchedRendering(false);
-        portableObject.transform.SetParent(anchor, true);
-        portableObject.transform.position = startWorldPositionProvider != null
-            ? startWorldPositionProvider()
-            : startWorldPosition;
-        portableObject.transform.rotation = Quaternion.identity;
-        portableObject.transform.localScale = Vector3.one;
-        portableObject.gameObject.SetActive(true);
+        portableObject.SetCachedParent(anchor, true);
+        portableObject.SetWorldPose(
+            startWorldPositionProvider != null ? startWorldPositionProvider() : startWorldPosition,
+            Quaternion.identity);
+        portableObject.SetWorldScale(Vector3.one);
+        portableObject.SetCachedActive(true);
         Vector3 finalWorldPosition = GetFloorObjectWorldPosition(anchor, 0);
         portableObject.MoveTo(
             () => anchor != null ? GetFloorObjectWorldPosition(anchor, 0) : finalWorldPosition,
@@ -2405,11 +2422,12 @@ public partial class Block : BaseObject
         }
 
         portableObject.SetBatchedRendering(false);
-        portableObject.transform.SetParent(RuntimeObjectRoot, true);
-        portableObject.transform.position = startWorldPositionProvider != null ? startWorldPositionProvider() : startWorldPosition;
-        portableObject.transform.rotation = Quaternion.identity;
-        portableObject.transform.localScale = Vector3.one;
-        portableObject.gameObject.SetActive(true);
+        portableObject.SetCachedParent(RuntimeObjectRoot, true);
+        portableObject.SetWorldPose(
+            startWorldPositionProvider != null ? startWorldPositionProvider() : startWorldPosition,
+            Quaternion.identity);
+        portableObject.SetWorldScale(Vector3.one);
+        portableObject.SetCachedActive(true);
         SetConveyorItemAtLane(laneIndex, objectId, portableObject, ConveyorPickupGateState.Settled());
         TerrainGenerator.Active?.NotifyConveyorItemAddedToBelt();
         NotifyRuntimeItemStackChanged();
@@ -3290,7 +3308,7 @@ public partial class Block : BaseObject
                 itemId,
                 position,
                 rotation,
-                gameObject.layer,
+                RuntimeLayer,
                 useSleepAwakeDarkTint,
                 useBeltItemLineDebugColor,
                 beltItemLineDebugColor,
@@ -4144,7 +4162,7 @@ public partial class Block : BaseObject
     public BlockHandle RuntimeHandle => runtimeHandle;
     public BlockType Type => type;
     public IMapObjectTarget MapObject => mapObject;
-    internal bool CanReleaseResourceOnlyRuntimeProxy
+    internal bool CanReleaseResourceOnlyEntity
     {
         get
         {
@@ -4177,7 +4195,7 @@ public partial class Block : BaseObject
                    && conveyorLinearMotionStates.Count == 0;
         }
     }
-    public bool CanReleaseEmptyRuntimeProxy
+    public bool CanReleaseEmptyEntity
     {
         get
         {
@@ -5658,7 +5676,7 @@ public partial class Block : BaseObject
                 continue;
             }
 
-            Vector3 offset = candidateTopObject.transform.position - playerPosition;
+            Vector3 offset = candidateTopObject.WorldPosition - playerPosition;
             offset.y = 0f;
             float candidateDistanceSqr = offset.sqrMagnitude;
             UpdatePickupGates(candidateStack, gateOriginPosition);
@@ -5731,7 +5749,7 @@ public partial class Block : BaseObject
             return false;
         }
 
-        Vector3 offset = topObject.transform.position - playerPosition;
+        Vector3 offset = topObject.WorldPosition - playerPosition;
         offset.y = 0f;
         distanceSqr = offset.sqrMagnitude;
         float pickupRadiusSqr = pickupRadius * pickupRadius;
@@ -5990,7 +6008,7 @@ public partial class Block : BaseObject
                     break;
                 }
 
-                Vector3 worldPosition = portableObject.transform.position;
+                Vector3 worldPosition = portableObject.WorldPosition;
                 Vector3 offset = worldPosition - referenceWorldPosition;
                 offset.y = 0f;
                 float distanceSqr = offset.sqrMagnitude;
@@ -6837,7 +6855,7 @@ public partial class Block : BaseObject
 
         GameObject dotObject = GameObject.CreatePrimitive(PrimitiveType.Sphere);
         dotObject.name = $"ConveyorSlotDot_{laneIndex}";
-        dotObject.layer = gameObject.layer;
+        dotObject.layer = RuntimeLayer;
         dotObject.transform.SetParent(conveyorSlotDotRoot, false);
         dotObject.transform.localRotation = Quaternion.identity;
         dotObject.transform.localScale = new Vector3(
@@ -6848,7 +6866,7 @@ public partial class Block : BaseObject
         Collider collider = dotObject.GetComponent<Collider>();
         if (collider != null)
         {
-            Destroy(collider);
+            UnityEngine.Object.Destroy(collider);
         }
 
         MeshRenderer renderer = dotObject.GetComponent<MeshRenderer>();
@@ -7374,13 +7392,7 @@ public partial class Block : BaseObject
             return;
         }
 
-        if (Application.isPlaying)
-        {
-            Destroy(portableObject.gameObject);
-            return;
-        }
-
-        DestroyImmediate(portableObject.gameObject);
+        portableObject.Dispose();
     }
 
     private int GetAvailableFloorCapacity()
@@ -7533,8 +7545,14 @@ public partial class Block : BaseObject
             return true;
         }
 
-        TerrainGenerator generator = GetComponentInParent<TerrainGenerator>();
-        GameObject host = generator != null ? generator.gameObject : gameObject;
+        TerrainGenerator generator = cachedTerrainGenerator != null
+            ? cachedTerrainGenerator
+            : TerrainGenerator.Active;
+        GameObject host = generator != null ? generator.gameObject : null;
+        if (host == null)
+        {
+            return false;
+        }
         floorObjectPool = host.GetComponent<PortableObjectPool>();
 
         if (floorObjectPool == null)
@@ -7621,7 +7639,7 @@ public partial class Block : BaseObject
             }
         }
 
-        if (!portableObject.CachedGameObject.activeSelf)
+        if (!portableObject.IsActive)
         {
             portableObject.SetCachedActive(true);
         }
@@ -7636,7 +7654,7 @@ public partial class Block : BaseObject
         portableObject.SetBatchedRendering(false);
         portableObject.SetCachedParent(RuntimeObjectRoot, true);
         SetConveyorPortableObjectWorldPose(portableObject, laneIndex, worldPosition);
-        portableObject.CachedTransform.localScale = Vector3.one;
+        portableObject.SetWorldScale(Vector3.one);
         return portableObject;
     }
 
@@ -7702,12 +7720,12 @@ public partial class Block : BaseObject
         if (!ResolveFloorObjectPool() || floorObjectPool == null)
         {
             floorObject.SetBatchedRendering(false);
-            floorObject.gameObject.SetActive(false);
+            floorObject.SetCachedActive(false);
             return;
         }
 
         floorObject.SetBatchedRendering(false);
-        floorObject.transform.SetParent(null, true);
+        floorObject.SetCachedParent(null, true);
         floorObjectPool.Release(floorObject);
     }
 
@@ -7724,11 +7742,12 @@ public partial class Block : BaseObject
 
     private void ConfigureFloorObjectTransform(PortableObject portableObject, Transform anchor, int stackIndex)
     {
-        portableObject.transform.SetParent(anchor, true);
-        portableObject.transform.position = GetFloorObjectWorldPosition(anchor, stackIndex);
-        portableObject.transform.localRotation = Quaternion.identity;
-        portableObject.transform.localScale = Vector3.one;
-        portableObject.gameObject.SetActive(true);
+        portableObject.SetLocalPose(
+            anchor,
+            GetFloorObjectLocalPosition(anchor, stackIndex),
+            Quaternion.identity,
+            Vector3.one);
+        portableObject.SetCachedActive(true);
     }
 
     private Vector3 GetFloorObjectLocalPosition(Transform anchor, int stackIndex)
@@ -7753,10 +7772,9 @@ public partial class Block : BaseObject
             return;
         }
 
-        Transform portableTransform = portableObject.CachedTransform;
         portableObject.SetCachedParent(RuntimeObjectRoot, true);
         SetConveyorPortableObjectWorldPose(portableObject, laneIndex, GetConveyorLaneWorldPosition(laneIndex));
-        portableTransform.localScale = Vector3.one;
+        portableObject.SetWorldScale(RuntimeObjectRoot != null ? RuntimeObjectRoot.lossyScale : Vector3.one);
         portableObject.SetCachedActive(true);
     }
 
@@ -7772,11 +7790,12 @@ public partial class Block : BaseObject
             return;
         }
 
-        portableObject.transform.SetParent(inputAreaCenterAnchor, false);
-        portableObject.transform.localPosition = new Vector3(0f, stackIndex * InputAreaCenterVerticalSpacing, 0f);
-        portableObject.transform.localRotation = Quaternion.identity;
-        portableObject.transform.localScale = Vector3.one;
-        portableObject.gameObject.SetActive(true);
+        portableObject.SetLocalPose(
+            inputAreaCenterAnchor,
+            new Vector3(0f, stackIndex * InputAreaCenterVerticalSpacing, 0f),
+            Quaternion.identity,
+            Vector3.one);
+        portableObject.SetCachedActive(true);
     }
 
     private void ApplyInputAreaCenterObjectVisibility(PortableObject portableObject, int stackIndex)
@@ -7790,16 +7809,17 @@ public partial class Block : BaseObject
         {
             if (inputAreaCenterAnchor != null)
             {
-                portableObject.transform.SetParent(inputAreaCenterAnchor, false);
-                portableObject.transform.localPosition = new Vector3(0f, stackIndex * InputAreaCenterVerticalSpacing, 0f);
-                portableObject.transform.localRotation = Quaternion.identity;
-                portableObject.transform.localScale = Vector3.one;
+                portableObject.SetLocalPose(
+                    inputAreaCenterAnchor,
+                    new Vector3(0f, stackIndex * InputAreaCenterVerticalSpacing, 0f),
+                    Quaternion.identity,
+                    Vector3.one);
             }
 
             portableObject.SetBatchedRendering(false);
-            if (portableObject.gameObject.activeSelf)
+            if (portableObject.IsActive)
             {
-                portableObject.gameObject.SetActive(false);
+                portableObject.SetCachedActive(false);
             }
 
             return;
@@ -7807,9 +7827,9 @@ public partial class Block : BaseObject
 
         if (portableObject.IsMovingToTarget)
         {
-            if (!portableObject.gameObject.activeSelf)
+            if (!portableObject.IsActive)
             {
-                portableObject.gameObject.SetActive(true);
+                portableObject.SetCachedActive(true);
             }
 
             return;
@@ -7886,6 +7906,8 @@ public partial class Block : BaseObject
     {
         if (OwnsConveyorTransport)
             return ReadTransportLane(laneIndex, out ConveyorTransportItem item, out _) ? item.Id : -1;
+        if (TryReadBeltJobLane(laneIndex, out BeltLaneState nativeState))
+            return nativeState.ItemId;
         if (!IsConveyorStorageLaneIndex(laneIndex))
         {
             return -1;
@@ -7925,6 +7947,20 @@ public partial class Block : BaseObject
     private ConveyorPickupGateState GetConveyorPickupGateStateAtLane(int laneIndex)
     {
         if (ReadTransportLane(laneIndex, out ConveyorTransportItem item, out _)) return item.Gate;
+        if (TryReadBeltJobLane(laneIndex, out BeltLaneState nativeState))
+        {
+            return new ConveyorPickupGateState
+            {
+                hasGate = (nativeState.GateBits & 1) != 0,
+                requiresExit = (nativeState.GateBits & 2) != 0,
+                hasExited = (nativeState.GateBits & 4) != 0,
+                isSettled = (nativeState.GateBits & 8) != 0,
+                hasOrigin = (nativeState.GateBits & 16) != 0,
+                autoPickupBlocked = (nativeState.GateBits & 32) != 0,
+                dropOrigin = new Vector3(nativeState.DropX, nativeState.DropY, nativeState.DropZ),
+                exitRadius = nativeState.ExitRadius
+            };
+        }
         if (laneIndex < 0 || laneIndex >= conveyorItemPickupGateStates.Count)
         {
             return ConveyorPickupGateState.Settled();
@@ -7941,7 +7977,7 @@ public partial class Block : BaseObject
 
     private void SetConveyorPickupGateStateAtLane(int laneIndex, ConveyorPickupGateState gateState)
     {
-        QueueBeltJobWrite(laneIndex);
+        QueueBeltJobWrite(laneIndex, updatePickupGate: true);
         if (ReadTransportLane(laneIndex, out ConveyorTransportItem item, out _))
         {
             item.Gate = gateState;
@@ -9224,7 +9260,7 @@ public partial class Block : BaseObject
 
         if (portableObject.HasActiveOutline)
         {
-            if (!portableObject.CachedGameObject.activeSelf)
+            if (!portableObject.IsActive)
             {
                 portableObject.SetCachedActive(true);
             }
@@ -9244,7 +9280,7 @@ public partial class Block : BaseObject
                 portableObject.SetVisualRenderingSuppressed(true);
             }
 
-            if (!portableObject.IsMovingToTarget && portableObject.CachedGameObject.activeSelf)
+            if (!portableObject.IsMovingToTarget && portableObject.IsActive)
             {
                 DroppedItemPickupGate gate = portableObject.PickupGate;
                 gate?.SetPreserveStateOnDisable(true);
@@ -9254,7 +9290,7 @@ public partial class Block : BaseObject
             return;
         }
 
-        if (!portableObject.CachedGameObject.activeSelf)
+        if (!portableObject.IsActive)
         {
             portableObject.SetCachedActive(true);
         }
@@ -9279,7 +9315,7 @@ public partial class Block : BaseObject
 
         if (portableObject.HasActiveOutline)
         {
-            if (!portableObject.CachedGameObject.activeSelf)
+            if (!portableObject.IsActive)
             {
                 portableObject.SetCachedActive(true);
             }
@@ -9297,7 +9333,7 @@ public partial class Block : BaseObject
             portableObject.SetVisualRenderingSuppressed(true);
         }
 
-        if (!portableObject.IsMovingToTarget && portableObject.CachedGameObject.activeSelf)
+        if (!portableObject.IsMovingToTarget && portableObject.IsActive)
         {
             DroppedItemPickupGate gate = portableObject.PickupGate;
             gate?.SetPreserveStateOnDisable(true);
@@ -9709,8 +9745,7 @@ public partial class Block : BaseObject
                 continue;
             }
 
-            Transform portableTransform = portableObject.CachedTransform;
-            if (portableTransform.parent != RuntimeObjectRoot)
+            if (portableObject.PresentationParent != RuntimeObjectRoot)
             {
                 portableObject.SetCachedParent(RuntimeObjectRoot, true);
             }
@@ -11808,7 +11843,7 @@ public partial class Block : BaseObject
             return true;
         }
 
-        cachedTerrainGenerator = GetComponentInParent<TerrainGenerator>();
+        cachedTerrainGenerator = TerrainGenerator.Active;
         terrainGenerator = cachedTerrainGenerator;
         return terrainGenerator != null;
     }
@@ -13225,7 +13260,7 @@ public partial class Block : BaseObject
             return false;
         }
 
-        Vector3 offset = topObject.transform.position - playerPosition;
+        Vector3 offset = topObject.WorldPosition - playerPosition;
         offset.y = 0f;
         float distanceSqr = offset.sqrMagnitude;
         if (distanceSqr > pickupRadiusSqr)
@@ -13330,7 +13365,7 @@ public partial class Block : BaseObject
             return false;
         }
 
-        Vector3 offset = topObject.transform.position - playerPosition;
+        Vector3 offset = topObject.WorldPosition - playerPosition;
         offset.y = 0f;
         float distanceSqr = offset.sqrMagnitude;
         if (distanceSqr > pickupRadiusSqr)
@@ -13386,7 +13421,7 @@ public partial class Block : BaseObject
             return false;
         }
 
-        Vector3 offset = topObject.transform.position - playerPosition;
+        Vector3 offset = topObject.WorldPosition - playerPosition;
         offset.y = 0f;
         float distanceSqr = offset.sqrMagnitude;
         if (distanceSqr > pickupRadiusSqr)

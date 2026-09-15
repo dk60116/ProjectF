@@ -80,7 +80,7 @@ public sealed partial class RobotArmInstance : IMapObjectTarget, IMapObjectSimul
         BlockStateStore.InstallationSaveState placement)
     { World = world; Index = index; Generation = generation; Prototype = prototype; Placement = placement; Template = world.GetTemplate(prototype); }
     public bool IsRuntimeActive => World != null && World.IsValid(Index, Generation);
-    public bool IsTargetActive => IsRuntimeActive && World.isActiveAndEnabled;
+    public bool IsTargetActive => IsRuntimeActive;
     public MapObject SceneObject => null;
     public string ObjectName => Prototype.ObjectName;
     public bool AllowsFocus => Prototype.AllowsFocus;

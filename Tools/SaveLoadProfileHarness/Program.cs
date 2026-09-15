@@ -11,10 +11,23 @@ internal static class Program
     private static int Main(string[] args)
     {
         RegisterAssemblyResolver();
+        if (args.Length == 1 && string.Equals(args[0], "--self-check", StringComparison.Ordinal))
+        {
+            if (!SaveGameBinarySerializer.RunTerrainCloneRegionRoundTripSelfCheck(
+                    out string firstIssue))
+            {
+                Console.Error.WriteLine($"FAIL {firstIssue}");
+                return 2;
+            }
+
+            Console.WriteLine("PASS terrain clone region save round trip");
+            return 0;
+        }
+
         if ((args.Length != 1 && args.Length != 3) || !File.Exists(args[0]))
         {
             Console.Error.WriteLine(
-                "Usage: SaveLoadProfileHarness <save-file> [chunk-size load-radius]");
+                "Usage: SaveLoadProfileHarness --self-check | <save-file> [chunk-size load-radius]");
             return 1;
         }
 
@@ -125,7 +138,8 @@ internal static class Program
         Console.WriteLine(
             $"Animals={map.animals?.Count ?? 0} Farmland={map.farmlandCoordinates?.Count ?? 0} " +
             $"Fertilizer={map.farmlandFertilizer?.Count ?? 0} " +
-            $"PlantedResources={map.plantedResources?.Count ?? 0}");
+            $"PlantedResources={map.plantedResources?.Count ?? 0} " +
+            $"TerrainCloneRegions={map.terrainCloneRegions?.Count ?? 0}");
         Console.WriteLine(
             $"Player=({data.player?.position.x ?? 0:F2},{data.player?.position.y ?? 0:F2}," +
             $"{data.player?.position.z ?? 0:F2}) HasPlayer={data.player?.hasPlayer ?? false}");

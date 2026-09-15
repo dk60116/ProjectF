@@ -27,7 +27,7 @@ public class Handcart : Vehicle, IPlayerItemStorage, IPlayerItemStoragePortableP
     private GameObject handleObject;
 
     [SerializeField]
-    private PortableObject itemObjectPrefab;
+    private PortableObjectTemplate itemObjectPrefab;
     [SerializeField, Min(0.001f)]
     private float itemStackVerticalSpacing = 0.05f;
     [SerializeField, HideInInspector]
@@ -1657,31 +1657,35 @@ public class Handcart : Vehicle, IPlayerItemStorage, IPlayerItemStoragePortableP
     private PortableObject CreateCargoVisual(int itemId)
     {
         PortableObject visual = itemObjectPrefab != null
-            ? Instantiate(itemObjectPrefab)
+            ? PortableObject.Create(itemObjectPrefab)
             : CreateGeneratedCargoVisual(itemId);
         if (visual == null)
         {
             return null;
         }
 
-        visual.gameObject.layer = gameObject.layer;
+        visual.Layer = gameObject.layer;
         if (!visual.SetItem(itemId))
         {
             PlayerItemStorageUtility.DestroyPortableObject(visual);
             return null;
         }
 
+        _ = visual.PresentationGameObject;
         visual.SetBatchedRendering(false);
         return visual;
     }
 
     private PortableObject CreateGeneratedCargoVisual(int itemId)
     {
-        GameObject itemObject = new GameObject($"HandcartCargoItem_{itemId}");
-        itemObject.transform.SetParent(transform, false);
-        itemObject.AddComponent<MeshFilter>();
-        itemObject.AddComponent<MeshRenderer>();
-        return itemObject.AddComponent<PortableObject>();
+        PortableObject entity = PortableObject.Create(
+            transform.position,
+            transform.rotation,
+            Vector3.one,
+            gameObject.layer,
+            $"HandcartCargoItem_{itemId}");
+        entity.SetCachedParent(transform, true);
+        return entity;
     }
 
     private void PlayCargoMove(
@@ -1697,13 +1701,12 @@ public class Handcart : Vehicle, IPlayerItemStorage, IPlayerItemStoragePortableP
             return;
         }
 
-        visual.transform.SetParent(targetPoint, true);
-        visual.transform.position = startWorldPositionProvider != null
-            ? startWorldPositionProvider()
-            : startWorldPosition;
-        visual.transform.rotation = targetPoint.rotation;
-        visual.transform.localScale = Vector3.one;
-        visual.gameObject.SetActive(true);
+        visual.SetCachedParent(targetPoint, true);
+        visual.SetWorldPose(
+            startWorldPositionProvider != null ? startWorldPositionProvider() : startWorldPosition,
+            targetPoint.rotation);
+        visual.SetWorldScale(targetPoint.lossyScale);
+        visual.SetCachedActive(true);
 
         Vector3 finalWorldPosition = targetPoint.TransformPoint(targetLocalPosition);
         visual.MoveTo(
@@ -1734,11 +1737,8 @@ public class Handcart : Vehicle, IPlayerItemStorage, IPlayerItemStoragePortableP
             return;
         }
 
-        visual.transform.SetParent(targetPoint, false);
-        visual.transform.localPosition = targetLocalPosition;
-        visual.transform.localRotation = Quaternion.identity;
-        visual.transform.localScale = Vector3.one;
-        visual.gameObject.SetActive(true);
+        visual.SetLocalPose(targetPoint, targetLocalPosition, Quaternion.identity, Vector3.one);
+        visual.SetCachedActive(true);
         visual.SetBatchedRendering(false);
         visual.GetOrAddPickupGate()?.MarkSettled();
     }
@@ -1887,7 +1887,7 @@ public class Handcart : Vehicle, IPlayerItemStorage, IPlayerItemStoragePortableP
             && cargoIndex < itemVisuals.Count
             && itemVisuals[cargoIndex] != null)
         {
-            return itemVisuals[cargoIndex].transform.position;
+            return itemVisuals[cargoIndex].WorldPosition;
         }
 
         if (TryGetCargoPose(cargoIndex, out Transform targetPoint, out Vector3 localPosition))

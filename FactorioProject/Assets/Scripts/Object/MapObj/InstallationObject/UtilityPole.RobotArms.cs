@@ -232,7 +232,7 @@ public partial class UtilityPole
     {
         // Evaluate the shared network once before the entity loop. Individual arms then
         // perform only their cached binding lookup and fixed-point supply calculation.
-        EnsureNetworksEvaluated();
+        PrepareSimulationPowerTick();
     }
 
     public static bool HasElectricityAvailable(RobotArmInstance arm)
@@ -263,8 +263,7 @@ public partial class UtilityPole
         ElectricNetwork network = ResolveRobotArmNetwork(arm);
         if (network != null)
         {
-            supplied = required * Mathf.Clamp01(
-                network.ProductionWatts / Mathf.Max(required, network.RequiredWatts));
+            supplied = required * network.Power.GetConsumerRatio(required, true);
         }
 
         return true;
@@ -310,10 +309,7 @@ public partial class UtilityPole
         }
 
         consumedEnergy = DeterministicSimulationUnits.ToFloat(
-            DeterministicSimulationUnits.MultiplyRatio(
-                DeterministicSimulationUnits.FromFloat(requestedEnergy),
-                DeterministicSimulationUnits.FromFloat(network.ProductionWatts),
-                DeterministicSimulationUnits.FromFloat(Mathf.Max(requiredWatts, network.RequiredWatts))));
+            network.Power.GrantEnergy(DeterministicSimulationUnits.FromFloat(requestedEnergy), requiredWatts));
         return consumedEnergy > 0f;
     }
 

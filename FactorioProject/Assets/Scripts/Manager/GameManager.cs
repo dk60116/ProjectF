@@ -127,7 +127,7 @@ public class GameManager : MonoBehaviour
         
         uiManager = GetComponentInChildren<UIManager>();
         itemManager = GetComponentInChildren<ItemManager>();
-        virtualObjectWorld = VirtualObjectWorld.EnsureFor(gameObject);
+        virtualObjectWorld = VirtualObjectWorld.Ensure();
         worldTimeService = WorldTimeService.EnsureFor(gameObject);
         virtualItemStackRenderer = GetComponent<VirtualItemStackRenderer>();
         if (virtualItemStackRenderer == null)
@@ -147,7 +147,8 @@ public class GameManager : MonoBehaviour
             railLineDebugRenderer = gameObject.AddComponent<RailLineDebugRenderer>();
         }
 
-        animalAIWorld = AnimalAIWorld.EnsureFor(gameObject);
+        animalAIWorld = AnimalAIWorld.Ensure();
+        animalAIWorld.AttachView(transform);
         animalHerdDebugRenderer = GetComponent<AnimalHerdDebugRenderer>();
         if (animalHerdDebugRenderer == null)
         {
@@ -210,6 +211,8 @@ public class GameManager : MonoBehaviour
         if (Instance == this)
         {
             SceneManager.sceneLoaded -= OnSceneLoaded;
+            animalAIWorld?.Dispose();
+            virtualObjectWorld?.Dispose();
             Instance = null;
         }
     }
@@ -752,6 +755,7 @@ public sealed class RuntimeItemGiveReceiver : MonoBehaviour
     private float currentPlayerSpeed;
     private bool hasPlayerSpeedSample;
     private float cachedStatusWorldStatsTime = float.NegativeInfinity;
+    private int cachedLoadedMapObjectTotal = -1;
     private int cachedInstalledObjectTotal = -1;
     private int cachedConveyorItemTotal;
     private int cachedSceneGameObjectTotal = -1;
@@ -2046,7 +2050,8 @@ public sealed class RuntimeItemGiveReceiver : MonoBehaviour
             sceneMonoBehaviourTotal,
             activeSceneMonoBehaviourTotal);
         float censusAge = float.IsNegativeInfinity(cachedStatusWorldStatsTime) ? -1f : Time.unscaledTime - cachedStatusWorldStatsTime;
-        extraTokens += " worldStatsAgeSeconds=" + censusAge.ToString("0.###", CultureInfo.InvariantCulture);
+        extraTokens += " mapObjectTotal=" + cachedLoadedMapObjectTotal.ToString(CultureInfo.InvariantCulture)
+            + " worldStatsAgeSeconds=" + censusAge.ToString("0.###", CultureInfo.InvariantCulture);
         return ToolResult.Status(
             fps,
             frameMs,
@@ -3218,7 +3223,7 @@ public sealed class RuntimeItemGiveReceiver : MonoBehaviour
         {
             cachedCensusTerrain = terrain;
             cachedStatusWorldStatsTime = float.NegativeInfinity;
-            cachedInstalledObjectTotal = cachedSceneGameObjectTotal = cachedActiveSceneGameObjectTotal = -1;
+            cachedLoadedMapObjectTotal = cachedInstalledObjectTotal = cachedSceneGameObjectTotal = cachedActiveSceneGameObjectTotal = -1;
             cachedSceneMonoBehaviourTotal = cachedActiveSceneMonoBehaviourTotal = -1;
             cachedInstallationTypeCounts = "-";
         }
@@ -3230,7 +3235,7 @@ public sealed class RuntimeItemGiveReceiver : MonoBehaviour
             installationCountsByItemId.Clear();
             cachedInstalledObjectTotal = terrain != null ? terrain.GetInstallationItemCounts(installationCountsByItemId) : 0;
             cachedInstallationTypeCounts = BuildInstallationTypeCountToken(installationCountsByItemId);
-            terrain?.CaptureRuntimeProfilerCensus();
+            cachedLoadedMapObjectTotal = terrain != null ? terrain.CaptureRuntimeProfilerCensus() : 0;
             cachedStatusWorldStatsTime = Time.unscaledTime;
         }
         cachedConveyorItemTotal = terrain != null ? terrain.GetConveyorItemCount() : 0;
@@ -3766,6 +3771,12 @@ public sealed class RuntimeItemGiveReceiver : MonoBehaviour
 
     private static ToolResult CloneProfilingArea()
     {
+        if (!SaveGameBinarySerializer.RunTerrainCloneRegionRoundTripSelfCheck(
+                out string saveIssue))
+        {
+            return ToolResult.Error(0, 0, $"profileclone save check failed first={saveIssue}");
+        }
+
         TerrainGenerator terrain = TerrainGenerator.ResolveActive();
         if (terrain == null)
         {

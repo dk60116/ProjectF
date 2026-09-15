@@ -122,7 +122,7 @@ public partial class TerrainGenerator : MonoBehaviour
     private bool IsLoadedRuntimeBlock(Block block)
     {
         return block != null
-            && block.gameObject.activeInHierarchy
+            && block.IsRuntimeActive
             && loadedBlocks.TryGetValue(block.Coordinate, out Block loadedBlock)
             && loadedBlock == block;
     }
@@ -146,7 +146,7 @@ public partial class TerrainGenerator : MonoBehaviour
         return handle.IsValid
             && loadedBlocks.TryGetValue(handle, out block)
             && block != null
-            && block.gameObject.activeInHierarchy;
+            && block.IsRuntimeActive;
     }
 
     private bool IsActiveConveyor(Block block)
@@ -3053,16 +3053,16 @@ public partial class TerrainGenerator : MonoBehaviour
             return false;
         }
 
-        if (line.runtimeBlocks.Length != line.blockHandles.Count)
+        if (line.entityCache.Length != line.blockHandles.Count)
         {
-            line.runtimeBlocks = new BlockDataStore.RuntimeProxyCache[line.blockHandles.Count];
+            line.entityCache = new BlockDataStore.EntityCache[line.blockHandles.Count];
         }
 
         BlockHandle handle = line.blockHandles[slotIndex];
         return handle.IsValid
-            && loadedBlocks.TryGetValue(handle, ref line.runtimeBlocks[slotIndex], out block)
+            && loadedBlocks.TryGetValue(handle, ref line.entityCache[slotIndex], out block)
             && block != null
-            && block.gameObject.activeInHierarchy;
+            && block.IsRuntimeActive;
     }
 
     private static bool CanTickStraightConveyorLine(ConveyorLine line)
@@ -4226,7 +4226,7 @@ public partial class TerrainGenerator : MonoBehaviour
     private float runtimeProfilerCensusTime = float.NegativeInfinity;
 
     // Explicit diagnostic census: recurring perf/status polls never traverse hierarchies.
-    public void CaptureRuntimeProfilerCensus()
+    public int CaptureRuntimeProfilerCensus()
     {
         using var sample = MapObjectTickProfiler.SampleNamed("Diagnostics", "World Census", "World Census");
         runtimeProfilerCensus.Clear();
@@ -4359,6 +4359,7 @@ public partial class TerrainGenerator : MonoBehaviour
         AddRuntimeCensusCounter("Physics", "BeltColliders", beltColliderCount);
         AddRuntimeCensusCounter("Physics", "EnabledBeltColliders", enabledBeltColliderCount);
         runtimeProfilerCensusTime = Time.unscaledTime;
+        return loadedMapObjectCount;
     }
 
     private void AddRuntimeCensusCounter(string group, string name, int value)
@@ -4374,6 +4375,8 @@ public partial class TerrainGenerator : MonoBehaviour
             MapObjectTickProfiler.AddRuntimeCounter(counter.Group, counter.Name, counter.Value, "cached census; see Census/AgeSeconds");
         ResourceTypeWorld.AppendProfilerCounters();
         ConveyorWorld.AppendProfilerCounters();
+        AreaMarkerRenderer.AppendProfilerCounters();
+        FacilitySimulationWorld.AppendProfilerCounters();
         ProjectF.Rendering.WorldVisualUpdateManager.AppendProfilerCounters();
         ProjectF.MapObjects.StaticMapObjectBatchRenderer staticRenderer =
             GameManager.Instance != null ? GameManager.Instance.StaticMapObjectRenderer : null;
@@ -4395,6 +4398,14 @@ public partial class TerrainGenerator : MonoBehaviour
             staticRenderer != null ? staticRenderer.ActiveBatchCount : 0);
         MapObjectTickProfiler.AddRuntimeCounter(
             "StaticInstallationRender",
+            "CandidateBatches",
+            staticRenderer != null ? staticRenderer.LastCandidateBatchCount : 0);
+        MapObjectTickProfiler.AddRuntimeCounter(
+            "StaticInstallationRender",
+            "CandidateCells",
+            staticRenderer != null ? staticRenderer.LastCandidateCellCount : 0);
+        MapObjectTickProfiler.AddRuntimeCounter(
+            "StaticInstallationRender",
             "Matrices",
             staticRenderer != null ? staticRenderer.ActiveMatrixCount : 0);
         MapObjectTickProfiler.AddRuntimeCounter(
@@ -4402,21 +4413,15 @@ public partial class TerrainGenerator : MonoBehaviour
             "EstimatedDrawCalls",
             staticRenderer != null ? staticRenderer.EstimatedDrawCallCount : 0);
         MapObjectTickProfiler.AddRuntimeCounter("World", "LoadedChunks", loadedChunks.Count);
-        MapObjectTickProfiler.AddRuntimeCounter(
-            "World",
-            "ChunkGameObjects",
-            createdBlockRuntimeProxyHostCount);
+        MapObjectTickProfiler.AddRuntimeCounter("World", "ChunkGameObjects", 0);
         MapObjectTickProfiler.AddRuntimeCounter("World", "DedicatedBlockGameObjects", 0);
-        MapObjectTickProfiler.AddRuntimeCounter(
-            "World",
-            "BlockHostGameObjects",
-            loadedBlocks.Count > 0 ? 1 : 0);
-        MapObjectTickProfiler.AddRuntimeCounter("World", "BlockComponents", loadedBlocks.Count);
+        MapObjectTickProfiler.AddRuntimeCounter("World", "BlockHostGameObjects", 0);
+        MapObjectTickProfiler.AddRuntimeCounter("World", "BlockComponents", 0);
+        MapObjectTickProfiler.AddRuntimeCounter("World", "BlockEntities", loadedBlocks.Count);
         MapObjectTickProfiler.AddRuntimeCounter(
             "World",
             "ChunkSurfaceMeshes",
             GetLoadedChunkSurfaceMeshCount());
-        MapObjectTickProfiler.AddRuntimeCounter("World", "LoadedBlocks", loadedBlocks.Count);
         MapObjectTickProfiler.AddRuntimeCounter(
             "World",
             "BlockSimulationStates",
@@ -4439,6 +4444,7 @@ public partial class TerrainGenerator : MonoBehaviour
         MapObjectTickProfiler.AddRuntimeCounter("RenderToggles", "FreeCameraPlayerCulling", gameManager != null && gameManager.FreeCamera && gameManager.FreeCameraPlayerCulling);
         MapObjectTickProfiler.AddRuntimeCounter("Render", "RenderedChunkSurfaces", LastRenderedChunkSurfaces);
         MapObjectTickProfiler.AddRuntimeCounter("Render", "CulledChunkSurfaces", LastCulledChunkSurfaces);
+        MapObjectTickProfiler.AddRuntimeCounter("Render", "SurfaceCandidateChunks", LastSurfaceCandidateChunks);
 
         MapObjectTickProfiler.AddRuntimeCounter("Conveyor", "LoadedConveyorItems", GetLoadedConveyorItemCount());
         MapObjectTickProfiler.AddRuntimeCounter("Conveyor", "TotalConveyorItems", GetConveyorItemCount());
@@ -4453,12 +4459,18 @@ public partial class TerrainGenerator : MonoBehaviour
         PortableItemRenderer itemRenderer = portableItemRenderer;
         MapObjectTickProfiler.AddRuntimeCounter("ConveyorItemRender", "ItemBatchCellSize", itemRenderer != null ? itemRenderer.VirtualConveyorItemBatchCellSize : 0f);
         MapObjectTickProfiler.AddRuntimeCounter("ConveyorItemRender", "PortableBrgBatches", itemRenderer != null ? itemRenderer.PortableObjectBatchRendererGroupBatchCount : 0);
+        MapObjectTickProfiler.AddRuntimeCounter("ConveyorItemRender", "PortableCandidateBatches", itemRenderer != null ? itemRenderer.PortableObjectCandidateBatchCount : 0);
+        MapObjectTickProfiler.AddRuntimeCounter("ConveyorItemRender", "PortableCandidateCells", itemRenderer != null ? itemRenderer.PortableObjectCandidateCellCount : 0);
         MapObjectTickProfiler.AddRuntimeCounter("ConveyorItemRender", "StaticBatches", itemRenderer != null ? itemRenderer.StaticVirtualConveyorItemBatchCount : 0);
+        MapObjectTickProfiler.AddRuntimeCounter("ConveyorItemRender", "StaticCandidateBatches", itemRenderer != null ? itemRenderer.StaticVirtualConveyorItemCandidateBatchCount : 0);
+        MapObjectTickProfiler.AddRuntimeCounter("ConveyorItemRender", "StaticCandidateCells", itemRenderer != null ? itemRenderer.StaticVirtualConveyorItemCandidateCellCount : 0);
         MapObjectTickProfiler.AddRuntimeCounter("ConveyorItemRender", "StaticBrgBatches", itemRenderer != null ? itemRenderer.StaticVirtualConveyorItemBatchRendererGroupBatchCount : 0);
         MapObjectTickProfiler.AddRuntimeCounter("ConveyorItemRender", "StaticInstances", itemRenderer != null ? itemRenderer.StaticVirtualConveyorItemInstanceCount : 0);
         MapObjectTickProfiler.AddRuntimeCounter("ConveyorItemRender", "GpuMotionInstances", itemRenderer != null ? itemRenderer.GpuMotionVirtualConveyorItemInstanceCount : 0);
         MapObjectTickProfiler.AddRuntimeCounter("ConveyorItemRender", "StaticDrawCalls", itemRenderer != null ? itemRenderer.StaticVirtualConveyorItemDrawCallCount : 0);
         MapObjectTickProfiler.AddRuntimeCounter("ConveyorItemRender", "DynamicBatches", itemRenderer != null ? itemRenderer.DynamicVirtualConveyorItemBatchCount : 0);
+        MapObjectTickProfiler.AddRuntimeCounter("ConveyorItemRender", "DynamicCandidateBatches", itemRenderer != null ? itemRenderer.DynamicVirtualConveyorItemCandidateBatchCount : 0);
+        MapObjectTickProfiler.AddRuntimeCounter("ConveyorItemRender", "DynamicCandidateCells", itemRenderer != null ? itemRenderer.DynamicVirtualConveyorItemCandidateCellCount : 0);
         MapObjectTickProfiler.AddRuntimeCounter("ConveyorItemRender", "DynamicBrgBatches", itemRenderer != null ? itemRenderer.DynamicVirtualConveyorItemBatchRendererGroupBatchCount : 0);
         MapObjectTickProfiler.AddRuntimeCounter("ConveyorItemRender", "DynamicInstances", itemRenderer != null ? itemRenderer.DynamicVirtualConveyorItemInstanceCount : 0);
         MapObjectTickProfiler.AddRuntimeCounter("ConveyorItemRender", "DynamicDrawCalls", itemRenderer != null ? itemRenderer.DynamicVirtualConveyorItemDrawCallCount : 0);
@@ -4531,6 +4543,8 @@ public partial class TerrainGenerator : MonoBehaviour
         MapObjectTickProfiler.AddRuntimeCounter("Virtualization", "VirtualBeltSourceHiddenObjects", virtualConveyorBeltRenderer != null ? virtualConveyorBeltRenderer.HiddenSourceViewObjectCount : 0);
         MapObjectTickProfiler.AddRuntimeCounter("Virtualization", "VirtualBeltEffectiveBatchCellSize", virtualConveyorBeltRenderer != null ? virtualConveyorBeltRenderer.EffectiveBatchCellSize : 0f);
         MapObjectTickProfiler.AddRuntimeCounter("Virtualization", "VirtualBeltBatches", virtualConveyorBeltRenderer != null ? virtualConveyorBeltRenderer.ActiveBatchCount : 0);
+        MapObjectTickProfiler.AddRuntimeCounter("Virtualization", "VirtualBeltCandidateBatches", virtualConveyorBeltRenderer != null ? virtualConveyorBeltRenderer.LastCandidateBatchCount : 0);
+        MapObjectTickProfiler.AddRuntimeCounter("Virtualization", "VirtualBeltCandidateCells", virtualConveyorBeltRenderer != null ? virtualConveyorBeltRenderer.LastCandidateCellCount : 0);
         MapObjectTickProfiler.AddRuntimeCounter("Virtualization", "VirtualBeltBrgBatches", virtualConveyorBeltRenderer != null ? virtualConveyorBeltRenderer.ActiveBatchRendererGroupBatchCount : 0);
         MapObjectTickProfiler.AddRuntimeCounter("Virtualization", "VirtualBeltEntries", virtualConveyorBeltRenderer != null ? virtualConveyorBeltRenderer.ActiveEntryCount : 0);
         MapObjectTickProfiler.AddRuntimeCounter("Virtualization", "VirtualBeltDedicatedTopEntries", virtualConveyorBeltRenderer != null ? virtualConveyorBeltRenderer.DedicatedBeltTopEntryCount : 0);

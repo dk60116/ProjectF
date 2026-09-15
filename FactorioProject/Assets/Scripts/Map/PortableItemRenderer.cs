@@ -263,7 +263,11 @@ public sealed partial class PortableItemRenderer : MonoBehaviour
     public int RegisteredPortableObjectCount => registeredPortableObjects.Count;
     public int PortableObjectBatchRendererGroupBatchCount =>
         portableObjectBatches.ActiveBatchRendererGroupBatchCount;
+    public int PortableObjectCandidateBatchCount => portableObjectBatches.LastCandidateBatchCount;
+    public int PortableObjectCandidateCellCount => portableObjectBatches.LastCandidateCellCount;
     public int StaticVirtualConveyorItemBatchCount => virtualConveyorBatches.ActiveBatchCount;
+    public int StaticVirtualConveyorItemCandidateBatchCount => virtualConveyorBatches.LastCandidateBatchCount;
+    public int StaticVirtualConveyorItemCandidateCellCount => virtualConveyorBatches.LastCandidateCellCount;
     public int StaticVirtualConveyorItemInstanceCount => virtualConveyorBatches.ActiveMatrixCount;
     public int StaticVirtualConveyorItemDrawCallCount => virtualConveyorBatches.EstimatedDrawCallCount;
     public int GpuMotionVirtualConveyorItemInstanceCount =>
@@ -271,6 +275,8 @@ public sealed partial class PortableItemRenderer : MonoBehaviour
     public int StaticVirtualConveyorItemBatchRendererGroupBatchCount =>
         virtualConveyorBatches.ActiveBatchRendererGroupBatchCount;
     public int DynamicVirtualConveyorItemBatchCount => dynamicVirtualConveyorBatches.ActiveBatchCount;
+    public int DynamicVirtualConveyorItemCandidateBatchCount => dynamicVirtualConveyorBatches.LastCandidateBatchCount;
+    public int DynamicVirtualConveyorItemCandidateCellCount => dynamicVirtualConveyorBatches.LastCandidateCellCount;
     public int DynamicVirtualConveyorItemInstanceCount => dynamicVirtualConveyorBatches.ActiveMatrixCount;
     public int DynamicVirtualConveyorItemDrawCallCount => dynamicVirtualConveyorBatches.EstimatedDrawCallCount;
     public int DynamicVirtualConveyorItemBatchRendererGroupBatchCount =>
@@ -587,7 +593,7 @@ public sealed partial class PortableItemRenderer : MonoBehaviour
 
     private void RenderPortableObjectBatches()
     {
-        portableObjectBatches.RenderBatches(mainCamera);
+        portableObjectBatches.RenderBatches(mainCamera, portableObjectBatchCellSize);
     }
 
     private void RenderVirtualConveyorItems()
@@ -926,7 +932,7 @@ public sealed partial class PortableItemRenderer : MonoBehaviour
             && terrainGenerator != null
             && terrainGenerator.TryResolveLoadedBlock(handle, out block)
             && block != null
-            && block.gameObject.activeInHierarchy;
+            && block.IsRuntimeActive;
     }
 
     private void RefreshDynamicVirtualConveyorRenderBlocksIfNeeded()
@@ -1277,7 +1283,7 @@ public sealed partial class PortableItemRenderer : MonoBehaviour
     private void RefreshVirtualConveyorBlockRenderCache(BlockHandle handle, Block block, BlockRenderCache cache)
     {
         Bounds bounds = CreateDynamicVirtualConveyorBlockCullBounds(block);
-        if (!itemCameraCulling.IsLayerVisible(block.gameObject.layer) || !itemCameraCulling.Intersects(bounds))
+        if (!itemCameraCulling.IsLayerVisible(block.RuntimeLayer) || !itemCameraCulling.Intersects(bounds))
         {
             // Drop stale draw entries, but retain the pending update until it becomes visible.
             // A large visible batch must not draw an obsolete off-screen item at its old pose.
@@ -1390,7 +1396,7 @@ public sealed partial class PortableItemRenderer : MonoBehaviour
         long staticRenderStartTimestamp = BeginRuntimeProfileSample(out bool profileStaticRender);
         try
         {
-            virtualConveyorBatches.RenderBatches(mainCamera);
+            virtualConveyorBatches.RenderBatches(mainCamera, virtualConveyorItemBatchCellSize);
         }
         finally
         {
@@ -1424,7 +1430,7 @@ public sealed partial class PortableItemRenderer : MonoBehaviour
         long dynamicRenderStartTimestamp = BeginRuntimeProfileSample(out bool profileDynamicRender);
         try
         {
-            dynamicVirtualConveyorBatches.RenderBatches(mainCamera);
+            dynamicVirtualConveyorBatches.RenderBatches(mainCamera, virtualConveyorItemBatchCellSize);
         }
         finally
         {
@@ -1728,7 +1734,7 @@ public sealed partial class PortableItemRenderer : MonoBehaviour
 
     private DynamicVirtualConveyorCullResult GetDynamicVirtualConveyorBlockCullResult(Block block)
     {
-        if (block == null || !itemCameraCulling.IsLayerVisible(block.gameObject.layer))
+        if (block == null || !itemCameraCulling.IsLayerVisible(block.RuntimeLayer))
         {
             return DynamicVirtualConveyorCullResult.Layer;
         }

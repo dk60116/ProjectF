@@ -1,11 +1,15 @@
 using System.Collections.Generic;
 using UnityEngine;
+using UnityEngine.Serialization;
 
 public class PlayerBag : MonoBehaviour
 {
     public event System.Action Changed;
 
+    [FormerlySerializedAs("portableStack")]
     [SerializeField]
+    private List<PortableTemplateStack> portableStackTemplates;
+
     private List<PortableStack> portableStack;
 
     [SerializeField]
@@ -33,7 +37,12 @@ public class PlayerBag : MonoBehaviour
             portableStack = new List<PortableStack>();
         }
 
-        if (!initialized || portableStack.Count == 0)
+        if (!initialized)
+        {
+            CreatePortableStacksFromTemplates();
+        }
+
+        if (portableStack.Count == 0)
         {
             SyncPortableStacksFromChildStackRoots();
         }
@@ -69,7 +78,7 @@ public class PlayerBag : MonoBehaviour
             {
                 if (stack.stack[j] != null)
                 {
-                    stack.stack[j].gameObject.SetActive(false);
+                    stack.stack[j].SetCachedActive(false);
                 }
             }
         }
@@ -119,7 +128,7 @@ public class PlayerBag : MonoBehaviour
 
     private void SyncPortableStacksFromChildStackRoots()
     {
-        if (usesExternalStack)
+        if (usesExternalStack || portableStack.Count > 0)
         {
             return;
         }
@@ -130,15 +139,42 @@ public class PlayerBag : MonoBehaviour
             return;
         }
 
-        if (!ShouldUseChildStackRoots(childStacks))
+        for (int i = 0; i < childStacks.Count; i++)
+        {
+            portableStack.Add(childStacks[i]);
+        }
+    }
+
+    private void CreatePortableStacksFromTemplates()
+    {
+        if (usesExternalStack || portableStack.Count > 0 || portableStackTemplates == null)
         {
             return;
         }
 
-        portableStack.Clear();
-        for (int i = 0; i < childStacks.Count; i++)
+        for (int i = 0; i < portableStackTemplates.Count; i++)
         {
-            portableStack.Add(childStacks[i]);
+            List<PortableObjectTemplate> templates = portableStackTemplates[i]?.stack;
+            if (templates == null || templates.Count == 0)
+            {
+                portableStack.Add(new PortableStack { stack = new List<PortableObject>() });
+                continue;
+            }
+
+            PortableStack runtimeStack = new PortableStack
+            {
+                stack = new List<PortableObject>(templates.Count)
+            };
+            for (int j = 0; j < templates.Count; j++)
+            {
+                PortableObjectTemplate template = templates[j];
+                if (template != null)
+                {
+                    runtimeStack.stack.Add(template.CreateEntity(true));
+                }
+            }
+
+            portableStack.Add(runtimeStack);
         }
     }
 
@@ -154,22 +190,23 @@ public class PlayerBag : MonoBehaviour
                 continue;
             }
 
-            PortableObject[] stackObjects = child.GetComponentsInChildren<PortableObject>(true);
-            if (stackObjects == null || stackObjects.Length == 0)
+            PortableObjectTemplate[] stackTemplates = child.GetComponentsInChildren<PortableObjectTemplate>(true);
+            if (stackTemplates == null || stackTemplates.Length == 0)
             {
                 continue;
             }
 
             PortableStack stack = new PortableStack
             {
-                stack = new List<PortableObject>(stackObjects.Length)
+                stack = new List<PortableObject>(stackTemplates.Length)
             };
 
-            for (int j = 0; j < stackObjects.Length; j++)
+            for (int j = 0; j < stackTemplates.Length; j++)
             {
-                if (stackObjects[j] != null)
+                PortableObjectTemplate template = stackTemplates[j];
+                if (template != null)
                 {
-                    stack.stack.Add(stackObjects[j]);
+                    stack.stack.Add(template.CreateEntity(true));
                 }
             }
 
@@ -190,44 +227,6 @@ public class PlayerBag : MonoBehaviour
         return target != null
                && !string.IsNullOrEmpty(target.name)
                && target.name.StartsWith("Stack", System.StringComparison.OrdinalIgnoreCase);
-    }
-
-    private bool ShouldUseChildStackRoots(List<PortableStack> childStacks)
-    {
-        if (portableStack == null || portableStack.Count == 0)
-        {
-            return true;
-        }
-
-        if (childStacks.Count > portableStack.Count)
-        {
-            return true;
-        }
-
-        if (childStacks.Count < portableStack.Count)
-        {
-            return false;
-        }
-
-        for (int i = 0; i < childStacks.Count; i++)
-        {
-            List<PortableObject> childStack = childStacks[i].stack;
-            List<PortableObject> serializedStack = portableStack[i] != null ? portableStack[i].stack : null;
-            if (childStack == null || serializedStack == null || childStack.Count != serializedStack.Count)
-            {
-                return true;
-            }
-
-            for (int j = 0; j < childStack.Count; j++)
-            {
-                if (childStack[j] != serializedStack[j])
-                {
-                    return true;
-                }
-            }
-        }
-
-        return false;
     }
 
     public void RefreshExternalStackCounts(bool notify = true)
@@ -301,10 +300,10 @@ public class PlayerBag : MonoBehaviour
             return false;
         }
 
-        targetPortableObject.gameObject.SetActive(true);
+        targetPortableObject.SetCachedActive(true);
         if (!targetPortableObject.SetItem(objectId))
         {
-            targetPortableObject.gameObject.SetActive(false);
+            targetPortableObject.SetCachedActive(false);
             targetPortableObject = null;
             return false;
         }
@@ -579,9 +578,9 @@ public class PlayerBag : MonoBehaviour
                     }
                 }
             }
-            if (portableObject.gameObject.activeSelf != shouldBeActive)
+            if (portableObject.IsActive != shouldBeActive)
             {
-                portableObject.gameObject.SetActive(shouldBeActive);
+                portableObject.SetCachedActive(shouldBeActive);
                 changed = true;
             }
         }
@@ -761,9 +760,9 @@ public class PlayerBag : MonoBehaviour
 
         if (!TryFindPortableObjectIndex(targetPortableObject, out int stackIndex, out int objectIndex))
         {
-            if (!targetPortableObject.gameObject.activeSelf)
+            if (!targetPortableObject.IsActive)
             {
-                targetPortableObject.gameObject.SetActive(true);
+                targetPortableObject.SetCachedActive(true);
             }
 
             NotifyChanged();
@@ -771,9 +770,9 @@ public class PlayerBag : MonoBehaviour
         }
 
         currentStack[stackIndex] = Mathf.Max(currentStack[stackIndex], objectIndex + 1);
-        if (!targetPortableObject.gameObject.activeSelf)
+        if (!targetPortableObject.IsActive)
         {
-            targetPortableObject.gameObject.SetActive(true);
+            targetPortableObject.SetCachedActive(true);
         }
 
         SynchronizeSlotObjectActivity(stackIndex);
@@ -790,9 +789,9 @@ public class PlayerBag : MonoBehaviour
         }
 
         reservedObjects.Remove(targetPortableObject);
-        if (targetPortableObject.gameObject.activeSelf)
+        if (targetPortableObject.IsActive)
         {
-            targetPortableObject.gameObject.SetActive(false);
+            targetPortableObject.SetCachedActive(false);
         }
 
         if (TryMergeDuplicateItemStacks())
@@ -835,7 +834,7 @@ public class PlayerBag : MonoBehaviour
         currentStack[index] = topIndex;
         if (topObject != null)
         {
-            topObject.gameObject.SetActive(false);
+            topObject.SetCachedActive(false);
         }
 
         ClampVisualPreservedStackCount(index);
@@ -881,7 +880,7 @@ public class PlayerBag : MonoBehaviour
         PortableObject topObject = stack.stack[occupiedCount - 1];
         if (topObject != null)
         {
-            startWorldPosition = topObject.transform.position;
+            startWorldPosition = topObject.WorldPosition;
         }
 
         objectId = GetSlotItemId(index);
@@ -936,7 +935,7 @@ public class PlayerBag : MonoBehaviour
         PortableObject topObject = stack.stack[occupiedCount - 1];
         if (topObject != null)
         {
-            startWorldPosition = topObject.transform.position;
+            startWorldPosition = topObject.WorldPosition;
         }
 
         objectId = GetSlotItemId(index);
@@ -1045,7 +1044,7 @@ public class PlayerBag : MonoBehaviour
             PortableObject portableObject = stack.stack[topIndex];
             if (portableObject != null)
             {
-                portableObject.gameObject.SetActive(false);
+                portableObject.SetCachedActive(false);
             }
         }
 
@@ -1169,14 +1168,14 @@ public class PlayerBag : MonoBehaviour
                 return false;
             }
 
-            if (!targetPortableObject.gameObject.activeSelf)
+            if (!targetPortableObject.IsActive)
             {
-                targetPortableObject.gameObject.SetActive(true);
+                targetPortableObject.SetCachedActive(true);
             }
 
-            if (sourcePortableObject.gameObject.activeSelf)
+            if (sourcePortableObject.IsActive)
             {
-                sourcePortableObject.gameObject.SetActive(false);
+                sourcePortableObject.SetCachedActive(false);
             }
         }
 
@@ -1274,7 +1273,7 @@ public class PlayerBag : MonoBehaviour
         {
             PortableObject portableObject = stack.stack[i];
             if (portableObject != null
-                && !portableObject.gameObject.activeSelf
+                && !portableObject.IsActive
                 && !reservedObjects.Contains(portableObject))
             {
                 return i;
@@ -1433,9 +1432,9 @@ public class PlayerBag : MonoBehaviour
         for (int i = logicalCount; i < activeCount; i++)
         {
             PortableObject portableObject = stack.stack[i];
-            if (portableObject != null && portableObject.gameObject.activeSelf)
+            if (portableObject != null && portableObject.IsActive)
             {
-                portableObject.gameObject.SetActive(false);
+                portableObject.SetCachedActive(false);
             }
         }
 
@@ -1462,9 +1461,9 @@ public class PlayerBag : MonoBehaviour
             return false;
         }
 
-        if (removedPortableObject.gameObject.activeSelf)
+        if (removedPortableObject.IsActive)
         {
-            removedPortableObject.gameObject.SetActive(false);
+            removedPortableObject.SetCachedActive(false);
         }
 
         visualPreservedStackCounts[index] = Mathf.Max(0, visualPreservedStackCounts[index] - 1);
@@ -1511,9 +1510,9 @@ public class PlayerBag : MonoBehaviour
             return false;
         }
 
-        if (targetPortableObject.gameObject.activeSelf)
+        if (targetPortableObject.IsActive)
         {
-            targetPortableObject.gameObject.SetActive(false);
+            targetPortableObject.SetCachedActive(false);
         }
 
         reservedObjects.Add(targetPortableObject);
@@ -1657,9 +1656,9 @@ public class PlayerBag : MonoBehaviour
                     {
                         continue;
                     }
-                    if (portableObject.gameObject.activeSelf)
+                    if (portableObject.IsActive)
                     {
-                        portableObject.gameObject.SetActive(false);
+                        portableObject.SetCachedActive(false);
                     }
                 }
             }
@@ -1716,9 +1715,9 @@ public class PlayerBag : MonoBehaviour
                 shouldBeActive = false;
             }
 
-            if (portableObject.gameObject.activeSelf != shouldBeActive)
+            if (portableObject.IsActive != shouldBeActive)
             {
-                portableObject.gameObject.SetActive(shouldBeActive);
+                portableObject.SetCachedActive(shouldBeActive);
             }
         }
 
@@ -1821,9 +1820,9 @@ public class PlayerBag : MonoBehaviour
 
         hiddenRetainedObject = portableObject;
         hiddenRetainedObjectIndex = objectIndex;
-        if (portableObject.gameObject.activeSelf)
+        if (portableObject.IsActive)
         {
-            portableObject.gameObject.SetActive(false);
+            portableObject.SetCachedActive(false);
             NotifyChanged();
         }
 
@@ -1879,9 +1878,9 @@ public class PlayerBag : MonoBehaviour
                         && hiddenRetainedObjectIndex >= 0
                         && hiddenRetainedObjectIndex < currentStack[retainedSlotIndex]
                         && hiddenRetainedObject.ItemId == retainedItemId;
-        if (restored && !hiddenRetainedObject.gameObject.activeSelf)
+        if (restored && !hiddenRetainedObject.IsActive)
         {
-            hiddenRetainedObject.gameObject.SetActive(true);
+            hiddenRetainedObject.SetCachedActive(true);
         }
 
         hiddenRetainedObject = null;
@@ -1905,9 +1904,9 @@ public class PlayerBag : MonoBehaviour
             return false;
         }
 
-        if (hiddenRetainedObject.gameObject.activeSelf)
+        if (hiddenRetainedObject.IsActive)
         {
-            hiddenRetainedObject.gameObject.SetActive(false);
+            hiddenRetainedObject.SetCachedActive(false);
         }
 
         return true;
@@ -2143,12 +2142,12 @@ public class PlayerBag : MonoBehaviour
             }
 
             bool shouldRemainActive = objectIndex < activeLimit;
-            if (shouldRemainActive || !portableObject.gameObject.activeSelf)
+            if (shouldRemainActive || !portableObject.IsActive)
             {
                 continue;
             }
 
-            portableObject.gameObject.SetActive(false);
+            portableObject.SetCachedActive(false);
             changed = true;
         }
 
@@ -2166,7 +2165,7 @@ public class PlayerBag : MonoBehaviour
         for (int i = 0; i < stack.stack.Count; i++)
         {
             PortableObject portableObject = stack.stack[i];
-            if (portableObject == null || !portableObject.gameObject.activeSelf)
+            if (portableObject == null || !portableObject.IsActive)
             {
                 break;
             }
@@ -2188,7 +2187,7 @@ public class PlayerBag : MonoBehaviour
         for (int i = 0; i < stack.stack.Count; i++)
         {
             PortableObject portableObject = stack.stack[i];
-            if (portableObject != null && portableObject.gameObject.activeSelf)
+            if (portableObject != null && portableObject.IsActive)
             {
                 count++;
             }
@@ -2254,7 +2253,7 @@ public class PlayerBag : MonoBehaviour
         {
             PortableObject portableObject = stack.stack[i];
             if (portableObject == null
-                || !portableObject.gameObject.activeSelf
+                || !portableObject.IsActive
                 || reservedObjects.Contains(portableObject))
             {
                 continue;

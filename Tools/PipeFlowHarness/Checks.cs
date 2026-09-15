@@ -72,6 +72,7 @@ public partial class InputOutputModule : InstallationObject
     public readonly List<InstallationObject> cachedFluidOutputStorages = new();
     private readonly Dictionary<InstallationObject, int> cachedFluidOutputStoragePipeDistances = new();
     public static readonly Dictionary<Vector2Int, HashSet<InputOutputModule>> registeredRuntimeAreaCoordinates = new();
+    public static readonly Dictionary<Vector2Int, HashSet<InputOutputModule>> registeredRuntimeFluidOutputCoordinates = new();
     public void Report(int id, float liters) => RecordFluidNetworkOutput(id, liters);
     public void Consume(int id, float liters) => RecordFluidNetworkConsumption(id, liters);
     public float Emit(int id, float liters) { TryEmitFluidOutputToConnectedStorages(id, liters, 20, out var actual); return actual; }
@@ -94,6 +95,9 @@ public partial class InputOutputModule : InstallationObject
         if (!registeredRuntimeAreaCoordinates.TryGetValue(coordinate, out var set))
             registeredRuntimeAreaCoordinates[coordinate] = set = new();
         set.Add(module);
+        if (!registeredRuntimeFluidOutputCoordinates.TryGetValue(coordinate, out var outputSet))
+            registeredRuntimeFluidOutputCoordinates[coordinate] = outputSet = new();
+        outputSet.Add(module);
     }
     public static void RegisterConsumer(InputOutputModule module, Vector2Int coordinate)
     {

@@ -25,10 +25,19 @@ public partial class Block
         beltJobLane0 = beltJobLane1 = beltJobLane2 = beltJobLane3 = -1;
     }
 
-    private void QueueBeltJobWrite(int lane, bool replaceItem = false, float holdSeconds = 0f)
+    private void QueueBeltJobWrite(
+        int lane,
+        bool replaceItem = false,
+        float holdSeconds = 0f,
+        bool updatePickupGate = false)
     {
         if (!UsesBeltJobs) return;
-        TerrainGenerator.Active.QueueBeltJobWrite(this, lane, replaceItem, BeltSimulationMath.Seconds(holdSeconds));
+        TerrainGenerator.Active.QueueBeltJobWrite(
+            this,
+            lane,
+            replaceItem,
+            BeltSimulationMath.Seconds(holdSeconds),
+            updatePickupGate);
     }
 
     internal void PrepareBeltJobStorage()
@@ -62,13 +71,18 @@ public partial class Block
         return BeltSimulationMath.Duration(length, destination != null ? destination.GetConveyorSpeed() : GetConveyorSpeed());
     }
 
-    internal BeltLaneState CaptureBeltJobInput(int lane, BeltLaneState previous, bool replace, long hold)
+    internal BeltLaneState CaptureBeltJobInput(
+        int lane,
+        BeltLaneState previous,
+        bool replace,
+        long hold,
+        bool updatePickupGate)
     {
         BeltLaneState state = previous;
-        int id = IsConveyorStorageLaneIndex(lane) ? conveyorItemIds[lane] : -1;
-        if (id < 0) return BeltLaneState.Empty;
-        if (replace || previous.ItemId != id)
+        if (replace)
         {
+            int id = IsConveyorStorageLaneIndex(lane) ? conveyorItemIds[lane] : -1;
+            if (id < 0) return BeltLaneState.Empty;
             state = new BeltLaneState { ItemId = id, Origin = -1 };
             Vector3 start = GetConveyorLaneWorldPosition(lane);
             if (lane < conveyorItemMotionStates.Count && conveyorItemMotionStates[lane].active)
@@ -80,22 +94,30 @@ public partial class Block
                 if (motion.hasViaWorldPosition) state.GateBits |= 64;
             }
             PortableObject portable = GetConveyorPortableObjectAtLane(lane);
-            if (portable != null) start = portable.transform.position;
+            if (portable != null) start = portable.WorldPosition;
             state.StartX = start.x; state.StartY = start.y; state.StartZ = start.z;
         }
+        if (state.ItemId < 0) return state;
         if (hold > state.Remaining) state.Remaining = state.Duration = hold;
-        ConveyorPickupGateState gate = lane < conveyorItemPickupGateStates.Count
-            ? conveyorItemPickupGateStates[lane] : ConveyorPickupGateState.Settled();
-        state.GateBits = (state.GateBits & 64) | (gate.hasGate ? 1 : 0) | (gate.requiresExit ? 2 : 0) | (gate.hasExited ? 4 : 0)
-            | (gate.isSettled ? 8 : 0) | (gate.hasOrigin ? 16 : 0) | (gate.autoPickupBlocked ? 32 : 0);
-        state.DropX = gate.dropOrigin.x; state.DropY = gate.dropOrigin.y; state.DropZ = gate.dropOrigin.z;
-        state.ExitRadius = gate.exitRadius;
+        if (replace || updatePickupGate)
+        {
+            ConveyorPickupGateState gate = lane < conveyorItemPickupGateStates.Count
+                ? conveyorItemPickupGateStates[lane]
+                : ConveyorPickupGateState.Settled();
+            state.GateBits = (state.GateBits & 64) | (gate.hasGate ? 1 : 0)
+                | (gate.requiresExit ? 2 : 0) | (gate.hasExited ? 4 : 0)
+                | (gate.isSettled ? 8 : 0) | (gate.hasOrigin ? 16 : 0)
+                | (gate.autoPickupBlocked ? 32 : 0);
+            state.DropX = gate.dropOrigin.x;
+            state.DropY = gate.dropOrigin.y;
+            state.DropZ = gate.dropOrigin.z;
+            state.ExitRadius = gate.exitRadius;
+        }
         return state;
     }
 
-    // Publish caches only after all jobs complete. These arrays serve existing synchronous
-    // inventory APIs; their accepted changes are reserved immediately and queued for the next tick.
-    internal void PublishBeltJobLane(int lane, BeltLaneState state)
+    // Managed lane lists are only a short-lived command staging area after native ownership.
+    internal void ReleaseBeltJobLegacyLaneView(int lane)
     {
         if (!IsConveyorStorageLaneIndex(lane)) return;
         PortableObject portable = GetConveyorPortableObjectAtLane(lane);
@@ -106,25 +128,28 @@ public partial class Block
             conveyorStack[lane] = null;
             ReleaseFloorObject(portable);
         }
-        int before = conveyorItemIds[lane];
-        conveyorItemIds[lane] = state.ItemId;
+        conveyorItemIds[lane] = -1;
         conveyorItemMotionStates[lane] = default;
         conveyorItemMoveFrames[lane] = -1;
         conveyorItemMovementHoldUntilTimes[lane] = 0f;
-        conveyorItemPickupGateStates[lane] = new ConveyorPickupGateState
+        conveyorItemPickupGateStates[lane] = default;
+    }
+
+    internal void RecordBeltJobLaneChange(int lane, bool occupancyMayHaveChanged)
+    {
+        if (!occupancyMayHaveChanged || lane < 0 || lane >= ConveyorStackLaneLimit) return;
+        int[] versions = EnsureConveyorRuntimeArrays().LaneOccupancyVersions;
+        unchecked
         {
-            hasGate = (state.GateBits & 1) != 0, requiresExit = (state.GateBits & 2) != 0,
-            hasExited = (state.GateBits & 4) != 0, isSettled = (state.GateBits & 8) != 0,
-            hasOrigin = (state.GateBits & 16) != 0, autoPickupBlocked = (state.GateBits & 32) != 0,
-            dropOrigin = new Vector3(state.DropX, state.DropY, state.DropZ), exitRadius = state.ExitRadius
-        };
-        if (before != state.ItemId) IncrementConveyorLaneOccupancyVersion(lane, false);
+            versions[lane]++;
+            if (versions[lane] == 0) versions[lane] = 1;
+        }
     }
 
     internal void NotifyBeltJobPublished(bool wakeRuntimeDependents = true)
     {
         // Several lanes in the same block can change during one native tick.
-        // Rebuild its visual/activity mirrors once after every lane is committed.
+        // Invalidate presentation and observers once without copying lane data.
         MarkConveyorItemVisualDirty();
         NotifyRuntimeItemStackChanged(wakeRuntimeDependents);
         RefreshConveyorActivityRegistration(false, false);

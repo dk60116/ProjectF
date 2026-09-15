@@ -4,9 +4,9 @@ using UnityEngine;
 namespace ProjectF.MapObjects
 {
     /// <summary>
-    /// Synchronizes active installation handles into one runtime host GameObject per item type.
-    /// The hosts own visual instance slots and rendering; source objects remain as temporary
-    /// gameplay/collider shells until their type is migrated to data-only simulation.
+    /// Synchronizes installation handles into one presentation host GameObject per item type.
+    /// Live entities can still provide interaction shells; data-only entities are rendered
+    /// directly from their authoritative record without creating a per-entity GameObject.
     /// </summary>
     [DisallowMultipleComponent, DefaultExecutionOrder(1001)]
     public sealed class StaticMapObjectBatchRenderer : MonoBehaviour
@@ -15,6 +15,7 @@ namespace ProjectF.MapObjects
         private float batchCellSize = 16f;
 
         private readonly List<InstallationObject> activeInstallations = new List<InstallationObject>(256);
+        private readonly List<VirtualObjectRecord> dataOnlyInstallations = new List<VirtualObjectRecord>(256);
         private readonly Dictionary<int, StaticMapObjectTypeHost> hostsByItemId =
             new Dictionary<int, StaticMapObjectTypeHost>();
         private readonly List<StaticMapObjectTypeHost> hostScratch =
@@ -51,6 +52,8 @@ namespace ProjectF.MapObjects
         public int ActiveBatchCount => SumHostValue(HostValue.BatchCount);
         public int ActiveMatrixCount => SumHostValue(HostValue.MatrixCount);
         public int EstimatedDrawCallCount => SumHostValue(HostValue.DrawCallCount);
+        public int LastCandidateBatchCount => SumHostValue(HostValue.CandidateBatchCount);
+        public int LastCandidateCellCount => SumHostValue(HostValue.CandidateCellCount);
 
         public void Configure(VirtualObjectWorld world, ItemManager manager)
         {
@@ -120,11 +123,7 @@ namespace ProjectF.MapObjects
         {
             if (virtualWorld == null)
             {
-                virtualWorld = GetComponent<VirtualObjectWorld>();
-                if (virtualWorld == null)
-                {
-                    virtualWorld = VirtualObjectWorld.Current;
-                }
+                virtualWorld = VirtualObjectWorld.Current;
             }
 
             if (itemManager == null && GameManager.Instance != null)
@@ -172,6 +171,34 @@ namespace ProjectF.MapObjects
                 {
                     host.AbortSynchronization();
                     rejectedTypeIds.Add(handle.TypeId);
+                }
+            }
+
+            // Data-only entities have no source GameObject to enumerate. Their authoritative
+            // pose and generation-safe handle are sufficient to build the presentation batch.
+            virtualWorld.CopyRecords(dataOnlyInstallations, true);
+            for (int i = 0; i < dataOnlyInstallations.Count; i++)
+            {
+                VirtualObjectRecord record = dataOnlyInstallations[i];
+                if (record == null
+                    || record.kind != VirtualObjectKind.Installation
+                    || record.HasAttachedView
+                    || !record.mapObjectHandle.IsValid
+                    || rejectedTypeIds.Contains(record.itemId))
+                {
+                    continue;
+                }
+
+                if (!TryGetOrCreateHost(record.itemId, out StaticMapObjectTypeHost host))
+                {
+                    rejectedTypeIds.Add(record.itemId);
+                    continue;
+                }
+
+                if (!host.SynchronizeRecord(record))
+                {
+                    host.AbortSynchronization();
+                    rejectedTypeIds.Add(record.itemId);
                 }
             }
 
@@ -273,6 +300,7 @@ namespace ProjectF.MapObjects
             emptyHostItemIds.Clear();
             rejectedTypeIds.Clear();
             activeInstallations.Clear();
+            dataOnlyInstallations.Clear();
         }
 
         private void RemoveHost(int itemId)
@@ -323,6 +351,12 @@ namespace ProjectF.MapObjects
                     case HostValue.DrawCallCount:
                         total += host.EstimatedDrawCallCount;
                         break;
+                    case HostValue.CandidateBatchCount:
+                        total += host.LastCandidateBatchCount;
+                        break;
+                    case HostValue.CandidateCellCount:
+                        total += host.LastCandidateCellCount;
+                        break;
                 }
             }
 
@@ -364,7 +398,9 @@ namespace ProjectF.MapObjects
         {
             BatchCount,
             MatrixCount,
-            DrawCallCount
+            DrawCallCount,
+            CandidateBatchCount,
+            CandidateCellCount
         }
     }
 }

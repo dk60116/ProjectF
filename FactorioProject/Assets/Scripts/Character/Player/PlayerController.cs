@@ -503,7 +503,8 @@ public partial class PlayerController : MonoBehaviour
 
     public bool RequestPitchforkDigging()
     {
-        if (interactionPointSnapTarget != null
+        if (IsPlayerInputLocked()
+            || interactionPointSnapTarget != null
             || player == null
             || player.IsCarrying
             || !TryGetSelectedPitchforkGroundBlock(out Block targetBlock))
@@ -661,7 +662,8 @@ public partial class PlayerController : MonoBehaviour
 
     public bool TryMountSaddledAnimal(Animal animal)
     {
-        if (animal == null
+        if (IsPlayerInputLocked()
+            || animal == null
             || player == null
             || IsMounted
             || !animal.CanBeMounted
@@ -784,12 +786,15 @@ public partial class PlayerController : MonoBehaviour
 
     public bool TrySnapBodyToInteractionPoint(Transform targetPoint, Vehicle vehicle = null)
     {
-        return TrySnapBodyToMountPoint(targetPoint, vehicle, null);
+        return !IsPlayerInputLocked()
+               && TrySnapBodyToMountPoint(targetPoint, vehicle, null);
     }
 
     public bool TrySnapBodyToAnimalMountPoint(Transform targetPoint, Animal animal)
     {
-        return animal != null && TrySnapBodyToMountPoint(targetPoint, null, animal);
+        return !IsPlayerInputLocked()
+               && animal != null
+               && TrySnapBodyToMountPoint(targetPoint, null, animal);
     }
 
     private bool TrySnapBodyToMountPoint(
@@ -855,7 +860,7 @@ public partial class PlayerController : MonoBehaviour
 
     public bool TryDismount()
     {
-        if (interactionPointSnapTarget == null)
+        if (IsPlayerInputLocked() || interactionPointSnapTarget == null)
         {
             return false;
         }
@@ -1173,14 +1178,21 @@ public partial class PlayerController : MonoBehaviour
 
     private bool IsTemporaryDropFocusBlockedByMode()
     {
-        if (GameManager.TextInputFocused
-            || (GameManager.Instance != null && GameManager.Instance.PlayerInteractionLocked))
+        if (IsPlayerInputLocked())
         {
             return true;
         }
 
         InstallationPlacementController placementController = ResolveInstallationPlacementController();
         return placementController != null && placementController.PlacementOrMapEditModeActive;
+    }
+
+    private static bool IsPlayerInputLocked()
+    {
+        GameManager gameManager = GameManager.Instance;
+        return SaveManager.GameplayInputBlocked
+               || GameManager.TextInputFocused
+               || (gameManager != null && gameManager.PlayerInteractionLocked);
     }
 
     private void Update()
@@ -1213,8 +1225,7 @@ public partial class PlayerController : MonoBehaviour
         player?.UpdateDropExitGate(transform.position);
 
         GameManager gameManager = GameManager.Instance;
-        bool isInteractionLocked = GameManager.TextInputFocused
-                                   || (gameManager != null && gameManager.PlayerInteractionLocked);
+        bool isInteractionLocked = IsPlayerInputLocked();
         bool isKeyboardMoveLocked = gameManager != null && gameManager.FreeCamera;
 
         Vector2 input = Vector2.zero;
@@ -1438,8 +1449,7 @@ public partial class PlayerController : MonoBehaviour
 
         SnapRootToGroundY();
 
-        if (GameManager.TextInputFocused
-            || (GameManager.Instance != null && GameManager.Instance.PlayerInteractionLocked))
+        if (IsPlayerInputLocked())
         {
             pendingMoveDirection = Vector3.zero;
             currentConveyorCarryVelocity = Vector3.zero;
@@ -3296,7 +3306,7 @@ public partial class PlayerController : MonoBehaviour
                 : block == closestInteractionFocusBlock;
             long stableId = target is ResourceInstance resourceIdentity ? resourceIdentity.SimulationId
                 : target is RobotArmInstance armIdentity ? armIdentity.SimulationId
-                : target is MapObject nativeTarget ? nativeTarget.GetInstanceID() : block.GetInstanceID();
+                : target is MapObject nativeTarget ? nativeTarget.GetInstanceID() : block.RuntimeIdentity;
             bool tiedDistance = Mathf.Abs(distanceSqr - closestDistanceSqr) <= 0.000001f;
             if (float.IsNaN(distanceSqr) || float.IsInfinity(distanceSqr)
                 || (tiedDistance
@@ -3791,7 +3801,8 @@ public partial class PlayerController : MonoBehaviour
 
     public bool RequestAnimalKnifeInteraction(Animal animal)
     {
-        if (animal == null
+        if (IsPlayerInputLocked()
+            || animal == null
             || !animal.gameObject.activeInHierarchy
             || player == null
             || interactionPointSnapTarget != null)
@@ -3826,8 +3837,7 @@ public partial class PlayerController : MonoBehaviour
             || nooseDefinition.portableMat == null
             || player == null
             || interactionPointSnapTarget != null
-            || GameManager.TextInputFocused
-            || (GameManager.Instance != null && GameManager.Instance.PlayerInteractionLocked))
+            || IsPlayerInputLocked())
         {
             return false;
         }
@@ -4275,7 +4285,8 @@ public partial class PlayerController : MonoBehaviour
 
     public bool RequestResourceHarvest(ResourceInstance resource)
     {
-        if (resource == null
+        if (IsPlayerInputLocked()
+            || resource == null
             || !resource.CanHarvest
             || player == null)
         {
@@ -5596,9 +5607,7 @@ public partial class PlayerController : MonoBehaviour
 
     private void RefreshMouseMapObjectFocus()
     {
-        GameManager gameManager = GameManager.Instance;
-        bool isInteractionLocked = GameManager.TextInputFocused
-                                   || (gameManager != null && gameManager.PlayerInteractionLocked);
+        bool isInteractionLocked = IsPlayerInputLocked();
         if (mouseFocusRefreshFrame == Time.frameCount
             && mouseFocusRefreshInteractionLocked == isInteractionLocked)
         {
@@ -5934,7 +5943,7 @@ public partial class PlayerController : MonoBehaviour
             closestDistance = pipeDistance;
             TerrainGenerator pipeFocusTerrain = ResolveTerrainGenerator();
             if (pipeFocusTerrain != null
-                && !pipeFocusTerrain.TryGetLoadedBlockRuntimeProxy(
+                && !pipeFocusTerrain.TryGetLoadedBlockEntity(
                     pipeCoordinate,
                     out closestDataOnlyFallbackBlock))
             {
@@ -5980,7 +5989,7 @@ public partial class PlayerController : MonoBehaviour
         }
 
         TerrainGenerator terrain = ResolveTerrainGenerator();
-        terrain?.TryGetLoadedBlockRuntimeProxy(pointerCoordinate, out fallbackBlock);
+        terrain?.TryGetLoadedBlockEntity(pointerCoordinate, out fallbackBlock);
         using (FindMouseFocusInstallationMarker.Auto())
         {
             mapObject = TryFindInstallationCoveringCoordinate(
@@ -6324,7 +6333,7 @@ public partial class PlayerController : MonoBehaviour
         out InstallationObject installationObject,
         out Block fallbackBlock)
     {
-        terrain.TryGetLoadedBlockRuntimeProxy(searchCoordinate, out Block candidateBlock);
+        terrain.TryGetLoadedBlockEntity(searchCoordinate, out Block candidateBlock);
         ConveyorWorld conveyorWorld = ConveyorWorld.Current;
         if (conveyorWorld != null
             && conveyorWorld.TryGetBelt2FAtCoordinate(
@@ -6465,7 +6474,7 @@ public partial class PlayerController : MonoBehaviour
 
         for (int i = 0; i < occupiedCoordinates.Count; i++)
         {
-            if (terrain.TryGetLoadedBlockRuntimeProxy(occupiedCoordinates[i], out fallbackBlock)
+            if (terrain.TryGetLoadedBlockEntity(occupiedCoordinates[i], out fallbackBlock)
                 && fallbackBlock != null)
             {
                 break;

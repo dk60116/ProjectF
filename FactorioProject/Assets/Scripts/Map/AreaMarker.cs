@@ -53,6 +53,12 @@ public class InputOutputModuleAreaMarkerController : MonoBehaviour
 
     internal int MarkerCount => requests.Count;
     internal bool IsVisible => visible;
+    internal float VisibleRange => visibleRange;
+    internal Vector3 VisibilityWorldPosition => transform.position;
+    internal bool RequiresContinuousVisibilityRefresh => UsesMovingBatches
+        || visibleRange <= 0f
+        || forceMarkerVisibility
+        || selectionVisibilityRequested;
     // Retain the batch partition even after Unity destroys the parent, so unregistration
     // invalidates the mesh that actually contains these markers.
     internal bool UsesMovingBatches => !object.ReferenceEquals(markerParent, null);
@@ -111,7 +117,9 @@ public class InputOutputModuleAreaMarkerController : MonoBehaviour
 
     public void SetSelectionVisibilityRequested(bool requested)
     {
+        if (selectionVisibilityRequested == requested) return;
         selectionVisibilityRequested = requested;
+        markerRenderer?.NotifyVisibilityOverrideChanged(this);
     }
 
     private void OnEnable()

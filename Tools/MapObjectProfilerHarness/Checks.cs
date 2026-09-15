@@ -46,6 +46,8 @@ namespace UnityEngine
         public static int Max(int a, int b) => Math.Max(a, b);
         public static float Max(float a, float b) => Math.Max(a, b);
         public static int Min(int a, int b) => Math.Min(a, b);
+        public static int Clamp(int value, int minimum, int maximum)
+            => Math.Min(Math.Max(value, minimum), maximum);
     }
 }
 
@@ -151,7 +153,7 @@ public static class Checks
         if (expected.Count != snapshots.Count) throw new Exception("Snapshot count differs.");
         for (int i = 0; i < snapshots.Count; i++)
         {
-            if (expected[i] != snapshots[i].Replace("\"renderFrames\":0,\"simulationTicks\":0,", "")) throw new Exception($"Snapshot {i} differs. Expected:\n{expected[i]}\nActual:\n{snapshots[i]}");
+            if (expected[i] != snapshots[i]) throw new Exception($"Snapshot {i} differs. Expected:\n{expected[i]}\nActual:\n{snapshots[i]}");
         }
         GameManager.Instance.MapObjectTickProfilingEnabled = true;
         MapObjectTickProfiler.Reset();

@@ -188,7 +188,7 @@ internal static class PlayerItemStorageUtility
         portableObject.GetComponent<DroppedItemPickupGate>()?.ClearGate();
         portableObject.CancelMove();
         portableObject.SetBatchedRendering(false);
-        portableObject.transform.SetParent(null, true);
+        portableObject.SetCachedParent(null, true);
         if (!Application.isPlaying)
         {
             reservation.Commit();
@@ -220,7 +220,7 @@ internal static class PlayerItemStorageUtility
         portableObject.MoveCancelled += HandleMoveCancelled;
 
         portableObject.MoveTo(
-            storageTarget.transform,
+            storageTarget.PresentationTransform,
             Mathf.Max(0f, delay),
             startPositionProvider,
             () =>
@@ -262,10 +262,7 @@ internal static class PlayerItemStorageUtility
         }
 
         PortableObject visualTemplate = template != null ? template : reservation.Target;
-        PortableObject movingPortableObject = Object.Instantiate(
-            visualTemplate,
-            startPosition,
-            startRotation);
+        PortableObject movingPortableObject = visualTemplate.Clone(startPosition, startRotation);
         if (movingPortableObject == null)
         {
             reservation.Commit();
@@ -276,12 +273,12 @@ internal static class PlayerItemStorageUtility
         movingPortableObject.name = string.IsNullOrEmpty(nameSuffix)
             ? visualTemplate.name
             : $"{visualTemplate.name}_{nameSuffix}";
-        movingPortableObject.transform.SetParent(null, true);
-        movingPortableObject.transform.position = startPosition;
-        movingPortableObject.transform.localScale = startScale;
-        if (!movingPortableObject.gameObject.activeSelf)
+        movingPortableObject.SetCachedParent(null, true);
+        movingPortableObject.SetWorldPose(startPosition, startRotation);
+        movingPortableObject.SetWorldScale(startScale);
+        if (!movingPortableObject.IsActive)
         {
-            movingPortableObject.gameObject.SetActive(true);
+            movingPortableObject.SetCachedActive(true);
         }
 
         if (!movingPortableObject.SetItem(itemId))
@@ -324,13 +321,6 @@ internal static class PlayerItemStorageUtility
             return;
         }
 
-        portableObject.CancelMove();
-        if (Application.isPlaying)
-        {
-            Object.Destroy(portableObject.gameObject);
-            return;
-        }
-
-        Object.DestroyImmediate(portableObject.gameObject);
+        portableObject.Dispose();
     }
 }

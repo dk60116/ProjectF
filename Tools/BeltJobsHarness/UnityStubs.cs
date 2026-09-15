@@ -7,8 +7,13 @@ namespace Unity.Jobs
     public struct JobHandle { public void Complete() { } }
     public static class JobScheduling
     {
+        public static bool UseParallel = true;
         public static JobHandle Schedule<T>(this T job, int count, int batch) where T : struct, IJobParallelFor
-        { Parallel.For(0, count, job.Execute); return default; }
+        {
+            if (UseParallel) Parallel.For(0, count, job.Execute);
+            else for (int i = 0; i < count; i++) job.Execute(i);
+            return default;
+        }
     }
 }
 namespace Unity.Collections.LowLevel.Unsafe
@@ -52,6 +57,7 @@ namespace UnityEngine
     }
     public static class Mathf
     {
+        public static int Max(int a, int b) => Math.Max(a, b);
         public static float Clamp01(float x) => Math.Clamp(x, 0, 1);
         public static float Sin(float x) => MathF.Sin(x);
         public const float PI = MathF.PI;

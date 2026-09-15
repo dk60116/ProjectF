@@ -136,6 +136,12 @@ public sealed class VirtualRenderBatchCollection
 
     private readonly Dictionary<VirtualRenderBatchKey, BatchRenderCache> batchesByKey = new Dictionary<VirtualRenderBatchKey, BatchRenderCache>();
     private readonly List<VirtualRenderBatchKey> activeBatchKeys = new List<VirtualRenderBatchKey>();
+    private readonly Dictionary<Vector2Int, List<VirtualRenderBatchKey>> batchKeysByCell =
+        new Dictionary<Vector2Int, List<VirtualRenderBatchKey>>();
+    private readonly Stack<List<VirtualRenderBatchKey>> recycledBatchKeyLists =
+        new Stack<List<VirtualRenderBatchKey>>();
+    private readonly List<VirtualRenderBatchKey> visibleBatchCandidates =
+        new List<VirtualRenderBatchKey>();
     private readonly List<Vector4> uvDrawScratch = new List<Vector4>(MaxInstancesPerDraw);
     private readonly List<Vector4> conveyorMotionStartDrawScratch = new List<Vector4>(MaxInstancesPerDraw);
     private readonly List<Vector4> conveyorMotionEndDrawScratch = new List<Vector4>(MaxInstancesPerDraw);
@@ -194,6 +200,8 @@ public sealed class VirtualRenderBatchCollection
 
     public int LastVisibleBatchCount { get; private set; }
     public int LastCulledBatchCount { get; private set; }
+    public int LastCandidateBatchCount { get; private set; }
+    public int LastCandidateCellCount { get; private set; }
     public int LastLegacySubmittedMatrixCount { get; private set; }
     public int LastLegacyDrawCallCount { get; private set; }
     public int LastBatchRendererGroupBatchCount { get; private set; }
@@ -204,6 +212,8 @@ public sealed class VirtualRenderBatchCollection
         DisposeBatchRendererGroupBackend();
         batchesByKey.Clear();
         activeBatchKeys.Clear();
+        ClearBatchCellIndex();
+        visibleBatchCandidates.Clear();
         uvDrawScratch.Clear();
         conveyorMotionStartDrawScratch.Clear();
         conveyorMotionEndDrawScratch.Clear();
@@ -227,6 +237,8 @@ public sealed class VirtualRenderBatchCollection
         }
 
         activeBatchKeys.Clear();
+        ClearBatchCellIndex();
+        visibleBatchCandidates.Clear();
         batchRendererGroupBackend?.DeactivateAll();
     }
 
@@ -236,6 +248,7 @@ public sealed class VirtualRenderBatchCollection
         if (!created && batchCache.Matrices.Count == 0)
         {
             activeBatchKeys.Add(key);
+            AddBatchKeyToCellIndex(key);
         }
 
         batchCache.Matrices.Add(matrix);
@@ -328,6 +341,7 @@ public sealed class VirtualRenderBatchCollection
         if (!created && batchCache.Matrices.Count == 0)
         {
             activeBatchKeys.Add(key);
+            AddBatchKeyToCellIndex(key);
         }
 
         int entryIndex = ownerEntries.Count;
@@ -387,10 +401,12 @@ public sealed class VirtualRenderBatchCollection
         ownerEntries.Clear();
     }
 
-    public void RenderBatches(Camera renderCamera = null)
+    public void RenderBatches(Camera renderCamera = null, float batchCellSize = 0f)
     {
         LastVisibleBatchCount = 0;
         LastCulledBatchCount = 0;
+        LastCandidateBatchCount = 0;
+        LastCandidateCellCount = 0;
         LastLegacySubmittedMatrixCount = 0;
         LastLegacyDrawCallCount = 0;
         LastBatchRendererGroupBatchCount = 0;
@@ -404,12 +420,25 @@ public sealed class VirtualRenderBatchCollection
         cameraCulling.Update(renderCamera);
         if (backend != null)
             backend.DisableCameraCulling = ProjectF.Rendering.CameraRenderCulling.Disabled;
-        backend?.BeginSync();
+        backend?.BeginSync(retainUnsyncedBatches: batchCellSize > 0f && cameraCulling.Enabled);
+
+        List<VirtualRenderBatchKey> renderCandidates = activeBatchKeys;
+        if (TryBuildVisibleBatchCandidates(batchCellSize))
+        {
+            renderCandidates = visibleBatchCandidates;
+            LastCulledBatchCount = Mathf.Max(
+                0,
+                activeBatchKeys.Count - visibleBatchCandidates.Count);
+        }
+        else
+        {
+            LastCandidateBatchCount = activeBatchKeys.Count;
+        }
 
         bool hasLegacyBatches = false;
-        for (int batchIndex = 0; batchIndex < activeBatchKeys.Count; batchIndex++)
+        for (int batchIndex = 0; batchIndex < renderCandidates.Count; batchIndex++)
         {
-            VirtualRenderBatchKey key = activeBatchKeys[batchIndex];
+            VirtualRenderBatchKey key = renderCandidates[batchIndex];
             if (!batchesByKey.TryGetValue(key, out BatchRenderCache batchCache)
                 || batchCache.Matrices.Count <= 0)
             {
@@ -460,9 +489,9 @@ public sealed class VirtualRenderBatchCollection
             return;
         }
 
-        for (int batchIndex = 0; batchIndex < activeBatchKeys.Count; batchIndex++)
+        for (int batchIndex = 0; batchIndex < renderCandidates.Count; batchIndex++)
         {
-            VirtualRenderBatchKey key = activeBatchKeys[batchIndex];
+            VirtualRenderBatchKey key = renderCandidates[batchIndex];
             if (!batchesByKey.TryGetValue(key, out BatchRenderCache batchCache) || batchCache.Matrices.Count <= 0)
             {
                 continue;
@@ -512,6 +541,87 @@ public sealed class VirtualRenderBatchCollection
                 }
             }
         }
+    }
+
+    private bool TryBuildVisibleBatchCandidates(float batchCellSize)
+    {
+        visibleBatchCandidates.Clear();
+        if (batchCellSize <= 0f
+            || !cameraCulling.TryGetVisibleCellRange(
+                batchCellSize,
+                1,
+                out Vector2Int minimum,
+                out Vector2Int maximum))
+        {
+            return false;
+        }
+
+        long candidateCellCount =
+            ProjectF.Rendering.CameraRenderCulling.GetCellCount(minimum, maximum);
+        LastCandidateCellCount = candidateCellCount <= int.MaxValue
+            ? (int)candidateCellCount
+            : int.MaxValue;
+        if (candidateCellCount >= (long)Mathf.Max(1, activeBatchKeys.Count) * 2L)
+        {
+            return false;
+        }
+
+        for (int y = minimum.y; y <= maximum.y; y++)
+        {
+            for (int x = minimum.x; x <= maximum.x; x++)
+            {
+                if (batchKeysByCell.TryGetValue(
+                        new Vector2Int(x, y),
+                        out List<VirtualRenderBatchKey> keys))
+                {
+                    visibleBatchCandidates.AddRange(keys);
+                }
+            }
+        }
+
+        LastCandidateBatchCount = visibleBatchCandidates.Count;
+        return true;
+    }
+
+    private void AddBatchKeyToCellIndex(VirtualRenderBatchKey key)
+    {
+        Vector2Int cell = new Vector2Int(key.BatchCellX, key.BatchCellZ);
+        if (!batchKeysByCell.TryGetValue(cell, out List<VirtualRenderBatchKey> keys))
+        {
+            keys = recycledBatchKeyLists.Count > 0
+                ? recycledBatchKeyLists.Pop()
+                : new List<VirtualRenderBatchKey>(2);
+            batchKeysByCell.Add(cell, keys);
+        }
+
+        keys.Add(key);
+    }
+
+    private void RemoveBatchKeyFromCellIndex(VirtualRenderBatchKey key)
+    {
+        Vector2Int cell = new Vector2Int(key.BatchCellX, key.BatchCellZ);
+        if (!batchKeysByCell.TryGetValue(cell, out List<VirtualRenderBatchKey> keys))
+        {
+            return;
+        }
+
+        keys.Remove(key);
+        if (keys.Count == 0)
+        {
+            batchKeysByCell.Remove(cell);
+            recycledBatchKeyLists.Push(keys);
+        }
+    }
+
+    private void ClearBatchCellIndex()
+    {
+        foreach (KeyValuePair<Vector2Int, List<VirtualRenderBatchKey>> pair in batchKeysByCell)
+        {
+            pair.Value.Clear();
+            recycledBatchKeyLists.Push(pair.Value);
+        }
+
+        batchKeysByCell.Clear();
     }
 
     private void DrawLegacyBatch(VirtualRenderBatchKey key, BatchRenderCache batchCache,
@@ -574,6 +684,7 @@ public sealed class VirtualRenderBatchCollection
             batchCache = new BatchRenderCache();
             batchesByKey.Add(key, batchCache);
             activeBatchKeys.Add(key);
+            AddBatchKeyToCellIndex(key);
             created = true;
             return batchCache;
         }
@@ -641,6 +752,7 @@ public sealed class VirtualRenderBatchCollection
             batchRendererGroupBackend?.Deactivate(entry.BatchKey);
             batchesByKey.Remove(entry.BatchKey);
             activeBatchKeys.Remove(entry.BatchKey);
+            RemoveBatchKeyFromCellIndex(entry.BatchKey);
         }
         else
         {

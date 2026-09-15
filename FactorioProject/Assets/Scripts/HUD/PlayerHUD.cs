@@ -4653,7 +4653,9 @@ public partial class PlayerHUD : BagSlot
 
     private void UpdateCraftingQueue(float deltaTime)
     {
-        if (craftingWaitingQueue == null || craftingWaitingQueue.Count == 0)
+        if (IsInventoryEditLocked()
+            || craftingWaitingQueue == null
+            || craftingWaitingQueue.Count == 0)
         {
             return;
         }
@@ -4771,8 +4773,8 @@ public partial class PlayerHUD : BagSlot
                 entry.itemId,
                 handTarget,
                 startPosition,
-                handTarget.transform.rotation,
-                handTarget.transform.lossyScale,
+                handTarget.WorldRotation,
+                handTarget.WorldScale,
                 reservation,
                 "CraftMove",
                 deliveredIndex * Mathf.Max(0f, craftedPortableMoveInterval),
@@ -4826,7 +4828,7 @@ public partial class PlayerHUD : BagSlot
 
                 float fillValue = i == 0 ? currentFill : 1f;
                 slot.SetFill(fillValue);
-                bool canCancel = entry.remainingTime > 0f;
+                bool canCancel = entry.remainingTime > 0f && !IsInventoryEditLocked();
                 slot.BindCancelAction(canCancel ? () => CancelCraftingQueueAt(capturedIndex) : null);
                 slot.SetCancelInteractable(canCancel);
             }
@@ -4849,7 +4851,9 @@ public partial class PlayerHUD : BagSlot
 
     private bool CancelCraftingQueueAt(int index)
     {
-        if (index < 0 || index >= craftingQueue.Count)
+        if (IsInventoryEditLocked()
+            || index < 0
+            || index >= craftingQueue.Count)
         {
             return false;
         }

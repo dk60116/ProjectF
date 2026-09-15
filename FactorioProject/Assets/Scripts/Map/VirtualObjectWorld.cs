@@ -199,13 +199,12 @@ public sealed class VirtualObjectRecord
     public int currentGauge;
     public int initialResourceCount;
     public int liveInstanceId;
-    public ResourceHandle liveResourceHandle;
     public readonly List<Vector2Int> occupiedCoordinates = new List<Vector2Int>();
     public VirtualItemStackState itemStack;
     public Resource.ResourceSaveState resourceState;
     public BlockStateStore.InstallationSaveState installationState;
 
-    public bool HasLiveObject => liveInstanceId != 0 || liveResourceHandle.IsValid;
+    public bool HasAttachedView => liveInstanceId != 0;
 
     public VirtualObjectRecord Clone()
     {
@@ -227,7 +226,6 @@ public sealed class VirtualObjectRecord
             currentGauge = currentGauge,
             initialResourceCount = initialResourceCount,
             liveInstanceId = liveInstanceId,
-            liveResourceHandle = liveResourceHandle,
             itemStack = itemStack,
             resourceState = resourceState,
             installationState = installationState != null ? installationState.Clone() : null
@@ -238,10 +236,14 @@ public sealed class VirtualObjectRecord
     }
 }
 
-[DisallowMultipleComponent]
-public sealed class VirtualObjectWorld : MonoBehaviour
+/// <summary>
+/// Simulation-facing world-object identity and spatial index. This is an ordinary managed service: its lifetime is
+/// owned by GameManager and never follows a presentation GameObject's enabled state.
+/// </summary>
+public sealed class VirtualObjectWorld : IDisposable
 {
     private static VirtualObjectWorld current;
+    private static uint nextGlobalMapObjectGeneration = 1;
 
     private readonly Dictionary<int, VirtualObjectRecord> recordsById = new Dictionary<int, VirtualObjectRecord>();
     private readonly Dictionary<Vector2Int, List<int>> recordIdsByCoordinate = new Dictionary<Vector2Int, List<int>>();
@@ -249,51 +251,25 @@ public sealed class VirtualObjectWorld : MonoBehaviour
     private readonly Dictionary<Vector2Int, int> resourceRecordByCoordinate = new Dictionary<Vector2Int, int>();
     private readonly Dictionary<Vector2Int, int> installationRecordByAnchor = new Dictionary<Vector2Int, int>();
     private int nextId = 1;
-    private uint nextMapObjectGeneration = 1;
     private int version;
     private int itemStackVersion;
     private int installationVersion;
 
-    public static VirtualObjectWorld Current
-    {
-        get
-        {
-            if (current != null)
-            {
-                return current;
-            }
-
-            current = FindObjectOfType<VirtualObjectWorld>();
-            return current;
-        }
-    }
+    public static VirtualObjectWorld Current => current;
 
     public int Count => recordsById.Count;
     public int Version => version;
     public int ItemStackVersion => itemStackVersion;
     public int InstallationVersion => installationVersion;
 
-    public static VirtualObjectWorld EnsureFor(GameObject host)
+    public static VirtualObjectWorld Ensure()
     {
         if (current != null)
         {
             return current;
         }
 
-        if (host == null)
-        {
-            GameObject worldObject = new GameObject("VirtualObjectWorld");
-            current = worldObject.AddComponent<VirtualObjectWorld>();
-            return current;
-        }
-
-        VirtualObjectWorld world = host.GetComponent<VirtualObjectWorld>();
-        if (world == null)
-        {
-            world = host.AddComponent<VirtualObjectWorld>();
-        }
-
-        current = world;
+        current = new VirtualObjectWorld();
         return current;
     }
 
@@ -555,18 +531,16 @@ public sealed class VirtualObjectWorld : MonoBehaviour
     public VirtualObjectId UpsertResource(
         Vector2Int coordinate,
         int itemId,
-        Resource.ResourceSaveState state,
-        ResourceInstance liveResource = null,
-        VirtualObjectResidency residency = VirtualObjectResidency.Virtual)
+        Resource.ResourceSaveState state)
     {
         VirtualObjectRecord record = GetOrCreateIndexedRecord(
             resourceRecordByCoordinate,
             coordinate,
             VirtualObjectKind.Resource);
 
-        record.residency = liveResource != null ? residency : VirtualObjectResidency.Virtual;
+        record.residency = VirtualObjectResidency.Virtual;
         record.anchorCoordinate = coordinate;
-        record.worldPosition = liveResource != null ? liveResource.WorldPosition : new Vector3(coordinate.x, 0f, coordinate.y);
+        record.worldPosition = new Vector3(coordinate.x, 0f, coordinate.y);
         record.worldRotation = Quaternion.identity;
         record.itemId = itemId;
         record.count = Mathf.Max(0, state.resourceCount);
@@ -577,8 +551,6 @@ public sealed class VirtualObjectWorld : MonoBehaviour
         record.resourceState = state;
         EnsureMapObjectHandle(record, itemId, record.id.Value);
         record.liveInstanceId = 0;
-        record.liveResourceHandle = liveResource != null && residency != VirtualObjectResidency.Virtual
-            ? liveResource.Handle : default;
         ReplaceOccupiedCoordinates(record, coordinate);
         StoreRecord(record);
         return record.id;
@@ -586,17 +558,46 @@ public sealed class VirtualObjectWorld : MonoBehaviour
 
     public VirtualObjectId UpsertInstallation(
         BlockStateStore.InstallationSaveState state,
-        VirtualObjectResidency residency = VirtualObjectResidency.Virtual,
-        InstallationObject liveInstallation = null)
+        VirtualObjectResidency residency = VirtualObjectResidency.Virtual)
     {
-        MapObjectHandle handle = UpsertInstallationHandle(state, residency, liveInstallation);
+        MapObjectHandle handle = UpsertInstallationHandle(state, residency);
         return handle.IsValid ? new VirtualObjectId(handle.Slot) : default;
     }
 
     public MapObjectHandle UpsertInstallationHandle(
         BlockStateStore.InstallationSaveState state,
-        VirtualObjectResidency residency = VirtualObjectResidency.Virtual,
-        InstallationObject liveInstallation = null)
+        VirtualObjectResidency residency = VirtualObjectResidency.Virtual)
+    {
+        return UpsertInstallationRecord(state, residency, 0, default, default, false);
+    }
+
+    public MapObjectHandle AttachInstallationView(
+        BlockStateStore.InstallationSaveState state,
+        int viewInstanceId,
+        Vector3 worldPosition,
+        Quaternion worldRotation)
+    {
+        if (viewInstanceId == 0)
+        {
+            throw new ArgumentOutOfRangeException(nameof(viewInstanceId));
+        }
+
+        return UpsertInstallationRecord(
+            state,
+            VirtualObjectResidency.Live,
+            viewInstanceId,
+            worldPosition,
+            worldRotation,
+            true);
+    }
+
+    private MapObjectHandle UpsertInstallationRecord(
+        BlockStateStore.InstallationSaveState state,
+        VirtualObjectResidency residency,
+        int viewInstanceId,
+        Vector3 attachedWorldPosition,
+        Quaternion attachedWorldRotation,
+        bool hasAttachedPose)
     {
         if (state == null)
         {
@@ -609,15 +610,15 @@ public sealed class VirtualObjectWorld : MonoBehaviour
             storageKey,
             VirtualObjectKind.Installation);
 
-        record.residency = liveInstallation != null ? VirtualObjectResidency.Live : residency;
+        record.residency = hasAttachedPose ? VirtualObjectResidency.Live : residency;
         record.anchorCoordinate = state.anchorCoordinate;
-        record.worldPosition = liveInstallation != null
-            ? liveInstallation.transform.position
+        record.worldPosition = hasAttachedPose
+            ? attachedWorldPosition
             : state.hasWorldPose
                 ? state.worldPosition
             : new Vector3(state.anchorCoordinate.x, 0f, state.anchorCoordinate.y);
-        record.worldRotation = liveInstallation != null
-            ? liveInstallation.transform.rotation
+        record.worldRotation = hasAttachedPose
+            ? attachedWorldRotation
             : state.hasWorldPose
                 ? state.worldRotation
             : Quaternion.Euler(0f, state.quarterTurns * 90f, 0f);
@@ -625,25 +626,27 @@ public sealed class VirtualObjectWorld : MonoBehaviour
         record.itemId = state.itemId;
         record.count = 1;
         record.sequence = state.placementSequence;
-        record.installationState = state.Clone();
+        // BlockStateStore owns this state. Keep the same object internally so a View binding
+        // cannot introduce a second runtime state owner; public reads still return clones.
+        record.installationState = state;
         EnsureMapObjectHandle(record, state.itemId, state.placementSequence);
-        record.liveInstanceId = liveInstallation != null ? liveInstallation.GetInstanceID() : 0;
+        record.liveInstanceId = viewInstanceId;
         ReplaceOccupiedCoordinates(record, state.occupiedCoordinates);
         StoreRecord(record);
         return record.mapObjectHandle;
     }
 
-    public bool UpdateLiveInstallationWorldPose(
+    public bool UpdateAttachedInstallationViewPose(
         Vector2Int storageKey,
-        InstallationObject liveInstallation,
+        int viewInstanceId,
         Vector3 worldPosition,
         Quaternion worldRotation)
     {
-        if (liveInstallation == null
+        if (viewInstanceId == 0
             || !installationRecordByAnchor.TryGetValue(storageKey, out int recordId)
             || !recordsById.TryGetValue(recordId, out VirtualObjectRecord record)
             || record == null
-            || record.liveInstanceId != liveInstallation.GetInstanceID())
+            || record.liveInstanceId != viewInstanceId)
         {
             return false;
         }
@@ -725,14 +728,13 @@ public sealed class VirtualObjectWorld : MonoBehaviour
         installationVersion++;
     }
 
-    private void Awake()
+    public void Dispose()
     {
-        if (current != null && current != this)
+        Clear();
+        if (ReferenceEquals(current, this))
         {
-            return;
+            current = null;
         }
-
-        current = this;
     }
 
     private VirtualObjectRecord GetOrCreateIndexedRecord(
@@ -892,15 +894,15 @@ public sealed class VirtualObjectWorld : MonoBehaviour
             simulationId);
     }
 
-    private uint AllocateMapObjectGeneration()
+    private static uint AllocateMapObjectGeneration()
     {
-        uint generation = nextMapObjectGeneration++;
+        uint generation = nextGlobalMapObjectGeneration++;
         if (generation != 0)
         {
             return generation;
         }
 
-        generation = nextMapObjectGeneration++;
+        generation = nextGlobalMapObjectGeneration++;
         return generation != 0 ? generation : 1u;
     }
 

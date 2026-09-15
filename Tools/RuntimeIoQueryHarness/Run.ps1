@@ -20,9 +20,11 @@ foreach ($field in [regex]::Matches($text, 'private static readonly RuntimeCoord
 }
 foreach ($signature in @(
     'public static bool TryGetOutputItemIdsAtRuntimeGridCoordinate(',
+    'public static bool TryGetFluidOutputInfoAtRuntimeGridCoordinate(',
     'public static bool TryGetAcceptedInputItemIdsAtRuntimeGridCoordinate(',
     'public static bool TryGetInputEnergyTypesAtRuntimeGridCoordinate(',
     'private static bool TryGetRuntimeCoordinateValues<T>(',
+    'private static bool TryGetFluidOutputInfoAtRuntimeGridCoordinate(',
     'private static bool TryAppendRuntimeOutputItemIds(',
     'private static bool TryAppendRuntimeInputItemIds(',
     'private static bool TryAppendAcceptedRuntimeInputItemIds(',

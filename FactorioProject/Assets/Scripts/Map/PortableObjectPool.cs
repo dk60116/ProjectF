@@ -1,19 +1,17 @@
-using DG.Tweening;
 using System.Collections.Generic;
 using UnityEngine;
 
 public class PortableObjectPool : MonoBehaviour
 {
     [SerializeField]
-    private PortableObject defaultPrefab;
+    private PortableObjectTemplate defaultPrefab;
 
     private readonly Stack<PortableObject> pooledObjects = new Stack<PortableObject>();
-    private Transform poolRoot;
     private bool isDestroying;
 
     public bool CanRelease => !isDestroying && this != null;
 
-    public void Configure(PortableObject prefab)
+    public void Configure(PortableObjectTemplate prefab)
     {
         if (prefab != null && defaultPrefab == null)
         {
@@ -21,9 +19,9 @@ public class PortableObjectPool : MonoBehaviour
         }
     }
 
-    public PortableObject Get(PortableObject prefabOverride = null)
+    public PortableObject Get(PortableObjectTemplate prefabOverride = null)
     {
-        PortableObject prefab = prefabOverride != null ? prefabOverride : defaultPrefab;
+        PortableObjectTemplate prefab = prefabOverride != null ? prefabOverride : defaultPrefab;
         if (prefab == null)
         {
             return null;
@@ -46,8 +44,8 @@ public class PortableObjectPool : MonoBehaviour
             return pooled;
         }
 
-        PortableObject created = Instantiate(prefab, GetPoolRoot());
-        created.gameObject.SetActive(false);
+        PortableObject created = PortableObject.Create(prefab);
+        created.SetCachedActive(false);
         PrepareBorrowedObject(created);
         return created;
     }
@@ -59,73 +57,32 @@ public class PortableObjectPool : MonoBehaviour
             return;
         }
 
-        portableObject.transform.DOKill();
+        portableObject.CancelMove();
         portableObject.SetSleepAwakeSleeping(false);
         portableObject.ClearBeltItemLineDebugColor();
         portableObject.SetBatchedRendering(false);
-        portableObject.gameObject.SetActive(false);
-        Transform root = GetPoolRoot();
-        if (root == null)
-        {
-            DestroyReleasedObject(portableObject);
-            return;
-        }
-
-        portableObject.transform.SetParent(root, false);
-        portableObject.transform.localPosition = Vector3.zero;
-        portableObject.transform.localRotation = Quaternion.identity;
-        portableObject.transform.localScale = Vector3.one;
+        portableObject.SetCachedActive(false);
+        portableObject.SetCachedParent(null, true);
+        portableObject.SetWorldPose(Vector3.zero, Quaternion.identity);
+        portableObject.SetWorldScale(Vector3.one);
         pooledObjects.Push(portableObject);
     }
 
     private void OnDestroy()
     {
         isDestroying = true;
-        pooledObjects.Clear();
-        poolRoot = null;
+        while (pooledObjects.Count > 0)
+        {
+            pooledObjects.Pop()?.Dispose();
+        }
     }
 
     private void PrepareBorrowedObject(PortableObject portableObject)
     {
-        portableObject.transform.DOKill();
+        portableObject.CancelMove();
         portableObject.SetSleepAwakeSleeping(false);
         portableObject.ClearBeltItemLineDebugColor();
         portableObject.SetBatchedRendering(false);
-        portableObject.gameObject.SetActive(true);
-    }
-
-    private Transform GetPoolRoot()
-    {
-        if (!CanRelease)
-        {
-            return null;
-        }
-
-        if (poolRoot != null)
-        {
-            return poolRoot;
-        }
-
-        GameObject rootObject = new GameObject("PortableObjectPool");
-        rootObject.transform.SetParent(transform, false);
-        poolRoot = rootObject.transform;
-        return poolRoot;
-    }
-
-    private static void DestroyReleasedObject(PortableObject portableObject)
-    {
-        if (portableObject == null)
-        {
-            return;
-        }
-
-        if (Application.isPlaying)
-        {
-            Object.Destroy(portableObject.gameObject);
-        }
-        else
-        {
-            Object.DestroyImmediate(portableObject.gameObject);
-        }
+        portableObject.SetCachedActive(true);
     }
 }

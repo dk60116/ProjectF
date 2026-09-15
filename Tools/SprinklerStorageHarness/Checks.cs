@@ -66,7 +66,7 @@ public readonly record struct Vector2Int(int x, int y)
     public static Vector2Int operator -(Vector2Int a) => new(-a.x, -a.y);
 }
 public struct Quaternion { public static Quaternion identity => default; }
-public class Pipe : InstallationObject
+public partial class Pipe : InstallationObject
 {
     public Vector2Int? Remote;
     public bool HasConnectionTowardsAt(Vector2Int coordinate, Quaternion rotation, Vector2Int direction) => true;

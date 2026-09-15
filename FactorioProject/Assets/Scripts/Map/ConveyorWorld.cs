@@ -561,11 +561,10 @@ public sealed class ConveyorRuntimeRecord
 }
 
 /// <summary>
-/// The only persistent scene object used by installed conveyors.  It owns simulation records,
-/// coordinate lookup, child-transform matrices and all conveyor draw batches.
+/// Runtime registry for installed conveyors. Its optional ConveyorWorldView drives rendering;
+/// releasing the view does not release records. Geometry/legacy Block IO migration is separate.
 /// </summary>
-[DisallowMultipleComponent, DefaultExecutionOrder(999)]
-public sealed class ConveyorWorld : MonoBehaviour, IVirtualRenderBatchOwner
+public sealed class ConveyorWorld : IDisposable, IVirtualRenderBatchOwner
 {
     internal enum EndpointVisualKind : byte
     {
@@ -657,6 +656,10 @@ public sealed class ConveyorWorld : MonoBehaviour, IVirtualRenderBatchOwner
     private const float BatchCellSize = 16f;
     private static readonly int CullShaderId = Shader.PropertyToID("_Cull");
     private static ConveyorWorld current;
+    internal TerrainGenerator Owner { get; private set; }
+    private ConveyorWorldView view;
+    internal ConveyorWorldView View => view;
+    private bool disposed;
 
     private readonly Dictionary<Vector2Int, ConveyorRuntimeRecord> recordsByStorageKey =
         new Dictionary<Vector2Int, ConveyorRuntimeRecord>();
@@ -677,13 +680,15 @@ public sealed class ConveyorWorld : MonoBehaviour, IVirtualRenderBatchOwner
 
     public static ConveyorWorld Current => current;
     public int InstalledBeltCount => recordsByStorageKey.Count;
-    public int SceneGameObjectCount => 1;
+    public int SceneGameObjectCount => view != null ? 1 : 0;
     public int BatchEntryCount => batchEntries.Count;
     public int ActiveBatchCount => batches.ActiveBatchCount;
     public int ActiveMatrixCount => batches.ActiveMatrixCount;
     public int EstimatedDrawCallCount => batches.EstimatedDrawCallCount;
     public int LastVisibleBatchCount => batches.LastVisibleBatchCount;
     public int LastCulledBatchCount => batches.LastCulledBatchCount;
+    public int LastCandidateBatchCount => batches.LastCandidateBatchCount;
+    public int LastCandidateCellCount => batches.LastCandidateCellCount;
     public int LastSubmittedMatrixCount => batches.LastLegacySubmittedMatrixCount;
     public int LastDrawCallCount => batches.LastLegacyDrawCallCount;
     public int LastBatchRendererGroupBatchCount => batches.LastBatchRendererGroupBatchCount;
@@ -736,6 +741,14 @@ public sealed class ConveyorWorld : MonoBehaviour, IVirtualRenderBatchOwner
             current != null ? current.LastCulledBatchCount : 0);
         MapObjectTickProfiler.AddRuntimeCounter(
             "ConveyorBodyRender",
+            "CandidateBatches",
+            current != null ? current.LastCandidateBatchCount : 0);
+        MapObjectTickProfiler.AddRuntimeCounter(
+            "ConveyorBodyRender",
+            "CandidateCells",
+            current != null ? current.LastCandidateCellCount : 0);
+        MapObjectTickProfiler.AddRuntimeCounter(
+            "ConveyorBodyRender",
             "LegacySubmittedMatrices",
             current != null ? current.LastSubmittedMatrixCount : 0);
         MapObjectTickProfiler.AddRuntimeCounter(
@@ -754,31 +767,38 @@ public sealed class ConveyorWorld : MonoBehaviour, IVirtualRenderBatchOwner
 
     public static ConveyorWorld EnsureFor(TerrainGenerator terrain)
     {
-        if (terrain == null)
-        {
-            return null;
-        }
-
-        if (current != null && current.transform.parent == terrain.transform)
-        {
-            return current;
-        }
-
-        Transform child = terrain.transform.Find(HostName);
-        GameObject host = child != null ? child.gameObject : new GameObject(HostName);
-        if (child == null)
-        {
-            host.transform.SetParent(terrain.transform, false);
-        }
-
-        current = host.GetComponent<ConveyorWorld>();
-        if (current == null)
-        {
-            current = host.AddComponent<ConveyorWorld>();
-        }
-
+        if (terrain == null) return null;
+        if (current != null && current.Owner == terrain) return current;
+        current?.Dispose();
+        current = new ConveyorWorld { Owner = terrain };
+        current.AttachView();
         return current;
     }
+
+    public void AttachView()
+    {
+        if (disposed) throw new ObjectDisposedException(nameof(ConveyorWorld));
+        if (view != null) return;
+        view = ConveyorWorldView.Create(this, Owner.transform, HostName);
+        foreach (var record in recordsByStorageKey.Values) CreateSplitterCollider(record, record.Prototype);
+    }
+
+    public void DetachView()
+    {
+        if (view == null) return;
+        var previous = view; view = null;
+        splitterCollidersByStorageKey.Clear(); splitterRecordsByCollider.Clear();
+        previous.Release();
+    }
+
+    internal void OnViewDestroyed(ConveyorWorldView previous)
+    {
+        if (!ReferenceEquals(view, previous)) return;
+        view = null;
+        splitterCollidersByStorageKey.Clear(); splitterRecordsByCollider.Clear();
+    }
+
+    internal void SuspendRendering() => batches.SuspendRendering();
 
     public ConveyorRuntimeRecord Register(
         BlockStateStore.InstallationSaveState state,
@@ -932,13 +952,12 @@ public sealed class ConveyorWorld : MonoBehaviour, IVirtualRenderBatchOwner
                && record.HasValidPrototype;
     }
 
-    private void Awake()
+    public void Dispose()
     {
-        current = this;
-    }
-
-    private void OnDestroy()
-    {
+        if (disposed) return;
+        disposed = true;
+        ClearRecords();
+        DetachView();
         if (current == this)
         {
             current = null;
@@ -954,17 +973,17 @@ public sealed class ConveyorWorld : MonoBehaviour, IVirtualRenderBatchOwner
 
             if (Application.isPlaying)
             {
-                Destroy(material);
+                UnityEngine.Object.Destroy(material);
             }
             else
             {
-                DestroyImmediate(material);
+                UnityEngine.Object.DestroyImmediate(material);
             }
         }
         mirroredMaterials.Clear();
     }
 
-    private void LateUpdate()
+    internal void Render()
     {
         using var sample = MapObjectTickProfiler.SampleNamed(
             "Render",
@@ -1008,7 +1027,7 @@ public sealed class ConveyorWorld : MonoBehaviour, IVirtualRenderBatchOwner
                    "Conveyor Body Render",
                    "Conveyor Body Submit"))
         {
-            batches.RenderBatches(mainCamera);
+            batches.RenderBatches(mainCamera, BatchCellSize);
         }
     }
 
@@ -1633,7 +1652,7 @@ public sealed class ConveyorWorld : MonoBehaviour, IVirtualRenderBatchOwner
 
     private void CreateSplitterCollider(ConveyorRuntimeRecord record, ConveyorBelt source)
     {
-        if (record == null || !record.IsSplitter || source == null)
+        if (view == null || record == null || !record.IsSplitter || source == null)
         {
             return;
         }
@@ -1644,12 +1663,12 @@ public sealed class ConveyorWorld : MonoBehaviour, IVirtualRenderBatchOwner
             return;
         }
 
-        BoxCollider collider = gameObject.AddComponent<BoxCollider>();
+        BoxCollider collider = view.gameObject.AddComponent<BoxCollider>();
         Matrix4x4 worldMatrix = Matrix4x4.TRS(
             record.WorldPosition,
             record.WorldRotation,
             record.WorldScale);
-        Matrix4x4 hostWorldToLocal = transform.worldToLocalMatrix;
+        Matrix4x4 hostWorldToLocal = view.transform.worldToLocalMatrix;
         collider.center = hostWorldToLocal.MultiplyPoint3x4(
             worldMatrix.MultiplyPoint3x4(sourceCollider.center));
         Vector3 axisX = hostWorldToLocal.MultiplyVector(
@@ -1694,11 +1713,11 @@ public sealed class ConveyorWorld : MonoBehaviour, IVirtualRenderBatchOwner
 
         if (Application.isPlaying)
         {
-            Destroy(component);
+            UnityEngine.Object.Destroy(component);
         }
         else
         {
-            DestroyImmediate(component);
+            UnityEngine.Object.DestroyImmediate(component);
         }
     }
 
