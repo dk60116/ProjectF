@@ -395,6 +395,8 @@ public sealed class AreaMarkerRenderer : MonoBehaviour
     private void OnDestroy()
     {
         if (Current == this) Current = null;
+        if (ProjectFApplicationLifecycle.IsQuitting) return;
+
         foreach (MarkerBatch batch in batches.Values) batch.Dispose();
         foreach (Material material in materials.Values) ReleaseResource(material);
         batches.Clear();

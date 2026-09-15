@@ -43,6 +43,10 @@ public partial class TerrainGenerator
     private int fluidJobFullDisplayResolveCount;
     private int fluidJobLastResolvedDisplayNetworkCount;
     private int fluidJobLastDisplaySourceQueryCount;
+    private int fluidJobLastReportedRebuildCount;
+    private int fluidJobLastReportedDisplayResolveCount;
+    private int fluidJobLastReportedDirtySignalCount;
+    private int fluidJobLastReportedFullDisplayResolveCount;
 
     public int FluidJobNetworkCount => fluidJobNetworkBuild.Count;
     public int FluidJobPipeCount => fluidJobRecordOrder.Count;
@@ -594,6 +598,21 @@ public partial class TerrainGenerator
 
     private void AppendFluidJobRuntimeProfilerCounters()
     {
+        int rebuildDelta = Math.Max(0, fluidJobRebuildCount - fluidJobLastReportedRebuildCount);
+        int displayResolveDelta = Math.Max(
+            0,
+            fluidJobDisplayResolveCount - fluidJobLastReportedDisplayResolveCount);
+        int dirtySignalDelta = Math.Max(
+            0,
+            fluidJobDisplayDirtySignalCount - fluidJobLastReportedDirtySignalCount);
+        int fullDisplayResolveDelta = Math.Max(
+            0,
+            fluidJobFullDisplayResolveCount - fluidJobLastReportedFullDisplayResolveCount);
+        fluidJobLastReportedRebuildCount = fluidJobRebuildCount;
+        fluidJobLastReportedDisplayResolveCount = fluidJobDisplayResolveCount;
+        fluidJobLastReportedDirtySignalCount = fluidJobDisplayDirtySignalCount;
+        fluidJobLastReportedFullDisplayResolveCount = fluidJobFullDisplayResolveCount;
+
         MapObjectTickProfiler.AddRuntimeCounter("FluidJobs", "ShadowMode", true);
         MapObjectTickProfiler.AddRuntimeCounter("FluidJobs", "Authoritative", false);
         MapObjectTickProfiler.AddRuntimeCounter("FluidJobs", "DisplayAuthoritative", true);
@@ -602,9 +621,16 @@ public partial class TerrainGenerator
         MapObjectTickProfiler.AddRuntimeCounter("FluidJobs", "Edges", fluidJobEdgeBuild.Count);
         MapObjectTickProfiler.AddRuntimeCounter("FluidJobs", "TopologyRebuilds", fluidJobRebuildCount);
         MapObjectTickProfiler.AddRuntimeCounter(
+            "FluidJobs", "TopologyRebuildsDelta", rebuildDelta, "Since previous profiler snapshot");
+        MapObjectTickProfiler.AddRuntimeCounter(
             "FluidJobs",
             "DisplayResolves",
             fluidJobDisplayResolveCount);
+        MapObjectTickProfiler.AddRuntimeCounter(
+            "FluidJobs",
+            "DisplayResolvesDelta",
+            displayResolveDelta,
+            "Since previous profiler snapshot");
         MapObjectTickProfiler.AddRuntimeCounter(
             "FluidJobs",
             "LastChangedDisplayPipes",
@@ -619,8 +645,18 @@ public partial class TerrainGenerator
             fluidJobDisplayDirtySignalCount);
         MapObjectTickProfiler.AddRuntimeCounter(
             "FluidJobs",
+            "DisplayDirtySignalsDelta",
+            dirtySignalDelta,
+            "Since previous profiler snapshot");
+        MapObjectTickProfiler.AddRuntimeCounter(
+            "FluidJobs",
             "FullDisplayResolves",
             fluidJobFullDisplayResolveCount);
+        MapObjectTickProfiler.AddRuntimeCounter(
+            "FluidJobs",
+            "FullDisplayResolvesDelta",
+            fullDisplayResolveDelta,
+            "Since previous profiler snapshot");
         MapObjectTickProfiler.AddRuntimeCounter(
             "FluidJobs",
             "LastResolvedDisplayNetworks",
@@ -641,6 +677,26 @@ public partial class TerrainGenerator
             "FluidJobs",
             "IndexedFluidStorageCoordinates",
             InputOutputModule.RuntimeFluidStorageCoordinateCount);
+        MapObjectTickProfiler.AddRuntimeCounter(
+            "FluidJobs",
+            "TopologyInvalidations",
+            InputOutputModule.FluidTopologyInvalidationCount);
+        MapObjectTickProfiler.AddRuntimeCounter(
+            "FluidJobs",
+            "PlacementInvalidations",
+            InputOutputModule.FluidPlacementInvalidationCount);
+        MapObjectTickProfiler.AddRuntimeCounter(
+            "FluidJobs",
+            "IgnoredNonFluidPlacementChanges",
+            InputOutputModule.IgnoredNonFluidPlacementChangeCount);
+        MapObjectTickProfiler.AddRuntimeCounter(
+            "FluidJobs",
+            "InputSleepWaiterLinks",
+            InputOutputModule.FluidInputSleepWaiterLinkCount);
+        MapObjectTickProfiler.AddRuntimeCounter(
+            "FluidJobs",
+            "OutputSleepWaiterLinks",
+            InputOutputModule.FluidOutputSleepWaiterLinkCount);
         MapObjectTickProfiler.AddRuntimeCounter(
             "FluidJobs",
             "LastCompletedTick",

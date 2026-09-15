@@ -6,6 +6,11 @@ public class ItemDefinition { }
 public class FakeGameObject { public bool activeInHierarchy = true; }
 public class FakeTransform { public Quaternion rotation = Quaternion.identity; }
 public static class MapClimate { public static float CurrentWaterTemperatureCelsius => 20; }
+public static class MapObjectTickProfiler
+{
+    public static Scope SampleNamed(string kind, string typeName, string itemName) => default;
+    public readonly struct Scope : IDisposable { public void Dispose() { } }
+}
 public class InstallationObject
 {
     private static long nextSimulationId;
@@ -38,6 +43,7 @@ public partial class InputOutputModule : InstallationObject
     protected readonly List<Vector2Int> runtimeOutputCoordinates = new() { Vector2Int.zero };
     protected readonly List<InstallationObject> cachedFluidOutputStorages = new();
     private int connectedFluidSearchCurrentPipeCount = 0;
+    private bool fluidOutputCapacityBlocked;
     protected bool TryGetPlacementRuntime(out Vector2Int anchor, out int rotation)
     { anchor = Anchor; rotation = Rotation; return Placed; }
     public static Vector2Int Rotate(Vector2Int value, int rotation)
@@ -59,7 +65,7 @@ public partial class InputOutputModule : InstallationObject
     }
     public void Traverse(InputOutputModule module, Vector2Int coordinate) => EnqueueFluidStoragePipePassCoordinatesAt(new[] { module }, coordinate);
 }
-public class SteamGenerator : InputOutputModule { }
+public partial class SteamGenerator : InputOutputModule { }
 public class SteamTrain : InstallationObject
 { public bool CanAcceptWaterFromPipeDirection(Vector2Int direction, int id, bool space) => false; }
 public class Pipe : InstallationObject
@@ -84,10 +90,7 @@ public partial class Boiler : InputOutputModule
         inward = anchor - coordinate;
         return coordinate == anchor + Rotate(Vector2Int.left, rotation) || coordinate == anchor + Rotate(Vector2Int.right, rotation);
     }
-    private bool TryConsumeBoilerOperatingEnergy(float dt, ItemDefinition definition, out float energy) { energy = dt; return true; }
-    private float ResolveTemperatureGain(float dt, float energy, ItemDefinition definition) => dt * 10;
-    private void SetStoredFluidTemperatureCelsius(float temperature) { }
-    public bool Heat(float dt) => TryHeatWater(dt, 1, null);
+    public bool Heat(float dt) => IsWaterStorageFull(1);
 }
 public partial class Pump : InputOutputModule
 {
@@ -109,6 +112,7 @@ public static class Checks
     private static void Require(bool condition, string message) { if (!condition) throw new Exception(message); checks++; }
     public static void Main()
     {
+        CheckDirectedSteamGeneratorConnections();
         for (int rotation = 0; rotation < 4; rotation++)
         for (int count = 2; count <= 3; count++)
         {
@@ -151,5 +155,70 @@ public static class Checks
             Require(Math.Abs(stored - (50 + supplied - consumed)) < .02f, "water must be conserved");
         }
         Console.WriteLine($"PASS: {checks} boiler water pass, continuous upstream consumption, heating and conservation checks (2/3 boilers, four rotations). No engine launched.");
+    }
+
+    private static void CheckDirectedSteamGeneratorConnections()
+    {
+        Vector2Int source = new(11, -7);
+        for (int rotation = 0; rotation < 4; rotation++)
+        {
+            Vector2Int flow = InputOutputModule.Rotate(Vector2Int.right, rotation);
+            Vector2Int side = InputOutputModule.Rotate(Vector2Int.up, rotation);
+
+            Require(
+                SteamGenerator.IsDirectedSteamPortConnection(
+                    source,
+                    flow,
+                    source + flow,
+                    source,
+                    flow,
+                    flow),
+                "overlapping output/input must connect");
+            Require(
+                SteamGenerator.IsDirectedSteamPortConnection(
+                    source,
+                    flow,
+                    source + flow * 2,
+                    source + flow,
+                    flow,
+                    flow),
+                "one-cell forward input must connect");
+            Require(
+                SteamGenerator.IsDirectedSteamPortConnection(
+                    source,
+                    flow,
+                    source,
+                    source - flow,
+                    flow,
+                    flow),
+                "dense serial center overlap must connect");
+            Require(
+                !SteamGenerator.IsDirectedSteamPortConnection(
+                    source,
+                    flow,
+                    source + side,
+                    source + side - flow,
+                    flow,
+                    flow),
+                "parallel side neighbour must not connect");
+            Require(
+                !SteamGenerator.IsDirectedSteamPortConnection(
+                    source,
+                    flow,
+                    source,
+                    source - flow,
+                    -flow,
+                    -flow),
+                "reverse-facing generator must not connect");
+            Require(
+                !SteamGenerator.IsDirectedSteamPortConnection(
+                    source,
+                    flow,
+                    source + flow,
+                    source - flow,
+                    flow,
+                    flow),
+                "behind-port input without center overlap must not connect");
+        }
     }
 }

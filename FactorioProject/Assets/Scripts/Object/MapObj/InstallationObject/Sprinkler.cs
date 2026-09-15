@@ -107,7 +107,10 @@ public class Sprinkler : InputOutputModule
 
     protected override void OnDisable()
     {
+        if (ProjectFApplicationLifecycle.IsQuitting) return;
+
         SetOperating(false);
+        ApplyOperatingVisuals();
         wateringTargets.Clear();
         ActiveSprinklers.Remove(this);
         if (IsDirectRangeVisualRequested && !gameObject.activeInHierarchy)
@@ -122,8 +125,12 @@ public class Sprinkler : InputOutputModule
         base.OnDisable();
     }
 
+    protected override bool RequiresManagedVisualUpdate =>
+        base.RequiresManagedVisualUpdate || isOperating;
+
     protected override void TickManagedVisuals(float deltaTime)
     {
+        base.TickManagedVisuals(deltaTime);
         if (!Application.isPlaying || !isOperating || nozzleTransform == null)
         {
             return;
@@ -291,8 +298,13 @@ public class Sprinkler : InputOutputModule
 
     protected override bool ShouldKeepRuntimeUpdateTickActive()
     {
-        return TryGetPlacementRuntime(out _, out _)
-               || base.ShouldKeepRuntimeUpdateTickActive();
+        if (!TryGetPlacementRuntime(out _, out _) || ResolveWaterItemId() < 0)
+        {
+            return false;
+        }
+
+        GetWaterStorageInfo(out float storedLiters, out _);
+        return storedLiters > WaterEpsilon || base.ShouldKeepRuntimeUpdateTickActive();
     }
 
     protected override void OnPlacementRuntimeChanged()
@@ -743,6 +755,16 @@ public class Sprinkler : InputOutputModule
         }
 
         isOperating = operating;
+        MarkManagedRuntimeVisualsDirty();
+    }
+
+    protected override void OnManagedRuntimeVisualsFlushed()
+    {
+        ApplyOperatingVisuals();
+    }
+
+    private void ApplyOperatingVisuals()
+    {
         EnsureWaterJetEffects();
         for (int i = 0; i < waterJetEffects.Count; i++)
         {
@@ -752,7 +774,7 @@ public class Sprinkler : InputOutputModule
                 continue;
             }
 
-            SetVisualParticleActive(effect, operating, clear: true);
+            SetVisualParticleActive(effect, isOperating, clear: true);
         }
     }
 

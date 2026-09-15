@@ -3,6 +3,8 @@ using System.Collections;
 using System.IO;
 using System.Threading;
 using System.Threading.Tasks;
+using ProjectF.Persistence;
+using Unity.Profiling;
 using UnityEngine;
 using UnityEngine.SceneManagement;
 
@@ -12,12 +14,14 @@ public class SaveManager : MonoBehaviour
 
     private const string RecentSlotPlayerPrefsKey = "ProjectF.SaveManager.RecentSlot";
     private const string SaveFileExtension = ".pfsave";
-    private const int SaveSnapshotEntriesPerFrame = 64;
-    private const int SaveSnapshotBeltLanesPerFrame = 128;
+    private const int SaveSnapshotBatchSize = 16;
+    private const int SaveSnapshotBeltLaneBatchSize = 64;
+    private static readonly ProfilerMarker SaveSnapshotSliceMarker = new ProfilerMarker("SaveManager.SnapshotSlice");
 
     private static SaveGameData pendingRuntimeLoadData;
     private static int pendingRuntimeLoadSlot = -1;
     private static bool pendingRuntimeStartNewMap;
+    private static bool publishingRuntimeSceneLoad;
     private static int runtimeSaveInputBlockDepth;
 
     [Header("Inspector")]
@@ -31,6 +35,10 @@ public class SaveManager : MonoBehaviour
     [SerializeField]
     private bool randomizeEmptySlotMap = true;
 
+    [Header("Save Performance")]
+    [SerializeField, Range(0.5f, 8f)]
+    private float snapshotFrameBudgetMilliseconds = 4f;
+
     private PlayerSaveData defaultPlayerState;
     private bool hasDefaultPlayerState;
     private readonly bool[] cachedSaveFileExists = new bool[SlotCount];
@@ -39,6 +47,7 @@ public class SaveManager : MonoBehaviour
     private bool startupLoadCompleted;
     private bool sceneReloadRequested;
     private Coroutine activeSaveCoroutine;
+    private SaveSnapshotScheduler activeSaveSnapshot;
     private Task activeSaveWriteTask;
     private Coroutine activeLoadCoroutine;
     private Task<SaveGameData> activeLoadReadTask;
@@ -69,11 +78,16 @@ public class SaveManager : MonoBehaviour
         pendingRuntimeLoadData = null;
         pendingRuntimeLoadSlot = -1;
         pendingRuntimeStartNewMap = false;
+        publishingRuntimeSceneLoad = false;
         runtimeSaveInputBlockDepth = 0;
+        SlotLoadTimingLog.Reset();
+        SlotSaveTimingLog.Reset();
     }
 
     internal static void DiscardPendingRuntimeLoadForSceneReplacement()
     {
+        if (!publishingRuntimeSceneLoad)
+            SlotLoadTimingLog.CancelActive("scene-load-replaced");
         pendingRuntimeLoadData = null;
         pendingRuntimeLoadSlot = -1;
         pendingRuntimeStartNewMap = false;
@@ -148,6 +162,7 @@ public class SaveManager : MonoBehaviour
 
         if (!Application.isPlaying)
         {
+            SlotSaveTimingLog.Begin(slotIndex, "immediate-save");
             return SaveSlotImmediate(slotIndex, terrain, player);
         }
 
@@ -157,6 +172,7 @@ public class SaveManager : MonoBehaviour
             return false;
         }
 
+        SlotSaveTimingLog.Begin(slotIndex, "runtime-save");
         BeginSaveInputBlock();
         try
         {
@@ -164,6 +180,7 @@ public class SaveManager : MonoBehaviour
         }
         catch (Exception exception)
         {
+            SlotSaveTimingLog.Fail(slotIndex, "save-coroutine-start-failed: " + exception.GetType().Name);
             EndSaveInputBlock();
             Debug.LogError($"[SaveManager] Slot {slotIndex + 1} 저장 코루틴 시작 실패: {exception}");
             return false;
@@ -171,6 +188,7 @@ public class SaveManager : MonoBehaviour
 
         if (activeSaveCoroutine == null)
         {
+            SlotSaveTimingLog.Fail(slotIndex, "save-coroutine-missing");
             EndSaveInputBlock();
             Debug.LogError($"[SaveManager] Slot {slotIndex + 1} 저장 코루틴을 생성하지 못했습니다.");
             return false;
@@ -182,15 +200,19 @@ public class SaveManager : MonoBehaviour
     private bool SaveSlotImmediate(int slotIndex, TerrainGenerator terrain, Player player)
     {
         string path = GetSlotPath(slotIndex);
+        var timer = System.Diagnostics.Stopwatch.StartNew();
         try
         {
             SaveGameData data = CaptureSaveData(terrain, player);
+            SlotSaveTimingLog.MarkSnapshotComplete(
+                slotIndex, timer.Elapsed.TotalMilliseconds, timer.Elapsed.TotalMilliseconds, 1, 0);
             SaveGameBinarySerializer.WriteToFile(path, data);
             CompleteSuccessfulSave(slotIndex, path);
             return true;
         }
         catch (Exception exception)
         {
+            SlotSaveTimingLog.Fail(slotIndex, "immediate-save-failed: " + exception.GetType().Name);
             Debug.LogError($"[SaveManager] Slot {slotIndex + 1} 저장 실패: {exception}");
             return false;
         }
@@ -205,29 +227,46 @@ public class SaveManager : MonoBehaviour
 
             SaveGameData data = null;
             Exception captureException = null;
+            var saveTimer = System.Diagnostics.Stopwatch.StartNew();
             BeginSaveTickPause();
             IEnumerator captureRoutine = CaptureSaveDataIncremental(
                 terrain,
                 player,
                 captured => data = captured);
-            while (captureException == null)
+            activeSaveSnapshot = new SaveSnapshotScheduler(
+                captureRoutine, Mathf.Clamp(snapshotFrameBudgetMilliseconds, 0.5f, 8f));
+            using (SaveSnapshotScheduler scheduler = activeSaveSnapshot)
             {
-                bool hasNext = false;
-                object yielded = null;
-                try
+                while (captureException == null)
                 {
-                    hasNext = captureRoutine.MoveNext();
-                    if (hasNext) yielded = captureRoutine.Current;
-                }
-                catch (Exception exception)
-                {
-                    captureException = exception;
+                    bool hasNext = false;
+                    try
+                    {
+                        using (SaveSnapshotSliceMarker.Auto()) { hasNext = scheduler.RunSlice(); }
+                    }
+                    catch (Exception exception)
+                    {
+                        captureException = exception;
+                    }
+
+                    if (!hasNext) break;
+                    yield return null;
                 }
 
-                if (!hasNext) break;
-                yield return yielded;
+                if (captureException == null)
+                {
+                    SlotSaveTimingLog.MarkSnapshotComplete(
+                        slotIndex,
+                        scheduler.ActiveMilliseconds,
+                        scheduler.MaxSliceMilliseconds,
+                        scheduler.SliceCount,
+                        scheduler.CheckpointCount);
+                    Debug.Log($"[SaveManager] Snapshot wallMs={saveTimer.Elapsed.TotalMilliseconds:F1} "
+                        + $"activeMs={scheduler.ActiveMilliseconds:F1} maxSliceMs={scheduler.MaxSliceMilliseconds:F1} "
+                        + $"frames={scheduler.SliceCount} checkpoints={scheduler.CheckpointCount}");
+                }
             }
-            (captureRoutine as IDisposable)?.Dispose();
+            activeSaveSnapshot = null;
 
             if (captureException == null && data == null)
             {
@@ -239,6 +278,7 @@ public class SaveManager : MonoBehaviour
 
             if (captureException != null)
             {
+                SlotSaveTimingLog.Fail(slotIndex, "snapshot-failed: " + captureException.GetType().Name);
                 Debug.LogError($"[SaveManager] Slot {slotIndex + 1} 상태 수집 실패: {captureException}");
                 yield break;
             }
@@ -247,6 +287,7 @@ public class SaveManager : MonoBehaviour
             // can therefore run off the main thread while frames continue rendering.
             string path = GetSlotPath(slotIndex);
             Exception taskStartException = null;
+            saveTimer.Restart();
             try
             {
                 activeSaveWriteTask = Task.Factory.StartNew(
@@ -262,6 +303,7 @@ public class SaveManager : MonoBehaviour
 
             if (taskStartException != null)
             {
+                SlotSaveTimingLog.Fail(slotIndex, "write-task-start-failed: " + taskStartException.GetType().Name);
                 Debug.LogError($"[SaveManager] Slot {slotIndex + 1} 저장 작업 시작 실패: {taskStartException}");
                 yield break;
             }
@@ -274,14 +316,17 @@ public class SaveManager : MonoBehaviour
             if (activeSaveWriteTask.IsFaulted)
             {
                 Exception writeException = activeSaveWriteTask.Exception?.GetBaseException();
+                SlotSaveTimingLog.Fail(slotIndex, "write-failed: " + (writeException?.GetType().Name ?? "Unknown"));
                 Debug.LogError($"[SaveManager] Slot {slotIndex + 1} 저장 실패: {writeException}");
             }
             else if (activeSaveWriteTask.IsCanceled)
             {
+                SlotSaveTimingLog.Fail(slotIndex, "write-cancelled");
                 Debug.LogWarning($"[SaveManager] Slot {slotIndex + 1} 저장이 취소되었습니다.");
             }
             else
             {
+                Debug.Log($"[SaveManager] Compress/write wallMs={saveTimer.Elapsed.TotalMilliseconds:F1}");
                 CompleteSuccessfulSave(slotIndex, path);
             }
         }
@@ -329,21 +374,23 @@ public class SaveManager : MonoBehaviour
             throw new InvalidOperationException("Cannot save inside a simulation tick or with unapplied commands.");
 
         ProjectF.Conveyors.BeltSimulationSnapshot beltSnapshot = null;
-        IEnumerator beltCapture = terrain.CaptureBeltSimulationSnapshotIncremental(
-            snapshot => beltSnapshot = snapshot,
-            SaveSnapshotBeltLanesPerFrame);
-        while (beltCapture.MoveNext())
+        IEnumerator beltCapture = SlotSaveTimingLog.TrackStage(
+            "belt-snapshot",
+            terrain.CaptureBeltSimulationSnapshotIncremental(
+                snapshot => beltSnapshot = snapshot,
+                SaveSnapshotBeltLaneBatchSize));
+        using (beltCapture as IDisposable)
         {
-            yield return beltCapture.Current;
+            while (beltCapture.MoveNext()) yield return beltCapture.Current;
         }
 
         MapSaveData mapSaveData = new MapSaveData();
         IEnumerator mapCapture = terrain.CaptureMapSaveStateIncremental(
             mapSaveData,
-            SaveSnapshotEntriesPerFrame);
-        while (mapCapture.MoveNext())
+            SaveSnapshotBatchSize);
+        using (mapCapture as IDisposable)
         {
-            yield return mapCapture.Current;
+            while (mapCapture.MoveNext()) yield return mapCapture.Current;
         }
 
         SaveGameData data = new SaveGameData
@@ -367,6 +414,7 @@ public class SaveManager : MonoBehaviour
     {
         SetCachedSaveFileExists(slotIndex, true);
         SetRecentSlot(slotIndex);
+        SlotSaveTimingLog.Complete(slotIndex);
         Debug.Log($"[SaveManager] Slot {slotIndex + 1} 저장 완료: {path}");
     }
 
@@ -420,11 +468,16 @@ public class SaveManager : MonoBehaviour
 
     private void FinishSaveOperation()
     {
-        EndSaveTickPause();
-        EndSaveInputBlock();
-
-        activeSaveWriteTask = null;
-        activeSaveCoroutine = null;
+        try { activeSaveSnapshot?.Dispose(); }
+        finally
+        {
+            SlotSaveTimingLog.CancelActive("save-operation-ended-without-result");
+            activeSaveSnapshot = null;
+            EndSaveTickPause();
+            EndSaveInputBlock();
+            activeSaveWriteTask = null;
+            activeSaveCoroutine = null;
+        }
     }
 
     private void BeginSaveInputBlock()
@@ -462,8 +515,9 @@ public class SaveManager : MonoBehaviour
 
     private void OnDestroy()
     {
-        EndSaveTickPause();
-        EndSaveInputBlock();
+        // A scene replacement must release a suspended snapshot even when Unity's
+        // coroutine driver does not dispose the outer iterator.
+        FinishSaveOperation();
     }
 
     public bool LoadSlot(int slotIndex)
@@ -476,6 +530,9 @@ public class SaveManager : MonoBehaviour
 
         slotIndex = NormalizeSlotIndex(slotIndex);
         SelectedSlotIndex = slotIndex;
+        SlotLoadTimingLog.Begin(
+            slotIndex,
+            Application.isPlaying && startupLoadCompleted ? "runtime-scene-reload" : "direct-load");
 
         if (Application.isPlaying && startupLoadCompleted)
         {
@@ -500,6 +557,7 @@ public class SaveManager : MonoBehaviour
         try
         {
             SaveGameData data = SaveGameBinarySerializer.ReadFromFile(path);
+            SlotLoadTimingLog.MarkPayloadReady(slotIndex);
             if (data == null)
             {
                 StartNewMap(slotIndex);
@@ -510,6 +568,7 @@ public class SaveManager : MonoBehaviour
         }
         catch (Exception exception)
         {
+            SlotLoadTimingLog.Fail(slotIndex, "read-or-apply-failed: " + exception.GetType().Name);
             Debug.LogError($"[SaveManager] Slot {slotIndex + 1} 로드 실패: {exception}");
             return false;
         }
@@ -519,6 +578,7 @@ public class SaveManager : MonoBehaviour
     {
         slotIndex = NormalizeSlotIndex(slotIndex);
         SelectedSlotIndex = slotIndex;
+        SlotLoadTimingLog.Begin(slotIndex, "startup-recent-slot");
         string path = GetSlotPath(slotIndex);
         if (!HasSaveFile(slotIndex))
         {
@@ -538,6 +598,7 @@ public class SaveManager : MonoBehaviour
 
         if (taskStartException != null)
         {
+            SlotLoadTimingLog.Fail(slotIndex, "read-task-start-failed: " + taskStartException.GetType().Name);
             Debug.LogError($"[SaveManager] Slot {slotIndex + 1} 로드 작업 시작 실패: {taskStartException}");
             activeLoadReadTask = null;
             yield break;
@@ -553,17 +614,20 @@ public class SaveManager : MonoBehaviour
         if (completedTask.IsFaulted)
         {
             Exception readException = completedTask.Exception?.GetBaseException();
+            SlotLoadTimingLog.Fail(slotIndex, "read-failed: " + (readException?.GetType().Name ?? "Unknown"));
             Debug.LogError($"[SaveManager] Slot {slotIndex + 1} 로드 실패: {readException}");
             yield break;
         }
 
         if (completedTask.IsCanceled)
         {
+            SlotLoadTimingLog.Fail(slotIndex, "read-cancelled");
             Debug.LogWarning($"[SaveManager] Slot {slotIndex + 1} 로드가 취소되었습니다.");
             yield break;
         }
 
         SaveGameData data = completedTask.Result;
+        SlotLoadTimingLog.MarkPayloadReady(slotIndex);
         if (data == null)
         {
             StartNewMap(slotIndex);
@@ -577,12 +641,14 @@ public class SaveManager : MonoBehaviour
     {
         if (sceneReloadRequested)
         {
+            SlotLoadTimingLog.Fail(slotIndex, "scene-reload-already-requested");
             return false;
         }
 
         Scene activeScene = SceneManager.GetActiveScene();
         if (!activeScene.IsValid())
         {
+            SlotLoadTimingLog.Fail(slotIndex, "active-scene-invalid");
             Debug.LogError("[SaveManager] 활성 씬을 찾을 수 없어 런타임 로드를 시작하지 못했습니다.");
             return false;
         }
@@ -626,6 +692,7 @@ public class SaveManager : MonoBehaviour
 
         if (taskStartException != null)
         {
+            SlotLoadTimingLog.Fail(slotIndex, "read-task-start-failed: " + taskStartException.GetType().Name);
             Debug.LogError($"[SaveManager] Slot {slotIndex + 1} 로드 작업 시작 실패: {taskStartException}");
             ResetActiveLoadState();
             yield break;
@@ -644,6 +711,7 @@ public class SaveManager : MonoBehaviour
         if (completedTask.IsFaulted)
         {
             Exception readException = completedTask.Exception?.GetBaseException();
+            SlotLoadTimingLog.Fail(slotIndex, "read-failed: " + (readException?.GetType().Name ?? "Unknown"));
             Debug.LogError($"[SaveManager] Slot {slotIndex + 1} 로드 실패: {readException}");
             ResetActiveLoadState();
             yield break;
@@ -651,12 +719,14 @@ public class SaveManager : MonoBehaviour
 
         if (completedTask.IsCanceled)
         {
+            SlotLoadTimingLog.Fail(slotIndex, "read-cancelled");
             Debug.LogWarning($"[SaveManager] Slot {slotIndex + 1} 로드가 취소되었습니다.");
             ResetActiveLoadState();
             yield break;
         }
 
         SaveGameData data = completedTask.Result;
+        SlotLoadTimingLog.MarkPayloadReady(slotIndex);
         StartSceneReloadForSlot(
             slotIndex,
             data,
@@ -672,18 +742,23 @@ public class SaveManager : MonoBehaviour
         int sceneBuildIndex,
         string sceneName)
     {
-        bool reloadStarted;
-        if (sceneBuildIndex >= 0)
+        bool reloadStarted = false;
+        publishingRuntimeSceneLoad = true;
+        try
         {
-            reloadStarted = GameSceneLoadingScreen.TryLoadSceneAsync(sceneBuildIndex);
+            if (sceneBuildIndex >= 0)
+                reloadStarted = GameSceneLoadingScreen.TryLoadSceneAsync(sceneBuildIndex);
+            else
+                reloadStarted = GameSceneLoadingScreen.TryLoadSceneAsync(sceneName);
         }
-        else
+        finally
         {
-            reloadStarted = GameSceneLoadingScreen.TryLoadSceneAsync(sceneName);
+            publishingRuntimeSceneLoad = false;
         }
 
         if (!reloadStarted)
         {
+            SlotLoadTimingLog.Fail(slotIndex, "scene-reload-request-failed");
             ResetActiveLoadState();
             Debug.LogError("[SaveManager] 활성 씬 재로드 요청을 생성하지 못했습니다.");
             return false;
@@ -724,12 +799,14 @@ public class SaveManager : MonoBehaviour
             ApplySaveData(data, () =>
             {
                 SetRecentSlot(slotIndex);
+                CompleteLoadedSlotTimingWhenWorldReady(slotIndex);
                 Debug.Log($"[SaveManager] Slot {slotIndex + 1} 최종 상태 복원 완료: {path}");
             });
             return true;
         }
         catch (Exception exception)
         {
+            SlotLoadTimingLog.Fail(slotIndex, "apply-failed: " + exception.GetType().Name);
             Debug.LogError($"[SaveManager] Slot {slotIndex + 1} 적용 실패: {exception}");
             return false;
         }
@@ -755,6 +832,32 @@ public class SaveManager : MonoBehaviour
         pendingRuntimeLoadData = null;
         pendingRuntimeStartNewMap = false;
         return true;
+    }
+
+    private void CompleteLoadedSlotTimingWhenWorldReady(int slotIndex)
+    {
+        if (!SlotLoadTimingLog.IsActiveFor(slotIndex)) return;
+        TerrainGenerator terrain = TerrainGenerator.ResolveActive();
+        if (!Application.isPlaying || terrain == null)
+        {
+            SlotLoadTimingLog.Complete(slotIndex, "saved-world-ready");
+            return;
+        }
+        StartCoroutine(CompleteSavedWorldLoadTimingWhenReady(slotIndex, terrain));
+    }
+
+    private static IEnumerator CompleteSavedWorldLoadTimingWhenReady(
+        int slotIndex,
+        TerrainGenerator terrain)
+    {
+        while (terrain != null && terrain.IsWorldRestorePending)
+            yield return null;
+
+        if (!SlotLoadTimingLog.IsActiveFor(slotIndex)) yield break;
+        if (terrain != null && terrain.IsWorldReadyForPresentation)
+            SlotLoadTimingLog.Complete(slotIndex, "saved-world-ready");
+        else
+            SlotLoadTimingLog.Fail(slotIndex, "saved-world-restore-failed");
     }
 
     public bool ResetSlot(int slotIndex)
@@ -835,10 +938,38 @@ public class SaveManager : MonoBehaviour
             {
                 GameSceneLoadingScreen.TryShowUntilWorldReady();
             }
+
+            if (SlotLoadTimingLog.IsActiveFor(slotIndex))
+            {
+                if (Application.isPlaying)
+                    StartCoroutine(CompleteNewMapLoadTimingWhenReady(slotIndex, terrain));
+                else if (terrain.IsWorldReadyForPresentation)
+                    SlotLoadTimingLog.Complete(slotIndex, "new-map-world-ready");
+                else
+                    SlotLoadTimingLog.Fail(slotIndex, "new-map-world-not-ready");
+            }
+        }
+        else if (SlotLoadTimingLog.IsActiveFor(slotIndex))
+        {
+            SlotLoadTimingLog.Fail(slotIndex, "terrain-generator-missing");
         }
 
         SetRecentSlot(slotIndex);
         Debug.Log($"[SaveManager] Slot {slotIndex + 1}에 새 맵을 시작했습니다. randomSeed={randomizeSeed}");
+    }
+
+    private static IEnumerator CompleteNewMapLoadTimingWhenReady(
+        int slotIndex,
+        TerrainGenerator terrain)
+    {
+        while (terrain != null && terrain.IsWorldRestorePending)
+            yield return null;
+
+        if (!SlotLoadTimingLog.IsActiveFor(slotIndex)) yield break;
+        if (terrain != null && terrain.IsWorldReadyForPresentation)
+            SlotLoadTimingLog.Complete(slotIndex, "new-map-world-ready");
+        else
+            SlotLoadTimingLog.Fail(slotIndex, "new-map-world-restore-failed");
     }
 
     public string[] BuildSlotLabels()
@@ -932,15 +1063,40 @@ public class SaveManager : MonoBehaviour
                 data.map,
                 () =>
                 {
-                    terrain.RestoreBeltSimulationSnapshot(data.beltSimulation);
-                    CompletePlayerLoad(player, data.player);
-                    onRestored?.Invoke();
+                    RecordLoadStage(
+                        "checkpoint-belt-snapshot",
+                        () => terrain.RestoreBeltSimulationSnapshot(data.beltSimulation));
+                    RecordLoadStage(
+                        "checkpoint-player",
+                        () => CompletePlayerLoad(player, data.player));
+                    RecordLoadStage("checkpoint-publish", onRestored);
                 });
             return;
         }
 
         CompletePlayerLoad(player, data.player);
         onRestored?.Invoke();
+    }
+
+    private static void RecordLoadStage(string stage, Action action)
+    {
+        if (action == null)
+        {
+            return;
+        }
+
+        long startedAt = System.Diagnostics.Stopwatch.GetTimestamp();
+        try
+        {
+            action();
+        }
+        finally
+        {
+            SlotLoadTimingLog.RecordStageWork(
+                stage,
+                (System.Diagnostics.Stopwatch.GetTimestamp() - startedAt)
+                * (1000d / System.Diagnostics.Stopwatch.Frequency));
+        }
     }
 
     private void CompletePlayerLoad(Player player, PlayerSaveData playerSaveData)

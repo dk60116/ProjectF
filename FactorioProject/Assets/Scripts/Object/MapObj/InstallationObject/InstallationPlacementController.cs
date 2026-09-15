@@ -880,6 +880,8 @@ public class InstallationPlacementController : MonoBehaviour
 
     private void OnDisable()
     {
+        if (ProjectFApplicationLifecycle.IsQuitting) return;
+
         WorkableObject.SetInstallOrEditWorkableSelectionRangeVisualsRequested(false);
         UtilityPole.SetInstallOrEditRangeVisualsRequested(false, false);
         Sprinkler.SetInstallOrEditRangeVisualsRequested(false);
@@ -903,6 +905,8 @@ public class InstallationPlacementController : MonoBehaviour
 
     private void OnDestroy()
     {
+        if (ProjectFApplicationLifecycle.IsQuitting) return;
+
         WorkableObject.SetInstallOrEditWorkableSelectionRangeVisualsRequested(false);
         UtilityPole.SetInstallOrEditRangeVisualsRequested(false, false);
         Sprinkler.SetInstallOrEditRangeVisualsRequested(false);
@@ -8480,11 +8484,6 @@ public class InstallationPlacementController : MonoBehaviour
             inputOutputModule.ApplyPersistentState(persistentState);
             ConfigureInstalledInputOutputRuntimeAreas(installedObject, anchorCoordinate, quarterTurns);
             ConfigureInstalledInputOutputRuntimeGrid(installedObject, anchorCoordinate, quarterTurns);
-        }
-
-        if (installedObject is UtilityPole)
-        {
-            UtilityPole.RefreshPoleTopologyNow();
         }
     }
 
@@ -40436,11 +40435,6 @@ public class InstallationPlacementController : MonoBehaviour
             if (installedObject is InstallationObject installationObject)
             {
                 installationObject.SetMapObjectTypeVisualTransition(false);
-            }
-
-            if (installedObject is UtilityPole)
-            {
-                UtilityPole.RefreshPoleTopologyNow();
             }
         };
 

@@ -13,6 +13,8 @@ public class MiningMachine : InputOutputModule
 
     protected override void OnDisable()
     {
+        if (ProjectFApplicationLifecycle.IsQuitting) return;
+
         ClearActiveMiningResourceSelection();
         base.OnDisable();
     }

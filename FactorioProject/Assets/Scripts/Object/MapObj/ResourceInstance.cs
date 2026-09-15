@@ -1,6 +1,7 @@
 using System;
 using System.Collections;
 using System.Collections.Generic;
+using ProjectF.Rendering;
 using UnityEngine;
 using UnityEngine.Rendering;
 using HarvestMode = Resource.HarvestMode;
@@ -11,7 +12,7 @@ using UnityEditor;
 #endif
 
 // A stable managed identity over a generation-checked slot, never a Component.
-public class ResourceInstance : IMapObjectTarget, IMapObjectSimulationIdentity
+public class ResourceInstance : IMapObjectTarget, IMapObjectSimulationIdentity, IWorldColliderCullingTarget
 {
     private struct HarvestReward { public int itemId; public int amount; }
     private const int BodyYawStepCount = 8;
@@ -53,6 +54,13 @@ public class ResourceInstance : IMapObjectTarget, IMapObjectSimulationIdentity
     private bool useBatchedRendering;
     private ResourceBatchRenderer batchRenderer;
     private bool released;
+    private bool colliderCullingCulled;
+    private int colliderCullingAccountedCount;
+    private int colliderCullingRegistryIndex = -1;
+    private Vector2Int colliderCullingCell;
+    private int colliderCullingCellIndex = -1;
+    private int colliderCullingPendingIndex = -1;
+    private int colliderCullingActiveIndex = -1;
     private int activeResourceListIndex = -1;
     private bool sharedBoundsDirty = true;
     private Bounds sharedBounds;
@@ -86,6 +94,54 @@ public class ResourceInstance : IMapObjectTarget, IMapObjectSimulationIdentity
     internal float SharedYawDegrees => hasBodyYawStep ? bodyYawStep * BodyYawStepDegrees : 0f;
     internal float SharedBodyScale => sharedBodyScale;
     internal bool SharedBodyVisible => bodyPresentationVisible && ResourceCount > 0;
+    internal bool ColliderCullingAlive => !released && sharedWorld != null;
+    internal bool ColliderCullingCulled => colliderCullingCulled;
+    internal float ColliderCullingRadius
+    {
+        get
+        {
+            Bounds bounds = PresentationBounds;
+            return Mathf.Max(2f, Mathf.Max(bounds.extents.x, bounds.extents.z));
+        }
+    }
+    bool IWorldColliderCullingTarget.ColliderCullingAlive => ColliderCullingAlive;
+    bool IWorldColliderCullingTarget.ColliderCullingExempt => false;
+    bool IWorldColliderCullingTarget.ColliderCullingCulled => colliderCullingCulled;
+    Vector3 IWorldColliderCullingTarget.ColliderCullingPosition => WorldPosition;
+    float IWorldColliderCullingTarget.ColliderCullingRadius => ColliderCullingRadius;
+    int IWorldColliderCullingTarget.ColliderCullingManagedCount => SharedColliders?.Length ?? 0;
+    int IWorldColliderCullingTarget.ColliderCullingAccountedCount
+    {
+        get => colliderCullingAccountedCount;
+        set => colliderCullingAccountedCount = value;
+    }
+    int IWorldColliderCullingTarget.ColliderCullingRegistryIndex
+    {
+        get => colliderCullingRegistryIndex;
+        set => colliderCullingRegistryIndex = value;
+    }
+    Vector2Int IWorldColliderCullingTarget.ColliderCullingCell
+    {
+        get => colliderCullingCell;
+        set => colliderCullingCell = value;
+    }
+    int IWorldColliderCullingTarget.ColliderCullingCellIndex
+    {
+        get => colliderCullingCellIndex;
+        set => colliderCullingCellIndex = value;
+    }
+    int IWorldColliderCullingTarget.ColliderCullingPendingIndex
+    {
+        get => colliderCullingPendingIndex;
+        set => colliderCullingPendingIndex = value;
+    }
+    int IWorldColliderCullingTarget.ColliderCullingActiveIndex
+    {
+        get => colliderCullingActiveIndex;
+        set => colliderCullingActiveIndex = value;
+    }
+    void IWorldColliderCullingTarget.ApplyColliderCulling(bool culled) => ApplyColliderCulling(culled);
+    void IWorldColliderCullingTarget.ReleaseColliderCulling() => ApplyColliderCulling(false);
     public HarvestMode ResolvedHarvestMode => sharedWorld.HarvestMode;
     internal ResourceInstance(ResourceTypeWorld world, ResourceHandle handle)
     {
@@ -100,10 +156,14 @@ public class ResourceInstance : IMapObjectTarget, IMapObjectSimulationIdentity
             ActiveResourcesInternal.Add(this);
         }
         UpdateBodyScale(); SetBatchedRendering(true);
+        WorldColliderCullingManager.Register(this);
     }
     public void ReleaseRuntime()
     {
         if (released) return;
+        bool notifyOwningCoordinate = hasOwningCoordinate;
+        Vector2Int releasedCoordinate = owningCoordinate;
+        WorldColliderCullingManager.Unregister(this);
         UnregisterActiveResourceCoordinate();
         if (this is IMapObjectUpdateTick tick) MapObjectTickManager.UnregisterUpdateTick(tick);
         batchRenderer?.Unregister(this);
@@ -122,6 +182,16 @@ public class ResourceInstance : IMapObjectTarget, IMapObjectSimulationIdentity
         RemoveFromActiveResourceList();
         released = true;
         sharedWorld.Remove(this);
+        if (notifyOwningCoordinate)
+        {
+            FacilityRuntimeWakeRegistry.NotifyCoordinateChanged(releasedCoordinate);
+        }
+    }
+    internal void ApplyColliderCulling(bool culled)
+    {
+        if (colliderCullingCulled == culled) return;
+        colliderCullingCulled = culled;
+        sharedWorld?.UpdateColliders(this);
     }
     private void DeactivateResource() => ReleaseRuntime();
     private void StartCoroutine(IEnumerator routine)
@@ -317,6 +387,7 @@ public class ResourceInstance : IMapObjectTarget, IMapObjectSimulationIdentity
         ApplyAdditionalSavedState(state);
         ShowBodyPresentation();
         UpdateBodyScale();
+        NotifyOwningCoordinateRuntimeChanged();
     }
 
     public void InitializeRuntimeQuantity(int resourceCount)
@@ -330,6 +401,7 @@ public class ResourceInstance : IMapObjectTarget, IMapObjectSimulationIdentity
         initialResourceCount = Mathf.Max(1, resourceStatus.resourceCount);
         ShowBodyPresentation();
         UpdateBodyScale();
+        NotifyOwningCoordinateRuntimeChanged();
     }
 
     public void ConfigureDynamicBodyScale(float minimumScaleRatio, float maximumScaleRatio, int maxResourceCountForScale)
@@ -1254,6 +1326,8 @@ public class ResourceInstance : IMapObjectTarget, IMapObjectSimulationIdentity
     public void SetOwningBlock(Block block)
     {
         if (released) return;
+        bool hadPreviousCoordinate = hasOwningCoordinate;
+        Vector2Int previousCoordinate = owningCoordinate;
         bool keepCoordinate = block != null;
         Vector2Int nextCoordinate = keepCoordinate ? block.Coordinate : default;
         if (owningBlock == block
@@ -1262,6 +1336,7 @@ public class ResourceInstance : IMapObjectTarget, IMapObjectSimulationIdentity
         {
             RegisterActiveResourceCoordinate();
             OnOwningBlockChanged(block);
+            NotifyOwningCoordinateRuntimeChanged();
             return;
         }
 
@@ -1272,6 +1347,20 @@ public class ResourceInstance : IMapObjectTarget, IMapObjectSimulationIdentity
         RegisterActiveResourceCoordinate();
         OnOwningBlockChanged(block);
         MarkBatchRenderDataDirty();
+        WorldColliderCullingManager.RefreshSpatialRegistration(this);
+        if (hadPreviousCoordinate && (!keepCoordinate || previousCoordinate != nextCoordinate))
+        {
+            FacilityRuntimeWakeRegistry.NotifyCoordinateChanged(previousCoordinate);
+        }
+        NotifyOwningCoordinateRuntimeChanged();
+    }
+
+    protected void NotifyOwningCoordinateRuntimeChanged()
+    {
+        if (hasOwningCoordinate)
+        {
+            FacilityRuntimeWakeRegistry.NotifyCoordinateChanged(owningCoordinate);
+        }
     }
 
     internal void DetachOwningBlockPreservingCoordinate(Block expectedBlock)
@@ -1288,6 +1377,7 @@ public class ResourceInstance : IMapObjectTarget, IMapObjectSimulationIdentity
         RegisterActiveResourceCoordinate();
         OnOwningBlockChanged(null);
         MarkBatchRenderDataDirty();
+        WorldColliderCullingManager.RefreshSpatialRegistration(this);
     }
 
     public static bool TryGetActiveResourceAtCoordinate(

@@ -61,7 +61,7 @@ public readonly record struct BlockHandle(Vector2Int ChunkCoordinate, int Id, in
 public readonly record struct VirtualConveyorItemRenderData(int Version);
 public class Block
 {
-    public GameObject gameObject = new(); public Vector3 WorldPosition; public int ConveyorItemVisualVersion;
+    public GameObject gameObject = new(); public Vector3 WorldPosition; public int ConveyorItemVisualVersion, RuntimeLayer;
     public bool Dynamic; public int Appends, DynamicChecks;
     public bool HasDynamicVirtualConveyorItemVisuals() { DynamicChecks++; return Dynamic; }
     public void AppendVirtualConveyorItemRenderData(List<VirtualConveyorItemRenderData> items) { Appends++; items.Add(new(ConveyorItemVisualVersion)); }
@@ -217,6 +217,7 @@ public partial class BackendProbe
     private readonly Dictionary<VirtualRenderBatchKey, BrgBatchState> statesByKey = new();
     private readonly List<VirtualRenderBatchKey> staleKeys = new();
     private int syncGeneration, releasedBuffers;
+    private bool retainUnsyncedBatches;
     private void RemoveState(VirtualRenderBatchKey key)
     {
         states.Remove(statesByKey[key]); statesByKey.Remove(key); releasedBuffers++;

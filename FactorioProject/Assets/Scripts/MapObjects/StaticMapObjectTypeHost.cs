@@ -32,8 +32,14 @@ namespace ProjectF.MapObjects
         public int ActiveBatchCount => batches.ActiveBatchCount;
         public int ActiveMatrixCount => batches.ActiveMatrixCount;
         public int EstimatedDrawCallCount => batches.EstimatedDrawCallCount;
+        public int LastVisibleBatchCount => batches.LastVisibleBatchCount;
+        public int LastCulledBatchCount => batches.LastCulledBatchCount;
         public int LastCandidateBatchCount => batches.LastCandidateBatchCount;
         public int LastCandidateCellCount => batches.LastCandidateCellCount;
+        public int LastLegacySubmittedMatrixCount => batches.LastLegacySubmittedMatrixCount;
+        public int LastLegacyDrawCallCount => batches.LastLegacyDrawCallCount;
+        public int LastBatchRendererGroupBatchCount => batches.LastBatchRendererGroupBatchCount;
+        public int LastBatchRendererGroupMatrixCount => batches.LastBatchRendererGroupMatrixCount;
 
         public void Configure(int typeItemId, MapObjectArchetype typeArchetype, float cellSize)
         {
@@ -241,11 +247,12 @@ namespace ProjectF.MapObjects
 
         private void OnDisable()
         {
-            Suspend();
+            if (!ProjectFApplicationLifecycle.IsQuitting) Suspend();
         }
 
         private void OnDestroy()
         {
+            if (ProjectFApplicationLifecycle.IsQuitting) return;
             Release();
             batches.Dispose();
         }
@@ -262,7 +269,8 @@ namespace ProjectF.MapObjects
             // These types already have specialized data-oriented render systems.
             if (sourceInstallation is ConveyorBelt
                 || sourceInstallation is Pipe
-                || sourceInstallation is RobotArm)
+                || sourceInstallation is RobotArm
+                || sourceInstallation is Vehicle)
             {
                 return false;
             }

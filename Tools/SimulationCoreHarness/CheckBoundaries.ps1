@@ -46,7 +46,7 @@ if ($virtualWorldOwnsSceneLifetime) {
 $staticRendererText = [IO.File]::ReadAllText((Join-Path $scripts 'MapObjects/StaticMapObjectBatchRenderer.cs'))
 $typeHostText = [IO.File]::ReadAllText((Join-Path $scripts 'MapObjects/StaticMapObjectTypeHost.cs'))
 $dataOnlyPresentationNeedsSource =
-    ($staticRendererText -notmatch 'CopyRecords\(dataOnlyInstallations, true\)') -or
+    ($staticRendererText -notmatch 'CopyInstallationRecords\(dataOnlyInstallations, true\)') -or
     ($staticRendererText -notmatch 'SynchronizeRecord\(record\)') -or
     ($typeHostText -notmatch 'public bool SynchronizeRecord\(VirtualObjectRecord record\)')
 if ($dataOnlyPresentationNeedsSource) {
@@ -136,6 +136,36 @@ if (-not $fluidDisplayLookupIsIndexedAndLocal) {
     throw 'Fluid display still performs global, allocating or schedule-then-wait lookup work'
 }
 Write-Output 'PASS fluid display uses indexed, allocation-free, per-network dirty resolution (source contract)'
+$fluidTankText = [IO.File]::ReadAllText((Join-Path $installationRoot 'Fluid tank.cs'))
+$fluidWakeIsStorageIndexed =
+    ($inputOutputText -match 'registeredFluidInputSleepWaiters') -and
+    ($inputOutputText -match 'NotifyFluidInputAvailabilityIncreased') -and
+    ($inputOutputText -match 'RegisterFluidSleepWaiterLinks') -and
+    ($inputOutputText -notmatch 'WakeRuntimeModulesAtFluidRuntimeCoordinates') -and
+    ($inputOutputText -notmatch 'WakeSleepingFluidRuntimeModules') -and
+    ($installationText -match 'NotifyFluidInputAvailabilityIncreased\(this\)') -and
+    ($installationText -match 'NotifyFluidOutputCapacityIncreased\(this\)') -and
+    ($fluidTankText -notmatch 'WakeSleepingFluidRuntimeModules')
+if (-not $fluidWakeIsStorageIndexed) {
+    throw 'Steady-state fluid changes still use broad coordinate or global module wake propagation'
+}
+Write-Output 'PASS sleeping fluid facilities wake through storage-indexed input/output waiters (source contract)'
+$utilityPoleText = [IO.File]::ReadAllText((Join-Path $installationRoot 'UtilityPole.cs'))
+$utilityRobotArmText = [IO.File]::ReadAllText((Join-Path $installationRoot 'UtilityPole.RobotArms.cs'))
+$powerRuntimeIsTickBatched =
+    ($utilityPoleText -match 'InvalidateNetworkRuntimeForNextTick\(\)') -and
+    ($utilityPoleText -match 'networkRuntimeEvaluatedSimulationTick == currentSimulationTick') -and
+    ($utilityPoleText -match 'BeginSimulationPowerMutationBatch\(\)') -and
+    ($utilityPoleText -match 'EndSimulationPowerMutationBatch\(\)') -and
+    ($utilityPoleText -match 'FlushElectricRuntimeModulesWake\(\)') -and
+    ($facilityWorldText -match 'UtilityPole\.BeginSimulationPowerMutationBatch\(\)') -and
+    ($facilityWorldText -match 'UtilityPole\.EndSimulationPowerMutationBatch\(\)') -and
+    ($inputOutputText -match '!module\.runtimeSleeping') -and
+    ($utilityRobotArmText -match 'InvalidateNetworkRuntimeForNextTick\(\)')
+if (-not $powerRuntimeIsTickBatched) {
+    throw 'Electric source mutations can still reevaluate or wake the whole runtime repeatedly inside one facility Tick'
+}
+Write-Output 'PASS electric source mutations defer reevaluation and coalesce sleeping-module wake per facility Tick (source contract)'
 $knownSceneTickOwners = @(
     'LoggingMachine.cs',
     'Vehicle/SteamTrain.cs'

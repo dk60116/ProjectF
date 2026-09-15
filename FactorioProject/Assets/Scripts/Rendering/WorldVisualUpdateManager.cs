@@ -7,9 +7,10 @@ namespace ProjectF.Rendering
     [DefaultExecutionOrder(850), DisallowMultipleComponent]
     public sealed class WorldVisualUpdateManager : MonoBehaviour
     {
-        // Visible machines animate every frame. Hidden machines only need a bounded
-        // visibility recheck; Unity still owns renderer frustum culling meanwhile.
-        private const int CulledRecheckIntervalFrames = 4;
+        // Unity owns actual renderer frustum culling. This coarser check only pauses
+        // script visuals, Animators, and particles, so all installations can share
+        // a bounded stagger instead of recomputing bounds every frame while visible.
+        private const int VisibilityRecheckIntervalFrames = 4;
         private static WorldVisualUpdateManager instance;
         private readonly List<InstallationVisualState> targets = new List<InstallationVisualState>();
         private readonly CameraRenderCulling culling = new CameraRenderCulling();
@@ -92,7 +93,7 @@ namespace ProjectF.Rendering
             LastTickedCount = 0;
             LastVisualUpdateCount = 0;
             LastDeferredCulledCount = 0;
-            int recheckPhase = Time.frameCount % CulledRecheckIntervalFrames;
+            int recheckPhase = Time.frameCount % VisibilityRecheckIntervalFrames;
             for (int i = targets.Count - 1; i >= 0; i--)
             {
                 InstallationVisualState target = targets[i];
@@ -102,18 +103,18 @@ namespace ProjectF.Rendering
                     continue;
                 }
 
-                bool shouldTick = target.Visible
-                    || !culling.Enabled
-                    || i % CulledRecheckIntervalFrames == recheckPhase;
-                if (shouldTick)
+                bool refreshVisibility = !culling.Enabled
+                    || i % VisibilityRecheckIntervalFrames == recheckPhase;
+                if (target.Tick(culling, Time.deltaTime, refreshVisibility))
                 {
-                    if (target.Tick(culling, Time.deltaTime))
-                    {
-                        LastVisualUpdateCount++;
-                    }
+                    LastVisualUpdateCount++;
+                }
+
+                if (refreshVisibility)
+                {
                     LastTickedCount++;
                 }
-                else
+                else if (!target.Visible)
                 {
                     LastDeferredCulledCount++;
                 }
@@ -126,6 +127,8 @@ namespace ProjectF.Rendering
 
         private void OnDisable()
         {
+            if (ProjectFApplicationLifecycle.IsQuitting) return;
+
             for (int i = 0; i < targets.Count; i++)
                 targets[i].SetVisible(true);
         }
@@ -134,6 +137,12 @@ namespace ProjectF.Rendering
         {
             if (instance != this)
                 return;
+            if (ProjectFApplicationLifecycle.IsQuitting)
+            {
+                instance = null;
+                return;
+            }
+
             for (int i = 0; i < targets.Count; i++)
             {
                 targets[i].Index = -1;

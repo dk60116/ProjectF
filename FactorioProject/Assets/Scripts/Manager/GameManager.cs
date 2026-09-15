@@ -477,6 +477,7 @@ public class GameManager : MonoBehaviour
         sleepAwakeRuntimeStateInitialized = true;
         lastRuntimeShowSleepAwake = showSleepAwake;
         PortableObject.RefreshAllSleepAwakeVisuals();
+        InstallationObject.RefreshAllSleepAwakeDebugVisuals();
         TerrainGenerator.Active?.RefreshSleepAwakeRuntimeVisibility();
     }
 
@@ -2255,7 +2256,7 @@ public sealed class RuntimeItemGiveReceiver : MonoBehaviour
             MapObjectTickManager.TargetSimulationUps);
         MapObjectTickProfiler.AddRuntimeCounter(
             "Simulation", "WaitingForWorldLoad", MapObjectTickManager.WaitingForWorldLoad ? 1 : 0,
-            "Fixed ticks resume after all queued chunks and world restoration finish; loading time is discarded.");
+            "Fixed ticks wait only for initial world restoration; runtime chunk streaming continues alongside simulation.");
         MapObjectTickProfiler.AddRuntimeCounter(
             "Simulation",
             "BacklogTicks",
@@ -3032,8 +3033,17 @@ public sealed class RuntimeItemGiveReceiver : MonoBehaviour
             BuildPlayerStateExtraTokens(),
             BuildConveyorWorldExtraTokens(),
             BuildPipeWorldExtraTokens(),
+            BuildMemoryExtraTokens(),
             $"sceneGameObjects={sceneGameObjectTotal} activeSceneGameObjects={activeSceneGameObjectTotal} sceneMonoBehaviours={sceneMonoBehaviourTotal} activeSceneMonoBehaviours={activeSceneMonoBehaviourTotal}",
             BuildWorldTimeExtraTokens(ResolveWorldTime()));
+    }
+
+    private static string BuildMemoryExtraTokens()
+    {
+        long allocatedBytes = Math.Max(0L, Profiler.GetTotalAllocatedMemoryLong());
+        long reservedBytes = Math.Max(0L, Profiler.GetTotalReservedMemoryLong());
+        long managedHeapBytes = Math.Max(0L, GC.GetTotalMemory(false));
+        return $"memoryAllocatedBytes={allocatedBytes} memoryReservedBytes={reservedBytes} managedHeapBytes={managedHeapBytes}";
     }
 
     private static string BuildConveyorWorldExtraTokens()

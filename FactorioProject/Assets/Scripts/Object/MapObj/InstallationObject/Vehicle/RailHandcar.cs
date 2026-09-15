@@ -159,6 +159,8 @@ public class RailHandcar : Train
 
     protected override void OnDisable()
     {
+        if (ProjectFApplicationLifecycle.IsQuitting) return;
+
         ActiveRuntimeHandcars.Remove(this);
         ResetRailPlacementState();
         base.OnDisable();

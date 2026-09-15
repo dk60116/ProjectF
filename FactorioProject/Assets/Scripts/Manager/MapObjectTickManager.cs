@@ -5,6 +5,26 @@ using System.Globalization;
 using System.Text;
 using UnityEngine;
 
+public static class ProjectFApplicationLifecycle
+{
+    public static bool IsQuitting { get; private set; }
+
+#if UNITY_5_3_OR_NEWER
+    [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.SubsystemRegistration)]
+    private static void ResetStaticState()
+    {
+        IsQuitting = false;
+        Application.quitting -= MarkQuitting;
+        Application.quitting += MarkQuitting;
+    }
+
+    private static void MarkQuitting()
+    {
+        IsQuitting = true;
+    }
+#endif
+}
+
 public sealed class MapObjectTickManager : MonoBehaviour, ProjectF.Simulation.ISimulationTickObserver
 {
     public const int DefaultSimulationTicksPerSecond = ProjectF.Simulation.SimulationTickWorld.DefaultSimulationTicksPerSecond;
@@ -15,7 +35,6 @@ public sealed class MapObjectTickManager : MonoBehaviour, ProjectF.Simulation.IS
     private const double SimulationUpsSampleIntervalSeconds = 0.5d;
 
     private static MapObjectTickManager instance;
-    private static bool applicationQuitting;
     private static readonly HashSet<IMapObjectUpdateTick> requestedUpdateTicks =
         new HashSet<IMapObjectUpdateTick>();
 
@@ -58,8 +77,10 @@ public sealed class MapObjectTickManager : MonoBehaviour, ProjectF.Simulation.IS
         get
         {
             TerrainGenerator terrain = TerrainGenerator.Active;
-            return terrain != null
-                   && (!terrain.IsWorldReadyForPresentation || terrain.IsChunkStreamingBusy);
+            // Only the initial/restored world readiness boundary stops deterministic
+            // simulation. Runtime chunk streaming is frame-budgeted and must run
+            // alongside ticks while the player moves through an already ready world.
+            return terrain != null && !terrain.IsWorldReadyForPresentation;
         }
     }
     public static float TargetSimulationUps => SimulationPaused || WaitingForWorldLoad
@@ -72,7 +93,7 @@ public sealed class MapObjectTickManager : MonoBehaviour, ProjectF.Simulation.IS
 
     public static void RegisterUpdateTick(IMapObjectUpdateTick tick)
     {
-        if (tick == null || !Application.isPlaying || applicationQuitting)
+        if (tick == null || !Application.isPlaying || ProjectFApplicationLifecycle.IsQuitting)
         {
             return;
         }
@@ -109,7 +130,6 @@ public sealed class MapObjectTickManager : MonoBehaviour, ProjectF.Simulation.IS
     private static void ResetStaticState()
     {
         instance = null;
-        applicationQuitting = false;
         requestedUpdateTicks.Clear();
     }
 
@@ -193,7 +213,7 @@ public sealed class MapObjectTickManager : MonoBehaviour, ProjectF.Simulation.IS
 
     public static void SetSimulationPaused(bool paused)
     {
-        if (!Application.isPlaying || applicationQuitting)
+        if (!Application.isPlaying || ProjectFApplicationLifecycle.IsQuitting)
         {
             return;
         }
@@ -203,7 +223,7 @@ public sealed class MapObjectTickManager : MonoBehaviour, ProjectF.Simulation.IS
 
     public static void BeginSaveTickPause()
     {
-        if (!Application.isPlaying || applicationQuitting)
+        if (!Application.isPlaying || ProjectFApplicationLifecycle.IsQuitting)
         {
             return;
         }
@@ -271,7 +291,7 @@ public sealed class MapObjectTickManager : MonoBehaviour, ProjectF.Simulation.IS
 
     public static void RestoreSimulationTick(long restoredTick)
     {
-        if (!Application.isPlaying || applicationQuitting)
+        if (!Application.isPlaying || ProjectFApplicationLifecycle.IsQuitting)
         {
             return;
         }
@@ -307,11 +327,6 @@ public sealed class MapObjectTickManager : MonoBehaviour, ProjectF.Simulation.IS
         simulationUpsSampleStartTime = currentTime;
         simulationUpsSampleStartTick = simulationTick;
         hasSimulationUpsSample = true;
-    }
-
-    private void OnApplicationQuit()
-    {
-        applicationQuitting = true;
     }
 
     private void OnDestroy()
@@ -502,17 +517,36 @@ public static class MapObjectTickProfiler
 
     public static void EndNamedSample(string kind, string typeName, string itemName, long startTimestamp)
     {
+        // Finish timing before hashing the group key, as with object samples.
+        long elapsedTicks = Math.Max(0L, Stopwatch.GetTimestamp() - startTimestamp);
+        RecordNamedElapsedTicksInternal(kind, typeName, itemName, elapsedTicks);
+    }
+
+    public static void RecordNamedElapsedTicks(
+        string kind,
+        string typeName,
+        string itemName,
+        long elapsedTimestampTicks)
+    {
+        if (!IsEnabled) return;
+        RecordNamedElapsedTicksInternal(kind, typeName, itemName, elapsedTimestampTicks);
+    }
+
+    private static void RecordNamedElapsedTicksInternal(
+        string kind,
+        string typeName,
+        string itemName,
+        long elapsedTimestampTicks)
+    {
         string resolvedTypeName = string.IsNullOrWhiteSpace(typeName) ? "Unknown" : typeName;
         string resolvedKind = string.IsNullOrWhiteSpace(kind) ? "Update" : kind;
         string resolvedItemName = string.IsNullOrWhiteSpace(itemName) ? resolvedTypeName : itemName;
-        // Finish timing before hashing the group key, as with object samples.
-        long elapsedTicks = Math.Max(0L, Stopwatch.GetTimestamp() - startTimestamp);
         ProfilerGroupKey key = new ProfilerGroupKey(
             resolvedKind,
             resolvedTypeName,
             -1,
             resolvedItemName);
-        RecordSample(key, elapsedTicks);
+        RecordSample(key, Math.Max(0L, elapsedTimestampTicks));
     }
 
     public static void SetActiveUpdateTargets(ICollection<IMapObjectUpdateTick> updateTicks)

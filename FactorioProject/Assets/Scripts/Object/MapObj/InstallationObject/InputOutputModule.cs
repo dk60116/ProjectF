@@ -159,10 +159,31 @@ public class InputOutputModule : InstallationObject,
         = new List<InputOutputModule>(16);
     private static readonly HashSet<InputOutputModule> runtimeWakeSet
         = new HashSet<InputOutputModule>();
+    private static readonly HashSet<SteamGenerator> directedBoilerSteamChainGenerators
+        = new HashSet<SteamGenerator>();
+    private static readonly Dictionary<InstallationObject, HashSet<InputOutputModule>>
+        registeredFluidInputSleepWaiters =
+            new Dictionary<InstallationObject, HashSet<InputOutputModule>>();
+    private static readonly Dictionary<InstallationObject, HashSet<InputOutputModule>>
+        registeredFluidOutputSleepWaiters =
+            new Dictionary<InstallationObject, HashSet<InputOutputModule>>();
+    private static readonly Stack<HashSet<InputOutputModule>> fluidSleepWaiterSetPool =
+        new Stack<HashSet<InputOutputModule>>();
     private static int fluidTopologyVersion = 1;
+    private static int directedBoilerSteamChainTopologyVersion;
+    private static long fluidTopologyInvalidationCount;
+    private static long fluidPlacementInvalidationCount;
+    private static long ignoredNonFluidPlacementChangeCount;
+    private static int fluidInputSleepWaiterLinkCount;
+    private static int fluidOutputSleepWaiterLinkCount;
     internal static int FluidTopologyVersion => fluidTopologyVersion;
     internal static int RuntimeFluidOutputCoordinateCount => registeredRuntimeFluidOutputCoordinates.Count;
     internal static int RuntimeFluidStorageCoordinateCount => registeredRuntimeFluidStorageCoordinates.Count;
+    internal static long FluidTopologyInvalidationCount => fluidTopologyInvalidationCount;
+    internal static long FluidPlacementInvalidationCount => fluidPlacementInvalidationCount;
+    internal static long IgnoredNonFluidPlacementChangeCount => ignoredNonFluidPlacementChangeCount;
+    internal static int FluidInputSleepWaiterLinkCount => fluidInputSleepWaiterLinkCount;
+    internal static int FluidOutputSleepWaiterLinkCount => fluidOutputSleepWaiterLinkCount;
 
     private delegate bool RuntimeCoordinateValueCollector<T>(
         InputOutputModule module,
@@ -500,12 +521,17 @@ public class InputOutputModule : InstallationObject,
     private readonly Dictionary<Vector2Int, int> connectedFluidSearchPipeCounts =
         new Dictionary<Vector2Int, int>();
     private readonly HashSet<InstallationObject> connectedFluidStorageCandidates = new HashSet<InstallationObject>();
+    private readonly HashSet<SteamGenerator> directedSteamChainVisited = new HashSet<SteamGenerator>();
     private readonly List<Vector2Int> connectedFluidSeedCoordinates = new List<Vector2Int>(8);
     private readonly List<InstallationObject> cachedConnectedFluidSourceStorages = new List<InstallationObject>(8);
+    private readonly List<InstallationObject> registeredFluidInputSleepStorages =
+        new List<InstallationObject>(4);
     private readonly Dictionary<InstallationObject, int> cachedConnectedFluidSourcePipeDistances =
         new Dictionary<InstallationObject, int>();
     private int cachedConnectedFluidSourceStoragesTopologyVersion;
     private readonly List<InstallationObject> cachedFluidOutputStorages = new List<InstallationObject>(8);
+    private readonly List<InstallationObject> registeredFluidOutputSleepStorages =
+        new List<InstallationObject>(4);
     private readonly Dictionary<InstallationObject, int> cachedFluidOutputStoragePipeDistances =
         new Dictionary<InstallationObject, int>();
     private int cachedFluidOutputStoragesTopologyVersion;
@@ -532,12 +558,14 @@ public class InputOutputModule : InstallationObject,
     private InputOutputModuleAreaMarkerController cachedAreaMarkerController;
     private bool areaMarkerControllerResolved;
     private bool runtimeSleeping;
+    private bool fluidOutputCapacityBlocked;
     private readonly List<ItemIoEntry> effectiveInputList = new List<ItemIoEntry>();
     private readonly List<ItemIoEntry> effectiveOutputList = new List<ItemIoEntry>();
     private bool effectivePairDataInitialized;
     private PlannedModuleCommand plannedModuleCommands;
     private float plannedModuleDeltaTime;
     private bool stagedModuleTickPlanned;
+    private bool managedRuntimeVisualsDirty;
 
     public ItemDefinition ParentInputOutputModuleItem => parentInputOutputModuleItem;
 
@@ -790,6 +818,7 @@ public class InputOutputModule : InstallationObject,
         activeOutputCount = Mathf.Max(0, state.activeOutputCount);
         cachedTerrain = null;
         cachedBlockStateStore = null;
+        MarkManagedRuntimeVisualsDirty();
         WakeRuntimeUpdate();
     }
 
@@ -808,7 +837,10 @@ public class InputOutputModule : InstallationObject,
         fluidOutputRateMeter?.Reset();
         fluidConsumptionRateMeter?.Reset();
         FacilitySimulationWorld.Unregister(this);
+        UnregisterFluidSleepWaiters();
         runtimeSleeping = false;
+        fluidOutputCapacityBlocked = false;
+        managedRuntimeVisualsDirty = false;
         UnregisterRuntimeFluidSpatialCoordinates();
         UnregisterRuntimeGridCoordinates();
         UnregisterRuntimeAreaCoordinates();
@@ -1052,6 +1084,7 @@ public class InputOutputModule : InstallationObject,
         {
             if (module == null
                 || !module.gameObject.activeInHierarchy
+                || !module.runtimeSleeping
                 || module.waitingForOutput
                 || !module.RequiresElectricOperationalEnergy())
             {
@@ -1071,18 +1104,41 @@ public class InputOutputModule : InstallationObject,
 
     private static void HandleInstallationPlacementRuntimeChanged(InstallationObject installationObject)
     {
+        if (!AffectsRuntimeFluidTopology(installationObject))
+        {
+            ignoredNonFluidPlacementChangeCount++;
+            return;
+        }
+
+        fluidPlacementInvalidationCount++;
         InvalidateFluidTopologyCache();
         WakeRuntimeModulesAroundInstallation(installationObject);
     }
 
     private static void HandleInstallationPlacementRuntimeCleared(InstallationObject installationObject)
     {
+        if (!AffectsRuntimeFluidTopology(installationObject))
+        {
+            ignoredNonFluidPlacementChangeCount++;
+            return;
+        }
+
+        fluidPlacementInvalidationCount++;
         InvalidateFluidTopologyCache();
         WakeRuntimeModulesAroundInstallation(installationObject);
     }
 
+    internal static bool AffectsRuntimeFluidTopology(InstallationObject installationObject)
+    {
+        return installationObject is Pipe
+               || installationObject is Fluidtank
+               || installationObject is InputOutputModule module
+               && module.HasRuntimePipeTopologyCoordinates();
+    }
+
     private static void InvalidateFluidTopologyCache()
     {
+        fluidTopologyInvalidationCount++;
         unchecked
         {
             fluidTopologyVersion++;
@@ -1859,12 +1915,16 @@ public class InputOutputModule : InstallationObject,
     }
 
     protected override bool UsesManagedVisualUpdates => true;
+    protected override bool RequiresManagedVisualUpdate => managedRuntimeVisualsDirty;
 
     protected override void OnManagedVisualsResumed()
     {
-        UpdateEnergyGaugeVisual();
-        UpdateCraftParticleEffectVisual();
-        RefreshWorkAnimatorState(true);
+        FlushManagedRuntimeVisuals(true);
+    }
+
+    protected override void TickManagedVisuals(float deltaTime)
+    {
+        FlushManagedRuntimeVisuals(false);
     }
 
     public virtual void ManagedUpdateTick(float deltaTime)
@@ -1946,29 +2006,51 @@ public class InputOutputModule : InstallationObject,
             TryStartNextCraft();
         }
 
-        if (this is MiningMachine)
-        {
-            using var visualSample = MapObjectTickProfiler.SampleNamed(
-                "Runtime",
-                nameof(MiningMachine),
-                "Mining Visuals");
-            UpdateManagedRuntimeVisuals();
-        }
-        else
-        {
-            UpdateManagedRuntimeVisuals();
-        }
+        MarkManagedRuntimeVisualsDirty();
         RefreshRuntimeUpdateSleepState();
         plannedModuleCommands = PlannedModuleCommand.None;
         plannedModuleDeltaTime = 0f;
     }
 
-    private void UpdateManagedRuntimeVisuals()
+    protected void MarkManagedRuntimeVisualsDirty()
+    {
+        managedRuntimeVisualsDirty = true;
+    }
+
+    protected virtual void OnManagedRuntimeVisualsFlushed()
+    {
+    }
+
+    private void FlushManagedRuntimeVisuals(bool force)
+    {
+        if (!force && !managedRuntimeVisualsDirty)
+        {
+            return;
+        }
+
+        managedRuntimeVisualsDirty = false;
+        if (this is MiningMachine)
+        {
+            using var visualSample = MapObjectTickProfiler.SampleNamed(
+                "Render",
+                nameof(MiningMachine),
+                "Mining Visuals");
+            UpdateManagedRuntimeVisuals(force);
+        }
+        else
+        {
+            UpdateManagedRuntimeVisuals(force);
+        }
+
+        OnManagedRuntimeVisualsFlushed();
+    }
+
+    private void UpdateManagedRuntimeVisuals(bool force)
     {
         if (ShouldUpdateVisuals)
         {
             UpdateEnergyGaugeVisual();
-            RefreshWorkAnimatorState();
+            RefreshWorkAnimatorState(force);
         }
 
         UpdateCraftParticleEffectVisual();
@@ -1996,7 +2078,7 @@ public class InputOutputModule : InstallationObject,
         return HasConnectedFluidSource(ResolvePreferredFluidInputItemId());
     }
 
-    private void RefreshRuntimeUpdateSleepState()
+    protected void RefreshRuntimeUpdateSleepState()
     {
         if (!Application.isPlaying || !isActiveAndEnabled)
         {
@@ -2022,6 +2104,7 @@ public class InputOutputModule : InstallationObject,
             return;
         }
 
+        MarkPersistenceStateDirty();
         SetRuntimeSleeping(false, true);
     }
 
@@ -2037,15 +2120,10 @@ public class InputOutputModule : InstallationObject,
             currentFluidItemId,
             currentStoredLiters);
 
-        WakeRuntimeUpdate();
-        WakeRuntimeModulesAtFluidRuntimeCoordinates();
-    }
-
-    private void WakeRuntimeModulesAtFluidRuntimeCoordinates()
-    {
-        WakeRuntimeModulesAtCoordinates(runtimePipeInputCoordinates);
-        WakeRuntimeModulesAtCoordinates(runtimeOutputCoordinates);
-        WakeRuntimeModulesAtCoordinates(runtimeGridCoordinates);
+        if (runtimeSleeping)
+        {
+            WakeRuntimeUpdate();
+        }
     }
 
     private static void WakeRuntimeModulesAtCoordinates(IReadOnlyList<Vector2Int> coordinates)
@@ -2074,7 +2152,237 @@ public class InputOutputModule : InstallationObject,
         }
 
         runtimeSleeping = sleeping;
+        if (runtimeSleeping)
+        {
+            RegisterFluidSleepWaiters();
+        }
+        else
+        {
+            UnregisterFluidSleepWaiters();
+        }
         FacilitySimulationWorld.SetScheduled(this, !runtimeSleeping && isActiveAndEnabled);
+        SetSleepAwakeDebugSleeping(runtimeSleeping);
+    }
+
+    private void RegisterFluidSleepWaiters()
+    {
+        UnregisterFluidSleepWaiters();
+        RegisterFluidInputSleepWaiters();
+        RegisterFluidOutputSleepWaiters();
+    }
+
+    private void RegisterFluidInputSleepWaiters()
+    {
+        if (cachedConnectedFluidSourceStoragesTopologyVersion != fluidTopologyVersion)
+        {
+            return;
+        }
+
+        int requiredFluidItemId = ResolvePreferredFluidInputItemId();
+        float currentFillRatio = GetFluidStorageFillRatio(this);
+        for (int i = 0; i < cachedConnectedFluidSourceStorages.Count; i++)
+        {
+            if (CanUseConnectedFluidSource(
+                    cachedConnectedFluidSourceStorages[i],
+                    requiredFluidItemId,
+                    currentFillRatio))
+            {
+                return;
+            }
+        }
+
+        fluidInputSleepWaiterLinkCount += RegisterFluidSleepWaiterLinks(
+            this,
+            cachedConnectedFluidSourceStorages,
+            registeredFluidInputSleepStorages,
+            registeredFluidInputSleepWaiters);
+    }
+
+    private void RegisterFluidOutputSleepWaiters()
+    {
+        if (!fluidOutputCapacityBlocked
+            || cachedFluidOutputStoragesTopologyVersion != fluidTopologyVersion)
+        {
+            return;
+        }
+
+        fluidOutputSleepWaiterLinkCount += RegisterFluidSleepWaiterLinks(
+            this,
+            cachedFluidOutputStorages,
+            registeredFluidOutputSleepStorages,
+            registeredFluidOutputSleepWaiters);
+    }
+
+    private static int RegisterFluidSleepWaiterLinks(
+        InputOutputModule waiter,
+        IReadOnlyList<InstallationObject> candidateStorages,
+        List<InstallationObject> registeredStorages,
+        Dictionary<InstallationObject, HashSet<InputOutputModule>> waitersByStorage)
+    {
+        int addedCount = 0;
+        for (int i = 0; candidateStorages != null && i < candidateStorages.Count; i++)
+        {
+            InstallationObject storage = candidateStorages[i];
+            if (storage == null || storage == waiter || !storage.CanStoreFluid)
+            {
+                continue;
+            }
+
+            if (!waitersByStorage.TryGetValue(storage, out HashSet<InputOutputModule> waiters))
+            {
+                waiters = RentFluidSleepWaiterSet();
+                waitersByStorage.Add(storage, waiters);
+            }
+
+            if (!waiters.Add(waiter))
+            {
+                continue;
+            }
+
+            registeredStorages.Add(storage);
+            addedCount++;
+        }
+
+        return addedCount;
+    }
+
+    private static HashSet<InputOutputModule> RentFluidSleepWaiterSet()
+    {
+        return fluidSleepWaiterSetPool.Count > 0
+            ? fluidSleepWaiterSetPool.Pop()
+            : new HashSet<InputOutputModule>();
+    }
+
+    private static void ReturnFluidSleepWaiterSet(HashSet<InputOutputModule> waiters)
+    {
+        if (waiters == null)
+        {
+            return;
+        }
+
+        waiters.Clear();
+        fluidSleepWaiterSetPool.Push(waiters);
+    }
+
+    private void UnregisterFluidSleepWaiters()
+    {
+        fluidInputSleepWaiterLinkCount = Mathf.Max(
+            0,
+            fluidInputSleepWaiterLinkCount - UnregisterFluidSleepWaiters(
+                this,
+                registeredFluidInputSleepStorages,
+                registeredFluidInputSleepWaiters));
+        fluidOutputSleepWaiterLinkCount = Mathf.Max(
+            0,
+            fluidOutputSleepWaiterLinkCount - UnregisterFluidSleepWaiters(
+                this,
+                registeredFluidOutputSleepStorages,
+                registeredFluidOutputSleepWaiters));
+    }
+
+    private static int UnregisterFluidSleepWaiters(
+        InputOutputModule waiter,
+        List<InstallationObject> registeredStorages,
+        Dictionary<InstallationObject, HashSet<InputOutputModule>> waitersByStorage)
+    {
+        int removedCount = 0;
+        for (int i = 0; i < registeredStorages.Count; i++)
+        {
+            InstallationObject storage = registeredStorages[i];
+            if (ReferenceEquals(storage, null)
+                || !waitersByStorage.TryGetValue(storage, out HashSet<InputOutputModule> waiters)
+                || !waiters.Remove(waiter))
+            {
+                continue;
+            }
+
+            removedCount++;
+            if (waiters.Count <= 0)
+            {
+                waitersByStorage.Remove(storage);
+                ReturnFluidSleepWaiterSet(waiters);
+            }
+        }
+
+        registeredStorages.Clear();
+        return removedCount;
+    }
+
+    internal static void NotifyFluidInputAvailabilityIncreased(InstallationObject storage)
+    {
+        if (storage == null
+            || !registeredFluidInputSleepWaiters.TryGetValue(
+                storage,
+                out HashSet<InputOutputModule> waiters)
+            || waiters.Count <= 0)
+        {
+            return;
+        }
+
+        runtimeWakeScratch.Clear();
+        foreach (InputOutputModule waiter in waiters)
+        {
+            if (waiter == null
+                || !waiter.runtimeSleeping
+                || !waiter.gameObject.activeInHierarchy)
+            {
+                continue;
+            }
+
+            int requiredFluidItemId = waiter.ResolvePreferredFluidInputItemId();
+            if (waiter.CanUseConnectedFluidSource(
+                    storage,
+                    requiredFluidItemId,
+                    GetFluidStorageFillRatio(waiter)))
+            {
+                runtimeWakeScratch.Add(waiter);
+            }
+        }
+
+        using var wakeSample = MapObjectTickProfiler.SampleNamed(
+            "Simulation",
+            nameof(InputOutputModule),
+            "Fluid Input Waiter Wake");
+        for (int i = 0; i < runtimeWakeScratch.Count; i++)
+        {
+            runtimeWakeScratch[i]?.WakeRuntimeUpdate();
+        }
+
+        runtimeWakeScratch.Clear();
+    }
+
+    internal static void NotifyFluidOutputCapacityIncreased(InstallationObject storage)
+    {
+        if (storage == null
+            || !registeredFluidOutputSleepWaiters.TryGetValue(
+                storage,
+                out HashSet<InputOutputModule> waiters)
+            || waiters.Count <= 0)
+        {
+            return;
+        }
+
+        runtimeWakeScratch.Clear();
+        foreach (InputOutputModule waiter in waiters)
+        {
+            if (waiter != null
+                && waiter.runtimeSleeping
+                && waiter.gameObject.activeInHierarchy)
+            {
+                runtimeWakeScratch.Add(waiter);
+            }
+        }
+
+        using var wakeSample = MapObjectTickProfiler.SampleNamed(
+            "Simulation",
+            nameof(InputOutputModule),
+            "Fluid Output Waiter Wake");
+        for (int i = 0; i < runtimeWakeScratch.Count; i++)
+        {
+            runtimeWakeScratch[i]?.WakeRuntimeUpdate();
+        }
+
+        runtimeWakeScratch.Clear();
     }
 
     private void PullFluidFromConnectedStorage(float deltaTime)
@@ -2157,31 +2465,44 @@ public class InputOutputModule : InstallationObject,
                 remainingLiters,
                 sourceStorage.StoredFluidLiters,
                 CalculateFluidEqualizationTransferLiters(sourceStorage, this));
-            float transferTemperatureCelsius = sourceStorage.GetStoredFluidTemperatureCelsius(transferFluidItemId);
-            if (transferLiters <= 0.0001f
-                || !sourceStorage.TryConsumeFluidLiters(transferFluidItemId, transferLiters, out float consumedLiters)
-                || consumedLiters <= 0.0001f)
+            if (transferLiters <= 0.0001f)
             {
                 break;
             }
 
-            TryAddFluidLiters(
-                transferFluidItemId,
-                consumedLiters,
-                transferTemperatureCelsius,
-                out float acceptedThisAttempt);
-            acceptedThisAttempt = Mathf.Max(0f, acceptedThisAttempt);
-            acceptedLiters += acceptedThisAttempt;
-
-            float rejectedLiters = consumedLiters - acceptedThisAttempt;
-            if (rejectedLiters > 0.0001f)
+            using (MapObjectTickProfiler.SampleNamed(
+                       "Simulation",
+                       nameof(InputOutputModule),
+                       "Fluid Input Transfer"))
             {
-                sourceStorage.TryAddFluidLiters(
+                float transferTemperatureCelsius = sourceStorage.GetStoredFluidTemperatureCelsius(transferFluidItemId);
+                if (!sourceStorage.TryConsumeFluidLiters(
+                        transferFluidItemId,
+                        transferLiters,
+                        out float consumedLiters)
+                    || consumedLiters <= 0.0001f)
+                {
+                    break;
+                }
+
+                TryAddFluidLiters(
                     transferFluidItemId,
-                    rejectedLiters,
+                    consumedLiters,
                     transferTemperatureCelsius,
-                    out _);
-                break;
+                    out float acceptedThisAttempt);
+                acceptedThisAttempt = Mathf.Max(0f, acceptedThisAttempt);
+                acceptedLiters += acceptedThisAttempt;
+
+                float rejectedLiters = consumedLiters - acceptedThisAttempt;
+                if (rejectedLiters > 0.0001f)
+                {
+                    sourceStorage.TryAddFluidLiters(
+                        transferFluidItemId,
+                        rejectedLiters,
+                        transferTemperatureCelsius,
+                        out _);
+                    break;
+                }
             }
         }
 
@@ -2235,6 +2556,10 @@ public class InputOutputModule : InstallationObject,
     private bool TryFindConnectedFluidSource(int requiredFluidItemId, out InstallationObject sourceStorage)
     {
         sourceStorage = null;
+        using var searchSample = MapObjectTickProfiler.SampleNamed(
+            "Simulation",
+            nameof(InputOutputModule),
+            "Fluid Input Storage Search");
         float currentFillRatio = GetFluidStorageFillRatio(this);
         if (TryGetCachedConnectedFluidSource(requiredFluidItemId, currentFillRatio, out sourceStorage))
         {
@@ -2395,31 +2720,20 @@ public class InputOutputModule : InstallationObject,
 
     private void EnqueueFluidStoragePipePassCoordinatesAt(Vector2Int coordinate)
     {
-        bool hasConnectedPipeArea = EnqueueFluidStoragePipePassCoordinatesAt(
+        EnqueueFluidStoragePipePassCoordinatesAt(
             registeredRuntimeAreaCoordinates.TryGetValue(
                 coordinate,
                 out HashSet<InputOutputModule> areaModules)
                 ? areaModules
                 : null,
             coordinate);
-        hasConnectedPipeArea |= EnqueueFluidStoragePipePassCoordinatesAt(
+        EnqueueFluidStoragePipePassCoordinatesAt(
             registeredRuntimeGridCoordinates.TryGetValue(
                 coordinate,
                 out HashSet<InputOutputModule> gridModules)
                 ? gridModules
                 : null,
             coordinate);
-
-        if (!hasConnectedPipeArea
-            || !TryResolveConnectedFluidStorageBodyAtCoordinate(
-                coordinate,
-                out InstallationObject bodyStorage)
-            || !(bodyStorage is SteamGenerator bodyGenerator))
-        {
-            return;
-        }
-
-        EnqueueSteamGeneratorPipePassCoordinates(bodyGenerator);
     }
 
     private bool EnqueueFluidStoragePipePassCoordinatesAt(
@@ -2445,36 +2759,9 @@ public class InputOutputModule : InstallationObject,
                 continue;
             }
 
-            if (!(module is SteamGenerator steamGenerator)
-                || !steamGenerator.gameObject.activeInHierarchy
-                || !steamGenerator.ContainsRuntimePipeAreaBlockCoordinate(coordinate))
-            {
-                continue;
-            }
-
-            foundPipeArea = true;
-            EnqueueSteamGeneratorPipePassCoordinates(steamGenerator);
         }
 
         return foundPipeArea;
-    }
-
-    private void EnqueueSteamGeneratorPipePassCoordinates(SteamGenerator steamGenerator)
-    {
-        if (steamGenerator == null
-            || !steamGenerator.TryGetRuntimePipePassCoordinates(
-                out Vector2Int inputCoordinate,
-                out Vector2Int tailCoordinate))
-        {
-            return;
-        }
-
-        EnqueueConnectedFluidSearchCoordinate(
-            inputCoordinate,
-            connectedFluidSearchCurrentPipeCount);
-        EnqueueConnectedFluidSearchCoordinate(
-            tailCoordinate,
-            connectedFluidSearchCurrentPipeCount);
     }
 
     private bool TrySelectConnectedFluidSourceFromCache(
@@ -2887,6 +3174,12 @@ public class InputOutputModule : InstallationObject,
         storageIsPipeArea = false;
         if (TryGetRuntimePipeFluidStorageAtCoordinate(coordinate, this, false, out storage))
         {
+            if (storage is SteamGenerator)
+            {
+                storage = null;
+                return false;
+            }
+
             storageIsPipeArea = true;
             return true;
         }
@@ -3115,13 +3408,18 @@ public class InputOutputModule : InstallationObject,
 
     protected override void OnDisable()
     {
+        if (ProjectFApplicationLifecycle.IsQuitting) return;
+
         fluidOutputRateMeter?.Reset();
         fluidConsumptionRateMeter?.Reset();
         bool hadRuntimePipeTopologyCoordinates = HasRuntimePipeTopologyCoordinates();
         SetWorkAnimatorState(false, true);
         StopCraftParticleEffectVisual(true);
         FacilitySimulationWorld.Unregister(this);
+        UnregisterFluidSleepWaiters();
         runtimeSleeping = false;
+        fluidOutputCapacityBlocked = false;
+        managedRuntimeVisualsDirty = false;
         UnregisterRuntimeFluidSpatialCoordinates();
         UnregisterRuntimeGridCoordinates();
         UnregisterRuntimeAreaCoordinates();
@@ -3157,8 +3455,12 @@ public class InputOutputModule : InstallationObject,
 
     private void OnDestroy()
     {
+        if (ProjectFApplicationLifecycle.IsQuitting) return;
+
         FacilitySimulationWorld.Unregister(this);
+        UnregisterFluidSleepWaiters();
         runtimeSleeping = false;
+        fluidOutputCapacityBlocked = false;
         UnregisterRuntimeFluidSpatialCoordinates();
         UnregisterRuntimeGridCoordinates();
         UnregisterRuntimeAreaCoordinates();
@@ -6120,20 +6422,29 @@ public class InputOutputModule : InstallationObject,
             return false;
         }
 
-        if (TryGetCachedFluidOutputStorage(fluidItemId, fluidLiters, out targetStorage))
+        using (MapObjectTickProfiler.SampleNamed(
+                   "Simulation",
+                   nameof(InputOutputModule),
+                   "Fluid Output Storage Search"))
         {
-            return true;
+            if (TryGetCachedFluidOutputStorage(fluidItemId, fluidLiters, out targetStorage))
+            {
+                fluidOutputCapacityBlocked = false;
+                return true;
+            }
+
+            if (!EnsureFluidOutputStorageCache()
+                || !TrySelectFluidOutputStorageFromCache(
+                    fluidItemId,
+                    fluidLiters,
+                    out targetStorage))
+            {
+                fluidOutputCapacityBlocked = cachedFluidOutputStorages.Count > 0;
+                return false;
+            }
         }
 
-        if (!EnsureFluidOutputStorageCache()
-            || !TrySelectFluidOutputStorageFromCache(
-                fluidItemId,
-                fluidLiters,
-                out targetStorage))
-        {
-            return false;
-        }
-
+        fluidOutputCapacityBlocked = false;
         CacheFluidOutputStorage(fluidItemId, targetStorage);
         return true;
     }
@@ -6147,9 +6458,18 @@ public class InputOutputModule : InstallationObject,
         if (!IsFluidItemId(fluidItemId)
             || maxLiters <= 0.0001f
             || runtimeOutputCoordinates == null
-            || runtimeOutputCoordinates.Count <= 0
-            || !EnsureFluidOutputStorageCache())
+            || runtimeOutputCoordinates.Count <= 0)
         {
+            return false;
+        }
+
+        using var searchSample = MapObjectTickProfiler.SampleNamed(
+            "Simulation",
+            nameof(InputOutputModule),
+            "Fluid Output Storage Search");
+        if (!EnsureFluidOutputStorageCache())
+        {
+            fluidOutputCapacityBlocked = false;
             return false;
         }
 
@@ -6165,10 +6485,12 @@ public class InputOutputModule : InstallationObject,
             if (availableLiters + 0.0001f >= maxLiters)
             {
                 availableLiters = maxLiters;
+                fluidOutputCapacityBlocked = false;
                 return true;
             }
         }
 
+        fluidOutputCapacityBlocked = cachedFluidOutputStorages.Count > 0;
         return availableLiters > 0.0001f;
     }
 
@@ -6176,20 +6498,25 @@ public class InputOutputModule : InstallationObject,
     {
         if (!IsFluidItemId(fluidItemId)
             || runtimeOutputCoordinates == null
-            || runtimeOutputCoordinates.Count <= 0
-            || !EnsureFluidOutputStorageCache()
-            || !TrySelectFluidOutputStorageWithAnySpaceFromCache(
-                fluidItemId,
-                out InstallationObject targetStorage)
-            || targetStorage == null
-            || !cachedFluidOutputStoragePipeDistances.TryGetValue(
-                targetStorage,
-                out int pipeDistance))
+            || runtimeOutputCoordinates.Count <= 0)
         {
             return 1f;
         }
 
-        return CalculateFluidPressureRetention(pipeDistance);
+        using var searchSample = MapObjectTickProfiler.SampleNamed(
+            "Simulation",
+            nameof(InputOutputModule),
+            "Fluid Output Storage Search");
+        return EnsureFluidOutputStorageCache()
+               && TrySelectFluidOutputStorageWithAnySpaceFromCache(
+                   fluidItemId,
+                   out InstallationObject targetStorage)
+               && targetStorage != null
+               && cachedFluidOutputStoragePipeDistances.TryGetValue(
+                   targetStorage,
+                   out int pipeDistance)
+            ? CalculateFluidPressureRetention(pipeDistance)
+            : 1f;
     }
 
     protected bool TryEmitFluidOutputToConnectedStorages(
@@ -6202,10 +6529,21 @@ public class InputOutputModule : InstallationObject,
         if (!IsFluidItemId(fluidItemId)
             || requestedLiters <= 0.0001f
             || runtimeOutputCoordinates == null
-            || runtimeOutputCoordinates.Count <= 0
-            || !EnsureFluidOutputStorageCache())
+            || runtimeOutputCoordinates.Count <= 0)
         {
             return false;
+        }
+
+        using (MapObjectTickProfiler.SampleNamed(
+                   "Simulation",
+                   nameof(InputOutputModule),
+                   "Fluid Output Storage Search"))
+        {
+            if (!EnsureFluidOutputStorageCache())
+            {
+                fluidOutputCapacityBlocked = false;
+                return false;
+            }
         }
 
         int maxAttempts = Mathf.Max(1, cachedFluidOutputStorages.Count);
@@ -6217,10 +6555,17 @@ public class InputOutputModule : InstallationObject,
                 break;
             }
 
-            if (!TrySelectFluidOutputStorageWithAnySpaceFromCache(fluidItemId, out InstallationObject targetStorage)
-                || targetStorage == null)
+            InstallationObject targetStorage;
+            using (MapObjectTickProfiler.SampleNamed(
+                       "Simulation",
+                       nameof(InputOutputModule),
+                       "Fluid Output Storage Search"))
             {
-                break;
+                if (!TrySelectFluidOutputStorageWithAnySpaceFromCache(fluidItemId, out targetStorage)
+                    || targetStorage == null)
+                {
+                    break;
+                }
             }
 
             float litersToEmit = Mathf.Min(
@@ -6231,19 +6576,27 @@ public class InputOutputModule : InstallationObject,
                 break;
             }
 
-            if (!targetStorage.TryAddFluidLiters(
-                    fluidItemId,
-                    litersToEmit,
-                    temperatureCelsius,
-                    out float acceptedThisAttempt)
-                || acceptedThisAttempt <= 0.0001f)
+            using (MapObjectTickProfiler.SampleNamed(
+                       "Simulation",
+                       nameof(InputOutputModule),
+                       "Fluid Output Transfer"))
             {
-                break;
-            }
+                if (!targetStorage.TryAddFluidLiters(
+                        fluidItemId,
+                        litersToEmit,
+                        temperatureCelsius,
+                        out float acceptedThisAttempt)
+                    || acceptedThisAttempt <= 0.0001f)
+                {
+                    break;
+                }
 
-            acceptedLiters += Mathf.Max(0f, acceptedThisAttempt);
+                acceptedLiters += Mathf.Max(0f, acceptedThisAttempt);
+            }
         }
 
+        fluidOutputCapacityBlocked = acceptedLiters + 0.0001f < requestedLiters
+                                     && cachedFluidOutputStorages.Count > 0;
         RecordFluidNetworkOutput(fluidItemId, acceptedLiters);
         return acceptedLiters > 0.0001f;
     }
@@ -6261,6 +6614,14 @@ public class InputOutputModule : InstallationObject,
         connectedFluidSearchQueue.Clear();
         connectedFluidSearchPipeCounts.Clear();
         connectedFluidStorageCandidates.Clear();
+
+        if (this is Boiler boiler)
+        {
+            BuildDirectedBoilerSteamOutputCache(boiler);
+            cachedFluidOutputStorages.Sort(CompareSimulationOrder);
+            cachedFluidOutputStoragesTopologyVersion = fluidTopologyVersion;
+            return cachedFluidOutputStorages.Count > 0;
+        }
 
         for (int i = 0; i < runtimeOutputCoordinates.Count; i++)
         {
@@ -6375,6 +6736,177 @@ public class InputOutputModule : InstallationObject,
         return cachedFluidOutputStorages.Count > 0;
     }
 
+    internal static bool IsInDirectedBoilerSteamChain(SteamGenerator generator)
+    {
+        if (generator == null || !generator.gameObject.activeInHierarchy)
+        {
+            return false;
+        }
+
+        EnsureDirectedBoilerSteamChainCache();
+        return directedBoilerSteamChainGenerators.Contains(generator);
+    }
+
+    private static void EnsureDirectedBoilerSteamChainCache()
+    {
+        if (directedBoilerSteamChainTopologyVersion == fluidTopologyVersion)
+        {
+            return;
+        }
+
+        directedBoilerSteamChainGenerators.Clear();
+        foreach (InputOutputModule module in activeRuntimeModules)
+        {
+            if (!(module is Boiler boiler) || !boiler.gameObject.activeInHierarchy)
+            {
+                continue;
+            }
+
+            AddDirectedBoilerSteamChains(boiler, directedBoilerSteamChainGenerators, null);
+        }
+
+        directedBoilerSteamChainTopologyVersion = fluidTopologyVersion;
+    }
+
+    private void BuildDirectedBoilerSteamOutputCache(Boiler boiler)
+    {
+        directedSteamChainVisited.Clear();
+        AddDirectedBoilerSteamChains(boiler, directedSteamChainVisited, this);
+    }
+
+    private static void AddDirectedBoilerSteamChains(
+        Boiler boiler,
+        HashSet<SteamGenerator> visited,
+        InputOutputModule outputCacheOwner)
+    {
+        if (boiler == null || visited == null)
+        {
+            return;
+        }
+
+        IReadOnlyList<Vector2Int> outputCoordinates = boiler.runtimeOutputCoordinates;
+        for (int outputIndex = 0; outputIndex < outputCoordinates.Count; outputIndex++)
+        {
+            Vector2Int sourcePortCoordinate = outputCoordinates[outputIndex];
+            if (!boiler.TryGetRuntimePipeOutputExternalDirection(
+                    sourcePortCoordinate,
+                    out Vector2Int flowDirection))
+            {
+                continue;
+            }
+
+            while (TryFindDirectedSteamGenerator(
+                       sourcePortCoordinate,
+                       flowDirection,
+                       visited,
+                       out SteamGenerator generator))
+            {
+                visited.Add(generator);
+                outputCacheOwner?.AddFluidOutputStorageCacheCandidate(generator, 0);
+                if (!generator.TryGetRuntimePipePassTail(
+                        out sourcePortCoordinate,
+                        out flowDirection))
+                {
+                    break;
+                }
+            }
+        }
+    }
+
+    private static bool TryFindDirectedSteamGenerator(
+        Vector2Int sourcePortCoordinate,
+        Vector2Int flowDirection,
+        ISet<SteamGenerator> visited,
+        out SteamGenerator generator)
+    {
+        generator = null;
+        if (flowDirection == Vector2Int.zero)
+        {
+            return false;
+        }
+
+        SelectDirectedSteamGeneratorAtCoordinate(
+            sourcePortCoordinate - flowDirection,
+            sourcePortCoordinate,
+            flowDirection,
+            visited,
+            ref generator);
+        SelectDirectedSteamGeneratorAtCoordinate(
+            sourcePortCoordinate,
+            sourcePortCoordinate,
+            flowDirection,
+            visited,
+            ref generator);
+        SelectDirectedSteamGeneratorAtCoordinate(
+            sourcePortCoordinate + flowDirection,
+            sourcePortCoordinate,
+            flowDirection,
+            visited,
+            ref generator);
+        return generator != null;
+    }
+
+    private static void SelectDirectedSteamGeneratorAtCoordinate(
+        Vector2Int searchCoordinate,
+        Vector2Int sourcePortCoordinate,
+        Vector2Int flowDirection,
+        ISet<SteamGenerator> visited,
+        ref SteamGenerator bestGenerator)
+    {
+        if (registeredRuntimeAreaCoordinates.TryGetValue(
+                searchCoordinate,
+                out HashSet<InputOutputModule> areaModules))
+        {
+            SelectDirectedSteamGenerator(
+                areaModules,
+                sourcePortCoordinate,
+                flowDirection,
+                visited,
+                ref bestGenerator);
+        }
+
+        if (registeredRuntimeGridCoordinates.TryGetValue(
+                searchCoordinate,
+                out HashSet<InputOutputModule> gridModules))
+        {
+            SelectDirectedSteamGenerator(
+                gridModules,
+                sourcePortCoordinate,
+                flowDirection,
+                visited,
+                ref bestGenerator);
+        }
+    }
+
+    private static void SelectDirectedSteamGenerator(
+        IEnumerable<InputOutputModule> modules,
+        Vector2Int sourcePortCoordinate,
+        Vector2Int flowDirection,
+        ISet<SteamGenerator> visited,
+        ref SteamGenerator bestGenerator)
+    {
+        if (modules == null)
+        {
+            return;
+        }
+
+        foreach (InputOutputModule module in modules)
+        {
+            if (!(module is SteamGenerator candidate)
+                || !candidate.gameObject.activeInHierarchy
+                || visited != null && visited.Contains(candidate)
+                || !candidate.CanReceiveSteamFromDirectedPortAtRuntime(
+                    sourcePortCoordinate,
+                    flowDirection)
+                || bestGenerator != null && CompareSimulationOrder(candidate, bestGenerator) >= 0)
+            {
+                continue;
+            }
+
+            bestGenerator = candidate;
+        }
+    }
+
     private bool TrySelectFluidOutputStorageFromCache(
         int fluidItemId,
         float fluidLiters,
@@ -6456,7 +6988,8 @@ public class InputOutputModule : InstallationObject,
     {
         if (storage == null
             || storage == this
-            || !storage.CanStoreFluid)
+            || !storage.CanStoreFluid
+            || storage is SteamGenerator && !(this is Boiler))
         {
             return;
         }

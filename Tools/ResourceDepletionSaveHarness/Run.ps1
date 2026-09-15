@@ -16,9 +16,9 @@ function Read-Member([string]$file, [string]$signature) {
     return $source.Substring($start, $end - $start)
 }
 
-$resourceFile = 'FactorioProject/Assets/Scripts/Object/MapObj/Resource.cs'
+$resourceFile = 'FactorioProject/Assets/Scripts/Object/MapObj/ResourceInstance.cs'
 $terrainFile = 'FactorioProject/Assets/Scripts/Map/TerrainGenerator.ChunkPersistence.cs'
-$generated = "using UnityEngine; public partial class Resource {`n"
+$generated = "using UnityEngine; public partial class ResourceInstance {`n"
 $generated += Read-Member $resourceFile 'private int ConsumeGaugeDotsInternal('
 $generated += Read-Member $resourceFile 'private void PersistDepletedResourceState()'
 $generated += "}`npublic partial class TerrainGenerator {`n"

@@ -101,6 +101,7 @@ internal sealed class EditorToolForm : Form
     private readonly Label playerSpeedLabel = new Label();
     private readonly Label runtimeStatsLabel = new Label();
     private readonly Label playerPositionLabel = new Label();
+    private readonly Label memoryUsageLabel = new Label();
     private readonly Label sceneGameObjectCountLabel = new Label();
     private readonly TextBox runtimeStatsTextBox = new TextBox();
     private readonly System.Windows.Forms.Timer statusTimer = new System.Windows.Forms.Timer();
@@ -142,7 +143,7 @@ internal sealed class EditorToolForm : Form
         layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 96f));
         layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 112f));
         layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 56f));
-        layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 132f));
+        layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 156f));
         layout.RowStyles.Add(new RowStyle(SizeType.Percent, 100f));
 
         Label titleLabel = new Label
@@ -724,9 +725,10 @@ internal sealed class EditorToolForm : Form
         {
             Dock = DockStyle.Fill,
             ColumnCount = 1,
-            RowCount = 4
+            RowCount = 5
         };
         runtimeStatsLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 26f));
+        runtimeStatsLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 24f));
         runtimeStatsLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 24f));
         runtimeStatsLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 24f));
         runtimeStatsLayout.RowStyles.Add(new RowStyle(SizeType.Percent, 100f));
@@ -740,6 +742,11 @@ internal sealed class EditorToolForm : Form
         playerPositionLabel.Dock = DockStyle.Fill;
         playerPositionLabel.ForeColor = Color.FromArgb(176, 177, 158);
         playerPositionLabel.Font = new Font(Font.FontFamily, 10f, FontStyle.Regular);
+
+        memoryUsageLabel.Text = "게임 메모리: --";
+        memoryUsageLabel.Dock = DockStyle.Fill;
+        memoryUsageLabel.ForeColor = Color.FromArgb(176, 177, 158);
+        memoryUsageLabel.Font = new Font(Font.FontFamily, 10f, FontStyle.Regular);
 
         sceneGameObjectCountLabel.Text = "씬 GameObject: --";
         sceneGameObjectCountLabel.Dock = DockStyle.Fill;
@@ -758,8 +765,9 @@ internal sealed class EditorToolForm : Form
 
         runtimeStatsLayout.Controls.Add(runtimeStatsLabel, 0, 0);
         runtimeStatsLayout.Controls.Add(playerPositionLabel, 0, 1);
-        runtimeStatsLayout.Controls.Add(sceneGameObjectCountLabel, 0, 2);
-        runtimeStatsLayout.Controls.Add(runtimeStatsTextBox, 0, 3);
+        runtimeStatsLayout.Controls.Add(memoryUsageLabel, 0, 2);
+        runtimeStatsLayout.Controls.Add(sceneGameObjectCountLabel, 0, 3);
+        runtimeStatsLayout.Controls.Add(runtimeStatsTextBox, 0, 4);
         runtimeStatsCard.Controls.Add(runtimeStatsLayout);
         layout.Controls.Add(runtimeStatsCard, 0, 8);
         layout.SetColumnSpan(runtimeStatsCard, 2);
@@ -1335,6 +1343,7 @@ internal sealed class EditorToolForm : Form
                     playerSpeedLabel.ForeColor = Color.FromArgb(176, 177, 158);
                 }
                 UpdatePlayerPositionFromResponse(response);
+                UpdateMemoryUsageFromResponse(response);
                 UpdateRuntimeStatsFromResponse(response);
                 UpdateSaveSlotsFromResponse(response, false);
             }
@@ -1346,6 +1355,7 @@ internal sealed class EditorToolForm : Form
                 playerSpeedLabel.Text = "플레이어 속도: -- m/s";
                 playerSpeedLabel.ForeColor = Color.FromArgb(176, 177, 158);
                 SetPlayerPositionUnavailable("--");
+                SetMemoryUsageUnavailable("--");
                 SetRuntimeStatsUnavailable("상태 응답 없음");
                 SetWorldTimeUnavailable("상태 응답 없음");
             }
@@ -1360,6 +1370,7 @@ internal sealed class EditorToolForm : Form
             playerSpeedLabel.Text = "플레이어 속도: offline";
             playerSpeedLabel.ForeColor = Color.FromArgb(236, 104, 94);
             SetPlayerPositionUnavailable("offline");
+            SetMemoryUsageUnavailable("offline");
             SetRuntimeStatsUnavailable("게임 연결 안 됨");
             SetWorldTimeUnavailable("게임 연결 안 됨");
             PositionHeaderStats(fpsLabel.Parent ?? this);
@@ -1423,6 +1434,36 @@ internal sealed class EditorToolForm : Form
     {
         playerPositionLabel.Text = $"플레이어 좌표: {value}";
         playerPositionLabel.ForeColor = Color.FromArgb(176, 177, 158);
+    }
+
+    private void UpdateMemoryUsageFromResponse(string response)
+    {
+        if (!TryReadProtocolLong(response, "memoryAllocatedBytes", out long allocatedBytes)
+            || !TryReadProtocolLong(response, "memoryReservedBytes", out long reservedBytes)
+            || !TryReadProtocolLong(response, "managedHeapBytes", out long managedHeapBytes))
+        {
+            SetMemoryUsageUnavailable("--");
+            return;
+        }
+
+        memoryUsageLabel.Text =
+            $"게임 메모리: 사용 {FormatByteSize(allocatedBytes)} / 예약 {FormatByteSize(reservedBytes)}    Managed {FormatByteSize(managedHeapBytes)}";
+        memoryUsageLabel.ForeColor = Color.FromArgb(176, 177, 158);
+    }
+
+    private void SetMemoryUsageUnavailable(string value)
+    {
+        memoryUsageLabel.Text = $"게임 메모리: {value}";
+        memoryUsageLabel.ForeColor = Color.FromArgb(176, 177, 158);
+    }
+
+    private static string FormatByteSize(long bytes)
+    {
+        const double mebibyte = 1024d * 1024d;
+        const double gibibyte = mebibyte * 1024d;
+        return bytes >= gibibyte
+            ? $"{bytes / gibibyte:0.00} GB"
+            : $"{bytes / mebibyte:0.0} MB";
     }
 
     private void UpdateRuntimeStatsFromResponse(string response)
@@ -1891,6 +1932,17 @@ internal sealed class EditorToolForm : Form
         }
 
         return int.TryParse(token, out value);
+    }
+
+    private static bool TryReadProtocolLong(string response, string key, out long value)
+    {
+        value = 0L;
+        if (!TryReadProtocolToken(response, key, out string token))
+        {
+            return false;
+        }
+
+        return long.TryParse(token, NumberStyles.Integer, CultureInfo.InvariantCulture, out value);
     }
 
     private static bool TryReadProtocolBool(string response, string key, out bool value)

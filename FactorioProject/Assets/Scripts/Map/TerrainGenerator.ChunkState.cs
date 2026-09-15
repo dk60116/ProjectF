@@ -61,12 +61,6 @@ public partial class TerrainGenerator
         return false;
     }
 
-    private void CaptureConveyorItemSaveRuns(MapSaveData mapSaveData)
-    {
-        IEnumerator capture = CaptureConveyorItemSaveRunsIncremental(mapSaveData, int.MaxValue);
-        while (capture.MoveNext()) { }
-    }
-
     private IEnumerator CaptureConveyorItemSaveRunsIncremental(
         MapSaveData mapSaveData,
         int entriesPerFrame)
@@ -335,13 +329,17 @@ public partial class TerrainGenerator
         }
     }
 
-    private void ExpandConveyorItemSaveRunsAfterBeltTopology(MapSaveData mapSaveData)
+    private IEnumerator ExpandConveyorItemSaveRunsAfterBeltTopologyIncremental(
+        MapSaveData mapSaveData,
+        int entriesPerCheckpoint)
     {
         if (mapSaveData?.conveyorItemRuns == null || mapSaveData.conveyorItemRuns.Count <= 0)
         {
-            return;
+            yield break;
         }
 
+        entriesPerCheckpoint = Mathf.Max(1, entriesPerCheckpoint);
+        int processed = 0;
         mapSaveData.conveyorItems ??= new List<ConveyorItemBlockSaveEntry>();
         Dictionary<Vector2Int, ConveyorItemBlockSaveEntry> entriesByCoordinate =
             new Dictionary<Vector2Int, ConveyorItemBlockSaveEntry>(mapSaveData.conveyorItems.Count);
@@ -368,6 +366,11 @@ public partial class TerrainGenerator
                 {
                     occupiedKeys.Add(
                         new ConveyorLaneCoordinateKey(entry.coordinate, lane.laneIndex));
+                }
+                if (++processed >= entriesPerCheckpoint)
+                {
+                    processed = 0;
+                    yield return null;
                 }
             }
         }
@@ -411,7 +414,14 @@ public partial class TerrainGenerator
                     itemId = runItemIds[itemIndex]
                 });
                 occupiedKeys.Add(key);
+                if (++processed >= entriesPerCheckpoint)
+                {
+                    processed = 0;
+                    yield return null;
+                }
             }
+
+            yield return null;
         }
 
         mapSaveData.conveyorItems.Sort(CompareConveyorItemBlockSaveEntries);
@@ -422,6 +432,11 @@ public partial class TerrainGenerator
             if (entry != null)
             {
                 resourceStateStore?.SetConveyorItems(entry.coordinate, entry.lanes);
+            }
+            if (++processed >= entriesPerCheckpoint)
+            {
+                processed = 0;
+                yield return null;
             }
         }
 

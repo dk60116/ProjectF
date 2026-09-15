@@ -102,22 +102,24 @@ public partial class TerrainGenerator : MonoBehaviour
             this,
             detachedChunkResourceScratch,
             false);
-        for (int i = 0; i < detachedChunkResourceScratch.Count; i++)
+        try
         {
-            ResourceInstance resource = detachedChunkResourceScratch[i];
-            if (resource != null && resource.TryGetOwningCoordinate(out Vector2Int coordinate))
+            for (int i = 0; i < detachedChunkResourceScratch.Count; i++)
             {
-                resourceStateStore.Save(coordinate, resource);
-            }
+                ResourceInstance resource = detachedChunkResourceScratch[i];
+                if (resource != null && resource.TryGetOwningCoordinate(out Vector2Int coordinate))
+                {
+                    resourceStateStore.Save(coordinate, resource);
+                }
 
-            if (++processed >= entriesPerFrame)
-            {
-                processed = 0;
-                yield return null;
+                if (++processed >= entriesPerFrame)
+                {
+                    processed = 0;
+                    yield return null;
+                }
             }
         }
-
-        detachedChunkResourceScratch.Clear();
+        finally { detachedChunkResourceScratch.Clear(); }
     }
 
     private ResourceInstance SpawnResourceOnBlock(Block block, Resource prefab, Vector2Int worldCoordinate)

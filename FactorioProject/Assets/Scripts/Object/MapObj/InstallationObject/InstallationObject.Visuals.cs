@@ -5,6 +5,7 @@ public partial class InstallationObject
 {
     private InstallationVisualState managedVisualState;
     protected virtual bool UsesManagedVisualUpdates => false;
+    protected virtual bool RequiresManagedVisualUpdate => false;
     protected bool ShouldUpdateVisuals => managedVisualState == null || managedVisualState.Visible;
 
     private void RegisterManagedVisualUpdates()
@@ -21,7 +22,14 @@ public partial class InstallationObject
         WorldVisualUpdateManager.Unregister(managedVisualState);
     }
 
-    internal void RunManagedVisualUpdate(float deltaTime) => TickManagedVisuals(deltaTime);
+    internal bool RunManagedVisualUpdate(float deltaTime)
+    {
+        if (!RequiresManagedVisualUpdate)
+            return false;
+
+        TickManagedVisuals(deltaTime);
+        return true;
+    }
     internal void RefreshManagedVisualState() => OnManagedVisualsResumed();
     protected virtual void TickManagedVisuals(float deltaTime) { }
     protected virtual void OnManagedVisualsResumed() { }

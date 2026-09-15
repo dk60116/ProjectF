@@ -199,7 +199,17 @@ public static class Checks
             if (json.RootElement.GetProperty("rowCount").GetInt32() != 0)
                 throw new Exception("Disabled named scope recorded a row");
         }
-        Console.WriteLine("PASS: named scopes record early returns, allocate 0 bytes after warmup, and skip disabled profiling.");
+        GameManager.Instance.MapObjectTickProfilingEnabled = true;
+        MapObjectTickProfiler.Reset();
+        MapObjectTickProfiler.RecordNamedElapsedTicks("Facility Type", "Probe", "Probe Apply", 37);
+        using (var json = JsonDocument.Parse(MapObjectTickProfiler.BuildAndResetSnapshotJson()))
+        {
+            var row = json.RootElement.GetProperty("rows")[0];
+            if (row.GetProperty("samples").GetInt32() != 1
+                || row.GetProperty("totalUs").GetDouble() != 37)
+                throw new Exception("Aggregated named elapsed timing differs");
+        }
+        Console.WriteLine("PASS: named and aggregated scopes record exact durations, allocate 0 bytes after warmup, and skip disabled profiling.");
     }
     private static void CheckFrameCounts()
     {

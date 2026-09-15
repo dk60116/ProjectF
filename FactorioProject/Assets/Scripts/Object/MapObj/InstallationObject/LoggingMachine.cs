@@ -5,7 +5,8 @@ using UnityEngine;
 public class LoggingMachine : InstallationObject,
     IMapObjectUpdateTick,
     IMapObjectUpdateTickInterval,
-    IItemLightWorkStateProvider
+    IItemLightWorkStateProvider,
+    IFacilityRuntimeWakeTarget
 {
     private static readonly Vector2Int[] LocalHarvestDirections =
     {
@@ -55,6 +56,7 @@ public class LoggingMachine : InstallationObject,
     private float emptyDirectionElapsed;
     private long consumedWorkEnergyUnits;
     private readonly List<KeyValuePair<int, int>> harvestedSeedDrops = new List<KeyValuePair<int, int>>(2);
+    private readonly List<Vector2Int> runtimeWakeCoordinates = new List<Vector2Int>(4);
     private readonly List<InputOutputModule> seedRecoveryModules = new List<InputOutputModule>(2);
 
     public float ManagedUpdateTickIntervalSeconds => DefaultTickIntervalSeconds;
@@ -202,16 +204,17 @@ public class LoggingMachine : InstallationObject,
         base.OnEnable();
         ResolveHingeReference();
         ResetRuntimeState(true);
-
-        if (Application.isPlaying && TryGetPlacementRuntime(out _, out _))
-        {
-            MapObjectTickManager.RegisterUpdateTick(this);
-        }
+        FacilitySimulationWorld.Register(this);
+        RegisterRuntimeWakeCoordinates();
+        WakeRuntimeTick();
     }
 
     protected override void OnDisable()
     {
-        MapObjectTickManager.UnregisterUpdateTick(this);
+        if (ProjectFApplicationLifecycle.IsQuitting) return;
+
+        FacilityRuntimeWakeRegistry.Unregister(this);
+        FacilitySimulationWorld.Unregister(this);
         SetWorking(false);
         activeTree = null;
         base.OnDisable();
@@ -219,7 +222,8 @@ public class LoggingMachine : InstallationObject,
 
     public override void PrepareForPool()
     {
-        MapObjectTickManager.UnregisterUpdateTick(this);
+        FacilityRuntimeWakeRegistry.Unregister(this);
+        FacilitySimulationWorld.Unregister(this);
         SetWorking(false);
         ResetRuntimeState(true);
         minimumGrowth = DefaultMinimumGrowth;
@@ -231,15 +235,14 @@ public class LoggingMachine : InstallationObject,
     {
         base.OnPlacementRuntimeChanged();
         ResetRuntimeState(true);
-        if (Application.isPlaying && isActiveAndEnabled)
-        {
-            MapObjectTickManager.RegisterUpdateTick(this);
-        }
+        RegisterRuntimeWakeCoordinates();
+        WakeRuntimeTick();
     }
 
     protected override void OnPlacementRuntimeCleared()
     {
-        MapObjectTickManager.UnregisterUpdateTick(this);
+        FacilityRuntimeWakeRegistry.Unregister(this);
+        FacilitySimulationWorld.SetScheduled(this, false);
         SetWorking(false);
         ResetRuntimeState(true);
         base.OnPlacementRuntimeCleared();
@@ -247,65 +250,130 @@ public class LoggingMachine : InstallationObject,
 
     public void ManagedUpdateTick(float deltaTime)
     {
+        try
+        {
+            if (!Application.isPlaying
+                || deltaTime <= 0f
+                || !isActiveAndEnabled
+                || !TryGetPlacementRuntime(out _, out _))
+            {
+                SetWorking(false);
+                return;
+            }
+
+            hasElectricDemand = activeTree != null || HasAnyAdjacentTree();
+            if (!hasElectricDemand)
+            {
+                SetWorking(false);
+                return;
+            }
+
+            if (!UtilityPole.HasElectricityAvailable(this))
+            {
+                SetWorking(false);
+                return;
+            }
+
+            UpdateHingeRotation(deltaTime);
+            if (!IsHingeAligned())
+            {
+                SetWorking(false);
+                return;
+            }
+
+            if (!TryResolveAdjacentTree(currentDirectionIndex, out ResourceInstance tree))
+            {
+                activeTree = null;
+                consumedWorkEnergyUnits = 0L;
+                SetWorking(false);
+                UpdateEmptyDirection(deltaTime);
+                return;
+            }
+
+            emptyDirectionElapsed = 0f;
+            if (activeTree != tree)
+            {
+                activeTree = tree;
+                consumedWorkEnergyUnits = 0L;
+            }
+
+            if (!TryConsumeWorkEnergy(deltaTime, out float consumedEnergy))
+            {
+                SetWorking(false);
+                return;
+            }
+
+            consumedWorkEnergyUnits += DeterministicSimulationUnits.FromFloat(consumedEnergy);
+            SetWorking(true);
+            if (consumedWorkEnergyUnits < DeterministicSimulationUnits.FromFloat(ResolveRequiredWorkEnergy()))
+            {
+                return;
+            }
+
+            CompleteTreeHarvest(tree);
+        }
+        finally
+        {
+            RefreshRuntimeTickSleepState();
+        }
+    }
+
+    bool IFacilityRuntimeWakeTarget.IsFacilityRuntimeWakeTargetActive =>
+        Application.isPlaying && isActiveAndEnabled;
+
+    void IFacilityRuntimeWakeTarget.WakeFacilityRuntimeTick()
+    {
+        WakeRuntimeTick();
+    }
+
+    private void RegisterRuntimeWakeCoordinates()
+    {
+        FacilityRuntimeWakeRegistry.Unregister(this);
+        runtimeWakeCoordinates.Clear();
+        if (!TryGetPlacementRuntime(out Vector2Int anchorCoordinate, out int quarterTurns))
+        {
+            return;
+        }
+
+        for (int directionIndex = 0; directionIndex < LocalHarvestDirections.Length; directionIndex++)
+        {
+            runtimeWakeCoordinates.Add(GetHarvestCoordinate(
+                anchorCoordinate,
+                quarterTurns,
+                directionIndex));
+        }
+
+        FacilityRuntimeWakeRegistry.Register(this, runtimeWakeCoordinates);
+    }
+
+    private void WakeRuntimeTick()
+    {
         if (!Application.isPlaying
-            || deltaTime <= 0f
             || !isActiveAndEnabled
             || !TryGetPlacementRuntime(out _, out _))
         {
-            SetWorking(false);
             return;
         }
 
-        hasElectricDemand = activeTree != null || HasAnyAdjacentTree();
-        if (!hasElectricDemand)
+        SetSleepAwakeDebugSleeping(false);
+        if (!FacilitySimulationWorld.IsScheduled(this))
         {
-            SetWorking(false);
-            return;
+            FacilitySimulationWorld.SetScheduled(this, true);
+        }
+    }
+
+    private void RefreshRuntimeTickSleepState()
+    {
+        bool shouldRemainScheduled = Application.isPlaying
+                                     && isActiveAndEnabled
+                                     && TryGetPlacementRuntime(out _, out _)
+                                     && hasElectricDemand;
+        if (FacilitySimulationWorld.IsScheduled(this) != shouldRemainScheduled)
+        {
+            FacilitySimulationWorld.SetScheduled(this, shouldRemainScheduled);
         }
 
-        if (!UtilityPole.HasElectricityAvailable(this))
-        {
-            SetWorking(false);
-            return;
-        }
-
-        UpdateHingeRotation(deltaTime);
-        if (!IsHingeAligned())
-        {
-            SetWorking(false);
-            return;
-        }
-
-        if (!TryResolveAdjacentTree(currentDirectionIndex, out ResourceInstance tree))
-        {
-            activeTree = null;
-            consumedWorkEnergyUnits = 0L;
-            SetWorking(false);
-            UpdateEmptyDirection(deltaTime);
-            return;
-        }
-
-        emptyDirectionElapsed = 0f;
-        if (activeTree != tree)
-        {
-            activeTree = tree;
-            consumedWorkEnergyUnits = 0L;
-        }
-
-        if (!TryConsumeWorkEnergy(deltaTime, out float consumedEnergy))
-        {
-            SetWorking(false);
-            return;
-        }
-
-        consumedWorkEnergyUnits += DeterministicSimulationUnits.FromFloat(consumedEnergy);
-        SetWorking(true);
-        if (consumedWorkEnergyUnits < DeterministicSimulationUnits.FromFloat(ResolveRequiredWorkEnergy()))
-        {
-            return;
-        }
-
-        CompleteTreeHarvest(tree);
+        SetSleepAwakeDebugSleeping(!shouldRemainScheduled);
     }
 
     public bool TryGetElectricPowerRequirement(out float wattsPerSecond)
@@ -938,6 +1006,8 @@ public class LoggingMachine : InstallationObject,
         {
             SetWorking(false);
         }
+
+        WakeRuntimeTick();
     }
 
     private bool ContainsTreeDefinitionKey(string key)

@@ -5,9 +5,66 @@ internal static class Phase34Checks
     internal static void Run(Action<bool, string> require)
     {
         Production(require);
+        FacilityFlow(require);
         Calendar(require);
         Motion(require);
         Rail(require);
+    }
+
+    private static void FacilityFlow(Action<bool, string> require)
+    {
+        var batch = new FacilityFlowBatch(3);
+        batch.Begin();
+        int pump = batch.ReserveSlot();
+        batch.ConfigurePump(pump, 1, 60f, .1f, 6, true, 0, 0, -1);
+        int boiler = batch.ReserveSlot();
+        batch.ConfigureBoiler(
+            boiler, 1, 60, 2, 60, 60, 120, .1f, 6,
+            true, true, 60, 50, 0, -1);
+        int generator = batch.ReserveSlot();
+        batch.ConfigureSteamGenerator(generator, 2, 10, .1f, true, false, 5, 100);
+        batch.PlanAll();
+
+        require(Math.Abs(batch.GetPumpRequestedLiters(pump) - 6f) < .0001f,
+            "pump SoA plan quantizes one interval of fluid output");
+        batch.CommitPumpStorageAcceptance(pump, 4);
+        require(batch.GetPumpAccumulatorUnits(pump) == DeterministicSimulationUnits.FromFloat(2),
+            "pump SoA commit retains only rejected current-tick output");
+        require(Math.Abs(batch.GetBoilerRequestedPullLiters(boiler) - 12f) < .0001f,
+            "boiler SoA plan separates the storage pull command");
+        batch.PrepareBoilerOutput(boiler);
+        require(Math.Abs(batch.GetBoilerMaximumOutputLiters(boiler) - 6f) < .0001f,
+            "boiler SoA output respects rate, water and deterministic budget");
+        batch.CommitBoilerOutput(boiler, 4);
+        require(batch.GetBoilerBudgetUnits(boiler) == DeterministicSimulationUnits.FromFloat(2),
+            "boiler SoA commit deducts only accepted steam");
+        require(batch.HeatBoiler(boiler, 10, 100, true, 1)
+                && Math.Abs(batch.GetBoilerTemperature(boiler) - 60f) < .0001f,
+            "boiler temperature is advanced in data state from granted energy");
+        require(batch.CoolBoiler(boiler, 0, 1, .2f)
+                && Math.Abs(batch.GetBoilerTemperature(boiler) - 58f) < .0001f,
+            "boiler passive cooling remains deterministic without a MonoBehaviour");
+        require(Math.Abs(batch.GetSteamRequiredLiters(generator) - 12.5f) < .0001f
+                && Math.Abs(batch.GetSteamMissingLiters(generator) - 7.5f) < .0001f,
+            "steam generator SoA plan retains the startup reserve rule");
+
+        for (int i = 0; i < 100; i++)
+        {
+            batch.Begin();
+            int index = batch.ReserveSlot();
+            batch.ConfigurePump(index, 1, 60, 1f / 60f, i, true, 0, 0, -1);
+            batch.PlanAll();
+        }
+        long allocated = GC.GetAllocatedBytesForCurrentThread();
+        for (int i = 0; i < 10000; i++)
+        {
+            batch.Begin();
+            int index = batch.ReserveSlot();
+            batch.ConfigurePump(index, 1, 60, 1f / 60f, i, true, 0, 0, -1);
+            batch.PlanAll();
+        }
+        require(GC.GetAllocatedBytesForCurrentThread() == allocated,
+            "facility SoA steady-state planning allocates no managed memory");
     }
     private static void Production(Action<bool, string> require)
     {

@@ -10,6 +10,10 @@ static class MapObjectTickManager
 {
     public const float FixedSimulationDeltaSeconds = 1f / 60f;
     public static long CurrentSimulationTick => Time.frameCount;
+    private static readonly HashSet<object> Registered = new();
+    public static void RegisterUpdateTick(object target) => Registered.Add(target);
+    public static void UnregisterUpdateTick(object target) => Registered.Remove(target);
+    public static bool IsRegistered(object target) => Registered.Contains(target);
 }
 static class DeterministicSimulationUnits
 {
@@ -164,6 +168,9 @@ public partial class RailHandcar : Train
 
 public partial class SteamTrain
 {
+    public bool isActiveAndEnabled = true;
+    public bool SleepAwakeDebugSleeping { get; private set; }
+    protected void SetSleepAwakeDebugSleeping(bool sleeping) => SleepAwakeDebugSleeping = sleeping;
     const float AutoDriveRouteSegmentTolerance = .2f, AutoDriveRouteRefreshInterval = .25f;
     const float AutoDriveWaitDurationSeconds = 5, BurnEnergyEpsilon = .0001f, WaterEpsilon = .0001f;
     const float BurnEnergyDrivingSpeedThreshold = .0001f;
@@ -393,6 +400,10 @@ public partial class SteamTrain
         Train.Link(car, fuel);
         engine.TestFuelCar = fuel;
         engine.ApplyAutoDriveState(true, "A", "B", 1, 2, 0, 0, "B", "A", 1);
+        Check(MapObjectTickManager.IsRegistered(engine),
+            "Auto-drive state wakes the locomotive simulation tick");
+        Check(!engine.SleepAwakeDebugSleeping,
+            "Auto-drive awake state is exposed to ShowSleepAwake");
         Time.frameCount++; engine.TickAutoDrive(1, null);
         CheckTrainInfo(engine, "Waiting: Station wait", InfoWarning.DepartureCondition);
         Time.frameCount++; engine.TickAutoDrive(.1f, null);
@@ -418,6 +429,10 @@ public partial class SteamTrain
         Train.Link(otherEnd, car);
         CheckTrainInfo(otherEnd, "Waiting: Full freight", InfoWarning.DepartureCondition);
         engine.ApplyAutoDriveSettings(false, "A", "B", "Free", "Free", "Free", "Free");
+        Check(!MapObjectTickManager.IsRegistered(engine),
+            "Disabling auto-drive puts the locomotive simulation tick to sleep");
+        Check(engine.SleepAwakeDebugSleeping,
+            "Auto-drive sleep state is exposed to ShowSleepAwake");
         engine.ResetVehicleMotion();
         CheckTrainInfo(engine, "Stopped: Auto-drive off", InfoWarning.None);
     }

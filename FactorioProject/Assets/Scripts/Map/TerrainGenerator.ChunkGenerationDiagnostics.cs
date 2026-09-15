@@ -1,6 +1,7 @@
 using System;
 using System.Runtime.CompilerServices;
 using System.Text;
+using ProjectF.Persistence;
 using UnityEngine;
 
 public partial class TerrainGenerator
@@ -32,6 +33,8 @@ public partial class TerrainGenerator
         new int[(int)ChunkGenerationDiagnosticStage.Count];
     private readonly StringBuilder chunkGenerationDiagnosticsBuilder = new StringBuilder(1024);
     private bool chunkGenerationDiagnosticsActive;
+    private bool chunkGenerationDiagnosticsTrackAllocations;
+    private bool chunkGenerationDiagnosticsReportToSlotLog;
     private Vector2Int chunkGenerationDiagnosticsCoordinate;
     private double chunkGenerationDiagnosticsStartTime;
     private int chunkGenerationDiagnosticsGen0Start;
@@ -48,7 +51,8 @@ public partial class TerrainGenerator
 
     private void BeginChunkGenerationDiagnostics(Vector2Int chunkCoordinate)
     {
-        if (!enableChunkGenerationDiagnostics)
+        bool reportToSlotLog = SlotLoadTimingLog.HasActiveSession;
+        if (!enableChunkGenerationDiagnostics && !reportToSlotLog)
         {
             return;
         }
@@ -67,9 +71,17 @@ public partial class TerrainGenerator
             chunkGenerationCallsByStage.Length);
         chunkGenerationDiagnosticsCoordinate = chunkCoordinate;
         chunkGenerationDiagnosticsStartTime = Time.realtimeSinceStartupAsDouble;
-        chunkGenerationDiagnosticsGen0Start = GC.CollectionCount(0);
-        chunkGenerationDiagnosticsGen1Start = GC.CollectionCount(1);
-        chunkGenerationDiagnosticsGen2Start = GC.CollectionCount(2);
+        chunkGenerationDiagnosticsTrackAllocations = enableChunkGenerationDiagnostics;
+        chunkGenerationDiagnosticsReportToSlotLog = reportToSlotLog;
+        chunkGenerationDiagnosticsGen0Start = enableChunkGenerationDiagnostics
+            ? GC.CollectionCount(0)
+            : 0;
+        chunkGenerationDiagnosticsGen1Start = enableChunkGenerationDiagnostics
+            ? GC.CollectionCount(1)
+            : 0;
+        chunkGenerationDiagnosticsGen2Start = enableChunkGenerationDiagnostics
+            ? GC.CollectionCount(2)
+            : 0;
         chunkGenerationDiagnosticsActive = true;
     }
 
@@ -83,7 +95,9 @@ public partial class TerrainGenerator
         }
 
         startTime = Time.realtimeSinceStartupAsDouble;
-        return GC.GetAllocatedBytesForCurrentThread();
+        return chunkGenerationDiagnosticsTrackAllocations
+            ? GC.GetAllocatedBytesForCurrentThread()
+            : 0L;
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -98,7 +112,9 @@ public partial class TerrainGenerator
         }
 
         int stageIndex = (int)stage;
-        long allocatedBytes = GC.GetAllocatedBytesForCurrentThread() - allocatedBytesAtStart;
+        long allocatedBytes = chunkGenerationDiagnosticsTrackAllocations
+            ? GC.GetAllocatedBytesForCurrentThread() - allocatedBytesAtStart
+            : 0L;
         chunkGenerationAllocatedBytesByStage[stageIndex] += Math.Max(0L, allocatedBytes);
         chunkGenerationMillisecondsByStage[stageIndex] +=
             Math.Max(0d, Time.realtimeSinceStartupAsDouble - startTime) * 1000d;
@@ -112,25 +128,38 @@ public partial class TerrainGenerator
             return;
         }
 
+        bool trackAllocations = chunkGenerationDiagnosticsTrackAllocations;
+        bool reportToSlotLog = chunkGenerationDiagnosticsReportToSlotLog;
         chunkGenerationDiagnosticsActive = false;
+        chunkGenerationDiagnosticsTrackAllocations = false;
+        chunkGenerationDiagnosticsReportToSlotLog = false;
         long totalAllocatedBytes = 0L;
         double totalActiveMilliseconds = 0d;
         for (int i = 0; i < (int)ChunkGenerationDiagnosticStage.Count; i++)
         {
             totalAllocatedBytes += chunkGenerationAllocatedBytesByStage[i];
             totalActiveMilliseconds += chunkGenerationMillisecondsByStage[i];
+            if (reportToSlotLog && chunkGenerationCallsByStage[i] > 0)
+            {
+                SlotLoadTimingLog.RecordStageWork(
+                    GetChunkLoadStageName((ChunkGenerationDiagnosticStage)i),
+                    chunkGenerationMillisecondsByStage[i]);
+            }
         }
 
         LastChunkGenerationManagedAllocationBytes = totalAllocatedBytes;
         LastChunkGenerationActiveMilliseconds = totalActiveMilliseconds;
         LastChunkGenerationWallMilliseconds =
             (Time.realtimeSinceStartupAsDouble - chunkGenerationDiagnosticsStartTime) * 1000d;
-        lastChunkGenerationGen0Collections =
-            GC.CollectionCount(0) - chunkGenerationDiagnosticsGen0Start;
-        lastChunkGenerationGen1Collections =
-            GC.CollectionCount(1) - chunkGenerationDiagnosticsGen1Start;
-        lastChunkGenerationGen2Collections =
-            GC.CollectionCount(2) - chunkGenerationDiagnosticsGen2Start;
+        lastChunkGenerationGen0Collections = trackAllocations
+            ? GC.CollectionCount(0) - chunkGenerationDiagnosticsGen0Start
+            : 0;
+        lastChunkGenerationGen1Collections = trackAllocations
+            ? GC.CollectionCount(1) - chunkGenerationDiagnosticsGen1Start
+            : 0;
+        lastChunkGenerationGen2Collections = trackAllocations
+            ? GC.CollectionCount(2) - chunkGenerationDiagnosticsGen2Start
+            : 0;
         lastChunkGenerationPendingCount = chunkStreamingScheduler?.PendingCount ?? 0;
 
         if (logChunkGenerationDiagnostics)
@@ -185,5 +214,29 @@ public partial class TerrainGenerator
     private void CancelChunkGenerationDiagnostics()
     {
         chunkGenerationDiagnosticsActive = false;
+        chunkGenerationDiagnosticsTrackAllocations = false;
+        chunkGenerationDiagnosticsReportToSlotLog = false;
+    }
+
+    private static string GetChunkLoadStageName(ChunkGenerationDiagnosticStage stage)
+    {
+        switch (stage)
+        {
+            case ChunkGenerationDiagnosticStage.Preparation: return "chunk-preparation";
+            case ChunkGenerationDiagnosticStage.EntityGeneration: return "chunk-entities";
+            case ChunkGenerationDiagnosticStage.InstallationRestore: return "chunk-installations";
+            case ChunkGenerationDiagnosticStage.BlockStateRestore: return "chunk-block-state";
+            case ChunkGenerationDiagnosticStage.AnimalSpawn: return "chunk-animals";
+            case ChunkGenerationDiagnosticStage.RuntimeViewRefresh: return "chunk-runtime-views";
+            case ChunkGenerationDiagnosticStage.ConveyorItemRestore: return "chunk-items";
+            case ChunkGenerationDiagnosticStage.EmptyEntityRelease: return "chunk-empty-release";
+            case ChunkGenerationDiagnosticStage.SurfaceBuildSchedule: return "chunk-surface-schedule";
+            case ChunkGenerationDiagnosticStage.SurfaceBuildComplete: return "chunk-surface-complete";
+            case ChunkGenerationDiagnosticStage.SurfaceMeshDataSchedule: return "chunk-mesh-schedule";
+            case ChunkGenerationDiagnosticStage.SurfaceMeshDataApply: return "chunk-mesh-apply";
+            case ChunkGenerationDiagnosticStage.SurfaceFallbackBuild: return "chunk-surface-fallback";
+            case ChunkGenerationDiagnosticStage.SurfaceAssignment: return "chunk-surface-assign";
+            default: return "chunk-other";
+        }
     }
 }

@@ -221,6 +221,8 @@ public class Train : Vehicle
 
     protected override void OnDisable()
     {
+        if (ProjectFApplicationLifecycle.IsQuitting) return;
+
         ClearTrainConnections();
         ActiveRuntimeTrains.Remove(this);
         base.OnDisable();

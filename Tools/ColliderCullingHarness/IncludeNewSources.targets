@@ -1,0 +1,8 @@
+<Project>
+  <ItemGroup Condition="'$(MSBuildProjectName)' == 'Assembly-CSharp'">
+    <Compile Remove="$(MSBuildProjectDirectory)\Assets\Scripts\Rendering\WorldColliderCullingManager.cs" />
+    <Compile Remove="$(MSBuildProjectDirectory)\Assets\Scripts\Object\MapObj\InstallationObject\InstallationObject.ColliderCulling.cs" />
+    <Compile Include="$(MSBuildProjectDirectory)\Assets\Scripts\Rendering\WorldColliderCullingManager.cs" />
+    <Compile Include="$(MSBuildProjectDirectory)\Assets\Scripts\Object\MapObj\InstallationObject\InstallationObject.ColliderCulling.cs" />
+  </ItemGroup>
+</Project>

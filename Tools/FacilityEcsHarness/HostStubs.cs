@@ -11,6 +11,7 @@ namespace UnityEngine
     {
         public RuntimeInitializeOnLoadMethodAttribute(RuntimeInitializeLoadType loadType) { }
     }
+    public readonly record struct Vector2Int(int x, int y);
 }
 
 namespace ProjectF.Simulation
@@ -53,18 +54,29 @@ public static class MapObjectTickManager
 public static class UtilityPole
 {
     public static int PrepareCalls;
+    public static int MutationBatchDepth;
     public static void PrepareSimulationPowerTick() => PrepareCalls++;
+    public static void BeginSimulationPowerMutationBatch() => MutationBatchDepth++;
+    public static void EndSimulationPowerMutationBatch() => MutationBatchDepth--;
 }
 
 public static class MapObjectTickProfiler
 {
+    public static readonly Dictionary<string, long> RuntimeCounters = new();
+    public static bool IsEnabled => false;
+    public static long BeginSample() => 0L;
     public static Scope SampleNamed(string kind, string type, string name) => default;
-    public static void AddRuntimeCounter(string group, string name, object value) { }
+    public static void AddRuntimeCounter(string group, string name, object value)
+        => RuntimeCounters[group + "/" + name] = Convert.ToInt64(value);
+    public static void RecordNamedElapsedTicks(string kind, string type, string name, long elapsed) { }
     public readonly struct Scope : IDisposable { public void Dispose() { } }
 }
 
 public abstract class InputOutputModule : IMapObjectUpdateTick
 {
+    public static int CoordinateWakeCalls;
+    public static void WakeRuntimeModulesAtCoordinate(UnityEngine.Vector2Int coordinate)
+        => CoordinateWakeCalls++;
     public bool RequiresFacilityPowerEvaluation => true;
     public abstract void ManagedUpdateTick(float deltaTime);
 }

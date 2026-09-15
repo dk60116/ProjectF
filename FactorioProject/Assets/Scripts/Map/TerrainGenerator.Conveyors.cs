@@ -4378,6 +4378,7 @@ public partial class TerrainGenerator : MonoBehaviour
         AreaMarkerRenderer.AppendProfilerCounters();
         FacilitySimulationWorld.AppendProfilerCounters();
         ProjectF.Rendering.WorldVisualUpdateManager.AppendProfilerCounters();
+        ProjectF.Rendering.WorldColliderCullingManager.AppendProfilerCounters();
         ProjectF.MapObjects.StaticMapObjectBatchRenderer staticRenderer =
             GameManager.Instance != null ? GameManager.Instance.StaticMapObjectRenderer : null;
         MapObjectTickProfiler.AddRuntimeCounter(
@@ -4412,6 +4413,46 @@ public partial class TerrainGenerator : MonoBehaviour
             "StaticInstallationRender",
             "EstimatedDrawCalls",
             staticRenderer != null ? staticRenderer.EstimatedDrawCallCount : 0);
+        MapObjectTickProfiler.AddRuntimeCounter(
+            "StaticInstallationRender",
+            "VisibleBatches",
+            staticRenderer != null ? staticRenderer.LastVisibleBatchCount : 0);
+        MapObjectTickProfiler.AddRuntimeCounter(
+            "StaticInstallationRender",
+            "CulledBatches",
+            staticRenderer != null ? staticRenderer.LastCulledBatchCount : 0);
+        MapObjectTickProfiler.AddRuntimeCounter(
+            "StaticInstallationRender",
+            "LegacySubmittedMatrices",
+            staticRenderer != null ? staticRenderer.LastLegacySubmittedMatrixCount : 0);
+        MapObjectTickProfiler.AddRuntimeCounter(
+            "StaticInstallationRender",
+            "LegacyDrawCalls",
+            staticRenderer != null ? staticRenderer.LastLegacyDrawCallCount : 0);
+        MapObjectTickProfiler.AddRuntimeCounter(
+            "StaticInstallationRender",
+            "BrgBatches",
+            staticRenderer != null ? staticRenderer.LastBatchRendererGroupBatchCount : 0);
+        MapObjectTickProfiler.AddRuntimeCounter(
+            "StaticInstallationRender",
+            "BrgMatrices",
+            staticRenderer != null ? staticRenderer.LastBatchRendererGroupMatrixCount : 0);
+        MapObjectTickProfiler.AddRuntimeCounter(
+            "StaticInstallationRender",
+            "Synchronizations",
+            staticRenderer != null ? staticRenderer.SynchronizationCount : 0);
+        MapObjectTickProfiler.AddRuntimeCounter(
+            "StaticInstallationRender",
+            "LastSynchronizationFrame",
+            staticRenderer != null ? staticRenderer.LastSynchronizationFrame : -1);
+        MapObjectTickProfiler.AddRuntimeCounter(
+            "StaticInstallationRender",
+            "LastSynchronizedActive",
+            staticRenderer != null ? staticRenderer.LastSynchronizedActiveInstallationCount : 0);
+        MapObjectTickProfiler.AddRuntimeCounter(
+            "StaticInstallationRender",
+            "LastSynchronizedDataOnly",
+            staticRenderer != null ? staticRenderer.LastSynchronizedDataOnlyInstallationCount : 0);
         MapObjectTickProfiler.AddRuntimeCounter("World", "LoadedChunks", loadedChunks.Count);
         MapObjectTickProfiler.AddRuntimeCounter("World", "ChunkGameObjects", 0);
         MapObjectTickProfiler.AddRuntimeCounter("World", "DedicatedBlockGameObjects", 0);

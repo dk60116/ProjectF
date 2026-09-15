@@ -200,6 +200,8 @@ public class Handcart : Vehicle, IPlayerItemStorage, IPlayerItemStoragePortableP
 
     protected override void OnDisable()
     {
+        if (ProjectFApplicationLifecycle.IsQuitting) return;
+
         ActiveRuntimeHandcarts.Remove(this);
         RefreshActiveConnectedGroupsAfterDeactivation();
         ClearCargoVisuals();
@@ -208,6 +210,8 @@ public class Handcart : Vehicle, IPlayerItemStorage, IPlayerItemStoragePortableP
 
     private void OnDestroy()
     {
+        if (ProjectFApplicationLifecycle.IsQuitting) return;
+
         DetachDraftAnimal();
         ClearHandcartConnections();
         ActiveRuntimeHandcarts.Remove(this);

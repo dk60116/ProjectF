@@ -119,6 +119,7 @@ public partial class InputOutputModule : InstallationObject
     public int CacheBuilds;
     public float ReportedConsumption;
     protected virtual bool UsesConnectedTankNetworkStorage => false;
+    protected virtual bool ShouldKeepRuntimeUpdateTickActive() => false;
     public IReadOnlyList<InstallationObject> Sources => GetConnectedFluidSourceStorages();
     public int GetSourcePipeDistance(InstallationObject storage)
     {
@@ -239,6 +240,12 @@ public static class Checks
         passed++;
     }
     private static bool Near(float a, float b) => Math.Abs(a - b) < .001f;
+    private static bool RequiresRuntimeTick(Sprinkler sprinkler) =>
+        (bool)typeof(Sprinkler)
+            .GetMethod(
+                "ShouldKeepRuntimeUpdateTickActive",
+                System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)
+            .Invoke(sprinkler, null);
     private static Fluidtank Tank(float liters, int item = 1, float capacity = 1000)
     {
         var tank = new Fluidtank { FluidStorageCapacityLiters = capacity };
@@ -251,6 +258,7 @@ public static class Checks
         var tank = Tank(60, capacity: 100000);
         s.Connections.Add(tank);
         s.GetWaterStorageInfo(out float stored, out float capacity);
+        Check(RequiresRuntimeTick(s), "connected water keeps the sprinkler tick awake");
         Check(Near(stored, 60) && Near(capacity, 100300), "UI includes tank water and capacity");
         Check(s.Status == "Ready", "status uses tank water with empty local storage");
         Check(!s.AutoPull, "water is not reserved in the local reservoir by automatic equalization");
@@ -263,6 +271,7 @@ public static class Checks
         var second = new Sprinkler();
         second.Connections.Add(tank);
         Check(second.Spray(30) && !s.Spray(30) && s.Status == "No water", "two sprinklers cannot double spend shared water");
+        Check(!RequiresRuntimeTick(second), "empty sprinkler water supply puts its tick to sleep");
 
         var a = Tank(8);
         var b = Tank(12);

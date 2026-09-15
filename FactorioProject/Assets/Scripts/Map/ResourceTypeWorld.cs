@@ -298,6 +298,7 @@ public sealed partial class ResourceTypeWorld : MonoBehaviour
             }
         }
         bool visible = resource.IsRuntimeActive && resource.SharedBodyVisible
+            && !resource.ColliderCullingCulled
             && (!(resource is ProjectF.MapObjects.TreeInstance tree) || tree.Growth > 0.0001f);
         for (int i = 0; i < colliderParts.Count; i++)
         {
@@ -380,6 +381,8 @@ public sealed partial class ResourceTypeWorld : MonoBehaviour
 
     private void OnDestroy()
     {
+        if (ProjectFApplicationLifecycle.IsQuitting) return;
+
         growthPresentation?.Dispose();
         var key = (Terrain, prototype);
         if (Hosts.TryGetValue(key, out ResourceTypeWorld host) && host == this) Hosts.Remove(key);

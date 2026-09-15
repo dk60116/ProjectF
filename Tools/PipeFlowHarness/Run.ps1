@@ -28,6 +28,9 @@ $base = 'FactorioProject/Assets/Scripts/Object/MapObj/InstallationObject/'
 $manager = 'FactorioProject/Assets/Scripts/Simulation/Core/SimulationTickContracts.cs'
 $generated = "using System; using System.Collections.Generic;`n"
 $generated += (Read-Member $manager 'public static class DeterministicSimulationUnits').Replace('ProjectF.Simulation.SimulationTickWorld.', 'MapObjectTickManager.') + "`n"
+$flowSource = [IO.File]::ReadAllText((Join-Path $repo 'FactorioProject/Assets/Scripts/Simulation/Core/FacilityFlowBatch.cs'))
+$flowSource = $flowSource.Replace("using System;`r`n`r`n", '').Replace("using System;`n`n", '')
+$generated += $flowSource + "`n"
 $generated += "public partial class InputOutputModule {`n"
 foreach ($signature in @(
     'protected void RecordFluidNetworkOutput(',
@@ -37,6 +40,14 @@ foreach ($signature in @(
     'public float GetObjectInfoFluidPressureConsumptionLitersPerSecond(',
     'public static void AppendFluidOutputSourcesAtCoordinate(',
     'public static void AppendFluidPressureConsumersAtCoordinate(',
+    'private void RegisterFluidInputSleepWaiters()',
+    'private void RegisterFluidOutputSleepWaiters()',
+    'private static int RegisterFluidSleepWaiterLinks(',
+    'private static HashSet<InputOutputModule> RentFluidSleepWaiterSet()',
+    'private static void ReturnFluidSleepWaiterSet(',
+    'private static int UnregisterFluidSleepWaiters(',
+    'internal static void NotifyFluidInputAvailabilityIncreased(',
+    'internal static void NotifyFluidOutputCapacityIncreased(',
     'protected float ResolveFluidOutputTransportRetention(',
     'protected bool TryEmitFluidOutputToConnectedStorages(')) {
     $generated += (Read-Member ($base + 'InputOutputModule.cs') $signature) + "`n"
@@ -44,9 +55,7 @@ foreach ($signature in @(
 $generated += "}`npublic partial class Pump {`n"
 foreach ($signature in @(
     'public bool TryGetObjectInfoOutputRate(',
-    'public override float GetObjectInfoFluidPressureLitersPerSecond(',
-    'private void ProduceWater(',
-    'private void RefreshWaterOutputBudget(')) {
+    'public override float GetObjectInfoFluidPressureLitersPerSecond(')) {
     $generated += (Read-Member ($base + 'Pump.cs') $signature) + "`n"
 }
 $generated += "}`npublic partial class Pipe {`n"
@@ -70,6 +79,8 @@ Require-Text $sprinklerFile 'RecordFluidNetworkConsumption(' 'sprinkler reports 
 Require-Text $steamGeneratorFile 'RecordFluidNetworkConsumption(' 'steam generator reports actual steam consumption to pipe pressure'
 Require-Text ($base + 'InputOutputModule.cs') 'Pipe.AddRemoteTraversalPipeDistance(' 'storage transport counts underground installed length'
 Require-Text ($base + 'Fluid tank.cs') 'Pipe.AddRemoteTraversalPipeDistance(' 'tank equalization counts underground installed length'
+Require-Text ($base + 'Pump.cs') 'RefreshRuntimeUpdateSleepState();' 'pump applies common runtime sleep decision'
+Require-Text ($base + 'Pump.cs') 'return !waterOutputBlocked;' 'pump sleeps only after its output is blocked'
 $probeDir = Join-Path ([IO.Path]::GetTempPath()) ('ProjectF-PipeFlow-' + [Guid]::NewGuid().ToString('N'))
 New-Item -ItemType Directory -Path $probeDir | Out-Null
 Set-Content -LiteralPath (Join-Path $probeDir 'Production.cs') -Value $generated

@@ -4,6 +4,12 @@ public static class Checks
 {
     private static int passed;
     private static long Duration => DeterministicSimulationUnits.FromFloat(5f);
+    private static bool RequiresRuntimeTick(SeedPlanter planter) =>
+        (bool)typeof(SeedPlanter)
+            .GetMethod(
+                "ShouldKeepRuntimeUpdateTickActive",
+                System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)
+            .Invoke(planter, null);
     private static void Check(bool condition, string label)
     {
         if (!condition) throw new Exception(label);
@@ -53,6 +59,7 @@ public static class Checks
         Check(outage.CurrentOperatingState == SeedPlanter.OperatingState.NoPower
               && outage.CapturePersistentState().seedPlanterPlantElapsedUnits == Duration - 1
               && outage.CapturePersistentState().seedPlanterHasLoadedSeed, "real outage preserves unfinished work and seed");
+        Check(!RequiresRuntimeTick(outage), "power outage puts the planter tick to sleep");
         outage.SupplyRatio = 1f;
         outage.ApplyManagedUpdateTick();
         CheckCompleted(outage, "power restoration finishes stranded save");
@@ -63,6 +70,7 @@ public static class Checks
         transfer.ApplyManagedUpdateTick();
         Check(transfer.CurrentOperatingState == SeedPlanter.OperatingState.LoadingSeed
               && TerrainGenerator.Active.PlantCalls == 0, "completed progress still waits for seed transfer");
+        Check(RequiresRuntimeTick(transfer), "seed transfer keeps the planter tick awake");
         for (int i = 0; i < 3 && TerrainGenerator.Active.PlantCalls == 0; i++) transfer.ApplyManagedUpdateTick();
         CheckCompleted(transfer, "completion follows seed arrival");
 

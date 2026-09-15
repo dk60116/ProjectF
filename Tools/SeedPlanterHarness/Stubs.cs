@@ -3,6 +3,11 @@ using System;
 using System.Collections.Generic;
 using UnityEngine;
 
+public static class ProjectFApplicationLifecycle
+{
+    public static bool IsQuitting => false;
+}
+
 public class InputOutputModule
 {
     public class PersistentState
@@ -54,7 +59,7 @@ public class InputOutputModule
     public virtual void ApplyPersistentState(PersistentState state) { }
     protected virtual bool TryCollectAdditionalRuntimeInputItemIds(ICollection<int> ids) => false;
     protected virtual bool AppendAcceptedRuntimeInputItemIdsAtCoordinate(Vector2Int coordinate, ISet<int> ids) => false;
-    protected virtual bool ShouldKeepRuntimeUpdateTickActive() => true;
+    protected virtual bool ShouldKeepRuntimeUpdateTickActive() => false;
     protected virtual bool ShouldPlayWorkAnimation() => false;
     protected virtual float ResolveWorkAnimationSpeedMultiplier() => 1f;
     protected virtual string ResolveObjectInfoStatus(out bool producing) { producing = false; return ""; }

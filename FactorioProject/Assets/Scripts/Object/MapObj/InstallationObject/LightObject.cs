@@ -22,6 +22,8 @@ public class LightObject : InstallationObject, IItemLightPowerStateProvider
 
     protected override void OnDisable()
     {
+        if (ProjectFApplicationLifecycle.IsQuitting) return;
+
         ApplyLightTexture(false);
         UnbindLightController();
         base.OnDisable();

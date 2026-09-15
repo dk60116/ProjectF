@@ -35,24 +35,25 @@ namespace ProjectF.Rendering
 
         internal InstallationVisualState(InstallationObject owner) { Owner = owner; }
 
-        internal bool Tick(CameraRenderCulling culling, float deltaTime)
+        internal bool Tick(
+            CameraRenderCulling culling,
+            float deltaTime,
+            bool refreshVisibility = true)
         {
-            Capture();
-            Matrix4x4 matrix = Owner.transform.localToWorldMatrix;
-            if (!hasMatrix || !lastMatrix.Equals(matrix))
+            if (refreshVisibility)
             {
-                lastMatrix = matrix;
-                hasMatrix = true;
-                worldBounds = VirtualRenderBatchCollection.CalculateWorldBounds(localBounds, matrix);
-            }
-            SetVisible(culling.IsAnyLayerVisible(layerMask) && culling.Intersects(worldBounds));
-            if (Visible)
-            {
-                Owner.RunManagedVisualUpdate(deltaTime);
-                return true;
+                Capture();
+                Matrix4x4 matrix = Owner.transform.localToWorldMatrix;
+                if (!hasMatrix || !lastMatrix.Equals(matrix))
+                {
+                    lastMatrix = matrix;
+                    hasMatrix = true;
+                    worldBounds = VirtualRenderBatchCollection.CalculateWorldBounds(localBounds, matrix);
+                }
+                SetVisible(culling.IsAnyLayerVisible(layerMask) && culling.Intersects(worldBounds));
             }
 
-            return false;
+            return Visible && Owner.RunManagedVisualUpdate(deltaTime);
         }
 
         private void Capture()

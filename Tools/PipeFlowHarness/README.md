@@ -5,7 +5,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File Tools/PipeFlowHarness/Run.ps
 ```
 
 Requires .NET 9; does not launch Unity. Uses the production rolling output meter,
-pump production, standard fluid output, endpoint collection, pipe traversal, and
+pump SoA flow planner, standard fluid output, endpoint collection, pipe traversal, and
 InfoPanel data query methods. Checks actual accepted liters, blocked output,
 ground-item exclusion, one-second expiry, additive pump pressure, multiple
 producers, measured consumer demand, consumer deduplication, zero clamping,

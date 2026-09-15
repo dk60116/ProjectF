@@ -65,6 +65,8 @@ public class SeedPlanter : InputOutputModule
 
     protected override void OnDisable()
     {
+        if (ProjectFApplicationLifecycle.IsQuitting) return;
+
         requestingPower = false;
         isOperating = false;
         SetWorkAnimatorState(false, true);
@@ -439,7 +441,21 @@ public class SeedPlanter : InputOutputModule
 
     protected override bool ShouldKeepRuntimeUpdateTickActive()
     {
-        return TryGetPlacementRuntime(out _, out _) || base.ShouldKeepRuntimeUpdateTickActive();
+        if (operatingState == OperatingState.LoadingSeed
+            || operatingState == OperatingState.Planting)
+        {
+            return true;
+        }
+
+        if (operatingState == OperatingState.Ready
+            && (hasLoadedSeed || currentSeedItemId >= 0 && currentSeedCount > 0))
+        {
+            return true;
+        }
+
+        // NoSeeds wakes from input-area mutations, NoPower from the electric network,
+        // and InvalidGround/TargetOccupied from coordinate mutations.
+        return base.ShouldKeepRuntimeUpdateTickActive();
     }
 
     protected override bool ShouldPlayWorkAnimation()

@@ -73,7 +73,7 @@ foreach ($signature in @(
     'public override void HandleMountedInput(', 'private void TickAutoDrive(', 'private DriveMotionOutcome HandleResolvedDriveMotion(',
     'public void ApplyAutoDriveSettings(', 'public void CaptureAutoDriveState(', 'public void ApplyAutoDriveState(',
     'private void ClaimAutoDriveControl(', 'private bool IsPrimaryAutoDriveControllerForConsist(', 'private SteamTrain ResolveAutoDriveControllerForConsist(',
-    'private void TransferAutoDriveControl(', 'private void ResetAutoDriveRuntimeState(', 'private void ClearAutoDriveFixedRoute(',
+    'private void TransferAutoDriveControl(', 'private void RefreshAutoDriveTickSchedule()', 'private void ResetAutoDriveRuntimeState(', 'private void ClearAutoDriveFixedRoute(',
     'private bool TryBuildActiveRouteFromFixedRoute(', 'private bool TryAlignAutoDriveRouteSegmentsToCurrentPose(',
     'private static string NormalizeAutoDriveStationName(', 'private bool HasCompleteAutoDriveTargets()', 'private static bool HasCompleteAutoDriveTargets(',
     'private static AutoDriveFuelFilter ParseAutoDriveFuelFilter(', 'private static AutoDriveFreightFilter ParseAutoDriveFreightFilter(',

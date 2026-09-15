@@ -111,17 +111,24 @@ public class Resource
     }
 }
 
+public class ResourceInstance : Resource
+{
+    public bool IsRuntimeActive => gameObject.activeInHierarchy;
+}
+
 namespace ProjectF.MapObjects
 {
-    public class Tree : Resource
+    public class TreeInstance : ResourceInstance
     {
         public float Growth;
     }
+
+    public class Tree : TreeInstance { }
 }
 
 public class Block
 {
-    public Resource Resource;
+    public ResourceInstance Resource;
 }
 
 public class TerrainGenerator

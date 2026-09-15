@@ -66,7 +66,7 @@ $generated += "}`npublic partial class VirtualRenderBatchCollection {`n"
 $generated += (Read-Member $batchFile 'internal static Bounds CalculateWorldBounds(Mesh') + "`n"
 $generated += (Read-Member $batchFile 'internal static Bounds CalculateWorldBounds(Bounds') + "`n}"
 $generated += "`npublic partial class BackendProbe {`n"
-foreach ($signature in @('public void BeginSync()', 'public void Deactivate(', 'public void EndSync()')) {
+foreach ($signature in @('public void BeginSync(', 'public void Deactivate(', 'public void EndSync()')) {
     $generated += (Read-Member $backendFile $signature) + "`n"
 }
 $generated += "}`n"

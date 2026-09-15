@@ -1,12 +1,12 @@
 using System.Collections.Generic;
+using ProjectF.Simulation;
 using UnityEngine;
 
-public class Pump : InputOutputModule
+public class Pump : InputOutputModule, IFacilityFlowAdapter
 {
     private const string DefaultWaterItemName = "Water";
     private const int DefaultWaterItemId = 1;
     private const int MaxWaterEmitAttemptsPerTick = 32;
-    private const float WaterOutputBudgetSeconds = 1f;
     [SerializeField]
     private InstallationFacingDirection localPipeConnectionDirection = InstallationFacingDirection.PositiveZ;
     [SerializeField]
@@ -17,6 +17,8 @@ public class Pump : InputOutputModule
     private long waterAccumulatorUnits;
     private long availableWaterOutputUnits;
     private long waterOutputBudgetUpdatedTick = -1L;
+    private bool waterOutputBlocked;
+    private FacilityFlowBatch fallbackFlowBatch;
 
     public InstallationFacingDirection LocalPipeConnectionDirection => localPipeConnectionDirection;
     public float WaterLitersPerSecond
@@ -72,12 +74,16 @@ public class Pump : InputOutputModule
             return;
         }
 
-        if (!Application.isPlaying || deltaTime <= 0f)
-        {
-            return;
-        }
-
-        ProduceWater(deltaTime);
+        fallbackFlowBatch ??= new FacilityFlowBatch(1);
+        fallbackFlowBatch.Begin();
+        int index = fallbackFlowBatch.ReserveSlot();
+        CaptureFacilityFlow(
+            fallbackFlowBatch,
+            index,
+            deltaTime,
+            MapObjectTickManager.CurrentSimulationTick);
+        fallbackFlowBatch.PlanAll();
+        ApplyFacilityFlowCommit(fallbackFlowBatch, index, deltaTime);
     }
 
     public override void PrepareForPool()
@@ -86,11 +92,12 @@ public class Pump : InputOutputModule
         waterAccumulatorUnits = 0L;
         availableWaterOutputUnits = 0L;
         waterOutputBudgetUpdatedTick = -1L;
+        waterOutputBlocked = false;
     }
 
     protected override bool ShouldKeepRuntimeUpdateTickActive()
     {
-        return true;
+        return !waterOutputBlocked;
     }
 
     protected override bool AppendOutputItemIds(ISet<int> outputItemIds)
@@ -144,7 +151,11 @@ public class Pump : InputOutputModule
         return "Working";
     }
 
-    private void ProduceWater(float deltaTime)
+    public void CaptureFacilityFlow(
+        FacilityFlowBatch batch,
+        int index,
+        float deltaTime,
+        long simulationTick)
     {
         int waterItemId = ResolveWaterItemId();
         float litersPerSecond = WaterLitersPerSecond;
@@ -152,101 +163,71 @@ public class Pump : InputOutputModule
         {
             litersPerSecond *= ResolveFluidOutputTransportRetention(waterItemId);
         }
-        if (waterItemId < 0 || litersPerSecond <= 0f || !HasRuntimeOutputCoordinates)
-        {
-            waterAccumulatorUnits = 0L;
-            availableWaterOutputUnits = 0L;
-            waterOutputBudgetUpdatedTick = -1L;
-            return;
-        }
 
-        RefreshWaterOutputBudget(litersPerSecond, deltaTime);
-        long availableThisTickUnits = System.Math.Min(
-            DeterministicSimulationUnits.RateForTicks(
-                litersPerSecond,
-                DeterministicSimulationUnits.DeltaTimeToTicks(deltaTime)),
-            availableWaterOutputUnits);
-        float requestedForLiveStorage = DeterministicSimulationUnits.ToFloat(
-            waterAccumulatorUnits + availableThisTickUnits);
-        if (TryEmitFluidOutputToConnectedStorages(
-                waterItemId,
-                requestedForLiveStorage,
-                MapClimate.CurrentWaterTemperatureCelsius,
-                out float acceptedLiters))
-        {
-            long acceptedUnits = DeterministicSimulationUnits.FromFloat(acceptedLiters);
-            long accumulatedUnitsUsed = System.Math.Min(waterAccumulatorUnits, acceptedUnits);
-            waterAccumulatorUnits -= accumulatedUnitsUsed;
-
-            long budgetUnitsUsed = System.Math.Min(
-                availableThisTickUnits,
-                System.Math.Max(0L, acceptedUnits - accumulatedUnitsUsed));
-            availableThisTickUnits -= budgetUnitsUsed;
-            availableWaterOutputUnits = System.Math.Max(
-                0L,
-                availableWaterOutputUnits - budgetUnitsUsed);
-        }
-
-        availableWaterOutputUnits = System.Math.Max(
-            0L,
-            availableWaterOutputUnits - availableThisTickUnits);
-        waterAccumulatorUnits += availableThisTickUnits;
-
-        if (waterAccumulatorUnits < DeterministicSimulationUnits.UnitsPerWhole)
-        {
-            return;
-        }
-
-        int emitAttempts = Mathf.Min(
-            (int)System.Math.Min(
-                int.MaxValue,
-                waterAccumulatorUnits / DeterministicSimulationUnits.UnitsPerWhole),
-            Mathf.Min(MaxWaterEmitAttemptsPerTick, Mathf.Max(1, RuntimeAreaMaxObjects)));
-        Vector3 startWorldPosition = ResolveConsumeTargetWorldPosition();
-
-        for (int i = 0; i < emitAttempts; i++)
-        {
-            if (!TryEmitOutputItems(waterItemId, 1, startWorldPosition))
-            {
-                waterAccumulatorUnits = System.Math.Min(
-                    waterAccumulatorUnits,
-                    DeterministicSimulationUnits.UnitsPerWhole);
-                return;
-            }
-
-            waterAccumulatorUnits = System.Math.Max(
-                0L,
-                waterAccumulatorUnits - DeterministicSimulationUnits.UnitsPerWhole);
-        }
+        batch.ConfigurePump(
+            index,
+            waterItemId,
+            litersPerSecond,
+            deltaTime,
+            simulationTick,
+            waterItemId >= 0 && litersPerSecond > 0f && HasRuntimeOutputCoordinates,
+            waterAccumulatorUnits,
+            availableWaterOutputUnits,
+            waterOutputBudgetUpdatedTick);
     }
 
-    private void RefreshWaterOutputBudget(
-        float outputLitersPerSecond,
-        float initialAvailableSeconds)
+    public void ApplyFacilityFlow(FacilityFlowBatch batch, int index)
     {
-        float outputRate = Mathf.Max(0f, outputLitersPerSecond);
-        long nowTick = MapObjectTickManager.CurrentSimulationTick;
-        long maximumBudgetUnits = System.Math.Max(
-            0L,
-            DeterministicSimulationUnits.FromFloat(outputRate * WaterOutputBudgetSeconds)
-            - waterAccumulatorUnits);
-        if (waterOutputBudgetUpdatedTick < 0L || nowTick < waterOutputBudgetUpdatedTick)
+        if (!TryBeginPlannedModuleApply(out float deltaTime))
         {
-            availableWaterOutputUnits = System.Math.Min(
-                maximumBudgetUnits,
-                DeterministicSimulationUnits.RateForTicks(
-                    outputRate,
-                    DeterministicSimulationUnits.SecondsToTicks(initialAvailableSeconds)));
-            waterOutputBudgetUpdatedTick = nowTick;
             return;
         }
 
-        long elapsedTicks = System.Math.Max(0L, nowTick - waterOutputBudgetUpdatedTick);
-        availableWaterOutputUnits = System.Math.Min(
-            maximumBudgetUnits,
-            availableWaterOutputUnits
-            + DeterministicSimulationUnits.RateForTicks(outputRate, elapsedTicks));
-        waterOutputBudgetUpdatedTick = nowTick;
+        ApplyFacilityFlowCommit(batch, index, deltaTime);
+    }
+
+    private void ApplyFacilityFlowCommit(FacilityFlowBatch batch, int index, float deltaTime)
+    {
+        if (!Application.isPlaying || deltaTime <= 0f)
+        {
+            return;
+        }
+
+        int waterItemId = batch.GetPumpItemId(index);
+        if (batch.IsPumpOutputValid(index))
+        {
+            float acceptedLiters = 0f;
+            TryEmitFluidOutputToConnectedStorages(
+                waterItemId,
+                batch.GetPumpRequestedLiters(index),
+                MapClimate.CurrentWaterTemperatureCelsius,
+                out acceptedLiters);
+            batch.CommitPumpStorageAcceptance(index, acceptedLiters);
+
+            int emitAttempts = Mathf.Min(
+                (int)System.Math.Min(
+                    int.MaxValue,
+                    batch.GetPumpAccumulatorUnits(index) / DeterministicSimulationUnits.UnitsPerWhole),
+                Mathf.Min(MaxWaterEmitAttemptsPerTick, Mathf.Max(1, RuntimeAreaMaxObjects)));
+            Vector3 startWorldPosition = ResolveConsumeTargetWorldPosition();
+
+            for (int i = 0; i < emitAttempts; i++)
+            {
+                if (!TryEmitOutputItems(waterItemId, 1, startWorldPosition))
+                {
+                    batch.SetPumpBlocked(index, true);
+                    break;
+                }
+
+                batch.TryConsumePumpWholeLiter(index);
+            }
+        }
+
+        waterAccumulatorUnits = batch.GetPumpAccumulatorUnits(index);
+        availableWaterOutputUnits = batch.GetPumpBudgetUnits(index);
+        waterOutputBudgetUpdatedTick = batch.GetPumpBudgetUpdatedTick(index);
+        waterOutputBlocked = batch.IsPumpBlocked(index);
+        RefreshRuntimeUpdateSleepState();
     }
 
     private int ResolveWaterItemId()

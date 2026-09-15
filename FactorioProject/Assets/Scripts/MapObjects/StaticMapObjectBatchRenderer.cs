@@ -28,6 +28,10 @@ namespace ProjectF.MapObjects
         private Camera mainCamera;
         private int cachedInstallationVersion = -1;
         private int cachedActiveInstanceVersion = -1;
+        private int synchronizationCount;
+        private int lastSynchronizationFrame = -1;
+        private int lastSynchronizedActiveInstallationCount;
+        private int lastSynchronizedDataOnlyInstallationCount;
 
         public int ActiveTypeCount => hostsByItemId.Count;
         public int UnsupportedActiveTypeCount => rejectedTypeIds.Count;
@@ -52,8 +56,18 @@ namespace ProjectF.MapObjects
         public int ActiveBatchCount => SumHostValue(HostValue.BatchCount);
         public int ActiveMatrixCount => SumHostValue(HostValue.MatrixCount);
         public int EstimatedDrawCallCount => SumHostValue(HostValue.DrawCallCount);
+        public int LastVisibleBatchCount => SumHostValue(HostValue.VisibleBatchCount);
+        public int LastCulledBatchCount => SumHostValue(HostValue.CulledBatchCount);
         public int LastCandidateBatchCount => SumHostValue(HostValue.CandidateBatchCount);
         public int LastCandidateCellCount => SumHostValue(HostValue.CandidateCellCount);
+        public int LastLegacySubmittedMatrixCount => SumHostValue(HostValue.LegacySubmittedMatrixCount);
+        public int LastLegacyDrawCallCount => SumHostValue(HostValue.LegacyDrawCallCount);
+        public int LastBatchRendererGroupBatchCount => SumHostValue(HostValue.BatchRendererGroupBatchCount);
+        public int LastBatchRendererGroupMatrixCount => SumHostValue(HostValue.BatchRendererGroupMatrixCount);
+        public int SynchronizationCount => synchronizationCount;
+        public int LastSynchronizationFrame => lastSynchronizationFrame;
+        public int LastSynchronizedActiveInstallationCount => lastSynchronizedActiveInstallationCount;
+        public int LastSynchronizedDataOnlyInstallationCount => lastSynchronizedDataOnlyInstallationCount;
 
         public void Configure(VirtualObjectWorld world, ItemManager manager)
         {
@@ -85,12 +99,12 @@ namespace ProjectF.MapObjects
 
         private void OnDisable()
         {
-            SuspendHosts();
+            if (!ProjectFApplicationLifecycle.IsQuitting) SuspendHosts();
         }
 
         private void OnDestroy()
         {
-            ReleaseHosts();
+            if (!ProjectFApplicationLifecycle.IsQuitting) ReleaseHosts();
         }
 
         private void LateUpdate()
@@ -107,16 +121,28 @@ namespace ProjectF.MapObjects
             }
 
             int installationVersion = virtualWorld.InstallationVersion;
-            int activeVersion = InstallationObject.ActiveInstanceVersion;
+            int activeVersion = InstallationObject.StaticRenderActiveInstanceVersion;
             if (cachedInstallationVersion != installationVersion
                 || cachedActiveInstanceVersion != activeVersion)
             {
-                SynchronizeHosts();
+                using (MapObjectTickProfiler.SampleNamed(
+                           "Render Detail",
+                           "Static Installation Render",
+                           "Static Installation Synchronize"))
+                {
+                    SynchronizeHosts();
+                }
                 cachedInstallationVersion = installationVersion;
                 cachedActiveInstanceVersion = activeVersion;
             }
 
-            RenderHosts();
+            using (MapObjectTickProfiler.SampleNamed(
+                       "Render Detail",
+                       "Static Installation Render",
+                       "Static Installation Submit"))
+            {
+                RenderHosts();
+            }
         }
 
         private void ResolveDependencies()
@@ -139,6 +165,8 @@ namespace ProjectF.MapObjects
 
         private void SynchronizeHosts()
         {
+            synchronizationCount++;
+            lastSynchronizationFrame = Time.frameCount;
             CopyHostsToScratch();
             for (int i = 0; i < hostScratch.Count; i++)
             {
@@ -146,6 +174,7 @@ namespace ProjectF.MapObjects
             }
 
             InstallationObject.CopyActiveInstances(activeInstallations);
+            lastSynchronizedActiveInstallationCount = activeInstallations.Count;
             rejectedTypeIds.Clear();
             for (int i = 0; i < activeInstallations.Count; i++)
             {
@@ -176,7 +205,8 @@ namespace ProjectF.MapObjects
 
             // Data-only entities have no source GameObject to enumerate. Their authoritative
             // pose and generation-safe handle are sufficient to build the presentation batch.
-            virtualWorld.CopyRecords(dataOnlyInstallations, true);
+            virtualWorld.CopyInstallationRecords(dataOnlyInstallations, true);
+            lastSynchronizedDataOnlyInstallationCount = dataOnlyInstallations.Count;
             for (int i = 0; i < dataOnlyInstallations.Count; i++)
             {
                 VirtualObjectRecord record = dataOnlyInstallations[i];
@@ -351,11 +381,29 @@ namespace ProjectF.MapObjects
                     case HostValue.DrawCallCount:
                         total += host.EstimatedDrawCallCount;
                         break;
+                    case HostValue.VisibleBatchCount:
+                        total += host.LastVisibleBatchCount;
+                        break;
+                    case HostValue.CulledBatchCount:
+                        total += host.LastCulledBatchCount;
+                        break;
                     case HostValue.CandidateBatchCount:
                         total += host.LastCandidateBatchCount;
                         break;
                     case HostValue.CandidateCellCount:
                         total += host.LastCandidateCellCount;
+                        break;
+                    case HostValue.LegacySubmittedMatrixCount:
+                        total += host.LastLegacySubmittedMatrixCount;
+                        break;
+                    case HostValue.LegacyDrawCallCount:
+                        total += host.LastLegacyDrawCallCount;
+                        break;
+                    case HostValue.BatchRendererGroupBatchCount:
+                        total += host.LastBatchRendererGroupBatchCount;
+                        break;
+                    case HostValue.BatchRendererGroupMatrixCount:
+                        total += host.LastBatchRendererGroupMatrixCount;
                         break;
                 }
             }
@@ -399,8 +447,14 @@ namespace ProjectF.MapObjects
             BatchCount,
             MatrixCount,
             DrawCallCount,
+            VisibleBatchCount,
+            CulledBatchCount,
             CandidateBatchCount,
-            CandidateCellCount
+            CandidateCellCount,
+            LegacySubmittedMatrixCount,
+            LegacyDrawCallCount,
+            BatchRendererGroupBatchCount,
+            BatchRendererGroupMatrixCount
         }
     }
 }

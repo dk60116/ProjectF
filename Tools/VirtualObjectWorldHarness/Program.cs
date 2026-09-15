@@ -12,6 +12,10 @@ internal static class Program
         CheckManagedLifetime();
         CheckInstallationViewBinding();
         CheckCoordinateIndexAndReplacement();
+        CheckCoordinateRelocation();
+        CheckInstallationPresentationVersioning();
+        CheckInstallationOnlyCopy();
+        CheckBulkLoadIndexBuild();
         CheckServiceReplacementInvalidatesOldHandles();
         Console.WriteLine($"PASS {checks} virtual-object world checks; no Unity scene or GameObject created");
     }
@@ -94,6 +98,81 @@ internal static class Program
         Require(newHandle != oldHandle, "new world epoch cannot revive an old handle");
         Require(!replacementWorld.IsHandleAlive(oldHandle), "old world handle remains stale");
         replacementWorld.Dispose();
+    }
+
+    private static void CheckBulkLoadIndexBuild()
+    {
+        VirtualObjectWorld world = VirtualObjectWorld.Current;
+        Vector2Int resourceCoordinate = new Vector2Int(20, 21);
+        BlockStateStore.InstallationSaveState installation = CreateState(48, 8301L);
+        installation.anchorCoordinate = new Vector2Int(22, 23);
+        installation.storageKey = installation.anchorCoordinate;
+        installation.occupiedCoordinates.Clear();
+        installation.occupiedCoordinates.Add(installation.anchorCoordinate);
+
+        world.BeginBulkLoad(0, 1, 1);
+        world.UpsertResource(resourceCoordinate, 12, new Resource.ResourceSaveState { resourceCount = 5 });
+        MapObjectHandle installationHandle = world.UpsertInstallationHandle(installation);
+        world.CompleteBulkLoad();
+
+        var handles = new List<MapObjectHandle>();
+        world.CopyMapObjectHandlesAtCoordinate(resourceCoordinate, handles);
+        Require(handles.Count == 1, "bulk load builds the resource coordinate index once complete");
+        world.CopyMapObjectHandlesAtCoordinate(installation.anchorCoordinate, handles);
+        Require(handles.Contains(installationHandle), "bulk load builds the installation coordinate index once complete");
+    }
+
+    private static void CheckCoordinateRelocation()
+    {
+        VirtualObjectWorld world = VirtualObjectWorld.Current;
+        BlockStateStore.InstallationSaveState state = CreateState(47, 8201L);
+        MapObjectHandle handle = world.UpsertInstallationHandle(state);
+        Vector2Int previousCoordinate = new Vector2Int(5, 8);
+        Vector2Int nextCoordinate = new Vector2Int(6, 9);
+
+        state.occupiedCoordinates.Clear();
+        state.occupiedCoordinates.Add(state.anchorCoordinate);
+        state.occupiedCoordinates.Add(nextCoordinate);
+        MapObjectHandle updatedHandle = world.UpsertInstallationHandle(state);
+        Require(updatedHandle == handle, "footprint update preserves installation identity");
+
+        var handles = new List<MapObjectHandle>();
+        world.CopyMapObjectHandlesAtCoordinate(previousCoordinate, handles);
+        Require(!handles.Contains(handle), "footprint update removes the previous coordinate mapping");
+        world.CopyMapObjectHandlesAtCoordinate(nextCoordinate, handles);
+        Require(handles.Contains(handle), "footprint update registers the new coordinate mapping");
+    }
+
+    private static void CheckInstallationPresentationVersioning()
+    {
+        VirtualObjectWorld world = VirtualObjectWorld.Current;
+        BlockStateStore.InstallationSaveState state = CreateState(49, 8401L);
+        world.UpsertInstallationHandle(state);
+        int initialVersion = world.InstallationVersion;
+
+        world.UpsertInstallationHandle(state);
+        Require(world.InstallationVersion == initialVersion,
+            "state-only installation upsert preserves render version");
+
+        state.worldPosition = new Vector3(8f, 0f, 7f);
+        world.UpsertInstallationHandle(state);
+        Require(world.InstallationVersion == initialVersion + 1,
+            "installation pose change advances render version");
+    }
+
+    private static void CheckInstallationOnlyCopy()
+    {
+        VirtualObjectWorld world = VirtualObjectWorld.Current;
+        Vector2Int resourceCoordinate = new Vector2Int(31, 32);
+        world.UpsertResource(resourceCoordinate, 13, new Resource.ResourceSaveState { resourceCount = 2 });
+        var records = new List<VirtualObjectRecord>();
+        world.CopyInstallationRecords(records, true);
+        Require(records.Count > 0, "installation-only copy returns installations");
+        for (int i = 0; i < records.Count; i++)
+        {
+            Require(records[i].kind == VirtualObjectKind.Installation,
+                "installation-only copy excludes non-installation records");
+        }
     }
 
     private static BlockStateStore.InstallationSaveState CreateState(int itemId, long sequence)

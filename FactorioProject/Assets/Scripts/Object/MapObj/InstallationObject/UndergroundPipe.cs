@@ -73,6 +73,8 @@ public class UndergroundPipe : Pipe
 
     protected override void OnDisable()
     {
+        if (ProjectFApplicationLifecycle.IsQuitting) return;
+
         ActivePipes.Remove(this);
         base.OnDisable();
     }
@@ -802,6 +804,8 @@ public class UndergroundPipe : Pipe
 
     private void OnDestroy()
     {
+        if (ProjectFApplicationLifecycle.IsQuitting) return;
+
         if (previewRouteMaterial != null)
         {
             Destroy(previewRouteMaterial);

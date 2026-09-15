@@ -332,6 +332,8 @@ public class ConveyorBelt : InstallationObject
 
     protected override void OnDisable()
     {
+        if (ProjectFApplicationLifecycle.IsQuitting) return;
+
         bool isSuspendingRoot = runtimeRootSuspended;
         if (Application.isPlaying && !isSuspendingRoot)
         {

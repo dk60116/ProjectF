@@ -1,0 +1,20 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net9.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>disable</Nullable>
+    <NoWarn>$(NoWarn);0436</NoWarn>
+    <CompiledAssemblyDirectory Condition="'$(CompiledAssemblyDirectory)' == ''">../../FactorioProject/Temp/bin/Debug</CompiledAssemblyDirectory>
+    <UnityManagedDirectory Condition="'$(UnityManagedDirectory)' == ''">C:/Program Files/Unity/Hub/Editor/6000.4.0f1/Editor/Data/Managed/UnityEngine</UnityManagedDirectory>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="../../FactorioProject/Assets/Scripts/Manager/SaveSnapshotScheduler.cs" Link="Production/SaveSnapshotScheduler.cs" />
+    <Compile Include="../../FactorioProject/Assets/Scripts/Manager/SavedWorldChunkPlan.cs" Link="Production/SavedWorldChunkPlan.cs" />
+    <Compile Include="../../FactorioProject/Assets/Scripts/Manager/SlotLoadTimingLog.cs" Link="Production/SlotLoadTimingLog.cs" />
+    <Compile Include="../../FactorioProject/Assets/Scripts/Manager/SlotSaveTimingLog.cs" Link="Production/SlotSaveTimingLog.cs" />
+    <Compile Include="../../FactorioProject/Assets/Scripts/Manager/SlotTimingLogSink.cs" Link="Production/SlotTimingLogSink.cs" />
+    <Reference Include="Assembly-CSharp"><HintPath>$(CompiledAssemblyDirectory)/Assembly-CSharp.dll</HintPath></Reference>
+    <Reference Include="UnityEngine.CoreModule"><HintPath>$(UnityManagedDirectory)/UnityEngine.CoreModule.dll</HintPath></Reference>
+  </ItemGroup>
+</Project>

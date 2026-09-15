@@ -51,13 +51,14 @@ internal sealed class VirtualRenderBatchRendererGroupBackend : IDisposable
     private int syncGeneration;
     private bool retainUnsyncedBatches;
     private bool initializationFailed;
+    private bool disposed;
 
     public static bool IsSupported =>
         SystemInfo.supportsInstancing
         && GraphicsSettings.currentRenderPipeline != null
         && BatchRendererGroup.BufferTarget == BatchBufferTarget.RawBuffer;
 
-    public bool IsAvailable => !initializationFailed;
+    public bool IsAvailable => !initializationFailed && !disposed;
     public bool DisableCameraCulling { get; set; }
 
     public int ActiveBatchCount
@@ -252,6 +253,12 @@ internal sealed class VirtualRenderBatchRendererGroupBackend : IDisposable
 
     public void Dispose()
     {
+        if (disposed) return;
+        disposed = true;
+        // The standalone player is already releasing its graphics device and process
+        // memory. Per-batch teardown here only extends the visible quit delay.
+        if (ProjectFApplicationLifecycle.IsQuitting) return;
+
         for (int i = states.Count - 1; i >= 0; i--)
         {
             DisposeState(states[i]);

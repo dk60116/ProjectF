@@ -1,13 +1,13 @@
 using System.Collections.Generic;
+using ProjectF.Simulation;
 using UnityEngine;
 
-public class Boiler : InputOutputModule
+public class Boiler : InputOutputModule, IFacilityFlowAdapter
 {
     private const float FluidEpsilon = 0.0001f;
     private const float MinWaterTemperatureCelsius = 0f;
     private const float MaxWaterTemperatureCelsiusValue = 100f;
     private const float PassiveCoolingRateScale = 0.2f;
-    private const float SteamOutputBudgetSeconds = 1f;
 
     [SerializeField]
     private List<InstallationFacingDirection> localPipeConnectionDirections =
@@ -17,6 +17,7 @@ public class Boiler : InputOutputModule
     private bool preserveSteamReadyTemperatureForMakeupWater;
     private long availableSteamOutputUnits;
     private long steamOutputBudgetUpdatedTick = -1L;
+    private FacilityFlowBatch fallbackFlowBatch;
 
     public IReadOnlyList<InstallationFacingDirection> LocalPipeConnectionDirections => localPipeConnectionDirections;
     public float WaterTemperatureCelsius => Mathf.Clamp(waterTemperatureCelsius, MinWaterTemperatureCelsius, MaxWaterTemperatureCelsiusValue);
@@ -76,13 +77,16 @@ public class Boiler : InputOutputModule
             return;
         }
 
-        ApplyPlannedBaseModuleTick(deltaTime);
-        if (!Application.isPlaying)
-        {
-            return;
-        }
-
-        UpdateBoilerFluidProcess(deltaTime);
+        fallbackFlowBatch ??= new FacilityFlowBatch(1);
+        fallbackFlowBatch.Begin();
+        int index = fallbackFlowBatch.ReserveSlot();
+        CaptureFacilityFlow(
+            fallbackFlowBatch,
+            index,
+            deltaTime,
+            MapObjectTickManager.CurrentSimulationTick);
+        fallbackFlowBatch.PlanAll();
+        ApplyFacilityFlowCommit(fallbackFlowBatch, index, deltaTime);
     }
 
     public override PersistentState CapturePersistentState()
@@ -519,41 +523,106 @@ public class Boiler : InputOutputModule
         return base.TryCompleteActiveCraft();
     }
 
-    private void UpdateBoilerFluidProcess(float deltaTime)
+    public void CaptureFacilityFlow(
+        FacilityFlowBatch batch,
+        int index,
+        float deltaTime,
+        long simulationTick)
     {
-        if (deltaTime <= 0f
-            || !TryGetBoilerFluidRecipe(
-                out int inputItemId,
-                out int inputLitersPerSecond,
-                out int outputItemId,
-                out int outputLitersPerSecond,
-                out _,
-                out _))
+        int inputItemId = -1;
+        int inputLitersPerSecond = 0;
+        int outputItemId = -1;
+        int outputLitersPerSecond = 0;
+        bool valid = deltaTime > 0f
+                     && TryGetBoilerFluidRecipe(
+                         out inputItemId,
+                         out inputLitersPerSecond,
+                         out outputItemId,
+                         out outputLitersPerSecond,
+                         out _,
+                         out _);
+        float effectiveOutputRate = valid
+            ? outputLitersPerSecond * ResolveFluidOutputTransportRetention(outputItemId)
+            : 0f;
+        bool canPull = valid
+                       && inputItemId >= 0
+                       && CanStoreFluid
+                       && HasFluidStorageSpace
+                       && !IsWaterStorageFull(inputItemId);
+        batch.ConfigureBoiler(
+            index,
+            inputItemId,
+            inputLitersPerSecond,
+            outputItemId,
+            outputLitersPerSecond,
+            effectiveOutputRate,
+            ConnectedFluidStorageTransferLitersPerSecond,
+            deltaTime,
+            simulationTick,
+            valid,
+            canPull,
+            StoredFluidLiters,
+            WaterTemperatureCelsius,
+            availableSteamOutputUnits,
+            steamOutputBudgetUpdatedTick);
+    }
+
+    public void ApplyFacilityFlow(FacilityFlowBatch batch, int index)
+    {
+        if (!TryBeginPlannedModuleApply(out float deltaTime))
         {
             return;
         }
 
-        TryPullBoilerInputWater(deltaTime, inputItemId);
+        ApplyFacilityFlowCommit(batch, index, deltaTime);
+    }
+
+    private void ApplyFacilityFlowCommit(FacilityFlowBatch batch, int index, float deltaTime)
+    {
+        ApplyPlannedBaseModuleTick(deltaTime);
+        if (Application.isPlaying)
+        {
+            UpdateBoilerFluidProcess(batch, index);
+        }
+        waterTemperatureCelsius = batch.GetBoilerTemperature(index);
+        availableSteamOutputUnits = batch.GetBoilerBudgetUnits(index);
+        steamOutputBudgetUpdatedTick = batch.GetBoilerBudgetUpdatedTick(index);
+    }
+
+    private void UpdateBoilerFluidProcess(FacilityFlowBatch batch, int index)
+    {
+        if (!batch.IsBoilerValid(index)) return;
+
+        int inputItemId = batch.GetBoilerInputItemId(index);
+        int outputItemId = batch.GetBoilerOutputItemId(index);
+        float requestedPullLiters = batch.GetBoilerRequestedPullLiters(index);
+        if (requestedPullLiters > FluidEpsilon)
+        {
+            TryPullFluidFromConnectedStorage(inputItemId, requestedPullLiters, out _);
+        }
 
         if (!NormalizeWaterTemperatureForStoredFluid(inputItemId))
         {
+            batch.SetBoilerTemperature(index, MinWaterTemperatureCelsius);
             preserveSteamReadyTemperatureForMakeupWater = false;
             return;
         }
+        batch.SetBoilerTemperature(index, WaterTemperatureCelsius);
+        batch.UpdateBoilerStoredWater(index, StoredFluidLiters);
 
         preserveSteamReadyTemperatureForMakeupWater = false;
         ItemDefinition installedDefinition = ResolveInstalledDefinition();
         if (!HasOperationalEnergyAvailable(installedDefinition))
         {
-            TryCoolStoredWater(deltaTime);
+            TryCoolStoredWater(batch, index);
             return;
         }
 
         if (WaterTemperatureCelsius + FluidEpsilon < MaxWaterTemperatureCelsiusValue)
         {
-            if (!TryHeatWater(deltaTime, inputItemId, installedDefinition))
+            if (!TryHeatWater(batch, index, inputItemId, installedDefinition))
             {
-                TryCoolStoredWater(deltaTime);
+                TryCoolStoredWater(batch, index);
             }
 
             // Heating and steam generation are separate operating ticks. Running
@@ -563,72 +632,79 @@ public class Boiler : InputOutputModule
         }
 
         if (!TryGenerateSteam(
-                deltaTime,
+                batch,
+                index,
                 inputItemId,
-                inputLitersPerSecond,
                 outputItemId,
-                outputLitersPerSecond,
                 installedDefinition))
         {
             // A steam-ready boiler cools only while it cannot operate. Cooling
             // before every generation tick forced it below 100C and made the
             // full-water startup condition repeatedly interrupt steady output.
-            TryCoolStoredWater(deltaTime);
+            TryCoolStoredWater(batch, index);
         }
     }
 
-    private bool TryHeatWater(float deltaTime, int inputItemId, ItemDefinition installedDefinition)
+    private bool TryHeatWater(
+        FacilityFlowBatch batch,
+        int index,
+        int inputItemId,
+        ItemDefinition installedDefinition)
     {
         if (!IsWaterStorageFull(inputItemId)
-            || !TryConsumeBoilerOperatingEnergy(deltaTime, installedDefinition, out float consumedEnergy))
+            || !TryConsumeBoilerOperatingEnergy(
+                batch.GetBoilerDeltaTime(index),
+                installedDefinition,
+                out float consumedEnergy))
         {
             return false;
         }
 
-        float temperatureGain = ResolveTemperatureGain(deltaTime, consumedEnergy, installedDefinition);
-        if (temperatureGain <= FluidEpsilon)
+        bool requiresEnergy = RequiresOperationalEnergy(installedDefinition);
+        float completeEnergy = requiresEnergy
+            ? ResolveCompleteEnergy(installedDefinition, CraftDurationSeconds)
+            : 0f;
+        if (!batch.HeatBoiler(
+                index,
+                consumedEnergy,
+                completeEnergy,
+                requiresEnergy,
+                CraftDurationSeconds))
         {
             return false;
         }
 
-        waterTemperatureCelsius = Mathf.Min(
-            MaxWaterTemperatureCelsiusValue,
-            WaterTemperatureCelsius + temperatureGain);
+        waterTemperatureCelsius = batch.GetBoilerTemperature(index);
         SetStoredFluidTemperatureCelsius(waterTemperatureCelsius);
         return true;
     }
 
-    private bool TryCoolStoredWater(float deltaTime)
+    private bool TryCoolStoredWater(FacilityFlowBatch batch, int index)
     {
         float targetTemperature = ResolveIdleWaterTemperatureCelsius();
-        float currentTemperature = WaterTemperatureCelsius;
-        if (deltaTime <= 0f || currentTemperature <= targetTemperature + FluidEpsilon)
+        if (!batch.CoolBoiler(
+                index,
+                targetTemperature,
+                CraftDurationSeconds,
+                PassiveCoolingRateScale))
         {
             return false;
         }
 
-        float temperatureDrop = ResolveTemperatureDrop(deltaTime);
-        if (temperatureDrop <= FluidEpsilon)
-        {
-            return false;
-        }
-
-        waterTemperatureCelsius = Mathf.MoveTowards(
-            currentTemperature,
-            targetTemperature,
-            temperatureDrop);
+        waterTemperatureCelsius = batch.GetBoilerTemperature(index);
         SetStoredFluidTemperatureCelsius(waterTemperatureCelsius);
         return true;
     }
 
     private bool TryGenerateSteam(
-        float deltaTime,
+        FacilityFlowBatch batch,
+        int index,
         int inputItemId,
-        int inputLitersPerSecond,
         int outputItemId,
-        int outputLitersPerSecond,
         ItemDefinition installedDefinition)
     {
+        float inputLitersPerSecond = batch.GetBoilerInputRate(index);
+        float outputLitersPerSecond = batch.GetBoilerOutputRate(index);
         if (StoredFluidLiters <= FluidEpsilon
             || !CanProvideFluidItem(inputItemId)
             || inputLitersPerSecond <= 0
@@ -640,20 +716,10 @@ public class Boiler : InputOutputModule
         // Steam is a per-second flow, not an internal backlog. If the connected
         // engines cannot accept this tick's steam, the boiler throttles instead
         // of saving unsent steam and dumping it later when more engines connect.
-        float effectiveOutputLitersPerSecond = outputLitersPerSecond
-                                               * ResolveFluidOutputTransportRetention(outputItemId);
-        long requestedUnits = DeterministicSimulationUnits.RateForTicks(
-            effectiveOutputLitersPerSecond,
-            DeterministicSimulationUnits.DeltaTimeToTicks(deltaTime));
-        float requestedLiters = DeterministicSimulationUnits.ToFloat(requestedUnits);
         float waterLitersPerSteamLiter = (float)inputLitersPerSecond / outputLitersPerSecond;
-        float maxSteamLitersFromWater = StoredFluidLiters / waterLitersPerSteamLiter;
-        RefreshSteamOutputBudget(effectiveOutputLitersPerSecond, deltaTime);
-        float maxLitersToEmit = Mathf.Min(
-            requestedLiters,
-            Mathf.Min(
-                maxSteamLitersFromWater,
-                DeterministicSimulationUnits.ToFloat(availableSteamOutputUnits)));
+        batch.UpdateBoilerStoredWater(index, StoredFluidLiters);
+        batch.PrepareBoilerOutput(index);
+        float maxLitersToEmit = batch.GetBoilerMaximumOutputLiters(index);
         if (maxLitersToEmit <= FluidEpsilon)
         {
             return true;
@@ -665,7 +731,10 @@ public class Boiler : InputOutputModule
             return false;
         }
 
-        if (!TryConsumeBoilerOperatingEnergy(deltaTime, installedDefinition, out _))
+        if (!TryConsumeBoilerOperatingEnergy(
+                batch.GetBoilerDeltaTime(index),
+                installedDefinition,
+                out _))
         {
             return false;
         }
@@ -700,38 +769,9 @@ public class Boiler : InputOutputModule
             inputItemId,
             Mathf.Max(0f, acceptedLiters) * waterLitersPerSteamLiter);
 
-        availableSteamOutputUnits = System.Math.Max(
-            0L,
-            availableSteamOutputUnits - DeterministicSimulationUnits.FromFloat(acceptedLiters));
+        batch.CommitBoilerOutput(index, acceptedLiters);
         preserveSteamReadyTemperatureForMakeupWater = true;
         return true;
-    }
-
-    private void RefreshSteamOutputBudget(
-        float outputLitersPerSecond,
-        float initialAvailableSeconds)
-    {
-        float outputRate = Mathf.Max(0f, outputLitersPerSecond);
-        long nowTick = MapObjectTickManager.CurrentSimulationTick;
-        long maximumBudgetUnits = DeterministicSimulationUnits.FromFloat(
-            outputRate * SteamOutputBudgetSeconds);
-        if (steamOutputBudgetUpdatedTick < 0L || nowTick < steamOutputBudgetUpdatedTick)
-        {
-            availableSteamOutputUnits = System.Math.Min(
-                maximumBudgetUnits,
-                DeterministicSimulationUnits.RateForTicks(
-                    outputRate,
-                    DeterministicSimulationUnits.DeltaTimeToTicks(initialAvailableSeconds)));
-            steamOutputBudgetUpdatedTick = nowTick;
-            return;
-        }
-
-        long elapsedTicks = System.Math.Max(0L, nowTick - steamOutputBudgetUpdatedTick);
-        availableSteamOutputUnits = System.Math.Min(
-            maximumBudgetUnits,
-            availableSteamOutputUnits
-            + DeterministicSimulationUnits.RateForTicks(outputRate, elapsedTicks));
-        steamOutputBudgetUpdatedTick = nowTick;
     }
 
     private bool TryConsumeBoilerOperatingEnergy(
@@ -749,49 +789,12 @@ public class Boiler : InputOutputModule
                && consumedEnergy > FluidEpsilon;
     }
 
-    private float ResolveTemperatureGain(float deltaTime, float consumedEnergy, ItemDefinition installedDefinition)
-    {
-        if (RequiresOperationalEnergy(installedDefinition))
-        {
-            float completeEnergy = ResolveCompleteEnergy(installedDefinition, CraftDurationSeconds);
-            return completeEnergy > FluidEpsilon
-                ? (Mathf.Max(0f, consumedEnergy) / completeEnergy) * MaxWaterTemperatureCelsiusValue
-                : 0f;
-        }
-
-        return (Mathf.Max(0f, deltaTime) / CraftDurationSeconds) * MaxWaterTemperatureCelsiusValue;
-    }
-
-    private float ResolveTemperatureDrop(float deltaTime)
-    {
-        return (Mathf.Max(0f, deltaTime) / CraftDurationSeconds)
-               * MaxWaterTemperatureCelsiusValue
-               * PassiveCoolingRateScale;
-    }
-
     private static float ResolveIdleWaterTemperatureCelsius()
     {
         return Mathf.Clamp(
             MapClimate.CurrentWaterTemperatureCelsius,
             MinWaterTemperatureCelsius,
             MaxWaterTemperatureCelsiusValue);
-    }
-
-    private void TryPullBoilerInputWater(float deltaTime, int inputItemId)
-    {
-        if (deltaTime <= 0f
-            || inputItemId < 0
-            || !CanStoreFluid
-            || !HasFluidStorageSpace
-            || IsWaterStorageFull(inputItemId))
-        {
-            return;
-        }
-
-        TryPullFluidFromConnectedStorage(
-            inputItemId,
-            ConnectedFluidStorageTransferLitersPerSecond * deltaTime,
-            out _);
     }
 
     private bool NormalizeWaterTemperatureForStoredFluid(int inputItemId)

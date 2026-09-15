@@ -440,7 +440,7 @@ public class SteamTrain : RailHandcar,
     protected override void OnEnable()
     {
         base.OnEnable();
-        MapObjectTickManager.RegisterUpdateTick(this);
+        RefreshAutoDriveTickSchedule();
         InvalidateAutoDriveConnectedTrainCache();
         ResetMovementParticleState();
         CaptureWaterPipeDefaults();
@@ -449,6 +449,8 @@ public class SteamTrain : RailHandcar,
 
     protected override void OnDisable()
     {
+        if (ProjectFApplicationLifecycle.IsQuitting) return;
+
         MapObjectTickManager.UnregisterUpdateTick(this);
         InvalidateAutoDriveConnectedTrainCache();
         StopMovementParticle(true);
@@ -552,6 +554,7 @@ public class SteamTrain : RailHandcar,
         {
             autoDriveEnabled = false;
             autoDriveControllerRevision = 0;
+            RefreshAutoDriveTickSchedule();
             ResetAutoDriveRuntimeState();
             SetAutoDriveStatus(AutoDriveStatus.NoTarget, string.Empty, string.Empty);
             PersistAutoDriveState();
@@ -683,6 +686,9 @@ public class SteamTrain : RailHandcar,
         lastMovementParticlePosition = currentPosition;
     }
 
+    protected override bool RequiresManagedVisualUpdate =>
+        base.RequiresManagedVisualUpdate || waterPipeAnimating;
+
     protected override void TickManagedVisuals(float deltaTime)
     {
         base.TickManagedVisuals(deltaTime);
@@ -788,6 +794,8 @@ public class SteamTrain : RailHandcar,
             autoDriveControllerRevision = 0;
         }
 
+        RefreshAutoDriveTickSchedule();
+
         if (!changed)
         {
             return;
@@ -851,6 +859,8 @@ public class SteamTrain : RailHandcar,
         {
             autoDriveControllerRevision = 0;
         }
+
+        RefreshAutoDriveTickSchedule();
 
         ResetAutoDriveRuntimeState();
         autoDriveRouteTargetStationName = NormalizeAutoDriveStationName(routeTargetStationName);
@@ -1611,6 +1621,7 @@ public class SteamTrain : RailHandcar,
     {
         autoDriveEnabled = false;
         autoDriveControllerRevision = 0;
+        RefreshAutoDriveTickSchedule();
         autoDriveTargetAStationName = string.Empty;
         autoDriveTargetBStationName = string.Empty;
         autoDriveTargetAFuelFilter = AutoDriveFuelFilter.Free;
@@ -1706,10 +1717,30 @@ public class SteamTrain : RailHandcar,
         StopMovementParticle(false);
         autoDriveEnabled = false;
         autoDriveControllerRevision = 0;
+        RefreshAutoDriveTickSchedule();
         ResetAutoDriveRuntimeState();
         SetAutoDriveStatus(AutoDriveStatus.Idle, string.Empty, string.Empty);
         PersistAutoDriveState();
         powerSource.PersistAutoDriveState();
+    }
+
+    private void RefreshAutoDriveTickSchedule()
+    {
+        if (!isActiveAndEnabled)
+        {
+            return;
+        }
+
+        if (autoDriveEnabled && HasCompleteAutoDriveTargets())
+        {
+            MapObjectTickManager.RegisterUpdateTick(this);
+            SetSleepAwakeDebugSleeping(false);
+        }
+        else
+        {
+            MapObjectTickManager.UnregisterUpdateTick(this);
+            SetSleepAwakeDebugSleeping(true);
+        }
     }
 
     private void ResetAutoDriveRuntimeState()

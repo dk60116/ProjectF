@@ -8,7 +8,7 @@ public class BlockStateStore
     public int SaveCount;
     public Vector2Int SavedCoordinate;
     public int SavedResourceCount = -1;
-    public void Save(Vector2Int coordinate, Resource resource)
+    public void Save(Vector2Int coordinate, ResourceInstance resource)
     {
         SaveCount++;
         SavedCoordinate = coordinate;
@@ -23,8 +23,10 @@ public partial class TerrainGenerator
     private void EnsureResourceStateStore() { }
     private BlockStateStore resourceStateStore => Store;
 }
-public partial class Resource
+public partial class ResourceInstance
 {
+    private sealed class ResourceWorld { public TerrainGenerator Terrain; }
+    private readonly ResourceWorld sharedWorld = new();
     private struct Status { public int resourceCount, currentGague; }
     private Status resourceStatus;
     private float accumulatedWork;
@@ -32,6 +34,11 @@ public partial class Resource
     private int reservedHarvestGaugeCount;
     private Block owningBlock;
     public Block OwningBlock => owningBlock;
+    public bool TryGetOwningCoordinate(out Vector2Int coordinate)
+    {
+        coordinate = owningBlock != null ? owningBlock.Coordinate : default;
+        return owningBlock != null;
+    }
     public int ResourceCount => Math.Max(0, resourceStatus.resourceCount);
     public int CurrentGauge => Math.Max(0, resourceStatus.currentGague);
     public int MaxGauge { get; private set; } = 10;
@@ -40,6 +47,7 @@ public partial class Resource
     private void UpdateBodyScale() { }
     public void Initialize(Block block, int count, int gauge)
     {
+        sharedWorld.Terrain = TerrainGenerator.Active;
         owningBlock = block;
         resourceStatus.resourceCount = count;
         resourceStatus.currentGague = gauge;
@@ -68,7 +76,7 @@ public static class Checks
         var store = new BlockStateStore();
         TerrainGenerator.Active = new TerrainGenerator { Store = store };
         var block = new Block { Coordinate = new Vector2Int(17, -23) };
-        var tree = new Resource();
+        var tree = new ResourceInstance();
         tree.Initialize(block, 1, 10);
         Require(tree.Harvest(5, out bool partiallyDepleted) == 0 && !partiallyDepleted,
             "partial work does not create a depletion tombstone");
@@ -80,7 +88,7 @@ public static class Checks
         Require(store.SavedCoordinate == block.Coordinate,
             "depletion tombstone is stored at the harvested coordinate");
 
-        var multi = new Resource();
+        var multi = new ResourceInstance();
         multi.Initialize(block, 2, 10);
         Require(multi.Harvest(10, out bool oneRemaining) == 1 && !oneRemaining,
             "non-final depletion keeps the resource alive");
@@ -91,7 +99,7 @@ public static class Checks
             "multi-count resources save one tombstone only at zero");
 
         TerrainGenerator.Active = null;
-        var detached = new Resource();
+        var detached = new ResourceInstance();
         detached.Initialize(block, 1, 10);
         Require(detached.Harvest(10, out bool detachedDepleted) == 1 && detachedDepleted,
             "depletion remains safe while no terrain is active");

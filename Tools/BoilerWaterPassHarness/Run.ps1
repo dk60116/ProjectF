@@ -28,10 +28,11 @@ foreach ($member in @(
     $generated += (Read-Member ($base + 'InputOutputModule.cs') $member) + "`n"
 }
 $generated += "} public partial class Boiler {`n"
-foreach ($member in @('public bool TryGetRuntimeWaterPass(', 'private bool IsWaterStorageFull(', 'private bool TryHeatWater(')) {
+foreach ($member in @('public bool TryGetRuntimeWaterPass(', 'private bool IsWaterStorageFull(')) {
     $generated += (Read-Member ($base + 'Boiler.cs') $member) + "`n"
 }
-$generated += "}"
+$generated += "} public partial class SteamGenerator {`n"
+$generated += (Read-Member ($base + 'SteamGenerator.cs') 'internal static bool IsDirectedSteamPortConnection(') + "`n}"
 $probeDir = Join-Path $env:TEMP ('ProjectF-BoilerWaterPass-' + [Guid]::NewGuid().ToString('N'))
 New-Item -ItemType Directory -Path $probeDir | Out-Null
 Set-Content -LiteralPath (Join-Path $probeDir 'Production.cs') -Value $generated

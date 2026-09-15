@@ -282,13 +282,15 @@ public sealed class VirtualConveyorBeltRenderer : MonoBehaviour
 
     private void OnDestroy()
     {
+        if (ProjectFApplicationLifecycle.IsQuitting) return;
+
         Clear();
         batches.Dispose();
     }
 
     private void OnDisable()
     {
-        batches.SuspendRendering();
+        if (!ProjectFApplicationLifecycle.IsQuitting) batches.SuspendRendering();
     }
 
     public void Register(ConveyorBelt conveyorBelt)

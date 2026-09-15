@@ -130,6 +130,8 @@ public class BoxObject : InputOutputModule
 
     protected override void OnDisable()
     {
+        if (ProjectFApplicationLifecycle.IsQuitting) return;
+
         SetObservedContentBlock(null);
         ActiveInstances.Remove(this);
         globalMaxFocusActivationRadiusDirty = true;
@@ -353,6 +355,7 @@ public class BoxObject : InputOutputModule
 
         minimumRetainedItemCount = clampedValue;
         maximumStoredItemCount = clampedMaximum;
+        MarkPersistenceStateDirty();
         if (TryGetContentBlock(out Block contentBlock) && contentBlock != null)
         {
             RobotArm.WakeAroundCoordinate(contentBlock.Coordinate);

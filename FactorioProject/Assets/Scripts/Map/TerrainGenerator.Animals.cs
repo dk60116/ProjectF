@@ -695,12 +695,6 @@ public partial class TerrainGenerator : MonoBehaviour
         return animal;
     }
 
-    private void CaptureAnimalSaveStates(MapSaveData mapSaveData)
-    {
-        IEnumerator capture = CaptureAnimalSaveStatesIncremental(mapSaveData, int.MaxValue);
-        while (capture.MoveNext()) { }
-    }
-
     private IEnumerator CaptureAnimalSaveStatesIncremental(
         MapSaveData mapSaveData,
         int entriesPerFrame)

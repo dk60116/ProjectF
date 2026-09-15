@@ -1,0 +1,10 @@
+<Project>
+  <!-- Unity regenerates its project after import. CLI verification includes newly
+       added runtime files without editing Unity's generated project. -->
+  <Target Name="IncludePendingSaveLoadRuntimeSources" BeforeTargets="CoreCompile" Condition="'$(MSBuildProjectName)' == 'Assembly-CSharp'">
+    <ItemGroup>
+      <Compile Include="$(MSBuildProjectDirectory)/Assets/Scripts/**/*.cs"
+               Exclude="@(Compile->'%(FullPath)');$(MSBuildProjectDirectory)/Assets/Scripts/Simulation/Core/**/*.cs;$(MSBuildProjectDirectory)/Assets/Scripts/**/Editor/**/*.cs" />
+    </ItemGroup>
+  </Target>
+</Project>

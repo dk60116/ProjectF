@@ -34,6 +34,8 @@ public sealed class TerrainSaveData
 {
     public int seed;
     public int mapSize;
+    // Persisted explored/generated history, not a demand to recreate every view at load.
+    // The binary field is unchanged; residency is derived from saved activities and player position.
     public List<Vector2Int> activeChunkCoordinates = new List<Vector2Int>();
 }
 

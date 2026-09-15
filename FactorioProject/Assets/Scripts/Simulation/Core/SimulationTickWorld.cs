@@ -288,6 +288,8 @@ namespace ProjectF.Simulation
                     tick.ManagedUpdateTick(entry.PendingDeltaTime);
                 }
 
+                (tick as IPersistenceDirtyTrackable)?.MarkPersistenceStateDirty();
+
                 if (observer != null)
                 {
                     observer.EndSample(tick, startTimestamp);

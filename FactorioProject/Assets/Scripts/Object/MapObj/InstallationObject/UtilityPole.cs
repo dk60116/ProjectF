@@ -28,8 +28,22 @@ public partial class UtilityPole : InstallationObject
     private static readonly List<UtilityPole> connectionPoleScratch = new List<UtilityPole>();
     private static readonly List<PoleConnectionCandidate> connectionCandidateScratch =
         new List<PoleConnectionCandidate>();
+    private static readonly Dictionary<Vector2Int, List<UtilityPole>> connectionPolesByCoordinate =
+        new Dictionary<Vector2Int, List<UtilityPole>>();
+    private static readonly Stack<List<UtilityPole>> connectionPoleListPool =
+        new Stack<List<UtilityPole>>();
+    private static readonly Dictionary<UtilityPole, int> connectionPoleOrder =
+        new Dictionary<UtilityPole, int>();
+    private static readonly Dictionary<UtilityPole, int> connectionComponentIndex =
+        new Dictionary<UtilityPole, int>();
+    private static readonly List<int> connectionComponentParents = new List<int>();
+    private static readonly List<byte> connectionComponentRanks = new List<byte>();
     private static readonly List<PoleConnection> poleConnections = new List<PoleConnection>();
     private static readonly List<PoleConnection> previewPoleConnections = new List<PoleConnection>();
+    private static readonly Dictionary<UtilityPole, List<UtilityPole>> connectedPolesByPole =
+        new Dictionary<UtilityPole, List<UtilityPole>>();
+    private static readonly Stack<List<UtilityPole>> connectedPoleListPool =
+        new Stack<List<UtilityPole>>();
     private static readonly List<UtilityPole> visualPoleScratch = new List<UtilityPole>();
     private static readonly HashSet<UtilityPole> screenRangePoles = new HashSet<UtilityPole>();
     private static readonly HashSet<UtilityPole> screenRangePoleScratch = new HashSet<UtilityPole>();
@@ -55,6 +69,14 @@ public partial class UtilityPole : InstallationObject
         new HashSet<InstallationObject>();
 
     private static long networkRuntimeEvaluatedSimulationTick = -1L;
+    private static int simulationPowerMutationBatchDepth;
+    private static int topologyRefreshBatchDepth;
+    private static bool topologyRefreshPending;
+    private static bool electricRuntimeWakePending;
+    private static long networkRuntimeEvaluationCount;
+    private static long networkRuntimeDeferredInvalidationCount;
+    private static long electricRuntimeWakeBatchCount;
+    private static long electricRuntimeWakeCoalescedCount;
     private static bool networksDirty = true;
     private static bool poleConnectionsDirty = true;
     private static bool previewPoleConnectionsDirty = true;
@@ -70,6 +92,8 @@ public partial class UtilityPole : InstallationObject
     private static bool installOrEditSupplyRangeVisualsRequested;
     private static bool installOrEditConnectionRangeVisualsRequested;
     private static bool screenRangePolesInitialized;
+    private static int activePoleVersion;
+    private static int screenRangePoleVersion = -1;
     private static Material sharedLineMaterial;
     private static Transform connectionLineRoot;
 
@@ -172,15 +196,46 @@ public partial class UtilityPole : InstallationObject
 
     public static void RefreshAllRangeVisuals()
     {
+        if (topologyRefreshBatchDepth > 0)
+        {
+            topologyRefreshPending = true;
+            return;
+        }
+
         RefreshSelectedSupplyRangeVisual();
         RefreshSelectedConnectionRangeVisual();
     }
 
-    public static void RefreshPoleTopologyNow()
+    /// <summary>
+    /// Defers global pole/network rebuilds while a saved world activates poles one by one.
+    /// Nested batches are supported so scene and chunk restoration can share the guard.
+    /// </summary>
+    public static void BeginTopologyRefreshBatch()
     {
-        MarkPoleTopologyDirty();
-        RefreshConnectionLineRenderersIfDirty();
-        RefreshAllRangeVisuals();
+        topologyRefreshBatchDepth++;
+    }
+
+    public static void EndTopologyRefreshBatch(bool rebuildDirtyTopology = true)
+    {
+        if (topologyRefreshBatchDepth <= 0)
+        {
+            topologyRefreshBatchDepth = 0;
+            return;
+        }
+
+        topologyRefreshBatchDepth--;
+        if (topologyRefreshBatchDepth > 0)
+        {
+            return;
+        }
+
+        bool needsRefresh = topologyRefreshPending || connectionLineVisualsDirty;
+        topologyRefreshPending = false;
+        if (rebuildDirtyTopology && needsRefresh)
+        {
+            RefreshConnectionLineRenderersIfDirty();
+            RefreshAllRangeVisuals();
+        }
     }
 
     public static void RegisterBlueprintPreview(
@@ -194,9 +249,6 @@ public partial class UtilityPole : InstallationObject
             return;
         }
 
-        pole.ResolveLinePointReferences();
-        pole.EnsureLineRenderers();
-        pole.RefreshLineRenderers();
         PreviewPoleRuntime nextRuntime = new PreviewPoleRuntime(
             anchorCoordinate,
             ((quarterTurns % 4) + 4) % 4,
@@ -209,6 +261,9 @@ public partial class UtilityPole : InstallationObject
             return;
         }
 
+        pole.ResolveLinePointReferences();
+        pole.EnsureLineRenderers();
+        pole.RefreshLineRenderers();
         previewPoleRuntimes[pole] = nextRuntime;
         MarkPreviewPoleConnectionsDirty();
         RequestDeferredConnectionLineVisualRefresh();
@@ -287,11 +342,13 @@ public partial class UtilityPole : InstallationObject
         visualPoleScratch.Clear();
         previewPoleRuntimes.Clear();
         previewConsumerRuntimes.Clear();
+        previewPoleConnections.Clear();
         HidePreviewConsumerLineRenderers();
-        MarkPreviewPoleConnectionsDirty();
+        previewPoleConnectionsDirty = false;
+        connectionLineVisualsDirty = true;
         previewConsumerLineVisualsDirty = false;
         deferredPreviewConsumerLineVisualRefreshRequested = false;
-        RefreshConnectionLineRenderersIfDirty();
+        RequestDeferredConnectionLineVisualRefresh();
     }
 
     public static void SetInstallOrEditRangeVisualsRequested(
@@ -325,7 +382,14 @@ public partial class UtilityPole : InstallationObject
             return;
         }
 
-        rangeVisualCulling.Update(targetCamera);
+        bool cullingChanged = rangeVisualCulling.Update(targetCamera);
+        if (screenRangePolesInitialized
+            && !cullingChanged
+            && screenRangePoleVersion == activePoleVersion)
+        {
+            return;
+        }
+
         screenRangePoleScratch.Clear();
         foreach (UtilityPole pole in activePoles)
         {
@@ -348,6 +412,7 @@ public partial class UtilityPole : InstallationObject
         screenRangePoles.Clear();
         screenRangePoles.UnionWith(screenRangePoleScratch);
         screenRangePolesInitialized = true;
+        screenRangePoleVersion = activePoleVersion;
         RefreshAllRangeVisuals();
     }
 
@@ -604,9 +669,14 @@ public partial class UtilityPole : InstallationObject
         }
 
         EnsurePoleConnectionsEvaluated();
-        for (int i = 0; i < poleConnections.Count; i++)
+        if (!connectedPolesByPole.TryGetValue(this, out List<UtilityPole> connectedPoles))
         {
-            UtilityPole connectedPole = GetConnectedPole(poleConnections[i], this);
+            return true;
+        }
+
+        for (int i = 0; i < connectedPoles.Count; i++)
+        {
+            UtilityPole connectedPole = connectedPoles[i];
             if (connectedPole == null
                 || !connectedPole.TryGetPlacementRuntime(
                     out Vector2Int connectedAnchor,
@@ -636,27 +706,44 @@ public partial class UtilityPole : InstallationObject
         ResolveLinePointReferences();
         EnsureLineRenderers();
         RefreshLineRenderers();
-        activePoles.Add(this);
+        bool registeredPlacedPole = TryGetPlacementRuntime(out _, out _)
+                                  && activePoles.Add(this);
         if (selectedSupplyRangeVisualRequested)
         {
             SelectedSupplyRangeVisualInstances.Add(this);
         }
 
-        MarkPoleTopologyDirty();
-        RefreshConnectionLineRenderersIfDirty();
-        RefreshSupplyRangeVisual();
+        if (registeredPlacedPole)
+        {
+            activePoleVersion++;
+            MarkPoleTopologyDirty();
+            RequestDeferredConnectionLineVisualRefresh();
+            screenRangePolesInitialized = false;
+        }
+
+        if (selectedSupplyRangeVisualRequested)
+        {
+            RefreshSupplyRangeVisual();
+        }
     }
 
     protected override void OnDisable()
     {
+        if (ProjectFApplicationLifecycle.IsQuitting) return;
+
         HideConnectionLineRenderers();
         SelectedSupplyRangeVisualInstances.Remove(this);
         selectedSupplyRangeVisualRequested = false;
         selectedConnectionRangeVisualRequested = false;
 
-        activePoles.Remove(this);
-        MarkPoleTopologyDirty();
-        RefreshConnectionLineRenderersIfDirty();
+        if (activePoles.Remove(this))
+        {
+            activePoleVersion++;
+            MarkPoleTopologyDirty();
+            RequestDeferredConnectionLineVisualRefresh();
+            screenRangePolesInitialized = false;
+        }
+
         RefreshSupplyRangeVisual();
         base.OnDisable();
     }
@@ -669,11 +756,18 @@ public partial class UtilityPole : InstallationObject
 
     private void OnDestroy()
     {
+        if (ProjectFApplicationLifecycle.IsQuitting) return;
+
         HideConnectionLineRenderers();
         SelectedSupplyRangeVisualInstances.Remove(this);
-        activePoles.Remove(this);
-        MarkPoleTopologyDirty();
-        RefreshConnectionLineRenderersIfDirty();
+        if (activePoles.Remove(this))
+        {
+            activePoleVersion++;
+            MarkPoleTopologyDirty();
+            RequestDeferredConnectionLineVisualRefresh();
+            screenRangePolesInitialized = false;
+        }
+
         RefreshSupplyRangeVisual();
         DestroyConnectionLineRenderers();
     }
@@ -686,9 +780,6 @@ public partial class UtilityPole : InstallationObject
         selectedConnectionRangeVisualRequested = false;
         RefreshLineRenderers();
         HideConnectionLineRenderers();
-        MarkPoleTopologyDirty();
-        RefreshConnectionLineRenderersIfDirty();
-        RefreshSupplyRangeVisual();
     }
 
     private static void MarkPoleTopologyDirty()
@@ -709,20 +800,79 @@ public partial class UtilityPole : InstallationObject
     private static void MarkElectricNetworkDirty()
     {
         networksDirty = true;
-        networkRuntimeEvaluatedSimulationTick = -1L;
+        InvalidateNetworkRuntimeForNextTick();
         connectionLineVisualsDirty = true;
-        InputOutputModule.WakeElectricRuntimeModules();
+        RequestElectricRuntimeModulesWake();
     }
 
     public static void NotifyElectricPowerSourceStateChanged()
     {
-        networkRuntimeEvaluatedSimulationTick = -1L;
-        InputOutputModule.WakeElectricRuntimeModules();
+        InvalidateNetworkRuntimeForNextTick();
+        RequestElectricRuntimeModulesWake();
     }
 
     public static void NotifyFreeElectroEnergyChanged()
     {
+        InvalidateNetworkRuntimeForNextTick();
+        RequestElectricRuntimeModulesWake();
+    }
+
+    private static void InvalidateNetworkRuntimeForNextTick()
+    {
+        long currentSimulationTick = MapObjectTickManager.CurrentSimulationTick;
+        if (networkRuntimeEvaluatedSimulationTick == currentSimulationTick)
+        {
+            networkRuntimeDeferredInvalidationCount++;
+            return;
+        }
+
         networkRuntimeEvaluatedSimulationTick = -1L;
+    }
+
+    internal static void BeginSimulationPowerMutationBatch()
+    {
+        simulationPowerMutationBatchDepth++;
+    }
+
+    internal static void EndSimulationPowerMutationBatch()
+    {
+        if (simulationPowerMutationBatchDepth <= 0)
+        {
+            simulationPowerMutationBatchDepth = 0;
+            return;
+        }
+
+        simulationPowerMutationBatchDepth--;
+        if (simulationPowerMutationBatchDepth == 0)
+        {
+            FlushElectricRuntimeModulesWake();
+        }
+    }
+
+    private static void RequestElectricRuntimeModulesWake()
+    {
+        if (electricRuntimeWakePending)
+        {
+            electricRuntimeWakeCoalescedCount++;
+            return;
+        }
+
+        electricRuntimeWakePending = true;
+        if (simulationPowerMutationBatchDepth <= 0)
+        {
+            FlushElectricRuntimeModulesWake();
+        }
+    }
+
+    private static void FlushElectricRuntimeModulesWake()
+    {
+        if (!electricRuntimeWakePending)
+        {
+            return;
+        }
+
+        electricRuntimeWakePending = false;
+        electricRuntimeWakeBatchCount++;
         InputOutputModule.WakeElectricRuntimeModules();
     }
 
@@ -738,9 +888,16 @@ public partial class UtilityPole : InstallationObject
             pole.ResolveLinePointReferences();
             pole.EnsureLineRenderers();
             pole.RefreshLineRenderers();
+            if (!pole.isActiveAndEnabled || !pole.gameObject.activeInHierarchy)
+            {
+                return;
+            }
+
+            activePoles.Add(pole);
+            activePoleVersion++;
             MarkPoleTopologyDirty();
-            RefreshConnectionLineRenderersIfDirty();
-            RefreshAllRangeVisuals();
+            RequestDeferredConnectionLineVisualRefresh();
+            screenRangePolesInitialized = false;
             return;
         }
 
@@ -752,9 +909,14 @@ public partial class UtilityPole : InstallationObject
         if (installationObject is UtilityPole pole)
         {
             pole.HideConnectionLineRenderers();
-            MarkPoleTopologyDirty();
-            RefreshConnectionLineRenderersIfDirty();
-            RefreshAllRangeVisuals();
+            if (activePoles.Remove(pole))
+            {
+                activePoleVersion++;
+                MarkPoleTopologyDirty();
+                RequestDeferredConnectionLineVisualRefresh();
+                screenRangePolesInitialized = false;
+            }
+
             return;
         }
 
@@ -824,7 +986,7 @@ public partial class UtilityPole : InstallationObject
         {
             networkRuntimeEvaluatedSimulationTick = -1L;
             RefreshNetworkRuntimeValues(true);
-            InputOutputModule.WakeElectricRuntimeModules();
+            RequestElectricRuntimeModulesWake();
         }
 
         supplyingNetworkScratch.Clear();
@@ -1066,6 +1228,12 @@ public partial class UtilityPole : InstallationObject
             return;
         }
 
+        if (topologyRefreshBatchDepth > 0)
+        {
+            topologyRefreshPending = true;
+            return;
+        }
+
         RefreshConnectionLineRenderers();
     }
 
@@ -1129,6 +1297,10 @@ public partial class UtilityPole : InstallationObject
 
     private static void RefreshConnectionLineRenderers()
     {
+        using var sample = MapObjectTickProfiler.SampleNamed(
+            "ElectricPower",
+            nameof(UtilityPole),
+            "Utility Pole Connection Visual Refresh");
         CleanupPreviewPoleRuntimes();
         CleanupPreviewConsumerRuntimes();
         if (activePoles.Count <= 0 && previewPoleRuntimes.Count <= 0)
@@ -2205,6 +2377,10 @@ public partial class UtilityPole : InstallationObject
 
     private static void RebuildPoleConnections()
     {
+        using var sample = MapObjectTickProfiler.SampleNamed(
+            "ElectricPower",
+            nameof(UtilityPole),
+            "Utility Pole Topology Rebuild");
         poleConnections.Clear();
         connectionPoleScratch.Clear();
         connectionCandidateScratch.Clear();
@@ -2227,28 +2403,8 @@ public partial class UtilityPole : InstallationObject
         }
 
         connectionPoleScratch.Sort(CompareSimulationOrder);
-
-        for (int i = 0; i < connectionPoleScratch.Count; i++)
-        {
-            UtilityPole first = connectionPoleScratch[i];
-            for (int j = i + 1; j < connectionPoleScratch.Count; j++)
-            {
-                UtilityPole second = connectionPoleScratch[j];
-                if (first == null
-                    || second == null
-                    || !ArePolesAutoConnected(first, second)
-                    || !TryGetBestLinePointDistanceSqr(first, second, out float bestLinePointDistanceSqr))
-                {
-                    continue;
-                }
-
-                connectionCandidateScratch.Add(new PoleConnectionCandidate(
-                    first,
-                    second,
-                    GetPoleDistanceSqr(first, second),
-                    bestLinePointDistanceSqr));
-            }
-        }
+        BuildSpatialConnectionCandidates(false);
+        InitializeConnectionComponents();
 
         connectionCandidateScratch.Sort(ComparePoleConnectionCandidates);
         for (int unconnectedEndpointPriority = 2; unconnectedEndpointPriority >= 0; unconnectedEndpointPriority--)
@@ -2256,19 +2412,29 @@ public partial class UtilityPole : InstallationObject
             for (int i = 0; i < connectionCandidateScratch.Count; i++)
             {
                 PoleConnectionCandidate candidate = connectionCandidateScratch[i];
-                if (ArePolesAlreadyConnected(candidate.FirstPole, candidate.SecondPole)
+                if (ArePolesInSameComponent(candidate.FirstPole, candidate.SecondPole)
                     || CountUnconnectedCandidateEndpoints(candidate) != unconnectedEndpointPriority)
                 {
                     continue;
                 }
 
-                TryAddPoleConnection(candidate);
+                if (TryAddPoleConnection(candidate))
+                {
+                    UnionConnectionComponents(candidate.FirstPole, candidate.SecondPole);
+                }
             }
         }
+
+        ClearConnectionComponents();
+        RebuildPoleConnectionAdjacency();
     }
 
     private static void RebuildPreviewPoleConnections()
     {
+        using var sample = MapObjectTickProfiler.SampleNamed(
+            "ElectricPower",
+            nameof(UtilityPole),
+            "Utility Pole Preview Topology Rebuild");
         previewPoleConnections.Clear();
         CleanupPreviewPoleRuntimes();
         if (previewPoleRuntimes.Count <= 0)
@@ -2330,30 +2496,8 @@ public partial class UtilityPole : InstallationObject
             MarkConnectionLinePointsOccupied(poleConnections[i]);
         }
 
-        for (int i = 0; i < connectionPoleScratch.Count; i++)
-        {
-            UtilityPole first = connectionPoleScratch[i];
-            for (int j = i + 1; j < connectionPoleScratch.Count; j++)
-            {
-                UtilityPole second = connectionPoleScratch[j];
-                bool firstIsPreview = IsPreviewPole(first);
-                bool secondIsPreview = IsPreviewPole(second);
-                if ((!firstIsPreview && !secondIsPreview)
-                    || first == null
-                    || second == null
-                    || !ArePolesAutoConnected(first, second)
-                    || !TryGetBestLinePointDistanceSqr(first, second, out float bestLinePointDistanceSqr))
-                {
-                    continue;
-                }
-
-                connectionCandidateScratch.Add(new PoleConnectionCandidate(
-                    first,
-                    second,
-                    GetPoleDistanceSqr(first, second),
-                    bestLinePointDistanceSqr));
-            }
-        }
+        BuildSpatialConnectionCandidates(true);
+        InitializeConnectionComponents(poleConnections);
 
         connectionCandidateScratch.Sort(ComparePoleConnectionCandidates);
         for (int unconnectedEndpointPriority = 2; unconnectedEndpointPriority >= 0; unconnectedEndpointPriority--)
@@ -2361,15 +2505,20 @@ public partial class UtilityPole : InstallationObject
             for (int i = 0; i < connectionCandidateScratch.Count; i++)
             {
                 PoleConnectionCandidate candidate = connectionCandidateScratch[i];
-                if (ArePolesAlreadyConnected(candidate.FirstPole, candidate.SecondPole, poleConnections, previewPoleConnections)
+                if (ArePolesInSameComponent(candidate.FirstPole, candidate.SecondPole)
                     || CountUnconnectedCandidateEndpoints(candidate) != unconnectedEndpointPriority)
                 {
                     continue;
                 }
 
-                TryAddPoleConnection(candidate, previewPoleConnections);
+                if (TryAddPoleConnection(candidate, previewPoleConnections))
+                {
+                    UnionConnectionComponents(candidate.FirstPole, candidate.SecondPole);
+                }
             }
         }
+
+        ClearConnectionComponents();
     }
 
     private static void RebuildFullPreviewPoleConnections()
@@ -2416,28 +2565,8 @@ public partial class UtilityPole : InstallationObject
         }
 
         connectionPoleScratch.Sort(CompareSimulationOrder);
-
-        for (int i = 0; i < connectionPoleScratch.Count; i++)
-        {
-            UtilityPole first = connectionPoleScratch[i];
-            for (int j = i + 1; j < connectionPoleScratch.Count; j++)
-            {
-                UtilityPole second = connectionPoleScratch[j];
-                if (first == null
-                    || second == null
-                    || !ArePolesAutoConnected(first, second)
-                    || !TryGetBestLinePointDistanceSqr(first, second, out float bestLinePointDistanceSqr))
-                {
-                    continue;
-                }
-
-                connectionCandidateScratch.Add(new PoleConnectionCandidate(
-                    first,
-                    second,
-                    GetPoleDistanceSqr(first, second),
-                    bestLinePointDistanceSqr));
-            }
-        }
+        BuildSpatialConnectionCandidates(false);
+        InitializeConnectionComponents();
 
         connectionCandidateScratch.Sort(ComparePoleConnectionCandidates);
         for (int unconnectedEndpointPriority = 2; unconnectedEndpointPriority >= 0; unconnectedEndpointPriority--)
@@ -2445,15 +2574,20 @@ public partial class UtilityPole : InstallationObject
             for (int i = 0; i < connectionCandidateScratch.Count; i++)
             {
                 PoleConnectionCandidate candidate = connectionCandidateScratch[i];
-                if (ArePolesAlreadyConnected(candidate.FirstPole, candidate.SecondPole, previewPoleConnections)
+                if (ArePolesInSameComponent(candidate.FirstPole, candidate.SecondPole)
                     || CountUnconnectedCandidateEndpoints(candidate) != unconnectedEndpointPriority)
                 {
                     continue;
                 }
 
-                TryAddPoleConnection(candidate, previewPoleConnections);
+                if (TryAddPoleConnection(candidate, previewPoleConnections))
+                {
+                    UnionConnectionComponents(candidate.FirstPole, candidate.SecondPole);
+                }
             }
         }
+
+        ClearConnectionComponents();
     }
 
     private static bool HasTopologyReplacementPreview()
@@ -2523,83 +2657,98 @@ public partial class UtilityPole : InstallationObject
         return count;
     }
 
-    private static bool ArePolesAlreadyConnected(UtilityPole first, UtilityPole second)
+    private static void InitializeConnectionComponents(List<PoleConnection> existingConnections = null)
     {
-        return ArePolesAlreadyConnected(first, second, poleConnections);
-    }
-
-    private static bool ArePolesAlreadyConnected(
-        UtilityPole first,
-        UtilityPole second,
-        List<PoleConnection> connections)
-    {
-        return ArePolesAlreadyConnected(first, second, connections, null);
-    }
-
-    private static bool ArePolesAlreadyConnected(
-        UtilityPole first,
-        UtilityPole second,
-        List<PoleConnection> primaryConnections,
-        List<PoleConnection> secondaryConnections)
-    {
-        if (first == null || second == null)
+        ClearConnectionComponents();
+        for (int i = 0; i < connectionPoleScratch.Count; i++)
         {
-            return false;
-        }
-
-        if (first == second)
-        {
-            return true;
-        }
-
-        visitedPoles.Clear();
-        poleQueue.Clear();
-        visitedPoles.Add(first);
-        poleQueue.Enqueue(first);
-
-        while (poleQueue.Count > 0)
-        {
-            UtilityPole pole = poleQueue.Dequeue();
-            if (TryVisitConnectedPoles(pole, primaryConnections, second)
-                || TryVisitConnectedPoles(pole, secondaryConnections, second))
-            {
-                visitedPoles.Clear();
-                poleQueue.Clear();
-                return true;
-            }
-        }
-
-        visitedPoles.Clear();
-        poleQueue.Clear();
-        return false;
-    }
-
-    private static bool TryVisitConnectedPoles(
-        UtilityPole pole,
-        List<PoleConnection> connections,
-        UtilityPole targetPole)
-    {
-        for (int i = 0; connections != null && i < connections.Count; i++)
-        {
-            PoleConnection connection = connections[i];
-            UtilityPole connectedPole = GetConnectedPole(connection, pole);
-            if (connectedPole == null)
+            UtilityPole pole = connectionPoleScratch[i];
+            if (pole == null || connectionComponentIndex.ContainsKey(pole))
             {
                 continue;
             }
 
-            if (connectedPole == targetPole)
-            {
-                return true;
-            }
-
-            if (visitedPoles.Add(connectedPole))
-            {
-                poleQueue.Enqueue(connectedPole);
-            }
+            int componentIndex = connectionComponentParents.Count;
+            connectionComponentIndex.Add(pole, componentIndex);
+            connectionComponentParents.Add(componentIndex);
+            connectionComponentRanks.Add(0);
         }
 
-        return false;
+        for (int i = 0; existingConnections != null && i < existingConnections.Count; i++)
+        {
+            PoleConnection connection = existingConnections[i];
+            UnionConnectionComponents(connection.FirstPole, connection.SecondPole);
+        }
+    }
+
+    private static void ClearConnectionComponents()
+    {
+        connectionComponentIndex.Clear();
+        connectionComponentParents.Clear();
+        connectionComponentRanks.Clear();
+    }
+
+    private static bool ArePolesInSameComponent(UtilityPole first, UtilityPole second)
+    {
+        if (first == null
+            || second == null
+            || !connectionComponentIndex.TryGetValue(first, out int firstIndex)
+            || !connectionComponentIndex.TryGetValue(second, out int secondIndex))
+        {
+            return false;
+        }
+
+        return FindConnectionComponentRoot(firstIndex) == FindConnectionComponentRoot(secondIndex);
+    }
+
+    private static void UnionConnectionComponents(UtilityPole first, UtilityPole second)
+    {
+        if (first == null
+            || second == null
+            || !connectionComponentIndex.TryGetValue(first, out int firstIndex)
+            || !connectionComponentIndex.TryGetValue(second, out int secondIndex))
+        {
+            return;
+        }
+
+        int firstRoot = FindConnectionComponentRoot(firstIndex);
+        int secondRoot = FindConnectionComponentRoot(secondIndex);
+        if (firstRoot == secondRoot)
+        {
+            return;
+        }
+
+        byte firstRank = connectionComponentRanks[firstRoot];
+        byte secondRank = connectionComponentRanks[secondRoot];
+        if (firstRank < secondRank)
+        {
+            connectionComponentParents[firstRoot] = secondRoot;
+            return;
+        }
+
+        connectionComponentParents[secondRoot] = firstRoot;
+        if (firstRank == secondRank)
+        {
+            connectionComponentRanks[firstRoot] = (byte)(firstRank + 1);
+        }
+    }
+
+    private static int FindConnectionComponentRoot(int index)
+    {
+        int root = index;
+        while (connectionComponentParents[root] != root)
+        {
+            root = connectionComponentParents[root];
+        }
+
+        while (connectionComponentParents[index] != index)
+        {
+            int parent = connectionComponentParents[index];
+            connectionComponentParents[index] = root;
+            index = parent;
+        }
+
+        return root;
     }
 
     private static void MarkConnectionLinePointsOccupied(PoleConnection connection)
@@ -2755,14 +2904,45 @@ public partial class UtilityPole : InstallationObject
         return difference < 0f ? -1 : 1;
     }
 
-    private static UtilityPole GetConnectedPole(PoleConnection connection, UtilityPole pole)
+    private static void RebuildPoleConnectionAdjacency()
     {
-        if (connection.FirstPole == pole)
+        ClearPoleConnectionAdjacency();
+        for (int i = 0; i < poleConnections.Count; i++)
         {
-            return connection.SecondPole;
+            PoleConnection connection = poleConnections[i];
+            AddConnectedPole(connection.FirstPole, connection.SecondPole);
+            AddConnectedPole(connection.SecondPole, connection.FirstPole);
+        }
+    }
+
+    private static void AddConnectedPole(UtilityPole pole, UtilityPole connectedPole)
+    {
+        if (pole == null || connectedPole == null)
+        {
+            return;
         }
 
-        return connection.SecondPole == pole ? connection.FirstPole : null;
+        if (!connectedPolesByPole.TryGetValue(pole, out List<UtilityPole> connectedPoles))
+        {
+            connectedPoles = connectedPoleListPool.Count > 0
+                ? connectedPoleListPool.Pop()
+                : new List<UtilityPole>(4);
+            connectedPolesByPole.Add(pole, connectedPoles);
+        }
+
+        connectedPoles.Add(connectedPole);
+    }
+
+    private static void ClearPoleConnectionAdjacency()
+    {
+        foreach (KeyValuePair<UtilityPole, List<UtilityPole>> entry in connectedPolesByPole)
+        {
+            List<UtilityPole> connectedPoles = entry.Value;
+            connectedPoles.Clear();
+            connectedPoleListPool.Push(connectedPoles);
+        }
+
+        connectedPolesByPole.Clear();
     }
 
     private static void EnsureNetworksEvaluated(bool refreshLineVisuals = true)
@@ -2787,6 +2967,10 @@ public partial class UtilityPole : InstallationObject
 
     private static void RebuildNetworks()
     {
+        using var sample = MapObjectTickProfiler.SampleNamed(
+            "ElectricPower",
+            nameof(UtilityPole),
+            "Utility Pole Network Rebuild");
         EnsurePoleConnectionsEvaluated();
         ClearPoleSupplyCoordinateCache();
         networks.Clear();
@@ -2823,9 +3007,14 @@ public partial class UtilityPole : InstallationObject
                 UtilityPole pole = poleQueue.Dequeue();
                 network.Poles.Add(pole);
 
-                for (int connectionIndex = 0; connectionIndex < poleConnections.Count; connectionIndex++)
+                if (!connectedPolesByPole.TryGetValue(pole, out List<UtilityPole> connectedPoles))
                 {
-                    UtilityPole candidate = GetConnectedPole(poleConnections[connectionIndex], pole);
+                    continue;
+                }
+
+                for (int connectionIndex = 0; connectionIndex < connectedPoles.Count; connectionIndex++)
+                {
+                    UtilityPole candidate = connectedPoles[connectionIndex];
                     if (candidate == null || visitedPoles.Contains(candidate))
                     {
                         continue;
@@ -2843,7 +3032,7 @@ public partial class UtilityPole : InstallationObject
         RebuildNetworkSupplyAreasFromCache();
 
         RefreshNetworkRuntimeValues(true);
-        InputOutputModule.WakeElectricRuntimeModules();
+        RequestElectricRuntimeModulesWake();
     }
 
     private static bool IsValidPlacedPole(UtilityPole pole)
@@ -3066,6 +3255,7 @@ public partial class UtilityPole : InstallationObject
         }
 
         networkRuntimeEvaluatedSimulationTick = currentSimulationTick;
+        networkRuntimeEvaluationCount++;
         RefreshRobotArmConsumers();
         using var sample = MapObjectTickProfiler.SampleNamed("Runtime", nameof(UtilityPole), "Electric Network Runtime");
         for (int i = 0; i < networks.Count; i++)
@@ -3123,6 +3313,126 @@ public partial class UtilityPole : InstallationObject
                 network.ProductionWatts += generatorWatts;
             }
         }
+    }
+
+    private static void BuildSpatialConnectionCandidates(bool requirePreviewEndpoint)
+    {
+        ClearConnectionPoleSpatialIndex();
+        connectionPoleOrder.Clear();
+        int maximumConnectionRadius = 0;
+        for (int i = 0; i < connectionPoleScratch.Count; i++)
+        {
+            UtilityPole pole = connectionPoleScratch[i];
+            if (pole == null || !TryGetPoleAnchorCoordinate(pole, out _))
+            {
+                continue;
+            }
+
+            connectionPoleOrder[pole] = i;
+            maximumConnectionRadius = Mathf.Max(maximumConnectionRadius, pole.ConnectionRadiusCells);
+        }
+
+        int spatialCellSize = Mathf.Max(1, maximumConnectionRadius);
+        for (int i = 0; i < connectionPoleScratch.Count; i++)
+        {
+            UtilityPole pole = connectionPoleScratch[i];
+            if (pole == null || !TryGetPoleAnchorCoordinate(pole, out Vector2Int anchor))
+            {
+                continue;
+            }
+
+            Vector2Int spatialCell = GetConnectionSpatialCell(anchor, spatialCellSize);
+            if (!connectionPolesByCoordinate.TryGetValue(spatialCell, out List<UtilityPole> poles))
+            {
+                poles = connectionPoleListPool.Count > 0
+                    ? connectionPoleListPool.Pop()
+                    : new List<UtilityPole>(1);
+                connectionPolesByCoordinate.Add(spatialCell, poles);
+            }
+
+            poles.Add(pole);
+        }
+
+        for (int i = 0; i < connectionPoleScratch.Count; i++)
+        {
+            UtilityPole first = connectionPoleScratch[i];
+            if (first == null || !TryGetPoleAnchorCoordinate(first, out Vector2Int firstAnchor))
+            {
+                continue;
+            }
+
+            Vector2Int minimumCell = GetConnectionSpatialCell(
+                firstAnchor - new Vector2Int(maximumConnectionRadius, maximumConnectionRadius),
+                spatialCellSize);
+            Vector2Int maximumCell = GetConnectionSpatialCell(
+                firstAnchor + new Vector2Int(maximumConnectionRadius, maximumConnectionRadius),
+                spatialCellSize);
+            for (int y = minimumCell.y; y <= maximumCell.y; y++)
+            {
+                for (int x = minimumCell.x; x <= maximumCell.x; x++)
+                {
+                    if (!connectionPolesByCoordinate.TryGetValue(
+                            new Vector2Int(x, y),
+                            out List<UtilityPole> nearbyPoles))
+                    {
+                        continue;
+                    }
+
+                    for (int candidateIndex = 0; candidateIndex < nearbyPoles.Count; candidateIndex++)
+                    {
+                        UtilityPole second = nearbyPoles[candidateIndex];
+                        if (second == null
+                            || !connectionPoleOrder.TryGetValue(second, out int secondOrder)
+                            || secondOrder <= i
+                            || requirePreviewEndpoint
+                               && !IsPreviewPole(first)
+                               && !IsPreviewPole(second)
+                            || !ArePolesAutoConnected(first, second)
+                            || !TryGetBestLinePointDistanceSqr(
+                                first,
+                                second,
+                                out float bestLinePointDistanceSqr))
+                        {
+                            continue;
+                        }
+
+                        connectionCandidateScratch.Add(new PoleConnectionCandidate(
+                            first,
+                            second,
+                            GetPoleDistanceSqr(first, second),
+                            bestLinePointDistanceSqr));
+                    }
+                }
+            }
+        }
+
+        ClearConnectionPoleSpatialIndex();
+        connectionPoleOrder.Clear();
+    }
+
+    private static Vector2Int GetConnectionSpatialCell(Vector2Int anchor, int cellSize)
+    {
+        float normalizedCellSize = Mathf.Max(1, cellSize);
+        return new Vector2Int(
+            Mathf.FloorToInt(anchor.x / normalizedCellSize),
+            Mathf.FloorToInt(anchor.y / normalizedCellSize));
+    }
+
+    private static void ClearConnectionPoleSpatialIndex()
+    {
+        foreach (KeyValuePair<Vector2Int, List<UtilityPole>> entry in connectionPolesByCoordinate)
+        {
+            List<UtilityPole> poles = entry.Value;
+            if (poles == null)
+            {
+                continue;
+            }
+
+            poles.Clear();
+            connectionPoleListPool.Push(poles);
+        }
+
+        connectionPolesByCoordinate.Clear();
     }
 
     private static bool IsElectricNetworkParticipant(InstallationObject installationObject)

@@ -114,6 +114,8 @@ public class Pipe : InstallationObject
 
     protected override void OnDisable()
     {
+        if (ProjectFApplicationLifecycle.IsQuitting) return;
+
         InvalidateFluidDisplayNetworkCache();
         SetFluidDisplayVisible(false, true);
         base.OnDisable();
@@ -121,6 +123,8 @@ public class Pipe : InstallationObject
     }
 
     protected override bool UsesManagedVisualUpdates => true;
+    protected override bool RequiresManagedVisualUpdate =>
+        Time.unscaledTime >= nextFluidDisplayRefreshTime;
 
     protected override void OnManagedVisualsResumed() => RefreshFluidDisplayImmediately();
 

@@ -13,6 +13,7 @@ public class Fluidtank : InstallationObject, IMapObjectUpdateTick, IMapObjectUpd
     private MeshRenderer fluidColor;
 
     private MaterialPropertyBlock fluidColorPropertyBlock;
+    private int displayedFluidColorItemId = int.MinValue;
 
     private static readonly Vector2Int[] FluidCardinalDirections =
     {
@@ -70,6 +71,7 @@ public class Fluidtank : InstallationObject, IMapObjectUpdateTick, IMapObjectUpd
     private bool hasCachedDefaultPipeLocalPositions;
     private bool hasFlatCarMountedPresentationState;
     private bool isFlatCarMountedPresentation;
+    private bool runtimeTickSleeping;
 
     public float ManagedUpdateTickIntervalSeconds => FluidTankUpdateIntervalSeconds;
     public Vector3 FlatCarMountedLocalPosition => Vector3.down * flatCarMountedLowering;
@@ -292,15 +294,20 @@ public class Fluidtank : InstallationObject, IMapObjectUpdateTick, IMapObjectUpd
             InputOutputModule.RuntimePipeTopologyChanged += HandleRuntimePipeTopologyChanged;
         }
 
+        FacilitySimulationWorld.Register(this);
         InvalidateFluidNetworkTopology();
-        FacilitySimulationWorld.Register(this, true);
+        WakeRuntimeTick();
         RefreshAllPipeVisuals();
+        displayedFluidColorItemId = int.MinValue;
         RefreshFluidColor();
     }
 
     protected override void OnDisable()
     {
+        if (ProjectFApplicationLifecycle.IsQuitting) return;
+
         FacilitySimulationWorld.Unregister(this);
+        runtimeTickSleeping = false;
         ActiveFluidTanks.Remove(this);
         if (ActiveFluidTanks.Count == 0)
         {
@@ -320,15 +327,30 @@ public class Fluidtank : InstallationObject, IMapObjectUpdateTick, IMapObjectUpd
         if (deltaTime <= 0f
             || !isActiveAndEnabled
             || !CanStoreFluid
-            || !HasFluidStorageSpace
-            || !EnsureConnectedTankCache())
+            || !HasFluidStorageSpace)
         {
+            SetRuntimeTickSleeping(true);
             return;
         }
 
-        Fluidtank sourceTank = FindBestEqualizationSource();
+        Fluidtank sourceTank;
+        using (MapObjectTickProfiler.SampleNamed(
+                   "Simulation",
+                   nameof(Fluidtank),
+                   "Fluid Input Storage Search"))
+        {
+            if (!EnsureConnectedTankCache())
+            {
+                SetRuntimeTickSleeping(true);
+                return;
+            }
+
+            sourceTank = FindBestEqualizationSource();
+        }
+
         if (sourceTank == null)
         {
+            SetRuntimeTickSleeping(true);
             return;
         }
 
@@ -345,29 +367,53 @@ public class Fluidtank : InstallationObject, IMapObjectUpdateTick, IMapObjectUpd
             AvailableFluidStorageLiters,
             sourceTank.StoredFluidLiters,
             CalculateFluidEqualizationTransferLiters(sourceTank, this));
-        float transferTemperatureCelsius = sourceTank.GetStoredFluidTemperatureCelsius(fluidItemId);
-        if (fluidItemId < 0
-            || transferLiters <= 0.0001f
-            || !sourceTank.TryConsumeFluidLiters(fluidItemId, transferLiters, out float consumedLiters)
-            || consumedLiters <= 0.0001f)
+        if (fluidItemId < 0 || transferLiters <= 0.0001f)
         {
+            SetRuntimeTickSleeping(true);
             return;
         }
 
-        TryAddFluidLiters(
-            fluidItemId,
-            consumedLiters,
-            transferTemperatureCelsius,
-            out float acceptedLiters);
-        float rejectedLiters = consumedLiters - Mathf.Max(0f, acceptedLiters);
-        if (rejectedLiters > 0.0001f)
+        using (MapObjectTickProfiler.SampleNamed(
+                   "Simulation",
+                   nameof(Fluidtank),
+                   "Fluid Input Transfer"))
         {
-            sourceTank.TryAddFluidLiters(
+            float transferTemperatureCelsius = sourceTank.GetStoredFluidTemperatureCelsius(fluidItemId);
+            if (!sourceTank.TryConsumeFluidLiters(
+                    fluidItemId,
+                    transferLiters,
+                    out float consumedLiters)
+                || consumedLiters <= 0.0001f)
+            {
+                SetRuntimeTickSleeping(true);
+                return;
+            }
+
+            TryAddFluidLiters(
                 fluidItemId,
-                rejectedLiters,
+                consumedLiters,
                 transferTemperatureCelsius,
-                out _);
+                out float acceptedLiters);
+            float rejectedLiters = consumedLiters - Mathf.Max(0f, acceptedLiters);
+            if (rejectedLiters > 0.0001f)
+            {
+                sourceTank.TryAddFluidLiters(
+                    fluidItemId,
+                    rejectedLiters,
+                    transferTemperatureCelsius,
+                    out _);
+            }
         }
+
+        bool hasRemainingSource;
+        using (MapObjectTickProfiler.SampleNamed(
+                   "Simulation",
+                   nameof(Fluidtank),
+                   "Fluid Input Storage Search"))
+        {
+            hasRemainingSource = FindBestEqualizationSource() != null;
+        }
+        SetRuntimeTickSleeping(!hasRemainingSource);
     }
 
     protected override void OnStoredFluidChanged(
@@ -381,6 +427,14 @@ public class Fluidtank : InstallationObject, IMapObjectUpdateTick, IMapObjectUpd
             previousStoredLiters,
             currentFluidItemId,
             currentStoredLiters);
+
+        using (MapObjectTickProfiler.SampleNamed(
+                   "Simulation",
+                   nameof(Fluidtank),
+                   "Fluid Tank Wake Propagation"))
+        {
+            WakeConnectedFluidTankTicks();
+        }
 
         RefreshFluidColor();
         if (previousFluidItemId != currentFluidItemId)
@@ -398,15 +452,22 @@ public class Fluidtank : InstallationObject, IMapObjectUpdateTick, IMapObjectUpd
         }
 
         int fluidItemId = StoredFluidItemId;
+        if (displayedFluidColorItemId == fluidItemId)
+        {
+            return;
+        }
+
         ItemDefinition definition = fluidItemId >= 0
             ? InputOutputModule.ResolveItemDefinition(fluidItemId)
             : null;
         if (definition == null)
         {
             fluidColor.SetPropertyBlock(null);
+            displayedFluidColorItemId = fluidItemId < 0 ? fluidItemId : int.MinValue;
             return;
         }
 
+        displayedFluidColorItemId = fluidItemId;
         fluidColorPropertyBlock ??= new MaterialPropertyBlock();
         fluidColor.GetPropertyBlock(fluidColorPropertyBlock);
         Color displayColor = definition.fluidDisplayColor;
@@ -461,8 +522,13 @@ public class Fluidtank : InstallationObject, IMapObjectUpdateTick, IMapObjectUpd
         }
     }
 
-    private static void HandlePlacementTopologyChanged(InstallationObject _)
+    private static void HandlePlacementTopologyChanged(InstallationObject installationObject)
     {
+        if (!InputOutputModule.AffectsRuntimeFluidTopology(installationObject))
+        {
+            return;
+        }
+
         InvalidateFluidNetworkTopology();
         RefreshAllPipeVisuals();
     }
@@ -483,6 +549,72 @@ public class Fluidtank : InstallationObject, IMapObjectUpdateTick, IMapObjectUpd
                 fluidNetworkTopologyVersion = 1;
             }
         }
+
+        WakeAllRuntimeTicks();
+    }
+
+    private void WakeConnectedFluidTankTicks()
+    {
+        if (runtimeTickSleeping)
+        {
+            WakeRuntimeTick();
+        }
+
+        if (connectedTankCacheTopologyVersion != fluidNetworkTopologyVersion)
+        {
+            WakeAllRuntimeTicks();
+            return;
+        }
+
+        for (int i = 0; i < connectedTankCache.Count; i++)
+        {
+            Fluidtank tank = connectedTankCache[i];
+            if (tank != null && tank.runtimeTickSleeping)
+            {
+                tank.WakeRuntimeTick();
+            }
+        }
+    }
+
+    private static void WakeAllRuntimeTicks()
+    {
+        foreach (Fluidtank tank in ActiveFluidTanks)
+        {
+            if (tank != null && tank.runtimeTickSleeping)
+            {
+                tank.WakeRuntimeTick();
+            }
+        }
+    }
+
+    private void WakeRuntimeTick()
+    {
+        if (!Application.isPlaying
+            || !isActiveAndEnabled)
+        {
+            return;
+        }
+
+        runtimeTickSleeping = false;
+        SetSleepAwakeDebugSleeping(false);
+        if (!FacilitySimulationWorld.IsScheduled(this))
+        {
+            FacilitySimulationWorld.SetScheduled(this, true);
+        }
+    }
+
+    private void SetRuntimeTickSleeping(bool sleeping)
+    {
+        bool shouldRemainScheduled = !sleeping && isActiveAndEnabled;
+        if (runtimeTickSleeping == sleeping
+            && FacilitySimulationWorld.IsScheduled(this) == shouldRemainScheduled)
+        {
+            return;
+        }
+
+        runtimeTickSleeping = sleeping;
+        FacilitySimulationWorld.SetScheduled(this, shouldRemainScheduled);
+        SetSleepAwakeDebugSleeping(runtimeTickSleeping);
     }
 
     private bool EnsureConnectedTankCache()

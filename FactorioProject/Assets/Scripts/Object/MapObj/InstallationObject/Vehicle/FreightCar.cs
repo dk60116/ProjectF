@@ -602,6 +602,7 @@ public class FreightCar : Train,
         }
 
         stack.RemoveAt(stack.Count - 1);
+        MarkPersistenceStateDirty();
         if (releasePortableObject)
         {
             ReleaseTakenPortableObject(portableObject);
@@ -758,6 +759,8 @@ public class FreightCar : Train,
 
     protected override void OnDisable()
     {
+        if (ProjectFApplicationLifecycle.IsQuitting) return;
+
         if (fuelRoleIcon != null)
         {
             fuelRoleIcon.enabled = false;
@@ -862,6 +865,7 @@ public class FreightCar : Train,
         Vector3 finalLocalPosition = new Vector3(0f, objectIndex * Mathf.Max(0.001f, itemStackVerticalSpacing), 0f);
         Vector3 finalWorldPosition = itemPoint.TransformPoint(finalLocalPosition);
         stack.Add(portableObject);
+        MarkPersistenceStateDirty();
         NotifyRobotArmsAtRuntimeCoordinates();
         targetPortableObject = portableObject;
 

@@ -105,7 +105,7 @@ public interface IPlayerItemStoragePortablePreview
         out PortableObject previewPortableObject);
 }
 
-public partial class InstallationObject : MapObject, IMapObjectSimulationIdentity
+public partial class InstallationObject : MapObject, IMapObjectSimulationIdentity, IPersistenceDirtyTrackable
 {
     protected const float ConnectedFluidStorageTransferLitersPerSecond = 50f;
     protected const float FluidPressureLossPerPipe = 0.01f;
@@ -144,6 +144,7 @@ public partial class InstallationObject : MapObject, IMapObjectSimulationIdentit
     private static readonly Dictionary<Vector2Int, ulong> ActiveInstanceVersionsByRuntimeGridCoordinate =
         new Dictionary<Vector2Int, ulong>();
     private static int activeInstanceVersion;
+    private static int staticRenderActiveInstanceVersion;
     private static ulong nextActiveInstanceCoordinateVersion = 1UL;
     private static float cachedGlobalMaxFocusActivationRadius;
     private static bool globalMaxFocusActivationRadiusDirty = true;
@@ -157,6 +158,7 @@ public partial class InstallationObject : MapObject, IMapObjectSimulationIdentit
         ActiveInstancesByRuntimeGridCoordinate.Clear();
         ActiveInstanceVersionsByRuntimeGridCoordinate.Clear();
         activeInstanceVersion = 0;
+        staticRenderActiveInstanceVersion = 0;
         nextActiveInstanceCoordinateVersion = 1UL;
     }
 
@@ -463,6 +465,7 @@ public partial class InstallationObject : MapObject, IMapObjectSimulationIdentit
     }
 
     public static int ActiveInstanceVersion => activeInstanceVersion;
+    public static int StaticRenderActiveInstanceVersion => staticRenderActiveInstanceVersion;
 
     public static ulong GetActiveInstanceVersionAtRuntimeGridCoordinate(Vector2Int coordinate)
     {
@@ -511,6 +514,7 @@ public partial class InstallationObject : MapObject, IMapObjectSimulationIdentit
 
     public virtual void PrepareForPool()
     {
+        ResetSleepAwakeDebugVisual();
         UnregisterRuntimeCoordinateIndex(this);
 
         runtimeAnchorCoordinate = default;
@@ -544,6 +548,7 @@ public partial class InstallationObject : MapObject, IMapObjectSimulationIdentit
 
         runtimeMapObjectHandle = handle;
         activeInstanceVersion++;
+        staticRenderActiveInstanceVersion++;
     }
 
     internal void SetMapObjectTypeVisualTransition(bool active)
@@ -555,18 +560,39 @@ public partial class InstallationObject : MapObject, IMapObjectSimulationIdentit
 
         mapObjectTypeVisualTransition = active;
         activeInstanceVersion++;
+        staticRenderActiveInstanceVersion++;
     }
 
     protected virtual void OnPlacementRuntimeChanged()
     {
         activeInstanceVersion++;
+        RefreshManagedColliderCullingSpatialRegistration();
+        if (this is IMapObjectUpdateTick tick)
+        {
+            FacilitySimulationWorld.RefreshSchedule(tick);
+        }
+        MarkPersistenceStateDirty();
         PlacementRuntimeChanged?.Invoke(this);
     }
 
     protected virtual void OnPlacementRuntimeCleared()
     {
+        ResetSleepAwakeDebugVisual();
         activeInstanceVersion++;
+        staticRenderActiveInstanceVersion++;
+        RefreshManagedColliderCullingSpatialRegistration();
         PlacementRuntimeCleared?.Invoke(this);
+    }
+
+    public void MarkPersistenceStateDirty()
+    {
+        TerrainGenerator.Active?.MarkPersistenceStateDirty(this);
+    }
+
+    protected override void OnItemFilterMaskChanged()
+    {
+        MarkPersistenceStateDirty();
+        base.OnItemFilterMaskChanged();
     }
 
     public static int CompareSimulationOrder(InstallationObject left, InstallationObject right)
@@ -881,6 +907,7 @@ public partial class InstallationObject : MapObject, IMapObjectSimulationIdentit
         int currentFluidItemId,
         float currentStoredLiters)
     {
+        MarkPersistenceStateDirty();
         if (previousFluidItemId != currentFluidItemId)
         {
             Pipe.InvalidateFluidDisplayNetworkCache(this);
@@ -903,11 +930,30 @@ public partial class InstallationObject : MapObject, IMapObjectSimulationIdentit
             previousLiters,
             currentFluidItemId,
             currentLiters);
+
+        bool fluidItemChanged = previousFluidItemId != currentFluidItemId;
+        if (currentLiters > previousLiters + 0.0001f
+            || fluidItemChanged && currentLiters > 0.0001f)
+        {
+            InputOutputModule.NotifyFluidInputAvailabilityIncreased(this);
+        }
+
+        if (currentLiters + 0.0001f < previousLiters || fluidItemChanged)
+        {
+            InputOutputModule.NotifyFluidOutputCapacityIncreased(this);
+        }
     }
 
     protected void SetStoredFluidTemperatureCelsius(float temperatureCelsius)
     {
-        storedFluidTemperatureCelsius = NormalizeFluidTemperatureCelsius(temperatureCelsius);
+        float normalizedTemperature = NormalizeFluidTemperatureCelsius(temperatureCelsius);
+        if (Mathf.Approximately(storedFluidTemperatureCelsius, normalizedTemperature))
+        {
+            return;
+        }
+
+        storedFluidTemperatureCelsius = normalizedTemperature;
+        MarkPersistenceStateDirty();
     }
 
     protected static float NormalizeFluidTemperatureCelsius(float temperatureCelsius)
@@ -991,21 +1037,30 @@ public partial class InstallationObject : MapObject, IMapObjectSimulationIdentit
         if (ActiveInstances.Add(this))
         {
             activeInstanceVersion++;
+            staticRenderActiveInstanceVersion++;
         }
         RegisterRuntimeCoordinateIndex(this);
         globalMaxFocusActivationRadiusDirty = true;
         RefreshInstalledDirectionFromCurrentTransform();
         ApplyRuntimeShadowSettings();
         RegisterManagedVisualUpdates();
+        RegisterManagedColliderCulling();
     }
 
     protected virtual void OnDisable()
     {
+        // Process shutdown does not need to rebuild the managed world indices.
+        // Avoid an O(installation count) teardown pass before the OS can exit.
+        if (ProjectFApplicationLifecycle.IsQuitting) return;
+
+        ResetSleepAwakeDebugVisual();
+        UnregisterManagedColliderCulling();
         UnregisterManagedVisualUpdates();
         UnregisterRuntimeCoordinateIndex(this);
         if (ActiveInstances.Remove(this))
         {
             activeInstanceVersion++;
+            staticRenderActiveInstanceVersion++;
         }
         globalMaxFocusActivationRadiusDirty = true;
     }

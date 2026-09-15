@@ -376,6 +376,8 @@ public sealed partial class PortableItemRenderer : MonoBehaviour
     private void OnDestroy()
     {
         conveyorItemTransformJobProcessor.Dispose();
+        if (ProjectFApplicationLifecycle.IsQuitting) return;
+
         portableObjectBatches.Dispose();
         virtualConveyorBatches.Dispose();
         dynamicVirtualConveyorBatches.Dispose();
@@ -383,6 +385,8 @@ public sealed partial class PortableItemRenderer : MonoBehaviour
 
     private void OnDisable()
     {
+        if (ProjectFApplicationLifecycle.IsQuitting) return;
+
         portableObjectBatches.SuspendRendering();
         virtualConveyorBatches.SuspendRendering();
         dynamicVirtualConveyorBatches.SuspendRendering();

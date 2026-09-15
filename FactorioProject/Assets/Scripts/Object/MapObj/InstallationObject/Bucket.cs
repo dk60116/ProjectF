@@ -89,6 +89,8 @@ public class Bucket : InstallationObject,
 
     protected override void OnDisable()
     {
+        if (ProjectFApplicationLifecycle.IsQuitting) return;
+
         PlacementRuntimeChanged -= HandleFluidTopologyChanged;
         PlacementRuntimeCleared -= HandleFluidTopologyChanged;
         bucketConversionPending = false;
@@ -523,6 +525,11 @@ public class Bucket : InstallationObject,
     private void HandleFluidTopologyChanged(InstallationObject changedInstallation)
     {
         if (!Application.isPlaying || !isActiveAndEnabled)
+        {
+            return;
+        }
+
+        if (!InputOutputModule.AffectsRuntimeFluidTopology(changedInstallation))
         {
             return;
         }

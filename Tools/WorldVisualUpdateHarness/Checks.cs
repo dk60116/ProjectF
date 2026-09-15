@@ -4,6 +4,11 @@ using System.Reflection;
 using ProjectF.Rendering;
 using UnityEngine;
 
+public static class ProjectFApplicationLifecycle
+{
+    public static bool IsQuitting => false;
+}
+
 static class Checks
 {
     private static int checks;
@@ -24,6 +29,10 @@ static class Checks
         state.SetParticle(effect, true, 2f, false);
         state.Tick(culling, 0.1f);
         Check(owner.VisualTicks == 1 && effect.isEmitting, "visible visual work runs");
+        owner.NeedsVisualUpdate = false;
+        Check(!state.Tick(culling, 0.1f) && owner.VisualTicks == 1,
+            "unchanged visible installation skips managed visual dispatch");
+        owner.NeedsVisualUpdate = true;
         culling.InView = false;
         state.Tick(culling, 0.1f);
         Check(owner.VisualTicks == 1 && !state.Visible, "offscreen skips visual work");
@@ -111,17 +120,21 @@ static class Checks
         var managerCulling = (CameraRenderCulling)typeof(WorldVisualUpdateManager)
             .GetField("culling", BindingFlags.Instance | BindingFlags.NonPublic).GetValue(manager);
         managerCulling.InView = false;
-        Time.frameCount++;
-        typeof(WorldVisualUpdateManager).GetMethod("LateUpdate", BindingFlags.Instance | BindingFlags.NonPublic)
-            .Invoke(manager, null);
+        for (int frame = 0; frame < 4; frame++)
+        {
+            Time.frameCount++;
+            typeof(WorldVisualUpdateManager).GetMethod("LateUpdate", BindingFlags.Instance | BindingFlags.NonPublic)
+                .Invoke(manager, null);
+        }
         Check(manager.CulledCount == 2 && manager.LastVisualUpdateCount == 0,
-            "visible targets cull script animation without delay");
+            "visible targets cull script animation within stagger interval");
         int hiddenTicks = a.Owner.VisualTicks + c.Owner.VisualTicks;
         Time.frameCount++;
         typeof(WorldVisualUpdateManager).GetMethod("LateUpdate", BindingFlags.Instance | BindingFlags.NonPublic)
             .Invoke(manager, null);
         Check(a.Owner.VisualTicks + c.Owner.VisualTicks == hiddenTicks
-              && manager.LastDeferredCulledCount == 2,
+              && manager.LastDeferredCulledCount >= 1
+              && manager.LastTickedCount <= 1,
             "hidden targets defer redundant matrix/frustum work");
         managerCulling.InView = true;
         for (int frame = 0; frame < 4; frame++)
@@ -148,6 +161,7 @@ public class InstallationObject : MonoBehaviour
 {
     private readonly List<Component> components = new List<Component>();
     public int VisualTicks, Resumes;
+    public bool NeedsVisualUpdate = true;
     public Action OnResume;
     public InstallationObject() { gameObject.Owner = this; }
     public T Add<T>(T component) where T : Component
@@ -162,7 +176,12 @@ public class InstallationObject : MonoBehaviour
         foreach (var component in components) if (component is T target) result.Add(target);
         return result.ToArray();
     }
-    internal void RunManagedVisualUpdate(float dt) { VisualTicks++; }
+    internal bool RunManagedVisualUpdate(float dt)
+    {
+        if (!NeedsVisualUpdate) return false;
+        VisualTicks++;
+        return true;
+    }
     internal void RefreshManagedVisualState() { Resumes++; OnResume?.Invoke(); }
 }
 public static class VirtualRenderBatchCollection

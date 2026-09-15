@@ -1,11 +1,17 @@
 using System;
 using System.Collections;
 using System.Collections.Generic;
+using ProjectF.Persistence;
 using Unity.Profiling;
 using UnityEngine;
 
 internal sealed class TerrainChunkStreamingScheduler
 {
+    // A null child yield is a budget checkpoint and can be consumed in the same
+    // frame. This marker is reserved for work that must wait for a later frame,
+    // such as polling an asynchronous terrain job without blocking on Complete().
+    internal static readonly object WaitForNextFrame = new object();
+
     private readonly MonoBehaviour owner;
     private readonly Func<Vector2Int, bool> isChunkLoaded;
     private readonly Func<Vector2Int, bool> shouldGenerateChunk;
@@ -208,12 +214,23 @@ internal sealed class TerrainChunkStreamingScheduler
                         _ = HasFrameBudget;
                         bool hasNext;
                         object current = null;
+                        long stepStartedAt = System.Diagnostics.Stopwatch.GetTimestamp();
                         using (generateStepMarker.Auto())
                         {
-                            hasNext = AdvanceChunkRoutine(chunkRoutine);
-                            if (hasNext)
+                            try
                             {
-                                current = chunkRoutine.Current;
+                                hasNext = AdvanceChunkRoutine(chunkRoutine);
+                                if (hasNext)
+                                {
+                                    current = chunkRoutine.Current;
+                                }
+                            }
+                            finally
+                            {
+                                SlotLoadTimingLog.RecordStageWork(
+                                    "chunks",
+                                    (System.Diagnostics.Stopwatch.GetTimestamp() - stepStartedAt)
+                                    * (1000d / System.Diagnostics.Stopwatch.Frequency));
                             }
                         }
 
@@ -223,7 +240,26 @@ internal sealed class TerrainChunkStreamingScheduler
                             break;
                         }
 
-                        yield return current;
+                        if (ReferenceEquals(current, WaitForNextFrame))
+                        {
+                            yield return null;
+                            continue;
+                        }
+
+                        if (current != null)
+                        {
+                            yield return current;
+                            continue;
+                        }
+
+                        // Child routines use null as a cooperative checkpoint. Keep
+                        // consuming checkpoints while the shared frame budget remains;
+                        // mapping every checkpoint to a Unity frame made large saves
+                        // pay thousands of frames of scheduler latency.
+                        if (!HasFrameBudget)
+                        {
+                            yield return null;
+                        }
                     }
                 }
                 finally

@@ -210,6 +210,8 @@ public class WorkableObject : InstallationObject
 
     protected override void OnDisable()
     {
+        if (ProjectFApplicationLifecycle.IsQuitting) return;
+
         DisableLegacyRangeVisual();
         ActiveInstances.Remove(this);
         if (selectedRangeVisualRequested && !gameObject.activeInHierarchy)

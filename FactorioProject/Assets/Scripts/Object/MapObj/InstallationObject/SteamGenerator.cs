@@ -1,16 +1,16 @@
 using System.Collections.Generic;
+using ProjectF.Simulation;
 using UnityEngine;
 
-public class SteamGenerator : InputOutputModule
+public class SteamGenerator : InputOutputModule, IFacilityFlowAdapter
 {
     private const float FluidEpsilon = 0.0001f;
-    private const float SteamGenerationStartReserveSeconds = 1.25f;
 
     [SerializeField]
     private InstallationFacingDirection localPipeAreaConnectionDirection = InstallationFacingDirection.PositiveX;
 
-    private bool hasSteamGenerationReserve;
     private bool generationVisualActive;
+    private FacilityFlowBatch fallbackFlowBatch;
 
     [SerializeField]
     private Transform wheelTF;
@@ -26,22 +26,24 @@ public class SteamGenerator : InputOutputModule
             return;
         }
 
-        ApplyPlannedBaseModuleTick(deltaTime);
-        generationVisualActive = ConsumeSteamForGeneration(deltaTime);
-        SetVisualParticleActive(particleEffect, generationVisualActive);
-    }
-
-    public override PersistentState CapturePersistentState()
-    {
-        PersistentState state = base.CapturePersistentState();
-        state.steamGeneratorHasGenerationReserve = hasSteamGenerationReserve;
-        return state;
+        fallbackFlowBatch ??= new FacilityFlowBatch(1);
+        fallbackFlowBatch.Begin();
+        int index = fallbackFlowBatch.ReserveSlot();
+        CaptureFacilityFlow(
+            fallbackFlowBatch,
+            index,
+            deltaTime,
+            MapObjectTickManager.CurrentSimulationTick);
+        fallbackFlowBatch.PlanAll();
+        ApplyFacilityFlowCommit(fallbackFlowBatch, index, deltaTime);
     }
 
     public override void ApplyPersistentState(PersistentState state)
     {
         base.ApplyPersistentState(state);
-        hasSteamGenerationReserve = state != null && state.steamGeneratorHasGenerationReserve;
+        // Generation is a derived runtime state. Restoring the previous frame's
+        // flag can publish power before this generator has consumed any steam.
+        StopGenerationVisuals(true);
         if (isActiveAndEnabled)
         {
             UtilityPole.NotifyElectricPowerSourceStateChanged();
@@ -56,7 +58,8 @@ public class SteamGenerator : InputOutputModule
 
     protected override void OnDisable()
     {
-        hasSteamGenerationReserve = false;
+        if (ProjectFApplicationLifecycle.IsQuitting) return;
+
         StopGenerationVisuals(true);
         base.OnDisable();
         UtilityPole.NotifyElectricPowerSourceStateChanged();
@@ -69,7 +72,8 @@ public class SteamGenerator : InputOutputModule
 
     protected override bool ShouldKeepRuntimeUpdateTickActive()
     {
-        if (!TryGetSteamInputRecipe(out int inputItemId, out _))
+        if (!InputOutputModule.IsInDirectedBoilerSteamChain(this)
+            || !TryGetSteamInputRecipe(out int inputItemId, out _))
         {
             return false;
         }
@@ -79,9 +83,10 @@ public class SteamGenerator : InputOutputModule
             return StoredFluidItemId < 0 || CanProvideFluidItem(inputItemId);
         }
 
-        return CanStoreFluid
-               && HasFluidStorageSpace
-               && HasConnectedFluidSource(inputItemId);
+        // Steam is pushed by a boiler into the directed generator chain. An empty
+        // generator sleeps until TryAddFluidLiters wakes it instead of searching
+        // the bidirectional fluid graph and pulling from a neighbouring row.
+        return false;
     }
 
     public bool TryGetPipeAreaConnectionDirection(Quaternion rotation, out Vector2Int direction)
@@ -255,6 +260,75 @@ public class SteamGenerator : InputOutputModule
         return foundInput && foundTail && inputCoordinate != tailCoordinate;
     }
 
+    public bool CanReceiveSteamFromDirectedPortAtRuntime(
+        Vector2Int sourcePortCoordinate,
+        Vector2Int flowDirection)
+    {
+        if (flowDirection == Vector2Int.zero
+            || !TryGetPlacementRuntime(out Vector2Int anchorCoordinate, out int quarterTurns)
+            || !TryGetInputCoordinateAndDirection(
+                this,
+                anchorCoordinate,
+                quarterTurns,
+                out Vector2Int inputCoordinate,
+                out Vector2Int inputDirection)
+            || inputDirection != flowDirection)
+        {
+            return false;
+        }
+
+        TryGetBodyDirectionFromCenter(this, quarterTurns, out Vector2Int bodyDirection);
+        return IsDirectedSteamPortConnection(
+            sourcePortCoordinate,
+            flowDirection,
+            anchorCoordinate,
+            inputCoordinate,
+            inputDirection,
+            bodyDirection);
+    }
+
+    internal static bool IsDirectedSteamPortConnection(
+        Vector2Int sourcePortCoordinate,
+        Vector2Int flowDirection,
+        Vector2Int generatorAnchorCoordinate,
+        Vector2Int inputCoordinate,
+        Vector2Int inputDirection,
+        Vector2Int bodyDirection)
+    {
+        if (flowDirection == Vector2Int.zero || inputDirection != flowDirection)
+        {
+            return false;
+        }
+
+        Vector2Int inputDelta = inputCoordinate - sourcePortCoordinate;
+        if (inputDelta == Vector2Int.zero || inputDelta == flowDirection)
+        {
+            return true;
+        }
+
+        // The dense serial placement overlaps the upstream tail with this
+        // generator's anchor and its input with the upstream tail body cell.
+        return sourcePortCoordinate == generatorAnchorCoordinate
+               && inputCoordinate == sourcePortCoordinate - flowDirection
+               && bodyDirection == flowDirection;
+    }
+
+    public bool TryGetRuntimePipePassTail(
+        out Vector2Int tailCoordinate,
+        out Vector2Int tailDirection)
+    {
+        tailCoordinate = Vector2Int.zero;
+        tailDirection = Vector2Int.zero;
+        return TryGetPlacementRuntime(out Vector2Int anchorCoordinate, out int quarterTurns)
+               && TryGetRuntimePipePassCoordinates(out _, out tailCoordinate)
+               && TryGetPipePassTailDirectionAtCoordinate(
+                   this,
+                   anchorCoordinate,
+                   quarterTurns,
+                   tailCoordinate,
+                   out tailDirection);
+    }
+
     public bool TryGetPipePassTailDirectionAtCoordinate(
         MapObject footprintSource,
         Vector2Int anchorCoordinate,
@@ -328,7 +402,8 @@ public class SteamGenerator : InputOutputModule
             return false;
         }
 
-        if (!HasAvailableSteamGenerationReserve(inputLitersPerSecond))
+        if (!generationVisualActive
+            || !InputOutputModule.IsInDirectedBoilerSteamChain(this))
         {
             return false;
         }
@@ -404,7 +479,12 @@ public class SteamGenerator : InputOutputModule
             return "No utility pole";
         }
 
-        if (!HasAvailableSteamGenerationReserve(inputLitersPerSecond))
+        if (!InputOutputModule.IsInDirectedBoilerSteamChain(this))
+        {
+            return "No boiler steam connection";
+        }
+
+        if (!generationVisualActive)
         {
             return "No steam";
         }
@@ -413,102 +493,83 @@ public class SteamGenerator : InputOutputModule
         return "Generating";
     }
 
-    private bool ConsumeSteamForGeneration(float deltaTime)
+    public void CaptureFacilityFlow(
+        FacilityFlowBatch batch,
+        int index,
+        float deltaTime,
+        long simulationTick)
     {
+        bool hasRecipe = TryGetSteamInputRecipe(out int inputItemId, out int inputLitersPerSecond)
+                         && inputLitersPerSecond > 0;
+        bool valid = hasRecipe
+                     && InputOutputModule.IsInDirectedBoilerSteamChain(this)
+                     && (StoredFluidItemId < 0 || CanProvideFluidItem(inputItemId));
+        batch.ConfigureSteamGenerator(
+            index,
+            inputItemId,
+            inputLitersPerSecond,
+            deltaTime,
+            valid,
+            StoredFluidLiters);
+    }
+
+    public void ApplyFacilityFlow(FacilityFlowBatch batch, int index)
+    {
+        if (!TryBeginPlannedModuleApply(out float deltaTime))
+        {
+            return;
+        }
+
+        ApplyFacilityFlowCommit(batch, index, deltaTime);
+    }
+
+    private void ApplyFacilityFlowCommit(FacilityFlowBatch batch, int index, float deltaTime)
+    {
+        ApplyPlannedBaseModuleTick(deltaTime);
         if (deltaTime <= 0f)
         {
-            return hasSteamGenerationReserve;
+            return;
         }
 
-        if (!TryGetSteamInputRecipe(out int inputItemId, out int inputLitersPerSecond)
-            || inputLitersPerSecond <= 0)
+        int inputItemId = batch.GetSteamInputItemId(index);
+        float requestedLiters = batch.GetSteamRequestedLiters(index);
+        float requiredStoredLiters = batch.GetSteamRequiredLiters(index);
+        if (!batch.IsSteamGeneratorValid(index)
+            || inputItemId < 0
+            || requestedLiters <= FluidEpsilon
+            || (StoredFluidItemId >= 0 && !CanProvideFluidItem(inputItemId)))
         {
-            SetSteamGenerationReserve(false);
-            return false;
+            SetGenerationActive(false);
+            return;
         }
 
-        if (StoredFluidItemId >= 0 && !CanProvideFluidItem(inputItemId))
+        float consumedLiters = 0f;
+        bool generated = StoredFluidLiters + FluidEpsilon >= requiredStoredLiters
+                         && TryConsumeFluidLiters(inputItemId, requestedLiters, out consumedLiters)
+                         && consumedLiters + FluidEpsilon >= requestedLiters;
+        if (generated)
         {
-            SetSteamGenerationReserve(false);
-            return false;
+            RecordFluidNetworkConsumption(inputItemId, consumedLiters);
         }
 
-        float requestedLiters = inputLitersPerSecond * deltaTime;
-        if (requestedLiters <= FluidEpsilon)
-        {
-            return hasSteamGenerationReserve;
-        }
-
-        float requiredStoredLiters = ResolveRequiredSteamReserveLiters(
-            inputLitersPerSecond,
-            requestedLiters);
-        float missingLocalLiters = requiredStoredLiters - StoredFluidLiters;
-        if (missingLocalLiters > FluidEpsilon)
-        {
-            TryPullFluidFromConnectedStorage(inputItemId, missingLocalLiters, out _);
-        }
-
-        if (StoredFluidLiters + FluidEpsilon < requiredStoredLiters
-            || !TryConsumeFluidLiters(inputItemId, requestedLiters, out float consumedLiters)
-            || consumedLiters + FluidEpsilon < requestedLiters)
-        {
-            SetSteamGenerationReserve(false);
-            return false;
-        }
-
-        RecordFluidNetworkConsumption(inputItemId, consumedLiters);
-        SetSteamGenerationReserve(true);
-        return true;
+        SetGenerationActive(generated);
     }
 
     public override void PrepareForPool()
     {
         base.PrepareForPool();
-        hasSteamGenerationReserve = false;
         StopGenerationVisuals(true);
     }
 
-    private bool HasEnoughSteamReserve(int inputLitersPerSecond, float requestedLiters)
+    private void SetGenerationActive(bool active)
     {
-        float requiredStoredLiters = ResolveRequiredSteamReserveLiters(
-            inputLitersPerSecond,
-            requestedLiters);
-        return StoredFluidLiters + FluidEpsilon >= requiredStoredLiters;
-    }
-
-    private bool HasAvailableSteamGenerationReserve(int inputLitersPerSecond)
-    {
-        return hasSteamGenerationReserve || HasEnoughSteamReserve(inputLitersPerSecond, 0f);
-    }
-
-    private float ResolveRequiredSteamReserveLiters(int inputLitersPerSecond, float requestedLiters)
-    {
-        // Once generation has started, the stored reserve is allowed to absorb
-        // uneven boiler/output update timing. Requiring a full second of steam on
-        // every tick made otherwise sufficient supplies repeatedly stop and start.
-        float continueReserveLiters = Mathf.Max(FluidEpsilon, requestedLiters);
-        if (hasSteamGenerationReserve)
-        {
-            return continueReserveLiters;
-        }
-
-        float startReserveLiters = Mathf.Max(
-            continueReserveLiters,
-            inputLitersPerSecond * SteamGenerationStartReserveSeconds);
-        float capacity = FluidStorageCapacityLiters;
-        return capacity > FluidEpsilon
-            ? Mathf.Min(capacity, startReserveLiters)
-            : startReserveLiters;
-    }
-
-    private void SetSteamGenerationReserve(bool hasReserve)
-    {
-        if (hasSteamGenerationReserve == hasReserve)
+        if (generationVisualActive == active)
         {
             return;
         }
 
-        hasSteamGenerationReserve = hasReserve;
+        generationVisualActive = active;
+        MarkManagedRuntimeVisualsDirty();
         UtilityPole.NotifyElectricPowerSourceStateChanged();
     }
 
@@ -570,8 +631,12 @@ public class SteamGenerator : InputOutputModule
         return false;
     }
 
+    protected override bool RequiresManagedVisualUpdate =>
+        base.RequiresManagedVisualUpdate || generationVisualActive;
+
     protected override void TickManagedVisuals(float deltaTime)
     {
+        base.TickManagedVisuals(deltaTime);
         if (!generationVisualActive)
             return;
 
@@ -579,6 +644,11 @@ public class SteamGenerator : InputOutputModule
         {
             wheelTF.Rotate(0f, 0f, -wheelRotationDegreesPerSecond * deltaTime, Space.Self);
         }
+    }
+
+    protected override void OnManagedRuntimeVisualsFlushed()
+    {
+        SetVisualParticleActive(particleEffect, generationVisualActive);
     }
 
     private void StopGenerationVisuals(bool clearParticles)

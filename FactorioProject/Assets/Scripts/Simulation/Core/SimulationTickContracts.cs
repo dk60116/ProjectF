@@ -15,6 +15,11 @@ public interface IMapObjectSimulationIdentity
     long SimulationId { get; }
 }
 
+public interface IPersistenceDirtyTrackable
+{
+    void MarkPersistenceStateDirty();
+}
+
 public interface IMapObjectStagedUpdateTick
 {
     void PlanManagedUpdateTick(float deltaTime);

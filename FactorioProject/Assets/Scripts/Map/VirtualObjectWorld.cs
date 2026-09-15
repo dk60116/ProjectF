@@ -250,6 +250,7 @@ public sealed class VirtualObjectWorld : IDisposable
     private readonly Dictionary<Vector2Int, int> floorStackRecordByCoordinate = new Dictionary<Vector2Int, int>();
     private readonly Dictionary<Vector2Int, int> resourceRecordByCoordinate = new Dictionary<Vector2Int, int>();
     private readonly Dictionary<Vector2Int, int> installationRecordByAnchor = new Dictionary<Vector2Int, int>();
+    private bool coordinateIndexBuildDeferred;
     private int nextId = 1;
     private int version;
     private int itemStackVersion;
@@ -271,6 +272,43 @@ public sealed class VirtualObjectWorld : IDisposable
 
         current = new VirtualObjectWorld();
         return current;
+    }
+
+    public void BeginBulkLoad(int floorStackCount, int resourceCount, int installationCount)
+    {
+        if (coordinateIndexBuildDeferred)
+        {
+            throw new InvalidOperationException("A virtual-object bulk load is already active.");
+        }
+
+        floorStackCount = Math.Max(0, floorStackCount);
+        resourceCount = Math.Max(0, resourceCount);
+        installationCount = Math.Max(0, installationCount);
+        int totalCount = (int)Math.Min(
+            int.MaxValue,
+            (long)floorStackCount + resourceCount + installationCount);
+        recordsById.EnsureCapacity(Math.Max(recordsById.Count, totalCount));
+        floorStackRecordByCoordinate.EnsureCapacity(floorStackCount);
+        resourceRecordByCoordinate.EnsureCapacity(resourceCount);
+        installationRecordByAnchor.EnsureCapacity(installationCount);
+        recordIdsByCoordinate.Clear();
+        recordIdsByCoordinate.EnsureCapacity(Math.Max(recordIdsByCoordinate.Count, totalCount));
+        coordinateIndexBuildDeferred = true;
+    }
+
+    public void CompleteBulkLoad()
+    {
+        if (!coordinateIndexBuildDeferred)
+        {
+            return;
+        }
+
+        coordinateIndexBuildDeferred = false;
+        recordIdsByCoordinate.Clear();
+        foreach (KeyValuePair<int, VirtualObjectRecord> pair in recordsById)
+        {
+            RegisterCoordinateMappings(pair.Value);
+        }
     }
 
     public bool TryGetRecord(VirtualObjectId id, out VirtualObjectRecord record)
@@ -446,6 +484,28 @@ public sealed class VirtualObjectWorld : IDisposable
         }
     }
 
+    public void CopyInstallationRecords(List<VirtualObjectRecord> results, bool includeLiveRecords = false)
+    {
+        if (results == null)
+        {
+            return;
+        }
+
+        results.Clear();
+        foreach (KeyValuePair<Vector2Int, int> pair in installationRecordByAnchor)
+        {
+            if (!recordsById.TryGetValue(pair.Value, out VirtualObjectRecord record)
+                || record == null
+                || record.kind != VirtualObjectKind.Installation
+                || (!includeLiveRecords && record.residency == VirtualObjectResidency.Live))
+            {
+                continue;
+            }
+
+            results.Add(record);
+        }
+    }
+
     public VirtualObjectId UpsertFloorItemStack(
         Vector2Int coordinate,
         IReadOnlyList<int> itemIds,
@@ -501,8 +561,6 @@ public sealed class VirtualObjectWorld : IDisposable
             floorStackRecordByCoordinate,
             coordinate,
             VirtualObjectKind.ItemStack);
-        bool keepsCoordinateMapping = record.occupiedCoordinates.Count == 1
-            && record.occupiedCoordinates[0] == coordinate;
 
         record.residency = residency;
         record.anchorCoordinate = coordinate;
@@ -513,17 +571,8 @@ public sealed class VirtualObjectWorld : IDisposable
         record.count = itemCount;
         record.itemStack = itemStack;
         record.liveInstanceId = 0;
-        if (keepsCoordinateMapping)
-        {
-            recordsById[record.id.Value] = record;
-            version++;
-            itemStackVersion++;
-        }
-        else
-        {
-            ReplaceOccupiedCoordinates(record, coordinate);
-            StoreRecord(record);
-        }
+        UpdateCoordinateMappings(record, coordinate);
+        StoreRecord(record);
 
         return record.id;
     }
@@ -551,7 +600,7 @@ public sealed class VirtualObjectWorld : IDisposable
         record.resourceState = state;
         EnsureMapObjectHandle(record, itemId, record.id.Value);
         record.liveInstanceId = 0;
-        ReplaceOccupiedCoordinates(record, coordinate);
+        UpdateCoordinateMappings(record, coordinate);
         StoreRecord(record);
         return record.id;
     }
@@ -609,20 +658,34 @@ public sealed class VirtualObjectWorld : IDisposable
             installationRecordByAnchor,
             storageKey,
             VirtualObjectKind.Installation);
-
-        record.residency = hasAttachedPose ? VirtualObjectResidency.Live : residency;
-        record.anchorCoordinate = state.anchorCoordinate;
-        record.worldPosition = hasAttachedPose
+        VirtualObjectResidency targetResidency = hasAttachedPose ? VirtualObjectResidency.Live : residency;
+        Vector3 targetWorldPosition = hasAttachedPose
             ? attachedWorldPosition
             : state.hasWorldPose
                 ? state.worldPosition
             : new Vector3(state.anchorCoordinate.x, 0f, state.anchorCoordinate.y);
-        record.worldRotation = hasAttachedPose
+        Quaternion targetWorldRotation = hasAttachedPose
             ? attachedWorldRotation
             : state.hasWorldPose
                 ? state.worldRotation
             : Quaternion.Euler(0f, state.quarterTurns * 90f, 0f);
-        record.quarterTurns = ((state.quarterTurns % 4) + 4) % 4;
+        int targetQuarterTurns = ((state.quarterTurns % 4) + 4) % 4;
+        bool presentationChanged = !record.mapObjectHandle.IsValid
+                                   || record.residency != targetResidency
+                                   || record.anchorCoordinate != state.anchorCoordinate
+                                   || !record.worldPosition.Equals(targetWorldPosition)
+                                   || !record.worldRotation.Equals(targetWorldRotation)
+                                   || record.quarterTurns != targetQuarterTurns
+                                   || record.itemId != state.itemId
+                                   || record.sequence != state.placementSequence
+                                   || record.liveInstanceId != viewInstanceId
+                                   || !CoordinatesMatch(record.occupiedCoordinates, state.occupiedCoordinates);
+
+        record.residency = targetResidency;
+        record.anchorCoordinate = state.anchorCoordinate;
+        record.worldPosition = targetWorldPosition;
+        record.worldRotation = targetWorldRotation;
+        record.quarterTurns = targetQuarterTurns;
         record.itemId = state.itemId;
         record.count = 1;
         record.sequence = state.placementSequence;
@@ -631,8 +694,8 @@ public sealed class VirtualObjectWorld : IDisposable
         record.installationState = state;
         EnsureMapObjectHandle(record, state.itemId, state.placementSequence);
         record.liveInstanceId = viewInstanceId;
-        ReplaceOccupiedCoordinates(record, state.occupiedCoordinates);
-        StoreRecord(record);
+        UpdateCoordinateMappings(record, state.occupiedCoordinates);
+        StoreRecord(record, presentationChanged);
         return record.mapObjectHandle;
     }
 
@@ -717,6 +780,7 @@ public sealed class VirtualObjectWorld : IDisposable
 
     public void Clear()
     {
+        coordinateIndexBuildDeferred = false;
         recordsById.Clear();
         recordIdsByCoordinate.Clear();
         floorStackRecordByCoordinate.Clear();
@@ -761,25 +825,114 @@ public sealed class VirtualObjectWorld : IDisposable
         return record;
     }
 
-    private void StoreRecord(VirtualObjectRecord record)
+    private void StoreRecord(VirtualObjectRecord record, bool installationPresentationChanged = true)
     {
         if (record == null || !record.id.IsValid)
         {
             return;
         }
 
-        RemoveCoordinateMappings(record.id.Value);
         recordsById[record.id.Value] = record;
-        RegisterCoordinateMappings(record);
         version++;
         if (record.kind == VirtualObjectKind.ItemStack)
         {
             itemStackVersion++;
         }
-        else if (record.kind == VirtualObjectKind.Installation)
+        else if (record.kind == VirtualObjectKind.Installation && installationPresentationChanged)
         {
             installationVersion++;
         }
+    }
+
+    private static bool CoordinatesMatch(
+        IReadOnlyList<Vector2Int> current,
+        IReadOnlyList<Vector2Int> next)
+    {
+        int currentCount = current != null ? current.Count : 0;
+        int nextCount = next != null ? next.Count : 0;
+        if (currentCount != nextCount)
+        {
+            return false;
+        }
+
+        for (int i = 0; i < currentCount; i++)
+        {
+            if (current[i] != next[i])
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    private void UpdateCoordinateMappings(VirtualObjectRecord record, Vector2Int coordinate)
+    {
+        if (record.occupiedCoordinates.Count == 1
+            && record.occupiedCoordinates[0] == coordinate)
+        {
+            return;
+        }
+
+        if (!coordinateIndexBuildDeferred && record.occupiedCoordinates.Count > 0)
+        {
+            RemoveCoordinateMappings(record);
+        }
+
+        ReplaceOccupiedCoordinates(record, coordinate);
+        if (!coordinateIndexBuildDeferred)
+        {
+            RegisterCoordinateMappings(record);
+        }
+    }
+
+    private void UpdateCoordinateMappings(
+        VirtualObjectRecord record,
+        IReadOnlyList<Vector2Int> coordinates)
+    {
+        if (HasSameOccupiedCoordinates(record, coordinates))
+        {
+            return;
+        }
+
+        if (!coordinateIndexBuildDeferred && record.occupiedCoordinates.Count > 0)
+        {
+            RemoveCoordinateMappings(record);
+        }
+
+        ReplaceOccupiedCoordinates(record, coordinates);
+        if (!coordinateIndexBuildDeferred)
+        {
+            RegisterCoordinateMappings(record);
+        }
+    }
+
+    private static bool HasSameOccupiedCoordinates(
+        VirtualObjectRecord record,
+        IReadOnlyList<Vector2Int> coordinates)
+    {
+        int coordinateCount = coordinates != null && coordinates.Count > 0
+            ? coordinates.Count
+            : 1;
+        if (record.occupiedCoordinates.Count != coordinateCount)
+        {
+            return false;
+        }
+
+        if (coordinates == null || coordinates.Count <= 0)
+        {
+            return record.occupiedCoordinates[0] == record.anchorCoordinate;
+        }
+
+        for (int i = 0; i < coordinates.Count; i++)
+        {
+            if (record.occupiedCoordinates[i] != coordinates[i])
+            {
+                return false;
+            }
+        }
+
+        return true;
     }
 
     private void ReplaceOccupiedCoordinates(VirtualObjectRecord record, Vector2Int coordinate)

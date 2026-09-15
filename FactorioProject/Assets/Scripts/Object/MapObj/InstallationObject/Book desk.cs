@@ -37,6 +37,8 @@ public class Desk : InstallationObject, IPlayerMapObjectInteraction, IPersistent
 
     protected override void OnDisable()
     {
+        if (ProjectFApplicationLifecycle.IsQuitting) return;
+
         UnregisterStoredManual();
         CancelManualMoveAnimation();
         SetManualVisualActive(false);

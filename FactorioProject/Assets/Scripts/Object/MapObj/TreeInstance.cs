@@ -132,6 +132,7 @@ namespace ProjectF.MapObjects
             if (changedStage)
             {
                 ResetCurrentGrowthStageProgress();
+                NotifyOwningCoordinateRuntimeChanged();
             }
 
             RefreshGrowthPresentation();
@@ -189,6 +190,7 @@ namespace ProjectF.MapObjects
             int completedGrowthLevel = TargetGrowthLevel;
             growth = completedGrowthLevel;
             ResetCurrentGrowthStageProgress();
+            NotifyOwningCoordinateRuntimeChanged();
             RefreshGrowthPresentation();
             RefreshGrowthTickRegistration();
         }

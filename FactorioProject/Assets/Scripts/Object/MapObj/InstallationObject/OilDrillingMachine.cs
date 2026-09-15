@@ -1,7 +1,7 @@
 using System.Collections.Generic;
 using UnityEngine;
 
-public class OilDrillingMachine : InputOutputModule
+public class OilDrillingMachine : InputOutputModule, IFacilityRuntimeWakeTarget
 {
     private const int DefaultOilItemId = 4;
     private const float FluidEpsilon = 0.0001f;
@@ -27,6 +27,7 @@ public class OilDrillingMachine : InputOutputModule
     private long productionProgressUnits;
     private ResourceInstance cachedOilResource;
     private bool isExtracting;
+    private readonly List<Vector2Int> runtimeWakeCoordinates = new List<Vector2Int>(1);
     private bool hasPumpjackVisual;
     private float pumpjackPhase;
     private Quaternion pumpjackBeamBaseRotation;
@@ -97,6 +98,7 @@ public class OilDrillingMachine : InputOutputModule
 
     public override void PrepareForPool()
     {
+        FacilityRuntimeWakeRegistry.Unregister(this);
         RestorePumpjackVisual();
         productionProgressUnits = 0L;
         cachedOilResource = null;
@@ -119,12 +121,12 @@ public class OilDrillingMachine : InputOutputModule
 
         isExtracting = ExtractOil(deltaTime);
         ApplyPlannedBaseModuleTick(deltaTime);
-        ApplyAnimatorPlayback(isExtracting);
     }
 
     protected override void OnEnable()
     {
         base.OnEnable();
+        RegisterRuntimeWakeCoordinate();
         isExtracting = false;
         CapturePumpjackVisual();
         ApplyAnimatorPlayback(false);
@@ -132,6 +134,9 @@ public class OilDrillingMachine : InputOutputModule
 
     protected override void OnDisable()
     {
+        if (ProjectFApplicationLifecycle.IsQuitting) return;
+
+        FacilityRuntimeWakeRegistry.Unregister(this);
         isExtracting = false;
         cachedOilResource = null;
         RestorePumpjackVisual();
@@ -142,20 +147,30 @@ public class OilDrillingMachine : InputOutputModule
     protected override void OnPlacementRuntimeChanged()
     {
         base.OnPlacementRuntimeChanged();
+        RegisterRuntimeWakeCoordinate();
         productionProgressUnits = 0L;
         cachedOilResource = null;
         isExtracting = false;
         RestorePumpjackVisual();
     }
 
-    protected override void OnManagedVisualsResumed()
+    protected override void OnPlacementRuntimeCleared()
     {
-        base.OnManagedVisualsResumed();
+        FacilityRuntimeWakeRegistry.Unregister(this);
+        base.OnPlacementRuntimeCleared();
+    }
+
+    protected override void OnManagedRuntimeVisualsFlushed()
+    {
         ApplyAnimatorPlayback(isExtracting);
     }
 
+    protected override bool RequiresManagedVisualUpdate =>
+        base.RequiresManagedVisualUpdate || isExtracting;
+
     protected override void TickManagedVisuals(float deltaTime)
     {
+        base.TickManagedVisuals(deltaTime);
         if (!Application.isPlaying || !isExtracting || !hasPumpjackVisual)
         {
             return;
@@ -187,7 +202,32 @@ public class OilDrillingMachine : InputOutputModule
 
     protected override bool ShouldKeepRuntimeUpdateTickActive()
     {
-        return true;
+        int oilItemId = ResolveOilItemId();
+        return oilItemId >= 0
+               && OilLitersPerSecond * ResolveFluidOutputTransportRetention(oilItemId) > FluidEpsilon
+               && TryResolveOilResource(out ResourceInstance resource)
+               && resource.CanHarvest;
+    }
+
+    bool IFacilityRuntimeWakeTarget.IsFacilityRuntimeWakeTargetActive =>
+        Application.isPlaying && isActiveAndEnabled;
+
+    void IFacilityRuntimeWakeTarget.WakeFacilityRuntimeTick()
+    {
+        WakeRuntimeUpdate();
+    }
+
+    private void RegisterRuntimeWakeCoordinate()
+    {
+        FacilityRuntimeWakeRegistry.Unregister(this);
+        runtimeWakeCoordinates.Clear();
+        if (!TryGetPlacementRuntime(out Vector2Int anchorCoordinate, out int quarterTurns))
+        {
+            return;
+        }
+
+        runtimeWakeCoordinates.Add(ResolveOilTargetCoordinate(anchorCoordinate, quarterTurns));
+        FacilityRuntimeWakeRegistry.Register(this, runtimeWakeCoordinates);
     }
 
     protected override bool ShouldAutoPullFluidFromConnectedStorage()

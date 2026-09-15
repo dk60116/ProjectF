@@ -1,6 +1,7 @@
 using System;
 using System.Collections;
 using System.Collections.Generic;
+using ProjectF.Persistence;
 using Unity.Profiling;
 using UnityEngine;
 #if UNITY_EDITOR
@@ -32,6 +33,7 @@ public partial class TerrainGenerator : MonoBehaviour,
     private const float GeneratedOilPitDepth = 0.20f;
     private const int GeneratedSurfaceBiomeMargin = 4;
     private const int ChunkCapacityGrowthHeadroom = 64;
+    private const int WorldFinalizationEntriesPerCheckpoint = 64;
     public const float GeneratedOilPitInnerRadius =
         GeneratedOilSurfaceRadius + GeneratedOilPitInnerMargin;
     public const float GeneratedOilPitOuterRadius =
@@ -809,6 +811,14 @@ public partial class TerrainGenerator : MonoBehaviour,
     private readonly HashSet<BlockHandle> pendingBeltItemLineDebugRefreshSet = new HashSet<BlockHandle>();
     private readonly HashSet<BlockHandle> conveyorItemVisualBlocks = new HashSet<BlockHandle>();
     private readonly HashSet<BlockHandle> conveyorItemVisualDirtyBlocks = new HashSet<BlockHandle>();
+    private readonly HashSet<BlockHandle> persistenceDirtyBlocks = new HashSet<BlockHandle>();
+    private readonly List<BlockHandle> persistenceDirtyBlockScratch = new List<BlockHandle>(256);
+    private bool persistenceDirtyTrackingReady;
+    private readonly HashSet<InstallationObject> persistenceDirtyInstallations =
+        new HashSet<InstallationObject>();
+    private readonly List<InstallationObject> persistenceDirtyInstallationScratch =
+        new List<InstallationObject>(256);
+    private bool persistenceInstallationDirtyTrackingReady;
     private readonly List<BlockHandle> dynamicConveyorItemVisualBlocks = new List<BlockHandle>(256);
     private readonly Dictionary<BlockHandle, int> dynamicConveyorItemVisualBlockIndices = new Dictionary<BlockHandle, int>();
     private readonly Dictionary<BlockHandle, int> conveyorItemCountsByBlock = new Dictionary<BlockHandle, int>();
@@ -896,6 +906,9 @@ public partial class TerrainGenerator : MonoBehaviour,
     private bool pendingSavedWorldFinalization;
     private MapSaveData pendingWorldMapSaveData;
     private Action pendingWorldReadyCallback;
+    private IEnumerator worldFinalizationRoutine;
+    private int worldFinalizationAdvancedFrame = -1;
+    private bool worldPoleTopologyBatchActive;
     private int terrainGenerationVersion;
     private bool activeConveyorOrderDirty = true;
     private bool conveyorNetworkCacheDirty = true;
@@ -1243,6 +1256,12 @@ public partial class TerrainGenerator : MonoBehaviour,
 
     private void OnDisable()
     {
+        if (ProjectFApplicationLifecycle.IsQuitting)
+        {
+            if (Active == this) Active = null;
+            return;
+        }
+
         if (worldRestore.IsPending)
             FailWorldRestoration(new OperationCanceledException("World restoration was interrupted by terrain host disable."));
         MapObjectTickManager.UnregisterUpdateTick(this);
@@ -1266,6 +1285,8 @@ public partial class TerrainGenerator : MonoBehaviour,
         if (ConveyorWorld.Current?.Owner == this) ConveyorWorld.Current.Dispose();
         DisposeActiveSurfaceBuildJob();
         CleanupChunkGenerationTransientState();
+        if (ProjectFApplicationLifecycle.IsQuitting) return;
+
         foreach (KeyValuePair<Vector2Int, ChunkRuntimeData> pair in loadedChunks)
         {
             ReleaseChunkSurfaceMeshes(pair.Value);
@@ -1365,6 +1386,32 @@ public partial class TerrainGenerator : MonoBehaviour,
     private void RebuildAuthoritativeConveyorItemTotal()
     {
         authoritativeConveyorItemTotal = CalculateConveyorItemCountSnapshot();
+        authoritativeConveyorItemTotalInitialized = true;
+    }
+
+    private IEnumerator RebuildAuthoritativeConveyorItemTotalIncremental(int entriesPerCheckpoint)
+    {
+        EnsureResourceStateStore();
+        int count = resourceStateStore != null
+            ? resourceStateStore.GetSavedConveyorItemCount()
+            : 0;
+        entriesPerCheckpoint = Mathf.Max(1, entriesPerCheckpoint);
+        int processed = 0;
+        foreach (KeyValuePair<Vector2Int, Block> pair in loadedBlocks)
+        {
+            if (pair.Value != null)
+            {
+                count += CaptureLoadedConveyorItemCountContribution(pair.Key, pair.Value);
+            }
+
+            if (++processed >= entriesPerCheckpoint)
+            {
+                processed = 0;
+                yield return null;
+            }
+        }
+
+        authoritativeConveyorItemTotal = Mathf.Max(0, count);
         authoritativeConveyorItemTotalInitialized = true;
     }
 
@@ -1482,6 +1529,7 @@ public partial class TerrainGenerator : MonoBehaviour,
         }
 
         resourceStateStore.RegisterLiveInstallation(installationObject);
+        persistenceDirtyInstallations.Remove(installationObject);
         if (installationObject is Trainstation || installationObject is Railload)
         {
             RefreshAutomaticTrainStationNames();
@@ -1526,7 +1574,11 @@ public partial class TerrainGenerator : MonoBehaviour,
         {
             SaveRuntimeInstallationState(installationObject);
         }
-        else if (!resourceStateStore.UpdateLiveInstallationWorldPose(installationObject))
+        else if (resourceStateStore.UpdateLiveInstallationWorldPose(installationObject))
+        {
+            persistenceDirtyInstallations.Remove(installationObject);
+        }
+        else
         {
             SaveRuntimeInstallationState(installationObject);
         }
@@ -1534,15 +1586,16 @@ public partial class TerrainGenerator : MonoBehaviour,
 
     public TerrainSaveData CaptureTerrainSaveState()
     {
-        List<Vector2Int> activeChunkCoordinates = new List<Vector2Int>(loadedChunks.Count);
+        // Keep explored history even when an empty saved chunk has no resident view.
         foreach (KeyValuePair<Vector2Int, ChunkRuntimeData> pair in loadedChunks)
         {
             if (pair.Value != null)
             {
-                activeChunkCoordinates.Add(pair.Key);
+                savedExploredChunkCoordinates.Add(pair.Key);
             }
         }
 
+        List<Vector2Int> activeChunkCoordinates = new List<Vector2Int>(savedExploredChunkCoordinates);
         activeChunkCoordinates.Sort(CompareChunkCoordinates);
         return new TerrainSaveData
         {
@@ -1560,20 +1613,10 @@ public partial class TerrainGenerator : MonoBehaviour,
 
     public MapSaveData CaptureMapSaveState()
     {
-        EnsureResourceStateStore();
         MapSaveData mapSaveData = new MapSaveData();
-        if (resourceStateStore != null)
-        {
-            FlushLoadedRuntimeStateToStore();
-            resourceStateStore.CaptureSaveState(mapSaveData);
-            CaptureLoadedConveyorItemSaveStates(mapSaveData);
-        }
-
-        CaptureAnimalSaveStates(mapSaveData);
-        CaptureFarmlandSaveState(mapSaveData);
-        CaptureConveyorItemSaveRuns(mapSaveData);
-        SaveGameConveyorItemBackfill.StripConveyorItemsFromFloorObjects(mapSaveData);
-        CaptureProfilingCloneTerrainRegions(mapSaveData);
+        IEnumerator capture = CaptureMapSaveStateIncremental(mapSaveData, int.MaxValue);
+        try { while (capture.MoveNext()) { } }
+        finally { (capture as IDisposable)?.Dispose(); }
         return mapSaveData;
     }
 
@@ -1588,63 +1631,70 @@ public partial class TerrainGenerator : MonoBehaviour,
         {
             // Tick remains paused for the whole iterator, but yielding lets rendering,
             // loading UI and input frames continue between detached DTO batches.
-            IEnumerator flushRoutine = FlushLoadedRuntimeStateToStoreIncremental(entriesPerFrame);
-            while (flushRoutine.MoveNext())
+            IEnumerator flushRoutine = SlotSaveTimingLog.TrackStage(
+                "map-flush-live",
+                FlushLoadedRuntimeStateToStoreIncremental(entriesPerFrame));
+            using (flushRoutine as IDisposable)
             {
-                yield return flushRoutine.Current;
+                while (flushRoutine.MoveNext()) yield return flushRoutine.Current;
             }
 
-            IEnumerator storeCapture = resourceStateStore.CaptureSaveStateIncremental(
+            IEnumerator storeCapture = SlotSaveTimingLog.TrackStage(
+                "map-copy-store",
+                resourceStateStore.CaptureSaveStateIncremental(
+                    mapSaveData,
+                    entriesPerFrame));
+            using (storeCapture as IDisposable)
+            {
+                while (storeCapture.MoveNext()) yield return storeCapture.Current;
+            }
+
+            // Flush already saved the occupied belt lanes (including native checkpoints)
+            // through SaveLoadedBlockFloorObjects. Store capture owns the detached copy.
+        }
+
+        IEnumerator animalCapture = SlotSaveTimingLog.TrackStage(
+            "map-animals",
+            CaptureAnimalSaveStatesIncremental(
                 mapSaveData,
-                entriesPerFrame);
-            while (storeCapture.MoveNext())
-            {
-                yield return storeCapture.Current;
-            }
-
-            IEnumerator conveyorCapture = CaptureLoadedConveyorItemSaveStatesIncremental(
+                entriesPerFrame));
+        using (animalCapture as IDisposable)
+        {
+            while (animalCapture.MoveNext()) yield return animalCapture.Current;
+        }
+        IEnumerator farmlandCapture = SlotSaveTimingLog.TrackStage(
+            "map-farmland",
+            CaptureFarmlandSaveStateIncremental(
                 mapSaveData,
-                entriesPerFrame);
-            while (conveyorCapture.MoveNext())
-            {
-                yield return conveyorCapture.Current;
-            }
-        }
-
-        IEnumerator animalCapture = CaptureAnimalSaveStatesIncremental(
-            mapSaveData,
-            entriesPerFrame);
-        while (animalCapture.MoveNext())
+                entriesPerFrame));
+        using (farmlandCapture as IDisposable)
         {
-            yield return animalCapture.Current;
+            while (farmlandCapture.MoveNext()) yield return farmlandCapture.Current;
         }
-        IEnumerator farmlandCapture = CaptureFarmlandSaveStateIncremental(
-            mapSaveData,
-            entriesPerFrame);
-        while (farmlandCapture.MoveNext())
+        IEnumerator runCapture = SlotSaveTimingLog.TrackStage(
+            "map-conveyor-runs",
+            CaptureConveyorItemSaveRunsIncremental(
+                mapSaveData,
+                entriesPerFrame));
+        using (runCapture as IDisposable)
         {
-            yield return farmlandCapture.Current;
+            while (runCapture.MoveNext()) yield return runCapture.Current;
         }
-        IEnumerator runCapture = CaptureConveyorItemSaveRunsIncremental(
-            mapSaveData,
-            entriesPerFrame);
-        while (runCapture.MoveNext())
-        {
-            yield return runCapture.Current;
-        }
-        IEnumerator stripConveyors =
+        IEnumerator stripConveyors = SlotSaveTimingLog.TrackStage(
+            "map-strip-floor-conveyors",
             SaveGameConveyorItemBackfill.StripConveyorItemsFromFloorObjectsIncremental(
                 mapSaveData,
-                entriesPerFrame);
-        while (stripConveyors.MoveNext())
+                entriesPerFrame));
+        using (stripConveyors as IDisposable)
         {
-            yield return stripConveyors.Current;
+            while (stripConveyors.MoveNext()) yield return stripConveyors.Current;
         }
-        IEnumerator terrainCloneCapture =
-            CaptureProfilingCloneTerrainRegionsIncremental(mapSaveData, entriesPerFrame);
-        while (terrainCloneCapture.MoveNext())
+        IEnumerator terrainCloneCapture = SlotSaveTimingLog.TrackStage(
+            "map-profile-clones",
+            CaptureProfilingCloneTerrainRegionsIncremental(mapSaveData, entriesPerFrame));
+        using (terrainCloneCapture as IDisposable)
         {
-            yield return terrainCloneCapture.Current;
+            while (terrainCloneCapture.MoveNext()) yield return terrainCloneCapture.Current;
         }
     }
 
@@ -1660,6 +1710,7 @@ public partial class TerrainGenerator : MonoBehaviour,
 
     private void LoadSavedWorldRecordsAndChunks(TerrainSaveData terrainSaveData, MapSaveData mapSaveData)
     {
+        long recordsStartedAt = System.Diagnostics.Stopwatch.GetTimestamp();
         RestoreProfilingCloneTerrainRegions(mapSaveData);
         NormalizeTerrainBoundsSettings();
         NormalizeResourceGenerationSettings();
@@ -1689,13 +1740,16 @@ public partial class TerrainGenerator : MonoBehaviour,
         ApplyFarmlandSaveState(mapSaveData);
         ApplyAnimalSaveStates(mapSaveData);
         resourceStateStore?.ApplySaveState(mapSaveData);
+        SlotLoadTimingLog.RecordStageWork(
+            "records-apply",
+            (System.Diagnostics.Stopwatch.GetTimestamp() - recordsStartedAt)
+            * (1000d / System.Diagnostics.Stopwatch.Frequency));
 
         worldRestore.RecordsRestored();
         deferConveyorItemRestoreUntilBeltTopologyReady = true;
         currentCenterChunk = GetCenterChunkCoordinate();
         hasGeneratedChunks = true;
-        EnsureChunkActivationStorageCapacity(terrainSaveData?.activeChunkCoordinates?.Count ?? 0);
-        if (!QueueSavedActiveChunks(terrainSaveData?.activeChunkCoordinates))
+        if (!QueueSavedActiveChunks(terrainSaveData?.activeChunkCoordinates, mapSaveData))
         {
             RefreshChunks(currentCenterChunk, true);
         }
@@ -1711,28 +1765,32 @@ public partial class TerrainGenerator : MonoBehaviour,
         }
     }
 
-    private bool QueueSavedActiveChunks(IReadOnlyList<Vector2Int> activeChunkCoordinates)
+    private readonly HashSet<Vector2Int> savedExploredChunkCoordinates = new HashSet<Vector2Int>();
+
+    private bool QueueSavedActiveChunks(IReadOnlyList<Vector2Int> activeChunkCoordinates, MapSaveData mapSaveData)
     {
-        if (activeChunkCoordinates == null || activeChunkCoordinates.Count <= 0)
-        {
-            return false;
-        }
-
         int normalizedChunkSize = Mathf.Max(4, chunkSize);
-        bool queuedAny = false;
-        for (int i = 0; i < activeChunkCoordinates.Count; i++)
+        if (activeChunkCoordinates != null)
         {
-            Vector2Int chunkCoordinate = activeChunkCoordinates[i];
-            if (!DoesChunkIntersectMapBounds(chunkCoordinate, normalizedChunkSize))
-            {
-                continue;
-            }
-
-            QueueChunkGeneration(chunkCoordinate, normalizedChunkSize);
-            queuedAny = true;
+            for (int i = 0; i < activeChunkCoordinates.Count; i++)
+                if (DoesChunkIntersectMapBounds(activeChunkCoordinates[i], normalizedChunkSize))
+                    savedExploredChunkCoordinates.Add(activeChunkCoordinates[i]);
         }
 
-        return queuedAny;
+        GetMapChunkRange(normalizedChunkSize, out Vector2Int minimumChunk, out Vector2Int maximumChunk);
+        var plan = new ProjectF.Persistence.SavedWorldChunkPlan(normalizedChunkSize, minimumChunk, maximumChunk);
+        List<Vector2Int> initialChunks = plan.Build(
+            mapSaveData, currentCenterChunk, GetEffectiveLoadRadius(),
+            itemId => ResolveItemDefinition(itemId)?.sprinklerRangeRadius ?? 0);
+        EnsureChunkActivationStorageCapacity(initialChunks.Count);
+        for (int i = 0; i < initialChunks.Count; i++)
+        {
+            QueueChunkGeneration(initialChunks[i], normalizedChunkSize);
+        }
+
+        Debug.Log($"[TerrainGenerator] Load chunks: explored={savedExploredChunkCoordinates.Count} "
+            + $"initial={initialChunks.Count} installations={mapSaveData?.installations?.Count ?? 0}");
+        return initialChunks.Count > 0;
     }
 
     public void StartNewGeneratedMap(bool randomizeSeed)
@@ -1750,8 +1808,18 @@ public partial class TerrainGenerator : MonoBehaviour,
         MapSaveData mapSaveData,
         Action onWorldReady)
     {
+        DisposeWorldFinalizationRoutine();
+        EndWorldPoleTopologyBatch(false);
+        persistenceDirtyBlocks.Clear();
+        persistenceDirtyBlockScratch.Clear();
+        persistenceDirtyTrackingReady = false;
+        persistenceDirtyInstallations.Clear();
+        persistenceDirtyInstallationScratch.Clear();
+        persistenceInstallationDirtyTrackingReady = false;
         deferConveyorItemRestoreUntilBeltTopologyReady = false;
         worldRestore.Begin();
+        UtilityPole.BeginTopologyRefreshBatch();
+        worldPoleTopologyBatchActive = true;
         pendingSavedWorldFinalization = restoreSavedWorld;
         pendingWorldMapSaveData = mapSaveData;
         pendingWorldReadyCallback = onWorldReady;
@@ -1759,57 +1827,191 @@ public partial class TerrainGenerator : MonoBehaviour,
 
     private void TryFinalizePendingWorldLoad()
     {
-        if (worldRestore.Phase != ProjectF.Simulation.WorldRestorePhase.Chunks
-            || IsChunkStreamingBusy)
+        if (worldRestore.Phase == ProjectF.Simulation.WorldRestorePhase.Chunks)
+        {
+            if (IsChunkStreamingBusy)
+            {
+                return;
+            }
+
+            if (loadedChunks.Count <= 0)
+            {
+                var exception = new InvalidOperationException("World restoration produced no chunks.");
+                FailWorldRestoration(exception);
+                throw exception;
+            }
+
+            worldRestore.BeginConnections();
+            worldFinalizationRoutine = FinalizePendingWorldLoadIncremental();
+        }
+
+        if (worldRestore.Phase != ProjectF.Simulation.WorldRestorePhase.Connections
+            || worldFinalizationRoutine == null
+            || (Application.isPlaying && worldFinalizationAdvancedFrame == Time.frameCount))
         {
             return;
         }
 
-        Action readyCallback = pendingWorldReadyCallback;
+        worldFinalizationAdvancedFrame = Time.frameCount;
+        double sliceStartedAt = Time.realtimeSinceStartupAsDouble;
         try
         {
-            if (loadedChunks.Count <= 0)
-                throw new InvalidOperationException("World restoration produced no chunks.");
-            worldRestore.BeginConnections();
-            if (pendingSavedWorldFinalization)
+            bool hasNext;
+            do
             {
-                RefreshLoadedConveyorBeltRuntimeViews();
-                RefreshLoadedPipeRuntimeViews();
-                ExpandConveyorItemSaveRunsAfterBeltTopology(pendingWorldMapSaveData);
-                ApplyLoadedConveyorItemSaveStates(pendingWorldMapSaveData);
+                hasNext = worldFinalizationRoutine.MoveNext();
+                if (hasNext && worldFinalizationRoutine.Current != null)
+                {
+                    throw new InvalidOperationException(
+                        "World finalization work may only yield null checkpoints.");
+                }
+            }
+            while (hasNext
+                   && (!Application.isPlaying
+                       || (Time.realtimeSinceStartupAsDouble - sliceStartedAt) * 1000d
+                       < Mathf.Max(0.25f, initialWorldLoadFrameBudgetMilliseconds)));
+
+            SlotLoadTimingLog.RecordStageWork(
+                "finalize-total",
+                (Time.realtimeSinceStartupAsDouble - sliceStartedAt) * 1000d);
+            if (hasNext)
+            {
+                return;
             }
 
-            RefreshLoadedRuntimeRegistrations();
-            RefreshLoadedRuntimeVisibility();
-            if (pendingSavedWorldFinalization)
-            {
-                // 압축 저장된 운송 라인은 위 토폴로지 복원 전까지 BlockStateStore에 없다.
-                // 스트리밍 중 상태 조회로 만들어진 부분 합계를 최종 런타임 상태에서 교체한다.
-                RebuildAuthoritativeConveyorItemTotal();
-            }
-
-            // Belt checkpoints and mounted-player/animal references are part of readiness.
+            IEnumerator completedRoutine = worldFinalizationRoutine;
+            worldFinalizationRoutine = null;
+            (completedRoutine as IDisposable)?.Dispose();
+            Action readyCallback = pendingWorldReadyCallback;
+            ResetPersistenceDirtyTracking();
+            long checkpointStartedAt = System.Diagnostics.Stopwatch.GetTimestamp();
             worldRestore.Complete(readyCallback);
-        }
-        catch (Exception exception) { FailWorldRestoration(exception); throw; }
-        finally
-        {
+            SlotLoadTimingLog.RecordStageWork(
+                "finalize-checkpoint",
+                (System.Diagnostics.Stopwatch.GetTimestamp() - checkpointStartedAt)
+                * (1000d / System.Diagnostics.Stopwatch.Frequency));
             ClearWorldRestoreReferences();
+        }
+        catch (Exception exception)
+        {
+            FailWorldRestoration(exception);
+            throw;
+        }
+    }
+
+    private IEnumerator FinalizePendingWorldLoadIncremental()
+    {
+        long powerTopologyStartedAt = System.Diagnostics.Stopwatch.GetTimestamp();
+        EndWorldPoleTopologyBatch(true);
+        SlotLoadTimingLog.RecordStageWork(
+            "finalize-power-topology",
+            (System.Diagnostics.Stopwatch.GetTimestamp() - powerTopologyStartedAt)
+            * (1000d / System.Diagnostics.Stopwatch.Frequency));
+
+        if (pendingSavedWorldFinalization)
+        {
+            IEnumerator beltViews = SlotLoadTimingLog.TrackStage(
+                "finalize-belts",
+                RefreshLoadedConveyorBeltRuntimeViewsIncremental(
+                    WorldFinalizationEntriesPerCheckpoint));
+            using (beltViews as IDisposable)
+            {
+                while (beltViews.MoveNext()) yield return beltViews.Current;
+            }
+
+            IEnumerator pipeViews = SlotLoadTimingLog.TrackStage(
+                "finalize-pipes",
+                RefreshLoadedPipeRuntimeViewsIncremental(
+                    WorldFinalizationEntriesPerCheckpoint));
+            using (pipeViews as IDisposable)
+            {
+                while (pipeViews.MoveNext()) yield return pipeViews.Current;
+            }
+
+            IEnumerator expandedItems = SlotLoadTimingLog.TrackStage(
+                "finalize-expand-items",
+                ExpandConveyorItemSaveRunsAfterBeltTopologyIncremental(
+                    pendingWorldMapSaveData,
+                    WorldFinalizationEntriesPerCheckpoint));
+            using (expandedItems as IDisposable)
+            {
+                while (expandedItems.MoveNext()) yield return expandedItems.Current;
+            }
+
+            IEnumerator appliedItems = SlotLoadTimingLog.TrackStage(
+                "finalize-apply-items",
+                ApplyLoadedConveyorItemSaveStatesIncremental(
+                    pendingWorldMapSaveData,
+                    WorldFinalizationEntriesPerCheckpoint));
+            using (appliedItems as IDisposable)
+            {
+                while (appliedItems.MoveNext()) yield return appliedItems.Current;
+            }
+        }
+
+        IEnumerator registrations = SlotLoadTimingLog.TrackStage(
+            "finalize-registrations",
+            RefreshLoadedRuntimeRegistrationsIncremental(
+                WorldFinalizationEntriesPerCheckpoint));
+        using (registrations as IDisposable)
+        {
+            while (registrations.MoveNext()) yield return registrations.Current;
+        }
+
+        IEnumerator visibility = SlotLoadTimingLog.TrackStage(
+            "finalize-visibility",
+            RefreshLoadedRuntimeVisibilityIncremental());
+        using (visibility as IDisposable)
+        {
+            while (visibility.MoveNext()) yield return visibility.Current;
+        }
+
+        if (pendingSavedWorldFinalization)
+        {
+            IEnumerator itemCount = SlotLoadTimingLog.TrackStage(
+                "finalize-item-count",
+                RebuildAuthoritativeConveyorItemTotalIncremental(
+                    WorldFinalizationEntriesPerCheckpoint));
+            using (itemCount as IDisposable)
+            {
+                while (itemCount.MoveNext()) yield return itemCount.Current;
+            }
         }
     }
 
     private void FailWorldRestoration(Exception exception)
     {
+        EndWorldPoleTopologyBatch(false);
         worldRestore.Fail(exception);
         ClearWorldRestoreReferences();
     }
 
+    private void EndWorldPoleTopologyBatch(bool rebuildDirtyTopology)
+    {
+        if (!worldPoleTopologyBatchActive)
+        {
+            return;
+        }
+
+        worldPoleTopologyBatchActive = false;
+        UtilityPole.EndTopologyRefreshBatch(rebuildDirtyTopology);
+    }
+
     private void ClearWorldRestoreReferences()
     {
+        DisposeWorldFinalizationRoutine();
         deferConveyorItemRestoreUntilBeltTopologyReady = false;
         pendingSavedWorldFinalization = false;
         pendingWorldMapSaveData = null;
         pendingWorldReadyCallback = null;
+    }
+
+    private void DisposeWorldFinalizationRoutine()
+    {
+        IEnumerator routine = worldFinalizationRoutine;
+        worldFinalizationRoutine = null;
+        worldFinalizationAdvancedFrame = -1;
+        (routine as IDisposable)?.Dispose();
     }
 
     public void FlushLoadedRuntimeStateToStore()
@@ -1824,57 +2026,223 @@ public partial class TerrainGenerator : MonoBehaviour,
         if (resourceStateStore == null) yield break;
 
         entriesPerFrame = Mathf.Max(1, entriesPerFrame);
-        int processed = 0;
         HashSet<InstallationObject> savedInstallations = new HashSet<InstallationObject>();
-        foreach (KeyValuePair<Vector2Int, Block> pair in loadedBlocks)
+        IEnumerator blockCapture = SlotSaveTimingLog.TrackStage(
+            "map-flush-blocks",
+            FlushDirtyBlockRuntimeStateToStoreIncremental(
+                savedInstallations,
+                entriesPerFrame));
+        using (blockCapture as IDisposable)
         {
-            Block block = pair.Value;
-            if (block != null)
+            while (blockCapture.MoveNext()) yield return blockCapture.Current;
+        }
+
+        IEnumerator resourceCapture = SlotSaveTimingLog.TrackStage(
+            "map-flush-resources",
+            SaveAllRuntimeResourcesToStoreIncremental(entriesPerFrame));
+        using (resourceCapture as IDisposable)
+        {
+            while (resourceCapture.MoveNext()) yield return resourceCapture.Current;
+        }
+
+        IEnumerator installationCapture = SlotSaveTimingLog.TrackStage(
+            "map-flush-installations",
+            FlushActiveInstallationRuntimeStateToStoreIncremental(
+                savedInstallations,
+                entriesPerFrame));
+        using (installationCapture as IDisposable)
+        {
+            while (installationCapture.MoveNext()) yield return installationCapture.Current;
+        }
+    }
+
+    private IEnumerator FlushDirtyBlockRuntimeStateToStoreIncremental(
+        HashSet<InstallationObject> savedInstallations,
+        int entriesPerFrame)
+    {
+        int processed = 0;
+        if (!persistenceDirtyTrackingReady)
+        {
+            // This fallback is used before the first complete world checkpoint.
+            // Enable tracking before scanning so a later mutation is not erased.
+            persistenceDirtyBlocks.Clear();
+            persistenceDirtyTrackingReady = true;
+            bool completedFullScan = false;
+            try
             {
-                SaveLoadedBlockFloorObjects(block);
-                if (!block.TryGetRuntimeConveyorRecord(out _)
-                    && !block.TryGetRuntimePipeRecord(out _)
-                    && block.MapObject is InstallationObject installationObject
-                    && !installationObject.ExcludeFromTerrainPersistence
-                    && savedInstallations.Add(installationObject))
+                foreach (KeyValuePair<Vector2Int, Block> pair in loadedBlocks)
                 {
-                    resourceStateStore.RegisterLiveInstallation(installationObject);
+                    SaveLoadedBlockRuntimeState(pair.Value, savedInstallations);
+                    if (++processed >= entriesPerFrame)
+                    {
+                        processed = 0;
+                        yield return null;
+                    }
+                }
+                completedFullScan = true;
+            }
+            finally
+            {
+                // An interrupted fallback must rescan next time because it has no
+                // complete dirty baseline yet.
+                if (!completedFullScan)
+                {
+                    persistenceDirtyTrackingReady = false;
+                }
+            }
+            yield break;
+        }
+
+        persistenceDirtyBlockScratch.Clear();
+        persistenceDirtyBlockScratch.AddRange(persistenceDirtyBlocks);
+        for (int i = 0; i < persistenceDirtyBlockScratch.Count; i++)
+        {
+            BlockHandle handle = persistenceDirtyBlockScratch[i];
+            // Remove before capture. A mutation occurring after this point re-adds
+            // the handle and remains dirty for the next snapshot.
+            persistenceDirtyBlocks.Remove(handle);
+            try
+            {
+                if (TryResolveLoadedRuntimeBlock(handle, out Block block))
+                {
+                    SaveLoadedBlockRuntimeState(block, savedInstallations);
+                }
+            }
+            catch
+            {
+                persistenceDirtyBlocks.Add(handle);
+                throw;
+            }
+
+            if (++processed >= entriesPerFrame)
+            {
+                processed = 0;
+                yield return null;
+            }
+        }
+        persistenceDirtyBlockScratch.Clear();
+    }
+
+    private void SaveLoadedBlockRuntimeState(
+        Block block,
+        HashSet<InstallationObject> savedInstallations)
+    {
+        if (block == null)
+        {
+            return;
+        }
+
+        SaveLoadedBlockFloorObjects(block);
+        if (!block.TryGetRuntimeConveyorRecord(out _)
+            && !block.TryGetRuntimePipeRecord(out _)
+            && block.MapObject is InstallationObject installationObject
+            && !installationObject.ExcludeFromTerrainPersistence
+            && savedInstallations.Add(installationObject))
+        {
+            resourceStateStore.RegisterLiveInstallation(installationObject);
+            persistenceDirtyInstallations.Remove(installationObject);
+        }
+    }
+
+    private IEnumerator FlushActiveInstallationRuntimeStateToStoreIncremental(
+        HashSet<InstallationObject> savedInstallations,
+        int entriesPerFrame)
+    {
+        int processed = 0;
+        bool requiresFullScan = !persistenceInstallationDirtyTrackingReady;
+        persistenceDirtyInstallationScratch.Clear();
+        if (requiresFullScan)
+        {
+            // Before the first complete checkpoint there is no reliable dirty baseline.
+            // Activate tracking before capture so mutations after an entry is read remain dirty.
+            persistenceDirtyInstallations.Clear();
+            persistenceInstallationDirtyTrackingReady = true;
+            InstallationObject.CopyActiveInstances(persistenceDirtyInstallationScratch);
+        }
+        else
+        {
+            persistenceDirtyInstallationScratch.AddRange(persistenceDirtyInstallations);
+            persistenceDirtyInstallationScratch.Sort(InstallationObject.CompareSimulationOrder);
+        }
+
+        bool completed = false;
+        try
+        {
+            for (int i = 0; i < persistenceDirtyInstallationScratch.Count; i++)
+            {
+                InstallationObject installationObject = persistenceDirtyInstallationScratch[i];
+                persistenceDirtyInstallations.Remove(installationObject);
+                try
+                {
+                    if (installationObject != null
+                        && !savedInstallations.Contains(installationObject)
+                        && !installationObject.ExcludeFromTerrainPersistence
+                        && installationObject.TryGetPlacementRuntime(out _, out _))
+                    {
+                        savedInstallations.Add(installationObject);
+                        resourceStateStore.RegisterLiveInstallation(installationObject);
+                    }
+                }
+                catch
+                {
+                    if (installationObject != null)
+                    {
+                        persistenceDirtyInstallations.Add(installationObject);
+                    }
+                    throw;
+                }
+
+                if (++processed >= entriesPerFrame)
+                {
+                    processed = 0;
+                    yield return null;
                 }
             }
 
-            if (++processed >= entriesPerFrame)
-            {
-                processed = 0;
-                yield return null;
-            }
+            completed = true;
         }
-
-        IEnumerator resourceCapture = SaveAllRuntimeResourcesToStoreIncremental(entriesPerFrame);
-        while (resourceCapture.MoveNext())
+        finally
         {
-            yield return resourceCapture.Current;
+            persistenceDirtyInstallationScratch.Clear();
+            if (requiresFullScan && !completed)
+            {
+                persistenceInstallationDirtyTrackingReady = false;
+            }
         }
+    }
 
-        List<InstallationObject> activeInstallations = new List<InstallationObject>();
-        InstallationObject.CopyActiveInstances(activeInstallations);
-        for (int i = 0; i < activeInstallations.Count; i++)
+    internal void MarkPersistenceStateDirty(Block block)
+    {
+        if (persistenceDirtyTrackingReady
+            && block != null
+            && TryGetRuntimeBlockHandle(block, out BlockHandle handle))
         {
-            InstallationObject installationObject = activeInstallations[i];
-            if (installationObject != null
-                && !savedInstallations.Contains(installationObject)
-                && !installationObject.ExcludeFromTerrainPersistence
-                && installationObject.TryGetPlacementRuntime(out _, out _))
-            {
-                savedInstallations.Add(installationObject);
-                resourceStateStore.RegisterLiveInstallation(installationObject);
-            }
-
-            if (++processed >= entriesPerFrame)
-            {
-                processed = 0;
-                yield return null;
-            }
+            persistenceDirtyBlocks.Add(handle);
         }
+    }
+
+    internal void MarkPersistenceStateDirty(InstallationObject installationObject)
+    {
+        if (persistenceInstallationDirtyTrackingReady
+            && installationObject != null
+            && !installationObject.ExcludeFromTerrainPersistence)
+        {
+            persistenceDirtyInstallations.Add(installationObject);
+        }
+    }
+
+    private void ResetPersistenceDirtyTracking()
+    {
+        persistenceDirtyBlocks.Clear();
+        // Conveyor item entries are removed from the detached store when views are
+        // restored. Capture occupied belts once even if they remain asleep forever;
+        // subsequent changes arrive through MarkPersistenceStateDirty.
+        persistenceDirtyBlocks.UnionWith(conveyorItemVisualBlocks);
+        persistenceDirtyBlockScratch.Clear();
+        persistenceDirtyTrackingReady = true;
+        persistenceDirtyInstallations.Clear();
+        persistenceDirtyInstallationScratch.Clear();
+        persistenceInstallationDirtyTrackingReady = true;
     }
 
     private void SaveActiveRuntimeInstallations(
@@ -1936,91 +2304,18 @@ public partial class TerrainGenerator : MonoBehaviour,
                && coordinateFilter.Contains(anchorCoordinate);
     }
 
-    private void CaptureLoadedConveyorItemSaveStates(MapSaveData mapSaveData)
-    {
-        IEnumerator capture = CaptureLoadedConveyorItemSaveStatesIncremental(mapSaveData, int.MaxValue);
-        while (capture.MoveNext()) { }
-    }
-
-    private IEnumerator CaptureLoadedConveyorItemSaveStatesIncremental(
+    private IEnumerator ApplyLoadedConveyorItemSaveStatesIncremental(
         MapSaveData mapSaveData,
-        int entriesPerFrame)
-    {
-        if (mapSaveData == null) yield break;
-
-        entriesPerFrame = Mathf.Max(1, entriesPerFrame);
-        int processed = 0;
-        mapSaveData.conveyorItems ??= new List<ConveyorItemBlockSaveEntry>();
-        Dictionary<Vector2Int, ConveyorItemBlockSaveEntry> entriesByCoordinate =
-            new Dictionary<Vector2Int, ConveyorItemBlockSaveEntry>(mapSaveData.conveyorItems.Count);
-        for (int i = 0; i < mapSaveData.conveyorItems.Count; i++)
-        {
-            ConveyorItemBlockSaveEntry existingEntry = mapSaveData.conveyorItems[i];
-            if (existingEntry != null && !entriesByCoordinate.ContainsKey(existingEntry.coordinate))
-            {
-                entriesByCoordinate.Add(existingEntry.coordinate, existingEntry);
-            }
-            if (++processed >= entriesPerFrame)
-            {
-                processed = 0;
-                yield return null;
-            }
-        }
-
-        foreach (KeyValuePair<Vector2Int, Block> pair in loadedBlocks)
-        {
-            Block block = pair.Value;
-            if (block != null && block.IsRuntimeConveyor)
-            {
-                ConveyorItemBlockSaveEntry entry = new ConveyorItemBlockSaveEntry { coordinate = pair.Key };
-                block.CaptureConveyorItemSaveStates(entry.lanes);
-                entriesByCoordinate.TryGetValue(pair.Key, out ConveyorItemBlockSaveEntry existingEntry);
-                if (entry.lanes.Count > 0)
-                {
-                    if (existingEntry != null) existingEntry.lanes = entry.lanes;
-                    else
-                    {
-                        mapSaveData.conveyorItems.Add(entry);
-                        entriesByCoordinate.Add(pair.Key, entry);
-                    }
-                }
-                else if (existingEntry != null) existingEntry.lanes?.Clear();
-            }
-
-            if (++processed >= entriesPerFrame)
-            {
-                processed = 0;
-                yield return null;
-            }
-        }
-
-        for (int i = mapSaveData.conveyorItems.Count - 1; i >= 0; i--)
-        {
-            if (IsEmptyConveyorItemSaveEntry(mapSaveData.conveyorItems[i]))
-            {
-                mapSaveData.conveyorItems.RemoveAt(i);
-            }
-            if (++processed >= entriesPerFrame)
-            {
-                processed = 0;
-                yield return null;
-            }
-        }
-    }
-
-    private static bool IsEmptyConveyorItemSaveEntry(ConveyorItemBlockSaveEntry entry)
-    {
-        return entry == null || entry.lanes == null || entry.lanes.Count <= 0;
-    }
-
-    private void ApplyLoadedConveyorItemSaveStates(MapSaveData mapSaveData)
+        int entriesPerCheckpoint)
     {
         ResetLastConveyorItemLoadStats();
         if (mapSaveData?.conveyorItems == null)
         {
-            return;
+            yield break;
         }
 
+        entriesPerCheckpoint = Mathf.Max(1, entriesPerCheckpoint);
+        int processed = 0;
         for (int i = 0; i < mapSaveData.conveyorItems.Count; i++)
         {
             ConveyorItemBlockSaveEntry entry = mapSaveData.conveyorItems[i];
@@ -2050,6 +2345,11 @@ public partial class TerrainGenerator : MonoBehaviour,
 
             loadedBlocks.TryGetValue(entry.coordinate, out Block block);
             ApplyLoadedConveyorItemSaveStatesToBlock(entry.coordinate, block, lanes, mapSaveData, true);
+            if (++processed >= entriesPerCheckpoint)
+            {
+                processed = 0;
+                yield return null;
+            }
         }
     }
 
@@ -2281,27 +2581,42 @@ public partial class TerrainGenerator : MonoBehaviour,
         return false;
     }
 
-    private void RefreshLoadedRuntimeRegistrations()
+    private IEnumerator RefreshLoadedRuntimeRegistrationsIncremental(int entriesPerCheckpoint)
     {
         MarkConveyorNetworkDirty();
+        entriesPerCheckpoint = Mathf.Max(1, entriesPerCheckpoint);
+        int processed = 0;
         foreach (KeyValuePair<Vector2Int, Block> pair in loadedBlocks)
         {
             RefreshRestoredBlockRuntimeRegistration(pair.Value);
+            if (++processed >= entriesPerCheckpoint)
+            {
+                processed = 0;
+                yield return null;
+            }
         }
     }
 
-    private void RefreshLoadedConveyorBeltRuntimeViews()
+    private IEnumerator RefreshLoadedConveyorBeltRuntimeViewsIncremental(int entriesPerCheckpoint)
     {
         if (!Application.isPlaying)
         {
-            return;
+            yield break;
         }
 
+        entriesPerCheckpoint = Mathf.Max(1, entriesPerCheckpoint);
+        int processed = 0;
         List<ConveyorBelt> conveyorBelts = new List<ConveyorBelt>();
         HashSet<ConveyorBelt> uniqueConveyorBelts = new HashSet<ConveyorBelt>();
         EnsureResourceStateStore();
         foreach (KeyValuePair<Vector2Int, Block> pair in loadedBlocks)
         {
+            if (++processed >= entriesPerCheckpoint)
+            {
+                processed = 0;
+                yield return null;
+            }
+
             Block block = pair.Value;
             if (block != null
                 && !block.TryGetRuntimeConveyorRecord(out _)
@@ -2332,27 +2647,45 @@ public partial class TerrainGenerator : MonoBehaviour,
 
         if (conveyorBelts.Count <= 0)
         {
-            return;
+            yield break;
         }
 
         virtualConveyorBeltRenderer?.Clear();
+        processed = 0;
         for (int i = 0; i < conveyorBelts.Count; i++)
         {
             conveyorBelts[i]?.RefreshEndpointVisuals();
+            if (++processed >= entriesPerCheckpoint)
+            {
+                processed = 0;
+                yield return null;
+            }
         }
 
         ConvayorBelt2F.MarkCoverageDirty();
+        processed = 0;
         for (int i = 0; i < conveyorBelts.Count; i++)
         {
             if (conveyorBelts[i] is ConvayorBelt2F belt2F)
             {
                 belt2F.RefreshCoveredConveyorTopology();
             }
+            if (++processed >= entriesPerCheckpoint)
+            {
+                processed = 0;
+                yield return null;
+            }
         }
 
+        processed = 0;
         for (int i = 0; i < conveyorBelts.Count; i++)
         {
             RegisterVirtualConveyorBelt(conveyorBelts[i]);
+            if (++processed >= entriesPerCheckpoint)
+            {
+                processed = 0;
+                yield return null;
+            }
         }
     }
 
@@ -2373,13 +2706,18 @@ public partial class TerrainGenerator : MonoBehaviour,
         block.RefreshConveyorSlotDotVisuals();
     }
 
-    private void RefreshLoadedRuntimeVisibility()
+    private IEnumerator RefreshLoadedRuntimeVisibilityIncremental()
     {
         RefreshBeltItemRenderingVisibility();
+        yield return null;
         RefreshBeltRenderingVisibility();
+        yield return null;
         RefreshConveyorSlotDotRuntimeVisibility();
+        yield return null;
         RefreshBeltItemLineRuntimeVisibility();
+        yield return null;
         RefreshBeltDirectionRuntimeVisibility();
+        yield return null;
     }
 
     public void CopyConveyorItemVisualBlocks(List<BlockHandle> results)
@@ -2404,17 +2742,25 @@ public partial class TerrainGenerator : MonoBehaviour,
         results.AddRange(dynamicConveyorItemVisualBlocks);
     }
 
-    private void RefreshLoadedPipeRuntimeViews()
+    private IEnumerator RefreshLoadedPipeRuntimeViewsIncremental(int entriesPerCheckpoint)
     {
         if (!Application.isPlaying)
         {
-            return;
+            yield break;
         }
 
+        entriesPerCheckpoint = Mathf.Max(1, entriesPerCheckpoint);
+        int processed = 0;
         HashSet<Pipe> uniquePipes = new HashSet<Pipe>();
         EnsureResourceStateStore();
         foreach (KeyValuePair<Vector2Int, Block> pair in loadedBlocks)
         {
+            if (++processed >= entriesPerCheckpoint)
+            {
+                processed = 0;
+                yield return null;
+            }
+
             Block block = pair.Value;
             if (block == null
                 || block.TryGetRuntimePipeRecord(out _)
@@ -3142,8 +3488,8 @@ public partial class TerrainGenerator : MonoBehaviour,
                 diagnosticStageStartTime);
             while (!surfaceJob.IsCompleted)
             {
-                if (!allowYield || (pendingWorldFinalization && EnsureChunkStreamingScheduler().HasFrameBudget)) break;
-                yield return null;
+                if (!allowYield) break;
+                yield return TerrainChunkStreamingScheduler.WaitForNextFrame;
             }
 
             try
@@ -3178,8 +3524,8 @@ public partial class TerrainGenerator : MonoBehaviour,
                 {
                     while (!surfaceJob.IsMeshDataReady)
                     {
-                        if (!allowYield || (pendingWorldFinalization && EnsureChunkStreamingScheduler().HasFrameBudget)) break;
-                        yield return null;
+                        if (!allowYield) break;
+                        yield return TerrainChunkStreamingScheduler.WaitForNextFrame;
                     }
 
                     try
@@ -3283,6 +3629,7 @@ public partial class TerrainGenerator : MonoBehaviour,
     {
         if (preserveRuntimeState)
         {
+            savedExploredChunkCoordinates.UnionWith(loadedChunks.Keys);
             RefreshAnimalOverridesFromRuntime();
         }
 
@@ -3310,6 +3657,7 @@ public partial class TerrainGenerator : MonoBehaviour,
         }
 
         loadedChunks.Clear();
+        if (!preserveRuntimeState) savedExploredChunkCoordinates.Clear();
         loadedBlocks.Clear();
         ClearAnimalRuntimeTracking();
         ClearConveyorRuntimeState();

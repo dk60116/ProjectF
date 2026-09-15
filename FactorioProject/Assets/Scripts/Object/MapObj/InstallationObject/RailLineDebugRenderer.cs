@@ -162,6 +162,8 @@ public sealed class RailLineDebugRenderer : MonoBehaviour
 
     private void OnDisable()
     {
+        if (ProjectFApplicationLifecycle.IsQuitting) return;
+
         InstallationObject.PlacementRuntimeChanged -= HandlePlacementRuntimeChanged;
         InstallationObject.PlacementRuntimeCleared -= HandlePlacementRuntimeChanged;
         DisableAllRenderers();

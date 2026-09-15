@@ -1354,54 +1354,62 @@ public partial class BlockStateStore : MonoBehaviour
         savedInstallationStates.EnsureCapacity(installationCount);
         savedInstallationStorageKeysByPlacement.EnsureCapacity(installationCount);
         savedConveyorItemStates.EnsureCapacity(mapSaveData.conveyorItems?.Count ?? 0);
-
-        if (mapSaveData.resources != null)
+        int floorObjectCount = mapSaveData.floorObjects?.Count ?? 0;
+        world?.BeginBulkLoad(floorObjectCount, resourceCount, installationCount);
+        try
         {
-            for (int i = 0; i < mapSaveData.resources.Count; i++)
+            if (mapSaveData.resources != null)
             {
-                ResourceSaveEntry entry = mapSaveData.resources[i];
-                if (entry == null)
+                for (int i = 0; i < mapSaveData.resources.Count; i++)
                 {
-                    continue;
-                }
+                    ResourceSaveEntry entry = mapSaveData.resources[i];
+                    if (entry == null)
+                    {
+                        continue;
+                    }
 
-                savedStates[entry.coordinate] = entry.state;
-                savedResourceItemIds[entry.coordinate] = entry.itemId;
-                if (entry.itemId >= 0)
+                    savedStates[entry.coordinate] = entry.state;
+                    savedResourceItemIds[entry.coordinate] = entry.itemId;
+                    if (entry.itemId >= 0)
+                    {
+                        world?.UpsertResource(entry.coordinate, entry.itemId, entry.state);
+                    }
+                }
+            }
+
+            if (mapSaveData.floorObjects != null)
+            {
+                for (int i = 0; i < mapSaveData.floorObjects.Count; i++)
                 {
-                    world?.UpsertResource(entry.coordinate, entry.itemId, entry.state);
+                    FloorObjectSaveEntry entry = mapSaveData.floorObjects[i];
+                    if (entry == null)
+                    {
+                        continue;
+                    }
+
+                    SetFloorObjects(entry.coordinate, entry.itemIds);
+                }
+            }
+
+            ApplyInstallationSaveStates(mapSaveData.installations);
+
+            if (mapSaveData.conveyorItems != null)
+            {
+                for (int i = 0; i < mapSaveData.conveyorItems.Count; i++)
+                {
+                    ConveyorItemBlockSaveEntry entry = mapSaveData.conveyorItems[i];
+                    if (entry == null)
+                    {
+                        continue;
+                    }
+
+                    SetConveyorItems(entry.coordinate, entry.lanes);
                 }
             }
         }
-
-        if (mapSaveData.floorObjects != null)
+        finally
         {
-            for (int i = 0; i < mapSaveData.floorObjects.Count; i++)
-            {
-                FloorObjectSaveEntry entry = mapSaveData.floorObjects[i];
-                if (entry == null)
-                {
-                    continue;
-                }
-
-                SetFloorObjects(entry.coordinate, entry.itemIds);
-            }
-        }
-
-        ApplyInstallationSaveStates(mapSaveData.installations);
-
-        if (mapSaveData.conveyorItems != null)
-        {
-            for (int i = 0; i < mapSaveData.conveyorItems.Count; i++)
-            {
-                ConveyorItemBlockSaveEntry entry = mapSaveData.conveyorItems[i];
-                if (entry == null)
-                {
-                    continue;
-                }
-
-                SetConveyorItems(entry.coordinate, entry.lanes);
-            }
+            world?.CompleteBulkLoad();
         }
     }
 
@@ -1542,16 +1550,6 @@ public partial class BlockStateStore : MonoBehaviour
         if (installationObject is InputOutputModule inputOutputModule)
         {
             state.inputOutputState = inputOutputModule.CapturePersistentState();
-            if (installationObject is SteamGenerator steamGenerator
-                && state.inputOutputState != null
-                && steamGenerator.TryGetAvailableElectricOutputRate(
-                    out float availableOutputWatts)
-                && availableOutputWatts > 0f)
-            {
-                // Persist the effective live source state so save/load restoration
-                // does not lose a generator that was supplying power at capture time.
-                state.inputOutputState.steamGeneratorHasGenerationReserve = true;
-            }
         }
 
         if (installationObject is RobotArm robotArm)

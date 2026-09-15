@@ -34,6 +34,8 @@ public class FenceDoor : Wall
 
     protected override void OnDisable()
     {
+        if (ProjectFApplicationLifecycle.IsQuitting) return;
+
         hinge?.DOKill();
         base.OnDisable();
     }

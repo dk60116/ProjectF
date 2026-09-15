@@ -36,7 +36,7 @@ public partial class UtilityPole
     internal static void InvalidateRobotArmConsumers()
     {
         robotArmConsumersDirty = true;
-        networkRuntimeEvaluatedSimulationTick = -1L;
+        InvalidateNetworkRuntimeForNextTick();
     }
 
     internal static void UnregisterRobotArmConsumer(RobotArmInstance arm)
@@ -323,5 +323,25 @@ public partial class UtilityPole
             "Common path resolves without scanning candidate networks.");
         MapObjectTickProfiler.AddRuntimeCounter("RobotArmPower", "BindingCacheHits", robotArmPowerBindingCacheHits);
         MapObjectTickProfiler.AddRuntimeCounter("RobotArmPower", "BindingCacheMisses", robotArmPowerBindingCacheMisses);
+        MapObjectTickProfiler.AddRuntimeCounter(
+            "ElectricPower",
+            "RuntimeEvaluations",
+            networkRuntimeEvaluationCount);
+        MapObjectTickProfiler.AddRuntimeCounter(
+            "ElectricPower",
+            "DeferredRuntimeInvalidations",
+            networkRuntimeDeferredInvalidationCount);
+        MapObjectTickProfiler.AddRuntimeCounter(
+            "ElectricPower",
+            "RuntimeWakeBatches",
+            electricRuntimeWakeBatchCount);
+        MapObjectTickProfiler.AddRuntimeCounter(
+            "ElectricPower",
+            "CoalescedRuntimeWakes",
+            electricRuntimeWakeCoalescedCount);
+        MapObjectTickProfiler.AddRuntimeCounter(
+            "ElectricPower",
+            "RuntimeWakePending",
+            electricRuntimeWakePending ? 1 : 0);
     }
 }

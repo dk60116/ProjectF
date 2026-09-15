@@ -133,6 +133,8 @@ public partial class Spliterbelt : ConveyorBelt
 
     protected override void OnDisable()
     {
+        if (ProjectFApplicationLifecycle.IsQuitting) return;
+
         UnregisterCoverage();
         base.OnDisable();
     }
@@ -249,6 +251,7 @@ public partial class Spliterbelt : ConveyorBelt
     private float WheelAnimationTime => Time.time;
 
     protected override bool UsesManagedVisualUpdates => true;
+    protected override bool RequiresManagedVisualUpdate => true;
 
     protected override void TickManagedVisuals(float deltaTime)
     {

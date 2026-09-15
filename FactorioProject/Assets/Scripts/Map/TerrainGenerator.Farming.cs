@@ -245,6 +245,7 @@ public partial class TerrainGenerator : MonoBehaviour
 
         InitializePlantedResourceGrowth(spawnedResource, true);
         resourceStateStore?.Save(block.Coordinate, spawnedResource);
+        FacilityRuntimeWakeRegistry.NotifyCoordinateChanged(block.Coordinate);
         return true;
     }
 
@@ -302,6 +303,7 @@ public partial class TerrainGenerator : MonoBehaviour
 
         plantedSeedItemIds[coordinate] = seedDefinition.id;
         resourceStateStore.UpdateSavedResourceState(coordinate, resourceItemId, state);
+        FacilityRuntimeWakeRegistry.NotifyCoordinateChanged(coordinate);
         return true;
     }
 
@@ -397,6 +399,7 @@ public partial class TerrainGenerator : MonoBehaviour
 
         RefreshFarmlandVisual(block);
         RefreshLoadedFarmlandNeighbors(block.Coordinate);
+        FacilityRuntimeWakeRegistry.NotifyCoordinateChanged(block.Coordinate);
         return true;
     }
 
@@ -856,12 +859,6 @@ public partial class TerrainGenerator : MonoBehaviour
                 farmlandCoordinates.Contains(coordinate + Vector2Int.left + Vector2Int.up) ? 1f : 0f,
                 farmlandCoordinates.Contains(coordinate + Vector2Int.right + Vector2Int.up) ? 1f : 0f));
         meshRenderer.SetPropertyBlock(farmlandVisualPropertyBlock);
-    }
-
-    private void CaptureFarmlandSaveState(MapSaveData mapSaveData)
-    {
-        IEnumerator capture = CaptureFarmlandSaveStateIncremental(mapSaveData, int.MaxValue);
-        while (capture.MoveNext()) { }
     }
 
     private IEnumerator CaptureFarmlandSaveStateIncremental(

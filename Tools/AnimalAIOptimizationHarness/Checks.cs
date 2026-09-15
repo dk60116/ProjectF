@@ -210,19 +210,18 @@ public static partial class Checks
         Require(clock.Tick == 0 && clock.Backlog == 0, "initial world finalization blocks all fixed ticks and discards loading time");
         terrain.IsWorldReadyForPresentation = true; terrain.IsChunkStreamingBusy = true;
         clock.Frame(1);
-        Require(clock.Executions == 0, "pending or in-progress chunk streaming still blocks simulation");
-        terrain.IsChunkStreamingBusy = false; clock.Frame(1);
-        Require(clock.Tick == 0, "completion frame cannot replay loading wall time");
+        Require(clock.Executions == 0, "initial readiness transition discards its completion frame");
         clock.Frame(1f / 60);
-        Require(clock.Tick == 1 && clock.Executions == 1, "first post-loading fixed tick starts normally");
-        terrain.IsChunkStreamingBusy = true; clock.Frame(10); terrain.IsChunkStreamingBusy = false; clock.Frame(10);
+        Require(clock.Tick == 1 && clock.Executions == 1, "runtime chunk streaming does not pause fixed ticks");
         clock.Frame(1f / 60);
-        Require(clock.Tick == 2, "later chunk loads suspend and resume without catch-up bursts");
+        Require(clock.Tick == 2 && clock.Executions == 2, "streaming frames continue at the normal fixed-tick cadence");
+        terrain.IsChunkStreamingBusy = false; clock.Frame(1f / 60);
+        Require(clock.Tick == 3, "streaming completion does not discard or replay simulation time");
         clock.Pause(true); terrain.IsChunkStreamingBusy = true; clock.Frame(1);
         terrain.IsChunkStreamingBusy = false; clock.Frame(1); clock.Frame(1);
-        Require(clock.Tick == 2, "loading completion preserves an explicit user pause");
+        Require(clock.Tick == 3, "runtime streaming does not override an explicit user pause");
         clock.Pause(false); clock.Frame(1f / 60);
-        Require(clock.Tick == 3, "user can resume normally after loading and pause");
+        Require(clock.Tick == 4, "user can resume normally after streaming and pause");
         TerrainGenerator.Active = null;
     }
 }

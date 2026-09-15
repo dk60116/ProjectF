@@ -46,6 +46,8 @@ public class ConvayorBelt2F : ConveyorBelt
 
     protected override void OnDisable()
     {
+        if (ProjectFApplicationLifecycle.IsQuitting) return;
+
         if (!IsRuntimeRootSuspended)
         {
             ActiveBelts.Remove(this);

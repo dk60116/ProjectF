@@ -264,14 +264,6 @@ public partial class TerrainGenerator : MonoBehaviour
         profilingCloneTerrainRegions.Clear();
     }
 
-    private void CaptureProfilingCloneTerrainRegions(MapSaveData mapSaveData)
-    {
-        IEnumerator capture = CaptureProfilingCloneTerrainRegionsIncremental(
-            mapSaveData,
-            int.MaxValue);
-        while (capture.MoveNext()) { }
-    }
-
     private IEnumerator CaptureProfilingCloneTerrainRegionsIncremental(
         MapSaveData mapSaveData,
         int entriesPerFrame)

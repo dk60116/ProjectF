@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using ProjectF.FluidTransport;
+using ProjectF.Simulation;
 
 public static class Mathf
 {
@@ -25,6 +26,11 @@ public static class MapObjectTickManager
         MidpointRounding.AwayFromZero);
     public static double CurrentSimulationTimeSeconds => Time.timeAsDouble;
 }
+public static class MapObjectTickProfiler
+{
+    public static Scope SampleNamed(string kind, string typeName, string itemName) => default;
+    public readonly struct Scope : IDisposable { public void Dispose() { } }
+}
 public static class MapClimate
 {
     public static float CurrentTemperatureCelsius => 20;
@@ -40,8 +46,17 @@ public struct Vector3 { }
 public struct Quaternion { public static Quaternion identity => default; }
 public class InstallationObject
 {
+    public sealed class RuntimeObjectState { public bool activeInHierarchy = true; }
     protected const float FluidPressureLossPerPipe = .01f;
+    public readonly RuntimeObjectState gameObject = new();
+    public bool CanStoreFluid => true;
+    public int StoredFluidItemId = -1;
+    public float StoredFluidLiters;
+    public float FluidStorageCapacityLiters = 100f;
     public float AvailableFluidStorageLiters;
+    public bool CanProvideFluidItem(int fluidItemId) =>
+        StoredFluidLiters > .0001f
+        && (fluidItemId < 0 || StoredFluidItemId == fluidItemId);
     protected static float CalculateFluidPressureRetention(int pipeDistance)
     {
         int clampedDistance = Math.Max(0, pipeDistance);
@@ -69,8 +84,26 @@ public partial class InputOutputModule : InstallationObject
     public Vector2Int OutputDirection = new(-1, 0);
     public readonly List<Vector2Int> runtimeOutputCoordinates = new() { new(0, 0) };
     public readonly List<Vector2Int> runtimePipeInputCoordinates = new();
+    public readonly List<InstallationObject> cachedConnectedFluidSourceStorages = new();
+    private readonly List<InstallationObject> registeredFluidInputSleepStorages = new();
     public readonly List<InstallationObject> cachedFluidOutputStorages = new();
+    private readonly List<InstallationObject> registeredFluidOutputSleepStorages = new();
     private readonly Dictionary<InstallationObject, int> cachedFluidOutputStoragePipeDistances = new();
+    private static readonly Dictionary<InstallationObject, HashSet<InputOutputModule>> registeredFluidInputSleepWaiters = new();
+    private static readonly Dictionary<InstallationObject, HashSet<InputOutputModule>> registeredFluidOutputSleepWaiters = new();
+    private static readonly Stack<HashSet<InputOutputModule>> fluidSleepWaiterSetPool = new();
+    private static readonly List<InputOutputModule> runtimeWakeScratch = new();
+    private static int fluidTopologyVersion = 1;
+    private static int fluidInputSleepWaiterLinkCount;
+    private static int fluidOutputSleepWaiterLinkCount;
+    private int cachedConnectedFluidSourceStoragesTopologyVersion = fluidTopologyVersion;
+    private int cachedFluidOutputStoragesTopologyVersion = fluidTopologyVersion;
+    private bool runtimeSleeping;
+    private bool fluidOutputCapacityBlocked;
+    public int PreferredFluidInputItemId = -1;
+    public int WakeCount;
+    public static int InputSleepWaiterLinks => fluidInputSleepWaiterLinkCount;
+    public static int OutputSleepWaiterLinks => fluidOutputSleepWaiterLinkCount;
     public static readonly Dictionary<Vector2Int, HashSet<InputOutputModule>> registeredRuntimeAreaCoordinates = new();
     public static readonly Dictionary<Vector2Int, HashSet<InputOutputModule>> registeredRuntimeFluidOutputCoordinates = new();
     public void Report(int id, float liters) => RecordFluidNetworkOutput(id, liters);
@@ -79,10 +112,63 @@ public partial class InputOutputModule : InstallationObject
     public void ResetMeter() => fluidOutputRateMeter?.Reset();
     public void SetOutputPipeDistance(InstallationObject storage, int distance) =>
         cachedFluidOutputStoragePipeDistances[storage] = distance;
+    public void SleepForFluidOutput(InstallationObject storage)
+    {
+        cachedFluidOutputStorages.Clear();
+        cachedFluidOutputStorages.Add(storage);
+        cachedFluidOutputStoragesTopologyVersion = fluidTopologyVersion;
+        fluidOutputCapacityBlocked = true;
+        runtimeSleeping = true;
+        RegisterFluidOutputSleepWaiters();
+    }
+    public void SleepForFluidInput(InstallationObject storage, int requiredFluidItemId)
+    {
+        cachedConnectedFluidSourceStorages.Clear();
+        cachedConnectedFluidSourceStorages.Add(storage);
+        cachedConnectedFluidSourceStoragesTopologyVersion = fluidTopologyVersion;
+        PreferredFluidInputItemId = requiredFluidItemId;
+        runtimeSleeping = true;
+        RegisterFluidInputSleepWaiters();
+    }
+    public static void IncreaseFluidInputAvailability(InstallationObject storage) =>
+        NotifyFluidInputAvailabilityIncreased(storage);
+    public static void IncreaseFluidOutputCapacity(InstallationObject storage) =>
+        NotifyFluidOutputCapacityIncreased(storage);
+    protected virtual void WakeRuntimeUpdate()
+    {
+        WakeCount++;
+        runtimeSleeping = false;
+        fluidInputSleepWaiterLinkCount = Math.Max(
+            0,
+            fluidInputSleepWaiterLinkCount - UnregisterFluidSleepWaiters(
+                this,
+                registeredFluidInputSleepStorages,
+                registeredFluidInputSleepWaiters));
+        fluidOutputSleepWaiterLinkCount = Math.Max(
+            0,
+            fluidOutputSleepWaiterLinkCount - UnregisterFluidSleepWaiters(
+                this,
+                registeredFluidOutputSleepStorages,
+                registeredFluidOutputSleepWaiters));
+    }
     private bool ContainsRuntimeOutputCoordinate(Vector2Int coordinate) => runtimeOutputCoordinates.Contains(coordinate);
     private bool ContainsRuntimeFluidPressureInputCoordinate(Vector2Int coordinate) => runtimePipeInputCoordinates.Contains(coordinate);
     private bool TryGetRuntimePipeAreaExternalDirection(Vector2Int coordinate, out Vector2Int direction) { direction = OutputDirection; return direction != Vector2Int.zero; }
     private static bool IsFluidItemId(int id) => id >= 0;
+    private int ResolvePreferredFluidInputItemId() => PreferredFluidInputItemId;
+    private static float GetFluidStorageFillRatio(InstallationObject storage) =>
+        storage != null && storage.FluidStorageCapacityLiters > .0001f
+            ? Math.Clamp(storage.StoredFluidLiters / storage.FluidStorageCapacityLiters, 0f, 1f)
+            : 0f;
+    private bool CanUseConnectedFluidSource(
+        InstallationObject sourceStorage,
+        int requiredFluidItemId,
+        float currentFillRatio) =>
+        sourceStorage != null
+        && sourceStorage != this
+        && sourceStorage.gameObject.activeInHierarchy
+        && sourceStorage.CanProvideFluidItem(requiredFluidItemId)
+        && GetFluidStorageFillRatio(sourceStorage) > currentFillRatio + .001f;
     private bool EnsureFluidOutputStorageCache() => cachedFluidOutputStorages.Count > 0;
     private bool TrySelectFluidOutputStorageWithAnySpaceFromCache(int id, out InstallationObject storage)
     {
@@ -110,23 +196,61 @@ public partial class InputOutputModule : InstallationObject
 public partial class Pump : InputOutputModule
 {
     private const int MaxWaterEmitAttemptsPerTick = 32;
-    private const float WaterOutputBudgetSeconds = 1;
     private long waterAccumulatorUnits, availableWaterOutputUnits;
     private long waterOutputBudgetUpdatedTick = -1L;
+    private bool waterOutputBlocked;
     public float WaterLitersPerSecond = 10;
     public bool HasRuntimeOutputCoordinates = true;
     public int RuntimeAreaMaxObjects = 32;
     public int OutputPipeDistance;
     public float Space;
     public int GroundItems;
+    public bool CanEmitGround = true;
+    public bool OutputBlocked => waterOutputBlocked;
     private readonly InstallationObject pumpStorage = new();
+    private readonly FacilityFlowBatch flowBatch = new(1);
     public void Tick(float dt)
     {
         pumpStorage.AvailableFluidStorageLiters = Space;
         cachedFluidOutputStorages.Clear();
         cachedFluidOutputStorages.Add(pumpStorage);
         SetOutputPipeDistance(pumpStorage, OutputPipeDistance);
-        ProduceWater(dt);
+        flowBatch.Begin();
+        int index = flowBatch.ReserveSlot();
+        float outputRate = WaterLitersPerSecond * ResolveFluidOutputTransportRetention(1);
+        flowBatch.ConfigurePump(
+            index,
+            1,
+            outputRate,
+            dt,
+            MapObjectTickManager.CurrentSimulationTick,
+            HasRuntimeOutputCoordinates && outputRate > 0,
+            waterAccumulatorUnits,
+            availableWaterOutputUnits,
+            waterOutputBudgetUpdatedTick);
+        flowBatch.PlanAll();
+        float accepted = 0;
+        if (flowBatch.IsPumpOutputValid(index))
+        {
+            TryEmitFluidOutputToConnectedStorages(1, flowBatch.GetPumpRequestedLiters(index), 20, out accepted);
+            flowBatch.CommitPumpStorageAcceptance(index, accepted);
+            int attempts = Math.Min(
+                (int)(flowBatch.GetPumpAccumulatorUnits(index) / DeterministicSimulationUnits.UnitsPerWhole),
+                Math.Min(MaxWaterEmitAttemptsPerTick, Math.Max(1, RuntimeAreaMaxObjects)));
+            for (int i = 0; i < attempts; i++)
+            {
+                if (!TryEmitOutputItems(1, 1, default))
+                {
+                    flowBatch.SetPumpBlocked(index, true);
+                    break;
+                }
+                flowBatch.TryConsumePumpWholeLiter(index);
+            }
+        }
+        waterAccumulatorUnits = flowBatch.GetPumpAccumulatorUnits(index);
+        availableWaterOutputUnits = flowBatch.GetPumpBudgetUnits(index);
+        waterOutputBudgetUpdatedTick = flowBatch.GetPumpBudgetUpdatedTick(index);
+        waterOutputBlocked = flowBatch.IsPumpBlocked(index);
         Space = pumpStorage.AvailableFluidStorageLiters;
     }
     private int ResolveWaterItemId() => 1;
@@ -134,7 +258,12 @@ public partial class Pump : InputOutputModule
     {
         accepted = Math.Min(Space, requested); Space -= accepted; return accepted > 0;
     }
-    private bool TryEmitOutputItems(int id, int count, Vector3 position) { GroundItems += count; return true; }
+    private bool TryEmitOutputItems(int id, int count, Vector3 position)
+    {
+        if (!CanEmitGround) return false;
+        GroundItems += count;
+        return true;
+    }
     private Vector3 ResolveConsumeTargetWorldPosition() => default;
 }
 public class TerrainGenerator
@@ -248,6 +377,12 @@ public static class Checks
         var pump = new Pump { Space = 2 };
         pump.Tick(.5f);
         Check(Near(pump.GetObjectInfoFluidOutputLitersPerSecond(1), 2) && pump.GroundItems == 3, "pump meters storage delivery and excludes ground item output");
+        var blockedPump = new Pump { Space = 0, CanEmitGround = false };
+        blockedPump.Tick(.1f);
+        Check(blockedPump.OutputBlocked, "pump marks a fully blocked output for runtime sleep");
+        blockedPump.Space = 1;
+        blockedPump.Tick(.1f);
+        Check(!blockedPump.OutputBlocked, "pump clears output block after storage accepts water");
         Time.timeAsDouble = 1.1;
         Check(Near(pump.GetObjectInfoFluidOutputLitersPerSecond(1), 0), "blocked pump output reaches zero");
         var halfPressurePump = new Pump { Space = 20, OutputPipeDistance = 50 };
@@ -256,6 +391,47 @@ public static class Checks
         var blockedByDistancePump = new Pump { Space = 20, OutputPipeDistance = 100 };
         blockedByDistancePump.Tick(1);
         Check(Near(blockedByDistancePump.Space, 20), "one hundred pipes stop actual pump transport");
+        var sharedBoilerStorage = new InstallationObject();
+        var firstSleepingPump = new InputOutputModule();
+        var secondSleepingPump = new InputOutputModule();
+        firstSleepingPump.SleepForFluidOutput(sharedBoilerStorage);
+        secondSleepingPump.SleepForFluidOutput(sharedBoilerStorage);
+        Check(InputOutputModule.OutputSleepWaiterLinks == 2,
+            "multiple pumps register independently against one full boiler storage");
+        InputOutputModule.IncreaseFluidOutputCapacity(sharedBoilerStorage);
+        Check(firstSleepingPump.WakeCount == 1 && secondSleepingPump.WakeCount == 1
+              && InputOutputModule.OutputSleepWaiterLinks == 0,
+            "boiler water consumption wakes every connected sleeping pump exactly once");
+        InputOutputModule.IncreaseFluidOutputCapacity(sharedBoilerStorage);
+        Check(firstSleepingPump.WakeCount == 1 && secondSleepingPump.WakeCount == 1,
+            "cleared waiter links do not cause repeated wakes");
+        var alreadyUsableSource = new InstallationObject
+        {
+            StoredFluidItemId = 1,
+            StoredFluidLiters = 50,
+            FluidStorageCapacityLiters = 100
+        };
+        var outputBlockedConsumer = new InputOutputModule();
+        outputBlockedConsumer.SleepForFluidInput(alreadyUsableSource, 1);
+        Check(InputOutputModule.InputSleepWaiterLinks == 0,
+            "a facility sleeping for another reason does not subscribe to an already usable input");
+        var sourceStorage = new InstallationObject
+        {
+            StoredFluidItemId = 2,
+            StoredFluidLiters = 50,
+            FluidStorageCapacityLiters = 100
+        };
+        var sleepingConsumer = new InputOutputModule();
+        sleepingConsumer.SleepForFluidInput(sourceStorage, 1);
+        Check(InputOutputModule.InputSleepWaiterLinks == 1,
+            "sleeping fluid consumer registers directly against its connected source storage");
+        InputOutputModule.IncreaseFluidInputAvailability(sourceStorage);
+        Check(sleepingConsumer.WakeCount == 0 && InputOutputModule.InputSleepWaiterLinks == 1,
+            "an incompatible fluid increase does not wake the sleeping consumer");
+        sourceStorage.StoredFluidItemId = 1;
+        InputOutputModule.IncreaseFluidInputAvailability(sourceStorage);
+        Check(sleepingConsumer.WakeCount == 1 && InputOutputModule.InputSleepWaiterLinks == 0,
+            "a compatible source increase wakes and unlinks the sleeping consumer exactly once");
         Check(Pipe.AddRemoteTraversalPipeDistance(0, new(4, 9), new(12, 9)) == 8,
             "underground traversal uses endpoint tile distance");
         Check(Pipe.AddRemoteTraversalPipeDistance(7, new(-3, 2), new(-3, -8)) == 17,

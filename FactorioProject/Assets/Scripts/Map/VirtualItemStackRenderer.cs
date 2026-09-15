@@ -55,12 +55,12 @@ public sealed class VirtualItemStackRenderer : MonoBehaviour
 
     private void OnDestroy()
     {
-        batches.Dispose();
+        if (!ProjectFApplicationLifecycle.IsQuitting) batches.Dispose();
     }
 
     private void OnDisable()
     {
-        batches.SuspendRendering();
+        if (!ProjectFApplicationLifecycle.IsQuitting) batches.SuspendRendering();
     }
 
     private void LateUpdate()

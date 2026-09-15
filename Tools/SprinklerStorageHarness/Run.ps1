@@ -29,6 +29,7 @@ foreach ($signature in @(
     'private static float GetUsableWaterLiters(',
     'private bool TryConsumeSprayWater(',
     'protected override bool ShouldAutoPullFluidFromConnectedStorage()',
+    'protected override bool ShouldKeepRuntimeUpdateTickActive()',
     'protected override string ResolveObjectInfoStatus(')) {
     $generated += (Read-Member ($base + 'Sprinkler.cs') $signature) + "`n"
 }

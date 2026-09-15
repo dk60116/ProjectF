@@ -55,6 +55,7 @@ public partial class Block
 
     private void NotifyRuntimeItemStackChanged(bool wakeRuntimeDependents)
     {
+        TerrainGenerator.Active?.MarkPersistenceStateDirty(this);
         if (wakeRuntimeDependents)
         {
             RobotArm.WakeAroundCoordinate(coordinate);
@@ -1308,6 +1309,7 @@ public partial class Block
         }
 
         int remaining = count;
+        bool stateChanged = false;
         for (int stackIndex = 0; stackIndex < floorStacks.Count && remaining > 0; stackIndex++)
         {
             List<PortableObject> stack = floorStacks[stackIndex];
@@ -1322,6 +1324,7 @@ public partial class Block
                 if (portableObject == null)
                 {
                     stack.RemoveAt(objectIndex);
+                    stateChanged = true;
                     continue;
                 }
 
@@ -1332,10 +1335,15 @@ public partial class Block
 
                 stack.RemoveAt(objectIndex);
                 ReleaseFloorObject(portableObject);
+                stateChanged = true;
                 remaining--;
             }
         }
 
+        if (stateChanged)
+        {
+            NotifyRuntimeItemStackChanged();
+        }
         return count - remaining;
     }
 
@@ -1378,6 +1386,7 @@ public partial class Block
                 }
             }
 
+            NotifyRuntimeItemStackChanged();
             return true;
         }
 
@@ -1511,6 +1520,7 @@ public partial class Block
     {
         takenItemId = -1;
         EnsureFloorObjectsInitialized();
+        bool stateChanged = false;
         for (int stackIndex = 0; stackIndex < floorStacks.Count; stackIndex++)
         {
             List<PortableObject> stack = floorStacks[stackIndex];
@@ -1520,6 +1530,7 @@ public partial class Block
                 if (portableObject == null)
                 {
                     stack.RemoveAt(stack.Count - 1);
+                    stateChanged = true;
                     continue;
                 }
 
@@ -1528,6 +1539,7 @@ public partial class Block
                 {
                     stack.RemoveAt(stack.Count - 1);
                     ReleaseFloorObject(portableObject);
+                    stateChanged = true;
                     continue;
                 }
 
@@ -1548,6 +1560,10 @@ public partial class Block
             }
         }
 
+        if (stateChanged)
+        {
+            NotifyRuntimeItemStackChanged();
+        }
         return false;
     }
 
@@ -5366,10 +5382,7 @@ public partial class Block
 
             stack.RemoveAt(stack.Count - 1);
             MovePickupObjectToStorage(topObject, reservation);
-            if (useInputAreaCenter)
-            {
-                NotifyRuntimeItemStackChanged();
-            }
+            NotifyRuntimeItemStackChanged();
 
             return true;
         }
@@ -5539,10 +5552,7 @@ public partial class Block
 
             stack.RemoveAt(stack.Count - 1);
             MovePickupObjectToStorage(topObject, reservation);
-            if (useInputAreaCenter)
-            {
-                NotifyRuntimeItemStackChanged();
-            }
+            NotifyRuntimeItemStackChanged();
 
             return true;
         }
@@ -5806,6 +5816,7 @@ public partial class Block
             return false;
         }
 
+        bool stateChanged = false;
         for (int stackIndex = 0; stackIndex < floorStacks.Count; stackIndex++)
         {
             List<PortableObject> stack = stackIndex < floorStacks.Count ? floorStacks[stackIndex] : null;
@@ -5813,6 +5824,7 @@ public partial class Block
             {
                 PortableObject portableObject = stack[stack.Count - 1];
                 stack.RemoveAt(stack.Count - 1);
+                stateChanged = true;
                 if (portableObject == null)
                 {
                     continue;
@@ -5826,10 +5838,15 @@ public partial class Block
                 }
 
                 takenItemId = itemId;
+                NotifyRuntimeItemStackChanged();
                 return true;
             }
         }
 
+        if (stateChanged)
+        {
+            NotifyRuntimeItemStackChanged();
+        }
         return false;
     }
 
@@ -6042,6 +6059,7 @@ public partial class Block
         }
 
         int transferred = 0;
+        bool floorStateChanged = false;
 
         for (int stackIndex = 0; stackIndex < floorStacks.Count; stackIndex++)
         {
@@ -6057,6 +6075,7 @@ public partial class Block
                 if (floorObject == null)
                 {
                     stack.RemoveAt(objectIndex);
+                    floorStateChanged = true;
                     continue;
                 }
 
@@ -6065,6 +6084,7 @@ public partial class Block
                 {
                     stack.RemoveAt(objectIndex);
                     ReleaseFloorObject(floorObject);
+                    floorStateChanged = true;
                     continue;
                 }
 
@@ -6073,13 +6093,23 @@ public partial class Block
                         itemId,
                         out PlayerItemStorageReservation reservation))
                 {
+                    if (floorStateChanged)
+                    {
+                        NotifyRuntimeItemStackChanged();
+                    }
                     return transferred;
                 }
 
                 stack.RemoveAt(objectIndex);
                 MovePickupObjectToStorage(floorObject, reservation);
+                floorStateChanged = true;
                 transferred++;
             }
+        }
+
+        if (floorStateChanged)
+        {
+            NotifyRuntimeItemStackChanged();
         }
 
         for (int objectIndex = inputAreaCenterStack.Count - 1; objectIndex >= 0; objectIndex--)
@@ -7318,6 +7348,7 @@ public partial class Block
             {
                 WakeConveyorMoveAttemptsAround();
                 RefreshConveyorActivityRegistration();
+                TerrainGenerator.Active?.MarkPersistenceStateDirty(this);
             }
 
             return;
@@ -7366,6 +7397,7 @@ public partial class Block
         {
             WakeConveyorMoveAttemptsAround();
             RefreshConveyorActivityRegistration();
+            TerrainGenerator.Active?.MarkPersistenceStateDirty(this);
         }
     }
 
