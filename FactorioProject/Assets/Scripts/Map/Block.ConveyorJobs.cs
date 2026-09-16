@@ -152,9 +152,30 @@ public partial class Block
     {
         // Several lanes in the same block can change during one native tick.
         // Invalidate presentation and observers once without copying lane data.
-        MarkConveyorItemVisualDirty();
-        NotifyRuntimeItemStackChanged(wakeRuntimeDependents);
-        if (refreshActivity) RefreshConveyorActivityRegistration(false, false);
+        MarkBeltJobItemVisualDirty(refreshActivity);
+        NotifyRuntimeItemStackChanged(wakeRuntimeDependents, false);
+    }
+
+    internal void CaptureBeltJobItemVisualState(out int itemCount, out bool hasDynamicVisuals)
+    {
+        itemCount = 0;
+        hasDynamicVisuals = false;
+        if (!Application.isPlaying
+            || !IsConveyorStackingEnabled()
+            || !ShouldUseVirtualConveyorItemRendering())
+        {
+            return;
+        }
+
+        for (int lane = 0; lane < ConveyorStackLaneLimit; lane++)
+        {
+            if (!TryReadBeltJobLane(lane, out BeltLaneState state) || state.ItemId < 0) continue;
+            itemCount++;
+            hasDynamicVisuals |= state.Remaining > 0;
+        }
+
+        if (!hasDynamicVisuals)
+            hasDynamicVisuals = HasNonBeltCpuRenderedConveyorMotionStates();
     }
 
     private bool TryReadBeltJobLane(int lane, out BeltLaneState state)

@@ -16,7 +16,13 @@ public sealed class BoxObject
     public int Allowed;
     public bool AcceptsItem(int itemId) => itemId == Allowed;
 }
-public sealed class Block { public object MapObject; }
+public sealed class Block
+{
+    public object MapObject;
+    public Vector2Int Coordinate { get; }
+    public Block() { }
+    public Block(Vector2Int coordinate) { Coordinate = coordinate; }
+}
 public static class MapClimate { public static float CurrentTemperatureCelsius => 20f; }
 public sealed class TerrainGenerator
 {
@@ -41,6 +47,8 @@ public partial class InputOutputModule
 {
     private static readonly Dictionary<Vector2Int, HashSet<InputOutputModule>> registeredRuntimeAreaCoordinates = new();
     private static readonly Dictionary<Vector2Int, HashSet<InputOutputModule>> registeredRuntimeFluidOutputCoordinates = new();
+    private static readonly List<InputOutputModule> runtimeWakeScratch = new();
+    private static readonly HashSet<InputOutputModule> runtimeWakeSet = new();
     public readonly ModuleObject gameObject = new();
     private readonly List<Vector2Int> runtimeInputEnergyCoordinates = new();
     private readonly List<Vector2Int> runtimeOutputCoordinates = new();
@@ -51,7 +59,9 @@ public partial class InputOutputModule
     public readonly List<int> Output = new();
     public readonly List<int> Accepted = new();
     public int OutputReads;
+    public int WakeCount;
     public Action NestedQuery;
+    private bool runtimeSleeping;
     private static readonly ItemDefinition fuel = new() { energyType = ItemDefinition.EnergyType.Chemical, energyAmount = 10 };
     private static readonly ItemDefinition solid = new();
     private static ItemDefinition ResolveItemDefinition(int id) => id == 3 ? fuel : solid;
@@ -85,6 +95,17 @@ public partial class InputOutputModule
         runtimeInputEnergyCoordinates.Clear();
     }
     private bool ContainsRuntimeOutputCoordinate(Vector2Int coordinate) => runtimeOutputCoordinates.Contains(coordinate);
+    private bool ContainsRuntimeAreaCoordinate(Vector2Int coordinate)
+    {
+        if (runtimeInputEnergyCoordinates.Contains(coordinate)
+            || runtimeOutputCoordinates.Contains(coordinate)
+            || runtimePipeInputCoordinates.Contains(coordinate)) return true;
+        foreach (Area area in runtimeInputItemAreas)
+            if (area.coordinate == coordinate) return true;
+        return false;
+    }
+    public void SetSleeping(bool sleeping) => runtimeSleeping = sleeping;
+    protected virtual void WakeRuntimeUpdate() { WakeCount++; runtimeSleeping = false; }
     private bool AppendOutputItemIds(ISet<int> result)
     {
         OutputReads++;
@@ -120,6 +141,11 @@ public static class Checks
         Vector2Int cell = new(100, 20), moved = new(101, 20);
         var producer = new InputOutputModule(); producer.Output.AddRange(new[] { 1, 2, 3 }); producer.Place(cell, output: true);
         var consumer = new InputOutputModule(); consumer.Accepted.Add(1); consumer.Place(cell, input: true);
+        producer.SetSleeping(false);
+        consumer.SetSleeping(true);
+        InputOutputModule.WakeRuntimeModulesForChangedBlocks(new[] { new Block(cell), new Block(cell) });
+        Require(producer.WakeCount == 0, "already scheduled module was redundantly woken");
+        Require(consumer.WakeCount == 1, "sleeping module was not woken exactly once");
         var irrelevant = new List<InputOutputModule>();
         for (int i = 0; i < 10000; i++)
         {

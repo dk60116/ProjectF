@@ -788,6 +788,7 @@ public class FreightCar : Train,
 
     private void LateUpdate()
     {
+        using var callerSample = MapObjectTickProfiler.SampleLateUpdateCaller<FreightCar>();
         if (fuelRoleIcon != null)
         {
             bool visible = IsFuelSupplyCar;

@@ -198,6 +198,7 @@ namespace ProjectF.Rendering
 
         private void LateUpdate()
         {
+            using var callerSample = MapObjectTickProfiler.SampleLateUpdateCaller<WorldColliderCullingManager>();
             GameManager gameManager = GameManager.Instance;
             Player player = gameManager != null ? gameManager.Player : null;
             if (CameraRenderCulling.Disabled || player == null)

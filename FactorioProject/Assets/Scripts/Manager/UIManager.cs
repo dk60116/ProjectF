@@ -51,6 +51,7 @@ public class UIManager : MonoBehaviour
 
     private void LateUpdate()
     {
+        using var callerSample = MapObjectTickProfiler.SampleLateUpdateCaller<UIManager>();
         using var sample = MapObjectTickProfiler.SampleNamed(
             "Frame",
             "World UI",

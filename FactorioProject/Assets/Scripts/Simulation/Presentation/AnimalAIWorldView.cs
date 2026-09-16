@@ -23,6 +23,7 @@ public sealed class AnimalAIWorldView : MonoBehaviour
     private void OnDestroy() => world?.OnViewDestroyed(this);
     private void Update()
     {
+        using var callerSample = MapObjectTickProfiler.SampleUpdateCaller<AnimalAIWorldView>();
         if (world == null || MapObjectTickManager.SimulationPaused || MapObjectTickManager.WaitingForWorldLoad) return;
         using var sample = MapObjectTickProfiler.SampleNamed("AI Render", "AnimalAI", "Animal Presentation");
         if (presentationCamera == null || !presentationCamera.isActiveAndEnabled) presentationCamera = Camera.main;
@@ -37,5 +38,9 @@ public sealed class AnimalAIWorldView : MonoBehaviour
             AnimalAIProfiler.Add(visible ? AnimalAIProfiler.Counter.Presentations : AnimalAIProfiler.Counter.CulledPresentations);
         }
     }
-    private void LateUpdate() => world?.CompletePresentationFrame();
+    private void LateUpdate()
+    {
+        using var callerSample = MapObjectTickProfiler.SampleLateUpdateCaller<AnimalAIWorldView>();
+        world?.CompletePresentationFrame();
+    }
 }

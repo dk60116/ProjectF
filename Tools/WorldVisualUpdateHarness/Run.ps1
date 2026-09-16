@@ -1,5 +1,12 @@
 $ErrorActionPreference = 'Stop'
 $repo = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '../..'))
+$utilityPoleSource = [IO.File]::ReadAllText((Join-Path $repo 'FactorioProject/Assets/Scripts/Object/MapObj/InstallationObject/UtilityPole.cs'))
+if ($utilityPoleSource -match '\bvoid\s+LateUpdate\s*\(') {
+    throw 'FAIL utility poles still register one LateUpdate callback per instance'
+}
+if ($utilityPoleSource.IndexOf('internal static void FlushDeferredVisualRefreshes()', [StringComparison]::Ordinal) -lt 0) {
+    throw 'FAIL centralized utility-pole visual flush entry point is missing'
+}
 $probeDir = Join-Path ([IO.Path]::GetTempPath()) ('ProjectF-VisualUpdates-' + [Guid]::NewGuid().ToString('N'))
 New-Item -ItemType Directory -Path $probeDir | Out-Null
 $files = @(

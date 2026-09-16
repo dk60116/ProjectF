@@ -678,6 +678,7 @@ public class InstallationPlacementController : MonoBehaviour
 
     private void Update()
     {
+        using var callerSample = MapObjectTickProfiler.SampleUpdateCaller<InstallationPlacementController>();
         bool profileRuntime = MapObjectTickProfiler.IsDetailedEnabled;
         long startTimestamp = profileRuntime ? MapObjectTickProfiler.BeginSample() : 0L;
         try
@@ -747,6 +748,7 @@ public class InstallationPlacementController : MonoBehaviour
 
     private void LateUpdate()
     {
+        using var callerSample = MapObjectTickProfiler.SampleLateUpdateCaller<InstallationPlacementController>();
         bool profileRuntime = MapObjectTickProfiler.IsDetailedEnabled;
         long startTimestamp = profileRuntime ? MapObjectTickProfiler.BeginSample() : 0L;
         try

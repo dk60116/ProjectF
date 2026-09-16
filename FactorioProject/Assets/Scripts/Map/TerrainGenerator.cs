@@ -83,6 +83,7 @@ public partial class TerrainGenerator : MonoBehaviour,
     public long SimulationId => long.MinValue;
     public float ManagedUpdateTickIntervalSeconds => MapObjectTickManager.FixedSimulationDeltaSeconds;
     public int TerrainGenerationVersion => terrainGenerationVersion;
+    public int MapMarkerVersion => resourceStateStore != null ? resourceStateStore.MapMarkerVersion : 0;
     public int CurrentMapSize => GetNormalizedMapSize();
 
     public enum ResourcePlacementMode
@@ -1090,6 +1091,7 @@ public partial class TerrainGenerator : MonoBehaviour,
 
     private void Update()
     {
+        using var callerSample = MapObjectTickProfiler.SampleUpdateCaller<TerrainGenerator>();
         using var sample = MapObjectTickProfiler.SampleNamed("World", "Terrain Update", "Terrain Update (inclusive)");
         if (!Application.isPlaying || !hasGeneratedChunks)
         {

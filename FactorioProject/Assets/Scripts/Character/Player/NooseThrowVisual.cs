@@ -186,6 +186,7 @@ public sealed class NooseThrowVisual : MonoBehaviour
 
     private void Update()
     {
+        using var callerSample = MapObjectTickProfiler.SampleUpdateCaller<NooseThrowVisual>();
         if (tetherOrigin == null)
         {
             ReleaseAttachment();

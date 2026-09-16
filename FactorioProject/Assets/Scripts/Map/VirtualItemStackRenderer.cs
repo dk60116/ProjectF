@@ -83,6 +83,7 @@ public sealed class VirtualItemStackRenderer : MonoBehaviour
 
     private void LateUpdate()
     {
+        using var callerSample = MapObjectTickProfiler.SampleLateUpdateCaller<VirtualItemStackRenderer>();
         using var sample = MapObjectTickProfiler.SampleNamed(
             "Render",
             "Ground Item Render",

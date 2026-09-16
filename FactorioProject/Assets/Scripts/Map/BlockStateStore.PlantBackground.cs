@@ -53,6 +53,10 @@ public partial class BlockStateStore
         Resource.ResourceSaveState state,
         bool refreshVirtualWorld = true)
     {
+        bool markerChanged = !savedStates.TryGetValue(coordinate, out Resource.ResourceSaveState previousState)
+                             || !savedResourceItemIds.TryGetValue(coordinate, out int previousItemId)
+                             || previousItemId != itemId
+                             || (previousState.resourceCount > 0) != (state.resourceCount > 0);
         savedStates[coordinate] = state;
         if (itemId >= 0)
         {
@@ -62,6 +66,7 @@ public partial class BlockStateStore
                 ResolveVirtualObjectWorld()?.UpsertResource(coordinate, itemId, state);
             }
         }
+        if (markerChanged) MarkMapMarkersChanged();
     }
 
     public bool IsSavedCoordinateEmptyGround(Vector2Int coordinate)

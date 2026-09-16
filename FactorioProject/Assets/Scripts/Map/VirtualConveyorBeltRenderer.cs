@@ -362,6 +362,7 @@ public sealed class VirtualConveyorBeltRenderer : MonoBehaviour
 
     private void LateUpdate()
     {
+        using var callerSample = MapObjectTickProfiler.SampleLateUpdateCaller<VirtualConveyorBeltRenderer>();
         LastTrackedTransformMatrixReads = 0;
         LastCulledTrackedBelts = 0;
         if (!Application.isPlaying)

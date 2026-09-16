@@ -35,7 +35,11 @@ namespace ProjectF.Rendering
         }
 
         // Also recover if rendering was interrupted before an end-camera callback.
-        private void LateUpdate() => RestoreAll();
+        private void LateUpdate()
+        {
+            using var callerSample = MapObjectTickProfiler.SampleLateUpdateCaller<WorldCameraCulling>();
+            RestoreAll();
+        }
 
         private void BeginCameraRendering(ScriptableRenderContext context, Camera camera) => BeginCamera(camera);
         private void EndCameraRendering(ScriptableRenderContext context, Camera camera) => EndCamera(camera);

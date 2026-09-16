@@ -258,6 +258,7 @@ public partial class PlayerHUD : BagSlot
 
     private void Update()
     {
+        using var callerSample = MapObjectTickProfiler.SampleUpdateCaller<PlayerHUD>();
         EnsureHandBagBinding();
         PollHandBagChanges();
         ResolveHudReferences();

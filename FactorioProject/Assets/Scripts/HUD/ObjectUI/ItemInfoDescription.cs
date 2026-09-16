@@ -83,6 +83,7 @@ public class ItemInfoDescription : MonoBehaviour
 
     private void Update()
     {
+        using var callerSample = MapObjectTickProfiler.SampleUpdateCaller<ItemInfoDescription>();
         RefreshLiveGaugeTargets();
         UpdateGaugeFill(energyFill);
         UpdateGaugeFill(workFill);

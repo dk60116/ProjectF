@@ -10,6 +10,8 @@ dotnet run --project Tools/FramePhaseProfilerHarness/FramePhaseProfilerHarness.c
 
 기존 `mapObjectTickProfiling`을 켜면 스냅샷에 `FramePhases`가 추가돼. Unity 기본 마커가 없는 빌드에서도 PlayerLoop 최상위 단계와 바로 아래 단계의 벽시계 시간을 기록해.
 
+상세 계측이 켜져 있으면 프로젝트의 MonoBehaviour `Update()`와 `LateUpdate()` 진입점도 각각 `Update Caller`, `LateUpdate Caller` 행으로 집계돼. 같은 타입의 여러 인스턴스는 타입별 한 행으로 합산되고, `Samples`는 전체 호출 횟수, `MsPerRenderFrame`은 해당 타입이 프레임당 사용한 총 시간이야. 이 행은 내부 세부 타이머를 포함하는 상위 범위라 자식 행과 합산하지 않아.
+
 - 값은 최근 최대 128개 **완료된 프레임**의 평균 ms야. 상세 열에 median/p95/max가 있어.
 - 부모 단계에는 자식 시간이 포함돼. 부모·자식을 합산하면 안 돼.
 - FixedUpdate가 여러 번 실행되면 프레임 내 시간을 합산해. 실행되지 않은 프레임은 0으로 포함해.

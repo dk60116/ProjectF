@@ -17,7 +17,11 @@ public sealed class ConveyorWorldView : MonoBehaviour
         gameObject.SetActive(false);
         if (Application.isPlaying) Destroy(gameObject); else DestroyImmediate(gameObject);
     }
-    private void LateUpdate() => world?.Render();
+    private void LateUpdate()
+    {
+        using var callerSample = MapObjectTickProfiler.SampleLateUpdateCaller<ConveyorWorldView>();
+        world?.Render();
+    }
     private void OnDisable() => world?.SuspendRendering();
     private void OnDestroy() => world?.OnViewDestroyed(this);
 }

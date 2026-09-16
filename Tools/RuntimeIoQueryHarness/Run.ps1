@@ -1,6 +1,9 @@
 $ErrorActionPreference = 'Stop'
 $repo = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '../..'))
 $text = [IO.File]::ReadAllText((Join-Path $repo 'FactorioProject/Assets/Scripts/Object/MapObj/InstallationObject/InputOutputModule.cs'))
+if (-not $text.Contains('|| !module.runtimeSleeping', [StringComparison]::Ordinal)) {
+    throw 'Runtime item-area wake collection must skip modules that are already scheduled.'
+}
 function Member([string]$signature) {
     $start = $text.IndexOf($signature, [StringComparison]::Ordinal)
     if ($start -lt 0) { throw "Missing member: $signature" }
@@ -40,7 +43,10 @@ foreach ($signature in @(
     'private void UnregisterRuntimeAreaCoordinates(IReadOnlyList',
     'private void UnregisterRuntimeInputItemAreaCoordinates()',
     'private static void RegisterRuntimeCoordinate(',
-    'private static void UnregisterRuntimeCoordinate('
+    'private static void UnregisterRuntimeCoordinate(',
+    'internal static void WakeRuntimeModulesForChangedBlocks(',
+    'private static void CollectRuntimeModulesAtCoordinate(',
+    'private static void WakeCollectedRuntimeModules()'
 )) { $source += (Member $signature) + "`n" }
 $source += '}'
 $probe = Join-Path ([IO.Path]::GetTempPath()) ('ProjectF-RuntimeIoQuery-' + [guid]::NewGuid().ToString('N'))

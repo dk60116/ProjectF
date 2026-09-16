@@ -358,7 +358,10 @@ public partial class BlockStateStore : MonoBehaviour
     private readonly Dictionary<int, int> savedInstallationCountsByItemId = new Dictionary<int, int>();
     private readonly Dictionary<int, int> savedInstallationStoredItemCountsByItemId = new Dictionary<int, int>();
     private int savedInstallationItemTotal;
+    private int mapMarkerVersion;
     private VirtualObjectWorld virtualObjectWorld;
+
+    public int MapMarkerVersion => mapMarkerVersion;
 
     public void Save(Vector2Int worldCoordinate, ResourceInstance resource)
     {
@@ -368,17 +371,25 @@ public partial class BlockStateStore : MonoBehaviour
         }
 
         Resource.ResourceSaveState state = resource.CaptureState();
-        savedStates[worldCoordinate] = state;
         int itemId = resource.ResolveItemId();
+        bool markerChanged = !savedStates.TryGetValue(worldCoordinate, out Resource.ResourceSaveState previousState)
+                             || !savedResourceItemIds.TryGetValue(worldCoordinate, out int previousItemId)
+                             || previousItemId != itemId
+                             || (previousState.resourceCount > 0) != (state.resourceCount > 0);
+        savedStates[worldCoordinate] = state;
         savedResourceItemIds[worldCoordinate] = itemId;
         ResolveVirtualObjectWorld()?.UpsertResource(worldCoordinate, itemId, state);
+        if (markerChanged) MarkMapMarkersChanged();
     }
 
     public void RemoveResource(Vector2Int worldCoordinate)
     {
+        bool markerChanged = savedStates.TryGetValue(worldCoordinate, out Resource.ResourceSaveState previousState)
+                             && previousState.resourceCount > 0;
         savedStates.Remove(worldCoordinate);
         savedResourceItemIds.Remove(worldCoordinate);
         ResolveVirtualObjectWorld()?.RemoveResource(worldCoordinate);
+        if (markerChanged) MarkMapMarkersChanged();
     }
 
     public void SaveFloorObjects(Vector2Int worldCoordinate, Block block, VirtualObjectResidency residency)
@@ -566,6 +577,10 @@ public partial class BlockStateStore : MonoBehaviour
             return;
         }
 
+        bool trainPresentationChanged = installationObject is Train
+                                        && (!liveInstallationStates.TryGetValue(storageKey, out LiveInstallationRecord currentRecord)
+                                            || currentRecord?.installationObject != installationObject);
+
         RemoveLiveInstallationRecordsForSamePlacement(installationObject, storedState, storageKey);
 
         if (liveInstallationStates.TryGetValue(storageKey, out LiveInstallationRecord existingRecord))
@@ -595,6 +610,7 @@ public partial class BlockStateStore : MonoBehaviour
             storedState,
             storageKey);
         RegisterLiveCoordinateMappings(storedState, storageKey);
+        if (trainPresentationChanged) MarkMapMarkersChanged();
     }
 
     public bool UpdateLiveInstallationWorldPose(InstallationObject installationObject)
@@ -1140,6 +1156,7 @@ public partial class BlockStateStore : MonoBehaviour
             return;
         }
 
+        bool trainPresentationChanged = record.installationObject is Train;
         UnregisterLiveCoordinateMappings(record.state, storageKey);
         UnregisterInstallationPlacementKey(
             liveInstallationStorageKeysByPlacement,
@@ -1156,12 +1173,14 @@ public partial class BlockStateStore : MonoBehaviour
         {
             world?.RemoveInstallation(storageKey);
         }
+        if (trainPresentationChanged) MarkMapMarkersChanged();
     }
 
     public void RemoveInstallation(Vector2Int storageKey)
     {
         RobotArmWorld.Current?.Remove(storageKey);
         Vector2Int removedAnchor = storageKey;
+        bool markerChanged = savedInstallationStates.ContainsKey(storageKey);
         if (liveInstallationStates.TryGetValue(storageKey, out LiveInstallationRecord liveRecord))
         {
             liveRecord?.installationObject?.BindRuntimeMapObjectHandle(default);
@@ -1184,6 +1203,7 @@ public partial class BlockStateStore : MonoBehaviour
         ConveyorWorld.Current?.Remove(storageKey);
         PipeWorld.Current?.Remove(storageKey);
         RemoveUtilityPoleConnectionReferences(removedAnchor);
+        if (markerChanged) MarkMapMarkersChanged();
     }
 
     public void RemoveInstallation(InstallationObject installationObject)
@@ -1235,6 +1255,7 @@ public partial class BlockStateStore : MonoBehaviour
         PipeWorld.Current?.ClearRecords();
         RobotArmWorld.Current?.ClearRecords();
         ResolveVirtualObjectWorld()?.Clear();
+        MarkMapMarkersChanged();
     }
 
     public void CaptureSaveState(MapSaveData mapSaveData)
@@ -1851,6 +1872,10 @@ public partial class BlockStateStore : MonoBehaviour
         storedState = state.Clone();
         storageKey = ResolveInstallationStorageKey(storedState, savedInstallationStates);
         AssignInstallationStorageKey(storedState, storageKey);
+        bool markerChanged = !savedInstallationStates.TryGetValue(
+                                 storageKey,
+                                 out InstallationSaveState previousMarkerState)
+                             || !HasSameMapMarkerState(previousMarkerState, storedState);
         RemoveSavedInstallationStatesForSamePlacement(storedState, storageKey);
         if (savedInstallationStates.TryGetValue(storageKey, out InstallationSaveState existingState))
         {
@@ -1897,6 +1922,50 @@ public partial class BlockStateStore : MonoBehaviour
         {
             world?.UpsertInstallation(storedState);
         }
+        if (markerChanged) MarkMapMarkersChanged();
+        return true;
+    }
+
+    private void MarkMapMarkersChanged()
+    {
+        unchecked
+        {
+            mapMarkerVersion++;
+        }
+    }
+
+    private static bool HasSameMapMarkerState(
+        InstallationSaveState first,
+        InstallationSaveState second)
+    {
+        if (first == null || second == null
+            || first.anchorCoordinate != second.anchorCoordinate
+            || first.itemId != second.itemId
+            || first.quarterTurns != second.quarterTurns
+            || first.stationColorAssigned != second.stationColorAssigned
+            || !first.stationColor.Equals(second.stationColor)
+            || first.railVisualPathExtendsStart != second.railVisualPathExtendsStart
+            || first.railVisualPathExtendsEnd != second.railVisualPathExtendsEnd)
+        {
+            return false;
+        }
+
+        List<Vector2> firstPath = first.railVisualPathPoints;
+        List<Vector2> secondPath = second.railVisualPathPoints;
+        int firstCount = firstPath?.Count ?? 0;
+        if (firstCount != (secondPath?.Count ?? 0))
+        {
+            return false;
+        }
+
+        for (int i = 0; i < firstCount; i++)
+        {
+            if (firstPath[i] != secondPath[i])
+            {
+                return false;
+            }
+        }
+
         return true;
     }
 
@@ -2065,6 +2134,7 @@ public partial class BlockStateStore : MonoBehaviour
         Vector2Int storageKey,
         LiveInstallationRecord liveRecord)
     {
+        bool trainPresentationChanged = liveRecord?.installationObject is Train;
         VirtualObjectWorld world = ResolveVirtualObjectWorld();
         liveRecord.installationObject?.BindRuntimeMapObjectHandle(default);
         UnregisterLiveCoordinateMappings(liveRecord.state, storageKey);
@@ -2081,6 +2151,7 @@ public partial class BlockStateStore : MonoBehaviour
         {
             world?.RemoveInstallation(storageKey);
         }
+        if (trainPresentationChanged) MarkMapMarkersChanged();
     }
 
     private static void EnsureListCapacity<T>(List<T> values, int capacity)

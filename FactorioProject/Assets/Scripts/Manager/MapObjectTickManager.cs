@@ -163,6 +163,7 @@ public sealed class MapObjectTickManager : MonoBehaviour, ProjectF.Simulation.IS
 
     private void Update()
     {
+        using var callerSample = MapObjectTickProfiler.SampleUpdateCaller<MapObjectTickManager>();
         MapObjectTickProfiler.RecordRenderFrame();
         using var sample = MapObjectTickProfiler.SampleNamed("Simulation", "Simulation Frame", "Simulation Frame (inclusive)");
         // Streaming/finalization run in TerrainGenerator.Update and coroutines, not this clock.
@@ -478,6 +479,31 @@ public static class MapObjectTickProfiler
     public static NamedSampleScope SampleNamed(string kind, string typeName, string itemName)
     {
         return new NamedSampleScope(kind, typeName, itemName);
+    }
+
+    public static NamedSampleScope SampleUpdateCaller<T>()
+    {
+        return new NamedSampleScope(
+            "Update Caller",
+            CallerSampleNames<T>.TypeName,
+            CallerSampleNames<T>.UpdateName);
+    }
+
+    public static NamedSampleScope SampleLateUpdateCaller<T>()
+    {
+        return new NamedSampleScope(
+            "LateUpdate Caller",
+            CallerSampleNames<T>.TypeName,
+            CallerSampleNames<T>.LateUpdateName);
+    }
+
+    // Generic statics build the labels once per caller type instead of allocating
+    // a method label on every Update/LateUpdate invocation.
+    private static class CallerSampleNames<T>
+    {
+        internal static readonly string TypeName = typeof(T).Name;
+        internal static readonly string UpdateName = TypeName + ".Update";
+        internal static readonly string LateUpdateName = TypeName + ".LateUpdate";
     }
 
     // A value-type scope avoids closures/allocations and records early returns too.

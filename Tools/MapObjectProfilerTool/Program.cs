@@ -130,7 +130,7 @@ internal sealed class ProfilerForm : Form
         ConfigureTextInput(hostTextBox, DefaultHost, 130);
         ConfigureNumberInput(portInput, 1, 65535, DefaultPort, 76);
         ConfigureNumberInput(intervalInput, 1000, 60000, 10000, 86);
-        ConfigureNumberInput(maxRowsInput, 1, 256, 64, 70);
+        ConfigureNumberInput(maxRowsInput, 1, 256, 128, 70);
         intervalInput.Increment = 100;
         intervalInput.ValueChanged += (_, _) => pollTimer.Interval = Decimal.ToInt32(intervalInput.Value);
 

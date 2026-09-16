@@ -186,13 +186,17 @@ public sealed partial class PortableItemRenderer : MonoBehaviour
     [SerializeField, Min(1)]
     private int minimumBurstTransformJobItemCount = 128;
 
-    private readonly HashSet<PortableObject> registeredPortableObjects = new HashSet<PortableObject>();
     private readonly VirtualRenderBatchCollection portableObjectBatches = new VirtualRenderBatchCollection();
-    private readonly List<PortableObject> portableObjectCleanupBuffer = new List<PortableObject>();
-    private readonly List<PortableObjectRenderSnapshot> portableObjectRenderSnapshots =
-        new List<PortableObjectRenderSnapshot>();
-    private bool portableObjectBatchesDirty = true;
-    private bool portableObjectRenderRefreshRequested;
+    private readonly Dictionary<PortableObject, PortableObjectBatchCache> portableObjectBatchCaches =
+        new Dictionary<PortableObject, PortableObjectBatchCache>(512);
+    private readonly List<PortableObject> dirtyPortableObjects = new List<PortableObject>(128);
+    private readonly HashSet<PortableObject> dirtyPortableObjectLookup = new HashSet<PortableObject>();
+    private int pendingPortableObjectDirtyRequests;
+    private int lastPortableObjectDirtyRequests;
+    private int lastPortableObjectDirtyObjects;
+    private int lastPortableObjectSnapshotReads;
+    private int lastPortableObjectMatrixUpdates;
+    private int lastPortableObjectBatchRebuilds;
 
     private readonly List<BlockHandle> activeVirtualConveyorRenderBlocks = new List<BlockHandle>(512);
     private readonly HashSet<BlockHandle> activeVirtualConveyorRenderBlockLookup = new HashSet<BlockHandle>();
@@ -260,7 +264,17 @@ public sealed partial class PortableItemRenderer : MonoBehaviour
     private int cachedDynamicVirtualConveyorCullViewVersion = int.MinValue;
     private int cachedDynamicVirtualConveyorCullVisibleChunks;
 
-    public int RegisteredPortableObjectCount => registeredPortableObjects.Count;
+    public int RegisteredPortableObjectCount => portableObjectBatchCaches.Count;
+    public int DirtyPortableObjectCount => lastPortableObjectDirtyObjects;
+    public int PortableObjectDirtyRequestCount => lastPortableObjectDirtyRequests;
+    public int PortableObjectSnapshotReadCount => lastPortableObjectSnapshotReads;
+    public int PortableObjectMatrixUpdateCount => lastPortableObjectMatrixUpdates;
+    public int PortableObjectBatchRebuildCount => lastPortableObjectBatchRebuilds;
+    public int PortableObjectInstanceCount => portableObjectBatches.ActiveMatrixCount;
+    public int PortableObjectVisibleBatchCount => portableObjectBatches.LastVisibleBatchCount;
+    public int PortableObjectCulledBatchCount => portableObjectBatches.LastCulledBatchCount;
+    public int PortableObjectLegacySubmittedMatrixCount => portableObjectBatches.LastLegacySubmittedMatrixCount;
+    public int PortableObjectLegacyDrawCallCount => portableObjectBatches.LastLegacyDrawCallCount;
     public int PortableObjectBatchRendererGroupBatchCount =>
         portableObjectBatches.ActiveBatchRendererGroupBatchCount;
     public int PortableObjectCandidateBatchCount => portableObjectBatches.LastCandidateBatchCount;
@@ -339,10 +353,12 @@ public sealed partial class PortableItemRenderer : MonoBehaviour
             return;
         }
 
-        if (registeredPortableObjects.Add(portableObject))
+        if (!portableObjectBatchCaches.ContainsKey(portableObject))
         {
-            portableObjectBatchesDirty = true;
+            portableObjectBatchCaches.Add(portableObject, new PortableObjectBatchCache());
         }
+
+        MarkDirty(portableObject);
     }
 
     public void Unregister(PortableObject portableObject)
@@ -352,20 +368,27 @@ public sealed partial class PortableItemRenderer : MonoBehaviour
             return;
         }
 
-        if (registeredPortableObjects.Remove(portableObject))
+        if (portableObjectBatchCaches.TryGetValue(portableObject, out PortableObjectBatchCache cache))
         {
-            portableObjectBatchesDirty = true;
+            portableObjectBatches.RemoveOwnedEntries(cache.BatchEntries);
+            portableObjectBatchCaches.Remove(portableObject);
         }
+
+        dirtyPortableObjectLookup.Remove(portableObject);
     }
 
-    public void MarkDirty()
+    public void MarkDirty(PortableObject portableObject)
     {
-        portableObjectBatchesDirty = true;
-    }
+        if (portableObject == null || !portableObjectBatchCaches.ContainsKey(portableObject))
+        {
+            return;
+        }
 
-    public void RequestPortableObjectRenderDataRefresh()
-    {
-        portableObjectRenderRefreshRequested = true;
+        pendingPortableObjectDirtyRequests++;
+        if (dirtyPortableObjectLookup.Add(portableObject))
+        {
+            dirtyPortableObjects.Add(portableObject);
+        }
     }
 
     private void Awake()
@@ -394,33 +417,32 @@ public sealed partial class PortableItemRenderer : MonoBehaviour
 
     private void LateUpdate()
     {
+        using var callerSample = MapObjectTickProfiler.SampleLateUpdateCaller<PortableItemRenderer>();
         ResolveDependencies();
 
         if (HasPortableObjectRenderWork())
         {
             using (RebuildPortableObjectBatchesMarker.Auto())
             {
-                bool snapshotsRefreshed = false;
-                // Animator/tween/parent changes must be observed at the original render
-                // preparation time, not at the robot arm's earlier simulation tick.
-                if (portableObjectRenderRefreshRequested && !portableObjectBatchesDirty)
-                {
-                    portableObjectBatchesDirty = RefreshPortableObjectRenderSnapshots(true);
-                    snapshotsRefreshed = true;
-                }
-                portableObjectRenderRefreshRequested = false;
-
-                if (portableObjectBatchesDirty)
-                {
-                    RebuildPortableObjectBatches(!snapshotsRefreshed);
-                    portableObjectBatchesDirty = false;
-                }
+                using var sample = MapObjectTickProfiler.SampleNamed(
+                    "Render Detail",
+                    nameof(PortableItemRenderer),
+                    "Portable Object Incremental Update");
+                RefreshDirtyPortableObjectBatches();
             }
 
             using (RenderPortableObjectBatchesMarker.Auto())
             {
+                using var sample = MapObjectTickProfiler.SampleNamed(
+                    "Render Detail",
+                    nameof(PortableItemRenderer),
+                    "Portable Object Submit");
                 RenderPortableObjectBatches();
             }
+        }
+        else
+        {
+            ResetPortableObjectFrameCounters();
         }
 
         if (HasVirtualConveyorRenderWork())
@@ -451,79 +473,77 @@ public sealed partial class PortableItemRenderer : MonoBehaviour
         }
     }
 
-    private void RebuildPortableObjectBatches(bool refreshSnapshots = true)
+    private void RefreshDirtyPortableObjectBatches()
     {
-        if (refreshSnapshots)
-        {
-            RefreshPortableObjectRenderSnapshots(false);
-        }
+        lastPortableObjectDirtyRequests = pendingPortableObjectDirtyRequests;
+        pendingPortableObjectDirtyRequests = 0;
+        lastPortableObjectDirtyObjects = dirtyPortableObjectLookup.Count;
+        lastPortableObjectSnapshotReads = 0;
+        lastPortableObjectMatrixUpdates = 0;
+        lastPortableObjectBatchRebuilds = 0;
 
-        portableObjectBatches.ClearActiveMatrices();
-        for (int i = 0; i < portableObjectRenderSnapshots.Count; i++)
+        for (int i = 0; i < dirtyPortableObjects.Count; i++)
         {
-            PortableObjectRenderSnapshot snapshot = portableObjectRenderSnapshots[i];
-            if (!snapshot.IsRenderable)
+            PortableObject portableObject = dirtyPortableObjects[i];
+            if (!dirtyPortableObjectLookup.Remove(portableObject)
+                || !portableObjectBatchCaches.TryGetValue(portableObject, out PortableObjectBatchCache cache))
             {
                 continue;
             }
 
-            Material material = snapshot.Key.Material;
+            if (portableObject == null)
+            {
+                portableObjectBatches.RemoveOwnedEntries(cache.BatchEntries);
+                portableObjectBatchCaches.Remove(portableObject);
+                continue;
+            }
+
+            lastPortableObjectSnapshotReads++;
+            PortableObjectRenderSnapshot current = ReadPortableObjectRenderSnapshot(portableObject);
+            if (!current.IsRenderable)
+            {
+                portableObjectBatches.RemoveOwnedEntries(cache.BatchEntries);
+                portableObjectBatchCaches.Remove(portableObject);
+                continue;
+            }
+
+            if (cache.HasSnapshot && cache.Snapshot.Equals(current))
+            {
+                continue;
+            }
+
+            if (cache.HasSnapshot
+                && cache.Snapshot.HasSameBatchIdentity(current)
+                && cache.BatchEntries.Count == 1
+                && portableObjectBatches.TryUpdateOwnedMatrix(
+                    cache.BatchEntries,
+                    0,
+                    current.Key,
+                    current.Matrix))
+            {
+                cache.Snapshot = current;
+                lastPortableObjectMatrixUpdates++;
+                continue;
+            }
+
+            portableObjectBatches.RemoveOwnedEntries(cache.BatchEntries);
+            Material material = current.Key.Material;
             if (material != null && !material.enableInstancing)
             {
                 material.enableInstancing = true;
             }
-
-            portableObjectBatches.AddMatrix(snapshot.Key, snapshot.Matrix);
+            portableObjectBatches.AddOwnedMatrix(
+                cache,
+                cache.BatchEntries,
+                current.Key,
+                current.Matrix);
+            cache.Snapshot = current;
+            cache.HasSnapshot = true;
+            lastPortableObjectBatchRebuilds++;
         }
 
-        for (int i = 0; i < portableObjectCleanupBuffer.Count; i++)
-        {
-            registeredPortableObjects.Remove(portableObjectCleanupBuffer[i]);
-        }
-    }
-
-    private bool RefreshPortableObjectRenderSnapshots(bool compareWithPrevious)
-    {
-        // Keep the old global refresh semantics: another portable object may have
-        // moved through its parent without issuing its own dirty notification. Reuse
-        // these reads for rebuilding too, so moving items never need a second scan.
-        portableObjectCleanupBuffer.Clear();
-        bool changed = portableObjectRenderSnapshots.Count != registeredPortableObjects.Count;
-        int index = 0;
-        foreach (PortableObject portableObject in registeredPortableObjects)
-        {
-            if (portableObject == null)
-            {
-                portableObjectCleanupBuffer.Add(portableObject);
-                changed = true;
-                continue;
-            }
-
-            PortableObjectRenderSnapshot current = ReadPortableObjectRenderSnapshot(portableObject);
-            if (index < portableObjectRenderSnapshots.Count)
-            {
-                if (compareWithPrevious && !changed
-                    && (!current.Equals(portableObjectRenderSnapshots[index])
-                        || (current.IsRenderable && !current.Key.Material.enableInstancing)))
-                {
-                    changed = true;
-                }
-
-                portableObjectRenderSnapshots[index] = current;
-            }
-            else
-            {
-                portableObjectRenderSnapshots.Add(current);
-                changed = true;
-            }
-            index++;
-        }
-
-        if (index < portableObjectRenderSnapshots.Count)
-        {
-            portableObjectRenderSnapshots.RemoveRange(index, portableObjectRenderSnapshots.Count - index);
-        }
-        return changed;
+        dirtyPortableObjects.Clear();
+        dirtyPortableObjectLookup.Clear();
     }
 
     private PortableObjectRenderSnapshot ReadPortableObjectRenderSnapshot(PortableObject portableObject)
@@ -593,6 +613,37 @@ public sealed partial class PortableItemRenderer : MonoBehaviour
                            && meshBounds.Equals(other.meshBounds)
                            && sleepingColor.Equals(other.sleepingColor)));
         }
+
+        public bool HasSameBatchIdentity(PortableObjectRenderSnapshot other)
+        {
+            return IsRenderable
+                   && other.IsRenderable
+                   && Key.Equals(other.Key)
+                   && meshBounds.Equals(other.meshBounds)
+                   && sleepingColor.Equals(other.sleepingColor);
+        }
+    }
+
+    private sealed class PortableObjectBatchCache : IVirtualRenderBatchOwner
+    {
+        internal readonly List<VirtualRenderBatchEntry> BatchEntries =
+            new List<VirtualRenderBatchEntry>(1);
+        internal PortableObjectRenderSnapshot Snapshot;
+        internal bool HasSnapshot;
+
+        public int BatchEntryCount => BatchEntries.Count;
+
+        public void UpdateBatchEntryMatrixIndex(int entryIndex, int matrixIndex)
+        {
+            if ((uint)entryIndex >= (uint)BatchEntries.Count)
+            {
+                return;
+            }
+
+            VirtualRenderBatchEntry entry = BatchEntries[entryIndex];
+            entry.MatrixIndex = matrixIndex;
+            BatchEntries[entryIndex] = entry;
+        }
     }
 
     private void RenderPortableObjectBatches()
@@ -656,9 +707,19 @@ public sealed partial class PortableItemRenderer : MonoBehaviour
 
     private bool HasPortableObjectRenderWork()
     {
-        return portableObjectBatchesDirty
-               || registeredPortableObjects.Count > 0
+        return dirtyPortableObjects.Count > 0
+               || portableObjectBatchCaches.Count > 0
                || portableObjectBatches.ActiveBatchCount > 0;
+    }
+
+    private void ResetPortableObjectFrameCounters()
+    {
+        lastPortableObjectDirtyRequests = pendingPortableObjectDirtyRequests;
+        pendingPortableObjectDirtyRequests = 0;
+        lastPortableObjectDirtyObjects = 0;
+        lastPortableObjectSnapshotReads = 0;
+        lastPortableObjectMatrixUpdates = 0;
+        lastPortableObjectBatchRebuilds = 0;
     }
 
     private bool HasVirtualConveyorRenderWork()

@@ -69,16 +69,19 @@ namespace ProjectF.Rendering
         {
             if (!Application.isPlaying || target.Index >= 0)
                 return;
-            if (instance == null)
-            {
-                var host = new GameObject(nameof(WorldVisualUpdateManager));
-                instance = host.AddComponent<WorldVisualUpdateManager>();
-                DontDestroyOnLoad(host);
-            }
+            EnsureExists();
             target.Index = instance.targets.Count;
             instance.targets.Add(target);
             instance.AddToSpatialIndex(target);
             instance.pendingVisibility.Add(target);
+        }
+
+        internal static void EnsureExists()
+        {
+            if (!Application.isPlaying || instance != null) return;
+            var host = new GameObject(nameof(WorldVisualUpdateManager));
+            instance = host.AddComponent<WorldVisualUpdateManager>();
+            DontDestroyOnLoad(host);
         }
 
         internal static void Unregister(InstallationVisualState target)
@@ -104,6 +107,8 @@ namespace ProjectF.Rendering
 
         private void LateUpdate()
         {
+            using var callerSample = MapObjectTickProfiler.SampleLateUpdateCaller<WorldVisualUpdateManager>();
+            UtilityPole.FlushDeferredVisualRefreshes();
             using var sample = MapObjectTickProfiler.SampleNamed(
                 "Render",
                 "Installation Visuals",

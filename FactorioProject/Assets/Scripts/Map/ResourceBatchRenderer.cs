@@ -115,6 +115,7 @@ public class ResourceBatchRenderer : MonoBehaviour
 
     protected void LateUpdate()
     {
+        using var callerSample = MapObjectTickProfiler.SampleLateUpdateCaller<ResourceBatchRenderer>();
         using var sample = MapObjectTickProfiler.SampleNamed("Render", "Resource Render", "Resource Render (inclusive)");
         LastDirtyResourceUpdates = 0;
         LastPendingAdds = 0;

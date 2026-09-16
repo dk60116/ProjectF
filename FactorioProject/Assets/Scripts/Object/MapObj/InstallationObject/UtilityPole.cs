@@ -755,12 +755,6 @@ public partial class UtilityPole : InstallationObject
         base.OnDisable();
     }
 
-    private void LateUpdate()
-    {
-        FlushDeferredConnectionLineVisualRefresh();
-        FlushDeferredPreviewConsumerLineVisualRefresh();
-    }
-
     private void OnDestroy()
     {
         if (ProjectFApplicationLifecycle.IsQuitting) return;
@@ -1253,6 +1247,13 @@ public partial class UtilityPole : InstallationObject
         }
 
         deferredConnectionLineVisualRefreshRequested = true;
+        ProjectF.Rendering.WorldVisualUpdateManager.EnsureExists();
+    }
+
+    internal static void FlushDeferredVisualRefreshes()
+    {
+        FlushDeferredConnectionLineVisualRefresh();
+        FlushDeferredPreviewConsumerLineVisualRefresh();
     }
 
     private static void FlushDeferredConnectionLineVisualRefresh()
@@ -1277,6 +1278,7 @@ public partial class UtilityPole : InstallationObject
         }
 
         deferredPreviewConsumerLineVisualRefreshRequested = true;
+        ProjectF.Rendering.WorldVisualUpdateManager.EnsureExists();
     }
 
     private static void FlushDeferredPreviewConsumerLineVisualRefresh()

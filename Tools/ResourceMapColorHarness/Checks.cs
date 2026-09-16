@@ -30,7 +30,7 @@ static class Checks
         var coordinate = new Vector2Int(-2, 4);
         var terrain = new TerrainGenerator();
         var prefab = new Resource { Definition = definition, ResourceCount = 12, ItemId = 7 };
-        var live = new Resource { Definition = definition, ResourceCount = 12, ItemId = 7 };
+        var live = new ResourceInstance { Definition = definition, ResourceCount = 12, ItemId = 7 };
         terrain.loadedBlocks[coordinate] = new Block { Resource = live };
         Check(terrain.TryGetMapResourceColor32At(coordinate, out var actual) && Same(actual, opaque), "Live resource color");
         Check(!terrain.TryGetMapResourceColor32At(new Vector2Int(1000, 1000), out _), "Unknown coordinate must not create a resource");
@@ -319,6 +319,7 @@ public class Resource : MapObject
     public int ResourceCount;
     public struct ResourceSaveState { public int resourceCount; }
 }
+public class ResourceInstance : Resource { }
 public class InstallationObject : MapObject
 {
     public Vector2Int RuntimeAnchorCoordinate;
@@ -339,7 +340,12 @@ public class Train : InstallationObject
         foreach (Train train in activeRuntimeTrains) results.Add(train);
     }
 }
-public class Block { public Resource Resource; public MapObject MapObject; }
+public class Trainstation : InstallationObject
+{
+    public bool HasAssignedStationColor;
+    public Color32 StoredStationColor;
+}
+public class Block { public ResourceInstance Resource; public MapObject MapObject; }
 public partial class ItemDefinition
 {
     public MapObject mapObject;
@@ -378,6 +384,8 @@ public class BlockStateStore
         public int quarterTurns;
         public List<Vector2Int> occupiedCoordinates = new();
         public List<Vector2> railVisualPathPoints = new();
+        public bool stationColorAssigned;
+        public Color32 stationColor;
     }
     public readonly Dictionary<Vector2Int, (int, Resource.ResourceSaveState)> states = new();
     public readonly Dictionary<Vector2Int, InstallationSaveState> installations = new();
@@ -449,6 +457,7 @@ public partial class MapPaper
     readonly Vector2Int lastTextureSize = new(7, 7), viewRadius = new(3, 3);
     readonly int texturePadding = 0;
     readonly Color32[] pixelBuffer = new Color32[49], biomePixelBuffer = new Color32[49];
+    readonly Color32[] staticMarkerPixelBuffer = new Color32[49];
     readonly Color32[] composedPixelBuffer = new Color32[49];
     readonly int[] markerDistanceBuffer = new int[49];
     readonly byte[] markerLayerBuffer = new byte[49];
@@ -464,7 +473,7 @@ public partial class MapPaper
         boundTerrain = terrain;
         Array.Fill(biomePixelBuffer, biome);
     }
-    public void Refresh(Vector2Int center) => RefreshMapMarkers(center);
+    public void Refresh(Vector2Int center) => RefreshStaticMapMarkers(center);
     public Color32 Pixel(int x, int y) => pixelBuffer[y * 7 + x];
 }
 namespace UnityEngine
@@ -516,4 +525,10 @@ namespace UnityEngine
         public void SetPixels32(Color32[] pixels) { Uploads++; }
         public void Apply(bool updateMipmaps, bool makeNoLongerReadable) { }
     }
+}
+
+public static class MapObjectTickProfiler
+{
+    public readonly struct Sample : IDisposable { public void Dispose() { } }
+    public static Sample SampleNamed(string kind, string type, string item) => default;
 }

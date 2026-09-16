@@ -1746,9 +1746,9 @@ public partial class TerrainGenerator : MonoBehaviour
         bool isTracked = conveyorItemVisualBlocks.Contains(handle);
         if (isTracked)
         {
-            CacheConveyorBlockItemCount(block, CaptureConveyorBlockItemCount(block));
+            CacheConveyorBlockItemCount(handle, CaptureConveyorBlockItemCount(block));
             bool hasDynamicVisuals = block.HasDynamicVirtualConveyorItemVisuals();
-            SetDynamicConveyorItemVisualBlockTracked(block, hasDynamicVisuals);
+            SetDynamicConveyorItemVisualBlockTracked(handle, hasDynamicVisuals);
             if (hasDynamicVisuals)
             {
                 return;
@@ -1756,6 +1756,68 @@ public partial class TerrainGenerator : MonoBehaviour
         }
 
         conveyorItemVisualDirtyBlocks.Add(handle);
+    }
+
+    internal void MarkBeltJobItemVisualDirty(Block block, bool refreshActivity)
+    {
+        if (!Application.isPlaying || block == null)
+        {
+            return;
+        }
+
+        if (!TryGetRuntimeBlockHandle(block, out BlockHandle handle))
+        {
+            return;
+        }
+
+        if (persistenceDirtyTrackingReady) persistenceDirtyBlocks.Add(handle);
+        if (refreshActivity && IsConveyorRuntimeRefreshDeferred)
+        {
+            QueueDeferredConveyorRuntimeRefresh(block);
+            refreshActivity = false;
+        }
+
+        bool isTracked = conveyorItemVisualBlocks.Contains(handle);
+        if (!isTracked && !refreshActivity)
+        {
+            conveyorItemVisualDirtyBlocks.Add(handle);
+            return;
+        }
+
+        block.CaptureBeltJobItemVisualState(out int itemCount, out bool hasDynamicVisuals);
+        if (!refreshActivity)
+        {
+            CacheConveyorBlockItemCount(handle, itemCount);
+            SetDynamicConveyorItemVisualBlockTracked(handle, hasDynamicVisuals);
+            if (!hasDynamicVisuals) conveyorItemVisualDirtyBlocks.Add(handle);
+            return;
+        }
+
+        MapObjectTickProfiler.AddBeltActivityRefreshCall();
+        if (itemCount <= 0)
+        {
+            SetDynamicConveyorItemVisualBlockTracked(handle, false);
+            RemoveCachedConveyorBlockItemCount(handle);
+            bool removed = conveyorItemVisualBlocks.Remove(handle);
+            conveyorItemVisualDirtyBlocks.Add(handle);
+            if (removed)
+            {
+                conveyorItemVisualBlockSetVersion++;
+                InvalidateBeltItemLineDebugVisuals(block);
+            }
+            return;
+        }
+
+        CacheConveyorBlockItemCount(handle, itemCount);
+        bool added = conveyorItemVisualBlocks.Add(handle);
+        SetDynamicConveyorItemVisualBlockTracked(handle, hasDynamicVisuals);
+        if (!hasDynamicVisuals) conveyorItemVisualDirtyBlocks.Add(handle);
+        if (added)
+        {
+            conveyorItemVisualDirtyBlocks.Add(handle);
+            conveyorItemVisualBlockSetVersion++;
+            InvalidateBeltItemLineDebugVisuals(block);
+        }
     }
 
     public void RefreshBeltItemRenderingVisibility()
@@ -1787,9 +1849,9 @@ public partial class TerrainGenerator : MonoBehaviour
             return;
         }
 
-        CacheConveyorBlockItemCount(block, CaptureConveyorBlockItemCount(block));
+        CacheConveyorBlockItemCount(handle, CaptureConveyorBlockItemCount(block));
         bool added = conveyorItemVisualBlocks.Add(handle);
-        SetDynamicConveyorItemVisualBlockTracked(block, block.HasDynamicVirtualConveyorItemVisuals());
+        SetDynamicConveyorItemVisualBlockTracked(handle, block.HasDynamicVirtualConveyorItemVisuals());
         if (!added)
         {
             return;
@@ -1807,8 +1869,8 @@ public partial class TerrainGenerator : MonoBehaviour
             return;
         }
 
-        SetDynamicConveyorItemVisualBlockTracked(block, false);
-        RemoveCachedConveyorBlockItemCount(block);
+        SetDynamicConveyorItemVisualBlockTracked(handle, false);
+        RemoveCachedConveyorBlockItemCount(handle);
         if (!conveyorItemVisualBlocks.Remove(handle))
         {
             return;
@@ -1834,13 +1896,8 @@ public partial class TerrainGenerator : MonoBehaviour
         dynamicConveyorItemVisualBlockSetVersion++;
     }
 
-    private void SetDynamicConveyorItemVisualBlockTracked(Block block, bool isTracked)
+    private void SetDynamicConveyorItemVisualBlockTracked(BlockHandle handle, bool isTracked)
     {
-        if (!TryGetRuntimeBlockHandle(block, out BlockHandle handle))
-        {
-            return;
-        }
-
         if (isTracked)
         {
             if (dynamicConveyorItemVisualBlockIndices.ContainsKey(handle))
@@ -1879,16 +1936,11 @@ public partial class TerrainGenerator : MonoBehaviour
             : 0;
     }
 
-    private void CacheConveyorBlockItemCount(Block block, int itemCount)
+    private void CacheConveyorBlockItemCount(BlockHandle handle, int itemCount)
     {
-        if (!TryGetRuntimeBlockHandle(block, out BlockHandle handle))
-        {
-            return;
-        }
-
         int clampedItemCount = Mathf.Max(0, itemCount);
-        conveyorItemCountsByBlock.TryGetValue(handle, out int previousItemCount);
-        if (previousItemCount == clampedItemCount && conveyorItemCountsByBlock.ContainsKey(handle))
+        bool wasCached = conveyorItemCountsByBlock.TryGetValue(handle, out int previousItemCount);
+        if (wasCached && previousItemCount == clampedItemCount)
         {
             return;
         }
@@ -1901,13 +1953,8 @@ public partial class TerrainGenerator : MonoBehaviour
         }
     }
 
-    private void RemoveCachedConveyorBlockItemCount(Block block)
+    private void RemoveCachedConveyorBlockItemCount(BlockHandle handle)
     {
-        if (!TryGetRuntimeBlockHandle(block, out BlockHandle handle))
-        {
-            return;
-        }
-
         if (!conveyorItemCountsByBlock.TryGetValue(handle, out int previousItemCount))
         {
             return;
@@ -4499,6 +4546,17 @@ public partial class TerrainGenerator : MonoBehaviour
 
         PortableItemRenderer itemRenderer = portableItemRenderer;
         MapObjectTickProfiler.AddRuntimeCounter("ConveyorItemRender", "ItemBatchCellSize", itemRenderer != null ? itemRenderer.VirtualConveyorItemBatchCellSize : 0f);
+        MapObjectTickProfiler.AddRuntimeCounter("ConveyorItemRender", "PortableRegistered", itemRenderer != null ? itemRenderer.RegisteredPortableObjectCount : 0);
+        MapObjectTickProfiler.AddRuntimeCounter("ConveyorItemRender", "PortableDirtyRequests", itemRenderer != null ? itemRenderer.PortableObjectDirtyRequestCount : 0);
+        MapObjectTickProfiler.AddRuntimeCounter("ConveyorItemRender", "PortableDirtyObjects", itemRenderer != null ? itemRenderer.DirtyPortableObjectCount : 0);
+        MapObjectTickProfiler.AddRuntimeCounter("ConveyorItemRender", "PortableSnapshotReads", itemRenderer != null ? itemRenderer.PortableObjectSnapshotReadCount : 0);
+        MapObjectTickProfiler.AddRuntimeCounter("ConveyorItemRender", "PortableMatrixUpdates", itemRenderer != null ? itemRenderer.PortableObjectMatrixUpdateCount : 0);
+        MapObjectTickProfiler.AddRuntimeCounter("ConveyorItemRender", "PortableBatchRebuilds", itemRenderer != null ? itemRenderer.PortableObjectBatchRebuildCount : 0);
+        MapObjectTickProfiler.AddRuntimeCounter("ConveyorItemRender", "PortableInstances", itemRenderer != null ? itemRenderer.PortableObjectInstanceCount : 0);
+        MapObjectTickProfiler.AddRuntimeCounter("ConveyorItemRender", "PortableVisibleBatches", itemRenderer != null ? itemRenderer.PortableObjectVisibleBatchCount : 0);
+        MapObjectTickProfiler.AddRuntimeCounter("ConveyorItemRender", "PortableCulledBatches", itemRenderer != null ? itemRenderer.PortableObjectCulledBatchCount : 0);
+        MapObjectTickProfiler.AddRuntimeCounter("ConveyorItemRender", "PortableSubmittedMatrices", itemRenderer != null ? itemRenderer.PortableObjectLegacySubmittedMatrixCount : 0);
+        MapObjectTickProfiler.AddRuntimeCounter("ConveyorItemRender", "PortableDrawCalls", itemRenderer != null ? itemRenderer.PortableObjectLegacyDrawCallCount : 0);
         MapObjectTickProfiler.AddRuntimeCounter("ConveyorItemRender", "PortableBrgBatches", itemRenderer != null ? itemRenderer.PortableObjectBatchRendererGroupBatchCount : 0);
         MapObjectTickProfiler.AddRuntimeCounter("ConveyorItemRender", "PortableCandidateBatches", itemRenderer != null ? itemRenderer.PortableObjectCandidateBatchCount : 0);
         MapObjectTickProfiler.AddRuntimeCounter("ConveyorItemRender", "PortableCandidateCells", itemRenderer != null ? itemRenderer.PortableObjectCandidateCellCount : 0);

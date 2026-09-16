@@ -70,6 +70,7 @@ public sealed class RobotArmWorldView : MonoBehaviour
     }
     private void LateUpdate()
     {
+        using var callerSample = MapObjectTickProfiler.SampleLateUpdateCaller<RobotArmWorldView>();
         if (world == null) return;
         if (MapObjectTickManager.WaitingForWorldLoad)
         {

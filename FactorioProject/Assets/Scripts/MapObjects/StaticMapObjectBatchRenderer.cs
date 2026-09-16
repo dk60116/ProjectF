@@ -120,6 +120,7 @@ namespace ProjectF.MapObjects
 
         private void LateUpdate()
         {
+            using var callerSample = MapObjectTickProfiler.SampleLateUpdateCaller<StaticMapObjectBatchRenderer>();
             using var sample = MapObjectTickProfiler.SampleNamed(
                 "Render",
                 "Static Installation Render",

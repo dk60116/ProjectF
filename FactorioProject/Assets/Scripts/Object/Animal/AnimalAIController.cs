@@ -289,6 +289,7 @@ public sealed class AnimalAIController : MonoBehaviour
 
     private void LateUpdate()
     {
+        using var callerSample = MapObjectTickProfiler.SampleLateUpdateCaller<AnimalAIController>();
         if (configured && !draftAttached)
         {
             animal?.TryRestorePendingDraftHandcart();

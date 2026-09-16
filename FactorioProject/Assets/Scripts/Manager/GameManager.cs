@@ -167,6 +167,7 @@ public class GameManager : MonoBehaviour
 
     private void Update()
     {
+        using var callerSample = MapObjectTickProfiler.SampleUpdateCaller<GameManager>();
         bool textInputFocused = IsTextInputFocused();
         if (!MapObjectTickManager.SimulationPaused)
         {
@@ -978,6 +979,7 @@ public sealed class RuntimeItemGiveReceiver : MonoBehaviour
 
     private void Update()
     {
+        using var callerSample = MapObjectTickProfiler.SampleUpdateCaller<RuntimeItemGiveReceiver>();
         using var sample = MapObjectTickProfiler.SampleNamed("Diagnostics", "Tool Requests", "Tool Requests");
         MapObjectTickProfiler.RecordRenderFrame();
         UpdateFrameStats();

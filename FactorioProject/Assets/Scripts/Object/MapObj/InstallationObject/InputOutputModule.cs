@@ -1085,6 +1085,7 @@ public class InputOutputModule : InstallationObject,
             {
                 if (module == null
                     || !module.gameObject.activeInHierarchy
+                    || !module.runtimeSleeping
                     || !module.ContainsRuntimeAreaCoordinate(coordinate)
                     || (outputOnly && !module.ContainsRuntimeOutputCoordinate(coordinate))
                     || !runtimeWakeSet.Add(module))

@@ -185,13 +185,14 @@ public sealed class PortableObject : IDisposable
 
     public void SetSleepAwakeSleeping(bool sleeping)
     {
+        if (Read().Sleeping == sleeping) return;
         Mutate((ref PortableObjectComponent c) => c.Sleeping = sleeping);
         RefreshSleepAwakeVisual(true);
     }
 
     public void RefreshSleepAwakeVisual(bool force = false)
     {
-        portableItemRenderer?.MarkDirty();
+        portableItemRenderer?.MarkDirty(this);
         MeshRenderer renderer = view != null ? view.BodyRenderer : null;
         if (renderer == null) return;
         PortableObjectComponent component = Read();
@@ -217,10 +218,13 @@ public sealed class PortableObject : IDisposable
 
     public void SetBeltItemLineDebugColor(bool active, Color32 color)
     {
+        Color32 resolvedColor = active ? color : (Color32)Color.white;
+        PortableObjectComponent current = Read();
+        if (current.BeltDebugActive == active && current.BeltDebugColor.Equals(resolvedColor)) return;
         Mutate((ref PortableObjectComponent c) =>
         {
             c.BeltDebugActive = active;
-            c.BeltDebugColor = active ? color : (Color32)Color.white;
+            c.BeltDebugColor = resolvedColor;
         });
         RefreshSleepAwakeVisual(true);
     }
@@ -244,6 +248,7 @@ public sealed class PortableObject : IDisposable
 
     public void SetCachedActive(bool active)
     {
+        if (Read().Active == active) return;
         if (!active)
         {
             pickupGate?.OnOwnerDisabled();
@@ -252,7 +257,7 @@ public sealed class PortableObject : IDisposable
         Mutate((ref PortableObjectComponent c) => c.Active = active);
         if (view != null && view.gameObject.activeSelf != active) view.gameObject.SetActive(active);
         UpdateRendererVisibility();
-        MarkPortableItemRenderDataDirty();
+        RefreshPortableItemRendererRegistration();
     }
 
     public void SetWorldPosition(Vector3 position)
@@ -300,10 +305,6 @@ public sealed class PortableObject : IDisposable
     }
 
     public void MarkBatchedRenderDataDirty() => MarkPortableItemRenderDataDirty();
-    public void RequestBatchedRenderDataRefresh()
-    {
-        if (IsUsingBatchedRendering) portableItemRenderer?.RequestPortableObjectRenderDataRefresh();
-    }
 
     public bool SetItem(int itemId)
     {
@@ -334,7 +335,7 @@ public sealed class PortableObject : IDisposable
             presentationPinned = true;
             EnsureView();
         }
-        MarkPortableItemRenderDataDirty();
+        RefreshPortableItemRendererRegistration();
         return true;
     }
 
@@ -351,26 +352,27 @@ public sealed class PortableObject : IDisposable
             restoreBatchedRenderingAfterOutline = true;
             batched = false;
         }
-        Mutate((ref PortableObjectComponent c) => { c.BatchedRendering = batched; if (batched) c.SuppressRendering = false; });
-        if (batched)
+        PortableObjectComponent current = Read();
+        bool suppressRendering = batched ? false : current.SuppressRendering;
+        if (current.BatchedRendering != batched || current.SuppressRendering != suppressRendering)
         {
-            portableItemRenderer = ResolvePortableItemRenderer();
-            portableItemRenderer?.Register(this);
+            Mutate((ref PortableObjectComponent c) =>
+            {
+                c.BatchedRendering = batched;
+                c.SuppressRendering = suppressRendering;
+            });
+            RefreshPortableItemRendererRegistration();
         }
-        else
-        {
-            UnregisterFromPortableItemRenderer();
-        }
-        MarkPortableItemRenderDataDirty();
         UpdateRendererVisibility();
         if (batched) ReleaseGeneratedPresentationIfPossible();
     }
 
     public void SetVisualRenderingSuppressed(bool suppressed)
     {
+        if (Read().SuppressRendering == suppressed) return;
         Mutate((ref PortableObjectComponent c) => c.SuppressRendering = suppressed);
         if (suppressed) ClearFocusOutlines(false);
-        MarkPortableItemRenderDataDirty();
+        RefreshPortableItemRendererRegistration();
         UpdateRendererVisibility();
     }
 
@@ -431,11 +433,11 @@ public sealed class PortableObject : IDisposable
         moveTween = sequence;
         if (delay > 0f)
         {
-            bodyRendererTemporarilyHidden = true;
+            SetBodyRendererTemporarilyHidden(true);
             sequence.Append(DOVirtual.DelayedCall(delay, () =>
             {
                 if (startPositionProvider != null) SetWorldPosition(startPositionProvider());
-                bodyRendererTemporarilyHidden = false;
+                SetBodyRendererTemporarilyHidden(false);
             }));
         }
         Vector3 launchStart = startPositionProvider != null ? startPositionProvider() : WorldPosition;
@@ -455,8 +457,8 @@ public sealed class PortableObject : IDisposable
             moveTween = null;
             Mutate((ref PortableObjectComponent c) => c.Moving = false);
             SetWorldPosition(targetPositionProvider());
-            bodyRendererTemporarilyHidden = false;
             if (deactivateOnComplete) SetCachedActive(false);
+            SetBodyRendererTemporarilyHidden(false);
             onComplete?.Invoke();
         });
         sequence.OnKill(() =>
@@ -464,8 +466,7 @@ public sealed class PortableObject : IDisposable
             if (!IsAlive) return;
             moveTween = null;
             Mutate((ref PortableObjectComponent c) => c.Moving = false);
-            bodyRendererTemporarilyHidden = false;
-            MarkPortableItemRenderDataDirty();
+            SetBodyRendererTemporarilyHidden(false);
         });
     }
 
@@ -474,7 +475,7 @@ public sealed class PortableObject : IDisposable
         moveTween?.Kill();
         moveTween = null;
         if (IsAlive) Mutate((ref PortableObjectComponent c) => c.Moving = false);
-        bodyRendererTemporarilyHidden = false;
+        SetBodyRendererTemporarilyHidden(false);
         MoveCancelled?.Invoke(this);
     }
 
@@ -572,7 +573,7 @@ public sealed class PortableObject : IDisposable
         c.Layer = source.gameObject.layer;
         c.Active = source.gameObject.activeSelf;
         world.Set(handle, c);
-        MarkPortableItemRenderDataDirty();
+        RefreshPortableItemRendererRegistration();
     }
 
     public void Dispose() => Dispose(true);
@@ -617,6 +618,7 @@ public sealed class PortableObject : IDisposable
         cachedMaterial = null;
         Mutate((ref PortableObjectComponent c) => { c.ItemId = -1; c.SuppressRendering = true; });
         ConfigureViewAssets();
+        RefreshPortableItemRendererRegistration();
     }
 
     private PortableObjectView EnsureView()
@@ -737,7 +739,41 @@ public sealed class PortableObject : IDisposable
 
     private void MarkPortableItemRenderDataDirty()
     {
-        if (IsUsingBatchedRendering) portableItemRenderer?.MarkDirty();
+        portableItemRenderer?.MarkDirty(this);
+    }
+
+    private void RefreshPortableItemRendererRegistration()
+    {
+        if (!IsAlive)
+        {
+            portableItemRenderer?.Unregister(this);
+            return;
+        }
+
+        PortableObjectComponent component = Read();
+        bool shouldRegister = component.Active
+                              && component.BatchedRendering
+                              && !component.SuppressRendering
+                              && !bodyRendererTemporarilyHidden
+                              && component.ItemId >= 0
+                              && cachedMesh != null
+                              && cachedMaterial != null;
+        if (!shouldRegister)
+        {
+            portableItemRenderer?.Unregister(this);
+            return;
+        }
+
+        portableItemRenderer = ResolvePortableItemRenderer();
+        portableItemRenderer?.Register(this);
+    }
+
+    private void SetBodyRendererTemporarilyHidden(bool hidden)
+    {
+        if (bodyRendererTemporarilyHidden == hidden) return;
+        bodyRendererTemporarilyHidden = hidden;
+        RefreshPortableItemRendererRegistration();
+        UpdateRendererVisibility();
     }
 
     private void UnregisterFromPortableItemRenderer()

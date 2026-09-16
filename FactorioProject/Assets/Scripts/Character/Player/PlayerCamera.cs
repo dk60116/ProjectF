@@ -132,6 +132,7 @@ public class PlayerCamera : MonoBehaviour
 
     private void LateUpdate()
     {
+        using var callerSample = MapObjectTickProfiler.SampleLateUpdateCaller<PlayerCamera>();
         using var sample = MapObjectTickProfiler.SampleNamed(
             "Frame",
             "Player Camera",

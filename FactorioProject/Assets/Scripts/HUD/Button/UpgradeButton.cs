@@ -39,6 +39,7 @@ public class UpgradeButton : MonoBehaviour
 
     private void Update()
     {
+        using var callerSample = MapObjectTickProfiler.SampleUpdateCaller<UpgradeButton>();
         if (!isExpanded || Time.unscaledTime < nextIngredientRefreshTime)
         {
             return;

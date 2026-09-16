@@ -30,8 +30,6 @@ public sealed class RobotArmWorld : IDisposable, IMapObjectUpdateTick, IMapObjec
     private long tickCandidatesVisited;
     private long wakeRequests;
     private long wakeAdmissions;
-    private readonly HashSet<RobotArmInstance> wakeBatchSet = new HashSet<RobotArmInstance>();
-    private readonly List<RobotArmInstance> wakeBatch = new List<RobotArmInstance>();
     private readonly Dictionary<RobotArm, RobotArmRenderTemplate> templates = new Dictionary<RobotArm, RobotArmRenderTemplate>();
     private bool orderDirty;
     private RobotArmInstance selectedMarkerArm;
@@ -224,8 +222,6 @@ public sealed class RobotArmWorld : IDisposable, IMapObjectUpdateTick, IMapObjec
     }
     internal void Wake(IReadOnlyList<Block> changedBlocks)
     {
-        wakeBatchSet.Clear();
-        wakeBatch.Clear();
         for (int blockIndex = 0; changedBlocks != null && blockIndex < changedBlocks.Count; blockIndex++)
         {
             Block block = changedBlocks[blockIndex];
@@ -233,13 +229,11 @@ public sealed class RobotArmWorld : IDisposable, IMapObjectUpdateTick, IMapObjec
             for (int observerIndex = 0; observerIndex < list.Count; observerIndex++)
             {
                 RobotArmInstance arm = list[observerIndex];
-                if (arm != null && wakeBatchSet.Add(arm)) wakeBatch.Add(arm);
+                // WakeRuntimeSleep already coalesces repeated notifications through
+                // runtimeWakePending. Avoid hashing and replaying the same batch here.
+                arm?.WakeRuntimeSleep();
             }
         }
-
-        for (int i = 0; i < wakeBatch.Count; i++) wakeBatch[i].WakeRuntimeSleep();
-        wakeBatch.Clear();
-        wakeBatchSet.Clear();
     }
     private void Unobserve(Vector2Int coordinate, RobotArmInstance arm)
     {

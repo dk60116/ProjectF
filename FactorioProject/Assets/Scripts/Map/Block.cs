@@ -53,9 +53,11 @@ public partial class Block
         NotifyRuntimeItemStackChanged(true);
     }
 
-    private void NotifyRuntimeItemStackChanged(bool wakeRuntimeDependents)
+    private void NotifyRuntimeItemStackChanged(
+        bool wakeRuntimeDependents,
+        bool markPersistenceDirty = true)
     {
-        TerrainGenerator.Active?.MarkPersistenceStateDirty(this);
+        if (markPersistenceDirty) TerrainGenerator.Active?.MarkPersistenceStateDirty(this);
         if (wakeRuntimeDependents)
         {
             RobotArm.WakeAroundCoordinate(coordinate);
@@ -4688,6 +4690,11 @@ public partial class Block
     private bool HasCpuRenderedConveyorMotionStates()
     {
         if (HasBeltJobMotion()) return true;
+        return HasNonBeltCpuRenderedConveyorMotionStates();
+    }
+
+    private bool HasNonBeltCpuRenderedConveyorMotionStates()
+    {
         if (OwnsConveyorTransport) return true;
         if (HasPortableConveyorMotionStates())
         {
@@ -8500,6 +8507,19 @@ public partial class Block
     private void MarkConveyorItemVisualDirty()
     {
         InvalidateConveyorCanMoveCaches();
+        IncrementConveyorItemVisualVersion();
+        TerrainGenerator.Active?.MarkConveyorItemVisualDirty(this);
+    }
+
+    private void MarkBeltJobItemVisualDirty(bool refreshActivity)
+    {
+        InvalidateConveyorCanMoveCaches();
+        IncrementConveyorItemVisualVersion();
+        TerrainGenerator.Active?.MarkBeltJobItemVisualDirty(this, refreshActivity);
+    }
+
+    private void IncrementConveyorItemVisualVersion()
+    {
         unchecked
         {
             conveyorItemVisualVersion++;
@@ -8508,8 +8528,6 @@ public partial class Block
                 conveyorItemVisualVersion = 1;
             }
         }
-
-        TerrainGenerator.Active?.MarkConveyorItemVisualDirty(this);
     }
 
     private bool WasConveyorItemMovedThisFrame(int laneIndex)

@@ -39,7 +39,7 @@ foreach ($member in @('internal enum PlannedTransferCommand', 'public bool TryGe
     $source += (Member $arm $member) + "`n"
 }
 $source += "}`npublic partial class RobotArmWorld {`n"
-foreach ($member in @('private void Observe(', 'public void Wake(', 'public void PlanManagedUpdateTick(', 'public void ApplyManagedUpdateTick(')) {
+foreach ($member in @('private void Observe(', 'public void Wake(', 'internal void Wake(IReadOnlyList<Block>', 'public void PlanManagedUpdateTick(', 'public void ApplyManagedUpdateTick(')) {
     $source += (Member $world $member) + "`n"
 }
 $source += "}`n"

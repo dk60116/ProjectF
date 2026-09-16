@@ -46,6 +46,7 @@ public sealed class PortableObjectView : MonoBehaviour
 
     private void LateUpdate()
     {
+        using var callerSample = MapObjectTickProfiler.SampleLateUpdateCaller<PortableObjectView>();
         owner?.SyncStateFromView(this);
     }
 

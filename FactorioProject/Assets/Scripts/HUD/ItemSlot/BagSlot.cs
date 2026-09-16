@@ -611,6 +611,7 @@ public class BagSlot : ItemSlot, IBeginDragHandler, IDragHandler, IEndDragHandle
 
     private void Update()
     {
+        using var callerSample = MapObjectTickProfiler.SampleUpdateCaller<BagSlot>();
         RunSharedBagSlotFrameUpdate();
 
         if (isDragging)

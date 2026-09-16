@@ -75,6 +75,7 @@ public sealed class HUDButtonHoverTween : MonoBehaviour, IPointerEnterHandler, I
 
     private void Update()
     {
+        using var callerSample = MapObjectTickProfiler.SampleUpdateCaller<HUDButtonHoverTween>();
         if (pointerInside)
         {
             RefreshHoverState(null);

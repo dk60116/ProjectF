@@ -63,6 +63,7 @@ public sealed class AnimalHerdDebugRenderer : MonoBehaviour
 
     private void Update()
     {
+        using var callerSample = MapObjectTickProfiler.SampleUpdateCaller<AnimalHerdDebugRenderer>();
         if (!visible)
         {
             return;

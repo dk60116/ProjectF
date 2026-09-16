@@ -651,6 +651,7 @@ public class SteamTrain : RailHandcar,
 
     private void LateUpdate()
     {
+        using var callerSample = MapObjectTickProfiler.SampleLateUpdateCaller<SteamTrain>();
         Vector3 currentPosition = transform.position;
         if (!hasLastMovementParticlePosition)
         {

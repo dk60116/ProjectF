@@ -19,6 +19,7 @@ namespace ProjectF.Rendering
 
         private void LateUpdate()
         {
+            using var callerSample = MapObjectTickProfiler.SampleLateUpdateCaller<TerrainWorldRenderer>();
             using var sample = MapObjectTickProfiler.SampleNamed("Render", "Terrain Visuals", "Terrain Visuals (inclusive)");
             if (terrain != null && terrain.isActiveAndEnabled)
                 terrain.RenderWorldVisuals();

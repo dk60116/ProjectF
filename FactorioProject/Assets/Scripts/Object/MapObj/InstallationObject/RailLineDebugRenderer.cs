@@ -171,6 +171,7 @@ public sealed class RailLineDebugRenderer : MonoBehaviour
 
     private void LateUpdate()
     {
+        using var callerSample = MapObjectTickProfiler.SampleLateUpdateCaller<RailLineDebugRenderer>();
         if (!isVisible)
         {
             return;

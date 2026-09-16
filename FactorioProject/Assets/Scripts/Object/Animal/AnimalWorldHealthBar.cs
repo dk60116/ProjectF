@@ -178,6 +178,7 @@ public sealed class AnimalWorldHealthBar : MonoBehaviour
 
     private void LateUpdate()
     {
+        using var callerSample = MapObjectTickProfiler.SampleLateUpdateCaller<AnimalWorldHealthBar>();
         if (animal == null)
         {
             return;

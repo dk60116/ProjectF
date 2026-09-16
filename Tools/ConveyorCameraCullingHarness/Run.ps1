@@ -35,7 +35,7 @@ $itemFile = 'FactorioProject/Assets/Scripts/Map/PortableItemRenderer.cs'
 $beltFile = 'FactorioProject/Assets/Scripts/Map/VirtualConveyorBeltRenderer.cs'
 $batchFile = 'FactorioProject/Assets/Scripts/Map/VirtualRenderBatcher.cs'
 $backendFile = 'FactorioProject/Assets/Scripts/Rendering/VirtualRenderBatchRendererGroupBackend.cs'
-$generated = "using System; using System.Collections.Generic; using UnityEngine; using UnityEngine.Rendering; public class ResourceInstance {}`n"
+$generated = "using System; using System.Collections.Generic; using UnityEngine; using UnityEngine.Rendering; public class ResourceInstance {} public static class MapObjectTickProfiler { public readonly struct Scope : IDisposable { public void Dispose() {} } public static Scope SampleLateUpdateCaller<T>() => default; }`n"
 $generated += "public sealed partial class PortableItemRenderer {`n"
 foreach ($signature in @(
     'private void RefreshVirtualConveyorBlockRenderCache(',

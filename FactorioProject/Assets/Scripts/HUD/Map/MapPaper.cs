@@ -75,6 +75,7 @@ public class MapPaper : MonoBehaviour
     private float mapOrientationScale = 1f;
     private Color32[] pixelBuffer;
     private Color32[] biomePixelBuffer;
+    private Color32[] staticMarkerPixelBuffer;
     private Color32[] composedPixelBuffer;
     private int[] markerDistanceBuffer;
     private byte[] markerLayerBuffer;
@@ -94,6 +95,7 @@ public class MapPaper : MonoBehaviour
     private bool isDirty = true;
     private bool hasStoredOriginalImageColor;
     private int lastTerrainGenerationVersion = int.MinValue;
+    private int lastMapMarkerVersion = int.MinValue;
     private Rect lastUvRect;
     private bool hasLastUvRect;
 
@@ -124,6 +126,7 @@ public class MapPaper : MonoBehaviour
 
     private void Update()
     {
+        using var callerSample = MapObjectTickProfiler.SampleUpdateCaller<MapPaper>();
         if (targetImage == null || targetRawImage == null || hostMask == null)
         {
             ResolveTargetGraphics();
@@ -145,6 +148,8 @@ public class MapPaper : MonoBehaviour
         bool sizeChanged = EnsureTexture();
         int terrainGenerationVersion = boundTerrain.TerrainGenerationVersion;
         bool terrainChanged = terrainGenerationVersion != lastTerrainGenerationVersion;
+        int mapMarkerVersion = boundTerrain.MapMarkerVersion;
+        bool staticMarkersChanged = mapMarkerVersion != lastMapMarkerVersion;
         bool movedOutsideBufferedTexture = !IsInsideBufferedTexture(trackedPosition);
         if (isDirty || sizeChanged || terrainChanged || movedOutsideBufferedTexture)
         {
@@ -153,11 +158,17 @@ public class MapPaper : MonoBehaviour
             hasLastCenterCoordinate = true;
             isDirty = false;
             lastTerrainGenerationVersion = terrainGenerationVersion;
+            lastMapMarkerVersion = mapMarkerVersion;
             hasLastUvRect = false;
+        }
+        else if (staticMarkersChanged)
+        {
+            RefreshStaticMapMarkers(lastCenterCoordinate);
+            lastMapMarkerVersion = mapMarkerVersion;
         }
         else if (Time.unscaledTime >= nextMarkerRefreshTime)
         {
-            RefreshMapMarkers(lastCenterCoordinate);
+            RefreshLiveTrainMarkers(lastCenterCoordinate);
         }
 
         UpdateViewport(lastCenterCoordinate, trackedPosition);
@@ -551,6 +562,7 @@ public class MapPaper : MonoBehaviour
             && pixelBuffer != null
             && pixelBuffer.Length == pixelCount
             && biomePixelBuffer != null
+            && staticMarkerPixelBuffer != null
             && composedPixelBuffer != null
             && markerDistanceBuffer != null
             && markerLayerBuffer != null
@@ -570,6 +582,7 @@ public class MapPaper : MonoBehaviour
         };
         pixelBuffer = new Color32[pixelCount];
         biomePixelBuffer = new Color32[pixelBuffer.Length];
+        staticMarkerPixelBuffer = new Color32[pixelBuffer.Length];
         composedPixelBuffer = new Color32[pixelBuffer.Length];
         markerDistanceBuffer = new int[pixelBuffer.Length];
         markerLayerBuffer = new byte[pixelBuffer.Length];
@@ -618,11 +631,15 @@ public class MapPaper : MonoBehaviour
             }
         }
 
-        RefreshMapMarkers(centerCoordinate, true);
+        RefreshStaticMapMarkers(centerCoordinate, true);
     }
 
-    private void RefreshMapMarkers(Vector2Int centerCoordinate, bool forceUpload = false)
+    private void RefreshStaticMapMarkers(Vector2Int centerCoordinate, bool forceUpload = false)
     {
+        using var sample = MapObjectTickProfiler.SampleNamed(
+            "UI Detail",
+            nameof(MapPaper),
+            "Static Map Marker Rebuild");
         int width = lastTextureSize.x;
         int height = lastTextureSize.y;
         int minX = centerCoordinate.x - viewRadius.x - texturePadding;
@@ -663,6 +680,23 @@ public class MapPaper : MonoBehaviour
             }
         }
 
+        StampSmallResourceMarkers(minX, minY, width, height);
+        Array.Copy(composedPixelBuffer, staticMarkerPixelBuffer, composedPixelBuffer.Length);
+        RefreshLiveTrainMarkers(centerCoordinate, forceUpload);
+    }
+
+    private void RefreshLiveTrainMarkers(Vector2Int centerCoordinate, bool forceUpload = false)
+    {
+        using var sample = MapObjectTickProfiler.SampleNamed(
+            "UI Detail",
+            nameof(MapPaper),
+            "Dynamic Train Marker Refresh");
+        int width = lastTextureSize.x;
+        int height = lastTextureSize.y;
+        int minX = centerCoordinate.x - viewRadius.x - texturePadding;
+        int minY = centerCoordinate.y - viewRadius.y - texturePadding;
+        Array.Copy(staticMarkerPixelBuffer, composedPixelBuffer, staticMarkerPixelBuffer.Length);
+        stampedMarkerKeys.Clear();
         mapMarkerSampleScratch.Clear();
         boundTerrain.CollectLiveTrainMapMarkers(mapMarkerSampleScratch);
         for (int markerIndex = 0; markerIndex < mapMarkerSampleScratch.Count; markerIndex++)
@@ -676,8 +710,12 @@ public class MapPaper : MonoBehaviour
             }
         }
 
-        StampSmallResourceMarkers(minX, minY, width, height);
+        UploadComposedPixels(forceUpload);
+        nextMarkerRefreshTime = Time.unscaledTime + MarkerRefreshInterval;
+    }
 
+    private void UploadComposedPixels(bool forceUpload)
+    {
         bool changed = forceUpload;
         for (int i = 0; i < pixelBuffer.Length; i++)
         {
@@ -693,8 +731,6 @@ public class MapPaper : MonoBehaviour
             mapTexture.SetPixels32(pixelBuffer);
             mapTexture.Apply(false, false);
         }
-
-        nextMarkerRefreshTime = Time.unscaledTime + MarkerRefreshInterval;
     }
 
     private void StampSmallResourceMarkers(
@@ -902,6 +938,7 @@ public class MapPaper : MonoBehaviour
 
         pixelBuffer = null;
         biomePixelBuffer = null;
+        staticMarkerPixelBuffer = null;
         composedPixelBuffer = null;
         markerDistanceBuffer = null;
         markerLayerBuffer = null;

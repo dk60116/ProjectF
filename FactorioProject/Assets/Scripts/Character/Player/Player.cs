@@ -241,6 +241,7 @@ public class Player : Character
 
     private void LateUpdate()
     {
+        using var callerSample = MapObjectTickProfiler.SampleLateUpdateCaller<Player>();
         UpdateActiveTorchEnergy(Time.deltaTime);
         RefreshEquipVisual();
     }

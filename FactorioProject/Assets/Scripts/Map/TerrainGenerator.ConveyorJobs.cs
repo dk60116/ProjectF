@@ -621,12 +621,29 @@ public partial class TerrainGenerator
         }
         beltJobPublishedIndices.Clear();
         beltJobLastPublishedBlocks += beltJobPublishedOrder.Count;
+
+        bool profileObservers = MapObjectTickProfiler.IsDetailedEnabled;
+        long observerStageStart = profileObservers ? MapObjectTickProfiler.BeginSample() : 0L;
         RobotArmWorld.Current?.Wake(beltJobPublishedOrder);
+        EndBeltPublishObserverStage(profileObservers, "Belt Jobs Publish Robot Arms", observerStageStart);
+
+        observerStageStart = profileObservers ? MapObjectTickProfiler.BeginSample() : 0L;
         InputOutputModule.WakeRuntimeModulesForChangedBlocks(beltJobPublishedOrder);
+        EndBeltPublishObserverStage(profileObservers, "Belt Jobs Publish Input Output", observerStageStart);
+
+        observerStageStart = profileObservers ? MapObjectTickProfiler.BeginSample() : 0L;
         for (int i = 0; i < beltJobPublishedOrder.Count; i++)
             beltJobPublishedOrder[i].NotifyBeltJobPublished(false, beltJobPublishedActivityOrder[i]);
+        EndBeltPublishObserverStage(profileObservers, "Belt Jobs Publish Blocks", observerStageStart);
+
         beltJobPublishedOrder.Clear();
         beltJobPublishedActivityOrder.Clear();
+    }
+
+    private static void EndBeltPublishObserverStage(bool enabled, string name, long startTimestamp)
+    {
+        if (!enabled) return;
+        MapObjectTickProfiler.EndNamedSample("Belt", "BeltJobs", name, startTimestamp);
     }
 
     private void RebuildBeltJobPublicationIndex()

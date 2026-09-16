@@ -1197,6 +1197,7 @@ public partial class PlayerController : MonoBehaviour
 
     private void Update()
     {
+        using var callerSample = MapObjectTickProfiler.SampleUpdateCaller<PlayerController>();
         using var sample = MapObjectTickProfiler.SampleNamed(
             "Frame",
             "Player Controller",
@@ -1559,6 +1560,7 @@ public partial class PlayerController : MonoBehaviour
 
     private void LateUpdate()
     {
+        using var callerSample = MapObjectTickProfiler.SampleLateUpdateCaller<PlayerController>();
         using var sample = MapObjectTickProfiler.SampleNamed(
             "Frame",
             "Player Controller",

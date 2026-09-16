@@ -109,8 +109,11 @@ static class Checks
         WorldVisualUpdateManager.Unregister(b);
         var manager = (WorldVisualUpdateManager)typeof(WorldVisualUpdateManager)
             .GetField("instance", BindingFlags.Static | BindingFlags.NonPublic).GetValue(null);
+        int utilityVisualFlushes = UtilityPole.VisualFlushes;
         typeof(WorldVisualUpdateManager).GetMethod("LateUpdate", BindingFlags.Instance | BindingFlags.NonPublic)
             .Invoke(manager, null);
+        Check(UtilityPole.VisualFlushes == utilityVisualFlushes + 1,
+            "single visual manager flushes deferred utility-pole visuals once per frame");
         Check(a.Owner.VisualTicks == 1 && c.Owner.VisualTicks == 1 && b.Owner.VisualTicks == 0,
             "single manager dispatches registered owners only");
         Check(manager.RegisteredCount == 2 && manager.VisibleCount == 2
@@ -200,6 +203,11 @@ public static class MapObjectTickProfiler
 public static class MapObjectTickManager
 {
     public static bool WaitingForWorldLoad;
+}
+public static class UtilityPole
+{
+    public static int VisualFlushes;
+    public static void FlushDeferredVisualRefreshes() => VisualFlushes++;
 }
 namespace ProjectF.Rendering
 {

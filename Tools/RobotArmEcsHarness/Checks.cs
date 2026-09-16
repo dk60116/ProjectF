@@ -20,6 +20,11 @@ public static class UtilityPole
     public static int PrepareCalls;
     public static void PrepareRobotArmPowerTick() { PrepareCalls++; }
 }
+public sealed class Block
+{
+    public Vector2Int Coordinate { get; }
+    public Block(Vector2Int coordinate) { Coordinate = coordinate; }
+}
 public partial class RobotArmInstance
 {
     public RobotArmWorld World;
@@ -171,6 +176,16 @@ public static class Checks
         Require(UtilityPole.PrepareCalls == 0, "fully sleeping world does not refresh the electric network");
         Require(world.tickCandidatesVisited == 1 && world.ActiveCount == 0,
             "sleep removes tick membership, not only queries; duplicate wakes admit once");
+
+        var batchWorld = new RobotArmWorld();
+        var batchArm = new RobotArmInstance { SimulationId = 3 };
+        var sharedInput = new Vector2Int(10, 0);
+        var sharedOutput = new Vector2Int(11, 0);
+        batchWorld.Add(batchArm, sharedInput, sharedOutput);
+        batchWorld.Wake(new[] { new Block(sharedInput), new Block(sharedOutput), new Block(sharedInput) });
+        Require(batchArm.runtimeWakePending && batchWorld.ActiveCount == 1,
+            "batched block notifications rely on entity wake coalescing without duplicate scheduling");
+
         world.Wake(output + Vector2Int.up); world.Tick();
         Require(arm.Queries == 1, "unrelated neighboring cell does not wake an endpoint observer");
         arm.Output.Available = true;

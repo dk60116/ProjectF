@@ -54,6 +54,7 @@ namespace UnityEngine
 
 public static class Checks
 {
+    private sealed class CallerProbe { }
     private static readonly List<string> snapshots = new List<string>();
     private static void Snapshot(int rows = 64)
     {
@@ -178,6 +179,18 @@ public static class Checks
         return;
     }
 
+    private static void ScopedUpdateCaller()
+    {
+        using var sample = MapObjectTickProfiler.SampleUpdateCaller<CallerProbe>();
+        ProfilerClock.Now += 11;
+    }
+
+    private static void ScopedLateUpdateCaller()
+    {
+        using var sample = MapObjectTickProfiler.SampleLateUpdateCaller<CallerProbe>();
+        ProfilerClock.Now += 13;
+    }
+
     private static void CheckNamedScopes()
     {
         MapObjectTickProfiler.Reset();
@@ -191,6 +204,29 @@ public static class Checks
             var row = json.RootElement.GetProperty("rows")[0];
             if (row.GetProperty("samples").GetInt32() != 1001 || row.GetProperty("avgUs").GetDouble() != 7)
                 throw new Exception("Named scope timing/early return differs");
+        }
+        MapObjectTickProfiler.Reset();
+        ScopedUpdateCaller();
+        ScopedLateUpdateCaller();
+        before = GC.GetAllocatedBytesForCurrentThread();
+        for (int i = 0; i < 1000; i++)
+        {
+            ScopedUpdateCaller();
+            ScopedLateUpdateCaller();
+        }
+        if (GC.GetAllocatedBytesForCurrentThread() != before) throw new Exception("Caller scopes allocate");
+        using (var json = JsonDocument.Parse(MapObjectTickProfiler.BuildAndResetSnapshotJson()))
+        {
+            bool foundUpdate = false;
+            bool foundLateUpdate = false;
+            foreach (JsonElement row in json.RootElement.GetProperty("rows").EnumerateArray())
+            {
+                string kind = row.GetProperty("kind").GetString();
+                string item = row.GetProperty("itemName").GetString();
+                foundUpdate |= kind == "Update Caller" && item == "CallerProbe.Update";
+                foundLateUpdate |= kind == "LateUpdate Caller" && item == "CallerProbe.LateUpdate";
+            }
+            if (!foundUpdate || !foundLateUpdate) throw new Exception("Caller scope labels differ");
         }
         MapObjectTickProfiler.Reset();
         GameManager.Instance.MapObjectTickProfilingEnabled = false;

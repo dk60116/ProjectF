@@ -398,6 +398,7 @@ public sealed partial class ResourceTypeWorld : MonoBehaviour
 
     private void LateUpdate()
     {
+        using var callerSample = MapObjectTickProfiler.SampleLateUpdateCaller<ResourceTypeWorld>();
         if (growthPresentation == null || MapObjectTickManager.WaitingForWorldLoad)
         {
             return;
