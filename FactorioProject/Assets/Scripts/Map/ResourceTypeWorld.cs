@@ -398,7 +398,7 @@ public sealed partial class ResourceTypeWorld : MonoBehaviour
 
     private void LateUpdate()
     {
-        if (growthPresentation == null)
+        if (growthPresentation == null || MapObjectTickManager.WaitingForWorldLoad)
         {
             return;
         }

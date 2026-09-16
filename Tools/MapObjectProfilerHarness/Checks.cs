@@ -15,6 +15,7 @@ public sealed class GameManager
 {
     public static GameManager Instance = new GameManager();
     public bool MapObjectTickProfilingEnabled = true;
+    public bool MapObjectTickDetailedProfilingEnabled = true;
     public ItemManager ItemManger = new ItemManager();
 }
 public sealed class ItemManager
@@ -210,6 +211,19 @@ public static class Checks
                 throw new Exception("Aggregated named elapsed timing differs");
         }
         Console.WriteLine("PASS: named and aggregated scopes record exact durations, allocate 0 bytes after warmup, and skip disabled profiling.");
+        MapObjectTickProfiler.Reset();
+        GameManager.Instance.MapObjectTickDetailedProfilingEnabled = false;
+        ScopedEarlyReturn();
+        MapObjectTickProfiler.RecordNamedElapsedTicks("Facility Type", "Probe", "Probe Apply", 37);
+        MapObjectTickProfiler.RecordRenderFrame();
+        using (var json = JsonDocument.Parse(MapObjectTickProfiler.BuildAndResetSnapshotJson()))
+        {
+            if (!json.RootElement.GetProperty("enabled").GetBoolean()
+                || json.RootElement.GetProperty("rowCount").GetInt32() != 0)
+                throw new Exception("Baseline capture must stay enabled without detailed rows");
+        }
+        GameManager.Instance.MapObjectTickDetailedProfilingEnabled = true;
+        Console.WriteLine("PASS: baseline mode keeps capture enabled and suppresses detailed timers.");
     }
     private static void CheckFrameCounts()
     {

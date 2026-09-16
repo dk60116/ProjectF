@@ -20,6 +20,137 @@ namespace ProjectF.Simulation
         void ApplyFacilityFlow(FacilityFlowBatch batch, int index);
     }
 
+    public interface IFacilityFlowParallelPlanner : IDisposable
+    {
+        int LastParallelEntityCount { get; }
+        int LastScheduledJobCount { get; }
+        bool TrySchedule(FacilityFlowBatch batch);
+        void Complete(FacilityFlowBatch batch);
+    }
+
+    public struct PumpFlowPlanInput
+    {
+        public int Valid;
+        public int ResetBudget;
+        public long AccumulatorUnits;
+        public long BudgetUnits;
+        public long MaximumBudgetUnits;
+        public long BudgetContributionUnits;
+        public long AvailableThisTickUnits;
+        public long SimulationTick;
+    }
+
+    public struct PumpFlowPlanOutput
+    {
+        public long AccumulatorUnits;
+        public long BudgetUnits;
+        public long BudgetUpdatedTick;
+        public long AvailableThisTickUnits;
+        public long RequestedUnits;
+        public int Blocked;
+    }
+
+    public struct BoilerFlowPlanInput
+    {
+        public int Valid;
+        public int CanPull;
+        public float PullRate;
+        public float DeltaTime;
+    }
+
+    public struct BoilerFlowPlanOutput
+    {
+        public float RequestedPullLiters;
+        public float MaximumOutputLiters;
+    }
+
+    public struct SteamGeneratorFlowPlanInput
+    {
+        public int Valid;
+        public float InputRate;
+        public float DeltaTime;
+        public float StoredLiters;
+    }
+
+    public struct SteamGeneratorFlowPlanOutput
+    {
+        public float RequestedLiters;
+        public float RequiredLiters;
+        public float MissingLiters;
+    }
+
+    /// <summary>
+    /// Blittable, Unity-free kernels shared by the serial fallback and Burst jobs.
+    /// Pump decimal conversions are completed while building its input so the job
+    /// executes integer-only deterministic state transitions.
+    /// </summary>
+    public static class FacilityFlowPlanKernels
+    {
+        public static PumpFlowPlanOutput PlanPump(PumpFlowPlanInput input)
+        {
+            if (input.Valid == 0)
+            {
+                return new PumpFlowPlanOutput
+                {
+                    BudgetUpdatedTick = -1L,
+                    Blocked = 1
+                };
+            }
+
+            long budgetUnits = input.ResetBudget != 0
+                ? Math.Min(input.MaximumBudgetUnits, input.BudgetContributionUnits)
+                : Math.Min(
+                    input.MaximumBudgetUnits,
+                    SaturatingAdd(input.BudgetUnits, input.BudgetContributionUnits));
+            long availableUnits = Math.Min(input.AvailableThisTickUnits, budgetUnits);
+            return new PumpFlowPlanOutput
+            {
+                AccumulatorUnits = input.AccumulatorUnits,
+                BudgetUnits = budgetUnits,
+                BudgetUpdatedTick = input.SimulationTick,
+                AvailableThisTickUnits = availableUnits,
+                RequestedUnits = SaturatingAdd(input.AccumulatorUnits, availableUnits),
+                Blocked = 0
+            };
+        }
+
+        public static BoilerFlowPlanOutput PlanBoiler(BoilerFlowPlanInput input)
+        {
+            return new BoilerFlowPlanOutput
+            {
+                RequestedPullLiters = input.Valid != 0 && input.CanPull != 0
+                    ? input.PullRate * input.DeltaTime
+                    : 0f,
+                MaximumOutputLiters = 0f
+            };
+        }
+
+        public static SteamGeneratorFlowPlanOutput PlanSteamGenerator(
+            SteamGeneratorFlowPlanInput input)
+        {
+            if (input.Valid == 0 || input.InputRate <= 0f)
+            {
+                return default;
+            }
+
+            float requested = input.InputRate * input.DeltaTime;
+            float required = Math.Max(FacilityFlowBatch.FluidEpsilon, requested);
+            return new SteamGeneratorFlowPlanOutput
+            {
+                RequestedLiters = requested,
+                RequiredLiters = required,
+                MissingLiters = Math.Max(0f, required - input.StoredLiters)
+            };
+        }
+
+        private static long SaturatingAdd(long left, long right)
+        {
+            if (left <= 0L) return Math.Max(0L, right);
+            if (right <= 0L) return left;
+            return left > long.MaxValue - right ? long.MaxValue : left + right;
+        }
+    }
+
     /// <summary>
     /// Reusable structure-of-arrays storage for high-count fluid/power facilities.
     /// The batch owns deterministic scalar calculation while adapters own Unity and
@@ -30,7 +161,11 @@ namespace ProjectF.Simulation
         public const float FluidEpsilon = 0.0001f;
         public const float OutputBudgetSeconds = 1f;
 
-        private FacilityFlowKind[] kinds;
+        private FacilityFlowKind[] slotKinds;
+        private int[] slotLocalIndices;
+        private int pumpCount;
+        private int boilerCount;
+        private int steamGeneratorCount;
 
         private int[] pumpItemIds;
         private bool[] pumpCanOutput;
@@ -76,37 +211,112 @@ namespace ProjectF.Simulation
         }
 
         public int Count { get; private set; }
+        public int PumpCount => pumpCount;
+        public int BoilerCount => boilerCount;
+        public int SteamGeneratorCount => steamGeneratorCount;
 
         public void Begin()
         {
             Count = 0;
+            pumpCount = 0;
+            boilerCount = 0;
+            steamGeneratorCount = 0;
         }
 
         public int ReserveSlot()
         {
             EnsureCapacity(Count + 1);
             int index = Count++;
-            kinds[index] = FacilityFlowKind.None;
+            slotKinds[index] = FacilityFlowKind.None;
+            slotLocalIndices[index] = -1;
             return index;
         }
 
         public void PlanAll()
         {
-            for (int i = 0; i < Count; i++)
+            for (int i = 0; i < pumpCount; i++) PlanPump(i);
+            for (int i = 0; i < boilerCount; i++) PlanBoiler(i);
+            for (int i = 0; i < steamGeneratorCount; i++) PlanSteamGenerator(i);
+        }
+
+        public PumpFlowPlanInput GetPumpPlanInput(int denseIndex)
+        {
+            ValidateDenseIndex(denseIndex, pumpCount);
+            float rate = pumpRates[denseIndex];
+            long nowTick = pumpSimulationTicks[denseIndex];
+            long updatedTick = pumpBudgetUpdatedTicks[denseIndex];
+            bool resetBudget = updatedTick < 0L || nowTick < updatedTick;
+            long elapsedTicks = resetBudget
+                ? DeterministicSimulationUnits.SecondsToTicks(pumpDeltaTimes[denseIndex])
+                : Math.Max(0L, nowTick - updatedTick);
+            return new PumpFlowPlanInput
             {
-                switch (kinds[i])
-                {
-                    case FacilityFlowKind.Pump:
-                        PlanPump(i);
-                        break;
-                    case FacilityFlowKind.Boiler:
-                        PlanBoiler(i);
-                        break;
-                    case FacilityFlowKind.SteamGenerator:
-                        PlanSteamGenerator(i);
-                        break;
-                }
-            }
+                Valid = IsPumpOutputValidLocal(denseIndex) ? 1 : 0,
+                ResetBudget = resetBudget ? 1 : 0,
+                AccumulatorUnits = pumpAccumulatorUnits[denseIndex],
+                BudgetUnits = pumpBudgetUnits[denseIndex],
+                MaximumBudgetUnits = Math.Max(
+                    0L,
+                    DeterministicSimulationUnits.FromFloat(rate * OutputBudgetSeconds)
+                    - pumpAccumulatorUnits[denseIndex]),
+                BudgetContributionUnits = DeterministicSimulationUnits.RateForTicks(rate, elapsedTicks),
+                AvailableThisTickUnits = DeterministicSimulationUnits.RateForTicks(
+                    rate,
+                    DeterministicSimulationUnits.DeltaTimeToTicks(pumpDeltaTimes[denseIndex])),
+                SimulationTick = nowTick
+            };
+        }
+
+        public void ApplyPumpPlanOutput(int denseIndex, PumpFlowPlanOutput output)
+        {
+            ValidateDenseIndex(denseIndex, pumpCount);
+            pumpAccumulatorUnits[denseIndex] = output.AccumulatorUnits;
+            pumpBudgetUnits[denseIndex] = output.BudgetUnits;
+            pumpBudgetUpdatedTicks[denseIndex] = output.BudgetUpdatedTick;
+            pumpAvailableThisTickUnits[denseIndex] = output.AvailableThisTickUnits;
+            pumpRequestedUnits[denseIndex] = output.RequestedUnits;
+            pumpBlocked[denseIndex] = output.Blocked != 0;
+        }
+
+        public BoilerFlowPlanInput GetBoilerPlanInput(int denseIndex)
+        {
+            ValidateDenseIndex(denseIndex, boilerCount);
+            return new BoilerFlowPlanInput
+            {
+                Valid = boilerValid[denseIndex] ? 1 : 0,
+                CanPull = boilerCanPull[denseIndex] ? 1 : 0,
+                PullRate = boilerPullRates[denseIndex],
+                DeltaTime = boilerDeltaTimes[denseIndex]
+            };
+        }
+
+        public void ApplyBoilerPlanOutput(int denseIndex, BoilerFlowPlanOutput output)
+        {
+            ValidateDenseIndex(denseIndex, boilerCount);
+            boilerRequestedPullLiters[denseIndex] = output.RequestedPullLiters;
+            boilerMaximumOutputLiters[denseIndex] = output.MaximumOutputLiters;
+        }
+
+        public SteamGeneratorFlowPlanInput GetSteamGeneratorPlanInput(int denseIndex)
+        {
+            ValidateDenseIndex(denseIndex, steamGeneratorCount);
+            return new SteamGeneratorFlowPlanInput
+            {
+                Valid = steamValid[denseIndex] ? 1 : 0,
+                InputRate = steamInputRates[denseIndex],
+                DeltaTime = steamDeltaTimes[denseIndex],
+                StoredLiters = steamStoredLiters[denseIndex]
+            };
+        }
+
+        public void ApplySteamGeneratorPlanOutput(
+            int denseIndex,
+            SteamGeneratorFlowPlanOutput output)
+        {
+            ValidateDenseIndex(denseIndex, steamGeneratorCount);
+            steamRequestedLiters[denseIndex] = output.RequestedLiters;
+            steamRequiredLiters[denseIndex] = output.RequiredLiters;
+            steamMissingLiters[denseIndex] = output.MissingLiters;
         }
 
         public void ConfigurePump(
@@ -120,8 +330,7 @@ namespace ProjectF.Simulation
             long budgetUnits,
             long budgetUpdatedTick)
         {
-            ValidateIndex(index);
-            kinds[index] = FacilityFlowKind.Pump;
+            index = AssignTypedSlot(index, FacilityFlowKind.Pump, ref pumpCount);
             pumpItemIds[index] = itemId;
             pumpRates[index] = Math.Max(0f, rateLitersPerSecond);
             pumpDeltaTimes[index] = Math.Max(0f, deltaTime);
@@ -133,16 +342,17 @@ namespace ProjectF.Simulation
             pumpBlocked[index] = false;
         }
 
-        public int GetPumpItemId(int index) => pumpItemIds[index];
-        public bool IsPumpOutputValid(int index) => pumpCanOutput[index] && pumpItemIds[index] >= 0 && pumpRates[index] > 0f;
-        public bool IsPumpBlocked(int index) => pumpBlocked[index];
-        public long GetPumpAccumulatorUnits(int index) => pumpAccumulatorUnits[index];
-        public long GetPumpBudgetUnits(int index) => pumpBudgetUnits[index];
-        public long GetPumpBudgetUpdatedTick(int index) => pumpBudgetUpdatedTicks[index];
-        public float GetPumpRequestedLiters(int index) => DeterministicSimulationUnits.ToFloat(pumpRequestedUnits[index]);
+        public int GetPumpItemId(int index) => pumpItemIds[ResolveTypedSlot(index, FacilityFlowKind.Pump)];
+        public bool IsPumpOutputValid(int index) => IsPumpOutputValidLocal(ResolveTypedSlot(index, FacilityFlowKind.Pump));
+        public bool IsPumpBlocked(int index) => pumpBlocked[ResolveTypedSlot(index, FacilityFlowKind.Pump)];
+        public long GetPumpAccumulatorUnits(int index) => pumpAccumulatorUnits[ResolveTypedSlot(index, FacilityFlowKind.Pump)];
+        public long GetPumpBudgetUnits(int index) => pumpBudgetUnits[ResolveTypedSlot(index, FacilityFlowKind.Pump)];
+        public long GetPumpBudgetUpdatedTick(int index) => pumpBudgetUpdatedTicks[ResolveTypedSlot(index, FacilityFlowKind.Pump)];
+        public float GetPumpRequestedLiters(int index) => DeterministicSimulationUnits.ToFloat(pumpRequestedUnits[ResolveTypedSlot(index, FacilityFlowKind.Pump)]);
 
         public void CommitPumpStorageAcceptance(int index, float acceptedLiters)
         {
+            index = ResolveTypedSlot(index, FacilityFlowKind.Pump);
             long acceptedUnits = Math.Min(
                 pumpRequestedUnits[index],
                 DeterministicSimulationUnits.FromFloat(acceptedLiters));
@@ -166,6 +376,7 @@ namespace ProjectF.Simulation
 
         public bool TryConsumePumpWholeLiter(int index)
         {
+            index = ResolveTypedSlot(index, FacilityFlowKind.Pump);
             if (pumpAccumulatorUnits[index] < DeterministicSimulationUnits.UnitsPerWhole)
                 return false;
             pumpAccumulatorUnits[index] -= DeterministicSimulationUnits.UnitsPerWhole;
@@ -174,6 +385,7 @@ namespace ProjectF.Simulation
 
         public void SetPumpBlocked(int index, bool blocked)
         {
+            index = ResolveTypedSlot(index, FacilityFlowKind.Pump);
             pumpBlocked[index] = blocked;
             if (blocked)
             {
@@ -200,8 +412,7 @@ namespace ProjectF.Simulation
             long budgetUnits,
             long budgetUpdatedTick)
         {
-            ValidateIndex(index);
-            kinds[index] = FacilityFlowKind.Boiler;
+            index = AssignTypedSlot(index, FacilityFlowKind.Boiler, ref boilerCount);
             boilerInputItemIds[index] = inputItemId;
             boilerInputRates[index] = Math.Max(0f, inputLitersPerSecond);
             boilerOutputItemIds[index] = outputItemId;
@@ -218,26 +429,28 @@ namespace ProjectF.Simulation
             boilerBudgetUpdatedTicks[index] = budgetUpdatedTick;
         }
 
-        public bool IsBoilerValid(int index) => boilerValid[index];
-        public int GetBoilerInputItemId(int index) => boilerInputItemIds[index];
-        public int GetBoilerOutputItemId(int index) => boilerOutputItemIds[index];
-        public float GetBoilerInputRate(int index) => boilerInputRates[index];
-        public float GetBoilerOutputRate(int index) => boilerOutputRates[index];
-        public float GetBoilerDeltaTime(int index) => boilerDeltaTimes[index];
-        public float GetBoilerRequestedPullLiters(int index) => boilerRequestedPullLiters[index];
-        public float GetBoilerMaximumOutputLiters(int index) => boilerMaximumOutputLiters[index];
-        public float GetBoilerTemperature(int index) => boilerTemperatures[index];
-        public long GetBoilerBudgetUnits(int index) => boilerBudgetUnits[index];
-        public long GetBoilerBudgetUpdatedTick(int index) => boilerBudgetUpdatedTicks[index];
+        public bool IsBoilerValid(int index) => boilerValid[ResolveTypedSlot(index, FacilityFlowKind.Boiler)];
+        public int GetBoilerInputItemId(int index) => boilerInputItemIds[ResolveTypedSlot(index, FacilityFlowKind.Boiler)];
+        public int GetBoilerOutputItemId(int index) => boilerOutputItemIds[ResolveTypedSlot(index, FacilityFlowKind.Boiler)];
+        public float GetBoilerInputRate(int index) => boilerInputRates[ResolveTypedSlot(index, FacilityFlowKind.Boiler)];
+        public float GetBoilerOutputRate(int index) => boilerOutputRates[ResolveTypedSlot(index, FacilityFlowKind.Boiler)];
+        public float GetBoilerDeltaTime(int index) => boilerDeltaTimes[ResolveTypedSlot(index, FacilityFlowKind.Boiler)];
+        public float GetBoilerRequestedPullLiters(int index) => boilerRequestedPullLiters[ResolveTypedSlot(index, FacilityFlowKind.Boiler)];
+        public float GetBoilerMaximumOutputLiters(int index) => boilerMaximumOutputLiters[ResolveTypedSlot(index, FacilityFlowKind.Boiler)];
+        public float GetBoilerTemperature(int index) => boilerTemperatures[ResolveTypedSlot(index, FacilityFlowKind.Boiler)];
+        public long GetBoilerBudgetUnits(int index) => boilerBudgetUnits[ResolveTypedSlot(index, FacilityFlowKind.Boiler)];
+        public long GetBoilerBudgetUpdatedTick(int index) => boilerBudgetUpdatedTicks[ResolveTypedSlot(index, FacilityFlowKind.Boiler)];
 
         public void UpdateBoilerStoredWater(int index, float storedWaterLiters)
         {
+            index = ResolveTypedSlot(index, FacilityFlowKind.Boiler);
             boilerStoredWaterLiters[index] = Math.Max(0f, storedWaterLiters);
             ResolveBoilerMaximumOutput(index);
         }
 
         public void PrepareBoilerOutput(int index)
         {
+            index = ResolveTypedSlot(index, FacilityFlowKind.Boiler);
             if (!boilerValid[index])
             {
                 boilerMaximumOutputLiters[index] = 0f;
@@ -270,6 +483,7 @@ namespace ProjectF.Simulation
 
         public void SetBoilerTemperature(int index, float temperatureCelsius)
         {
+            index = ResolveTypedSlot(index, FacilityFlowKind.Boiler);
             boilerTemperatures[index] = Clamp(temperatureCelsius, 0f, 100f);
         }
 
@@ -280,6 +494,7 @@ namespace ProjectF.Simulation
             bool requiresEnergy,
             float craftDurationSeconds)
         {
+            index = ResolveTypedSlot(index, FacilityFlowKind.Boiler);
             float gain = requiresEnergy
                 ? completeEnergy > FluidEpsilon
                     ? Math.Max(0f, consumedEnergy) / completeEnergy * 100f
@@ -292,6 +507,7 @@ namespace ProjectF.Simulation
 
         public bool CoolBoiler(int index, float targetTemperature, float craftDurationSeconds, float coolingRateScale)
         {
+            index = ResolveTypedSlot(index, FacilityFlowKind.Boiler);
             float current = boilerTemperatures[index];
             float target = Clamp(targetTemperature, 0f, 100f);
             if (current <= target + FluidEpsilon) return false;
@@ -306,6 +522,7 @@ namespace ProjectF.Simulation
 
         public void CommitBoilerOutput(int index, float acceptedLiters)
         {
+            index = ResolveTypedSlot(index, FacilityFlowKind.Boiler);
             boilerBudgetUnits[index] = Math.Max(
                 0L,
                 boilerBudgetUnits[index] - DeterministicSimulationUnits.FromFloat(acceptedLiters));
@@ -319,8 +536,7 @@ namespace ProjectF.Simulation
             bool valid,
             float storedLiters)
         {
-            ValidateIndex(index);
-            kinds[index] = FacilityFlowKind.SteamGenerator;
+            index = AssignTypedSlot(index, FacilityFlowKind.SteamGenerator, ref steamGeneratorCount);
             steamInputItemIds[index] = inputItemId;
             steamInputRates[index] = Math.Max(0f, inputLitersPerSecond);
             steamDeltaTimes[index] = Math.Max(0f, deltaTime);
@@ -328,70 +544,20 @@ namespace ProjectF.Simulation
             steamStoredLiters[index] = Math.Max(0f, storedLiters);
         }
 
-        public bool IsSteamGeneratorValid(int index) => steamValid[index];
-        public int GetSteamInputItemId(int index) => steamInputItemIds[index];
-        public float GetSteamRequestedLiters(int index) => steamRequestedLiters[index];
-        public float GetSteamRequiredLiters(int index) => steamRequiredLiters[index];
-        public float GetSteamMissingLiters(int index) => steamMissingLiters[index];
+        public bool IsSteamGeneratorValid(int index) => steamValid[ResolveTypedSlot(index, FacilityFlowKind.SteamGenerator)];
+        public int GetSteamInputItemId(int index) => steamInputItemIds[ResolveTypedSlot(index, FacilityFlowKind.SteamGenerator)];
+        public float GetSteamRequestedLiters(int index) => steamRequestedLiters[ResolveTypedSlot(index, FacilityFlowKind.SteamGenerator)];
+        public float GetSteamRequiredLiters(int index) => steamRequiredLiters[ResolveTypedSlot(index, FacilityFlowKind.SteamGenerator)];
+        public float GetSteamMissingLiters(int index) => steamMissingLiters[ResolveTypedSlot(index, FacilityFlowKind.SteamGenerator)];
 
         private void PlanPump(int index)
         {
-            if (!IsPumpOutputValid(index))
-            {
-                pumpAccumulatorUnits[index] = 0L;
-                pumpBudgetUnits[index] = 0L;
-                pumpBudgetUpdatedTicks[index] = -1L;
-                pumpAvailableThisTickUnits[index] = 0L;
-                pumpRequestedUnits[index] = 0L;
-                pumpBlocked[index] = true;
-                return;
-            }
-
-            float rate = pumpRates[index];
-            long maximumBudget = Math.Max(
-                0L,
-                DeterministicSimulationUnits.FromFloat(rate * OutputBudgetSeconds)
-                - pumpAccumulatorUnits[index]);
-            long nowTick = pumpSimulationTicks[index];
-            if (pumpBudgetUpdatedTicks[index] < 0L || nowTick < pumpBudgetUpdatedTicks[index])
-            {
-                pumpBudgetUnits[index] = Math.Min(
-                    maximumBudget,
-                    DeterministicSimulationUnits.RateForTicks(
-                        rate,
-                        DeterministicSimulationUnits.SecondsToTicks(pumpDeltaTimes[index])));
-            }
-            else
-            {
-                long elapsedTicks = Math.Max(0L, nowTick - pumpBudgetUpdatedTicks[index]);
-                pumpBudgetUnits[index] = Math.Min(
-                    maximumBudget,
-                    SaturatingAdd(
-                        pumpBudgetUnits[index],
-                        DeterministicSimulationUnits.RateForTicks(rate, elapsedTicks)));
-            }
-            pumpBudgetUpdatedTicks[index] = nowTick;
-            pumpAvailableThisTickUnits[index] = Math.Min(
-                DeterministicSimulationUnits.RateForTicks(
-                    rate,
-                    DeterministicSimulationUnits.DeltaTimeToTicks(pumpDeltaTimes[index])),
-                pumpBudgetUnits[index]);
-            pumpRequestedUnits[index] = SaturatingAdd(
-                pumpAccumulatorUnits[index],
-                pumpAvailableThisTickUnits[index]);
+            ApplyPumpPlanOutput(index, FacilityFlowPlanKernels.PlanPump(GetPumpPlanInput(index)));
         }
 
         private void PlanBoiler(int index)
         {
-            boilerRequestedPullLiters[index] = boilerValid[index] && boilerCanPull[index]
-                ? boilerPullRates[index] * boilerDeltaTimes[index]
-                : 0f;
-            if (!boilerValid[index])
-            {
-                boilerMaximumOutputLiters[index] = 0f;
-                return;
-            }
-            boilerMaximumOutputLiters[index] = 0f;
+            ApplyBoilerPlanOutput(index, FacilityFlowPlanKernels.PlanBoiler(GetBoilerPlanInput(index)));
         }
 
         private void ResolveBoilerMaximumOutput(int index)
@@ -417,29 +583,18 @@ namespace ProjectF.Simulation
 
         private void PlanSteamGenerator(int index)
         {
-            if (!steamValid[index] || steamInputRates[index] <= 0f)
-            {
-                steamRequestedLiters[index] = 0f;
-                steamRequiredLiters[index] = 0f;
-                steamMissingLiters[index] = 0f;
-                return;
-            }
-            float requested = steamInputRates[index] * steamDeltaTimes[index];
-            // A generator only needs the steam consumed by this deterministic
-            // update. A larger start-only reserve starves otherwise supplied
-            // generators when several engines share one boiler.
-            float required = Math.Max(FluidEpsilon, requested);
-            steamRequestedLiters[index] = requested;
-            steamRequiredLiters[index] = required;
-            steamMissingLiters[index] = Math.Max(0f, required - steamStoredLiters[index]);
+            ApplySteamGeneratorPlanOutput(
+                index,
+                FacilityFlowPlanKernels.PlanSteamGenerator(GetSteamGeneratorPlanInput(index)));
         }
 
         private void EnsureCapacity(int required)
         {
-            int current = kinds?.Length ?? 0;
+            int current = slotKinds?.Length ?? 0;
             if (current >= required) return;
             int capacity = Math.Max(required, current > 0 ? current * 2 : 16);
-            Resize(ref kinds, capacity);
+            Resize(ref slotKinds, capacity);
+            Resize(ref slotLocalIndices, capacity);
             Resize(ref pumpItemIds, capacity); Resize(ref pumpCanOutput, capacity); Resize(ref pumpBlocked, capacity);
             Resize(ref pumpRates, capacity); Resize(ref pumpDeltaTimes, capacity); Resize(ref pumpSimulationTicks, capacity);
             Resize(ref pumpAccumulatorUnits, capacity); Resize(ref pumpBudgetUnits, capacity); Resize(ref pumpBudgetUpdatedTicks, capacity);
@@ -459,6 +614,35 @@ namespace ProjectF.Simulation
         private void ValidateIndex(int index)
         {
             if (index < 0 || index >= Count) throw new ArgumentOutOfRangeException(nameof(index));
+        }
+
+        private static void ValidateDenseIndex(int index, int count)
+        {
+            if (index < 0 || index >= count) throw new ArgumentOutOfRangeException(nameof(index));
+        }
+
+        private int AssignTypedSlot(int slotIndex, FacilityFlowKind kind, ref int typedCount)
+        {
+            ValidateIndex(slotIndex);
+            if (slotKinds[slotIndex] != FacilityFlowKind.None)
+                throw new InvalidOperationException("Facility flow slot is already configured.");
+            int localIndex = typedCount++;
+            slotKinds[slotIndex] = kind;
+            slotLocalIndices[slotIndex] = localIndex;
+            return localIndex;
+        }
+
+        private int ResolveTypedSlot(int slotIndex, FacilityFlowKind expectedKind)
+        {
+            ValidateIndex(slotIndex);
+            if (slotKinds[slotIndex] != expectedKind || slotLocalIndices[slotIndex] < 0)
+                throw new InvalidOperationException("Facility flow slot kind does not match the requested operation.");
+            return slotLocalIndices[slotIndex];
+        }
+
+        private bool IsPumpOutputValidLocal(int index)
+        {
+            return pumpCanOutput[index] && pumpItemIds[index] >= 0 && pumpRates[index] > 0f;
         }
 
         private static void Resize<T>(ref T[] values, int capacity)

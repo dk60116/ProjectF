@@ -31,6 +31,9 @@ namespace ProjectF.Conveyors
     public struct BeltGroupState
     {
         public int Sleeping, ChangedCount, Moves, Waves;
+        // Moving items keep materialized lane times until the next state boundary.
+        // Intermediate ticks accumulate here and can skip the lane arrays entirely.
+        public long DeferredUnits, NextEventUnits;
     }
 
     public struct BeltSplitterState
@@ -70,6 +73,14 @@ namespace ProjectF.Conveyors
             BeltGroupState status = GroupStates[index];
             status.ChangedCount = status.Moves = status.Waves = 0;
             if (status.Sleeping != 0) { GroupStates[index] = status; return; }
+            long elapsedUnits = status.DeferredUnits + TickUnits;
+            if (status.NextEventUnits > elapsedUnits)
+            {
+                status.DeferredUnits = elapsedUnits;
+                GroupStates[index] = status;
+                return;
+            }
+            status.DeferredUnits = status.NextEventUnits = 0;
             int end = group.Start + group.Count;
             for (int i = group.Start; i < end; i++)
             {
@@ -77,11 +88,11 @@ namespace ProjectF.Conveyors
                 BeltLaneState item = Lanes[i];
                 if (item.ItemId < 0 || (Topology[i].Paused != 0 && item.Origin >= 0)) continue;
                 long before = item.Remaining;
-                item.Remaining -= TickUnits;
+                item.Remaining -= elapsedUnits;
                 if (before > 0 && item.Remaining <= 0)
                 {
                     item.GateBits |= SettledGateBit;
-                    Touch(i, group.Start, ref status);
+                    Touch(i, group.Start, ref status, false);
                 }
                 Lanes[i] = item;
             }
@@ -137,7 +148,7 @@ namespace ProjectF.Conveyors
                 {
                     if (Resolution[source] != 2) continue;
                     Lanes[source] = BeltLaneState.Empty;
-                    Touch(source, group.Start, ref status);
+                    Touch(source, group.Start, ref status, true);
                 }
                 for (int source = group.Start; source < end; source++)
                 {
@@ -145,7 +156,7 @@ namespace ProjectF.Conveyors
                     int target = Targets[source];
                     Lanes[target] = Transfers[target];
                     MergeCursor[target] = source + 1 < end ? source + 1 : group.Start;
-                    Touch(target, group.Start, ref status);
+                    Touch(target, group.Start, ref status, true);
                 }
                 // Commit splitter arbitration in its preferred input order, independent of node order.
                 for (int s = group.SplitterStart; s < group.SplitterStart + group.SplitterCount; s++)
@@ -169,15 +180,21 @@ namespace ProjectF.Conveyors
             }
 
             status.Sleeping = 1;
+            long nextEventUnits = long.MaxValue;
             for (int i = group.Start; i < end; i++)
             {
                 BeltLaneState item = Lanes[i];
                 if (item.ItemId < 0) continue;
                 if (item.Remaining < 0) { item.Remaining = 0; Lanes[i] = item; }
-                if (item.Remaining > 0 && (Topology[i].Paused == 0 || item.Origin < 0)) status.Sleeping = 0;
+                if (item.Remaining > 0 && (Topology[i].Paused == 0 || item.Origin < 0))
+                {
+                    status.Sleeping = 0;
+                    if (item.Remaining < nextEventUnits) nextEventUnits = item.Remaining;
+                }
             }
             // A move may have vacated an output for another input whose proposal lost this tick.
             if (status.Moves > 0) status.Sleeping = 0;
+            status.NextEventUnits = nextEventUnits != long.MaxValue ? nextEventUnits : 0;
             GroupStates[index] = status;
         }
 
@@ -238,11 +255,13 @@ namespace ProjectF.Conveyors
             return changed;
         }
 
-        private void Touch(int slot, int start, ref BeltGroupState status)
+        private void Touch(int slot, int start, ref BeltGroupState status, bool occupancyChanged)
         {
-            if (Touched[slot] != 0) return;
-            Touched[slot] = 1;
-            Changed[start + status.ChangedCount++] = slot;
+            byte flags = Touched[slot];
+            if (flags == 0) Changed[start + status.ChangedCount++] = slot;
+            flags |= 1;
+            if (occupancyChanged) flags |= 2;
+            Touched[slot] = flags;
         }
 
         private void Propose(int source, int target, BeltGroupRange group)

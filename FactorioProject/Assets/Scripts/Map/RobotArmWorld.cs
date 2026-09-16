@@ -2,6 +2,8 @@ using System;
 using System.Collections.Generic;
 using UnityEngine;
 using ProjectF.Runtime;
+using ProjectF.Simulation;
+using ProjectF.Rendering;
 
 // Runtime lifetime belongs to the world; its optional view never owns arm ticks.
 public sealed class RobotArmWorld : IDisposable, IMapObjectUpdateTick, IMapObjectUpdateTickInterval, IMapObjectStagedUpdateTick, IMapObjectSimulationIdentity
@@ -21,6 +23,13 @@ public sealed class RobotArmWorld : IDisposable, IMapObjectUpdateTick, IMapObjec
     private readonly HashSet<RobotArmInstance> markerCandidateSet = new HashSet<RobotArmInstance>();
     private readonly List<RobotArmInstance> markerCandidates = new List<RobotArmInstance>();
     private readonly List<RobotArmInstance> planned = new List<RobotArmInstance>();
+    private readonly ActiveTickSet<RobotArmInstance> activeTicks = new ActiveTickSet<RobotArmInstance>(
+        Comparer<RobotArmInstance>.Create((a, b) => a.SimulationId.CompareTo(b.SimulationId)));
+    internal double PresentationTime { get; private set; }
+    private int lastPlannedCount;
+    private long tickCandidatesVisited;
+    private long wakeRequests;
+    private long wakeAdmissions;
     private readonly HashSet<RobotArmInstance> wakeBatchSet = new HashSet<RobotArmInstance>();
     private readonly List<RobotArmInstance> wakeBatch = new List<RobotArmInstance>();
     private readonly Dictionary<RobotArm, RobotArmRenderTemplate> templates = new Dictionary<RobotArm, RobotArmRenderTemplate>();
@@ -44,6 +53,8 @@ public sealed class RobotArmWorld : IDisposable, IMapObjectUpdateTick, IMapObjec
     private bool disposed;
     public int VisibleCount => view != null ? view.VisibleCount : 0;
     public int MatrixCount => view != null ? view.MatrixCount : 0;
+    public int RenderCandidateCount { get; private set; }
+    public int RenderCandidateCellCount { get; private set; }
     public bool HasView => view != null;
     public static RobotArmWorld Ensure(TerrainGenerator terrain)
     {
@@ -197,6 +208,7 @@ public sealed class RobotArmWorld : IDisposable, IMapObjectUpdateTick, IMapObjec
     }
     private void ReleaseEntity(RobotArmInstance arm)
     {
+        activeTicks.Remove(arm);
         arm.ReleaseRuntimeCaches();
         UtilityPole.UnregisterRobotArmConsumer(arm);
         foreach (var coordinate in arm.RuntimeOccupiedCoordinates)
@@ -296,8 +308,44 @@ public sealed class RobotArmWorld : IDisposable, IMapObjectUpdateTick, IMapObjec
             Mathf.FloorToInt(position.x / MarkerChunkSize),
             Mathf.FloorToInt(position.z / MarkerChunkSize));
     }
+    internal void BuildRenderCandidates(CameraRenderCulling culling, List<RobotArmInstance> destination)
+    {
+        destination.Clear();
+        RenderCandidateCellCount = 0;
+        if (culling == null || !culling.TryGetVisibleCellRange(MarkerChunkSize, 2,
+                out Vector2Int minimum, out Vector2Int maximum))
+        {
+            destination.AddRange(ordered);
+            RenderCandidateCount = destination.Count;
+            return;
+        }
+        long cellCount = CameraRenderCulling.GetCellCount(minimum, maximum);
+        RenderCandidateCellCount = cellCount <= int.MaxValue ? (int)cellCount : int.MaxValue;
+        if (cellCount >= (long)Mathf.Max(1, ordered.Count) * 2L)
+        {
+            destination.AddRange(ordered);
+            RenderCandidateCount = destination.Count;
+            return;
+        }
+        for (int y = minimum.y; y <= maximum.y; y++)
+        for (int x = minimum.x; x <= maximum.x; x++)
+            if (markerArmsByCell.TryGetValue(new Vector2Int(x, y), out List<RobotArmInstance> arms))
+                destination.AddRange(arms);
+        RenderCandidateCount = destination.Count;
+    }
+    internal void ResetRenderCandidateMetrics()
+    {
+        RenderCandidateCount = 0;
+        RenderCandidateCellCount = 0;
+    }
 
     public void WakeAll() { foreach (var arm in ordered) arm.WakeRuntimeSleep(); }
+    internal void ScheduleTick(RobotArmInstance arm, bool wake = false)
+    {
+        if (wake) wakeRequests++;
+        if (activeTicks.Add(arm) && wake) wakeAdmissions++;
+    }
+    internal void UnscheduleTick(RobotArmInstance arm) => activeTicks.Remove(arm);
     public void SetSelectedMarkerArm(RobotArmInstance arm)
     {
         if (ReferenceEquals(selectedMarkerArm, arm)) return;
@@ -346,10 +394,15 @@ public sealed class RobotArmWorld : IDisposable, IMapObjectUpdateTick, IMapObjec
     {
         foreach (var arm in ordered) ReleaseEntity(arm);
         byKey.Clear(); ordered.Clear(); observers.Clear(); planned.Clear();
+        activeTicks.Clear();
+        PresentationTime = 0d;
+        lastPlannedCount = 0;
+        tickCandidatesVisited = wakeRequests = wakeAdmissions = 0L;
         markerArmsByCell.Clear(); visibleMarkerArms.Clear();
         markerCandidateSet.Clear(); markerCandidates.Clear();
         selectedMarkerArm = null; MaxFocusRadius = 0f; markersDirty = true;
         VisibleMarkerCount = MarkerVisibilityCandidateCount = 0;
+        RenderCandidateCount = RenderCandidateCellCount = 0;
         interactionBlockCacheHits = interactionBlockCacheMisses = 0L;
         interactionTargetCacheHits = interactionTargetCacheMisses = 0L;
         interactionFreightCacheHits = interactionFreightCacheMisses = 0L;
@@ -368,18 +421,18 @@ public sealed class RobotArmWorld : IDisposable, IMapObjectUpdateTick, IMapObjec
     public void ManagedUpdateTick(float dt) { PlanManagedUpdateTick(dt); ApplyManagedUpdateTick(); }
     public void PlanManagedUpdateTick(float dt)
     {
+        PresentationTime += Math.Max(0f, dt);
         if (orderDirty) { ordered.Sort((a,b) => a.SimulationId.CompareTo(b.SimulationId)); orderDirty = false; }
-        planned.Clear();
-        foreach (var arm in ordered)
-        {
-            if (!arm.ReadyForTick) { arm.AdvanceSleepingPresentation(dt); continue; }
-            planned.Add(arm);
-        }
+        // Wake/Sleep can mutate membership during Plan or Apply, never this snapshot.
+        activeTicks.CopyOrderedTo(planned);
+        lastPlannedCount = planned.Count;
+        tickCandidatesVisited += planned.Count;
         if (planned.Count == 0) return;
         UtilityPole.PrepareRobotArmPowerTick();
         using var sample = MapObjectTickProfiler.SampleNamed("Runtime", nameof(RobotArm), "Robot Arm Entity Plan");
         foreach (var arm in planned)
         {
+            if (!arm.IsRuntimeActive) continue;
             arm.PlanManagedUpdateTick(dt);
         }
     }
@@ -402,8 +455,15 @@ public sealed class RobotArmWorld : IDisposable, IMapObjectUpdateTick, IMapObjec
         MapObjectTickProfiler.AddRuntimeCounter("RobotArmWorld", "GameObjects", Current.HasView ? 1 : 0);
         MapObjectTickProfiler.AddRuntimeCounter("RobotArmWorld", "MonoBehaviours", Current.HasView ? 1 : 0);
         MapObjectTickProfiler.AddRuntimeCounter("RobotArmWorld", "Entities", Current.Count);
+        MapObjectTickProfiler.AddRuntimeCounter("RobotArmWorld", "Scheduled", Current.activeTicks.Count);
+        MapObjectTickProfiler.AddRuntimeCounter("RobotArmWorld", "LastPlanned", Current.lastPlannedCount);
+        MapObjectTickProfiler.AddRuntimeCounter("RobotArmWorld", "TickCandidatesVisited", Current.tickCandidatesVisited);
+        MapObjectTickProfiler.AddRuntimeCounter("RobotArmWorld", "CoalescedWakeRequests", Current.wakeRequests);
+        MapObjectTickProfiler.AddRuntimeCounter("RobotArmWorld", "WakeAdmissions", Current.wakeAdmissions);
         MapObjectTickProfiler.AddRuntimeCounter("RobotArmWorld", "Visible", Current.VisibleCount);
         MapObjectTickProfiler.AddRuntimeCounter("RobotArmWorld", "Matrices", Current.MatrixCount);
+        MapObjectTickProfiler.AddRuntimeCounter("RobotArmWorld", "RenderCandidates", Current.RenderCandidateCount);
+        MapObjectTickProfiler.AddRuntimeCounter("RobotArmWorld", "RenderCandidateCells", Current.RenderCandidateCellCount);
         MapObjectTickProfiler.AddRuntimeCounter("RobotArmTargetCache", "BlockHits", Current.interactionBlockCacheHits);
         MapObjectTickProfiler.AddRuntimeCounter("RobotArmTargetCache", "BlockMisses", Current.interactionBlockCacheMisses);
         MapObjectTickProfiler.AddRuntimeCounter("RobotArmTargetCache", "TargetHits", Current.interactionTargetCacheHits);

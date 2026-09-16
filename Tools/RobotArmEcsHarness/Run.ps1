@@ -35,7 +35,7 @@ Require-Text $markers '"VisibilityCandidateOwners"' 'area-marker candidate count
 $source = "using System; using System.Collections.Generic; using UnityEngine; using RobotArmState = RobotArm.RobotArmState;`n"
 $source += "public class RobotArm {`n" + (Member $author 'public enum RobotArmState') + "`n" + (Member $author 'public sealed class TransferState') + "`n}`n"
 $source += "public partial class RobotArmInstance {`n"
-foreach ($member in @('internal enum PlannedTransferCommand', 'public bool TryGetElectricPowerDemand(', 'private static bool IsActiveTransferState(', 'internal void WakeRuntimeSleep(', 'private void TickDrop(', 'private void TickWaitBeforeDropPlace(', 'private void ApplyPlannedDrop(', 'private void BeginDropRetryDelay(', 'private static bool TickTimerStillRunning(', 'private void NormalizeRuntimeState(', 'public void PlanManagedUpdateTick(', 'public void ApplyManagedUpdateTick(', 'private bool RefreshRuntimeSleepState(', 'private bool ShouldRunRuntimeSleepCheck(', 'private bool CanRuntimeSleepInCurrentState(', 'private bool ShouldRuntimeSleep(', 'private bool ShouldRuntimeSleepWithHeldItem(', 'private bool CanPlaceHeldItemForCurrentPlan(', 'private bool CanPickupOneItemForCurrentPlan(')) {
+foreach ($member in @('internal enum PlannedTransferCommand', 'public bool TryGetElectricPowerDemand(', 'private static bool IsActiveTransferState(', 'internal void WakeRuntimeSleep(', 'private void SetRuntimeSleeping(', 'private void TickDrop(', 'private void TickWaitBeforeDropPlace(', 'private void ApplyPlannedDrop(', 'private void BeginDropRetryDelay(', 'private static bool TickTimerStillRunning(', 'private void NormalizeRuntimeState(', 'public void PlanManagedUpdateTick(', 'public void ApplyManagedUpdateTick(', 'private bool RefreshRuntimeSleepState(', 'private bool ShouldRunRuntimeSleepCheck(', 'private bool CanRuntimeSleepInCurrentState(', 'private bool ShouldRuntimeSleep(', 'private bool ShouldRuntimeSleepWithHeldItem(', 'private bool CanPlaceHeldItemForCurrentPlan(', 'private bool CanPickupOneItemForCurrentPlan(')) {
     $source += (Member $arm $member) + "`n"
 }
 $source += "}`npublic partial class RobotArmWorld {`n"
@@ -49,6 +49,7 @@ New-Item -ItemType Directory -Path $probe | Out-Null
 Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'Checks.cs') -Destination $probe
 Copy-Item -LiteralPath (Join-Path $repo 'FactorioProject/Assets/Scripts/Simulation/Core/SimulationTickContracts.cs') -Destination $probe
 Copy-Item -LiteralPath (Join-Path $repo 'FactorioProject/Assets/Scripts/Simulation/Core/SimulationTickWorld.cs') -Destination $probe
+Copy-Item -LiteralPath (Join-Path $repo 'FactorioProject/Assets/Scripts/Simulation/Core/ActiveTickSet.cs') -Destination $probe
 Copy-Item -LiteralPath (Join-Path $repo 'FactorioProject/Assets/Scripts/Map/ResourceStateSlots.cs') -Destination $probe
 $unity = 'C:/Program Files/Unity/Hub/Editor/6000.4.0f1/Editor/Data/Managed/UnityEngine/UnityEngine.CoreModule.dll'
 [IO.File]::WriteAllText((Join-Path $probe 'Probe.csproj'), '<Project Sdk="Microsoft.NET.Sdk"><PropertyGroup><OutputType>Exe</OutputType><TargetFramework>net9.0</TargetFramework><NoWarn>0649</NoWarn></PropertyGroup><ItemGroup><Reference Include="UnityEngine.CoreModule"><HintPath>' + $unity + '</HintPath></Reference></ItemGroup></Project>')

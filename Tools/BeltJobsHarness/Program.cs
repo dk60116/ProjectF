@@ -41,12 +41,27 @@ int Count(BeltSimulationBuffers b)
 {
     int count = 0; for (int i = 0; i < b.Lanes.Length; i++) if (b.Lanes[i].ItemId >= 0) count++; return count;
 }
+BeltLaneState Effective(BeltSimulationBuffers b, int lane)
+{
+    BeltLaneState state = b.Lanes[lane];
+    for (int groupIndex = 0; groupIndex < b.Groups.Length; groupIndex++)
+    {
+        BeltGroupRange group = b.Groups[groupIndex];
+        if (lane < group.Start || lane >= group.Start + group.Count) continue;
+        long deferred = b.GroupStates[groupIndex].DeferredUnits;
+        if (state.ItemId >= 0 && state.Remaining > 0 && deferred > 0
+            && (b.Topology[lane].Paused == 0 || state.Origin < 0))
+            state.Remaining = Math.Max(0, state.Remaining - deferred);
+        break;
+    }
+    return state;
+}
 string State(BeltSimulationBuffers b)
 {
     var builder = new System.Text.StringBuilder();
     for (int i = 0; i < b.Lanes.Length; i++)
     {
-        var s = b.Lanes[i]; builder.Append($"{s.ItemId}:{s.Remaining}:{s.Duration}:{s.Origin}:{s.GateBits}:{b.MergeCursor[i]}|");
+        var s = Effective(b, i); builder.Append($"{s.ItemId}:{s.Remaining}:{s.Duration}:{s.Origin}:{s.GateBits}:{b.MergeCursor[i]}|");
     }
     for (int i = 0; i < b.Splitters.Length; i++)
     {
@@ -59,8 +74,8 @@ using (var b = Create(4))
 {
     Edge(b, 0, 1); Edge(b, 1, 2); Edge(b, 2, 3);
     Put(b, 0, 7); Step(b);
-    Require(b.Lanes[1].ItemId == 7 && b.Lanes[1].Remaining == 2 * tick, "first fixed tick advances one tick of travel");
-    Step(b); Require(b.Lanes[1].Remaining == tick, "integer travel countdown");
+    Require(Effective(b, 1).ItemId == 7 && Effective(b, 1).Remaining == 2 * tick, "first fixed tick advances one tick of travel");
+    Step(b); Require(Effective(b, 1).Remaining == tick, "integer travel countdown");
     Step(b); Require(b.Lanes[2].ItemId == 7 && b.Lanes[2].Remaining == 3 * tick, "arrival transfers with no duplicated frame delay");
     for (int i = 0; i < 20; i++) Step(b);
     Require(Count(b) == 1 && b.Lanes[3].ItemId == 7 && b.GroupStates[0].Sleeping != 0, "blocked endpoint sleeps and conserves items");
@@ -90,6 +105,22 @@ using (var b = Create(2))
     var held = b.Lanes[0]; held.Remaining = held.Duration = tick * 5; held.GateBits = 1; b.Lanes[0] = held;
     for (int i = 0; i < 4; i++) { Step(b); Require(b.Lanes[0].ItemId == 4, "external placement hold uses ticks"); }
     Step(b); Require(b.Lanes[1].ItemId == 4 && (b.Lanes[1].GateBits & 8) != 0, "hold completes and settles at the deterministic tick");
+}
+using (var b = Create(2))
+{
+    Edge(b, 0, 1); Put(b, 0, 12); Step(b);
+    Require((b.Touched[0] & 2) != 0 && (b.Touched[1] & 2) != 0,
+        "transport notifications distinguish occupancy changes");
+    long materialized = b.Lanes[1].Remaining;
+    Step(b);
+    Require(b.Lanes[1].Remaining == materialized
+            && b.GroupStates[0].DeferredUnits == tick
+            && Effective(b, 1).Remaining == materialized - tick,
+        "transport group defers lane-array scans until the next movement event");
+    Step(b);
+    Require(b.GroupStates[0].DeferredUnits == 0 && Effective(b, 1).Remaining == 0
+            && (b.Touched[1] & 2) == 0,
+        "deferred transport time materializes exactly at the event boundary");
 }
 using (var b = Create(4, 1, 1))
 {
@@ -223,6 +254,22 @@ using (var host = new TerrainGenerator())
     Require(callbacks == 1, "placement callback fires once");
     host.Remove(d); host.StepBeltSimulation();
     Require(host.BeltJobLaneCount == 3, "removal releases the native lane at rebuild");
+}
+
+using (var host = new TerrainGenerator())
+{
+    var a = new Block(10); var b = new Block(11);
+    a.Edges[0].Add((b, 0)); host.Add(a); host.Add(b); host.Put(a, 0, 91);
+    long beforeTick = host.BeltSimulationTick;
+    host.ScheduleBeltStep();
+    Require(host.IsBeltStepPending && host.BeltSimulationTick == beforeTick,
+        "belt Plan schedules work without committing the simulation clock");
+    Require(host.Read(b).ItemId == 91 && host.BeltSimulationTick == beforeTick,
+        "a staged consumer fences belt data without committing Publish or the clock");
+    host.StepBeltSimulation();
+    Require(!host.IsBeltStepPending && host.BeltSimulationTick == beforeTick + 1
+            && host.Read(b).ItemId == 91,
+        "a synchronous step completes an already scheduled tick without executing a duplicate tick");
 }
 
 using (var host = new TerrainGenerator())

@@ -398,7 +398,7 @@ public sealed class VirtualConveyorBeltRenderer : MonoBehaviour
             mainCamera = Camera.main;
         }
 
-        bool profileRender = MapObjectTickProfiler.IsEnabled;
+        bool profileRender = MapObjectTickProfiler.IsDetailedEnabled;
         cameraCulling.Update(mainCamera);
         long startTimestamp = profileRender ? MapObjectTickProfiler.BeginSample() : 0L;
         try

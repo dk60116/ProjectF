@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.IO;
 using System.IO.Compression;
 using System.Text;
+using System.Threading;
 using UnityEngine;
 
 public static class SaveGameBinarySerializer
@@ -56,6 +57,12 @@ public static class SaveGameBinarySerializer
 
     public static SaveGameData ReadFromFile(string path)
     {
+        return ReadFromFile(path, CancellationToken.None);
+    }
+
+    public static SaveGameData ReadFromFile(string path, CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
         if (string.IsNullOrEmpty(path) || !File.Exists(path))
         {
             return null;
@@ -64,29 +71,34 @@ public static class SaveGameBinarySerializer
         if (TryReadFromFile(
                 path,
                 SaveReadCompatibilityMode.Current,
+                cancellationToken,
                 out SaveGameData data,
                 out Exception currentException))
         {
             return data;
         }
 
-        if (TryPeekSaveVersion(path, out int version)
+        cancellationToken.ThrowIfCancellationRequested();
+        if (TryPeekSaveVersion(path, cancellationToken, out int version)
             && version == 18
             && TryReadFromFile(
                 path,
                 SaveReadCompatibilityMode.LegacyV18AutoDriveInstallationFields,
+                cancellationToken,
                 out data,
                 out _))
         {
             return data;
         }
 
+        cancellationToken.ThrowIfCancellationRequested();
         throw currentException;
     }
 
     private static bool TryReadFromFile(
         string path,
         SaveReadCompatibilityMode compatibilityMode,
+        CancellationToken cancellationToken,
         out SaveGameData data,
         out Exception exception)
     {
@@ -102,7 +114,8 @@ public static class SaveGameBinarySerializer
                        FileShare.Read,
                        65536,
                        FileOptions.SequentialScan))
-            using (GZipStream gzipStream = new GZipStream(fileStream, CompressionMode.Decompress))
+            using (var cancellableStream = new CancellationCheckingReadStream(fileStream, cancellationToken))
+            using (GZipStream gzipStream = new GZipStream(cancellableStream, CompressionMode.Decompress))
             using (BinaryReader reader = new BinaryReader(gzipStream, Encoding.UTF8))
             {
                 string magic = reader.ReadString();
@@ -134,7 +147,10 @@ public static class SaveGameBinarySerializer
         }
     }
 
-    private static bool TryPeekSaveVersion(string path, out int version)
+    private static bool TryPeekSaveVersion(
+        string path,
+        CancellationToken cancellationToken,
+        out int version)
     {
         version = 0;
         if (string.IsNullOrEmpty(path) || !File.Exists(path))
@@ -151,7 +167,8 @@ public static class SaveGameBinarySerializer
                        FileShare.Read,
                        4096,
                        FileOptions.SequentialScan))
-            using (GZipStream gzipStream = new GZipStream(fileStream, CompressionMode.Decompress))
+            using (var cancellableStream = new CancellationCheckingReadStream(fileStream, cancellationToken))
+            using (GZipStream gzipStream = new GZipStream(cancellableStream, CompressionMode.Decompress))
             using (BinaryReader reader = new BinaryReader(gzipStream, Encoding.UTF8))
             {
                 string magic = reader.ReadString();
@@ -168,6 +185,75 @@ public static class SaveGameBinarySerializer
         {
             version = 0;
             return false;
+        }
+    }
+
+    private sealed class CancellationCheckingReadStream : Stream
+    {
+        private readonly Stream inner;
+        private readonly CancellationToken cancellationToken;
+
+        internal CancellationCheckingReadStream(Stream inner, CancellationToken cancellationToken)
+        {
+            this.inner = inner ?? throw new ArgumentNullException(nameof(inner));
+            this.cancellationToken = cancellationToken;
+        }
+
+        public override bool CanRead => inner.CanRead;
+        public override bool CanSeek => inner.CanSeek;
+        public override bool CanWrite => false;
+        public override long Length => inner.Length;
+        public override long Position
+        {
+            get => inner.Position;
+            set
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                inner.Position = value;
+            }
+        }
+
+        public override void Flush()
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            inner.Flush();
+        }
+
+        public override int Read(byte[] buffer, int offset, int count)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            return inner.Read(buffer, offset, count);
+        }
+
+        public override int ReadByte()
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            return inner.ReadByte();
+        }
+
+        public override long Seek(long offset, SeekOrigin origin)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            return inner.Seek(offset, origin);
+        }
+
+        public override void SetLength(long value)
+        {
+            throw new NotSupportedException();
+        }
+
+        public override void Write(byte[] buffer, int offset, int count)
+        {
+            throw new NotSupportedException();
+        }
+
+        protected override void Dispose(bool disposing)
+        {
+            if (disposing)
+            {
+                inner.Dispose();
+            }
+            base.Dispose(disposing);
         }
     }
 

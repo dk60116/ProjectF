@@ -7,6 +7,7 @@ $files = @(
     (Join-Path $PSScriptRoot 'HostStubs.cs'),
     (Join-Path $repo 'FactorioProject/Assets/Scripts/Simulation/Core/SimulationTickContracts.cs'),
     (Join-Path $repo 'FactorioProject/Assets/Scripts/Simulation/Core/FacilityFlowBatch.cs'),
+    (Join-Path $repo 'FactorioProject/Assets/Scripts/Simulation/Core/FacilityFlowStateWorld.cs'),
     (Join-Path $repo 'FactorioProject/Assets/Scripts/Map/FacilitySimulationWorld.cs'),
     (Join-Path $repo 'FactorioProject/Assets/Scripts/Map/FacilityRuntimeWakeRegistry.cs'))
 $compile = ($files | ForEach-Object { '<Compile Include="' + [Security.SecurityElement]::Escape($_) + '" />' }) -join "`n"

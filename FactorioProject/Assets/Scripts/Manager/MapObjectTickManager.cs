@@ -201,7 +201,7 @@ public sealed class MapObjectTickManager : MonoBehaviour, ProjectF.Simulation.IS
             simulationTimeAccumulator -= FixedSimulationDeltaSeconds;
             bool fullValidationRequested = RequestPeriodicAliveValidation();
             ReconcileRequestedUpdateTicks(fullValidationRequested);
-            simulation.Observer = MapObjectTickProfiler.IsEnabled ? this : null;
+            simulation.Observer = MapObjectTickProfiler.IsDetailedEnabled ? this : null;
             simulation.Step();
             completedSteps++;
         }
@@ -463,6 +463,8 @@ public static class MapObjectTickProfiler
         renderFrameCount++;
     }
 
+    public static bool IsDetailedEnabled => IsEnabled && GameManager.Instance.MapObjectTickDetailedProfilingEnabled;
+
     public static void RecordSimulationTicks(int completedTicks)
     {
         if (IsEnabled) completedSimulationTickCount += Mathf.Max(0, completedTicks);
@@ -489,7 +491,7 @@ public static class MapObjectTickProfiler
 
         internal NamedSampleScope(string kind, string typeName, string itemName)
         {
-            enabled = IsEnabled;
+            enabled = IsDetailedEnabled;
             start = enabled ? BeginSample() : 0L;
             this.kind = kind;
             this.typeName = typeName;
@@ -528,7 +530,7 @@ public static class MapObjectTickProfiler
         string itemName,
         long elapsedTimestampTicks)
     {
-        if (!IsEnabled) return;
+        if (!IsDetailedEnabled) return;
         RecordNamedElapsedTicksInternal(kind, typeName, itemName, elapsedTimestampTicks);
     }
 
@@ -581,7 +583,7 @@ public static class MapObjectTickProfiler
         activeBeltDataMotionCount = Mathf.Max(0, dataMotionBelts);
         activeBeltVisualTickCount = Mathf.Max(0, visualBelts);
 
-        bool enabled = IsEnabled;
+        bool enabled = IsDetailedEnabled;
         beltFrameProfilingEnabled = enabled;
         if (!enabled)
         {
@@ -598,7 +600,7 @@ public static class MapObjectTickProfiler
 
     public static void SetBeltProfilingFrameEnabled(bool enabled)
     {
-        beltFrameProfilingEnabled = enabled;
+        beltFrameProfilingEnabled = enabled && IsDetailedEnabled;
     }
 
     public static void AddBeltLoopIterations(

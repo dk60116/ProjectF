@@ -146,13 +146,15 @@ public partial class Block
         }
     }
 
-    internal void NotifyBeltJobPublished(bool wakeRuntimeDependents = true)
+    internal void NotifyBeltJobPublished(
+        bool wakeRuntimeDependents = true,
+        bool refreshActivity = true)
     {
         // Several lanes in the same block can change during one native tick.
         // Invalidate presentation and observers once without copying lane data.
         MarkConveyorItemVisualDirty();
         NotifyRuntimeItemStackChanged(wakeRuntimeDependents);
-        RefreshConveyorActivityRegistration(false, false);
+        if (refreshActivity) RefreshConveyorActivityRegistration(false, false);
     }
 
     private bool TryReadBeltJobLane(int lane, out BeltLaneState state)

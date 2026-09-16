@@ -17,6 +17,9 @@ public sealed class GameSceneLoadingScreen : MonoBehaviour
     private float displayedProgress;
     private Coroutine requestRoutine;
     private bool waitForCurrentWorldReady;
+    private bool sceneOperationActive;
+
+    public static bool IsSceneOperationActive => active != null && active.sceneOperationActive;
 
     [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.SubsystemRegistration)]
     private static void ResetStaticState()
@@ -128,6 +131,7 @@ public sealed class GameSceneLoadingScreen : MonoBehaviour
     private void OnDestroy()
     {
         requestRoutine = null;
+        sceneOperationActive = false;
         sceneRequests.Clear();
         if (active == this)
         {
@@ -191,6 +195,7 @@ public sealed class GameSceneLoadingScreen : MonoBehaviour
                     yield break;
                 }
 
+                sceneOperationActive = true;
                 // Unity cannot cancel a LoadSceneAsync operation after it starts. Keep the
                 // newest replacement queued and run it as soon as this operation completes.
                 while (!operation.isDone)
@@ -199,6 +204,7 @@ public sealed class GameSceneLoadingScreen : MonoBehaviour
                     SetDisplayedProgress(sceneProgress * SceneProgressWeight);
                     yield return null;
                 }
+                sceneOperationActive = false;
 
                 waitForCurrentWorldReady =
                     SceneManager.GetActiveScene().name == GameSceneName;

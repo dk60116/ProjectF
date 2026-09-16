@@ -22,6 +22,11 @@ public static class UtilityPole
 }
 public partial class RobotArmInstance
 {
+    public RobotArmWorld World;
+    public sealed class PresentationData { public double SleepingPresentationTime; }
+    private readonly PresentationData Data = new();
+    private void SynchronizeSleepingPresentation() { }
+    private void ApplyRuntimeSleepPose() { }
     public long SimulationId;
     public int HeldItemId => heldItemId;
     public void Persist() { }
@@ -38,11 +43,9 @@ public partial class RobotArmInstance
     private float PickupIntervalSeconds => .1f;
     private PlannedTransferCommand plannedTransferCommand;
     private bool stagedTickPlanned, plannedPickupAvailabilityChecked, plannedPickupAvailable, plannedDropAvailabilityChecked, plannedDropAvailable;
-    public bool ReadyForTick => !runtimeSleeping || runtimeWakePending;
     public sealed class Destination { public bool Available; public int Items; }
     public Destination Output = new();
-    public void Sleep() { runtimeSleeping = true; }
-    private void SetRuntimeSleeping(bool value, bool force = false) { runtimeSleeping = value; runtimeSleepCheckTimer = 0f; }
+    public void Sleep() { SetRuntimeSleeping(true); }
     private bool TryGetElectricOperationalPowerRequirement(out float watts) { watts = Watts; return watts > 0; }
     private void EnsureRuntimeStateInitialized() { }
     private bool HasPlacementRuntime() => Placed;
@@ -61,7 +64,6 @@ public partial class RobotArmInstance
     private void PlayDropAnimation() { Animations++; }
     private float ResolvePoweredDeltaTime(float dt) => dt;
     private void AdvanceAnimation(float dt) { }
-    internal void AdvanceSleepingPresentation(float dt) { }
     private void TickPickup(float dt) { }
     private void TickWaitBeforePickupTake(float dt) { }
     private void TickWaitAfterPickupTake(float dt) { }
@@ -73,12 +75,20 @@ public partial class RobotArmInstance
 }
 public partial class RobotArmWorld
 {
+    private readonly ProjectF.Simulation.ActiveTickSet<RobotArmInstance> activeTicks = new(
+        Comparer<RobotArmInstance>.Create((a, b) => a.SimulationId.CompareTo(b.SimulationId)));
+    public double PresentationTime { get; private set; }
+    private int lastPlannedCount;
+    public long tickCandidatesVisited;
+    public int ActiveCount => activeTicks.Count;
+    internal void ScheduleTick(RobotArmInstance arm, bool wake = false) { activeTicks.Add(arm); }
+    internal void UnscheduleTick(RobotArmInstance arm) { activeTicks.Remove(arm); }
     private readonly List<RobotArmInstance> ordered = new();
     private readonly List<RobotArmInstance> planned = new();
     private readonly Dictionary<Vector2Int, List<RobotArmInstance>> observers = new();
     private bool orderDirty;
     public void Add(RobotArmInstance arm, Vector2Int input, Vector2Int output)
-    { ordered.Add(arm); orderDirty = true; Observe(input, arm); Observe(output, arm); }
+    { arm.World = this; ordered.Add(arm); if (!arm.runtimeSleeping || arm.runtimeWakePending) activeTicks.Add(arm); orderDirty = true; Observe(input, arm); Observe(output, arm); }
     public void Tick() { PlanManagedUpdateTick(1f / 60f); ApplyManagedUpdateTick(); }
 }
 public sealed class TickProbe : IMapObjectUpdateTick
@@ -159,6 +169,8 @@ public static class Checks
         for (int i = 0; i < 100; i++) world.Tick();
         Require(arm.Queries == 1 && arm.Animations == 0 && arm.TransferAttempts == 0, "idle sleeping world does no further destination queries");
         Require(UtilityPole.PrepareCalls == 0, "fully sleeping world does not refresh the electric network");
+        Require(world.tickCandidatesVisited == 1 && world.ActiveCount == 0,
+            "sleep removes tick membership, not only queries; duplicate wakes admit once");
         world.Wake(output + Vector2Int.up); world.Tick();
         Require(arm.Queries == 1, "unrelated neighboring cell does not wake an endpoint observer");
         arm.Output.Available = true;
@@ -188,7 +200,7 @@ public static class Checks
         playerTakeWorld.Add(playerTake, input, output);
         playerTake.WakeRuntimeSleep();
         playerTakeWorld.Tick();
-        Require(!playerTake.runtimeSleeping && !playerTake.runtimeWakePending && playerTake.ReadyForTick,
+        Require(!playerTake.runtimeSleeping && !playerTake.runtimeWakePending && playerTakeWorld.ActiveCount == 1,
             "taking a held item wakes the arm for its return-to-pickup state");
 
         var shared = new RobotArmInstance.Destination { Available = true };
@@ -217,6 +229,20 @@ public static class Checks
         moving.MovingFreight = false; moving.Output.Available = true;
         for (int i = 0; i < 20; i++) trainWorld.Tick();
         Require(moving.Output.Items == 1, "train stopping in the same cell eventually resumes transfer");
+        var polling = new RobotArmInstance { heldItemId = -1, state = RobotArmState.WaitingForPickup, MovingFreight = true };
+        var pollingWorld = new RobotArmWorld(); pollingWorld.Add(polling, input, output);
+        pollingWorld.Wake(input); pollingWorld.Tick();
+        pollingWorld.Tick(); // Wake transition resets once; subsequent confirmed checks must retain their interval.
+        Require(polling.runtimeSleepCheckTimer > 0f, "confirmed awake state preserves sleep recheck interval");
+        var idleWorld = new RobotArmWorld();
+        for (int i = 0; i < 5000; i++)
+            idleWorld.Add(new RobotArmInstance { SimulationId = i, heldItemId = -1, state = RobotArmState.WaitingForPickup },
+                new Vector2Int(i * 4, 0), new Vector2Int(i * 4 + 1, 0));
+        for (int i = 0; i < 100; i++) idleWorld.Tick();
+        Require(idleWorld.tickCandidatesVisited == 0, "5000 sleeping arms cause zero tick candidate visits");
+        idleWorld.Wake(new Vector2Int(0, 0)); idleWorld.Tick();
+        Require(idleWorld.tickCandidatesVisited == 1 && idleWorld.ActiveCount == 0,
+            "one input change wakes only its observer among 5000 sleeping arms");
 
         foreach (RobotArmState state in Enum.GetValues<RobotArmState>())
         foreach (bool held in new[] { false, true })

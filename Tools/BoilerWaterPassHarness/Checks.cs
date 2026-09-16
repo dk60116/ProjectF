@@ -41,7 +41,7 @@ public partial class InputOutputModule : InstallationObject
     public bool Placed = true;
     public readonly HashSet<Vector2Int> Passed = new();
     protected readonly List<Vector2Int> runtimeOutputCoordinates = new() { Vector2Int.zero };
-    protected readonly List<InstallationObject> cachedFluidOutputStorages = new();
+    private readonly List<FluidOutputConnection> cachedFluidOutputConnections = new();
     private int connectedFluidSearchCurrentPipeCount = 0;
     private bool fluidOutputCapacityBlocked;
     protected bool TryGetPlacementRuntime(out Vector2Int anchor, out int rotation)
@@ -53,15 +53,14 @@ public partial class InputOutputModule : InstallationObject
     private bool ContainsRuntimePipeAreaBlockCoordinate(Vector2Int coordinate) => true;
     private void EnqueueConnectedFluidSearchCoordinate(Vector2Int coordinate, int pipeCount) => Passed.Add(coordinate);
     private void EnqueueSteamGeneratorPipePassCoordinates(SteamGenerator generator) => Passed.Add(generator.Anchor);
-    private bool EnsureFluidOutputStorageCache() => cachedFluidOutputStorages.Count > 0;
+    private bool EnsureFluidOutputStorageCache() => cachedFluidOutputConnections.Count > 0;
     private static bool IsFluidItemId(int id) => id >= 0;
     protected void RecordFluidNetworkOutput(int id, float liters) { }
     protected void SetFluidOutputStorages(IEnumerable<InstallationObject> storages)
     {
-        cachedFluidOutputStorages.Clear();
+        cachedFluidOutputConnections.Clear();
         foreach (InstallationObject storage in storages)
-            if (storage != null && !cachedFluidOutputStorages.Contains(storage)) cachedFluidOutputStorages.Add(storage);
-        cachedFluidOutputStorages.Sort(CompareSimulationOrder);
+            if (storage != null) cachedFluidOutputConnections.Add(new FluidOutputConnection(storage, 0));
     }
     public void Traverse(InputOutputModule module, Vector2Int coordinate) => EnqueueFluidStoragePipePassCoordinatesAt(new[] { module }, coordinate);
 }

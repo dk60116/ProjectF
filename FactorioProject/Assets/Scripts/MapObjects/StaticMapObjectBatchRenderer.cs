@@ -87,6 +87,17 @@ namespace ProjectF.MapObjects
             return TryGetSupportedArchetype(itemId, out _);
         }
 
+        public void SynchronizeForWorldPresentation()
+        {
+            ResolveDependencies();
+            if (virtualWorld == null || itemManager == null)
+            {
+                return;
+            }
+
+            SynchronizeHostsIfNeeded();
+        }
+
         private void Awake()
         {
             ResolveDependencies();
@@ -113,6 +124,14 @@ namespace ProjectF.MapObjects
                 "Render",
                 "Static Installation Render",
                 "Static Installation Render (inclusive)");
+            // InstallationVersion changes repeatedly while saved chunks are restored. Preserve
+            // the stale cached versions so the first ready frame performs one complete sync.
+            if (MapObjectTickManager.WaitingForWorldLoad)
+            {
+                SuspendHostRendering();
+                return;
+            }
+
             ResolveDependencies();
             if (virtualWorld == null || itemManager == null)
             {
@@ -120,21 +139,7 @@ namespace ProjectF.MapObjects
                 return;
             }
 
-            int installationVersion = virtualWorld.InstallationVersion;
-            int activeVersion = InstallationObject.StaticRenderActiveInstanceVersion;
-            if (cachedInstallationVersion != installationVersion
-                || cachedActiveInstanceVersion != activeVersion)
-            {
-                using (MapObjectTickProfiler.SampleNamed(
-                           "Render Detail",
-                           "Static Installation Render",
-                           "Static Installation Synchronize"))
-                {
-                    SynchronizeHosts();
-                }
-                cachedInstallationVersion = installationVersion;
-                cachedActiveInstanceVersion = activeVersion;
-            }
+            SynchronizeHostsIfNeeded();
 
             using (MapObjectTickProfiler.SampleNamed(
                        "Render Detail",
@@ -161,6 +166,27 @@ namespace ProjectF.MapObjects
             {
                 mainCamera = Camera.main;
             }
+        }
+
+        private void SynchronizeHostsIfNeeded()
+        {
+            int installationVersion = virtualWorld.InstallationVersion;
+            int activeVersion = InstallationObject.StaticRenderActiveInstanceVersion;
+            if (cachedInstallationVersion == installationVersion
+                && cachedActiveInstanceVersion == activeVersion)
+            {
+                return;
+            }
+
+            using (MapObjectTickProfiler.SampleNamed(
+                       "Render Detail",
+                       "Static Installation Render",
+                       "Static Installation Synchronize"))
+            {
+                SynchronizeHosts();
+            }
+            cachedInstallationVersion = installationVersion;
+            cachedActiveInstanceVersion = activeVersion;
         }
 
         private void SynchronizeHosts()
@@ -299,6 +325,12 @@ namespace ProjectF.MapObjects
 
         private void SuspendHosts()
         {
+            SuspendHostRendering();
+            InvalidateSyncVersions();
+        }
+
+        private void SuspendHostRendering()
+        {
             foreach (StaticMapObjectTypeHost host in hostsByItemId.Values)
             {
                 if (host != null)
@@ -306,8 +338,6 @@ namespace ProjectF.MapObjects
                     host.Suspend();
                 }
             }
-
-            InvalidateSyncVersions();
         }
 
         private void ReleaseHosts()

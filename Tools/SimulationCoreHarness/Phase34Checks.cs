@@ -22,7 +22,7 @@ internal static class Phase34Checks
             boiler, 1, 60, 2, 60, 60, 120, .1f, 6,
             true, true, 60, 50, 0, -1);
         int generator = batch.ReserveSlot();
-        batch.ConfigureSteamGenerator(generator, 2, 10, .1f, true, false, 5, 100);
+        batch.ConfigureSteamGenerator(generator, 2, 10, .1f, true, .25f);
         batch.PlanAll();
 
         require(Math.Abs(batch.GetPumpRequestedLiters(pump) - 6f) < .0001f,
@@ -44,9 +44,9 @@ internal static class Phase34Checks
         require(batch.CoolBoiler(boiler, 0, 1, .2f)
                 && Math.Abs(batch.GetBoilerTemperature(boiler) - 58f) < .0001f,
             "boiler passive cooling remains deterministic without a MonoBehaviour");
-        require(Math.Abs(batch.GetSteamRequiredLiters(generator) - 12.5f) < .0001f
-                && Math.Abs(batch.GetSteamMissingLiters(generator) - 7.5f) < .0001f,
-            "steam generator SoA plan retains the startup reserve rule");
+        require(Math.Abs(batch.GetSteamRequiredLiters(generator) - 1f) < .0001f
+                && Math.Abs(batch.GetSteamMissingLiters(generator) - .75f) < .0001f,
+            "steam generator SoA plan requests the exact scheduled interval without a startup reserve");
 
         for (int i = 0; i < 100; i++)
         {

@@ -41,7 +41,9 @@ public class Block
     }
     public void ReleaseBeltJobLegacyLaneView(int lane) => Items[lane] = BeltLaneState.Empty;
     public void RecordBeltJobLaneChange(int lane, bool occupancyMayHaveChanged) { }
-    public void NotifyBeltJobPublished(bool notifyTransportObservers = true) => OnPublished?.Invoke();
+    public void NotifyBeltJobPublished(
+        bool notifyTransportObservers = true,
+        bool refreshActivity = true) => OnPublished?.Invoke();
     public Vector3 TransportLanePosition(int lane) => new(Coordinate.x, lane, Coordinate.y);
     public Vector3 EvaluateBeltJobSegment(int lane, Block target, int targetLane, float progress)
         => Vector3.Lerp(TransportLanePosition(lane), target.TransportLanePosition(targetLane), progress);
@@ -93,11 +95,15 @@ public partial class TerrainGenerator : IDisposable
         while (harnessAccumulator + 0.000000001d >= interval)
         {
             harnessAccumulator -= interval;
-            TickManagedBeltSimulation();
+            PlanManagedBeltSimulation();
+            CompleteBeltSimulationStep();
         }
 
         MapObjectTickManager.SimulationBacklogTicks = harnessAccumulator * BeltSimulationJob.TickRate;
     }
+    public void ScheduleBeltStep() => PlanManagedBeltSimulation();
+    public void CompleteBeltStep() => CompleteBeltSimulationStep();
+    public bool IsBeltStepPending => beltJobStepScheduled;
     public void Put(Block block, int lane, int id, long hold = 0)
     {
         block.Items[lane] = id < 0 ? BeltLaneState.Empty : new BeltLaneState { ItemId = id, Origin = -1, GateBits = 8 };
@@ -112,7 +118,7 @@ public partial class TerrainGenerator : IDisposable
         block.Items[lane] = staged;
         QueueBeltJobWrite(block, lane, false, 0, true);
     }
-    public BeltLaneState Read(Block block, int lane = 0) => beltJobBuffers.Lanes[beltJobIndices[BeltId(block, lane)]];
+    public BeltLaneState Read(Block block, int lane = 0) => beltSimulation.ReadLane(beltJobIndices[BeltId(block, lane)]);
     public BeltLaneState ReadEffective(Block block, int lane = 0)
         => TryReadBeltJobLane(block, lane, out BeltLaneState state) ? state : block.Items[lane];
     public string Committed()
@@ -121,7 +127,7 @@ public partial class TerrainGenerator : IDisposable
         result.Append(beltSimulationTick).Append('|');
         for (int i = 0; i < beltJobNodes.Count; i++)
         {
-            var node = beltJobNodes[i]; var state = beltJobBuffers.Lanes[i];
+            var node = beltJobNodes[i]; var state = beltSimulation.ReadLane(i);
             result.Append($"{node.X},{node.Lane}:{state.ItemId}:{state.Remaining}:{state.Duration}:{state.Origin}:{beltJobBuffers.MergeCursor[i]}|");
         }
         return result.ToString();
@@ -152,6 +158,7 @@ public partial class TerrainGenerator : IDisposable
 public static class MapObjectTickProfiler
 {
     public static bool IsEnabled => false;
+    public static bool IsDetailedEnabled => IsEnabled;
     public static long BeginSample() => 0;
     public static void EndNamedSample(string kind, string typeName, string itemName, long startTimestamp) { }
     public static void AddRuntimeCounter(string category, string name, object value) { }

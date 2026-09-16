@@ -136,6 +136,11 @@ public class PlayerCamera : MonoBehaviour
             "Frame",
             "Player Camera",
             "Player Camera LateUpdate");
+        if (MapObjectTickManager.WaitingForWorldLoad)
+        {
+            return;
+        }
+
         ItemLightController.UpdateDisplayLightGlobals(ResolveDisplayLightingFocusPosition());
 
         if (freeCameraEnabled)

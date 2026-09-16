@@ -131,7 +131,6 @@ public sealed partial class RobotArmInstance : IMapObjectTarget, IMapObjectSimul
         else words[itemId >> 6] &= ~(1UL << (itemId & 63));
         WakeRuntimeSleep();
     }
-    internal bool ReadyForTick => !runtimeSleeping || runtimeWakePending;
     public void Persist() { Placement.robotArmState = CaptureTransferState(); World.StateStore.UpdateInstallationState(Placement); }
     internal void PersistTransferState()
     {
@@ -148,9 +147,23 @@ public sealed partial class RobotArmInstance : IMapObjectTarget, IMapObjectSimul
         if (!IsRuntimeActive || runtimeWakePending) return;
         runtimeWakePending = true;
         runtimeSleepCheckTimer = 0f;
+        World.ScheduleTick(this, wake: true);
     }
     private void SetRuntimeSleeping(bool sleeping, bool force = false)
-    { runtimeSleeping = sleeping; runtimeSleepCheckTimer = 0f; if (sleeping) ApplyRuntimeSleepPose(); }
+    {
+        bool changed = runtimeSleeping != sleeping;
+        if (changed) SynchronizeSleepingPresentation();
+        runtimeSleeping = sleeping;
+        // Preserve the recheck interval when a check merely confirms the current state.
+        if (changed || force) runtimeSleepCheckTimer = 0f;
+        if (sleeping)
+        {
+            if (changed || force) Data.SleepingPresentationTime = World.PresentationTime;
+            ApplyRuntimeSleepPose();
+            if (!runtimeWakePending) World.UnscheduleTick(this);
+        }
+        else if (changed || force) World.ScheduleTick(this);
+    }
     private TerrainGenerator ResolveTerrainGenerator() => World.Terrain;
     private BlockStateStore ResolveBlockStateStore() => World.StateStore;
     private Vector3 GetBodyWorldPosition() => Template.BodyWorld(this);
@@ -161,12 +174,22 @@ public sealed partial class RobotArmInstance : IMapObjectTarget, IMapObjectSimul
     private void SetHeldItem(int id, Vector3 position)
     { heldItemId = id; Data.ItemMoveStart = position; Data.ItemMoveElapsed = 0f; }
     private void ClearHeldItem() { heldItemId = -1; }
-    internal Vector3 ItemPresentationPosition(Vector3 handPosition) => Vector3.Lerp(Data.ItemMoveStart, handPosition,
-        ItemMoveDuration > 0f ? Mathf.Clamp01(Data.ItemMoveElapsed / ItemMoveDuration) : 1f);
-    internal void AdvanceSleepingPresentation(float dt)
-    { if (Data.AnimationTime < 1f) AdvanceAnimation(dt * Mathf.Clamp01(lastElectricPowerSupplyRatio)); }
+    internal Vector3 ItemPresentationPosition(Vector3 handPosition)
+    {
+        SynchronizeSleepingPresentation();
+        return Vector3.Lerp(Data.ItemMoveStart, handPosition,
+            ItemMoveDuration > 0f ? Mathf.Clamp01(Data.ItemMoveElapsed / ItemMoveDuration) : 1f);
+    }
+    private void SynchronizeSleepingPresentation()
+    {
+        if (!runtimeSleeping) return;
+        double now = World.PresentationTime;
+        float elapsed = (float)Math.Max(0d, now - Data.SleepingPresentationTime);
+        Data.SleepingPresentationTime = now;
+        if (Data.AnimationTime < 1f) AdvanceAnimation(elapsed * Mathf.Clamp01(lastElectricPowerSupplyRatio));
+    }
     internal Quaternion BodyRotation => Data.BodyRotation;
-    internal float AnimationTime => Data.AnimationTime;
+    internal float AnimationTime { get { SynchronizeSleepingPresentation(); return Data.AnimationTime; } }
     internal int AnimationKind => Data.AnimationKind;
     private void SetBodyLocalRotation(Quaternion rotation) { Data.BodyRotation = rotation; }
     private bool RotateBodyToward(Quaternion target, float dt)

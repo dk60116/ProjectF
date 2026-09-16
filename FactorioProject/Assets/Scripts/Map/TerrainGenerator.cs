@@ -1138,12 +1138,14 @@ public partial class TerrainGenerator : MonoBehaviour,
 
         managedUpdateTickPlanned = true;
         ScheduleFluidSimulationShadow();
+        PlanManagedBeltSimulation();
     }
 
     public void ApplyManagedUpdateTick()
     {
         if (!managedUpdateTickPlanned)
         {
+            CompleteBeltSimulationStep();
             CompleteFluidSimulationShadow();
             return;
         }
@@ -1154,7 +1156,7 @@ public partial class TerrainGenerator : MonoBehaviour,
             TickFarmlandFertilizerAbsorption();
             bool profileBeltTicks = RefreshBeltTickProfilerFrameState();
             long beltJobsStart = profileBeltTicks ? MapObjectTickProfiler.BeginSample() : 0L;
-            TickManagedBeltSimulation();
+            CompleteBeltSimulationStep();
             if (profileBeltTicks)
             {
                 MapObjectTickProfiler.EndNamedSample(
@@ -1175,7 +1177,7 @@ public partial class TerrainGenerator : MonoBehaviour,
         if (!Application.isPlaying || !hasGeneratedChunks)
             return;
 
-        bool profileBeltTicks = MapObjectTickProfiler.IsEnabled;
+        bool profileBeltTicks = MapObjectTickProfiler.IsDetailedEnabled;
         if (ShouldTickConveyorVisualRuntime())
         {
             using (TickConveyorDotsMarker.Auto())
@@ -1210,7 +1212,7 @@ public partial class TerrainGenerator : MonoBehaviour,
 
     private bool RefreshBeltTickProfilerFrameState()
     {
-        bool profileBeltTicks = MapObjectTickProfiler.IsEnabled;
+        bool profileBeltTicks = MapObjectTickProfiler.IsDetailedEnabled;
         if (profileBeltTicks)
         {
             MapObjectTickProfiler.SetBeltTickCounts(
@@ -1314,6 +1316,19 @@ public partial class TerrainGenerator : MonoBehaviour,
     public int ConveyorItemVisualBlockSetVersion => conveyorItemVisualBlockSetVersion;
     public int DynamicConveyorItemVisualBlockSetVersion => dynamicConveyorItemVisualBlockSetVersion;
     public int ConveyorItemVisualDirtyBlockCount => conveyorItemVisualDirtyBlocks.Count;
+
+    public bool CancelWorldRestorationForLoadReplacement()
+    {
+        if (!worldRestore.IsPending)
+        {
+            return false;
+        }
+
+        ClearPendingChunkGenerations();
+        FailWorldRestoration(
+            new OperationCanceledException("World restoration was replaced by a newer slot load."));
+        return true;
+    }
 
     public void CopyLoadedBlocks(List<Block> results)
     {
@@ -1977,6 +1992,16 @@ public partial class TerrainGenerator : MonoBehaviour,
                 while (itemCount.MoveNext()) yield return itemCount.Current;
             }
         }
+
+        long presentationStartedAt = System.Diagnostics.Stopwatch.GetTimestamp();
+        pipeWorld?.SynchronizeForWorldPresentation();
+        conveyorWorld?.SynchronizeForWorldPresentation();
+        GameManager.Instance?.StaticMapObjectRenderer?.SynchronizeForWorldPresentation();
+        GameManager.Instance?.VirtualItemRenderer?.SynchronizeForWorldPresentation();
+        SlotLoadTimingLog.RecordStageWork(
+            "finalize-presentation",
+            (System.Diagnostics.Stopwatch.GetTimestamp() - presentationStartedAt)
+            * (1000d / System.Diagnostics.Stopwatch.Frequency));
     }
 
     private void FailWorldRestoration(Exception exception)

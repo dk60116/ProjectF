@@ -64,6 +64,7 @@ public static class MapObjectTickProfiler
 {
     public static readonly Dictionary<string, long> RuntimeCounters = new();
     public static bool IsEnabled => false;
+    public static bool IsDetailedEnabled => IsEnabled;
     public static long BeginSample() => 0L;
     public static Scope SampleNamed(string kind, string type, string name) => default;
     public static void AddRuntimeCounter(string group, string name, object value)

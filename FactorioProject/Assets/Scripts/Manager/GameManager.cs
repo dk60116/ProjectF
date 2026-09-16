@@ -74,6 +74,8 @@ public class GameManager : MonoBehaviour
     private bool freeBucket;
     [SerializeField]
     private bool mapObjectTickProfilingEnabled;
+    [SerializeField, Tooltip("Disable detailed object timers for a low-overhead comparison. Frame phases and native recorders remain enabled.")]
+    private bool mapObjectTickDetailedProfilingEnabled = true;
     [SerializeField, Min(1)]
     private int mapObjectTickProfilingMaxRows = 64;
     [SerializeField, Min(1f)]
@@ -104,6 +106,7 @@ public class GameManager : MonoBehaviour
     private bool lastRuntimeFreeElectroEnergy;
     private bool mapObjectTickProfilingRuntimeStateInitialized;
     private bool lastRuntimeMapObjectTickProfilingEnabled;
+    private bool lastRuntimeMapObjectTickDetailedProfilingEnabled;
     private RailLineDebugRenderer railLineDebugRenderer;
     private AnimalAIWorld animalAIWorld;
     private AnimalHerdDebugRenderer animalHerdDebugRenderer;
@@ -185,6 +188,8 @@ public class GameManager : MonoBehaviour
         SyncFreeCameraRuntimeState();
         SyncFreeElectroEnergyRuntimeState();
         SyncMapObjectTickProfilingRuntimeState();
+        // PlayerLoop mutation belongs to Update, never OnValidate's loading thread.
+        ProjectF.Diagnostics.FramePhaseProfiler.SetEnabled(mapObjectTickProfilingEnabled);
     }
 
     private void OnValidate()
@@ -210,6 +215,7 @@ public class GameManager : MonoBehaviour
     {
         if (Instance == this)
         {
+            ProjectF.Diagnostics.FramePhaseProfiler.SetEnabled(false);
             SceneManager.sceneLoaded -= OnSceneLoaded;
             animalAIWorld?.Dispose();
             virtualObjectWorld?.Dispose();
@@ -254,6 +260,7 @@ public class GameManager : MonoBehaviour
     public bool FreeElectroEnergy => freeElectroEnergy;
     public bool FreeBucket => freeBucket;
     public bool MapObjectTickProfilingEnabled => mapObjectTickProfilingEnabled;
+    public bool MapObjectTickDetailedProfilingEnabled => mapObjectTickDetailedProfilingEnabled;
     public int MapObjectTickProfilingMaxRows => Mathf.Max(1, mapObjectTickProfilingMaxRows);
     public float AnimalAIActiveRadius => Mathf.Max(1f, animalAIActiveRadius);
     public bool ShowAnimalHerdAreas => showAnimalHerdAreas;
@@ -648,6 +655,13 @@ public class GameManager : MonoBehaviour
         UtilityPole.NotifyFreeElectroEnergyChanged();
     }
 
+    public void SetMapObjectTickDetailedProfilingEnabled(bool enabled)
+    {
+        if (mapObjectTickDetailedProfilingEnabled == enabled) return;
+        mapObjectTickDetailedProfilingEnabled = enabled;
+        SyncMapObjectTickProfilingRuntimeState(true);
+    }
+
     private void SyncMapObjectTickProfilingRuntimeState(bool force = false)
     {
         if (!Application.isPlaying)
@@ -657,14 +671,18 @@ public class GameManager : MonoBehaviour
 
         if (!force
             && mapObjectTickProfilingRuntimeStateInitialized
-            && lastRuntimeMapObjectTickProfilingEnabled == mapObjectTickProfilingEnabled)
+            && lastRuntimeMapObjectTickProfilingEnabled == mapObjectTickProfilingEnabled
+            && lastRuntimeMapObjectTickDetailedProfilingEnabled == mapObjectTickDetailedProfilingEnabled)
         {
             return;
         }
 
+        bool modeChanged = mapObjectTickProfilingRuntimeStateInitialized
+            && lastRuntimeMapObjectTickDetailedProfilingEnabled != mapObjectTickDetailedProfilingEnabled;
         mapObjectTickProfilingRuntimeStateInitialized = true;
         lastRuntimeMapObjectTickProfilingEnabled = mapObjectTickProfilingEnabled;
-        if (!mapObjectTickProfilingEnabled)
+        lastRuntimeMapObjectTickDetailedProfilingEnabled = mapObjectTickDetailedProfilingEnabled;
+        if (!mapObjectTickProfilingEnabled || modeChanged)
         {
             MapObjectTickProfiler.Reset();
         }
@@ -2199,6 +2217,7 @@ public sealed class RuntimeItemGiveReceiver : MonoBehaviour
         EnsureRuntimeProfilerRecorders();
         MapObjectTickProfiler.ClearRuntimeCounters();
         AppendFrameRuntimeProfilerCounters();
+        ProjectF.Diagnostics.FramePhaseProfiler.AppendCounters();
         TerrainGenerator.Active?.AppendRuntimeProfilerCounters();
         AnimalAIWorld.Instance?.AppendRuntimeProfilerCounters();
         string json = MapObjectTickProfiler.BuildAndResetSnapshotJson(resolvedMaxRows);
@@ -3136,8 +3155,8 @@ public sealed class RuntimeItemGiveReceiver : MonoBehaviour
     private static string BuildMapObjectTickProfilingExtraTokens(GameManager gameManager)
     {
         return gameManager != null
-            ? $"mapObjectTickProfiling={(gameManager.MapObjectTickProfilingEnabled ? 1 : 0)}"
-            : "mapObjectTickProfiling=0";
+            ? $"mapObjectTickProfiling={(gameManager.MapObjectTickProfilingEnabled ? 1 : 0)} mapObjectTickDetailedProfiling={(gameManager.MapObjectTickDetailedProfilingEnabled ? 1 : 0)}"
+            : "mapObjectTickProfiling=0 mapObjectTickDetailedProfiling=0";
     }
 
     private static string BuildWorldTimeExtraTokens(WorldTimeService worldTime)
@@ -5141,6 +5160,12 @@ public sealed class RuntimeItemGiveReceiver : MonoBehaviour
                 0,
                 $"freeBucket={(value ? 1 : 0)}",
                 BuildFreeBucketExtraTokens(gameManager));
+        }
+
+        if (string.Equals(toggleName, "mapObjectTickDetailedProfiling", StringComparison.OrdinalIgnoreCase))
+        {
+            gameManager.SetMapObjectTickDetailedProfilingEnabled(value);
+            return ToolResult.Success(0, 0, 0, 0, 0, 0, $"mapObjectTickDetailedProfiling={(value ? 1 : 0)}");
         }
 
         if (string.Equals(toggleName, "mapObjectTickProfiling", StringComparison.OrdinalIgnoreCase)

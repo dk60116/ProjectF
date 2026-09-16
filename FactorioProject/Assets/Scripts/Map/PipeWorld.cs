@@ -761,8 +761,13 @@ public sealed class PipeWorld : IDisposable
         fluidMaterials.Clear();
     }
 
-    internal void Render()
+    internal void SynchronizeForWorldPresentation()
     {
+        if (disposed)
+        {
+            return;
+        }
+
         using (MapObjectTickProfiler.SampleNamed("Runtime", nameof(Pipe), "Pipe Render Build"))
         {
             if (bodyDirty)
@@ -772,6 +777,19 @@ public sealed class PipeWorld : IDisposable
 
             RefreshFluidRecords();
         }
+    }
+
+    internal void Render()
+    {
+        if (MapObjectTickManager.WaitingForWorldLoad)
+        {
+            bodyBatches.SuspendRendering();
+            fluidBatches.SuspendRendering();
+            lastFluidDisplayBatchUpdateCount = 0;
+            return;
+        }
+
+        SynchronizeForWorldPresentation();
 
         if (mainCamera == null || !mainCamera.isActiveAndEnabled)
         {

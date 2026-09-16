@@ -2517,7 +2517,7 @@ public partial class TerrainGenerator : MonoBehaviour
             return false;
         }
 
-        bool profileCornerGroup = MapObjectTickProfiler.IsEnabled;
+        bool profileCornerGroup = MapObjectTickProfiler.IsDetailedEnabled;
         using (ConveyorCornerGroupCollectMarker.Auto())
         {
             long collectStartTimestamp = BeginConveyorRuntimeSample(profileCornerGroup);
@@ -2844,7 +2844,7 @@ public partial class TerrainGenerator : MonoBehaviour
 
         ResolveStraightConveyorLineWakeRange(line, ref wakeRange, out int minSlotIndex, out int maxSlotIndex);
 
-        bool profileLine = MapObjectTickProfiler.IsEnabled;
+        bool profileLine = MapObjectTickProfiler.IsDetailedEnabled;
         bool hasRetryWork;
         using (ConveyorLineRetryWorkMarker.Auto())
         {

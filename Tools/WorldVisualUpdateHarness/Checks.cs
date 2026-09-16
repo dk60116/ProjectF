@@ -120,6 +120,8 @@ static class Checks
         var managerCulling = (CameraRenderCulling)typeof(WorldVisualUpdateManager)
             .GetField("culling", BindingFlags.Instance | BindingFlags.NonPublic).GetValue(manager);
         managerCulling.InView = false;
+        managerCulling.HasCellRange = true;
+        managerCulling.MinimumCell = managerCulling.MaximumCell = new Vector2Int(10, 10);
         for (int frame = 0; frame < 4; frame++)
         {
             Time.frameCount++;
@@ -127,16 +129,17 @@ static class Checks
                 .Invoke(manager, null);
         }
         Check(manager.CulledCount == 2 && manager.LastVisualUpdateCount == 0,
-            "visible targets cull script animation within stagger interval");
+            "previously visible targets receive one exact culling pass");
         int hiddenTicks = a.Owner.VisualTicks + c.Owner.VisualTicks;
         Time.frameCount++;
         typeof(WorldVisualUpdateManager).GetMethod("LateUpdate", BindingFlags.Instance | BindingFlags.NonPublic)
             .Invoke(manager, null);
         Check(a.Owner.VisualTicks + c.Owner.VisualTicks == hiddenTicks
               && manager.LastDeferredCulledCount >= 1
-              && manager.LastTickedCount <= 1,
-            "hidden targets defer redundant matrix/frustum work");
+              && manager.LastTickedCount == 0,
+            "hidden targets outside visible cells leave the exact culling loop");
         managerCulling.InView = true;
+        managerCulling.MinimumCell = managerCulling.MaximumCell = new Vector2Int(0, 0);
         for (int frame = 0; frame < 4; frame++)
         {
             Time.frameCount++;
@@ -144,7 +147,7 @@ static class Checks
                 .Invoke(manager, null);
         }
         Check(manager.VisibleCount == 2 && a.Visible && c.Visible,
-            "staggered hidden targets return within bounded interval");
+            "hidden targets return when their spatial cell becomes visible");
 
         a.Owner.isActiveAndEnabled = false;
         typeof(WorldVisualUpdateManager).GetMethod("LateUpdate", BindingFlags.Instance | BindingFlags.NonPublic)
@@ -194,15 +197,30 @@ public static class MapObjectTickProfiler
     public static void AddRuntimeCounter(string group, string name, int value) { }
     public readonly struct Scope : IDisposable { public void Dispose() { } }
 }
+public static class MapObjectTickManager
+{
+    public static bool WaitingForWorldLoad;
+}
 namespace ProjectF.Rendering
 {
     // Frustum math is covered separately by ConveyorCameraCullingHarness.
     public class CameraRenderCulling
     {
         public bool Enabled = true, InView = true, LayersVisible = true;
+        public bool HasCellRange;
+        public Vector2Int MinimumCell, MaximumCell;
         public void Update(Camera camera) { }
         public bool IsAnyLayerVisible(int mask) => !Enabled || LayersVisible;
         public bool Intersects(Bounds bounds) => !Enabled || InView;
+        public bool TryGetVisibleCellRange(float cellSize, int paddingCells,
+            out Vector2Int minimum, out Vector2Int maximum)
+        {
+            minimum = MinimumCell;
+            maximum = MaximumCell;
+            return Enabled && HasCellRange;
+        }
+        public static long GetCellCount(Vector2Int minimum, Vector2Int maximum) =>
+            ((long)maximum.x - minimum.x + 1L) * ((long)maximum.y - minimum.y + 1L);
     }
 }
 namespace UnityEngine
@@ -250,6 +268,16 @@ namespace UnityEngine
         public float magnitude => MathF.Sqrt(x*x + y*y + z*z);
         public static Vector3 operator *(Vector3 a, float b) => new Vector3(a.x*b, a.y*b, a.z*b);
     }
+    public readonly struct Vector2Int : IEquatable<Vector2Int>
+    {
+        public readonly int x, y;
+        public Vector2Int(int xValue, int yValue) { x = xValue; y = yValue; }
+        public bool Equals(Vector2Int other) => x == other.x && y == other.y;
+        public override bool Equals(object obj) => obj is Vector2Int other && Equals(other);
+        public override int GetHashCode() => HashCode.Combine(x, y);
+        public static bool operator ==(Vector2Int left, Vector2Int right) => left.Equals(right);
+        public static bool operator !=(Vector2Int left, Vector2Int right) => !left.Equals(right);
+    }
     public struct Matrix4x4 : IEquatable<Matrix4x4>
     {
         public bool Equals(Matrix4x4 other) => true;
@@ -263,6 +291,8 @@ namespace UnityEngine
     public static class Mathf
     {
         public static float Max(float a, float b) => MathF.Max(a,b);
+        public static int Max(int a, int b) => Math.Max(a,b);
+        public static int FloorToInt(float value) => (int)MathF.Floor(value);
         public static float Abs(float a) => MathF.Abs(a);
         public static bool Approximately(float a, float b) => MathF.Abs(a-b) < 0.00001f;
     }

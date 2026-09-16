@@ -2,13 +2,14 @@ using System.Collections.Generic;
 using ProjectF.Simulation;
 using UnityEngine;
 
-public class SteamGenerator : InputOutputModule, IFacilityFlowAdapter
+public class SteamGenerator : InputOutputModule, IFacilityFlowAdapter, IFacilityFlowStateOwner
 {
     private const float FluidEpsilon = 0.0001f;
 
     [SerializeField]
     private InstallationFacingDirection localPipeAreaConnectionDirection = InstallationFacingDirection.PositiveX;
 
+    private FacilityFlowEntityHandle flowEntityHandle;
     private bool generationVisualActive;
     private FacilityFlowBatch fallbackFlowBatch;
 
@@ -402,7 +403,7 @@ public class SteamGenerator : InputOutputModule, IFacilityFlowAdapter
             return false;
         }
 
-        if (!generationVisualActive
+        if (!IsGenerationActive
             || !InputOutputModule.IsInDirectedBoilerSteamChain(this))
         {
             return false;
@@ -484,7 +485,7 @@ public class SteamGenerator : InputOutputModule, IFacilityFlowAdapter
             return "No boiler steam connection";
         }
 
-        if (!generationVisualActive)
+        if (!IsGenerationActive)
         {
             return "No steam";
         }
@@ -499,6 +500,7 @@ public class SteamGenerator : InputOutputModule, IFacilityFlowAdapter
         float deltaTime,
         long simulationTick)
     {
+        EnsureFlowState();
         bool hasRecipe = TryGetSteamInputRecipe(out int inputItemId, out int inputLitersPerSecond)
                          && inputLitersPerSecond > 0;
         bool valid = hasRecipe
@@ -557,20 +559,54 @@ public class SteamGenerator : InputOutputModule, IFacilityFlowAdapter
 
     public override void PrepareForPool()
     {
-        base.PrepareForPool();
         StopGenerationVisuals(true);
+        base.PrepareForPool();
     }
 
     private void SetGenerationActive(bool active)
     {
-        if (generationVisualActive == active)
+        ref SteamGeneratorFlowState state = ref EnsureFlowState();
+        bool stateChanged = state.IsGenerating != active;
+        bool visualChanged = generationVisualActive != active;
+        if (!stateChanged && !visualChanged)
         {
             return;
         }
 
-        generationVisualActive = active;
-        MarkManagedRuntimeVisualsDirty();
-        UtilityPole.NotifyElectricPowerSourceStateChanged();
+        state.IsGenerating = active;
+        if (visualChanged)
+        {
+            generationVisualActive = active;
+            MarkManagedRuntimeVisualsDirty();
+        }
+        if (stateChanged)
+        {
+            UtilityPole.NotifyElectricPowerSourceStateChanged();
+        }
+    }
+
+    private bool IsGenerationActive =>
+        FacilityFlowStateWorld.ContainsSteamGenerator(flowEntityHandle)
+        && FacilityFlowStateWorld.GetSteamGenerator(flowEntityHandle).IsGenerating;
+
+    private ref SteamGeneratorFlowState EnsureFlowState()
+    {
+        if (!FacilityFlowStateWorld.ContainsSteamGenerator(flowEntityHandle))
+        {
+            flowEntityHandle = FacilityFlowStateWorld.CreateSteamGenerator();
+        }
+
+        return ref FacilityFlowStateWorld.GetSteamGenerator(flowEntityHandle);
+    }
+
+    void IFacilityFlowStateOwner.ReleaseFacilityFlowState()
+    {
+        FacilityFlowStateWorld.ReleaseSteamGenerator(ref flowEntityHandle);
+    }
+
+    void IFacilityFlowStateOwner.EnsureFacilityFlowState()
+    {
+        EnsureFlowState();
     }
 
     private bool TryGetSteamInputRecipe(out int inputItemId, out int inputLitersPerSecond)
@@ -653,6 +689,10 @@ public class SteamGenerator : InputOutputModule, IFacilityFlowAdapter
 
     private void StopGenerationVisuals(bool clearParticles)
     {
+        if (FacilityFlowStateWorld.ContainsSteamGenerator(flowEntityHandle))
+        {
+            FacilityFlowStateWorld.GetSteamGenerator(flowEntityHandle).IsGenerating = false;
+        }
         generationVisualActive = false;
         SetVisualParticleActive(particleEffect, false, clear: clearParticles);
     }

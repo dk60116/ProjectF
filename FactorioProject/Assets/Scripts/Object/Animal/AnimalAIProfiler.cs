@@ -34,7 +34,7 @@ namespace ProjectF.Animals
 
             internal SearchScope(bool reachable, bool line = false)
             {
-                enabled = MapObjectTickProfiler.IsEnabled;
+                enabled = MapObjectTickProfiler.IsDetailedEnabled;
                 this.line = line;
                 countNodes = !line && searchScopeDepth++ == 0;
                 before = line ? AnimalGridPathfinder.WalkableLineSampleCount : AnimalGridPathfinder.ExpandedNodeCount;

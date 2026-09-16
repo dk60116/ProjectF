@@ -229,10 +229,17 @@ public partial class UtilityPole : InstallationObject
             return;
         }
 
-        bool needsRefresh = topologyRefreshPending || connectionLineVisualsDirty;
+        bool needsRefresh = topologyRefreshPending
+                            || poleConnectionsDirty
+                            || networksDirty
+                            || connectionLineVisualsDirty;
         topologyRefreshPending = false;
         if (rebuildDirtyTopology && needsRefresh)
         {
+            // Rebuild the authoritative graph once before presentation asks for line data.
+            // EnsureNetworksEvaluated calls made while the batch was open deliberately kept
+            // the dirty flags intact.
+            EnsureNetworksEvaluated(false);
             RefreshConnectionLineRenderersIfDirty();
             RefreshAllRangeVisuals();
         }
@@ -2947,6 +2954,17 @@ public partial class UtilityPole : InstallationObject
 
     private static void EnsureNetworksEvaluated(bool refreshLineVisuals = true)
     {
+        if (topologyRefreshBatchDepth > 0)
+        {
+            // Simulation is paused across initial/saved-world restoration. Queries issued by
+            // partially activated views must not rebuild an incomplete global graph.
+            topologyRefreshPending = topologyRefreshPending
+                                     || poleConnectionsDirty
+                                     || networksDirty
+                                     || connectionLineVisualsDirty;
+            return;
+        }
+
         if (networksDirty)
         {
             RebuildNetworks();
@@ -3207,6 +3225,8 @@ public partial class UtilityPole : InstallationObject
 
         network.PowerSources.Clear();
         network.OrderedSuppliedInstallations.Clear();
+        network.PoweredConsumers.Clear();
+        network.RuntimeConsumers.Clear();
         foreach (InstallationObject installationObject in network.SuppliedInstallations)
         {
             if (installationObject != null)
@@ -3236,10 +3256,18 @@ public partial class UtilityPole : InstallationObject
                 network.PowerSources.Add(steamGenerator);
             }
 
-            // Operation-dependent consumers are added during the per-frame runtime
-            // refresh instead of being fixed into the topology total.
-            if (!HasRuntimeElectricPowerDemand(installationObject)
-                && TryGetElectricPowerRequirement(installationObject, out float requiredWatts))
+            if (!TryGetElectricPowerRequirement(installationObject, out float requiredWatts))
+            {
+                continue;
+            }
+            network.PoweredConsumers.Add(installationObject);
+            // Categorize once per topology change. Runtime evaluation no longer
+            // walks every supplied installation and repeats type/definition checks.
+            if (HasRuntimeElectricPowerDemand(installationObject))
+            {
+                network.RuntimeConsumers.Add(installationObject);
+            }
+            else
             {
                 network.StaticRequiredWatts += requiredWatts;
             }
@@ -3282,13 +3310,12 @@ public partial class UtilityPole : InstallationObject
         network.RequiredWatts = network.StaticRequiredWatts;
         if (robotArmDemand.TryGetValue(network, out float armWatts)) network.RequiredWatts += armWatts;
         for (int installationIndex = 0;
-             installationIndex < network.OrderedSuppliedInstallations.Count;
+             installationIndex < network.RuntimeConsumers.Count;
              installationIndex++)
         {
             InstallationObject installationObject =
-                network.OrderedSuppliedInstallations[installationIndex];
-            if (HasRuntimeElectricPowerDemand(installationObject)
-                && TryGetElectricPowerDemand(installationObject, out float demandWatts))
+                network.RuntimeConsumers[installationIndex];
+            if (TryGetElectricPowerDemand(installationObject, out float demandWatts))
             {
                 network.RequiredWatts += demandWatts;
             }
@@ -3463,9 +3490,10 @@ public partial class UtilityPole : InstallationObject
                 continue;
             }
 
-            foreach (InstallationObject installationObject in network.SuppliedInstallations)
+            for (int consumerIndex = 0; consumerIndex < network.PoweredConsumers.Count; consumerIndex++)
             {
-                if (installationObject == null || !TryGetElectricPowerRequirement(installationObject, out _))
+                InstallationObject installationObject = network.PoweredConsumers[consumerIndex];
+                if (installationObject == null)
                 {
                     continue;
                 }
@@ -3663,6 +3691,8 @@ public partial class UtilityPole : InstallationObject
         public readonly HashSet<InstallationObject> SuppliedInstallations = new HashSet<InstallationObject>();
         public readonly List<InstallationObject> OrderedSuppliedInstallations =
             new List<InstallationObject>();
+        public readonly List<InstallationObject> PoweredConsumers = new List<InstallationObject>();
+        public readonly List<InstallationObject> RuntimeConsumers = new List<InstallationObject>();
         public readonly List<SteamGenerator> PowerSources = new List<SteamGenerator>();
         public float StaticRequiredWatts;
         public ProjectF.Simulation.PowerSupplySnapshot Power;
@@ -3675,6 +3705,8 @@ public partial class UtilityPole : InstallationObject
         {
             SuppliedInstallations.Clear();
             OrderedSuppliedInstallations.Clear();
+            PoweredConsumers.Clear();
+            RuntimeConsumers.Clear();
             PowerSources.Clear();
             StaticRequiredWatts = 0f;
             ClearPowerRuntime();

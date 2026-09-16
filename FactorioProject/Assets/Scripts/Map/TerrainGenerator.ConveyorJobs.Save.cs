@@ -26,7 +26,7 @@ public partial class TerrainGenerator
         for (int i = 0; i < beltJobNodes.Count; i++)
         {
             // Occupied lanes are already saved with their item checkpoint in map.conveyorItems.
-            if (beltJobBuffers.Lanes[i].ItemId < 0)
+            if (beltSimulation.ReadLane(i).ItemId < 0)
             {
                 var node = beltJobNodes[i];
                 snapshot.Lanes.Add(beltSimulation.CaptureLane(node));
@@ -44,7 +44,7 @@ public partial class TerrainGenerator
     internal BeltSavedLane CaptureBeltJobLane(Block block, int lane)
     {
         if (beltJobBuffers == null || !beltJobIndices.TryGetValue(BeltId(block, lane), out int index)) return null;
-        BeltLaneState state = beltJobBuffers.Lanes[index];
+        BeltLaneState state = beltSimulation.ReadLane(index);
         if (beltJobPending.TryGetValue(BeltId(block, lane), out BeltPendingWrite pending))
         {
             if (pending.Restore != null) return pending.Restore;

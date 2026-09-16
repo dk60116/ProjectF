@@ -6,7 +6,7 @@ using System.Text;
 
 static class Time { public static float time; }
 static class Mathf { public static int Min(int x, int y) => Math.Min(x, y); public static int Max(int x, int y) => Math.Max(x, y); }
-static class MapObjectTickProfiler { public static bool IsEnabled; }
+static class MapObjectTickProfiler { public static bool IsEnabled; public static bool IsDetailedEnabled => IsEnabled; }
 readonly struct Marker {
     public Scope Auto() => default;
     public readonly struct Scope : IDisposable { public void Dispose() { } }

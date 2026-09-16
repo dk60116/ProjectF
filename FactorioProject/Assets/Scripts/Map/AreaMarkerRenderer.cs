@@ -154,6 +154,13 @@ public sealed class AreaMarkerRenderer : MonoBehaviour
             "Render",
             "Area Markers",
             "Area Marker Render (inclusive)");
+        if (MapObjectTickManager.WaitingForWorldLoad)
+        {
+            VisibilityCandidateOwnerCount = 0;
+            VisibleMarkerCount = 0;
+            return;
+        }
+
         if (!InitializeTemplate()) return;
         using (UpdateMarker.Auto())
         {

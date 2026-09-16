@@ -800,6 +800,22 @@ public sealed class ConveyorWorld : IDisposable, IVirtualRenderBatchOwner
 
     internal void SuspendRendering() => batches.SuspendRendering();
 
+    internal void SynchronizeForWorldPresentation()
+    {
+        if (disposed || !batchesDirty)
+        {
+            return;
+        }
+
+        using (MapObjectTickProfiler.SampleNamed(
+                   "Render",
+                   "Conveyor Body Render",
+                   "Conveyor Body Rebuild"))
+        {
+            RebuildBatches();
+        }
+    }
+
     public ConveyorRuntimeRecord Register(
         BlockStateStore.InstallationSaveState state,
         ConveyorBelt prototype,
@@ -989,16 +1005,19 @@ public sealed class ConveyorWorld : IDisposable, IVirtualRenderBatchOwner
             "Render",
             "Conveyor Body Render",
             "Conveyor Body Render (inclusive)");
-        if (batchesDirty)
+        // Saved-world restoration mutates the record set many times while chunks stream in.
+        // Keep batchesDirty set and rebuild the complete presentation once the world becomes
+        // ready instead of rescanning every belt after each partial chunk batch.
+        if (MapObjectTickManager.WaitingForWorldLoad)
         {
-            using (MapObjectTickProfiler.SampleNamed(
-                       "Render",
-                       "Conveyor Body Render",
-                       "Conveyor Body Rebuild"))
-            {
-                RebuildBatches();
-            }
+            LastVisibleAnimatedRecordCount = 0;
+            LastCulledAnimatedRecordCount = 0;
+            LastUpdatedAnimatedPartCount = 0;
+            batches.SuspendRendering();
+            return;
         }
+
+        SynchronizeForWorldPresentation();
 
         if (GameManager.Instance != null && GameManager.Instance.HideBelts)
         {

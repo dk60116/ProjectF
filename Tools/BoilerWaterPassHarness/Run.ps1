@@ -19,9 +19,11 @@ function Read-Member([string]$file, [string]$signature, [int]$occurrence = 1) {
 }
 $base = 'FactorioProject/Assets/Scripts/Object/MapObj/InstallationObject/'
 $generated = "using System.Collections.Generic; using UnityEngine; public partial class InputOutputModule {`n"
+$generated += (Read-Member ($base + 'InputOutputModule.cs') 'private readonly struct FluidOutputConnection') + "`n"
 foreach ($member in @(
     'protected bool TryEmitFluidOutputToConnectedStorages(',
     'private bool TrySelectFluidOutputStorageWithAnySpaceFromCache(',
+    'private bool TrySelectFluidOutputConnectionWithAnySpaceFromCache(',
     'private bool CanUseFluidOutputStorageWithAnySpace(',
     'private static float GetFluidStorageFillRatio(',
     'private bool EnqueueFluidStoragePipePassCoordinatesAt(')) {

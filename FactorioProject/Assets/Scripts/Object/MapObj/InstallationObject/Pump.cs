@@ -2,7 +2,7 @@ using System.Collections.Generic;
 using ProjectF.Simulation;
 using UnityEngine;
 
-public class Pump : InputOutputModule, IFacilityFlowAdapter
+public class Pump : InputOutputModule, IFacilityFlowAdapter, IFacilityFlowStateOwner
 {
     private const string DefaultWaterItemName = "Water";
     private const int DefaultWaterItemId = 1;
@@ -14,10 +14,7 @@ public class Pump : InputOutputModule, IFacilityFlowAdapter
     [SerializeField, Min(0)]
     private int fallbackWaterItemId = DefaultWaterItemId;
 
-    private long waterAccumulatorUnits;
-    private long availableWaterOutputUnits;
-    private long waterOutputBudgetUpdatedTick = -1L;
-    private bool waterOutputBlocked;
+    private FacilityFlowEntityHandle flowEntityHandle;
     private FacilityFlowBatch fallbackFlowBatch;
 
     public InstallationFacingDirection LocalPipeConnectionDirection => localPipeConnectionDirection;
@@ -86,18 +83,10 @@ public class Pump : InputOutputModule, IFacilityFlowAdapter
         ApplyFacilityFlowCommit(fallbackFlowBatch, index, deltaTime);
     }
 
-    public override void PrepareForPool()
-    {
-        base.PrepareForPool();
-        waterAccumulatorUnits = 0L;
-        availableWaterOutputUnits = 0L;
-        waterOutputBudgetUpdatedTick = -1L;
-        waterOutputBlocked = false;
-    }
-
     protected override bool ShouldKeepRuntimeUpdateTickActive()
     {
-        return !waterOutputBlocked;
+        ref PumpFlowState state = ref EnsureFlowState();
+        return !state.OutputBlocked;
     }
 
     protected override bool AppendOutputItemIds(ISet<int> outputItemIds)
@@ -157,6 +146,7 @@ public class Pump : InputOutputModule, IFacilityFlowAdapter
         float deltaTime,
         long simulationTick)
     {
+        ref PumpFlowState state = ref EnsureFlowState();
         int waterItemId = ResolveWaterItemId();
         float litersPerSecond = WaterLitersPerSecond;
         if (waterItemId >= 0 && litersPerSecond > 0f)
@@ -171,9 +161,9 @@ public class Pump : InputOutputModule, IFacilityFlowAdapter
             deltaTime,
             simulationTick,
             waterItemId >= 0 && litersPerSecond > 0f && HasRuntimeOutputCoordinates,
-            waterAccumulatorUnits,
-            availableWaterOutputUnits,
-            waterOutputBudgetUpdatedTick);
+            state.WaterAccumulatorUnits,
+            state.AvailableOutputUnits,
+            state.OutputBudgetUpdatedTick);
     }
 
     public void ApplyFacilityFlow(FacilityFlowBatch batch, int index)
@@ -223,11 +213,32 @@ public class Pump : InputOutputModule, IFacilityFlowAdapter
             }
         }
 
-        waterAccumulatorUnits = batch.GetPumpAccumulatorUnits(index);
-        availableWaterOutputUnits = batch.GetPumpBudgetUnits(index);
-        waterOutputBudgetUpdatedTick = batch.GetPumpBudgetUpdatedTick(index);
-        waterOutputBlocked = batch.IsPumpBlocked(index);
+        ref PumpFlowState state = ref EnsureFlowState();
+        state.WaterAccumulatorUnits = batch.GetPumpAccumulatorUnits(index);
+        state.AvailableOutputUnits = batch.GetPumpBudgetUnits(index);
+        state.OutputBudgetUpdatedTick = batch.GetPumpBudgetUpdatedTick(index);
+        state.OutputBlocked = batch.IsPumpBlocked(index);
         RefreshRuntimeUpdateSleepState();
+    }
+
+    private ref PumpFlowState EnsureFlowState()
+    {
+        if (!FacilityFlowStateWorld.ContainsPump(flowEntityHandle))
+        {
+            flowEntityHandle = FacilityFlowStateWorld.CreatePump();
+        }
+
+        return ref FacilityFlowStateWorld.GetPump(flowEntityHandle);
+    }
+
+    void IFacilityFlowStateOwner.ReleaseFacilityFlowState()
+    {
+        FacilityFlowStateWorld.ReleasePump(ref flowEntityHandle);
+    }
+
+    void IFacilityFlowStateOwner.EnsureFacilityFlowState()
+    {
+        EnsureFlowState();
     }
 
     private int ResolveWaterItemId()

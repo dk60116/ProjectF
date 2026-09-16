@@ -63,24 +63,37 @@ public sealed class VirtualItemStackRenderer : MonoBehaviour
         if (!ProjectFApplicationLifecycle.IsQuitting) batches.SuspendRendering();
     }
 
-    private void LateUpdate()
+    public void SynchronizeForWorldPresentation()
     {
-        using var sample = MapObjectTickProfiler.SampleNamed(
-            "Render",
-            "Ground Item Render",
-            "Ground Item Render (inclusive)");
         ResolveDependencies();
         if (virtualWorld == null || itemManager == null)
         {
             return;
         }
 
-        if (cachedItemStackVersion != virtualWorld.ItemStackVersion)
+        int itemStackVersion = virtualWorld.ItemStackVersion;
+        if (cachedItemStackVersion == itemStackVersion)
         {
-            RebuildBatches();
-            cachedItemStackVersion = virtualWorld.ItemStackVersion;
+            return;
         }
 
+        RebuildBatches();
+        cachedItemStackVersion = itemStackVersion;
+    }
+
+    private void LateUpdate()
+    {
+        using var sample = MapObjectTickProfiler.SampleNamed(
+            "Render",
+            "Ground Item Render",
+            "Ground Item Render (inclusive)");
+        if (MapObjectTickManager.WaitingForWorldLoad)
+        {
+            batches.SuspendRendering();
+            return;
+        }
+
+        SynchronizeForWorldPresentation();
         RenderBatches();
     }
 

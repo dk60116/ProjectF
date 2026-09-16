@@ -163,6 +163,13 @@ public class ResourceBatchRenderer : MonoBehaviour
             }
         }
 
+        // Keep the cheap, bounded registration work distributed across load frames, but do
+        // not spend CPU/GPU submitting partial-world batches behind the loading screen.
+        if (MapObjectTickManager.WaitingForWorldLoad)
+        {
+            return;
+        }
+
         using (RenderBatchesMarker.Auto())
         using (MapObjectTickProfiler.SampleNamed(
                    "Render",

@@ -98,6 +98,7 @@ static class Checks
             Require(observer.Completed == 2, "profiling observer is stable for the current batch even when detached during Plan");
         }
         Phase34Checks.Run(Require);
+        ActiveTickSetChecks.Run(Require);
         Console.WriteLine($"PASS {assertions} simulation core checks (production source, no Unity references)");
     }
     sealed class Command : ISimulationCommand

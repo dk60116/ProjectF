@@ -32,6 +32,7 @@ internal static class Program
         };
         CheckScheduling();
         CheckLoadTimingLog();
+        CheckCancelableRead();
         CheckSaveTimingLog();
         CheckDetachedBeltState();
         CheckChunkDependencies();
@@ -258,6 +259,26 @@ internal static class Program
         Console.WriteLine("PASS off-screen factory dependencies, negative coordinates and map boundaries");
     }
 
+    private static void CheckCancelableRead()
+    {
+        using var cancellation = new CancellationTokenSource();
+        cancellation.Cancel();
+        bool cancelled = false;
+        try
+        {
+            SaveGameBinarySerializer.ReadFromFile(
+                Path.Combine(Path.GetTempPath(), "ProjectF-cancelled-load.pfsave"),
+                cancellation.Token);
+        }
+        catch (OperationCanceledException)
+        {
+            cancelled = true;
+        }
+
+        Require(cancelled, "save payload reads observe cancellation before touching the slot file");
+        Console.WriteLine("PASS cancellable save payload read");
+    }
+
     private static void CheckRuntimeOptimizationContracts()
     {
         string utilityPole = File.ReadAllText(
@@ -272,6 +293,34 @@ internal static class Program
             "FactorioProject/Assets/Scripts/Object/MapObj/InstallationObject/SteamGenerator.cs");
         string blockStateStore = File.ReadAllText(
             "FactorioProject/Assets/Scripts/Map/BlockStateStore.cs");
+        string saveManager = File.ReadAllText(
+            "FactorioProject/Assets/Scripts/Manager/SaveManager.cs");
+        string loadingScreen = File.ReadAllText(
+            "FactorioProject/Assets/Scripts/UI/GameSceneLoadingScreen.cs");
+        string serializer = File.ReadAllText(
+            "FactorioProject/Assets/Scripts/Manager/SaveGameBinarySerializer.cs");
+        string conveyorWorld = File.ReadAllText(
+            "FactorioProject/Assets/Scripts/Map/ConveyorWorld.cs");
+        string staticInstallationRenderer = File.ReadAllText(
+            "FactorioProject/Assets/Scripts/MapObjects/StaticMapObjectBatchRenderer.cs");
+        string installationVisuals = File.ReadAllText(
+            "FactorioProject/Assets/Scripts/Rendering/WorldVisualUpdateManager.cs");
+        string pipeWorld = File.ReadAllText(
+            "FactorioProject/Assets/Scripts/Map/PipeWorld.cs");
+        string robotArmView = File.ReadAllText(
+            "FactorioProject/Assets/Scripts/Simulation/Presentation/RobotArmWorldView.cs");
+        string resourceRenderer = File.ReadAllText(
+            "FactorioProject/Assets/Scripts/Map/ResourceBatchRenderer.cs");
+        string resourceWorld = File.ReadAllText(
+            "FactorioProject/Assets/Scripts/Map/ResourceTypeWorld.cs");
+        string itemRenderer = File.ReadAllText(
+            "FactorioProject/Assets/Scripts/Map/VirtualItemStackRenderer.cs");
+        string areaMarkers = File.ReadAllText(
+            "FactorioProject/Assets/Scripts/Map/AreaMarkerRenderer.cs");
+        string playerController = File.ReadAllText(
+            "FactorioProject/Assets/Scripts/Character/Player/PlayerController.cs");
+        string playerCamera = File.ReadAllText(
+            "FactorioProject/Assets/Scripts/Character/Player/PlayerCamera.cs");
 
         Require(utilityPole.Contains("BeginTopologyRefreshBatch()")
                 && utilityPole.Contains("EndTopologyRefreshBatch(bool rebuildDirtyTopology = true)")
@@ -280,6 +329,52 @@ internal static class Program
             "world restoration must batch utility-pole topology refresh");
         Require(terrain.Contains("\"finalize-power-topology\""),
             "the deferred topology rebuild must remain visible in slot load timing");
+        int deferredPowerGuard = utilityPole.IndexOf("if (topologyRefreshBatchDepth > 0)",
+            utilityPole.IndexOf("private static void EnsureNetworksEvaluated", StringComparison.Ordinal),
+            StringComparison.Ordinal);
+        int powerRebuild = utilityPole.IndexOf("if (networksDirty)",
+            utilityPole.IndexOf("private static void EnsureNetworksEvaluated", StringComparison.Ordinal),
+            StringComparison.Ordinal);
+        Require(deferredPowerGuard >= 0
+                && powerRebuild > deferredPowerGuard
+                && utilityPole.Contains("EnsureNetworksEvaluated(false);"),
+            "partial world activation must defer electric topology and flush it once at batch end");
+        int conveyorLoadGuard = conveyorWorld.IndexOf("if (MapObjectTickManager.WaitingForWorldLoad)",
+            conveyorWorld.IndexOf("internal void Render()", StringComparison.Ordinal),
+            StringComparison.Ordinal);
+        int conveyorRebuild = conveyorWorld.IndexOf("SynchronizeForWorldPresentation();",
+            conveyorWorld.IndexOf("internal void Render()", StringComparison.Ordinal),
+            StringComparison.Ordinal);
+        Require(conveyorLoadGuard >= 0
+                && conveyorRebuild > conveyorLoadGuard
+                && conveyorWorld.Contains("if (disposed || !batchesDirty)")
+                && terrain.Contains("\"finalize-presentation\"")
+                && terrain.Contains("conveyorWorld?.SynchronizeForWorldPresentation()")
+                && terrain.Contains("StaticMapObjectRenderer?.SynchronizeForWorldPresentation()")
+                && staticInstallationRenderer.Contains("if (MapObjectTickManager.WaitingForWorldLoad)")
+                && staticInstallationRenderer.Contains("public void SynchronizeForWorldPresentation()")
+                && installationVisuals.Contains("if (MapObjectTickManager.WaitingForWorldLoad)"),
+            "world-load presentation must defer and explicitly flush conveyor and installation batches");
+        int pipeLoadGuard = pipeWorld.IndexOf("if (MapObjectTickManager.WaitingForWorldLoad)",
+            pipeWorld.IndexOf("internal void Render()", StringComparison.Ordinal),
+            StringComparison.Ordinal);
+        int pipeSynchronization = pipeWorld.IndexOf("SynchronizeForWorldPresentation();",
+            pipeWorld.IndexOf("internal void Render()", StringComparison.Ordinal),
+            StringComparison.Ordinal);
+        Require(pipeLoadGuard >= 0
+                && pipeSynchronization > pipeLoadGuard
+                && terrain.Contains("pipeWorld?.SynchronizeForWorldPresentation()")
+                && terrain.Contains("VirtualItemRenderer?.SynchronizeForWorldPresentation()")
+                && itemRenderer.Contains("public void SynchronizeForWorldPresentation()")
+                && robotArmView.Contains("if (MapObjectTickManager.WaitingForWorldLoad)")
+                && resourceRenderer.Contains("if (MapObjectTickManager.WaitingForWorldLoad)")
+                && resourceWorld.Contains("growthPresentation == null || MapObjectTickManager.WaitingForWorldLoad")
+                && itemRenderer.Contains("if (MapObjectTickManager.WaitingForWorldLoad)")
+                && areaMarkers.Contains("if (MapObjectTickManager.WaitingForWorldLoad)")
+                && Regex.Matches(playerController,
+                    @"if \(MapObjectTickManager\.WaitingForWorldLoad\)").Count >= 3
+                && playerCamera.Contains("if (MapObjectTickManager.WaitingForWorldLoad)"),
+            "world loading must suppress fluid and remaining nonessential presentation loops");
         Require(utilityPole.Contains("BuildSpatialConnectionCandidates(false)")
                 && utilityPole.Contains("BuildSpatialConnectionCandidates(true)")
                 && utilityPole.Contains("GetConnectionSpatialCell")
@@ -293,13 +388,20 @@ internal static class Program
                 && terrain.Contains("MarkPersistenceStateDirty(InstallationObject installationObject)"),
             "simulation mutations must feed installation persistence dirty tracking");
         Require(!facilityFlow.Contains("SteamGenerationStartReserveSeconds")
-                && facilityFlow.Contains("float required = Math.Max(FluidEpsilon, requested)"),
+                && facilityFlow.Contains(
+                    "float required = Math.Max(FacilityFlowBatch.FluidEpsilon, requested)"),
             "steam generation must require the current interval, not a start-only reserve");
         Require(!steamGenerator.Contains("hasSteamGenerationReserve")
                 && steamGenerator.Contains("SetGenerationActive(generated)"),
             "generator power, status and visuals must share one committed state");
         Require(!blockStateStore.Contains("steamGenerator.TryGetAvailableElectricOutputRate"),
             "save capture must not persist a derived generator power state");
+        Require(saveManager.Contains("ReplaceActiveLoadWithSlot")
+                && saveManager.Contains("CancelWorldRestorationForLoadReplacement")
+                && saveManager.Contains("pendingRuntimeReadAfterSceneLoad")
+                && loadingScreen.Contains("IsSceneOperationActive")
+                && serializer.Contains("CancellationCheckingReadStream"),
+            "new slot loads must cancel replaceable work and supersede in-flight scene payloads");
         Console.WriteLine("PASS deferred pole topology, spatial candidates and dirty-only installation capture");
     }
 

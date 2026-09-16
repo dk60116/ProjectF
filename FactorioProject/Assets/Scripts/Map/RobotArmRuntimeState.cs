@@ -22,6 +22,6 @@ internal struct RobotArmRuntimeState
     internal Quaternion BodyRotation;
     internal int AnimationKind;
     internal float AnimationTime, ItemMoveElapsed;
+    internal double SleepingPresentationTime;
     internal Vector3 ItemMoveStart;
 }
-

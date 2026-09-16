@@ -2,7 +2,7 @@ using System.Collections.Generic;
 using ProjectF.Simulation;
 using UnityEngine;
 
-public class Boiler : InputOutputModule, IFacilityFlowAdapter
+public class Boiler : InputOutputModule, IFacilityFlowAdapter, IFacilityFlowStateOwner
 {
     private const float FluidEpsilon = 0.0001f;
     private const float MinWaterTemperatureCelsius = 0f;
@@ -13,11 +13,32 @@ public class Boiler : InputOutputModule, IFacilityFlowAdapter
     private List<InstallationFacingDirection> localPipeConnectionDirections =
         new List<InstallationFacingDirection> { InstallationFacingDirection.PositiveZ };
 
-    private float waterTemperatureCelsius;
-    private bool preserveSteamReadyTemperatureForMakeupWater;
-    private long availableSteamOutputUnits;
-    private long steamOutputBudgetUpdatedTick = -1L;
+    private FacilityFlowEntityHandle flowEntityHandle;
     private FacilityFlowBatch fallbackFlowBatch;
+
+    private float waterTemperatureCelsius
+    {
+        get => EnsureFlowState().WaterTemperatureCelsius;
+        set => EnsureFlowState().WaterTemperatureCelsius = value;
+    }
+
+    private bool preserveSteamReadyTemperatureForMakeupWater
+    {
+        get => EnsureFlowState().PreserveSteamReadyTemperatureForMakeupWater;
+        set => EnsureFlowState().PreserveSteamReadyTemperatureForMakeupWater = value;
+    }
+
+    private long availableSteamOutputUnits
+    {
+        get => EnsureFlowState().AvailableSteamOutputUnits;
+        set => EnsureFlowState().AvailableSteamOutputUnits = value;
+    }
+
+    private long steamOutputBudgetUpdatedTick
+    {
+        get => EnsureFlowState().SteamOutputBudgetUpdatedTick;
+        set => EnsureFlowState().SteamOutputBudgetUpdatedTick = value;
+    }
 
     public IReadOnlyList<InstallationFacingDirection> LocalPipeConnectionDirections => localPipeConnectionDirections;
     public float WaterTemperatureCelsius => Mathf.Clamp(waterTemperatureCelsius, MinWaterTemperatureCelsius, MaxWaterTemperatureCelsiusValue);
@@ -109,15 +130,6 @@ public class Boiler : InputOutputModule, IFacilityFlowAdapter
             state.boilerWaterTemperatureCelsius,
             MinWaterTemperatureCelsius,
             MaxWaterTemperatureCelsiusValue);
-        preserveSteamReadyTemperatureForMakeupWater = false;
-        availableSteamOutputUnits = 0L;
-        steamOutputBudgetUpdatedTick = -1L;
-    }
-
-    public override void PrepareForPool()
-    {
-        base.PrepareForPool();
-        waterTemperatureCelsius = MinWaterTemperatureCelsius;
         preserveSteamReadyTemperatureForMakeupWater = false;
         availableSteamOutputUnits = 0L;
         steamOutputBudgetUpdatedTick = -1L;
@@ -529,6 +541,7 @@ public class Boiler : InputOutputModule, IFacilityFlowAdapter
         float deltaTime,
         long simulationTick)
     {
+        ref BoilerFlowState state = ref EnsureFlowState();
         int inputItemId = -1;
         int inputLitersPerSecond = 0;
         int outputItemId = -1;
@@ -562,9 +575,12 @@ public class Boiler : InputOutputModule, IFacilityFlowAdapter
             valid,
             canPull,
             StoredFluidLiters,
-            WaterTemperatureCelsius,
-            availableSteamOutputUnits,
-            steamOutputBudgetUpdatedTick);
+            Mathf.Clamp(
+                state.WaterTemperatureCelsius,
+                MinWaterTemperatureCelsius,
+                MaxWaterTemperatureCelsiusValue),
+            state.AvailableSteamOutputUnits,
+            state.SteamOutputBudgetUpdatedTick);
     }
 
     public void ApplyFacilityFlow(FacilityFlowBatch batch, int index)
@@ -584,9 +600,30 @@ public class Boiler : InputOutputModule, IFacilityFlowAdapter
         {
             UpdateBoilerFluidProcess(batch, index);
         }
-        waterTemperatureCelsius = batch.GetBoilerTemperature(index);
-        availableSteamOutputUnits = batch.GetBoilerBudgetUnits(index);
-        steamOutputBudgetUpdatedTick = batch.GetBoilerBudgetUpdatedTick(index);
+        ref BoilerFlowState state = ref EnsureFlowState();
+        state.WaterTemperatureCelsius = batch.GetBoilerTemperature(index);
+        state.AvailableSteamOutputUnits = batch.GetBoilerBudgetUnits(index);
+        state.SteamOutputBudgetUpdatedTick = batch.GetBoilerBudgetUpdatedTick(index);
+    }
+
+    private ref BoilerFlowState EnsureFlowState()
+    {
+        if (!FacilityFlowStateWorld.ContainsBoiler(flowEntityHandle))
+        {
+            flowEntityHandle = FacilityFlowStateWorld.CreateBoiler();
+        }
+
+        return ref FacilityFlowStateWorld.GetBoiler(flowEntityHandle);
+    }
+
+    void IFacilityFlowStateOwner.ReleaseFacilityFlowState()
+    {
+        FacilityFlowStateWorld.ReleaseBoiler(ref flowEntityHandle);
+    }
+
+    void IFacilityFlowStateOwner.EnsureFacilityFlowState()
+    {
+        EnsureFlowState();
     }
 
     private void UpdateBoilerFluidProcess(FacilityFlowBatch batch, int index)

@@ -23,6 +23,7 @@ namespace ProjectF.Rendering
 
         internal readonly InstallationObject Owner;
         internal int Index = -1;
+        internal Vector2Int SpatialCell;
         internal bool Visible { get; private set; } = true;
         private readonly List<AnimatorState> animators = new List<AnimatorState>();
         private readonly List<ParticleState> particles = new List<ParticleState>();

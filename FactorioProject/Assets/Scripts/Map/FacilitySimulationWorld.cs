@@ -13,18 +13,17 @@ public sealed class FacilitySimulationWorld :
     IMapObjectStagedUpdateTick,
     IMapObjectSimulationIdentity
 {
-    private static readonly Comparison<Entry> EntryComparison = CompareEntries;
     private static FacilitySimulationWorld current;
+    private static IFacilityFlowParallelPlanner parallelFlowPlanner;
 
-    private readonly HashSet<IMapObjectUpdateTick> registered = new HashSet<IMapObjectUpdateTick>();
-    private readonly HashSet<IMapObjectUpdateTick> scheduled = new HashSet<IMapObjectUpdateTick>();
-    private readonly Dictionary<IMapObjectUpdateTick, Entry> entriesByTarget =
-        new Dictionary<IMapObjectUpdateTick, Entry>();
-    private readonly List<Entry> entries = new List<Entry>(256);
-    private readonly List<Entry> due = new List<Entry>(128);
-    private readonly Dictionary<long, List<Entry>> dueBuckets =
-        new Dictionary<long, List<Entry>>(64);
-    private readonly Stack<List<Entry>> dueBucketPool = new Stack<List<Entry>>(16);
+    private readonly Dictionary<IMapObjectUpdateTick, int> entryIndexByTarget =
+        new Dictionary<IMapObjectUpdateTick, int>();
+    private Entry[] entries = new Entry[256];
+    private readonly List<int> due = new List<int>(128);
+    private readonly Dictionary<long, List<int>> dueBuckets =
+        new Dictionary<long, List<int>>(64);
+    private readonly Stack<List<int>> dueBucketPool = new Stack<List<int>>(16);
+    private readonly Comparison<int> dueEntryIndexComparison;
     private readonly FacilityFlowBatch flowBatch = new FacilityFlowBatch(128);
     private readonly Dictionary<Type, FacilityTypeProfile> typeProfiles =
         new Dictionary<Type, FacilityTypeProfile>();
@@ -34,16 +33,30 @@ public sealed class FacilitySimulationWorld :
         new List<FacilityTypeProfile>(16);
     private bool membershipDirty;
     private bool clockRegistered;
+    private int entryCount;
+    private int registeredCount;
+    private int scheduledCount;
     private int lastDueCount;
     private int lastScheduleCandidateCount;
     private int lastFlowCount;
+    private int lastPumpFlowCount;
+    private int lastBoilerFlowCount;
+    private int lastSteamGeneratorFlowCount;
+    private int lastParallelPlanCount;
+    private int lastParallelPlanJobCount;
+    private bool parallelPlanPending;
     private int lastStagedCount;
     private int lastDirectCount;
 
     public long SimulationId => long.MaxValue - 30L;
-    public int RegisteredCount => registered.Count;
-    public int ScheduledCount => scheduled.Count;
+    public int RegisteredCount => registeredCount;
+    public int ScheduledCount => scheduledCount;
     public int LastDueCount => lastDueCount;
+
+    private FacilitySimulationWorld()
+    {
+        dueEntryIndexComparison = CompareEntryIndices;
+    }
 
     public static void Register(IMapObjectUpdateTick target, bool schedule = false)
     {
@@ -61,19 +74,27 @@ public sealed class FacilitySimulationWorld :
     {
         if (target == null || !Application.isPlaying) return;
         FacilitySimulationWorld world = Ensure();
-        if (!world.registered.Contains(target)) world.RegisterInternal(target, false);
+        if (!world.entryIndexByTarget.ContainsKey(target)) world.RegisterInternal(target, false);
         world.SetScheduledInternal(target, value);
     }
 
     public static bool IsScheduled(IMapObjectUpdateTick target)
     {
-        return target != null && current != null && current.scheduled.Contains(target);
+        return target != null && current != null && current.IsScheduledInternal(target);
     }
 
     public static void RefreshSchedule(IMapObjectUpdateTick target)
     {
         if (target == null || current == null) return;
         current.RefreshScheduleInternal(target);
+    }
+
+    public static void SetParallelFlowPlanner(IFacilityFlowParallelPlanner planner)
+    {
+        if (ReferenceEquals(parallelFlowPlanner, planner)) return;
+        current?.CompleteParallelFlowPlan();
+        parallelFlowPlanner?.Dispose();
+        parallelFlowPlanner = planner;
     }
 
     internal static void RestoreSimulationTick(long restoredTick)
@@ -114,12 +135,52 @@ public sealed class FacilitySimulationWorld :
             world != null ? world.lastFlowCount : 0);
         MapObjectTickProfiler.AddRuntimeCounter(
             "FacilityECS",
+            "LastPumpFlowEntities",
+            world != null ? world.lastPumpFlowCount : 0);
+        MapObjectTickProfiler.AddRuntimeCounter(
+            "FacilityECS",
+            "LastBoilerFlowEntities",
+            world != null ? world.lastBoilerFlowCount : 0);
+        MapObjectTickProfiler.AddRuntimeCounter(
+            "FacilityECS",
+            "LastSteamGeneratorFlowEntities",
+            world != null ? world.lastSteamGeneratorFlowCount : 0);
+        MapObjectTickProfiler.AddRuntimeCounter(
+            "FacilityECS",
+            "ParallelPlannerInstalled",
+            parallelFlowPlanner != null ? 1 : 0);
+        MapObjectTickProfiler.AddRuntimeCounter(
+            "FacilityECS",
+            "LastParallelPlanEntities",
+            world != null ? world.lastParallelPlanCount : 0);
+        MapObjectTickProfiler.AddRuntimeCounter(
+            "FacilityECS",
+            "LastParallelPlanJobs",
+            world != null ? world.lastParallelPlanJobCount : 0);
+        MapObjectTickProfiler.AddRuntimeCounter(
+            "FacilityECS",
+            "ParallelPlanPending",
+            world != null && world.parallelPlanPending ? 1 : 0);
+        MapObjectTickProfiler.AddRuntimeCounter(
+            "FacilityECS",
             "LastStagedEntities",
             world != null ? world.lastStagedCount : 0);
         MapObjectTickProfiler.AddRuntimeCounter(
             "FacilityECS",
             "LastDirectEntities",
             world != null ? world.lastDirectCount : 0);
+        MapObjectTickProfiler.AddRuntimeCounter(
+            "FacilityStateECS",
+            "PumpEntities",
+            FacilityFlowStateWorld.PumpCount);
+        MapObjectTickProfiler.AddRuntimeCounter(
+            "FacilityStateECS",
+            "BoilerEntities",
+            FacilityFlowStateWorld.BoilerCount);
+        MapObjectTickProfiler.AddRuntimeCounter(
+            "FacilityStateECS",
+            "SteamGeneratorEntities",
+            FacilityFlowStateWorld.SteamGeneratorCount);
         if (world != null)
         {
             for (int i = 0; i < world.typeProfilesInOrder.Count; i++)
@@ -138,6 +199,8 @@ public sealed class FacilitySimulationWorld :
     {
         current?.Clear();
         current = null;
+        SetParallelFlowPlanner(null);
+        FacilityFlowStateWorld.Clear();
     }
 
     private static FacilitySimulationWorld Ensure()
@@ -147,44 +210,59 @@ public sealed class FacilitySimulationWorld :
 
     private void RegisterInternal(IMapObjectUpdateTick target, bool schedule)
     {
-        if (registered.Add(target))
+        if (!entryIndexByTarget.TryGetValue(target, out int entryIndex))
         {
-            var entry = new Entry(
+            EnsureEntryCapacity(entryCount + 1);
+            entryIndex = entryCount++;
+            entries[entryIndex] = new Entry(
                 target,
                 ResolveIntervalTicks(target),
                 MapObjectTickManager.CurrentSimulationTick);
-            entriesByTarget.Add(target, entry);
-            entries.Add(entry);
+            entryIndexByTarget.Add(target, entryIndex);
+            registeredCount++;
         }
 
-        SetScheduledInternal(target, schedule);
+        SetScheduledInternal(entryIndex, schedule);
     }
 
     private void UnregisterInternal(IMapObjectUpdateTick target)
     {
-        if (!registered.Remove(target)) return;
-        scheduled.Remove(target);
-        entriesByTarget.Remove(target);
+        if (!entryIndexByTarget.TryGetValue(target, out int entryIndex)) return;
+        entryIndexByTarget.Remove(target);
+        ref Entry entry = ref entries[entryIndex];
+        if (!entry.Registered) return;
+        if (entry.Scheduled)
+        {
+            entry.Scheduled = false;
+            scheduledCount--;
+        }
+        entry.Registered = false;
+        registeredCount--;
         membershipDirty = true;
         RefreshClockRegistration();
-        if (registered.Count == 0) CompactEntries();
+        if (registeredCount == 0 && due.Count == 0) CompactEntries();
     }
 
     private void SetScheduledInternal(IMapObjectUpdateTick target, bool value)
     {
-        if (!registered.Contains(target)) return;
+        if (!entryIndexByTarget.TryGetValue(target, out int entryIndex)) return;
+        SetScheduledInternal(entryIndex, value);
+    }
+
+    private void SetScheduledInternal(int entryIndex, bool value)
+    {
+        ref Entry entry = ref entries[entryIndex];
+        if (!entry.Registered || entry.Scheduled == value) return;
+        entry.Scheduled = value;
         if (value)
         {
-            if (!scheduled.Add(target)) return;
-            if (entriesByTarget.TryGetValue(target, out Entry entry))
-            {
-                entry.ResetSchedule(MapObjectTickManager.CurrentSimulationTick);
-                ScheduleEntry(entry);
-            }
+            scheduledCount++;
+            entry.ResetSchedule(MapObjectTickManager.CurrentSimulationTick);
+            ScheduleEntry(entryIndex);
         }
-        else if (!scheduled.Remove(target))
+        else
         {
-            return;
+            scheduledCount--;
         }
 
         RefreshClockRegistration();
@@ -192,14 +270,22 @@ public sealed class FacilitySimulationWorld :
 
     private void RefreshScheduleInternal(IMapObjectUpdateTick target)
     {
-        if (!entriesByTarget.TryGetValue(target, out Entry entry)) return;
+        if (!entryIndexByTarget.TryGetValue(target, out int entryIndex)) return;
+        ref Entry entry = ref entries[entryIndex];
         entry.ResetSchedule(MapObjectTickManager.CurrentSimulationTick);
-        if (scheduled.Contains(target)) ScheduleEntry(entry);
+        if (entry.Scheduled) ScheduleEntry(entryIndex);
+    }
+
+    private bool IsScheduledInternal(IMapObjectUpdateTick target)
+    {
+        return entryIndexByTarget.TryGetValue(target, out int entryIndex)
+               && entries[entryIndex].Registered
+               && entries[entryIndex].Scheduled;
     }
 
     private void RefreshClockRegistration()
     {
-        bool shouldRegister = scheduled.Count > 0;
+        bool shouldRegister = scheduledCount > 0;
         if (clockRegistered == shouldRegister) return;
         clockRegistered = shouldRegister;
         if (shouldRegister) MapObjectTickManager.RegisterUpdateTick(this);
@@ -218,42 +304,52 @@ public sealed class FacilitySimulationWorld :
 
     public void PlanManagedUpdateTick(float deltaTime)
     {
+        CompleteParallelFlowPlan();
         CompactEntries();
         due.Clear();
         flowBatch.Begin();
         lastDueCount = lastScheduleCandidateCount = lastFlowCount = lastStagedCount = lastDirectCount = 0;
+        lastPumpFlowCount = lastBoilerFlowCount = lastSteamGeneratorFlowCount = 0;
+        lastParallelPlanCount = 0;
+        lastParallelPlanJobCount = 0;
         long simulationTick = MapObjectTickManager.CurrentSimulationTick;
         bool hasPowerParticipant = false;
-        if (dueBuckets.Remove(simulationTick, out List<Entry> bucket))
+        if (dueBuckets.TryGetValue(simulationTick, out List<int> bucket))
         {
+            dueBuckets.Remove(simulationTick);
             lastScheduleCandidateCount = bucket.Count;
             for (int i = 0; i < bucket.Count; i++)
             {
-                Entry entry = bucket[i];
-                IMapObjectUpdateTick target = entry?.Target;
-                if (!IsAlive(target))
+                int entryIndex = bucket[i];
+                if ((uint)entryIndex >= (uint)entryCount)
                 {
-                    RemoveInvalidTarget(target);
                     continue;
                 }
-                if (!registered.Contains(target)
-                    || !scheduled.Contains(target)
+
+                ref Entry entry = ref entries[entryIndex];
+                IMapObjectUpdateTick target = entry.Target;
+                if (!IsAlive(target))
+                {
+                    RemoveInvalidEntry(entryIndex);
+                    continue;
+                }
+                if (!entry.Registered
+                    || !entry.Scheduled
                     || entry.NextDueTick != simulationTick)
                     continue;
 
                 long elapsedTicks = Math.Max(1L, simulationTick - entry.LastExecutedTick);
                 entry.PendingDeltaTime = elapsedTicks * MapObjectTickManager.FixedSimulationDeltaSeconds;
                 entry.MarkExecuted(simulationTick);
-                ScheduleEntry(entry);
-                due.Add(entry);
-                hasPowerParticipant |= target is InputOutputModule module
-                                       && module.RequiresFacilityPowerEvaluation;
+                ScheduleEntry(entryIndex);
+                due.Add(entryIndex);
+                hasPowerParticipant |= entry.RequiresPowerEvaluation;
             }
             ReturnDueBucket(bucket);
         }
 
-        if (membershipDirty) CompactEntries();
-        if (due.Count > 1) due.Sort(EntryComparison);
+        if (membershipDirty && due.Count == 0) CompactEntries();
+        if (due.Count > 1) due.Sort(dueEntryIndexComparison);
         lastDueCount = due.Count;
         if (due.Count == 0) return;
         using var sample = MapObjectTickProfiler.SampleNamed(
@@ -262,25 +358,41 @@ public sealed class FacilitySimulationWorld :
             "Facility ECS Plan");
         for (int i = 0; i < due.Count; i++)
         {
-            Entry entry = due[i];
+            int entryIndex = due[i];
+            ref Entry entry = ref entries[entryIndex];
             IMapObjectUpdateTick target = entry.Target;
             entry.PendingFlowIndex = -1;
-            if (!scheduled.Contains(target) || target is not IMapObjectStagedUpdateTick staged) continue;
-            staged.PlanManagedUpdateTick(entry.PendingDeltaTime);
+            if (!entry.Registered || !entry.Scheduled || entry.Staged == null) continue;
+            entry.Staged.PlanManagedUpdateTick(entry.PendingDeltaTime);
             lastStagedCount++;
-            if (target is IFacilityFlowAdapter flowAdapter)
+            if (entry.FlowAdapter != null)
             {
                 int flowIndex = flowBatch.ReserveSlot();
                 entry.PendingFlowIndex = flowIndex;
-                flowAdapter.CaptureFacilityFlow(
+                entry.FlowAdapter.CaptureFacilityFlow(
                     flowBatch,
                     flowIndex,
                     entry.PendingDeltaTime,
                     simulationTick);
             }
         }
-        flowBatch.PlanAll();
+        bool plannedInParallel = parallelFlowPlanner != null
+                                 && parallelFlowPlanner.TrySchedule(flowBatch);
+        parallelPlanPending = plannedInParallel;
+        if (!plannedInParallel)
+        {
+            flowBatch.PlanAll();
+        }
+        lastParallelPlanCount = plannedInParallel
+            ? parallelFlowPlanner.LastParallelEntityCount
+            : 0;
+        lastParallelPlanJobCount = plannedInParallel
+            ? parallelFlowPlanner.LastScheduledJobCount
+            : 0;
         lastFlowCount = flowBatch.Count;
+        lastPumpFlowCount = flowBatch.PumpCount;
+        lastBoilerFlowCount = flowBatch.BoilerCount;
+        lastSteamGeneratorFlowCount = flowBatch.SteamGeneratorCount;
         // Publish one immutable supply snapshot after every due facility has planned,
         // before any facility or robot arm commits its work for this tick.
         if (hasPowerParticipant) UtilityPole.PrepareSimulationPowerTick();
@@ -288,12 +400,13 @@ public sealed class FacilitySimulationWorld :
 
     public void ApplyManagedUpdateTick()
     {
+        CompleteParallelFlowPlan();
         if (due.Count == 0) return;
         using var sample = MapObjectTickProfiler.SampleNamed(
             "ECS",
             nameof(FacilitySimulationWorld),
             "Facility ECS Apply");
-        bool profileTypes = MapObjectTickProfiler.IsEnabled;
+        bool profileTypes = MapObjectTickProfiler.IsDetailedEnabled;
         touchedTypeProfiles.Clear();
         if (profileTypes)
         {
@@ -305,17 +418,17 @@ public sealed class FacilitySimulationWorld :
         {
             for (int i = 0; i < due.Count; i++)
             {
-                Entry entry = due[i];
+                int entryIndex = due[i];
+                ref Entry entry = ref entries[entryIndex];
                 IMapObjectUpdateTick target = entry.Target;
-                if (!registered.Contains(target) || !scheduled.Contains(target)) continue;
+                if (!entry.Registered || !entry.Scheduled) continue;
                 if (!profileTypes)
                 {
-                    ApplyTarget(entry, target);
+                    ApplyTarget(ref entry, target);
                     continue;
                 }
 
-                FacilityTypeProfile profile = entry.TypeProfile ??=
-                    GetOrCreateTypeProfile(target.GetType());
+                FacilityTypeProfile profile = GetOrCreateTypeProfile(target.GetType());
                 if (!profile.Touched)
                 {
                     profile.Touched = true;
@@ -325,7 +438,7 @@ public sealed class FacilitySimulationWorld :
                 }
 
                 long startTimestamp = MapObjectTickProfiler.BeginSample();
-                ApplyTarget(entry, target);
+                ApplyTarget(ref entry, target);
                 profile.ElapsedTimestampTicks += Math.Max(
                     0L,
                     MapObjectTickProfiler.BeginSample() - startTimestamp);
@@ -343,24 +456,35 @@ public sealed class FacilitySimulationWorld :
         CompactEntries();
     }
 
-    private void ApplyTarget(Entry entry, IMapObjectUpdateTick target)
+    private void CompleteParallelFlowPlan()
     {
-        if (entry.PendingFlowIndex >= 0 && target is IFacilityFlowAdapter flowAdapter)
+        if (!parallelPlanPending) return;
+        using var sample = MapObjectTickProfiler.SampleNamed(
+            "ECS",
+            nameof(FacilitySimulationWorld),
+            "Facility ECS Job Complete");
+        parallelFlowPlanner?.Complete(flowBatch);
+        parallelPlanPending = false;
+    }
+
+    private void ApplyTarget(ref Entry entry, IMapObjectUpdateTick target)
+    {
+        if (entry.PendingFlowIndex >= 0 && entry.FlowAdapter != null)
         {
-            flowAdapter.ApplyFacilityFlow(flowBatch, entry.PendingFlowIndex);
-            (target as IPersistenceDirtyTrackable)?.MarkPersistenceStateDirty();
+            entry.FlowAdapter.ApplyFacilityFlow(flowBatch, entry.PendingFlowIndex);
+            entry.Persistence?.MarkPersistenceStateDirty();
             return;
         }
 
-        if (target is IMapObjectStagedUpdateTick staged)
+        if (entry.Staged != null)
         {
-            staged.ApplyManagedUpdateTick();
-            (target as IPersistenceDirtyTrackable)?.MarkPersistenceStateDirty();
+            entry.Staged.ApplyManagedUpdateTick();
+            entry.Persistence?.MarkPersistenceStateDirty();
             return;
         }
 
         target.ManagedUpdateTick(entry.PendingDeltaTime);
-        (target as IPersistenceDirtyTrackable)?.MarkPersistenceStateDirty();
+        entry.Persistence?.MarkPersistenceStateDirty();
         lastDirectCount++;
     }
 
@@ -392,42 +516,71 @@ public sealed class FacilitySimulationWorld :
     private void CompactEntries()
     {
         if (!membershipDirty) return;
+        due.Clear();
+        ClearDueBuckets();
+        entryIndexByTarget.Clear();
         int writeIndex = 0;
-        for (int readIndex = 0; readIndex < entries.Count; readIndex++)
+        int nextScheduledCount = 0;
+        for (int readIndex = 0; readIndex < entryCount; readIndex++)
         {
             Entry entry = entries[readIndex];
-            if (entry == null || !registered.Contains(entry.Target)) continue;
-            entries[writeIndex++] = entry;
+            if (!entry.Registered || !IsAlive(entry.Target)) continue;
+            entries[writeIndex] = entry;
+            entryIndexByTarget[entry.Target] = writeIndex;
+            if (entry.Scheduled)
+            {
+                nextScheduledCount++;
+                ScheduleEntry(writeIndex);
+            }
+            writeIndex++;
         }
 
-        if (writeIndex < entries.Count) entries.RemoveRange(writeIndex, entries.Count - writeIndex);
+        if (writeIndex < entryCount)
+        {
+            Array.Clear(entries, writeIndex, entryCount - writeIndex);
+        }
+
+        entryCount = writeIndex;
+        registeredCount = writeIndex;
+        scheduledCount = nextScheduledCount;
         membershipDirty = false;
         RefreshClockRegistration();
     }
 
-    private void RemoveInvalidTarget(IMapObjectUpdateTick target)
+    private void RemoveInvalidEntry(int entryIndex)
     {
-        if (target != null)
+        if ((uint)entryIndex >= (uint)entryCount) return;
+        ref Entry entry = ref entries[entryIndex];
+        if (!entry.Registered) return;
+        IMapObjectUpdateTick target = entry.Target;
+        if (!ReferenceEquals(target, null))
         {
-            registered.Remove(target);
-            scheduled.Remove(target);
-            entriesByTarget.Remove(target);
+            entryIndexByTarget.Remove(target);
         }
+
+        if (entry.Scheduled)
+        {
+            entry.Scheduled = false;
+            scheduledCount--;
+        }
+        entry.Registered = false;
+        registeredCount--;
         membershipDirty = true;
     }
 
-    private void ScheduleEntry(Entry entry)
+    private void ScheduleEntry(int entryIndex)
     {
-        if (entry == null || entry.NextDueTick == long.MaxValue) return;
-        if (!dueBuckets.TryGetValue(entry.NextDueTick, out List<Entry> bucket))
+        ref Entry entry = ref entries[entryIndex];
+        if (!entry.Registered || !entry.Scheduled || entry.NextDueTick == long.MaxValue) return;
+        if (!dueBuckets.TryGetValue(entry.NextDueTick, out List<int> bucket))
         {
-            bucket = dueBucketPool.Count > 0 ? dueBucketPool.Pop() : new List<Entry>(16);
+            bucket = dueBucketPool.Count > 0 ? dueBucketPool.Pop() : new List<int>(16);
             dueBuckets.Add(entry.NextDueTick, bucket);
         }
-        bucket.Add(entry);
+        bucket.Add(entryIndex);
     }
 
-    private void ReturnDueBucket(List<Entry> bucket)
+    private void ReturnDueBucket(List<int> bucket)
     {
         bucket.Clear();
         dueBucketPool.Push(bucket);
@@ -435,7 +588,7 @@ public sealed class FacilitySimulationWorld :
 
     private void ClearDueBuckets()
     {
-        foreach (KeyValuePair<long, List<Entry>> pair in dueBuckets)
+        foreach (KeyValuePair<long, List<int>> pair in dueBuckets)
             ReturnDueBucket(pair.Value);
         dueBuckets.Clear();
     }
@@ -449,12 +602,12 @@ public sealed class FacilitySimulationWorld :
 
     private void Clear()
     {
+        CompleteParallelFlowPlan();
         if (clockRegistered) MapObjectTickManager.UnregisterUpdateTick(this);
         clockRegistered = false;
-        registered.Clear();
-        scheduled.Clear();
-        entriesByTarget.Clear();
-        entries.Clear();
+        entryIndexByTarget.Clear();
+        Array.Clear(entries, 0, entryCount);
+        entryCount = registeredCount = scheduledCount = 0;
         due.Clear();
         ClearDueBuckets();
         typeProfiles.Clear();
@@ -462,19 +615,26 @@ public sealed class FacilitySimulationWorld :
         touchedTypeProfiles.Clear();
         membershipDirty = false;
         lastDueCount = lastScheduleCandidateCount = lastFlowCount = lastStagedCount = lastDirectCount = 0;
+        lastPumpFlowCount = lastBoilerFlowCount = lastSteamGeneratorFlowCount = 0;
+        lastParallelPlanCount = 0;
+        lastParallelPlanJobCount = 0;
     }
 
     private void ResetSchedules(long simulationTick)
     {
+        CompleteParallelFlowPlan();
         due.Clear();
         ClearDueBuckets();
-        for (int i = 0; i < entries.Count; i++)
+        for (int i = 0; i < entryCount; i++)
         {
-            Entry entry = entries[i];
-            entry?.ResetSchedule(simulationTick);
-            if (entry != null && scheduled.Contains(entry.Target)) ScheduleEntry(entry);
+            ref Entry entry = ref entries[i];
+            entry.ResetSchedule(simulationTick);
+            if (entry.Registered && entry.Scheduled) ScheduleEntry(i);
         }
         lastDueCount = lastScheduleCandidateCount = lastFlowCount = lastStagedCount = lastDirectCount = 0;
+        lastPumpFlowCount = lastBoilerFlowCount = lastSteamGeneratorFlowCount = 0;
+        lastParallelPlanCount = 0;
+        lastParallelPlanJobCount = 0;
     }
 
     private static int ResolveIntervalTicks(IMapObjectUpdateTick target)
@@ -490,34 +650,59 @@ public sealed class FacilitySimulationWorld :
             : Math.Max(1, (int)Math.Round(ticks, MidpointRounding.ToEven));
     }
 
-    private static int CompareEntries(Entry left, Entry right)
+    private int CompareEntryIndices(int leftIndex, int rightIndex)
     {
-        if (ReferenceEquals(left, right)) return 0;
-        if (left == null) return 1;
-        if (right == null) return -1;
-        long leftId = left.Target is IMapObjectSimulationIdentity leftIdentity ? leftIdentity.SimulationId : 0L;
-        long rightId = right.Target is IMapObjectSimulationIdentity rightIdentity ? rightIdentity.SimulationId : 0L;
-        int comparison = leftId.CompareTo(rightId);
+        if (leftIndex == rightIndex) return 0;
+        Entry left = entries[leftIndex];
+        Entry right = entries[rightIndex];
+        int comparison = left.SimulationId.CompareTo(right.SimulationId);
         if (comparison != 0) return comparison;
         return string.CompareOrdinal(
-            left.Target?.GetType().FullName ?? string.Empty,
-            right.Target?.GetType().FullName ?? string.Empty);
+            left.TypeName,
+            right.TypeName);
     }
 
-    private sealed class Entry
+    private void EnsureEntryCapacity(int required)
     {
-        public readonly IMapObjectUpdateTick Target;
-        public readonly int IntervalTicks;
+        if (entries.Length >= required) return;
+        int capacity = Math.Max(required, checked(entries.Length * 2));
+        Array.Resize(ref entries, capacity);
+    }
+
+    private struct Entry
+    {
+        public IMapObjectUpdateTick Target;
+        public IMapObjectStagedUpdateTick Staged;
+        public IFacilityFlowAdapter FlowAdapter;
+        public IPersistenceDirtyTrackable Persistence;
+        public long SimulationId;
+        public string TypeName;
         public long LastExecutedTick;
         public long NextDueTick;
+        public int IntervalTicks;
+        public int PendingFlowIndex;
         public float PendingDeltaTime;
-        public int PendingFlowIndex = -1;
-        public FacilityTypeProfile TypeProfile;
+        public bool Registered;
+        public bool Scheduled;
+        public bool RequiresPowerEvaluation;
 
         public Entry(IMapObjectUpdateTick target, int intervalTicks, long currentTick)
         {
             Target = target;
+            Staged = target as IMapObjectStagedUpdateTick;
+            FlowAdapter = target as IFacilityFlowAdapter;
+            Persistence = target as IPersistenceDirtyTrackable;
+            SimulationId = target is IMapObjectSimulationIdentity identity ? identity.SimulationId : 0L;
+            TypeName = target?.GetType().FullName ?? string.Empty;
+            RequiresPowerEvaluation = target is InputOutputModule module
+                                      && module.RequiresFacilityPowerEvaluation;
             IntervalTicks = Math.Max(1, intervalTicks);
+            LastExecutedTick = 0L;
+            NextDueTick = 0L;
+            PendingDeltaTime = 0f;
+            PendingFlowIndex = -1;
+            Registered = true;
+            Scheduled = false;
             ResetSchedule(currentTick);
         }
 

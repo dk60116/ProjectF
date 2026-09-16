@@ -1201,6 +1201,13 @@ public partial class PlayerController : MonoBehaviour
             "Frame",
             "Player Controller",
             "Player Update");
+        if (MapObjectTickManager.WaitingForWorldLoad)
+        {
+            pendingMoveDirection = Vector3.zero;
+            currentConveyorCarryVelocity = Vector3.zero;
+            return;
+        }
+
         if (interactionPointSnapTarget == null && interactionPointSnapAnimal != null)
         {
             interactionPointSnapAnimal.NotifyRiderDismounted(player);
@@ -1441,6 +1448,13 @@ public partial class PlayerController : MonoBehaviour
             "Frame",
             "Player Controller",
             "Player FixedUpdate");
+        if (MapObjectTickManager.WaitingForWorldLoad)
+        {
+            pendingMoveDirection = Vector3.zero;
+            currentConveyorCarryVelocity = Vector3.zero;
+            return;
+        }
+
         if (interactionPointSnapTarget != null)
         {
             ApplyInteractionPointSnap();
@@ -1549,6 +1563,11 @@ public partial class PlayerController : MonoBehaviour
             "Frame",
             "Player Controller",
             "Player LateUpdate");
+        if (MapObjectTickManager.WaitingForWorldLoad)
+        {
+            return;
+        }
+
         if (interactionPointSnapTarget != null)
         {
             ApplyInteractionPointSnap();

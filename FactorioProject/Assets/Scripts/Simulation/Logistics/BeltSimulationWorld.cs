@@ -22,6 +22,7 @@ namespace ProjectF.Conveyors
     {
         private readonly Dictionary<BeltLaneId, int> indices = new Dictionary<BeltLaneId, int>();
         private readonly List<BeltLaneId> laneIds = new List<BeltLaneId>();
+        private readonly List<int> laneGroups = new List<int>();
         private JobHandle pending;
         private bool scheduled;
         private bool stepOpen;
@@ -36,7 +37,7 @@ namespace ProjectF.Conveyors
             var replacement = new BeltSimulationBuffers(lanes, groups, splitters, words);
             Buffers?.Dispose();
             Buffers = replacement;
-            indices.Clear(); laneIds.Clear();
+            indices.Clear(); laneIds.Clear(); laneGroups.Clear();
         }
 
         internal void AddLane(BeltLaneId id)
@@ -89,6 +90,12 @@ namespace ProjectF.Conveyors
             }
             if (expectedStart != LaneCount) throw new InvalidOperationException("Unowned transport lanes.");
             if (expectedSplitterStart != Buffers.Splitters.Length) throw new InvalidOperationException("Unowned splitters.");
+            laneGroups.Clear();
+            for (int groupIndex = 0; groupIndex < Buffers.Groups.Length; groupIndex++)
+            {
+                BeltGroupRange group = Buffers.Groups[groupIndex];
+                for (int i = 0; i < group.Count; i++) laneGroups.Add(groupIndex);
+            }
         }
 
         private static bool InGroupOrAbsent(int index, int start, int end)
@@ -96,6 +103,54 @@ namespace ProjectF.Conveyors
 
         internal bool TryGetIndex(BeltLaneId id, out int index) => indices.TryGetValue(id, out index);
         internal BeltLaneId GetLaneId(int index) => laneIds[index];
+
+        internal BeltLaneState ReadLane(int index)
+        {
+            // A staged consumer may inspect the authoritative lane after Schedule but
+            // before the owner reaches Apply. Fence the writer before exposing data.
+            Complete();
+            BeltLaneState state = Buffers.Lanes[index];
+            BeltGroupState group = Buffers.GroupStates[FindGroup(index)];
+            if (state.ItemId >= 0 && state.Remaining > 0 && group.DeferredUnits > 0
+                && (Buffers.Topology[index].Paused == 0 || state.Origin < 0))
+                state.Remaining = Math.Max(0, state.Remaining - group.DeferredUnits);
+            return state;
+        }
+
+        internal void MaterializeDeferredTime()
+        {
+            Complete();
+            if (Buffers == null) return;
+            for (int groupIndex = 0; groupIndex < Buffers.Groups.Length; groupIndex++)
+                MaterializeGroup(groupIndex);
+        }
+
+        internal void MaterializeDeferredTimeForLane(int lane)
+        {
+            Complete();
+            if (Buffers != null) MaterializeGroup(FindGroup(lane));
+        }
+
+        private void MaterializeGroup(int groupIndex)
+        {
+            BeltGroupState state = Buffers.GroupStates[groupIndex];
+            long elapsed = state.DeferredUnits;
+            if (elapsed <= 0) return;
+            BeltGroupRange group = Buffers.Groups[groupIndex];
+            int end = group.Start + group.Count;
+            for (int i = group.Start; i < end; i++)
+            {
+                BeltLaneState lane = Buffers.Lanes[i];
+                if (lane.ItemId < 0 || lane.Remaining <= 0
+                    || (Buffers.Topology[i].Paused != 0 && lane.Origin >= 0))
+                    continue;
+                lane.Remaining = Math.Max(0, lane.Remaining - elapsed);
+                Buffers.Lanes[i] = lane;
+            }
+            state.DeferredUnits = 0;
+            state.NextEventUnits = Math.Max(0, state.NextEventUnits - elapsed);
+            Buffers.GroupStates[groupIndex] = state;
+        }
 
         internal void Schedule()
         {
@@ -131,7 +186,7 @@ namespace ProjectF.Conveyors
             Complete();
             state = BeltLaneState.Empty;
             if (Buffers == null || !indices.TryGetValue(id, out int index)) return false;
-            state = Buffers.Lanes[index];
+            state = ReadLane(index);
             return true;
         }
 
@@ -140,7 +195,7 @@ namespace ProjectF.Conveyors
             RequireCommittedStep();
             Complete();
             if (!indices.TryGetValue(id, out int index)) return null;
-            var saved = new BeltSavedLane { X = id.X, Y = id.Y, Lane = id.Lane, State = Buffers.Lanes[index] };
+            var saved = new BeltSavedLane { X = id.X, Y = id.Y, Lane = id.Lane, State = ReadLane(index) };
             if (saved.State.Origin >= 0 && saved.State.Origin < LaneCount)
             {
                 BeltLaneId origin = laneIds[saved.State.Origin];
@@ -160,6 +215,7 @@ namespace ProjectF.Conveyors
             RequireCommittedStep();
             Complete();
             if (saved == null || !indices.TryGetValue(new BeltLaneId(saved.X, saved.Y, saved.Lane), out int index)) return false;
+            MaterializeGroup(FindGroup(index));
             BeltLaneState state = saved.State;
             state.Origin = saved.OriginLane >= 0 && indices.TryGetValue(
                 new BeltLaneId(saved.OriginX, saved.OriginY, saved.OriginLane), out int origin) ? origin : -1;
@@ -180,6 +236,7 @@ namespace ProjectF.Conveyors
             RequireCommittedStep();
             if (itemId < 0 || !TryRead(id, out var state) || state.ItemId >= 0) return false;
             int index = indices[id];
+            MaterializeGroup(FindGroup(index));
             long hold = Math.Max(0, holdUnits);
             Buffers.Lanes[index] = new BeltLaneState { ItemId = itemId, Origin = -1,
                 Remaining = hold, Duration = hold, GateBits = hold > 0 ? 0 : BeltSimulationJob.SettledGateBit };
@@ -193,6 +250,7 @@ namespace ProjectF.Conveyors
             itemId = -1;
             if (!TryRead(id, out var state) || state.ItemId < 0 || state.Remaining > 0) return false;
             int index = indices[id];
+            MaterializeGroup(FindGroup(index));
             itemId = state.ItemId;
             Buffers.Lanes[index] = BeltLaneState.Empty;
             Buffers.GroupStates[FindGroup(index)] = default;
@@ -206,6 +264,7 @@ namespace ProjectF.Conveyors
 
         private int FindGroup(int lane)
         {
+            if ((uint)lane < (uint)laneGroups.Count) return laneGroups[lane];
             int low = 0, high = Buffers.Groups.Length - 1;
             while (low <= high)
             {
@@ -221,7 +280,7 @@ namespace ProjectF.Conveyors
         public void Dispose()
         {
             Complete(); Buffers?.Dispose(); Buffers = null;
-            indices.Clear(); laneIds.Clear(); Tick = 0; stepOpen = false;
+            indices.Clear(); laneIds.Clear(); laneGroups.Clear(); Tick = 0; stepOpen = false;
         }
     }
 }

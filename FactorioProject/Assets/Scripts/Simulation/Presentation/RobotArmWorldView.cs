@@ -9,6 +9,7 @@ public sealed class RobotArmWorldView : MonoBehaviour
     private readonly Dictionary<RobotArmInstance, SphereCollider> colliders = new Dictionary<RobotArmInstance, SphereCollider>();
     private readonly VirtualRenderBatchCollection batches = new VirtualRenderBatchCollection();
     private readonly ProjectF.Rendering.CameraRenderCulling culling = new ProjectF.Rendering.CameraRenderCulling();
+    private readonly List<RobotArmInstance> renderCandidates = new List<RobotArmInstance>();
     private Camera renderCamera;
     public int VisibleCount { get; private set; }
     public int MatrixCount { get; private set; }
@@ -56,7 +57,12 @@ public sealed class RobotArmWorldView : MonoBehaviour
         gameObject.SetActive(false);
         if (Application.isPlaying) Destroy(gameObject); else DestroyImmediate(gameObject);
     }
-    private void OnDisable() { batches.SuspendRendering(); VisibleCount = MatrixCount = 0; }
+    private void OnDisable()
+    {
+        batches.SuspendRendering();
+        VisibleCount = MatrixCount = 0;
+        world?.ResetRenderCandidateMetrics();
+    }
     private void OnDestroy()
     {
         world?.OnViewDestroyed(this);
@@ -65,14 +71,23 @@ public sealed class RobotArmWorldView : MonoBehaviour
     private void LateUpdate()
     {
         if (world == null) return;
+        if (MapObjectTickManager.WaitingForWorldLoad)
+        {
+            batches.SuspendRendering();
+            VisibleCount = MatrixCount = 0;
+            world.ResetRenderCandidateMetrics();
+            return;
+        }
         if (renderCamera == null || !renderCamera.isActiveAndEnabled) renderCamera = Camera.main;
         culling.Update(renderCamera);
+        world.BuildRenderCandidates(culling, renderCandidates);
         batches.ClearActiveMatrices();
         VisibleCount = MatrixCount = 0;
         using (MapObjectTickProfiler.SampleNamed("Runtime", nameof(RobotArm), "Robot Arm Render Build"))
         {
-            foreach (var arm in world.Instances)
+            for (int i = 0; i < renderCandidates.Count; i++)
             {
+                RobotArmInstance arm = renderCandidates[i];
                 if (!culling.IsAnyLayerVisible(arm.Template.LayerMask) || !culling.Intersects(arm.CullBounds)) continue;
                 VisibleCount++;
                 MatrixCount += arm.Template.Append(arm, batches);

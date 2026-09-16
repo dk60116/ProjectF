@@ -21,6 +21,7 @@ public class SaveManager : MonoBehaviour
     private static SaveGameData pendingRuntimeLoadData;
     private static int pendingRuntimeLoadSlot = -1;
     private static bool pendingRuntimeStartNewMap;
+    private static bool pendingRuntimeReadAfterSceneLoad;
     private static bool publishingRuntimeSceneLoad;
     private static int runtimeSaveInputBlockDepth;
 
@@ -51,6 +52,7 @@ public class SaveManager : MonoBehaviour
     private Task activeSaveWriteTask;
     private Coroutine activeLoadCoroutine;
     private Task<SaveGameData> activeLoadReadTask;
+    private CancellationTokenSource activeLoadCancellation;
     private bool saveTickPauseActive;
     private bool saveInputBlockActive;
 
@@ -78,6 +80,7 @@ public class SaveManager : MonoBehaviour
         pendingRuntimeLoadData = null;
         pendingRuntimeLoadSlot = -1;
         pendingRuntimeStartNewMap = false;
+        pendingRuntimeReadAfterSceneLoad = false;
         publishingRuntimeSceneLoad = false;
         runtimeSaveInputBlockDepth = 0;
         SlotLoadTimingLog.Reset();
@@ -88,9 +91,7 @@ public class SaveManager : MonoBehaviour
     {
         if (!publishingRuntimeSceneLoad)
             SlotLoadTimingLog.CancelActive("scene-load-replaced");
-        pendingRuntimeLoadData = null;
-        pendingRuntimeLoadSlot = -1;
-        pendingRuntimeStartNewMap = false;
+        ClearPendingRuntimeLoadState();
     }
 
     private IEnumerator Start()
@@ -102,11 +103,16 @@ public class SaveManager : MonoBehaviour
         if (TryConsumePendingRuntimeLoad(
                 out int pendingSlot,
                 out SaveGameData pendingData,
-                out bool startNewMap))
+                out bool startNewMap,
+                out bool readAfterSceneLoad))
         {
             if (startNewMap)
             {
                 StartNewMap(pendingSlot);
+            }
+            else if (readAfterSceneLoad)
+            {
+                yield return LoadStartupSlotRoutine(pendingSlot, false);
             }
             else
             {
@@ -518,18 +524,24 @@ public class SaveManager : MonoBehaviour
         // A scene replacement must release a suspended snapshot even when Unity's
         // coroutine driver does not dispose the outer iterator.
         FinishSaveOperation();
+        CancelActiveLoadRead();
     }
 
     public bool LoadSlot(int slotIndex)
     {
-        if (IsSaving || IsLoading)
+        slotIndex = NormalizeSlotIndex(slotIndex);
+        SelectedSlotIndex = slotIndex;
+        if (IsSaving)
         {
-            Debug.LogWarning("[SaveManager] 저장 또는 불러오기가 끝나기 전에는 슬롯을 불러올 수 없습니다.");
+            Debug.LogWarning("[SaveManager] 저장이 끝나기 전에는 슬롯을 불러올 수 없습니다.");
             return false;
         }
 
-        slotIndex = NormalizeSlotIndex(slotIndex);
-        SelectedSlotIndex = slotIndex;
+        if (IsLoading)
+        {
+            return ReplaceActiveLoadWithSlot(slotIndex);
+        }
+
         SlotLoadTimingLog.Begin(
             slotIndex,
             Application.isPlaying && startupLoadCompleted ? "runtime-scene-reload" : "direct-load");
@@ -540,6 +552,56 @@ public class SaveManager : MonoBehaviour
         }
 
         return LoadSlotImmediate(slotIndex);
+    }
+
+    private bool ReplaceActiveLoadWithSlot(int slotIndex)
+    {
+        CancelActiveLoadForReplacement();
+
+        Scene activeScene = SceneManager.GetActiveScene();
+        if (!activeScene.IsValid())
+        {
+            Debug.LogError("[SaveManager] 활성 씬을 찾을 수 없어 로드 슬롯을 교체하지 못했습니다.");
+            return false;
+        }
+
+        bool startNewMap = !HasSaveFile(slotIndex, true);
+        SlotLoadTimingLog.Begin(slotIndex, "runtime-load-replacement");
+        sceneReloadRequested = true;
+        if (GameSceneLoadingScreen.IsSceneOperationActive)
+        {
+            PublishPendingRuntimeLoad(
+                slotIndex,
+                null,
+                startNewMap,
+                !startNewMap);
+            Debug.Log($"[SaveManager] 진행 중인 씬 로드 대상을 Slot {slotIndex + 1}로 교체했습니다.");
+            return true;
+        }
+
+        return StartSceneReloadForSlot(
+            slotIndex,
+            null,
+            startNewMap,
+            activeScene.buildIndex,
+            activeScene.name,
+            !startNewMap);
+    }
+
+    private void CancelActiveLoadForReplacement()
+    {
+        SlotLoadTimingLog.CancelActive("replaced-by-new-slot-load");
+        Coroutine loadCoroutine = activeLoadCoroutine;
+        activeLoadCoroutine = null;
+        if (loadCoroutine != null)
+        {
+            StopCoroutine(loadCoroutine);
+        }
+
+        CancelActiveLoadRead();
+        TerrainGenerator.ResolveActive()?.CancelWorldRestorationForLoadReplacement();
+        ClearPendingRuntimeLoadState();
+        sceneReloadRequested = false;
     }
 
     private bool LoadSlotImmediate(int slotIndex)
@@ -574,11 +636,14 @@ public class SaveManager : MonoBehaviour
         }
     }
 
-    private IEnumerator LoadStartupSlotRoutine(int slotIndex)
+    private IEnumerator LoadStartupSlotRoutine(int slotIndex, bool beginTiming = true)
     {
         slotIndex = NormalizeSlotIndex(slotIndex);
         SelectedSlotIndex = slotIndex;
-        SlotLoadTimingLog.Begin(slotIndex, "startup-recent-slot");
+        if (beginTiming)
+        {
+            SlotLoadTimingLog.Begin(slotIndex, "startup-recent-slot");
+        }
         string path = GetSlotPath(slotIndex);
         if (!HasSaveFile(slotIndex))
         {
@@ -586,31 +651,29 @@ public class SaveManager : MonoBehaviour
             yield break;
         }
 
-        Exception taskStartException = null;
-        try
-        {
-            activeLoadReadTask = Task.Run(() => SaveGameBinarySerializer.ReadFromFile(path));
-        }
-        catch (Exception exception)
-        {
-            taskStartException = exception;
-        }
-
-        if (taskStartException != null)
+        if (!TryBeginLoadRead(
+                path,
+                out CancellationTokenSource requestCancellation,
+                out Task<SaveGameData> readTask,
+                out Exception taskStartException))
         {
             SlotLoadTimingLog.Fail(slotIndex, "read-task-start-failed: " + taskStartException.GetType().Name);
             Debug.LogError($"[SaveManager] Slot {slotIndex + 1} 로드 작업 시작 실패: {taskStartException}");
-            activeLoadReadTask = null;
             yield break;
         }
 
-        while (!activeLoadReadTask.IsCompleted)
+        while (!readTask.IsCompleted)
         {
             yield return null;
         }
 
-        Task<SaveGameData> completedTask = activeLoadReadTask;
-        activeLoadReadTask = null;
+        if (!ReferenceEquals(activeLoadCancellation, requestCancellation))
+        {
+            yield break;
+        }
+
+        CompleteActiveLoadRead(requestCancellation);
+        Task<SaveGameData> completedTask = readTask;
         if (completedTask.IsFaulted)
         {
             Exception readException = completedTask.Exception?.GetBaseException();
@@ -680,17 +743,11 @@ public class SaveManager : MonoBehaviour
         int sceneBuildIndex,
         string sceneName)
     {
-        Exception taskStartException = null;
-        try
-        {
-            activeLoadReadTask = Task.Run(() => SaveGameBinarySerializer.ReadFromFile(path));
-        }
-        catch (Exception exception)
-        {
-            taskStartException = exception;
-        }
-
-        if (taskStartException != null)
+        if (!TryBeginLoadRead(
+                path,
+                out CancellationTokenSource requestCancellation,
+                out Task<SaveGameData> readTask,
+                out Exception taskStartException))
         {
             SlotLoadTimingLog.Fail(slotIndex, "read-task-start-failed: " + taskStartException.GetType().Name);
             Debug.LogError($"[SaveManager] Slot {slotIndex + 1} 로드 작업 시작 실패: {taskStartException}");
@@ -700,13 +757,18 @@ public class SaveManager : MonoBehaviour
 
         // Ensure StartCoroutine returns before this routine clears its tracked handle.
         yield return null;
-        while (!activeLoadReadTask.IsCompleted)
+        while (!readTask.IsCompleted)
         {
             yield return null;
         }
 
-        Task<SaveGameData> completedTask = activeLoadReadTask;
-        activeLoadReadTask = null;
+        if (!ReferenceEquals(activeLoadCancellation, requestCancellation))
+        {
+            yield break;
+        }
+
+        CompleteActiveLoadRead(requestCancellation);
+        Task<SaveGameData> completedTask = readTask;
         activeLoadCoroutine = null;
         if (completedTask.IsFaulted)
         {
@@ -740,7 +802,8 @@ public class SaveManager : MonoBehaviour
         SaveGameData data,
         bool startNewMap,
         int sceneBuildIndex,
-        string sceneName)
+        string sceneName,
+        bool readAfterSceneLoad = false)
     {
         bool reloadStarted = false;
         publishingRuntimeSceneLoad = true;
@@ -767,21 +830,107 @@ public class SaveManager : MonoBehaviour
         // TryLoadSceneAsync can replace an older active screen and discard its pending
         // slot payload. Publish this request only after the screen accepted it so the new
         // payload cannot be mistaken for the superseded load.
-        pendingRuntimeLoadSlot = slotIndex;
-        pendingRuntimeLoadData = data;
-        pendingRuntimeStartNewMap = startNewMap;
-        SetRecentSlot(slotIndex);
+        PublishPendingRuntimeLoad(slotIndex, data, startNewMap, readAfterSceneLoad);
         return true;
     }
 
-    private void ResetActiveLoadState()
+    private void PublishPendingRuntimeLoad(
+        int slotIndex,
+        SaveGameData data,
+        bool startNewMap,
+        bool readAfterSceneLoad)
+    {
+        pendingRuntimeLoadSlot = slotIndex;
+        pendingRuntimeLoadData = data;
+        pendingRuntimeStartNewMap = startNewMap;
+        pendingRuntimeReadAfterSceneLoad = readAfterSceneLoad;
+        SetRecentSlot(slotIndex);
+    }
+
+    private static void ClearPendingRuntimeLoadState()
     {
         pendingRuntimeLoadSlot = -1;
         pendingRuntimeLoadData = null;
         pendingRuntimeStartNewMap = false;
+        pendingRuntimeReadAfterSceneLoad = false;
+    }
+
+    private void ResetActiveLoadState()
+    {
+        ClearPendingRuntimeLoadState();
         sceneReloadRequested = false;
         activeLoadCoroutine = null;
+        CancelActiveLoadRead();
+    }
+
+    private bool TryBeginLoadRead(
+        string path,
+        out CancellationTokenSource requestCancellation,
+        out Task<SaveGameData> readTask,
+        out Exception exception)
+    {
+        CancelActiveLoadRead();
+        requestCancellation = new CancellationTokenSource();
+        CancellationToken cancellationToken = requestCancellation.Token;
+        readTask = null;
+        exception = null;
+        try
+        {
+            readTask = Task.Run(
+                () => SaveGameBinarySerializer.ReadFromFile(path, cancellationToken),
+                cancellationToken);
+            activeLoadCancellation = requestCancellation;
+            activeLoadReadTask = readTask;
+            return true;
+        }
+        catch (Exception startException)
+        {
+            exception = startException;
+            requestCancellation.Dispose();
+            requestCancellation = null;
+            readTask = null;
+            return false;
+        }
+    }
+
+    private void CompleteActiveLoadRead(CancellationTokenSource requestCancellation)
+    {
+        if (!ReferenceEquals(activeLoadCancellation, requestCancellation))
+        {
+            return;
+        }
+
         activeLoadReadTask = null;
+        activeLoadCancellation = null;
+        requestCancellation.Dispose();
+    }
+
+    private void CancelActiveLoadRead()
+    {
+        CancellationTokenSource cancellation = activeLoadCancellation;
+        Task<SaveGameData> readTask = activeLoadReadTask;
+        activeLoadCancellation = null;
+        activeLoadReadTask = null;
+        if (cancellation != null)
+        {
+            try
+            {
+                cancellation.Cancel();
+            }
+            finally
+            {
+                cancellation.Dispose();
+            }
+        }
+
+        if (readTask != null && !readTask.IsCompleted)
+        {
+            _ = readTask.ContinueWith(
+                task => { _ = task.Exception; },
+                CancellationToken.None,
+                TaskContinuationOptions.OnlyOnFaulted | TaskContinuationOptions.ExecuteSynchronously,
+                TaskScheduler.Default);
+        }
     }
 
     private bool ApplyLoadedSlotData(int slotIndex, SaveGameData data, string path)
@@ -815,22 +964,23 @@ public class SaveManager : MonoBehaviour
     private static bool TryConsumePendingRuntimeLoad(
         out int slotIndex,
         out SaveGameData data,
-        out bool startNewMap)
+        out bool startNewMap,
+        out bool readAfterSceneLoad)
     {
         if (pendingRuntimeLoadSlot < 0)
         {
             slotIndex = -1;
             data = null;
             startNewMap = false;
+            readAfterSceneLoad = false;
             return false;
         }
 
         slotIndex = pendingRuntimeLoadSlot;
         data = pendingRuntimeLoadData;
         startNewMap = pendingRuntimeStartNewMap;
-        pendingRuntimeLoadSlot = -1;
-        pendingRuntimeLoadData = null;
-        pendingRuntimeStartNewMap = false;
+        readAfterSceneLoad = pendingRuntimeReadAfterSceneLoad;
+        ClearPendingRuntimeLoadState();
         return true;
     }
 

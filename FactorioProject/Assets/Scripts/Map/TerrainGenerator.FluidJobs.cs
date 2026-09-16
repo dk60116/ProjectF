@@ -93,7 +93,7 @@ public partial class TerrainGenerator
 
         using (FluidDisplayResolveMarker.Auto())
         {
-            long start = MapObjectTickProfiler.IsEnabled ? MapObjectTickProfiler.BeginSample() : 0L;
+            long start = MapObjectTickProfiler.IsDetailedEnabled ? MapObjectTickProfiler.BeginSample() : 0L;
             int sourceQueryCount = 0;
             using (MapObjectTickProfiler.SampleNamed(
                        "Fluid",
@@ -178,7 +178,7 @@ public partial class TerrainGenerator
             fluidJobLastResolvedDisplayNetworkCount = resolvedNetworkCount;
             fluidJobLastDisplaySourceQueryCount = sourceQueryCount;
             ClearFluidJobDirtyDisplayNetworks();
-            if (MapObjectTickProfiler.IsEnabled)
+            if (MapObjectTickProfiler.IsDetailedEnabled)
             {
                 MapObjectTickProfiler.EndNamedSample(
                     "Fluid",
@@ -302,7 +302,7 @@ public partial class TerrainGenerator
 
     private void ScheduleFluidSimulationShadow()
     {
-        if (!MapObjectTickProfiler.IsEnabled)
+        if (!MapObjectTickProfiler.IsDetailedEnabled)
         {
             CompleteFluidSimulationShadow();
             return;
@@ -346,12 +346,12 @@ public partial class TerrainGenerator
 
         using (FluidJobsCompleteMarker.Auto())
         {
-            long start = MapObjectTickProfiler.IsEnabled ? MapObjectTickProfiler.BeginSample() : 0L;
+            long start = MapObjectTickProfiler.IsDetailedEnabled ? MapObjectTickProfiler.BeginSample() : 0L;
             fluidShadowJobHandle.Complete();
             fluidShadowJobScheduled = false;
             fluidShadowChecksum = ComputeFluidShadowChecksum();
             fluidShadowCompletedTick = MapObjectTickManager.CurrentSimulationTick;
-            if (MapObjectTickProfiler.IsEnabled)
+            if (MapObjectTickProfiler.IsDetailedEnabled)
             {
                 MapObjectTickProfiler.EndNamedSample(
                     "Fluid",
@@ -373,9 +373,9 @@ public partial class TerrainGenerator
 
         using (FluidJobsBakeMarker.Auto())
         {
-            long start = MapObjectTickProfiler.IsEnabled ? MapObjectTickProfiler.BeginSample() : 0L;
+            long start = MapObjectTickProfiler.IsDetailedEnabled ? MapObjectTickProfiler.BeginSample() : 0L;
             RebuildFluidSimulationBuffers();
-            if (MapObjectTickProfiler.IsEnabled)
+            if (MapObjectTickProfiler.IsDetailedEnabled)
             {
                 MapObjectTickProfiler.EndNamedSample(
                     "Fluid",

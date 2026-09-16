@@ -703,7 +703,7 @@ public sealed partial class PortableItemRenderer : MonoBehaviour
 
     private static long BeginRuntimeProfileSample(out bool profile)
     {
-        profile = MapObjectTickProfiler.IsEnabled;
+        profile = MapObjectTickProfiler.IsDetailedEnabled;
         return profile ? MapObjectTickProfiler.BeginSample() : 0L;
     }
 
@@ -1387,7 +1387,7 @@ public sealed partial class PortableItemRenderer : MonoBehaviour
 
     private void RenderVirtualConveyorBatches()
     {
-        bool profileDynamicRebuild = MapObjectTickProfiler.IsEnabled;
+        bool profileDynamicRebuild = MapObjectTickProfiler.IsDetailedEnabled;
         long dynamicRebuildTicks = 0L;
         long dynamicRebuildSegmentStart = profileDynamicRebuild
             ? MapObjectTickProfiler.BeginSample()
@@ -1446,7 +1446,7 @@ public sealed partial class PortableItemRenderer : MonoBehaviour
     {
         DynamicConveyorBatchBuildProfile profile = new DynamicConveyorBatchBuildProfile
         {
-            ProfileBreakdown = MapObjectTickProfiler.IsEnabled
+            ProfileBreakdown = MapObjectTickProfiler.IsDetailedEnabled
         };
         ResetDynamicVirtualConveyorRenderCounters();
         lastDynamicVirtualConveyorCullSourceBlocks = activeDynamicVirtualConveyorRenderBlocks.Count;
