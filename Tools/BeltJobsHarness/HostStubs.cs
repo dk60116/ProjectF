@@ -16,6 +16,7 @@ public class Block
     public Action OnPublished;
     public Spliterbelt Splitter;
     private readonly int[] indices = { -1, -1, -1, -1 };
+    private readonly int[] occupancyVersions = new int[4];
     public Block(int x, int y = 0) { Coordinate = new(x, y); }
     public int BeltJobIndex(int lane) => indices[lane];
     public void BindBeltJobLane(TerrainGenerator owner, int lane, int index) => indices[lane] = index;
@@ -40,7 +41,11 @@ public class Block
         return state;
     }
     public void ReleaseBeltJobLegacyLaneView(int lane) => Items[lane] = BeltLaneState.Empty;
-    public void RecordBeltJobLaneChange(int lane, bool occupancyMayHaveChanged) { }
+    public void RecordBeltJobLaneChange(int lane, bool occupancyMayHaveChanged)
+    {
+        if (occupancyMayHaveChanged) occupancyVersions[lane]++;
+    }
+    public int GetBeltJobLaneOccupancyVersion(int lane) => occupancyVersions[lane];
     public void NotifyBeltJobPublished(
         bool notifyTransportObservers = true,
         bool refreshActivity = true) => OnPublished?.Invoke();
@@ -174,6 +179,7 @@ public static class InputOutputModule
 }
 public static class MapObjectTickManager
 {
+    public static long CurrentSimulationTick;
     public static double SimulationBacklogTicks;
     public static float SimulationInterpolationAlpha =>
         (float)Math.Min(1d, SimulationBacklogTicks);

@@ -27,6 +27,9 @@ public partial class TerrainGenerator
     private readonly Dictionary<BeltLaneId, BeltLaneState> beltJobRebuildStates = new Dictionary<BeltLaneId, BeltLaneState>();
     private readonly Dictionary<BeltLaneId, BeltLaneId> beltJobRebuildOrigins = new Dictionary<BeltLaneId, BeltLaneId>();
     private readonly Dictionary<BeltLaneId, BeltLaneId> beltJobRebuildCursors = new Dictionary<BeltLaneId, BeltLaneId>();
+    private readonly List<BeltVisualProgressState> beltJobVisualProgressStates = new List<BeltVisualProgressState>();
+    private readonly Dictionary<BeltLaneId, BeltVisualProgressState> beltJobRebuildVisualProgressStates =
+        new Dictionary<BeltLaneId, BeltVisualProgressState>();
     private readonly Dictionary<BeltLaneId, BeltPendingWrite> beltJobPending = new Dictionary<BeltLaneId, BeltPendingWrite>();
     private readonly List<int> beltJobPendingIndices = new List<int>();
     private readonly List<BeltLaneId> beltJobUnindexedPending = new List<BeltLaneId>();
@@ -45,7 +48,9 @@ public partial class TerrainGenerator
     private long beltSimulationTick => beltSimulation.Tick;
     private int beltJobRebuildCount, beltJobLastTickMoves, beltJobLastTickChanged, beltJobLastFrameTicks;
     private int beltJobLastPendingApplied, beltJobLastPendingDiscarded, beltJobLastPublishedBlocks;
+    private int beltJobVisualProgressClampCount;
     private int beltJobLastRenderedFrame = -1;
+    private long beltJobLastAdvancedWorldTick = long.MinValue;
     private readonly List<(long tick, Action callback)> beltPlacementCompletions = new List<(long, Action)>();
     private readonly List<Action> beltPlacementReadyCallbacks = new List<Action>();
 
@@ -56,6 +61,41 @@ public partial class TerrainGenerator
         internal long Hold;
         internal BeltSavedLane Restore;
         internal Block LegacySource;
+    }
+
+    private struct BeltVisualProgressState
+    {
+        internal bool Valid;
+        internal int ItemId;
+        internal int OccupancyVersion;
+        internal long Duration;
+        internal float StartX;
+        internal float StartY;
+        internal float StartZ;
+        internal float Progress;
+
+        internal bool Matches(BeltLaneState state, int occupancyVersion)
+        {
+            return Valid
+                && ItemId == state.ItemId
+                && OccupancyVersion == occupancyVersion
+                && Duration == state.Duration
+                && StartX == state.StartX
+                && StartY == state.StartY
+                && StartZ == state.StartZ;
+        }
+
+        internal void Capture(BeltLaneState state, int occupancyVersion, float progress)
+        {
+            Valid = true;
+            ItemId = state.ItemId;
+            OccupancyVersion = occupancyVersion;
+            Duration = state.Duration;
+            StartX = state.StartX;
+            StartY = state.StartY;
+            StartZ = state.StartZ;
+            Progress = progress;
+        }
     }
 
     private static BeltLaneId BeltId(Block block, int lane)
@@ -231,6 +271,7 @@ public partial class TerrainGenerator
             finally
             {
                 beltSimulation.CommitStep();
+                beltJobLastAdvancedWorldTick = MapObjectTickManager.CurrentSimulationTick;
                 beltJobStepScheduled = false;
                 beltJobStepDataCompleted = false;
                 beltJobStepHasGroups = false;
@@ -359,9 +400,12 @@ public partial class TerrainGenerator
             FlushBeltJobWrites();
             beltSimulation.MaterializeDeferredTime();
             beltJobRebuildStates.Clear(); beltJobRebuildOrigins.Clear(); beltJobRebuildCursors.Clear();
+            beltJobRebuildVisualProgressStates.Clear();
             for (int i = 0; i < beltJobNodes.Count; i++)
             {
                 var key = beltJobNodes[i];
+                if (i < beltJobVisualProgressStates.Count && beltJobVisualProgressStates[i].Valid)
+                    beltJobRebuildVisualProgressStates[key] = beltJobVisualProgressStates[i];
                 BeltLaneState state = beltJobBuffers.Lanes[i];
                 if (state.Origin >= 0 && state.Origin < beltJobNodes.Count)
                 {
@@ -413,6 +457,16 @@ public partial class TerrainGenerator
                 beltJobViews.Add(key.block); beltJobGroupIds.Add(group);
             }
             beltJobBuildOrder.Clear();
+            beltJobVisualProgressStates.Clear();
+            for (int i = 0; i < beltJobNodes.Count; i++)
+            {
+                beltJobVisualProgressStates.Add(
+                    beltJobRebuildVisualProgressStates.TryGetValue(
+                        beltJobNodes[i],
+                        out BeltVisualProgressState visualProgress)
+                        ? visualProgress
+                        : default);
+            }
             RebuildBeltJobPublicationIndex();
             foreach (Block block in beltSplitBlocks) block.PrepareBeltJobStorage();
             for (int g = 0; g < beltJobRanges.Count; g++)
@@ -475,6 +529,7 @@ public partial class TerrainGenerator
             beltSimulation.ValidateTopology();
             beltSplitConnections.Clear();
             beltJobRebuildStates.Clear(); beltJobRebuildOrigins.Clear(); beltJobRebuildCursors.Clear();
+            beltJobRebuildVisualProgressStates.Clear();
             beltJobsDirty = false;
             FlushBeltJobWrites();
             // Imported managed items are consumed once. Native lanes remain authoritative;
@@ -698,10 +753,30 @@ public partial class TerrainGenerator
     {
         position = default;
         if (!TryReadBeltJobLane(block, lane, out BeltLaneState state) || state.ItemId < 0) return false;
-        double fraction = state.Origin >= 0 && beltJobBuffers.Topology[block.BeltJobIndex(lane)].Paused != 0
-            ? 0 : MapObjectTickManager.SimulationInterpolationAlpha;
+        int index = block.BeltJobIndex(lane);
+        double fraction = state.Origin >= 0 && beltJobBuffers.Topology[index].Paused != 0
+            ? 0 : ResolveBeltVisualInterpolationAlpha(
+                BeltSimulationExternallyClocked,
+                beltJobLastAdvancedWorldTick,
+                MapObjectTickManager.CurrentSimulationTick,
+                MapObjectTickManager.SimulationInterpolationAlpha);
         float progress = state.Duration > 0 ? Mathf.Clamp01(1f - (float)((state.Remaining - fraction
             * BeltSimulationJob.TickUnits) / state.Duration)) : 1f;
+        if ((uint)index < (uint)beltJobVisualProgressStates.Count)
+        {
+            int occupancyVersion = block.GetBeltJobLaneOccupancyVersion(lane);
+            BeltVisualProgressState visualProgress = beltJobVisualProgressStates[index];
+            bool sameSegment = visualProgress.Matches(state, occupancyVersion);
+            float monotonicProgress = ResolveMonotonicBeltVisualProgress(
+                progress,
+                sameSegment,
+                visualProgress.Progress);
+            if (monotonicProgress > progress)
+                beltJobVisualProgressClampCount++;
+            progress = monotonicProgress;
+            visualProgress.Capture(state, occupancyVersion, progress);
+            beltJobVisualProgressStates[index] = visualProgress;
+        }
         if (state.Origin >= 0 && state.Origin < beltJobNodes.Count && beltJobViews[state.Origin] != null)
         {
             var origin = beltJobNodes[state.Origin];
@@ -713,6 +788,38 @@ public partial class TerrainGenerator
             if ((state.GateBits & 64) != 0) position.y += Mathf.Sin(progress * Mathf.PI) * 0.35f;
         }
         return true;
+    }
+
+    internal static float ResolveMonotonicBeltVisualProgress(
+        float currentProgress,
+        bool sameSegment,
+        float previousProgress)
+    {
+        return sameSegment && previousProgress > currentProgress
+            ? previousProgress
+            : currentProgress;
+    }
+
+    internal static float ResolveBeltVisualInterpolationAlpha(
+        bool externallyClocked,
+        long lastAdvancedWorldTick,
+        long currentWorldTick,
+        float worldInterpolationAlpha)
+    {
+        if (externallyClocked
+            || lastAdvancedWorldTick == long.MinValue
+            || lastAdvancedWorldTick > currentWorldTick)
+        {
+            return 0f;
+        }
+
+        // Chunk restore and batched topology refresh can deliberately skip a belt
+        // step while the world clock keeps advancing. Reusing the world's reset
+        // alpha against unchanged belt state produces a 1 -> 0 sawtooth, so hold
+        // the completed visual interval until the belt advances again.
+        return lastAdvancedWorldTick < currentWorldTick
+            ? 1f
+            : Mathf.Clamp01(worldInterpolationAlpha);
     }
 
     internal bool IsBeltJobLaneSleeping(Block block, int lane)
@@ -736,11 +843,14 @@ public partial class TerrainGenerator
         beltJobPublishedIndices.Clear(); beltJobPublishedOrder.Clear();
         beltJobPublishedActivityOrder.Clear();
         beltJobRebuildStates.Clear(); beltJobRebuildOrigins.Clear(); beltJobRebuildCursors.Clear();
+        beltJobVisualProgressStates.Clear(); beltJobRebuildVisualProgressStates.Clear();
         beltJobsDirty = true;
         beltJobStepScheduled = beltJobStepDataCompleted = beltJobStepHasGroups = false;
         beltJobLastRenderedFrame = -1;
+        beltJobLastAdvancedWorldTick = long.MinValue;
         beltJobRebuildCount = beltJobLastTickMoves = beltJobLastTickChanged = beltJobLastFrameTicks = 0;
         beltJobLastPendingApplied = beltJobLastPendingDiscarded = beltJobLastPublishedBlocks = 0;
+        beltJobVisualProgressClampCount = 0;
         beltPlacementCompletions.Clear(); beltPlacementReadyCallbacks.Clear();
     }
 
@@ -766,6 +876,14 @@ public partial class TerrainGenerator
         MapObjectTickProfiler.AddRuntimeCounter("BeltJobs", "DeferredLaneScans", deferredLanes);
         MapObjectTickProfiler.AddRuntimeCounter("BeltJobs", "JobPending", beltJobStepScheduled ? 1 : 0);
         MapObjectTickProfiler.AddRuntimeCounter("BeltJobs", "JobDataCompleted", beltJobStepDataCompleted ? 1 : 0);
+        MapObjectTickProfiler.AddRuntimeCounter(
+            "BeltJobs",
+            "VisualInterpolationHeld",
+            !BeltSimulationExternallyClocked
+            && beltJobLastAdvancedWorldTick != long.MinValue
+            && beltJobLastAdvancedWorldTick < MapObjectTickManager.CurrentSimulationTick
+                ? 1
+                : 0);
         MapObjectTickProfiler.AddRuntimeCounter("BeltJobs", "PendingWrites", beltJobPending.Count);
         MapObjectTickProfiler.AddRuntimeCounter("BeltJobs", "LastTickPendingWritesApplied", beltJobLastPendingApplied);
         MapObjectTickProfiler.AddRuntimeCounter("BeltJobs", "LastTickPendingWritesDiscarded", beltJobLastPendingDiscarded);
@@ -778,5 +896,9 @@ public partial class TerrainGenerator
             "BacklogTicks",
             (float)MapObjectTickManager.SimulationBacklogTicks);
         MapObjectTickProfiler.AddRuntimeCounter("BeltJobs", "TopologyRebuilds", beltJobRebuildCount);
+        MapObjectTickProfiler.AddRuntimeCounter(
+            "BeltJobs",
+            "VisualProgressRegressionsClamped",
+            beltJobVisualProgressClampCount);
     }
 }

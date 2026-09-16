@@ -427,25 +427,9 @@ public static class MapObjectTickProfiler
     private static int activeBeltTickCount;
     private static int activeBeltDataMotionCount;
     private static int activeBeltVisualTickCount;
-    private static long beltDataMotionLoopIterations;
-    private static long beltActiveLoopIterations;
-    private static long beltStraightLineBlockLoopIterations;
-    private static long beltVisualLoopIterations;
-    private static long beltTryMoveAttempts;
-    private static long beltTryMoveSuccesses;
-    private static long beltStraightMoveAttempts;
-    private static long beltStraightMoveSuccesses;
-    private static long beltPlanMoveCalls;
-    private static long beltPlannedMoveApplications;
-    private static long beltTouchedBlockRefreshes;
-    private static long beltWakeAroundCalls;
-    private static long beltActivityRefreshCalls;
     private static int renderFrameCount;
     private static int lastRenderFrame = -1;
     private static int completedSimulationTickCount;
-    private static int beltLoopProfileFrameCount;
-    private static int beltLoopProfileLastFrame = -1;
-    private static bool beltFrameProfilingEnabled;
     private static float windowStartTime = -1f;
 
     public static bool IsEnabled
@@ -608,111 +592,6 @@ public static class MapObjectTickProfiler
         activeBeltTickCount = Mathf.Max(0, activeBelts);
         activeBeltDataMotionCount = Mathf.Max(0, dataMotionBelts);
         activeBeltVisualTickCount = Mathf.Max(0, visualBelts);
-
-        bool enabled = IsDetailedEnabled;
-        beltFrameProfilingEnabled = enabled;
-        if (!enabled)
-        {
-            return;
-        }
-
-        int frame = Time.frameCount;
-        if (frame != beltLoopProfileLastFrame)
-        {
-            beltLoopProfileLastFrame = frame;
-            beltLoopProfileFrameCount++;
-        }
-    }
-
-    public static void SetBeltProfilingFrameEnabled(bool enabled)
-    {
-        beltFrameProfilingEnabled = enabled && IsDetailedEnabled;
-    }
-
-    public static void AddBeltLoopIterations(
-        int dataMotionLoops,
-        int activeLoops,
-        int straightLineBlockLoops,
-        int visualLoops)
-    {
-        if (!IsEnabled)
-        {
-            return;
-        }
-
-        beltDataMotionLoopIterations += Mathf.Max(0, dataMotionLoops);
-        beltActiveLoopIterations += Mathf.Max(0, activeLoops);
-        beltStraightLineBlockLoopIterations += Mathf.Max(0, straightLineBlockLoops);
-        beltVisualLoopIterations += Mathf.Max(0, visualLoops);
-    }
-
-    public static void AddBeltTryMoveAttempt(bool success)
-    {
-        if (!beltFrameProfilingEnabled)
-        {
-            return;
-        }
-
-        beltTryMoveAttempts++;
-        if (success)
-        {
-            beltTryMoveSuccesses++;
-        }
-    }
-
-    public static void AddBeltStraightMoveAttempt(bool success)
-    {
-        if (!beltFrameProfilingEnabled)
-        {
-            return;
-        }
-
-        beltStraightMoveAttempts++;
-        if (success)
-        {
-            beltStraightMoveSuccesses++;
-        }
-    }
-
-    public static void AddBeltPlanMoveCall()
-    {
-        if (!beltFrameProfilingEnabled)
-        {
-            return;
-        }
-
-        beltPlanMoveCalls++;
-    }
-
-    public static void AddBeltPlannedMoveApplication(int plannedMoveCount, int touchedBlockCount)
-    {
-        if (!beltFrameProfilingEnabled)
-        {
-            return;
-        }
-
-        beltPlannedMoveApplications += Mathf.Max(0, plannedMoveCount);
-        beltTouchedBlockRefreshes += Mathf.Max(0, touchedBlockCount);
-    }
-
-    public static void AddBeltWakeAroundCall()
-    {
-        if (!beltFrameProfilingEnabled)
-        {
-            return;
-        }
-
-        beltWakeAroundCalls++;
-    }
-
-    public static void AddBeltActivityRefreshCall()
-    {
-        if (!beltFrameProfilingEnabled)
-        {
-            return;
-        }
-
-        beltActivityRefreshCalls++;
     }
 
     public static void ClearRuntimeCounters()
@@ -758,25 +637,9 @@ public static class MapObjectTickProfiler
         activeBeltTickCount = 0;
         activeBeltDataMotionCount = 0;
         activeBeltVisualTickCount = 0;
-        beltDataMotionLoopIterations = 0L;
-        beltActiveLoopIterations = 0L;
-        beltStraightLineBlockLoopIterations = 0L;
-        beltVisualLoopIterations = 0L;
-        beltTryMoveAttempts = 0L;
-        beltTryMoveSuccesses = 0L;
-        beltStraightMoveAttempts = 0L;
-        beltStraightMoveSuccesses = 0L;
-        beltPlanMoveCalls = 0L;
-        beltPlannedMoveApplications = 0L;
-        beltTouchedBlockRefreshes = 0L;
-        beltWakeAroundCalls = 0L;
-        beltActivityRefreshCalls = 0L;
         lastRenderFrame = -1;
         renderFrameCount = 0;
         completedSimulationTickCount = 0;
-        beltLoopProfileFrameCount = 0;
-        beltLoopProfileLastFrame = -1;
-        beltFrameProfilingEnabled = false;
         windowStartTime = Time.unscaledTime;
     }
 
@@ -822,27 +685,6 @@ public static class MapObjectTickProfiler
         AppendJsonProperty("activeBeltTicks", activeBeltTickCount.ToString(CultureInfo.InvariantCulture), true);
         AppendJsonProperty("activeBeltDataMotions", activeBeltDataMotionCount.ToString(CultureInfo.InvariantCulture), true);
         AppendJsonProperty("activeBeltVisualTicks", activeBeltVisualTickCount.ToString(CultureInfo.InvariantCulture), true);
-        long beltItemLoopIterations =
-            beltDataMotionLoopIterations
-            + beltActiveLoopIterations
-            + beltStraightLineBlockLoopIterations
-            + beltVisualLoopIterations;
-        int beltLoopFrameCount = Mathf.Max(1, beltLoopProfileFrameCount);
-        AppendJsonProperty("beltLoopProfileFrames", beltLoopProfileFrameCount.ToString(CultureInfo.InvariantCulture), true);
-        AppendJsonProperty("beltItemLoopIterations", FormatBeltLoopsPerFrame(beltItemLoopIterations, beltLoopFrameCount), true);
-        AppendJsonProperty("beltDataMotionLoopIterations", FormatBeltLoopsPerFrame(beltDataMotionLoopIterations, beltLoopFrameCount), true);
-        AppendJsonProperty("beltActiveLoopIterations", FormatBeltLoopsPerFrame(beltActiveLoopIterations, beltLoopFrameCount), true);
-        AppendJsonProperty("beltStraightLineBlockLoopIterations", FormatBeltLoopsPerFrame(beltStraightLineBlockLoopIterations, beltLoopFrameCount), true);
-        AppendJsonProperty("beltVisualLoopIterations", FormatBeltLoopsPerFrame(beltVisualLoopIterations, beltLoopFrameCount), true);
-        AppendJsonProperty("beltTryMoveAttempts", FormatBeltLoopsPerFrame(beltTryMoveAttempts, beltLoopFrameCount), true);
-        AppendJsonProperty("beltTryMoveSuccesses", FormatBeltLoopsPerFrame(beltTryMoveSuccesses, beltLoopFrameCount), true);
-        AppendJsonProperty("beltStraightMoveAttempts", FormatBeltLoopsPerFrame(beltStraightMoveAttempts, beltLoopFrameCount), true);
-        AppendJsonProperty("beltStraightMoveSuccesses", FormatBeltLoopsPerFrame(beltStraightMoveSuccesses, beltLoopFrameCount), true);
-        AppendJsonProperty("beltPlanMoveCalls", FormatBeltLoopsPerFrame(beltPlanMoveCalls, beltLoopFrameCount), true);
-        AppendJsonProperty("beltPlannedMoveApplications", FormatBeltLoopsPerFrame(beltPlannedMoveApplications, beltLoopFrameCount), true);
-        AppendJsonProperty("beltTouchedBlockRefreshes", FormatBeltLoopsPerFrame(beltTouchedBlockRefreshes, beltLoopFrameCount), true);
-        AppendJsonProperty("beltWakeAroundCalls", FormatBeltLoopsPerFrame(beltWakeAroundCalls, beltLoopFrameCount), true);
-        AppendJsonProperty("beltActivityRefreshCalls", FormatBeltLoopsPerFrame(beltActivityRefreshCalls, beltLoopFrameCount), true);
         AppendJsonProperty("runtimeCounterCount", runtimeCounters.Count.ToString(CultureInfo.InvariantCulture), true);
         jsonBuilder.Append(",\"runtimeCounters\":[");
         for (int i = 0; i < runtimeCounters.Count; i++)
@@ -902,24 +744,8 @@ public static class MapObjectTickProfiler
         snapshotRows.Clear();
         runtimeCounters.Clear();
         windowStartTime = now;
-        beltDataMotionLoopIterations = 0L;
-        beltActiveLoopIterations = 0L;
-        beltStraightLineBlockLoopIterations = 0L;
-        beltVisualLoopIterations = 0L;
-        beltTryMoveAttempts = 0L;
-        beltTryMoveSuccesses = 0L;
-        beltStraightMoveAttempts = 0L;
-        beltStraightMoveSuccesses = 0L;
-        beltPlanMoveCalls = 0L;
-        beltPlannedMoveApplications = 0L;
-        beltTouchedBlockRefreshes = 0L;
-        beltWakeAroundCalls = 0L;
-        beltActivityRefreshCalls = 0L;
         renderFrameCount = 0;
         completedSimulationTickCount = 0;
-        beltLoopProfileFrameCount = 0;
-        beltLoopProfileLastFrame = -1;
-        beltFrameProfilingEnabled = false;
 
         if (!enabled)
         {
@@ -928,12 +754,6 @@ public static class MapObjectTickProfiler
         }
 
         return json;
-    }
-
-    private static string FormatBeltLoopsPerFrame(long loopIterations, int frameCount)
-    {
-        double loopsPerFrame = loopIterations / (double)Mathf.Max(1, frameCount);
-        return loopsPerFrame.ToString("0.###", CultureInfo.InvariantCulture);
     }
 
     private static void RecordActiveTarget(object target)

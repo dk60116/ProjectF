@@ -697,7 +697,7 @@ internal sealed class ProfilerForm : Form
         else
         {
             summaryLabel.Text =
-                $"Window {snapshot.WindowMs:0.#} ms / Render frames {FormatSnapshotCount(snapshot.RenderFrames)} / Simulation ticks {FormatSnapshotCount(snapshot.SimulationTicks)} / Belt sampled frames {snapshot.BeltLoopProfileFrames:N0}\n" +
+                $"Window {snapshot.WindowMs:0.#} ms / Render frames {FormatSnapshotCount(snapshot.RenderFrames)} / Simulation ticks {FormatSnapshotCount(snapshot.SimulationTicks)}\n" +
                 $"CPU main {FrameMetric(snapshot, "ProfilerCPU", "MainThreadMs")} / Render thread {FrameMetric(snapshot, "ProfilerCPU", "RenderThreadMs")} / GPU {FrameMetric(snapshot, "ProfilerGPU", "FrameGpuMs")} / Present wait {FrameMetric(snapshot, "ProfilerCPU", "GfxWaitForPresentMs")}\n" +
                 $"Scripts {FrameMetric(snapshot, "ProfilerCPU", "ScriptsUpdateMs")} / Physics {FrameMetric(snapshot, "ProfilerCPU", "PhysicsMs")} / Animation {FrameMetric(snapshot, "ProfilerCPU", "AnimationMs")} / UI {FrameMetric(snapshot, "ProfilerCPU", "CanvasUpdateMs")} / Census {CensusAge(snapshot)}";
         }
@@ -1621,73 +1621,7 @@ internal sealed class ProfilerForm : Form
                 "Visual ticks",
                 snapshot.ActiveBeltVisualTicks,
                 BeltMetricIcon.Items,
-                Color.FromArgb(176, 141, 255)),
-            new BeltMetric(
-                "ActiveQueueLoops",
-                "Active queue loops",
-                snapshot.BeltActiveLoopIterations,
-                BeltMetricIcon.Candidates,
-                Color.FromArgb(235, 189, 92)),
-            new BeltMetric(
-                "StraightLineBlockLoops",
-                "Straight line loops",
-                snapshot.BeltStraightLineBlockLoopIterations,
-                BeltMetricIcon.Blocks,
-                Color.FromArgb(132, 177, 255)),
-            new BeltMetric(
-                "DataMotionLoops",
-                "Data motion loops",
-                snapshot.BeltDataMotionLoopIterations,
-                BeltMetricIcon.MotionDirty,
-                Color.FromArgb(208, 136, 255)),
-            new BeltMetric(
-                "TryMoveAttempts",
-                "TryMove attempts",
-                snapshot.BeltTryMoveAttempts,
-                BeltMetricIcon.Attempts,
-                Color.FromArgb(245, 150, 92)),
-            new BeltMetric(
-                "TryMoveSuccesses",
-                "TryMove successes",
-                snapshot.BeltTryMoveSuccesses,
-                BeltMetricIcon.Successes,
-                Color.FromArgb(119, 218, 151)),
-            new BeltMetric(
-                "StraightMoveAttempts",
-                "Straight attempts",
-                snapshot.BeltStraightMoveAttempts,
-                BeltMetricIcon.Attempts,
-                Color.FromArgb(247, 128, 116)),
-            new BeltMetric(
-                "PlanMoveCalls",
-                "Plan move calls",
-                snapshot.BeltPlanMoveCalls,
-                BeltMetricIcon.Passes,
-                Color.FromArgb(255, 208, 112)),
-            new BeltMetric(
-                "PlannedMoveApplications",
-                "Move applications",
-                snapshot.BeltPlannedMoveApplications,
-                BeltMetricIcon.Successes,
-                Color.FromArgb(152, 196, 138)),
-            new BeltMetric(
-                "TouchedBlockRefreshes",
-                "Touched refreshes",
-                snapshot.BeltTouchedBlockRefreshes,
-                BeltMetricIcon.Dirty,
-                Color.FromArgb(236, 104, 94)),
-            new BeltMetric(
-                "WakeAroundCalls",
-                "Wake around calls",
-                snapshot.BeltWakeAroundCalls,
-                BeltMetricIcon.Candidates,
-                Color.FromArgb(178, 154, 122)),
-            new BeltMetric(
-                "ActivityRefreshCalls",
-                "Activity refreshes",
-                snapshot.BeltActivityRefreshCalls,
-                BeltMetricIcon.Passes,
-                Color.FromArgb(197, 142, 245))
+                Color.FromArgb(176, 141, 255))
         };
     }
 
@@ -1735,27 +1669,10 @@ internal sealed class ProfilerForm : Form
         builder.AppendLine($"RenderFrames\t{FormatSnapshotCount(snapshot.RenderFrames)}");
         builder.AppendLine($"SimulationTicks\t{FormatSnapshotCount(snapshot.SimulationTicks)}");
         builder.AppendLine("TimingNote\tInclusive scopes overlap. ms/frame uses renderFrames. Engine recorder windows may differ.");
-        builder.AppendLine($"BeltLoopProfileFrames\t{snapshot.BeltLoopProfileFrames.ToString(CultureInfo.InvariantCulture)}");
         builder.AppendLine($"ActiveUpdateTicks\t{snapshot.ActiveUpdateTicks.ToString(CultureInfo.InvariantCulture)}");
         builder.AppendLine($"ActiveBeltTicks\t{snapshot.ActiveBeltTicks.ToString(CultureInfo.InvariantCulture)}");
         builder.AppendLine($"ActiveBeltDataMotions\t{snapshot.ActiveBeltDataMotions.ToString(CultureInfo.InvariantCulture)}");
         builder.AppendLine($"ActiveBeltVisualTicks\t{snapshot.ActiveBeltVisualTicks.ToString(CultureInfo.InvariantCulture)}");
-        builder.AppendLine();
-        builder.AppendLine("BeltCountersPerFrame");
-        AppendMetric(builder, "Loops", snapshot.BeltItemLoopIterations);
-        AppendMetric(builder, "DataMotionLoops", snapshot.BeltDataMotionLoopIterations);
-        AppendMetric(builder, "ActiveQueueLoops", snapshot.BeltActiveLoopIterations);
-        AppendMetric(builder, "StraightLineBlockLoops", snapshot.BeltStraightLineBlockLoopIterations);
-        AppendMetric(builder, "VisualLoops", snapshot.BeltVisualLoopIterations);
-        AppendMetric(builder, "TryMoveAttempts", snapshot.BeltTryMoveAttempts);
-        AppendMetric(builder, "TryMoveSuccesses", snapshot.BeltTryMoveSuccesses);
-        AppendMetric(builder, "StraightMoveAttempts", snapshot.BeltStraightMoveAttempts);
-        AppendMetric(builder, "StraightMoveSuccesses", snapshot.BeltStraightMoveSuccesses);
-        AppendMetric(builder, "PlanMoveCalls", snapshot.BeltPlanMoveCalls);
-        AppendMetric(builder, "PlannedMoveApplications", snapshot.BeltPlannedMoveApplications);
-        AppendMetric(builder, "TouchedBlockRefreshes", snapshot.BeltTouchedBlockRefreshes);
-        AppendMetric(builder, "WakeAroundCalls", snapshot.BeltWakeAroundCalls);
-        AppendMetric(builder, "ActivityRefreshCalls", snapshot.BeltActivityRefreshCalls);
         if (snapshot.RuntimeCounters != null && snapshot.RuntimeCounters.Count > 0)
         {
             builder.AppendLine();
@@ -2003,9 +1920,9 @@ internal sealed class SnapshotBeltTickForm : Form
                 activeMetrics,
                 0,
                 0.0,
-                "Active belt per frame",
-                "Samples 0",
-                "No active belt samples yet",
+                "Active belt snapshot",
+                "Render frames 0",
+                "No active belt snapshot yet",
                 false);
             schedulingGraphPanel.SetMetrics(
                 schedulingMetrics,
@@ -2029,10 +1946,10 @@ internal sealed class SnapshotBeltTickForm : Form
             activeMetrics,
             snapshot.Frame,
             snapshot.WindowMs,
-            "Active belt per frame",
-            $"Samples {snapshot.BeltLoopProfileFrames:N0}",
-            "No active belt samples yet",
-            snapshot.BeltLoopProfileFrames > 0);
+            "Active belt snapshot",
+            $"Render frames {(snapshot.RenderFrames.HasValue ? snapshot.RenderFrames.Value.ToString("N0") : "n/a")}",
+            "No active belt snapshot yet",
+            snapshot.RenderFrames.GetValueOrDefault() > 0);
         schedulingGraphPanel.SetMetrics(
             schedulingMetrics,
             snapshot.Frame,
@@ -2056,8 +1973,7 @@ internal sealed class SnapshotBeltTickForm : Form
         builder.AppendLine($"Frame\t{snapshot.Frame.ToString(CultureInfo.InvariantCulture)}");
         builder.AppendLine($"WindowMs\t{snapshot.WindowMs.ToString("0.###", CultureInfo.InvariantCulture)}");
         builder.AppendLine();
-        builder.AppendLine("ActiveBeltPerFrame");
-        builder.AppendLine($"Samples\t{snapshot.BeltLoopProfileFrames.ToString(CultureInfo.InvariantCulture)}");
+        builder.AppendLine("ActiveBeltCounts");
         for (int i = 0; i < activeMetrics.Length; i++)
         {
             builder.Append(activeMetrics[i].Key).Append('\t')
@@ -2504,51 +2420,6 @@ internal sealed class ProfileSnapshot
 
     [JsonPropertyName("activeBeltVisualTicks")]
     public int ActiveBeltVisualTicks { get; set; }
-
-    [JsonPropertyName("beltLoopProfileFrames")]
-    public int BeltLoopProfileFrames { get; set; }
-
-    [JsonPropertyName("beltItemLoopIterations")]
-    public double BeltItemLoopIterations { get; set; }
-
-    [JsonPropertyName("beltDataMotionLoopIterations")]
-    public double BeltDataMotionLoopIterations { get; set; }
-
-    [JsonPropertyName("beltActiveLoopIterations")]
-    public double BeltActiveLoopIterations { get; set; }
-
-    [JsonPropertyName("beltStraightLineBlockLoopIterations")]
-    public double BeltStraightLineBlockLoopIterations { get; set; }
-
-    [JsonPropertyName("beltVisualLoopIterations")]
-    public double BeltVisualLoopIterations { get; set; }
-
-    [JsonPropertyName("beltTryMoveAttempts")]
-    public double BeltTryMoveAttempts { get; set; }
-
-    [JsonPropertyName("beltTryMoveSuccesses")]
-    public double BeltTryMoveSuccesses { get; set; }
-
-    [JsonPropertyName("beltStraightMoveAttempts")]
-    public double BeltStraightMoveAttempts { get; set; }
-
-    [JsonPropertyName("beltStraightMoveSuccesses")]
-    public double BeltStraightMoveSuccesses { get; set; }
-
-    [JsonPropertyName("beltPlanMoveCalls")]
-    public double BeltPlanMoveCalls { get; set; }
-
-    [JsonPropertyName("beltPlannedMoveApplications")]
-    public double BeltPlannedMoveApplications { get; set; }
-
-    [JsonPropertyName("beltTouchedBlockRefreshes")]
-    public double BeltTouchedBlockRefreshes { get; set; }
-
-    [JsonPropertyName("beltWakeAroundCalls")]
-    public double BeltWakeAroundCalls { get; set; }
-
-    [JsonPropertyName("beltActivityRefreshCalls")]
-    public double BeltActivityRefreshCalls { get; set; }
 
     [JsonPropertyName("runtimeCounterCount")]
     public int RuntimeCounterCount { get; set; }

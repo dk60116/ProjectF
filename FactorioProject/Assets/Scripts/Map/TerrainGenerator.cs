@@ -1222,10 +1222,6 @@ public partial class TerrainGenerator : MonoBehaviour,
                 activeConveyorDataMotionBlocks.Count,
                 activeConveyorDotVisualList.Count);
         }
-        else
-        {
-            MapObjectTickProfiler.SetBeltProfilingFrameEnabled(false);
-        }
 
         return profileBeltTicks;
     }

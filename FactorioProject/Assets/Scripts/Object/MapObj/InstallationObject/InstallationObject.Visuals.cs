@@ -4,8 +4,11 @@ using UnityEngine;
 public partial class InstallationObject
 {
     private InstallationVisualState managedVisualState;
+    private bool managedVisualRootMotionExpected;
     protected virtual bool UsesManagedVisualUpdates => false;
     protected virtual bool RequiresManagedVisualUpdate => false;
+    protected virtual bool ManagedVisualRootCanMove => managedVisualRootMotionExpected;
+    internal bool RequiresContinuousManagedVisibilityRefresh => ManagedVisualRootCanMove;
     protected bool ShouldUpdateVisuals => managedVisualState == null || managedVisualState.Visible;
 
     private void RegisterManagedVisualUpdates()
@@ -20,6 +23,22 @@ public partial class InstallationObject
     private void UnregisterManagedVisualUpdates()
     {
         WorldVisualUpdateManager.Unregister(managedVisualState);
+    }
+
+    private void InvalidateManagedVisualVisibility()
+    {
+        WorldVisualUpdateManager.InvalidateVisibility(managedVisualState);
+    }
+
+    internal void SetManagedVisualRootMotionExpected(bool expected)
+    {
+        if (managedVisualRootMotionExpected == expected)
+        {
+            return;
+        }
+
+        managedVisualRootMotionExpected = expected;
+        WorldVisualUpdateManager.InvalidateVisibility(managedVisualState, true);
     }
 
     internal bool RunManagedVisualUpdate(float deltaTime)

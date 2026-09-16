@@ -66,6 +66,7 @@ namespace ProjectF.Conveyors
         [NativeDisableParallelForRestriction] public NativeArray<int> MergeCursor;
         [NativeDisableParallelForRestriction] public NativeArray<int> Changed;
         [NativeDisableParallelForRestriction] public NativeArray<byte> Touched;
+        [NativeDisableParallelForRestriction] public NativeArray<long> MoveOvershoot;
 
         public void Execute(int index)
         {
@@ -128,6 +129,12 @@ namespace ProjectF.Conveyors
                     ResolveTransfers(group);
                 }
 
+                // A ready item normally carries the unused part of this tick into its next lane.
+                // In a packed chain, however, that lane may only be vacated late in the tick.
+                // Propagate the actual vacancy time backwards so followers cannot move farther
+                // than the item directly ahead of them.
+                ResolveMoveOvershoots(group, elapsedUnits);
+
                 int moved = 0;
                 for (int source = group.Start; source < end; source++)
                 {
@@ -139,7 +146,7 @@ namespace ProjectF.Conveyors
                     item.Origin = source;
                     item.GateBits &= ~64;
                     item.Duration = duration;
-                    item.Remaining = duration + item.Remaining;
+                    item.Remaining = duration - MoveOvershoot[source];
                     Transfers[target] = item;
                     moved++;
                 }
@@ -223,6 +230,87 @@ namespace ProjectF.Conveyors
                 }
                 while (count > 0) Resolution[Stack[group.Start + --count]] = result;
             }
+        }
+
+        private void ResolveMoveOvershoots(BeltGroupRange group, long elapsedUnits)
+        {
+            const int Visiting = 4;
+            const int Resolved = 5;
+            int end = group.Start + group.Count;
+            for (int seed = group.Start; seed < end; seed++)
+            {
+                if (Resolution[seed] != 2) continue;
+                int count = 0;
+                int current = seed;
+                long available;
+                while (true)
+                {
+                    int state = Resolution[current];
+                    if (state == Resolved)
+                    {
+                        available = MoveOvershoot[current];
+                        break;
+                    }
+                    if (state == Visiting)
+                    {
+                        // A closed, full loop can rotate only as far as its latest-ready item.
+                        available = elapsedUnits;
+                        int cycleStart = count - 1;
+                        while (cycleStart >= 0 && Stack[group.Start + cycleStart] != current) cycleStart--;
+                        if (cycleStart < 0) available = 0;
+                        else
+                        {
+                            for (int i = cycleStart; i < count; i++)
+                            {
+                                long potential = PotentialOvershoot(Stack[group.Start + i], elapsedUnits);
+                                if (potential < available) available = potential;
+                            }
+                        }
+                        break;
+                    }
+                    if (state != 2)
+                    {
+                        available = 0;
+                        break;
+                    }
+
+                    Resolution[current] = Visiting;
+                    Stack[group.Start + count++] = current;
+                    int target = Targets[current];
+                    if (target < group.Start || target >= end)
+                    {
+                        available = 0;
+                        break;
+                    }
+                    if (Lanes[target].ItemId < 0)
+                    {
+                        available = elapsedUnits;
+                        break;
+                    }
+                    current = target;
+                }
+
+                while (count > 0)
+                {
+                    int source = Stack[group.Start + --count];
+                    long potential = PotentialOvershoot(source, elapsedUnits);
+                    if (potential < available) available = potential;
+                    MoveOvershoot[source] = available;
+                    Resolution[source] = Resolved;
+                }
+            }
+
+            // Preserve the established transfer-state contract for the commit passes below.
+            for (int i = group.Start; i < end; i++)
+                if (Resolution[i] == Resolved) Resolution[i] = 2;
+        }
+
+        private long PotentialOvershoot(int source, long elapsedUnits)
+        {
+            long remaining = Lanes[source].Remaining;
+            if (remaining >= 0) return 0;
+            long overshoot = -remaining;
+            return overshoot < elapsedUnits ? overshoot : elapsedUnits;
         }
 
         private bool RepairBlockedSplitterOutputs(BeltGroupRange group)

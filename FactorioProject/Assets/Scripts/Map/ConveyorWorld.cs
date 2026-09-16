@@ -19,7 +19,7 @@ public sealed class ConveyorRuntimeRecord
     private const float Belt2FSlotLongitudinalOffset = 0.25f;
     private const float Belt2FPathSlopeItemPitchDegrees = 34.0587f;
 
-    private readonly Vector2Int[] occupiedCoordinates;
+    private Vector2Int[] occupiedCoordinates;
     private SplitterRoutingPolicy splitterRouting;
     private int splitterFilterOutput;
     private int splitterWheelMask;
@@ -89,6 +89,7 @@ public sealed class ConveyorRuntimeRecord
     public Bounds VisualCullBounds { get; }
     public int VisualLayerMask { get; }
     public IReadOnlyList<Vector2Int> OccupiedCoordinates => occupiedCoordinates;
+    internal bool PlacementPresentationSuppressed { get; set; }
     internal ConveyorWorld.VisualPart[] VisualParts { get; }
 
     public bool Covers(Vector2Int coordinate)
@@ -146,6 +147,62 @@ public sealed class ConveyorRuntimeRecord
     }
 
     public bool IsBridgeCenter(Vector2Int coordinate) => IsBelt2F && coordinate == AnchorCoordinate;
+
+    internal bool ReleaseBridgeCenterOccupancy(Vector2Int coordinate)
+    {
+        if (!IsBridgeCenter(coordinate))
+        {
+            return false;
+        }
+
+        var remainingCoordinates = new List<Vector2Int>(Mathf.Max(2, occupiedCoordinates.Length - 1));
+        bool removed = false;
+        for (int i = 0; i < occupiedCoordinates.Length; i++)
+        {
+            Vector2Int occupiedCoordinate = occupiedCoordinates[i];
+            if (occupiedCoordinate == coordinate)
+            {
+                removed = true;
+                continue;
+            }
+
+            if (!remainingCoordinates.Contains(occupiedCoordinate))
+            {
+                remainingCoordinates.Add(occupiedCoordinate);
+            }
+        }
+
+        if (!removed)
+        {
+            return true;
+        }
+
+        // Legacy 2F states may contain only the anchor. Rebuild their two ramp cells so an
+        // empty occupied list cannot be interpreted as occupying the bridge center again.
+        if (remainingCoordinates.Count == 0)
+        {
+            for (int y = -2; y <= 2; y++)
+            {
+                for (int x = -2; x <= 2; x++)
+                {
+                    Vector2Int candidate = AnchorCoordinate + new Vector2Int(x, y);
+                    if (candidate != coordinate && Covers(candidate))
+                    {
+                        remainingCoordinates.Add(candidate);
+                    }
+                }
+            }
+        }
+
+        if (remainingCoordinates.Count == 0)
+        {
+            return false;
+        }
+
+        occupiedCoordinates = remainingCoordinates.ToArray();
+        State.occupiedCoordinates = new List<Vector2Int>(remainingCoordinates);
+        return true;
+    }
 
     public bool IsInputEdge(Vector2Int coordinate)
     {
@@ -224,6 +281,13 @@ public sealed class ConveyorRuntimeRecord
     public Vector3 Belt2FBridgePeakWorldPosition =>
         Matrix4x4.TRS(WorldPosition, WorldRotation, WorldScale)
             .MultiplyPoint3x4(new Vector3(0f, Belt2FPathHighHeight, 0f));
+
+    public void GetPlayerSideBarrierEndpoints(out Vector3 start, out Vector3 end)
+    {
+        Matrix4x4 root = Matrix4x4.TRS(WorldPosition, WorldRotation, WorldScale);
+        start = root.MultiplyPoint3x4(new Vector3(-ConveyorSideBarrier.RaisedHalfLength, 0f, 0f));
+        end = root.MultiplyPoint3x4(new Vector3(ConveyorSideBarrier.RaisedHalfLength, 0f, 0f));
+    }
 
     public bool IsUpperBelt2FWorldPosition(Vector3 worldPosition)
     {
@@ -800,6 +864,23 @@ public sealed class ConveyorWorld : IDisposable, IVirtualRenderBatchOwner
 
     internal void SuspendRendering() => batches.SuspendRendering();
 
+    internal void SetPlacementPresentationSuppressed(
+        ConveyorRuntimeRecord record,
+        bool suppressed)
+    {
+        if (disposed
+            || record == null
+            || record.PlacementPresentationSuppressed == suppressed
+            || !recordsByStorageKey.TryGetValue(record.StorageKey, out ConveyorRuntimeRecord currentRecord)
+            || !ReferenceEquals(currentRecord, record))
+        {
+            return;
+        }
+
+        record.PlacementPresentationSuppressed = suppressed;
+        batchesDirty = true;
+    }
+
     internal void SynchronizeForWorldPresentation()
     {
         if (disposed || !batchesDirty)
@@ -1058,7 +1139,9 @@ public sealed class ConveyorWorld : IDisposable, IVirtualRenderBatchOwner
         animatedVisualEntries.Clear();
         foreach (ConveyorRuntimeRecord record in recordsByStorageKey.Values)
         {
-            if (record == null || !record.HasValidPrototype)
+            if (record == null
+                || !record.HasValidPrototype
+                || record.PlacementPresentationSuppressed)
             {
                 continue;
             }

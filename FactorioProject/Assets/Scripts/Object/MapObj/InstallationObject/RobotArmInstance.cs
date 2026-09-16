@@ -95,6 +95,7 @@ public sealed partial class RobotArmInstance : IMapObjectTarget, IMapObjectSimul
     public int ID => ResolveItemId();
     public long SimulationId => Placement.placementSequence;
     public long RuntimePlacementSequence => SimulationId;
+    internal bool PlacementPresentationSuppressed { get; set; }
     public IReadOnlyList<Vector2Int> RuntimeOccupiedCoordinates => Placement.occupiedCoordinates;
     public IReadOnlyList<RectGridBlockPlacement> RectGridPlacements => Prototype.RectGridPlacements;
     public bool TryGetPlacementRuntime(out Vector2Int anchor, out int turns)

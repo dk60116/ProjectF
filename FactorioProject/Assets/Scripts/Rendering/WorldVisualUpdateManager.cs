@@ -18,9 +18,14 @@ namespace ProjectF.Rendering
             new Dictionary<Vector2Int, List<InstallationVisualState>>();
         private readonly HashSet<InstallationVisualState> pendingVisibility = new HashSet<InstallationVisualState>();
         private readonly HashSet<InstallationVisualState> visibleTargets = new HashSet<InstallationVisualState>();
+        private readonly HashSet<InstallationVisualState> continuousVisibilityTargets =
+            new HashSet<InstallationVisualState>();
         private readonly HashSet<InstallationVisualState> candidateSet = new HashSet<InstallationVisualState>();
         private readonly List<InstallationVisualState> candidates = new List<InstallationVisualState>();
         private readonly CameraRenderCulling culling = new CameraRenderCulling();
+        private bool candidateCacheDirty = true;
+        private long candidateRebuildCount;
+        private long candidateCacheHitCount;
 
         public int RegisteredCount => targets.Count;
         public int VisibleCount { get; private set; }
@@ -30,6 +35,7 @@ namespace ProjectF.Rendering
         public int LastDeferredCulledCount { get; private set; }
         public int LastCandidateCount { get; private set; }
         public int LastCandidateCellCount { get; private set; }
+        public int LastVisibilityRefreshCount { get; private set; }
 
         public static void AppendProfilerCounters()
         {
@@ -63,6 +69,14 @@ namespace ProjectF.Rendering
                 instance != null ? instance.LastCandidateCellCount : 0);
             MapObjectTickProfiler.AddRuntimeCounter("InstallationVisuals", "IndexedCells",
                 instance != null ? instance.targetsByCell.Count : 0);
+            MapObjectTickProfiler.AddRuntimeCounter("InstallationVisuals", "ContinuousTargets",
+                instance != null ? instance.continuousVisibilityTargets.Count : 0);
+            MapObjectTickProfiler.AddRuntimeCounter("InstallationVisuals", "VisibilityChecks",
+                instance != null ? instance.LastVisibilityRefreshCount : 0);
+            MapObjectTickProfiler.AddRuntimeCounter("InstallationVisuals", "CandidateRebuilds",
+                instance != null ? instance.candidateRebuildCount : 0L);
+            MapObjectTickProfiler.AddRuntimeCounter("InstallationVisuals", "CandidateCacheHits",
+                instance != null ? instance.candidateCacheHitCount : 0L);
         }
 
         internal static void Register(InstallationVisualState target)
@@ -74,6 +88,36 @@ namespace ProjectF.Rendering
             instance.targets.Add(target);
             instance.AddToSpatialIndex(target);
             instance.pendingVisibility.Add(target);
+            if (target.RequiresContinuousVisibilityRefresh)
+            {
+                instance.continuousVisibilityTargets.Add(target);
+            }
+            instance.candidateCacheDirty = true;
+        }
+
+        internal static void InvalidateVisibility(
+            InstallationVisualState target,
+            bool includeContinuousTarget = false)
+        {
+            if (instance == null || target == null || target.Index < 0
+                || (!includeContinuousTarget && target.RequiresContinuousVisibilityRefresh))
+            {
+                return;
+            }
+
+            if (includeContinuousTarget)
+            {
+                if (target.RequiresContinuousVisibilityRefresh)
+                {
+                    instance.continuousVisibilityTargets.Add(target);
+                }
+                else
+                {
+                    instance.continuousVisibilityTargets.Remove(target);
+                }
+            }
+            instance.pendingVisibility.Add(target);
+            instance.candidateCacheDirty = true;
         }
 
         internal static void EnsureExists()
@@ -99,7 +143,9 @@ namespace ProjectF.Rendering
                 instance.targets.RemoveAt(last);
                 instance.pendingVisibility.Remove(target);
                 instance.visibleTargets.Remove(target);
+                instance.continuousVisibilityTargets.Remove(target);
                 instance.candidateSet.Remove(target);
+                instance.candidateCacheDirty = true;
             }
             target.Index = -1;
             target.Release();
@@ -122,16 +168,27 @@ namespace ProjectF.Rendering
                 LastDeferredCulledCount = 0;
                 LastCandidateCount = 0;
                 LastCandidateCellCount = 0;
+                LastVisibilityRefreshCount = 0;
                 return;
             }
 
-            culling.Update(Camera.main);
+            bool cameraChanged = culling.Update(Camera.main);
             VisibleCount = 0;
             CulledCount = 0;
             LastTickedCount = 0;
             LastVisualUpdateCount = 0;
             LastDeferredCulledCount = 0;
-            BuildCandidates();
+            LastVisibilityRefreshCount = 0;
+            if (cameraChanged || candidateCacheDirty)
+            {
+                BuildCandidates(cameraChanged);
+                candidateCacheDirty = false;
+                candidateRebuildCount++;
+            }
+            else
+            {
+                candidateCacheHitCount++;
+            }
             LastCandidateCount = candidates.Count;
             for (int i = candidates.Count - 1; i >= 0; i--)
             {
@@ -142,26 +199,53 @@ namespace ProjectF.Rendering
                     continue;
                 }
 
-                RefreshSpatialIndex(target);
-                if (target.Tick(culling, Time.deltaTime, true))
+                bool pendingRefresh = pendingVisibility.Contains(target);
+                bool continuousRefresh = target.RequiresContinuousVisibilityRefresh;
+                bool refreshVisibility = cameraChanged || pendingRefresh || continuousRefresh;
+                if (pendingRefresh || continuousRefresh)
+                {
+                    RefreshSpatialIndex(target);
+                }
+
+                bool wasVisible = target.Visible;
+                if (target.Tick(culling, Time.deltaTime, refreshVisibility))
                 {
                     LastVisualUpdateCount++;
+                }
+                if (refreshVisibility)
+                {
+                    LastVisibilityRefreshCount++;
                 }
 
                 LastTickedCount++;
                 pendingVisibility.Remove(target);
                 if (target.Visible) visibleTargets.Add(target);
                 else visibleTargets.Remove(target);
+                if (wasVisible != target.Visible && !continuousRefresh)
+                {
+                    // Rebuild once after a static target crosses the frustum so the
+                    // steady-state cache contains only visible, pending, and mobile targets.
+                    candidateCacheDirty = true;
+                }
             }
             VisibleCount = visibleTargets.Count;
             CulledCount = Mathf.Max(0, targets.Count - VisibleCount);
             LastDeferredCulledCount = Mathf.Max(0, targets.Count - LastTickedCount);
         }
 
-        private void BuildCandidates()
+        private void BuildCandidates(bool scanVisibleCells)
         {
             candidateSet.Clear();
             candidates.Clear();
+            foreach (InstallationVisualState target in pendingVisibility) AddCandidate(target);
+            foreach (InstallationVisualState target in visibleTargets) AddCandidate(target);
+            foreach (InstallationVisualState target in continuousVisibilityTargets) AddCandidate(target);
+
+            if (!scanVisibleCells)
+            {
+                return;
+            }
+
             LastCandidateCellCount = 0;
             if (!culling.TryGetVisibleCellRange(SpatialCellSize, SpatialPaddingCells,
                     out Vector2Int minimum, out Vector2Int maximum))
@@ -178,8 +262,6 @@ namespace ProjectF.Rendering
                 return;
             }
 
-            foreach (InstallationVisualState target in pendingVisibility) AddCandidate(target);
-            foreach (InstallationVisualState target in visibleTargets) AddCandidate(target);
             for (int y = minimum.y; y <= maximum.y; y++)
             for (int x = minimum.x; x <= maximum.x; x++)
                 if (targetsByCell.TryGetValue(new Vector2Int(x, y), out List<InstallationVisualState> cellTargets))
@@ -230,9 +312,10 @@ namespace ProjectF.Rendering
                 pendingVisibility.Add(targets[i]);
             }
             visibleTargets.Clear();
+            candidateCacheDirty = true;
             VisibleCount = targets.Count;
             CulledCount = LastTickedCount = LastVisualUpdateCount = LastDeferredCulledCount = 0;
-            LastCandidateCount = LastCandidateCellCount = 0;
+            LastCandidateCount = LastCandidateCellCount = LastVisibilityRefreshCount = 0;
         }
 
         private void OnDestroy()
@@ -252,6 +335,7 @@ namespace ProjectF.Rendering
             }
             targets.Clear();
             targetsByCell.Clear(); pendingVisibility.Clear(); visibleTargets.Clear();
+            continuousVisibilityTargets.Clear();
             candidateSet.Clear(); candidates.Clear();
             instance = null;
         }

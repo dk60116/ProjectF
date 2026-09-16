@@ -3595,12 +3595,15 @@ public partial class PlayerController : MonoBehaviour
 
     private bool TryResolveConveyorFocusTarget(Block block, out ConveyorBelt belt)
     {
-        belt = ResolveInteractionFocusTarget(block) as ConveyorBelt;
-        if (belt == null
-            && block != null
+        belt = null;
+        if (block != null
             && block.TryGetRuntimeConveyorRecord(out ConveyorRuntimeRecord record))
         {
             belt = record.Prototype;
+        }
+        if (belt == null)
+        {
+            belt = ResolveInteractionFocusTarget(block) as ConveyorBelt;
         }
         if (belt == null && block != null && Spliterbelt.TryFindCoveringBelt(block.Coordinate, out Spliterbelt splitter))
             belt = splitter;
@@ -5123,6 +5126,7 @@ public partial class PlayerController : MonoBehaviour
         nearbyInstallationObjects.Clear();
         nearbyConveyorRecords.Clear();
         nearbyPipeRecords.Clear();
+        ConveyorWorld conveyorWorld = ConveyorWorld.Current;
         PipeWorld pipeWorld = PipeWorld.Current;
         RobotArmWorld robotArmWorld = RobotArmWorld.Current;
         nearbyRobotArmInstances.Clear();
@@ -5145,6 +5149,18 @@ public partial class PlayerController : MonoBehaviour
                 if (block.MapObject is RobotArmInstance boundArm)
                 {
                     TryAppendNearbyRobotArmFocus(boundArm, block, origin, results);
+                }
+                if (conveyorWorld != null
+                    && conveyorWorld.TryGetAtCoordinate(
+                        coordinate,
+                        out ConveyorRuntimeRecord conveyorRecord))
+                {
+                    TryAppendNearbyInstallationFocus(
+                        conveyorRecord.Prototype,
+                        block,
+                        origin,
+                        results,
+                        standingConveyorFocusBlock);
                 }
                 if (pipeWorld != null
                     && pipeWorld.TryGetAtCoordinate(coordinate, out PipeRuntimeRecord pipeRecord))
@@ -6356,21 +6372,6 @@ public partial class PlayerController : MonoBehaviour
     {
         terrain.TryGetLoadedBlockEntity(searchCoordinate, out Block candidateBlock);
         ConveyorWorld conveyorWorld = ConveyorWorld.Current;
-        if (conveyorWorld != null
-            && conveyorWorld.TryGetBelt2FAtCoordinate(
-                searchCoordinate,
-                out ConveyorRuntimeRecord belt2FRecord)
-            && TrySelectMouseFocusInstallation(
-                belt2FRecord.Prototype,
-                candidateBlock,
-                targetCoordinate,
-                terrain,
-                out installationObject,
-                out fallbackBlock))
-        {
-            return true;
-        }
-
         PipeWorld pipeWorld = PipeWorld.Current;
         if (pipeWorld != null
             && pipeWorld.TryGetAtCoordinate(searchCoordinate, out PipeRuntimeRecord pipeRecord)
@@ -6391,6 +6392,21 @@ public partial class PlayerController : MonoBehaviour
                 out ConveyorRuntimeRecord conveyorRecord)
             && TrySelectMouseFocusInstallation(
                 conveyorRecord.Prototype,
+                candidateBlock,
+                targetCoordinate,
+                terrain,
+                out installationObject,
+                out fallbackBlock))
+        {
+            return true;
+        }
+
+        if (conveyorWorld != null
+            && conveyorWorld.TryGetBelt2FAtCoordinate(
+                searchCoordinate,
+                out ConveyorRuntimeRecord belt2FRecord)
+            && TrySelectMouseFocusInstallation(
+                belt2FRecord.Prototype,
                 candidateBlock,
                 targetCoordinate,
                 terrain,

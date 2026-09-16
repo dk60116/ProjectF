@@ -8,6 +8,9 @@ void Require(bool condition, string message)
 }
 const long tick = BeltSimulationJob.TickUnits;
 
+float VisualProgress(long remaining, long duration, float alpha)
+    => Math.Clamp(1f - (remaining - alpha * tick) / duration, 0f, 1f);
+
 BeltSimulationBuffers Create(int count, int groups = 1, int splitters = 0)
 {
     var buffers = new BeltSimulationBuffers(count, groups, splitters, splitters);
@@ -82,6 +85,40 @@ using (var b = Create(4))
     string stable = State(b); for (int i = 0; i < 100; i++) Step(b);
     Require(State(b) == stable, "sleep does not accumulate movement debt");
 }
+using (var b = Create(3))
+{
+    const long duration = tick * 4;
+    Edge(b, 0, 1, duration); Edge(b, 1, 2, duration);
+    Put(b, 0, 30); Put(b, 1, 31);
+    var leader = b.Lanes[1]; leader.Remaining = tick; leader.Duration = duration; b.Lanes[1] = leader;
+    Step(b);
+    Require(b.Lanes[1].ItemId == 30 && b.Lanes[2].ItemId == 31,
+        "adjacent items transfer as one chain");
+    Require(b.Lanes[1].Remaining == duration && b.Lanes[2].Remaining == duration,
+        "a follower cannot bank time before its leader vacates the next lane");
+}
+using (var b = Create(4))
+{
+    const long duration = tick * 4;
+    Edge(b, 0, 1, duration); Edge(b, 1, 2, duration); Edge(b, 2, 3, duration);
+    Put(b, 0, 40); Put(b, 1, 41); Put(b, 2, 42);
+    var head = b.Lanes[2]; head.Remaining = tick * 3 / 4; head.Duration = duration; b.Lanes[2] = head;
+    var middle = b.Lanes[1]; middle.Remaining = tick / 4; middle.Duration = duration; b.Lanes[1] = middle;
+    Step(b);
+    long expected = duration - tick / 4;
+    Require(b.Lanes[1].Remaining == expected && b.Lanes[2].Remaining == expected && b.Lanes[3].Remaining == expected,
+        "packed chains share the head item's actual sub-tick vacancy time");
+}
+using (var b = Create(4))
+{
+    const long duration = tick * 4;
+    Edge(b, 0, 1, duration); Edge(b, 1, 2, duration); Edge(b, 2, 3, duration);
+    Put(b, 0, 50); Put(b, 1, 51); Put(b, 2, 52);
+    Step(b);
+    Require(b.Lanes[1].Remaining == duration - tick && b.Lanes[2].Remaining == duration - tick
+        && b.Lanes[3].Remaining == duration - tick,
+        "already-ready packed chains retain a full tick of forward travel");
+}
 using (var b = Create(4))
 {
     for (int i = 0; i < 4; i++) { Edge(b, i, (i + 1) % 4, tick); Put(b, i, i + 10); }
@@ -105,6 +142,32 @@ using (var b = Create(2))
     var held = b.Lanes[0]; held.Remaining = held.Duration = tick * 5; held.GateBits = 1; b.Lanes[0] = held;
     for (int i = 0; i < 4; i++) { Step(b); Require(b.Lanes[0].ItemId == 4, "external placement hold uses ticks"); }
     Step(b); Require(b.Lanes[1].ItemId == 4 && (b.Lanes[1].GateBits & 8) != 0, "hold completes and settles at the deterministic tick");
+}
+
+{
+    const long duration = tick * 4;
+    const long remaining = tick * 3;
+    float beforeSkippedTick = VisualProgress(remaining, duration, 0.8f);
+    float legacyAfterSkippedTick = VisualProgress(remaining, duration, 0.1f);
+    Require(legacyAfterSkippedTick < beforeSkippedTick,
+        "world interpolation reset reproduces backward belt-item motion when a belt step is skipped");
+
+    float heldAlpha = TerrainGenerator.ResolveBeltVisualInterpolationAlpha(false, 10, 11, 0.1f);
+    float heldAfterSkippedTick = VisualProgress(remaining, duration, heldAlpha);
+    Require(heldAlpha == 1f && heldAfterSkippedTick >= beforeSkippedTick,
+        "skipped belt ticks hold the completed visual interval instead of moving backward");
+
+    float resumedAlpha = TerrainGenerator.ResolveBeltVisualInterpolationAlpha(false, 12, 12, 0.1f);
+    float resumedProgress = VisualProgress(remaining - tick, duration, resumedAlpha);
+    Require(resumedAlpha == 0.1f && resumedProgress >= heldAfterSkippedTick,
+        "resumed belt simulation continues forward from the held interval");
+    Require(TerrainGenerator.ResolveBeltVisualInterpolationAlpha(true, 12, 12, 0.9f) == 0f,
+        "externally clocked belt presentation never predicts an unscheduled step");
+
+    Require(TerrainGenerator.ResolveMonotonicBeltVisualProgress(0.3f, true, 0.7f) == 0.7f,
+        "the same belt item segment cannot render behind its previously submitted progress");
+    Require(TerrainGenerator.ResolveMonotonicBeltVisualProgress(0.3f, false, 0.7f) == 0.3f,
+        "a newly occupied lane starts its own segment without inheriting the previous item progress");
 }
 using (var b = Create(2))
 {

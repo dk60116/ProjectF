@@ -845,6 +845,18 @@ public partial class TerrainGenerator : MonoBehaviour
         ConveyorBelt conveyorBelt,
         ConveyorBelt sourcePrefab = null)
     {
+        return RegisterDataOnlyConveyorInstallation(
+            conveyorBelt,
+            sourcePrefab,
+            out _);
+    }
+
+    internal bool RegisterDataOnlyConveyorInstallation(
+        ConveyorBelt conveyorBelt,
+        ConveyorBelt sourcePrefab,
+        out ConveyorRuntimeRecord registeredRecord)
+    {
+        registeredRecord = null;
         if (conveyorBelt == null || conveyorBelt.ExcludeFromTerrainPersistence)
         {
             return false;
@@ -890,6 +902,7 @@ public partial class TerrainGenerator : MonoBehaviour
         {
             RobotArm.WakeAroundCoordinate(record.OccupiedCoordinates[i]);
         }
+        registeredRecord = record;
         return true;
     }
 
@@ -920,6 +933,37 @@ public partial class TerrainGenerator : MonoBehaviour
 
         EnsureResourceStateStore();
         resourceStateStore?.UpdateInstallationState(state);
+    }
+
+    internal bool ReleaseDataOnlyBelt2FBridgeCenterOccupancy(
+        ConveyorRuntimeRecord record,
+        Vector2Int bridgeCenterCoordinate)
+    {
+        ConveyorWorld world = ConveyorWorld.Current;
+        if (record == null
+            || world == null
+            || !world.TryGetByStorageKey(record.StorageKey, out ConveyorRuntimeRecord currentRecord)
+            || !ReferenceEquals(currentRecord, record))
+        {
+            return false;
+        }
+
+        EnsureResourceStateStore();
+        if (resourceStateStore == null
+            || !record.ReleaseBridgeCenterOccupancy(bridgeCenterCoordinate))
+        {
+            return false;
+        }
+
+        resourceStateStore.UpdateInstallationState(record.State);
+        if (loadedBlocks.TryGetValue(bridgeCenterCoordinate, out Block bridgeCenterBlock)
+            && bridgeCenterBlock != null)
+        {
+            bridgeCenterBlock.InvalidateRuntimeConveyorTopology();
+        }
+
+        MarkConveyorNetworkDirty();
+        return true;
     }
 
     private void BindLoadedBlocksToDataOnlyConveyor(ConveyorRuntimeRecord record)
@@ -961,9 +1005,10 @@ public partial class TerrainGenerator : MonoBehaviour
         }
 
         if (record.IsBridgeCenter(coordinate)
-            && block.TryGetRuntimeConveyorRecord(out ConveyorRuntimeRecord existing)
-            && existing != null
-            && !existing.IsBelt2F)
+            && (block.TryGetRuntimePipeRecord(out _)
+                || (block.TryGetRuntimeConveyorRecord(out ConveyorRuntimeRecord existing)
+                    && existing != null
+                    && !existing.IsBelt2F)))
         {
             block.InvalidateRuntimeConveyorTopology();
             return;
@@ -974,6 +1019,15 @@ public partial class TerrainGenerator : MonoBehaviour
 
     public bool RegisterDataOnlyPipeInstallation(Pipe pipe, Pipe sourcePrefab = null)
     {
+        return RegisterDataOnlyPipeInstallation(pipe, sourcePrefab, out _);
+    }
+
+    internal bool RegisterDataOnlyPipeInstallation(
+        Pipe pipe,
+        Pipe sourcePrefab,
+        out PipeRuntimeRecord registeredRecord)
+    {
+        registeredRecord = null;
         if (pipe == null || pipe.ExcludeFromTerrainPersistence)
         {
             return false;
@@ -1021,6 +1075,7 @@ public partial class TerrainGenerator : MonoBehaviour
             RobotArm.WakeAroundCoordinate(record.OccupiedCoordinates[i]);
         }
 
+        registeredRecord = record;
         return true;
     }
 

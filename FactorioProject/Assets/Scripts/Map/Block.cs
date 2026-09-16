@@ -4603,9 +4603,6 @@ public partial class Block
             destinationBlock.InitializeConveyorDataMotionTiming(dataMotionState, 0f);
         destinationBlock.MarkConveyorItemVisualDirty();
         destinationBlock.MarkConveyorItemMovedThisFrame(destinationLaneIndex);
-        // Line callers previously ran a separate CanMove guard before recording
-        // an attempt. Keep rejected candidates uncounted after merging the guard.
-        MapObjectTickProfiler.AddBeltStraightMoveAttempt(true);
         return true;
     }
 
@@ -4937,8 +4934,6 @@ public partial class Block
             return;
         }
 
-        MapObjectTickProfiler.AddBeltActivityRefreshCall();
-
         if (UsesBeltJobs)
         {
             generator.SetConveyorItemVisualActive(this, IsConveyorStackingEnabled() && HasAnyConveyorObjects());
@@ -5165,8 +5160,6 @@ public partial class Block
 
     public void WakeConveyorMoveAttemptsAroundImmediate()
     {
-        MapObjectTickProfiler.AddBeltWakeAroundCall();
-
         WakeConveyorMoveAttempts(true);
         if (!TryResolveOwningTerrainGenerator(out TerrainGenerator terrainGenerator))
         {
@@ -9956,7 +9949,6 @@ public partial class Block
             out movedDestinationBlock,
             out movedDestinationLaneIndex,
             ignoreMoveAttemptThrottle);
-        MapObjectTickProfiler.AddBeltTryMoveAttempt(moved);
         return moved;
     }
 
@@ -10100,7 +10092,6 @@ public partial class Block
             ignoreMoveAttemptThrottle,
             markBlockedCycles: false,
             recordPlannedMoves: false,
-            countPlanCall: false,
             cacheFailures: false);
 
         conveyorCanMoveVisiting.Clear();
@@ -10605,7 +10596,6 @@ public partial class Block
         bool ignoreMoveAttemptThrottle,
         bool markBlockedCycles = true,
         bool recordPlannedMoves = true,
-        bool countPlanCall = true,
         bool cacheFailures = true)
     {
         if (!TryResolveRuntimeBlock(currentLane.BlockHandle, out Block currentBlock)
@@ -10623,11 +10613,6 @@ public partial class Block
         if (recordPlannedMoves && plannedMoves == null)
         {
             return false;
-        }
-
-        if (countPlanCall)
-        {
-            MapObjectTickProfiler.AddBeltPlanMoveCall();
         }
 
         int itemId = currentBlock.GetConveyorItemIdAtLane(currentLane.LaneIndex);
@@ -10732,7 +10717,6 @@ public partial class Block
                 ignoreMoveAttemptThrottle,
                 markBlockedCycles,
                 recordPlannedMoves,
-                countPlanCall,
                 cacheFailures);
             visiting.Remove(destinationLane);
             if (!planned)
@@ -10947,7 +10931,6 @@ public partial class Block
         }
 
         int touchedBlockCount = conveyorTouchedBlocks.Count;
-        MapObjectTickProfiler.AddBeltPlannedMoveApplication(plannedMoves.Count, touchedBlockCount);
         if (activeTerrain != null)
         {
             activeTerrain.WakeAndRefreshConveyorRuntimeBlocks(

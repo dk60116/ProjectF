@@ -7,6 +7,7 @@ namespace ProjectF.Conveyors
     internal static class ConveyorSideBarrier
     {
         private const float Epsilon = 0.00001f;
+        internal const float RaisedHalfLength = 1.13f;
 
         public static bool Sweep(Vector2 start, Vector2 direction, float maxDistance,
             Vector2 center, Vector2 axis, Vector2 outward, float halfLength, float radius,

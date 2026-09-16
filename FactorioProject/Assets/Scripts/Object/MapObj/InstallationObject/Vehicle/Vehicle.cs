@@ -35,6 +35,7 @@ public class Vehicle : InstallationObject
     private float currentVehicleSignedSpeed { get => vehicleMotion.SignedSpeed; set => vehicleMotion.SignedSpeed = value; }
     private float pendingWheelVisualDistance;
     protected override bool UsesManagedVisualUpdates => true;
+    protected override bool ManagedVisualRootCanMove => true;
     protected override bool RequiresManagedVisualUpdate => Mathf.Abs(pendingWheelVisualDistance) > 0.0001f;
     private readonly Vector2Int[] runtimeCoordinateBuffer = new Vector2Int[1];
 

@@ -48,6 +48,12 @@ internal static class Program
         timer.Stop();
 
         MapSaveData map = data.map ?? new MapSaveData();
+        bool hasInstallationBounds = TryGetInstallationBounds(
+            map.installations,
+            out int installationMinimumX,
+            out int installationMinimumY,
+            out int installationMaximumX,
+            out int installationMaximumY);
         int occupiedCoordinates = map.installations.Sum(
             entry => entry?.state?.occupiedCoordinates?.Count ?? 0);
         int installationListItems = map.installations.Sum(
@@ -127,6 +133,7 @@ internal static class Program
             $"RecompressedBytes={recompressedBytes}");
         Console.WriteLine(
             $"Chunks={data.terrain?.activeChunkCoordinates?.Count ?? 0} " +
+            $"MapSize={data.terrain?.mapSize ?? 0} " +
             $"ChunkBounds=({minimumChunkX},{minimumChunkY})..({maximumChunkX},{maximumChunkY}) " +
             $"Resources={map.resources?.Count ?? 0} Floors={map.floorObjects?.Count ?? 0} " +
             $"FloorItems={floorItems} Installations={map.installations?.Count ?? 0} " +
@@ -140,6 +147,25 @@ internal static class Program
             $"Fertilizer={map.farmlandFertilizer?.Count ?? 0} " +
             $"PlantedResources={map.plantedResources?.Count ?? 0} " +
             $"TerrainCloneRegions={map.terrainCloneRegions?.Count ?? 0}");
+        Console.WriteLine(hasInstallationBounds
+            ? $"InstallationBounds=({installationMinimumX},{installationMinimumY})..({installationMaximumX},{installationMaximumY}) "
+              + $"Size={installationMaximumX - installationMinimumX + 1}x{installationMaximumY - installationMinimumY + 1}"
+            : "InstallationBounds=none");
+        for (int regionIndex = 0;
+             map.terrainCloneRegions != null && regionIndex < map.terrainCloneRegions.Count;
+             regionIndex++)
+        {
+            TerrainCloneRegionSaveEntry region = map.terrainCloneRegions[regionIndex];
+            if (region == null)
+            {
+                continue;
+            }
+
+            Console.WriteLine(
+                $"TerrainCloneRegion[{regionIndex}] Source=({region.sourceMinimum.x},{region.sourceMinimum.y})"
+                + $"..({region.sourceMaximum.x},{region.sourceMaximum.y}) "
+                + $"Offset=({region.offset.x},{region.offset.y})");
+        }
         Console.WriteLine(
             $"Player=({data.player?.position.x ?? 0:F2},{data.player?.position.y ?? 0:F2}," +
             $"{data.player?.position.z ?? 0:F2}) HasPlayer={data.player?.hasPlayer ?? false}");
@@ -164,6 +190,68 @@ internal static class Program
         }
 
         return 0;
+    }
+
+    private static bool TryGetInstallationBounds(
+        IReadOnlyList<InstallationSaveEntry> installations,
+        out int minimumX,
+        out int minimumY,
+        out int maximumX,
+        out int maximumY)
+    {
+        minimumX = minimumY = int.MaxValue;
+        maximumX = maximumY = int.MinValue;
+        bool found = false;
+
+        for (int i = 0; installations != null && i < installations.Count; i++)
+        {
+            BlockStateStore.InstallationSaveState state = installations[i]?.state;
+            if (state == null)
+            {
+                continue;
+            }
+
+            IncludeBoundsCoordinate(
+                state.anchorCoordinate.x,
+                state.anchorCoordinate.y,
+                ref minimumX,
+                ref minimumY,
+                ref maximumX,
+                ref maximumY,
+                ref found);
+            for (int coordinateIndex = 0;
+                 state.occupiedCoordinates != null && coordinateIndex < state.occupiedCoordinates.Count;
+                 coordinateIndex++)
+            {
+                var coordinate = state.occupiedCoordinates[coordinateIndex];
+                IncludeBoundsCoordinate(
+                    coordinate.x,
+                    coordinate.y,
+                    ref minimumX,
+                    ref minimumY,
+                    ref maximumX,
+                    ref maximumY,
+                    ref found);
+            }
+        }
+
+        return found;
+    }
+
+    private static void IncludeBoundsCoordinate(
+        int x,
+        int y,
+        ref int minimumX,
+        ref int minimumY,
+        ref int maximumX,
+        ref int maximumY,
+        ref bool found)
+    {
+        minimumX = Math.Min(minimumX, x);
+        minimumY = Math.Min(minimumY, y);
+        maximumX = Math.Max(maximumX, x);
+        maximumY = Math.Max(maximumY, y);
+        found = true;
     }
 
     private static long MeasureCompressedSerialization(SaveGameData data)

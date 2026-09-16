@@ -78,6 +78,7 @@ public sealed class PipeRuntimeRecord : IVirtualRenderBatchOwner
     public IReadOnlyList<Vector2Int> OccupiedCoordinates => occupiedCoordinates;
     public bool HasValidPrototype => Prototype != null;
     public bool IsUnderground { get; }
+    internal bool PlacementPresentationSuppressed { get; set; }
     internal PipeWorld.VisualPart[] VisualParts { get; }
     internal int DisplayedFluidItemId { get; set; } = -1;
     internal List<VirtualRenderBatchEntry> FluidBatchEntries => fluidBatchEntries;
@@ -512,6 +513,28 @@ public sealed class PipeWorld : IDisposable
         bodyBatches.SuspendRendering(); fluidBatches.SuspendRendering();
     }
 
+    internal void SetPlacementPresentationSuppressed(
+        PipeRuntimeRecord record,
+        bool suppressed)
+    {
+        if (disposed
+            || record == null
+            || record.PlacementPresentationSuppressed == suppressed
+            || !recordsByStorageKey.TryGetValue(record.StorageKey, out PipeRuntimeRecord currentRecord)
+            || !ReferenceEquals(currentRecord, record))
+        {
+            return;
+        }
+
+        record.PlacementPresentationSuppressed = suppressed;
+        bodyDirty = true;
+        RemoveFluidRecordBatches(record);
+        if (!suppressed && record.DisplayedFluidItemId >= 0)
+        {
+            RefreshFluidRecordBatch(record);
+        }
+    }
+
     public PipeRuntimeRecord Register(
         BlockStateStore.InstallationSaveState state,
         Pipe prototype,
@@ -821,7 +844,9 @@ public sealed class PipeWorld : IDisposable
         IVirtualRenderBatchOwner owner,
         List<VirtualRenderBatchEntry> ownerEntries)
     {
-        if (record == null || !record.HasValidPrototype)
+        if (record == null
+            || !record.HasValidPrototype
+            || record.PlacementPresentationSuppressed)
         {
             return;
         }

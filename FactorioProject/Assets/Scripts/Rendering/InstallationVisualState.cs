@@ -25,6 +25,8 @@ namespace ProjectF.Rendering
         internal int Index = -1;
         internal Vector2Int SpatialCell;
         internal bool Visible { get; private set; } = true;
+        internal bool RequiresContinuousVisibilityRefresh =>
+            Owner != null && Owner.RequiresContinuousManagedVisibilityRefresh;
         private readonly List<AnimatorState> animators = new List<AnimatorState>();
         private readonly List<ParticleState> particles = new List<ParticleState>();
         private bool captured;

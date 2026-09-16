@@ -4,6 +4,15 @@ public partial class TerrainGenerator
 {
     internal bool ConvertRobotArmPresentation(RobotArm presentation, RobotArm source = null)
     {
+        return ConvertRobotArmPresentation(presentation, source, out _);
+    }
+
+    internal bool ConvertRobotArmPresentation(
+        RobotArm presentation,
+        RobotArm source,
+        out RobotArmInstance registeredArm)
+    {
+        registeredArm = null;
         EnsureResourceStateStore();
         if (presentation == null || !resourceStateStore.TryCaptureInstallationState(presentation, out var state)) return false;
         source = source != null ? source : ResolveInstallationSourcePrefab(state, ResolveInstallationPlacementController(), ResolveInstallationDefinition(state)) as RobotArm;
@@ -11,7 +20,8 @@ public partial class TerrainGenerator
         state.hasWorldPose = true;
         state.worldPosition = presentation.transform.position;
         state.worldRotation = presentation.transform.rotation;
-        return RegisterDataOnlyRobotArm(source, state) != null;
+        registeredArm = RegisterDataOnlyRobotArm(source, state);
+        return registeredArm != null;
     }
     public RobotArmInstance RegisterDataOnlyRobotArm(RobotArm prototype, BlockStateStore.InstallationSaveState state)
     {

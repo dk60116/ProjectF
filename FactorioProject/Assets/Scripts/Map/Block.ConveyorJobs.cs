@@ -197,6 +197,16 @@ public partial class Block
         return beltJobOwner != null && beltJobOwner.TryGetBeltJobVisualPosition(this, lane, out position);
     }
 
+    internal int GetBeltJobLaneOccupancyVersion(int lane)
+    {
+        ConveyorRuntimeArrays runtimeArrays = conveyorRuntimeArrays;
+        return runtimeArrays != null
+            && lane >= 0
+            && lane < runtimeArrays.LaneOccupancyVersions.Length
+                ? runtimeArrays.LaneOccupancyVersions[lane]
+                : 0;
+    }
+
     internal Vector3 EvaluateBeltJobSegment(int sourceLane, Block destination, int targetLane, float progress)
     {
         Vector3 from = GetConveyorLaneWorldPosition(sourceLane);

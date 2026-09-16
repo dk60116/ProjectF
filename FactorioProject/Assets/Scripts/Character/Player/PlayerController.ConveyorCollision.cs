@@ -20,6 +20,7 @@ public partial class PlayerController
         int minY = Mathf.FloorToInt(Mathf.Min(start.y, end.y) - radius + 0.5f);
         int maxY = Mathf.FloorToInt(Mathf.Max(start.y, end.y) + radius + 0.5f);
         float nearestDistance = blocked ? blockingHit.distance : distance;
+        ConveyorWorld conveyorWorld = ConveyorWorld.Current;
 
         // Coverage remains available while the belt's render root is suspended.
         // Raised sides block entry only; stepping off and low landings stay open.
@@ -28,13 +29,39 @@ public partial class PlayerController
             for (int x = minX; x <= maxX; x++)
             {
                 Vector2Int coordinate = new Vector2Int(x, y);
-                if (!ConvayorBelt2F.TryFindCoveringBelt(coordinate, out ConvayorBelt2F belt)
-                    || !belt.TryGetOutputDirection(belt.transform.rotation, out Vector2Int flow)
-                    || flow == Vector2Int.zero)
+                ConveyorRuntimeRecord dataOnlyBelt = null;
+                ConvayorBelt2F sceneBelt = null;
+                Vector2Int flow;
+                Vector3 barrierStart;
+                Vector3 barrierEnd;
+                if (conveyorWorld != null
+                    && conveyorWorld.TryGetBelt2FAtCoordinate(coordinate, out dataOnlyBelt))
+                {
+                    if (dataOnlyBelt.PlacementPresentationSuppressed
+                        || !dataOnlyBelt.TryGetOutputDirection(out flow)
+                        || flow == Vector2Int.zero)
+                    {
+                        continue;
+                    }
+
+                    dataOnlyBelt.GetPlayerSideBarrierEndpoints(out barrierStart, out barrierEnd);
+                }
+                else if (ConvayorBelt2F.TryFindCoveringBelt(coordinate, out sceneBelt))
+                {
+                    if (!sceneBelt.TryGetOutputDirection(sceneBelt.transform.rotation, out flow)
+                        || flow == Vector2Int.zero)
+                    {
+                        continue;
+                    }
+
+                    sceneBelt.GetPlayerSideBarrierEndpoints(out barrierStart, out barrierEnd);
+                }
+                else
+                {
                     continue;
+                }
 
                 Vector2 axis = new Vector2(flow.x, flow.y);
-                belt.GetPlayerSideBarrierEndpoints(out Vector3 barrierStart, out Vector3 barrierEnd);
                 Vector2 barrierCenter = new Vector2(
                     (barrierStart.x + barrierEnd.x) * 0.5f,
                     (barrierStart.z + barrierEnd.z) * 0.5f);
@@ -44,7 +71,9 @@ public partial class PlayerController
                 for (int sign = -1; sign <= 1; sign += 2)
                 {
                     Vector2Int outward = side * sign;
-                    if (belt.CoversCoordinate(coordinate + outward))
+                    if (dataOnlyBelt != null
+                        ? dataOnlyBelt.Covers(coordinate + outward)
+                        : sceneBelt.CoversCoordinate(coordinate + outward))
                         continue;
 
                     Vector2 wallCenter = new Vector2(x + outward.x * 0.5f, y + outward.y * 0.5f);

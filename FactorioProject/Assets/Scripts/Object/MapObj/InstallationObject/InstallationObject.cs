@@ -515,6 +515,7 @@ public partial class InstallationObject : MapObject, IMapObjectSimulationIdentit
     public virtual void PrepareForPool()
     {
         ResetSleepAwakeDebugVisual();
+        SetManagedVisualRootMotionExpected(false);
         UnregisterRuntimeCoordinateIndex(this);
 
         runtimeAnchorCoordinate = default;
@@ -566,6 +567,7 @@ public partial class InstallationObject : MapObject, IMapObjectSimulationIdentit
     protected virtual void OnPlacementRuntimeChanged()
     {
         activeInstanceVersion++;
+        InvalidateManagedVisualVisibility();
         RefreshManagedColliderCullingSpatialRegistration();
         if (this is IMapObjectUpdateTick tick)
         {

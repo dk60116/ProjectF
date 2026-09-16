@@ -98,6 +98,7 @@ public partial class TerrainGenerator
         beltJobPendingIndices.Clear();
         beltJobUnindexedPending.Clear();
         beltSimulation.RestoreTick(snapshot.Tick);
+        beltJobLastAdvancedWorldTick = MapObjectTickManager.CurrentSimulationTick;
         foreach (BeltSavedLane checkpoint in snapshot.Lanes)
         {
             if (checkpoint == null) continue;

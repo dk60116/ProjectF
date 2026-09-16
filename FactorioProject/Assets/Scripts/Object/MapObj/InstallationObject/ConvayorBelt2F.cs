@@ -12,7 +12,6 @@ public class ConvayorBelt2F : ConveyorBelt
     private const float DefaultPathLowHeight = 0.13f;
     private const float DefaultPathHighHeight = 0.806f;
     private const float DefaultVisualHalfLength = 1.5f;
-    private const float DefaultSideBarrierHalfLength = 1.13f;
     private const bool PathUsesLocalX = true;
     private const float SlotLongitudinalOffset = 0.25f;
     private const float PathSlopeItemPitchDegrees = 34.0587f;
@@ -238,8 +237,8 @@ public class ConvayorBelt2F : ConveyorBelt
     {
         Vector3 localStart = Vector3.zero;
         Vector3 localEnd = Vector3.zero;
-        SetPathCoordinate(ref localStart, -DefaultSideBarrierHalfLength);
-        SetPathCoordinate(ref localEnd, DefaultSideBarrierHalfLength);
+        SetPathCoordinate(ref localStart, -ConveyorSideBarrier.RaisedHalfLength);
+        SetPathCoordinate(ref localEnd, ConveyorSideBarrier.RaisedHalfLength);
         start = transform.TransformPoint(localStart);
         end = transform.TransformPoint(localEnd);
     }

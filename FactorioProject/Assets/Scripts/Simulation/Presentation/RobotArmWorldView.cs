@@ -89,7 +89,9 @@ public sealed class RobotArmWorldView : MonoBehaviour
             for (int i = 0; i < renderCandidates.Count; i++)
             {
                 RobotArmInstance arm = renderCandidates[i];
-                if (!culling.IsAnyLayerVisible(arm.Template.LayerMask) || !culling.Intersects(arm.CullBounds)) continue;
+                if (arm.PlacementPresentationSuppressed
+                    || !culling.IsAnyLayerVisible(arm.Template.LayerMask)
+                    || !culling.Intersects(arm.CullBounds)) continue;
                 VisibleCount++;
                 MatrixCount += arm.Template.Append(arm, batches);
             }

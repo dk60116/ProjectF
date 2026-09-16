@@ -1793,7 +1793,6 @@ public partial class TerrainGenerator : MonoBehaviour
             return;
         }
 
-        MapObjectTickProfiler.AddBeltActivityRefreshCall();
         if (itemCount <= 0)
         {
             SetDynamicConveyorItemVisualBlockTracked(handle, false);
@@ -3886,10 +3885,8 @@ public partial class TerrainGenerator : MonoBehaviour
         BeginConveyorSlotDotInstancedRendering();
 
         int index = 0;
-        int loopIterations = 0;
         while (index < activeConveyorDotVisualList.Count)
         {
-            loopIterations++;
             BlockHandle handle = activeConveyorDotVisualList[index];
             if (!TryResolveLoadedRuntimeBlock(handle, out Block block)
                 || !block.IsConveyorStackingEnabled())
@@ -3904,11 +3901,6 @@ public partial class TerrainGenerator : MonoBehaviour
         }
 
         EndConveyorSlotDotInstancedRendering();
-
-        if (loopIterations > 0)
-        {
-            MapObjectTickProfiler.AddBeltLoopIterations(0, 0, 0, loopIterations);
-        }
     }
 
     private void DrawActiveBeltDirectionArrows()

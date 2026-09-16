@@ -6297,6 +6297,9 @@ public class InstallationPlacementController : MonoBehaviour
         List<MapObject> placedPreviews = new List<MapObject>(previewsToPlace.Count);
         List<Vector2Int> placedAnchorCoordinates = new List<Vector2Int>(previewsToPlace.Count);
         List<MapObject> placedObjects = new List<MapObject>(previewsToPlace.Count);
+        List<Vector3> placedAnimationTargetPositions = new List<Vector3>(previewsToPlace.Count);
+        List<DataOnlyPlacementPresentation> placedAnimationPresentations =
+            new List<DataOnlyPlacementPresentation>(previewsToPlace.Count);
         List<PortableObject> placedAnimationSources = new List<PortableObject>(previewsToPlace.Count);
         List<bool> placedUsedReservations = new List<bool>(previewsToPlace.Count);
         int placedCount = 0;
@@ -6357,6 +6360,7 @@ public class InstallationPlacementController : MonoBehaviour
             bool dataOnlyArm = placementPlan.sourcePrefab is RobotArm
                 && !placementPlan.attachToFreightCarBoxPoint && placementPlan.registerTerrainPersistence;
             MapObject installedObject = null;
+            DataOnlyPlacementPresentation dataOnlyPresentation = default;
             if (dataOnlyArm)
             {
                 RobotArm prototype = (RobotArm)placementPlan.sourcePrefab;
@@ -6374,7 +6378,11 @@ public class InstallationPlacementController : MonoBehaviour
                     itemFilterMaskInitialized = placementPlan.preview.IsItemFilterMaskInitialized,
                     itemFilterMaskWords = placementPlan.preview.CaptureItemFilterMaskWords()
                 };
-                if (terrain == null || terrain.RegisterDataOnlyRobotArm(prototype, state) == null) continue;
+                RobotArmInstance registeredArm = terrain != null
+                    ? terrain.RegisterDataOnlyRobotArm(prototype, state)
+                    : null;
+                if (registeredArm == null) continue;
+                dataOnlyPresentation = new DataOnlyPlacementPresentation(registeredArm);
             }
             else
             {
@@ -6434,15 +6442,16 @@ public class InstallationPlacementController : MonoBehaviour
                 RegisterInstalledHandcartPreview(
                     installedObject as Handcart,
                     placementPlan.preview as Handcart);
-                bool registeredAsDataOnlyConveyor = false;
+                bool registeredAsDataOnlyInstallation = false;
                 if (placementPlan.registerTerrainPersistence)
                 {
-                    registeredAsDataOnlyConveyor = RegisterInstalledObjectPersistence(
+                    registeredAsDataOnlyInstallation = RegisterInstalledObjectPersistence(
                         installedObject,
-                        placementPlan.sourcePrefab);
+                        placementPlan.sourcePrefab,
+                        out dataOnlyPresentation);
                 }
 
-                if (registeredAsDataOnlyConveyor)
+                if (registeredAsDataOnlyInstallation)
                 {
                     ReleaseInstalledObjectInstance(
                         installedObject as InstallationObject,
@@ -6480,6 +6489,8 @@ public class InstallationPlacementController : MonoBehaviour
             }
 
             placedObjects.Add(installedObject);
+            placedAnimationTargetPositions.Add(placementPlan.position);
+            placedAnimationPresentations.Add(dataOnlyPresentation);
             if (TryConsumeInstallPreviewReservation(placementPlan.preview, out PortableObject reservedSourcePortableObject))
             {
                 placedAnimationSources.Add(reservedSourcePortableObject);
@@ -6526,6 +6537,8 @@ public class InstallationPlacementController : MonoBehaviour
 
                 PlayInstallPlacementAnimation(
                     placedObjects[i],
+                    placedAnimationTargetPositions[i],
+                    placedAnimationPresentations[i],
                     sourcePortableObject,
                     placementDefinition.id,
                     i * Mathf.Max(0f, installPlacementPortableLaunchInterval));
@@ -6706,7 +6719,7 @@ public class InstallationPlacementController : MonoBehaviour
                 conveyorPrototype,
                 sourcePrefab,
                 anchorBlock.Coordinate,
-                previewQuarterTurns,
+                ref previewQuarterTurns,
                 preview);
             if (TryResolveActiveConveyorCornerPromotion(
                     conveyorPrototype,
@@ -16570,7 +16583,9 @@ public class InstallationPlacementController : MonoBehaviour
     {
         resolvedPrefab = null;
         resolvedQuarterTurns = quarterTurns;
-        if (conveyorPrototype == null)
+        if (conveyorPrototype == null
+            || (!IsBelt2F(conveyorPrototype)
+                && IsInstalledBelt2FBridgeCenter(anchorCoordinate)))
         {
             return false;
         }
@@ -20317,7 +20332,7 @@ public class InstallationPlacementController : MonoBehaviour
                 conveyorPrototype,
                 manualSourcePrefab,
                 anchorCoordinate,
-                quarterTurns,
+                ref quarterTurns,
                 preview);
             if (TryResolveActiveConveyorCornerPromotion(
                     conveyorPrototype,
@@ -26929,7 +26944,8 @@ public class InstallationPlacementController : MonoBehaviour
         int candidateQuarterTurns,
         MapObject previewToIgnore)
     {
-        if (!(candidateVariantPrefab is ConveyorBelt candidateConveyor)
+        if (IsInstalledBelt2FBridgeCenter(anchorCoordinate)
+            || !(candidateVariantPrefab is ConveyorBelt candidateConveyor)
             || !candidateConveyor.IsCornerVariant)
         {
             return false;
@@ -27012,6 +27028,7 @@ public class InstallationPlacementController : MonoBehaviour
         if (conveyorPrototype == null
             || straightFirstConveyorPreviews.Contains(previewToIgnore)
             || IsBelt2F(conveyorPrototype)
+            || IsInstalledBelt2FBridgeCenter(anchorCoordinate)
             || !(sourcePrefab is ConveyorBelt sourceConveyor)
             || sourceConveyor.IsCornerVariant)
         {
@@ -27116,12 +27133,28 @@ public class InstallationPlacementController : MonoBehaviour
         ConveyorBelt conveyorPrototype,
         MapObject sourcePrefab,
         Vector2Int anchorCoordinate,
-        int quarterTurns,
+        ref int quarterTurns,
         MapObject previewToIgnore)
     {
         if (IsBelt2F(conveyorPrototype))
         {
             return sourcePrefab != null ? sourcePrefab : conveyorPrototype;
+        }
+
+        if (conveyorPrototype != null
+            && IsInstalledBelt2FBridgeCenter(anchorCoordinate))
+        {
+            if (previewToIgnore is ConveyorBelt previewConveyor
+                && previewConveyor.IsCornerVariant
+                && TryGetConveyorStraightQuarterTurnsFromPreview(
+                    previewToIgnore,
+                    conveyorPrototype,
+                    out int straightQuarterTurns))
+            {
+                quarterTurns = NormalizePlacementQuarterTurns(straightQuarterTurns);
+            }
+
+            return ResolveConveyorVariantPrefab(conveyorPrototype, 0) ?? conveyorPrototype;
         }
 
         if (conveyorPrototype == null || !(sourcePrefab is ConveyorBelt sourceConveyor) || !sourceConveyor.IsCornerVariant)
@@ -28134,6 +28167,12 @@ public class InstallationPlacementController : MonoBehaviour
         if (!installPreviewInstances.Contains(preview))
         {
             installPreviewInstances.Add(preview);
+        }
+        if (preview is InstallationObject installationPreview)
+        {
+            // Blueprint instances move independently of placement runtime, so their
+            // managed visibility must follow the root every frame until destruction.
+            installationPreview.SetManagedVisualRootMotionExpected(true);
         }
 
         MapObject rotationSource = ResolveInstallPreviewRotationSource(preview);
@@ -36201,15 +36240,27 @@ public class InstallationPlacementController : MonoBehaviour
     private void PrepareBelt2FBridgeCenterForPassthroughPlacement(Block block, MapObject passthroughSource)
     {
         if (!IsBelt2FPassthroughPlacementSource(passthroughSource)
-            || block == null
-            || !(block.MapObject is ConvayorBelt2F belt2F)
+            || block == null)
+        {
+            return;
+        }
+
+        TerrainGenerator terrain = ResolveInstallPreviewTerrain();
+        if (TryGetDataOnlyBelt2FBridgeCenter(block, out ConveyorRuntimeRecord dataOnlyBelt2F))
+        {
+            terrain?.ReleaseDataOnlyBelt2FBridgeCenterOccupancy(
+                dataOnlyBelt2F,
+                block.Coordinate);
+            return;
+        }
+
+        if (!(block.MapObject is ConvayorBelt2F belt2F)
             || !belt2F.IsBridgeCenterCoordinate(block.Coordinate)
             || !belt2F.TryGetPlacementRuntime(out Vector2Int anchorCoordinate, out int quarterTurns))
         {
             return;
         }
 
-        TerrainGenerator terrain = ResolveInstallPreviewTerrain();
         terrain?.RemoveInstallationPersistence(belt2F);
 
         List<Vector2Int> blockingCoordinates = GetFootprintCoordinates(anchorCoordinate, belt2F, quarterTurns);
@@ -36234,8 +36285,7 @@ public class InstallationPlacementController : MonoBehaviour
         if (!IsBelt2FPassthroughPlacementSource(footprintSource)
             || block == null
             || block.Type != Block.BlockType.Ground
-            || !(occupyingObject is ConvayorBelt2F belt2F)
-            || !belt2F.IsBridgeCenterCoordinate(block.Coordinate))
+            || !IsAvailableBelt2FBridgeCenter(block, occupyingObject))
         {
             return false;
         }
@@ -36249,6 +36299,62 @@ public class InstallationPlacementController : MonoBehaviour
         }
 
         return true;
+    }
+
+    private static bool IsAvailableBelt2FBridgeCenter(
+        Block block,
+        IMapObjectTarget occupyingObject)
+    {
+        if (TryGetDataOnlyBelt2FBridgeCenter(block, out ConveyorRuntimeRecord dataOnlyBelt2F))
+        {
+            if (block.TryGetRuntimePipeRecord(out _))
+            {
+                return false;
+            }
+
+            if (block.TryGetRuntimeConveyorRecord(out ConveyorRuntimeRecord activeConveyor)
+                && !ReferenceEquals(activeConveyor, dataOnlyBelt2F))
+            {
+                return false;
+            }
+
+            return occupyingObject == null
+                   || ReferenceEquals(occupyingObject, dataOnlyBelt2F.Prototype);
+        }
+
+        return occupyingObject is ConvayorBelt2F belt2F
+               && belt2F.IsBridgeCenterCoordinate(block.Coordinate);
+    }
+
+    private static bool TryGetDataOnlyBelt2FBridgeCenter(
+        Block block,
+        out ConveyorRuntimeRecord record)
+    {
+        ConveyorWorld world = ConveyorWorld.Current;
+        if (block != null
+            && world != null
+            && world.TryGetBelt2FAtCoordinate(block.Coordinate, out record)
+            && record.IsBridgeCenter(block.Coordinate))
+        {
+            return true;
+        }
+
+        record = null;
+        return false;
+    }
+
+    private static bool IsInstalledBelt2FBridgeCenter(Vector2Int coordinate)
+    {
+        ConveyorWorld world = ConveyorWorld.Current;
+        if (world != null
+            && world.TryGetBelt2FAtCoordinate(coordinate, out ConveyorRuntimeRecord record)
+            && record.IsBridgeCenter(coordinate))
+        {
+            return true;
+        }
+
+        return ConvayorBelt2F.TryFindCoveringBelt(coordinate, out ConvayorBelt2F belt2F)
+               && belt2F.IsBridgeCenterCoordinate(coordinate);
     }
 
     private static bool IsBelt2FPassthroughPlacementSource(MapObject mapObject)
@@ -40242,6 +40348,18 @@ public class InstallationPlacementController : MonoBehaviour
         MapObject installedObject,
         MapObject sourcePrefab = null)
     {
+        return RegisterInstalledObjectPersistence(
+            installedObject,
+            sourcePrefab,
+            out _);
+    }
+
+    private bool RegisterInstalledObjectPersistence(
+        MapObject installedObject,
+        MapObject sourcePrefab,
+        out DataOnlyPlacementPresentation dataOnlyPresentation)
+    {
+        dataOnlyPresentation = default;
         if (!(installedObject is InstallationObject installationObject))
         {
             return false;
@@ -40249,20 +40367,32 @@ public class InstallationPlacementController : MonoBehaviour
 
         TerrainGenerator terrain = ResolveInstallPreviewTerrain();
         if (installationObject is RobotArm armPresentation && terrain != null
-            && terrain.ConvertRobotArmPresentation(armPresentation, sourcePrefab as RobotArm))
+            && terrain.ConvertRobotArmPresentation(
+                armPresentation,
+                sourcePrefab as RobotArm,
+                out RobotArmInstance registeredArm))
+        {
+            dataOnlyPresentation = new DataOnlyPlacementPresentation(registeredArm);
             return true;
+        }
         if (installationObject is ConveyorBelt conveyorBelt
             && terrain != null
             && terrain.RegisterDataOnlyConveyorInstallation(
                 conveyorBelt,
-                sourcePrefab as ConveyorBelt))
+                sourcePrefab as ConveyorBelt,
+                out ConveyorRuntimeRecord conveyorRecord))
         {
+            dataOnlyPresentation = new DataOnlyPlacementPresentation(conveyorRecord);
             return true;
         }
         if (installationObject is Pipe pipe
             && terrain != null
-            && terrain.RegisterDataOnlyPipeInstallation(pipe, sourcePrefab as Pipe))
+            && terrain.RegisterDataOnlyPipeInstallation(
+                pipe,
+                sourcePrefab as Pipe,
+                out PipeRuntimeRecord pipeRecord))
         {
+            dataOnlyPresentation = new DataOnlyPlacementPresentation(pipeRecord);
             return true;
         }
 
@@ -40338,25 +40468,76 @@ public class InstallationPlacementController : MonoBehaviour
         return sourcePrefab;
     }
 
-    private void PlayInstallPlacementAnimation(MapObject installedObject, PortableObject sourcePortableObject, int itemId, float delay)
+    private readonly struct DataOnlyPlacementPresentation
     {
-        if (installedObject == null)
+        private readonly ConveyorRuntimeRecord conveyor;
+        private readonly PipeRuntimeRecord pipe;
+        private readonly RobotArmInstance robotArm;
+
+        internal DataOnlyPlacementPresentation(ConveyorRuntimeRecord conveyor)
         {
-            return;
+            this.conveyor = conveyor;
+            pipe = null;
+            robotArm = null;
         }
 
-        Transform installedTransform = installedObject.transform;
-        Vector3 originalScale = installedTransform.localScale;
-        if (installedObject is InstallationObject installationObject
-            && ShouldTrackMapObjectTypeVisualTransition(installationObject))
+        internal DataOnlyPlacementPresentation(PipeRuntimeRecord pipe)
         {
-            installationObject.SetMapObjectTypeVisualTransition(true);
+            conveyor = null;
+            this.pipe = pipe;
+            robotArm = null;
         }
 
-        SetConveyorBeltVirtualRendering(installedObject, false);
-        installedTransform.DOKill();
-        installedTransform.localScale = Vector3.zero;
-        List<RendererVisibilityState> rendererStates = CaptureAndHideRendererVisibility(installedObject);
+        internal DataOnlyPlacementPresentation(RobotArmInstance robotArm)
+        {
+            conveyor = null;
+            pipe = null;
+            this.robotArm = robotArm;
+        }
+
+        internal void SetSuppressed(bool suppressed)
+        {
+            if (conveyor != null)
+            {
+                ConveyorWorld.Current?.SetPlacementPresentationSuppressed(conveyor, suppressed);
+            }
+            else if (pipe != null)
+            {
+                PipeWorld.Current?.SetPlacementPresentationSuppressed(pipe, suppressed);
+            }
+            else if (robotArm != null)
+            {
+                robotArm.PlacementPresentationSuppressed = suppressed;
+            }
+        }
+    }
+
+    private void PlayInstallPlacementAnimation(
+        MapObject installedObject,
+        Vector3 fallbackTargetPosition,
+        DataOnlyPlacementPresentation dataOnlyPresentation,
+        PortableObject sourcePortableObject,
+        int itemId,
+        float delay)
+    {
+        Transform installedTransform = installedObject != null ? installedObject.transform : null;
+        Vector3 originalScale = installedTransform != null
+            ? installedTransform.localScale
+            : Vector3.one;
+        List<RendererVisibilityState> rendererStates = null;
+        if (installedObject != null)
+        {
+            if (installedObject is InstallationObject installationObject
+                && ShouldTrackMapObjectTypeVisualTransition(installationObject))
+            {
+                installationObject.SetMapObjectTypeVisualTransition(true);
+            }
+
+            SetConveyorBeltVirtualRendering(installedObject, false);
+            installedTransform.DOKill();
+            installedTransform.localScale = Vector3.zero;
+            rendererStates = CaptureAndHideRendererVisibility(installedObject);
+        }
 
         if (sourcePortableObject == null || itemId < 0)
         {
@@ -40364,11 +40545,25 @@ public class InstallationPlacementController : MonoBehaviour
             return;
         }
 
+        bool dataOnlyPresentationReleased = false;
+        dataOnlyPresentation.SetSuppressed(true);
+        void ReleaseDataOnlyPresentation()
+        {
+            if (dataOnlyPresentationReleased)
+            {
+                return;
+            }
+
+            dataOnlyPresentationReleased = true;
+            dataOnlyPresentation.SetSuppressed(false);
+        }
+
         PortableObject movingPortableObject = sourcePortableObject.Clone(
             sourcePortableObject.WorldPosition,
             sourcePortableObject.WorldRotation);
         if (movingPortableObject == null)
         {
+            ReleaseDataOnlyPresentation();
             RevealInstalledObjectAfterPlacement(installedObject, installedTransform, originalScale, rendererStates, delay);
             return;
         }
@@ -40385,18 +40580,45 @@ public class InstallationPlacementController : MonoBehaviour
         if (!movingPortableObject.SetItem(itemId))
         {
             movingPortableObject.Dispose();
+            ReleaseDataOnlyPresentation();
             RevealInstalledObjectAfterPlacement(installedObject, installedTransform, originalScale, rendererStates, delay);
             return;
         }
 
+        void HandleMoveCancelled(PortableObject cancelledPortableObject)
+        {
+            if (cancelledPortableObject != null)
+            {
+                cancelledPortableObject.MoveCancelled -= HandleMoveCancelled;
+            }
+
+            ReleaseDataOnlyPresentation();
+            RevealInstalledObjectAfterPlacement(
+                installedObject,
+                installedTransform,
+                originalScale,
+                rendererStates,
+                0f);
+        }
+
+        movingPortableObject.MoveCancelled += HandleMoveCancelled;
+
         Vector3 startPosition = sourcePortableObject.WorldPosition;
-        Vector3 targetPosition = installedTransform != null ? installedTransform.position : movingPortableObject.WorldPosition;
+        Vector3 targetPosition = installedTransform != null
+            ? installedTransform.position
+            : fallbackTargetPosition;
         movingPortableObject.MoveTo(
             () => installedTransform != null ? installedTransform.position : targetPosition,
             Mathf.Max(0f, delay),
             () => sourcePortableObject != null ? sourcePortableObject.WorldPosition : startPosition,
             () =>
             {
+                if (movingPortableObject != null)
+                {
+                    movingPortableObject.MoveCancelled -= HandleMoveCancelled;
+                }
+
+                ReleaseDataOnlyPresentation();
                 if (movingPortableObject != null)
                 {
                     movingPortableObject.Dispose();
@@ -40474,7 +40696,13 @@ public class InstallationPlacementController : MonoBehaviour
             sourcePortableObject = handPortableSources[0];
         }
 
-        PlayInstallPlacementAnimation(restoredObject, sourcePortableObject, itemId, 0f);
+        PlayInstallPlacementAnimation(
+            restoredObject,
+            restoredObject.transform.position,
+            default,
+            sourcePortableObject,
+            itemId,
+            0f);
     }
 
     private bool TryGetPrimaryPointerPosition(out Vector2 pointerPosition)

@@ -13,6 +13,7 @@ namespace ProjectF.Conveyors
         internal NativeArray<ulong> FilterBits;
         internal NativeArray<int> Targets, Incoming, Resolution, Stack, MergeCursor, Changed;
         internal NativeArray<byte> Touched;
+        internal NativeArray<long> MoveOvershoot;
 
         internal BeltSimulationBuffers(int lanes, int groups, int splitters, int words)
         {
@@ -25,6 +26,7 @@ namespace ProjectF.Conveyors
                 Targets = Allocate<int>(lanes); Incoming = Allocate<int>(lanes); Resolution = Allocate<int>(lanes);
                 Stack = Allocate<int>(lanes); MergeCursor = Allocate<int>(lanes); Changed = Allocate<int>(lanes);
                 Touched = Allocate<byte>(lanes);
+                MoveOvershoot = Allocate<long>(lanes);
             }
             catch { Dispose(); throw; }
         }
@@ -36,7 +38,8 @@ namespace ProjectF.Conveyors
         {
             Topology = Topology, Lanes = Lanes, Transfers = Transfers, Groups = Groups, GroupStates = GroupStates,
             Splitters = Splitters, FilterBits = FilterBits, Targets = Targets, Incoming = Incoming,
-            Resolution = Resolution, Stack = Stack, MergeCursor = MergeCursor, Changed = Changed, Touched = Touched
+            Resolution = Resolution, Stack = Stack, MergeCursor = MergeCursor, Changed = Changed, Touched = Touched,
+            MoveOvershoot = MoveOvershoot
         };
 
         public void Dispose()
@@ -44,7 +47,7 @@ namespace ProjectF.Conveyors
             Release(ref Topology); Release(ref Lanes); Release(ref Transfers); Release(ref Groups);
             Release(ref GroupStates); Release(ref Splitters); Release(ref FilterBits);
             Release(ref Targets); Release(ref Incoming); Release(ref Resolution); Release(ref Stack);
-            Release(ref MergeCursor); Release(ref Changed); Release(ref Touched);
+            Release(ref MergeCursor); Release(ref Changed); Release(ref Touched); Release(ref MoveOvershoot);
         }
 
         private static void Release<T>(ref NativeArray<T> array) where T : struct

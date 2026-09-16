@@ -122,7 +122,23 @@ static class Checks
 
         var managerCulling = (CameraRenderCulling)typeof(WorldVisualUpdateManager)
             .GetField("culling", BindingFlags.Instance | BindingFlags.NonPublic).GetValue(manager);
+        int stableIntersectionChecks = managerCulling.IntersectionChecks;
+        Time.frameCount++;
+        typeof(WorldVisualUpdateManager).GetMethod("LateUpdate", BindingFlags.Instance | BindingFlags.NonPublic)
+            .Invoke(manager, null);
+        Check(manager.LastVisibilityRefreshCount == 0
+              && managerCulling.IntersectionChecks == stableIntersectionChecks,
+            "static targets reuse visibility while the camera is unchanged");
+        WorldVisualUpdateManager.InvalidateVisibility(a);
+        Time.frameCount++;
+        typeof(WorldVisualUpdateManager).GetMethod("LateUpdate", BindingFlags.Instance | BindingFlags.NonPublic)
+            .Invoke(manager, null);
+        Check(manager.LastVisibilityRefreshCount == 1
+              && managerCulling.IntersectionChecks == stableIntersectionChecks + 1,
+            "static placement invalidation refreshes only the changed target");
+
         managerCulling.InView = false;
+        managerCulling.Changed = true;
         managerCulling.HasCellRange = true;
         managerCulling.MinimumCell = managerCulling.MaximumCell = new Vector2Int(10, 10);
         for (int frame = 0; frame < 4; frame++)
@@ -142,6 +158,7 @@ static class Checks
               && manager.LastTickedCount == 0,
             "hidden targets outside visible cells leave the exact culling loop");
         managerCulling.InView = true;
+        managerCulling.Changed = true;
         managerCulling.MinimumCell = managerCulling.MaximumCell = new Vector2Int(0, 0);
         for (int frame = 0; frame < 4; frame++)
         {
@@ -151,6 +168,21 @@ static class Checks
         }
         Check(manager.VisibleCount == 2 && a.Visible && c.Visible,
             "hidden targets return when their spatial cell becomes visible");
+
+        var mobileOwner = new InstallationObject { MovingVisualRoot = true };
+        var mobile = new InstallationVisualState(mobileOwner);
+        WorldVisualUpdateManager.Register(mobile);
+        Time.frameCount++;
+        typeof(WorldVisualUpdateManager).GetMethod("LateUpdate", BindingFlags.Instance | BindingFlags.NonPublic)
+            .Invoke(manager, null);
+        int mobileIntersectionChecks = managerCulling.IntersectionChecks;
+        Time.frameCount++;
+        typeof(WorldVisualUpdateManager).GetMethod("LateUpdate", BindingFlags.Instance | BindingFlags.NonPublic)
+            .Invoke(manager, null);
+        Check(manager.LastVisibilityRefreshCount == 1
+              && managerCulling.IntersectionChecks == mobileIntersectionChecks + 1,
+            "mobile target keeps exact visibility refresh on a stable camera");
+        WorldVisualUpdateManager.Unregister(mobile);
 
         a.Owner.isActiveAndEnabled = false;
         typeof(WorldVisualUpdateManager).GetMethod("LateUpdate", BindingFlags.Instance | BindingFlags.NonPublic)
@@ -168,7 +200,9 @@ public class InstallationObject : MonoBehaviour
     private readonly List<Component> components = new List<Component>();
     public int VisualTicks, Resumes;
     public bool NeedsVisualUpdate = true;
+    public bool MovingVisualRoot;
     public Action OnResume;
+    internal bool RequiresContinuousManagedVisibilityRefresh => MovingVisualRoot;
     public InstallationObject() { gameObject.Owner = this; }
     public T Add<T>(T component) where T : Component
     {
@@ -197,7 +231,9 @@ public static class VirtualRenderBatchCollection
 public static class MapObjectTickProfiler
 {
     public static Scope SampleNamed(string kind, string type, string item) => default;
+    public static Scope SampleLateUpdateCaller<T>() => default;
     public static void AddRuntimeCounter(string group, string name, int value) { }
+    public static void AddRuntimeCounter(string group, string name, long value) { }
     public readonly struct Scope : IDisposable { public void Dispose() { } }
 }
 public static class MapObjectTickManager
@@ -215,11 +251,22 @@ namespace ProjectF.Rendering
     public class CameraRenderCulling
     {
         public bool Enabled = true, InView = true, LayersVisible = true;
+        public bool Changed = true;
+        public int IntersectionChecks;
         public bool HasCellRange;
         public Vector2Int MinimumCell, MaximumCell;
-        public void Update(Camera camera) { }
+        public bool Update(Camera camera)
+        {
+            bool changed = Changed;
+            Changed = false;
+            return changed;
+        }
         public bool IsAnyLayerVisible(int mask) => !Enabled || LayersVisible;
-        public bool Intersects(Bounds bounds) => !Enabled || InView;
+        public bool Intersects(Bounds bounds)
+        {
+            IntersectionChecks++;
+            return !Enabled || InView;
+        }
         public bool TryGetVisibleCellRange(float cellSize, int paddingCells,
             out Vector2Int minimum, out Vector2Int maximum)
         {

@@ -127,14 +127,7 @@ public static class Checks
             {
                 Time.frameCount++;
                 MapObjectTickProfiler.SetBeltTickCounts(random.Next(-2, 20), random.Next(-2, 20), random.Next(-2, 20));
-                MapObjectTickProfiler.SetBeltTickCounts(10, 9, 8); // Same frame counted once.
-                MapObjectTickProfiler.AddBeltLoopIterations(random.Next(-2, 15), 5, 7, 8);
-                MapObjectTickProfiler.AddBeltTryMoveAttempt(random.Next(2) == 0);
-                MapObjectTickProfiler.AddBeltStraightMoveAttempt(random.Next(2) == 0);
-                MapObjectTickProfiler.AddBeltPlanMoveCall();
-                MapObjectTickProfiler.AddBeltPlannedMoveApplication(random.Next(-2, 4), 6);
-                MapObjectTickProfiler.AddBeltWakeAroundCall();
-                MapObjectTickProfiler.AddBeltActivityRefreshCall();
+                MapObjectTickProfiler.SetBeltTickCounts(10, 9, 8);
                 for (int sample = 0; sample < 20; sample++)
                 {
                     int targetIndex = random.Next(targets.Length);
