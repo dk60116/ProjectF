@@ -79,6 +79,7 @@ public sealed class PipeRuntimeRecord : IVirtualRenderBatchOwner
     public bool HasValidPrototype => Prototype != null;
     public bool IsUnderground { get; }
     internal bool PlacementPresentationSuppressed { get; set; }
+    internal float PlacementPresentationScale { get; set; } = 1f;
     internal PipeWorld.VisualPart[] VisualParts { get; }
     internal int DisplayedFluidItemId { get; set; } = -1;
     internal List<VirtualRenderBatchEntry> FluidBatchEntries => fluidBatchEntries;
@@ -174,6 +175,12 @@ public sealed class PipeRuntimeRecord : IVirtualRenderBatchOwner
             secondPosition,
             WorldRotation * Quaternion.Euler(0f, 180f, 0f),
             WorldScale);
+    }
+
+    internal Matrix4x4 GetPresentationRootMatrix(int endpointIndex)
+    {
+        Matrix4x4 root = GetRootMatrix(endpointIndex);
+        return root * Matrix4x4.Scale(Vector3.one * PlacementPresentationScale);
     }
 
     internal bool TryRaycast(Ray ray, float maxDistance, out Vector2Int coordinate, out float distance)
@@ -535,6 +542,27 @@ public sealed class PipeWorld : IDisposable
         }
     }
 
+    internal void SetPlacementPresentationScale(PipeRuntimeRecord record, float scale)
+    {
+        scale = Mathf.Max(0f, scale);
+        if (disposed
+            || record == null
+            || Mathf.Approximately(record.PlacementPresentationScale, scale)
+            || !recordsByStorageKey.TryGetValue(record.StorageKey, out PipeRuntimeRecord currentRecord)
+            || !ReferenceEquals(currentRecord, record))
+        {
+            return;
+        }
+
+        record.PlacementPresentationScale = scale;
+        bodyDirty = true;
+        RemoveFluidRecordBatches(record);
+        if (!record.PlacementPresentationSuppressed && record.DisplayedFluidItemId >= 0)
+        {
+            RefreshFluidRecordBatch(record);
+        }
+    }
+
     public PipeRuntimeRecord Register(
         BlockStateStore.InstallationSaveState state,
         Pipe prototype,
@@ -854,7 +882,7 @@ public sealed class PipeWorld : IDisposable
         int endpointCount = record.IsUnderground && record.TryGetPairCoordinates(out _, out _) ? 2 : 1;
         for (int endpoint = 0; endpoint < endpointCount; endpoint++)
         {
-            Matrix4x4 rootMatrix = record.GetRootMatrix(endpoint);
+            Matrix4x4 rootMatrix = record.GetPresentationRootMatrix(endpoint);
             VisualPart[] parts = record.VisualParts;
             for (int i = 0; i < parts.Length; i++)
             {

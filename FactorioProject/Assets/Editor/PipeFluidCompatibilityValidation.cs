@@ -650,7 +650,7 @@ public static class PipeFluidCompatibilityValidation
                 typeof(IEnumerable<InputOutputModule>),
                 typeof(Vector2Int),
                 typeof(ISet<InputOutputModule>),
-                typeof(Pump).MakeByRefType()
+                typeof(WaterPump).MakeByRefType()
             },
             null);
         MethodInfo runtimeOutputCoordinateMethod = typeof(InputOutputModule).GetMethod(

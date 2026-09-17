@@ -13,7 +13,7 @@ MonoBehaviour:
   m_Name: Item_89_Oil_Bucket
   m_EditorClassIdentifier: Assembly-CSharp::ItemDefinition
   itemName: Oil Bucket
-  id: 108
+  id: 109
   mapObject: {fileID: 3525437405879595132, guid: 8d2fb53ebe5fa2d448cf0d63b521f261, type: 3}
   mapObjectArchetype: {fileID: 11400000, guid: 3ece98643ac3b86418ef03408f727e66, type: 2}
   useMapColor: 1

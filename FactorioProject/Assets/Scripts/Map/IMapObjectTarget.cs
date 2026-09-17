@@ -36,7 +36,19 @@ public static class MapObjectTargetExtensions
     { results.Clear(); if (target?.SceneObject != null) target.SceneObject.GetComponentsInChildren(includeInactive, results); }
     // Unity destroyed-object semantics must be explicit at interface/object boundaries.
     public static bool IsAlive(this IMapObjectTarget target) => target is ResourceInstance resource
-        ? resource.IsRuntimeActive : target is RobotArmInstance arm ? arm.IsRuntimeActive : target is MapObject component && component != null;
-    public static bool IsAliveTarget(object target) => target is ResourceInstance resource
-        ? resource.IsRuntimeActive : target is RobotArmInstance arm ? arm.IsRuntimeActive : target is Object unityObject && unityObject != null;
+        ? resource.IsRuntimeActive
+        : target is RobotArmInstance arm
+            ? arm.IsRuntimeActive
+            : target is BuildingRuntimeRecord building
+                ? building.IsRuntimeActive
+                : target is MapObject component && component != null;
+    public static bool IsAliveTarget(object target) => target is PortableObject portableObject
+        ? portableObject.IsAlive
+        : target is ResourceInstance resource
+            ? resource.IsRuntimeActive
+            : target is RobotArmInstance arm
+                ? arm.IsRuntimeActive
+                : target is BuildingRuntimeRecord building
+                    ? building.IsRuntimeActive
+                    : target is Object unityObject && unityObject != null;
 }

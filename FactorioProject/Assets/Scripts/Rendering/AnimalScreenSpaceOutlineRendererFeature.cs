@@ -14,14 +14,12 @@ public static class AnimalScreenSpaceOutline
     {
         get
         {
-            focusedRenderer = ResolveActive(focusedRenderer);
-            pickupRenderer = ResolveActive(pickupRenderer);
-            hoveredRenderer = ResolveActive(hoveredRenderer);
-            return pickupRenderer != null
-                ? pickupRenderer
-                : focusedRenderer != null
-                    ? focusedRenderer
-                    : hoveredRenderer;
+            // Drop animations temporarily hide their renderer before launch.
+            // Visibility only filters drawing; Show/Hide owns the focus request.
+            Renderer activePickup = ResolveActive(pickupRenderer);
+            if (activePickup != null) return activePickup;
+            Renderer activeFocused = ResolveActive(focusedRenderer);
+            return activeFocused != null ? activeFocused : ResolveActive(hoveredRenderer);
         }
     }
 

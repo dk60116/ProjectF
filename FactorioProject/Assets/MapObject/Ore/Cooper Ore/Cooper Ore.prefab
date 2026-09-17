@@ -182,7 +182,6 @@ MonoBehaviour:
   objectName: Cooper ore
   objId: 14
   itemDefinition: {fileID: 11400000, guid: 9f4a67f687b990743914d4045038aa8e, type: 2}
-  portableObj: {fileID: 0}
   mapStatus:
     mapSizeX: 1
     mapSizeY: 1

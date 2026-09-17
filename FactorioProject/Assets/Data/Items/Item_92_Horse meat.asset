@@ -13,7 +13,7 @@ MonoBehaviour:
   m_Name: Item_92_Horse meat
   m_EditorClassIdentifier: Assembly-CSharp::ItemDefinition
   itemName: Horse meat
-  id: 90
+  id: 91
   mapObject: {fileID: 0}
   mapObjectArchetype: {fileID: 0}
   useMapColor: 0

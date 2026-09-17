@@ -13,7 +13,7 @@ MonoBehaviour:
   m_Name: Item_73_Handcart
   m_EditorClassIdentifier: Assembly-CSharp::ItemDefinition
   itemName: Handcart
-  id: 100
+  id: 101
   mapObject: {fileID: 1311924932887929831, guid: ee02ddd42c01fdd46b2f5e3d7b8bdd2f, type: 3}
   mapObjectArchetype: {fileID: 11400000, guid: 94d68673dd72136438618ba4c9fa0b18, type: 2}
   useMapColor: 1

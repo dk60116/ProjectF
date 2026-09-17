@@ -6,8 +6,7 @@ namespace ProjectF.MapObjects
 {
     /// <summary>
     /// Owns all visual instance data for one ItemDefinition ID.
-    /// Root transforms are stored by generation-safe handle; child transforms are derived from
-    /// the baked archetype without creating per-instance Transform hierarchies.
+    /// Root transforms are stored by generation-safe handle. Specialized data worlds are excluded.
     /// </summary>
     [DisallowMultipleComponent]
     public sealed class StaticMapObjectTypeHost : MonoBehaviour
@@ -270,6 +269,7 @@ namespace ProjectF.MapObjects
             if (sourceInstallation is ConveyorBelt
                 || sourceInstallation is Pipe
                 || sourceInstallation is RobotArm
+                || sourceInstallation is Building
                 || sourceInstallation is Vehicle)
             {
                 return false;

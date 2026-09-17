@@ -87,10 +87,6 @@ public class Player : Character
     private PlayerBag handBag;
     private readonly HashSet<PortableObject> reservedHandStack = new HashSet<PortableObject>();
     private bool isCarrying;
-    private bool dropExitPending;
-    private Vector2Int dropExitOriginCoord;
-    private Vector2Int lastDropTargetCoord;
-    private bool hasLastDropTarget;
 
     [Header("Equips")]
     [SerializeField]
@@ -953,56 +949,6 @@ public class Player : Character
         return false;
     }
 
-    public void MarkDropExitGate(Vector3 origin, float radius)
-    {
-        dropExitOriginCoord = new Vector2Int(
-            Mathf.RoundToInt(origin.x),
-            Mathf.RoundToInt(origin.z));
-        dropExitPending = true;
-    }
-
-    public void SetLastDropTarget(Vector2Int coordinate)
-    {
-        lastDropTargetCoord = coordinate;
-        hasLastDropTarget = true;
-    }
-
-    public void UpdateDropExitGate(Vector3 currentPosition)
-    {
-        if (!dropExitPending)
-        {
-            return;
-        }
-
-        Vector2Int currentCoord = new Vector2Int(
-            Mathf.RoundToInt(currentPosition.x),
-            Mathf.RoundToInt(currentPosition.z));
-        if (currentCoord != dropExitOriginCoord)
-        {
-            dropExitPending = false;
-            hasLastDropTarget = false;
-        }
-    }
-
-    public bool IsDropExitPending => dropExitPending;
-
-    public bool TryGetLastDropTarget(out Vector2Int coordinate)
-    {
-        if (hasLastDropTarget)
-        {
-            coordinate = lastDropTargetCoord;
-            return true;
-        }
-
-        coordinate = default;
-        return false;
-    }
-
-    public void ClearLastDropTarget()
-    {
-        hasLastDropTarget = false;
-    }
-
     public PlayerState State => playerState;
 
     public PlayerSaveData CaptureSaveState()
@@ -1102,8 +1048,6 @@ public class Player : Character
         transform.SetPositionAndRotation(rootPosition, saveData.rotation);
         Physics.SyncTransforms();
         StopImmediateActions();
-        dropExitPending = false;
-        hasLastDropTarget = false;
     }
 
     private Vector3 ResolveSavePosition()

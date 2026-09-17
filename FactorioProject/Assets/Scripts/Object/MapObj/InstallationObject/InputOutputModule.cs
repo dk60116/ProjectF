@@ -15,12 +15,12 @@ public class InputOutputModule : InstallationObject,
         None = 0,
         PullFluid = 1 << 0,
         AdvanceCraft = 1 << 1,
-        StartCraft = 1 << 2
+        StartCraft = 1 << 2,
+        DrainOutputAreaStack = 1 << 3
     }
     public static event System.Action<InputOutputModule> RuntimePipeTopologyChanged;
 
     private ProjectF.FluidTransport.FluidOutputRateMeter fluidOutputRateMeter;
-    private ProjectF.FluidTransport.FluidOutputRateMeter fluidConsumptionRateMeter;
 
     protected void RecordFluidNetworkOutput(int fluidItemId, float acceptedLiters)
     {
@@ -48,29 +48,6 @@ public class InputOutputModule : InstallationObject,
     public virtual float GetObjectInfoFluidPressureLitersPerSecond(int fluidItemId)
     {
         return GetObjectInfoFluidOutputLitersPerSecond(fluidItemId);
-    }
-
-    protected void RecordFluidNetworkConsumption(int fluidItemId, float consumedLiters)
-    {
-        if (consumedLiters <= 0f)
-        {
-            return;
-        }
-
-        fluidConsumptionRateMeter ??= new ProjectF.FluidTransport.FluidOutputRateMeter();
-        fluidConsumptionRateMeter.Record(
-            fluidItemId,
-            consumedLiters,
-            MapObjectTickManager.CurrentSimulationTimeSeconds);
-    }
-
-    public float GetObjectInfoFluidPressureConsumptionLitersPerSecond(int fluidItemId)
-    {
-        return isActiveAndEnabled && fluidConsumptionRateMeter != null
-            ? fluidConsumptionRateMeter.GetLitersPerSecond(
-                fluidItemId,
-                MapObjectTickManager.CurrentSimulationTimeSeconds)
-            : 0f;
     }
 
     public static void AppendFluidOutputSourcesAtCoordinate(
@@ -105,35 +82,69 @@ public class InputOutputModule : InstallationObject,
         }
     }
 
-    public static void AppendFluidPressureConsumersAtCoordinate(
+    internal static bool TryGetRuntimeFluidOutputDirectionAtCoordinate(
         Vector2Int coordinate,
-        Vector2Int directionToPipe,
-        ISet<InputOutputModule> consumers)
+        out Vector2Int directionToPipe)
     {
-        if (consumers == null
-            || !registeredRuntimeAreaCoordinates.TryGetValue(
+        directionToPipe = Vector2Int.zero;
+        if (!registeredRuntimeFluidOutputCoordinates.TryGetValue(
                 coordinate,
                 out HashSet<InputOutputModule> modules))
         {
-            return;
+            return false;
         }
 
+        InputOutputModule selectedSource = null;
         foreach (InputOutputModule module in modules)
         {
             if (module == null
                 || !module.isActiveAndEnabled
-                || !module.ContainsRuntimeFluidPressureInputCoordinate(coordinate)
-                || (directionToPipe != Vector2Int.zero
-                    && (!module.TryGetRuntimePipeAreaExternalDirection(
-                            coordinate,
-                            out Vector2Int externalDirection)
-                        || externalDirection != directionToPipe)))
+                || !module.ContainsRuntimeOutputCoordinate(coordinate)
+                || !module.TryGetRuntimePipeAreaExternalDirection(
+                    coordinate,
+                    out Vector2Int candidateDirection)
+                || candidateDirection == Vector2Int.zero)
             {
                 continue;
             }
 
-            consumers.Add(module);
+            if (selectedSource == null || CompareSimulationOrder(module, selectedSource) < 0)
+            {
+                selectedSource = module;
+                directionToPipe = candidateDirection;
+            }
         }
+
+        return selectedSource != null;
+    }
+
+    internal static bool HasRuntimeFluidOutputTowardsPipe(
+        Vector2Int coordinate,
+        Vector2Int directionToPipe)
+    {
+        if (directionToPipe == Vector2Int.zero
+            || !registeredRuntimeFluidOutputCoordinates.TryGetValue(
+                coordinate,
+                out HashSet<InputOutputModule> modules))
+        {
+            return false;
+        }
+
+        foreach (InputOutputModule module in modules)
+        {
+            if (module != null
+                && module.isActiveAndEnabled
+                && module.ContainsRuntimeOutputCoordinate(coordinate)
+                && module.TryGetRuntimePipeAreaExternalDirection(
+                    coordinate,
+                    out Vector2Int candidateDirection)
+                && candidateDirection == directionToPipe)
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     private const float DefaultManagedUpdateTickIntervalSeconds = 0.1f;
@@ -517,12 +528,45 @@ public class InputOutputModule : InstallationObject,
         }
     }
 
+    private readonly struct DirectedSteamPort : IEquatable<DirectedSteamPort>
+    {
+        public readonly Vector2Int Coordinate;
+        public readonly Vector2Int FlowDirection;
+
+        public DirectedSteamPort(Vector2Int coordinate, Vector2Int flowDirection)
+        {
+            Coordinate = coordinate;
+            FlowDirection = flowDirection;
+        }
+
+        public bool Equals(DirectedSteamPort other) =>
+            Coordinate == other.Coordinate && FlowDirection == other.FlowDirection;
+
+        public override bool Equals(object obj) => obj is DirectedSteamPort other && Equals(other);
+
+        public override int GetHashCode()
+        {
+            unchecked
+            {
+                return (Coordinate.GetHashCode() * 397) ^ FlowDirection.GetHashCode();
+            }
+        }
+    }
+
     private readonly Queue<ConnectedFluidSearchNode> connectedFluidSearchQueue =
         new Queue<ConnectedFluidSearchNode>(32);
     private readonly Dictionary<Vector2Int, int> connectedFluidSearchPipeCounts =
         new Dictionary<Vector2Int, int>();
     private readonly HashSet<InstallationObject> connectedFluidStorageCandidates = new HashSet<InstallationObject>();
+    private readonly List<InstallationObject> fluidStorageBodyScratch = new List<InstallationObject>(4);
     private readonly HashSet<SteamGenerator> directedSteamChainVisited = new HashSet<SteamGenerator>();
+    private readonly Queue<DirectedSteamPort> directedSteamPortSearchQueue =
+        new Queue<DirectedSteamPort>(8);
+    private readonly HashSet<DirectedSteamPort> directedSteamVisitedPorts =
+        new HashSet<DirectedSteamPort>();
+    private readonly Queue<Vector2Int> directedSteamPipeSearchQueue = new Queue<Vector2Int>(32);
+    private readonly HashSet<Vector2Int> directedSteamVisitedPipeCoordinates =
+        new HashSet<Vector2Int>();
     private readonly List<Vector2Int> connectedFluidSeedCoordinates = new List<Vector2Int>(8);
     private readonly List<InstallationObject> cachedConnectedFluidSourceStorages = new List<InstallationObject>(8);
     private readonly List<InstallationObject> registeredFluidInputSleepStorages =
@@ -837,7 +881,6 @@ public class InputOutputModule : InstallationObject,
     public override void PrepareForPool()
     {
         fluidOutputRateMeter?.Reset();
-        fluidConsumptionRateMeter?.Reset();
         FacilitySimulationWorld.Unregister(this);
         UnregisterFluidSleepWaiters();
         runtimeSleeping = false;
@@ -1044,6 +1087,183 @@ public class InputOutputModule : InstallationObject,
         return added;
     }
 
+    internal static bool TryGetSteamGeneratorPipePassAtRuntimeCoordinate(
+        Vector2Int coordinate,
+        out SteamGenerator generator,
+        out Vector2Int otherCoordinate,
+        out Vector2Int externalDirection)
+    {
+        generator = null;
+        otherCoordinate = default;
+        externalDirection = default;
+        SelectSteamGeneratorPipePass(
+            registeredRuntimeAreaCoordinates.TryGetValue(
+                coordinate,
+                out HashSet<InputOutputModule> areaModules)
+                ? areaModules
+                : null,
+            coordinate,
+            ref generator,
+            ref otherCoordinate,
+            ref externalDirection);
+        SelectSteamGeneratorPipePass(
+            registeredRuntimeGridCoordinates.TryGetValue(
+                coordinate,
+                out HashSet<InputOutputModule> gridModules)
+                ? gridModules
+                : null,
+            coordinate,
+            ref generator,
+            ref otherCoordinate,
+            ref externalDirection);
+        return generator != null;
+    }
+
+    internal static bool TryGetPumpPipePassAtRuntimeCoordinate(
+        Vector2Int coordinate,
+        out Pump pump,
+        out Vector2Int otherCoordinate,
+        out Vector2Int externalDirection)
+    {
+        pump = null;
+        otherCoordinate = default;
+        externalDirection = default;
+        SelectPumpPipePass(
+            registeredRuntimeAreaCoordinates.TryGetValue(
+                coordinate,
+                out HashSet<InputOutputModule> areaModules)
+                ? areaModules
+                : null,
+            coordinate,
+            ref pump,
+            ref otherCoordinate,
+            ref externalDirection);
+        SelectPumpPipePass(
+            registeredRuntimeGridCoordinates.TryGetValue(
+                coordinate,
+                out HashSet<InputOutputModule> gridModules)
+                ? gridModules
+                : null,
+            coordinate,
+            ref pump,
+            ref otherCoordinate,
+            ref externalDirection);
+        return pump != null;
+    }
+
+    internal static bool TryGetOverlappingSteamSourcePort(
+        SteamGenerator generator,
+        out Vector2Int sourceCoordinate)
+    {
+        sourceCoordinate = default;
+        if (generator == null
+            || !generator.TryGetPlacementRuntime(out Vector2Int anchor, out int quarterTurns)
+            || !generator.TryGetInputCoordinateAndDirection(
+                generator, anchor, quarterTurns, out Vector2Int input, out Vector2Int flowDirection)
+            || input != anchor - flowDirection
+            || !generator.CanReceiveSteamFromDirectedPortAtRuntime(anchor, flowDirection))
+        {
+            return false;
+        }
+
+        // Dense placement puts the upstream outlet at this generator's anchor,
+        // one cell inside its nominal inlet. Use the same directed connection
+        // rule as boiler delivery; a body cell alone is never a fluid edge.
+        if (registeredRuntimeFluidOutputCoordinates.TryGetValue(anchor, out var outputs))
+        {
+            foreach (InputOutputModule output in outputs)
+            {
+                if (output is Boiler boiler && boiler.isActiveAndEnabled
+                    && boiler.TryGetRuntimePipeOutputExternalDirection(anchor, out Vector2Int direction)
+                    && direction == flowDirection)
+                {
+                    sourceCoordinate = anchor;
+                    return true;
+                }
+            }
+        }
+
+        if (registeredRuntimeAreaCoordinates.TryGetValue(anchor, out var modules))
+        {
+            foreach (InputOutputModule module in modules)
+            {
+                if (module is SteamGenerator upstream && upstream != generator
+                    && upstream.isActiveAndEnabled
+                    && upstream.TryGetRuntimePipePassTail(out Vector2Int tail, out Vector2Int direction)
+                    && tail == anchor && direction == flowDirection)
+                {
+                    sourceCoordinate = tail;
+                    return true;
+                }
+            }
+        }
+
+        return false;
+    }
+
+    private static void SelectSteamGeneratorPipePass(
+        IEnumerable<InputOutputModule> modules,
+        Vector2Int coordinate,
+        ref SteamGenerator bestGenerator,
+        ref Vector2Int otherCoordinate,
+        ref Vector2Int externalDirection)
+    {
+        if (modules == null)
+        {
+            return;
+        }
+
+        foreach (InputOutputModule module in modules)
+        {
+            if (!(module is SteamGenerator candidate)
+                || !candidate.gameObject.activeInHierarchy
+                || !candidate.TryGetRuntimeSteamPass(
+                    coordinate,
+                    out Vector2Int candidateOtherCoordinate,
+                    out Vector2Int candidateExternalDirection)
+                || bestGenerator != null
+                && CompareSimulationOrder(candidate, bestGenerator) >= 0)
+            {
+                continue;
+            }
+
+            bestGenerator = candidate;
+            otherCoordinate = candidateOtherCoordinate;
+            externalDirection = candidateExternalDirection;
+        }
+    }
+
+    private static void SelectPumpPipePass(
+        IEnumerable<InputOutputModule> modules,
+        Vector2Int coordinate,
+        ref Pump bestPump,
+        ref Vector2Int otherCoordinate,
+        ref Vector2Int externalDirection)
+    {
+        if (modules == null)
+        {
+            return;
+        }
+
+        foreach (InputOutputModule module in modules)
+        {
+            if (!(module is Pump candidate)
+                || !candidate.gameObject.activeInHierarchy
+                || !candidate.TryGetRuntimePipePass(
+                    coordinate,
+                    out Vector2Int candidateOtherCoordinate,
+                    out Vector2Int candidateExternalDirection)
+                || bestPump != null && CompareSimulationOrder(candidate, bestPump) >= 0)
+            {
+                continue;
+            }
+
+            bestPump = candidate;
+            otherCoordinate = candidateOtherCoordinate;
+            externalDirection = candidateExternalDirection;
+        }
+    }
+
     public static void WakeRuntimeModulesAtCoordinate(Vector2Int coordinate)
     {
         WakeRuntimeModulesAtCoordinate(coordinate, false);
@@ -1144,7 +1364,7 @@ public class InputOutputModule : InstallationObject,
 
         fluidPlacementInvalidationCount++;
         InvalidateFluidTopologyCache();
-        WakeRuntimeModulesAroundInstallation(installationObject);
+        WakeRuntimeFluidTopologyModules();
     }
 
     private static void HandleInstallationPlacementRuntimeCleared(InstallationObject installationObject)
@@ -1157,13 +1377,14 @@ public class InputOutputModule : InstallationObject,
 
         fluidPlacementInvalidationCount++;
         InvalidateFluidTopologyCache();
-        WakeRuntimeModulesAroundInstallation(installationObject);
+        WakeRuntimeFluidTopologyModules();
     }
 
     internal static bool AffectsRuntimeFluidTopology(InstallationObject installationObject)
     {
         return installationObject is Pipe
                || installationObject is Fluidtank
+               || installationObject != null && installationObject.CanStoreFluid
                || installationObject is InputOutputModule module
                && module.HasRuntimePipeTopologyCoordinates();
     }
@@ -1189,8 +1410,15 @@ public class InputOutputModule : InstallationObject,
         InvalidateFluidTopologyCache();
         WakeRuntimeModulesAtCoordinates(coordinates);
 
-        // A pipe added at the far end of an existing route can connect a sleeping
-        // producer without touching one of its registered area coordinates.
+        WakeRuntimeFluidTopologyModules();
+        RuntimePipeTopologyChanged?.Invoke(null);
+    }
+
+    private static void WakeRuntimeFluidTopologyModules()
+    {
+        // Installing/removing either a pipe OR a storage can change the far end
+        // of a sleeping producer's route. Local-coordinate wakes miss it, and an
+        // empty output cache has no storage-capacity waiter to wake it later.
         runtimeWakeScratch.Clear();
         foreach (InputOutputModule module in activeRuntimeModules)
         {
@@ -1208,22 +1436,6 @@ public class InputOutputModule : InstallationObject,
         }
 
         runtimeWakeScratch.Clear();
-    }
-
-    private static void WakeRuntimeModulesAroundInstallation(InstallationObject installationObject)
-    {
-        if (installationObject == null)
-        {
-            return;
-        }
-
-        WakeRuntimeModulesAtCoordinates(installationObject.RuntimeOccupiedCoordinates);
-        if (installationObject is InputOutputModule module)
-        {
-            WakeRuntimeModulesAtCoordinates(module.runtimePipeInputCoordinates);
-            WakeRuntimeModulesAtCoordinates(module.runtimeOutputCoordinates);
-            WakeRuntimeModulesAtCoordinates(module.runtimeGridCoordinates);
-        }
     }
 
     public static bool TryGetRuntimePipeFluidStorageAtCoordinate(
@@ -1292,7 +1504,7 @@ public class InputOutputModule : InstallationObject,
             out storage);
     }
 
-    public static bool TryGetRuntimePipeSourceAtCoordinate(Vector2Int coordinate, out Pump pump)
+    public static bool TryGetRuntimePipeSourceAtCoordinate(Vector2Int coordinate, out WaterPump pump)
     {
         pump = null;
         if (TryGetRuntimePipeSourceAtCoordinate(
@@ -1362,7 +1574,7 @@ public class InputOutputModule : InstallationObject,
         IEnumerable<InputOutputModule> modules,
         Vector2Int coordinate,
         ISet<InputOutputModule> visitedModules,
-        out Pump pump)
+        out WaterPump pump)
     {
         pump = null;
         if (modules == null)
@@ -1375,7 +1587,7 @@ public class InputOutputModule : InstallationObject,
             if (candidate == null
                 || !candidate.gameObject.activeInHierarchy
                 || (visitedModules != null && !visitedModules.Add(candidate))
-                || !(candidate is Pump candidatePump)
+                || !(candidate is WaterPump candidatePump)
                 || !candidate.ContainsRuntimePipeAreaBlockCoordinate(coordinate)
                 || !candidate.ContainsRuntimeOutputCoordinate(coordinate))
             {
@@ -1975,6 +2187,11 @@ public class InputOutputModule : InstallationObject,
             return;
         }
 
+        if (HasDrainableOutputAreaConveyorItem())
+        {
+            plannedModuleCommands |= PlannedModuleCommand.DrainOutputAreaStack;
+        }
+
         if (CanStoreFluid && ShouldAutoPullFluidFromConnectedStorage())
         {
             plannedModuleCommands |= PlannedModuleCommand.PullFluid;
@@ -2016,6 +2233,11 @@ public class InputOutputModule : InstallationObject,
     {
         runtimeSleeping = false;
         EnsureEffectivePairData();
+        if ((plannedModuleCommands & PlannedModuleCommand.DrainOutputAreaStack) != 0)
+        {
+            TryDrainOneOutputAreaItemToConveyor();
+        }
+
         if ((plannedModuleCommands & PlannedModuleCommand.PullFluid) != 0 && CanStoreFluid)
         {
             DiscardIncompatibleStoredFluid();
@@ -2120,7 +2342,9 @@ public class InputOutputModule : InstallationObject,
         // A completed craft whose output is blocked is woken by mutations at its
         // registered output coordinates. Keeping it scheduled would only repeat
         // the same area scan every update interval while nothing has changed.
-        if (ShouldKeepRuntimeUpdateTickActive() || (hasActiveCraft && !waitingForOutput))
+        if (HasDrainableOutputAreaConveyorItem()
+            || ShouldKeepRuntimeUpdateTickActive()
+            || (hasActiveCraft && !waitingForOutput))
         {
             SetRuntimeSleeping(false);
             return;
@@ -2665,13 +2889,17 @@ public class InputOutputModule : InstallationObject,
                 continue;
             }
 
-            EnqueueFluidStoragePipePassCoordinatesAt(coordinate);
             bool isSeedCoordinate = ContainsCoordinate(connectedFluidSeedCoordinates, coordinate);
             bool hasPipe = TryGetConnectedPipeAtCoordinate(
                 coordinate,
                 out Pipe pipe,
                 out Quaternion pipeRotation,
                 out PipeRuntimeRecord pipeRecord);
+            EnqueueFluidStoragePipePassCoordinatesAt(coordinate);
+            bool hasPumpPressureResetPass = TryEnqueuePumpPressureResetPassAt(
+                coordinate,
+                true,
+                out Vector2Int pumpPassExternalDirection);
             TryResolveConnectedFluidSearchStorageAtCoordinate(
                 coordinate,
                 out InstallationObject fluidStorage,
@@ -2681,9 +2909,11 @@ public class InputOutputModule : InstallationObject,
                 fluidStorage,
                 cachedConnectedFluidSourceStorages,
                 cachedConnectedFluidSourcePipeDistances,
-                Mathf.Max(0, connectedFluidSearchCurrentPipeCount - 1));
+                Mathf.Max(
+                    0,
+                    ResolveConnectedFluidPipeCount(connectedFluidSearchCurrentPipeCount) - 1));
 
-            if (!isSeedCoordinate && !hasPipe && !storageIsPipeArea
+            if (!isSeedCoordinate && !hasPipe && !storageIsPipeArea && !hasPumpPressureResetPass
                 && !IsFixedFluidTank(fluidStorage)
                 && !(UsesConnectedTankNetworkStorage && fluidStorage is Fluidtank))
             {
@@ -2693,7 +2923,7 @@ public class InputOutputModule : InstallationObject,
             for (int directionIndex = 0; directionIndex < FluidCardinalDirections.Length; directionIndex++)
             {
                 Vector2Int direction = FluidCardinalDirections[directionIndex];
-                if (hasPipe
+                if (hasPipe && !hasPumpPressureResetPass
                     && !HasConnectedPipeConnectionTowards(
                         pipe,
                         pipeRecord,
@@ -2704,7 +2934,13 @@ public class InputOutputModule : InstallationObject,
                     continue;
                 }
 
-                if (!hasPipe
+                if (hasPumpPressureResetPass
+                    && direction != pumpPassExternalDirection)
+                {
+                    continue;
+                }
+
+                if (!hasPipe && !hasPumpPressureResetPass
                     && !CanFluidSearchLeaveCoordinate(
                         coordinate,
                         isSeedCoordinate,
@@ -2732,17 +2968,22 @@ public class InputOutputModule : InstallationObject,
                     cachedConnectedFluidSourcePipeDistances,
                     Mathf.Max(
                         0,
-                        connectedFluidSearchCurrentPipeCount + (nextNodeIsPipe ? 1 : 0) - 1));
+                        ResolveConnectedFluidPipeCount(
+                            AddConnectedFluidPipeCount(
+                                connectedFluidSearchCurrentPipeCount,
+                                nextNodeIsPipe ? 1 : 0)) - 1));
 
                 if (canContinueRoute || UsesConnectedTankNetworkStorage && nextStorage is Fluidtank)
                 {
                     EnqueueConnectedFluidSearchCoordinate(
                         nextCoordinate,
-                        connectedFluidSearchCurrentPipeCount + (nextNodeIsPipe ? 1 : 0));
+                        AddConnectedFluidPipeCount(
+                            connectedFluidSearchCurrentPipeCount,
+                            nextNodeIsPipe ? 1 : 0));
                 }
             }
 
-            if (hasPipe
+            if (hasPipe && !hasPumpPressureResetPass
                 && TryGetConnectedPipeRemoteCoordinate(
                     pipe,
                     pipeRecord,
@@ -2751,10 +2992,12 @@ public class InputOutputModule : InstallationObject,
             {
                 EnqueueConnectedFluidSearchCoordinate(
                     remoteCoordinate,
-                    Pipe.AddRemoteTraversalPipeDistance(
-                        connectedFluidSearchCurrentPipeCount,
-                        coordinate,
-                        remoteCoordinate));
+                    IsConnectedFluidPipeCountFrozen(connectedFluidSearchCurrentPipeCount)
+                        ? connectedFluidSearchCurrentPipeCount
+                        : Pipe.AddRemoteTraversalPipeDistance(
+                            connectedFluidSearchCurrentPipeCount,
+                            coordinate,
+                            remoteCoordinate));
             }
         }
 
@@ -2807,6 +3050,32 @@ public class InputOutputModule : InstallationObject,
         }
 
         return foundPipeArea;
+    }
+
+    private bool TryEnqueuePumpPressureResetPassAt(
+        Vector2Int coordinate,
+        bool freezeCurrentPipeCount,
+        out Vector2Int externalDirection)
+    {
+        externalDirection = Vector2Int.zero;
+        if (!TryGetPumpPipePassAtRuntimeCoordinate(
+                coordinate,
+                out _,
+                out Vector2Int otherCoordinate,
+                out Vector2Int candidateExternalDirection))
+        {
+            return false;
+        }
+
+        externalDirection = candidateExternalDirection;
+        // A pump starts a fresh pipe-loss section instead of carrying the
+        // accumulated distance through its body.
+        EnqueueConnectedFluidSearchCoordinate(
+            otherCoordinate,
+            freezeCurrentPipeCount
+                ? FreezeConnectedFluidPipeCount(connectedFluidSearchCurrentPipeCount)
+                : 0);
+        return true;
     }
 
     private bool TrySelectConnectedFluidSourceFromCache(
@@ -3049,6 +3318,21 @@ public class InputOutputModule : InstallationObject,
         canContinueRoute = false;
         isPipeNode = false;
 
+        // A PipePass owns its endpoint even when a pipe is installed on the
+        // same cell. Checking that overlapping pipe first can reject a valid
+        // pass because its resolved visual variant need not expose the inward
+        // connection in the runtime pipe mask.
+        if (TryGetPumpPipePassAtRuntimeCoordinate(
+                coordinate,
+                out _,
+                out _,
+                out Vector2Int pumpExternalDirection)
+            && pumpExternalDirection == directionToPrevious)
+        {
+            canContinueRoute = true;
+            return true;
+        }
+
         if (TryGetConnectedPipeAtCoordinate(
                 coordinate,
                 out Pipe pipe,
@@ -3082,11 +3366,11 @@ public class InputOutputModule : InstallationObject,
                 out storage,
                 out bool storageIsPipeArea))
         {
-            if (this is Pump
+            if (this is WaterPump
                 && storage is SteamTrain steamTrain
                 && !steamTrain.CanAcceptWaterFromPipeDirection(
                     -directionToPrevious,
-                    Pump.ResolveWaterItemId(null),
+                    WaterPump.ResolveWaterItemId(null),
                     false))
             {
                 storage = null;
@@ -3125,6 +3409,27 @@ public class InputOutputModule : InstallationObject,
         pipe = null;
         pipeRotation = Quaternion.identity;
         pipeRecord = null;
+
+        // Data-only pipes are owned by PipeWorld. A loaded Block binding is only
+        // a view/cache and can legitimately be absent when a pipe overlaps an
+        // installation pipe area. Fluid transport must therefore use the world
+        // record first, just like pipe pressure and tank-network searches do.
+        PipeWorld pipeWorld = PipeWorld.Current;
+        if (pipeWorld != null
+            && pipeWorld.TryGetAtCoordinate(coordinate, out pipeRecord)
+            && pipeRecord != null)
+        {
+            pipe = pipeRecord.Prototype;
+            pipeRotation = pipeRecord.WorldRotation;
+            if (pipe != null)
+            {
+                return true;
+            }
+
+            pipeRecord = null;
+            pipeRotation = Quaternion.identity;
+        }
+
         if (!TryGetLoadedBlock(coordinate, out Block block)
             || block == null)
         {
@@ -3193,22 +3498,7 @@ public class InputOutputModule : InstallationObject,
             return true;
         }
 
-        storage = null;
-        if (!TryGetLoadedBlock(coordinate, out Block block)
-            || block == null
-            || !(block.MapObject is InstallationObject installationObject)
-            || installationObject == this
-            || installationObject is Pipe
-            || installationObject is Pump
-            || !installationObject.gameObject.activeInHierarchy
-            || !installationObject.CanStoreFluid
-            || (storageFilter != null && !storageFilter(installationObject)))
-        {
-            return false;
-        }
-
-        storage = installationObject;
-        return true;
+        return TryResolveConnectedFluidStorageBodyAtCoordinate(coordinate, out storage, storageFilter);
     }
 
     private bool TryResolveConnectedFluidSearchStorageAtCoordinate(
@@ -3219,7 +3509,8 @@ public class InputOutputModule : InstallationObject,
         storageIsPipeArea = false;
         if (TryGetRuntimePipeFluidStorageAtCoordinate(coordinate, this, false, out storage))
         {
-            if (storage is SteamGenerator)
+            if (storage is SteamGenerator generator
+                && (!(this is Boiler) || !directedSteamChainVisited.Contains(generator)))
             {
                 storage = null;
                 return false;
@@ -3346,35 +3637,46 @@ public class InputOutputModule : InstallationObject,
 
     private bool TryResolveConnectedFluidStorageBodyAtCoordinate(
         Vector2Int coordinate,
-        out InstallationObject storage)
+        out InstallationObject storage,
+        System.Predicate<InstallationObject> storageFilter = null)
     {
         // Trains are moving installations and deliberately are not written to
         // Block.MapObject. A ready water-pipe dock registers its current grid
         // coordinate separately so the pipe search can still resolve the tank.
         if (SteamTrain.TryGetWaterPipeReceiverAtCoordinate(
                 coordinate,
-                out SteamTrain waterReceiver))
+                out SteamTrain waterReceiver)
+            && (storageFilter == null || storageFilter(waterReceiver)))
         {
             storage = waterReceiver;
             return true;
         }
 
         storage = null;
-        if (!TryGetLoadedBlock(coordinate, out Block block)
-            || block == null
-            || !(block.MapObject is InstallationObject installationObject)
-            || installationObject == this
-            || installationObject is Pipe
-            || installationObject is Pump
-            || !installationObject.gameObject.activeInHierarchy
-            || !installationObject.CanStoreFluid
-            || !ContainsRuntimeOccupiedCoordinate(installationObject, coordinate))
+        // Multiple installations can share a grid cell. Block.MapObject holds
+        // only the representative object; the placement index owns all storages.
+        fluidStorageBodyScratch.Clear();
+        CollectActiveInstallationsAtRuntimeGridCoordinate(coordinate, fluidStorageBodyScratch);
+        for (int i = 0; i < fluidStorageBodyScratch.Count; i++)
         {
-            return false;
+            InstallationObject candidate = fluidStorageBodyScratch[i];
+            if (candidate == null || candidate == this
+                || candidate is Pipe || candidate is WaterPump
+                || !candidate.gameObject.activeInHierarchy || !candidate.CanStoreFluid
+                || !ContainsRuntimeOccupiedCoordinate(candidate, coordinate)
+                || storageFilter != null && !storageFilter(candidate))
+            {
+                continue;
+            }
+
+            if (storage == null || CompareSimulationOrder(candidate, storage) < 0)
+            {
+                storage = candidate;
+            }
         }
 
-        storage = installationObject;
-        return true;
+        fluidStorageBodyScratch.Clear();
+        return storage != null;
     }
 
     private static bool ContainsRuntimeOccupiedCoordinate(InstallationObject installationObject, Vector2Int coordinate)
@@ -3403,7 +3705,7 @@ public class InputOutputModule : InstallationObject,
         if (connectedFluidSearchPipeCounts.TryGetValue(
                 coordinate,
                 out int previousPipeCount)
-            && previousPipeCount <= pipeCount)
+            && !IsBetterConnectedFluidPipeCount(pipeCount, previousPipeCount))
         {
             return;
         }
@@ -3411,6 +3713,50 @@ public class InputOutputModule : InstallationObject,
         connectedFluidSearchPipeCounts[coordinate] = pipeCount;
         connectedFluidSearchQueue.Enqueue(
             new ConnectedFluidSearchNode(coordinate, pipeCount));
+    }
+
+    private static int FreezeConnectedFluidPipeCount(int pipeCount)
+    {
+        return IsConnectedFluidPipeCountFrozen(pipeCount)
+            ? pipeCount
+            : -Mathf.Max(0, pipeCount) - 1;
+    }
+
+    private static int AddConnectedFluidPipeCount(int pipeCount, int amount)
+    {
+        if (IsConnectedFluidPipeCountFrozen(pipeCount))
+        {
+            return pipeCount;
+        }
+
+        long result = (long)Mathf.Max(0, pipeCount) + Mathf.Max(0, amount);
+        return result >= int.MaxValue ? int.MaxValue : (int)result;
+    }
+
+    private static bool IsBetterConnectedFluidPipeCount(int candidate, int current)
+    {
+        int candidateCount = ResolveConnectedFluidPipeCount(candidate);
+        int currentCount = ResolveConnectedFluidPipeCount(current);
+        return candidateCount < currentCount
+               || candidateCount == currentCount
+               && IsConnectedFluidPipeCountFrozen(candidate)
+               && !IsConnectedFluidPipeCountFrozen(current);
+    }
+
+    private static bool IsConnectedFluidPipeCountFrozen(int pipeCount)
+    {
+        return pipeCount < 0;
+    }
+
+    private static int ResolveConnectedFluidPipeCount(int pipeCount)
+    {
+        if (!IsConnectedFluidPipeCountFrozen(pipeCount))
+        {
+            return Mathf.Max(0, pipeCount);
+        }
+
+        long decodedCount = -(long)pipeCount - 1L;
+        return decodedCount >= int.MaxValue ? int.MaxValue : (int)decodedCount;
     }
 
     private static bool IsFixedFluidTank(InstallationObject storage)
@@ -3457,7 +3803,6 @@ public class InputOutputModule : InstallationObject,
         if (ProjectFApplicationLifecycle.IsQuitting) return;
 
         fluidOutputRateMeter?.Reset();
-        fluidConsumptionRateMeter?.Reset();
         bool hadRuntimePipeTopologyCoordinates = HasRuntimePipeTopologyCoordinates();
         SetWorkAnimatorState(false, true);
         StopCraftParticleEffectVisual(true);
@@ -3646,13 +3991,6 @@ public class InputOutputModule : InstallationObject,
     private bool ContainsRuntimePipeInputCoordinate(Vector2Int coordinate)
     {
         return ContainsCoordinate(runtimePipeInputCoordinates, coordinate);
-    }
-
-    private bool ContainsRuntimeFluidPressureInputCoordinate(Vector2Int coordinate)
-    {
-        return ContainsRuntimePipeInputCoordinate(coordinate)
-               || ContainsRuntimeRectGridBlockType(coordinate, RectGridBlockType.PipeInputItem)
-               || ContainsRuntimeRectGridBlockType(coordinate, RectGridBlockType.PipeInputEnergy);
     }
 
     protected virtual bool AppendOutputItemIds(ISet<int> outputItemIds)
@@ -6108,6 +6446,36 @@ public class InputOutputModule : InstallationObject,
         return false;
     }
 
+    private bool HasDrainableOutputAreaConveyorItem()
+    {
+        for (int i = 0; i < runtimeOutputCoordinates.Count; i++)
+        {
+            if (TryGetLoadedBlock(runtimeOutputCoordinates[i], out Block block)
+                && block != null
+                && block.CanTransferOneInputAreaCenterObjectToConveyor())
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private bool TryDrainOneOutputAreaItemToConveyor()
+    {
+        for (int i = 0; i < runtimeOutputCoordinates.Count; i++)
+        {
+            if (TryGetLoadedBlock(runtimeOutputCoordinates[i], out Block block)
+                && block != null
+                && block.TryTransferOneInputAreaCenterObjectToConveyor())
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
     private bool TryGetRecipePair(int recipeIndex, out int inputItemId, out int inputCount, out int outputItemId, out int outputCount)
     {
         inputItemId = -1;
@@ -6662,10 +7030,6 @@ public class InputOutputModule : InstallationObject,
         if (this is Boiler boiler)
         {
             BuildDirectedBoilerSteamOutputCache(boiler);
-            cachedFluidOutputConnections.Sort(CompareFluidOutputConnectionOrder);
-            cachedFluidOutputConnectionIndices.Clear();
-            cachedFluidOutputConnectionsTopologyVersion = fluidTopologyVersion;
-            return cachedFluidOutputConnections.Count > 0;
         }
 
         for (int i = 0; i < runtimeOutputCoordinates.Count; i++)
@@ -6688,7 +7052,6 @@ public class InputOutputModule : InstallationObject,
                 continue;
             }
 
-            EnqueueFluidStoragePipePassCoordinatesAt(coordinate);
             AddFluidOutputStorageCacheCandidatesAtCoordinate(
                 coordinate,
                 Mathf.Max(0, connectedFluidSearchCurrentPipeCount - 1));
@@ -6699,6 +7062,11 @@ public class InputOutputModule : InstallationObject,
                 out Pipe pipe,
                 out Quaternion pipeRotation,
                 out PipeRuntimeRecord pipeRecord);
+            EnqueueFluidStoragePipePassCoordinatesAt(coordinate);
+            bool hasPumpPressureResetPass = TryEnqueuePumpPressureResetPassAt(
+                coordinate,
+                false,
+                out Vector2Int pumpPassExternalDirection);
             TryResolveConnectedFluidSearchStorageAtCoordinate(
                 coordinate,
                 out InstallationObject fluidStorage,
@@ -6707,6 +7075,7 @@ public class InputOutputModule : InstallationObject,
             if (!isOutputSeed
                 && !hasPipe
                 && !storageIsPipeArea
+                && !hasPumpPressureResetPass
                 && !IsFixedFluidTank(fluidStorage))
             {
                 continue;
@@ -6715,7 +7084,7 @@ public class InputOutputModule : InstallationObject,
             for (int directionIndex = 0; directionIndex < FluidCardinalDirections.Length; directionIndex++)
             {
                 Vector2Int direction = FluidCardinalDirections[directionIndex];
-                if (hasPipe
+                if (hasPipe && !hasPumpPressureResetPass
                     && !HasConnectedPipeConnectionTowards(
                         pipe,
                         pipeRecord,
@@ -6726,7 +7095,13 @@ public class InputOutputModule : InstallationObject,
                     continue;
                 }
 
-                if (!hasPipe
+                if (hasPumpPressureResetPass
+                    && direction != pumpPassExternalDirection)
+                {
+                    continue;
+                }
+
+                if (!hasPipe && !hasPumpPressureResetPass
                     && !CanFluidSearchLeaveCoordinate(
                         coordinate,
                         isOutputSeed,
@@ -6760,7 +7135,7 @@ public class InputOutputModule : InstallationObject,
                 }
             }
 
-            if (hasPipe
+            if (hasPipe && !hasPumpPressureResetPass
                 && TryGetConnectedPipeRemoteCoordinate(
                     pipe,
                     pipeRecord,
@@ -6818,6 +7193,18 @@ public class InputOutputModule : InstallationObject,
     {
         directedSteamChainVisited.Clear();
         AddDirectedBoilerSteamChains(boiler, directedSteamChainVisited, this);
+        // Continue the common storage search beyond each validated generator.
+        // The directed traversal discovers generators but does not collect tanks.
+        foreach (SteamGenerator generator in directedSteamChainVisited)
+        {
+            if (generator.TryGetRuntimePipePassTail(out Vector2Int tail, out Vector2Int direction)
+                && (!TryGetConnectedPipeAtCoordinate(tail, out Pipe pipe,
+                        out Quaternion rotation, out PipeRuntimeRecord record)
+                    || HasConnectedPipeConnectionTowards(pipe, record, tail, rotation, -direction)))
+            {
+                EnqueueConnectedFluidSearchCoordinate(tail, 0);
+            }
+        }
     }
 
     private static void AddDirectedBoilerSteamChains(
@@ -6830,6 +7217,11 @@ public class InputOutputModule : InstallationObject,
             return;
         }
 
+        boiler.directedSteamPortSearchQueue.Clear();
+        boiler.directedSteamVisitedPorts.Clear();
+        boiler.directedSteamPipeSearchQueue.Clear();
+        boiler.directedSteamVisitedPipeCoordinates.Clear();
+
         IReadOnlyList<Vector2Int> outputCoordinates = boiler.runtimeOutputCoordinates;
         for (int outputIndex = 0; outputIndex < outputCoordinates.Count; outputIndex++)
         {
@@ -6841,21 +7233,156 @@ public class InputOutputModule : InstallationObject,
                 continue;
             }
 
-            while (TryFindDirectedSteamGenerator(
-                       sourcePortCoordinate,
-                       flowDirection,
-                       visited,
-                       out SteamGenerator generator))
+            EnqueueDirectedSteamPort(boiler, sourcePortCoordinate, flowDirection);
+        }
+
+        while (boiler.directedSteamPortSearchQueue.Count > 0)
+        {
+            DirectedSteamPort sourcePort = boiler.directedSteamPortSearchQueue.Dequeue();
+            if (!boiler.directedSteamVisitedPorts.Add(sourcePort))
             {
-                visited.Add(generator);
-                outputCacheOwner?.AddFluidOutputStorageCacheCandidate(generator, 0);
-                if (!generator.TryGetRuntimePipePassTail(
-                        out sourcePortCoordinate,
-                        out flowDirection))
+                continue;
+            }
+
+            TryAppendDirectedSteamGeneratorAtPort(boiler, sourcePort, visited, outputCacheOwner);
+            EnqueueDirectedSteamPipesAtPort(boiler, sourcePort);
+
+            // Pipes are an undirected transport network, while each generator keeps
+            // a directed inlet/tail. Traverse every reciprocal pipe edge, then hand
+            // the flow direction of that edge to the generator inlet check.
+            while (boiler.directedSteamPipeSearchQueue.Count > 0)
+            {
+                Vector2Int pipeCoordinate = boiler.directedSteamPipeSearchQueue.Dequeue();
+                if (!boiler.directedSteamVisitedPipeCoordinates.Add(pipeCoordinate)
+                    || !boiler.TryGetConnectedPipeAtCoordinate(
+                        pipeCoordinate,
+                        out Pipe pipe,
+                        out Quaternion pipeRotation,
+                        out PipeRuntimeRecord pipeRecord))
                 {
-                    break;
+                    continue;
+                }
+
+                for (int directionIndex = 0; directionIndex < FluidCardinalDirections.Length; directionIndex++)
+                {
+                    Vector2Int direction = FluidCardinalDirections[directionIndex];
+                    if (!HasConnectedPipeConnectionTowards(
+                            pipe,
+                            pipeRecord,
+                            pipeCoordinate,
+                            pipeRotation,
+                            direction))
+                    {
+                        continue;
+                    }
+
+                    TryAppendDirectedSteamGeneratorAtPort(
+                        boiler,
+                        new DirectedSteamPort(pipeCoordinate, direction),
+                        visited,
+                        outputCacheOwner);
+
+                    Vector2Int nextPipeCoordinate = pipeCoordinate + direction;
+                    if (boiler.TryGetConnectedPipeAtCoordinate(
+                            nextPipeCoordinate,
+                            out Pipe nextPipe,
+                            out Quaternion nextPipeRotation,
+                            out PipeRuntimeRecord nextPipeRecord)
+                        && HasConnectedPipeConnectionTowards(
+                            nextPipe,
+                            nextPipeRecord,
+                            nextPipeCoordinate,
+                            nextPipeRotation,
+                            -direction))
+                    {
+                        boiler.directedSteamPipeSearchQueue.Enqueue(nextPipeCoordinate);
+                    }
+                }
+
+                if (TryGetConnectedPipeRemoteCoordinate(
+                        pipe,
+                        pipeRecord,
+                        pipeCoordinate,
+                        out Vector2Int remoteCoordinate))
+                {
+                    boiler.directedSteamPipeSearchQueue.Enqueue(remoteCoordinate);
                 }
             }
+        }
+    }
+
+    private static void EnqueueDirectedSteamPort(
+        Boiler boiler,
+        Vector2Int sourcePortCoordinate,
+        Vector2Int flowDirection)
+    {
+        if (boiler == null || flowDirection == Vector2Int.zero)
+        {
+            return;
+        }
+
+        boiler.directedSteamPortSearchQueue.Enqueue(
+            new DirectedSteamPort(sourcePortCoordinate, flowDirection));
+    }
+
+    private static void TryAppendDirectedSteamGeneratorAtPort(
+        Boiler boiler,
+        DirectedSteamPort sourcePort,
+        HashSet<SteamGenerator> visited,
+        InputOutputModule outputCacheOwner)
+    {
+        if (!TryFindDirectedSteamGenerator(
+                sourcePort.Coordinate,
+                sourcePort.FlowDirection,
+                visited,
+                out SteamGenerator generator))
+        {
+            return;
+        }
+
+        visited.Add(generator);
+        outputCacheOwner?.AddFluidOutputStorageCacheCandidate(generator, 0);
+        if (generator.TryGetRuntimePipePassTail(
+                out Vector2Int tailCoordinate,
+                out Vector2Int tailDirection))
+        {
+            EnqueueDirectedSteamPort(boiler, tailCoordinate, tailDirection);
+        }
+    }
+
+    private static void EnqueueDirectedSteamPipesAtPort(
+        Boiler boiler,
+        DirectedSteamPort sourcePort)
+    {
+        if (boiler.TryGetConnectedPipeAtCoordinate(
+                sourcePort.Coordinate,
+                out Pipe overlappingPipe,
+                out Quaternion overlappingPipeRotation,
+                out PipeRuntimeRecord overlappingPipeRecord)
+            && HasConnectedPipeConnectionTowards(
+                overlappingPipe,
+                overlappingPipeRecord,
+                sourcePort.Coordinate,
+                overlappingPipeRotation,
+                sourcePort.FlowDirection))
+        {
+            boiler.directedSteamPipeSearchQueue.Enqueue(sourcePort.Coordinate);
+        }
+
+        Vector2Int adjacentCoordinate = sourcePort.Coordinate + sourcePort.FlowDirection;
+        if (boiler.TryGetConnectedPipeAtCoordinate(
+                adjacentCoordinate,
+                out Pipe adjacentPipe,
+                out Quaternion adjacentPipeRotation,
+                out PipeRuntimeRecord adjacentPipeRecord)
+            && HasConnectedPipeConnectionTowards(
+                adjacentPipe,
+                adjacentPipeRecord,
+                adjacentCoordinate,
+                adjacentPipeRotation,
+                -sourcePort.FlowDirection))
+        {
+            boiler.directedSteamPipeSearchQueue.Enqueue(adjacentCoordinate);
         }
     }
 
@@ -7049,7 +7576,8 @@ public class InputOutputModule : InstallationObject,
         if (storage == null
             || storage == this
             || !storage.CanStoreFluid
-            || storage is SteamGenerator && !(this is Boiler))
+            || storage is SteamGenerator generator
+            && (!(this is Boiler) || !directedSteamChainVisited.Contains(generator)))
         {
             return;
         }

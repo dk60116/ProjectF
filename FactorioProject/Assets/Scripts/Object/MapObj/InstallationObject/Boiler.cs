@@ -802,10 +802,6 @@ public class Boiler : InputOutputModule, IFacilityFlowAdapter, IFacilityFlowStat
             SetStoredFluidTemperatureCelsius(waterTemperatureCelsius);
         }
 
-        RecordFluidNetworkConsumption(
-            inputItemId,
-            Mathf.Max(0f, acceptedLiters) * waterLitersPerSteamLiter);
-
         batch.CommitBoilerOutput(index, acceptedLiters);
         preserveSteamReadyTemperatureForMakeupWater = true;
         return true;

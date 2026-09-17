@@ -15,6 +15,7 @@ public partial class TerrainGenerator : MonoBehaviour
     private const int MaxConveyorSlotDotInstancesPerBatch = 1023;
     private const int MaxBeltDirectionArrowInstancesPerBatch = 1023;
     private const int BeltDirectionArrowRenderQueue = 5000;
+    private const string BeltDirectionArrowMaterialResourcePath = "Materials/BeltDirectionArrowInstanced";
     private const int MaxBeltItemLineDebugRefreshesPerFrame = 128;
     private const float ConveyorLineBlockedRetryInterval = 0.2f;
     private const float ConveyorLineBlockedRetryMaxInterval = 2.4f;
@@ -26,7 +27,6 @@ public partial class TerrainGenerator : MonoBehaviour
     private const float ConveyorLineMovedReadyWakeDelay = 0.02f;
     private const float ConveyorSlotDotInstancedDiameter = 0.08f;
     private static readonly Color ConveyorSlotDotInstancedColor = new Color(1f, 0.36f, 0.08f, 1f);
-    private static readonly Color BeltDirectionArrowInstancedColor = new Color(1f, 0.92f, 0.08f, 1f);
     private static readonly ProfilerMarker ConveyorCornerGroupCollectMarker =
         new ProfilerMarker("TerrainGenerator.TickConveyors.CornerGroupCollect");
     private static readonly ProfilerMarker ConveyorCornerGroupTickMarker =
@@ -4019,57 +4019,21 @@ public partial class TerrainGenerator : MonoBehaviour
 
     private void EnsureBeltDirectionArrowInstancedResources()
     {
-        Shader shader = Shader.Find("Custom/InstallGridOverlay");
-        if (shader == null)
-        {
-            shader = Shader.Find("Sprites/Default");
-        }
+        if (beltDirectionArrowInstancedMaterial != null) return;
 
-        if (shader == null)
+        beltDirectionArrowInstancedMaterial = Resources.Load<Material>(BeltDirectionArrowMaterialResourcePath);
+        if (beltDirectionArrowInstancedMaterial == null)
         {
-            shader = Shader.Find("Universal Render Pipeline/Unlit");
-        }
-
-        if (shader == null)
-        {
-            shader = Shader.Find("Unlit/Color");
-        }
-
-        if (shader == null)
-        {
-            shader = Shader.Find("Standard");
-        }
-
-        if (shader == null)
-        {
+            Debug.LogError($"Direction arrow material is missing from Resources/{BeltDirectionArrowMaterialResourcePath}.mat.");
             return;
         }
 
-        if (beltDirectionArrowInstancedMaterial != null && beltDirectionArrowInstancedMaterial.shader == shader)
-        {
-            ConfigureBeltDirectionArrowInstancedMaterial(shader);
-            return;
-        }
-
-        if (beltDirectionArrowInstancedMaterial != null)
-        {
-            Destroy(beltDirectionArrowInstancedMaterial);
-        }
-
-        beltDirectionArrowInstancedMaterial = new Material(shader)
-        {
-            name = "BeltDirectionArrowInstancedMaterial",
-            enableInstancing = true,
-            hideFlags = HideFlags.DontSave,
-            renderQueue = BeltDirectionArrowRenderQueue
-        };
-
-        ConfigureBeltDirectionArrowInstancedMaterial(shader);
+        ConfigureBeltDirectionArrowInstancedMaterial();
     }
 
-    private void ConfigureBeltDirectionArrowInstancedMaterial(Shader shader)
+    private void ConfigureBeltDirectionArrowInstancedMaterial()
     {
-        if (beltDirectionArrowInstancedMaterial == null || shader == null)
+        if (beltDirectionArrowInstancedMaterial == null)
         {
             return;
         }
@@ -4077,18 +4041,14 @@ public partial class TerrainGenerator : MonoBehaviour
         beltDirectionArrowInstancedMaterial.enableInstancing = true;
         beltDirectionArrowInstancedMaterial.renderQueue = BeltDirectionArrowRenderQueue;
 
-        Color materialColor = shader.name == "Custom/InstallGridOverlay" || shader.name == "Sprites/Default"
-            ? Color.white
-            : BeltDirectionArrowInstancedColor;
-
         if (beltDirectionArrowInstancedMaterial.HasProperty("_BaseColor"))
         {
-            beltDirectionArrowInstancedMaterial.SetColor("_BaseColor", materialColor);
+            beltDirectionArrowInstancedMaterial.SetColor("_BaseColor", Color.white);
         }
 
         if (beltDirectionArrowInstancedMaterial.HasProperty("_Color"))
         {
-            beltDirectionArrowInstancedMaterial.SetColor("_Color", materialColor);
+            beltDirectionArrowInstancedMaterial.SetColor("_Color", Color.white);
         }
 
         if (beltDirectionArrowInstancedMaterial.HasProperty("_Cull"))
@@ -4515,6 +4475,7 @@ public partial class TerrainGenerator : MonoBehaviour
 
         RobotArmWorld.AppendProfilerCounters();
         PipeWorld.AppendProfilerCounters();
+        BuildingWorld.AppendProfilerCounters();
         AppendFluidJobRuntimeProfilerCounters();
 
         GameManager gameManager = GameManager.Instance;

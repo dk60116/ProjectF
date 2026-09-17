@@ -1202,6 +1202,7 @@ public partial class BlockStateStore : MonoBehaviour
         ResolveVirtualObjectWorld()?.RemoveInstallation(storageKey);
         ConveyorWorld.Current?.Remove(storageKey);
         PipeWorld.Current?.Remove(storageKey);
+        BuildingWorld.Current?.Remove(storageKey);
         RemoveUtilityPoleConnectionReferences(removedAnchor);
         if (markerChanged) MarkMapMarkersChanged();
     }
@@ -1253,6 +1254,7 @@ public partial class BlockStateStore : MonoBehaviour
         liveInstallationAnchorsByCoordinate.Clear();
         ConveyorWorld.Current?.ClearRecords();
         PipeWorld.Current?.ClearRecords();
+        BuildingWorld.Current?.ClearRecords();
         RobotArmWorld.Current?.ClearRecords();
         ResolveVirtualObjectWorld()?.Clear();
         MarkMapMarkersChanged();

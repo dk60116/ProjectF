@@ -129,6 +129,7 @@ public partial class PlayerController : MonoBehaviour
     private readonly HashSet<ConveyorRuntimeRecord> nearbyConveyorRecords = new HashSet<ConveyorRuntimeRecord>();
     private readonly HashSet<PipeRuntimeRecord> nearbyPipeRecords = new HashSet<PipeRuntimeRecord>();
     private readonly HashSet<RobotArmInstance> nearbyRobotArmInstances = new HashSet<RobotArmInstance>();
+    private readonly HashSet<BuildingRuntimeRecord> nearbyBuildingRecords = new HashSet<BuildingRuntimeRecord>();
     private readonly List<InstallationObject> nearbyRuntimeInstallationScratch = new List<InstallationObject>(8);
     private readonly List<Renderer> mapObjectFocusRenderers = new List<Renderer>(16);
     private readonly Dictionary<Block, IMapObjectTarget> interactionFocusTargetOverrides = new Dictionary<Block, IMapObjectTarget>();
@@ -1229,8 +1230,6 @@ public partial class PlayerController : MonoBehaviour
         {
             SnapRootToGroundY();
         }
-
-        player?.UpdateDropExitGate(transform.position);
 
         GameManager gameManager = GameManager.Instance;
         bool isInteractionLocked = IsPlayerInputLocked();
@@ -3327,6 +3326,7 @@ public partial class PlayerController : MonoBehaviour
                 : block == closestInteractionFocusBlock;
             long stableId = target is ResourceInstance resourceIdentity ? resourceIdentity.SimulationId
                 : target is RobotArmInstance armIdentity ? armIdentity.SimulationId
+                : target is BuildingRuntimeRecord buildingIdentity ? buildingIdentity.SimulationId
                 : target is MapObject nativeTarget ? nativeTarget.GetInstanceID() : block.RuntimeIdentity;
             bool tiedDistance = Mathf.Abs(distanceSqr - closestDistanceSqr) <= 0.000001f;
             if (float.IsNaN(distanceSqr) || float.IsInfinity(distanceSqr)
@@ -3666,13 +3666,18 @@ public partial class PlayerController : MonoBehaviour
             return GetResourceFocusSelectionDistanceSqr(resource, origin) <= harvestRange * harvestRange;
         }
 
-        if (!(mapObject is InstallationObject) && !(mapObject is RobotArmInstance))
+        if (!(mapObject is InstallationObject)
+            && !(mapObject is RobotArmInstance)
+            && !(mapObject is BuildingRuntimeRecord))
         {
             return false;
         }
 
         float interactionRadius = Mathf.Max(0f, mapObject is RobotArmInstance arm
-            ? arm.Prototype.FocusActivationRadius : ((InstallationObject)mapObject).FocusActivationRadius);
+            ? arm.Prototype.FocusActivationRadius
+            : mapObject is BuildingRuntimeRecord building
+                ? building.Prototype.FocusActivationRadius
+                : ((InstallationObject)mapObject).FocusActivationRadius);
         if (interactionRadius <= 0f)
         {
             return false;
@@ -5126,8 +5131,10 @@ public partial class PlayerController : MonoBehaviour
         nearbyInstallationObjects.Clear();
         nearbyConveyorRecords.Clear();
         nearbyPipeRecords.Clear();
+        nearbyBuildingRecords.Clear();
         ConveyorWorld conveyorWorld = ConveyorWorld.Current;
         PipeWorld pipeWorld = PipeWorld.Current;
+        BuildingWorld buildingWorld = BuildingWorld.Current;
         RobotArmWorld robotArmWorld = RobotArmWorld.Current;
         nearbyRobotArmInstances.Clear();
 
@@ -5149,6 +5156,13 @@ public partial class PlayerController : MonoBehaviour
                 if (block.MapObject is RobotArmInstance boundArm)
                 {
                     TryAppendNearbyRobotArmFocus(boundArm, block, origin, results);
+                }
+                if (buildingWorld != null
+                    && buildingWorld.TryGetAtCoordinate(
+                        coordinate,
+                        out BuildingRuntimeRecord buildingRecord))
+                {
+                    TryAppendNearbyBuildingFocus(buildingRecord, block, origin, results);
                 }
                 if (conveyorWorld != null
                     && conveyorWorld.TryGetAtCoordinate(
@@ -5196,6 +5210,29 @@ public partial class PlayerController : MonoBehaviour
         }
 
         nearbyRuntimeInstallationScratch.Clear();
+    }
+
+    private void TryAppendNearbyBuildingFocus(
+        BuildingRuntimeRecord building,
+        Block block,
+        Vector3 origin,
+        List<Block> results)
+    {
+        if (building == null
+            || block == null
+            || !building.IsRuntimeActive
+            || !building.AllowsFocus
+            || !nearbyBuildingRecords.Add(building))
+        {
+            return;
+        }
+
+        float focusRadius = Mathf.Max(0f, building.Prototype.FocusActivationRadius);
+        if (focusRadius > 0f
+            && GetMapObjectFocusSelectionDistanceSqr(building, block, origin) <= focusRadius * focusRadius)
+        {
+            AppendMapObjectFocusBlocks(building, block, results);
+        }
     }
 
     private void TryAppendNearbyRobotArmFocus(
@@ -5328,6 +5365,8 @@ public partial class PlayerController : MonoBehaviour
 
         if (mapObject is RobotArmInstance dataArm)
             return GetOccupiedCoordinateDistanceSqr(dataArm.RuntimeOccupiedCoordinates, origin);
+        if (mapObject is BuildingRuntimeRecord dataBuilding)
+            return GetOccupiedCoordinateDistanceSqr(dataBuilding.OccupiedCoordinates, origin);
         if (mapObject is InstallationObject installation)
         {
             IReadOnlyList<Vector2Int> occupied = installation.RuntimeOccupiedCoordinates;
@@ -5515,6 +5554,16 @@ public partial class PlayerController : MonoBehaviour
         {
             foreach (var coordinate in dataArm.RuntimeOccupiedCoordinates)
                 appended |= TryAppendFocusBlock(results, coordinate, dataArm);
+        }
+        else if (mapObject is BuildingRuntimeRecord dataBuilding)
+        {
+            for (int i = 0; i < dataBuilding.OccupiedCoordinates.Count; i++)
+            {
+                appended |= TryAppendFocusBlock(
+                    results,
+                    dataBuilding.OccupiedCoordinates[i],
+                    dataBuilding);
+            }
         }
         else if (mapObject is InputOutputModule inputOutputModule)
         {
@@ -5964,6 +6013,31 @@ public partial class PlayerController : MonoBehaviour
             closestDistance = hit.distance;
         }
 
+        BuildingWorld buildingWorld = BuildingWorld.Current;
+        if (buildingWorld != null
+            && buildingWorld.TryRaycast(
+                ray,
+                Mathf.Max(0f, maxDistance),
+                out BuildingRuntimeRecord buildingRecord,
+                out float buildingDistance)
+            && buildingRecord.IsRuntimeActive
+            && buildingRecord.AllowsFocus
+            && buildingDistance < closestDistance)
+        {
+            closestCandidate = buildingRecord;
+            closestDistance = buildingDistance;
+            TerrainGenerator buildingFocusTerrain = ResolveTerrainGenerator();
+            if (buildingFocusTerrain != null
+                && !buildingFocusTerrain.TryGetLoadedBlockEntity(
+                    buildingRecord.AnchorCoordinate,
+                    out closestDataOnlyFallbackBlock))
+            {
+                buildingFocusTerrain.TryGetLoadedBlock(
+                    buildingRecord.AnchorCoordinate,
+                    out closestDataOnlyFallbackBlock);
+            }
+        }
+
         PipeWorld pipeWorld = PipeWorld.Current;
         if (pipeWorld != null
             && pipeWorld.TryRaycast(
@@ -6299,6 +6373,20 @@ public partial class PlayerController : MonoBehaviour
                         fallbackBlock = block;
                         return true;
                     }
+                }
+            }
+        }
+        else if (mapObject is BuildingRuntimeRecord dataBuilding)
+        {
+            TerrainGenerator terrain = ResolveTerrainGenerator();
+            for (int i = 0; i < dataBuilding.OccupiedCoordinates.Count; i++)
+            {
+                if (terrain != null
+                    && terrain.TryGetLoadedBlock(dataBuilding.OccupiedCoordinates[i], out Block block)
+                    && block != null)
+                {
+                    fallbackBlock = block;
+                    return true;
                 }
             }
         }

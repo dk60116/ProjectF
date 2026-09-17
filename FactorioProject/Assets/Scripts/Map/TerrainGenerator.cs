@@ -17,10 +17,12 @@ public partial class TerrainGenerator : MonoBehaviour,
     private const float MinOreBodyScaleRatioLimit = 0.5f;
     private const float MaxOreBodyScaleRatioLimit = 1f;
     private const int MinMapSize = 32;
-    private const float IslandLandRadius = 0.78f;
-    private const float IslandCoastNoiseScale = 0.024f;
-    private const float IslandCoastDetailNoiseScale = 0.067f;
-    private const float IslandCoastIrregularity = 0.09f;
+    private const float IslandCoastNoiseScale = 0.018f;
+    private const float IslandCoastDetailNoiseScale = 0.047f;
+    private const float IslandCoastIrregularity = 0.10f;
+    private const int IslandShapeLobeCapacity = 4;
+    private const int IslandShapeBayCapacity = 2;
+    private const int IslandShapeSatelliteCapacity = 2;
     private const float GeneratedSurfaceBaseInset = 0.0035f;
     private const float GeneratedSurfaceBiomeLayerStep = 0.004f;
     public const float GeneratedOilSurfaceLocalY = -0.04f;
@@ -530,16 +532,49 @@ public partial class TerrainGenerator : MonoBehaviour,
     private Texture2D generatedSurfaceBlendSandTexture;
 
     [SerializeField, HideInInspector]
+    private Texture2D generatedSurfaceBlendSandTexture2;
+
+    [SerializeField, HideInInspector]
+    private Texture2D generatedSurfaceBlendSandTexture3;
+
+    [SerializeField, HideInInspector]
+    private Texture2D generatedSurfaceBlendSandTexture4;
+
+    [SerializeField, HideInInspector]
     private Texture2D generatedSurfaceBlendDirtTexture;
+
+    [SerializeField, HideInInspector]
+    private Texture2D generatedSurfaceBlendDirtTexture2;
+
+    [SerializeField, HideInInspector]
+    private Texture2D generatedSurfaceBlendDirtTexture3;
+
+    [SerializeField, HideInInspector]
+    private Texture2D generatedSurfaceBlendDirtTexture4;
 
     [SerializeField, HideInInspector]
     private Texture2D generatedSurfaceBlendGrassTexture;
 
     [SerializeField, HideInInspector]
+    private Texture2D generatedSurfaceBlendGrassTexture2;
+
+    [SerializeField, HideInInspector]
+    private Texture2D generatedSurfaceBlendGrassTexture3;
+
+    [SerializeField, HideInInspector]
+    private Texture2D generatedSurfaceBlendGrassTexture4;
+
+    [SerializeField, HideInInspector]
     private Texture2D generatedSurfaceBlendForestTexture;
 
     [SerializeField, HideInInspector]
-    private bool generatedSurfaceBlendTextureDefaultsInitialized;
+    private Texture2D generatedSurfaceBlendForestTexture2;
+
+    [SerializeField, HideInInspector]
+    private Texture2D generatedSurfaceBlendForestTexture3;
+
+    [SerializeField, HideInInspector]
+    private Texture2D generatedSurfaceBlendForestTexture4;
 
     [SerializeField, Min(0.001f)]
     private float largeLakeCellSize = 72f;
@@ -965,6 +1000,7 @@ public partial class TerrainGenerator : MonoBehaviour,
     private VirtualConveyorBeltRenderer virtualConveyorBeltRenderer;
     private ConveyorWorld conveyorWorld;
     private PipeWorld pipeWorld;
+    private BuildingWorld buildingWorld;
     private TerrainChunkStreamingScheduler chunkStreamingScheduler;
 
     private readonly List<ResourceEntry> starterTreeCacheEntries = new List<ResourceEntry>();
@@ -1005,12 +1041,15 @@ public partial class TerrainGenerator : MonoBehaviour,
         EnsurePortableItemRenderer();
         EnsureConveyorWorld();
         EnsurePipeWorld();
+        EnsureBuildingWorld();
         EnsureVirtualConveyorBeltRenderer();
     }
 
     private void OnEnable()
     {
         Active = this;
+        InputOutputModule.RuntimePipeTopologyChanged -= HandleRuntimePipeDirectionTopologyChanged;
+        InputOutputModule.RuntimePipeTopologyChanged += HandleRuntimePipeDirectionTopologyChanged;
         if (Application.isPlaying)
         {
             MapObjectTickManager.RegisterUpdateTick(this);
@@ -1078,6 +1117,7 @@ public partial class TerrainGenerator : MonoBehaviour,
         EnsurePortableItemRenderer();
         EnsureConveyorWorld();
         EnsurePipeWorld();
+        EnsureBuildingWorld();
         EnsureVirtualConveyorBeltRenderer();
 
         SaveManager saveManager = FindFirstObjectByType<SaveManager>();
@@ -1256,6 +1296,7 @@ public partial class TerrainGenerator : MonoBehaviour,
 
     private void OnDisable()
     {
+        InputOutputModule.RuntimePipeTopologyChanged -= HandleRuntimePipeDirectionTopologyChanged;
         if (ProjectFApplicationLifecycle.IsQuitting)
         {
             if (Active == this) Active = null;
@@ -1278,9 +1319,20 @@ public partial class TerrainGenerator : MonoBehaviour,
         ClearPendingChunkGenerations();
     }
 
+    private void HandleRuntimePipeDirectionTopologyChanged(InputOutputModule _)
+    {
+        if (Application.isPlaying
+            && GameManager.Instance != null
+            && GameManager.Instance.ShowDirections)
+        {
+            RefreshBeltDirectionRuntimeVisibility();
+        }
+    }
+
     private void OnDestroy()
     {
         if (RobotArmWorld.Current?.Terrain == this) RobotArmWorld.Current.Dispose();
+        if (BuildingWorld.Current?.Owner == this) BuildingWorld.Current.Dispose();
         if (PipeWorld.Current?.Owner == this) PipeWorld.Current.Dispose();
         if (ConveyorWorld.Current?.Owner == this) ConveyorWorld.Current.Dispose();
         DisposeActiveSurfaceBuildJob();
@@ -1732,6 +1784,7 @@ public partial class TerrainGenerator : MonoBehaviour,
         EnsurePortableItemRenderer();
         EnsureConveyorWorld();
         EnsurePipeWorld();
+        EnsureBuildingWorld();
         EnsureVirtualConveyorBeltRenderer();
 
         if (terrainSaveData != null)
@@ -1939,6 +1992,15 @@ public partial class TerrainGenerator : MonoBehaviour,
             using (pipeViews as IDisposable)
             {
                 while (pipeViews.MoveNext()) yield return pipeViews.Current;
+            }
+
+            IEnumerator buildingViews = SlotLoadTimingLog.TrackStage(
+                "finalize-buildings",
+                RefreshLoadedBuildingRuntimeViewsIncremental(
+                    WorldFinalizationEntriesPerCheckpoint));
+            using (buildingViews as IDisposable)
+            {
+                while (buildingViews.MoveNext()) yield return buildingViews.Current;
             }
 
             IEnumerator expandedItems = SlotLoadTimingLog.TrackStage(
@@ -2805,6 +2867,49 @@ public partial class TerrainGenerator : MonoBehaviour,
             if (RegisterDataOnlyPipeInstallation(pipe, sourcePrefab))
             {
                 ReleaseInstallationObject(pipe, sourcePrefab);
+            }
+        }
+    }
+
+    private IEnumerator RefreshLoadedBuildingRuntimeViewsIncremental(int entriesPerCheckpoint)
+    {
+        if (!Application.isPlaying)
+        {
+            yield break;
+        }
+
+        entriesPerCheckpoint = Mathf.Max(1, entriesPerCheckpoint);
+        int processed = 0;
+        HashSet<Building> uniqueBuildings = new HashSet<Building>();
+        EnsureResourceStateStore();
+        foreach (KeyValuePair<Vector2Int, Block> pair in loadedBlocks)
+        {
+            if (++processed >= entriesPerCheckpoint)
+            {
+                processed = 0;
+                yield return null;
+            }
+
+            Block block = pair.Value;
+            if (block == null
+                || !(block.MapObject is Building building)
+                || !building.gameObject.scene.IsValid()
+                || !uniqueBuildings.Add(building)
+                || !building.TryGetPlacementRuntime(out Vector2Int anchorCoordinate, out _)
+                || resourceStateStore == null
+                || !resourceStateStore.TryGetLiveInstallation(
+                    anchorCoordinate,
+                    out InstallationObject liveInstallation,
+                    out BlockStateStore.InstallationSaveState liveState)
+                || !ReferenceEquals(liveInstallation, building))
+            {
+                continue;
+            }
+
+            Building sourcePrefab = ResolveInstallationSourcePrefab(liveState) as Building;
+            if (RegisterDataOnlyBuildingInstallation(building, sourcePrefab))
+            {
+                ReleaseInstallationObject(building, sourcePrefab);
             }
         }
     }

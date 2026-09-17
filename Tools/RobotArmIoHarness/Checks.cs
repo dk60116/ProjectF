@@ -110,6 +110,9 @@ public class DroppedItemPickupGate
 }
 public class PortableObject
 {
+    public const float MoveToDuration = 0.2f;
+    public int ItemId;
+    public Vector3 WorldPosition;
     public DroppedItemPickupGate Gate;
     public T GetComponent<T>() where T : class => Gate as T;
 }
@@ -132,6 +135,9 @@ public partial class Block
     public int ConveyorInteractionBoundaryRequests;
     public int AvailableCapacity = 1;
     public int ConveyorAdds, CenterAdds;
+    public int ReleasedCenterObjects, RuntimeStackChangeNotifications;
+    public bool LastUseJumpArc = true;
+    public float LastMoveDuration;
     public Vector3 PlacementReference, StartPosition;
     public float AddDelay;
     public PortableObject AddedObject;
@@ -139,10 +145,14 @@ public partial class Block
     public Vector2Int Coordinate;
     public int[] Items = { -1, -1 };
     public Vector3[] Positions = new Vector3[2];
+    public readonly List<PortableObject> inputAreaCenterStack = new();
     public Vector3 WorldPosition;
     public bool Enabled = true;
     private void EnsureFloorObjectsInitialized() { }
     private void CleanupConveyorStack() { }
+    private void CleanupPortableStack(List<PortableObject> stack) => stack.RemoveAll(item => item == null);
+    private static PortableObject GetTopPortableObject(List<PortableObject> stack) =>
+        stack != null && stack.Count > 0 ? stack[stack.Count - 1] : null;
     private bool IsConveyorStackingEnabled() => Enabled;
     private int GetConveyorLaneCount() => Items.Length;
     private int GetConveyorItemIdAtLane(int lane) => Items[lane];
@@ -150,8 +160,8 @@ public partial class Block
     private PortableObject GetConveyorPortableObjectAtLane(int lane) => null;
     private PortableObject MaterializeConveyorObjectForTransfer(PortableObject item, int id, int lane) => item;
     private void ClearConveyorItemForExternalRemoval(int lane) => Items[lane] = -1;
-    private void ReleaseFloorObject(PortableObject item) { }
-    private void NotifyRuntimeItemStackChanged() { }
+    private void ReleaseFloorObject(PortableObject item) => ReleasedCenterObjects++;
+    private void NotifyRuntimeItemStackChanged() => RuntimeStackChangeNotifications++;
     public int GetAvailableConveyorCapacity() => AvailableCapacity;
     public void EnsureConveyorTransportInteractionBoundary() => ConveyorInteractionBoundaryRequests++;
     public bool CanAddConveyorObjects(int count) => ConveyorAccepts;
@@ -163,12 +173,17 @@ public partial class Block
         return false;
     }
     public bool CanAddInputAreaCenterObjects(int count, int itemId) => CenterAccepts;
+    public bool CanAddConveyorObjectAtPlacement(int itemId, Vector3 placementReference) =>
+        itemId >= 0 && IsRuntimeConveyor && ConveyorAccepts;
     public bool TryAddConveyorObjectAnimatedAtPlacement(int itemId, Vector3 placementReference, Vector3 start,
-        float delay, out PortableObject output)
+        float delay, out PortableObject output, Action onComplete = null,
+        Func<Vector3> startWorldPositionProvider = null, float movementReleaseDelay = 0f,
+        bool useJumpArc = true, float moveDuration = PortableObject.MoveToDuration)
     {
         PlacementReference = placementReference; StartPosition = start; AddDelay = delay;
+        LastUseJumpArc = useJumpArc; LastMoveDuration = moveDuration;
         if (!ConveyorAccepts) { output = null; return false; }
-        ConveyorAdds++; output = AddedObject = new PortableObject(); return true;
+        ConveyorAdds++; output = AddedObject = new PortableObject { ItemId = itemId }; return true;
     }
     public bool TryAddInputAreaCenterObjectAnimated(int itemId, Vector3 start, float delay,
         out PortableObject output)
@@ -227,6 +242,7 @@ public static partial class Checks
         CheckConveyorPickup();
         CheckConveyorDropFallback();
         CheckMachineOutputToConveyor();
+        CheckStoredOutputDrainsToConveyor();
         CheckNearestBelt2FDrop();
         string robotArmSource = File.ReadAllText(Path.Combine(
             args[0],
@@ -343,23 +359,20 @@ public static partial class Checks
         foreach (MapObject conveyor in new MapObject[] { new ConveyorBelt(), new ConvayorBelt2F(), new Spliterbelt() })
         {
             Require(InstallationPlacementController.ConveyorCanOverlapOutput(
-                    conveyor, false, true, false, false, false, false, false),
-                "every conveyor type must be placeable on an unobstructed direct item output area");
+                    conveyor, false, true, false, false, false, false),
+                "every conveyor type must be placeable on a direct item output area even when items are waiting");
             Require(!InstallationPlacementController.ConveyorCanOverlapOutput(
-                    conveyor, false, true, true, false, false, false, false),
+                    conveyor, false, true, true, false, false, false),
                 "an energy input sharing the coordinate must still block conveyor placement");
             Require(!InstallationPlacementController.ConveyorCanOverlapOutput(
-                    conveyor, false, true, false, true, false, false, false),
+                    conveyor, false, true, false, true, false, false),
                 "an item input sharing the coordinate must still block conveyor placement");
-            Require(!InstallationPlacementController.ConveyorCanOverlapOutput(
-                    conveyor, false, true, false, false, false, false, true),
-                "items waiting in the output area must block conveyor placement");
         }
         Require(!InstallationPlacementController.ConveyorCanOverlapOutput(
-                new InputOutputModule(), false, true, false, false, false, false, false),
+                new InputOutputModule(), false, true, false, false, false, false),
             "non-conveyor installations must still be blocked by output areas");
         Require(!InstallationPlacementController.ConveyorCanOverlapOutput(
-                new ConvayorBelt2F(), true, true, false, false, false, false, false),
+                new ConvayorBelt2F(), true, true, false, false, false, false),
             "the raised bridge center must not masquerade as a belt output surface");
 
         foreach (MapObject conveyor in new MapObject[] { new ConveyorBelt(), new ConvayorBelt2F(), new Spliterbelt() })
@@ -545,6 +558,32 @@ public static partial class Checks
             "an ordinary output area must retain center-stack emission");
         Require(floorItem.Gate != null && floorItem.Gate.AutoPickupBlocked,
             "ordinary output items must retain their pickup gate");
+    }
+
+    private static void CheckStoredOutputDrainsToConveyor()
+    {
+        var block = new Block { RuntimeConveyor = true };
+        var lowerItem = new PortableObject { ItemId = 21, WorldPosition = new Vector3(1f, 0.05f, 2f) };
+        var topItem = new PortableObject { ItemId = 21, WorldPosition = new Vector3(1f, 0.1f, 2f) };
+        block.inputAreaCenterStack.Add(lowerItem);
+        block.inputAreaCenterStack.Add(topItem);
+
+        Require(block.TryTransferOneInputAreaCenterObjectToConveyor(),
+            "an item waiting in an output area must enter a conveyor installed on that block");
+        Require(block.inputAreaCenterStack.Count == 1 && block.inputAreaCenterStack[0] == lowerItem,
+            "each drain attempt must move only the top output-area item");
+        Require(block.ConveyorAdds == 1 && block.ReleasedCenterObjects == 1,
+            "a drained output item must be replaced by exactly one conveyor item");
+        Require(block.PlacementReference == topItem.WorldPosition && block.StartPosition == topItem.WorldPosition,
+            "the conveyor lane animation must begin at the stacked item's world position");
+        Require(!block.LastUseJumpArc && block.LastMoveDuration == PortableObject.MoveToDuration,
+            "stored output must move directly onto the conveyor lane-height destination");
+
+        block.ConveyorAccepts = false;
+        Require(!block.TryTransferOneInputAreaCenterObjectToConveyor()
+                && block.inputAreaCenterStack.Count == 1
+                && block.ReleasedCenterObjects == 1,
+            "a full conveyor must preserve the waiting output item until a lane is vacated");
     }
 
     private static void CheckNearestBelt2FDrop()

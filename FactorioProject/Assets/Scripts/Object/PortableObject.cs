@@ -125,7 +125,7 @@ public sealed class PortableObject : IDisposable
                 {
                     PortableObject member = focusStack[i];
                     if (member != null && member.ItemId == ItemId && member.IsActive
-                        && !member.IsMovingToTarget && !member.IsVisualRenderingSuppressed) count++;
+                        && !member.IsVisualRenderingSuppressed) count++;
                 }
             }
             return count > 0 ? count : (ItemId >= 0 ? 1 : 0);
@@ -482,7 +482,7 @@ public sealed class PortableObject : IDisposable
     public bool TryGetWorldFocusBounds(out Bounds bounds)
     {
         bounds = default;
-        if (!IsAlive || ItemId < 0 || IsMovingToTarget || IsOnConveyor
+        if (!IsAlive || ItemId < 0 || IsOnConveyor
             || IsVisualRenderingSuppressed || !IsActive || IsFocusExcludedByContainer()) return false;
         if (cachedMesh == null) return false;
         PortableObjectComponent component = Read();
@@ -824,13 +824,6 @@ public sealed class PortableObject : IDisposable
         if (visible)
         {
             AcquireFocusStackOutlineMembers();
-            if (IsUsingBatchedRendering)
-            {
-                restoreBatchedRenderingAfterOutline = true;
-                Mutate((ref PortableObjectComponent c) => c.BatchedRendering = false);
-                UnregisterFromPortableItemRenderer();
-                UpdateRendererVisibility();
-            }
         }
         else if (!HasOwnOutlineRequest) ReleaseFocusStackOutlineMembers(true);
     }
@@ -850,6 +843,12 @@ public sealed class PortableObject : IDisposable
         if (owner == null || focusOutlineOwner != null) return;
         focusOutlineOwner = owner;
         EnsureView();
+        if (!IsUsingBatchedRendering) return;
+
+        restoreBatchedRenderingAfterOutline = true;
+        Mutate((ref PortableObjectComponent c) => c.BatchedRendering = false);
+        UnregisterFromPortableItemRenderer();
+        UpdateRendererVisibility();
     }
 
     private void ReleaseFocusStackOutlineMembers(bool restore)

@@ -118,7 +118,7 @@ public partial class PlayerHUD : BagSlot
     private Animal currentDraftAnimalInteractionAnimal;
     private bool currentDraftAnimalInteractionDetaches;
     private BoxObject currentInteractionBoxObject;
-    private FenceDoor currentInteractionDoorObject;
+    private IFenceDoorTarget currentInteractionDoorTarget;
     private ResourceInstance currentInteractionResource;
     private IMapObjectTarget currentInteractionMapObject;
     private bool pitchforkGroundInteractionActive;
@@ -2260,7 +2260,7 @@ public partial class PlayerHUD : BagSlot
         {
             icon = ResolveInteractionIcon(boxObject);
         }
-        else if (mapObject is FenceDoor fenceDoor)
+        else if (mapObject is IFenceDoorTarget fenceDoor)
         {
             icon = ResolveInteractionIcon(fenceDoor);
             targetButton = ResolveDoorInteractionButtonForUse();
@@ -2317,9 +2317,9 @@ public partial class PlayerHUD : BagSlot
         {
             currentInteractionBoxObject = targetBox;
         }
-        else if (mapObject is FenceDoor targetDoor)
+        else if (mapObject is IFenceDoorTarget targetDoor)
         {
-            currentInteractionDoorObject = targetDoor;
+            currentInteractionDoorTarget = targetDoor;
         }
         else if (mapObject is ResourceInstance targetResource)
         {
@@ -2377,7 +2377,7 @@ public partial class PlayerHUD : BagSlot
         currentDraftAnimalInteractionAnimal = null;
         currentDraftAnimalInteractionDetaches = false;
         currentInteractionBoxObject = null;
-        currentInteractionDoorObject = null;
+        currentInteractionDoorTarget = null;
         currentInteractionResource = null;
         currentInteractionMapObject = null;
         pitchforkGroundInteractionActive = false;
@@ -2711,7 +2711,12 @@ public partial class PlayerHUD : BagSlot
         object focusedTarget = null;
         if (playerController != null)
         {
-            if (playerController.TryGetFocusedMapObject(out IMapObjectTarget focusedMapObject))
+            if (TryGetAutomaticPickupFocusedPortableObject(
+                    out PortableObject focusedPortableObject))
+            {
+                focusedTarget = focusedPortableObject;
+            }
+            else if (playerController.TryGetFocusedMapObject(out IMapObjectTarget focusedMapObject))
             {
                 focusedTarget = focusedMapObject;
             }
@@ -2757,11 +2762,7 @@ public partial class PlayerHUD : BagSlot
         }
 
         PlayerController playerController = ResolvePlayerController();
-        if (!IsObjectInfoTargetAvailable(currentObjectInfoTarget, playerController)
-            || (currentObjectInfoTarget is PortableObject portableObject
-                && (portableObject.ItemId < 0
-                    || portableObject.IsMovingToTarget
-                    || portableObject.IsVisualRenderingSuppressed)))
+        if (!IsObjectInfoTargetAvailable(currentObjectInfoTarget, playerController))
         {
             ClearObjectInfoPanelState();
             return;
@@ -3202,7 +3203,7 @@ public partial class PlayerHUD : BagSlot
         return true;
     }
 
-    private static Sprite ResolveInteractionIcon(FenceDoor fenceDoor)
+    private static Sprite ResolveInteractionIcon(IFenceDoorTarget fenceDoor)
     {
         if (fenceDoor == null)
         {
@@ -3687,17 +3688,17 @@ public partial class PlayerHUD : BagSlot
             return;
         }
 
-        if (currentInteractionDoorObject != null)
+        if (currentInteractionDoorTarget != null)
         {
             PlayerController playerController = ResolvePlayerController();
             if (playerController == null
-                || !playerController.IsWithinInteractionRange(currentInteractionDoorObject))
+                || !playerController.IsWithinInteractionRange(currentInteractionDoorTarget))
             {
                 UpdateInteractionButtonState();
                 return;
             }
 
-            currentInteractionDoorObject.ToggleOpenState(ResolveCurrentPlayerInteractionPosition());
+            currentInteractionDoorTarget.ToggleOpenState(ResolveCurrentPlayerInteractionPosition());
             UpdateInteractionButtonState();
             return;
         }
@@ -3859,7 +3860,7 @@ public partial class PlayerHUD : BagSlot
             return;
         }
 
-        InteractionButton contextButton = currentInteractionDoorObject != null
+        InteractionButton contextButton = currentInteractionDoorTarget != null
             ? ResolveDoorInteractionButtonForUse()
             : InteractionButton;
         bool hasContextTarget = currentInteractionBoxObject != null
@@ -3871,7 +3872,7 @@ public partial class PlayerHUD : BagSlot
                                 || currentSaddleInteractionAnimal != null
                                 || currentRideableInteractionAnimal != null
                                 || currentInteractionAnimal != null
-                                || currentInteractionDoorObject != null
+                                || currentInteractionDoorTarget != null
                                 || currentInteractionResource != null
                                 || currentInteractionMapObject != null;
         if (hasContextTarget && IsInteractionButtonVisible(contextButton))
@@ -4123,6 +4124,14 @@ public partial class PlayerHUD : BagSlot
 
         if (target is ResourceInstance resource) return resource.IsRuntimeActive;
         if (target is RobotArmInstance robotArm) return robotArm.IsTargetActive;
+        if (target is PortableObject portableObject)
+        {
+            return portableObject.IsAlive
+                   && portableObject.IsActive
+                   && portableObject.ItemId >= 0
+                   && !portableObject.IsOnConveyor
+                   && !portableObject.IsVisualRenderingSuppressed;
+        }
 
         if (target is Component component && component != null && component.gameObject.activeInHierarchy)
         {

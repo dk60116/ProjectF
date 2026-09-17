@@ -45,7 +45,7 @@ $source += (Member $placement 'private static bool CanItemOutputAreaOverlapConve
 $source += (Member $placement 'private static bool ShouldInputOutputAreasBlockInstallationPlacement(') + "`n"
 $source += (Member $placement 'private static bool ShouldCaptureInteractionAreaBlockStatesForEdit(') + "`n"
 $source += "public static bool IsNonBlockingRobotArmArea(MapObject source, InputOutputModule.RectGridBlockType blockType) => IsNonBlockingRobotArmInteractionArea(source, blockType);`n"
-$source += "public static bool ConveyorCanOverlapOutput(MapObject source, bool bridgeCenter, bool output, bool energy, bool input, bool pump, bool fluidStorage, bool outputItems) => CanConveyorOverlapItemOutputArea(source, bridgeCenter, output, energy, input, pump, fluidStorage, outputItems);`n"
+$source += "public static bool ConveyorCanOverlapOutput(MapObject source, bool bridgeCenter, bool output, bool energy, bool input, bool pump, bool fluidStorage) => CanConveyorOverlapItemOutputArea(source, bridgeCenter, output, energy, input, pump, fluidStorage);`n"
 $source += "public static bool OutputCanOverlapConveyor(InputOutputModule.RectGridBlockType blockType, MapObject occupying, bool bridgeCenter) => CanItemOutputAreaOverlapConveyor(blockType, occupying, bridgeCenter);`n"
 $source += "public static bool AreasBlockPlacement(MapObject source) => ShouldInputOutputAreasBlockInstallationPlacement(source);`n"
 $source += "public static bool CapturesInteractionAreaItemsInEdit(ItemDefinition definition) => ShouldCaptureInteractionAreaBlockStatesForEdit(definition);`n"
@@ -59,12 +59,40 @@ foreach ($methodName in @('TryTakeOneConveyorObject', 'TryGetClosestConveyorObje
         $source += (Member $block $match.Value) + "`n"
     }
 }
+$source += (Member $block 'public bool CanTransferOneInputAreaCenterObjectToConveyor()') + "`n"
+$source += (Member $block 'public bool TryTransferOneInputAreaCenterObjectToConveyor()') + "`n"
 $source += "}`n"
 $probe = Join-Path ([IO.Path]::GetTempPath()) ('ProjectF-RobotIO-' + [guid]::NewGuid().ToString('N'))
 New-Item -ItemType Directory -Path $probe | Out-Null
 [IO.File]::WriteAllText((Join-Path $probe 'Production.cs'), $source)
 Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'Checks.cs') -Destination $probe
 $unity = 'C:/Program Files/Unity/Hub/Editor/6000.4.0f1/Editor/Data/Managed/UnityEngine/UnityEngine.CoreModule.dll'
-[IO.File]::WriteAllText((Join-Path $probe 'Probe.csproj'), '<Project Sdk="Microsoft.NET.Sdk"><PropertyGroup><OutputType>Exe</OutputType><TargetFramework>net9.0</TargetFramework><NoWarn>0649</NoWarn></PropertyGroup><ItemGroup><Reference Include="UnityEngine.CoreModule"><HintPath>' + $unity + '</HintPath></Reference></ItemGroup></Project>')
-dotnet run --configuration Release --project (Join-Path $probe 'Probe.csproj') -- $repo
+$dotnetRoot = Split-Path -Parent (Get-Command dotnet).Source
+$sdk = Get-ChildItem -LiteralPath (Join-Path $dotnetRoot 'sdk') -Directory |
+    Sort-Object { [version]($_.Name -replace '-.*$') } -Descending |
+    Select-Object -First 1
+$referencePack = Get-ChildItem -LiteralPath (Join-Path $dotnetRoot 'packs/Microsoft.NETCore.App.Ref') -Directory |
+    Sort-Object { [version]($_.Name -replace '-.*$') } -Descending |
+    Select-Object -First 1
+$referenceDirectory = Get-ChildItem -LiteralPath (Join-Path $referencePack.FullName 'ref') -Directory |
+    Sort-Object Name -Descending |
+    Select-Object -First 1
+$compiler = Join-Path $sdk.FullName 'Roslyn/bincore/csc.dll'
+$compilerRuntimeConfig = Join-Path $sdk.FullName 'Roslyn/bincore/csc.runtimeconfig.json'
+$compilerArguments = @(
+    $compiler,
+    '-noconfig',
+    '-nostdlib+',
+    '-target:exe',
+    '-langversion:latest',
+    ('-out:' + (Join-Path $probe 'Probe.dll')),
+    ('-reference:' + $unity)
+)
+$compilerArguments += Get-ChildItem -LiteralPath $referenceDirectory.FullName -Filter '*.dll' |
+    ForEach-Object { '-reference:' + $_.FullName }
+$compilerArguments += @((Join-Path $probe 'Production.cs'), (Join-Path $probe 'Checks.cs'))
+& dotnet $compilerArguments
+if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+Copy-Item -LiteralPath $unity -Destination $probe
+dotnet exec --runtimeconfig $compilerRuntimeConfig (Join-Path $probe 'Probe.dll') $repo
 exit $LASTEXITCODE

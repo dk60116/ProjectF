@@ -343,7 +343,7 @@ internal static class WaterBucketItemGenerator
             serializedBucket.ApplyModifiedPropertiesWithoutUndo();
             Material surfaceMaterial = surfaceMaterialOverride != null
                 ? surfaceMaterialOverride
-                : bucket.ResolveFluidSurfaceMaterial(Pump.ResolveWaterItemId(null));
+                : bucket.ResolveFluidSurfaceMaterial(WaterPump.ResolveWaterItemId(null));
             ConfigureInstalledWaterSurface(
                 bucket,
                 containsWater,
@@ -523,7 +523,7 @@ internal static class WaterBucketItemGenerator
                             && surfaceFilter.sharedMesh != null
                             && surfaceRenderer != null
                             && surfaceRenderer.sharedMaterial
-                            == bucket.ResolveFluidSurfaceMaterial(Pump.ResolveWaterItemId(null));
+                            == bucket.ResolveFluidSurfaceMaterial(WaterPump.ResolveWaterItemId(null));
         if (expectedVisible != isConfigured)
         {
             throw new InvalidOperationException(
@@ -552,7 +552,7 @@ internal static class WaterBucketItemGenerator
             bucket,
             true,
             waterSurfaceMesh,
-            bucket.ResolveFluidSurfaceMaterial(Pump.ResolveWaterItemId(null)));
+            bucket.ResolveFluidSurfaceMaterial(WaterPump.ResolveWaterItemId(null)));
         EditorSceneManager.MarkSceneDirty(prefabStage.scene);
         SceneView.RepaintAll();
     }

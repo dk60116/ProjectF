@@ -73,12 +73,14 @@ public class SteamGenerator : InputOutputModule, IFacilityFlowAdapter, IFacility
 
     protected override bool ShouldKeepRuntimeUpdateTickActive()
     {
-        if (!InputOutputModule.IsInDirectedBoilerSteamChain(this)
-            || !TryGetSteamInputRecipe(out int inputItemId, out _))
+        if (!TryGetSteamInputRecipe(out int inputItemId, out _))
         {
             return false;
         }
 
+        // Pipe topology controls which producer may fill this storage. Once
+        // steam has been accepted, generation is driven by the stored resource
+        // itself so a transient/stale topology cache cannot strand valid steam.
         if (StoredFluidLiters > FluidEpsilon)
         {
             return StoredFluidItemId < 0 || CanProvideFluidItem(inputItemId);
@@ -261,6 +263,66 @@ public class SteamGenerator : InputOutputModule, IFacilityFlowAdapter, IFacility
         return foundInput && foundTail && inputCoordinate != tailCoordinate;
     }
 
+    public bool TryGetRuntimeSteamPass(
+        Vector2Int coordinate,
+        out Vector2Int otherCoordinate,
+        out Vector2Int externalDirection)
+    {
+        otherCoordinate = default;
+        externalDirection = default;
+        if (!TryGetPlacementRuntime(out Vector2Int anchorCoordinate, out int quarterTurns)
+            || !TryGetRuntimePipePassCoordinates(
+                out Vector2Int inputCoordinate,
+                out Vector2Int tailCoordinate))
+        {
+            return false;
+        }
+
+        if (coordinate == inputCoordinate
+            && TryGetInputDirectionAtCoordinate(
+                this,
+                anchorCoordinate,
+                quarterTurns,
+                inputCoordinate,
+                out Vector2Int inputDirection))
+        {
+            otherCoordinate = tailCoordinate;
+            externalDirection = -inputDirection;
+            return externalDirection != Vector2Int.zero;
+        }
+
+        if (coordinate == tailCoordinate
+            && TryGetPipePassTailDirectionAtCoordinate(
+                this,
+                anchorCoordinate,
+                quarterTurns,
+                tailCoordinate,
+                out Vector2Int tailDirection))
+        {
+            otherCoordinate = inputCoordinate;
+            externalDirection = tailDirection;
+            return externalDirection != Vector2Int.zero;
+        }
+
+        return false;
+    }
+
+    internal static bool TryResolveSteamPassPipeConnectionDirection(
+        Vector2Int pipeCoordinate,
+        Vector2Int endpointCoordinate,
+        Vector2Int externalDirection,
+        out Vector2Int pipeConnectionDirection)
+    {
+        pipeConnectionDirection = endpointCoordinate - pipeCoordinate;
+        if (pipeConnectionDirection == Vector2Int.zero)
+        {
+            pipeConnectionDirection = -externalDirection;
+        }
+
+        return externalDirection != Vector2Int.zero
+               && pipeConnectionDirection == -externalDirection;
+    }
+
     public bool CanReceiveSteamFromDirectedPortAtRuntime(
         Vector2Int sourcePortCoordinate,
         Vector2Int flowDirection)
@@ -403,13 +465,13 @@ public class SteamGenerator : InputOutputModule, IFacilityFlowAdapter, IFacility
             return false;
         }
 
-        if (!IsGenerationActive
-            || !InputOutputModule.IsInDirectedBoilerSteamChain(this))
+        float outputScale = GenerationOutputScale;
+        if (outputScale <= FluidEpsilon)
         {
             return false;
         }
 
-        wattsPerSecond = outputWattsPerSecond;
+        wattsPerSecond = outputWattsPerSecond * outputScale;
         return true;
     }
 
@@ -480,7 +542,11 @@ public class SteamGenerator : InputOutputModule, IFacilityFlowAdapter, IFacility
             return "No utility pole";
         }
 
-        if (!InputOutputModule.IsInDirectedBoilerSteamChain(this))
+        // A disconnected generator may finish consuming steam that was already
+        // accepted while the directed connection was valid. Only report the
+        // missing connection once no usable steam remains.
+        if (StoredFluidLiters <= FluidEpsilon
+            && !InputOutputModule.IsInDirectedBoilerSteamChain(this))
         {
             return "No boiler steam connection";
         }
@@ -504,7 +570,6 @@ public class SteamGenerator : InputOutputModule, IFacilityFlowAdapter, IFacility
         bool hasRecipe = TryGetSteamInputRecipe(out int inputItemId, out int inputLitersPerSecond)
                          && inputLitersPerSecond > 0;
         bool valid = hasRecipe
-                     && InputOutputModule.IsInDirectedBoilerSteamChain(this)
                      && (StoredFluidItemId < 0 || CanProvideFluidItem(inputItemId));
         batch.ConfigureSteamGenerator(
             index,
@@ -535,26 +600,28 @@ public class SteamGenerator : InputOutputModule, IFacilityFlowAdapter, IFacility
 
         int inputItemId = batch.GetSteamInputItemId(index);
         float requestedLiters = batch.GetSteamRequestedLiters(index);
-        float requiredStoredLiters = batch.GetSteamRequiredLiters(index);
         if (!batch.IsSteamGeneratorValid(index)
             || inputItemId < 0
             || requestedLiters <= FluidEpsilon
             || (StoredFluidItemId >= 0 && !CanProvideFluidItem(inputItemId)))
         {
-            SetGenerationActive(false);
+            SetGenerationOutputScale(0f);
             return;
         }
 
-        float consumedLiters = 0f;
-        bool generated = StoredFluidLiters + FluidEpsilon >= requiredStoredLiters
-                         && TryConsumeFluidLiters(inputItemId, requestedLiters, out consumedLiters)
-                         && consumedLiters + FluidEpsilon >= requestedLiters;
-        if (generated)
+        // A shared steam line can deliver less than one generator's full
+        // per-tick demand. Consume that partial supply and publish proportional
+        // power instead of leaving sub-tick steam stranded forever.
+        float availableLiters = Mathf.Min(StoredFluidLiters, requestedLiters);
+        if (availableLiters <= FluidEpsilon
+            || !TryConsumeFluidLiters(inputItemId, availableLiters, out float consumedLiters))
         {
-            RecordFluidNetworkConsumption(inputItemId, consumedLiters);
+            SetGenerationOutputScale(0f);
+            return;
         }
 
-        SetGenerationActive(generated);
+        SetGenerationOutputScale(
+            ResolveGenerationOutputScale(consumedLiters, requestedLiters));
     }
 
     public override void PrepareForPool()
@@ -563,10 +630,22 @@ public class SteamGenerator : InputOutputModule, IFacilityFlowAdapter, IFacility
         base.PrepareForPool();
     }
 
-    private void SetGenerationActive(bool active)
+    internal static float ResolveGenerationOutputScale(
+        float consumedLiters,
+        float requestedLiters)
     {
+        return requestedLiters > FluidEpsilon
+            ? Mathf.Clamp01(Mathf.Max(0f, consumedLiters) / requestedLiters)
+            : 0f;
+    }
+
+    private void SetGenerationOutputScale(float outputScale)
+    {
+        outputScale = Mathf.Clamp01(outputScale);
+        bool active = outputScale > FluidEpsilon;
         ref SteamGeneratorFlowState state = ref EnsureFlowState();
-        bool stateChanged = state.IsGenerating != active;
+        bool stateChanged = state.IsGenerating != active
+                            || Mathf.Abs(state.OutputScale - outputScale) > FluidEpsilon;
         bool visualChanged = generationVisualActive != active;
         if (!stateChanged && !visualChanged)
         {
@@ -574,6 +653,7 @@ public class SteamGenerator : InputOutputModule, IFacilityFlowAdapter, IFacility
         }
 
         state.IsGenerating = active;
+        state.OutputScale = outputScale;
         if (visualChanged)
         {
             generationVisualActive = active;
@@ -586,8 +666,22 @@ public class SteamGenerator : InputOutputModule, IFacilityFlowAdapter, IFacility
     }
 
     private bool IsGenerationActive =>
-        FacilityFlowStateWorld.ContainsSteamGenerator(flowEntityHandle)
-        && FacilityFlowStateWorld.GetSteamGenerator(flowEntityHandle).IsGenerating;
+        GenerationOutputScale > FluidEpsilon;
+
+    private float GenerationOutputScale
+    {
+        get
+        {
+            if (!FacilityFlowStateWorld.ContainsSteamGenerator(flowEntityHandle))
+            {
+                return 0f;
+            }
+
+            ref SteamGeneratorFlowState state =
+                ref FacilityFlowStateWorld.GetSteamGenerator(flowEntityHandle);
+            return state.IsGenerating ? Mathf.Clamp01(state.OutputScale) : 0f;
+        }
+    }
 
     private ref SteamGeneratorFlowState EnsureFlowState()
     {
@@ -691,7 +785,10 @@ public class SteamGenerator : InputOutputModule, IFacilityFlowAdapter, IFacility
     {
         if (FacilityFlowStateWorld.ContainsSteamGenerator(flowEntityHandle))
         {
-            FacilityFlowStateWorld.GetSteamGenerator(flowEntityHandle).IsGenerating = false;
+            ref SteamGeneratorFlowState state =
+                ref FacilityFlowStateWorld.GetSteamGenerator(flowEntityHandle);
+            state.IsGenerating = false;
+            state.OutputScale = 0f;
         }
         generationVisualActive = false;
         SetVisualParticleActive(particleEffect, false, clear: clearParticles);

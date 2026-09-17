@@ -27,8 +27,9 @@ belts with overlapping item/energy areas, in loaded and saved state. Covers inde
 floor/conveyor virtualization and preserves ordinary ground and machine-area stacks.
 It also checks conveyor placement eligibility on direct item-output areas and verifies
 that machine output uses conveyor lanes, applies backpressure when full, and never falls
-back to the area's center stack. A direct output must be empty before a conveyor can be
-placed over it. The reverse installation order is covered as well: a direct item output
+back to the area's center stack. A conveyor may be placed while output items are waiting;
+the stored stack then drains one item at a time into a free conveyor lane and keeps its
+items when the belt is full. The reverse installation order is covered as well: a direct item output
 cell may be placed over a normal, elevated-endpoint, or splitter belt, while pipe-only
 outputs and the raised 2F bridge center remain blocked.
 For elevated belts, manual drops choose the available footprint cell nearest the player

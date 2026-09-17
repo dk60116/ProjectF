@@ -183,9 +183,12 @@ var boilerState = ProjectF.Simulation.FacilityFlowStateWorld.CreateBoiler();
 var generatorState = ProjectF.Simulation.FacilityFlowStateWorld.CreateSteamGenerator();
 ProjectF.Simulation.FacilityFlowStateWorld.GetBoiler(boilerState).WaterTemperatureCelsius = 100f;
 ProjectF.Simulation.FacilityFlowStateWorld.GetSteamGenerator(generatorState).IsGenerating = true;
+ProjectF.Simulation.FacilityFlowStateWorld.GetSteamGenerator(generatorState).OutputScale = .5f;
 FacilitySimulationWorld.AppendProfilerCounters();
 Require(MapObjectTickProfiler.RuntimeCounters["FacilityStateECS/BoilerEntities"] == 1
-        && MapObjectTickProfiler.RuntimeCounters["FacilityStateECS/SteamGeneratorEntities"] == 1,
+        && MapObjectTickProfiler.RuntimeCounters["FacilityStateECS/SteamGeneratorEntities"] == 1
+        && Math.Abs(ProjectF.Simulation.FacilityFlowStateWorld
+            .GetSteamGenerator(generatorState).OutputScale - .5f) < .0001f,
     "profiler exposes persistent type-dense facility state counts");
 ProjectF.Simulation.FacilityFlowStateWorld.ReleaseBoiler(ref boilerState);
 ProjectF.Simulation.FacilityFlowStateWorld.ReleaseSteamGenerator(ref generatorState);

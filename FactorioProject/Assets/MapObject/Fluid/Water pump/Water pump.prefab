@@ -141,7 +141,6 @@ MonoBehaviour:
   objectName: Water pump
   objId: 53
   itemDefinition: {fileID: 11400000, guid: 347029aa316390a4982b64441c83789c, type: 2}
-  portableObj: {fileID: 0}
   mapStatus:
     mapSizeX: 1
     mapSizeY: 1
@@ -208,13 +207,14 @@ MonoBehaviour:
   runtimeFocusCoordinates: []
   storedEnergyUnits: 0
   energyGaugeCapacityUnits: 0
-  hasActiveCraft: 0
-  waitingForOutput: 0
-  remainingCraftTicks: 0
-  activeCraftConsumedEnergyUnits: 0
-  activeRecipeIndex: -1
-  activeOutputItemId: -1
-  activeOutputCount: 0
+  production:
+    Active: 0
+    WaitingForOutput: 0
+    RemainingTicks: 0
+    ConsumedEnergyUnits: 0
+    RecipeIndex: -1
+    OutputItemId: -1
+    OutputCount: 0
   localPipeConnectionDirection: 0
   waterDefinition: {fileID: 11400000, guid: 440d4476f9093b44e948d784c15c0d81, type: 2}
   fallbackWaterItemId: 1

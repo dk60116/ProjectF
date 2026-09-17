@@ -1,7 +1,7 @@
 using UnityEngine;
 using DG.Tweening;
 
-public class FenceDoor : Wall
+public class FenceDoor : Wall, IFenceDoorTarget
 {
     private const float ClosedAngle = 0f;
     private const float OpenAngle = 90f;
@@ -25,6 +25,10 @@ public class FenceDoor : Wall
 
     public bool IsOpen => isOpen;
     public override bool AllowsAnimalTraversal => isOpen;
+    internal Transform HingeTransform => hinge;
+    internal float HingeTweenDuration => hingeTweenDuration;
+    internal bool DisableColliderWhenOpen => disableColliderWhenOpen;
+    internal bool InvertOpenDirection => invertOpenDirection;
 
     protected override void OnEnable()
     {

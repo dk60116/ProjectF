@@ -51,7 +51,6 @@ MonoBehaviour:
   objectName: Oil
   objId: 4
   itemDefinition: {fileID: 11400000, guid: b7f6e746e5fdf2f43a58e92c85c78479, type: 2}
-  portableObj: {fileID: 0}
   mapStatus:
     mapSizeX: 1
     mapSizeY: 1

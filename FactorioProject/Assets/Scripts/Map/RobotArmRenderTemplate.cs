@@ -70,7 +70,10 @@ internal sealed class RobotArmRenderTemplate
     }
     private void Evaluate(RobotArmInstance arm)
     {
-        Matrix4x4 root = Matrix4x4.TRS(arm.WorldPosition, arm.WorldRotation, rootScale);
+        Matrix4x4 root = Matrix4x4.TRS(
+            arm.WorldPosition,
+            arm.WorldRotation,
+            rootScale * arm.PlacementPresentationScale);
         for (int i = 0; i < nodes.Length; i++)
         {
             Node n = nodes[i];

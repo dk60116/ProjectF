@@ -4931,7 +4931,6 @@ MonoBehaviour:
   objectName: Funance
   objId: 30
   itemDefinition: {fileID: 11400000, guid: 7ad57ef598401784aaa7e239c9a50507, type: 2}
-  portableObj: {fileID: 0}
   mapStatus:
     mapSizeX: 1
     mapSizeY: 1
@@ -5039,13 +5038,14 @@ MonoBehaviour:
   runtimeFocusCoordinates: []
   storedEnergyUnits: 0
   energyGaugeCapacityUnits: 0
-  hasActiveCraft: 0
-  waitingForOutput: 0
-  remainingCraftTicks: 0
-  activeCraftConsumedEnergyUnits: 0
-  activeRecipeIndex: -1
-  activeOutputItemId: -1
-  activeOutputCount: 0
+  production:
+    Active: 0
+    WaitingForOutput: 0
+    RemainingTicks: 0
+    ConsumedEnergyUnits: 0
+    RecipeIndex: -1
+    OutputItemId: -1
+    OutputCount: 0
 --- !u!65 &7808762303293523754
 BoxCollider:
   m_ObjectHideFlags: 0

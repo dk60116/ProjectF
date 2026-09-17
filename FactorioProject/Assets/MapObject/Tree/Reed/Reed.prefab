@@ -125,7 +125,6 @@ MonoBehaviour:
   objectName: Reed
   objId: 11
   itemDefinition: {fileID: 11400000, guid: eac1a52a94dced248b2c431dae676dfb, type: 2}
-  portableObj: {fileID: 0}
   mapStatus:
     mapSizeX: 1
     mapSizeY: 1

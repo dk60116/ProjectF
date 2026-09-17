@@ -158,6 +158,10 @@ public partial class Block
     private readonly List<Vector2Int> fluidDirectionConnectedDirections = new List<Vector2Int>();
     private readonly Queue<FluidSourceSearchNode> fluidDirectionSourceSearchQueue = new Queue<FluidSourceSearchNode>();
     private readonly HashSet<Vector2Int> fluidDirectionSourceSearchVisited = new HashSet<Vector2Int>();
+    private bool fluidDirectionSourceCacheValid;
+    private bool cachedHasFluidDirectionSource;
+    private Vector2Int cachedFluidSourceDirection;
+    private Vector2Int cachedFluidSourceFlowDirection;
     private PortableObjectPool floorObjectPool;
     private TerrainGenerator cachedTerrainGenerator;
     private Transform inputAreaCenterAnchor;
@@ -950,6 +954,49 @@ public partial class Block
         }
 
         worldPosition = topObject.WorldPosition;
+        return true;
+    }
+
+    public bool CanTransferOneInputAreaCenterObjectToConveyor()
+    {
+        CleanupPortableStack(inputAreaCenterStack);
+        if (!IsRuntimeConveyor || inputAreaCenterStack.Count <= 0)
+        {
+            return false;
+        }
+
+        PortableObject topObject = GetTopPortableObject(inputAreaCenterStack);
+        return topObject != null
+               && topObject.ItemId >= 0
+               && CanAddConveyorObjectAtPlacement(topObject.ItemId, topObject.WorldPosition);
+    }
+
+    public bool TryTransferOneInputAreaCenterObjectToConveyor()
+    {
+        if (!CanTransferOneInputAreaCenterObjectToConveyor())
+        {
+            return false;
+        }
+
+        PortableObject sourceObject = GetTopPortableObject(inputAreaCenterStack);
+        int itemId = sourceObject.ItemId;
+        Vector3 startWorldPosition = sourceObject.WorldPosition;
+        inputAreaCenterStack.RemoveAt(inputAreaCenterStack.Count - 1);
+        if (!TryAddConveyorObjectAnimatedAtPlacement(
+                itemId,
+                startWorldPosition,
+                startWorldPosition,
+                0f,
+                out _,
+                movementReleaseDelay: 0f,
+                useJumpArc: false,
+                moveDuration: PortableObject.MoveToDuration))
+        {
+            inputAreaCenterStack.Add(sourceObject);
+            return false;
+        }
+
+        ReleaseFloorObject(sourceObject);
         return true;
     }
 
@@ -5354,6 +5401,7 @@ public partial class Block
                    requiredPortableObject,
                    skippedFloorStackIndexes,
                    skipInputAreaCenter,
+                   false,
                    out bool useInputAreaCenter,
                    out int stackIndex,
                    out List<PortableObject> stack,
@@ -5468,6 +5516,7 @@ public partial class Block
                 null,
                 null,
                 false,
+                true,
                 out _,
                 out _,
                 out List<PortableObject> stack,
@@ -5478,7 +5527,11 @@ public partial class Block
             return false;
         }
 
-        int stackPickupCount = CountManualPickupStackObjectsFromTop(stack, itemId, distanceSqr, pickupRadiusSqr);
+        int stackPickupCount = CountManualPickupStackObjectsFromTop(
+            stack,
+            itemId,
+            distanceSqr,
+            pickupRadiusSqr);
         if (stackPickupCount <= 0)
         {
             return false;
@@ -5525,6 +5578,7 @@ public partial class Block
                    requiredPortableObject,
                    skippedFloorStackIndexes,
                    skipInputAreaCenter,
+                   false,
                    out bool useInputAreaCenter,
                    out int stackIndex,
                    out List<PortableObject> stack,
@@ -5568,6 +5622,7 @@ public partial class Block
         PortableObject requiredPortableObject,
         ISet<int> skippedFloorStackIndexes,
         bool skipInputAreaCenter,
+        bool allowUnsettledPreview,
         out bool useInputAreaCenter,
         out int stackIndex,
         out List<PortableObject> stack,
@@ -5589,6 +5644,7 @@ public partial class Block
             preferredItemId,
             requiredPortableObject,
             skippedFloorStackIndexes,
+            allowUnsettledPreview,
             out int floorStackIndex,
             out List<PortableObject> floorStack,
             out PortableObject floorTopObject,
@@ -5607,6 +5663,7 @@ public partial class Block
                 pickupRadius,
                 preferredItemId,
                 requiredPortableObject,
+                allowUnsettledPreview,
                 out inputAreaStack,
                 out inputAreaTopObject,
                 out inputAreaItemId,
@@ -5644,6 +5701,7 @@ public partial class Block
         int preferredItemId,
         PortableObject requiredPortableObject,
         ISet<int> skippedStackIndexes,
+        bool allowUnsettledPreview,
         out int bestStackIndex,
         out List<PortableObject> bestStack,
         out PortableObject bestTopObject,
@@ -5696,6 +5754,7 @@ public partial class Block
                     candidateDistanceSqr,
                     pickupRadiusSqr,
                     preferredItemId,
+                    allowUnsettledPreview,
                     out int candidateItemId))
             {
                 continue;
@@ -5723,6 +5782,7 @@ public partial class Block
         float pickupRadius,
         int preferredItemId,
         PortableObject requiredPortableObject,
+        bool allowUnsettledPreview,
         out List<PortableObject> stack,
         out PortableObject topObject,
         out int itemId,
@@ -5769,6 +5829,7 @@ public partial class Block
                 distanceSqr,
                 pickupRadiusSqr,
                 preferredItemId,
+                allowUnsettledPreview,
                 out itemId))
         {
             return false;
@@ -5783,6 +5844,7 @@ public partial class Block
         float distanceSqr,
         float pickupRadiusSqr,
         int preferredItemId,
+        bool allowUnsettledPreview,
         out int itemId)
     {
         itemId = -1;
@@ -5803,7 +5865,10 @@ public partial class Block
         }
 
         DroppedItemPickupGate topGate = topObject.GetComponent<DroppedItemPickupGate>();
-        return topGate == null || topGate.CanManualPickup(distanceSqr, pickupRadiusSqr);
+        return topGate == null
+               || (allowUnsettledPreview
+                   ? topGate.CanManualPreview(distanceSqr, pickupRadiusSqr)
+                   : topGate.CanManualPickup(distanceSqr, pickupRadiusSqr));
     }
 
     public bool TryTakeOneFloorObject(out int takenItemId)
@@ -6303,6 +6368,7 @@ public partial class Block
 
     public void RefreshBeltDirectionDebugVisuals()
     {
+        fluidDirectionSourceCacheValid = false;
         TerrainGenerator.Active?.SetBeltDirectionVisualActive(
             this,
             Application.isPlaying
@@ -6370,18 +6436,14 @@ public partial class Block
 
     private bool HasFluidDirectionArrow()
     {
-        if (!IsFluidDirectionMapObject(mapObject))
-        {
-            return false;
-        }
-
-        if (mapObject is Pump pump)
+        if (mapObject is WaterPump pump)
         {
             return pump.TryGetPipeConnectionDirection(pump.transform.rotation, out Vector2Int pumpDirection)
                    && pumpDirection != Vector2Int.zero;
         }
 
-        if (!(mapObject is Pipe pipe) || !TryResolveOwningTerrainGenerator(out TerrainGenerator terrainGenerator))
+        if (!TryGetRuntimePipe(out Pipe pipe, out _)
+            || !TryResolveOwningTerrainGenerator(out TerrainGenerator terrainGenerator))
         {
             return false;
         }
@@ -6394,13 +6456,12 @@ public partial class Block
     {
         if (matrices == null
             || !Application.isPlaying
-            || !ShouldShowBeltDirections()
-            || !IsFluidDirectionMapObject(mapObject))
+            || !ShouldShowBeltDirections())
         {
             return 0;
         }
 
-        if (mapObject is Pump pump)
+        if (mapObject is WaterPump pump)
         {
             if (!pump.TryGetPipeConnectionDirection(pump.transform.rotation, out Vector2Int pumpDirection)
                 || pumpDirection == Vector2Int.zero)
@@ -6412,7 +6473,7 @@ public partial class Block
             return 1;
         }
 
-        if (!(mapObject is Pipe pipe)
+        if (!TryGetRuntimePipe(out Pipe pipe, out _)
             || !TryResolveOwningTerrainGenerator(out TerrainGenerator terrainGenerator)
             || !TryFindFluidSourceDirection(pipe, terrainGenerator, out Vector2Int sourceDirection, out Vector2Int sourceFlowDirection))
         {
@@ -6493,7 +6554,7 @@ public partial class Block
     private Vector3 GetFluidDirectionArrowWorldPosition(Vector3 flowWorldDirection, int arrowIndex, int arrowCount)
     {
         Vector3 center = WorldPosition;
-        float verticalOffset = mapObject is Pump ? 0.42f : 0.28f;
+        float verticalOffset = mapObject is WaterPump ? 0.42f : 0.28f;
         center.y = Mathf.Max(
             center.y + verticalOffset,
             WorldPosition.y + BeltDirectionArrowMinimumWorldHeight);
@@ -6514,6 +6575,30 @@ public partial class Block
         out Vector2Int sourceDirection,
         out Vector2Int sourceFlowDirection)
     {
+        if (fluidDirectionSourceCacheValid)
+        {
+            sourceDirection = cachedFluidSourceDirection;
+            sourceFlowDirection = cachedFluidSourceFlowDirection;
+            return cachedHasFluidDirectionSource;
+        }
+
+        cachedHasFluidDirectionSource = TryFindFluidSourceDirectionUncached(
+            originPipe,
+            terrainGenerator,
+            out cachedFluidSourceDirection,
+            out cachedFluidSourceFlowDirection);
+        fluidDirectionSourceCacheValid = true;
+        sourceDirection = cachedFluidSourceDirection;
+        sourceFlowDirection = cachedFluidSourceFlowDirection;
+        return cachedHasFluidDirectionSource;
+    }
+
+    private bool TryFindFluidSourceDirectionUncached(
+        Pipe originPipe,
+        TerrainGenerator terrainGenerator,
+        out Vector2Int sourceDirection,
+        out Vector2Int sourceFlowDirection)
+    {
         sourceDirection = Vector2Int.zero;
         sourceFlowDirection = Vector2Int.zero;
         if (originPipe == null || terrainGenerator == null)
@@ -6521,9 +6606,9 @@ public partial class Block
             return false;
         }
 
-        if (InputOutputModule.TryGetRuntimePipeSourceAtCoordinate(coordinate, out Pump sameCoordinatePump)
-            && sameCoordinatePump != null
-            && sameCoordinatePump.TryGetPipeConnectionDirection(sameCoordinatePump.transform.rotation, out sourceFlowDirection)
+        if (InputOutputModule.TryGetRuntimeFluidOutputDirectionAtCoordinate(
+                coordinate,
+                out sourceFlowDirection)
             && sourceFlowDirection != Vector2Int.zero)
         {
             sourceDirection = -sourceFlowDirection;
@@ -6538,28 +6623,108 @@ public partial class Block
         while (fluidDirectionSourceSearchQueue.Count > 0)
         {
             FluidSourceSearchNode node = fluidDirectionSourceSearchQueue.Dequeue();
-            if (!terrainGenerator.TryGetLoadedBlock(node.coordinate, out Block currentBlock)
-                || currentBlock == null
-                || !currentBlock.TryGetRuntimePipe(out Pipe currentPipe, out Quaternion currentPipeRotation))
+            if (node.coordinate != coordinate
+                && node.firstDirection != Vector2Int.zero
+                && InputOutputModule.TryGetRuntimeFluidOutputDirectionAtCoordinate(
+                    node.coordinate,
+                    out _))
+            {
+                sourceDirection = node.firstDirection;
+                sourceFlowDirection = -sourceDirection;
+                return true;
+            }
+
+            bool hasPipe = TryGetFluidDirectionPipeAtCoordinate(
+                terrainGenerator,
+                node.coordinate,
+                out Pipe currentPipe,
+                out Quaternion currentPipeRotation,
+                out PipeRuntimeRecord currentRecord);
+            bool hasSteamGeneratorPass =
+                InputOutputModule.TryGetSteamGeneratorPipePassAtRuntimeCoordinate(
+                    node.coordinate,
+                    out SteamGenerator steamGenerator,
+                    out Vector2Int steamPassOtherCoordinate,
+                    out Vector2Int steamPassExternalDirection);
+            bool pipeConnectsToSteamPass = hasSteamGeneratorPass
+                                           && (!hasPipe
+                                               || (currentRecord != null
+                                                   ? currentRecord.HasConnectionTowardsAt(
+                                                       node.coordinate,
+                                                       -steamPassExternalDirection)
+                                                   : currentPipe.HasConnectionTowardsAt(
+                                                       node.coordinate,
+                                                       currentPipeRotation,
+                                                       -steamPassExternalDirection)));
+            bool hasPumpPass =
+                InputOutputModule.TryGetPumpPipePassAtRuntimeCoordinate(
+                    node.coordinate,
+                    out _,
+                    out Vector2Int pumpPassOtherCoordinate,
+                    out Vector2Int pumpPassExternalDirection);
+            bool pipeConnectsToPumpPass = hasPumpPass;
+            if (!hasPipe && !hasSteamGeneratorPass && !hasPumpPass)
             {
                 continue;
+            }
+
+            if (pipeConnectsToSteamPass)
+            {
+                Vector2Int firstDirection = node.firstDirection != Vector2Int.zero
+                    ? node.firstDirection
+                    : -steamPassExternalDirection;
+                if (fluidDirectionSourceSearchVisited.Add(steamPassOtherCoordinate))
+                {
+                    fluidDirectionSourceSearchQueue.Enqueue(
+                        new FluidSourceSearchNode(steamPassOtherCoordinate, firstDirection));
+                }
+
+                if (InputOutputModule.TryGetOverlappingSteamSourcePort(
+                        steamGenerator,
+                        out Vector2Int overlappingSourceCoordinate)
+                    && fluidDirectionSourceSearchVisited.Add(overlappingSourceCoordinate))
+                {
+                    fluidDirectionSourceSearchQueue.Enqueue(
+                        new FluidSourceSearchNode(overlappingSourceCoordinate, firstDirection));
+                }
+            }
+
+            if (pipeConnectsToPumpPass
+                && fluidDirectionSourceSearchVisited.Add(pumpPassOtherCoordinate))
+            {
+                Vector2Int firstDirection = node.firstDirection != Vector2Int.zero
+                    ? node.firstDirection
+                    : -pumpPassExternalDirection;
+                fluidDirectionSourceSearchQueue.Enqueue(
+                    new FluidSourceSearchNode(pumpPassOtherCoordinate, firstDirection));
             }
 
             for (int i = 0; i < ConveyorNeighborDirections.Length; i++)
             {
                 Vector2Int direction = ConveyorNeighborDirections[i];
-                if (!currentPipe.HasConnectionTowardsAt(node.coordinate, currentPipeRotation, direction))
+                if (hasPipe && !hasPumpPass
+                    && (currentRecord != null
+                        ? !currentRecord.HasConnectionTowardsAt(node.coordinate, direction)
+                        : !currentPipe.HasConnectionTowardsAt(
+                            node.coordinate,
+                            currentPipeRotation,
+                            direction)))
+                {
+                    continue;
+                }
+
+                if ((!hasPipe && hasSteamGeneratorPass || hasPumpPass)
+                    && direction != (hasPumpPass
+                        ? pumpPassExternalDirection
+                        : steamPassExternalDirection))
                 {
                     continue;
                 }
 
                 Vector2Int nextCoordinate = node.coordinate + direction;
-                if (TryGetFluidSourceAtNeighbor(
-                        terrainGenerator,
+                if (InputOutputModule.HasRuntimeFluidOutputTowardsPipe(
                         nextCoordinate,
-                        -direction,
-                        out Pump sourcePump)
-                    && sourcePump != null)
+                        -direction))
                 {
                     sourceDirection = node.firstDirection != Vector2Int.zero
                         ? node.firstDirection
@@ -6568,11 +6733,38 @@ public partial class Block
                     return true;
                 }
 
-                if (!terrainGenerator.TryGetLoadedBlock(nextCoordinate, out Block nextBlock)
-                    || nextBlock == null
-                    || !nextBlock.TryGetRuntimePipe(out Pipe nextPipe, out Quaternion nextPipeRotation)
-                    || !nextPipe.HasConnectionTowardsAt(nextCoordinate, nextPipeRotation, -direction)
-                    || !fluidDirectionSourceSearchVisited.Add(nextCoordinate))
+                bool hasNextPipe = TryGetFluidDirectionPipeAtCoordinate(
+                    terrainGenerator,
+                    nextCoordinate,
+                    out Pipe nextPipe,
+                    out Quaternion nextPipeRotation,
+                    out PipeRuntimeRecord nextRecord);
+                bool hasNextSteamGeneratorPass =
+                    InputOutputModule.TryGetSteamGeneratorPipePassAtRuntimeCoordinate(
+                        nextCoordinate,
+                        out _,
+                        out _,
+                        out Vector2Int nextSteamPassExternalDirection)
+                    && nextSteamPassExternalDirection == -direction;
+                bool hasNextPumpPass =
+                    InputOutputModule.TryGetPumpPipePassAtRuntimeCoordinate(
+                        nextCoordinate,
+                        out _,
+                        out _,
+                        out Vector2Int nextPumpPassExternalDirection)
+                    && nextPumpPassExternalDirection == -direction;
+                bool nextConnects = hasNextSteamGeneratorPass
+                                    || hasNextPumpPass
+                                    || hasNextPipe
+                                    && (nextRecord != null
+                                        ? nextRecord.HasConnectionTowardsAt(
+                                            nextCoordinate,
+                                            -direction)
+                                        : nextPipe.HasConnectionTowardsAt(
+                                            nextCoordinate,
+                                            nextPipeRotation,
+                                            -direction));
+                if (!nextConnects || !fluidDirectionSourceSearchVisited.Add(nextCoordinate))
                 {
                     continue;
                 }
@@ -6583,10 +6775,15 @@ public partial class Block
                 fluidDirectionSourceSearchQueue.Enqueue(new FluidSourceSearchNode(nextCoordinate, firstDirection));
             }
 
-            Vector2Int remoteCoordinate;
-            bool hasRemote = currentBlock.TryGetRuntimePipeRecord(out PipeRuntimeRecord currentRecord)
-                ? currentRecord.TryGetRemoteConnectionCoordinate(node.coordinate, out remoteCoordinate)
-                : currentPipe.TryGetRemoteConnectionCoordinate(node.coordinate, out remoteCoordinate);
+            Vector2Int remoteCoordinate = default;
+            bool hasRemote = hasPipe && !hasPumpPass
+                             && (currentRecord != null
+                                 ? currentRecord.TryGetRemoteConnectionCoordinate(
+                                     node.coordinate,
+                                     out remoteCoordinate)
+                                 : currentPipe.TryGetRemoteConnectionCoordinate(
+                                     node.coordinate,
+                                     out remoteCoordinate));
             if (hasRemote
                 && fluidDirectionSourceSearchVisited.Add(remoteCoordinate))
             {
@@ -6598,35 +6795,40 @@ public partial class Block
         return false;
     }
 
-    private bool TryGetFluidSourceAtNeighbor(
+    private static bool TryGetFluidDirectionPipeAtCoordinate(
         TerrainGenerator terrainGenerator,
-        Vector2Int sourceCoordinate,
-        Vector2Int directionFromSourceToPipe,
-        out Pump sourcePump)
+        Vector2Int pipeCoordinate,
+        out Pipe pipe,
+        out Quaternion pipeRotation,
+        out PipeRuntimeRecord pipeRecord)
     {
-        sourcePump = null;
-        if (InputOutputModule.TryGetRuntimePipeSourceAtCoordinate(sourceCoordinate, out sourcePump)
-            && sourcePump != null)
+        pipe = null;
+        pipeRotation = Quaternion.identity;
+        pipeRecord = null;
+
+        PipeWorld pipeWorld = PipeWorld.Current;
+        if (pipeWorld != null
+            && pipeWorld.TryGetAtCoordinate(pipeCoordinate, out pipeRecord)
+            && pipeRecord != null)
         {
-            if (directionFromSourceToPipe == Vector2Int.zero
-                || sourcePump.HasPipeConnectionTowards(sourcePump.transform.rotation, directionFromSourceToPipe))
-            {
-                return true;
-            }
+            pipe = pipeRecord.Prototype;
+            pipeRotation = pipeRecord.WorldRotation;
+            return pipe != null;
         }
 
         if (terrainGenerator == null
-            || !terrainGenerator.TryGetLoadedBlock(sourceCoordinate, out Block sourceBlock)
-            || sourceBlock == null
-            || !(sourceBlock.MapObject is Pump directPump)
-            || !directPump.gameObject.activeInHierarchy
-            || !directPump.HasPipeConnectionTowards(directPump.transform.rotation, directionFromSourceToPipe))
+            || !terrainGenerator.TryGetLoadedBlock(pipeCoordinate, out Block block)
+            || block == null
+            || !block.TryGetRuntimePipe(out pipe, out pipeRotation))
         {
+            pipe = null;
+            pipeRotation = Quaternion.identity;
+            pipeRecord = null;
             return false;
         }
 
-        sourcePump = directPump;
-        return true;
+        block.TryGetRuntimePipeRecord(out pipeRecord);
+        return pipe != null;
     }
 
     private int CollectFluidConnectedDirections(
@@ -6649,10 +6851,14 @@ public partial class Block
             && ReferenceEquals(runtimePipe, pipe)
             ? runtimeRotation
             : pipe.transform.rotation;
+        TryGetRuntimePipeRecord(out PipeRuntimeRecord runtimeRecord);
         for (int i = 0; i < ConveyorNeighborDirections.Length; i++)
         {
             Vector2Int direction = ConveyorNeighborDirections[i];
-            if (!pipe.HasConnectionTowardsAt(coordinate, pipeRotation, direction)
+            bool hasConnection = runtimeRecord != null
+                ? runtimeRecord.HasConnectionTowardsAt(coordinate, direction)
+                : pipe.HasConnectionTowardsAt(coordinate, pipeRotation, direction);
+            if (!hasConnection
                 || !IsFluidConnectedDirection(pipe, terrainGenerator, direction))
             {
                 continue;
@@ -6681,42 +6887,58 @@ public partial class Block
             return true;
         }
 
-        if (InputOutputModule.TryGetRuntimePipeSourceAtCoordinate(neighborCoordinate, out Pump sourcePump)
-            && sourcePump != null
-            && sourcePump.HasPipeConnectionTowards(sourcePump.transform.rotation, -direction))
+        if (InputOutputModule.HasRuntimeFluidOutputTowardsPipe(
+                neighborCoordinate,
+                -direction))
         {
             return true;
         }
 
-        if (!terrainGenerator.TryGetLoadedBlock(neighborCoordinate, out Block neighborBlock)
-            || neighborBlock == null
-            || neighborBlock.MapObject == null)
-        {
-            return false;
-        }
-
-        if (neighborBlock.TryGetRuntimePipe(out Pipe neighborPipe, out Quaternion neighborPipeRotation))
-        {
-            return neighborPipe.HasConnectionTowardsAt(
+        if (InputOutputModule.TryGetPumpPipePassAtRuntimeCoordinate(
                 neighborCoordinate,
-                neighborPipeRotation,
-                -direction);
-        }
-
-        if (neighborBlock.MapObject is Pump pump)
+                out _,
+                out _,
+                out Vector2Int pumpExternalDirection)
+            && pumpExternalDirection == -direction)
         {
-            return pump.gameObject.activeInHierarchy
-                   && pump.HasPipeConnectionTowards(pump.transform.rotation, -direction);
+            return true;
         }
 
-        return neighborBlock.MapObject is InstallationObject installationObject
+        if (InputOutputModule.TryGetSteamGeneratorPipePassAtRuntimeCoordinate(
+                neighborCoordinate,
+                out _,
+                out _,
+                out Vector2Int steamExternalDirection)
+            && steamExternalDirection == -direction)
+        {
+            return true;
+        }
+
+        if (TryGetFluidDirectionPipeAtCoordinate(
+                terrainGenerator,
+                neighborCoordinate,
+                out Pipe neighborPipe,
+                out Quaternion neighborPipeRotation,
+                out PipeRuntimeRecord neighborRecord))
+        {
+            return neighborRecord != null
+                ? neighborRecord.HasConnectionTowardsAt(neighborCoordinate, -direction)
+                : neighborPipe.HasConnectionTowardsAt(
+                    neighborCoordinate,
+                    neighborPipeRotation,
+                    -direction);
+        }
+
+        return terrainGenerator.TryGetLoadedBlock(neighborCoordinate, out Block neighborBlock)
+               && neighborBlock != null
+               && neighborBlock.MapObject is InstallationObject installationObject
                && installationObject.gameObject.activeInHierarchy
                && installationObject.CanStoreFluid;
     }
 
     private static bool IsFluidDirectionMapObject(IMapObjectTarget candidate)
     {
-        return candidate is Pipe || candidate is Pump;
+        return candidate is Pipe || candidate is WaterPump;
     }
 
     private Vector3 GetBeltDirectionArrowWorldPosition()
@@ -13302,7 +13524,7 @@ public partial class Block
         }
 
         DroppedItemPickupGate topGate = topObject.GetComponent<DroppedItemPickupGate>();
-        if (topGate != null && !topGate.CanManualPickup(distanceSqr, pickupRadiusSqr))
+        if (topGate != null && !topGate.CanManualPreview(distanceSqr, pickupRadiusSqr))
         {
             return false;
         }
@@ -13424,7 +13646,11 @@ public partial class Block
         }
 
         previewItemId = itemId;
-        previewPickupCount = CountManualPickupStackObjectsFromTop(inputAreaCenterStack, itemId, distanceSqr, pickupRadiusSqr);
+        previewPickupCount = CountManualPickupStackObjectsFromTop(
+            inputAreaCenterStack,
+            itemId,
+            distanceSqr,
+            pickupRadiusSqr);
         previewPortableObject = topObject;
         previewPortableObject.SetPickupSourceBlock(this);
         previewPortableObject.SetFocusStack(inputAreaCenterStack);
@@ -13584,7 +13810,11 @@ public partial class Block
         return stack != null && stack.Count > 0 ? stack[stack.Count - 1] : null;
     }
 
-    private static int CountManualPickupStackObjectsFromTop(List<PortableObject> stack, int itemId, float distanceSqr, float pickupRadiusSqr)
+    private static int CountManualPickupStackObjectsFromTop(
+        List<PortableObject> stack,
+        int itemId,
+        float distanceSqr,
+        float pickupRadiusSqr)
     {
         if (stack == null || itemId < 0)
         {
@@ -13606,7 +13836,7 @@ public partial class Block
             }
 
             DroppedItemPickupGate gate = portableObject.GetComponent<DroppedItemPickupGate>();
-            if (gate != null && !gate.CanManualPickup(distanceSqr, pickupRadiusSqr))
+            if (gate != null && !gate.CanManualPreview(distanceSqr, pickupRadiusSqr))
             {
                 break;
             }

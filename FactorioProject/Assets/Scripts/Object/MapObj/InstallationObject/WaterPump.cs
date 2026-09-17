@@ -2,7 +2,7 @@ using System.Collections.Generic;
 using ProjectF.Simulation;
 using UnityEngine;
 
-public class Pump : InputOutputModule, IFacilityFlowAdapter, IFacilityFlowStateOwner
+public class WaterPump : InputOutputModule, IFacilityFlowAdapter, IFacilityFlowStateOwner
 {
     private const string DefaultWaterItemName = "Water";
     private const int DefaultWaterItemId = 1;

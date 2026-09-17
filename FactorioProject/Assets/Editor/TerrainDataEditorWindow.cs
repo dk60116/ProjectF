@@ -71,19 +71,43 @@ public class TerrainDataEditorWindow : EditorWindow
             "waterBiomeColor"),
         new TerrainTextureSet(
             "Sand",
-            "generatedSurfaceBlendSandTexture",
+            new[]
+            {
+                "generatedSurfaceBlendSandTexture",
+                "generatedSurfaceBlendSandTexture2",
+                "generatedSurfaceBlendSandTexture3",
+                "generatedSurfaceBlendSandTexture4"
+            },
             "sandBiomeColor"),
         new TerrainTextureSet(
             "Dirt",
-            "generatedSurfaceBlendDirtTexture",
+            new[]
+            {
+                "generatedSurfaceBlendDirtTexture",
+                "generatedSurfaceBlendDirtTexture2",
+                "generatedSurfaceBlendDirtTexture3",
+                "generatedSurfaceBlendDirtTexture4"
+            },
             "dirtBiomeColor"),
         new TerrainTextureSet(
             "Grass",
-            "generatedSurfaceBlendGrassTexture",
+            new[]
+            {
+                "generatedSurfaceBlendGrassTexture",
+                "generatedSurfaceBlendGrassTexture2",
+                "generatedSurfaceBlendGrassTexture3",
+                "generatedSurfaceBlendGrassTexture4"
+            },
             "grassBiomeColor"),
         new TerrainTextureSet(
             "Forest",
-            "generatedSurfaceBlendForestTexture",
+            new[]
+            {
+                "generatedSurfaceBlendForestTexture",
+                "generatedSurfaceBlendForestTexture2",
+                "generatedSurfaceBlendForestTexture3",
+                "generatedSurfaceBlendForestTexture4"
+            },
             "forestBiomeColor"),
         new TerrainTextureSet(
             "Rock",
@@ -94,16 +118,16 @@ public class TerrainDataEditorWindow : EditorWindow
     private readonly struct TerrainTextureSet
     {
         public readonly string title;
-        public readonly string baseTexturePropertyPath;
+        public readonly string[] texturePropertyPaths;
         public readonly string baseColorPropertyPath;
 
         public TerrainTextureSet(
             string title,
-            string baseTexturePropertyPath,
+            string[] texturePropertyPaths,
             string baseColorPropertyPath)
         {
             this.title = title;
-            this.baseTexturePropertyPath = baseTexturePropertyPath;
+            this.texturePropertyPaths = texturePropertyPaths;
             this.baseColorPropertyPath = baseColorPropertyPath;
         }
     }
@@ -169,6 +193,7 @@ public class TerrainDataEditorWindow : EditorWindow
         new HashSet<string>(System.StringComparer.Ordinal);
     private bool visibleGeneratorsDirty = true;
     private SerializedObject selectedGeneratorSerializedObject;
+    private TerrainIslandPreviewPanel islandPreviewPanel;
 
     [MenuItem("Window/ProjectF/Terrain Editor")]
     public static void ShowWindow()
@@ -184,11 +209,15 @@ public class TerrainDataEditorWindow : EditorWindow
         EnsureSelection();
         EditorApplication.delayCall -= RefreshGeneratorSelection;
         EditorApplication.delayCall += RefreshGeneratorSelection;
+        islandPreviewPanel?.Dispose();
+        islandPreviewPanel = new TerrainIslandPreviewPanel(Repaint);
     }
 
     private void OnDisable()
     {
         EditorApplication.delayCall -= RefreshGeneratorSelection;
+        islandPreviewPanel?.Dispose();
+        islandPreviewPanel = null;
         ClearSelectedGeneratorCache();
         visibleGenerators.Clear();
         visibleGeneratorsDirty = true;
@@ -262,6 +291,7 @@ public class TerrainDataEditorWindow : EditorWindow
         DrawDetailHeader(generator);
 
         detailScroll = EditorGUILayout.BeginScrollView(detailScroll);
+        islandPreviewPanel?.Draw(generator, position.width);
         EditorGUI.BeginChangeCheck();
 
         DrawPropertySection(serializedGenerator, "Core", CorePropertyPaths);
@@ -291,6 +321,7 @@ public class TerrainDataEditorWindow : EditorWindow
         {
             serializedGenerator.ApplyModifiedProperties();
             EditorUtility.SetDirty(generator);
+            islandPreviewPanel?.RequestGeneration(generator);
             if (generator.gameObject.scene.IsValid())
             {
                 EditorSceneManager.MarkSceneDirty(generator.gameObject.scene);
@@ -451,15 +482,19 @@ public class TerrainDataEditorWindow : EditorWindow
         }
 
         EditorGUI.indentLevel++;
-        SerializedProperty baseTexture = !string.IsNullOrEmpty(textureSet.baseTexturePropertyPath)
-            ? GetCachedProperty(serializedObject, textureSet.baseTexturePropertyPath)
-            : null;
         SerializedProperty baseColor = !string.IsNullOrEmpty(textureSet.baseColorPropertyPath)
             ? GetCachedProperty(serializedObject, textureSet.baseColorPropertyPath)
             : null;
-        if (baseTexture != null)
+        if (textureSet.texturePropertyPaths != null)
         {
-            DrawTextureProperty(baseTexture, "Base Texture", false, Color.white);
+            for (int i = 0; i < textureSet.texturePropertyPaths.Length; i++)
+            {
+                SerializedProperty texture = GetCachedProperty(serializedObject, textureSet.texturePropertyPaths[i]);
+                if (texture != null)
+                {
+                    DrawTextureProperty(texture, $"Texture {i + 1}", false, Color.white);
+                }
+            }
         }
 
         if (baseColor != null)
@@ -642,12 +677,6 @@ public class TerrainDataEditorWindow : EditorWindow
 
     private static void SetTextureProperty(SerializedProperty property, Texture2D texture)
     {
-        SerializedProperty defaultsInitialized = property.serializedObject.FindProperty("generatedSurfaceBlendTextureDefaultsInitialized");
-        if (defaultsInitialized != null)
-        {
-            defaultsInitialized.boolValue = true;
-        }
-
         property.objectReferenceValue = texture;
         property.serializedObject.ApplyModifiedProperties();
         Object targetObject = property.serializedObject.targetObject;

@@ -78,6 +78,7 @@ namespace ProjectF.Simulation
     public struct SteamGeneratorFlowState
     {
         public bool IsGenerating;
+        public float OutputScale;
     }
 
     /// <summary>

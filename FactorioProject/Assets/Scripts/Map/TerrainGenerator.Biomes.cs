@@ -10,6 +10,34 @@ using UnityEditor;
 
 public partial class TerrainGenerator : MonoBehaviour
 {
+    private struct IslandShapeEllipse
+    {
+        public Vector2 center;
+        public Vector2 radii;
+        public float rotationCos;
+        public float rotationSin;
+    }
+
+    private sealed class IslandShapeProfile
+    {
+        public int seed;
+        public IslandShapeEllipse mainBody;
+        public IslandShapeEllipse[] lobes;
+        public int lobeCount;
+        public IslandShapeEllipse[] bays;
+        public int bayCount;
+        public IslandShapeEllipse[] satellites;
+        public int satelliteCount;
+        public float secondHarmonicPhase;
+        public float thirdHarmonicPhase;
+        public float fifthHarmonicPhase;
+        public float secondHarmonicStrength;
+        public float thirdHarmonicStrength;
+        public float fifthHarmonicStrength;
+    }
+
+    private IslandShapeProfile islandShapeProfile;
+
     private bool CanSpawnResourceOnBiome(TerrainBiome biome)
     {
         return biome != TerrainBiome.Water && biome != TerrainBiome.Sand;
@@ -180,13 +208,173 @@ public partial class TerrainGenerator : MonoBehaviour
 
         float halfSize = GetNormalizedMapSize() * 0.5f;
         Vector2 normalized = new Vector2(worldCoordinate.x + 0.5f, worldCoordinate.y + 0.5f) / Mathf.Max(1f, halfSize);
-        float distanceFromCenter = normalized.magnitude;
+        float protectedRadius = GetIslandProtectedRadius(halfSize);
+        if (normalized.sqrMagnitude <= protectedRadius * protectedRadius)
+        {
+            return false;
+        }
+
+        IslandShapeProfile profile = GetIslandShapeProfile();
+        float landScore = EvaluateIslandEllipse(normalized, profile.mainBody);
+        for (int i = 0; i < profile.lobeCount; i++)
+        {
+            landScore = SmoothMaximum(
+                landScore,
+                EvaluateIslandEllipse(normalized, profile.lobes[i]),
+                0.10f);
+        }
+
+        for (int i = 0; i < profile.satelliteCount; i++)
+        {
+            landScore = Mathf.Max(landScore, EvaluateIslandEllipse(normalized, profile.satellites[i]));
+        }
+
+        float angle = Mathf.Atan2(normalized.y, normalized.x);
+        landScore += Mathf.Sin((angle * 2f) + profile.secondHarmonicPhase) * profile.secondHarmonicStrength;
+        landScore += Mathf.Sin((angle * 3f) + profile.thirdHarmonicPhase) * profile.thirdHarmonicStrength;
+        landScore += Mathf.Sin((angle * 5f) + profile.fifthHarmonicPhase) * profile.fifthHarmonicStrength;
+
+        float bayProtectionRadius = Mathf.Max(0.18f, protectedRadius + 0.06f);
+        if (normalized.sqrMagnitude > bayProtectionRadius * bayProtectionRadius)
+        {
+            for (int i = 0; i < profile.bayCount; i++)
+            {
+                float bayScore = EvaluateIslandEllipse(normalized, profile.bays[i]);
+                if (bayScore > -0.12f)
+                {
+                    landScore = SmoothMinimum(
+                        landScore,
+                        0.025f - (bayScore * 0.72f),
+                        0.10f);
+                }
+            }
+        }
+
         float primaryNoise = SampleNoise(worldCoordinate, IslandCoastNoiseScale, new Vector2(187.4f, 58.6f));
         float detailNoise = SampleNoise(worldCoordinate, IslandCoastDetailNoiseScale, new Vector2(643.2f, 911.7f));
-        float coastNoise = ((primaryNoise * 0.7f) + (detailNoise * 0.3f) - 0.5f) * IslandCoastIrregularity;
-        float protectedRadius = GetIslandProtectedRadius(halfSize);
-        float coastRadius = Mathf.Max(protectedRadius, IslandLandRadius + coastNoise);
-        return distanceFromCenter > coastRadius;
+        float coastNoise = ((primaryNoise * 0.82f) + (detailNoise * 0.18f) - 0.5f) * IslandCoastIrregularity;
+        return landScore + coastNoise < 0f;
+    }
+
+    private IslandShapeProfile GetIslandShapeProfile()
+    {
+        EnsureSeedInitialized();
+        if (islandShapeProfile != null && islandShapeProfile.seed == seed)
+        {
+            return islandShapeProfile;
+        }
+
+        IslandShapeProfile profile = new IslandShapeProfile
+        {
+            seed = seed,
+            lobes = new IslandShapeEllipse[IslandShapeLobeCapacity],
+            bays = new IslandShapeEllipse[IslandShapeBayCapacity],
+            satellites = new IslandShapeEllipse[IslandShapeSatelliteCapacity]
+        };
+
+        float mainRotation = Hash01(0, 0, 10009) * Mathf.PI * 2f;
+        float mainAspect = Mathf.Lerp(0.68f, 1.42f, Hash01(0, 0, 10037));
+        float mainAspectRoot = Mathf.Sqrt(mainAspect);
+        float mainRadius = Mathf.Lerp(0.64f, 0.71f, Hash01(0, 0, 10061));
+        Vector2 mainCenter = new Vector2(
+            Mathf.Lerp(-0.055f, 0.055f, Hash01(0, 0, 10067)),
+            Mathf.Lerp(-0.055f, 0.055f, Hash01(0, 0, 10069)));
+        profile.mainBody = CreateIslandEllipse(
+            mainCenter,
+            new Vector2(mainRadius * mainAspectRoot, mainRadius / mainAspectRoot),
+            mainRotation);
+
+        profile.lobeCount = 2 + Mathf.Clamp(Mathf.FloorToInt(Hash01(0, 0, 10103) * 3f), 0, 2);
+        for (int i = 0; i < profile.lobeCount; i++)
+        {
+            float angle = Hash01(i, 1, 10111) * Mathf.PI * 2f;
+            float distance = Mathf.Lerp(0.31f, 0.55f, Hash01(i, 1, 10133));
+            Vector2 direction = new Vector2(Mathf.Cos(angle), Mathf.Sin(angle));
+            Vector2 center = mainCenter + (direction * distance);
+            float radialRadius = Mathf.Lerp(0.28f, 0.43f, Hash01(i, 1, 10139));
+            float tangentRadius = Mathf.Lerp(0.20f, 0.35f, Hash01(i, 1, 10141));
+            float rotation = angle + Mathf.Lerp(-0.65f, 0.65f, Hash01(i, 1, 10151));
+            profile.lobes[i] = CreateIslandEllipse(
+                center,
+                new Vector2(radialRadius, tangentRadius),
+                rotation);
+        }
+
+        profile.bayCount = Hash01(0, 0, 10159) < 0.72f ? 1 : 2;
+        float primaryBayAngle = Hash01(0, 2, 10163) * Mathf.PI * 2f;
+        for (int i = 0; i < profile.bayCount; i++)
+        {
+            float angle = i == 0
+                ? primaryBayAngle
+                : primaryBayAngle + Mathf.Lerp(2.2f, 4.08f, Hash01(i, 2, 10167));
+            float distance = Mathf.Lerp(0.57f, 0.71f, Hash01(i, 2, 10169));
+            Vector2 direction = new Vector2(Mathf.Cos(angle), Mathf.Sin(angle));
+            Vector2 center = mainCenter + (direction * distance);
+            float radialRadius = Mathf.Lerp(0.39f, 0.54f, Hash01(i, 2, 10177));
+            float tangentRadius = Mathf.Lerp(0.23f, 0.36f, Hash01(i, 2, 10181));
+            float rotation = angle + Mathf.Lerp(-0.20f, 0.20f, Hash01(i, 2, 10193));
+            profile.bays[i] = CreateIslandEllipse(
+                center,
+                new Vector2(radialRadius, tangentRadius),
+                rotation);
+        }
+
+        float satelliteSelector = Hash01(0, 0, 10211);
+        profile.satelliteCount = satelliteSelector < 0.28f ? 0 : satelliteSelector < 0.78f ? 1 : 2;
+        for (int i = 0; i < profile.satelliteCount; i++)
+        {
+            float angle = Hash01(i, 3, 10223) * Mathf.PI * 2f;
+            float distance = Mathf.Lerp(0.80f, 0.87f, Hash01(i, 3, 10243));
+            Vector2 direction = new Vector2(Mathf.Cos(angle), Mathf.Sin(angle));
+            Vector2 center = direction * distance;
+            float radiusX = Mathf.Lerp(0.065f, 0.11f, Hash01(i, 3, 10247));
+            float radiusY = Mathf.Lerp(0.055f, 0.10f, Hash01(i, 3, 10253));
+            float rotation = Hash01(i, 3, 10259) * Mathf.PI * 2f;
+            profile.satellites[i] = CreateIslandEllipse(center, new Vector2(radiusX, radiusY), rotation);
+        }
+
+        profile.secondHarmonicPhase = Hash01(0, 0, 10267) * Mathf.PI * 2f;
+        profile.thirdHarmonicPhase = Hash01(0, 0, 10271) * Mathf.PI * 2f;
+        profile.fifthHarmonicPhase = Hash01(0, 0, 10273) * Mathf.PI * 2f;
+        profile.secondHarmonicStrength = Mathf.Lerp(0.025f, 0.065f, Hash01(0, 0, 10289));
+        profile.thirdHarmonicStrength = Mathf.Lerp(0.035f, 0.080f, Hash01(0, 0, 10301));
+        profile.fifthHarmonicStrength = Mathf.Lerp(0.008f, 0.022f, Hash01(0, 0, 10303));
+
+        islandShapeProfile = profile;
+        return profile;
+    }
+
+    private static IslandShapeEllipse CreateIslandEllipse(Vector2 center, Vector2 radii, float rotation)
+    {
+        return new IslandShapeEllipse
+        {
+            center = center,
+            radii = new Vector2(Mathf.Max(0.001f, radii.x), Mathf.Max(0.001f, radii.y)),
+            rotationCos = Mathf.Cos(rotation),
+            rotationSin = Mathf.Sin(rotation)
+        };
+    }
+
+    private static float EvaluateIslandEllipse(Vector2 normalizedCoordinate, IslandShapeEllipse ellipse)
+    {
+        Vector2 delta = normalizedCoordinate - ellipse.center;
+        float rotatedX = (delta.x * ellipse.rotationCos) + (delta.y * ellipse.rotationSin);
+        float rotatedY = (-delta.x * ellipse.rotationSin) + (delta.y * ellipse.rotationCos);
+        float normalizedX = rotatedX / ellipse.radii.x;
+        float normalizedY = rotatedY / ellipse.radii.y;
+        return 1f - Mathf.Sqrt((normalizedX * normalizedX) + (normalizedY * normalizedY));
+    }
+
+    private static float SmoothMinimum(float left, float right, float blendWidth)
+    {
+        float normalizedBlend = Mathf.Max(blendWidth - Mathf.Abs(left - right), 0f)
+                                / Mathf.Max(0.0001f, blendWidth);
+        return Mathf.Min(left, right) - ((normalizedBlend * normalizedBlend) * blendWidth * 0.25f);
+    }
+
+    private static float SmoothMaximum(float left, float right, float blendWidth)
+    {
+        return -SmoothMinimum(-left, -right, blendWidth);
     }
 
     private float GetIslandProtectedRadius(float halfSize)
@@ -439,6 +627,7 @@ public partial class TerrainGenerator : MonoBehaviour
     private void InvalidateTerrainBiomeDataCaches()
     {
         InvalidateAnimalNavigation();
+        islandShapeProfile = null;
         tileBiomeCache.Clear();
         rawWaterCache.Clear();
         directWaterBlockCache.Clear();
@@ -503,10 +692,8 @@ public partial class TerrainGenerator : MonoBehaviour
     }
 
 #if UNITY_EDITOR
-    private const string SandBaseColorTexturePath = "Assets/Stylized_Terrain_VOL3/textures/sand_ground/T_sand_ground_basecolor.tga";
-    private const string DirtBaseColorTexturePath = "Assets/Stylized_Terrain_VOL3/textures/earth/T_earth_basecolor.tga";
-    private const string GrassBaseColorTexturePath = "Assets/Stylized_Terrain_VOL3/textures/grass_a/T_grass_a_basecolor.tga";
-    private const string ForestBaseColorTexturePath = "Assets/Stylized_Terrain_VOL3/textures/grass_b/T_grass_b_basecolor.tga";
+    private const string TerrainMapTexturePath = "Assets/Textures/Map/";
+    private const string TerrainMapVariantTexturePath = "Assets/Resources/Textures/MapVariants/";
 
     private void PopulateGeneratedSurfaceBlendEditorDefaults()
     {
@@ -526,24 +713,44 @@ public partial class TerrainGenerator : MonoBehaviour
                 "Assets/Materials/M_ToonWater_Terrain.mat");
         }
 
-        if (generatedSurfaceBlendTextureDefaultsInitialized)
-        {
-            return;
-        }
-
-        generatedSurfaceBlendTextureDefaultsInitialized = true;
-
         AssignEditorTextureIfMissing(
             ref generatedSurfaceBlendSandTexture,
-            SandBaseColorTexturePath);
+            TerrainMapTexturePath + "Sand.png");
+        AssignEditorTextureIfMissing(
+            ref generatedSurfaceBlendSandTexture2,
+            TerrainMapVariantTexturePath + "Sand_02.png");
+        AssignEditorTextureIfMissing(
+            ref generatedSurfaceBlendSandTexture3,
+            TerrainMapVariantTexturePath + "Sand_03.png");
+        AssignEditorTextureIfMissing(
+            ref generatedSurfaceBlendSandTexture4,
+            TerrainMapVariantTexturePath + "Sand_04.png");
 
         AssignEditorTextureIfMissing(
             ref generatedSurfaceBlendDirtTexture,
-            DirtBaseColorTexturePath);
+            TerrainMapTexturePath + "Dirt.png");
+        AssignEditorTextureIfMissing(
+            ref generatedSurfaceBlendDirtTexture2,
+            TerrainMapVariantTexturePath + "Dirt_02.png");
+        AssignEditorTextureIfMissing(
+            ref generatedSurfaceBlendDirtTexture3,
+            TerrainMapVariantTexturePath + "Dirt_03.png");
+        AssignEditorTextureIfMissing(
+            ref generatedSurfaceBlendDirtTexture4,
+            TerrainMapVariantTexturePath + "Dirt_04.png");
 
         AssignEditorTextureIfMissing(
             ref generatedSurfaceBlendGrassTexture,
-            GrassBaseColorTexturePath);
+            TerrainMapTexturePath + "Grass.png");
+        AssignEditorTextureIfMissing(
+            ref generatedSurfaceBlendGrassTexture2,
+            TerrainMapVariantTexturePath + "Grass_02.png");
+        AssignEditorTextureIfMissing(
+            ref generatedSurfaceBlendGrassTexture3,
+            TerrainMapVariantTexturePath + "Grass_03.png");
+        AssignEditorTextureIfMissing(
+            ref generatedSurfaceBlendGrassTexture4,
+            TerrainMapVariantTexturePath + "Grass_04.png");
         if (generatedSurfaceBlendGrassTexture == null)
         {
             generatedSurfaceBlendGrassTexture = ResolveGeneratedSurfaceBlendTexture(
@@ -555,7 +762,16 @@ public partial class TerrainGenerator : MonoBehaviour
 
         AssignEditorTextureIfMissing(
             ref generatedSurfaceBlendForestTexture,
-            ForestBaseColorTexturePath);
+            TerrainMapTexturePath + "Forest.png");
+        AssignEditorTextureIfMissing(
+            ref generatedSurfaceBlendForestTexture2,
+            TerrainMapVariantTexturePath + "Forest_02.png");
+        AssignEditorTextureIfMissing(
+            ref generatedSurfaceBlendForestTexture3,
+            TerrainMapVariantTexturePath + "Forest_03.png");
+        AssignEditorTextureIfMissing(
+            ref generatedSurfaceBlendForestTexture4,
+            TerrainMapVariantTexturePath + "Forest_04.png");
         if (generatedSurfaceBlendForestTexture == null)
         {
             generatedSurfaceBlendForestTexture = ResolveGeneratedSurfaceBlendTexture(

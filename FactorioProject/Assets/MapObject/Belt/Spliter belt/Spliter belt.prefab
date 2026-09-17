@@ -1659,7 +1659,6 @@ MonoBehaviour:
   objectName: Spliter belt
   objId: 46
   itemDefinition: {fileID: 11400000, guid: 00a0cf5cedb5c624a9af78a08be87a5f, type: 2}
-  portableObj: {fileID: 0}
   mapStatus:
     mapSizeX: 2
     mapSizeY: 1

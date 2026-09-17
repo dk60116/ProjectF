@@ -90,6 +90,7 @@ public sealed class ConveyorRuntimeRecord
     public int VisualLayerMask { get; }
     public IReadOnlyList<Vector2Int> OccupiedCoordinates => occupiedCoordinates;
     internal bool PlacementPresentationSuppressed { get; set; }
+    internal float PlacementPresentationScale { get; set; } = 1f;
     internal ConveyorWorld.VisualPart[] VisualParts { get; }
 
     public bool Covers(Vector2Int coordinate)
@@ -881,6 +882,22 @@ public sealed class ConveyorWorld : IDisposable, IVirtualRenderBatchOwner
         batchesDirty = true;
     }
 
+    internal void SetPlacementPresentationScale(ConveyorRuntimeRecord record, float scale)
+    {
+        scale = Mathf.Max(0f, scale);
+        if (disposed
+            || record == null
+            || Mathf.Approximately(record.PlacementPresentationScale, scale)
+            || !recordsByStorageKey.TryGetValue(record.StorageKey, out ConveyorRuntimeRecord currentRecord)
+            || !ReferenceEquals(currentRecord, record))
+        {
+            return;
+        }
+
+        record.PlacementPresentationScale = scale;
+        batchesDirty = true;
+    }
+
     internal void SynchronizeForWorldPresentation()
     {
         if (disposed || !batchesDirty)
@@ -1149,7 +1166,7 @@ public sealed class ConveyorWorld : IDisposable, IVirtualRenderBatchOwner
             Matrix4x4 rootMatrix = Matrix4x4.TRS(
                 record.WorldPosition,
                 record.WorldRotation,
-                record.WorldScale);
+                record.WorldScale * record.PlacementPresentationScale);
             VisualPart[] parts = record.VisualParts;
             for (int i = 0; i < parts.Length; i++)
             {
@@ -1464,7 +1481,7 @@ public sealed class ConveyorWorld : IDisposable, IVirtualRenderBatchOwner
                 root = Matrix4x4.TRS(
                     entry.Record.WorldPosition,
                     entry.Record.WorldRotation,
-                    entry.Record.WorldScale);
+                    entry.Record.WorldScale * entry.Record.PlacementPresentationScale);
             }
 
             if (!recordVisible)

@@ -13,7 +13,7 @@ MonoBehaviour:
   m_Name: Item_50_Leather
   m_EditorClassIdentifier: 
   itemName: Leather
-  id: 69
+  id: 70
   mapObject: {fileID: 0}
   mapObjectArchetype: {fileID: 0}
   useMapColor: 0

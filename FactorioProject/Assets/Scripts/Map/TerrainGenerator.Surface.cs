@@ -1852,6 +1852,7 @@ public partial class TerrainGenerator : MonoBehaviour
         material.SetColor("_GrassColor", Color.white);
         material.SetColor("_ForestColor", Color.white);
         material.SetFloat("_TextureTiling", generatedSurfaceBlendTextureTiling);
+        material.SetFloat("_TerrainSeed", seed);
         material.SetFloat("_NoiseScale", generatedSurfaceBlendNoiseScale);
         material.SetFloat("_NoiseStrength", generatedSurfaceBlendNoiseStrength);
         if (material.HasProperty("_BlendEnabled"))
@@ -1896,26 +1897,81 @@ public partial class TerrainGenerator : MonoBehaviour
             forestTexture = grassTexture;
         }
 
-        if (sandTexture != null)
+        ApplyTerrainTextureSet(
+            material,
+            "_SandMap",
+            sandTexture,
+            generatedSurfaceBlendSandTexture2,
+            generatedSurfaceBlendSandTexture3,
+            generatedSurfaceBlendSandTexture4,
+            "Sand");
+        ApplyTerrainTextureSet(
+            material,
+            "_DirtMap",
+            dirtTexture,
+            generatedSurfaceBlendDirtTexture2,
+            generatedSurfaceBlendDirtTexture3,
+            generatedSurfaceBlendDirtTexture4,
+            "Dirt");
+        ApplyTerrainTextureSet(
+            material,
+            "_GrassMap",
+            grassTexture,
+            generatedSurfaceBlendGrassTexture2,
+            generatedSurfaceBlendGrassTexture3,
+            generatedSurfaceBlendGrassTexture4,
+            "Grass");
+        ApplyTerrainTextureSet(
+            material,
+            "_ForestMap",
+            forestTexture,
+            generatedSurfaceBlendForestTexture2,
+            generatedSurfaceBlendForestTexture3,
+            generatedSurfaceBlendForestTexture4,
+            "Forest");
+
+    }
+
+    private static void ApplyTerrainTextureSet(
+        Material material,
+        string shaderPropertyPrefix,
+        Texture2D texture1,
+        Texture2D texture2,
+        Texture2D texture3,
+        Texture2D texture4,
+        string resourceName)
+    {
+        if (material == null || texture1 == null)
         {
-            material.SetTexture("_SandMap", sandTexture);
+            return;
         }
 
-        if (dirtTexture != null)
+        material.SetTexture(shaderPropertyPrefix, texture1);
+        material.SetTexture(
+            shaderPropertyPrefix + "2",
+            ResolveTerrainTextureVariant(texture2, texture1, resourceName, 2));
+        material.SetTexture(
+            shaderPropertyPrefix + "3",
+            ResolveTerrainTextureVariant(texture3, texture1, resourceName, 3));
+        material.SetTexture(
+            shaderPropertyPrefix + "4",
+            ResolveTerrainTextureVariant(texture4, texture1, resourceName, 4));
+    }
+
+    private static Texture2D ResolveTerrainTextureVariant(
+        Texture2D configuredTexture,
+        Texture2D fallbackTexture,
+        string resourceName,
+        int variantNumber)
+    {
+        if (configuredTexture != null)
         {
-            material.SetTexture("_DirtMap", dirtTexture);
+            return configuredTexture;
         }
 
-        if (grassTexture != null)
-        {
-            material.SetTexture("_GrassMap", grassTexture);
-        }
-
-        if (forestTexture != null)
-        {
-            material.SetTexture("_ForestMap", forestTexture);
-        }
-
+        Texture2D resourceTexture = Resources.Load<Texture2D>(
+            $"Textures/MapVariants/{resourceName}_{variantNumber:00}");
+        return resourceTexture != null ? resourceTexture : fallbackTexture;
     }
 
     private void ApplyGeneratedSurfaceRuntimeMaterialSettings()

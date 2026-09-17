@@ -819,6 +819,8 @@ public partial class TerrainGenerator : MonoBehaviour
     {
         if (installationObject is RobotArm arm && ConvertRobotArmPresentation(arm))
         { ReleaseInstallationObject(arm); return; }
+        if (installationObject is Building building && RegisterDataOnlyBuildingInstallation(building))
+        { ReleaseInstallationObject(building); return; }
         if (installationObject is Pipe pipe && RegisterDataOnlyPipeInstallation(pipe))
         { ReleaseInstallationObject(pipe); return; }
         if (installationObject == null || installationObject.ExcludeFromTerrainPersistence)
@@ -1118,6 +1120,121 @@ public partial class TerrainGenerator : MonoBehaviour
         return true;
     }
 
+    public bool RegisterDataOnlyBuildingInstallation(
+        Building building,
+        Building sourcePrefab = null)
+    {
+        return RegisterDataOnlyBuildingInstallation(building, sourcePrefab, out _);
+    }
+
+    internal bool RegisterDataOnlyBuildingInstallation(
+        Building building,
+        Building sourcePrefab,
+        out BuildingRuntimeRecord registeredRecord)
+    {
+        registeredRecord = null;
+        if (building == null || building.ExcludeFromTerrainPersistence)
+        {
+            return false;
+        }
+
+        EnsureResourceStateStore();
+        if (resourceStateStore == null
+            || !resourceStateStore.TryCaptureInstallationState(
+                building,
+                out BlockStateStore.InstallationSaveState state))
+        {
+            return false;
+        }
+
+        state.hasWorldPose = true;
+        state.worldPosition = building.transform.position;
+        state.worldRotation = building.transform.rotation;
+        Building prototype = ResolveDataOnlyBuildingPrototype(state, sourcePrefab);
+        return prototype != null
+               && RegisterDataOnlyBuildingState(
+                   state,
+                   prototype,
+                   building.transform.position,
+                   building.transform.rotation,
+                   building.transform.localScale,
+                   out registeredRecord);
+    }
+
+    internal bool RegisterDataOnlyBuildingState(
+        BlockStateStore.InstallationSaveState state,
+        Building prototype,
+        Vector3 worldPosition,
+        Quaternion worldRotation,
+        Vector3 worldScale,
+        out BuildingRuntimeRecord registeredRecord)
+    {
+        registeredRecord = null;
+        if (state == null || prototype == null || prototype.gameObject.scene.IsValid())
+        {
+            return false;
+        }
+
+        EnsureResourceStateStore();
+        state.hasWorldPose = true;
+        state.worldPosition = worldPosition;
+        state.worldRotation = worldRotation;
+        if (resourceStateStore == null
+            || !resourceStateStore.RegisterDataOnlyInstallation(
+                state,
+                out BlockStateStore.InstallationSaveState storedState))
+        {
+            return false;
+        }
+
+        BuildingRuntimeRecord record = EnsureBuildingWorld()?.Register(
+            storedState,
+            prototype,
+            worldPosition,
+            worldRotation,
+            worldScale);
+        if (record == null)
+        {
+            return false;
+        }
+
+        BindLoadedBlocksToDataOnlyBuilding(record);
+        registeredRecord = record;
+        return true;
+    }
+
+    private Building ResolveDataOnlyBuildingPrototype(
+        BlockStateStore.InstallationSaveState state,
+        Building sourcePrefab)
+    {
+        Building resolved = ResolveInstallationSourcePrefab(state) as Building;
+        if (resolved != null && !resolved.gameObject.scene.IsValid())
+        {
+            return resolved;
+        }
+
+        return sourcePrefab != null && !sourcePrefab.gameObject.scene.IsValid()
+            ? sourcePrefab
+            : null;
+    }
+
+    private void BindLoadedBlocksToDataOnlyBuilding(BuildingRuntimeRecord record)
+    {
+        if (record == null)
+        {
+            return;
+        }
+
+        IReadOnlyList<Vector2Int> coordinates = record.OccupiedCoordinates;
+        for (int i = 0; i < coordinates.Count; i++)
+        {
+            if (loadedBlocks.TryGetValue(coordinates[i], out Block block) && block != null)
+            {
+                block.SetMapObject(record);
+            }
+        }
+    }
+
     private Pipe ResolveDataOnlyPipePrototype(
         BlockStateStore.InstallationSaveState state,
         Pipe sourcePrefab)
@@ -1233,6 +1350,8 @@ public partial class TerrainGenerator : MonoBehaviour
     {
         if (installationObject is RobotArm arm && ConvertRobotArmPresentation(arm))
         { ReleaseInstallationObject(arm); return; }
+        if (installationObject is Building building && RegisterDataOnlyBuildingInstallation(building))
+        { ReleaseInstallationObject(building); return; }
         if (installationObject is Pipe pipe && RegisterDataOnlyPipeInstallation(pipe))
         { ReleaseInstallationObject(pipe); return; }
         if (installationObject == null || installationObject.ExcludeFromTerrainPersistence)

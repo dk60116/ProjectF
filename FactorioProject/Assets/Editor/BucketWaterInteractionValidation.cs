@@ -142,7 +142,7 @@ public static class BucketWaterInteractionValidation
             return;
         }
 
-        int waterItemId = Pump.ResolveWaterItemId(null);
+        int waterItemId = WaterPump.ResolveWaterItemId(null);
         if (!TryValidateInstalledFluid(
                 emptyBucket,
                 waterBucket,

@@ -287,13 +287,7 @@ public class Sprinkler : InputOutputModule
             }
         }
 
-        bool consumedRequiredWater = remainingLiters <= WaterEpsilon;
-        if (consumedRequiredWater)
-        {
-            RecordFluidNetworkConsumption(waterItemId, requiredLiters);
-        }
-
-        return consumedRequiredWater;
+        return remainingLiters <= WaterEpsilon;
     }
 
     protected override bool ShouldKeepRuntimeUpdateTickActive()
@@ -744,7 +738,7 @@ public class Sprinkler : InputOutputModule
 
     private static int ResolveWaterItemId()
     {
-        return Pump.ResolveWaterItemId(null);
+        return WaterPump.ResolveWaterItemId(null);
     }
 
     private void SetOperating(bool operating)

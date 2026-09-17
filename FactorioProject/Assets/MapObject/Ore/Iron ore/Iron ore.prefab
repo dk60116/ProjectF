@@ -182,7 +182,6 @@ MonoBehaviour:
   objectName: Iron ore
   objId: 15
   itemDefinition: {fileID: 11400000, guid: 97f6dea012d4db649abc845562a30b93, type: 2}
-  portableObj: {fileID: 0}
   mapStatus:
     mapSizeX: 1
     mapSizeY: 1

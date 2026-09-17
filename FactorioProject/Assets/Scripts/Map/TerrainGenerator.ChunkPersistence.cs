@@ -854,7 +854,8 @@ public partial class TerrainGenerator : MonoBehaviour
 
             if (TryRestoreDataOnlyRobotArm(savedState)
                 || TryRestoreDataOnlyConveyor(savedState)
-                || TryRestoreDataOnlyPipe(savedState))
+                || TryRestoreDataOnlyPipe(savedState)
+                || TryRestoreDataOnlyBuilding(savedState))
             {
                 return;
             }
@@ -1063,6 +1064,46 @@ public partial class TerrainGenerator : MonoBehaviour
 
         BindLoadedBlocksToDataOnlyPipe(record);
         return true;
+    }
+
+    private bool TryRestoreDataOnlyBuilding(BlockStateStore.InstallationSaveState savedState)
+    {
+        if (savedState == null)
+        {
+            return false;
+        }
+
+        ItemDefinition definition = ResolveInstallationDefinition(savedState);
+        InstallationPlacementController placementController = ResolveInstallationPlacementController();
+        MapObject resolvedSource = ResolveInstallationSourcePrefab(savedState, placementController, definition);
+        if (!(resolvedSource is Building buildingPrototype))
+        {
+            return false;
+        }
+
+        int quarterTurns = ((savedState.quarterTurns % 4) + 4) % 4;
+        Quaternion rotation = placementController != null
+            ? placementController.GetInstalledObjectRotation(resolvedSource, quarterTurns)
+            : resolvedSource.transform.rotation * Quaternion.Euler(0f, quarterTurns * 90f, 0f);
+        Vector3 position = placementController != null
+            ? placementController.GetInstalledObjectWorldPosition(
+                savedState.anchorCoordinate,
+                resolvedSource,
+                quarterTurns)
+            : new Vector3(savedState.anchorCoordinate.x, transform.position.y, savedState.anchorCoordinate.y);
+        if (savedState.hasWorldPose)
+        {
+            position = savedState.worldPosition;
+            rotation = savedState.worldRotation;
+        }
+
+        return RegisterDataOnlyBuildingState(
+            savedState,
+            buildingPrototype,
+            position,
+            rotation,
+            resolvedSource.transform.localScale,
+            out _);
     }
 
     private bool TryInstantiateSavedInstallation(
@@ -1944,6 +1985,16 @@ public partial class TerrainGenerator : MonoBehaviour
         }
 
         return pipeWorld;
+    }
+
+    private BuildingWorld EnsureBuildingWorld()
+    {
+        if (buildingWorld == null)
+        {
+            buildingWorld = BuildingWorld.EnsureFor(this);
+        }
+
+        return buildingWorld;
     }
 
     private static ItemDefinition ResolveInstallationDefinition(int itemId)

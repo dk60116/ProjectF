@@ -600,6 +600,17 @@ public class GameManager : MonoBehaviour
             return;
         }
 
+        TerrainGenerator terrainGenerator = TerrainGenerator.ResolveActive();
+        if (terrainGenerator == null || !terrainGenerator.IsWorldReadyForPresentation)
+        {
+            // EditorTool requests are processed on the runtime request queue and
+            // can arrive while a save/load is still rebuilding the world. Do not
+            // consume the state transition against an empty block set; Update
+            // will retry once presentation becomes ready.
+            beltDirectionRuntimeStateInitialized = false;
+            return;
+        }
+
         if (!force
             && beltDirectionRuntimeStateInitialized
             && lastRuntimeShowBeltDirections == showDirections)
@@ -609,7 +620,7 @@ public class GameManager : MonoBehaviour
 
         beltDirectionRuntimeStateInitialized = true;
         lastRuntimeShowBeltDirections = showDirections;
-        TerrainGenerator.Active?.RefreshBeltDirectionRuntimeVisibility();
+        terrainGenerator.RefreshBeltDirectionRuntimeVisibility();
     }
 
     private void SyncFreeCameraRuntimeState(bool force = false)

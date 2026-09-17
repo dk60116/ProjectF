@@ -249,7 +249,7 @@ public class Bucket : InstallationObject,
     {
         if (IsWaterBucketDefinition(definition))
         {
-            return Pump.ResolveWaterItemId(null);
+            return WaterPump.ResolveWaterItemId(null);
         }
 
         if (IsOilBucketDefinition(definition))
@@ -302,7 +302,7 @@ public class Bucket : InstallationObject,
         int fluidItemId,
         out ItemDefinition filledBucketDefinition)
     {
-        if (fluidItemId == Pump.ResolveWaterItemId(null))
+        if (fluidItemId == WaterPump.ResolveWaterItemId(null))
         {
             return TryResolveWaterBucketDefinition(itemManager, out filledBucketDefinition);
         }
@@ -805,7 +805,7 @@ public class Bucket : InstallationObject,
             return cachedWaterItemId;
         }
 
-        int resolvedItemId = Pump.ResolveWaterItemId(null);
+        int resolvedItemId = WaterPump.ResolveWaterItemId(null);
         if (GameManager.Instance != null && GameManager.Instance.ItemManger != null)
         {
             cachedWaterItemId = resolvedItemId;

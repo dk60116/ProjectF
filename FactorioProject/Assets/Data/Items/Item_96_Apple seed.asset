@@ -13,7 +13,7 @@ MonoBehaviour:
   m_Name: Item_96_Apple seed
   m_EditorClassIdentifier: Assembly-CSharp::ItemDefinition
   itemName: Apple seed
-  id: 96
+  id: 97
   mapObject: {fileID: 0}
   mapObjectArchetype: {fileID: 0}
   useMapColor: 0

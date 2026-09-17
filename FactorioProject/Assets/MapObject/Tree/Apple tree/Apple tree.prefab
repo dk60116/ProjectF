@@ -500,7 +500,6 @@ MonoBehaviour:
   objectName: Apple tree
   objId: 7
   itemDefinition: {fileID: 11400000, guid: cc54448c2b8e64c40a4458e259ad7222, type: 2}
-  portableObj: {fileID: 0}
   mapStatus:
     mapSizeX: 1
     mapSizeY: 1

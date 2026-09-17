@@ -3824,7 +3824,7 @@ public class ItemDataEditorWindow : EditorWindow
     private static bool IsFluidOutputMachine(ItemDefinition definition)
     {
         return definition != null
-               && (definition.mapObject is OilDrillingMachine || definition.mapObject is Pump);
+               && (definition.mapObject is OilDrillingMachine || definition.mapObject is WaterPump);
     }
 
     private bool AllSelectedDefinitionsAreSprinklers()

@@ -13,7 +13,7 @@ MonoBehaviour:
   m_Name: Item_107_Manual - Long Robot arm
   m_EditorClassIdentifier: Assembly-CSharp::ItemDefinition
   itemName: Manual - Long Robot arm
-  id: 81
+  id: 82
   mapObject: {fileID: 0}
   mapObjectArchetype: {fileID: 0}
   useMapColor: 0

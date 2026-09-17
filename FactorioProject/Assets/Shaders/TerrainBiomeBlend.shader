@@ -3,14 +3,27 @@ Shader "ProjectF/Terrain/BiomeBlend"
     Properties
     {
         [NoScaleOffset] _SandMap("Sand Map", 2D) = "white" {}
+        [NoScaleOffset] _SandMap2("Sand Map 2", 2D) = "white" {}
+        [NoScaleOffset] _SandMap3("Sand Map 3", 2D) = "white" {}
+        [NoScaleOffset] _SandMap4("Sand Map 4", 2D) = "white" {}
         [NoScaleOffset] _DirtMap("Dirt Map", 2D) = "white" {}
+        [NoScaleOffset] _DirtMap2("Dirt Map 2", 2D) = "white" {}
+        [NoScaleOffset] _DirtMap3("Dirt Map 3", 2D) = "white" {}
+        [NoScaleOffset] _DirtMap4("Dirt Map 4", 2D) = "white" {}
         [NoScaleOffset] _GrassMap("Grass Map", 2D) = "white" {}
+        [NoScaleOffset] _GrassMap2("Grass Map 2", 2D) = "white" {}
+        [NoScaleOffset] _GrassMap3("Grass Map 3", 2D) = "white" {}
+        [NoScaleOffset] _GrassMap4("Grass Map 4", 2D) = "white" {}
         [NoScaleOffset] _ForestMap("Forest Map", 2D) = "white" {}
+        [NoScaleOffset] _ForestMap2("Forest Map 2", 2D) = "white" {}
+        [NoScaleOffset] _ForestMap3("Forest Map 3", 2D) = "white" {}
+        [NoScaleOffset] _ForestMap4("Forest Map 4", 2D) = "white" {}
         _SandColor("Sand Color", Color) = (1, 1, 1, 1)
         _DirtColor("Dirt Color", Color) = (1, 1, 1, 1)
         _GrassColor("Grass Color", Color) = (1, 1, 1, 1)
         _ForestColor("Forest Color", Color) = (1, 1, 1, 1)
         _TextureTiling("Texture Tiling", Float) = 0.28
+        [HideInInspector] _TerrainSeed("Terrain Seed", Float) = 0
         _NoiseScale("Noise Scale", Float) = 0.11
         _NoiseStrength("Noise Strength", Range(0, 0.5)) = 0.18
         [Toggle] _BlendEnabled("Biome Blend Enabled", Float) = 1
@@ -61,7 +74,7 @@ Shader "ProjectF/Terrain/BiomeBlend"
             AlphaToMask[_AlphaToMask]
 
             HLSLPROGRAM
-            #pragma target 2.0
+            #pragma target 3.5
             #pragma vertex vert
             #pragma fragment frag
 
@@ -118,12 +131,21 @@ Shader "ProjectF/Terrain/BiomeBlend"
 
             TEXTURE2D(_SandMap);
             SAMPLER(sampler_SandMap);
+            TEXTURE2D(_SandMap2);
+            TEXTURE2D(_SandMap3);
+            TEXTURE2D(_SandMap4);
             TEXTURE2D(_DirtMap);
-            SAMPLER(sampler_DirtMap);
+            TEXTURE2D(_DirtMap2);
+            TEXTURE2D(_DirtMap3);
+            TEXTURE2D(_DirtMap4);
             TEXTURE2D(_GrassMap);
-            SAMPLER(sampler_GrassMap);
+            TEXTURE2D(_GrassMap2);
+            TEXTURE2D(_GrassMap3);
+            TEXTURE2D(_GrassMap4);
             TEXTURE2D(_ForestMap);
-            SAMPLER(sampler_ForestMap);
+            TEXTURE2D(_ForestMap2);
+            TEXTURE2D(_ForestMap3);
+            TEXTURE2D(_ForestMap4);
 
             CBUFFER_START(UnityPerMaterial)
                 float4 _SandColor;
@@ -131,6 +153,7 @@ Shader "ProjectF/Terrain/BiomeBlend"
                 float4 _GrassColor;
                 float4 _ForestColor;
                 float4 _ShadowColor;
+                float _TerrainSeed;
                 half _TextureTiling;
                 half _NoiseScale;
                 half _NoiseStrength;
@@ -241,19 +264,24 @@ Shader "ProjectF/Terrain/BiomeBlend"
                 return NormalizeTerrainWeights(normalizedWeights);
             }
 
-            float2 GetTerrainSurfaceUV(float3 positionWS, half3 normalWS, float tiling)
+            float2 GetTerrainSurfaceProjection(float3 positionWS, half3 normalWS)
             {
                 half3 axisWeight = abs(normalWS);
-                float2 projectionUV = positionWS.xz;
+                float2 projection = positionWS.xz;
 
                 if (axisWeight.y < axisWeight.x || axisWeight.y < axisWeight.z)
                 {
-                    projectionUV = axisWeight.x > axisWeight.z
+                    projection = axisWeight.x > axisWeight.z
                         ? positionWS.zy
                         : positionWS.xy;
                 }
 
-                return projectionUV * tiling;
+                return projection;
+            }
+
+            float2 GetTerrainSurfaceUV(float3 positionWS, half3 normalWS, float tiling)
+            {
+                return GetTerrainSurfaceProjection(positionWS, normalWS) * tiling;
             }
 
             half4 GetTerrainBlendWeights(float3 positionWS, half3 normalWS, half4 blendWeights)
@@ -273,13 +301,115 @@ Shader "ProjectF/Terrain/BiomeBlend"
                     max(weights.r, max(weights.g, weights.b)) < dominantWeight ? 1.0h : 0.0h);
             }
 
+            int GetTerrainTextureVariant(float2 tiledWorldPosition)
+            {
+                float normalizedSeed = fmod(abs(_TerrainSeed), 8191.0);
+                float2 seedOffset = float2(normalizedSeed * 0.1031, normalizedSeed * 0.0973);
+                half selector = HashNoise(floor(tiledWorldPosition) + seedOffset);
+                return min((int)floor(selector * 4.0h), 3);
+            }
+
+            half4 SampleSandVariant(float2 uv, int variantIndex)
+            {
+                UNITY_BRANCH
+                if (variantIndex == 1)
+                {
+                    return SAMPLE_TEXTURE2D(_SandMap2, sampler_SandMap, uv);
+                }
+
+                UNITY_BRANCH
+                if (variantIndex == 2)
+                {
+                    return SAMPLE_TEXTURE2D(_SandMap3, sampler_SandMap, uv);
+                }
+
+                UNITY_BRANCH
+                if (variantIndex == 3)
+                {
+                    return SAMPLE_TEXTURE2D(_SandMap4, sampler_SandMap, uv);
+                }
+
+                return SAMPLE_TEXTURE2D(_SandMap, sampler_SandMap, uv);
+            }
+
+            half4 SampleDirtVariant(float2 uv, int variantIndex)
+            {
+                UNITY_BRANCH
+                if (variantIndex == 1)
+                {
+                    return SAMPLE_TEXTURE2D(_DirtMap2, sampler_SandMap, uv);
+                }
+
+                UNITY_BRANCH
+                if (variantIndex == 2)
+                {
+                    return SAMPLE_TEXTURE2D(_DirtMap3, sampler_SandMap, uv);
+                }
+
+                UNITY_BRANCH
+                if (variantIndex == 3)
+                {
+                    return SAMPLE_TEXTURE2D(_DirtMap4, sampler_SandMap, uv);
+                }
+
+                return SAMPLE_TEXTURE2D(_DirtMap, sampler_SandMap, uv);
+            }
+
+            half4 SampleGrassVariant(float2 uv, int variantIndex)
+            {
+                UNITY_BRANCH
+                if (variantIndex == 1)
+                {
+                    return SAMPLE_TEXTURE2D(_GrassMap2, sampler_SandMap, uv);
+                }
+
+                UNITY_BRANCH
+                if (variantIndex == 2)
+                {
+                    return SAMPLE_TEXTURE2D(_GrassMap3, sampler_SandMap, uv);
+                }
+
+                UNITY_BRANCH
+                if (variantIndex == 3)
+                {
+                    return SAMPLE_TEXTURE2D(_GrassMap4, sampler_SandMap, uv);
+                }
+
+                return SAMPLE_TEXTURE2D(_GrassMap, sampler_SandMap, uv);
+            }
+
+            half4 SampleForestVariant(float2 uv, int variantIndex)
+            {
+                UNITY_BRANCH
+                if (variantIndex == 1)
+                {
+                    return SAMPLE_TEXTURE2D(_ForestMap2, sampler_SandMap, uv);
+                }
+
+                UNITY_BRANCH
+                if (variantIndex == 2)
+                {
+                    return SAMPLE_TEXTURE2D(_ForestMap3, sampler_SandMap, uv);
+                }
+
+                UNITY_BRANCH
+                if (variantIndex == 3)
+                {
+                    return SAMPLE_TEXTURE2D(_ForestMap4, sampler_SandMap, uv);
+                }
+
+                return SAMPLE_TEXTURE2D(_ForestMap, sampler_SandMap, uv);
+            }
+
             half4 SampleBlendedBase(float3 positionWS, half3 normalWS, half4 weights)
             {
-                float2 uv = GetTerrainSurfaceUV(positionWS, normalWS, _TextureTiling);
-                half4 sandSample = SAMPLE_TEXTURE2D(_SandMap, sampler_SandMap, uv) * _SandColor;
-                half4 dirtSample = SAMPLE_TEXTURE2D(_DirtMap, sampler_DirtMap, uv) * _DirtColor;
-                half4 grassSample = SAMPLE_TEXTURE2D(_GrassMap, sampler_GrassMap, uv) * _GrassColor;
-                half4 forestSample = SAMPLE_TEXTURE2D(_ForestMap, sampler_ForestMap, uv) * _ForestColor;
+                float2 projection = GetTerrainSurfaceProjection(positionWS, normalWS);
+                float2 uv = projection * _TextureTiling;
+                int variantIndex = GetTerrainTextureVariant(uv);
+                half4 sandSample = SampleSandVariant(uv, variantIndex) * _SandColor;
+                half4 dirtSample = SampleDirtVariant(uv, variantIndex) * _DirtColor;
+                half4 grassSample = SampleGrassVariant(uv, variantIndex) * _GrassColor;
+                half4 forestSample = SampleForestVariant(uv, variantIndex) * _ForestColor;
 
                 return (sandSample * weights.r)
                      + (dirtSample * weights.g)

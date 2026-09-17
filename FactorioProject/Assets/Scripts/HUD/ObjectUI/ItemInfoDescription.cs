@@ -608,7 +608,7 @@ public class ItemInfoDescription : MonoBehaviour
             return;
         }
 
-        Pump pump = module as Pump;
+        WaterPump pump = module as WaterPump;
         bool showElectricPowerGauge = TrySetElectricPowerGauge(energyGauge, energyFill, energyText, module);
         if (pump != null)
         {
@@ -1201,7 +1201,7 @@ public class ItemInfoDescription : MonoBehaviour
             }
         }
 
-        if (module is Pump)
+        if (module is WaterPump)
         {
             return;
         }
@@ -1499,7 +1499,7 @@ public class ItemInfoDescription : MonoBehaviour
                    out connectedTileCount);
     }
 
-    private void SetPumpOutputRateDefaultItemSlot(int index, Pump pump)
+    private void SetPumpOutputRateDefaultItemSlot(int index, WaterPump pump)
     {
         GameObject root = defaultItem != null && index >= 0 && index < defaultItem.Count ? defaultItem[index] : null;
         ItemSlot slot = defaultItemSlot != null && index >= 0 && index < defaultItemSlot.Count ? defaultItemSlot[index] : null;

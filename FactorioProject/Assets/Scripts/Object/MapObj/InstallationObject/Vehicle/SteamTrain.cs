@@ -1087,7 +1087,7 @@ public class SteamTrain : RailHandcar,
 
     private int ResolveWaterItemId()
     {
-        return Pump.ResolveWaterItemId(null);
+        return WaterPump.ResolveWaterItemId(null);
     }
 
     private static bool IsFreeTrainEnabled()
@@ -4275,7 +4275,7 @@ public class SteamTrain : RailHandcar,
         Vector2Int directionToPipe,
         int waterItemId)
     {
-        if (!InputOutputModule.TryGetRuntimePipeSourceAtCoordinate(coordinate, out Pump pump)
+        if (!InputOutputModule.TryGetRuntimePipeSourceAtCoordinate(coordinate, out WaterPump pump)
             || pump == null
             || !pump.gameObject.activeInHierarchy
             || (directionToPipe != Vector2Int.zero
@@ -4297,6 +4297,22 @@ public class SteamTrain : RailHandcar,
         pipe = null;
         pipeRotation = Quaternion.identity;
         pipeRecord = null;
+        PipeWorld pipeWorld = PipeWorld.Current;
+        if (pipeWorld != null
+            && pipeWorld.TryGetAtCoordinate(coordinate, out pipeRecord)
+            && pipeRecord != null)
+        {
+            pipe = pipeRecord.Prototype;
+            pipeRotation = pipeRecord.WorldRotation;
+            if (pipe != null)
+            {
+                return true;
+            }
+
+            pipeRecord = null;
+            pipeRotation = Quaternion.identity;
+        }
+
         TerrainGenerator terrain = TerrainGenerator.Active;
         if (terrain == null
             || !terrain.TryGetLoadedBlock(coordinate, out Block block)

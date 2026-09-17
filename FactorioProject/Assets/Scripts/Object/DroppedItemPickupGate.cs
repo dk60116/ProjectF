@@ -90,6 +90,11 @@ public sealed class DroppedItemPickupGate
         return distanceSqr <= pickupRadiusSqr;
     }
 
+    public bool CanManualPreview(float distanceSqr, float pickupRadiusSqr)
+    {
+        return distanceSqr <= pickupRadiusSqr;
+    }
+
     public void MarkSettled()
     {
         isSettled = true;

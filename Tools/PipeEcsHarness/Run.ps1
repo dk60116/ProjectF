@@ -48,9 +48,12 @@ Require-Text $pipeWorld 'InputOutputModule.NotifyRuntimePipeTopologyChanged(reco
 Require-Text $inputOutput 'foreach (InputOutputModule module in activeRuntimeModules)' 'pipe changes wake sleeping fluid producers across the changed network'
 Require-Text $inputOutput 'pipeRecord.HasConnectionTowardsAt(coordinate, direction)' 'fluid traversal uses data-only pipe connection rules'
 Require-Text $inputOutput 'pipeRecord.TryGetRemoteConnectionCoordinate(coordinate, out remoteCoordinate)' 'fluid traversal crosses data-only underground pipe endpoints'
+Require-Text $block 'TryGetRuntimePipeRecord(out PipeRuntimeRecord runtimeRecord);' 'direction arrows resolve the installed pipe record'
+Require-Text $block 'runtimeRecord.HasConnectionTowardsAt(coordinate, direction)' 'direction arrows use authoritative tee connection masks'
+Require-Text $block 'TryGetFluidDirectionPipeAtCoordinate(' 'direction arrows discover data-only neighbor pipes'
 Require-Text $inputOutput 'SteamTrain.TryGetWaterPipeReceiverAtCoordinate(' 'fluid traversal resolves moving train water receivers outside Block.MapObject'
 Require-Text $steamTrain 'WaterPipeReceiversByCoordinate' 'ready train docks publish their current receiver coordinate'
 Require-Text $steamTrain 'InputOutputModule.NotifyRuntimePipeTopologyChanged(null);' 'train docking changes invalidate sleeping pump routes'
 Require-Text $steamTrain 'pipeRecord.HasConnectionTowardsAt(coordinate, direction)' 'train water-source search uses data-only pipe connection rules'
 
-Write-Output '27 pipe ECS integration checks passed.'
+Write-Output '30 pipe ECS integration checks passed.'

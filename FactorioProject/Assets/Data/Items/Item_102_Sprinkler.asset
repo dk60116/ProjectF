@@ -13,7 +13,7 @@ MonoBehaviour:
   m_Name: Item_102_Sprinkler
   m_EditorClassIdentifier: Assembly-CSharp::ItemDefinition
   itemName: Sprinkler
-  id: 57
+  id: 58
   mapObject: {fileID: 3543931225916085951, guid: 5c9d27cd414052a4fab2eee000e42bdd, type: 3}
   mapObjectArchetype: {fileID: 11400000, guid: af8a6c8b3d478ff4da3358cb7dcd838c, type: 2}
   useMapColor: 1
