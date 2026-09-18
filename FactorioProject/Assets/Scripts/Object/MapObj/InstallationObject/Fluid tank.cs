@@ -1051,6 +1051,17 @@ public class Fluidtank : InstallationObject, IMapObjectUpdateTick, IMapObjectUpd
             return true;
         }
 
+        // A standard Pump endpoint is a real fluid-network connector even
+        // though it is not represented by a Pipe object. Without this check a
+        // tank adjacent to the last Pump rejects the route after the producer
+        // has already traversed the complete pump chain.
+        if (InputOutputModule.HasRuntimePumpPipePassTowards(
+                neighborCoordinate,
+                -directionFromTank))
+        {
+            return true;
+        }
+
         return TryGetPipeOutputAreaConnectionFluidItemId(
             tankCoordinate,
             directionFromTank,

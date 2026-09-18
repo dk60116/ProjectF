@@ -14116,6 +14116,23 @@ public class InstallationPlacementController : MonoBehaviour
         return blockType == InputOutputModule.RectGridBlockType.PipeInput;
     }
 
+    private bool PlacementOwnsPipePassAtCoordinate(
+        MapObject mapObject,
+        Vector2Int anchorCoordinate,
+        int quarterTurns,
+        Vector2Int coordinate)
+    {
+        MapObject footprintSource = ResolveInstallPreviewFootprintSource(mapObject) ?? mapObject;
+        return footprintSource != null
+               && TryGetRectGridFootprintBlockType(
+                   anchorCoordinate,
+                   footprintSource,
+                   quarterTurns,
+                   coordinate,
+                   out InputOutputModule.RectGridBlockType blockType)
+               && IsPipePassBlockType(blockType);
+    }
+
     private bool TryGetPreviewPlacementSnapshot(
         Vector2Int coordinate,
         MapObject previewToIgnore,
@@ -36716,6 +36733,13 @@ public class InstallationPlacementController : MonoBehaviour
             return false;
         }
 
+        // PipePass is a fluid connector marker, not a physical footprint cell.
+        // It neither occupies the coordinate nor competes with another area's reservation.
+        if (IsPipePassBlockType(rectGridBlockType))
+        {
+            return true;
+        }
+
         bool hasExistingInputOutputAreaBlock =
             hasExistingInputOutputEnergyAreaBlock
             || hasExistingInputOutputItemAreaBlock
@@ -37201,6 +37225,13 @@ public class InstallationPlacementController : MonoBehaviour
             return true;
         }
 
+        // PipePass reserves no physical space. Apply this symmetrically so placement
+        // order cannot change the result; non-PipePass cells remain blocking.
+        if (IsPipePassBlockType(candidateBlockType) || IsPipePassBlockType(existingBlockType))
+        {
+            return true;
+        }
+
         if (candidateBlockType == InputOutputModule.RectGridBlockType.Output
             && existingBlockType == InputOutputModule.RectGridBlockType.Output)
         {
@@ -37274,11 +37305,6 @@ public class InstallationPlacementController : MonoBehaviour
                 new PipeAreaBlockCandidate(candidateSnapshot, candidateBlockType),
                 coordinate,
                 new PipeAreaBlockCandidate(existingSnapshot, existingBlockType));
-        }
-
-        if (IsPipePassBlockType(candidateBlockType) && IsPipePassBlockType(existingBlockType))
-        {
-            return true;
         }
 
         if (InputOutputModule.IsOutputBlockType(candidateBlockType))
@@ -39754,6 +39780,19 @@ public class InstallationPlacementController : MonoBehaviour
             occupyingObject = null;
         }
 
+        if (occupyingObject is InstallationObject occupyingInstallation
+            && occupyingInstallation.TryGetPlacementRuntime(
+                out Vector2Int occupyingAnchorCoordinate,
+                out int occupyingQuarterTurns)
+            && PlacementOwnsPipePassAtCoordinate(
+                occupyingInstallation,
+                occupyingAnchorCoordinate,
+                occupyingQuarterTurns,
+                block.Coordinate))
+        {
+            occupyingObject = null;
+        }
+
         // A Floor can remain bound to the block while another installation owns the same
         // runtime coordinate (for example, an object placed over the floor through an area cell).
         // Prefer that non-floor installation so the Floor filter alone cannot treat the cell as empty.
@@ -39773,7 +39812,12 @@ public class InstallationPlacementController : MonoBehaviour
                 out _,
                 out BlockStateStore.InstallationSaveState savedState)
             && savedOccupyingObject != previewToIgnore
-            && !SavedPlacementBelongsToIgnoredPreview(savedState, previewToIgnore))
+            && !SavedPlacementBelongsToIgnoredPreview(savedState, previewToIgnore)
+            && !PlacementOwnsPipePassAtCoordinate(
+                savedOccupyingObject,
+                savedState.anchorCoordinate,
+                savedState.quarterTurns,
+                block.Coordinate))
         {
             occupyingObject = savedOccupyingObject;
         }
@@ -39822,7 +39866,15 @@ public class InstallationPlacementController : MonoBehaviour
             if (candidate == null
                 || candidate == previewToIgnore
                 || candidate is Floor
-                || installPreviewAnchorCoordinates.ContainsKey(candidate))
+                || installPreviewAnchorCoordinates.ContainsKey(candidate)
+                || (candidate.TryGetPlacementRuntime(
+                        out Vector2Int candidateAnchorCoordinate,
+                        out int candidateQuarterTurns)
+                    && PlacementOwnsPipePassAtCoordinate(
+                        candidate,
+                        candidateAnchorCoordinate,
+                        candidateQuarterTurns,
+                        coordinate)))
             {
                 continue;
             }

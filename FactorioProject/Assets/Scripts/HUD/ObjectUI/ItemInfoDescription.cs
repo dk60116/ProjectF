@@ -277,6 +277,38 @@ public class ItemInfoDescription : MonoBehaviour
                 out pressureLitersPerSecond);
         }
 
+        SetFluidPressureInfo(
+            hasFluid,
+            fluidItemId,
+            temperatureCelsius,
+            pressureLitersPerSecond);
+    }
+
+    public void ShowPump(Pump pump, ResourceInstance underlyingResource = null)
+    {
+        BeginObjectDisplay(underlyingResource);
+
+        int fluidItemId = -1;
+        float temperatureCelsius = MapClimate.CurrentTemperatureCelsius;
+        float pressureLitersPerSecond = 0f;
+        bool hasFluid = pump != null && pump.TryGetObjectInfoFluidInfo(
+            out fluidItemId,
+            out temperatureCelsius,
+            out pressureLitersPerSecond);
+        SetFluidPressureInfo(
+            hasFluid,
+            fluidItemId,
+            temperatureCelsius,
+            pressureLitersPerSecond);
+    }
+
+    private void SetFluidPressureInfo(
+        bool hasFluid,
+        int fluidItemId,
+        float temperatureCelsius,
+        float pressureLitersPerSecond)
+    {
+
         if (hasFluid)
         {
             SetDefaultText(

@@ -557,6 +557,8 @@ public class InputOutputModule : InstallationObject,
         new Queue<ConnectedFluidSearchNode>(32);
     private readonly Dictionary<Vector2Int, int> connectedFluidSearchPipeCounts =
         new Dictionary<Vector2Int, int>();
+    private List<RuntimePumpPipePass> connectedFluidPumpPassScratch;
+    private List<Pump> connectedFluidInterlockedPumpScratch;
     private readonly HashSet<InstallationObject> connectedFluidStorageCandidates = new HashSet<InstallationObject>();
     private readonly List<InstallationObject> fluidStorageBodyScratch = new List<InstallationObject>(4);
     private readonly HashSet<SteamGenerator> directedSteamChainVisited = new HashSet<SteamGenerator>();
@@ -1149,6 +1151,93 @@ public class InputOutputModule : InstallationObject,
             ref otherCoordinate,
             ref externalDirection);
         return pump != null;
+    }
+
+    internal readonly struct RuntimePumpPipePass
+    {
+        public readonly Pump Pump;
+        public readonly Vector2Int OtherCoordinate;
+        public readonly Vector2Int ExternalDirection;
+
+        public RuntimePumpPipePass(
+            Pump pump,
+            Vector2Int otherCoordinate,
+            Vector2Int externalDirection)
+        {
+            Pump = pump;
+            OtherCoordinate = otherCoordinate;
+            ExternalDirection = externalDirection;
+        }
+    }
+
+    internal static bool CollectPumpPipePassesAtRuntimeCoordinate(
+        Vector2Int coordinate,
+        List<RuntimePumpPipePass> results)
+    {
+        if (results == null)
+        {
+            return false;
+        }
+
+        int initialCount = results.Count;
+        AppendPumpPipePasses(
+            registeredRuntimeAreaCoordinates.TryGetValue(
+                coordinate,
+                out HashSet<InputOutputModule> areaModules)
+                ? areaModules
+                : null,
+            coordinate,
+            results);
+        AppendPumpPipePasses(
+            registeredRuntimeGridCoordinates.TryGetValue(
+                coordinate,
+                out HashSet<InputOutputModule> gridModules)
+                ? gridModules
+                : null,
+            coordinate,
+            results);
+        return results.Count > initialCount;
+    }
+
+    private static void AppendPumpPipePasses(
+        IEnumerable<InputOutputModule> modules,
+        Vector2Int coordinate,
+        List<RuntimePumpPipePass> results)
+    {
+        if (modules == null)
+        {
+            return;
+        }
+
+        foreach (InputOutputModule module in modules)
+        {
+            if (!(module is Pump pump)
+                || !pump.gameObject.activeInHierarchy
+                || !pump.TryGetRuntimePipePass(
+                    coordinate,
+                    out Vector2Int otherCoordinate,
+                    out Vector2Int externalDirection))
+            {
+                continue;
+            }
+
+            bool alreadyAdded = false;
+            for (int i = 0; i < results.Count; i++)
+            {
+                if (results[i].Pump != pump)
+                {
+                    continue;
+                }
+
+                alreadyAdded = true;
+                break;
+            }
+
+            if (!alreadyAdded)
+            {
+                results.Add(new RuntimePumpPipePass(pump, otherCoordinate, externalDirection));
+            }
+        }
     }
 
     internal static bool TryGetOverlappingSteamSourcePort(
@@ -2896,10 +2985,10 @@ public class InputOutputModule : InstallationObject,
                 out Quaternion pipeRotation,
                 out PipeRuntimeRecord pipeRecord);
             EnqueueFluidStoragePipePassCoordinatesAt(coordinate);
-            bool hasPumpPressureResetPass = TryEnqueuePumpPressureResetPassAt(
+            bool hasPumpPressureResetPass = TryEnqueuePumpPressureResetPassesAt(
                 coordinate,
                 true,
-                out Vector2Int pumpPassExternalDirection);
+                out int pumpPassExternalDirectionMask);
             TryResolveConnectedFluidSearchStorageAtCoordinate(
                 coordinate,
                 out InstallationObject fluidStorage,
@@ -2935,7 +3024,7 @@ public class InputOutputModule : InstallationObject,
                 }
 
                 if (hasPumpPressureResetPass
-                    && direction != pumpPassExternalDirection)
+                    && !DirectionMaskContains(pumpPassExternalDirectionMask, directionIndex))
                 {
                     continue;
                 }
@@ -3052,30 +3141,100 @@ public class InputOutputModule : InstallationObject,
         return foundPipeArea;
     }
 
-    private bool TryEnqueuePumpPressureResetPassAt(
+    private bool TryEnqueuePumpPressureResetPassesAt(
         Vector2Int coordinate,
         bool freezeCurrentPipeCount,
-        out Vector2Int externalDirection)
+        out int externalDirectionMask)
     {
-        externalDirection = Vector2Int.zero;
-        if (!TryGetPumpPipePassAtRuntimeCoordinate(
-                coordinate,
-                out _,
-                out Vector2Int otherCoordinate,
-                out Vector2Int candidateExternalDirection))
+        externalDirectionMask = 0;
+        connectedFluidPumpPassScratch ??= new List<RuntimePumpPipePass>(2);
+        connectedFluidPumpPassScratch.Clear();
+        if (!CollectPumpPipePassesAtRuntimeCoordinate(coordinate, connectedFluidPumpPassScratch))
         {
             return false;
         }
 
-        externalDirection = candidateExternalDirection;
-        // A pump starts a fresh pipe-loss section instead of carrying the
-        // accumulated distance through its body.
-        EnqueueConnectedFluidSearchCoordinate(
-            otherCoordinate,
-            freezeCurrentPipeCount
-                ? FreezeConnectedFluidPipeCount(connectedFluidSearchCurrentPipeCount)
-                : 0);
+        for (int i = 0; i < connectedFluidPumpPassScratch.Count; i++)
+        {
+            RuntimePumpPipePass pass = connectedFluidPumpPassScratch[i];
+            externalDirectionMask |= GetDirectionMask(pass.ExternalDirection);
+            // Every pump sharing this PipePass cell starts its own fresh
+            // pressure-loss section. Traversing only one makes pump chains
+            // loop back through the first installed pump.
+            EnqueueConnectedFluidSearchCoordinate(
+                pass.OtherCoordinate,
+                freezeCurrentPipeCount
+                    ? FreezeConnectedFluidPipeCount(connectedFluidSearchCurrentPipeCount)
+                    : 0);
+        }
+
+        EnqueueInterlockedPumpEndpointsAt(coordinate, freezeCurrentPipeCount);
+
         return true;
+    }
+
+    private void EnqueueInterlockedPumpEndpointsAt(
+        Vector2Int coordinate,
+        bool freezeCurrentPipeCount)
+    {
+        connectedFluidInterlockedPumpScratch ??= new List<Pump>(2);
+        connectedFluidInterlockedPumpScratch.Clear();
+        AppendInterlockedPumpEndpointsAt(
+            registeredRuntimeAreaCoordinates.TryGetValue(
+                coordinate,
+                out HashSet<InputOutputModule> areaModules)
+                ? areaModules
+                : null,
+            coordinate,
+            freezeCurrentPipeCount);
+        AppendInterlockedPumpEndpointsAt(
+            registeredRuntimeGridCoordinates.TryGetValue(
+                coordinate,
+                out HashSet<InputOutputModule> gridModules)
+                ? gridModules
+                : null,
+            coordinate,
+            freezeCurrentPipeCount);
+    }
+
+    private void AppendInterlockedPumpEndpointsAt(
+        IEnumerable<InputOutputModule> modules,
+        Vector2Int coordinate,
+        bool freezeCurrentPipeCount)
+    {
+        if (modules == null)
+        {
+            return;
+        }
+
+        for (int passIndex = 0; passIndex < connectedFluidPumpPassScratch.Count; passIndex++)
+        {
+            Pump sourcePump = connectedFluidPumpPassScratch[passIndex].Pump;
+            foreach (InputOutputModule module in modules)
+            {
+                if (!(module is Pump candidatePump)
+                    || candidatePump == sourcePump
+                    || connectedFluidInterlockedPumpScratch.Contains(candidatePump)
+                    || !candidatePump.TryGetRuntimeInterlockedEndpoint(
+                        sourcePump,
+                        coordinate,
+                        out Vector2Int candidateEndpoint))
+                {
+                    continue;
+                }
+
+                connectedFluidInterlockedPumpScratch.Add(candidatePump);
+                // Consecutive pump meshes are authored two cells apart. Their
+                // facing PipePass cells reciprocally overlap the other pump's
+                // body rather than occupying the same grid cell. Treat only
+                // that reciprocal overlap as the connector between pumps.
+                EnqueueConnectedFluidSearchCoordinate(
+                    candidateEndpoint,
+                    freezeCurrentPipeCount
+                        ? FreezeConnectedFluidPipeCount(connectedFluidSearchCurrentPipeCount)
+                        : 0);
+            }
+        }
     }
 
     private bool TrySelectConnectedFluidSourceFromCache(
@@ -3322,12 +3481,7 @@ public class InputOutputModule : InstallationObject,
         // same cell. Checking that overlapping pipe first can reject a valid
         // pass because its resolved visual variant need not expose the inward
         // connection in the runtime pipe mask.
-        if (TryGetPumpPipePassAtRuntimeCoordinate(
-                coordinate,
-                out _,
-                out _,
-                out Vector2Int pumpExternalDirection)
-            && pumpExternalDirection == directionToPrevious)
+        if (HasRuntimePumpPipePassTowards(coordinate, directionToPrevious))
         {
             canContinueRoute = true;
             return true;
@@ -3713,6 +3867,74 @@ public class InputOutputModule : InstallationObject,
         connectedFluidSearchPipeCounts[coordinate] = pipeCount;
         connectedFluidSearchQueue.Enqueue(
             new ConnectedFluidSearchNode(coordinate, pipeCount));
+    }
+
+    internal static bool HasRuntimePumpPipePassTowards(Vector2Int coordinate, Vector2Int externalDirection)
+    {
+        return externalDirection != Vector2Int.zero
+               && (HasPumpPipePassTowards(
+                       registeredRuntimeAreaCoordinates.TryGetValue(
+                           coordinate,
+                           out HashSet<InputOutputModule> areaModules)
+                           ? areaModules
+                           : null,
+                       coordinate,
+                       externalDirection)
+                   || HasPumpPipePassTowards(
+                       registeredRuntimeGridCoordinates.TryGetValue(
+                           coordinate,
+                           out HashSet<InputOutputModule> gridModules)
+                           ? gridModules
+                           : null,
+                       coordinate,
+                       externalDirection));
+    }
+
+    private static bool HasPumpPipePassTowards(
+        IEnumerable<InputOutputModule> modules,
+        Vector2Int coordinate,
+        Vector2Int externalDirection)
+    {
+        if (modules == null)
+        {
+            return false;
+        }
+
+        foreach (InputOutputModule module in modules)
+        {
+            if (module is Pump pump
+                && pump.gameObject.activeInHierarchy
+                && pump.TryGetRuntimePipePass(
+                    coordinate,
+                    out _,
+                    out Vector2Int candidateExternalDirection)
+                && candidateExternalDirection == externalDirection)
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private static int GetDirectionMask(Vector2Int direction)
+    {
+        for (int i = 0; i < FluidCardinalDirections.Length; i++)
+        {
+            if (FluidCardinalDirections[i] == direction)
+            {
+                return 1 << i;
+            }
+        }
+
+        return 0;
+    }
+
+    private static bool DirectionMaskContains(int mask, int directionIndex)
+    {
+        return directionIndex >= 0
+               && directionIndex < FluidCardinalDirections.Length
+               && (mask & (1 << directionIndex)) != 0;
     }
 
     private static int FreezeConnectedFluidPipeCount(int pipeCount)
@@ -7063,10 +7285,10 @@ public class InputOutputModule : InstallationObject,
                 out Quaternion pipeRotation,
                 out PipeRuntimeRecord pipeRecord);
             EnqueueFluidStoragePipePassCoordinatesAt(coordinate);
-            bool hasPumpPressureResetPass = TryEnqueuePumpPressureResetPassAt(
+            bool hasPumpPressureResetPass = TryEnqueuePumpPressureResetPassesAt(
                 coordinate,
                 false,
-                out Vector2Int pumpPassExternalDirection);
+                out int pumpPassExternalDirectionMask);
             TryResolveConnectedFluidSearchStorageAtCoordinate(
                 coordinate,
                 out InstallationObject fluidStorage,
@@ -7096,7 +7318,7 @@ public class InputOutputModule : InstallationObject,
                 }
 
                 if (hasPumpPressureResetPass
-                    && direction != pumpPassExternalDirection)
+                    && !DirectionMaskContains(pumpPassExternalDirectionMask, directionIndex))
                 {
                     continue;
                 }

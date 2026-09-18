@@ -1,0 +1,26 @@
+{
+  "islands": 415,
+  "unwrap_angle_degrees": 66,
+  "isolated_folded_faces": 21,
+  "original_texture_preserved": true,
+  "padding_fraction": 0.008,
+  "vertices": 1882,
+  "triangles": 3186,
+  "geometry_ids_transforms_unchanged": true,
+  "uv_range": [
+    0.00799996778369,
+    0.992000043392
+  ],
+  "collapsed_visible_uv_triangles": 0,
+  "overlapping_interior_texels": 0,
+  "atlas_coverage": 0.2903147640978248,
+  "texture_size": [
+    2048,
+    2048
+  ],
+  "texture_transfer_mean_rgb_error": 0.0014133430547863533,
+  "fbx_sha256": "8d3bbdac8c66057f8dd18afd66551c090aaeb025717a86a67688b97e939fe824",
+  "texture_sha256": "18bcce7873fbea6a44a2d8c799bc6c4e9544e834fdc4a679451fea0d4ef538dc",
+  "installed_matches_validated": false,
+  "texture_superseded_by": "highlight_reduction.json"
+}

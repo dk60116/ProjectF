@@ -53,7 +53,7 @@ public static class World
     public static readonly List<InstallationObject> Storages = new();
     public static void Place(InstallationObject storage, Vector2Int coordinate, bool bind = true)
     { storage.Anchor = coordinate; storage.RuntimeOccupiedCoordinates.Add(coordinate); Storages.Add(storage); if (bind) Blocks[coordinate] = new Block { MapObject = storage }; }
-    public static void Reset() { Blocks.Clear(); Storages.Clear(); PipeWorld.Current.Records.Clear(); InputOutputModule.Reset(); }
+    public static void Reset() { Blocks.Clear(); Storages.Clear(); PipeWorld.Current.Records.Clear(); SteamTrain.Reset(); InputOutputModule.Reset(); }
 }
 public class Block
 {
@@ -88,17 +88,27 @@ public class Fluidtank : InstallationObject
     public bool IsFlatCarMounted => false;
     public bool HasFluidNetworkConnectionTowards(Vector2Int c, Vector2Int d) =>
         PipeWorld.Current.TryGetAtCoordinate(c + d, out var p) && p.HasConnectionTowardsAt(c + d, -d)
+        || InputOutputModule.HasRuntimePumpPipePassTowards(c + d, -d)
         || World.Storages.Exists(s => s != this && s.RuntimeOccupiedCoordinates.Contains(c + d));
 }
 public class SteamTrain : InstallationObject
 {
-    public static bool TryGetWaterPipeReceiverAtCoordinate(Vector2Int c, out SteamTrain s) { s = null; return false; }
+    private static readonly Dictionary<Vector2Int, SteamTrain> Receivers = new();
+    public static void Reset() => Receivers.Clear();
+    public static SteamTrain Register(Vector2Int coordinate)
+    {
+        var train = new SteamTrain { Anchor = coordinate };
+        Receivers[coordinate] = train;
+        return train;
+    }
+    public static bool TryGetWaterPipeReceiverAtCoordinate(Vector2Int c, out SteamTrain s) => Receivers.TryGetValue(c, out s);
     public bool CanAcceptWaterFromPipeDirection(Vector2Int d, int id, bool space) => true;
 }
 public class WaterPump : InputOutputModule { public static int ResolveWaterItemId(object o) => 1; }
 public class Pump : InputOutputModule
 {
     private Vector2Int first, second, firstExternal, secondExternal;
+    private readonly HashSet<Vector2Int> body = new();
     private bool hasPass;
     public void Pass(Vector2Int firstCoordinate, Vector2Int firstDirection, Vector2Int secondCoordinate, Vector2Int secondDirection)
     {
@@ -107,6 +117,18 @@ public class Pump : InputOutputModule
         second = secondCoordinate; secondExternal = secondDirection;
         hasPass = true;
         Port(first, firstExternal); Port(second, secondExternal);
+    }
+    public void Body(params Vector2Int[] coordinates)
+    {
+        foreach (Vector2Int coordinate in coordinates) { body.Add(coordinate); Grid(coordinate); }
+    }
+    internal bool TryGetRuntimeInterlockedEndpoint(Pump otherPump, Vector2Int otherPumpEndpoint, out Vector2Int endpoint)
+    {
+        endpoint = default;
+        if (otherPump == null || otherPump == this || !body.Contains(otherPumpEndpoint)) return false;
+        if (otherPump.body.Contains(first)) { endpoint = first; return true; }
+        if (otherPump.body.Contains(second)) { endpoint = second; return true; }
+        return false;
     }
     public bool TryGetRuntimePipePass(Vector2Int coordinate, out Vector2Int other, out Vector2Int external)
     {
@@ -144,6 +166,8 @@ public partial class InputOutputModule : InstallationObject
     private readonly List<Vector2Int> runtimeOutputCoordinates = new();
     private readonly Queue<ConnectedFluidSearchNode> connectedFluidSearchQueue = new();
     private readonly Dictionary<Vector2Int, int> connectedFluidSearchPipeCounts = new();
+    private List<RuntimePumpPipePass> connectedFluidPumpPassScratch;
+    private List<Pump> connectedFluidInterlockedPumpScratch;
     private readonly HashSet<InstallationObject> connectedFluidStorageCandidates = new();
     private readonly List<InstallationObject> fluidStorageBodyScratch = new();
     private readonly List<FluidOutputConnection> cachedFluidOutputConnections = new();
@@ -174,6 +198,14 @@ public partial class InputOutputModule : InstallationObject
     public float Emit(float amount) { TryEmitFluidOutputToConnectedStorages(1, amount, 100, out float accepted); return accepted; }
     public float TransportRetention(int itemId) => ResolveFluidOutputTransportRetention(itemId);
     public void Output(Vector2Int c, Vector2Int d) { runtimeOutputCoordinates.Add(c); Port(c, d); }
+    public void Grid(Vector2Int c)
+    {
+        runtimeGridCoordinates.Add(c);
+        if (!registeredRuntimeGridCoordinates.TryGetValue(c, out var set))
+            registeredRuntimeGridCoordinates[c] = set = new();
+        set.Add(this);
+        activeRuntimeModules.Add(this);
+    }
     protected void Port(Vector2Int c, Vector2Int d)
     { ports[c] = d; if (!registeredRuntimeAreaCoordinates.TryGetValue(c, out var set)) registeredRuntimeAreaCoordinates[c] = set = new(); set.Add(this); activeRuntimeModules.Add(this); }
     private bool TryGetRuntimePipeAreaExternalDirection(Vector2Int c, out Vector2Int d) => ports.TryGetValue(c, out d);
@@ -275,6 +307,34 @@ public static class Checks
             Pipes(d*54,d,4); tank = new Fluidtank(); World.Place(tank,d*58);
             Check(producer.TransportRetention(1),.97f,$"pump resets accumulated pipe loss with overlapping pipes {d}");
             Check(producer.Emit(3),3,$"fluid traverses overlapping pump pass {d}");
+
+            World.Reset(); producer = new InputOutputModule(); producer.Output(default,d);
+            var firstPump = new Pump(); firstPump.Pass(d,-d,d*4,d);
+            var secondPump = new Pump(); secondPump.Pass(d*5,-d,d*8,d);
+            tank = new Fluidtank(); World.Place(tank,d*9);
+            Check(producer.Emit(3),3,$"fluid traverses two adjacent pumps {d}");
+            Check(tank.StoredFluidLiters,3,"two adjacent pumps actual storage");
+
+            World.Reset(); producer = new InputOutputModule(); producer.Output(default,d);
+            firstPump = new Pump(); firstPump.Pass(d,-d,d*4,d);
+            secondPump = new Pump(); secondPump.Pass(d*4,-d,d*7,d);
+            tank = new Fluidtank(); World.Place(tank,d*8);
+            Check(producer.Emit(3),3,$"fluid traverses two pumps sharing a PipePass {d}");
+            Check(tank.StoredFluidLiters,3,"shared PipePass pump chain actual storage");
+
+            World.Reset(); var waterSource = new WaterPump(); waterSource.Output(default,d);
+            firstPump = new Pump(); firstPump.Pass(d,-d,d*4,d);
+            secondPump = new Pump(); secondPump.Pass(d*5,-d,d*8,d);
+            var train = SteamTrain.Register(d*8);
+            Check(waterSource.Emit(3),3,$"water reaches train through two pumps {d}");
+            Check(train.StoredFluidLiters,3,"two-pump train receiver actual storage");
+
+            World.Reset(); waterSource = new WaterPump(); waterSource.Output(default,d);
+            firstPump = new Pump(); firstPump.Pass(d,-d,d*4,d); firstPump.Body(d*2,d*3);
+            secondPump = new Pump(); secondPump.Pass(d*3,-d,d*6,d); secondPump.Body(d*4,d*5);
+            train = SteamTrain.Register(d*6);
+            Check(waterSource.Emit(3),3,$"water reaches train through two interlocked pumps {d}");
+            Check(train.StoredFluidLiters,3,"interlocked two-pump train receiver actual storage");
         }
         Console.WriteLine($"{passed} passed, {failed} failed. Production output BFS, directed traversal and fluid storage mutation; no Unity launched.");
         return failed == 0 ? 0 : 1;

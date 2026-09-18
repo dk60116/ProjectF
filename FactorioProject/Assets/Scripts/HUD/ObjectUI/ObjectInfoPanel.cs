@@ -265,6 +265,12 @@ public class ObjectInfoPanel : MonoBehaviour
             return;
         }
 
+        if (mapObject is Pump pump)
+        {
+            ShowPumpInfo(pump, underlyingResource);
+            return;
+        }
+
         if (mapObject is InputOutputModule inputOutputModule)
         {
             ShowInputOutputModuleInfo(inputOutputModule, underlyingResource);
@@ -836,6 +842,21 @@ public class ObjectInfoPanel : MonoBehaviour
         }
 
         infoLine.ShowInputOutputModule(inputOutputModule, underlyingResource);
+    }
+
+    private void ShowPumpInfo(Pump pump, ResourceInstance underlyingResource)
+    {
+        if (infoLine == null)
+        {
+            return;
+        }
+
+        if (!infoLine.gameObject.activeSelf)
+        {
+            infoLine.gameObject.SetActive(true);
+        }
+
+        infoLine.ShowPump(pump, underlyingResource);
     }
 
     private void ShowDeskInfo(Desk desk, ResourceInstance underlyingResource)

@@ -1,0 +1,10 @@
+{
+  "operation": "Hue-preserving baked highlight compression",
+  "linear_luminance_threshold": 0.08,
+  "compression_strength": 2.0,
+  "blender_roughness": 0.85,
+  "blender_specular_ior_level": 0.2,
+  "fbx_sha256": "8d3bbdac8c66057f8dd18afd66551c090aaeb025717a86a67688b97e939fe824",
+  "texture_sha256": "95c9be7c0ef55fc488ef90a70a7a30d91dff7b47ab7ea43322a44a68e762c306",
+  "source_texture_sha256": "18bcce7873fbea6a44a2d8c799bc6c4e9544e834fdc4a679451fea0d4ef538dc"
+}

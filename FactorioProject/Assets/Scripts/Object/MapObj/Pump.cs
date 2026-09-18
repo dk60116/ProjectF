@@ -8,6 +8,272 @@ using UnityEngine;
 /// </summary>
 public class Pump : InputOutputModule
 {
+    private const int MaxObjectInfoNetworkSearchNodes = 64;
+
+    private readonly Queue<Vector2Int> objectInfoSearchQueue = new Queue<Vector2Int>(8);
+    private readonly HashSet<Vector2Int> objectInfoSearchVisited = new HashSet<Vector2Int>();
+    private readonly List<RuntimePumpPipePass> objectInfoPumpPasses =
+        new List<RuntimePumpPipePass>(2);
+    private readonly List<InputOutputModule> objectInfoModules = new List<InputOutputModule>(4);
+    private readonly HashSet<InputOutputModule> objectInfoFluidSources =
+        new HashSet<InputOutputModule>();
+
+    public bool TryGetObjectInfoFluidInfo(
+        out int fluidItemId,
+        out float temperatureCelsius,
+        out float pressureLitersPerSecond)
+    {
+        fluidItemId = -1;
+        temperatureCelsius = MapClimate.CurrentTemperatureCelsius;
+        pressureLitersPerSecond = 0f;
+        if (!isActiveAndEnabled
+            || !TryGetPlacementRuntime(out Vector2Int anchorCoordinate, out int quarterTurns))
+        {
+            return false;
+        }
+
+        objectInfoSearchQueue.Clear();
+        objectInfoSearchVisited.Clear();
+        IReadOnlyList<RectGridBlockPlacement> placements = RectGridPlacements;
+        for (int i = 0; i < placements.Count; i++)
+        {
+            RectGridBlockPlacement placement = placements[i];
+            if (placement.blockType == RectGridBlockType.PipeInput
+                && TryGetRectGridPlacementCoordinate(
+                    this,
+                    anchorCoordinate,
+                    quarterTurns,
+                    placement,
+                    out Vector2Int endpoint))
+            {
+                EnqueueObjectInfoCoordinate(endpoint);
+            }
+        }
+
+        bool foundFallbackFluid = false;
+        int searchedNodeCount = 0;
+        while (objectInfoSearchQueue.Count > 0
+               && searchedNodeCount++ < MaxObjectInfoNetworkSearchNodes)
+        {
+            Vector2Int coordinate = objectInfoSearchQueue.Dequeue();
+            if (TryGetObjectInfoFromPipe(
+                    coordinate,
+                    out fluidItemId,
+                    out temperatureCelsius,
+                    out pressureLitersPerSecond))
+            {
+                ClearObjectInfoScratch();
+                return true;
+            }
+
+            if (TryGetObjectInfoSourceAt(
+                    coordinate,
+                    out int sourceItemId,
+                    out float sourceTemperature,
+                    out float sourcePressure)
+                && (!foundFallbackFluid || sourcePressure > pressureLitersPerSecond))
+            {
+                fluidItemId = sourceItemId;
+                temperatureCelsius = sourceTemperature;
+                pressureLitersPerSecond = sourcePressure;
+                foundFallbackFluid = true;
+            }
+            else if (!foundFallbackFluid
+                     && TryGetRuntimePipeFluidStorageAtCoordinate(
+                         coordinate,
+                         this,
+                         false,
+                         out InstallationObject storage)
+                     && storage.StoredFluidItemId >= 0)
+            {
+                fluidItemId = storage.StoredFluidItemId;
+                temperatureCelsius = storage.GetStoredFluidTemperatureCelsius(fluidItemId);
+                foundFallbackFluid = true;
+            }
+
+            EnqueueConnectedPumpCoordinates(coordinate);
+        }
+
+        ClearObjectInfoScratch();
+        return foundFallbackFluid;
+    }
+
+    private bool TryGetObjectInfoFromPipe(
+        Vector2Int coordinate,
+        out int fluidItemId,
+        out float temperatureCelsius,
+        out float pressureLitersPerSecond)
+    {
+        fluidItemId = -1;
+        temperatureCelsius = MapClimate.CurrentTemperatureCelsius;
+        pressureLitersPerSecond = 0f;
+        if (PipeWorld.Current != null
+            && PipeWorld.Current.TryGetAtCoordinate(coordinate, out PipeRuntimeRecord record))
+        {
+            return record.TryGetObjectInfoFluidInfo(
+                coordinate,
+                out fluidItemId,
+                out temperatureCelsius,
+                out pressureLitersPerSecond);
+        }
+
+        if (!TryGetLoadedBlock(coordinate, out Block block)
+            || block == null
+            || !block.TryGetRuntimePipe(out Pipe pipe, out _))
+        {
+            return false;
+        }
+
+        return block.TryGetRuntimePipeRecord(out record)
+            ? record.TryGetObjectInfoFluidInfo(
+                coordinate,
+                out fluidItemId,
+                out temperatureCelsius,
+                out pressureLitersPerSecond)
+            : pipe.TryGetObjectInfoFluidInfo(
+                out fluidItemId,
+                out temperatureCelsius,
+                out pressureLitersPerSecond);
+    }
+
+    private bool TryGetObjectInfoSourceAt(
+        Vector2Int coordinate,
+        out int fluidItemId,
+        out float temperatureCelsius,
+        out float pressureLitersPerSecond)
+    {
+        pressureLitersPerSecond = 0f;
+        if (!TryGetFluidOutputInfoAtRuntimeGridCoordinate(
+                coordinate,
+                out fluidItemId,
+                out temperatureCelsius))
+        {
+            return false;
+        }
+
+        objectInfoFluidSources.Clear();
+        AppendFluidOutputSourcesAtCoordinate(
+            coordinate,
+            Vector2Int.zero,
+            objectInfoFluidSources);
+        foreach (InputOutputModule source in objectInfoFluidSources)
+        {
+            if (source != null)
+            {
+                pressureLitersPerSecond +=
+                    source.GetObjectInfoFluidPressureLitersPerSecond(fluidItemId);
+            }
+        }
+
+        objectInfoFluidSources.Clear();
+        return true;
+    }
+
+    private void EnqueueConnectedPumpCoordinates(Vector2Int coordinate)
+    {
+        objectInfoPumpPasses.Clear();
+        if (!CollectPumpPipePassesAtRuntimeCoordinate(coordinate, objectInfoPumpPasses))
+        {
+            return;
+        }
+
+        for (int i = 0; i < objectInfoPumpPasses.Count; i++)
+        {
+            RuntimePumpPipePass pass = objectInfoPumpPasses[i];
+            EnqueueObjectInfoCoordinate(pass.OtherCoordinate);
+            EnqueueObjectInfoCoordinate(coordinate + pass.ExternalDirection);
+        }
+
+        objectInfoModules.Clear();
+        CollectModulesAtRuntimeAreaCoordinate(coordinate, objectInfoModules);
+        CollectModulesAtRuntimeGridCoordinate(coordinate, objectInfoModules);
+        for (int passIndex = 0; passIndex < objectInfoPumpPasses.Count; passIndex++)
+        {
+            Pump sourcePump = objectInfoPumpPasses[passIndex].Pump;
+            for (int moduleIndex = 0; moduleIndex < objectInfoModules.Count; moduleIndex++)
+            {
+                if (objectInfoModules[moduleIndex] is Pump candidatePump
+                    && candidatePump.TryGetRuntimeInterlockedEndpoint(
+                        sourcePump,
+                        coordinate,
+                        out Vector2Int endpoint))
+                {
+                    EnqueueObjectInfoCoordinate(endpoint);
+                }
+            }
+        }
+
+        objectInfoModules.Clear();
+        objectInfoPumpPasses.Clear();
+    }
+
+    private void EnqueueObjectInfoCoordinate(Vector2Int coordinate)
+    {
+        if (objectInfoSearchVisited.Add(coordinate))
+        {
+            objectInfoSearchQueue.Enqueue(coordinate);
+        }
+    }
+
+    private void ClearObjectInfoScratch()
+    {
+        objectInfoSearchQueue.Clear();
+        objectInfoSearchVisited.Clear();
+        objectInfoPumpPasses.Clear();
+        objectInfoModules.Clear();
+        objectInfoFluidSources.Clear();
+    }
+
+    internal bool TryGetRuntimeInterlockedEndpoint(
+        Pump otherPump,
+        Vector2Int otherPumpEndpoint,
+        out Vector2Int endpoint)
+    {
+        endpoint = default;
+        if (otherPump == null
+            || otherPump == this
+            || !gameObject.activeInHierarchy
+            || !TryGetPlacementRuntime(out Vector2Int anchorCoordinate, out int quarterTurns)
+            || !IsRuntimeObjectCoordinate(otherPumpEndpoint))
+        {
+            return false;
+        }
+
+        IReadOnlyList<RectGridBlockPlacement> placements = RectGridPlacements;
+        for (int i = 0; i < placements.Count; i++)
+        {
+            RectGridBlockPlacement placement = placements[i];
+            if (placement.blockType != RectGridBlockType.PipeInput
+                || !TryGetRectGridPlacementCoordinate(
+                    this,
+                    anchorCoordinate,
+                    quarterTurns,
+                    placement,
+                    out Vector2Int candidateEndpoint)
+                || !otherPump.IsRuntimeObjectCoordinate(candidateEndpoint))
+            {
+                continue;
+            }
+
+            endpoint = candidateEndpoint;
+            return true;
+        }
+
+        return false;
+    }
+
+    private bool IsRuntimeObjectCoordinate(Vector2Int coordinate)
+    {
+        return TryGetPlacementRuntime(out Vector2Int anchorCoordinate, out int quarterTurns)
+               && TryGetRectGridBlockTypeAtCoordinate(
+                   this,
+                   anchorCoordinate,
+                   quarterTurns,
+                   coordinate,
+                   out RectGridBlockType blockType)
+               && blockType == RectGridBlockType.Object;
+    }
+
     public bool TryGetRuntimePipePass(
         Vector2Int coordinate,
         out Vector2Int otherCoordinate,
