@@ -7235,7 +7235,104 @@ public class InputOutputModule : InstallationObject,
         return acceptedLiters > 0.0001f;
     }
 
+    protected bool TryTransferFluidFromStorageToConnectedStorage(
+        InstallationObject sourceStorage,
+        int fluidItemId,
+        float requestedLiters,
+        float temperatureCelsius,
+        IReadOnlyList<Vector2Int> seedCoordinates,
+        out float acceptedLiters)
+    {
+        acceptedLiters = 0f;
+        if (sourceStorage == null
+            || sourceStorage == this
+            || !IsFluidItemId(fluidItemId)
+            || requestedLiters <= 0.0001f
+            || seedCoordinates == null
+            || seedCoordinates.Count <= 0
+            || !sourceStorage.CanProvideFluidItem(fluidItemId, 0.0001f))
+        {
+            return false;
+        }
+
+        using (MapObjectTickProfiler.SampleNamed(
+                   "Simulation",
+                   nameof(InputOutputModule),
+                   "Fluid Output Storage Search"))
+        {
+            if (!EnsureFluidOutputStorageCache(seedCoordinates))
+            {
+                return false;
+            }
+        }
+
+        FluidOutputConnection bestConnection = default;
+        float bestFillRatio = float.PositiveInfinity;
+        bool foundTarget = false;
+        for (int i = 0; i < cachedFluidOutputConnections.Count; i++)
+        {
+            FluidOutputConnection connection = cachedFluidOutputConnections[i];
+            InstallationObject storage = connection.Storage;
+            if (storage == sourceStorage
+                || !CanUseFluidOutputStorageWithAnySpace(storage, fluidItemId))
+            {
+                continue;
+            }
+
+            float fillRatio = GetFluidStorageFillRatio(storage);
+            if (foundTarget && fillRatio >= bestFillRatio)
+            {
+                continue;
+            }
+
+            bestConnection = connection;
+            bestFillRatio = fillRatio;
+            foundTarget = true;
+        }
+
+        if (!foundTarget || bestConnection.Storage == null)
+        {
+            return false;
+        }
+
+        float transferLiters = Mathf.Min(
+            requestedLiters * CalculateFluidPressureRetention(bestConnection.PipeDistance),
+            sourceStorage.StoredFluidLiters,
+            bestConnection.Storage.AvailableFluidStorageLiters);
+        if (transferLiters <= 0.0001f
+            || !sourceStorage.TryConsumeFluidLiters(
+                fluidItemId,
+                transferLiters,
+                out float consumedLiters)
+            || consumedLiters <= 0.0001f)
+        {
+            return false;
+        }
+
+        bestConnection.Storage.TryAddFluidLiters(
+            fluidItemId,
+            consumedLiters,
+            temperatureCelsius,
+            out acceptedLiters);
+        float rejectedLiters = consumedLiters - Mathf.Max(0f, acceptedLiters);
+        if (rejectedLiters > 0.0001f)
+        {
+            sourceStorage.TryAddFluidLiters(
+                fluidItemId,
+                rejectedLiters,
+                temperatureCelsius,
+                out _);
+        }
+
+        return acceptedLiters > 0.0001f;
+    }
+
     private bool EnsureFluidOutputStorageCache()
+    {
+        return EnsureFluidOutputStorageCache(runtimeOutputCoordinates);
+    }
+
+    private bool EnsureFluidOutputStorageCache(IReadOnlyList<Vector2Int> seedCoordinates)
     {
         if (cachedFluidOutputConnectionsTopologyVersion == fluidTopologyVersion)
         {
@@ -7254,9 +7351,9 @@ public class InputOutputModule : InstallationObject,
             BuildDirectedBoilerSteamOutputCache(boiler);
         }
 
-        for (int i = 0; i < runtimeOutputCoordinates.Count; i++)
+        for (int i = 0; i < seedCoordinates.Count; i++)
         {
-            Vector2Int seedCoordinate = runtimeOutputCoordinates[i];
+            Vector2Int seedCoordinate = seedCoordinates[i];
             EnqueueConnectedFluidSearchCoordinate(
                 seedCoordinate,
                 TryGetConnectedPipeAtCoordinate(seedCoordinate, out _, out _, out _) ? 1 : 0);
@@ -7278,7 +7375,7 @@ public class InputOutputModule : InstallationObject,
                 coordinate,
                 Mathf.Max(0, connectedFluidSearchCurrentPipeCount - 1));
 
-            bool isOutputSeed = ContainsCoordinate(runtimeOutputCoordinates, coordinate);
+            bool isOutputSeed = ContainsCoordinate(seedCoordinates, coordinate);
             bool hasPipe = TryGetConnectedPipeAtCoordinate(
                 coordinate,
                 out Pipe pipe,

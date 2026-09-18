@@ -1373,49 +1373,12 @@ public partial class TerrainGenerator : MonoBehaviour
             }
         }
 
-        restoredInstallation.ApplyItemFilterMask(savedState.itemFilterMaskWords, savedState.itemFilterMaskInitialized);
-        if (restoredInstallation is Spliterbelt restoredSplitter)
-            restoredSplitter.ApplySplitterState(savedState.splitterState);
-        if (restoredInstallation is LoggingMachine restoredLoggingMachine)
+        if (restoredInstallation is FreightCar restoredFreightCar)
         {
-            restoredLoggingMachine.ApplyTreeFilterState(
-                savedState.loggingTreeFilterInitialized,
-                savedState.loggingEnabledTreeDefinitionKeys,
-                savedState.loggingMinimumGrowth,
-                savedState.loggingMaximumGrowth);
-        }
-        if (savedState.hasDeterministicUnits)
-        {
-            restoredInstallation.SetStoredFluidUnits(
-                savedState.storedFluidItemId,
-                savedState.storedFluidUnits,
-                savedState.storedFluidTemperatureCelsius);
-        }
-        else
-        {
-            restoredInstallation.SetStoredFluid(
-                savedState.storedFluidItemId,
-                savedState.storedFluidLiters,
-                savedState.storedFluidTemperatureCelsius);
+            RestoreMountedInstallations(restoredFreightCar, savedState.mountedInstallations);
         }
 
-        if (restoredInstallation is IPersistentInstallationItemStorage itemStorage)
-        {
-            itemStorage.ApplyPersistentStoredItemId(savedState.storedInstallationItemId);
-        }
-        if (restoredInstallation is IPersistentInstallationItemCollectionStorage collectionStorage)
-        {
-            collectionStorage.ApplyPersistentStoredItemIds(savedState.storedInstallationItemIds);
-        }
-
-        if (restoredInstallation is BoxObject restoredBoxObject)
-        {
-            if (savedState.boxIsOpen.HasValue)
-            {
-                restoredBoxObject.SetOpenState(savedState.boxIsOpen.Value, false);
-            }
-            restoredBoxObject.SetStorageRange(savedState.boxMinimumRetainedItemCount, savedState.boxMaximumStoredItemCount);
-        }
+        ApplySavedInstallationContentState(restoredInstallation, savedState);
 
         restoredInstallation.gameObject.SetActive(true);
         BindLoadedBlocksToInstallation(restoredInstallation, occupiedCoordinates);
@@ -1425,6 +1388,117 @@ public partial class TerrainGenerator : MonoBehaviour
         }
         installationObject = restoredInstallation;
         return true;
+        }
+    }
+
+    private void RestoreMountedInstallations(
+        FreightCar freightCar,
+        IReadOnlyList<BlockStateStore.MountedInstallationSaveState> mountedStates)
+    {
+        if (freightCar == null || mountedStates == null || mountedStates.Count <= 0)
+        {
+            return;
+        }
+
+        for (int i = 0; i < mountedStates.Count; i++)
+        {
+            BlockStateStore.MountedInstallationSaveState mountedState = mountedStates[i];
+            BlockStateStore.InstallationSaveState loadState = mountedState?.installation;
+            if (loadState == null || mountedState.pointIndex < 0)
+            {
+                continue;
+            }
+
+            MapObject sourcePrefab = ResolveInstallationSourcePrefab(loadState);
+            if (!(sourcePrefab is BoxObject) && !(sourcePrefab is Fluidtank))
+            {
+                continue;
+            }
+
+            InstallationObject loadObject = CreateInstallationObject(sourcePrefab, freightCar.transform);
+            if (!(loadObject is BoxObject) && !(loadObject is Fluidtank))
+            {
+                ReleaseInstallationObject(loadObject, sourcePrefab);
+                continue;
+            }
+
+            if (freightCar.TryGetPlacementRuntime(
+                    out Vector2Int anchorCoordinate,
+                    out int quarterTurns))
+            {
+                loadObject.ConfigurePlacementRuntime(
+                    anchorCoordinate,
+                    quarterTurns,
+                    new[] { anchorCoordinate },
+                    loadState.placementSequence);
+            }
+
+            if (loadState.inputOutputState != null && loadObject is InputOutputModule inputOutputModule)
+            {
+                inputOutputModule.ApplyPersistentState(loadState.inputOutputState);
+            }
+
+            ApplySavedInstallationContentState(loadObject, loadState);
+            if (!freightCar.TryAttachLoadObjectToPointIndex(loadObject, mountedState.pointIndex))
+            {
+                ReleaseInstallationObject(loadObject, sourcePrefab);
+            }
+        }
+    }
+
+    private static void ApplySavedInstallationContentState(
+        InstallationObject installationObject,
+        BlockStateStore.InstallationSaveState savedState)
+    {
+        installationObject.ApplyItemFilterMask(
+            savedState.itemFilterMaskWords,
+            savedState.itemFilterMaskInitialized);
+        if (installationObject is Spliterbelt splitter)
+        {
+            splitter.ApplySplitterState(savedState.splitterState);
+        }
+        if (installationObject is LoggingMachine loggingMachine)
+        {
+            loggingMachine.ApplyTreeFilterState(
+                savedState.loggingTreeFilterInitialized,
+                savedState.loggingEnabledTreeDefinitionKeys,
+                savedState.loggingMinimumGrowth,
+                savedState.loggingMaximumGrowth);
+        }
+
+        if (savedState.hasDeterministicUnits)
+        {
+            installationObject.SetStoredFluidUnits(
+                savedState.storedFluidItemId,
+                savedState.storedFluidUnits,
+                savedState.storedFluidTemperatureCelsius);
+        }
+        else
+        {
+            installationObject.SetStoredFluid(
+                savedState.storedFluidItemId,
+                savedState.storedFluidLiters,
+                savedState.storedFluidTemperatureCelsius);
+        }
+
+        if (installationObject is IPersistentInstallationItemStorage itemStorage)
+        {
+            itemStorage.ApplyPersistentStoredItemId(savedState.storedInstallationItemId);
+        }
+        if (installationObject is IPersistentInstallationItemCollectionStorage collectionStorage)
+        {
+            collectionStorage.ApplyPersistentStoredItemIds(savedState.storedInstallationItemIds);
+        }
+
+        if (installationObject is BoxObject boxObject)
+        {
+            if (savedState.boxIsOpen.HasValue)
+            {
+                boxObject.SetOpenState(savedState.boxIsOpen.Value, false);
+            }
+            boxObject.SetStorageRange(
+                savedState.boxMinimumRetainedItemCount,
+                savedState.boxMaximumStoredItemCount);
         }
     }
 

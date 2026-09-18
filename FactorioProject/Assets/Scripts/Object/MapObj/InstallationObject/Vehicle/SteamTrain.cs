@@ -85,9 +85,6 @@ public class SteamTrain : RailHandcar,
     private const float WaterUseRatePerSecond = 0.8f;
     private const float WaterPipeDockRailCoordinateSampleMaxDistance = 0.6f;
     private const float WaterPipeDockFacingDotEpsilon = 0.05f;
-    private const float WaterPipeDockMinAlongDistance = 0.45f;
-    private const float WaterPipeDockMaxAlongDistance = 1.35f;
-    private const float WaterPipeDockMaxLateralDistance = 0.35f;
     private const float AutoDriveRouteRefreshInterval = 0.25f;
     private const float AutoDriveLookAheadDistance = 0.65f;
     private const float AutoDriveBranchLookAheadDistance = 0.45f;
@@ -100,13 +97,6 @@ public class SteamTrain : RailHandcar,
     // Keep this above RailHandcar's input dead zone so auto-drive docking creep still moves.
     private const float AutoDriveDockApproachMinInputMagnitude = 0.18f;
     private const float AutoDriveWaitDurationSeconds = 5f;
-    private static readonly Vector2Int[] CardinalDirections =
-    {
-        Vector2Int.up,
-        Vector2Int.right,
-        Vector2Int.down,
-        Vector2Int.left
-    };
 
     private Vector3 lastMovementParticlePosition;
     private bool hasLastMovementParticlePosition;
@@ -124,6 +114,7 @@ public class SteamTrain : RailHandcar,
     private bool waterPipeTargetActive;
     private bool waterPipeAnimating;
     private bool waterPipeTransferReady;
+    private bool waterPipeExtensionComplete;
     private bool waterPipeReceiverRegistered;
     private Vector2Int registeredWaterPipeReceiverCoordinate;
     private Vector2Int registeredWaterPipeCoordinate;
@@ -281,8 +272,7 @@ public class SteamTrain : RailHandcar,
             SteamTrain candidate = candidates[i];
             if (!candidate.isActiveAndEnabled
                 || !candidate.gameObject.activeInHierarchy
-                || !candidate.waterPipeTargetActive
-                || !candidate.waterPipeDockLockActive)
+                || !candidate.IsWaterPipeTransferReady)
             {
                 continue;
             }
@@ -413,7 +403,29 @@ public class SteamTrain : RailHandcar,
             return false;
         }
 
-        return base.CanAcceptFluidItem(fluidItemId, requestedLiters);
+        return ShouldFillFluidAtCurrentStop()
+               && IsWaterPipeTransferReady
+               && base.CanAcceptFluidItem(fluidItemId, requestedLiters);
+    }
+
+    internal bool ShouldFillFluidAtCurrentStop()
+    {
+        return !ShouldUnloadFluidAtCurrentStop();
+    }
+
+    internal bool ShouldUnloadFluidAtCurrentStop()
+    {
+        SteamTrain filterOwner = ResolveTrainFilterSettingsOwnerForConsist() ?? this;
+        filterOwner.ResolveAutoDriveDepartureFilters(
+            out _,
+            out AutoDriveFreightFilter freightFilter);
+        return ShouldUnloadFluidForFreightFilter(freightFilter);
+    }
+
+    private static bool ShouldUnloadFluidForFreightFilter(
+        AutoDriveFreightFilter freightFilter)
+    {
+        return freightFilter == AutoDriveFreightFilter.Empty;
     }
 
     public bool CanAcceptWaterFromPipeDirection(
@@ -428,13 +440,18 @@ public class SteamTrain : RailHandcar,
 
         Vector2Int directionFromTrainToPipe = -directionFromPipeToTrain;
         int waterItemId = ResolveWaterItemId();
-        return waterPipeTargetActive
-               && waterPipeDockLockActive
+        return IsWaterPipeTransferReady
                && activeWaterPipeDirectionFromTrainToPipe == directionFromTrainToPipe
                && waterItemId >= 0
                && fluidItemId == waterItemId
                && CanAcceptFluidItem(fluidItemId, requireStorageSpace ? 0.0001f : 0f);
     }
+
+    private bool IsWaterPipeTransferReady =>
+        waterPipeTargetActive
+        && waterPipeTransferReady
+        && waterPipeExtensionComplete
+        && waterPipeDockLockActive;
 
     protected override void OnEnable()
     {
@@ -766,14 +783,16 @@ public class SteamTrain : RailHandcar,
         AutoDriveFreightFilter normalizedTargetBFreightFilter = ParseAutoDriveFreightFilter(targetBFreightFilterName);
         bool normalizedEnabled = enabled && HasCompleteAutoDriveTargets(normalizedTargetA, normalizedTargetB);
 
-        bool changed =
+        bool routeSettingsChanged =
             autoDriveEnabled != normalizedEnabled
             || !string.Equals(autoDriveTargetAStationName, normalizedTargetA, System.StringComparison.OrdinalIgnoreCase)
-            || !string.Equals(autoDriveTargetBStationName, normalizedTargetB, System.StringComparison.OrdinalIgnoreCase)
-            || autoDriveTargetAFuelFilter != normalizedTargetAFuelFilter
+            || !string.Equals(autoDriveTargetBStationName, normalizedTargetB, System.StringComparison.OrdinalIgnoreCase);
+        bool filtersChanged =
+            autoDriveTargetAFuelFilter != normalizedTargetAFuelFilter
             || autoDriveTargetAFreightFilter != normalizedTargetAFreightFilter
             || autoDriveTargetBFuelFilter != normalizedTargetBFuelFilter
             || autoDriveTargetBFreightFilter != normalizedTargetBFreightFilter;
+        bool changed = routeSettingsChanged || filtersChanged;
 
         autoDriveEnabled = normalizedEnabled;
         autoDriveTargetAStationName = normalizedTargetA;
@@ -784,7 +803,7 @@ public class SteamTrain : RailHandcar,
         autoDriveTargetBFreightFilter = normalizedTargetBFreightFilter;
         if (autoDriveEnabled)
         {
-            if (changed || autoDriveControllerRevision == 0)
+            if (routeSettingsChanged || autoDriveControllerRevision == 0)
             {
                 ClaimAutoDriveControl();
             }
@@ -801,8 +820,17 @@ public class SteamTrain : RailHandcar,
             return;
         }
 
-        ResetAutoDriveRuntimeState();
-        SetAutoDriveStatus(autoDriveEnabled ? AutoDriveStatus.Planning : AutoDriveStatus.Idle, string.Empty, string.Empty);
+        // A filter edit changes the transfer/departure condition at the current
+        // stop. It must not erase the station identity used to select A/B.
+        if (routeSettingsChanged)
+        {
+            ResetAutoDriveRuntimeState();
+            SetAutoDriveStatus(
+                autoDriveEnabled ? AutoDriveStatus.Planning : AutoDriveStatus.Idle,
+                string.Empty,
+                string.Empty);
+        }
+
         PersistAutoDriveState();
     }
 
@@ -1361,21 +1389,6 @@ public class SteamTrain : RailHandcar,
             return false;
         }
 
-        bool isRailPassDock = HasPumpWaterPipeRailPass(
-            lockedWaterPipeDockCoordinate,
-            lockedWaterPipeDockDirectionFromTrainToPipe);
-        if (!isRailPassDock
-            && !TryGetWaterPipeDockOffsetMetrics(
-                pathPoint,
-                lockedWaterPipeDockDirectionFromTrainToPipe,
-                lockedWaterPipeDockCoordinate,
-                out _,
-                out _))
-        {
-            ClearWaterPipeDockLock();
-            return false;
-        }
-
         dockSample.Rail = lockedWaterPipeDockRail;
         dockSample.DistanceAlongPath = lockedWaterPipeDockDistance;
         dockSample.Point = pathPoint;
@@ -1394,25 +1407,10 @@ public class SteamTrain : RailHandcar,
             return false;
         }
 
-        bool hasConnector = HasPumpWaterPipeRailPass(
-            lockedWaterPipeDockCoordinate,
-            lockedWaterPipeDockDirectionFromTrainToPipe);
-        if (!hasConnector
-            && TryGetActivePipeAtCoordinate(
-                lockedWaterPipeDockCoordinate,
-                out Pipe pipe,
-                out Quaternion pipeRotation,
-                out PipeRuntimeRecord pipeRecord))
-        {
-            hasConnector = HasActivePipeConnectionTowards(
-                pipe,
-                pipeRecord,
-                lockedWaterPipeDockCoordinate,
-                pipeRotation,
-                -lockedWaterPipeDockDirectionFromTrainToPipe);
-        }
-
-        return hasConnector && CanDeployWaterPipe(waterItemId);
+        return HasPumpWaterPipeRailPass(
+                   lockedWaterPipeDockCoordinate,
+                   lockedWaterPipeDockDirectionFromTrainToPipe)
+               && CanDeployWaterPipe(waterItemId);
     }
 
     private void LockWaterPipeDock(
@@ -1498,10 +1496,10 @@ public class SteamTrain : RailHandcar,
         {
             for (int offsetX = -searchCells; offsetX <= searchCells; offsetX++)
             {
-                Vector2Int candidatePipeCoordinate = centerCoordinate + new Vector2Int(offsetX, offsetY);
+                Vector2Int candidateDockCoordinate = centerCoordinate + new Vector2Int(offsetX, offsetY);
                 waterPipeDockPumpPassScratch.Clear();
                 if (InputOutputModule.CollectPumpPipePassesAtRuntimeCoordinate(
-                        candidatePipeCoordinate,
+                        candidateDockCoordinate,
                         waterPipeDockPumpPassScratch))
                 {
                     for (int passIndex = 0; passIndex < waterPipeDockPumpPassScratch.Count; passIndex++)
@@ -1509,12 +1507,10 @@ public class SteamTrain : RailHandcar,
                         Vector2Int passDirectionFromTrainToPipe =
                             -waterPipeDockPumpPassScratch[passIndex].ExternalDirection;
                         if (!TryEvaluateWaterPipeDockCandidate(
-                                candidatePipeCoordinate,
-                                candidatePipeCoordinate,
+                                candidateDockCoordinate,
                                 passDirectionFromTrainToPipe,
                                 currentSample,
                                 waterItemId,
-                                false,
                                 out RailSample passDockSample,
                                 out float passPathDelta,
                                 out float passScore)
@@ -1527,62 +1523,9 @@ public class SteamTrain : RailHandcar,
                         dockSample = passDockSample;
                         signedPathDelta = passPathDelta;
                         directionFromTrainToPipe = passDirectionFromTrainToPipe;
-                        pipeCoordinate = candidatePipeCoordinate;
+                        pipeCoordinate = candidateDockCoordinate;
                         found = true;
                     }
-
-                    // PipePass owns this endpoint even when a pipe overlaps it.
-                    continue;
-                }
-
-                if (!TryGetActivePipeAtCoordinate(
-                        candidatePipeCoordinate,
-                        out Pipe pipe,
-                        out Quaternion pipeRotation,
-                        out PipeRuntimeRecord pipeRecord))
-                {
-                    continue;
-                }
-
-                for (int directionIndex = 0; directionIndex < CardinalDirections.Length; directionIndex++)
-                {
-                    Vector2Int directionFromPipeToTrain = CardinalDirections[directionIndex];
-                    if (!HasActivePipeConnectionTowards(
-                            pipe,
-                            pipeRecord,
-                            candidatePipeCoordinate,
-                            pipeRotation,
-                            directionFromPipeToTrain))
-                    {
-                        continue;
-                    }
-
-                    Vector2Int trainCoordinate = candidatePipeCoordinate + directionFromPipeToTrain;
-                    if (!TryEvaluateWaterPipeDockCandidate(
-                            candidatePipeCoordinate,
-                            trainCoordinate,
-                            -directionFromPipeToTrain,
-                            currentSample,
-                            waterItemId,
-                            true,
-                            out RailSample candidateSample,
-                            out float candidatePathDelta,
-                            out float score))
-                    {
-                        continue;
-                    }
-
-                    if (score >= bestScore)
-                    {
-                        continue;
-                    }
-
-                    bestScore = score;
-                    dockSample = candidateSample;
-                    signedPathDelta = candidatePathDelta;
-                    directionFromTrainToPipe = -directionFromPipeToTrain;
-                    pipeCoordinate = candidatePipeCoordinate;
-                    found = true;
                 }
             }
         }
@@ -1591,12 +1534,10 @@ public class SteamTrain : RailHandcar,
     }
 
     private bool TryEvaluateWaterPipeDockCandidate(
-        Vector2Int connectorCoordinate,
         Vector2Int railCoordinate,
         Vector2Int candidateDirectionFromTrainToPipe,
         RailSample currentSample,
         int waterItemId,
-        bool requireOffsetMetrics,
         out RailSample dockSample,
         out float signedPathDelta,
         out float score)
@@ -1623,19 +1564,6 @@ public class SteamTrain : RailHandcar,
             return false;
         }
 
-        float alongDistance = 1f;
-        float lateralDistance = 0f;
-        if (requireOffsetMetrics
-            && !TryGetWaterPipeDockOffsetMetrics(
-                candidateSample.Point,
-                candidateDirectionFromTrainToPipe,
-                connectorCoordinate,
-                out alongDistance,
-                out lateralDistance))
-        {
-            return false;
-        }
-
         if (!CanDeployWaterPipe(waterItemId))
         {
             return false;
@@ -1643,10 +1571,7 @@ public class SteamTrain : RailHandcar,
 
         dockSample = candidateSample;
         signedPathDelta = candidatePathDelta;
-        score = candidatePathDistance
-                + candidateSqrDistance * 0.25f
-                + Mathf.Abs(1f - alongDistance) * 0.2f
-                + lateralDistance * 0.35f;
+        score = candidatePathDistance + candidateSqrDistance * 0.25f;
         return true;
     }
 
@@ -1797,6 +1722,33 @@ public class SteamTrain : RailHandcar,
         }
 
         return controller;
+    }
+
+    private SteamTrain ResolveTrainFilterSettingsOwnerForConsist()
+    {
+        CollectAutoDriveConnectedTrains();
+        SteamTrain owner = null;
+        for (int i = 0; i < autoDriveConnectedTrainScratch.Count; i++)
+        {
+            if (autoDriveConnectedTrainScratch[i] is not SteamTrain candidate
+                || candidate == null
+                || !candidate.HasAnyAutoDriveTarget)
+            {
+                continue;
+            }
+
+            if (owner == null
+                || candidate.autoDriveEnabled && !owner.autoDriveEnabled
+                || candidate.autoDriveEnabled == owner.autoDriveEnabled
+                && (candidate.autoDriveControllerRevision > owner.autoDriveControllerRevision
+                    || candidate.autoDriveControllerRevision == owner.autoDriveControllerRevision
+                    && CompareSimulationOrder(candidate, owner) < 0))
+            {
+                owner = candidate;
+            }
+        }
+
+        return owner;
     }
 
     private void TransferAutoDriveControl(SteamTrain powerSource)
@@ -2536,6 +2488,11 @@ public class SteamTrain : RailHandcar,
         out AutoDriveFuelFilter fuelFilter,
         out AutoDriveFreightFilter freightFilter)
     {
+        if (TryResolvePhysicallyDockedFilters(out fuelFilter, out freightFilter))
+        {
+            return;
+        }
+
         if (string.Equals(
                 autoDriveLastArrivedStationName,
                 autoDriveTargetAStationName,
@@ -2558,6 +2515,72 @@ public class SteamTrain : RailHandcar,
 
         fuelFilter = AutoDriveFuelFilter.Free;
         freightFilter = AutoDriveFreightFilter.Free;
+    }
+
+    private bool TryResolvePhysicallyDockedFilters(
+        out AutoDriveFuelFilter fuelFilter,
+        out AutoDriveFreightFilter freightFilter)
+    {
+        fuelFilter = AutoDriveFuelFilter.Free;
+        freightFilter = AutoDriveFreightFilter.Free;
+        CollectAutoDriveConnectedTrains();
+
+        bool foundTargetA = TryGetConsistStationDockDistance(
+            autoDriveTargetAStationName,
+            out float targetADistance);
+        bool foundTargetB = TryGetConsistStationDockDistance(
+            autoDriveTargetBStationName,
+            out float targetBDistance);
+        if (!foundTargetA && !foundTargetB)
+        {
+            return false;
+        }
+
+        if (foundTargetA && (!foundTargetB || targetADistance <= targetBDistance))
+        {
+            fuelFilter = autoDriveTargetAFuelFilter;
+            freightFilter = autoDriveTargetAFreightFilter;
+            return true;
+        }
+
+        fuelFilter = autoDriveTargetBFuelFilter;
+        freightFilter = autoDriveTargetBFreightFilter;
+        return true;
+    }
+
+    private bool TryGetConsistStationDockDistance(
+        string stationName,
+        out float dockDistance)
+    {
+        dockDistance = float.PositiveInfinity;
+        if (string.IsNullOrWhiteSpace(stationName)
+            || !AutoDriveRoutePlanner.TryFindStationByName(stationName, out Trainstation station)
+            || station == null
+            || !station.TryGetRailCoordinate(out Vector2Int railCoordinate))
+        {
+            return false;
+        }
+
+        float dockTolerance = ResolveDockCompleteDistance() + 0.001f;
+        bool found = false;
+        for (int i = 0; i < autoDriveConnectedTrainScratch.Count; i++)
+        {
+            if (autoDriveConnectedTrainScratch[i] is not RailHandcar railVehicle
+                || railVehicle == null
+                || !railVehicle.TryGetRailDockDistanceAtCoordinate(
+                    railCoordinate,
+                    out float candidateDistance)
+                || candidateDistance > dockTolerance
+                || found && candidateDistance >= dockDistance)
+            {
+                continue;
+            }
+
+            dockDistance = candidateDistance;
+            found = true;
+        }
+
+        return found;
     }
 
     private bool TryEvaluateAutoDriveFuelFilterSatisfied(AutoDriveFuelFilter fuelFilter)
@@ -4248,108 +4271,6 @@ public class SteamTrain : RailHandcar,
         return playerController != null && playerController.IsMountedOnVehicle(this);
     }
 
-    private bool TryGetWaterPipeDockOffsetMetrics(
-        Vector2 trainPoint,
-        Vector2Int directionFromTrainToPipe,
-        Vector2Int pipeCoordinate,
-        out float alongDistance,
-        out float lateralDistance)
-    {
-        alongDistance = 0f;
-        lateralDistance = 0f;
-        if (directionFromTrainToPipe == Vector2Int.zero)
-        {
-            return false;
-        }
-
-        Vector2 pipeDirection = new Vector2(directionFromTrainToPipe.x, directionFromTrainToPipe.y);
-        if (pipeDirection.sqrMagnitude <= 0.0001f)
-        {
-            return false;
-        }
-
-        pipeDirection.Normalize();
-        Vector2 offsetToPipe = new Vector2(pipeCoordinate.x, pipeCoordinate.y) - trainPoint;
-        alongDistance = Vector2.Dot(offsetToPipe, pipeDirection);
-        lateralDistance = Mathf.Abs((pipeDirection.x * offsetToPipe.y) - (pipeDirection.y * offsetToPipe.x));
-        return alongDistance >= WaterPipeDockMinAlongDistance
-               && alongDistance <= WaterPipeDockMaxAlongDistance
-               && lateralDistance <= WaterPipeDockMaxLateralDistance;
-    }
-
-    private bool TryGetActivePipeAtCoordinate(
-        Vector2Int coordinate,
-        out Pipe pipe,
-        out Quaternion pipeRotation,
-        out PipeRuntimeRecord pipeRecord)
-    {
-        pipe = null;
-        pipeRotation = Quaternion.identity;
-        pipeRecord = null;
-        PipeWorld pipeWorld = PipeWorld.Current;
-        if (pipeWorld != null
-            && pipeWorld.TryGetAtCoordinate(coordinate, out pipeRecord)
-            && pipeRecord != null)
-        {
-            pipe = pipeRecord.Prototype;
-            pipeRotation = pipeRecord.WorldRotation;
-            if (pipe != null)
-            {
-                return true;
-            }
-
-            pipeRecord = null;
-            pipeRotation = Quaternion.identity;
-        }
-
-        TerrainGenerator terrain = TerrainGenerator.Active;
-        if (terrain == null
-            || !terrain.TryGetLoadedBlock(coordinate, out Block block)
-            || block == null)
-        {
-            return false;
-        }
-
-        if (block.TryGetRuntimePipeRecord(out pipeRecord))
-        {
-            pipe = pipeRecord.Prototype;
-            pipeRotation = pipeRecord.WorldRotation;
-            return pipe != null;
-        }
-
-        if (!block.TryGetRuntimePipe(out Pipe candidatePipe, out pipeRotation))
-        {
-            return false;
-        }
-
-        pipe = candidatePipe;
-        return pipe != null;
-    }
-
-    private static bool HasActivePipeConnectionTowards(
-        Pipe pipe,
-        PipeRuntimeRecord pipeRecord,
-        Vector2Int coordinate,
-        Quaternion pipeRotation,
-        Vector2Int direction)
-    {
-        return pipeRecord != null
-            ? pipeRecord.HasConnectionTowardsAt(coordinate, direction)
-            : pipe != null && pipe.HasConnectionTowardsAt(coordinate, pipeRotation, direction);
-    }
-
-    private static bool TryGetActivePipeRemoteCoordinate(
-        Pipe pipe,
-        PipeRuntimeRecord pipeRecord,
-        Vector2Int coordinate,
-        out Vector2Int remoteCoordinate)
-    {
-        remoteCoordinate = default;
-        return pipeRecord != null
-            ? pipeRecord.TryGetRemoteConnectionCoordinate(coordinate, out remoteCoordinate)
-            : pipe != null && pipe.TryGetRemoteConnectionCoordinate(coordinate, out remoteCoordinate);
-    }
-
     private static bool IsUsableBurnEnergyItem(int itemId)
     {
         return TryResolveBurnEnergyAmount(itemId, out _);
@@ -4426,12 +4347,13 @@ public class SteamTrain : RailHandcar,
         waterPipeTargetActive = true;
         waterPipeTransferReady = transferReady;
         activeWaterPipeDirectionFromTrainToPipe = directionFromTrainToPipe;
-        RefreshWaterPipeReceiverRegistration();
 
         // The authored child is visual-only. A missing visual reference must not
         // disable the functional water connection.
         if (waterPipe == null)
         {
+            waterPipeExtensionComplete = true;
+            RefreshWaterPipeReceiverRegistration();
             return;
         }
 
@@ -4457,11 +4379,16 @@ public class SteamTrain : RailHandcar,
             Quaternion.Inverse(transform.rotation)
             * Quaternion.LookRotation(worldDirection, Vector3.up)
             * Quaternion.Euler(0f, 90f, 0f);
-        waterPipeAnimating = true;
+        waterPipeExtensionComplete =
+            (waterPipe.localPosition - waterPipeTargetLocalPosition).sqrMagnitude <= 0.000001f
+            && Quaternion.Angle(waterPipe.localRotation, waterPipeTargetLocalRotation) <= 0.1f;
+        waterPipeAnimating = !waterPipeExtensionComplete;
         if (!waterPipe.gameObject.activeSelf)
         {
             waterPipe.gameObject.SetActive(true);
         }
+
+        RefreshWaterPipeReceiverRegistration();
     }
 
     private void RequestWaterPipeRetract()
@@ -4469,6 +4396,7 @@ public class SteamTrain : RailHandcar,
         ClearWaterPipeDockLock();
         waterPipeTargetActive = false;
         waterPipeTransferReady = false;
+        waterPipeExtensionComplete = false;
         activeWaterPipeDirectionFromTrainToPipe = Vector2Int.zero;
         RefreshWaterPipeReceiverRegistration();
         if (waterPipe == null)
@@ -4490,6 +4418,7 @@ public class SteamTrain : RailHandcar,
         ClearWaterPipeDockLock();
         waterPipeTargetActive = active;
         waterPipeTransferReady = false;
+        waterPipeExtensionComplete = false;
         activeWaterPipeDirectionFromTrainToPipe = Vector2Int.zero;
         RefreshWaterPipeReceiverRegistration();
         waterPipeAnimating = false;
@@ -4511,19 +4440,14 @@ public class SteamTrain : RailHandcar,
 
     private void RefreshWaterPipeReceiverRegistration()
     {
-        bool shouldRegister = waterPipeTargetActive
-                              && waterPipeDockLockActive
-                              && activeWaterPipeDirectionFromTrainToPipe != Vector2Int.zero;
-        Vector2Int receiverCoordinate = Vector2Int.zero;
-        if (shouldRegister)
-        {
-            bool docksOnPipePass = HasPumpWaterPipeRailPass(
-                lockedWaterPipeDockCoordinate,
-                activeWaterPipeDirectionFromTrainToPipe);
-            receiverCoordinate = docksOnPipePass
-                ? lockedWaterPipeDockCoordinate
-                : lockedWaterPipeDockCoordinate - activeWaterPipeDirectionFromTrainToPipe;
-        }
+        bool shouldRegister = IsWaterPipeTransferReady
+                              && activeWaterPipeDirectionFromTrainToPipe != Vector2Int.zero
+                              && HasPumpWaterPipeRailPass(
+                                  lockedWaterPipeDockCoordinate,
+                                  activeWaterPipeDirectionFromTrainToPipe);
+        Vector2Int receiverCoordinate = shouldRegister
+            ? lockedWaterPipeDockCoordinate
+            : Vector2Int.zero;
 
         if (waterPipeReceiverRegistered
             && (!shouldRegister
@@ -4634,6 +4558,11 @@ public class SteamTrain : RailHandcar,
         waterPipe.localPosition = waterPipeTargetLocalPosition;
         waterPipe.localRotation = waterPipeTargetLocalRotation;
         waterPipeAnimating = false;
+        if (waterPipeTargetActive)
+        {
+            waterPipeExtensionComplete = true;
+            RefreshWaterPipeReceiverRegistration();
+        }
         if (!waterPipeTargetActive && waterPipe.gameObject.activeSelf)
         {
             waterPipe.gameObject.SetActive(false);

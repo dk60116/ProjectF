@@ -6,6 +6,21 @@ using UnityEngine;
 
 public partial class BlockStateStore : MonoBehaviour
 {
+    public sealed class MountedInstallationSaveState
+    {
+        public int pointIndex = -1;
+        public InstallationSaveState installation;
+
+        public MountedInstallationSaveState Clone()
+        {
+            return new MountedInstallationSaveState
+            {
+                pointIndex = pointIndex,
+                installation = installation?.Clone()
+            };
+        }
+    }
+
     public sealed class InstallationSaveState
     {
         public Vector2Int anchorCoordinate;
@@ -42,6 +57,8 @@ public partial class BlockStateStore : MonoBehaviour
         public float storedFluidTemperatureCelsius = MapClimate.DefaultCurrentTemperatureCelsius;
         public int storedInstallationItemId = -1;
         public List<int> storedInstallationItemIds = new List<int>();
+        public List<MountedInstallationSaveState> mountedInstallations =
+            new List<MountedInstallationSaveState>();
         public bool hasWorldPose;
         public Vector3 worldPosition;
         public Quaternion worldRotation = Quaternion.identity;
@@ -112,6 +129,7 @@ public partial class BlockStateStore : MonoBehaviour
                 storedFluidTemperatureCelsius = storedFluidTemperatureCelsius,
                 storedInstallationItemId = storedInstallationItemId,
                 storedInstallationItemIds = new List<int>(storedInstallationItemIds ?? new List<int>()),
+                mountedInstallations = CloneMountedInstallations(mountedInstallations),
                 hasWorldPose = hasWorldPose,
                 worldPosition = worldPosition,
                 worldRotation = worldRotation,
@@ -142,6 +160,28 @@ public partial class BlockStateStore : MonoBehaviour
                 stationColor = stationColor,
                 stationColorAssigned = stationColorAssigned
             };
+        }
+
+        private static List<MountedInstallationSaveState> CloneMountedInstallations(
+            List<MountedInstallationSaveState> source)
+        {
+            if (source == null || source.Count <= 0)
+            {
+                return new List<MountedInstallationSaveState>();
+            }
+
+            List<MountedInstallationSaveState> clone =
+                new List<MountedInstallationSaveState>(source.Count);
+            for (int i = 0; i < source.Count; i++)
+            {
+                MountedInstallationSaveState mountedState = source[i];
+                if (mountedState != null)
+                {
+                    clone.Add(mountedState.Clone());
+                }
+            }
+
+            return clone;
         }
     }
 
@@ -1611,7 +1651,34 @@ public partial class BlockStateStore : MonoBehaviour
             collectionStorage.CapturePersistentStoredItemIds(state.storedInstallationItemIds);
         }
 
+        if (installationObject is FreightCar freightCar)
+        {
+            CaptureMountedInstallationStates(freightCar, state.mountedInstallations);
+        }
+
         return true;
+    }
+
+    private void CaptureMountedInstallationStates(
+        FreightCar freightCar,
+        List<MountedInstallationSaveState> destination)
+    {
+        destination.Clear();
+        int pointCount = freightCar.AttachedLoadPointCount;
+        for (int pointIndex = 0; pointIndex < pointCount; pointIndex++)
+        {
+            if (!freightCar.TryGetAttachedLoadAtPoint(pointIndex, out InstallationObject loadObject)
+                || !TryBuildInstallationState(loadObject, out InstallationSaveState loadState))
+            {
+                continue;
+            }
+
+            destination.Add(new MountedInstallationSaveState
+            {
+                pointIndex = pointIndex,
+                installation = loadState
+            });
+        }
     }
 
     private bool TryCopySavedUtilityPoleTopology(InstallationSaveState destination)
@@ -2439,6 +2506,18 @@ public partial class BlockStateStore : MonoBehaviour
             AdjustItemCount(
                 savedInstallationStoredItemCountsByItemId,
                 state.storedInstallationItemId,
+                delta);
+        }
+
+        if (state.mountedInstallations == null)
+        {
+            return;
+        }
+
+        for (int i = 0; i < state.mountedInstallations.Count; i++)
+        {
+            AdjustSavedInstallationCount(
+                state.mountedInstallations[i]?.installation,
                 delta);
         }
     }

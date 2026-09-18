@@ -234,6 +234,17 @@ public static class SaveGameItemIdRemapper
         {
             state.itemFilterMaskWords = RemapItemFilterMask(state.itemFilterMaskWords, itemIdMap);
         }
+
+        if (state.mountedInstallations != null)
+        {
+            for (int i = 0; i < state.mountedInstallations.Count; i++)
+            {
+                RemapInstallation(
+                    state.mountedInstallations[i]?.installation,
+                    itemIdMap,
+                    currentDefinitions);
+            }
+        }
     }
 
     private static void RemapInputOutputState(

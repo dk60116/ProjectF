@@ -1,0 +1,25 @@
+{
+  "sphere_faces": [
+    {
+      "before": 768,
+      "removed": 396,
+      "remaining": 372
+    },
+    {
+      "before": 768,
+      "removed": 412,
+      "remaining": 356
+    }
+  ],
+  "removed_triangles": 808,
+  "visibility_test_rays": 202800,
+  "visibility_changes": 0,
+  "source_sha256": "d65792c60856b2ecf082cacbd2d4b2203a9604fbeef30f150dca43926e168a47",
+  "unity_vertices_before": 2058,
+  "unity_vertices_after": 1468,
+  "unity_triangles_before": 2408,
+  "unity_triangles_after": 1600,
+  "blender_vertices_after": 848,
+  "blender_faces_after": 1564,
+  "surviving_positions_normals_uvs_preserved": true
+}

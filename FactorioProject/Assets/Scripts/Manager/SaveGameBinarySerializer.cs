@@ -948,6 +948,14 @@ public static class SaveGameBinarySerializer
         writer.Write(state.trainRailDistanceAlongPathUnits);
         writer.Write(state.steamTrainStoredBurnEnergyUnits);
         writer.Write(state.steamTrainBurnEnergyGaugeCapacityUnits);
+        WriteList(
+            writer,
+            state.mountedInstallations,
+            (binaryWriter, mountedState) =>
+            {
+                binaryWriter.Write(mountedState?.pointIndex ?? -1);
+                WriteInstallationState(binaryWriter, mountedState?.installation);
+            });
     }
 
     private static BlockStateStore.InstallationSaveState ReadInstallationState(
@@ -1136,6 +1144,17 @@ public static class SaveGameBinarySerializer
             state.trainRailDistanceAlongPathUnits = reader.ReadInt64();
             state.steamTrainStoredBurnEnergyUnits = reader.ReadInt64();
             state.steamTrainBurnEnergyGaugeCapacityUnits = reader.ReadInt64();
+        }
+
+        if (version >= 64)
+        {
+            state.mountedInstallations = ReadList(
+                reader,
+                () => new BlockStateStore.MountedInstallationSaveState
+                {
+                    pointIndex = reader.ReadInt32(),
+                    installation = ReadInstallationState(reader, version, compatibilityMode)
+                });
         }
 
         return state;

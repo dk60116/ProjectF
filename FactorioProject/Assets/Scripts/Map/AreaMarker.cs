@@ -6,12 +6,59 @@ public readonly struct AreaMarkerSpawnRequest
     public readonly Vector3 WorldPosition;
     public readonly Sprite Icon;
     public readonly float IconRotationZ;
+    public readonly bool UsesRuntimeFluidIcon;
+    public readonly Vector2Int RuntimeFluidCoordinate;
+    public readonly Sprite FallbackIcon;
+    public readonly int RuntimeFluidItemId;
 
     public AreaMarkerSpawnRequest(Vector3 worldPosition, Sprite icon, float iconRotationZ = 0f)
+        : this(worldPosition, icon, iconRotationZ, false, default, icon, -1)
+    {
+    }
+
+    private AreaMarkerSpawnRequest(
+        Vector3 worldPosition,
+        Sprite icon,
+        float iconRotationZ,
+        bool usesRuntimeFluidIcon,
+        Vector2Int runtimeFluidCoordinate,
+        Sprite fallbackIcon,
+        int runtimeFluidItemId)
     {
         WorldPosition = worldPosition;
         Icon = icon;
         IconRotationZ = iconRotationZ;
+        UsesRuntimeFluidIcon = usesRuntimeFluidIcon;
+        RuntimeFluidCoordinate = runtimeFluidCoordinate;
+        FallbackIcon = fallbackIcon;
+        RuntimeFluidItemId = runtimeFluidItemId;
+    }
+
+    public static AreaMarkerSpawnRequest CreateRuntimeFluid(
+        Vector3 worldPosition,
+        Vector2Int fluidCoordinate,
+        Sprite fallbackIcon)
+    {
+        return new AreaMarkerSpawnRequest(
+            worldPosition,
+            fallbackIcon,
+            0f,
+            true,
+            fluidCoordinate,
+            fallbackIcon,
+            -1);
+    }
+
+    public AreaMarkerSpawnRequest WithRuntimeFluid(int fluidItemId, Sprite icon)
+    {
+        return new AreaMarkerSpawnRequest(
+            WorldPosition,
+            icon != null ? icon : FallbackIcon,
+            IconRotationZ,
+            UsesRuntimeFluidIcon,
+            RuntimeFluidCoordinate,
+            FallbackIcon,
+            fluidItemId);
     }
 }
 
@@ -39,8 +86,10 @@ public class InputOutputModuleAreaMarkerController : MonoBehaviour
 {
     [SerializeField, Min(0f)] private float visibleRange = 5f;
     [SerializeField, Min(0f)] private float verticalOffset = 0.08f;
+    [SerializeField, Min(0.05f)] private float runtimeFluidIconRefreshInterval = 0.2f;
     private readonly List<AreaMarkerSpawnRequest> requests = new List<AreaMarkerSpawnRequest>();
     private AreaMarkerRenderer markerRenderer;
+    private InputOutputModule runtimeFluidModule;
     private Transform markerParent;
     private Matrix4x4 configuredParentInverse = Matrix4x4.identity;
     private Matrix4x4 renderedParentDelta = Matrix4x4.identity;
@@ -50,6 +99,7 @@ public class InputOutputModuleAreaMarkerController : MonoBehaviour
     private int sortingOrderOffset;
     private bool renderOnTop;
     private float markerVerticalOffset;
+    private float nextRuntimeFluidIconRefreshTime = float.NegativeInfinity;
 
     internal int MarkerCount => requests.Count;
     internal bool IsVisible => visible;
@@ -86,7 +136,12 @@ public class InputOutputModuleAreaMarkerController : MonoBehaviour
             {
                 AreaMarkerSpawnRequest a = requests[i];
                 AreaMarkerSpawnRequest b = markerRequests[i];
-                if (a.WorldPosition != b.WorldPosition || a.Icon != b.Icon || a.IconRotationZ != b.IconRotationZ)
+                if (a.WorldPosition != b.WorldPosition
+                    || a.IconRotationZ != b.IconRotationZ
+                    || a.UsesRuntimeFluidIcon != b.UsesRuntimeFluidIcon
+                    || a.RuntimeFluidCoordinate != b.RuntimeFluidCoordinate
+                    || a.FallbackIcon != b.FallbackIcon
+                    || (!a.UsesRuntimeFluidIcon && a.Icon != b.Icon))
                 {
                     changed = true;
                     break;
@@ -105,6 +160,16 @@ public class InputOutputModuleAreaMarkerController : MonoBehaviour
         markerVerticalOffset = offset;
         requests.Clear();
         for (int i = 0; i < count; i++) requests.Add(markerRequests[i]);
+        runtimeFluidModule = null;
+        if (HasRuntimeFluidIconRequests())
+        {
+            runtimeFluidModule = GetComponent<InputOutputModule>();
+            if (runtimeFluidModule == null)
+            {
+                runtimeFluidModule = GetComponentInChildren<InputOutputModule>(true);
+            }
+        }
+        nextRuntimeFluidIconRefreshTime = float.NegativeInfinity;
         visible = false;
         if (isActiveAndEnabled && markerRenderer != null && count > 0) markerRenderer.Register(this);
     }
@@ -147,7 +212,102 @@ public class InputOutputModuleAreaMarkerController : MonoBehaviour
         bool changed = visible != nextVisible || (nextVisible && !renderedParentDelta.Equals(delta));
         visible = nextVisible;
         renderedParentDelta = delta;
+        if (nextVisible && RefreshRuntimeFluidIcons())
+        {
+            changed = true;
+        }
         return changed;
+    }
+
+    private bool HasRuntimeFluidIconRequests()
+    {
+        for (int i = 0; i < requests.Count; i++)
+        {
+            if (requests[i].UsesRuntimeFluidIcon)
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private bool RefreshRuntimeFluidIcons()
+    {
+        if (!Application.isPlaying
+            || runtimeFluidModule == null
+            || Time.unscaledTime < nextRuntimeFluidIconRefreshTime)
+        {
+            return false;
+        }
+
+        nextRuntimeFluidIconRefreshTime = Time.unscaledTime
+            + Mathf.Max(0.05f, runtimeFluidIconRefreshInterval);
+        bool changed = false;
+        for (int i = 0; i < requests.Count; i++)
+        {
+            AreaMarkerSpawnRequest request = requests[i];
+            if (!request.UsesRuntimeFluidIcon)
+            {
+                continue;
+            }
+
+            int fluidItemId = TryResolveRuntimeFluidItemId(
+                request.RuntimeFluidCoordinate,
+                out int resolvedFluidItemId)
+                ? resolvedFluidItemId
+                : -1;
+            if (request.RuntimeFluidItemId == fluidItemId)
+            {
+                continue;
+            }
+
+            ItemDefinition fluidDefinition = InputOutputModule.ResolveItemDefinition(fluidItemId);
+            Sprite icon = fluidDefinition != null ? fluidDefinition.icon : request.FallbackIcon;
+            AreaMarkerSpawnRequest updatedRequest = request.WithRuntimeFluid(fluidItemId, icon);
+            requests[i] = updatedRequest;
+            changed |= request.Icon != updatedRequest.Icon;
+        }
+
+        return changed;
+    }
+
+    private bool TryResolveRuntimeFluidItemId(Vector2Int coordinate, out int fluidItemId)
+    {
+        fluidItemId = -1;
+        PipeWorld pipeWorld = PipeWorld.Current;
+        if (pipeWorld != null
+            && pipeWorld.TryGetAtCoordinate(coordinate, out PipeRuntimeRecord pipeRecord)
+            && pipeRecord != null
+            && pipeRecord.TryGetObjectInfoFluidInfo(
+                coordinate,
+                out fluidItemId,
+                out _,
+                out _,
+                false)
+            && fluidItemId >= 0)
+        {
+            return true;
+        }
+
+        if (runtimeFluidModule is Pump pump
+            && pump.TryGetObjectInfoFluidInfo(out fluidItemId, out _, out _)
+            && fluidItemId >= 0)
+        {
+            return true;
+        }
+
+        if (runtimeFluidModule.StoredFluidItemId >= 0)
+        {
+            fluidItemId = runtimeFluidModule.StoredFluidItemId;
+            return true;
+        }
+
+        return InputOutputModule.TryGetFluidOutputInfoAtRuntimeGridCoordinate(
+                   coordinate,
+                   out fluidItemId,
+                   out _)
+               && fluidItemId >= 0;
     }
 
     private bool ShouldBeVisible(in AreaMarkerVisibilityContext context)

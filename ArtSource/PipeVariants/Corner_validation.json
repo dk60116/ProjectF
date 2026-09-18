@@ -1,0 +1,26 @@
+{
+  "authoring_removed_faces": 560,
+  "visibility_test_rays": 80688,
+  "visibility_changes": 0,
+  "uv_overlap_pixels_1024": 0,
+  "components": [
+    {
+      "asset": "Pipe_Corner.asset",
+      "components": 38,
+      "closed_components": 37,
+      "removed_faces": 560
+    }
+  ],
+  "assets": [
+    {
+      "source_hash": "c39eb3e41a21c389a6ed1607b26d130ed92f14db15e9a88ebcbb35bbdce09a9f",
+      "vertices_before": 2421,
+      "vertices_after": 2424,
+      "triangles_before": 3488,
+      "triangles_after": 2928,
+      "removed_source_triangles": 560,
+      "output": "C:\\Git\\ProjectF\\ArtSource\\PipeVariants\\Pipe_Corner_Baked.asset",
+      "tiny_source_triangles": 0
+    }
+  ]
+}

@@ -1,0 +1,26 @@
+{
+  "authoring_removed_faces": 4428,
+  "visibility_test_rays": 80688,
+  "visibility_changes": 0,
+  "uv_overlap_pixels_1024": 0,
+  "components": [
+    {
+      "asset": "Pipe_Cross.asset",
+      "components": 14,
+      "closed_components": 11,
+      "removed_faces": 4428
+    }
+  ],
+  "assets": [
+    {
+      "source_hash": "7be8781c86a8881e242ae558956e5ea5261efc1ee345b2bfdb02ca801b4ec786",
+      "vertices_before": 6869,
+      "vertices_after": 4985,
+      "triangles_before": 9938,
+      "triangles_after": 5510,
+      "removed_source_triangles": 4428,
+      "output": "C:\\Git\\ProjectF\\ArtSource\\PipeVariants\\Pipe_Cross_Baked.asset",
+      "tiny_source_triangles": 0
+    }
+  ]
+}

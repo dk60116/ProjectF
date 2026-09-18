@@ -182,6 +182,8 @@ public class InstallationPlacementController : MonoBehaviour
         new List<Vector3>(4);
     private readonly List<Vector3> areaMarkerPipeInputWorldPositionScratch =
         new List<Vector3>(4);
+    private readonly List<Vector2Int> areaMarkerPipeInputCoordinateScratch =
+        new List<Vector2Int>(4);
     private readonly Queue<Vector2Int> pipeFluidCompatibilityQueue = new Queue<Vector2Int>(64);
     private readonly HashSet<Vector2Int> pipeFluidCompatibilityVisited = new HashSet<Vector2Int>();
     private readonly List<InstallationObject> pipeFluidEndpointInstallationsScratch =
@@ -8020,11 +8022,24 @@ public class InstallationPlacementController : MonoBehaviour
             footprintSource,
             quarterTurns,
             PipeInputRectGridBlockTypes,
-            areaMarkerPipeInputWorldPositionScratch);
-        AddAreaMarkerRequests(
-            areaMarkerRequestScratch,
             areaMarkerPipeInputWorldPositionScratch,
-            ResolvePipePassMarkerIcon(footprintSource));
+            areaMarkerPipeInputCoordinateScratch);
+        Sprite pipePassIcon = ResolvePipePassMarkerIcon(footprintSource);
+        if (isInstallPreview)
+        {
+            AddAreaMarkerRequests(
+                areaMarkerRequestScratch,
+                areaMarkerPipeInputWorldPositionScratch,
+                pipePassIcon);
+        }
+        else
+        {
+            AddRuntimeFluidAreaMarkerRequests(
+                areaMarkerRequestScratch,
+                areaMarkerPipeInputWorldPositionScratch,
+                areaMarkerPipeInputCoordinateScratch,
+                pipePassIcon);
+        }
 
         if (areaMarkerRequestScratch.Count <= 0)
         {
@@ -14779,11 +14794,12 @@ public class InstallationPlacementController : MonoBehaviour
 
         if (definition.mapObject is Pipe pipePrototype)
         {
-            return TryResolvePipePlacementVariant(
+            return TryResolvePipePlacementVariantWithCompatibleAdjacency(
                        pipePrototype,
                        anchorCoordinate,
                        quarterTurns,
                        previewToIgnore,
+                       0,
                        out MapObject resolvedPipePrefab,
                        out _)
                 ? resolvedPipePrefab
@@ -20396,8 +20412,11 @@ public class InstallationPlacementController : MonoBehaviour
 
         int quarterTurns = GetPreviewQuarterTurns(preview);
         MapObject ignoredPreview = previewToIgnore ?? preview;
-        int baselineConnectionMask = preview is Pipe previewPipe
-            ? previewPipe.GetConnectionMask(preview.transform.rotation)
+        int baselineConnectionMask = TryGetManualPipeConnectionMask(
+            anchorCoordinate,
+            ignoredPreview,
+            out int manualConnectionMask)
+            ? manualConnectionMask
             : 0;
         if (!TryResolvePipePlacementVariantWithCompatibleAdjacency(
                 pipePrototype,
@@ -20945,6 +20964,29 @@ public class InstallationPlacementController : MonoBehaviour
         }
     }
 
+    private static void AddRuntimeFluidAreaMarkerRequests(
+        List<AreaMarkerSpawnRequest> markerRequests,
+        IReadOnlyList<Vector3> worldPositions,
+        IReadOnlyList<Vector2Int> coordinates,
+        Sprite fallbackIcon)
+    {
+        if (markerRequests == null
+            || worldPositions == null
+            || coordinates == null
+            || worldPositions.Count != coordinates.Count)
+        {
+            return;
+        }
+
+        for (int i = 0; i < worldPositions.Count; i++)
+        {
+            markerRequests.Add(AreaMarkerSpawnRequest.CreateRuntimeFluid(
+                worldPositions[i],
+                coordinates[i],
+                fallbackIcon));
+        }
+    }
+
     private static void AddDirectionalAreaMarkerRequests(
         List<AreaMarkerSpawnRequest> markerRequests,
         IReadOnlyList<Vector3> worldPositions,
@@ -21321,7 +21363,8 @@ public class InstallationPlacementController : MonoBehaviour
         MapObject footprintSource,
         int quarterTurns,
         IReadOnlyList<InputOutputModule.RectGridBlockType> blockTypes,
-        List<Vector3> worldPositions)
+        List<Vector3> worldPositions,
+        List<Vector2Int> coordinates = null)
     {
         if (worldPositions == null)
         {
@@ -21329,6 +21372,7 @@ public class InstallationPlacementController : MonoBehaviour
         }
 
         worldPositions.Clear();
+        coordinates?.Clear();
         if (!TryGetRectGridFootprintSettings(
                 footprintSource,
                 out int rectGridWidth,
@@ -21365,7 +21409,9 @@ public class InstallationPlacementController : MonoBehaviour
                 placement.x - objectAnchorCell.x,
                 placement.y - objectAnchorCell.y);
             Vector2Int rotatedOffset = RotateFootprintOffset(localOffset, normalizedQuarterTurns);
-            worldPositions.Add(GetAreaMarkerWorldPosition(anchorCoordinate + rotatedOffset, terrain, fallbackY));
+            Vector2Int coordinate = anchorCoordinate + rotatedOffset;
+            worldPositions.Add(GetAreaMarkerWorldPosition(coordinate, terrain, fallbackY));
+            coordinates?.Add(coordinate);
         }
     }
 
@@ -29127,11 +29173,12 @@ public class InstallationPlacementController : MonoBehaviour
         else if (activeInstallDefinition != null
                  && activeInstallDefinition.mapObject is Pipe pipePrototype)
         {
-            if (!TryResolvePipePlacementVariant(
+            if (!TryResolvePipePlacementVariantWithCompatibleAdjacency(
                     pipePrototype,
                     block.Coordinate,
                     quarterTurns,
                     previewToIgnore,
+                    0,
                     out MapObject resolvedPipeSource,
                     out int resolvedPipeQuarterTurns)
                 || !(resolvedPipeSource is Pipe))

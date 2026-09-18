@@ -1,0 +1,42 @@
+{
+  "authoring_removed_faces": 256,
+  "visibility_test_rays": 161376,
+  "visibility_changes": 0,
+  "uv_overlap_pixels_1024": 0,
+  "components": [
+    {
+      "asset": "Pipe_T.asset",
+      "components": 3,
+      "closed_components": 0,
+      "removed_faces": 0
+    },
+    {
+      "asset": "Cylinder.asset",
+      "components": 2,
+      "closed_components": 2,
+      "removed_faces": 256
+    }
+  ],
+  "assets": [
+    {
+      "source_hash": "6d08bf3a29eb31fd0f5a0502af6d3c82c9dc8ebe5787ab9428339d968434f90c",
+      "vertices_before": 818,
+      "vertices_after": 922,
+      "triangles_before": 1117,
+      "triangles_after": 1077,
+      "removed_source_triangles": 40,
+      "output": "C:\\Git\\ProjectF\\ArtSource\\PipeVariants\\Pipe_T_Baked.asset",
+      "tiny_source_triangles": 40
+    },
+    {
+      "source_hash": "6836406fc5e85912e81d1708150e93ba1fff69b870a9b1de585035d3d92651ba",
+      "vertices_before": 603,
+      "vertices_after": 564,
+      "triangles_before": 848,
+      "triangles_after": 592,
+      "removed_source_triangles": 256,
+      "output": "C:\\Git\\ProjectF\\ArtSource\\PipeVariants\\Pipe_T_Cylinder_Baked.asset",
+      "tiny_source_triangles": 0
+    }
+  ]
+}

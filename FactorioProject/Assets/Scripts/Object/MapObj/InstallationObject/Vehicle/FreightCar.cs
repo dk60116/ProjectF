@@ -63,6 +63,31 @@ public class FreightCar : Train,
     private Quaternion lastMountedTankMotionRotation;
     private float mountedTankCarrierStationarySeconds;
 
+    public int AttachedLoadPointCount
+    {
+        get
+        {
+            EnsureBoxPointBoxes();
+            return boxPointLoads.Count;
+        }
+    }
+
+    public bool TryGetAttachedLoadAtPoint(
+        int pointIndex,
+        out InstallationObject loadObject)
+    {
+        loadObject = null;
+        EnsureBoxPointBoxes();
+        if (pointIndex < 0 || pointIndex >= boxPointLoads.Count)
+        {
+            return false;
+        }
+
+        CleanupBoxPointSlot(pointIndex);
+        loadObject = boxPointLoads[pointIndex];
+        return loadObject != null && loadObject.gameObject.activeInHierarchy;
+    }
+
     public bool TryApplyRailPose(
         Railload rail,
         float distanceAlongPath,
@@ -506,6 +531,19 @@ public class FreightCar : Train,
     public bool TryAttachBoxObjectToPoint(BoxObject boxObject, Transform boxPoint)
     {
         return TryAttachLoadObjectToPoint(boxObject, boxPoint);
+    }
+
+    public bool TryAttachLoadObjectToPointIndex(
+        InstallationObject loadObject,
+        int pointIndex)
+    {
+        EnsureBoxPointBoxes();
+        if (pointIndex < 0 || pointIndex >= boxPointList.Count)
+        {
+            return false;
+        }
+
+        return TryAttachLoadObjectToPoint(loadObject, boxPointList[pointIndex]);
     }
 
     public bool TryAttachLoadObjectToPoint(

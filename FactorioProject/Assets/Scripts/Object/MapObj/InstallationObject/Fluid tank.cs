@@ -45,6 +45,8 @@ public class Fluidtank : InstallationObject, IMapObjectUpdateTick, IMapObjectUpd
 
     private readonly List<InstallationObject> adjacentInstallationScratch = new List<InstallationObject>(4);
     private readonly List<InputOutputModule> adjacentModuleScratch = new List<InputOutputModule>(2);
+    private readonly List<InputOutputModule.RuntimePumpPipePass> mountedPumpPipePassScratch =
+        new List<InputOutputModule.RuntimePumpPipePass>(2);
     private readonly HashSet<int> adjacentOutputFluidItemIdsScratch = new HashSet<int>();
     private readonly List<Fluidtank> connectedTankCache = new List<Fluidtank>(4);
     private readonly struct FluidNetworkSearchNode
@@ -67,15 +69,84 @@ public class Fluidtank : InstallationObject, IMapObjectUpdateTick, IMapObjectUpd
         new Dictionary<Fluidtank, int>();
     private readonly List<Vector3> defaultPipeLocalPositions = new List<Vector3>(4);
     private readonly List<bool> mountedPipeTargetActiveStates = new List<bool>(4);
+    private readonly List<bool> mountedPipeTransferReadyStates = new List<bool>(4);
     private int connectedTankCacheTopologyVersion;
     private bool hasCachedDefaultPipeLocalPositions;
     private bool hasFlatCarMountedPresentationState;
     private bool isFlatCarMountedPresentation;
+    private FreightCar mountedFreightCar;
     private bool runtimeTickSleeping;
 
     public float ManagedUpdateTickIntervalSeconds => FluidTankUpdateIntervalSeconds;
     public Vector3 FlatCarMountedLocalPosition => Vector3.down * flatCarMountedLowering;
     public bool IsFlatCarMounted => isFlatCarMountedPresentation;
+
+    private bool HasMountedPipeTransferReady
+    {
+        get
+        {
+            if (!isFlatCarMountedPresentation)
+            {
+                return true;
+            }
+
+            for (int i = 0; i < mountedPipeTransferReadyStates.Count; i++)
+            {
+                if (mountedPipeTransferReadyStates[i])
+                {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+    }
+
+    public override bool CanAcceptFluidItem(int fluidItemId, float requestedLiters = 0f)
+    {
+        return HasMountedPipeTransferReady
+               && ShouldFillMountedFluidAtCurrentStop()
+               && base.CanAcceptFluidItem(fluidItemId, requestedLiters);
+    }
+
+    public override bool CanProvideFluidItem(int fluidItemId, float requestedLiters = 0f)
+    {
+        return HasMountedPipeTransferReady
+               && ShouldUnloadMountedFluidAtCurrentStop()
+               && base.CanProvideFluidItem(fluidItemId, requestedLiters);
+    }
+
+    private bool ShouldFillMountedFluidAtCurrentStop()
+    {
+        return !isFlatCarMountedPresentation
+               || !TryGetMountedConsistSteamTrain(out SteamTrain steamTrain)
+               || steamTrain.ShouldFillFluidAtCurrentStop();
+    }
+
+    private bool ShouldUnloadMountedFluidAtCurrentStop()
+    {
+        return !isFlatCarMountedPresentation
+               || TryGetMountedConsistSteamTrain(out SteamTrain steamTrain)
+               && steamTrain.ShouldUnloadFluidAtCurrentStop();
+    }
+
+    private bool TryGetMountedConsistSteamTrain(out SteamTrain steamTrain)
+    {
+        steamTrain = null;
+        if (!isFlatCarMountedPresentation)
+        {
+            return false;
+        }
+
+        if (mountedFreightCar == null
+            || !transform.IsChildOf(mountedFreightCar.transform))
+        {
+            mountedFreightCar = GetComponentInParent<FreightCar>();
+        }
+
+        return mountedFreightCar != null
+               && mountedFreightCar.TryGetConsistSteamTrain(out steamTrain);
+    }
 
     public void SetFlatCarMountedPresentation(bool mounted)
     {
@@ -96,6 +167,7 @@ public class Fluidtank : InstallationObject, IMapObjectUpdateTick, IMapObjectUpd
         CacheDefaultPipeLocalPositions();
         hasFlatCarMountedPresentationState = true;
         isFlatCarMountedPresentation = mounted;
+        mountedFreightCar = mounted ? GetComponentInParent<FreightCar>() : null;
         ApplyFlatCarMountedPipePresentationImmediate(mounted);
         RefreshPipeVisuals();
         if (Application.isPlaying)
@@ -133,6 +205,7 @@ public class Fluidtank : InstallationObject, IMapObjectUpdateTick, IMapObjectUpd
         }
 
         EnsureMountedPipeTargetStateCapacity();
+        ResetMountedPipeTransferReadiness();
         int pipeCount = Mathf.Min(pipeList.Count, defaultPipeLocalPositions.Count);
         for (int i = 0; i < pipeCount; i++)
         {
@@ -168,12 +241,14 @@ public class Fluidtank : InstallationObject, IMapObjectUpdateTick, IMapObjectUpd
             : 1f;
         bool deploymentReady = carrierStationarySeconds >= Mathf.Max(0f, flatCarMountedPipeDeployDelay);
         bool hasPlacement = TryGetPlacementRuntime(out Vector2Int anchorCoordinate, out _);
+        bool readinessChanged = false;
         int pipeCount = Mathf.Min(pipeList.Count, defaultPipeLocalPositions.Count);
         for (int i = 0; i < pipeCount; i++)
         {
             GameObject pipeVisual = pipeList[i];
             if (pipeVisual == null || pipeVisual == gameObject)
             {
+                readinessChanged |= SetMountedPipeTransferReady(i, false);
                 continue;
             }
 
@@ -191,6 +266,7 @@ public class Fluidtank : InstallationObject, IMapObjectUpdateTick, IMapObjectUpd
             {
                 if (!targetActive)
                 {
+                    readinessChanged |= SetMountedPipeTransferReady(i, false);
                     continue;
                 }
 
@@ -207,14 +283,21 @@ public class Fluidtank : InstallationObject, IMapObjectUpdateTick, IMapObjectUpd
                 interpolation);
             if ((pipeVisual.transform.localPosition - targetPosition).sqrMagnitude > 0.000001f)
             {
+                readinessChanged |= SetMountedPipeTransferReady(i, false);
                 continue;
             }
 
             pipeVisual.transform.localPosition = targetPosition;
+            readinessChanged |= SetMountedPipeTransferReady(i, targetActive);
             if (!targetActive)
             {
                 pipeVisual.SetActive(false);
             }
+        }
+
+        if (readinessChanged)
+        {
+            NotifyMountedPipeTransferReadinessChanged();
         }
     }
 
@@ -230,6 +313,10 @@ public class Fluidtank : InstallationObject, IMapObjectUpdateTick, IMapObjectUpd
         }
 
         mountedPipeTargetActiveStates[index] = connected;
+        if (!connected)
+        {
+            mountedPipeTransferReadyStates[index] = false;
+        }
         if (connected && !pipeVisual.activeSelf)
         {
             pipeVisual.transform.localPosition = GetMountedPipeRetractedLocalPosition(index);
@@ -273,12 +360,40 @@ public class Fluidtank : InstallationObject, IMapObjectUpdateTick, IMapObjectUpd
         while (mountedPipeTargetActiveStates.Count < pipeCount)
         {
             mountedPipeTargetActiveStates.Add(false);
+            mountedPipeTransferReadyStates.Add(false);
         }
 
         while (mountedPipeTargetActiveStates.Count > pipeCount)
         {
             mountedPipeTargetActiveStates.RemoveAt(mountedPipeTargetActiveStates.Count - 1);
+            mountedPipeTransferReadyStates.RemoveAt(mountedPipeTransferReadyStates.Count - 1);
         }
+    }
+
+    private bool SetMountedPipeTransferReady(int index, bool ready)
+    {
+        if (index < 0
+            || index >= mountedPipeTransferReadyStates.Count
+            || mountedPipeTransferReadyStates[index] == ready)
+        {
+            return false;
+        }
+
+        mountedPipeTransferReadyStates[index] = ready;
+        return true;
+    }
+
+    private void ResetMountedPipeTransferReadiness()
+    {
+        for (int i = 0; i < mountedPipeTransferReadyStates.Count; i++)
+        {
+            mountedPipeTransferReadyStates[i] = false;
+        }
+    }
+
+    private void NotifyMountedPipeTransferReadinessChanged()
+    {
+        InputOutputModule.NotifyRuntimePipeTopologyChanged(RuntimeOccupiedCoordinates);
     }
 
     protected override void OnEnable()
@@ -308,6 +423,7 @@ public class Fluidtank : InstallationObject, IMapObjectUpdateTick, IMapObjectUpd
 
         FacilitySimulationWorld.Unregister(this);
         runtimeTickSleeping = false;
+        ResetMountedPipeTransferReadiness();
         ActiveFluidTanks.Remove(this);
         if (ActiveFluidTanks.Count == 0)
         {
@@ -327,7 +443,8 @@ public class Fluidtank : InstallationObject, IMapObjectUpdateTick, IMapObjectUpd
         if (deltaTime <= 0f
             || !isActiveAndEnabled
             || !CanStoreFluid
-            || !HasFluidStorageSpace)
+            || !HasFluidStorageSpace
+            || !HasMountedPipeTransferReady)
         {
             SetRuntimeTickSleeping(true);
             return;
@@ -843,7 +960,7 @@ public class Fluidtank : InstallationObject, IMapObjectUpdateTick, IMapObjectUpd
 
             bool connected = hasPlacement
                              && TryResolvePipeVisualDirection(pipeVisual, out Vector2Int direction)
-                             && HasFluidNetworkConnectionTowards(anchorCoordinate, direction);
+                             && HasPotentialFluidNetworkConnectionTowards(anchorCoordinate, direction);
             if (isFlatCarMountedPresentation)
             {
                 SetMountedPipeTarget(i, pipeVisual, connected);
@@ -890,10 +1007,46 @@ public class Fluidtank : InstallationObject, IMapObjectUpdateTick, IMapObjectUpd
         Vector2Int tankCoordinate,
         Vector2Int directionFromTank)
     {
+        return (!isFlatCarMountedPresentation
+                || IsMountedPipeTransferReadyTowards(directionFromTank))
+               && HasPotentialFluidNetworkConnectionTowards(tankCoordinate, directionFromTank);
+    }
+
+    private bool HasPotentialFluidNetworkConnectionTowards(
+        Vector2Int tankCoordinate,
+        Vector2Int directionFromTank)
+    {
         return HasFluidNetworkConnectionTowardsIgnoringStorageCoordinate(
             tankCoordinate,
             directionFromTank,
             tankCoordinate);
+    }
+
+    private bool IsMountedPipeTransferReadyTowards(Vector2Int directionFromTank)
+    {
+        if (!isFlatCarMountedPresentation
+            || directionFromTank == Vector2Int.zero
+            || pipeList == null)
+        {
+            return !isFlatCarMountedPresentation;
+        }
+
+        EnsureMountedPipeTargetStateCapacity();
+        int pipeCount = Mathf.Min(pipeList.Count, mountedPipeTransferReadyStates.Count);
+        for (int i = 0; i < pipeCount; i++)
+        {
+            GameObject pipeVisual = pipeList[i];
+            if (mountedPipeTransferReadyStates[i]
+                && pipeVisual != null
+                && pipeVisual != gameObject
+                && TryResolvePipeVisualDirection(pipeVisual, out Vector2Int pipeDirection)
+                && pipeDirection == directionFromTank)
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     private bool HasFluidNetworkConnectionTowardsIgnoringStorageCoordinate(
@@ -972,8 +1125,11 @@ public class Fluidtank : InstallationObject, IMapObjectUpdateTick, IMapObjectUpd
         int storedFluidItemId,
         int pipeFluidItemId)
     {
-        return pipeFluidItemId >= 0
-               && (storedFluidItemId < 0 || storedFluidItemId == pipeFluidItemId);
+        // A Pump remains a valid dock while its upstream network is dry. Once
+        // fluid identity is known, prevent a loaded cart from mixing fluids.
+        return pipeFluidItemId < 0
+               || storedFluidItemId < 0
+               || storedFluidItemId == pipeFluidItemId;
     }
 
     private bool TryResolveConnectionTowards(
@@ -985,6 +1141,14 @@ public class Fluidtank : InstallationObject, IMapObjectUpdateTick, IMapObjectUpd
     {
         neighborTank = null;
         neighborFluidItemId = -1;
+        if (isFlatCarMountedPresentation)
+        {
+            return TryResolveMountedPumpRailPass(
+                tankCoordinate,
+                directionFromTank,
+                out neighborFluidItemId);
+        }
+
         Vector2Int neighborCoordinate = tankCoordinate + directionFromTank;
         Pipe connectedPipe = null;
         PipeWorld pipeWorld = PipeWorld.Current;
@@ -1066,6 +1230,85 @@ public class Fluidtank : InstallationObject, IMapObjectUpdateTick, IMapObjectUpd
             tankCoordinate,
             directionFromTank,
             out neighborFluidItemId);
+    }
+
+    private bool TryResolveMountedPumpRailPass(
+        Vector2Int tankCoordinate,
+        Vector2Int directionFromTank,
+        out int fluidItemId)
+    {
+        return TryResolveMountedPumpRailPassCore(
+            null,
+            tankCoordinate,
+            directionFromTank,
+            out fluidItemId);
+    }
+
+    internal bool CanProvideMountedFluidToPump(
+        Pump pump,
+        Vector2Int tankCoordinate,
+        Vector2Int directionFromTank,
+        int fluidItemId,
+        float requestedLiters = 0f)
+    {
+        return isFlatCarMountedPresentation
+               && TryGetPlacementRuntime(out Vector2Int currentCoordinate, out _)
+               && currentCoordinate == tankCoordinate
+               && IsMountedPipeTransferReadyTowards(directionFromTank)
+               && TryResolveMountedPumpRailPassCore(
+                   pump,
+                   tankCoordinate,
+                   directionFromTank,
+                   out int pumpFluidItemId)
+               && (pumpFluidItemId < 0 || pumpFluidItemId == fluidItemId)
+               && CanProvideFluidItem(fluidItemId, requestedLiters);
+    }
+
+    private bool TryResolveMountedPumpRailPassCore(
+        Pump requiredPump,
+        Vector2Int tankCoordinate,
+        Vector2Int directionFromTank,
+        out int fluidItemId)
+    {
+        fluidItemId = -1;
+        if (directionFromTank == Vector2Int.zero)
+        {
+            return false;
+        }
+
+        mountedPumpPipePassScratch.Clear();
+        if (!InputOutputModule.CollectPumpPipePassesAtRuntimeCoordinate(
+                tankCoordinate,
+                mountedPumpPipePassScratch))
+        {
+            return false;
+        }
+
+        bool found = false;
+        for (int i = 0; i < mountedPumpPipePassScratch.Count; i++)
+        {
+            InputOutputModule.RuntimePumpPipePass pipePass = mountedPumpPipePassScratch[i];
+            if (-pipePass.ExternalDirection != directionFromTank
+                || requiredPump != null && pipePass.Pump != requiredPump)
+            {
+                continue;
+            }
+
+            found = true;
+            if (pipePass.Pump != null
+                && pipePass.Pump.TryGetObjectInfoFluidInfo(
+                    out int candidateFluidItemId,
+                    out _,
+                    out _)
+                && candidateFluidItemId >= 0)
+            {
+                fluidItemId = candidateFluidItemId;
+                break;
+            }
+        }
+
+        mountedPumpPipePassScratch.Clear();
+        return found;
     }
 
     private static Quaternion ResolvePipeRuntimeRotation(Vector2Int coordinate, Pipe pipe)

@@ -681,8 +681,26 @@ public static class PipeFluidCompatibilityValidation
             "TryValidateLockedWaterPipeDock",
             BindingFlags.Instance | BindingFlags.NonPublic);
         MethodInfo trainPipeDeploymentMethod = typeof(SteamTrain).GetMethod(
-            "CanDeployWaterPipeToNetwork",
+            "CanDeployWaterPipe",
             BindingFlags.Instance | BindingFlags.NonPublic);
+        MethodInfo trainPumpPassValidationMethod = typeof(SteamTrain).GetMethod(
+            "HasPumpWaterPipeRailPass",
+            BindingFlags.Instance | BindingFlags.NonPublic);
+        Type runtimePumpPipePassType = typeof(InputOutputModule).GetNestedType(
+            "RuntimePumpPipePass",
+            BindingFlags.NonPublic);
+        MethodInfo pumpPassCollectionMethod = typeof(InputOutputModule).GetMethod(
+            "CollectPumpPipePassesAtRuntimeCoordinate",
+            BindingFlags.Static | BindingFlags.NonPublic,
+            null,
+            runtimePumpPipePassType != null
+                ? new[]
+                {
+                    typeof(Vector2Int),
+                    typeof(List<>).MakeGenericType(runtimePumpPipePassType)
+                }
+                : Type.EmptyTypes,
+            null);
         MethodInfo idleDockingMethod = typeof(RailHandcar).GetMethod(
             "TryApplyIdleDocking",
             BindingFlags.Instance | BindingFlags.NonPublic);
@@ -698,12 +716,93 @@ public static class PipeFluidCompatibilityValidation
         MethodInfo mountedTankConnectionMethod = typeof(Fluidtank).GetMethod(
             "CanDockMountedPipeTowards",
             BindingFlags.Instance | BindingFlags.Public);
+        MethodInfo mountedTankFluidConnectionMethod = typeof(Fluidtank).GetMethod(
+            "HasFluidNetworkConnectionTowards",
+            BindingFlags.Instance | BindingFlags.Public);
+        MethodInfo mountedTankTransferReadyMethod = typeof(Fluidtank).GetMethod(
+            "IsMountedPipeTransferReadyTowards",
+            BindingFlags.Instance | BindingFlags.NonPublic);
+        MethodInfo mountedTankConnectionResolutionMethod = typeof(Fluidtank).GetMethod(
+            "TryResolveConnectionTowards",
+            BindingFlags.Instance | BindingFlags.NonPublic);
+        MethodInfo mountedTankPumpRailPassMethod = typeof(Fluidtank).GetMethod(
+            "TryResolveMountedPumpRailPass",
+            BindingFlags.Instance | BindingFlags.NonPublic);
+        MethodInfo mountedTankCanAcceptFluidMethod = typeof(Fluidtank).GetMethod(
+            nameof(Fluidtank.CanAcceptFluidItem),
+            BindingFlags.Instance | BindingFlags.Public | BindingFlags.DeclaredOnly);
+        MethodInfo mountedTankCanProvideFluidMethod = typeof(Fluidtank).GetMethod(
+            nameof(Fluidtank.CanProvideFluidItem),
+            BindingFlags.Instance | BindingFlags.Public | BindingFlags.DeclaredOnly);
+        MethodInfo mountedTankTransferReadyGetter = typeof(Fluidtank).GetProperty(
+            "HasMountedPipeTransferReady",
+            BindingFlags.Instance | BindingFlags.NonPublic)?.GetMethod;
+        MethodInfo mountedTankFillFilterMethod = typeof(Fluidtank).GetMethod(
+            "ShouldFillMountedFluidAtCurrentStop",
+            BindingFlags.Instance | BindingFlags.NonPublic);
+        MethodInfo mountedTankUnloadFilterMethod = typeof(Fluidtank).GetMethod(
+            "ShouldUnloadMountedFluidAtCurrentStop",
+            BindingFlags.Instance | BindingFlags.NonPublic);
+        MethodInfo mountedTankConsistSteamTrainMethod = typeof(Fluidtank).GetMethod(
+            "TryGetMountedConsistSteamTrain",
+            BindingFlags.Instance | BindingFlags.NonPublic);
+        MethodInfo consistSteamTrainMethod = typeof(Train).GetMethod(
+            "TryGetConsistSteamTrain",
+            BindingFlags.Instance | BindingFlags.NonPublic);
         MethodInfo attachedTankGetterMethod = typeof(FreightCar).GetMethod(
             "TryGetAttachedFluidTank",
             BindingFlags.Instance | BindingFlags.Public);
         MethodInfo steamCustomIdleDockingMethod = typeof(SteamTrain).GetMethod(
             "TryApplyCustomIdleDocking",
             BindingFlags.Instance | BindingFlags.NonPublic | BindingFlags.DeclaredOnly);
+        MethodInfo steamConsistWaterDockingMethod = typeof(SteamTrain).GetMethod(
+            "TryApplyConsistWaterPipeDocking",
+            BindingFlags.Instance | BindingFlags.NonPublic);
+        MethodInfo steamCanAcceptFluidMethod = typeof(SteamTrain).GetMethod(
+            nameof(SteamTrain.CanAcceptFluidItem),
+            BindingFlags.Instance | BindingFlags.Public | BindingFlags.DeclaredOnly);
+        MethodInfo steamFillFilterMethod = typeof(SteamTrain).GetMethod(
+            "ShouldFillFluidAtCurrentStop",
+            BindingFlags.Instance | BindingFlags.NonPublic);
+        MethodInfo steamUnloadFilterMethod = typeof(SteamTrain).GetMethod(
+            "ShouldUnloadFluidAtCurrentStop",
+            BindingFlags.Instance | BindingFlags.NonPublic);
+        MethodInfo steamFilterOwnerMethod = typeof(SteamTrain).GetMethod(
+            "ResolveTrainFilterSettingsOwnerForConsist",
+            BindingFlags.Instance | BindingFlags.NonPublic);
+        MethodInfo steamDepartureFilterMethod = typeof(SteamTrain).GetMethod(
+            "ResolveAutoDriveDepartureFilters",
+            BindingFlags.Instance | BindingFlags.NonPublic);
+        MethodInfo steamPhysicalDockFilterMethod = typeof(SteamTrain).GetMethod(
+            "TryResolvePhysicallyDockedFilters",
+            BindingFlags.Instance | BindingFlags.NonPublic);
+        MethodInfo steamConsistStationDistanceMethod = typeof(SteamTrain).GetMethod(
+            "TryGetConsistStationDockDistance",
+            BindingFlags.Instance | BindingFlags.NonPublic);
+        MethodInfo railDockDistanceMethod = typeof(RailHandcar).GetMethod(
+            nameof(RailHandcar.TryGetRailDockDistanceAtCoordinate),
+            BindingFlags.Instance | BindingFlags.Public);
+        Type steamFreightFilterType = typeof(SteamTrain).GetNestedType(
+            "AutoDriveFreightFilter",
+            BindingFlags.NonPublic);
+        MethodInfo steamFluidTransferFilterMethod = typeof(SteamTrain).GetMethod(
+            "ShouldUnloadFluidForFreightFilter",
+            BindingFlags.Static | BindingFlags.NonPublic);
+        MethodInfo pumpApplyTickMethod = typeof(Pump).GetMethod(
+            nameof(Pump.ApplyManagedUpdateTick),
+            BindingFlags.Instance | BindingFlags.Public | BindingFlags.DeclaredOnly);
+        MethodInfo pumpUnloadDockedWaterMethod = typeof(Pump).GetMethod(
+            "TryUnloadDockedWater",
+            BindingFlags.Instance | BindingFlags.NonPublic);
+        MethodInfo pumpResolveDockedWaterSourceMethod = typeof(Pump).GetMethod(
+            "TryResolveDockedWaterSource",
+            BindingFlags.Instance | BindingFlags.NonPublic);
+        MethodInfo fluidStorageTransferMethod = typeof(InputOutputModule).GetMethod(
+            "TryTransferFluidFromStorageToConnectedStorage",
+            BindingFlags.Instance | BindingFlags.NonPublic);
+        MethodInfo mountedTankPumpWaterSupplyMethod = typeof(Fluidtank).GetMethod(
+            "CanProvideMountedFluidToPump",
+            BindingFlags.Instance | BindingFlags.NonPublic);
         ValidateFixtureMethodDoesNotCall(
             report,
             result,
@@ -820,13 +919,19 @@ public static class PipeFluidCompatibilityValidation
             result,
             trainDockSearchMethod,
             trainPipeDeploymentMethod,
-            "steam locomotive dock search rejects pipe networks without a water source");
+            "steam locomotive dock search requires a valid water item");
+        ValidateFixtureMethodCall(
+            report,
+            result,
+            trainDockSearchMethod,
+            pumpPassCollectionMethod,
+            "steam locomotive dock search only discovers Pump PipePass endpoints");
         ValidateFixtureMethodCall(
             report,
             result,
             trainLockedDockValidationMethod,
-            trainPipeDeploymentMethod,
-            "steam locomotive retracts a locked pipe when its water source disappears");
+            trainPumpPassValidationMethod,
+            "steam locomotive keeps a dock lock only while its Pump PipePass exists");
         ValidateFixtureMethodCallOrder(
             report,
             result,
@@ -855,9 +960,123 @@ public static class PipeFluidCompatibilityValidation
         ValidateFixtureMethodCall(
             report,
             result,
+            mountedTankFluidConnectionMethod,
+            mountedTankTransferReadyMethod,
+            "mounted tanks join the fluid network only after their docking pipe extends");
+        ValidateFixtureMethodCall(
+            report,
+            result,
+            mountedTankConnectionResolutionMethod,
+            mountedTankPumpRailPassMethod,
+            "mounted tanks recognize a pump PipePass overlapping the rail cell");
+        ValidateFixtureMethodCall(
+            report,
+            result,
+            mountedTankCanAcceptFluidMethod,
+            mountedTankTransferReadyGetter,
+            "mounted tanks reject fluid until a docking pipe is transfer-ready");
+        ValidateFixtureMethodCall(
+            report,
+            result,
+            mountedTankCanAcceptFluidMethod,
+            mountedTankFillFilterMethod,
+            "FluidCart filling follows the current station TrainFilter");
+        ValidateFixtureMethodCall(
+            report,
+            result,
+            mountedTankCanProvideFluidMethod,
+            mountedTankUnloadFilterMethod,
+            "FluidCart unloading follows the current station TrainFilter");
+        ValidateFixtureMethodCall(
+            report,
+            result,
+            mountedTankFillFilterMethod,
+            mountedTankConsistSteamTrainMethod,
+            "FluidCart filling resolves its consist locomotive");
+        ValidateFixtureMethodCall(
+            report,
+            result,
+            mountedTankUnloadFilterMethod,
+            mountedTankConsistSteamTrainMethod,
+            "FluidCart unloading resolves its consist locomotive");
+        ValidateFixtureMethodCall(
+            report,
+            result,
+            mountedTankConsistSteamTrainMethod,
+            consistSteamTrainMethod,
+            "FluidCart TrainFilter lookup traverses its connected consist");
+        ValidateFixtureMethodCall(
+            report,
+            result,
+            steamCanAcceptFluidMethod,
+            steamFillFilterMethod,
+            "locomotive filling follows the current station TrainFilter");
+        ValidateFixtureMethodCall(
+            report,
+            result,
+            steamUnloadFilterMethod,
+            steamDepartureFilterMethod,
+            "fluid transfer mode uses the same TrainFilter as departure conditions");
+        ValidateFixtureMethodCall(
+            report,
+            result,
+            steamUnloadFilterMethod,
+            steamFilterOwnerMethod,
+            "fluid transfer finds the consist TrainFilter owner even when auto-drive is disabled");
+        ValidateFixtureMethodCall(
+            report,
+            result,
+            steamDepartureFilterMethod,
+            steamPhysicalDockFilterMethod,
+            "TrainFilter selection first uses the physically docked station");
+        ValidateFixtureMethodCall(
+            report,
+            result,
+            steamPhysicalDockFilterMethod,
+            steamConsistStationDistanceMethod,
+            "physical TrainFilter selection checks both configured stations");
+        ValidateFixtureMethodCall(
+            report,
+            result,
+            steamConsistStationDistanceMethod,
+            railDockDistanceMethod,
+            "physical TrainFilter selection measures every consist rail vehicle");
+        ValidateFixtureTrainFluidTransferFilter(
+            report,
+            result,
+            steamFreightFilterType,
+            steamFluidTransferFilterMethod);
+        ValidateFixtureMethodCallOrder(
+            report,
+            result,
+            steamCustomIdleDockingMethod,
+            steamConsistWaterDockingMethod,
+            customIdleDockingMethod,
+            "locomotive fluid docking precedes mounted-tank docking");
+        ValidateFixtureMethodCall(
+            report,
+            result,
             steamCustomIdleDockingMethod,
             customIdleDockingMethod,
             "steam locomotive water docking falls back to consist tank docking");
+        ValidateFixtureMethodCall(
+            report,
+            result,
+            pumpApplyTickMethod,
+            pumpUnloadDockedWaterMethod,
+            "an idle Pump attempts to unload a docked vehicle each simulation tick");
+        ValidateFixtureMethodCall(
+            report,
+            result,
+            pumpUnloadDockedWaterMethod,
+            fluidStorageTransferMethod,
+            "docked water is consumed only through a connected storage transfer");
+        ValidateFixtureMethodCall(
+            report,
+            result,
+            pumpResolveDockedWaterSourceMethod,
+            mountedTankPumpWaterSupplyMethod,
+            "Pump unloading accepts a transfer-ready FluidCart source");
 
         Pipe teePipe = LoadFixturePipe(TeePipePrefabPath);
         Pipe crossPipe = LoadFixturePipe(CrossPipePrefabPath);
@@ -892,6 +1111,63 @@ public static class PipeFluidCompatibilityValidation
         return result;
     }
 
+    private static void ValidateFixtureTrainFluidTransferFilter(
+        StringBuilder report,
+        JunctionInvariantFixtureResult result,
+        Type freightFilterType,
+        MethodInfo transferFilterMethod)
+    {
+        if (freightFilterType == null || transferFilterMethod == null)
+        {
+            result.errorCount++;
+            report.AppendLine("  ERROR TrainFilter fluid-transfer fixture unavailable");
+            return;
+        }
+
+        int[,] filterCases =
+        {
+            { 0, 0 }, // Free fills.
+            { 1, 0 }, // Full fills.
+            { 2, 1 }  // Empty unloads.
+        };
+        for (int caseIndex = 0; caseIndex < filterCases.GetLength(0); caseIndex++)
+        {
+            int filterValue = filterCases[caseIndex, 0];
+            bool expectedUnload = filterCases[caseIndex, 1] != 0;
+            bool actualUnload;
+            try
+            {
+                object filter = Enum.ToObject(freightFilterType, filterValue);
+                actualUnload = InvokeBoolean(
+                    transferFilterMethod,
+                    null,
+                    new[] { filter });
+            }
+            catch (Exception exception)
+            {
+                result.errorCount++;
+                report.Append("  ERROR TrainFilter fluid transfer: ")
+                    .AppendLine(SanitizeMessage(exception.GetBaseException().Message));
+                return;
+            }
+
+            result.identityChecks++;
+            if (actualUnload == expectedUnload)
+            {
+                continue;
+            }
+
+            result.failureCount++;
+            report.Append("  FAIL TrainFilter fluid transfer filter=")
+                .Append(filterValue)
+                .Append(", expectedUnload=")
+                .Append(expectedUnload)
+                .Append(", actualUnload=")
+                .Append(actualUnload)
+                .AppendLine();
+        }
+    }
+
     private static void ValidateFixtureMountedTankPipeDeployment(
         StringBuilder report,
         JunctionInvariantFixtureResult result,
@@ -907,11 +1183,11 @@ public static class PipeFluidCompatibilityValidation
         int[,] fluidCases =
         {
             { WaterFluidItemId, WaterFluidItemId, 1 },
-            { WaterFluidItemId, -1, 0 },
+            { WaterFluidItemId, -1, 1 },
             { WaterFluidItemId, OilFluidItemId, 0 },
             { -1, WaterFluidItemId, 1 },
             { -1, OilFluidItemId, 1 },
-            { -1, -1, 0 }
+            { -1, -1, 1 }
         };
         for (int caseIndex = 0; caseIndex < fluidCases.GetLength(0); caseIndex++)
         {

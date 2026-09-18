@@ -83,6 +83,48 @@ public class Train : Vehicle
         return isMoving;
     }
 
+    internal bool TryGetConsistSteamTrain(out SteamTrain steamTrain)
+    {
+        steamTrain = null;
+        connectionActionGroupQueue.Clear();
+        connectionActionGroupVisited.Clear();
+        connectionActionGroupQueue.Enqueue(this);
+        connectionActionGroupVisited.Add(this);
+
+        while (connectionActionGroupQueue.Count > 0)
+        {
+            Train current = connectionActionGroupQueue.Dequeue();
+            if (current is SteamTrain candidate
+                && candidate != null
+                && candidate.gameObject.activeInHierarchy)
+            {
+                steamTrain = candidate;
+                break;
+            }
+
+            if (current == null)
+            {
+                continue;
+            }
+
+            foreach (Train connectedTrain in current.ConnectedTrains)
+            {
+                if (connectedTrain == null
+                    || !connectedTrain.gameObject.activeInHierarchy
+                    || !connectionActionGroupVisited.Add(connectedTrain))
+                {
+                    continue;
+                }
+
+                connectionActionGroupQueue.Enqueue(connectedTrain);
+            }
+        }
+
+        connectionActionGroupQueue.Clear();
+        connectionActionGroupVisited.Clear();
+        return steamTrain != null;
+    }
+
     public void RotateTrainWheelsByDistance(float signedDistance)
     {
         RotateWheelsByDistance(signedDistance);

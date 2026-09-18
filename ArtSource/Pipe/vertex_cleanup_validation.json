@@ -1,0 +1,12 @@
+{
+  "vertices_before": 2846,
+  "vertices_after": 2058,
+  "removed_vertices": 788,
+  "triangles_before": 2408,
+  "triangles_after": 2408,
+  "positions_normals_uv0_uv1_winding_preserved": true,
+  "tangent_handedness_preserved": true,
+  "tangent_basis_valid": true,
+  "source_sha256": "d6aebfd6eb0d0d3936d3cfb81389298ccf47f28837ce843d0aea5ecab0929c4b",
+  "idempotent": true
+}

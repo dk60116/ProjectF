@@ -17,6 +17,168 @@ public class Pump : InputOutputModule
     private readonly List<InputOutputModule> objectInfoModules = new List<InputOutputModule>(4);
     private readonly HashSet<InputOutputModule> objectInfoFluidSources =
         new HashSet<InputOutputModule>();
+    private readonly List<Vector2Int> fluidDockSeedCoordinates = new List<Vector2Int>(2);
+    private readonly List<InstallationObject> fluidDockStorageScratch =
+        new List<InstallationObject>(4);
+    private float plannedFluidDockDeltaTime;
+
+    public override void PlanManagedUpdateTick(float deltaTime)
+    {
+        base.PlanManagedUpdateTick(deltaTime);
+        plannedFluidDockDeltaTime = Mathf.Max(0f, deltaTime);
+    }
+
+    public override void ApplyManagedUpdateTick()
+    {
+        float deltaTime = plannedFluidDockDeltaTime;
+        plannedFluidDockDeltaTime = 0f;
+        base.ApplyManagedUpdateTick();
+        TryUnloadDockedWater(deltaTime);
+    }
+
+    protected override bool ShouldKeepRuntimeUpdateTickActive()
+    {
+        return base.ShouldKeepRuntimeUpdateTickActive() || HasDockedFluidStorage();
+    }
+
+    private bool TryUnloadDockedWater(float deltaTime)
+    {
+        if (deltaTime <= 0f
+            || !TryResolveDockedWaterSource(
+                out InstallationObject sourceStorage,
+                out int waterItemId))
+        {
+            return false;
+        }
+
+        float requestedLiters = ConnectedFluidStorageTransferLitersPerSecond * deltaTime;
+        float temperatureCelsius = sourceStorage.GetStoredFluidTemperatureCelsius(waterItemId);
+        return TryTransferFluidFromStorageToConnectedStorage(
+            sourceStorage,
+            waterItemId,
+            requestedLiters,
+            temperatureCelsius,
+            fluidDockSeedCoordinates,
+            out _);
+    }
+
+    private bool TryResolveDockedWaterSource(
+        out InstallationObject sourceStorage,
+        out int waterItemId)
+    {
+        sourceStorage = null;
+        waterItemId = WaterPump.ResolveWaterItemId(null);
+        if (waterItemId < 0 || !CollectFluidDockSeedCoordinates())
+        {
+            return false;
+        }
+
+        Fluidtank bestMountedTank = null;
+        for (int i = 0; i < fluidDockSeedCoordinates.Count; i++)
+        {
+            Vector2Int dockCoordinate = fluidDockSeedCoordinates[i];
+            if (!TryGetRuntimePipePass(
+                    dockCoordinate,
+                    out _,
+                    out Vector2Int externalDirection))
+            {
+                continue;
+            }
+
+            Vector2Int directionFromVehicleToPump = -externalDirection;
+            fluidDockStorageScratch.Clear();
+            CollectActiveInstallationsAtRuntimeGridCoordinate(
+                dockCoordinate,
+                fluidDockStorageScratch);
+            for (int storageIndex = 0;
+                 storageIndex < fluidDockStorageScratch.Count;
+                 storageIndex++)
+            {
+                if (fluidDockStorageScratch[storageIndex] is not Fluidtank candidate
+                    || !candidate.CanProvideMountedFluidToPump(
+                        this,
+                        dockCoordinate,
+                        directionFromVehicleToPump,
+                        waterItemId,
+                        0.0001f)
+                    || bestMountedTank != null
+                    && bestMountedTank.RuntimePlacementSequence
+                    <= candidate.RuntimePlacementSequence)
+                {
+                    continue;
+                }
+
+                bestMountedTank = candidate;
+            }
+        }
+
+        fluidDockStorageScratch.Clear();
+        sourceStorage = bestMountedTank;
+        return sourceStorage != null;
+    }
+
+    private bool HasDockedFluidStorage()
+    {
+        if (!CollectFluidDockSeedCoordinates())
+        {
+            return false;
+        }
+
+        for (int i = 0; i < fluidDockSeedCoordinates.Count; i++)
+        {
+            Vector2Int coordinate = fluidDockSeedCoordinates[i];
+            fluidDockStorageScratch.Clear();
+            CollectActiveInstallationsAtRuntimeGridCoordinate(
+                coordinate,
+                fluidDockStorageScratch);
+            for (int storageIndex = 0;
+                 storageIndex < fluidDockStorageScratch.Count;
+                 storageIndex++)
+            {
+                if (fluidDockStorageScratch[storageIndex] is Fluidtank tank
+                    && tank.IsFlatCarMounted)
+                {
+                    fluidDockStorageScratch.Clear();
+                    return true;
+                }
+            }
+        }
+
+        fluidDockStorageScratch.Clear();
+        return false;
+    }
+
+    private bool CollectFluidDockSeedCoordinates()
+    {
+        fluidDockSeedCoordinates.Clear();
+        if (!TryGetPlacementRuntime(
+                out Vector2Int anchorCoordinate,
+                out int quarterTurns))
+        {
+            return false;
+        }
+
+        IReadOnlyList<RectGridBlockPlacement> placements = RectGridPlacements;
+        for (int i = 0; i < placements.Count; i++)
+        {
+            RectGridBlockPlacement placement = placements[i];
+            if (placement.blockType != RectGridBlockType.PipeInput
+                || !TryGetRectGridPlacementCoordinate(
+                    this,
+                    anchorCoordinate,
+                    quarterTurns,
+                    placement,
+                    out Vector2Int coordinate)
+                || fluidDockSeedCoordinates.Contains(coordinate))
+            {
+                continue;
+            }
+
+            fluidDockSeedCoordinates.Add(coordinate);
+        }
+
+        return fluidDockSeedCoordinates.Count > 0;
+    }
 
     public bool TryGetObjectInfoFluidInfo(
         out int fluidItemId,

@@ -6,9 +6,9 @@ using UnityEngine;
 [Serializable]
 public sealed class SaveGameData
 {
-    // Version 63 persists cloned terrain regions so water, biome and procedural
-    // resource selection survive a save/load round trip.
-    public const int CurrentVersion = 63;
+    // Version 64 persists Box/Tank installations mounted on freight cars,
+    // including their inventory, fluid and configuration state.
+    public const int CurrentVersion = 64;
 
     public int version = CurrentVersion;
     public long savedAtUtcTicks;
