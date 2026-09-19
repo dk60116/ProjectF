@@ -7683,7 +7683,9 @@ public class InputOutputModule : InstallationObject,
                 overlappingPipeRecord,
                 sourcePort.Coordinate,
                 overlappingPipeRotation,
-                sourcePort.FlowDirection))
+                // The pipe receives from the source body, opposite the outgoing flow.
+                // Requiring the forward connector incorrectly rejects a corner at the port.
+                -sourcePort.FlowDirection))
         {
             boiler.directedSteamPipeSearchQueue.Enqueue(sourcePort.Coordinate);
         }
@@ -8261,20 +8263,26 @@ public class InputOutputModule : InstallationObject,
             return;
         }
 
-        if (!hasActiveCraft || waitingForOutput)
+        if (!ShouldPlayActiveCraftVisuals())
         {
-            StopCraftParticleEffectVisual(false);
+            StopCraftParticleEffectVisual(true);
             return;
         }
 
         SetVisualParticleActive(particleEffect, true, OperationalAnimationSpeedRatio);
     }
 
-    protected virtual bool ShouldPlayWorkAnimation()
+    private bool ShouldPlayActiveCraftVisuals()
     {
         return IsActiveCraftRunning
                && !IsWaitingForOutput
+               && OperationalAnimationSpeedRatio > 0.0001f
                && HasOperationalEnergyAvailable(ResolveInstalledDefinition());
+    }
+
+    protected virtual bool ShouldPlayWorkAnimation()
+    {
+        return ShouldPlayActiveCraftVisuals();
     }
 
     protected bool IsWorkAnimatorStateActive => lastWorkAnimatorState;

@@ -9,6 +9,9 @@ Cases cover four cardinal orientations: pump to tank, boiler to generator,
 full generator to downstream tank, registered storage without a Block owner,
 disconnected pipes, reversed generators, and adding tanks/generators/generic
 CanStoreFluid objects after the upstream producer sleeps with an empty cache.
+Also covers the slot_01 layout (generator tail overlapping a corner pipe, then
+a perpendicular generator), a corner at a boiler output, and rejection of an
+overlapping pipe with no connector facing the source, in all four orientations.
 The earlier lookup-only harness was replaced because it could pass while actual
 storage transport remained broken.
 

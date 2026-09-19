@@ -3666,6 +3666,11 @@ public partial class PlayerController : MonoBehaviour
             return GetResourceFocusSelectionDistanceSqr(resource, origin) <= harvestRange * harvestRange;
         }
 
+        if (mapObject is WorkableObject workableObject)
+        {
+            return workableObject.ContainsWorldPositionInWorkableRange(origin);
+        }
+
         if (!(mapObject is InstallationObject)
             && !(mapObject is RobotArmInstance)
             && !(mapObject is BuildingRuntimeRecord))

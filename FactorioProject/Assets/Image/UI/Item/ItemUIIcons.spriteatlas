@@ -127,7 +127,6 @@ SpriteAtlas:
     - {fileID: 21300000, guid: 75d435afd75c6ec44b708bbf31363586, type: 3}
     - {fileID: 21300000, guid: 3980a1651bef90140b5a903009c5aeda, type: 3}
     - {fileID: 21300000, guid: 740997b407e44134995243fefc5cc32e, type: 3}
-    - {fileID: 21300000, guid: 6c8c4ff9ab9188f4aad656cee0ba0cb7, type: 3}
     - {fileID: 21300000, guid: c6dad119473afa24990c3c362265dcd7, type: 3}
     - {fileID: 21300000, guid: f746e9b9977c9604b9f09b6049af2215, type: 3}
     - {fileID: 21300000, guid: 46c58fd024bc9bc4985bd7acbec3938a, type: 3}
@@ -246,7 +245,6 @@ SpriteAtlas:
     - f746e9b9977c9604b9f09b6049af2215: 21300000
     - db8276e91c924ed8930c513384ad8527: 21300000
     - f09c56f9f04acdb4e9ceac56adb01f7e: 21300000
-    - 6c8c4ff9ab9188f4aad656cee0ba0cb7: 21300000
     - 20b8294ab69359c4888a20262c65887b: 21300000
     - 72a1ce6a9d343d3429777b5ee6e1c0e8: 21300000
     - 718b5f6a95dbb194397dc23854de1112: 21300000
@@ -385,7 +383,6 @@ SpriteAtlas:
   - {fileID: 21300000, guid: f746e9b9977c9604b9f09b6049af2215, type: 3}
   - {fileID: 21300000, guid: db8276e91c924ed8930c513384ad8527, type: 3}
   - {fileID: 21300000, guid: f09c56f9f04acdb4e9ceac56adb01f7e, type: 3}
-  - {fileID: 21300000, guid: 6c8c4ff9ab9188f4aad656cee0ba0cb7, type: 3}
   - {fileID: 21300000, guid: 20b8294ab69359c4888a20262c65887b, type: 3}
   - {fileID: 21300000, guid: 72a1ce6a9d343d3429777b5ee6e1c0e8, type: 3}
   - {fileID: 21300000, guid: 718b5f6a95dbb194397dc23854de1112, type: 3}
@@ -523,7 +520,6 @@ SpriteAtlas:
   - Manual - Noose_Icon
   - Pitchfork
   - Door_Interaction_0
-  - Manual - Electric mining machine_Icon
   - CPU_Icon
   - Box_Interaction_1
   - Beef_Icon

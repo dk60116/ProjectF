@@ -2847,7 +2847,8 @@ public class InstallationPlacementController : MonoBehaviour
             UtilityPole.RegisterConsumerBlueprintPreview(
                 installationObject,
                 consumerAnchorCoordinate,
-                GetPreviewQuarterTurns(preview));
+                GetPreviewQuarterTurns(preview),
+                ResolveItemDefinition(preview));
             return;
         }
 

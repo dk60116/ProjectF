@@ -786,7 +786,6 @@ public sealed class RuntimeItemGiveReceiver : MonoBehaviour
     private float currentPlayerSpeed;
     private bool hasPlayerSpeedSample;
     private float cachedStatusWorldStatsTime = float.NegativeInfinity;
-    private int cachedLoadedMapObjectTotal = -1;
     private int cachedInstalledObjectTotal = -1;
     private int cachedConveyorItemTotal;
     private int cachedSceneGameObjectTotal = -1;
@@ -2082,8 +2081,7 @@ public sealed class RuntimeItemGiveReceiver : MonoBehaviour
             sceneMonoBehaviourTotal,
             activeSceneMonoBehaviourTotal);
         float censusAge = float.IsNegativeInfinity(cachedStatusWorldStatsTime) ? -1f : Time.unscaledTime - cachedStatusWorldStatsTime;
-        extraTokens += " mapObjectTotal=" + cachedLoadedMapObjectTotal.ToString(CultureInfo.InvariantCulture)
-            + " worldStatsAgeSeconds=" + censusAge.ToString("0.###", CultureInfo.InvariantCulture);
+        extraTokens += " worldStatsAgeSeconds=" + censusAge.ToString("0.###", CultureInfo.InvariantCulture);
         return ToolResult.Status(
             fps,
             frameMs,
@@ -3265,7 +3263,7 @@ public sealed class RuntimeItemGiveReceiver : MonoBehaviour
         {
             cachedCensusTerrain = terrain;
             cachedStatusWorldStatsTime = float.NegativeInfinity;
-            cachedLoadedMapObjectTotal = cachedInstalledObjectTotal = cachedSceneGameObjectTotal = cachedActiveSceneGameObjectTotal = -1;
+            cachedInstalledObjectTotal = cachedSceneGameObjectTotal = cachedActiveSceneGameObjectTotal = -1;
             cachedSceneMonoBehaviourTotal = cachedActiveSceneMonoBehaviourTotal = -1;
             cachedInstallationTypeCounts = "-";
         }
@@ -3277,7 +3275,7 @@ public sealed class RuntimeItemGiveReceiver : MonoBehaviour
             installationCountsByItemId.Clear();
             cachedInstalledObjectTotal = terrain != null ? terrain.GetInstallationItemCounts(installationCountsByItemId) : 0;
             cachedInstallationTypeCounts = BuildInstallationTypeCountToken(installationCountsByItemId);
-            cachedLoadedMapObjectTotal = terrain != null ? terrain.CaptureRuntimeProfilerCensus() : 0;
+            terrain?.CaptureRuntimeProfilerCensus();
             cachedStatusWorldStatsTime = Time.unscaledTime;
         }
         cachedConveyorItemTotal = terrain != null ? terrain.GetConveyorItemCount() : 0;

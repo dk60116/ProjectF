@@ -263,6 +263,31 @@ public static class Checks
             Check(boiler.Emit(3),3,$"generator / 5 pipes / 3 dense generators {d}");
             Check(generator4.StoredFluidLiters,3,"fourth generator actual storage");
 
+            // Saved slot_01: boiler (2,8), first generator (3,8), corner (5,8),
+            // straight pipe (5,7), second generator (5,6). Rotate the same layout.
+            var turn = new Vector2Int(d.y,-d.x);
+            var origin = new Vector2Int(2,8);
+            World.Reset(); boiler = new Boiler(); boiler.Output(origin+d,d);
+            generator1 = new SteamGenerator(); generator1.Place(origin+d,d);
+            PipeRuntimeRecord.Add(generator1.Tail,-d,turn);
+            PipeRuntimeRecord.Add(generator1.Tail+turn,-turn,turn);
+            generator2 = new SteamGenerator(); generator2.Place(generator1.Tail+turn*2,turn);
+            generator1.TryAddFluidLiters(1,50,100,out _);
+            Check(boiler.Emit(3),3,$"saved layout: generator tail / overlapping corner / rotated generator {d}");
+            Check(generator2.StoredFluidLiters,3,"rotated downstream generator actual storage");
+
+            World.Reset(); boiler = new Boiler(); boiler.Output(default,d);
+            PipeRuntimeRecord.Add(default,-d,turn);
+            generator = new SteamGenerator(); generator.Place(turn*2,turn);
+            Check(boiler.Emit(3),3,$"boiler output / overlapping corner / rotated generator {d}");
+            Check(generator.StoredFluidLiters,3,"corner-fed generator actual storage");
+
+            World.Reset(); boiler = new Boiler(); boiler.Output(default,d);
+            PipeRuntimeRecord.Add(default,d,turn); // No connector facing the boiler.
+            generator = new SteamGenerator(); generator.Place(turn*2,turn);
+            Check(boiler.Emit(3),0,$"overlapping pipe without source-facing connector rejected {d}");
+            Check(generator.StoredFluidLiters,0,"disconnected overlapping pipe leaves generator empty");
+
             World.Reset(); boiler = new Boiler(); boiler.Output(default,d); Pipes(default,d,3);
             generator = new SteamGenerator(); generator.Place(d*4,d); generator.TryAddFluidLiters(1,50,100,out _);
             Pipes(generator.Tail,d,3); tank = new Fluidtank(); World.Place(tank,generator.Tail + d*3);

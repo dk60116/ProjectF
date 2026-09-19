@@ -1,5 +1,4 @@
 using System.Collections.Generic;
-using System.Linq;
 using TMPro;
 using UnityEngine;
 using UnityEngine.UI;
@@ -72,6 +71,9 @@ public partial class FilterSelectUI : MonoBehaviour
         boundTarget = ResolveCurrentTarget();
         ApplyBulkButtonVisibility();
         BuildVisibleDefinitions();
+        EnsureSlotCapacity(boundTarget is LoggingMachine
+            ? visibleTreeDefinitions.Count
+            : visibleDefinitions.Count);
         ApplyDefinitionsToSlots();
         RefreshSplitterControls();
     }
@@ -86,7 +88,7 @@ public partial class FilterSelectUI : MonoBehaviour
     private void SetSlotList()
     {
         ItemFilterSlot[] list = GetComponentsInChildren<ItemFilterSlot>(true);
-        slotList = list.ToList();
+        slotList = new List<ItemFilterSlot>(list);
     }
 
     private void EnsureSlotList()
@@ -94,6 +96,54 @@ public partial class FilterSelectUI : MonoBehaviour
         if (slotList == null || slotList.Count == 0)
         {
             SetSlotList();
+            return;
+        }
+
+        for (int i = 0; i < slotList.Count; i++)
+        {
+            if (slotList[i] != null)
+            {
+                continue;
+            }
+
+            SetSlotList();
+            return;
+        }
+    }
+
+    private void EnsureSlotCapacity(int requiredCount)
+    {
+        requiredCount = Mathf.Max(0, requiredCount);
+        if (slotList == null || slotList.Count >= requiredCount)
+        {
+            return;
+        }
+
+        ItemFilterSlot template = null;
+        for (int i = 0; i < slotList.Count; i++)
+        {
+            if (slotList[i] != null)
+            {
+                template = slotList[i];
+                break;
+            }
+        }
+
+        if (template == null)
+        {
+            return;
+        }
+
+        Transform slotParent = template.transform.parent != null
+            ? template.transform.parent
+            : transform;
+        while (slotList.Count < requiredCount)
+        {
+            ItemFilterSlot slot = Instantiate(template, slotParent);
+            slot.name = $"ItemFilterSlot ({slotList.Count})";
+            slot.ClearFilterItem();
+            slot.gameObject.SetActive(false);
+            slotList.Add(slot);
         }
     }
 

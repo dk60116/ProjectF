@@ -1548,12 +1548,7 @@ public partial class Block
                 return;
             }
 
-            portableObject.SetCachedParent(anchor, true);
-            portableObject.SetWorldPose(
-                GetFloorObjectWorldPosition(anchor, objectIndex),
-                anchor != null ? anchor.rotation : Quaternion.identity);
-            portableObject.SetWorldScale(anchor != null ? anchor.lossyScale : Vector3.one);
-            portableObject.SetCachedActive(true);
+            ConfigureFloorObjectTransform(portableObject, anchor, objectIndex);
             portableObject.SetBatchedRendering(true);
             gate?.MarkSettled();
             onComplete?.Invoke();
@@ -7996,11 +7991,11 @@ public partial class Block
 
     private void ConfigureFloorObjectTransform(PortableObject portableObject, Transform anchor, int stackIndex)
     {
-        portableObject.SetLocalPose(
-            anchor,
-            GetFloorObjectLocalPosition(anchor, stackIndex),
-            Quaternion.identity,
-            Vector3.one);
+        portableObject.SetCachedParent(anchor, true);
+        portableObject.SetWorldPose(
+            GetFloorObjectWorldPosition(anchor, stackIndex),
+            anchor != null ? anchor.rotation : Quaternion.identity);
+        portableObject.SetWorldScale(anchor != null ? anchor.lossyScale : Vector3.one);
         portableObject.SetCachedActive(true);
     }
 

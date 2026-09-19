@@ -19,8 +19,8 @@ MonoBehaviour:
   useMapColor: 0
   mapColor: {r: 1, g: 1, b: 1, a: 1}
   mapMarkerSize: 1
-  portableMesh: {fileID: 4300000, guid: ae2adc0685fa9a64994b8105637502b4, type: 2}
-  portableMat: {fileID: 2100000, guid: a2f041064ed95e54f8543f5af9d0fac3, type: 2}
+  portableMesh: {fileID: 4300000, guid: f2b6c4e51c2a4a1ea246c86d4bd33910, type: 2}
+  portableMat: {fileID: 2100000, guid: 5ae8b3d9ea9843cabf513a83b5e6b472, type: 2}
   icon: {fileID: 21300000, guid: 0660c0ff81df58b49ad7045794fc3ec9, type: 3}
   oneItem: 0
   interactionButtonList: []

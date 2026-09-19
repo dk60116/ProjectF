@@ -20,7 +20,7 @@ internal sealed class RobotArmRenderTemplate
     }
     private readonly Node[] nodes;
     private readonly Matrix4x4[] matrices;
-    private readonly int bodyIndex, handIndex;
+    private readonly int bodyIndex, handIndex, powerLineIndex;
     private readonly Vector3 rootScale;
     internal float CullDiameter { get; private set; } = 3f;
     internal int LayerMask { get; private set; }
@@ -34,7 +34,7 @@ internal sealed class RobotArmRenderTemplate
         bool isLong = source.UseLongArmAnimation;
         var pick = isLong ? RobotArmAnimationCurves.LongPick : RobotArmAnimationCurves.ShortPick;
         var drop = isLong ? RobotArmAnimationCurves.LongDrop : RobotArmAnimationCurves.ShortDrop;
-        bodyIndex = handIndex = -1;
+        bodyIndex = handIndex = powerLineIndex = -1;
         foreach (var t in transforms)
         {
             int parent = t == source.transform ? -1 : indices[t.parent];
@@ -45,6 +45,7 @@ internal sealed class RobotArmRenderTemplate
             foreach (var track in drop) if (track.Path == n.Path) n.Drop = track;
             if (t == source.RuntimeBodyTemplate) bodyIndex = list.Count;
             if (t == source.RuntimeHandTemplate) handIndex = list.Count;
+            if (t.name == "PowerLinePoint" || t.name == "powerLinePoint") powerLineIndex = list.Count;
             var r = t.GetComponent<MeshRenderer>();
             var filter = t.GetComponent<MeshFilter>();
             bool active = true;
@@ -95,6 +96,8 @@ internal sealed class RobotArmRenderTemplate
     }
     internal Vector3 BodyWorld(RobotArmInstance arm) => EvaluateChain(arm, bodyIndex).MultiplyPoint3x4(Vector3.zero);
     internal Vector3 HandWorld(RobotArmInstance arm) => EvaluateChain(arm, handIndex >= 0 ? handIndex : 0).MultiplyPoint3x4(Vector3.zero);
+    internal Vector3 PowerLineWorld(RobotArmInstance arm) =>
+        EvaluateChain(arm, powerLineIndex >= 0 ? powerLineIndex : bodyIndex).MultiplyPoint3x4(Vector3.zero);
     internal int Append(RobotArmInstance arm, VirtualRenderBatchCollection batches)
     {
         Evaluate(arm);

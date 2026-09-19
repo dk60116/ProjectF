@@ -37,6 +37,10 @@ public partial class UtilityPole
     {
         robotArmConsumersDirty = true;
         InvalidateNetworkRuntimeForNextTick();
+        connectionLineVisualsDirty = true;
+        previewConsumerLineVisualsDirty = true;
+        RequestDeferredConnectionLineVisualRefresh();
+        RequestDeferredPreviewConsumerLineVisualRefresh();
     }
 
     internal static void UnregisterRobotArmConsumer(RobotArmInstance arm)
@@ -161,6 +165,125 @@ public partial class UtilityPole
         }
 
         robotArmBindings.Clear();
+    }
+
+    private static void RenderRobotArmPowerLines(bool previewPolesOnly)
+    {
+        RobotArmWorld world = RobotArmWorld.Current;
+        if (world == null)
+        {
+            return;
+        }
+
+        IReadOnlyList<RobotArmInstance> instances = world.Instances;
+        for (int i = 0; i < instances.Count; i++)
+        {
+            RobotArmInstance arm = instances[i];
+            if (arm == null
+                || !arm.IsRuntimeActive
+                || !arm.TryGetElectricPowerRequirement(out _)
+                || !TryResolveRobotArmPowerLinePole(
+                    arm,
+                    previewPolesOnly,
+                    out UtilityPole supplyingPole))
+            {
+                continue;
+            }
+
+            if (previewPolesOnly)
+            {
+                supplyingPole.RenderPreviewConsumerPowerLine(arm.PowerLineWorldPosition);
+            }
+            else
+            {
+                supplyingPole.RenderConsumerPowerLine(arm.PowerLineWorldPosition);
+            }
+        }
+    }
+
+    private static bool TryResolveRobotArmPowerLinePole(
+        RobotArmInstance arm,
+        bool previewPolesOnly,
+        out UtilityPole supplyingPole)
+    {
+        supplyingPole = null;
+        if (arm == null || !arm.IsRuntimeActive)
+        {
+            return false;
+        }
+
+        Vector3 consumerPosition = arm.PowerLineWorldPosition;
+        float bestDistanceSqr = float.MaxValue;
+        consumerPoleScratch.Clear();
+        IReadOnlyList<Vector2Int> occupiedCoordinates = arm.RuntimeOccupiedCoordinates;
+        for (int coordinateIndex = 0; coordinateIndex < occupiedCoordinates.Count; coordinateIndex++)
+        {
+            Vector2Int coordinate = occupiedCoordinates[coordinateIndex];
+            if (!supplyPolesByCoordinate.TryGetValue(coordinate, out List<UtilityPole> poles))
+            {
+                continue;
+            }
+
+            for (int poleIndex = 0; poleIndex < poles.Count; poleIndex++)
+            {
+                UtilityPole pole = poles[poleIndex];
+                if (pole != null && consumerPoleScratch.Add(pole))
+                {
+                    TrySelectConsumerPowerLinePole(
+                        pole,
+                        consumerPosition,
+                        ref supplyingPole,
+                        ref bestDistanceSqr);
+                }
+            }
+        }
+
+        if (previewPolesOnly)
+        {
+            foreach (KeyValuePair<UtilityPole, PreviewPoleRuntime> entry in previewPoleRuntimes)
+            {
+                UtilityPole previewPole = entry.Key;
+                if (!IsValidPreviewPole(previewPole)
+                    || !consumerPoleScratch.Add(previewPole)
+                    || !PoleSuppliesRobotArm(previewPole, arm))
+                {
+                    continue;
+                }
+
+                TrySelectConsumerPowerLinePole(
+                    previewPole,
+                    consumerPosition,
+                    ref supplyingPole,
+                    ref bestDistanceSqr);
+            }
+        }
+
+        consumerPoleScratch.Clear();
+        return supplyingPole != null
+               && (!previewPolesOnly || IsPreviewPole(supplyingPole));
+    }
+
+    private static bool PoleSuppliesRobotArm(UtilityPole pole, RobotArmInstance arm)
+    {
+        if (pole == null
+            || arm == null
+            || !arm.IsRuntimeActive
+            || !TryGetPoleAnchorCoordinate(pole, out Vector2Int poleAnchor))
+        {
+            return false;
+        }
+
+        int radius = pole.SupplyRadiusCells;
+        IReadOnlyList<Vector2Int> occupiedCoordinates = arm.RuntimeOccupiedCoordinates;
+        for (int i = 0; i < occupiedCoordinates.Count; i++)
+        {
+            if (ChebyshevDistance(poleAnchor, occupiedCoordinates[i]) <= radius)
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     private static ElectricNetwork ResolveRobotArmNetwork(RobotArmInstance arm)

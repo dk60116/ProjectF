@@ -89,6 +89,7 @@ public sealed partial class RobotArmInstance : IMapObjectTarget, IMapObjectSimul
     public MapObject.MapObjectStatus Status => Prototype.Status;
     public Vector3 WorldPosition => Placement.worldPosition;
     public Quaternion WorldRotation => Placement.worldRotation;
+    internal Vector3 PowerLineWorldPosition => Template.PowerLineWorld(this);
     public ItemDefinition BoundItemDefinition => InputOutputModule.ResolveItemDefinition(Placement.itemId);
     public int ResolveItemId() => Placement.itemId;
     public int ResolvedItemId => ResolveItemId();

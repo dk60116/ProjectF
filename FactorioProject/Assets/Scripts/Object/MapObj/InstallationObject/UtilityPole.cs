@@ -291,9 +291,11 @@ public partial class UtilityPole : InstallationObject
     public static void RegisterConsumerBlueprintPreview(
         InstallationObject consumer,
         Vector2Int anchorCoordinate,
-        int quarterTurns)
+        int quarterTurns,
+        ItemDefinition definition)
     {
-        if (!CanRenderConsumerPowerLine(consumer))
+        bool requiresElectricPower = ItemDefinition.ResolveElectricUseWatts(definition) > EnergyEpsilon;
+        if (!CanRenderPreviewConsumerPowerLine(consumer, requiresElectricPower))
         {
             UnregisterConsumerBlueprintPreview(consumer);
             return;
@@ -301,10 +303,12 @@ public partial class UtilityPole : InstallationObject
 
         PreviewConsumerRuntime nextRuntime = new PreviewConsumerRuntime(
             anchorCoordinate,
-            ((quarterTurns % 4) + 4) % 4);
+            ((quarterTurns % 4) + 4) % 4,
+            requiresElectricPower);
         if (previewConsumerRuntimes.TryGetValue(consumer, out PreviewConsumerRuntime currentRuntime)
             && currentRuntime.AnchorCoordinate == nextRuntime.AnchorCoordinate
-            && currentRuntime.QuarterTurns == nextRuntime.QuarterTurns)
+            && currentRuntime.QuarterTurns == nextRuntime.QuarterTurns
+            && currentRuntime.RequiresElectricPower == nextRuntime.RequiresElectricPower)
         {
             return;
         }
@@ -1138,13 +1142,28 @@ public partial class UtilityPole : InstallationObject
         Transform endPoint,
         float sagDepth)
     {
+        bool hasEndpoints = startPoint != null && endPoint != null;
+        RefreshLineRenderer(
+            lineRenderer,
+            hasEndpoints ? ResolveLinePointWorldPosition(startPoint) : Vector3.zero,
+            hasEndpoints ? ResolveLinePointWorldPosition(endPoint) : Vector3.zero,
+            sagDepth,
+            hasEndpoints);
+    }
+
+    private void RefreshLineRenderer(
+        LineRenderer lineRenderer,
+        Vector3 startPosition,
+        Vector3 endPosition,
+        float sagDepth,
+        bool hasEndpoints = true)
+    {
         if (lineRenderer == null)
         {
             return;
         }
 
-        bool visible = startPoint != null
-                       && endPoint != null
+        bool visible = hasEndpoints
                        && lineWidth > 0f
                        && gameObject.activeInHierarchy;
         if (lineRenderer.gameObject.activeSelf != visible)
@@ -1173,10 +1192,7 @@ public partial class UtilityPole : InstallationObject
         {
             float t = pointCount > 1 ? (float)i / (pointCount - 1) : 0f;
             float sag = 4f * t * (1f - t) * Mathf.Max(0f, sagDepth);
-            Vector3 curvedPoint = Vector3.Lerp(
-                ResolveLinePointWorldPosition(startPoint),
-                ResolveLinePointWorldPosition(endPoint),
-                t) + Vector3.down * sag;
+            Vector3 curvedPoint = Vector3.Lerp(startPosition, endPosition, t) + Vector3.down * sag;
             lineRenderer.SetPosition(
                 i,
                 lineRenderer.useWorldSpace
@@ -1425,24 +1441,30 @@ public partial class UtilityPole : InstallationObject
             }
         }
 
+        RenderRobotArmPowerLines(false);
         renderedConsumerLineScratch.Clear();
     }
 
     private static void RefreshPreviewConsumerLineRenderers()
     {
+        CleanupPreviewPoleRuntimes();
         CleanupPreviewConsumerRuntimes();
         usedPreviewConsumerLineRendererCount = 0;
-        if (previewConsumerRuntimes.Count <= 0)
+        if (previewConsumerRuntimes.Count <= 0 && previewPoleRuntimes.Count <= 0)
         {
             HideUnusedPreviewConsumerLineRenderers();
             previewConsumerLineVisualsDirty = false;
             return;
         }
 
+        // The preview can be requested before the normal power tick has rebuilt the pole
+        // coordinate cache. Resolve it here so a newly opened placement preview works on
+        // its first frame instead of waiting for another topology change.
+        EnsureNetworksEvaluated(false);
         foreach (KeyValuePair<InstallationObject, PreviewConsumerRuntime> entry in previewConsumerRuntimes)
         {
             InstallationObject consumer = entry.Key;
-            if (!CanRenderConsumerPowerLine(consumer)
+            if (!CanRenderPreviewConsumerPowerLine(consumer, entry.Value.RequiresElectricPower)
                 || !TryResolvePreviewConsumerPowerLinePole(entry.Value, consumer, out UtilityPole supplyingPole))
             {
                 continue;
@@ -1451,8 +1473,60 @@ public partial class UtilityPole : InstallationObject
             supplyingPole.RenderPreviewConsumerPowerLine(consumer);
         }
 
+        RenderPreviewPoleConsumerPowerLines();
         HideUnusedPreviewConsumerLineRenderers();
         previewConsumerLineVisualsDirty = false;
+    }
+
+    private static void RenderPreviewPoleConsumerPowerLines()
+    {
+        if (previewPoleRuntimes.Count <= 0)
+        {
+            return;
+        }
+
+        installationScratch.Clear();
+        foreach (KeyValuePair<UtilityPole, PreviewPoleRuntime> entry in previewPoleRuntimes)
+        {
+            UtilityPole pole = entry.Key;
+            if (!IsValidPreviewPole(pole))
+            {
+                continue;
+            }
+
+            Vector2Int anchorCoordinate = entry.Value.AnchorCoordinate;
+            int radius = pole.SupplyRadiusCells;
+            for (int y = anchorCoordinate.y - radius; y <= anchorCoordinate.y + radius; y++)
+            {
+                for (int x = anchorCoordinate.x - radius; x <= anchorCoordinate.x + radius; x++)
+                {
+                    InstallationObject.CollectActiveInstallationsAtRuntimeGridCoordinate(
+                        new Vector2Int(x, y),
+                        installationScratch);
+                }
+            }
+        }
+
+        renderedConsumerLineScratch.Clear();
+        for (int i = 0; i < installationScratch.Count; i++)
+        {
+            InstallationObject consumer = installationScratch[i];
+            if (!renderedConsumerLineScratch.Add(consumer)
+                || !CanRenderConsumerPowerLine(consumer)
+                || !TryResolveInstalledConsumerPowerLinePoleIncludingPreviews(
+                    consumer,
+                    out UtilityPole supplyingPole)
+                || !IsPreviewPole(supplyingPole))
+            {
+                continue;
+            }
+
+            supplyingPole.RenderPreviewConsumerPowerLine(consumer);
+        }
+
+        renderedConsumerLineScratch.Clear();
+        installationScratch.Clear();
+        RenderRobotArmPowerLines(true);
     }
 
     private static bool CanRenderConsumerPowerLine(InstallationObject consumer)
@@ -1461,6 +1535,17 @@ public partial class UtilityPole : InstallationObject
                && !(consumer is UtilityPole)
                && consumer.gameObject.activeInHierarchy
                && TryGetElectricPowerRequirement(consumer, out _)
+               && consumer.TryGetPowerLinePoint(out _);
+    }
+
+    private static bool CanRenderPreviewConsumerPowerLine(
+        InstallationObject consumer,
+        bool requiresElectricPower)
+    {
+        return requiresElectricPower
+               && consumer != null
+               && !(consumer is UtilityPole)
+               && consumer.gameObject.activeInHierarchy
                && consumer.TryGetPowerLinePoint(out _);
     }
 
@@ -1567,6 +1652,45 @@ public partial class UtilityPole : InstallationObject
         return supplyingPole != null;
     }
 
+    private static bool TryResolveInstalledConsumerPowerLinePoleIncludingPreviews(
+        InstallationObject consumer,
+        out UtilityPole supplyingPole)
+    {
+        supplyingPole = null;
+        if (consumer == null || !consumer.TryGetPowerLinePoint(out Transform consumerPoint))
+        {
+            return false;
+        }
+
+        float bestDistanceSqr = float.MaxValue;
+        if (TryResolveConsumerPowerLinePole(null, consumer, out UtilityPole placedPole))
+        {
+            TrySelectConsumerPowerLinePole(
+                placedPole,
+                consumerPoint,
+                ref supplyingPole,
+                ref bestDistanceSqr);
+        }
+
+        foreach (KeyValuePair<UtilityPole, PreviewPoleRuntime> entry in previewPoleRuntimes)
+        {
+            UtilityPole previewPole = entry.Key;
+            if (!IsValidPreviewPole(previewPole)
+                || !PoleSuppliesInstalledConsumer(previewPole, consumer))
+            {
+                continue;
+            }
+
+            TrySelectConsumerPowerLinePole(
+                previewPole,
+                consumerPoint,
+                ref supplyingPole,
+                ref bestDistanceSqr);
+        }
+
+        return supplyingPole != null;
+    }
+
     private static void TryResolveConsumerPowerLinePoleInNetwork(
         ElectricNetwork network,
         InstallationObject consumer,
@@ -1621,6 +1745,19 @@ public partial class UtilityPole : InstallationObject
         ref UtilityPole supplyingPole,
         ref float bestDistanceSqr)
     {
+        TrySelectConsumerPowerLinePole(
+            pole,
+            ResolveLinePointWorldPosition(consumerPoint),
+            ref supplyingPole,
+            ref bestDistanceSqr);
+    }
+
+    private static void TrySelectConsumerPowerLinePole(
+        UtilityPole pole,
+        Vector3 consumerPosition,
+        ref UtilityPole supplyingPole,
+        ref float bestDistanceSqr)
+    {
         if (!IsValidPlacedPole(pole) && !IsValidPreviewPole(pole))
         {
             return;
@@ -1634,7 +1771,7 @@ public partial class UtilityPole : InstallationObject
 
         float distanceSqr = (
             ResolveLinePointWorldPosition(pole.linePointCenter)
-            - ResolveLinePointWorldPosition(consumerPoint)).sqrMagnitude;
+            - consumerPosition).sqrMagnitude;
         if (!IsBetterConsumerPowerLinePole(pole, supplyingPole, distanceSqr, bestDistanceSqr))
         {
             return;
@@ -1703,6 +1840,30 @@ public partial class UtilityPole : InstallationObject
         return false;
     }
 
+    private static bool PoleSuppliesInstalledConsumer(
+        UtilityPole pole,
+        InstallationObject consumer)
+    {
+        if (pole == null
+            || consumer == null
+            || consumer.RuntimeOccupiedCoordinates == null
+            || !TryGetPoleAnchorCoordinate(pole, out Vector2Int poleAnchor))
+        {
+            return false;
+        }
+
+        int radius = pole.SupplyRadiusCells;
+        for (int i = 0; i < consumer.RuntimeOccupiedCoordinates.Count; i++)
+        {
+            if (ChebyshevDistance(poleAnchor, consumer.RuntimeOccupiedCoordinates[i]) <= radius)
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
     private void RenderConsumerPowerLine(InstallationObject consumer)
     {
         if (consumer == null
@@ -1713,6 +1874,14 @@ public partial class UtilityPole : InstallationObject
         }
 
         RenderConnectionLine(linePointCenter, consumerPoint);
+    }
+
+    private void RenderConsumerPowerLine(Vector3 consumerPosition)
+    {
+        if (linePointCenter != null)
+        {
+            RenderConnectionLine(linePointCenter, consumerPosition);
+        }
     }
 
     private void RenderPreviewConsumerPowerLine(InstallationObject consumer)
@@ -1727,6 +1896,23 @@ public partial class UtilityPole : InstallationObject
         LineRenderer lineRenderer = EnsurePreviewConsumerLineRenderer(usedPreviewConsumerLineRendererCount, this);
         usedPreviewConsumerLineRendererCount++;
         RefreshLineRenderer(lineRenderer, linePointCenter, consumerPoint, ResolveConnectionLineSagDepth(linePointCenter, consumerPoint));
+    }
+
+    private void RenderPreviewConsumerPowerLine(Vector3 consumerPosition)
+    {
+        if (linePointCenter == null)
+        {
+            return;
+        }
+
+        LineRenderer lineRenderer = EnsurePreviewConsumerLineRenderer(usedPreviewConsumerLineRendererCount, this);
+        usedPreviewConsumerLineRendererCount++;
+        Vector3 polePosition = ResolveLinePointWorldPosition(linePointCenter);
+        RefreshLineRenderer(
+            lineRenderer,
+            polePosition,
+            consumerPosition,
+            ResolveConnectionLineSagDepth(polePosition, consumerPosition));
     }
 
     private void BeginConnectionLineVisualRefresh()
@@ -1810,10 +1996,27 @@ public partial class UtilityPole : InstallationObject
         RefreshLineRenderer(lineRenderer, startPoint, endPoint, ResolveConnectionLineSagDepth(startPoint, endPoint));
     }
 
+    private void RenderConnectionLine(Transform startPoint, Vector3 endPosition)
+    {
+        LineRenderer lineRenderer = EnsureConnectionLineRenderer(usedConnectionLineRendererCount);
+        usedConnectionLineRendererCount++;
+        Vector3 startPosition = ResolveLinePointWorldPosition(startPoint);
+        RefreshLineRenderer(
+            lineRenderer,
+            startPosition,
+            endPosition,
+            ResolveConnectionLineSagDepth(startPosition, endPosition));
+    }
+
     private float ResolveConnectionLineSagDepth(Transform startPoint, Transform endPoint)
     {
-        Vector3 startPosition = ResolveLinePointWorldPosition(startPoint);
-        Vector3 endPosition = ResolveLinePointWorldPosition(endPoint);
+        return ResolveConnectionLineSagDepth(
+            ResolveLinePointWorldPosition(startPoint),
+            ResolveLinePointWorldPosition(endPoint));
+    }
+
+    private float ResolveConnectionLineSagDepth(Vector3 startPosition, Vector3 endPosition)
+    {
         float distance = Vector3.Distance(startPosition, endPosition);
         float radius = Mathf.Max(1f, ConnectionRadiusCells);
         float distanceRatio = Mathf.Clamp01(distance / radius);
@@ -3626,14 +3829,19 @@ public partial class UtilityPole : InstallationObject
 
     private readonly struct PreviewConsumerRuntime
     {
-        public PreviewConsumerRuntime(Vector2Int anchorCoordinate, int quarterTurns)
+        public PreviewConsumerRuntime(
+            Vector2Int anchorCoordinate,
+            int quarterTurns,
+            bool requiresElectricPower)
         {
             AnchorCoordinate = anchorCoordinate;
             QuarterTurns = quarterTurns;
+            RequiresElectricPower = requiresElectricPower;
         }
 
         public Vector2Int AnchorCoordinate { get; }
         public int QuarterTurns { get; }
+        public bool RequiresElectricPower { get; }
     }
 
     private readonly struct PoleConnectionCandidate
