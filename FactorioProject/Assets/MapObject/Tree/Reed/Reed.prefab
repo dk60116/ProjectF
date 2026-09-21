@@ -123,7 +123,7 @@ MonoBehaviour:
   m_EditorClassIdentifier: 
   id: 0
   objectName: Reed
-  objId: 11
+  objId: 14
   itemDefinition: {fileID: 11400000, guid: eac1a52a94dced248b2c431dae676dfb, type: 2}
   mapStatus:
     mapSizeX: 1

@@ -141,6 +141,10 @@ public class ItemDataEditorWindow : EditorWindow
         new RectGridPaletteEntry(InputOutputModule.RectGridBlockType.DoubleInputItem, "Double Input Item", "Double\nInput", new Color(0.28f, 0.62f, 0.38f, 1f)),
         new RectGridPaletteEntry(InputOutputModule.RectGridBlockType.DoublePipeOutputItem, "Double Pipe Output Item", "Double\nOutput", new Color(0.62f, 0.36f, 0.36f, 1f))
     };
+    private static readonly System.Predicate<InputOutputModule.RectGridBlockType> InputItemRectGridBlockMatcher =
+        InputOutputModule.IsInputItemBlockType;
+    private static readonly System.Predicate<InputOutputModule.RectGridBlockType> PipeOutputRectGridBlockMatcher =
+        IsPipeOutputRectGridBlockType;
 
     private Vector2 listScroll;
     private Vector2 detailScroll;
@@ -161,10 +165,6 @@ public class ItemDataEditorWindow : EditorWindow
     private readonly HashSet<string> initializedInputOutputPairSectionKeys = new HashSet<string>();
     private readonly HashSet<string> initializedInputOutputPairKeys = new HashSet<string>();
     private readonly HashSet<string> initializedInputOutputSlotLayoutSectionKeys = new HashSet<string>();
-    private readonly Dictionary<int, string> cachedCraftingTreeIngredientSummaries = new Dictionary<int, string>();
-    private readonly List<CraftingTreeRuntime.IngredientEntry> craftingTreeIngredientBuffer =
-        new List<CraftingTreeRuntime.IngredientEntry>();
-    private readonly List<string> craftingTreeIngredientSummaryParts = new List<string>();
     private ItemManager cachedItemManager;
     private bool itemManagerCacheDirty = true;
     private ItemManager cachedDefinitionsItemManager;
@@ -201,7 +201,6 @@ public class ItemDataEditorWindow : EditorWindow
     private GUIContent[] cachedSeedTargetResourceOptionContents = Array.Empty<GUIContent>();
     private readonly Dictionary<int, int> cachedSeedTargetResourceOptionIndexes = new Dictionary<int, int>();
     private int cachedSeedTargetResourceOptionsVersion = -1;
-    private int cachedCraftingTreeIngredientSummaryVersion = -1;
     private readonly Dictionary<int, string> inputOutputTargetKeyCache = new Dictionary<int, string>();
     private readonly Dictionary<string, SerializedProperty> cachedSelectedDefinitionProperties =
         new Dictionary<string, SerializedProperty>(StringComparer.Ordinal);
@@ -386,8 +385,17 @@ public class ItemDataEditorWindow : EditorWindow
     private class ItemDataJsonFile
     {
         public string format = "ProjectF.ItemData";
-        public int version = 15;
+        public int version = 20;
         public List<ItemDataJsonEntry> items = new List<ItemDataJsonEntry>();
+    }
+
+    [Serializable]
+    private class EnergyUseJsonEntry
+    {
+        public string energyType;
+        public int energyTypeValue = -1;
+        public float useEnergyAmount;
+        public float completeEnergy;
     }
 
     [Serializable]
@@ -440,6 +448,7 @@ public class ItemDataEditorWindow : EditorWindow
         public int useEnergyTypeValue = -1;
         public float useEnergyAmount;
         public float completeEnergy;
+        public List<EnergyUseJsonEntry> useEnergyRequirements;
         public int utilityPoleConnectionRadius = -1;
         public int utilityPoleSupplyRadius = -1;
         public int sprinklerRangeRadius = -1;
@@ -483,12 +492,15 @@ public class ItemDataEditorWindow : EditorWindow
         public int id = -1;
         public string itemName;
         public string definitionAssetPath;
-        public int count = 1;
+        public float count = 1f;
     }
 
     [Serializable]
     private class InputOutputPairJsonEntry
     {
+        public List<InputOutputJsonEntry> inputs = new List<InputOutputJsonEntry>();
+        public List<InputOutputJsonEntry> outputs = new List<InputOutputJsonEntry>();
+        // Version 18 and older compatibility.
         public InputOutputJsonEntry input;
         public InputOutputJsonEntry output;
     }
@@ -652,8 +664,6 @@ public class ItemDataEditorWindow : EditorWindow
         cachedSeedTargetResourceOptionContents = Array.Empty<GUIContent>();
         cachedSeedTargetResourceOptionIndexes.Clear();
         cachedSeedTargetResourceOptionsVersion = -1;
-        cachedCraftingTreeIngredientSummaries.Clear();
-        cachedCraftingTreeIngredientSummaryVersion = -1;
     }
 
     private void InvalidateItemFolderPresentationCache()
@@ -3256,6 +3266,8 @@ public class ItemDataEditorWindow : EditorWindow
             GetMultiSelectedDefinitionProperty(serializedObject, "seedTargetResource");
         SerializedProperty useEnergyTypeProperty =
             GetMultiSelectedDefinitionProperty(serializedObject, "useEnergyType");
+        SerializedProperty useEnergyRequirementsProperty =
+            GetMultiSelectedDefinitionProperty(serializedObject, "useEnergyRequirements");
         SerializedProperty useEnergyAmountProperty =
             GetMultiSelectedDefinitionProperty(serializedObject, "useEnergyAmount");
         SerializedProperty completeEnergyProperty =
@@ -3518,44 +3530,15 @@ public class ItemDataEditorWindow : EditorWindow
             }
         }
 
-        if (useEnergyTypeProperty != null)
+        if (useEnergyRequirementsProperty != null)
         {
             EditorGUILayout.Space(8f);
             EditorGUILayout.LabelField("Use Energy", EditorStyles.boldLabel);
-            EditorGUI.BeginChangeCheck();
-            EditorGUILayout.PropertyField(useEnergyTypeProperty, new GUIContent("Use Energy Type"));
-            bool useEnergyTypeChanged = EditorGUI.EndChangeCheck();
-            if (useEnergyTypeChanged
-                && !useEnergyTypeProperty.hasMultipleDifferentValues
-                && useEnergyTypeProperty.enumValueIndex == (int)ItemDefinition.EnergyType.None)
-            {
-                if (useEnergyAmountProperty != null)
-                {
-                    useEnergyAmountProperty.floatValue = 0f;
-                }
-
-                if (completeEnergyProperty != null)
-                {
-                    completeEnergyProperty.floatValue = 0f;
-                }
-            }
-
-            if (useEnergyTypeProperty.hasMultipleDifferentValues
-                || useEnergyTypeProperty.enumValueIndex != (int)ItemDefinition.EnergyType.None)
-            {
-                string useEnergyAmountLabel = !useEnergyTypeProperty.hasMultipleDifferentValues
-                    && useEnergyTypeProperty.enumValueIndex == (int)ItemDefinition.EnergyType.Electricity
-                        ? "Use Energy Amount (kW)"
-                        : "Use Energy Amount / Sec";
-                DrawMultiClampedFloatProperty(
-                    useEnergyAmountProperty,
-                    new GUIContent(useEnergyAmountLabel),
-                    0f);
-                DrawMultiClampedFloatProperty(
-                    completeEnergyProperty,
-                    new GUIContent("Complete Energy"),
-                    0f);
-            }
+            DrawUseEnergyRequirements(
+                useEnergyRequirementsProperty,
+                useEnergyTypeProperty,
+                useEnergyAmountProperty,
+                completeEnergyProperty);
         }
 
         if (AllSelectedDefinitionsAreUtilityPoles()
@@ -3637,6 +3620,131 @@ public class ItemDataEditorWindow : EditorWindow
         {
             EditorGUILayout.PropertyField(property, label);
         }
+    }
+
+    private static void DrawUseEnergyRequirements(
+        SerializedProperty requirementsProperty,
+        SerializedProperty legacyTypeProperty,
+        SerializedProperty legacyAmountProperty,
+        SerializedProperty legacyCompleteProperty)
+    {
+        if (requirementsProperty == null || !requirementsProperty.isArray)
+        {
+            return;
+        }
+
+        if (requirementsProperty.arraySize == 0
+            && legacyTypeProperty != null
+            && !legacyTypeProperty.hasMultipleDifferentValues
+            && legacyTypeProperty.enumValueIndex != (int)ItemDefinition.EnergyType.None)
+        {
+            requirementsProperty.InsertArrayElementAtIndex(0);
+            SerializedProperty migrated = requirementsProperty.GetArrayElementAtIndex(0);
+            migrated.FindPropertyRelative("energyType").enumValueIndex = legacyTypeProperty.enumValueIndex;
+            migrated.FindPropertyRelative("useEnergyAmount").floatValue =
+                legacyAmountProperty != null ? Mathf.Max(0f, legacyAmountProperty.floatValue) : 0f;
+            migrated.FindPropertyRelative("completeEnergy").floatValue =
+                legacyCompleteProperty != null ? Mathf.Max(0f, legacyCompleteProperty.floatValue) : 0f;
+            legacyTypeProperty.enumValueIndex = (int)ItemDefinition.EnergyType.None;
+            if (legacyAmountProperty != null) legacyAmountProperty.floatValue = 0f;
+            if (legacyCompleteProperty != null) legacyCompleteProperty.floatValue = 0f;
+        }
+
+        if (legacyCompleteProperty != null
+            && !legacyCompleteProperty.hasMultipleDifferentValues
+            && legacyCompleteProperty.floatValue > 0f
+            && requirementsProperty.arraySize > 0)
+        {
+            SerializedProperty primaryElement = requirementsProperty.GetArrayElementAtIndex(0);
+            SerializedProperty primaryCompleteProperty =
+                primaryElement.FindPropertyRelative("completeEnergy");
+            if (primaryCompleteProperty.floatValue <= 0f)
+            {
+                primaryCompleteProperty.floatValue = legacyCompleteProperty.floatValue;
+            }
+
+            legacyCompleteProperty.floatValue = 0f;
+        }
+
+        int removeIndex = -1;
+        for (int i = 0; i < requirementsProperty.arraySize; i++)
+        {
+            SerializedProperty element = requirementsProperty.GetArrayElementAtIndex(i);
+            SerializedProperty typeProperty = element.FindPropertyRelative("energyType");
+            SerializedProperty amountProperty = element.FindPropertyRelative("useEnergyAmount");
+            SerializedProperty completeProperty = element.FindPropertyRelative("completeEnergy");
+
+            EditorGUILayout.BeginVertical(EditorStyles.helpBox);
+            EditorGUILayout.BeginHorizontal();
+            EditorGUILayout.LabelField($"Requirement {i + 1}", EditorStyles.miniBoldLabel);
+            if (GUILayout.Button("Remove", GUILayout.Width(64f)))
+            {
+                removeIndex = i;
+            }
+            EditorGUILayout.EndHorizontal();
+
+            EditorGUILayout.PropertyField(typeProperty, new GUIContent("Use Energy Type"));
+            ItemDefinition.EnergyType energyType =
+                (ItemDefinition.EnergyType)typeProperty.enumValueIndex;
+            amountProperty.floatValue = Mathf.Max(0f, amountProperty.floatValue);
+            EditorGUILayout.PropertyField(
+                amountProperty,
+                new GUIContent(energyType == ItemDefinition.EnergyType.Electricity
+                    ? "Use Energy Amount (kW)"
+                    : "Use Energy Amount / Sec"));
+            completeProperty.floatValue = i == 0
+                ? Mathf.Max(0f, completeProperty.floatValue)
+                : 0f;
+            if (i == 0)
+            {
+                EditorGUILayout.PropertyField(
+                    completeProperty,
+                    new GUIContent(energyType == ItemDefinition.EnergyType.Electricity
+                        ? "Complete Energy (kJ)"
+                        : "Complete Energy"));
+            }
+            EditorGUILayout.EndVertical();
+        }
+
+        if (removeIndex >= 0)
+        {
+            requirementsProperty.DeleteArrayElementAtIndex(removeIndex);
+        }
+
+        ItemDefinition.EnergyType nextEnergyType = ItemDefinition.EnergyType.None;
+        for (int typeValue = (int)ItemDefinition.EnergyType.Burn;
+             typeValue <= (int)ItemDefinition.EnergyType.LPGGas;
+             typeValue++)
+        {
+            bool alreadyUsed = false;
+            for (int i = 0; i < requirementsProperty.arraySize; i++)
+            {
+                if (requirementsProperty.GetArrayElementAtIndex(i)
+                        .FindPropertyRelative("energyType").enumValueIndex == typeValue)
+                {
+                    alreadyUsed = true;
+                    break;
+                }
+            }
+
+            if (!alreadyUsed)
+            {
+                nextEnergyType = (ItemDefinition.EnergyType)typeValue;
+                break;
+            }
+        }
+
+        EditorGUI.BeginDisabledGroup(nextEnergyType == ItemDefinition.EnergyType.None);
+        if (GUILayout.Button("Add", GUILayout.Width(80f)))
+        {
+            int newIndex = requirementsProperty.arraySize;
+            requirementsProperty.InsertArrayElementAtIndex(newIndex);
+            SerializedProperty element = requirementsProperty.GetArrayElementAtIndex(newIndex);
+            element.FindPropertyRelative("energyType").enumValueIndex = (int)nextEnergyType;
+            element.FindPropertyRelative("useEnergyAmount").floatValue = 0f;
+            element.FindPropertyRelative("completeEnergy").floatValue = 0f;
+        }
+        EditorGUI.EndDisabledGroup();
     }
 
     private static void DrawMapMarkerSizeToolbar(SerializedProperty property)
@@ -3927,6 +4035,8 @@ public class ItemDataEditorWindow : EditorWindow
         SerializedProperty isSeedProperty = GetSelectedDefinitionProperty(serializedObject, "isSeed");
         SerializedProperty seedTargetResourceProperty = GetSelectedDefinitionProperty(serializedObject, "seedTargetResource");
         SerializedProperty useEnergyTypeProperty = GetSelectedDefinitionProperty(serializedObject, "useEnergyType");
+        SerializedProperty useEnergyRequirementsProperty =
+            GetSelectedDefinitionProperty(serializedObject, "useEnergyRequirements");
         SerializedProperty useEnergyAmountProperty = GetSelectedDefinitionProperty(serializedObject, "useEnergyAmount");
         SerializedProperty completeEnergyProperty = GetSelectedDefinitionProperty(serializedObject, "completeEnergy");
         SerializedProperty utilityPoleConnectionRadiusProperty = GetSelectedDefinitionProperty(serializedObject, "utilityPoleConnectionRadius");
@@ -4198,40 +4308,15 @@ public class ItemDataEditorWindow : EditorWindow
             }
         }
 
-        if (useEnergyTypeProperty != null)
+        if (useEnergyRequirementsProperty != null)
         {
             EditorGUILayout.Space(8f);
             EditorGUILayout.LabelField("Use Energy", EditorStyles.boldLabel);
-            EditorGUILayout.PropertyField(useEnergyTypeProperty, new GUIContent("Use Energy Type"));
-
-            ItemDefinition.EnergyType useEnergyType = (ItemDefinition.EnergyType)useEnergyTypeProperty.enumValueIndex;
-            if (useEnergyType == ItemDefinition.EnergyType.None)
-            {
-                if (useEnergyAmountProperty != null)
-                {
-                    useEnergyAmountProperty.floatValue = 0f;
-                }
-
-                if (completeEnergyProperty != null)
-                {
-                    completeEnergyProperty.floatValue = 0f;
-                }
-            }
-            else
-            {
-                if (useEnergyAmountProperty != null)
-                {
-                    string useEnergyAmountLabel = useEnergyType == ItemDefinition.EnergyType.Electricity
-                        ? "Use Energy Amount (kW)"
-                        : "Use Energy Amount / Sec";
-                    EditorGUILayout.PropertyField(useEnergyAmountProperty, new GUIContent(useEnergyAmountLabel));
-                }
-
-                if (completeEnergyProperty != null)
-                {
-                    EditorGUILayout.PropertyField(completeEnergyProperty, new GUIContent("Complete Energy"));
-                }
-            }
+            DrawUseEnergyRequirements(
+                useEnergyRequirementsProperty,
+                useEnergyTypeProperty,
+                useEnergyAmountProperty,
+                completeEnergyProperty);
         }
 
         if (definition.mapObject is UtilityPole
@@ -5066,16 +5151,21 @@ public class ItemDataEditorWindow : EditorWindow
             return;
         }
 
+        SerializedProperty pairsProperty = mapObjectSerializedObject.FindProperty("inputOutputPairs");
         SerializedProperty inputListProperty = mapObjectSerializedObject.FindProperty("inputList");
         SerializedProperty outputListProperty = mapObjectSerializedObject.FindProperty("outputList");
         SerializedProperty legacyOutputProperty = mapObjectSerializedObject.FindProperty("output");
         SerializedProperty parentItemProperty = mapObjectSerializedObject.FindProperty("parentInputOutputModuleItem");
-        if (inputListProperty == null || outputListProperty == null)
+        if (pairsProperty == null)
         {
             return;
         }
 
-        EnsureInputOutputPairArraySizes(inputListProperty, outputListProperty, legacyOutputProperty);
+        MigrateLegacyInputOutputPairs(
+            pairsProperty,
+            inputListProperty,
+            outputListProperty,
+            legacyOutputProperty);
 
         EditorGUILayout.Space(6f);
         EditorGUILayout.LabelField("Input Output Module", EditorStyles.boldLabel);
@@ -5103,30 +5193,38 @@ public class ItemDataEditorWindow : EditorWindow
         if (parentModule != null)
         {
             DrawReferencedItemPreview(parentItem);
-            IReadOnlyList<InputOutputModule.ItemIoEntry> inheritedInputs = parentModule.InputList;
-            IReadOnlyList<InputOutputModule.ItemIoEntry> inheritedOutputs = parentModule.OutputList;
-            inheritedPairCount = Mathf.Min(inheritedInputs.Count, inheritedOutputs.Count);
-            EditorGUILayout.LabelField($"Inherited Pairs ({inheritedPairCount})", EditorStyles.miniBoldLabel);
-            using (new EditorGUI.DisabledScope(true))
+            IReadOnlyList<InputOutputModule.InputOutputPair> inheritedPairs = parentModule.InputOutputPairs;
+            inheritedPairCount = inheritedPairs.Count;
+            string inheritedSectionKey = GetInheritedInputOutputPairSectionFoldoutKey(targetObject);
+            bool inheritedSectionExpanded =
+                !collapsedInputOutputPairSectionKeys.Contains(inheritedSectionKey);
+            bool nextInheritedSectionExpanded = EditorGUILayout.Foldout(
+                inheritedSectionExpanded,
+                $"Inherited Pairs ({inheritedPairCount})",
+                true,
+                EditorStyles.foldout);
+            if (nextInheritedSectionExpanded != inheritedSectionExpanded)
             {
-                for (int i = 0; i < inheritedPairCount; i++)
+                SetInputOutputPairSectionCollapsedState(
+                    inheritedSectionKey,
+                    !nextInheritedSectionExpanded);
+                inheritedSectionExpanded = nextInheritedSectionExpanded;
+            }
+
+            if (inheritedSectionExpanded)
+            {
+                using (new EditorGUI.DisabledScope(true))
                 {
-                    InputOutputModule.ItemIoEntry inheritedInput = inheritedInputs[i];
-                    InputOutputModule.ItemIoEntry inheritedOutput = inheritedOutputs[i];
-                    string inputName = inheritedInput.itemDefinition != null
-                        ? inheritedInput.itemDefinition.itemName
-                        : "None";
-                    string outputName = inheritedOutput.itemDefinition != null
-                        ? inheritedOutput.itemDefinition.itemName
-                        : "None";
-                    EditorGUILayout.TextField(
-                        $"{i + 1}. {inputName} x{Mathf.Max(1, inheritedInput.count)}  →  "
-                        + $"{outputName} x{Mathf.Max(1, inheritedOutput.count)}");
+                    for (int i = 0; i < inheritedPairCount; i++)
+                    {
+                        InputOutputModule.InputOutputPair pair = inheritedPairs[i];
+                        EditorGUILayout.TextField($"{i + 1}. {GetInputOutputPairSummary(pair)}");
+                    }
                 }
             }
         }
 
-        int pairCount = inputListProperty.arraySize;
+        int pairCount = pairsProperty.arraySize;
         string sectionFoldoutKey = GetInputOutputPairSectionFoldoutKey(targetObject);
         InitializeInputOutputPairFoldoutStates(sectionFoldoutKey, targetObject, pairCount);
         bool isSectionExpanded = string.IsNullOrEmpty(sectionFoldoutKey)
@@ -5163,35 +5261,63 @@ public class ItemDataEditorWindow : EditorWindow
         {
             for (int i = 0; i < pairCount; i++)
             {
-                SerializedProperty inputEntryProperty = inputListProperty.GetArrayElementAtIndex(i);
-                SerializedProperty outputEntryProperty = outputListProperty.GetArrayElementAtIndex(i);
+                int previousPairCount = pairsProperty.arraySize;
                 DrawInputOutputPairRow(
-                    inputEntryProperty,
-                    outputEntryProperty,
+                    pairsProperty.GetArrayElementAtIndex(i),
                     definitions,
-                    targetObject is ProductionMachine,
                     GetInputOutputPairFoldoutKey(targetObject, i),
                     i,
-                    () =>
+                    () => pairsProperty.DeleteArrayElementAtIndex(i));
+                if (pairsProperty.arraySize != previousPairCount)
                 {
-                    inputListProperty.DeleteArrayElementAtIndex(i);
-                    outputListProperty.DeleteArrayElementAtIndex(i);
-                });
+                    pairCount = pairsProperty.arraySize;
+                    break;
+                }
             }
 
             if (GUILayout.Button("Add Pair", GUILayout.Width(96f)))
             {
-                int insertIndex = inputListProperty.arraySize;
-                inputListProperty.InsertArrayElementAtIndex(insertIndex);
-                ResetInputOutputEntry(inputListProperty.GetArrayElementAtIndex(insertIndex));
-
-                outputListProperty.InsertArrayElementAtIndex(insertIndex);
-                ResetInputOutputEntry(outputListProperty.GetArrayElementAtIndex(insertIndex));
+                int insertIndex = pairsProperty.arraySize;
+                pairsProperty.InsertArrayElementAtIndex(insertIndex);
+                ResetInputOutputPair(pairsProperty.GetArrayElementAtIndex(insertIndex), true);
             }
         }
 
         GUILayout.Space(8f);
         DrawInputOutputRectGridFields(mapObjectSerializedObject, inheritedPairCount + pairCount);
+    }
+
+    private static string GetInputOutputPairSummary(InputOutputModule.InputOutputPair pair)
+    {
+        if (pair == null)
+        {
+            return "None -> None";
+        }
+
+        return $"{GetInputOutputEntriesSummary(pair.inputs)} -> {GetInputOutputEntriesSummary(pair.outputs)}";
+    }
+
+    private static string GetInputOutputEntriesSummary(IReadOnlyList<InputOutputModule.ItemIoEntry> entries)
+    {
+        if (entries == null || entries.Count == 0)
+        {
+            return "None";
+        }
+
+        string summary = string.Empty;
+        for (int i = 0; i < entries.Count; i++)
+        {
+            InputOutputModule.ItemIoEntry entry = entries[i];
+            string itemName = entry.itemDefinition != null
+                ? GetDefinitionDisplayName(entry.itemDefinition)
+                : "None";
+            summary += i > 0 ? " + " : string.Empty;
+            summary += entry.IsFluid
+                ? $"{itemName} {entry.ResolvedAmount:0.###} L"
+                : $"{itemName} x{entry.ResolvedItemCount}";
+        }
+
+        return summary;
     }
 
     private ItemDefinition DrawParentInputOutputModuleItemField(
@@ -5252,6 +5378,11 @@ public class ItemDataEditorWindow : EditorWindow
     private string GetInputOutputPairSectionFoldoutKey(UnityEngine.Object targetObject)
     {
         return $"{GetInputOutputTargetKey(targetObject)}/Pairs";
+    }
+
+    private string GetInheritedInputOutputPairSectionFoldoutKey(UnityEngine.Object targetObject)
+    {
+        return $"{GetInputOutputTargetKey(targetObject)}/InheritedPairs";
     }
 
     private string GetInputOutputPairFoldoutKey(UnityEngine.Object targetObject, int pairIndex)
@@ -5793,19 +5924,36 @@ public class ItemDataEditorWindow : EditorWindow
     {
         if (InputOutputModule.IsInputItemBlockType(blockType))
         {
-            int numberedIndex = GetInputItemBlockIndex(inputOutputModule, cell);
+            int numberedIndex = GetNumberedRectGridBlockIndex(
+                inputOutputModule,
+                cell,
+                InputItemRectGridBlockMatcher);
             return numberedIndex > 0
                 ? $"Input\n{numberedIndex}"
                 : "Input";
+        }
+
+        if (IsPipeOutputRectGridBlockType(blockType))
+        {
+            int numberedIndex = GetNumberedRectGridBlockIndex(
+                inputOutputModule,
+                cell,
+                PipeOutputRectGridBlockMatcher);
+            return numberedIndex > 0
+                ? $"Pipe\nOutput\n{numberedIndex}"
+                : "Pipe\nOutput";
         }
 
         RectGridPaletteEntry entry = GetRectGridPaletteEntry(blockType);
         return string.IsNullOrWhiteSpace(entry.displayLabel) ? blockType.ToString() : entry.displayLabel;
     }
 
-    private static int GetInputItemBlockIndex(InputOutputModule inputOutputModule, Vector2Int cell)
+    private static int GetNumberedRectGridBlockIndex(
+        InputOutputModule inputOutputModule,
+        Vector2Int cell,
+        System.Predicate<InputOutputModule.RectGridBlockType> blockTypeMatcher)
     {
-        if (inputOutputModule == null)
+        if (inputOutputModule == null || blockTypeMatcher == null)
         {
             return -1;
         }
@@ -5816,7 +5964,7 @@ public class ItemDataEditorWindow : EditorWindow
         for (int i = 0; i < placements.Count; i++)
         {
             InputOutputModule.RectGridBlockPlacement placement = placements[i];
-            if (!InputOutputModule.IsInputItemBlockType(placement.blockType))
+            if (!blockTypeMatcher(placement.blockType))
             {
                 continue;
             }
@@ -5834,6 +5982,11 @@ public class ItemDataEditorWindow : EditorWindow
         }
 
         return found ? index : -1;
+    }
+
+    private static bool IsPipeOutputRectGridBlockType(InputOutputModule.RectGridBlockType blockType)
+    {
+        return blockType == InputOutputModule.RectGridBlockType.PipeOutputItem;
     }
 
     private static Color GetRectGridBlockColor(InputOutputModule.RectGridBlockType blockType)
@@ -5913,23 +6066,23 @@ public class ItemDataEditorWindow : EditorWindow
     }
 
     private void DrawInputOutputPairRow(
-        SerializedProperty inputEntryProperty,
-        SerializedProperty outputEntryProperty,
+        SerializedProperty pairProperty,
         List<ItemDefinition> definitions,
-        bool preferCraftingTreeIngredients,
         string foldoutKey,
         int pairIndex,
         Action removeAction)
     {
+        if (pairProperty == null)
+        {
+            return;
+        }
+
+        SerializedProperty inputsProperty = pairProperty.FindPropertyRelative("inputs");
+        SerializedProperty outputsProperty = pairProperty.FindPropertyRelative("outputs");
         EditorGUILayout.BeginVertical(EditorStyles.helpBox);
         EditorGUILayout.BeginHorizontal();
         bool isExpanded = string.IsNullOrEmpty(foldoutKey) || !collapsedInputOutputPairKeys.Contains(foldoutKey);
-        string header = GetInputOutputPairHeader(
-            inputEntryProperty,
-            outputEntryProperty,
-            definitions,
-            preferCraftingTreeIngredients,
-            pairIndex);
+        string header = GetInputOutputPairHeader(inputsProperty, outputsProperty, pairIndex);
         bool nextExpanded = EditorGUILayout.Foldout(isExpanded, header, true, EditorStyles.foldout);
         if (nextExpanded != isExpanded && !string.IsNullOrEmpty(foldoutKey))
         {
@@ -5957,38 +6110,38 @@ public class ItemDataEditorWindow : EditorWindow
         EditorGUILayout.EndHorizontal();
         if (isExpanded)
         {
-            if (preferCraftingTreeIngredients
-                && TryGetCraftingTreeIngredientSummary(outputEntryProperty, definitions, out string ingredientSummary))
-            {
-                DrawReadOnlyInputOutputSummary("Ingredients", ingredientSummary);
-            }
-            else
-            {
-                DrawInputOutputEntryFields(inputEntryProperty, definitions, "Input");
-            }
-
+            DrawInputOutputEntryList(inputsProperty, definitions, "Inputs", "Input");
             GUILayout.Space(4f);
-            DrawInputOutputEntryFields(outputEntryProperty, definitions, "Output");
+            DrawInputOutputEntryList(outputsProperty, definitions, "Outputs", "Output");
         }
 
         EditorGUILayout.EndVertical();
     }
 
-    private string GetInputOutputPairHeader(
-        SerializedProperty inputEntryProperty,
-        SerializedProperty outputEntryProperty,
-        List<ItemDefinition> definitions,
-        bool preferCraftingTreeIngredients,
+    private static string GetInputOutputPairHeader(
+        SerializedProperty inputsProperty,
+        SerializedProperty outputsProperty,
         int pairIndex)
     {
-        string inputSummary = GetInputOutputEntrySummary(inputEntryProperty);
-        if (preferCraftingTreeIngredients
-            && TryGetCraftingTreeIngredientSummary(outputEntryProperty, definitions, out string ingredientSummary))
+        return $"Pair {pairIndex + 1}: {GetInputOutputEntriesSummary(inputsProperty)} -> "
+               + GetInputOutputEntriesSummary(outputsProperty);
+    }
+
+    private static string GetInputOutputEntriesSummary(SerializedProperty entriesProperty)
+    {
+        if (entriesProperty == null || !entriesProperty.isArray || entriesProperty.arraySize == 0)
         {
-            inputSummary = ingredientSummary;
+            return "None";
         }
 
-        return $"Pair {pairIndex + 1}: {inputSummary} -> {GetInputOutputEntrySummary(outputEntryProperty)}";
+        string summary = string.Empty;
+        for (int i = 0; i < entriesProperty.arraySize; i++)
+        {
+            summary += i > 0 ? " + " : string.Empty;
+            summary += GetInputOutputEntrySummary(entriesProperty.GetArrayElementAtIndex(i));
+        }
+
+        return summary;
     }
 
     private static string GetInputOutputEntrySummary(SerializedProperty entryProperty)
@@ -6004,79 +6157,52 @@ public class ItemDataEditorWindow : EditorWindow
             ? itemDefinitionProperty.objectReferenceValue as ItemDefinition
             : null;
         string itemName = definition != null ? GetDefinitionDisplayName(definition) : "None";
-        int count = countProperty != null ? Mathf.Max(1, countProperty.intValue) : 1;
-        return $"{itemName} x{count}";
+        float amount = countProperty != null ? countProperty.floatValue : 1f;
+        return InputOutputModule.IsFluidItemDefinition(definition)
+            ? $"{itemName} {Mathf.Max(0.0001f, amount):0.###} L"
+            : $"{itemName} x{Mathf.Max(1, Mathf.RoundToInt(amount))}";
     }
 
-    private static void DrawReadOnlyInputOutputSummary(string label, string summary)
-    {
-        EditorGUILayout.BeginHorizontal();
-        EditorGUILayout.PrefixLabel(label);
-        EditorGUILayout.SelectableLabel(
-            string.IsNullOrWhiteSpace(summary) ? "None" : summary,
-            EditorStyles.textField,
-            GUILayout.Height(EditorGUIUtility.singleLineHeight));
-        EditorGUILayout.EndHorizontal();
-    }
-
-    private bool TryGetCraftingTreeIngredientSummary(
-        SerializedProperty outputEntryProperty,
+    private void DrawInputOutputEntryList(
+        SerializedProperty entriesProperty,
         List<ItemDefinition> definitions,
-        out string summary)
+        string sectionLabel,
+        string entryLabel)
     {
-        summary = string.Empty;
-        if (outputEntryProperty == null)
-        {
-            return false;
-        }
-
-        SerializedProperty itemDefinitionProperty = outputEntryProperty.FindPropertyRelative("itemDefinition");
-        ItemDefinition outputDefinition = itemDefinitionProperty != null
-            ? itemDefinitionProperty.objectReferenceValue as ItemDefinition
-            : null;
-        if (outputDefinition == null || outputDefinition.id < 0)
-        {
-            return false;
-        }
-
-        EnsureCraftingTreeIngredientSummaryCacheVersion();
-        if (cachedCraftingTreeIngredientSummaries.TryGetValue(outputDefinition.id, out summary))
-        {
-            return !string.IsNullOrWhiteSpace(summary);
-        }
-
-        if (!CraftingTreeRuntime.TryGetIngredients(outputDefinition.id, craftingTreeIngredientBuffer)
-            || craftingTreeIngredientBuffer.Count <= 0)
-        {
-            cachedCraftingTreeIngredientSummaries[outputDefinition.id] = string.Empty;
-            return false;
-        }
-
-        craftingTreeIngredientSummaryParts.Clear();
-        for (int i = 0; i < craftingTreeIngredientBuffer.Count; i++)
-        {
-            CraftingTreeRuntime.IngredientEntry ingredient = craftingTreeIngredientBuffer[i];
-            ItemDefinition ingredientDefinition = FindDefinitionById(definitions, ingredient.itemId);
-            string itemName = ingredientDefinition != null
-                ? GetDefinitionDisplayName(ingredientDefinition)
-                : $"Item {ingredient.itemId}";
-            craftingTreeIngredientSummaryParts.Add($"{itemName} x{Mathf.Max(1, ingredient.count)}");
-        }
-
-        summary = string.Join(" + ", craftingTreeIngredientSummaryParts);
-        cachedCraftingTreeIngredientSummaries[outputDefinition.id] = summary;
-        return !string.IsNullOrWhiteSpace(summary);
-    }
-
-    private void EnsureCraftingTreeIngredientSummaryCacheVersion()
-    {
-        if (cachedCraftingTreeIngredientSummaryVersion == definitionsCacheVersion)
+        if (entriesProperty == null || !entriesProperty.isArray)
         {
             return;
         }
 
-        cachedCraftingTreeIngredientSummaries.Clear();
-        cachedCraftingTreeIngredientSummaryVersion = definitionsCacheVersion;
+        EditorGUILayout.LabelField($"{sectionLabel} ({entriesProperty.arraySize})", EditorStyles.miniBoldLabel);
+        for (int i = 0; i < entriesProperty.arraySize; i++)
+        {
+            EditorGUILayout.BeginVertical(EditorStyles.helpBox);
+            EditorGUILayout.BeginHorizontal();
+            EditorGUILayout.LabelField($"{entryLabel} {i + 1}", EditorStyles.miniLabel);
+            GUILayout.FlexibleSpace();
+            bool remove = GUILayout.Button("X", GUILayout.Width(24f));
+            EditorGUILayout.EndHorizontal();
+            if (remove)
+            {
+                entriesProperty.DeleteArrayElementAtIndex(i);
+                EditorGUILayout.EndVertical();
+                break;
+            }
+
+            DrawInputOutputEntryFields(
+                entriesProperty.GetArrayElementAtIndex(i),
+                definitions,
+                entryLabel);
+            EditorGUILayout.EndVertical();
+        }
+
+        if (GUILayout.Button($"Add {entryLabel}", GUILayout.Width(96f)))
+        {
+            int insertIndex = entriesProperty.arraySize;
+            entriesProperty.InsertArrayElementAtIndex(insertIndex);
+            ResetInputOutputEntry(entriesProperty.GetArrayElementAtIndex(insertIndex));
+        }
     }
 
     private void DrawInputOutputEntryFields(
@@ -6123,11 +6249,23 @@ public class ItemDataEditorWindow : EditorWindow
 
         EditorGUILayout.BeginHorizontal();
         GUILayout.Space(EditorGUIUtility.labelWidth);
-        string countLabel = ItemDefinition.IsElectricityItemDefinition(currentDefinition)
-            ? "Count (kW)"
-            : "Count";
-        int nextCount = EditorGUILayout.IntField(countLabel, Mathf.Max(1, countProperty.intValue));
-        countProperty.intValue = Mathf.Max(1, nextCount);
+        if (InputOutputModule.IsFluidItemDefinition(currentDefinition))
+        {
+            float nextAmount = EditorGUILayout.FloatField(
+                "Amount (L)",
+                Mathf.Max(0.0001f, countProperty.floatValue));
+            countProperty.floatValue = Mathf.Max(0.0001f, nextAmount);
+        }
+        else
+        {
+            string countLabel = ItemDefinition.IsElectricityItemDefinition(currentDefinition)
+                ? "Count (kW)"
+                : "Count";
+            int nextCount = EditorGUILayout.IntField(
+                countLabel,
+                Mathf.Max(1, Mathf.RoundToInt(countProperty.floatValue)));
+            countProperty.floatValue = Mathf.Max(1, nextCount);
+        }
         EditorGUILayout.EndHorizontal();
 
         if (currentDefinition != null)
@@ -6291,48 +6429,103 @@ public class ItemDataEditorWindow : EditorWindow
 
         if (countProperty != null)
         {
-            countProperty.intValue = 1;
+            countProperty.floatValue = 1f;
         }
     }
 
-    private static void EnsureInputOutputPairArraySizes(
+    private static void MigrateLegacyInputOutputPairs(
+        SerializedProperty pairsProperty,
         SerializedProperty inputListProperty,
         SerializedProperty outputListProperty,
         SerializedProperty legacyOutputProperty)
     {
-        if (inputListProperty == null || outputListProperty == null)
+        if (pairsProperty == null || pairsProperty.arraySize > 0)
         {
             return;
         }
 
-        bool shouldMigrateLegacyOutput = outputListProperty.arraySize == 0
-            && inputListProperty.arraySize > 0
-            && legacyOutputProperty != null;
-
-        while (outputListProperty.arraySize < inputListProperty.arraySize)
+        int inputCount = inputListProperty != null ? inputListProperty.arraySize : 0;
+        int outputCount = outputListProperty != null ? outputListProperty.arraySize : 0;
+        int pairCount = Mathf.Max(inputCount, outputCount);
+        for (int i = 0; i < pairCount; i++)
         {
-            int insertIndex = outputListProperty.arraySize;
-            outputListProperty.InsertArrayElementAtIndex(insertIndex);
-            SerializedProperty insertedProperty = outputListProperty.GetArrayElementAtIndex(insertIndex);
-
-            if (shouldMigrateLegacyOutput)
+            int pairIndex = pairsProperty.arraySize;
+            pairsProperty.InsertArrayElementAtIndex(pairIndex);
+            SerializedProperty pairProperty = pairsProperty.GetArrayElementAtIndex(pairIndex);
+            ResetInputOutputPair(pairProperty, false);
+            SerializedProperty inputsProperty = pairProperty.FindPropertyRelative("inputs");
+            SerializedProperty outputsProperty = pairProperty.FindPropertyRelative("outputs");
+            if (i < inputCount)
             {
-                CopyInputOutputEntry(legacyOutputProperty, insertedProperty);
+                AddCopiedInputOutputEntry(
+                    inputsProperty,
+                    inputListProperty.GetArrayElementAtIndex(i));
             }
-            else
+
+            if (i < outputCount)
             {
-                ResetInputOutputEntry(insertedProperty);
+                AddCopiedInputOutputEntry(
+                    outputsProperty,
+                    outputListProperty.GetArrayElementAtIndex(i));
+            }
+            else if (outputCount == 0 && legacyOutputProperty != null)
+            {
+                AddCopiedInputOutputEntry(outputsProperty, legacyOutputProperty);
             }
         }
 
-        while (outputListProperty.arraySize > inputListProperty.arraySize)
+        if (inputListProperty != null)
         {
-            outputListProperty.DeleteArrayElementAtIndex(outputListProperty.arraySize - 1);
+            inputListProperty.ClearArray();
         }
 
-        if (shouldMigrateLegacyOutput)
+        if (outputListProperty != null)
         {
-            ResetInputOutputEntry(legacyOutputProperty);
+            outputListProperty.ClearArray();
+        }
+
+        ResetInputOutputEntry(legacyOutputProperty);
+    }
+
+    private static void ResetInputOutputPair(SerializedProperty pairProperty, bool addDefaultEntries)
+    {
+        if (pairProperty == null)
+        {
+            return;
+        }
+
+        SerializedProperty inputsProperty = pairProperty.FindPropertyRelative("inputs");
+        SerializedProperty outputsProperty = pairProperty.FindPropertyRelative("outputs");
+        inputsProperty?.ClearArray();
+        outputsProperty?.ClearArray();
+        if (!addDefaultEntries)
+        {
+            return;
+        }
+
+        AddCopiedInputOutputEntry(inputsProperty, null);
+        AddCopiedInputOutputEntry(outputsProperty, null);
+    }
+
+    private static void AddCopiedInputOutputEntry(
+        SerializedProperty entriesProperty,
+        SerializedProperty sourceProperty)
+    {
+        if (entriesProperty == null)
+        {
+            return;
+        }
+
+        int index = entriesProperty.arraySize;
+        entriesProperty.InsertArrayElementAtIndex(index);
+        SerializedProperty targetProperty = entriesProperty.GetArrayElementAtIndex(index);
+        if (sourceProperty != null)
+        {
+            CopyInputOutputEntry(sourceProperty, targetProperty);
+        }
+        else
+        {
+            ResetInputOutputEntry(targetProperty);
         }
     }
 
@@ -6353,7 +6546,7 @@ public class ItemDataEditorWindow : EditorWindow
         }
 
         targetDefinitionProperty.objectReferenceValue = sourceDefinitionProperty.objectReferenceValue;
-        targetCountProperty.intValue = Mathf.Max(1, sourceCountProperty.intValue);
+        targetCountProperty.floatValue = Mathf.Max(0.0001f, sourceCountProperty.floatValue);
     }
 
     private ItemDefinition[] GetInputOutputDefinitionOptions(List<ItemDefinition> definitions)
@@ -7456,6 +7649,7 @@ public class ItemDataEditorWindow : EditorWindow
             useEnergyTypeValue = (int)definition.useEnergyType,
             useEnergyAmount = Mathf.Max(0f, definition.useEnergyAmount),
             completeEnergy = Mathf.Max(0f, definition.completeEnergy),
+            useEnergyRequirements = BuildEnergyUseJsonEntries(definition),
             utilityPoleConnectionRadius = definition.mapObject is UtilityPole
                 ? Mathf.Max(0, definition.utilityPoleConnectionRadius)
                 : -1,
@@ -7565,23 +7759,65 @@ public class ItemDataEditorWindow : EditorWindow
                     entry.rectGridBlocks.Add(BuildRectGridBlockPlacementJsonEntry(rectGridPlacements[i]));
                 }
 
-                IReadOnlyList<InputOutputModule.ItemIoEntry> inputs = inputOutputModule.LocalInputList;
-                IReadOnlyList<InputOutputModule.ItemIoEntry> outputs = inputOutputModule.LocalOutputList;
-                int pairCount = Mathf.Min(inputs.Count, outputs.Count);
-                for (int i = 0; i < pairCount; i++)
+                IReadOnlyList<InputOutputModule.InputOutputPair> pairs =
+                    inputOutputModule.LocalInputOutputPairs;
+                for (int i = 0; i < pairs.Count; i++)
                 {
-                    InputOutputJsonEntry inputJsonEntry = BuildInputOutputJsonEntry(inputs[i]);
-                    InputOutputJsonEntry outputJsonEntry = BuildInputOutputJsonEntry(outputs[i]);
-                    entry.ioPairs.Add(new InputOutputPairJsonEntry
+                    InputOutputModule.InputOutputPair pair = pairs[i];
+                    var pairJsonEntry = new InputOutputPairJsonEntry();
+                    if (pair?.inputs != null)
                     {
-                        input = inputJsonEntry,
-                        output = outputJsonEntry
-                    });
+                        for (int inputIndex = 0; inputIndex < pair.inputs.Count; inputIndex++)
+                        {
+                            pairJsonEntry.inputs.Add(BuildInputOutputJsonEntry(pair.inputs[inputIndex]));
+                        }
+                    }
+
+                    if (pair?.outputs != null)
+                    {
+                        for (int outputIndex = 0; outputIndex < pair.outputs.Count; outputIndex++)
+                        {
+                            pairJsonEntry.outputs.Add(BuildInputOutputJsonEntry(pair.outputs[outputIndex]));
+                        }
+                    }
+
+                    entry.ioPairs.Add(pairJsonEntry);
                 }
             }
         }
 
         return entry;
+    }
+
+    private static List<EnergyUseJsonEntry> BuildEnergyUseJsonEntries(ItemDefinition definition)
+    {
+        var entries = new List<EnergyUseJsonEntry>();
+        if (definition == null)
+        {
+            return entries;
+        }
+
+        int count = definition.UseEnergyRequirementCount;
+        for (int i = 0; i < count; i++)
+        {
+            if (!definition.TryGetUseEnergyRequirement(
+                    i,
+                    out ItemDefinition.EnergyUseRequirement requirement)
+                || requirement.energyType == ItemDefinition.EnergyType.None)
+            {
+                continue;
+            }
+
+            entries.Add(new EnergyUseJsonEntry
+            {
+                energyType = requirement.energyType.ToString(),
+                energyTypeValue = (int)requirement.energyType,
+                useEnergyAmount = Mathf.Max(0f, requirement.useEnergyAmount),
+                completeEnergy = i == 0 ? Mathf.Max(0f, requirement.completeEnergy) : 0f
+            });
+        }
+
+        return entries;
     }
 
     private static RectGridBlockPlacementJsonEntry BuildRectGridBlockPlacementJsonEntry(InputOutputModule.RectGridBlockPlacement placement)
@@ -7598,7 +7834,7 @@ public class ItemDataEditorWindow : EditorWindow
     {
         InputOutputJsonEntry jsonEntry = BuildDefinitionReferenceJsonEntry(entry.itemDefinition)
                                          ?? new InputOutputJsonEntry();
-        jsonEntry.count = Mathf.Max(1, entry.count);
+        jsonEntry.count = entry.ResolvedAmount;
         return jsonEntry;
     }
 
@@ -7762,9 +7998,50 @@ public class ItemDataEditorWindow : EditorWindow
                 ? LoadAssetAtPath<ResourceDefinition>(entry.seedTargetResourceAssetPath)
                 : null;
         }
-        definition.useEnergyType = ParseEnergyType(entry.useEnergyType, entry.useEnergyTypeValue, definition.useEnergyType);
-        definition.useEnergyAmount = definition.useEnergyType == ItemDefinition.EnergyType.None ? 0f : Mathf.Max(0f, entry.useEnergyAmount);
-        definition.completeEnergy = definition.useEnergyType == ItemDefinition.EnergyType.None ? 0f : Mathf.Max(0f, entry.completeEnergy);
+        if (entry.useEnergyRequirements != null)
+        {
+            List<ItemDefinition.EnergyUseRequirement> requirements =
+                new List<ItemDefinition.EnergyUseRequirement>(entry.useEnergyRequirements.Count);
+            for (int i = 0; i < entry.useEnergyRequirements.Count; i++)
+            {
+                EnergyUseJsonEntry requirementEntry = entry.useEnergyRequirements[i];
+                if (requirementEntry == null)
+                {
+                    continue;
+                }
+
+                ItemDefinition.EnergyType requirementType = ParseEnergyType(
+                    requirementEntry.energyType,
+                    requirementEntry.energyTypeValue,
+                    ItemDefinition.EnergyType.None);
+                if (requirementType != ItemDefinition.EnergyType.None)
+                {
+                    bool isPrimaryRequirement = requirements.Count == 0;
+                    float requirementCompleteEnergy = isPrimaryRequirement
+                        ? Mathf.Max(0f, requirementEntry.completeEnergy)
+                        : 0f;
+                    if (isPrimaryRequirement
+                        && requirementCompleteEnergy <= 0f
+                        && entry.completeEnergy > 0f)
+                    {
+                        requirementCompleteEnergy = entry.completeEnergy;
+                    }
+
+                    requirements.Add(new ItemDefinition.EnergyUseRequirement(
+                        requirementType,
+                        requirementEntry.useEnergyAmount,
+                        requirementCompleteEnergy));
+                }
+            }
+
+            definition.ReplaceUseEnergyRequirements(requirements);
+        }
+        else
+        {
+            definition.useEnergyType = ParseEnergyType(entry.useEnergyType, entry.useEnergyTypeValue, definition.useEnergyType);
+            definition.useEnergyAmount = definition.useEnergyType == ItemDefinition.EnergyType.None ? 0f : Mathf.Max(0f, entry.useEnergyAmount);
+            definition.completeEnergy = definition.useEnergyType == ItemDefinition.EnergyType.None ? 0f : Mathf.Max(0f, entry.completeEnergy);
+        }
         if (entry.utilityPoleConnectionRadius >= 0)
         {
             definition.utilityPoleConnectionRadius = Mathf.Max(0, entry.utilityPoleConnectionRadius);
@@ -8144,6 +8421,7 @@ public class ItemDataEditorWindow : EditorWindow
             rectGridHeightProperty.intValue = Mathf.Max(1, entry.rectGridHeight);
         }
 
+        SerializedProperty pairsProperty = serializedMapObject.FindProperty("inputOutputPairs");
         SerializedProperty inputListProperty = serializedMapObject.FindProperty("inputList");
         SerializedProperty outputListProperty = serializedMapObject.FindProperty("outputList");
         SerializedProperty legacyOutputProperty = serializedMapObject.FindProperty("output");
@@ -8158,11 +8436,16 @@ public class ItemDataEditorWindow : EditorWindow
             outputListProperty.ClearArray();
         }
 
-        if (entry.ioPairs != null)
+        if (pairsProperty != null)
+        {
+            pairsProperty.ClearArray();
+        }
+
+        if (pairsProperty != null && entry.ioPairs != null)
         {
             for (int i = 0; i < entry.ioPairs.Count; i++)
             {
-                ApplyInputOutputPairJson(inputListProperty, outputListProperty, entry.ioPairs[i], definitions);
+                ApplyInputOutputPairJson(pairsProperty, entry.ioPairs[i], definitions);
             }
         }
 
@@ -8277,29 +8560,60 @@ public class ItemDataEditorWindow : EditorWindow
     }
 
     private static void ApplyInputOutputPairJson(
-        SerializedProperty inputListProperty,
-        SerializedProperty outputListProperty,
+        SerializedProperty pairsProperty,
         InputOutputPairJsonEntry pairEntry,
         List<ItemDefinition> definitions)
     {
-        if (pairEntry == null)
+        if (pairsProperty == null || pairEntry == null)
         {
             return;
         }
 
-        if (inputListProperty != null)
+        int pairIndex = pairsProperty.arraySize;
+        pairsProperty.InsertArrayElementAtIndex(pairIndex);
+        SerializedProperty pairProperty = pairsProperty.GetArrayElementAtIndex(pairIndex);
+        ResetInputOutputPair(pairProperty, false);
+        SerializedProperty inputsProperty = pairProperty.FindPropertyRelative("inputs");
+        SerializedProperty outputsProperty = pairProperty.FindPropertyRelative("outputs");
+
+        if (pairEntry.inputs != null && pairEntry.inputs.Count > 0)
         {
-            int inputIndex = inputListProperty.arraySize;
-            inputListProperty.InsertArrayElementAtIndex(inputIndex);
-            ApplyInputOutputEntryJson(inputListProperty.GetArrayElementAtIndex(inputIndex), pairEntry.input, definitions);
+            for (int i = 0; i < pairEntry.inputs.Count; i++)
+            {
+                AddInputOutputEntryJson(inputsProperty, pairEntry.inputs[i], definitions);
+            }
+        }
+        else if (pairEntry.input != null)
+        {
+            AddInputOutputEntryJson(inputsProperty, pairEntry.input, definitions);
         }
 
-        if (outputListProperty != null)
+        if (pairEntry.outputs != null && pairEntry.outputs.Count > 0)
         {
-            int outputIndex = outputListProperty.arraySize;
-            outputListProperty.InsertArrayElementAtIndex(outputIndex);
-            ApplyInputOutputEntryJson(outputListProperty.GetArrayElementAtIndex(outputIndex), pairEntry.output, definitions);
+            for (int i = 0; i < pairEntry.outputs.Count; i++)
+            {
+                AddInputOutputEntryJson(outputsProperty, pairEntry.outputs[i], definitions);
+            }
         }
+        else if (pairEntry.output != null)
+        {
+            AddInputOutputEntryJson(outputsProperty, pairEntry.output, definitions);
+        }
+    }
+
+    private static void AddInputOutputEntryJson(
+        SerializedProperty entriesProperty,
+        InputOutputJsonEntry entry,
+        List<ItemDefinition> definitions)
+    {
+        if (entriesProperty == null)
+        {
+            return;
+        }
+
+        int index = entriesProperty.arraySize;
+        entriesProperty.InsertArrayElementAtIndex(index);
+        ApplyInputOutputEntryJson(entriesProperty.GetArrayElementAtIndex(index), entry, definitions);
     }
 
     private static void ApplyInputOutputEntryJson(SerializedProperty entryProperty, InputOutputJsonEntry entry, List<ItemDefinition> definitions)
@@ -8319,12 +8633,15 @@ public class ItemDataEditorWindow : EditorWindow
         if (entry == null)
         {
             itemDefinitionProperty.objectReferenceValue = null;
-            countProperty.intValue = 1;
+            countProperty.floatValue = 1f;
             return;
         }
 
-        itemDefinitionProperty.objectReferenceValue = ResolveDefinitionReference(definitions, entry);
-        countProperty.intValue = Mathf.Max(1, entry.count);
+        ItemDefinition definition = ResolveDefinitionReference(definitions, entry);
+        itemDefinitionProperty.objectReferenceValue = definition;
+        countProperty.floatValue = InputOutputModule.IsFluidItemDefinition(definition)
+            ? Mathf.Max(0.0001f, entry.count)
+            : Mathf.Max(1, Mathf.RoundToInt(entry.count));
     }
 
     private static ItemDefinition ResolveDefinitionReference(List<ItemDefinition> definitions, ItemDataJsonEntry entry)

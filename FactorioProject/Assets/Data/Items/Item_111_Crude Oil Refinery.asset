@@ -10,34 +10,34 @@ MonoBehaviour:
   m_Enabled: 1
   m_EditorHideFlags: 0
   m_Script: {fileID: 11500000, guid: ccc5c26867f3fd3479193fd24dec463e, type: 3}
-  m_Name: Item_77_Oil
+  m_Name: Item_111_Crude Oil Refinery
   m_EditorClassIdentifier: Assembly-CSharp::ItemDefinition
-  itemName: Oil
-  id: 4
-  mapObject: {fileID: 5889860242806826768, guid: 49b74711fb3fda54cae8e732896a3353, type: 3}
-  mapObjectArchetype: {fileID: 11400000, guid: ae878a7104f2b134dae32b5b1f4a8fa3, type: 2}
+  itemName: Crude Oil Refinery
+  id: 62
+  mapObject: {fileID: 950080818205513044, guid: aa977cfc0de120b4dad23fcfaeac4a10, type: 3}
+  mapObjectArchetype: {fileID: 0}
   useMapColor: 0
   mapColor: {r: 1, g: 1, b: 1, a: 1}
   mapMarkerSize: 1
-  portableMesh: {fileID: 0}
-  portableMat: {fileID: 0}
-  icon: {fileID: 21300000, guid: 636111dedab44373b4ec11621b58c1d3, type: 3}
+  portableMesh: {fileID: 4300000, guid: 628cea7c87ae22644b204243295f4429, type: 2}
+  portableMat: {fileID: 2100000, guid: 1dfbd69284c27484dab13e0668a01836, type: 2}
+  icon: {fileID: 21300000, guid: 2555719673d649040b3aa0c7f74cdd50, type: 3}
   oneItem: 0
   interactionButtonList: []
   lightMode: 0
   lightRange: 6
   lightIntensityMultiplier: 1
-  size: 1
+  size: 0
   itemFilter: 0
-  ignoreFilter: 1
+  ignoreFilter: 0
   isManual: 0
   manualTargetItem: {fileID: 0}
-  upgradeable: 0
+  upgradeable: 1
   keepIoAreaItemsInPlaceWhileEditing: 0
   capacity: 10
   storesFluid: 0
   fluidStorageLiters: 0
-  fluidDisplayColor: {r: 0, g: 0, b: 0, a: 1}
+  fluidDisplayColor: {r: 1, g: 1, b: 1, a: 1}
   fluidOutputLitersPerSecond: 1
   bucketFillDurationSeconds: 10
   undergroundPipeMaxDistance: 5
@@ -47,6 +47,7 @@ MonoBehaviour:
   eatRewardChancePercent: 0
   isSeed: 0
   seedTargetResource: {fileID: 0}
+  useEnergyRequirements: []
   useEnergyType: 0
   useEnergyAmount: 0
   completeEnergy: 0

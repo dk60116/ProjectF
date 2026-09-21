@@ -25,6 +25,7 @@ foreach ($member in @('private bool EnsureInteractionCoordinateCache(', 'private
 foreach ($member in @('private static bool CanPlaceSingleLineDrop(', 'private static bool CanPlaceSavedSingleLineDrop(', 'private static bool CoordinateAcceptsInputAreaObject(', 'private static bool IsConveyorBeltMapObject(', 'private static bool IsOreMapObject(', 'private static bool ShouldUseSavedDropCoordinate(')) {
     $source += (Member $arm $member) + "`n"
 }
+$source += (Member $arm 'private static bool CanPlaceConveyorDrop(') + "`n"
 $source += "} public partial class Train {`n"
 $source += (Member $train 'public bool IsConsistMoving(') + "`n"
 $source += "} public partial class InputOutputModule {`n"

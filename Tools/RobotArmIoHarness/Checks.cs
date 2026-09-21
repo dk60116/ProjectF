@@ -134,6 +134,7 @@ public partial class Block
     public bool ConveyorAccepts = true, CenterAccepts = true, RuntimeConveyor;
     public int ConveyorInteractionBoundaryRequests;
     public int AvailableCapacity = 1;
+    public bool ConsumeConveyorCapacity, RejectConveyorMutation;
     public int ConveyorAdds, CenterAdds;
     public int ReleasedCenterObjects, RuntimeStackChangeNotifications;
     public bool LastUseJumpArc = true;
@@ -182,7 +183,8 @@ public partial class Block
     {
         PlacementReference = placementReference; StartPosition = start; AddDelay = delay;
         LastUseJumpArc = useJumpArc; LastMoveDuration = moveDuration;
-        if (!ConveyorAccepts) { output = null; return false; }
+        if (!ConveyorAccepts || RejectConveyorMutation) { output = null; return false; }
+        if (ConsumeConveyorCapacity) ConveyorAccepts = --AvailableCapacity > 0;
         ConveyorAdds++; output = AddedObject = new PortableObject { ItemId = itemId }; return true;
     }
     public bool TryAddInputAreaCenterObjectAnimated(int itemId, Vector3 start, float delay,
@@ -195,6 +197,7 @@ public partial class Block
 }
 public partial class RobotArm : InputOutputModule
 {
+    public static bool CanDropOnBelt(Block block, int itemId) => CanPlaceConveyorDrop(block, itemId, Vector3.zero);
     private InputOutputModule Prototype => this;
     public static bool AllowsStackFallback(Block block) => CanPlaceSingleLineDrop(block, Vector2Int.zero);
     public static bool AllowsSavedStackFallback(BlockStateStore store) => CanPlaceSavedSingleLineDrop(store, Vector2Int.zero);
@@ -243,6 +246,7 @@ public static partial class Checks
         CheckConveyorDropFallback();
         CheckMachineOutputToConveyor();
         CheckStoredOutputDrainsToConveyor();
+        CheckStoredOutputPriorityOverArm();
         CheckNearestBelt2FDrop();
         string robotArmSource = File.ReadAllText(Path.Combine(
             args[0],
@@ -250,6 +254,17 @@ public static partial class Checks
         robotArmSource += File.ReadAllText(Path.Combine(
             args[0],
             "FactorioProject/Assets/Scripts/Object/MapObj/InstallationObject/RobotArmInstance.InteractionCache.cs"));
+        Require(Regex.Matches(robotArmSource,
+                @"CanPlaceConveyorDrop\(dropBlock, itemId, dropReferenceWorldPosition\)").Count == 2
+                && Regex.IsMatch(robotArmSource,
+                    @"CanPlaceConveyorDrop\(dropBlock, itemId, dropReferenceWorldPosition\)\s*&& dropBlock.TryAddConveyorObjectAnimatedAtPlacement"),
+            "both arm query and final conveyor mutation must enforce stored-output priority");
+        string moduleSource = File.ReadAllText(Path.Combine(args[0],
+            "FactorioProject/Assets/Scripts/Object/MapObj/InstallationObject/InputOutputModule.cs"));
+        Require(!moduleSource.Contains("DrainOutputAreaStack")
+                && Regex.IsMatch(moduleSource,
+                    @"protected void ApplyPlannedBaseModuleTick\(float deltaTime\)\s*\{[^{}]*TryDrainOneOutputAreaItemToConveyor\(\);"),
+            "stored output must check live belt capacity during apply, not a stale plan command");
         Require(!robotArmSource.Contains("HasNearbyRuntimeInteractionTarget"),
             "empty arms must sleep after an actual pickup miss instead of polling nearby installations");
         Require(Regex.IsMatch(
@@ -584,6 +599,40 @@ public static partial class Checks
                 && block.inputAreaCenterStack.Count == 1
                 && block.ReleasedCenterObjects == 1,
             "a full conveyor must preserve the waiting output item until a lane is vacated");
+    }
+
+    private static void CheckStoredOutputPriorityOverArm()
+    {
+        foreach (MapObject belt in new MapObject[] { new ConveyorBelt(), new ConvayorBelt2F(), new Spliterbelt() })
+        {
+            var block = new Block { MapObject = belt, ConsumeConveyorCapacity = true };
+            Require(RobotArm.CanDropOnBelt(block, 17), "an empty belt without stored output must accept an arm");
+            var storedItem = new PortableObject { ItemId = 21 };
+            block.inputAreaCenterStack.Add(storedItem);
+            Require(!RobotArm.CanDropOnBelt(block, 17)
+                    && block.ConveyorAdds == 0 && block.inputAreaCenterStack.Count == 1,
+                "a stack arriving after arm planning must take priority without mutating the query");
+            Require(block.TryTransferOneInputAreaCenterObjectToConveyor()
+                    && block.AddedObject.ItemId == 21 && block.inputAreaCenterStack.Count == 0
+                    && block.ReleasedCenterObjects == 1 && block.RuntimeStackChangeNotifications == 1,
+                "the existing stack must own the last slot and notify observers exactly once");
+            Require(!RobotArm.CanDropOnBelt(block, 17), "the arm must retain its item when the stack fills the belt");
+            block.ConveyorAccepts = true;
+            block.AvailableCapacity = 1;
+            Require(RobotArm.CanDropOnBelt(block, 17), "the arm must resume when the belt opens after the stack drains");
+        }
+
+        var spare = new Block { RuntimeConveyor = true, ConsumeConveyorCapacity = true, AvailableCapacity = 2 };
+        spare.inputAreaCenterStack.Add(new PortableObject { ItemId = 21 });
+        Require(spare.TryTransferOneInputAreaCenterObjectToConveyor() && RobotArm.CanDropOnBelt(spare, 17),
+            "the arm may use remaining capacity in the same tick after the last stack item drains");
+        spare.inputAreaCenterStack.Add(new PortableObject { ItemId = 21 });
+        spare.RejectConveyorMutation = true;
+        Require(!spare.TryTransferOneInputAreaCenterObjectToConveyor()
+                && spare.inputAreaCenterStack.Count == 1 && spare.ReleasedCenterObjects == 1
+                && spare.RuntimeStackChangeNotifications == 1 && !RobotArm.CanDropOnBelt(spare, 17),
+            "a failed drain must restore the stack without notification or loss and preserve its priority");
+        Require(!RobotArm.CanDropOnBelt(new Block(), 17), "ordinary ground must not enter the conveyor drop path");
     }
 
     private static void CheckNearestBelt2FDrop()

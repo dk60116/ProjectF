@@ -139,7 +139,7 @@ MonoBehaviour:
   m_EditorClassIdentifier: 
   id: 0
   objectName: Water pump
-  objId: 53
+  objId: 56
   itemDefinition: {fileID: 11400000, guid: 347029aa316390a4982b64441c83789c, type: 2}
   mapStatus:
     mapSizeX: 1
@@ -165,6 +165,7 @@ MonoBehaviour:
   storedFluidTemperatureCelsius: 20
   powerLinePoint: {fileID: 0}
   parentInputOutputModuleItem: {fileID: 0}
+  inputOutputPairs: []
   inputList: []
   outputList: []
   output:

@@ -128,7 +128,7 @@ MonoBehaviour:
   m_EditorClassIdentifier: 
   id: 0
   objectName: Coal
-  objId: 12
+  objId: 15
   itemDefinition: {fileID: 11400000, guid: 76038fd87aa315c40ad6ad9af1c04071, type: 2}
   mapStatus:
     mapSizeX: 1

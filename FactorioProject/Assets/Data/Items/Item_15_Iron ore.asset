@@ -13,7 +13,7 @@ MonoBehaviour:
   m_Name: Item_15_Iron ore
   m_EditorClassIdentifier: 
   itemName: Iron ore
-  id: 15
+  id: 18
   mapObject: {fileID: 2667034222479840192, guid: 14f483af5ebd67544b8067e0db8985d3, type: 3}
   mapObjectArchetype: {fileID: 11400000, guid: 001c2d7b8ecbbb44c95aac4558186fc5, type: 2}
   useMapColor: 0
@@ -48,6 +48,7 @@ MonoBehaviour:
   eatRewardChancePercent: 0
   isSeed: 0
   seedTargetResource: {fileID: 0}
+  useEnergyRequirements: []
   useEnergyType: 0
   useEnergyAmount: 0
   completeEnergy: 0

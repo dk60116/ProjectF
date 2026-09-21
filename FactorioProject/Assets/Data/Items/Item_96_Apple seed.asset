@@ -13,7 +13,7 @@ MonoBehaviour:
   m_Name: Item_96_Apple seed
   m_EditorClassIdentifier: Assembly-CSharp::ItemDefinition
   itemName: Apple seed
-  id: 97
+  id: 102
   mapObject: {fileID: 0}
   mapObjectArchetype: {fileID: 0}
   useMapColor: 0
@@ -47,6 +47,7 @@ MonoBehaviour:
   eatRewardChancePercent: 0
   isSeed: 1
   seedTargetResource: {fileID: 11400000, guid: 7d9b36e16cb24e89a5c1924bb615df31, type: 2}
+  useEnergyRequirements: []
   useEnergyType: 0
   useEnergyAmount: 0
   completeEnergy: 0

@@ -13,7 +13,7 @@ MonoBehaviour:
   m_Name: Item_58_Railload
   m_EditorClassIdentifier: Assembly-CSharp::ItemDefinition
   itemName: Railload
-  id: 102
+  id: 107
   mapObject: {fileID: 8251220719155574395, guid: 0dc98386c96b46b4a952a73e308a908f, type: 3}
   mapObjectArchetype: {fileID: 11400000, guid: 96598a7a0f423dc46a63d6debeb0878d, type: 2}
   useMapColor: 1
@@ -47,6 +47,7 @@ MonoBehaviour:
   eatRewardChancePercent: 0
   isSeed: 0
   seedTargetResource: {fileID: 0}
+  useEnergyRequirements: []
   useEnergyType: 0
   useEnergyAmount: 0
   completeEnergy: 0

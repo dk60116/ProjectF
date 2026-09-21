@@ -13,7 +13,7 @@ MonoBehaviour:
   m_Name: Item_2_Coal
   m_EditorClassIdentifier: 
   itemName: Coal
-  id: 12
+  id: 15
   mapObject: {fileID: 7543741037075201388, guid: 0376f79f038416846b7ac71c7870f4eb, type: 3}
   mapObjectArchetype: {fileID: 11400000, guid: 988a7f8c3ff7e33489d3b2a689d5d348, type: 2}
   useMapColor: 0
@@ -48,6 +48,7 @@ MonoBehaviour:
   eatRewardChancePercent: 0
   isSeed: 0
   seedTargetResource: {fileID: 0}
+  useEnergyRequirements: []
   useEnergyType: 0
   useEnergyAmount: 0
   completeEnergy: 0

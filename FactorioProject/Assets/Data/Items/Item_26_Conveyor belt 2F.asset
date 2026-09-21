@@ -13,7 +13,7 @@ MonoBehaviour:
   m_Name: Item_26_Conveyor belt 2F
   m_EditorClassIdentifier: 
   itemName: Conveyor belt 2F
-  id: 45
+  id: 48
   mapObject: {fileID: 4923497655988066394, guid: ad2b1061faaacad479734368ff5211cc, type: 3}
   mapObjectArchetype: {fileID: 11400000, guid: 58a378330ebba6640a6bca5bdd634f68, type: 2}
   useMapColor: 1
@@ -47,6 +47,7 @@ MonoBehaviour:
   eatRewardChancePercent: 0
   isSeed: 0
   seedTargetResource: {fileID: 0}
+  useEnergyRequirements: []
   useEnergyType: 0
   useEnergyAmount: 0
   completeEnergy: 0

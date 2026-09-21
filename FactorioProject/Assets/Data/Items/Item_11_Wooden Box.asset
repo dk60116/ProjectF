@@ -13,7 +13,7 @@ MonoBehaviour:
   m_Name: Item_11_Wooden box
   m_EditorClassIdentifier: 
   itemName: Wooden Box
-  id: 26
+  id: 29
   mapObject: {fileID: 6524911674366201629, guid: 7ce21f04ec369dd4595efc204633050b, type: 3}
   mapObjectArchetype: {fileID: 11400000, guid: 9f1056b66a12dc245b572cd179b63e27, type: 2}
   useMapColor: 1
@@ -49,6 +49,7 @@ MonoBehaviour:
   eatRewardChancePercent: 0
   isSeed: 0
   seedTargetResource: {fileID: 0}
+  useEnergyRequirements: []
   useEnergyType: 0
   useEnergyAmount: 0
   completeEnergy: 0

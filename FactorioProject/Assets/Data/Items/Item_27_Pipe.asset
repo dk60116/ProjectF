@@ -13,7 +13,7 @@ MonoBehaviour:
   m_Name: Item_27_Pipe
   m_EditorClassIdentifier: 
   itemName: Pipe
-  id: 51
+  id: 54
   mapObject: {fileID: 196921536911978296, guid: 32693525afd78b34f9eb8e41424827a3, type: 3}
   mapObjectArchetype: {fileID: 11400000, guid: d688881f703090440ba5d7c527a5dcf5, type: 2}
   useMapColor: 1
@@ -47,6 +47,7 @@ MonoBehaviour:
   eatRewardChancePercent: 0
   isSeed: 0
   seedTargetResource: {fileID: 0}
+  useEnergyRequirements: []
   useEnergyType: 0
   useEnergyAmount: 0
   completeEnergy: 0

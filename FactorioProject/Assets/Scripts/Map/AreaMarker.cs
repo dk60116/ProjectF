@@ -404,6 +404,8 @@ public class InputOutputModuleEnergyAreaController : MonoBehaviour
 
     [SerializeField]
     private ItemDefinition.EnergyType acceptedEnergyType = ItemDefinition.EnergyType.None;
+    [SerializeField]
+    private List<ItemDefinition.EnergyType> acceptedEnergyTypes = new List<ItemDefinition.EnergyType>();
 
     [SerializeField]
     private List<Vector2Int> inputEnergyCoordinates = new List<Vector2Int>();
@@ -420,6 +422,11 @@ public class InputOutputModuleEnergyAreaController : MonoBehaviour
     {
         UnregisterCoordinates();
         acceptedEnergyType = energyType;
+        acceptedEnergyTypes.Clear();
+        if (energyType != ItemDefinition.EnergyType.None)
+        {
+            acceptedEnergyTypes.Add(energyType);
+        }
         blocksInstallationPlacement = blocksPlacement;
         inputEnergyCoordinates.Clear();
 
@@ -433,6 +440,48 @@ public class InputOutputModuleEnergyAreaController : MonoBehaviour
             if (!inputEnergyCoordinates.Contains(coordinates[i]))
             {
                 inputEnergyCoordinates.Add(coordinates[i]);
+            }
+        }
+
+        RegisterCoordinates();
+    }
+
+    public void Configure(
+        ItemDefinition definition,
+        IReadOnlyList<Vector2Int> coordinates,
+        bool blocksPlacement = true)
+    {
+        UnregisterCoordinates();
+        acceptedEnergyType = ItemDefinition.EnergyType.None;
+        acceptedEnergyTypes.Clear();
+        blocksInstallationPlacement = blocksPlacement;
+        inputEnergyCoordinates.Clear();
+
+        if (definition != null)
+        {
+            int requirementCount = definition.UseEnergyRequirementCount;
+            for (int i = 0; i < requirementCount; i++)
+            {
+                if (definition.TryGetUseEnergyRequirement(
+                        i,
+                        out ItemDefinition.EnergyUseRequirement requirement)
+                    && requirement.energyType != ItemDefinition.EnergyType.None
+                    && requirement.useEnergyAmount > 0f
+                    && !acceptedEnergyTypes.Contains(requirement.energyType))
+                {
+                    acceptedEnergyTypes.Add(requirement.energyType);
+                }
+            }
+        }
+
+        if (coordinates != null)
+        {
+            for (int i = 0; i < coordinates.Count; i++)
+            {
+                if (!inputEnergyCoordinates.Contains(coordinates[i]))
+                {
+                    inputEnergyCoordinates.Add(coordinates[i]);
+                }
             }
         }
 
@@ -526,7 +575,8 @@ public class InputOutputModuleEnergyAreaController : MonoBehaviour
 
     private void RegisterCoordinates()
     {
-        if (isRegistered || acceptedEnergyType == ItemDefinition.EnergyType.None || inputEnergyCoordinates.Count <= 0)
+        EnsureAcceptedEnergyTypeList();
+        if (isRegistered || acceptedEnergyTypes.Count <= 0 || inputEnergyCoordinates.Count <= 0)
         {
             return;
         }
@@ -541,8 +591,12 @@ public class InputOutputModuleEnergyAreaController : MonoBehaviour
                 registeredEnergyAreas[coordinate] = energyCounts;
             }
 
-            energyCounts.TryGetValue(acceptedEnergyType, out int existingCount);
-            energyCounts[acceptedEnergyType] = existingCount + 1;
+            for (int typeIndex = 0; typeIndex < acceptedEnergyTypes.Count; typeIndex++)
+            {
+                ItemDefinition.EnergyType energyType = acceptedEnergyTypes[typeIndex];
+                energyCounts.TryGetValue(energyType, out int existingCount);
+                energyCounts[energyType] = existingCount + 1;
+            }
             if (blocksInstallationPlacement)
             {
                 placementBlockingAreas.Register(coordinate);
@@ -568,15 +622,22 @@ public class InputOutputModuleEnergyAreaController : MonoBehaviour
                 continue;
             }
 
-            if (energyCounts.TryGetValue(acceptedEnergyType, out int existingCount))
+            EnsureAcceptedEnergyTypeList();
+            for (int typeIndex = 0; typeIndex < acceptedEnergyTypes.Count; typeIndex++)
             {
+                ItemDefinition.EnergyType energyType = acceptedEnergyTypes[typeIndex];
+                if (!energyCounts.TryGetValue(energyType, out int existingCount))
+                {
+                    continue;
+                }
+
                 if (existingCount <= 1)
                 {
-                    energyCounts.Remove(acceptedEnergyType);
+                    energyCounts.Remove(energyType);
                 }
                 else
                 {
-                    energyCounts[acceptedEnergyType] = existingCount - 1;
+                    energyCounts[energyType] = existingCount - 1;
                 }
             }
 
@@ -592,6 +653,14 @@ public class InputOutputModuleEnergyAreaController : MonoBehaviour
         }
 
         isRegistered = false;
+    }
+
+    private void EnsureAcceptedEnergyTypeList()
+    {
+        if (acceptedEnergyTypes.Count <= 0 && acceptedEnergyType != ItemDefinition.EnergyType.None)
+        {
+            acceptedEnergyTypes.Add(acceptedEnergyType);
+        }
     }
 }
 

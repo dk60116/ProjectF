@@ -6,6 +6,16 @@ public class SteamGenerator : InputOutputModule, IFacilityFlowAdapter, IFacility
 {
     private const float FluidEpsilon = 0.0001f;
 
+    internal override bool TryGetRuntimePassiveFluidPass(
+        Vector2Int coordinate,
+        out Vector2Int otherCoordinate,
+        out Vector2Int externalDirection)
+    {
+        otherCoordinate = default;
+        externalDirection = default;
+        return false;
+    }
+
     [SerializeField]
     private InstallationFacingDirection localPipeAreaConnectionDirection = InstallationFacingDirection.PositiveX;
 
@@ -453,7 +463,7 @@ public class SteamGenerator : InputOutputModule, IFacilityFlowAdapter, IFacility
         wattsPerSecond = 0f;
         if (!TryGetObjectInfoOutputRate(out _, out float outputWattsPerSecond)
             || outputWattsPerSecond <= FluidEpsilon
-            || !TryGetSteamInputRecipe(out int inputItemId, out int inputLitersPerSecond)
+            || !TryGetSteamInputRecipe(out int inputItemId, out float inputLitersPerSecond)
             || inputLitersPerSecond <= 0
             || !CanStoreFluid)
         {
@@ -522,7 +532,7 @@ public class SteamGenerator : InputOutputModule, IFacilityFlowAdapter, IFacility
     protected override string ResolveObjectInfoStatus(out bool isProducing)
     {
         isProducing = false;
-        if (!TryGetSteamInputRecipe(out int inputItemId, out int inputLitersPerSecond))
+        if (!TryGetSteamInputRecipe(out int inputItemId, out float inputLitersPerSecond))
         {
             return base.ResolveObjectInfoStatus(out isProducing);
         }
@@ -567,7 +577,7 @@ public class SteamGenerator : InputOutputModule, IFacilityFlowAdapter, IFacility
         long simulationTick)
     {
         EnsureFlowState();
-        bool hasRecipe = TryGetSteamInputRecipe(out int inputItemId, out int inputLitersPerSecond)
+        bool hasRecipe = TryGetSteamInputRecipe(out int inputItemId, out float inputLitersPerSecond)
                          && inputLitersPerSecond > 0;
         bool valid = hasRecipe
                      && (StoredFluidItemId < 0 || CanProvideFluidItem(inputItemId));
@@ -703,7 +713,7 @@ public class SteamGenerator : InputOutputModule, IFacilityFlowAdapter, IFacility
         EnsureFlowState();
     }
 
-    private bool TryGetSteamInputRecipe(out int inputItemId, out int inputLitersPerSecond)
+    private bool TryGetSteamInputRecipe(out int inputItemId, out float inputLitersPerSecond)
     {
         return TryGetSteamGenerationRecipe(
             out inputItemId,
@@ -714,12 +724,12 @@ public class SteamGenerator : InputOutputModule, IFacilityFlowAdapter, IFacility
 
     private bool TryGetSteamGenerationRecipe(
         out int inputItemId,
-        out int inputLitersPerSecond,
+        out float inputLitersPerSecond,
         out int outputItemId,
         out int outputWattsPerSecond)
     {
         inputItemId = -1;
-        inputLitersPerSecond = 0;
+        inputLitersPerSecond = 0f;
         outputItemId = -1;
         outputWattsPerSecond = 0;
 
@@ -745,7 +755,7 @@ public class SteamGenerator : InputOutputModule, IFacilityFlowAdapter, IFacility
                 ItemDefinition outputDefinition = output.itemDefinition;
                 outputItemId = outputDefinition != null ? outputDefinition.id : -1;
                 outputWattsPerSecond = outputItemId >= 0
-                    ? Mathf.RoundToInt(ItemDefinition.ResolveElectricOutputWatts(outputDefinition, output.count))
+                    ? Mathf.RoundToInt(ItemDefinition.ResolveElectricOutputWatts(outputDefinition, output.ResolvedAmount))
                     : 0;
                 if (outputItemId >= 0 && !IsRecipeOutputAvailable(outputItemId))
                 {
@@ -754,7 +764,7 @@ public class SteamGenerator : InputOutputModule, IFacilityFlowAdapter, IFacility
             }
 
             inputItemId = candidateInputItemId;
-            inputLitersPerSecond = Mathf.Max(1, input.count);
+            inputLitersPerSecond = input.ResolvedAmount;
             return true;
         }
 

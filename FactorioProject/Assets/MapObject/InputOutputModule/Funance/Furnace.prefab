@@ -4929,7 +4929,7 @@ MonoBehaviour:
   m_EditorClassIdentifier: 
   id: 0
   objectName: Funance
-  objId: 30
+  objId: 33
   itemDefinition: {fileID: 11400000, guid: 7ad57ef598401784aaa7e239c9a50507, type: 2}
   mapStatus:
     mapSizeX: 1
@@ -4955,40 +4955,57 @@ MonoBehaviour:
   storedFluidTemperatureCelsius: 20
   powerLinePoint: {fileID: 0}
   parentInputOutputModuleItem: {fileID: 0}
-  inputList:
-  - itemDefinition: {fileID: 11400000, guid: cc54448c2b8e64c40a4458e259ad7222, type: 2}
-    count: 1
-  - itemDefinition: {fileID: 11400000, guid: 97f6dea012d4db649abc845562a30b93, type: 2}
-    count: 1
-  - itemDefinition: {fileID: 11400000, guid: 9f4a67f687b990743914d4045038aa8e, type: 2}
-    count: 1
-  - itemDefinition: {fileID: 11400000, guid: fc1cba8967b6adc48867e456639cad4a, type: 2}
-    count: 1
-  - itemDefinition: {fileID: 11400000, guid: 1e1fcabb313ee6840a8a369650290ace, type: 2}
-    count: 2
-  - itemDefinition: {fileID: 11400000, guid: ba64144afa71dcb47b41000e16845b61, type: 2}
-    count: 1
-  - itemDefinition: {fileID: 11400000, guid: c5d6e973a767fdd48a87a2e4708be0cc, type: 2}
-    count: 1
-  - itemDefinition: {fileID: 11400000, guid: e18b544fca5809747ba18ab854492b79, type: 2}
-    count: 1
-  outputList:
-  - itemDefinition: {fileID: 11400000, guid: 57b83ba7916f5cd4ab74c985f88f4a3a, type: 2}
-    count: 2
-  - itemDefinition: {fileID: 11400000, guid: 1e1fcabb313ee6840a8a369650290ace, type: 2}
-    count: 1
-  - itemDefinition: {fileID: 11400000, guid: c386ddb4f7fc1904fbb047de3bff6a99, type: 2}
-    count: 1
-  - itemDefinition: {fileID: 11400000, guid: 5c4efc334bc1582409a913be8af752d3, type: 2}
-    count: 1
-  - itemDefinition: {fileID: 11400000, guid: a025b03cf674e024884437c532dfe480, type: 2}
-    count: 1
-  - itemDefinition: {fileID: 11400000, guid: da7225a987c96d44181d40c5827ce416, type: 2}
-    count: 1
-  - itemDefinition: {fileID: 11400000, guid: da7225a987c96d44181d40c5827ce416, type: 2}
-    count: 1
-  - itemDefinition: {fileID: 11400000, guid: 0e1d27a0f4c177c44985160c21333ad4, type: 2}
-    count: 1
+  inputOutputPairs:
+  - inputs:
+    - itemDefinition: {fileID: 11400000, guid: cc54448c2b8e64c40a4458e259ad7222, type: 2}
+      count: 1
+    outputs:
+    - itemDefinition: {fileID: 11400000, guid: 57b83ba7916f5cd4ab74c985f88f4a3a, type: 2}
+      count: 2
+  - inputs:
+    - itemDefinition: {fileID: 11400000, guid: 97f6dea012d4db649abc845562a30b93, type: 2}
+      count: 1
+    outputs:
+    - itemDefinition: {fileID: 11400000, guid: 1e1fcabb313ee6840a8a369650290ace, type: 2}
+      count: 1
+  - inputs:
+    - itemDefinition: {fileID: 11400000, guid: 9f4a67f687b990743914d4045038aa8e, type: 2}
+      count: 1
+    outputs:
+    - itemDefinition: {fileID: 11400000, guid: c386ddb4f7fc1904fbb047de3bff6a99, type: 2}
+      count: 1
+  - inputs:
+    - itemDefinition: {fileID: 11400000, guid: fc1cba8967b6adc48867e456639cad4a, type: 2}
+      count: 1
+    outputs:
+    - itemDefinition: {fileID: 11400000, guid: 5c4efc334bc1582409a913be8af752d3, type: 2}
+      count: 1
+  - inputs:
+    - itemDefinition: {fileID: 11400000, guid: 1e1fcabb313ee6840a8a369650290ace, type: 2}
+      count: 2
+    outputs:
+    - itemDefinition: {fileID: 11400000, guid: a025b03cf674e024884437c532dfe480, type: 2}
+      count: 1
+  - inputs:
+    - itemDefinition: {fileID: 11400000, guid: ba64144afa71dcb47b41000e16845b61, type: 2}
+      count: 1
+    outputs:
+    - itemDefinition: {fileID: 11400000, guid: da7225a987c96d44181d40c5827ce416, type: 2}
+      count: 1
+  - inputs:
+    - itemDefinition: {fileID: 11400000, guid: c5d6e973a767fdd48a87a2e4708be0cc, type: 2}
+      count: 1
+    outputs:
+    - itemDefinition: {fileID: 11400000, guid: da7225a987c96d44181d40c5827ce416, type: 2}
+      count: 1
+  - inputs:
+    - itemDefinition: {fileID: 11400000, guid: e18b544fca5809747ba18ab854492b79, type: 2}
+      count: 1
+    outputs:
+    - itemDefinition: {fileID: 11400000, guid: 0e1d27a0f4c177c44985160c21333ad4, type: 2}
+      count: 1
+  inputList: []
+  outputList: []
   output:
     itemDefinition: {fileID: 0}
     count: 1

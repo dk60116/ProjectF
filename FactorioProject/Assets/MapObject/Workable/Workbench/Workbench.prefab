@@ -196,7 +196,7 @@ MonoBehaviour:
   m_EditorClassIdentifier: 
   id: 0
   objectName: Workbench
-  objId: 16
+  objId: 19
   itemDefinition: {fileID: 11400000, guid: c7d14445b92c7d0468e83d73c68f384f, type: 2}
   mapStatus:
     mapSizeX: 1

@@ -1200,6 +1200,9 @@ public static class SaveGameBinarySerializer
         writer.Write(state.seedPlanterLoadedSeedItemId);
         WriteVector2Int(writer, state.seedPlanterLoadedSeedInputCoordinate);
         writer.Write(state.seedPlanterTransferRemainingUnits);
+        WriteIntList(writer, state.storedEnergyTypes);
+        WriteLongList(writer, state.storedEnergyUnitsByType);
+        WriteLongList(writer, state.energyGaugeCapacityUnitsByType);
     }
 
     private static InputOutputModule.PersistentState ReadInputOutputState(BinaryReader reader, int version)
@@ -1273,6 +1276,13 @@ public static class SaveGameBinarySerializer
             state.seedPlanterLoadedSeedItemId = reader.ReadInt32();
             state.seedPlanterLoadedSeedInputCoordinate = ReadVector2Int(reader);
             state.seedPlanterTransferRemainingUnits = reader.ReadInt64();
+        }
+
+        if (version >= 65)
+        {
+            state.storedEnergyTypes = ReadIntList(reader);
+            state.storedEnergyUnitsByType = ReadLongList(reader);
+            state.energyGaugeCapacityUnitsByType = ReadLongList(reader);
         }
 
         return state;
@@ -1678,6 +1688,16 @@ public static class SaveGameBinarySerializer
     private static List<int> ReadIntList(BinaryReader reader)
     {
         return ReadList(reader, () => reader.ReadInt32());
+    }
+
+    private static void WriteLongList(BinaryWriter writer, List<long> values)
+    {
+        WriteList(writer, values, (binaryWriter, value) => binaryWriter.Write(value));
+    }
+
+    private static List<long> ReadLongList(BinaryReader reader)
+    {
+        return ReadList(reader, () => reader.ReadInt64());
     }
 
     private static void WriteStringList(BinaryWriter writer, List<string> values)

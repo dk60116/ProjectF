@@ -190,8 +190,8 @@ public class SteamTrain : RailHandcar,
         get
         {
             ItemDefinition installedDefinition = ResolveInstalledDefinition();
-            return installedDefinition != null && installedDefinition.useEnergyType == ItemDefinition.EnergyType.Burn
-                ? ItemDefinition.ResolveUseEnergyRatePerSecond(installedDefinition)
+            return installedDefinition != null && installedDefinition.UsesEnergyType(ItemDefinition.EnergyType.Burn)
+                ? ItemDefinition.ResolveUseEnergyRatePerSecond(installedDefinition, ItemDefinition.EnergyType.Burn)
                 : 0f;
         }
     }
@@ -1044,13 +1044,15 @@ public class SteamTrain : RailHandcar,
 
         ItemDefinition installedDefinition = ResolveInstalledDefinition();
         if (installedDefinition == null
-            || installedDefinition.useEnergyType != ItemDefinition.EnergyType.Burn
+            || !installedDefinition.UsesEnergyType(ItemDefinition.EnergyType.Burn)
             || worldMoveDirection.sqrMagnitude <= 0.0001f)
         {
             return false;
         }
 
-        float burnEnergyPerSecond = ItemDefinition.ResolveUseEnergyRatePerSecond(installedDefinition);
+        float burnEnergyPerSecond = ItemDefinition.ResolveUseEnergyRatePerSecond(
+            installedDefinition,
+            ItemDefinition.EnergyType.Burn);
         burnEnergyCost = burnEnergyPerSecond * Mathf.Max(0f, deltaTime);
         return burnEnergyCost > BurnEnergyEpsilon;
     }

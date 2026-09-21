@@ -1,0 +1,36 @@
+{
+  "Utility pole": {
+    "geometry_uv": {
+      "vertices": 237,
+      "triangles": 426,
+      "overlap_pixels_at_512": 0,
+      "small_triangles_at_2048": 0,
+      "min_uv_area": 8.861482854172209e-07,
+      "min_border_pixels_at_2048": 51.2271728515625
+    },
+    "albedo": {
+      "surface_weighted_mean_error": 0.000895453301527138,
+      "sample_mean_error": 0.000814070695052341,
+      "sample_p95_error": 0.002251497353427111,
+      "max_error": 0.018380120396614075,
+      "samples": 1704
+    }
+  },
+  "Concrete Utility pole": {
+    "geometry_uv": {
+      "vertices": 377,
+      "triangles": 628,
+      "overlap_pixels_at_512": 0,
+      "small_triangles_at_2048": 7,
+      "min_uv_area": 9.741187056988565e-08,
+      "min_border_pixels_at_2048": 51.19998550415039
+    },
+    "albedo": {
+      "surface_weighted_mean_error": 0.006954234481328243,
+      "sample_mean_error": 0.005005585377895533,
+      "sample_p95_error": 0.02504801005125044,
+      "max_error": 0.11924111098051071,
+      "samples": 2512
+    }
+  }
+}

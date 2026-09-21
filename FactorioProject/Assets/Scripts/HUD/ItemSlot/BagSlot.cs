@@ -34,7 +34,6 @@ public class BagSlot : ItemSlot, IBeginDragHandler, IDragHandler, IEndDragHandle
     private const int CraftingMiddleRingSlotLimit = 5;
     private const float CraftingOuterRingSlotPadding = 0.9f;
     protected const float FocusedPickupRange = 999f;
-    private const float StandingTilePickupRange = 999f;
 
     [SerializeField, Range(0.1f, 1f)]
     private float draggingSlotAlpha = 0.6f;
@@ -1001,11 +1000,12 @@ public class BagSlot : ItemSlot, IBeginDragHandler, IDragHandler, IEndDragHandle
     {
         Block standingBlock = null;
         Vector2Int standingCoordinate = ResolveStandingCoordinate(player);
+        float pickupRange = GetPickupRange();
         if (TryGetGroundPickupBlock(terrain, player, standingCoordinate, out standingBlock)
             && standingBlock.TryPreviewPickupFloorObjects(
                 player,
                 origin,
-                GetStandingTilePickupRange(),
+                pickupRange,
                 preferredItemId,
                 out int itemId,
                 out int count,
@@ -1032,7 +1032,6 @@ public class BagSlot : ItemSlot, IBeginDragHandler, IDragHandler, IEndDragHandle
             return;
         }
 
-        float nearbyPickupRange = GetPickupRange();
         for (int offsetY = -1; offsetY <= 1; offsetY++)
         {
             for (int offsetX = -1; offsetX <= 1; offsetX++)
@@ -1046,7 +1045,7 @@ public class BagSlot : ItemSlot, IBeginDragHandler, IDragHandler, IEndDragHandle
                     || !block.TryPreviewPickupFloorObjects(
                         player,
                         origin,
-                        nearbyPickupRange,
+                        pickupRange,
                         preferredItemId,
                         out itemId,
                         out count,
@@ -2154,7 +2153,7 @@ public class BagSlot : ItemSlot, IBeginDragHandler, IDragHandler, IEndDragHandle
                 }
 
                 if (!discoveredCraftingMapObjects.Add(workableObject)
-                    || !workableObject.ContainsWorldPositionInWorkableRange(origin))
+                    || !workableObject.ContainsWorldPositionInConnectedWorkableRange(origin))
                 {
                     continue;
                 }
@@ -3706,7 +3705,7 @@ public class BagSlot : ItemSlot, IBeginDragHandler, IDragHandler, IEndDragHandle
         {
             case PickupSource.Ground:
                 pickedUp = TryPickupGroundCandidate(player, candidate.block, candidate.portable,
-                    origin, GetStandingTilePickupRange());
+                    origin, GetPickupRange());
                 break;
             case PickupSource.Conveyor:
                 pickedUp = TryPickupFocusedConveyorItem(player, candidate.block, FocusedPickupRange, 1);
@@ -3816,11 +3815,6 @@ public class BagSlot : ItemSlot, IBeginDragHandler, IDragHandler, IEndDragHandle
     protected float GetPickupRange()
     {
         return Mathf.Max(0.01f, pickupRange);
-    }
-
-    private static float GetStandingTilePickupRange()
-    {
-        return StandingTilePickupRange;
     }
 
     protected static bool TryGetFocusedConveyorBlock(Player player, out Block focusedConveyorBlock)

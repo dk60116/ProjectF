@@ -48,7 +48,7 @@ MonoBehaviour:
   m_EditorClassIdentifier: Assembly-CSharp::Pump
   id: 0
   objectName: Pump
-  objId: 54
+  objId: 57
   itemDefinition: {fileID: 11400000, guid: 196392e04bd90304ba8d68b0932750f7, type: 2}
   mapStatus:
     mapSizeX: 2
@@ -74,6 +74,7 @@ MonoBehaviour:
   storedFluidTemperatureCelsius: 20
   powerLinePoint: {fileID: 0}
   parentInputOutputModuleItem: {fileID: 0}
+  inputOutputPairs: []
   inputList: []
   outputList: []
   output:

@@ -10,6 +10,16 @@ public class Pump : InputOutputModule
 {
     private const int MaxObjectInfoNetworkSearchNodes = 64;
 
+    internal override bool TryGetRuntimePassiveFluidPass(
+        Vector2Int coordinate,
+        out Vector2Int otherCoordinate,
+        out Vector2Int externalDirection)
+    {
+        otherCoordinate = default;
+        externalDirection = default;
+        return false;
+    }
+
     private readonly Queue<Vector2Int> objectInfoSearchQueue = new Queue<Vector2Int>(8);
     private readonly HashSet<Vector2Int> objectInfoSearchVisited = new HashSet<Vector2Int>();
     private readonly List<RuntimePumpPipePass> objectInfoPumpPasses =

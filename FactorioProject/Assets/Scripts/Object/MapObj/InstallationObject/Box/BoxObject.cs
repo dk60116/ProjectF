@@ -111,6 +111,56 @@ public class BoxObject : InputOutputModule
         return nearestBoxObject != null;
     }
 
+    public static void CopyActiveInstances(List<BoxObject> results)
+    {
+        if (results == null)
+        {
+            return;
+        }
+
+        results.Clear();
+        foreach (BoxObject boxObject in ActiveInstances)
+        {
+            if (boxObject != null && boxObject.isActiveAndEnabled)
+            {
+                results.Add(boxObject);
+            }
+        }
+
+        results.Sort(CompareRuntimeOrder);
+    }
+
+    private static int CompareRuntimeOrder(BoxObject left, BoxObject right)
+    {
+        if (ReferenceEquals(left, right))
+        {
+            return 0;
+        }
+
+        if (left == null)
+        {
+            return 1;
+        }
+
+        if (right == null)
+        {
+            return -1;
+        }
+
+        int comparison = left.RuntimePlacementSequence.CompareTo(right.RuntimePlacementSequence);
+        if (comparison != 0)
+        {
+            return comparison;
+        }
+
+        left.TryGetPlacementRuntime(out Vector2Int leftCoordinate, out _);
+        right.TryGetPlacementRuntime(out Vector2Int rightCoordinate, out _);
+        comparison = leftCoordinate.x.CompareTo(rightCoordinate.x);
+        return comparison != 0
+            ? comparison
+            : leftCoordinate.y.CompareTo(rightCoordinate.y);
+    }
+
     public static bool IsRuntimeContentBlock(Block block)
     {
         return block != null
@@ -323,6 +373,26 @@ public class BoxObject : InputOutputModule
         return Mathf.Max(
             0,
             contentBlock.GetInputAreaCenterItemCount(itemId) - MinimumRetainedItemCount);
+    }
+
+    public int RemoveContainedItems(int itemId, int count)
+    {
+        if (!TryGetContentBlock(out Block contentBlock) || contentBlock == null)
+        {
+            return 0;
+        }
+
+        int remaining = Mathf.Min(
+            Mathf.Max(0, count),
+            GetExtractableContainedItemCount(itemId));
+        int requested = remaining;
+        while (remaining > 0
+               && contentBlock.TryConsumeOneInputAreaCenterObject(itemId, out _))
+        {
+            remaining--;
+        }
+
+        return requested - remaining;
     }
 
     public bool CanTakeContainedObject()

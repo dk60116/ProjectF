@@ -9,14 +9,17 @@ public class InputOutputModule : InstallationObject,
     IMapObjectStagedUpdateTick,
     IItemLightWorkStateProvider
 {
+    private const int EnergyTypeSlotCount = (int)ItemDefinition.EnergyType.LPGGas + 1;
+    private const float MinimumFluidFuelBufferLiters = 50f;
+    private const float FluidFuelBufferSeconds = 2f;
+
     [System.Flags]
     private enum PlannedModuleCommand
     {
         None = 0,
         PullFluid = 1 << 0,
         AdvanceCraft = 1 << 1,
-        StartCraft = 1 << 2,
-        DrainOutputAreaStack = 1 << 3
+        StartCraft = 1 << 2
     }
     public static event System.Action<InputOutputModule> RuntimePipeTopologyChanged;
 
@@ -215,6 +218,27 @@ public class InputOutputModule : InstallationObject,
     }
 
     public virtual float ManagedUpdateTickIntervalSeconds => DefaultManagedUpdateTickIntervalSeconds;
+    public override float FluidStorageCapacityLiters
+    {
+        get
+        {
+            float configuredCapacity = base.FluidStorageCapacityLiters;
+            ItemDefinition definition = ResolveInstalledDefinition();
+            if (!TryGetFluidFuelEnergyType(definition, out ItemDefinition.EnergyType energyType))
+            {
+                return configuredCapacity;
+            }
+
+            float fluidFuelUseRate = ItemDefinition.ResolveUseEnergyRatePerSecond(
+                definition,
+                energyType);
+            return Mathf.Max(
+                configuredCapacity,
+                Mathf.Max(
+                    MinimumFluidFuelBufferLiters,
+                    fluidFuelUseRate * FluidFuelBufferSeconds));
+        }
+    }
     internal bool RequiresFacilityPowerEvaluation =>
         RequiresElectricOperationalEnergy() || this is SteamGenerator;
 
@@ -246,12 +270,35 @@ public class InputOutputModule : InstallationObject,
     public struct ItemIoEntry
     {
         public ItemDefinition itemDefinition;
-        public int count;
+        [Min(0.0001f)] public float count;
 
-        public ItemIoEntry(ItemDefinition itemDefinition, int count)
+        public ItemIoEntry(ItemDefinition itemDefinition, float count)
         {
             this.itemDefinition = itemDefinition;
             this.count = count;
+        }
+
+        public bool IsFluid => IsFluidItemDefinition(itemDefinition);
+        public float ResolvedAmount => IsFluid
+            ? Mathf.Max(0.0001f, count)
+            : Mathf.Max(1, Mathf.RoundToInt(count));
+        public int ResolvedItemCount => Mathf.Max(1, Mathf.RoundToInt(count));
+    }
+
+    [System.Serializable]
+    public sealed class InputOutputPair
+    {
+        public List<ItemIoEntry> inputs = new List<ItemIoEntry>();
+        public List<ItemIoEntry> outputs = new List<ItemIoEntry>();
+
+        public InputOutputPair()
+        {
+        }
+
+        public InputOutputPair(ItemIoEntry input, ItemIoEntry output)
+        {
+            inputs.Add(input);
+            outputs.Add(output);
         }
     }
 
@@ -347,6 +394,9 @@ public class InputOutputModule : InstallationObject,
         public bool hasDeterministicUnits;
         public long storedEnergyUnits;
         public long energyGaugeCapacityUnits;
+        public List<int> storedEnergyTypes = new List<int>();
+        public List<long> storedEnergyUnitsByType = new List<long>();
+        public List<long> energyGaugeCapacityUnitsByType = new List<long>();
         public long remainingCraftTicks;
         public long activeCraftConsumedEnergyUnits;
         public long oilDrillingProgressUnits;
@@ -366,6 +416,9 @@ public class InputOutputModule : InstallationObject,
             energyGaugeCapacity = 0f;
             storedEnergyUnits = 0L;
             energyGaugeCapacityUnits = 0L;
+            storedEnergyTypes.Clear();
+            storedEnergyUnitsByType.Clear();
+            energyGaugeCapacityUnitsByType.Clear();
             hasActiveCraft = false;
             waitingForOutput = false;
             remainingCraftTime = 0f;
@@ -414,6 +467,9 @@ public class InputOutputModule : InstallationObject,
                 hasDeterministicUnits = hasDeterministicUnits,
                 storedEnergyUnits = storedEnergyUnits,
                 energyGaugeCapacityUnits = energyGaugeCapacityUnits,
+                storedEnergyTypes = new List<int>(storedEnergyTypes ?? new List<int>()),
+                storedEnergyUnitsByType = new List<long>(storedEnergyUnitsByType ?? new List<long>()),
+                energyGaugeCapacityUnitsByType = new List<long>(energyGaugeCapacityUnitsByType ?? new List<long>()),
                 remainingCraftTicks = remainingCraftTicks,
                 activeCraftConsumedEnergyUnits = activeCraftConsumedEnergyUnits,
                 oilDrillingProgressUnits = oilDrillingProgressUnits,
@@ -439,8 +495,10 @@ public class InputOutputModule : InstallationObject,
     [SerializeField]
     private ItemDefinition parentInputOutputModuleItem;
     [SerializeField]
+    private List<InputOutputPair> inputOutputPairs = new List<InputOutputPair>();
+    [SerializeField, HideInInspector]
     private List<ItemIoEntry> inputList = new List<ItemIoEntry>();
-    [SerializeField]
+    [SerializeField, HideInInspector]
     private List<ItemIoEntry> outputList = new List<ItemIoEntry>();
     [SerializeField, HideInInspector]
     private ItemIoEntry output = new ItemIoEntry(null, 1);
@@ -492,6 +550,10 @@ public class InputOutputModule : InstallationObject,
     private long storedEnergyUnits;
     [SerializeField]
     private long energyGaugeCapacityUnits;
+    private readonly long[] secondaryStoredEnergyUnitsByType =
+        new long[EnergyTypeSlotCount];
+    private readonly long[] secondaryEnergyGaugeCapacityUnitsByType =
+        new long[EnergyTypeSlotCount];
     // Runtime fields are consolidated here. PersistentState remains the explicit file-format boundary.
     [SerializeField]
     private ProjectF.Simulation.ProductionProcess production = ProjectF.Simulation.ProductionProcess.Empty;
@@ -507,6 +569,9 @@ public class InputOutputModule : InstallationObject,
     private BlockStateStore cachedBlockStateStore;
     private ItemDefinition cachedInstalledDefinition;
     private int cachedInstalledDefinitionId = int.MinValue;
+    private ItemManager cachedFluidFuelItemManager;
+    private int cachedFluidFuelDefinitionCount = -1;
+    private readonly int[] cachedFluidFuelItemIdsByType = new int[EnergyTypeSlotCount];
     private DefaultGauge activeEnergyGauge;
     private DefaultGauge activeCraftProgressGauge;
     private readonly List<Renderer> cachedEnergyGaugeRenderers = new List<Renderer>();
@@ -607,6 +672,9 @@ public class InputOutputModule : InstallationObject,
     private bool areaMarkerControllerResolved;
     private bool runtimeSleeping;
     private bool fluidOutputCapacityBlocked;
+    private readonly List<ItemIoEntry> localInputList = new List<ItemIoEntry>();
+    private readonly List<ItemIoEntry> localOutputList = new List<ItemIoEntry>();
+    private readonly List<InputOutputPair> effectiveInputOutputPairs = new List<InputOutputPair>();
     private readonly List<ItemIoEntry> effectiveInputList = new List<ItemIoEntry>();
     private readonly List<ItemIoEntry> effectiveOutputList = new List<ItemIoEntry>();
     private bool effectivePairDataInitialized;
@@ -617,12 +685,30 @@ public class InputOutputModule : InstallationObject,
 
     public ItemDefinition ParentInputOutputModuleItem => parentInputOutputModuleItem;
 
+    public IReadOnlyList<InputOutputPair> LocalInputOutputPairs
+    {
+        get
+        {
+            EnsurePairData();
+            return inputOutputPairs;
+        }
+    }
+
+    public IReadOnlyList<InputOutputPair> InputOutputPairs
+    {
+        get
+        {
+            EnsureEffectivePairData();
+            return effectiveInputOutputPairs;
+        }
+    }
+
     public IReadOnlyList<ItemIoEntry> LocalInputList
     {
         get
         {
             EnsurePairData();
-            return inputList;
+            return localInputList;
         }
     }
 
@@ -631,7 +717,7 @@ public class InputOutputModule : InstallationObject,
         get
         {
             EnsurePairData();
-            return outputList;
+            return localOutputList;
         }
     }
 
@@ -716,6 +802,7 @@ public class InputOutputModule : InstallationObject,
         IReadOnlyList<Vector2Int> outputCoordinates,
         IReadOnlyList<Vector2Int> pipeInputCoordinates)
     {
+        bool hadRuntimePipeInputs = runtimePipeInputCoordinates.Count > 0;
         UnregisterRuntimeFluidSpatialCoordinates();
         UnregisterRuntimeAreaCoordinates();
         runtimeInputEnergyCoordinates.Clear();
@@ -747,6 +834,13 @@ public class InputOutputModule : InstallationObject,
         cachedTerrain = null;
         cachedBlockStateStore = null;
         WakeRuntimeUpdate();
+        if (hadRuntimePipeInputs || runtimePipeInputCoordinates.Count > 0)
+        {
+            // PlacementRuntimeChanged is raised before the world-space area
+            // coordinates are configured. Invalidate again after registration
+            // so pipe display groups can discover newly installed pass-throughs.
+            NotifyRuntimePipeTopologyChanged(runtimePipeInputCoordinates);
+        }
     }
 
     public void ConfigureRuntimeGridCoordinates(IReadOnlyList<Vector2Int> coordinates)
@@ -787,6 +881,20 @@ public class InputOutputModule : InstallationObject,
             activeOutputItemId = activeOutputItemId,
             activeOutputCount = activeOutputCount
         };
+
+        for (int typeIndex = 1; typeIndex < secondaryStoredEnergyUnitsByType.Length; typeIndex++)
+        {
+            long storedUnits = Math.Max(0L, secondaryStoredEnergyUnitsByType[typeIndex]);
+            long gaugeUnits = Math.Max(0L, secondaryEnergyGaugeCapacityUnitsByType[typeIndex]);
+            if (storedUnits <= 0L && gaugeUnits <= 0L)
+            {
+                continue;
+            }
+
+            state.storedEnergyTypes.Add(typeIndex);
+            state.storedEnergyUnitsByType.Add(storedUnits);
+            state.energyGaugeCapacityUnitsByType.Add(Math.Max(gaugeUnits, storedUnits));
+        }
 
         AddUniqueCoordinates(runtimeInputEnergyCoordinates, state.inputEnergyCoordinates);
         AddUniqueCoordinates(runtimeOutputCoordinates, state.outputCoordinates);
@@ -847,6 +955,26 @@ public class InputOutputModule : InstallationObject,
         energyGaugeCapacityUnits = state.hasDeterministicUnits
             ? System.Math.Max(0L, state.energyGaugeCapacityUnits)
             : DeterministicSimulationUnits.FromFloat(state.energyGaugeCapacity);
+        Array.Clear(secondaryStoredEnergyUnitsByType, 0, secondaryStoredEnergyUnitsByType.Length);
+        Array.Clear(secondaryEnergyGaugeCapacityUnitsByType, 0, secondaryEnergyGaugeCapacityUnitsByType.Length);
+        int secondaryCount = Math.Min(
+            state.storedEnergyTypes?.Count ?? 0,
+            Math.Min(
+                state.storedEnergyUnitsByType?.Count ?? 0,
+                state.energyGaugeCapacityUnitsByType?.Count ?? 0));
+        for (int i = 0; i < secondaryCount; i++)
+        {
+            int typeIndex = state.storedEnergyTypes[i];
+            if (typeIndex <= 0 || typeIndex >= secondaryStoredEnergyUnitsByType.Length)
+            {
+                continue;
+            }
+
+            secondaryStoredEnergyUnitsByType[typeIndex] = Math.Max(0L, state.storedEnergyUnitsByType[i]);
+            secondaryEnergyGaugeCapacityUnitsByType[typeIndex] = Math.Max(
+                secondaryStoredEnergyUnitsByType[typeIndex],
+                state.energyGaugeCapacityUnitsByType[i]);
+        }
         hasActiveCraft = state.hasActiveCraft;
         waitingForOutput = state.waitingForOutput;
         remainingCraftTicks = state.hasDeterministicUnits
@@ -900,6 +1028,8 @@ public class InputOutputModule : InstallationObject,
         runtimeFocusCoordinates.Clear();
         storedEnergyUnits = 0L;
         energyGaugeCapacityUnits = 0L;
+        Array.Clear(secondaryStoredEnergyUnitsByType, 0, secondaryStoredEnergyUnitsByType.Length);
+        Array.Clear(secondaryEnergyGaugeCapacityUnitsByType, 0, secondaryEnergyGaugeCapacityUnitsByType.Length);
         hasActiveCraft = false;
         waitingForOutput = false;
         remainingCraftTicks = 0L;
@@ -913,6 +1043,9 @@ public class InputOutputModule : InstallationObject,
         cachedBlockStateStore = null;
         cachedInstalledDefinition = null;
         cachedInstalledDefinitionId = int.MinValue;
+        cachedFluidFuelItemManager = null;
+        cachedFluidFuelDefinitionCount = -1;
+        Array.Fill(cachedFluidFuelItemIdsByType, -1);
         ReleaseFacilityFlowState();
         base.PrepareForPool();
     }
@@ -1153,6 +1286,38 @@ public class InputOutputModule : InstallationObject,
         return pump != null;
     }
 
+    internal static bool TryGetPassiveFluidPassAtRuntimeCoordinate(
+        Vector2Int coordinate,
+        out InputOutputModule passOwner,
+        out Vector2Int otherCoordinate,
+        out Vector2Int externalDirection)
+    {
+        passOwner = null;
+        otherCoordinate = default;
+        externalDirection = default;
+        SelectPassiveFluidPass(
+            registeredRuntimeAreaCoordinates.TryGetValue(
+                coordinate,
+                out HashSet<InputOutputModule> areaModules)
+                ? areaModules
+                : null,
+            coordinate,
+            ref passOwner,
+            ref otherCoordinate,
+            ref externalDirection);
+        SelectPassiveFluidPass(
+            registeredRuntimeGridCoordinates.TryGetValue(
+                coordinate,
+                out HashSet<InputOutputModule> gridModules)
+                ? gridModules
+                : null,
+            coordinate,
+            ref passOwner,
+            ref otherCoordinate,
+            ref externalDirection);
+        return passOwner != null;
+    }
+
     internal readonly struct RuntimePumpPipePass
     {
         public readonly Pump Pump;
@@ -1348,6 +1513,38 @@ public class InputOutputModule : InstallationObject,
             }
 
             bestPump = candidate;
+            otherCoordinate = candidateOtherCoordinate;
+            externalDirection = candidateExternalDirection;
+        }
+    }
+
+    private static void SelectPassiveFluidPass(
+        IEnumerable<InputOutputModule> modules,
+        Vector2Int coordinate,
+        ref InputOutputModule bestPassOwner,
+        ref Vector2Int otherCoordinate,
+        ref Vector2Int externalDirection)
+    {
+        if (modules == null)
+        {
+            return;
+        }
+
+        foreach (InputOutputModule candidate in modules)
+        {
+            if (candidate == null
+                || !candidate.gameObject.activeInHierarchy
+                || !candidate.TryGetRuntimePassiveFluidPass(
+                    coordinate,
+                    out Vector2Int candidateOtherCoordinate,
+                    out Vector2Int candidateExternalDirection)
+                || bestPassOwner != null
+                && CompareSimulationOrder(candidate, bestPassOwner) >= 0)
+            {
+                continue;
+            }
+
+            bestPassOwner = candidate;
             otherCoordinate = candidateOtherCoordinate;
             externalDirection = candidateExternalDirection;
         }
@@ -2238,13 +2435,7 @@ public class InputOutputModule : InstallationObject,
         }
 
         ItemDefinition installedDefinition = ResolveInstalledDefinition();
-        if (installedDefinition == null || installedDefinition.useEnergyType == ItemDefinition.EnergyType.None)
-        {
-            return false;
-        }
-
-        energyTypes.Add(installedDefinition.useEnergyType);
-        return true;
+        return installedDefinition != null && installedDefinition.AppendUseEnergyTypes(energyTypes);
     }
 
     protected override bool UsesManagedVisualUpdates => true;
@@ -2274,11 +2465,6 @@ public class InputOutputModule : InstallationObject,
         if (!Application.isPlaying)
         {
             return;
-        }
-
-        if (HasDrainableOutputAreaConveyorItem())
-        {
-            plannedModuleCommands |= PlannedModuleCommand.DrainOutputAreaStack;
         }
 
         if (CanStoreFluid && ShouldAutoPullFluidFromConnectedStorage())
@@ -2322,10 +2508,9 @@ public class InputOutputModule : InstallationObject,
     {
         runtimeSleeping = false;
         EnsureEffectivePairData();
-        if ((plannedModuleCommands & PlannedModuleCommand.DrainOutputAreaStack) != 0)
-        {
-            TryDrainOneOutputAreaItemToConveyor();
-        }
+        // Belt transport applies after planning and may have just opened a slot.
+        // Drain stored output before producing or accepting competing arm output.
+        TryDrainOneOutputAreaItemToConveyor();
 
         if ((plannedModuleCommands & PlannedModuleCommand.PullFluid) != 0 && CanStoreFluid)
         {
@@ -2985,6 +3170,9 @@ public class InputOutputModule : InstallationObject,
                 out Quaternion pipeRotation,
                 out PipeRuntimeRecord pipeRecord);
             EnqueueFluidStoragePipePassCoordinatesAt(coordinate);
+            bool hasPassiveFluidPass = TryEnqueuePassiveFluidPassesAt(
+                coordinate,
+                out int passivePassExternalDirectionMask);
             bool hasPumpPressureResetPass = TryEnqueuePumpPressureResetPassesAt(
                 coordinate,
                 true,
@@ -3002,7 +3190,8 @@ public class InputOutputModule : InstallationObject,
                     0,
                     ResolveConnectedFluidPipeCount(connectedFluidSearchCurrentPipeCount) - 1));
 
-            if (!isSeedCoordinate && !hasPipe && !storageIsPipeArea && !hasPumpPressureResetPass
+            if (!isSeedCoordinate && !hasPipe && !storageIsPipeArea
+                && !hasPassiveFluidPass && !hasPumpPressureResetPass
                 && !IsFixedFluidTank(fluidStorage)
                 && !(UsesConnectedTankNetworkStorage && fluidStorage is Fluidtank))
             {
@@ -3012,7 +3201,7 @@ public class InputOutputModule : InstallationObject,
             for (int directionIndex = 0; directionIndex < FluidCardinalDirections.Length; directionIndex++)
             {
                 Vector2Int direction = FluidCardinalDirections[directionIndex];
-                if (hasPipe && !hasPumpPressureResetPass
+                if (hasPipe && !hasPumpPressureResetPass && !hasPassiveFluidPass
                     && !HasConnectedPipeConnectionTowards(
                         pipe,
                         pipeRecord,
@@ -3023,13 +3212,15 @@ public class InputOutputModule : InstallationObject,
                     continue;
                 }
 
-                if (hasPumpPressureResetPass
-                    && !DirectionMaskContains(pumpPassExternalDirectionMask, directionIndex))
+                if ((hasPumpPressureResetPass || hasPassiveFluidPass)
+                    && !DirectionMaskContains(
+                        pumpPassExternalDirectionMask | passivePassExternalDirectionMask,
+                        directionIndex))
                 {
                     continue;
                 }
 
-                if (!hasPipe && !hasPumpPressureResetPass
+                if (!hasPipe && !hasPumpPressureResetPass && !hasPassiveFluidPass
                     && !CanFluidSearchLeaveCoordinate(
                         coordinate,
                         isSeedCoordinate,
@@ -3072,7 +3263,7 @@ public class InputOutputModule : InstallationObject,
                 }
             }
 
-            if (hasPipe && !hasPumpPressureResetPass
+            if (hasPipe && !hasPumpPressureResetPass && !hasPassiveFluidPass
                 && TryGetConnectedPipeRemoteCoordinate(
                     pipe,
                     pipeRecord,
@@ -3139,6 +3330,63 @@ public class InputOutputModule : InstallationObject,
         }
 
         return foundPipeArea;
+    }
+
+    private bool TryEnqueuePassiveFluidPassesAt(
+        Vector2Int coordinate,
+        out int externalDirectionMask)
+    {
+        externalDirectionMask = 0;
+        bool foundPass = EnqueuePassiveFluidPassesAt(
+            registeredRuntimeAreaCoordinates.TryGetValue(
+                coordinate,
+                out HashSet<InputOutputModule> areaModules)
+                ? areaModules
+                : null,
+            coordinate,
+            ref externalDirectionMask);
+        return EnqueuePassiveFluidPassesAt(
+                   registeredRuntimeGridCoordinates.TryGetValue(
+                       coordinate,
+                       out HashSet<InputOutputModule> gridModules)
+                       ? gridModules
+                       : null,
+                   coordinate,
+                   ref externalDirectionMask)
+               || foundPass;
+    }
+
+    private bool EnqueuePassiveFluidPassesAt(
+        IEnumerable<InputOutputModule> modules,
+        Vector2Int coordinate,
+        ref int externalDirectionMask)
+    {
+        if (modules == null)
+        {
+            return false;
+        }
+
+        bool foundPass = false;
+        foreach (InputOutputModule module in modules)
+        {
+            if (module == null
+                || !module.gameObject.activeInHierarchy
+                || !module.TryGetRuntimePassiveFluidPass(
+                    coordinate,
+                    out Vector2Int otherCoordinate,
+                    out Vector2Int externalDirection))
+            {
+                continue;
+            }
+
+            externalDirectionMask |= GetDirectionMask(externalDirection);
+            EnqueueConnectedFluidSearchCoordinate(
+                otherCoordinate,
+                connectedFluidSearchCurrentPipeCount);
+            foundPass = true;
+        }
+
+        return foundPass;
     }
 
     private bool TryEnqueuePumpPressureResetPassesAt(
@@ -3294,6 +3542,14 @@ public class InputOutputModule : InstallationObject,
 
     protected virtual int ResolvePreferredFluidInputItemId()
     {
+        ItemDefinition installedDefinition = ResolveInstalledDefinition();
+        if (TryGetFluidFuelEnergyType(
+                installedDefinition,
+                out ItemDefinition.EnergyType fluidFuelEnergyType))
+        {
+            return ResolveFluidFuelItemId(fluidFuelEnergyType);
+        }
+
         int recipeCount = GetEffectiveRecipeCount();
         for (int recipeIndex = 0; recipeIndex < recipeCount; recipeIndex++)
         {
@@ -3317,14 +3573,26 @@ public class InputOutputModule : InstallationObject,
             return false;
         }
 
+        ItemDefinition installedDefinition = ResolveInstalledDefinition();
+        bool usesFluidFuelInput = TryGetFluidFuelEnergyType(
+            installedDefinition,
+            out ItemDefinition.EnergyType fluidFuelEnergyType);
+        int fluidFuelItemId = usesFluidFuelInput
+            ? ResolveFluidFuelItemId(fluidFuelEnergyType)
+            : -1;
         if (fluidItemId < 0)
+        {
+            return !usesFluidFuelInput || fluidFuelItemId >= 0;
+        }
+
+        if (usesFluidFuelInput && fluidItemId == fluidFuelItemId)
         {
             return true;
         }
 
         if (!HasFluidInputRecipe())
         {
-            return true;
+            return !usesFluidFuelInput;
         }
 
         return CanAcceptFluidInputItem(fluidItemId);
@@ -3376,8 +3644,7 @@ public class InputOutputModule : InstallationObject,
     {
         int storedFluidItemId = StoredFluidItemId;
         if (storedFluidItemId < 0
-            || !HasFluidInputRecipe()
-            || CanAcceptFluidInputItem(storedFluidItemId))
+            || CanAcceptFluidItem(storedFluidItemId, 0f))
         {
             return;
         }
@@ -3405,7 +3672,13 @@ public class InputOutputModule : InstallationObject,
         AddRuntimePipeAreaCoordinates(runtimeOutputCoordinates, coordinates);
         AddRuntimePipeAreaCoordinates(runtimePipeInputCoordinates, coordinates);
 
-        if (CanStoreFluid && coordinates.Count == originalCount)
+        ItemDefinition installedDefinition = ResolveInstalledDefinition();
+        bool hasConfiguredFluidStorage = installedDefinition != null
+                                         && installedDefinition.storesFluid
+                                         && installedDefinition.fluidStorageLiters > 0f;
+        if (CanStoreFluid
+            && coordinates.Count == originalCount
+            && hasConfiguredFluidStorage)
         {
             AddRuntimeFluidStoragePipeNodeCoordinates(RuntimeOccupiedCoordinates, coordinates);
         }
@@ -3482,6 +3755,12 @@ public class InputOutputModule : InstallationObject,
         // pass because its resolved visual variant need not expose the inward
         // connection in the runtime pipe mask.
         if (HasRuntimePumpPipePassTowards(coordinate, directionToPrevious))
+        {
+            canContinueRoute = true;
+            return true;
+        }
+
+        if (HasRuntimePassiveFluidPassTowards(coordinate, directionToPrevious))
         {
             canContinueRoute = true;
             return true;
@@ -3745,6 +4024,47 @@ public class InputOutputModule : InstallationObject,
         return direction != Vector2Int.zero;
     }
 
+    internal virtual bool TryGetRuntimePassiveFluidPass(
+        Vector2Int coordinate,
+        out Vector2Int otherCoordinate,
+        out Vector2Int externalDirection)
+    {
+        return TryGetPairedRuntimePipeInputPass(
+            coordinate,
+            out otherCoordinate,
+            out externalDirection);
+    }
+
+    protected bool TryGetPairedRuntimePipeInputPass(
+        Vector2Int coordinate,
+        out Vector2Int otherCoordinate,
+        out Vector2Int externalDirection)
+    {
+        otherCoordinate = default;
+        externalDirection = default;
+        if (runtimePipeInputCoordinates == null
+            || runtimePipeInputCoordinates.Count != 2
+            || !TryGetRuntimePipeAreaExternalDirection(coordinate, out externalDirection))
+        {
+            return false;
+        }
+
+        if (runtimePipeInputCoordinates[0] == coordinate)
+        {
+            otherCoordinate = runtimePipeInputCoordinates[1];
+        }
+        else if (runtimePipeInputCoordinates[1] == coordinate)
+        {
+            otherCoordinate = runtimePipeInputCoordinates[0];
+        }
+        else
+        {
+            return false;
+        }
+
+        return otherCoordinate != coordinate;
+    }
+
     private bool TryGetNearestRuntimeObjectDirectionFromCoordinate(Vector2Int coordinate, out Vector2Int direction)
     {
         direction = Vector2Int.zero;
@@ -3890,6 +4210,56 @@ public class InputOutputModule : InstallationObject,
                        externalDirection));
     }
 
+    internal static bool HasRuntimePassiveFluidPassTowards(
+        Vector2Int coordinate,
+        Vector2Int externalDirection)
+    {
+        return externalDirection != Vector2Int.zero
+               && (HasPassiveFluidPassTowards(
+                       registeredRuntimeAreaCoordinates.TryGetValue(
+                           coordinate,
+                           out HashSet<InputOutputModule> areaModules)
+                           ? areaModules
+                           : null,
+                       coordinate,
+                       externalDirection)
+                   || HasPassiveFluidPassTowards(
+                       registeredRuntimeGridCoordinates.TryGetValue(
+                           coordinate,
+                           out HashSet<InputOutputModule> gridModules)
+                           ? gridModules
+                           : null,
+                       coordinate,
+                       externalDirection));
+    }
+
+    private static bool HasPassiveFluidPassTowards(
+        IEnumerable<InputOutputModule> modules,
+        Vector2Int coordinate,
+        Vector2Int externalDirection)
+    {
+        if (modules == null)
+        {
+            return false;
+        }
+
+        foreach (InputOutputModule module in modules)
+        {
+            if (module != null
+                && module.gameObject.activeInHierarchy
+                && module.TryGetRuntimePassiveFluidPass(
+                    coordinate,
+                    out _,
+                    out Vector2Int candidateExternalDirection)
+                && candidateExternalDirection == externalDirection)
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
     private static bool HasPumpPipePassTowards(
         IEnumerable<InputOutputModule> modules,
         Vector2Int coordinate,
@@ -4016,7 +4386,14 @@ public class InputOutputModule : InstallationObject,
         RefreshWorkAnimatorState(true);
         if (HasRuntimePipeTopologyCoordinates())
         {
-            RuntimePipeTopologyChanged?.Invoke(this);
+            if (runtimePipeInputCoordinates.Count > 0)
+            {
+                NotifyRuntimePipeTopologyChanged(runtimePipeInputCoordinates);
+            }
+            else
+            {
+                RuntimePipeTopologyChanged?.Invoke(this);
+            }
         }
     }
 
@@ -4026,6 +4403,7 @@ public class InputOutputModule : InstallationObject,
 
         fluidOutputRateMeter?.Reset();
         bool hadRuntimePipeTopologyCoordinates = HasRuntimePipeTopologyCoordinates();
+        bool hadRuntimePipeInputs = runtimePipeInputCoordinates.Count > 0;
         SetWorkAnimatorState(false, true);
         StopCraftParticleEffectVisual(true);
         FacilitySimulationWorld.Unregister(this);
@@ -4039,7 +4417,14 @@ public class InputOutputModule : InstallationObject,
         activeRuntimeModules.Remove(this);
         if (hadRuntimePipeTopologyCoordinates)
         {
-            RuntimePipeTopologyChanged?.Invoke(this);
+            if (hadRuntimePipeInputs)
+            {
+                NotifyRuntimePipeTopologyChanged(runtimePipeInputCoordinates);
+            }
+            else
+            {
+                RuntimePipeTopologyChanged?.Invoke(this);
+            }
         }
         ReleaseEnergyGaugeVisual();
         base.OnDisable();
@@ -4084,6 +4469,11 @@ public class InputOutputModule : InstallationObject,
 
     private void EnsurePairData()
     {
+        if (inputOutputPairs == null)
+        {
+            inputOutputPairs = new List<InputOutputPair>();
+        }
+
         if (inputList == null)
         {
             inputList = new List<ItemIoEntry>();
@@ -4094,41 +4484,79 @@ public class InputOutputModule : InstallationObject,
             outputList = new List<ItemIoEntry>();
         }
 
-        for (int i = 0; i < inputList.Count; i++)
+        if (inputOutputPairs.Count == 0 && (inputList.Count > 0 || outputList.Count > 0))
         {
-            ItemIoEntry entry = inputList[i];
-            entry.count = Mathf.Max(1, entry.count);
-            inputList[i] = entry;
+            MigrateLegacyPairData();
         }
 
-        if (outputList.Count == 0 && inputList.Count > 0)
+        localInputList.Clear();
+        localOutputList.Clear();
+        for (int pairIndex = 0; pairIndex < inputOutputPairs.Count; pairIndex++)
         {
-            ItemIoEntry migratedOutput = output;
-            migratedOutput.count = Mathf.Max(1, migratedOutput.count);
-
-            for (int i = 0; i < inputList.Count; i++)
+            InputOutputPair pair = inputOutputPairs[pairIndex];
+            if (pair == null)
             {
-                outputList.Add(migratedOutput);
+                pair = new InputOutputPair();
+                inputOutputPairs[pairIndex] = pair;
             }
 
+            pair.inputs ??= new List<ItemIoEntry>();
+            pair.outputs ??= new List<ItemIoEntry>();
+            NormalizePairEntries(pair.inputs, localInputList);
+            NormalizePairEntries(pair.outputs, localOutputList);
+        }
+    }
+
+    private void MigrateLegacyPairData()
+    {
+        int legacyPairCount = Mathf.Max(inputList.Count, outputList.Count);
+        ItemIoEntry migratedOutput = output;
+        migratedOutput.count = migratedOutput.ResolvedAmount;
+        for (int pairIndex = 0; pairIndex < legacyPairCount; pairIndex++)
+        {
+            InputOutputPair pair = new InputOutputPair();
+            if (pairIndex < inputList.Count)
+            {
+                ItemIoEntry inputEntry = inputList[pairIndex];
+                inputEntry.count = inputEntry.ResolvedAmount;
+                pair.inputs.Add(inputEntry);
+            }
+
+            if (pairIndex < outputList.Count)
+            {
+                ItemIoEntry outputEntry = outputList[pairIndex];
+                outputEntry.count = outputEntry.ResolvedAmount;
+                pair.outputs.Add(outputEntry);
+            }
+            else if (outputList.Count == 0 && inputList.Count > 0)
+            {
+                pair.outputs.Add(migratedOutput);
+            }
+
+            inputOutputPairs.Add(pair);
+        }
+
+        if (legacyPairCount > 0)
+        {
+            inputList.Clear();
+            outputList.Clear();
             output = new ItemIoEntry(null, 1);
         }
+    }
 
-        while (outputList.Count < inputList.Count)
+    private static void NormalizePairEntries(List<ItemIoEntry> entries, List<ItemIoEntry> flattenedEntries)
+    {
+        if (entries == null || flattenedEntries == null)
         {
-            outputList.Add(new ItemIoEntry(null, 1));
+            return;
         }
 
-        while (outputList.Count > inputList.Count)
+        for (int i = 0; i < entries.Count; i++)
         {
-            outputList.RemoveAt(outputList.Count - 1);
-        }
-
-        for (int i = 0; i < outputList.Count; i++)
-        {
-            ItemIoEntry entry = outputList[i];
-            entry.count = Mathf.Max(1, entry.count);
-            outputList[i] = entry;
+            ItemIoEntry entry = entries[i];
+            entry.count = entry.ResolvedAmount;
+            entries[i] = entry;
+            flattenedEntries.Add(entry);
         }
     }
 
@@ -4673,27 +5101,37 @@ public class InputOutputModule : InstallationObject,
 
         effectiveInputList.Clear();
         effectiveOutputList.Clear();
+        effectiveInputOutputPairs.Clear();
         HashSet<InputOutputModule> visitedModules = new HashSet<InputOutputModule>();
-        AppendEffectivePairData(this, visitedModules, effectiveInputList, effectiveOutputList);
+        AppendEffectivePairData(this, visitedModules, effectiveInputOutputPairs);
+        for (int pairIndex = 0; pairIndex < effectiveInputOutputPairs.Count; pairIndex++)
+        {
+            InputOutputPair pair = effectiveInputOutputPairs[pairIndex];
+            if (pair == null)
+            {
+                continue;
+            }
+
+            AppendEntries(pair.inputs, effectiveInputList);
+            AppendEntries(pair.outputs, effectiveOutputList);
+        }
         effectivePairDataInitialized = true;
     }
 
     private int GetEffectiveRecipeCount()
     {
         EnsureEffectivePairData();
-        return Mathf.Min(effectiveInputList.Count, effectiveOutputList.Count);
+        return effectiveInputOutputPairs.Count;
     }
 
     private static void AppendEffectivePairData(
         InputOutputModule module,
         ISet<InputOutputModule> visitedModules,
-        List<ItemIoEntry> resolvedInputs,
-        List<ItemIoEntry> resolvedOutputs)
+        List<InputOutputPair> resolvedPairs)
     {
         if (module == null
             || visitedModules == null
-            || resolvedInputs == null
-            || resolvedOutputs == null
+            || resolvedPairs == null
             || !visitedModules.Add(module))
         {
             return;
@@ -4703,14 +5141,28 @@ public class InputOutputModule : InstallationObject,
         AppendEffectivePairData(
             module.ResolveParentInputOutputModule(),
             visitedModules,
-            resolvedInputs,
-            resolvedOutputs);
+            resolvedPairs);
 
-        int localPairCount = Mathf.Min(module.inputList.Count, module.outputList.Count);
-        for (int i = 0; i < localPairCount; i++)
+        for (int i = 0; i < module.inputOutputPairs.Count; i++)
         {
-            resolvedInputs.Add(module.inputList[i]);
-            resolvedOutputs.Add(module.outputList[i]);
+            InputOutputPair pair = module.inputOutputPairs[i];
+            if (pair != null)
+            {
+                resolvedPairs.Add(pair);
+            }
+        }
+    }
+
+    private static void AppendEntries(IReadOnlyList<ItemIoEntry> source, List<ItemIoEntry> target)
+    {
+        if (source == null || target == null)
+        {
+            return;
+        }
+
+        for (int i = 0; i < source.Count; i++)
+        {
+            target.Add(source[i]);
         }
     }
 
@@ -4903,7 +5355,7 @@ public class InputOutputModule : InstallationObject,
 
         ItemDefinition installedDefinition = ResolveInstalledDefinition();
         if (installedDefinition == null
-            || installedDefinition.useEnergyType != ItemDefinition.EnergyType.Burn
+            || !installedDefinition.UsesEnergyType(ItemDefinition.EnergyType.Burn)
             || runtimeInputEnergyCoordinates == null
             || runtimeInputEnergyCoordinates.Count <= 0)
         {
@@ -4916,7 +5368,7 @@ public class InputOutputModule : InstallationObject,
             1);
         burnEnergyAmount = GetRuntimeAreaEnergyAmount(
             runtimeInputEnergyCoordinates,
-            installedDefinition.useEnergyType);
+            ItemDefinition.EnergyType.Burn);
         return true;
     }
 
@@ -4924,18 +5376,81 @@ public class InputOutputModule : InstallationObject,
         out ItemDefinition.EnergyType energyType,
         out float amountPerSecond)
     {
+        return TryGetObjectInfoEnergyUseRate(0, out energyType, out amountPerSecond);
+    }
+
+    public bool TryGetObjectInfoFluidStorageItemId(out int fluidItemId)
+    {
+        fluidItemId = StoredFluidItemId >= 0
+            ? StoredFluidItemId
+            : ResolvePreferredFluidInputItemId();
+        return fluidItemId >= 0;
+    }
+
+    public int GetObjectInfoEnergyUseRateCount()
+    {
+        return ResolveObjectInfoEnergyUseRates(-1, out _, out _);
+    }
+
+    public bool TryGetObjectInfoEnergyUseRate(
+        int displayIndex,
+        out ItemDefinition.EnergyType energyType,
+        out float amountPerSecond)
+    {
         energyType = ItemDefinition.EnergyType.None;
         amountPerSecond = 0f;
+        return displayIndex >= 0
+               && ResolveObjectInfoEnergyUseRates(displayIndex, out energyType, out amountPerSecond)
+               > displayIndex;
+    }
+
+    private int ResolveObjectInfoEnergyUseRates(
+        int requestedDisplayIndex,
+        out ItemDefinition.EnergyType requestedEnergyType,
+        out float requestedAmountPerSecond)
+    {
+        requestedEnergyType = ItemDefinition.EnergyType.None;
+        requestedAmountPerSecond = 0f;
 
         ItemDefinition installedDefinition = ResolveInstalledDefinition();
         if (!RequiresOperationalEnergy(installedDefinition))
         {
-            return false;
+            return 0;
         }
 
-        energyType = installedDefinition.useEnergyType;
-        amountPerSecond = ItemDefinition.ResolveUseEnergyRatePerSecond(installedDefinition);
-        return energyType != ItemDefinition.EnergyType.None && amountPerSecond > 0.0001f;
+        int resultCount = 0;
+        int addedTypeMask = 0;
+        int requirementCount = installedDefinition.UseEnergyRequirementCount;
+        for (int i = 0; i < requirementCount; i++)
+        {
+            if (!installedDefinition.TryGetUseEnergyRequirement(
+                    i,
+                    out ItemDefinition.EnergyUseRequirement requirement)
+                || requirement.energyType == ItemDefinition.EnergyType.None
+                || requirement.useEnergyAmount <= 0f)
+            {
+                continue;
+            }
+
+            int typeBit = 1 << (int)requirement.energyType;
+            if ((addedTypeMask & typeBit) != 0)
+            {
+                continue;
+            }
+
+            addedTypeMask |= typeBit;
+            if (resultCount++ != requestedDisplayIndex)
+            {
+                continue;
+            }
+
+            requestedEnergyType = requirement.energyType;
+            requestedAmountPerSecond = ItemDefinition.ResolveUseEnergyRatePerSecond(
+                installedDefinition,
+                requestedEnergyType);
+        }
+
+        return resultCount;
     }
 
     public bool TryGetObjectInfoItemPair(
@@ -4997,8 +5512,8 @@ public class InputOutputModule : InstallationObject,
             return true;
         }
 
-        IReadOnlyList<ItemIoEntry> inputs = InputList;
-        for (int i = 0; i < inputs.Count; i++)
+        int recipeCount = GetEffectiveRecipeCount();
+        for (int i = 0; i < recipeCount; i++)
         {
             if (TryGetObjectInfoRecipeLine(
                     i,
@@ -5093,8 +5608,8 @@ public class InputOutputModule : InstallationObject,
     {
         int inputRecipeCount;
         int outputRecipeCount;
-        IReadOnlyList<ItemIoEntry> inputs = InputList;
-        for (int i = 0; i < inputs.Count; i++)
+        int recipeCount = GetEffectiveRecipeCount();
+        for (int i = 0; i < recipeCount; i++)
         {
             if (!TryGetObjectInfoRecipeLine(
                     i,
@@ -5277,22 +5792,22 @@ public class InputOutputModule : InstallationObject,
         outputItemId = -1;
         outputCount = 0;
 
-        IReadOnlyList<ItemIoEntry> inputs = InputList;
-        IReadOnlyList<ItemIoEntry> outputs = OutputList;
-        if (recipeIndex < 0 || recipeIndex >= inputs.Count)
+        if (!TryGetInputOutputPair(recipeIndex, out InputOutputPair pair)
+            || pair.inputs == null
+            || pair.inputs.Count <= 0)
         {
             return false;
         }
 
-        ItemIoEntry inputEntry = inputs[recipeIndex];
+        ItemIoEntry inputEntry = pair.inputs[0];
         inputItemId = inputEntry.itemDefinition != null ? inputEntry.itemDefinition.id : -1;
-        inputCount = Mathf.Max(1, inputEntry.count);
+        inputCount = inputEntry.ResolvedItemCount;
 
-        if (recipeIndex < outputs.Count)
+        if (pair.outputs != null && pair.outputs.Count > 0)
         {
-            ItemIoEntry outputEntry = outputs[recipeIndex];
+            ItemIoEntry outputEntry = pair.outputs[0];
             outputItemId = outputEntry.itemDefinition != null ? outputEntry.itemDefinition.id : -1;
-            outputCount = Mathf.Max(1, outputEntry.count);
+            outputCount = outputEntry.ResolvedItemCount;
         }
 
         return inputItemId >= 0;
@@ -5492,7 +6007,7 @@ public class InputOutputModule : InstallationObject,
             return;
         }
 
-        if (IsUniqueRectGridBlock(blockType))
+        if (RequiresUniqueRectGridPlacement(blockType))
         {
             RemoveUniqueRectGridBlockGroup(blockType);
         }
@@ -5622,7 +6137,7 @@ public class InputOutputModule : InstallationObject,
         HashSet<int> occupiedCells = new HashSet<int>();
         int objectCount = 0;
         bool hasInputEnergy = false;
-        bool hasOutput = false;
+        bool hasUniqueOutput = false;
         int maxObjectCount = GetMaxObjectBlockCount();
 
         for (int i = 0; i < rectGridPlacements.Count; i++)
@@ -5657,14 +6172,14 @@ public class InputOutputModule : InstallationObject,
 
                 hasInputEnergy = true;
             }
-            else if (IsOutputBlockType(placement.blockType))
+            else if (IsUniqueOutputRectGridBlockType(placement.blockType))
             {
-                if (hasOutput)
+                if (hasUniqueOutput)
                 {
                     continue;
                 }
 
-                hasOutput = true;
+                hasUniqueOutput = true;
             }
 
             occupiedCells.Add(cellKey);
@@ -5716,17 +6231,6 @@ public class InputOutputModule : InstallationObject,
         return -1;
     }
 
-    private void RemoveRectGridBlock(RectGridBlockType blockType)
-    {
-        for (int i = rectGridPlacements.Count - 1; i >= 0; i--)
-        {
-            if (rectGridPlacements[i].blockType == blockType)
-            {
-                rectGridPlacements.RemoveAt(i);
-            }
-        }
-    }
-
     private void RemoveUniqueRectGridBlockGroup(RectGridBlockType blockType)
     {
         if (IsInputEnergyBlockType(blockType))
@@ -5735,13 +6239,10 @@ public class InputOutputModule : InstallationObject,
             return;
         }
 
-        if (IsOutputBlockType(blockType))
+        if (IsUniqueOutputRectGridBlockType(blockType))
         {
-            RemoveRectGridBlocks(IsOutputBlockType);
-            return;
+            RemoveRectGridBlocks(IsUniqueOutputRectGridBlockType);
         }
-
-        RemoveRectGridBlock(blockType);
     }
 
     private void RemoveRectGridBlocks(System.Predicate<RectGridBlockType> predicate)
@@ -5783,10 +6284,16 @@ public class InputOutputModule : InstallationObject,
         rectGridPlacements.Add(placement);
     }
 
-    private static bool IsUniqueRectGridBlock(RectGridBlockType blockType)
+    private static bool RequiresUniqueRectGridPlacement(RectGridBlockType blockType)
     {
         return IsInputEnergyBlockType(blockType)
-            || IsOutputBlockType(blockType);
+            || IsUniqueOutputRectGridBlockType(blockType);
+    }
+
+    private static bool IsUniqueOutputRectGridBlockType(RectGridBlockType blockType)
+    {
+        return blockType == RectGridBlockType.Output
+            || blockType == RectGridBlockType.DoublePipeOutputItem;
     }
 
     private int GetRectGridObjectCount()
@@ -5825,7 +6332,7 @@ public class InputOutputModule : InstallationObject,
 
         ItemDefinition installedDefinition = ResolveInstalledDefinition();
         bool energyRequired = RequiresOperationalEnergy(installedDefinition);
-        long acceptedEnergyUnits = 0;
+        long acceptedEnergyUnits = 0L;
         if (energyRequired)
         {
             if (!TryConsumeOperatingEnergy(deltaTime, out float consumedEnergy))
@@ -5835,11 +6342,23 @@ public class InputOutputModule : InstallationObject,
 
             acceptedEnergyUnits = DeterministicSimulationUnits.FromFloat(consumedEnergy);
         }
-        long completeEnergy = energyRequired ? ResolveCompleteEnergyUnits(installedDefinition) : 0;
-        long energyRate = energyRequired ? DeterministicSimulationUnits.FromFloat(
-            Mathf.Max(0.0001f, ItemDefinition.ResolveUseEnergyRatePerSecond(installedDefinition))) : 0;
-        if (production.Advance(DeterministicSimulationUnits.DeltaTimeToTicks(deltaTime),
-            energyRequired, acceptedEnergyUnits, completeEnergy, energyRate)) TryCompleteActiveCraft();
+
+        long completeEnergyUnits = energyRequired
+            ? DeterministicSimulationUnits.FromFloat(ResolveCompleteEnergy(installedDefinition))
+            : 0L;
+        long energyRateUnits = energyRequired
+            ? DeterministicSimulationUnits.FromFloat(
+                Mathf.Max(0.0001f, ItemDefinition.ResolveUseEnergyRatePerSecond(installedDefinition)))
+            : 0L;
+        if (production.Advance(
+                DeterministicSimulationUnits.DeltaTimeToTicks(deltaTime),
+                energyRequired,
+                acceptedEnergyUnits,
+                completeEnergyUnits,
+                energyRateUnits))
+        {
+            TryCompleteActiveCraft();
+        }
     }
 
     protected virtual void TryStartNextCraft()
@@ -6180,58 +6699,63 @@ public class InputOutputModule : InstallationObject,
             return true;
         }
 
-        long requestedEnergyUnits = DeterministicSimulationUnits.RateForTicks(
-            ItemDefinition.ResolveUseEnergyRatePerSecond(installedDefinition),
-            DeterministicSimulationUnits.DeltaTimeToTicks(deltaTime));
-        long remainingEnergyUnits = requestedEnergyUnits;
-        if (requestedEnergyUnits <= 0L)
+        if (!HasOperationalEnergyAvailable(installedDefinition))
         {
             lastOperationalEnergySupplyRatio = 0f;
             return false;
         }
 
-        if (installedDefinition.useEnergyType == ItemDefinition.EnergyType.Electricity)
+        long deltaTicks = DeterministicSimulationUnits.DeltaTimeToTicks(deltaTime);
+        float minimumSupplyRatio = 1f;
+        int consumedTypeMask = 0;
+        int requirementCount = installedDefinition.UseEnergyRequirementCount;
+        for (int i = 0; i < requirementCount; i++)
         {
-            energyGaugeCapacityUnits = 0L;
-            bool consumedElectricity = UtilityPole.TryConsumeElectricityUnits(
-                this,
-                requestedEnergyUnits,
-                out long consumedEnergyUnits);
-            consumedEnergy = DeterministicSimulationUnits.ToFloat(consumedEnergyUnits);
-            lastOperationalEnergySupplyRatio = consumedElectricity
-                ? Mathf.Clamp01((float)((double)consumedEnergyUnits / requestedEnergyUnits))
-                : 0f;
-            return consumedElectricity;
-        }
-
-        long consumedUnits = 0L;
-        while (remainingEnergyUnits > 0L)
-        {
-            if (storedEnergyUnits <= 0L && !TryRefillEnergyStore(installedDefinition))
+            if (!installedDefinition.TryGetUseEnergyRequirement(
+                    i,
+                    out ItemDefinition.EnergyUseRequirement requirement)
+                || requirement.energyType == ItemDefinition.EnergyType.None)
             {
-                break;
+                continue;
             }
 
-            long spentEnergyUnits = Math.Min(storedEnergyUnits, remainingEnergyUnits);
-            if (spentEnergyUnits <= 0L)
+            int typeIndex = (int)requirement.energyType;
+            int typeBit = 1 << typeIndex;
+            if ((consumedTypeMask & typeBit) != 0)
             {
-                break;
+                continue;
             }
 
-            storedEnergyUnits -= spentEnergyUnits;
-            remainingEnergyUnits -= spentEnergyUnits;
-            consumedUnits += spentEnergyUnits;
+            consumedTypeMask |= typeBit;
+            long requestedUnits = DeterministicSimulationUnits.RateForTicks(
+                ItemDefinition.ResolveUseEnergyRatePerSecond(installedDefinition, requirement.energyType),
+                deltaTicks);
+            if (requestedUnits <= 0L)
+            {
+                continue;
+            }
+
+            long suppliedUnits;
+            if (requirement.energyType == ItemDefinition.EnergyType.Electricity)
+            {
+                UtilityPole.TryConsumeElectricityUnits(this, requestedUnits, out suppliedUnits);
+            }
+            else
+            {
+                suppliedUnits = ConsumeBufferedEnergyUnits(
+                    installedDefinition,
+                    requirement.energyType,
+                    requestedUnits);
+            }
+
+            float supplyRatio = Mathf.Clamp01((float)((double)suppliedUnits / requestedUnits));
+            minimumSupplyRatio = Mathf.Min(minimumSupplyRatio, supplyRatio);
         }
 
-        if (storedEnergyUnits <= 0L)
-        {
-            energyGaugeCapacityUnits = 0L;
-        }
-
-        consumedEnergy = DeterministicSimulationUnits.ToFloat(consumedUnits);
-        lastOperationalEnergySupplyRatio = Mathf.Clamp01(
-            (float)((double)consumedUnits / requestedEnergyUnits));
-        return consumedUnits > 0L;
+        float primaryRate = ItemDefinition.ResolveUseEnergyRatePerSecond(installedDefinition);
+        consumedEnergy = primaryRate * Mathf.Max(0f, deltaTime) * minimumSupplyRatio;
+        lastOperationalEnergySupplyRatio = minimumSupplyRatio;
+        return minimumSupplyRatio > 0f;
     }
 
     protected bool TryEnsureCraftStartEnergy(ItemDefinition installedDefinition)
@@ -6241,55 +6765,224 @@ public class InputOutputModule : InstallationObject,
             return true;
         }
 
-        if (installedDefinition.useEnergyType == ItemDefinition.EnergyType.Electricity)
+        int requirementCount = installedDefinition.UseEnergyRequirementCount;
+        for (int i = 0; i < requirementCount; i++)
         {
-            storedEnergyUnits = 0L;
-            energyGaugeCapacityUnits = 0L;
-            return UtilityPole.HasElectricityAvailable(this);
+            if (!installedDefinition.TryGetUseEnergyRequirement(
+                    i,
+                    out ItemDefinition.EnergyUseRequirement requirement)
+                || requirement.energyType == ItemDefinition.EnergyType.None
+                || requirement.useEnergyAmount <= 0f)
+            {
+                continue;
+            }
+
+            if (requirement.energyType == ItemDefinition.EnergyType.Electricity)
+            {
+                if (!UtilityPole.HasElectricityAvailable(this))
+                {
+                    return false;
+                }
+
+                continue;
+            }
+
+            if (GetBufferedEnergyUnits(installedDefinition, requirement.energyType) <= 0L
+                && !TryRefillEnergyStore(installedDefinition, requirement.energyType))
+            {
+                return false;
+            }
         }
 
-        if (storedEnergyUnits > 0L)
-        {
-            return true;
-        }
-
-        return TryRefillEnergyStore(installedDefinition);
+        return true;
     }
 
-    private bool TryRefillEnergyStore(ItemDefinition installedDefinition)
+    private long ConsumeBufferedEnergyUnits(
+        ItemDefinition installedDefinition,
+        ItemDefinition.EnergyType energyType,
+        long requestedUnits)
     {
-        if (!RequiresOperationalEnergy(installedDefinition))
+        long remainingUnits = Math.Max(0L, requestedUnits);
+        long consumedUnits = 0L;
+        while (remainingUnits > 0L)
         {
-            return true;
+            long storedUnits = GetBufferedEnergyUnits(installedDefinition, energyType);
+            if (storedUnits <= 0L && !TryRefillEnergyStore(installedDefinition, energyType))
+            {
+                break;
+            }
+
+            storedUnits = GetBufferedEnergyUnits(installedDefinition, energyType);
+            long spentUnits = Math.Min(storedUnits, remainingUnits);
+            if (spentUnits <= 0L)
+            {
+                break;
+            }
+
+            SetBufferedEnergyUnits(installedDefinition, energyType, storedUnits - spentUnits);
+            remainingUnits -= spentUnits;
+            consumedUnits += spentUnits;
         }
 
-        if (installedDefinition.useEnergyType == ItemDefinition.EnergyType.Electricity)
+        if (GetBufferedEnergyUnits(installedDefinition, energyType) <= 0L)
+        {
+            SetBufferedEnergyGaugeCapacityUnits(installedDefinition, energyType, 0L);
+        }
+
+        return consumedUnits;
+    }
+
+    private bool TryRefillEnergyStore(
+        ItemDefinition installedDefinition,
+        ItemDefinition.EnergyType energyType)
+    {
+        if (!RequiresOperationalEnergy(installedDefinition)
+            || energyType == ItemDefinition.EnergyType.None
+            || energyType == ItemDefinition.EnergyType.Electricity)
         {
             return false;
         }
 
         long minimumOperationalEnergyUnits = DeterministicSimulationUnits.FromFloat(
-            Mathf.Max(1, installedDefinition.useEnergyAmount));
-        bool consumedAnyEnergyItem = false;
-        while (storedEnergyUnits < minimumOperationalEnergyUnits)
+            Mathf.Max(1f, ItemDefinition.ResolveUseEnergyRatePerSecond(installedDefinition, energyType)));
+        if (ItemDefinition.IsFluidFuelEnergyType(energyType))
         {
-            if (!TryConsumeOneEnergyItem(installedDefinition.useEnergyType, out int gainedEnergy))
+            return GetBufferedEnergyUnits(installedDefinition, energyType)
+                   >= minimumOperationalEnergyUnits;
+        }
+
+        bool consumedAnyEnergyItem = false;
+        long storedUnits = GetBufferedEnergyUnits(installedDefinition, energyType);
+        while (storedUnits < minimumOperationalEnergyUnits)
+        {
+            if (!TryConsumeOneEnergyItem(energyType, out int gainedEnergy))
             {
                 break;
             }
 
-            storedEnergyUnits += DeterministicSimulationUnits.FromFloat(gainedEnergy);
+            storedUnits += DeterministicSimulationUnits.FromFloat(gainedEnergy);
             consumedAnyEnergyItem = true;
         }
 
+        SetBufferedEnergyUnits(installedDefinition, energyType, storedUnits);
         if (consumedAnyEnergyItem)
         {
-            energyGaugeCapacityUnits = Math.Max(
-                storedEnergyUnits,
-                DeterministicSimulationUnits.UnitsPerWhole);
+            SetBufferedEnergyGaugeCapacityUnits(
+                installedDefinition,
+                energyType,
+                Math.Max(
+                    storedUnits,
+                    DeterministicSimulationUnits.UnitsPerWhole));
         }
 
-        return storedEnergyUnits >= minimumOperationalEnergyUnits;
+        return storedUnits >= minimumOperationalEnergyUnits;
+    }
+
+    private static ItemDefinition.EnergyType ResolvePrimaryBufferedEnergyType(ItemDefinition definition)
+    {
+        if (definition == null)
+        {
+            return ItemDefinition.EnergyType.None;
+        }
+
+        int count = definition.UseEnergyRequirementCount;
+        for (int i = 0; i < count; i++)
+        {
+            if (definition.TryGetUseEnergyRequirement(
+                    i,
+                    out ItemDefinition.EnergyUseRequirement requirement)
+                && requirement.energyType != ItemDefinition.EnergyType.None
+                && requirement.energyType != ItemDefinition.EnergyType.Electricity
+                && requirement.useEnergyAmount > 0f)
+            {
+                return requirement.energyType;
+            }
+        }
+
+        return ItemDefinition.EnergyType.None;
+    }
+
+    private long GetBufferedEnergyUnits(
+        ItemDefinition definition,
+        ItemDefinition.EnergyType energyType)
+    {
+        if (ItemDefinition.IsFluidFuelEnergyType(energyType))
+        {
+            int fluidFuelItemId = ResolveFluidFuelItemId(energyType);
+            return fluidFuelItemId >= 0 && StoredFluidItemId == fluidFuelItemId
+                ? StoredFluidUnits
+                : 0L;
+        }
+
+        int typeIndex = (int)energyType;
+        if (energyType == ResolvePrimaryBufferedEnergyType(definition))
+        {
+            return Math.Max(0L, storedEnergyUnits);
+        }
+
+        return typeIndex > 0 && typeIndex < secondaryStoredEnergyUnitsByType.Length
+            ? Math.Max(0L, secondaryStoredEnergyUnitsByType[typeIndex])
+            : 0L;
+    }
+
+    private void SetBufferedEnergyUnits(
+        ItemDefinition definition,
+        ItemDefinition.EnergyType energyType,
+        long value)
+    {
+        value = Math.Max(0L, value);
+        if (ItemDefinition.IsFluidFuelEnergyType(energyType))
+        {
+            // Fluid fuels are measured directly in liters, so no duplicate
+            // buffered-energy value is kept for them.
+            int fluidFuelItemId = ResolveFluidFuelItemId(energyType);
+            long currentUnits = GetBufferedEnergyUnits(definition, energyType);
+            if (fluidFuelItemId >= 0 && value < currentUnits)
+            {
+                SetStoredFluidUnits(
+                    fluidFuelItemId,
+                    value,
+                    GetStoredFluidTemperatureCelsius(fluidFuelItemId));
+            }
+
+            return;
+        }
+
+        if (energyType == ResolvePrimaryBufferedEnergyType(definition))
+        {
+            storedEnergyUnits = value;
+            return;
+        }
+
+        int typeIndex = (int)energyType;
+        if (typeIndex > 0 && typeIndex < secondaryStoredEnergyUnitsByType.Length)
+        {
+            secondaryStoredEnergyUnitsByType[typeIndex] = value;
+        }
+    }
+
+    private void SetBufferedEnergyGaugeCapacityUnits(
+        ItemDefinition definition,
+        ItemDefinition.EnergyType energyType,
+        long value)
+    {
+        value = Math.Max(0L, value);
+        if (ItemDefinition.IsFluidFuelEnergyType(energyType))
+        {
+            return;
+        }
+
+        if (energyType == ResolvePrimaryBufferedEnergyType(definition))
+        {
+            energyGaugeCapacityUnits = value;
+            return;
+        }
+
+        int typeIndex = (int)energyType;
+        if (typeIndex > 0 && typeIndex < secondaryEnergyGaugeCapacityUnitsByType.Length)
+        {
+            secondaryEnergyGaugeCapacityUnitsByType[typeIndex] = value;
+        }
     }
 
     private bool TryConsumeOneEnergyItem(ItemDefinition.EnergyType requiredEnergyType, out int gainedEnergy)
@@ -6705,20 +7398,35 @@ public class InputOutputModule : InstallationObject,
         outputItemId = -1;
         outputCount = 0;
 
-        IReadOnlyList<ItemIoEntry> inputs = InputList;
-        IReadOnlyList<ItemIoEntry> outputs = OutputList;
-        if (recipeIndex < 0 || recipeIndex >= inputs.Count || recipeIndex >= outputs.Count)
+        if (!TryGetInputOutputPair(recipeIndex, out InputOutputPair pair)
+            || pair.inputs == null
+            || pair.inputs.Count <= 0
+            || pair.outputs == null
+            || pair.outputs.Count <= 0)
         {
             return false;
         }
 
-        ItemIoEntry inputEntry = inputs[recipeIndex];
-        ItemIoEntry outputEntry = outputs[recipeIndex];
+        ItemIoEntry inputEntry = pair.inputs[0];
+        ItemIoEntry outputEntry = pair.outputs[0];
         inputItemId = inputEntry.itemDefinition != null ? inputEntry.itemDefinition.id : -1;
         outputItemId = outputEntry.itemDefinition != null ? outputEntry.itemDefinition.id : -1;
-        inputCount = Mathf.Max(1, inputEntry.count);
-        outputCount = Mathf.Max(1, outputEntry.count);
+        inputCount = inputEntry.ResolvedItemCount;
+        outputCount = outputEntry.ResolvedItemCount;
         return inputItemId >= 0 && outputItemId >= 0;
+    }
+
+    protected bool TryGetInputOutputPair(int pairIndex, out InputOutputPair pair)
+    {
+        EnsureEffectivePairData();
+        if (pairIndex < 0 || pairIndex >= effectiveInputOutputPairs.Count)
+        {
+            pair = null;
+            return false;
+        }
+
+        pair = effectiveInputOutputPairs[pairIndex];
+        return pair != null;
     }
 
     protected bool TryGetLoadedBlock(Vector2Int coordinate, out Block block)
@@ -6940,20 +7648,94 @@ public class InputOutputModule : InstallationObject,
         string itemName = definition.itemName;
         return string.Equals(itemName, "Water", System.StringComparison.OrdinalIgnoreCase)
                || string.Equals(itemName, "Steam", System.StringComparison.OrdinalIgnoreCase)
-               || string.Equals(itemName, "Oil", System.StringComparison.OrdinalIgnoreCase);
+               || string.Equals(itemName, "Oil", System.StringComparison.OrdinalIgnoreCase)
+               || string.Equals(itemName, "Crude Oil", System.StringComparison.OrdinalIgnoreCase)
+               || string.Equals(itemName, "Diesel", System.StringComparison.OrdinalIgnoreCase)
+               || string.Equals(itemName, "Diesel Oil", System.StringComparison.OrdinalIgnoreCase)
+               || string.Equals(itemName, "Heavy Oil", System.StringComparison.OrdinalIgnoreCase)
+               || string.Equals(itemName, "LPG Gas", System.StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static bool TryGetFluidFuelEnergyType(
+        ItemDefinition definition,
+        out ItemDefinition.EnergyType energyType)
+    {
+        energyType = ItemDefinition.EnergyType.None;
+        if (definition == null)
+        {
+            return false;
+        }
+
+        int count = definition.UseEnergyRequirementCount;
+        for (int i = 0; i < count; i++)
+        {
+            if (definition.TryGetUseEnergyRequirement(
+                    i,
+                    out ItemDefinition.EnergyUseRequirement requirement)
+                && ItemDefinition.IsFluidFuelEnergyType(requirement.energyType)
+                && requirement.useEnergyAmount > 0f)
+            {
+                energyType = requirement.energyType;
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private int ResolveFluidFuelItemId(ItemDefinition.EnergyType energyType)
+    {
+        if (!ItemDefinition.IsFluidFuelEnergyType(energyType))
+        {
+            return -1;
+        }
+
+        ItemManager itemManager = GameManager.Instance != null
+            ? GameManager.Instance.ItemManger
+            : null;
+        List<ItemDefinition> definitions = itemManager != null
+            ? itemManager.ItemDefinitions
+            : null;
+        int definitionCount = definitions != null ? definitions.Count : 0;
+        if (cachedFluidFuelItemManager != itemManager
+            || cachedFluidFuelDefinitionCount != definitionCount)
+        {
+            cachedFluidFuelItemManager = itemManager;
+            cachedFluidFuelDefinitionCount = definitionCount;
+            Array.Fill(cachedFluidFuelItemIdsByType, -1);
+            for (int i = 0; i < definitionCount; i++)
+            {
+                ItemDefinition definition = definitions[i];
+                if (definition == null
+                    || definition.id < 0
+                    || !ItemDefinition.IsFluidFuelEnergyType(definition.energyType))
+                {
+                    continue;
+                }
+
+                int typeIndex = (int)definition.energyType;
+                if (cachedFluidFuelItemIdsByType[typeIndex] < 0)
+                {
+                    cachedFluidFuelItemIdsByType[typeIndex] = definition.id;
+                }
+            }
+        }
+
+        int requestedTypeIndex = (int)energyType;
+        return requestedTypeIndex >= 0 && requestedTypeIndex < cachedFluidFuelItemIdsByType.Length
+            ? cachedFluidFuelItemIdsByType[requestedTypeIndex]
+            : -1;
     }
 
     protected static bool RequiresOperationalEnergy(ItemDefinition installedDefinition)
     {
-        return installedDefinition != null
-               && installedDefinition.useEnergyType != ItemDefinition.EnergyType.None
-               && ItemDefinition.ResolveUseEnergyRatePerSecond(installedDefinition) > 0f;
+        return ItemDefinition.TryGetPrimaryUseEnergyRequirement(installedDefinition, out _);
     }
 
     protected static bool RequiresElectricOperationalEnergy(ItemDefinition installedDefinition)
     {
         return RequiresOperationalEnergy(installedDefinition)
-               && installedDefinition.useEnergyType == ItemDefinition.EnergyType.Electricity;
+               && installedDefinition.UsesEnergyType(ItemDefinition.EnergyType.Electricity);
     }
 
     protected bool HasOperationalEnergyAvailable(ItemDefinition installedDefinition)
@@ -6963,12 +7745,41 @@ public class InputOutputModule : InstallationObject,
             return true;
         }
 
-        if (installedDefinition.useEnergyType == ItemDefinition.EnergyType.Electricity)
+        int count = installedDefinition.UseEnergyRequirementCount;
+        int checkedTypeMask = 0;
+        for (int i = 0; i < count; i++)
         {
-            return UtilityPole.HasElectricityAvailable(this);
+            if (!installedDefinition.TryGetUseEnergyRequirement(
+                    i,
+                    out ItemDefinition.EnergyUseRequirement requirement)
+                || requirement.energyType == ItemDefinition.EnergyType.None
+                || requirement.useEnergyAmount <= 0f)
+            {
+                continue;
+            }
+
+            int typeBit = 1 << (int)requirement.energyType;
+            if ((checkedTypeMask & typeBit) != 0)
+            {
+                continue;
+            }
+
+            checkedTypeMask |= typeBit;
+            if (requirement.energyType == ItemDefinition.EnergyType.Electricity)
+            {
+                if (!UtilityPole.HasElectricityAvailable(this))
+                {
+                    return false;
+                }
+            }
+            else if (GetBufferedEnergyUnits(installedDefinition, requirement.energyType) <= 0L
+                     && !HasUsableEnergyItem(requirement.energyType))
+            {
+                return false;
+            }
         }
 
-        return storedEnergyUnits > 0L || HasUsableEnergyItem(installedDefinition.useEnergyType);
+        return true;
     }
 
     private bool HasUsableEnergyItem(ItemDefinition.EnergyType requiredEnergyType)
@@ -7382,6 +8193,9 @@ public class InputOutputModule : InstallationObject,
                 out Quaternion pipeRotation,
                 out PipeRuntimeRecord pipeRecord);
             EnqueueFluidStoragePipePassCoordinatesAt(coordinate);
+            bool hasPassiveFluidPass = TryEnqueuePassiveFluidPassesAt(
+                coordinate,
+                out int passivePassExternalDirectionMask);
             bool hasPumpPressureResetPass = TryEnqueuePumpPressureResetPassesAt(
                 coordinate,
                 false,
@@ -7394,6 +8208,7 @@ public class InputOutputModule : InstallationObject,
             if (!isOutputSeed
                 && !hasPipe
                 && !storageIsPipeArea
+                && !hasPassiveFluidPass
                 && !hasPumpPressureResetPass
                 && !IsFixedFluidTank(fluidStorage))
             {
@@ -7403,7 +8218,7 @@ public class InputOutputModule : InstallationObject,
             for (int directionIndex = 0; directionIndex < FluidCardinalDirections.Length; directionIndex++)
             {
                 Vector2Int direction = FluidCardinalDirections[directionIndex];
-                if (hasPipe && !hasPumpPressureResetPass
+                if (hasPipe && !hasPumpPressureResetPass && !hasPassiveFluidPass
                     && !HasConnectedPipeConnectionTowards(
                         pipe,
                         pipeRecord,
@@ -7414,13 +8229,15 @@ public class InputOutputModule : InstallationObject,
                     continue;
                 }
 
-                if (hasPumpPressureResetPass
-                    && !DirectionMaskContains(pumpPassExternalDirectionMask, directionIndex))
+                if ((hasPumpPressureResetPass || hasPassiveFluidPass)
+                    && !DirectionMaskContains(
+                        pumpPassExternalDirectionMask | passivePassExternalDirectionMask,
+                        directionIndex))
                 {
                     continue;
                 }
 
-                if (!hasPipe && !hasPumpPressureResetPass
+                if (!hasPipe && !hasPumpPressureResetPass && !hasPassiveFluidPass
                     && !CanFluidSearchLeaveCoordinate(
                         coordinate,
                         isOutputSeed,
@@ -7454,7 +8271,7 @@ public class InputOutputModule : InstallationObject,
                 }
             }
 
-            if (hasPipe && !hasPumpPressureResetPass
+            if (hasPipe && !hasPumpPressureResetPass && !hasPassiveFluidPass
                 && TryGetConnectedPipeRemoteCoordinate(
                     pipe,
                     pipeRecord,
@@ -8055,11 +8872,6 @@ public class InputOutputModule : InstallationObject,
         return ResolveCompleteEnergy(installedDefinition, CraftDurationSeconds);
     }
 
-    private long ResolveCompleteEnergyUnits(ItemDefinition installedDefinition)
-    {
-        return DeterministicSimulationUnits.FromFloat(ResolveCompleteEnergy(installedDefinition));
-    }
-
     public static float ResolveCompleteEnergy(ItemDefinition installedDefinition, float fallbackCraftDuration)
     {
         if (!RequiresOperationalEnergy(installedDefinition))
@@ -8084,7 +8896,9 @@ public class InputOutputModule : InstallationObject,
             return CraftDurationSeconds;
         }
 
-        float energyRate = Mathf.Max(0.0001f, ItemDefinition.ResolveUseEnergyRatePerSecond(installedDefinition));
+        float energyRate = Mathf.Max(
+            0.0001f,
+            ItemDefinition.ResolveUseEnergyRatePerSecond(installedDefinition));
         return Mathf.Max(0.1f, ResolveCompleteEnergy(installedDefinition) / energyRate);
     }
 
@@ -8193,7 +9007,7 @@ public class InputOutputModule : InstallationObject,
     protected virtual bool ShouldShowWorldEnergyGauge(ItemDefinition installedDefinition)
     {
         return RequiresOperationalEnergy(installedDefinition)
-               && installedDefinition.useEnergyType != ItemDefinition.EnergyType.Electricity;
+               && ResolvePrimaryBufferedEnergyType(installedDefinition) != ItemDefinition.EnergyType.None;
     }
 
     private bool ShouldShowGaugeByAreaMarkerVisibility()
@@ -8243,6 +9057,15 @@ public class InputOutputModule : InstallationObject,
         if (!RequiresOperationalEnergy(installedDefinition))
         {
             return 0f;
+        }
+
+        if (ItemDefinition.IsFluidFuelEnergyType(
+                ResolvePrimaryBufferedEnergyType(installedDefinition)))
+        {
+            float capacityLiters = FluidStorageCapacityLiters;
+            return capacityLiters > 0.0001f
+                ? Mathf.Clamp01(StoredFluidLiters / capacityLiters)
+                : 0f;
         }
 
         if (storedEnergyUnits > energyGaugeCapacityUnits)
@@ -8414,7 +9237,8 @@ public class InputOutputModule : InstallationObject,
         ItemDefinition installedDefinition = ResolveInstalledDefinition();
         if (RequiresOperationalEnergy(installedDefinition))
         {
-            long completeEnergyUnits = ResolveCompleteEnergyUnits(installedDefinition);
+            long completeEnergyUnits = DeterministicSimulationUnits.FromFloat(
+                ResolveCompleteEnergy(installedDefinition));
             return completeEnergyUnits > 0L
                 ? Mathf.Clamp01((float)((double)Math.Max(0L, activeCraftConsumedEnergyUnits) / completeEnergyUnits))
                 : 0f;
@@ -8626,6 +9450,14 @@ public class InputOutputModule : InstallationObject,
         if (storedEnergyUnits <= 0L)
         {
             energyGaugeCapacityUnits = 0L;
+        }
+
+        for (int i = 1; i < secondaryStoredEnergyUnitsByType.Length; i++)
+        {
+            if (secondaryStoredEnergyUnitsByType[i] <= 0L)
+            {
+                secondaryEnergyGaugeCapacityUnitsByType[i] = 0L;
+            }
         }
     }
 

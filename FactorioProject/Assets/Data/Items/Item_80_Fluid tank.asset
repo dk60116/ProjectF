@@ -13,7 +13,7 @@ MonoBehaviour:
   m_Name: Item_80_Fluid tank
   m_EditorClassIdentifier: Assembly-CSharp::ItemDefinition
   itemName: Fluid tank
-  id: 55
+  id: 58
   mapObject: {fileID: 233042269004523433, guid: 8a8b5c428315cb54ab566ee8f1a55423, type: 3}
   mapObjectArchetype: {fileID: 11400000, guid: fa43204dd4b5d5846a420e0372c76180, type: 2}
   useMapColor: 0
@@ -47,6 +47,7 @@ MonoBehaviour:
   eatRewardChancePercent: 0
   isSeed: 0
   seedTargetResource: {fileID: 0}
+  useEnergyRequirements: []
   useEnergyType: 0
   useEnergyAmount: 0
   completeEnergy: 0

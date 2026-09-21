@@ -6,9 +6,9 @@ using UnityEngine;
 [Serializable]
 public sealed class SaveGameData
 {
-    // Version 64 persists Box/Tank installations mounted on freight cars,
-    // including their inventory, fluid and configuration state.
-    public const int CurrentVersion = 64;
+    // Version 65 persists the independent buffered state of every configured
+    // non-electric operational energy requirement.
+    public const int CurrentVersion = 65;
 
     public int version = CurrentVersion;
     public long savedAtUtcTicks;

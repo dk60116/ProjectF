@@ -12,7 +12,7 @@ GameObject:
   - component: {fileID: 5889860242806826768}
   - component: {fileID: 4366984490287741542}
   m_Layer: 7
-  m_Name: Oil
+  m_Name: Crude Oil
   m_TagString: Untagged
   m_Icon: {fileID: 0}
   m_NavMeshLayer: 0
@@ -48,9 +48,9 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::Resource
   id: 0
-  objectName: Oil
+  objectName: Crude Oil
   objId: 4
-  itemDefinition: {fileID: 11400000, guid: b7f6e746e5fdf2f43a58e92c85c78479, type: 2}
+  itemDefinition: {fileID: 11400000, guid: 2e352f106be1f394da21ef84da75b7e9, type: 2}
   mapStatus:
     mapSizeX: 1
     mapSizeY: 1
@@ -60,7 +60,7 @@ MonoBehaviour:
   itemFilterMaskInitialized: 0
   itemFilterMaskWords: 
   harvestMode: 4
-  definition: {fileID: 11400000, guid: 7075439788d745f4ca07ecd747733b20, type: 2}
+  definition: {fileID: 11400000, guid: 66d30f2a933c77348b332e92038b5762, type: 2}
   resourceStatus:
     outputId: 4
     outputItemName: Oil

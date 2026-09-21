@@ -13,7 +13,7 @@ MonoBehaviour:
   m_Name: Item_84_CD
   m_EditorClassIdentifier: Assembly-CSharp::ItemDefinition
   itemName: CD
-  id: 86
+  id: 91
   mapObject: {fileID: 0}
   mapObjectArchetype: {fileID: 0}
   useMapColor: 0
@@ -47,6 +47,7 @@ MonoBehaviour:
   eatRewardChancePercent: 0
   isSeed: 0
   seedTargetResource: {fileID: 0}
+  useEnergyRequirements: []
   useEnergyType: 0
   useEnergyAmount: 0
   completeEnergy: 0

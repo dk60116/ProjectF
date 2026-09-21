@@ -13,7 +13,7 @@ MonoBehaviour:
   m_Name: Item_54_Book desk
   m_EditorClassIdentifier: Assembly-CSharp::ItemDefinition
   itemName: Book desk
-  id: 88
+  id: 93
   mapObject: {fileID: 2696065824665056805, guid: 27727148c8ab1b546aa4e1dd6f389261, type: 3}
   mapObjectArchetype: {fileID: 11400000, guid: 1b732a7259fef044d9dc0fc2abcd65fd, type: 2}
   useMapColor: 1
@@ -47,6 +47,7 @@ MonoBehaviour:
   eatRewardChancePercent: 0
   isSeed: 0
   seedTargetResource: {fileID: 0}
+  useEnergyRequirements: []
   useEnergyType: 0
   useEnergyAmount: 0
   completeEnergy: 0

@@ -13,7 +13,7 @@ MonoBehaviour:
   m_Name: Item_63_Circuit board
   m_EditorClassIdentifier: Assembly-CSharp::ItemDefinition
   itemName: Circuit board
-  id: 39
+  id: 42
   mapObject: {fileID: 0}
   mapObjectArchetype: {fileID: 0}
   useMapColor: 0
@@ -47,6 +47,7 @@ MonoBehaviour:
   eatRewardChancePercent: 0
   isSeed: 0
   seedTargetResource: {fileID: 0}
+  useEnergyRequirements: []
   useEnergyType: 0
   useEnergyAmount: 0
   completeEnergy: 0

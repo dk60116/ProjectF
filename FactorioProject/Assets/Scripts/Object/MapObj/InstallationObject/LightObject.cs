@@ -58,7 +58,7 @@ public class LightObject : InstallationObject, IItemLightPowerStateProvider
         {
             ItemDefinition definition = ResolveLightDefinition();
             return definition == null
-                   || definition.useEnergyType != ItemDefinition.EnergyType.Electricity
+                   || !definition.UsesEnergyType(ItemDefinition.EnergyType.Electricity)
                    || UtilityPole.HasElectricityAvailable(this);
         }
     }

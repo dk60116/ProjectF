@@ -13,7 +13,7 @@ MonoBehaviour:
   m_Name: Item_99_Pine cone
   m_EditorClassIdentifier: Assembly-CSharp::ItemDefinition
   itemName: Pine cone
-  id: 96
+  id: 101
   mapObject: {fileID: 0}
   mapObjectArchetype: {fileID: 0}
   useMapColor: 0
@@ -47,6 +47,7 @@ MonoBehaviour:
   eatRewardChancePercent: 0
   isSeed: 1
   seedTargetResource: {fileID: 11400000, guid: f01734a3267e50745b36764f463c62d7, type: 2}
+  useEnergyRequirements: []
   useEnergyType: 0
   useEnergyAmount: 0
   completeEnergy: 0

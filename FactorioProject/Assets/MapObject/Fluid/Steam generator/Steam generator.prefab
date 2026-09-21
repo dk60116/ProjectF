@@ -138,7 +138,7 @@ MonoBehaviour:
   m_EditorClassIdentifier: 
   id: 0
   objectName: Steam generator
-  objId: 57
+  objId: 60
   itemDefinition: {fileID: 11400000, guid: fde3e14d2afafaf4a9603cedda8d94d6, type: 2}
   mapStatus:
     mapSizeX: 2
@@ -164,12 +164,15 @@ MonoBehaviour:
   storedFluidTemperatureCelsius: 20
   powerLinePoint: {fileID: 0}
   parentInputOutputModuleItem: {fileID: 0}
-  inputList:
-  - itemDefinition: {fileID: 11400000, guid: f40db410eac38e44386c4ef5c3396514, type: 2}
-    count: 10
-  outputList:
-  - itemDefinition: {fileID: 11400000, guid: 763e6b55158c49c4db58cb49480d65f2, type: 2}
-    count: 150
+  inputOutputPairs:
+  - inputs:
+    - itemDefinition: {fileID: 11400000, guid: f40db410eac38e44386c4ef5c3396514, type: 2}
+      count: 10
+    outputs:
+    - itemDefinition: {fileID: 11400000, guid: 763e6b55158c49c4db58cb49480d65f2, type: 2}
+      count: 150
+  inputList: []
+  outputList: []
   output:
     itemDefinition: {fileID: 0}
     count: 1

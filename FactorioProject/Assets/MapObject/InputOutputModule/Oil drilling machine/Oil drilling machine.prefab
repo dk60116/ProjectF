@@ -807,7 +807,7 @@ MonoBehaviour:
   m_EditorClassIdentifier: Assembly-CSharp::OilDrillingMachine
   id: 0
   objectName: Oil drilling machine
-  objId: 49
+  objId: 52
   itemDefinition: {fileID: 11400000, guid: d4d9ce93c017a2e4d8c5891bb4f4e91c, type: 2}
   mapStatus:
     mapSizeX: 2
@@ -833,6 +833,7 @@ MonoBehaviour:
   storedFluidTemperatureCelsius: 20
   powerLinePoint: {fileID: 0}
   parentInputOutputModuleItem: {fileID: 0}
+  inputOutputPairs: []
   inputList: []
   outputList: []
   output:

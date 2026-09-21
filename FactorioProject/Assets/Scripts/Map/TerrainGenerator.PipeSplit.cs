@@ -35,6 +35,8 @@ public partial class TerrainGenerator
         new Dictionary<SteamGenerator, int>();
     private readonly Dictionary<Pump, int> pipeSplitPumpFirstPipe =
         new Dictionary<Pump, int>();
+    private readonly Dictionary<InputOutputModule, int> pipeSplitPassivePassFirstPipe =
+        new Dictionary<InputOutputModule, int>();
     private readonly List<PipeSplitVisualNode> pipeSplitVisualNodes = new List<PipeSplitVisualNode>();
     private readonly List<Vector3> pipeSplitSegments = new List<Vector3>(8);
     private readonly List<Vector3> pipeSplitVertices = new List<Vector3>();
@@ -114,6 +116,7 @@ public partial class TerrainGenerator
         pipeSplitFixedTankFirstPipe.Clear();
         pipeSplitSteamGeneratorFirstPipe.Clear();
         pipeSplitPumpFirstPipe.Clear();
+        pipeSplitPassivePassFirstPipe.Clear();
         pipeSplitVisualNodes.Clear();
         if (world == null)
         {
@@ -146,6 +149,7 @@ public partial class TerrainGenerator
                 ConnectPipeSplitThroughFixedTank(record, i, coordinate);
                 ConnectPipeSplitThroughSteamGenerator(record, i, coordinate, coordinate);
                 ConnectPipeSplitThroughPump(record, i, coordinate, coordinate);
+                ConnectPipeSplitThroughPassivePass(record, i, coordinate, coordinate);
                 for (int directionIndex = 0; directionIndex < PipeSplitDirections.Length; directionIndex++)
                 {
                     Vector2Int direction = PipeSplitDirections[directionIndex];
@@ -162,6 +166,11 @@ public partial class TerrainGenerator
                         coordinate,
                         neighborCoordinate);
                     ConnectPipeSplitThroughPump(
+                        record,
+                        i,
+                        coordinate,
+                        neighborCoordinate);
+                    ConnectPipeSplitThroughPassivePass(
                         record,
                         i,
                         coordinate,
@@ -272,6 +281,39 @@ public partial class TerrainGenerator
         }
 
         pipeSplitPumpFirstPipe.Add(pump, recordIndex);
+    }
+
+    private void ConnectPipeSplitThroughPassivePass(
+        PipeRuntimeRecord record,
+        int recordIndex,
+        Vector2Int pipeCoordinate,
+        Vector2Int endpointCoordinate)
+    {
+        if (record == null
+            || !record.HasValidPrototype
+            || !InputOutputModule.TryGetPassiveFluidPassAtRuntimeCoordinate(
+                endpointCoordinate,
+                out InputOutputModule passOwner,
+                out _,
+                out Vector2Int externalDirection)
+            || pipeCoordinate != endpointCoordinate
+            && (!Pump.TryResolvePipePassConnectionDirection(
+                pipeCoordinate,
+                endpointCoordinate,
+                externalDirection,
+                out Vector2Int directionToEndpoint)
+                || !record.HasConnectionTowardsAt(pipeCoordinate, directionToEndpoint)))
+        {
+            return;
+        }
+
+        if (pipeSplitPassivePassFirstPipe.TryGetValue(passOwner, out int firstPipeIndex))
+        {
+            pipeSplitGraph.Connect(firstPipeIndex, recordIndex);
+            return;
+        }
+
+        pipeSplitPassivePassFirstPipe.Add(passOwner, recordIndex);
     }
 
     private static int ComparePipeSplitRecords(PipeRuntimeRecord a, PipeRuntimeRecord b)

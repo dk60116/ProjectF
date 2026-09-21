@@ -5,12 +5,19 @@ using UnityEngine.Serialization;
 
 public class WorkableObject : InstallationObject
 {
+    private const float ConnectedRangeEdgeEpsilon = 0.001f;
     private static readonly HashSet<WorkableObject> ActiveInstances = new HashSet<WorkableObject>();
     private static readonly HashSet<WorkableObject> SelectedRangeVisualInstances = new HashSet<WorkableObject>();
     private static readonly List<WorkableObjectRangeVisualRequest> RangeVisualRequestScratch =
         new List<WorkableObjectRangeVisualRequest>();
     private static readonly HashSet<WorkableObject> RangeVisualObjectScratch =
         new HashSet<WorkableObject>();
+    private static readonly List<WorkableObject> ConnectedRangeQueueScratch =
+        new List<WorkableObject>();
+    private static readonly HashSet<WorkableObject> ConnectedRangeVisitedScratch =
+        new HashSet<WorkableObject>();
+    private static readonly List<WorkableObject> ConnectedRangeGroupScratch =
+        new List<WorkableObject>();
     private static float cachedGlobalMaxFocusActivationRadius;
     private static bool globalMaxFocusActivationRadiusDirty = true;
     private static BagSlot craftingSlotRangeVisualRequestSource;
@@ -35,7 +42,95 @@ public class WorkableObject : InstallationObject
         return Mathf.Max(0f, rangeCells * 0.5f);
     }
 
+    public static void CollectActiveContainingWorldPosition(
+        Vector3 worldPosition,
+        List<WorkableObject> results)
+    {
+        if (results == null)
+        {
+            return;
+        }
+
+        results.Clear();
+        foreach (WorkableObject workableObject in ActiveInstances)
+        {
+            if (workableObject != null
+                && workableObject.isActiveAndEnabled
+                && workableObject.ContainsWorldPositionInOwnWorkableRange(worldPosition))
+            {
+                CollectConnectedRangeGroup(workableObject, ConnectedRangeGroupScratch);
+                for (int i = 0; i < ConnectedRangeGroupScratch.Count; i++)
+                {
+                    WorkableObject connectedObject = ConnectedRangeGroupScratch[i];
+                    if (!results.Contains(connectedObject))
+                    {
+                        results.Add(connectedObject);
+                    }
+                }
+            }
+        }
+
+        results.Sort(CompareRuntimeOrder);
+    }
+
+    private static int CompareRuntimeOrder(WorkableObject left, WorkableObject right)
+    {
+        if (ReferenceEquals(left, right))
+        {
+            return 0;
+        }
+
+        if (left == null)
+        {
+            return 1;
+        }
+
+        if (right == null)
+        {
+            return -1;
+        }
+
+        int comparison = left.RuntimePlacementSequence.CompareTo(right.RuntimePlacementSequence);
+        if (comparison != 0)
+        {
+            return comparison;
+        }
+
+        left.TryGetPlacementRuntime(out Vector2Int leftCoordinate, out _);
+        right.TryGetPlacementRuntime(out Vector2Int rightCoordinate, out _);
+        comparison = leftCoordinate.x.CompareTo(rightCoordinate.x);
+        return comparison != 0
+            ? comparison
+            : leftCoordinate.y.CompareTo(rightCoordinate.y);
+    }
+
     public bool ContainsWorldPositionInWorkableRange(Vector3 worldPosition)
+    {
+        return ContainsWorldPositionInOwnWorkableRange(worldPosition);
+    }
+
+    public bool ContainsWorldPositionInConnectedWorkableRange(Vector3 worldPosition)
+    {
+        if (ContainsWorldPositionInOwnWorkableRange(worldPosition))
+        {
+            return true;
+        }
+
+        CollectConnectedRangeGroup(this, ConnectedRangeGroupScratch);
+        for (int i = 0; i < ConnectedRangeGroupScratch.Count; i++)
+        {
+            WorkableObject connectedObject = ConnectedRangeGroupScratch[i];
+            if (connectedObject != this
+                && connectedObject.ContainsWorldPositionInOwnWorkableRange(worldPosition))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    internal bool ContainsWorldPositionInOwnWorkableRange(Vector3 worldPosition)
     {
         if (!TryGetWorkableRangeBounds(out Bounds rangeBounds))
         {
@@ -46,6 +141,73 @@ public class WorkableObject : InstallationObject
                && worldPosition.x <= rangeBounds.max.x
                && worldPosition.z >= rangeBounds.min.z
                && worldPosition.z <= rangeBounds.max.z;
+    }
+
+    private static void CollectConnectedRangeGroup(
+        WorkableObject root,
+        List<WorkableObject> results)
+    {
+        results.Clear();
+        ConnectedRangeQueueScratch.Clear();
+        ConnectedRangeVisitedScratch.Clear();
+        if (root == null || !root.isActiveAndEnabled)
+        {
+            return;
+        }
+
+        int itemId = root.ResolveItemId();
+        if (itemId < 0)
+        {
+            results.Add(root);
+            return;
+        }
+
+        ConnectedRangeQueueScratch.Add(root);
+        ConnectedRangeVisitedScratch.Add(root);
+        for (int queueIndex = 0; queueIndex < ConnectedRangeQueueScratch.Count; queueIndex++)
+        {
+            WorkableObject current = ConnectedRangeQueueScratch[queueIndex];
+            results.Add(current);
+
+            foreach (WorkableObject candidate in ActiveInstances)
+            {
+                if (candidate == null
+                    || !candidate.isActiveAndEnabled
+                    || ConnectedRangeVisitedScratch.Contains(candidate)
+                    || candidate.ResolveItemId() != itemId
+                    || !AreWorkableRangesConnected(current, candidate))
+                {
+                    continue;
+                }
+
+                ConnectedRangeVisitedScratch.Add(candidate);
+                ConnectedRangeQueueScratch.Add(candidate);
+            }
+        }
+
+        results.Sort(CompareRuntimeOrder);
+    }
+
+    private static bool AreWorkableRangesConnected(
+        WorkableObject left,
+        WorkableObject right)
+    {
+        if (left == null
+            || right == null
+            || !left.TryGetWorkableRangeBounds(out Bounds leftBounds)
+            || !right.TryGetWorkableRangeBounds(out Bounds rightBounds))
+        {
+            return false;
+        }
+
+        float overlapX = Mathf.Min(leftBounds.max.x, rightBounds.max.x)
+                         - Mathf.Max(leftBounds.min.x, rightBounds.min.x);
+        float overlapZ = Mathf.Min(leftBounds.max.z, rightBounds.max.z)
+                         - Mathf.Max(leftBounds.min.z, rightBounds.min.z);
+        return overlapX >= -ConnectedRangeEdgeEpsilon
+               && overlapZ >= -ConnectedRangeEdgeEpsilon
+               && (overlapX > ConnectedRangeEdgeEpsilon
+                   || overlapZ > ConnectedRangeEdgeEpsilon);
     }
 
     public bool TryGetWorkableRangeBounds(out Bounds bounds)
@@ -265,7 +427,7 @@ public class WorkableObject : InstallationObject
                 RangeVisualObjectScratch);
         }
 
-        AppendRangeVisualRequests(
+        AppendConnectedRangeVisualRequests(
             SelectedRangeVisualInstances,
             RangeVisualRequestScratch,
             RangeVisualObjectScratch);
@@ -301,35 +463,59 @@ public class WorkableObject : InstallationObject
 
         foreach (WorkableObject workableObject in sourceObjects)
         {
-            if (workableObject == null)
-            {
-                continue;
-            }
-
-            if (!appendedObjects.Add(workableObject))
-            {
-                continue;
-            }
-
-            workableObject.DisableLegacyRangeVisual();
-            if (!workableObject.showWorkableRange
-                || workableObject.workableRangeCells == 0u
-                || !workableObject.gameObject.activeInHierarchy
-                || !workableObject.ShouldShowWorkableRangeVisual())
-            {
-                continue;
-            }
-
-            if (!workableObject.TryGetWorkableRangeBounds(out Bounds rangeBounds))
-            {
-                continue;
-            }
-
-            requests.Add(new WorkableObjectRangeVisualRequest(
-                rangeBounds.center,
-                rangeBounds.extents.x,
-                workableObject.rangeVisualYOffset));
+            AppendRangeVisualRequest(workableObject, requests, appendedObjects, false);
         }
+    }
+
+    private static void AppendConnectedRangeVisualRequests(
+        IEnumerable<WorkableObject> sourceObjects,
+        List<WorkableObjectRangeVisualRequest> requests,
+        HashSet<WorkableObject> appendedObjects)
+    {
+        if (sourceObjects == null || requests == null || appendedObjects == null)
+        {
+            return;
+        }
+
+        foreach (WorkableObject workableObject in sourceObjects)
+        {
+            CollectConnectedRangeGroup(workableObject, ConnectedRangeGroupScratch);
+            for (int i = 0; i < ConnectedRangeGroupScratch.Count; i++)
+            {
+                AppendRangeVisualRequest(
+                    ConnectedRangeGroupScratch[i],
+                    requests,
+                    appendedObjects,
+                    true);
+            }
+        }
+    }
+
+    private static void AppendRangeVisualRequest(
+        WorkableObject workableObject,
+        List<WorkableObjectRangeVisualRequest> requests,
+        HashSet<WorkableObject> appendedObjects,
+        bool forceSelectedNetworkVisible)
+    {
+        if (workableObject == null || !appendedObjects.Add(workableObject))
+        {
+            return;
+        }
+
+        workableObject.DisableLegacyRangeVisual();
+        if (!workableObject.showWorkableRange
+            || workableObject.workableRangeCells == 0u
+            || !workableObject.gameObject.activeInHierarchy
+            || !forceSelectedNetworkVisible && !workableObject.ShouldShowWorkableRangeVisual()
+            || !workableObject.TryGetWorkableRangeBounds(out Bounds rangeBounds))
+        {
+            return;
+        }
+
+        requests.Add(new WorkableObjectRangeVisualRequest(
+            rangeBounds.center,
+            rangeBounds.extents.x,
+            workableObject.rangeVisualYOffset));
     }
 
     private static WorkableObjectRangeVisual GetOrCreateSharedRangeVisual()

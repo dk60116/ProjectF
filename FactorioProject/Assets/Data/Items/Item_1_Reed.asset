@@ -13,7 +13,7 @@ MonoBehaviour:
   m_Name: Item_1_Reed
   m_EditorClassIdentifier: 
   itemName: Reed
-  id: 11
+  id: 14
   mapObject: {fileID: 5596077993400562758, guid: 24eb9727d7e44e846927e90bd34ba20f, type: 3}
   mapObjectArchetype: {fileID: 11400000, guid: bbd71924b14136c4b9a5a221e12b884c, type: 2}
   useMapColor: 0
@@ -48,6 +48,7 @@ MonoBehaviour:
   eatRewardChancePercent: 0
   isSeed: 0
   seedTargetResource: {fileID: 0}
+  useEnergyRequirements: []
   useEnergyType: 0
   useEnergyAmount: 0
   completeEnergy: 0

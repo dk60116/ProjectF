@@ -13,7 +13,7 @@ MonoBehaviour:
   m_Name: Item_106_Long Robot arm
   m_EditorClassIdentifier: Assembly-CSharp::ItemDefinition
   itemName: Long Robot arm
-  id: 61
+  id: 65
   mapObject: {fileID: 5617472291595085519, guid: 67e59f493a6d8be4f88637abe49568e4, type: 3}
   mapObjectArchetype: {fileID: 11400000, guid: 9017e43225375b7439732c5f9232ade7, type: 2}
   useMapColor: 1
@@ -47,6 +47,7 @@ MonoBehaviour:
   eatRewardChancePercent: 0
   isSeed: 0
   seedTargetResource: {fileID: 0}
+  useEnergyRequirements: []
   useEnergyType: 2
   useEnergyAmount: 20
   completeEnergy: 0

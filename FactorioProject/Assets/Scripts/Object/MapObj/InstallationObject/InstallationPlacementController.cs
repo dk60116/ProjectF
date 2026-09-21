@@ -170,6 +170,8 @@ public class InstallationPlacementController : MonoBehaviour
         new List<PipeAreaBlockCandidate>(4);
     private readonly List<PipeAreaBlockCandidate> pipeAreaBlockCandidateScratchC =
         new List<PipeAreaBlockCandidate>(4);
+    private readonly List<PipeAreaBlockCandidate> pipePassPlacementOverlapScratch =
+        new List<PipeAreaBlockCandidate>(4);
     private readonly List<AreaMarkerSpawnRequest> areaMarkerRequestScratch =
         new List<AreaMarkerSpawnRequest>(8);
     private readonly List<Vector3> areaMarkerPrimaryWorldPositionScratch =
@@ -2948,7 +2950,7 @@ public class InstallationPlacementController : MonoBehaviour
 
         ItemDefinition definition = knownDefinition ?? ResolveItemDefinition(mapObject);
         return definition != null
-               && definition.useEnergyType == ItemDefinition.EnergyType.Electricity;
+               && definition.UsesEnergyType(ItemDefinition.EnergyType.Electricity);
     }
 
     private bool ShouldRequestInstallOrEditSprinklerRangeVisuals()
@@ -8267,7 +8269,7 @@ public class InstallationPlacementController : MonoBehaviour
         }
 
         ItemDefinition installationDefinition = ResolveItemDefinition(installedObject);
-        if (installationDefinition == null || installationDefinition.useEnergyType == ItemDefinition.EnergyType.None)
+        if (!ItemDefinition.TryGetPrimaryUseEnergyRequirement(installationDefinition, out _))
         {
             return;
         }
@@ -8291,7 +8293,7 @@ public class InstallationPlacementController : MonoBehaviour
         }
 
         energyAreaController.Configure(
-            installationDefinition.useEnergyType,
+            installationDefinition,
             inputEnergyCoordinates,
             ShouldInputOutputAreasBlockInstallationPlacement(installedObject));
     }
@@ -14130,6 +14132,36 @@ public class InstallationPlacementController : MonoBehaviour
     private static bool IsPipePassBlockType(InputOutputModule.RectGridBlockType blockType)
     {
         return blockType == InputOutputModule.RectGridBlockType.PipeInput;
+    }
+
+    private bool CanOverlapExistingPipePass(
+        Vector2Int coordinate,
+        InputOutputModule.RectGridBlockType candidateBlockType,
+        MapObject previewToIgnore)
+    {
+        if (!IsPipePassBlockType(candidateBlockType))
+        {
+            return false;
+        }
+
+        pipePassPlacementOverlapScratch.Clear();
+        CollectRectGridPipeAreaBlockCandidatesAtCoordinate(
+            coordinate,
+            previewToIgnore,
+            pipePassPlacementOverlapScratch);
+        for (int i = 0; i < pipePassPlacementOverlapScratch.Count; i++)
+        {
+            if (!IsPipePassBlockType(pipePassPlacementOverlapScratch[i].blockType))
+            {
+                continue;
+            }
+
+            pipePassPlacementOverlapScratch.Clear();
+            return true;
+        }
+
+        pipePassPlacementOverlapScratch.Clear();
+        return false;
     }
 
     private bool PlacementOwnsPipePassAtCoordinate(
@@ -21185,7 +21217,7 @@ public class InstallationPlacementController : MonoBehaviour
     private Sprite ResolveInputEnergyMarkerIcon(MapObject installedObject)
     {
         ItemDefinition installationDefinition = ResolveItemDefinition(installedObject);
-        if (installationDefinition == null || installationDefinition.useEnergyType == ItemDefinition.EnergyType.None)
+        if (!ItemDefinition.TryGetPrimaryUseEnergyRequirement(installationDefinition, out _))
         {
             return null;
         }
@@ -21212,7 +21244,7 @@ public class InstallationPlacementController : MonoBehaviour
         {
             ItemDefinition candidate = definitions[i];
             if (candidate == null
-                || candidate.energyType != installationDefinition.useEnergyType
+                || !installationDefinition.UsesEnergyType(candidate.energyType)
                 || candidate.energyAmount <= 0)
             {
                 continue;
@@ -23641,15 +23673,24 @@ public class InstallationPlacementController : MonoBehaviour
             bool ignoresPlacementObstacles = IsNonBlockingRobotArmInteractionArea(
                 footprintSource,
                 placement.blockType);
-            if (!terrain.TryGetLoadedBlockCellData(coordinate, out BlockCellData cellData)
-                || (!ignoresPlacementObstacles
-                    && blocksDroppedFloorObjects
-                    && terrain.HasDroppedFloorObjectsAt(coordinate)))
+            if (!terrain.TryGetLoadedBlockCellData(coordinate, out BlockCellData cellData))
             {
                 return false;
             }
 
-            if (ignoresPlacementObstacles)
+            bool overlapsExistingPipePass = CanOverlapExistingPipePass(
+                coordinate,
+                placement.blockType,
+                previewToIgnore);
+            if (!overlapsExistingPipePass
+                && !ignoresPlacementObstacles
+                    && blocksDroppedFloorObjects
+                    && terrain.HasDroppedFloorObjectsAt(coordinate))
+            {
+                return false;
+            }
+
+            if (ignoresPlacementObstacles || overlapsExistingPipePass)
             {
                 checkedAnyPlacement = true;
                 continue;
@@ -33374,14 +33415,19 @@ public class InstallationPlacementController : MonoBehaviour
             bool ignoresPlacementObstacles = IsNonBlockingRobotArmInteractionArea(
                 footprintSource,
                 rectGridBlockType);
-            if (!ignoresPlacementObstacles
+            bool overlapsExistingPipePass = CanOverlapExistingPipePass(
+                coordinate,
+                rectGridBlockType,
+                previewToIgnore);
+            if (!overlapsExistingPipePass
+                && !ignoresPlacementObstacles
                 && blocksDroppedFloorObjects
                 && terrain.HasDroppedFloorObjectsAt(coordinate))
             {
                 return false;
             }
 
-            if (ignoresPlacementObstacles)
+            if (ignoresPlacementObstacles || overlapsExistingPipePass)
             {
                 footprintBlocks.Add(footprintBlock);
                 continue;
@@ -33502,6 +33548,11 @@ public class InstallationPlacementController : MonoBehaviour
         }
 
         if (IsNonBlockingRobotArmInteractionArea(footprintSource, rectGridBlockType))
+        {
+            return true;
+        }
+
+        if (CanOverlapExistingPipePass(block.Coordinate, rectGridBlockType, previewToIgnore))
         {
             return true;
         }
@@ -39312,14 +39363,12 @@ public class InstallationPlacementController : MonoBehaviour
         }
 
         ItemDefinition installationDefinition = ResolveItemDefinition(footprintSource);
-        if (installationDefinition == null
-            || installationDefinition.useEnergyType == ItemDefinition.EnergyType.None)
+        if (installationDefinition == null)
         {
             return false;
         }
 
-        energyTypes.Add(installationDefinition.useEnergyType);
-        return true;
+        return installationDefinition.AppendUseEnergyTypes(energyTypes);
     }
 
     private static bool TryGetExistingOutputItemIdsAtCoordinate(Vector2Int coordinate, ISet<int> outputItemIds)

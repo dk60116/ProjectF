@@ -180,7 +180,7 @@ MonoBehaviour:
   m_EditorClassIdentifier: 
   id: 0
   objectName: Stone
-  objId: 13
+  objId: 16
   itemDefinition: {fileID: 11400000, guid: fc1cba8967b6adc48867e456639cad4a, type: 2}
   mapStatus:
     mapSizeX: 1

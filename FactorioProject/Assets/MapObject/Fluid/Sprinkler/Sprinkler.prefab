@@ -355,7 +355,7 @@ MonoBehaviour:
   m_EditorClassIdentifier: Assembly-CSharp::Sprinkler
   id: 0
   objectName: Sprinkler
-  objId: 58
+  objId: 61
   itemDefinition: {fileID: 11400000, guid: e3e51ef812b2cca4a8b0033722dde4a1, type: 2}
   mapStatus:
     mapSizeX: 2
@@ -381,6 +381,7 @@ MonoBehaviour:
   storedFluidTemperatureCelsius: 20
   powerLinePoint: {fileID: 0}
   parentInputOutputModuleItem: {fileID: 0}
+  inputOutputPairs: []
   inputList: []
   outputList: []
   output:

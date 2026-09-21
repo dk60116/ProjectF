@@ -19,7 +19,36 @@ public class ItemDefinition : ScriptableObject
         Electricity = 2,
         CarnivoreFood = 3,
         HerbivoreFood = 4,
-        Fertilizer = 5
+        Fertilizer = 5,
+        [InspectorName("Diesel")]
+        Diesel = 6,
+        [InspectorName("Heavy Oil")]
+        HeavyOil = 7,
+        [InspectorName("LPG Gas")]
+        LPGGas = 8
+    }
+
+    [Serializable]
+    public struct EnergyUseRequirement
+    {
+        public EnergyType energyType;
+        [Min(0f)] public float useEnergyAmount;
+        [Min(0f)] public float completeEnergy;
+
+        public EnergyUseRequirement(EnergyType energyType, float useEnergyAmount)
+            : this(energyType, useEnergyAmount, 0f)
+        {
+        }
+
+        public EnergyUseRequirement(
+            EnergyType energyType,
+            float useEnergyAmount,
+            float completeEnergy)
+        {
+            this.energyType = energyType;
+            this.useEnergyAmount = Mathf.Max(0f, useEnergyAmount);
+            this.completeEnergy = Mathf.Max(0f, completeEnergy);
+        }
     }
 
     public enum ItemLightMode
@@ -92,10 +121,14 @@ public class ItemDefinition : ScriptableObject
     public bool isSeed;
     [Tooltip("씨앗을 밭에 심었을 때 생성할 리소스입니다.")]
     public ResourceDefinition seedTargetResource;
+    [SerializeField]
+    private List<EnergyUseRequirement> useEnergyRequirements = new List<EnergyUseRequirement>();
+    [HideInInspector]
     public EnergyType useEnergyType = EnergyType.None;
+    [HideInInspector]
     [Min(0f)]
     public float useEnergyAmount = 0f;
-    [Min(0f)]
+    [HideInInspector, Min(0f)]
     public float completeEnergy = 0f;
     [Min(0)]
     public int utilityPoleConnectionRadius = 6;
@@ -141,18 +174,141 @@ public class ItemDefinition : ScriptableObject
 
     public float UseEnergyRatePerSecond => ResolveUseEnergyRatePerSecond(this);
     public float ElectricUseWatts => ResolveElectricUseWatts(this);
+    public IReadOnlyList<EnergyUseRequirement> UseEnergyRequirements => useEnergyRequirements;
+
+    public int UseEnergyRequirementCount => useEnergyRequirements != null && useEnergyRequirements.Count > 0
+        ? useEnergyRequirements.Count
+        : useEnergyType != EnergyType.None ? 1 : 0;
+
+    public bool TryGetUseEnergyRequirement(int index, out EnergyUseRequirement requirement)
+    {
+        if (useEnergyRequirements != null && useEnergyRequirements.Count > 0)
+        {
+            if (index >= 0 && index < useEnergyRequirements.Count)
+            {
+                requirement = useEnergyRequirements[index];
+                ApplyLegacyCompleteEnergy(index, ref requirement);
+                return true;
+            }
+
+            requirement = default;
+            return false;
+        }
+
+        if (index == 0 && useEnergyType != EnergyType.None)
+        {
+            requirement = new EnergyUseRequirement(useEnergyType, useEnergyAmount, completeEnergy);
+            return true;
+        }
+
+        requirement = default;
+        return false;
+    }
+
+    public bool UsesEnergyType(EnergyType requiredType)
+    {
+        if (requiredType == EnergyType.None)
+        {
+            return false;
+        }
+
+        int count = UseEnergyRequirementCount;
+        for (int i = 0; i < count; i++)
+        {
+            if (TryGetUseEnergyRequirement(i, out EnergyUseRequirement requirement)
+                && requirement.energyType == requiredType
+                && requirement.useEnergyAmount > 0f)
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    public bool AppendUseEnergyTypes(ISet<EnergyType> result)
+    {
+        if (result == null)
+        {
+            return false;
+        }
+
+        bool foundAny = false;
+        int count = UseEnergyRequirementCount;
+        for (int i = 0; i < count; i++)
+        {
+            if (!TryGetUseEnergyRequirement(i, out EnergyUseRequirement requirement)
+                || requirement.energyType == EnergyType.None
+                || requirement.useEnergyAmount <= 0f)
+            {
+                continue;
+            }
+
+            result.Add(requirement.energyType);
+            foundAny = true;
+        }
+
+        return foundAny;
+    }
+
+    public void ReplaceUseEnergyRequirements(IReadOnlyList<EnergyUseRequirement> requirements)
+    {
+        if (useEnergyRequirements == null)
+        {
+            useEnergyRequirements = new List<EnergyUseRequirement>();
+        }
+        else
+        {
+            useEnergyRequirements.Clear();
+        }
+        if (requirements != null)
+        {
+            int addedTypeMask = 0;
+            for (int i = 0; i < requirements.Count; i++)
+            {
+                EnergyUseRequirement requirement = requirements[i];
+                int typeBit = 1 << (int)requirement.energyType;
+                if (requirement.energyType == EnergyType.None || (addedTypeMask & typeBit) != 0)
+                {
+                    continue;
+                }
+
+                addedTypeMask |= typeBit;
+                requirement.useEnergyAmount = Mathf.Max(0f, requirement.useEnergyAmount);
+                requirement.completeEnergy = useEnergyRequirements.Count == 0
+                    ? Mathf.Max(0f, requirement.completeEnergy)
+                    : 0f;
+                useEnergyRequirements.Add(requirement);
+            }
+        }
+
+        useEnergyType = EnergyType.None;
+        useEnergyAmount = 0f;
+        completeEnergy = 0f;
+    }
 
     public static float ResolveUseEnergyRatePerSecond(ItemDefinition definition)
     {
-        if (definition == null || definition.useEnergyType == EnergyType.None)
+        if (!TryGetPrimaryUseEnergyRequirement(definition, out EnergyUseRequirement requirement))
         {
             return 0f;
         }
 
-        float amount = Mathf.Max(0f, definition.useEnergyAmount);
-        return definition.useEnergyType == EnergyType.Electricity
+        float amount = Mathf.Max(0f, requirement.useEnergyAmount);
+        return requirement.energyType == EnergyType.Electricity
             ? amount * KilowattsToWatts
             : amount;
+    }
+
+    public static float ResolveUseEnergyRatePerSecond(ItemDefinition definition, EnergyType energyType)
+    {
+        if (!TryGetUseEnergyRequirement(definition, energyType, out EnergyUseRequirement requirement))
+        {
+            return 0f;
+        }
+
+        float amount = Mathf.Max(0f, requirement.useEnergyAmount);
+        return energyType == EnergyType.Electricity ? amount * KilowattsToWatts : amount;
     }
 
     public static int ResolveStackCapacity(ItemDefinition definition, int defaultCapacity)
@@ -177,6 +333,13 @@ public class ItemDefinition : ScriptableObject
     {
         return energyType == EnergyType.CarnivoreFood
                || energyType == EnergyType.HerbivoreFood;
+    }
+
+    public static bool IsFluidFuelEnergyType(EnergyType energyType)
+    {
+        return energyType == EnergyType.Diesel
+               || energyType == EnergyType.HeavyOil
+               || energyType == EnergyType.LPGGas;
     }
 
     public static bool IsFoodEnergyItemDefinition(ItemDefinition definition)
@@ -222,22 +385,81 @@ public class ItemDefinition : ScriptableObject
 
     public static float ResolveCompleteEnergyAmount(ItemDefinition definition)
     {
-        if (definition == null || definition.useEnergyType == EnergyType.None)
+        if (!TryGetPrimaryUseEnergyRequirement(definition, out EnergyUseRequirement requirement))
         {
             return 0f;
         }
 
-        float amount = Mathf.Max(0f, definition.completeEnergy);
-        return definition.useEnergyType == EnergyType.Electricity
+        float amount = Mathf.Max(0f, requirement.completeEnergy);
+        return requirement.energyType == EnergyType.Electricity
             ? amount * KilowattsToWatts
             : amount;
     }
 
+    private void ApplyLegacyCompleteEnergy(int index, ref EnergyUseRequirement requirement)
+    {
+        if (index != 0 || requirement.completeEnergy > 0f || completeEnergy <= 0f)
+        {
+            return;
+        }
+
+        requirement.completeEnergy = Mathf.Max(0f, completeEnergy);
+    }
+
     public static float ResolveElectricUseWatts(ItemDefinition definition)
     {
-        return definition != null && definition.useEnergyType == EnergyType.Electricity
-            ? ResolveUseEnergyRatePerSecond(definition)
-            : 0f;
+        return ResolveUseEnergyRatePerSecond(definition, EnergyType.Electricity);
+    }
+
+    public static bool TryGetPrimaryUseEnergyRequirement(
+        ItemDefinition definition,
+        out EnergyUseRequirement requirement)
+    {
+        requirement = default;
+        if (definition == null)
+        {
+            return false;
+        }
+
+        int count = definition.UseEnergyRequirementCount;
+        for (int i = 0; i < count; i++)
+        {
+            if (definition.TryGetUseEnergyRequirement(i, out requirement)
+                && requirement.energyType != EnergyType.None
+                && requirement.useEnergyAmount > 0f)
+            {
+                return true;
+            }
+        }
+
+        requirement = default;
+        return false;
+    }
+
+    public static bool TryGetUseEnergyRequirement(
+        ItemDefinition definition,
+        EnergyType energyType,
+        out EnergyUseRequirement requirement)
+    {
+        requirement = default;
+        if (definition == null || energyType == EnergyType.None)
+        {
+            return false;
+        }
+
+        int count = definition.UseEnergyRequirementCount;
+        for (int i = 0; i < count; i++)
+        {
+            if (definition.TryGetUseEnergyRequirement(i, out requirement)
+                && requirement.energyType == energyType
+                && requirement.useEnergyAmount > 0f)
+            {
+                return true;
+            }
+        }
+
+        requirement = default;
+        return false;
     }
 
     public static bool IsElectricityItemDefinition(ItemDefinition definition)
@@ -304,6 +526,60 @@ public class ItemDefinition : ScriptableObject
         lightIntensityMultiplier = Mathf.Max(0.01f, lightIntensityMultiplier);
         bucketFillDurationSeconds = Mathf.Max(0.1f, bucketFillDurationSeconds);
         fluidOutputLitersPerSecond = Mathf.Max(0f, fluidOutputLitersPerSecond);
+        if (useEnergyRequirements != null)
+        {
+            HashSet<EnergyType> seenTypes = new HashSet<EnergyType>();
+            for (int i = 0; i < useEnergyRequirements.Count;)
+            {
+                EnergyUseRequirement requirement = useEnergyRequirements[i];
+                if (requirement.energyType == EnergyType.None || !seenTypes.Add(requirement.energyType))
+                {
+                    useEnergyRequirements.RemoveAt(i);
+                    continue;
+                }
+
+                requirement.useEnergyAmount = Mathf.Max(0f, requirement.useEnergyAmount);
+                requirement.completeEnergy = i == 0
+                    ? Mathf.Max(0f, requirement.completeEnergy)
+                    : 0f;
+                useEnergyRequirements[i] = requirement;
+                i++;
+            }
+
+            if (useEnergyRequirements.Count > 0)
+            {
+                MigrateLegacyCompleteEnergy();
+                useEnergyType = EnergyType.None;
+                useEnergyAmount = 0f;
+            }
+        }
+    }
+
+    private void MigrateLegacyCompleteEnergy()
+    {
+        if (useEnergyRequirements == null || useEnergyRequirements.Count == 0)
+        {
+            return;
+        }
+
+        EnergyUseRequirement primaryRequirement = useEnergyRequirements[0];
+        if (primaryRequirement.completeEnergy <= 0f && completeEnergy > 0f)
+        {
+            primaryRequirement.completeEnergy = completeEnergy;
+            useEnergyRequirements[0] = primaryRequirement;
+        }
+
+        for (int i = 1; i < useEnergyRequirements.Count; i++)
+        {
+            EnergyUseRequirement requirement = useEnergyRequirements[i];
+            if (requirement.completeEnergy > 0f)
+            {
+                requirement.completeEnergy = 0f;
+                useEnergyRequirements[i] = requirement;
+            }
+        }
+
+        completeEnergy = 0f;
     }
 #endif
 }

@@ -13,7 +13,7 @@ MonoBehaviour:
   m_Name: Item_67_Anvil
   m_EditorClassIdentifier: Assembly-CSharp::ItemDefinition
   itemName: Anvil
-  id: 17
+  id: 20
   mapObject: {fileID: 7839628250064023149, guid: 5968b61eb9fd64e43862673d6f548d51, type: 3}
   mapObjectArchetype: {fileID: 11400000, guid: 838b2f2ac31acba438f649a65409527f, type: 2}
   useMapColor: 1
@@ -47,6 +47,7 @@ MonoBehaviour:
   eatRewardChancePercent: 0
   isSeed: 0
   seedTargetResource: {fileID: 0}
+  useEnergyRequirements: []
   useEnergyType: 0
   useEnergyAmount: 0
   completeEnergy: 0

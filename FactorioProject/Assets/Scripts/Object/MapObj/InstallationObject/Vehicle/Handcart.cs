@@ -79,6 +79,7 @@ public class Handcart : Vehicle, IPlayerItemStorage, IPlayerItemStoragePortableP
     private readonly List<PortableObject> itemVisuals = new List<PortableObject>();
     private readonly List<int> cargoStackItemIds = new List<int>();
     private readonly List<int> cargoStackCounts = new List<int>();
+    private List<List<PortableObject>> cargoFocusStacks = new List<List<PortableObject>>();
     private readonly HashSet<Handcart> connectedHandcarts = new HashSet<Handcart>();
     private readonly Dictionary<Handcart, int> connectedHandcartSides =
         new Dictionary<Handcart, int>();
@@ -1451,6 +1452,7 @@ public class Handcart : Vehicle, IPlayerItemStorage, IPlayerItemStoragePortableP
             return false;
         }
 
+        RebuildCargoFocusStacks();
         SaveCargoState();
         return true;
     }
@@ -1529,6 +1531,7 @@ public class Handcart : Vehicle, IPlayerItemStorage, IPlayerItemStoragePortableP
             itemVisuals.RemoveAt(cargoIndex);
         }
 
+        RebuildCargoFocusStacks();
         PlayerItemStorageUtility.MoveVisualToPlayerStorage(sourceVisual, reservation);
         ReflowCargoVisuals(cargoIndex);
         SaveCargoState();
@@ -1582,6 +1585,11 @@ public class Handcart : Vehicle, IPlayerItemStorage, IPlayerItemStoragePortableP
 
         previewItemId = storedItemIds[cargoIndex];
         previewPortableObject = cargoIndex < itemVisuals.Count ? itemVisuals[cargoIndex] : null;
+        if (previewPortableObject != null
+            && TryGetCargoFocusStack(cargoIndex, out List<PortableObject> focusStack))
+        {
+            previewPortableObject.SetFocusStack(focusStack);
+        }
         for (int i = 0; i < storedItemIds.Count; i++)
         {
             if (storedItemIds[i] == previewItemId)
@@ -1656,6 +1664,8 @@ public class Handcart : Vehicle, IPlayerItemStorage, IPlayerItemStoragePortableP
             itemVisuals.Add(visual);
             SettleCargoVisual(visual, i);
         }
+
+        RebuildCargoFocusStacks();
     }
 
     private PortableObject CreateCargoVisual(int itemId)
@@ -1810,6 +1820,19 @@ public class Handcart : Vehicle, IPlayerItemStorage, IPlayerItemStoragePortableP
         out int lastStackIndex,
         out int lastStackItemIndex)
     {
+        BuildCargoStackLayout(
+            itemLimit,
+            null,
+            out lastStackIndex,
+            out lastStackItemIndex);
+    }
+
+    private void BuildCargoStackLayout(
+        int itemLimit,
+        List<List<PortableObject>> focusStacks,
+        out int lastStackIndex,
+        out int lastStackItemIndex)
+    {
         cargoStackItemIds.Clear();
         cargoStackCounts.Clear();
         lastStackIndex = -1;
@@ -1840,12 +1863,46 @@ public class Handcart : Vehicle, IPlayerItemStorage, IPlayerItemStoragePortableP
                 targetStackIndex = cargoStackItemIds.Count;
                 cargoStackItemIds.Add(itemId);
                 cargoStackCounts.Add(0);
+                focusStacks?.Add(new List<PortableObject>());
             }
 
             lastStackIndex = targetStackIndex;
             lastStackItemIndex = cargoStackCounts[targetStackIndex];
             cargoStackCounts[targetStackIndex] = lastStackItemIndex + 1;
+            if (focusStacks != null && itemIndex < itemVisuals.Count)
+            {
+                PortableObject visual = itemVisuals[itemIndex];
+                if (visual != null)
+                {
+                    focusStacks[targetStackIndex].Add(visual);
+                }
+            }
         }
+    }
+
+    private void RebuildCargoFocusStacks()
+    {
+        var rebuiltStacks = new List<List<PortableObject>>(GetUsableItemPointCount());
+        BuildCargoStackLayout(
+            storedItemIds != null ? storedItemIds.Count : 0,
+            rebuiltStacks,
+            out _,
+            out _);
+        cargoFocusStacks = rebuiltStacks;
+    }
+
+    private bool TryGetCargoFocusStack(int cargoIndex, out List<PortableObject> focusStack)
+    {
+        focusStack = null;
+        if (!TryResolveCargoStack(cargoIndex, out int stackIndex, out _)
+            || stackIndex < 0
+            || stackIndex >= cargoFocusStacks.Count)
+        {
+            return false;
+        }
+
+        focusStack = cargoFocusStacks[stackIndex];
+        return focusStack != null && focusStack.Count > 0;
     }
 
     private bool TryFindPickupCargoItemIndex(
@@ -1956,6 +2013,7 @@ public class Handcart : Vehicle, IPlayerItemStorage, IPlayerItemStoragePortableP
         }
 
         itemVisuals.Clear();
+        cargoFocusStacks = new List<List<PortableObject>>();
     }
 
     private void SaveCargoState()

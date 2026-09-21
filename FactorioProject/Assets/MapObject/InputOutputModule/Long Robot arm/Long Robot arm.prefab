@@ -415,7 +415,7 @@ MonoBehaviour:
   m_EditorClassIdentifier: 
   id: 0
   objectName: Long Robot arm
-  objId: 61
+  objId: 65
   itemDefinition: {fileID: 11400000, guid: 3dcbbe571d74ad449bca45a7842feabe, type: 2}
   mapStatus:
     mapSizeX: 1
@@ -441,6 +441,7 @@ MonoBehaviour:
   storedFluidTemperatureCelsius: 20
   powerLinePoint: {fileID: 4220946898379902674}
   parentInputOutputModuleItem: {fileID: 0}
+  inputOutputPairs: []
   inputList: []
   outputList: []
   output:

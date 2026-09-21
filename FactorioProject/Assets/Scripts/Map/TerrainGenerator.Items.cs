@@ -1666,6 +1666,164 @@ public partial class TerrainGenerator : MonoBehaviour
         return count - remaining;
     }
 
+    public int GetDroppedItemCountInWorkableRanges(
+        IReadOnlyList<WorkableObject> workableObjects,
+        Vector3 excludedCenterWorldPosition,
+        int excludedRadius,
+        int itemId)
+    {
+        if (itemId < 0
+            || !TryGetWorkableRangeCoordinateBounds(
+                workableObjects,
+                out Vector2Int minimumCoordinate,
+                out Vector2Int maximumCoordinate))
+        {
+            return 0;
+        }
+
+        Vector2Int excludedCenter = GetWorldBlockCoordinate(excludedCenterWorldPosition);
+        int total = 0;
+        for (int y = minimumCoordinate.y; y <= maximumCoordinate.y; y++)
+        {
+            for (int x = minimumCoordinate.x; x <= maximumCoordinate.x; x++)
+            {
+                Vector2Int coordinate = new Vector2Int(x, y);
+                if (IsInsideSquareRadius(coordinate, excludedCenter, excludedRadius)
+                    || !IsInsideAnyWorkableRange(coordinate, workableObjects)
+                    || !loadedBlocks.TryGetValue(coordinate, out Block block)
+                    || block == null)
+                {
+                    continue;
+                }
+
+                if (block.Type == Block.BlockType.Ground)
+                {
+                    total += block.CountFloorObjects(itemId);
+                }
+            }
+        }
+
+        return total;
+    }
+
+    public int RemoveDroppedItemsInWorkableRanges(
+        IReadOnlyList<WorkableObject> workableObjects,
+        Vector3 excludedCenterWorldPosition,
+        int excludedRadius,
+        int itemId,
+        int count)
+    {
+        if (itemId < 0
+            || count <= 0
+            || !TryGetWorkableRangeCoordinateBounds(
+                workableObjects,
+                out Vector2Int minimumCoordinate,
+                out Vector2Int maximumCoordinate))
+        {
+            return 0;
+        }
+
+        Vector2Int excludedCenter = GetWorldBlockCoordinate(excludedCenterWorldPosition);
+        int remaining = count;
+        for (int y = minimumCoordinate.y; y <= maximumCoordinate.y && remaining > 0; y++)
+        {
+            for (int x = minimumCoordinate.x; x <= maximumCoordinate.x && remaining > 0; x++)
+            {
+                Vector2Int coordinate = new Vector2Int(x, y);
+                if (IsInsideSquareRadius(coordinate, excludedCenter, excludedRadius)
+                    || !IsInsideAnyWorkableRange(coordinate, workableObjects)
+                    || !loadedBlocks.TryGetValue(coordinate, out Block block)
+                    || block == null
+                    || block.Type != Block.BlockType.Ground)
+                {
+                    continue;
+                }
+
+                remaining -= block.RemoveFloorObjects(itemId, remaining);
+            }
+        }
+
+        return count - remaining;
+    }
+
+    private static bool TryGetWorkableRangeCoordinateBounds(
+        IReadOnlyList<WorkableObject> workableObjects,
+        out Vector2Int minimumCoordinate,
+        out Vector2Int maximumCoordinate)
+    {
+        minimumCoordinate = default;
+        maximumCoordinate = default;
+        bool foundRange = false;
+        if (workableObjects == null)
+        {
+            return false;
+        }
+
+        for (int i = 0; i < workableObjects.Count; i++)
+        {
+            WorkableObject workableObject = workableObjects[i];
+            if (workableObject == null
+                || !workableObject.isActiveAndEnabled
+                || !workableObject.TryGetWorkableRangeBounds(out Bounds bounds))
+            {
+                continue;
+            }
+
+            Vector2Int rangeMinimum = new Vector2Int(
+                Mathf.FloorToInt(bounds.min.x),
+                Mathf.FloorToInt(bounds.min.z));
+            Vector2Int rangeMaximum = new Vector2Int(
+                Mathf.CeilToInt(bounds.max.x),
+                Mathf.CeilToInt(bounds.max.z));
+            if (!foundRange)
+            {
+                minimumCoordinate = rangeMinimum;
+                maximumCoordinate = rangeMaximum;
+                foundRange = true;
+                continue;
+            }
+
+            minimumCoordinate = Vector2Int.Min(minimumCoordinate, rangeMinimum);
+            maximumCoordinate = Vector2Int.Max(maximumCoordinate, rangeMaximum);
+        }
+
+        return foundRange;
+    }
+
+    private static bool IsInsideAnyWorkableRange(
+        Vector2Int coordinate,
+        IReadOnlyList<WorkableObject> workableObjects)
+    {
+        if (workableObjects == null)
+        {
+            return false;
+        }
+
+        Vector3 worldPosition = new Vector3(coordinate.x, 0f, coordinate.y);
+        for (int i = 0; i < workableObjects.Count; i++)
+        {
+            WorkableObject workableObject = workableObjects[i];
+            if (workableObject != null
+                && workableObject.isActiveAndEnabled
+                && workableObject.ContainsWorldPositionInOwnWorkableRange(worldPosition))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private static bool IsInsideSquareRadius(
+        Vector2Int coordinate,
+        Vector2Int center,
+        int radius)
+    {
+        return radius >= 0
+               && Mathf.Abs(coordinate.x - center.x) <= radius
+               && Mathf.Abs(coordinate.y - center.y) <= radius;
+    }
+
     public int TransferDroppedItemsToHand(Player player, Vector3 worldPosition, int radius)
     {
         if (player == null || radius < 0)

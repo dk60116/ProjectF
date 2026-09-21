@@ -18,11 +18,12 @@ public class ProductionMachine : InputOutputModule
     private readonly HashSet<Vector2Int> resolvedProductionInputCoordinateSet = new HashSet<Vector2Int>();
     private readonly HashSet<int> productionIngredientItemIds = new HashSet<int>();
     private int maximumProductionIngredientTypes = LegacyMaximumProductionIngredientTypes;
+    public int MaximumProductionIngredientTypes => ResolveMaximumProductionIngredientTypes();
 
     protected override void OnEnable()
     {
         base.OnEnable();
-        maximumProductionIngredientTypes = ResolveMaximumProductionIngredientTypes();
+        maximumProductionIngredientTypes = MaximumProductionIngredientTypes;
         RefreshProductionTargetIconDisplays();
     }
 
@@ -353,7 +354,7 @@ public class ProductionMachine : InputOutputModule
 
         if (!TryResolveSelectedProductionRecipe(
                 resolvedProductionIngredients,
-                out int outputIndex,
+                out int outputPairIndex,
                 out int outputItemId,
                 out int outputCount))
         {
@@ -390,7 +391,7 @@ public class ProductionMachine : InputOutputModule
             }
         }
 
-        BeginActiveCraft(outputIndex, outputItemId, outputCount, installedDefinition);
+        BeginActiveCraft(outputPairIndex, outputItemId, outputCount, installedDefinition);
     }
 
     protected override string ResolveObjectInfoStatus(out bool isProducing)
@@ -507,11 +508,11 @@ public class ProductionMachine : InputOutputModule
 
     private bool TryResolveSelectedProductionRecipe(
         List<CraftingTreeRuntime.IngredientEntry> ingredients,
-        out int outputIndex,
+        out int outputPairIndex,
         out int outputItemId,
         out int outputCount)
     {
-        outputIndex = -1;
+        outputPairIndex = -1;
         outputItemId = -1;
         outputCount = 0;
 
@@ -521,9 +522,9 @@ public class ProductionMachine : InputOutputModule
         }
 
         outputItemId = ResolveSelectedProductionTargetItemId();
-        outputIndex = ResolveProductionTargetOutputIndex(outputItemId);
+        outputPairIndex = ResolveProductionTargetPairIndex(outputItemId);
         if (outputItemId < 0
-            || outputIndex < 0
+            || outputPairIndex < 0
             || !TryGetProductionIngredients(outputItemId, ingredients)
             || ingredients.Count <= 0
             || ingredients.Count > maximumProductionIngredientTypes)
@@ -531,17 +532,17 @@ public class ProductionMachine : InputOutputModule
             return false;
         }
 
-        outputCount = ResolveProductionOutputCount(outputIndex, outputItemId);
+        outputCount = ResolveProductionOutputCount(outputPairIndex, outputItemId);
         return outputCount > 0;
     }
 
     private bool TryResolveObjectInfoProductionIngredients(
         List<CraftingTreeRuntime.IngredientEntry> ingredients,
-        out int outputIndex,
+        out int outputPairIndex,
         out int outputItemId,
         out int outputCount)
     {
-        outputIndex = -1;
+        outputPairIndex = -1;
         outputItemId = -1;
         outputCount = 0;
 
@@ -556,16 +557,16 @@ public class ProductionMachine : InputOutputModule
             && ingredients.Count > 0)
         {
             outputItemId = ActiveOutputItemId;
-            outputIndex = ResolveProductionTargetOutputIndex(outputItemId);
+            outputPairIndex = ResolveProductionTargetPairIndex(outputItemId);
             outputCount = ActiveOutputCount > 0
                 ? ActiveOutputCount
-                : ResolveProductionOutputCount(outputIndex, outputItemId);
+                : ResolveProductionOutputCount(outputPairIndex, outputItemId);
             return outputCount > 0;
         }
 
         return TryResolveSelectedProductionRecipe(
             ingredients,
-            out outputIndex,
+            out outputPairIndex,
             out outputItemId,
             out outputCount);
     }
@@ -585,16 +586,21 @@ public class ProductionMachine : InputOutputModule
             return false;
         }
 
+        if (TryGetConfiguredProductionIngredients(outputItemId, ingredients))
+        {
+            return true;
+        }
+
         if (CraftingTreeRuntime.TryGetIngredients(outputItemId, ingredients))
         {
             MergeDuplicateProductionIngredients(ingredients);
             return ingredients.Count > 0;
         }
 
-        return TryGetLegacyProductionIngredients(outputItemId, ingredients);
+        return false;
     }
 
-    private bool TryGetLegacyProductionIngredients(
+    private bool TryGetConfiguredProductionIngredients(
         int outputItemId,
         List<CraftingTreeRuntime.IngredientEntry> ingredients)
     {
@@ -604,22 +610,27 @@ public class ProductionMachine : InputOutputModule
         }
 
         ingredients.Clear();
-        int outputIndex = ResolveProductionTargetOutputIndex(outputItemId);
-        IReadOnlyList<ItemIoEntry> inputs = InputList;
-        if (outputIndex < 0 || inputs == null || outputIndex >= inputs.Count)
+        int outputPairIndex = ResolveProductionTargetPairIndex(outputItemId);
+        if (!TryGetInputOutputPair(outputPairIndex, out InputOutputPair pair)
+            || pair.inputs == null)
         {
             return false;
         }
 
-        ItemIoEntry inputEntry = inputs[outputIndex];
-        int inputItemId = inputEntry.itemDefinition != null ? inputEntry.itemDefinition.id : -1;
-        if (inputItemId < 0)
+        for (int i = 0; i < pair.inputs.Count; i++)
         {
-            return false;
+            ItemIoEntry inputEntry = pair.inputs[i];
+            int inputItemId = inputEntry.itemDefinition != null ? inputEntry.itemDefinition.id : -1;
+            if (inputItemId >= 0)
+            {
+                ingredients.Add(new CraftingTreeRuntime.IngredientEntry(
+                    inputItemId,
+                    inputEntry.ResolvedItemCount));
+            }
         }
 
-        ingredients.Add(new CraftingTreeRuntime.IngredientEntry(inputItemId, Mathf.Max(1, inputEntry.count)));
-        return true;
+        MergeDuplicateProductionIngredients(ingredients);
+        return ingredients.Count > 0;
     }
 
     private bool TryResolveProductionIngredientBlocks(List<CraftingTreeRuntime.IngredientEntry> ingredients)
@@ -691,37 +702,53 @@ public class ProductionMachine : InputOutputModule
         }
     }
 
-    private int ResolveProductionTargetOutputIndex(int outputItemId)
+    private int ResolveProductionTargetPairIndex(int outputItemId)
     {
         if (outputItemId < 0)
         {
             return -1;
         }
 
-        IReadOnlyList<ItemIoEntry> outputs = OutputList;
-        if (outputs == null)
+        IReadOnlyList<InputOutputPair> pairs = InputOutputPairs;
+        if (pairs == null)
         {
             return -1;
         }
 
-        for (int i = 0; i < outputs.Count; i++)
+        for (int pairIndex = 0; pairIndex < pairs.Count; pairIndex++)
         {
-            ItemDefinition outputDefinition = outputs[i].itemDefinition;
-            if (outputDefinition != null && outputDefinition.id == outputItemId)
+            InputOutputPair pair = pairs[pairIndex];
+            if (pair?.outputs == null)
             {
-                return i;
+                continue;
+            }
+
+            for (int outputIndex = 0; outputIndex < pair.outputs.Count; outputIndex++)
+            {
+                ItemDefinition outputDefinition = pair.outputs[outputIndex].itemDefinition;
+                if (outputDefinition != null && outputDefinition.id == outputItemId)
+                {
+                    return pairIndex;
+                }
             }
         }
 
         return -1;
     }
 
-    private int ResolveProductionOutputCount(int outputIndex, int outputItemId)
+    private int ResolveProductionOutputCount(int outputPairIndex, int outputItemId)
     {
-        IReadOnlyList<ItemIoEntry> outputs = OutputList;
-        if (outputs != null && outputIndex >= 0 && outputIndex < outputs.Count)
+        if (TryGetInputOutputPair(outputPairIndex, out InputOutputPair pair)
+            && pair.outputs != null)
         {
-            return Mathf.Max(1, outputs[outputIndex].count);
+            for (int i = 0; i < pair.outputs.Count; i++)
+            {
+                ItemIoEntry output = pair.outputs[i];
+                if (output.itemDefinition != null && output.itemDefinition.id == outputItemId)
+                {
+                    return output.ResolvedItemCount;
+                }
+            }
         }
 
         return CraftingTreeRuntime.GetOutputCount(outputItemId);

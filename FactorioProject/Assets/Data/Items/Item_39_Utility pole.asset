@@ -13,14 +13,14 @@ MonoBehaviour:
   m_Name: Item_39_Utility pole
   m_EditorClassIdentifier: 
   itemName: Utility pole
-  id: 37
+  id: 40
   mapObject: {fileID: 2570451748998091923, guid: 7d1bdc86a2c93b7458f5a0d441e08e32, type: 3}
   mapObjectArchetype: {fileID: 11400000, guid: 3b4efd18e10cb144ca635e8bfd8eae9a, type: 2}
   useMapColor: 1
   mapColor: {r: 1, g: 0.8431373, b: 0, a: 1}
   mapMarkerSize: 2
-  portableMesh: {fileID: 4300000, guid: 628cea7c87ae22644b204243295f4429, type: 2}
-  portableMat: {fileID: 2100000, guid: 1dfbd69284c27484dab13e0668a01836, type: 2}
+  portableMesh: {fileID: 4300000, guid: 497ed4be74c34a118c2d524541d031a8, type: 2}
+  portableMat: {fileID: 2100000, guid: 29015bacd0f14718881ad0da69b09a38, type: 2}
   icon: {fileID: 21300000, guid: 671470f31844e554986ab955fd61c80d, type: 3}
   oneItem: 0
   interactionButtonList: []
@@ -47,6 +47,7 @@ MonoBehaviour:
   eatRewardChancePercent: 0
   isSeed: 0
   seedTargetResource: {fileID: 0}
+  useEnergyRequirements: []
   useEnergyType: 0
   useEnergyAmount: 0
   completeEnergy: 0

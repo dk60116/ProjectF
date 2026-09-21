@@ -1,0 +1,8 @@
+{
+  "vertices": 377,
+  "triangles": 628,
+  "overlap_pixels_at_512": 0,
+  "small_triangles_at_2048": 0,
+  "min_uv_area": 8.000544156061551e-07,
+  "min_border_pixels_at_2048": 61.43999481201172
+}

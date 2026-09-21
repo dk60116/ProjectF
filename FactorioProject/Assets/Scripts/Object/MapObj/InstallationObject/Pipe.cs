@@ -400,6 +400,12 @@ public class Pipe : InstallationObject
                     out Vector2Int pumpPassOtherCoordinate,
                     out Vector2Int pumpPassExternalDirection);
             bool pipeConnectsToPumpPass = hasPumpPass;
+            bool hasPassiveFluidPass =
+                InputOutputModule.TryGetPassiveFluidPassAtRuntimeCoordinate(
+                    coordinate,
+                    out _,
+                    out Vector2Int passivePassOtherCoordinate,
+                    out Vector2Int passivePassExternalDirection);
             // An outlet reached through a dense generator connection may have
             // no pipe or pass-through at its own coordinate. Still collect it.
             if (outputSources != null)
@@ -414,7 +420,8 @@ public class Pipe : InstallationObject
             if ((!hasPipe || pipe == null)
                 && !hasFixedFluidTank
                 && !hasSteamGeneratorPass
-                && !hasPumpPass)
+                && !hasPumpPass
+                && !hasPassiveFluidPass)
             {
                 continue;
             }
@@ -441,10 +448,17 @@ public class Pipe : InstallationObject
                     FreezeObjectInfoPressureDistance(pipeDistance));
             }
 
+            if (hasPassiveFluidPass)
+            {
+                EnqueueObjectInfoFluidSearchCoordinate(
+                    passivePassOtherCoordinate,
+                    pipeDistance);
+            }
+
             for (int i = 0; i < CardinalDirections.Length; i++)
             {
                 Vector2Int direction = CardinalDirections[i];
-                if (pipe != null && !hasPumpPass
+                if (pipe != null && !hasPumpPass && !hasPassiveFluidPass
                     && (runtimeRecord != null
                         ? !runtimeRecord.HasConnectionTowardsAt(coordinate, direction)
                         : !pipe.HasConnectionTowardsAt(coordinate, pipeRotation, direction)))
@@ -452,11 +466,13 @@ public class Pipe : InstallationObject
                     continue;
                 }
 
-                if ((pipe == null && hasSteamGeneratorPass || hasPumpPass)
+                if (((pipe == null && hasSteamGeneratorPass)
+                     || hasPumpPass
+                     || hasPassiveFluidPass)
                     && !hasFixedFluidTank
-                    && direction != (hasPumpPass
-                        ? pumpPassExternalDirection
-                        : steamPassExternalDirection))
+                    && !(hasPumpPass && direction == pumpPassExternalDirection)
+                    && !(hasPassiveFluidPass && direction == passivePassExternalDirection)
+                    && !(hasSteamGeneratorPass && direction == steamPassExternalDirection))
                 {
                     continue;
                 }
@@ -496,10 +512,15 @@ public class Pipe : InstallationObject
                         out _,
                         out Vector2Int neighborPumpPassExternalDirection)
                     && neighborPumpPassExternalDirection == -direction;
+                bool hasNeighborPassiveFluidPass =
+                    InputOutputModule.HasRuntimePassiveFluidPassTowards(
+                        neighborCoordinate,
+                        -direction);
                 PipeRuntimeRecord neighborRuntimeRecord = null;
                 PipeWorld.Current?.TryGetAtCoordinate(neighborCoordinate, out neighborRuntimeRecord);
                 bool neighborConnects = hasNeighborSteamGeneratorPass
                                         || hasNeighborPumpPass
+                                        || hasNeighborPassiveFluidPass
                                         || (hasNeighborPipe || hasNeighborFixedFluidTank)
                                         && (!hasNeighborPipe
                                             || (neighborRuntimeRecord != null
@@ -516,7 +537,11 @@ public class Pipe : InstallationObject
                         neighborCoordinate,
                         AddObjectInfoPipeDistance(
                             pipeDistance,
-                            hasNeighborPipe && !hasNeighborPumpPass ? 1 : 0));
+                            hasNeighborPipe
+                            && !hasNeighborPumpPass
+                            && !hasNeighborPassiveFluidPass
+                                ? 1
+                                : 0));
                 }
                 else if (!hasNeighborPipe && !hasNeighborFixedFluidTank && outputSources != null)
                 {
@@ -529,7 +554,7 @@ public class Pipe : InstallationObject
             }
 
             Vector2Int remoteCoordinate = default;
-            bool hasRemoteConnection = pipe != null && !hasPumpPass
+            bool hasRemoteConnection = pipe != null && !hasPumpPass && !hasPassiveFluidPass
                 && (runtimeRecord != null
                     ? runtimeRecord.TryGetRemoteConnectionCoordinate(coordinate, out remoteCoordinate)
                     : pipe.TryGetRemoteConnectionCoordinate(coordinate, out remoteCoordinate));

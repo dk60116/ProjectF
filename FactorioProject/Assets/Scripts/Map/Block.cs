@@ -997,6 +997,7 @@ public partial class Block
         }
 
         ReleaseFloorObject(sourceObject);
+        NotifyRuntimeItemStackChanged();
         return true;
     }
 
@@ -5843,7 +5844,8 @@ public partial class Block
         out int itemId)
     {
         itemId = -1;
-        if (topObject == null)
+        // The optional drop gate controls drop state, not whether range is enforced.
+        if (topObject == null || !(distanceSqr <= pickupRadiusSqr))
         {
             return false;
         }

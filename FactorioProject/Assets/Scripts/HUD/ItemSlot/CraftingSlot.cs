@@ -12,6 +12,7 @@ public class CraftingSlot : ItemSlot, IPointerEnterHandler, IPointerExitHandler
     private const float DefaultIngredientSpacing = 10f;
     private const float DefaultIngredientChildSize = 80f;
     private const float MinimumLayoutSize = 0.01f;
+    private const int PlayerDroppedIngredientRadius = 2;
 
     private static CraftingSlot activeIngredientsSlot;
     [SerializeField]
@@ -80,6 +81,8 @@ public class CraftingSlot : ItemSlot, IPointerEnterHandler, IPointerExitHandler
     private readonly List<int> requiredCraftingMapObjectIds = new List<int>();
     private readonly List<HUDButtonHoverTween> hoverTweenBuffer = new List<HUDButtonHoverTween>();
     private readonly Dictionary<RectTransform, Vector2> ingredientLayoutSizes = new Dictionary<RectTransform, Vector2>();
+    private readonly List<WorkableObject> workableMaterialSources = new List<WorkableObject>(4);
+    private readonly List<BoxObject> workableBoxSources = new List<BoxObject>(8);
 
     public float ExpandDuration => Mathf.Max(0f, expandDuration);
 
@@ -998,7 +1001,25 @@ public class CraftingSlot : ItemSlot, IPointerEnterHandler, IPointerExitHandler
         PlayerBag bag = player.GetBag();
         PlayerBag handBag = player.GetHandBag();
         TerrainGenerator terrain = ResolveTerrain();
-        Vector3 origin = player.transform.position;
+        Vector3 origin = player.BodyTransform != null
+            ? player.BodyTransform.position
+            : player.transform.position;
+        RefreshWorkableMaterialSources(player);
+
+        for (int i = 0; i < ingredientBuffer.Count; i++)
+        {
+            CraftingTreeRuntime.IngredientEntry entry = ingredientBuffer[i];
+            if (entry.count > 0
+                && GetOwnedIngredientCount(
+                    entry.itemId,
+                    bag,
+                    handBag,
+                    terrain,
+                    origin) < entry.count)
+            {
+                return false;
+            }
+        }
 
         for (int i = 0; i < ingredientBuffer.Count; i++)
         {
@@ -1027,7 +1048,30 @@ public class CraftingSlot : ItemSlot, IPointerEnterHandler, IPointerExitHandler
 
             if (remaining > 0 && terrain != null)
             {
-                int removed = terrain.RemoveDroppedItemsAround(origin, entry.itemId, 2, remaining);
+                int removed = terrain.RemoveDroppedItemsAround(
+                    origin,
+                    entry.itemId,
+                    PlayerDroppedIngredientRadius,
+                    remaining);
+                remaining -= removed;
+                removedTotal += removed;
+            }
+
+            if (remaining > 0 && terrain != null && workableMaterialSources.Count > 0)
+            {
+                int removed = terrain.RemoveDroppedItemsInWorkableRanges(
+                    workableMaterialSources,
+                    origin,
+                    PlayerDroppedIngredientRadius,
+                    entry.itemId,
+                    remaining);
+                remaining -= removed;
+                removedTotal += removed;
+            }
+
+            if (remaining > 0 && workableMaterialSources.Count > 0)
+            {
+                int removed = RemoveWorkableBoxItems(entry.itemId, remaining);
                 remaining -= removed;
                 removedTotal += removed;
             }
@@ -2001,27 +2045,140 @@ public class CraftingSlot : ItemSlot, IPointerEnterHandler, IPointerExitHandler
             return 0;
         }
 
+        Player player = GameManager.Instance.Player;
+        PlayerBag bag = player.GetBag();
+        PlayerBag handBag = player.GetHandBag();
+        TerrainGenerator terrain = ResolveTerrain();
+        Vector3 origin = player.BodyTransform != null
+            ? player.BodyTransform.position
+            : player.transform.position;
+        RefreshWorkableMaterialSources(player);
+        return GetOwnedIngredientCount(itemId, bag, handBag, terrain, origin);
+    }
+
+    private int GetOwnedIngredientCount(
+        int itemId,
+        PlayerBag bag,
+        PlayerBag handBag,
+        TerrainGenerator terrain,
+        Vector3 origin)
+    {
         int total = 0;
-        PlayerBag bag = GameManager.Instance.Player.GetBag();
         if (bag != null)
         {
             total += bag.GetTotalItemCount(itemId);
         }
 
-        PlayerBag handBag = GameManager.Instance.Player.GetHandBag();
         if (handBag != null)
         {
             handBag.RefreshExternalStackCounts(false);
             total += handBag.GetTotalItemCount(itemId);
         }
 
-        TerrainGenerator terrain = ResolveTerrain();
         if (terrain != null)
         {
-            total += terrain.GetDroppedItemCountAround(GameManager.Instance.Player.transform.position, itemId, 2);
+            total += terrain.GetDroppedItemCountAround(
+                origin,
+                itemId,
+                PlayerDroppedIngredientRadius);
+            if (workableMaterialSources.Count > 0)
+            {
+                total += terrain.GetDroppedItemCountInWorkableRanges(
+                    workableMaterialSources,
+                    origin,
+                    PlayerDroppedIngredientRadius,
+                    itemId);
+            }
+        }
+
+        if (workableMaterialSources.Count > 0)
+        {
+            for (int i = 0; i < workableBoxSources.Count; i++)
+            {
+                BoxObject box = workableBoxSources[i];
+                if (IsBoxInsideAnyWorkableRange(box))
+                {
+                    total += box.GetExtractableContainedItemCount(itemId);
+                }
+            }
         }
 
         return total;
+    }
+
+    private void RefreshWorkableMaterialSources(Player player)
+    {
+        workableMaterialSources.Clear();
+        workableBoxSources.Clear();
+        if (player == null)
+        {
+            return;
+        }
+
+        Vector3 origin = player.BodyTransform != null
+            ? player.BodyTransform.position
+            : player.transform.position;
+        WorkableObject.CollectActiveContainingWorldPosition(origin, workableMaterialSources);
+        if (workableMaterialSources.Count > 0)
+        {
+            BoxObject.CopyActiveInstances(workableBoxSources);
+        }
+    }
+
+    private int RemoveWorkableBoxItems(int itemId, int count)
+    {
+        int remaining = Mathf.Max(0, count);
+        for (int i = 0; i < workableBoxSources.Count && remaining > 0; i++)
+        {
+            BoxObject box = workableBoxSources[i];
+            if (!IsBoxInsideAnyWorkableRange(box))
+            {
+                continue;
+            }
+
+            remaining -= box.RemoveContainedItems(itemId, remaining);
+        }
+
+        return count - remaining;
+    }
+
+    private bool IsBoxInsideAnyWorkableRange(BoxObject box)
+    {
+        if (box == null || !box.isActiveAndEnabled)
+        {
+            return false;
+        }
+
+        IReadOnlyList<Vector2Int> occupiedCoordinates = box.RuntimeOccupiedCoordinates;
+        if (occupiedCoordinates != null && occupiedCoordinates.Count > 0)
+        {
+            for (int coordinateIndex = 0; coordinateIndex < occupiedCoordinates.Count; coordinateIndex++)
+            {
+                Vector2Int coordinate = occupiedCoordinates[coordinateIndex];
+                Vector3 coordinateWorldPosition = new Vector3(coordinate.x, 0f, coordinate.y);
+                for (int workableIndex = 0; workableIndex < workableMaterialSources.Count; workableIndex++)
+                {
+                    if (workableMaterialSources[workableIndex]
+                        .ContainsWorldPositionInOwnWorkableRange(coordinateWorldPosition))
+                    {
+                        return true;
+                    }
+                }
+            }
+
+            return false;
+        }
+
+        for (int i = 0; i < workableMaterialSources.Count; i++)
+        {
+            if (workableMaterialSources[i]
+                .ContainsWorldPositionInOwnWorkableRange(box.transform.position))
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     private static TerrainGenerator ResolveTerrain()

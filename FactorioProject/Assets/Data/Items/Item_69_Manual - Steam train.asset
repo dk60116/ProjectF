@@ -13,7 +13,7 @@ MonoBehaviour:
   m_Name: Item_69_Manual - Steam train
   m_EditorClassIdentifier: Assembly-CSharp::ItemDefinition
   itemName: Manual - Steam train
-  id: 84
+  id: 89
   mapObject: {fileID: 0}
   mapObjectArchetype: {fileID: 0}
   useMapColor: 0
@@ -47,6 +47,7 @@ MonoBehaviour:
   eatRewardChancePercent: 0
   isSeed: 0
   seedTargetResource: {fileID: 0}
+  useEnergyRequirements: []
   useEnergyType: 0
   useEnergyAmount: 0
   completeEnergy: 0

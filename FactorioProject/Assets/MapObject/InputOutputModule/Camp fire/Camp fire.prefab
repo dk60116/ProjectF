@@ -50,7 +50,7 @@ MonoBehaviour:
   m_EditorClassIdentifier: Assembly-CSharp::Campfire
   id: 0
   objectName: Camp fire
-  objId: 29
+  objId: 32
   itemDefinition: {fileID: 11400000, guid: 9f62310ff160eb14b82cc587cd98f19c, type: 2}
   mapStatus:
     mapSizeX: 1
@@ -76,6 +76,7 @@ MonoBehaviour:
   storedFluidTemperatureCelsius: 20
   powerLinePoint: {fileID: 0}
   parentInputOutputModuleItem: {fileID: 0}
+  inputOutputPairs: []
   inputList: []
   outputList: []
   output:

@@ -2,6 +2,8 @@ $ErrorActionPreference = 'Stop'
 $repo = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '../..'))
 $source = [IO.File]::ReadAllText((Join-Path $repo 'FactorioProject/Assets/Scripts/HUD/ItemSlot/BagSlot.cs'))
 $pickupGateSource = [IO.File]::ReadAllText((Join-Path $repo 'FactorioProject/Assets/Scripts/Object/DroppedItemPickupGate.cs'))
+$blockSource = [IO.File]::ReadAllText((Join-Path $repo 'FactorioProject/Assets/Scripts/Map/Block.cs'))
+$blockSource = $blockSource.Replace("`r`n", "`n")
 $outlineSource = [IO.File]::ReadAllText((Join-Path $repo 'FactorioProject/Assets/Scripts/Rendering/AnimalScreenSpaceOutlineRendererFeature.cs'))
 function Read-Member([string]$signature, [string]$memberSource = $source) {
     $start = $memberSource.IndexOf($signature, [StringComparison]::Ordinal)
@@ -15,7 +17,7 @@ function Read-Member([string]$signature, [string]$memberSource = $source) {
     }
     $memberSource.Substring($start, $end - $start)
 }
-$generated = "using UnityEngine; public partial class BagSlot {`n"
+$generated = "using System.Collections.Generic; using UnityEngine; public partial class BagSlot {`n"
 foreach ($signature in @(
     'private enum PickupSource', 'private struct PickupCandidate',
     'private bool TryResolvePickupCandidate(', 'private void ConsiderGroundPickupCandidates(',
@@ -28,6 +30,20 @@ foreach ($signature in @(
     'private bool TryResolveAutomaticPickupPreviewItem(', 'private bool TryResolvePickupPreviewItem(',
     'private bool TryHandlePickupClick('
 )) { $generated += (Read-Member $signature) + "`n" }
+$generated += '}'
+$generated += "`npublic partial class Block {`n"
+foreach ($signature in @(
+    "public bool TryPreviewPickupFloorObjects(`n",
+    'private bool TryPreviewPickupFloorStackObjects(',
+    'private bool TryFindBestManualPickupCandidate(',
+    'private bool TryFindBestManualPickupFloorStack(',
+    'private bool TryFindManualPickupInputAreaCenterStack(',
+    'private static bool IsManualPickupStackCandidate(',
+    'private static int CountManualPickupStackObjectsFromTop(',
+    'private static PortableObject GetTopPortableObject(',
+    'private static void CleanupPortableStack(',
+    'private static void UpdatePickupGates('
+)) { $generated += (Read-Member $signature $blockSource) + "`n" }
 $generated += '}'
 $generated += "`n" + ($pickupGateSource -replace '^using UnityEngine;\s*', '')
 $generated += "`n" + (Read-Member 'public static class AnimalScreenSpaceOutline' $outlineSource)

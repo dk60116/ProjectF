@@ -16,6 +16,9 @@ static class Checks
         Check(slot.AutoItem() == slot.ground.Item, "automatic preview uses closest candidate");
         Check(slot.HoverItem() == slot.ground.Item, "slot preview uses same candidate");
         Check(slot.Click() && slot.Picked == "Ground" && slot.ExactItem == slot.ground.Item, "click picks the exact ground stack shown");
+        var standingRangeSlot = new BagSlot { ground = new Block { Item = Item(0.6f) } };
+        Check(standingRangeSlot.Selected() == "None",
+            "standing-area item outside pickup range stays unfocused");
         slot.clickedConveyor.Item = Item(0.1f);
         Check(slot.Selected() == "Conveyor", "closer conveyor item remains pickable");
         slot.Click(); Check(slot.Picked == "Conveyor", "conveyor dispatch agrees with selection");
@@ -99,8 +102,48 @@ static class Checks
         Check(immediateTarget.PreviewedItem == immediateSource.ground.Item,
             "full-screen HUD hover cannot suppress nearby pickup outline");
         BagSlot.ResetAutomaticPreviewState();
+        CheckGroundPickupRange();
         CheckOutlineVisibilityLifecycle();
         Console.WriteLine($"PASS: {checks} production pickup selection/preview/dispatch checks. No engine launched.");
+    }
+
+    static void CheckGroundPickupRange()
+    {
+        foreach (bool inputArea in new[] { false, true })
+        foreach (bool hasGate in new[] { false, true })
+        {
+            var item = Item(0.6f);
+            if (hasGate) item.Gate = new DroppedItemPickupGate(item);
+            var block = new Block();
+            if (inputArea) block.inputAreaCenterStack.Add(item); else block.Item = item;
+            var slot = new BagSlot { ground = block, IsPreviewTarget = true };
+            string label = $"inputArea={inputArea}, gate={hasGate}";
+            Check(slot.AutoItem() == null && slot.HoverItem() == null && !slot.Click(),
+                "out-of-range stack cannot preview or dispatch pickup: " + label);
+            Check(!block.CanTake(slot.player, 0.5f),
+                "production manual pickup rejects out-of-range stack: " + label);
+
+            item.transform.position = new Vector3(0.5f, 10f, 0f);
+            Check(slot.AutoItem() == item && block.CanTake(slot.player, 0.5f),
+                "range boundary remains inclusive and ignores stack height: " + label);
+            BagSlot.SetAutomaticPreviewSlots(slot);
+            BagSlot.RefreshAutomaticPreview(false);
+            Check(slot.PreviewedItem == item, "in-range stack requests outline: " + label);
+            item.transform.position = new Vector3(0.501f, 10f, 0f);
+            BagSlot.RefreshAutomaticPreview(false);
+            Check(slot.PreviewedItem == null, "leaving range clears outline: " + label);
+            BagSlot.ResetAutomaticPreviewState();
+
+            if (hasGate)
+            {
+                item.transform.position = new Vector3(0.2f, 0f, 0f);
+                item.Gate.MarkDropped(0.5f, false, Vector3.zero);
+                Check(slot.AutoItem() == item && !block.CanTake(slot.player, 0.5f),
+                    "in-range moving drop previews but cannot be taken: " + label);
+                item.Gate.MarkSettled();
+                Check(block.CanTake(slot.player, 0.5f), "settled drop can be taken: " + label);
+            }
+        }
     }
 
     static void CheckOutlineVisibilityLifecycle()
@@ -213,7 +256,6 @@ public partial class BagSlot : ItemSlot
     TerrainGenerator ResolveTerrain() => terrain;
     Vector2Int ResolveStandingCoordinate(Player p) => new Vector2Int(0, 0);
     bool TryGetGroundPickupBlock(TerrainGenerator t, Player p, Vector2Int c, out Block b) { b=ground; return b!=null; }
-    float GetStandingTilePickupRange() => 999;
     float GetPickupRange() => 0.5f;
     bool TryGetClickedFocusedConveyorBlock(Player p,out Block b) { b=clickedConveyor; return b!=null; }
     bool TryGetFocusedConveyorBlock(Player p,out Block b) { b=conveyor; return b!=null; }
@@ -243,15 +285,29 @@ public class PortableObject
     public int ItemId;
     public Transform transform = new Transform();
     public Vector3 WorldPosition => transform.position;
+    public DroppedItemPickupGate Gate;
+    public T GetComponent<T>() where T : class => Gate as T;
+    public void SetPickupSourceBlock(Block block) { }
+    public void SetFocusStack(List<PortableObject> stack) { }
 }
-public class Block : Source
+public partial class Block : Source
 {
     public Vector3 WorldPosition => transform.position;
-    public bool TryPreviewPickupFloorObjects(Player p,Vector3 o,float r,int pref,out int id,out int count,out PortableObject obj)
+    private readonly List<List<PortableObject>> floorStacks = new();
+    public readonly List<PortableObject> inputAreaCenterStack = new();
+    private Transform inputAreaCenterAnchor = new();
+    private void EnsureFloorObjectsInitialized()
     {
-        if (!Preview(pref,out id,out count,out obj)) return false;
-        Vector3 offset = obj.WorldPosition - o; offset.y = 0;
-        return offset.sqrMagnitude <= r*r;
+        floorStacks.Clear();
+        if (Item != null) floorStacks.Add(new List<PortableObject> { Item });
+    }
+    private void EnsureInputAreaCenterAnchorInitialized() { }
+    private bool IsClosedBoxContentPickupBlocked() => false;
+    public bool CanTake(Player player, float radius)
+    {
+        EnsureFloorObjectsInitialized();
+        return TryFindBestManualPickupCandidate(player, player.transform.position, radius,
+            -1, null, null, false, false, out _, out _, out _, out _, out _, out _);
     }
     public bool TryPreviewPickupConveyorObjects(Player p,Vector3 o,float r,int pref,out int id,out int count,out PortableObject obj) => Preview(pref,out id,out count,out obj);
 }

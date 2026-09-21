@@ -32,6 +32,11 @@ the stored stack then drains one item at a time into a free conveyor lane and ke
 items when the belt is full. The reverse installation order is covered as well: a direct item output
 cell may be placed over a normal, elevated-endpoint, or splitter belt, while pipe-only
 outputs and the raised 2F bridge center remain blocked.
+Existing output stacks take priority over robot-arm deposits in both availability queries
+and final placement. Tests cover a stack appearing after planning, the last free slot,
+same-tick spare capacity after draining, failed-insert rollback, and wake notifications.
+Module draining checks live capacity during apply so a slot opened by belt transport
+is not missed because it was full during planning.
 For elevated belts, manual drops choose the available footprint cell nearest the player
 and skip a lower crossing belt that occupies the bridge center.
 The harness also verifies that motion anywhere in a connected train consist blocks

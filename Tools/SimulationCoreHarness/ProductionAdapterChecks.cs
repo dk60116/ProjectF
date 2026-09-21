@@ -19,6 +19,8 @@ public partial class CraftAdapterProbe
     public long GrantedEnergy;
     private float lastOperationalEnergySupplyRatio;
     private long storedEnergyUnits, energyGaugeCapacityUnits;
+    private readonly long[] secondaryStoredEnergyUnitsByType = new long[6];
+    private readonly long[] secondaryEnergyGaugeCapacityUnitsByType = new long[6];
     public ProductionProcess State => production;
     public void Tick(float dt) => UpdateActiveCraft(dt);
     public void Start(int output = 12, int count = 2) => BeginActiveCraft(3, output, count, Definition);
@@ -33,7 +35,7 @@ public partial class CraftAdapterProbe
     }
     private ItemDefinition ResolveInstalledDefinition() => Definition;
     private bool RequiresOperationalEnergy(ItemDefinition definition) => definition.Powered;
-    private long ResolveCompleteEnergyUnits(ItemDefinition definition) => DeterministicSimulationUnits.FromFloat(definition.CompleteEnergy);
+    private float ResolveCompleteEnergy(ItemDefinition definition) => definition.CompleteEnergy;
     private float ResolveInitialCraftDuration(ItemDefinition definition) => definition.Duration;
     private void WakeRuntimeUpdate() => WakeCount++;
     private Vector3 ResolveConsumeTargetWorldPosition() => default;

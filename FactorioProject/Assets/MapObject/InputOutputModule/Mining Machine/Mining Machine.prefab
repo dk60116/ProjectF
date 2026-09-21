@@ -140,7 +140,7 @@ MonoBehaviour:
   m_EditorClassIdentifier: 
   id: 0
   objectName: Mining Machine
-  objId: 47
+  objId: 50
   itemDefinition: {fileID: 11400000, guid: 71b40722fa5571a4cbbbcaa98dbb05e1, type: 2}
   mapStatus:
     mapSizeX: 1
@@ -166,6 +166,7 @@ MonoBehaviour:
   storedFluidTemperatureCelsius: 20
   powerLinePoint: {fileID: 0}
   parentInputOutputModuleItem: {fileID: 0}
+  inputOutputPairs: []
   inputList: []
   outputList: []
   output:

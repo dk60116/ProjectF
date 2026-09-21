@@ -776,14 +776,13 @@ public class ItemInfoDescription : MonoBehaviour
             return;
         }
 
-        bool energyUseRateDisplayed = SetEnergyUseRateDefaultItemSlot(0, module, energyInputItemId);
-        SetFluidStorageDefaultItemSlot(energyUseRateDisplayed ? 1 : 0, module);
+        int nextDefaultItemIndex = SetEnergyAndFluidDefaultItemSlots(module, energyInputItemId);
 
         ProductionMachine productionMachine = module as ProductionMachine;
         if (productionMachine != null
             && TrySetProductionMachineItemSlots(
                 productionMachine,
-                energyUseRateDisplayed ? 1 : 0))
+                nextDefaultItemIndex))
         {
             return;
         }
@@ -1222,6 +1221,11 @@ public class ItemInfoDescription : MonoBehaviour
             return;
         }
 
+        if (!(module is SteamGenerator))
+        {
+            SetEnergyAndFluidDefaultItemSlots(module, -1);
+        }
+
         bool showElectricPowerGauge = TrySetElectricPowerGauge(energyGauge, energyFill, energyText, module);
         if (module is OilDrillingMachine oilDrillingMachine)
         {
@@ -1651,30 +1655,30 @@ public class ItemInfoDescription : MonoBehaviour
         return true;
     }
 
-    private void SetFluidStorageDefaultItemSlot(int index, InstallationObject installationObject)
+    private bool SetFluidStorageDefaultItemSlot(int index, InstallationObject installationObject)
     {
         GameObject root = defaultItem != null && index >= 0 && index < defaultItem.Count ? defaultItem[index] : null;
         ItemSlot slot = defaultItemSlot != null && index >= 0 && index < defaultItemSlot.Count ? defaultItemSlot[index] : null;
-        SetFluidStorageItemSlot(root, slot, installationObject);
+        return SetFluidStorageItemSlot(root, slot, installationObject);
     }
 
-    private void SetFluidStorageInputItemSlot(InstallationObject installationObject)
+    private bool SetFluidStorageInputItemSlot(InstallationObject installationObject)
     {
-        SetFluidStorageItemSlot(inputItem, inputItemSlot, installationObject);
+        return SetFluidStorageItemSlot(inputItem, inputItemSlot, installationObject);
     }
 
-    private void SetFluidStorageItemSlot(GameObject root, ItemSlot slot, InstallationObject installationObject)
+    private bool SetFluidStorageItemSlot(GameObject root, ItemSlot slot, InstallationObject installationObject)
     {
         GetFluidStorageDisplayAmounts(installationObject, out float storedLiters, out float capacityLiters);
         if (installationObject == null || capacityLiters <= 0f)
         {
-            return;
+            return false;
         }
 
         SetActiveIfNeeded(root, true);
         if (slot == null)
         {
-            return;
+            return root != null;
         }
 
         if ((installationObject is Fluidtank
@@ -1682,7 +1686,7 @@ public class ItemInfoDescription : MonoBehaviour
             && installationObject.StoredFluidItemId < 0)
         {
             slot.SetCustomDisplay(-1, null, string.Empty, string.Empty);
-            return;
+            return true;
         }
 
         int fluidItemId = ResolveFluidGaugeItemId(installationObject);
@@ -1698,6 +1702,56 @@ public class ItemInfoDescription : MonoBehaviour
             fluidItemSet.icon,
             displayName,
             FormatFluidStorageText(installationObject, storedLiters, capacityLiters, false));
+        return true;
+    }
+
+    private int SetEnergyUseRateDefaultItemSlots(
+        int startIndex,
+        InputOutputModule module,
+        int preferredEnergyItemId)
+    {
+        if (module == null)
+        {
+            return 0;
+        }
+
+        int displayedCount = 0;
+        int energyCount = module.GetObjectInfoEnergyUseRateCount();
+        for (int energyIndex = 0; energyIndex < energyCount; energyIndex++)
+        {
+            if (!module.TryGetObjectInfoEnergyUseRate(
+                    energyIndex,
+                    out ItemDefinition.EnergyType energyType,
+                    out float amountPerSecond)
+                || !SetEnergyUseRateDefaultItemSlot(
+                    startIndex + displayedCount,
+                    energyType,
+                    amountPerSecond,
+                    preferredEnergyItemId))
+            {
+                continue;
+            }
+
+            displayedCount++;
+        }
+
+        return displayedCount;
+    }
+
+    private int SetEnergyAndFluidDefaultItemSlots(
+        InputOutputModule module,
+        int preferredEnergyItemId)
+    {
+        int nextDefaultItemIndex = SetEnergyUseRateDefaultItemSlots(
+            0,
+            module,
+            preferredEnergyItemId);
+        if (SetFluidStorageDefaultItemSlot(nextDefaultItemIndex, module))
+        {
+            nextDefaultItemIndex++;
+        }
+
+        return nextDefaultItemIndex;
     }
 
     private bool SetEnergyUseRateDefaultItemSlot(
@@ -1744,7 +1798,9 @@ public class ItemInfoDescription : MonoBehaviour
 
         int displayItemId = ResolveEnergyDisplayItemId(energyType, preferredEnergyItemId);
         ItemManager.ItemSet itemSet = ResolveItemSet(displayItemId);
-        string displayName = energyType == ItemDefinition.EnergyType.Electricity
+        bool useItemDisplayName = energyType == ItemDefinition.EnergyType.Electricity
+                                  || ItemDefinition.IsFluidFuelEnergyType(energyType);
+        string displayName = useItemDisplayName
             && displayItemId >= 0
             && !string.IsNullOrWhiteSpace(itemSet.name)
                 ? itemSet.name
@@ -2305,6 +2361,12 @@ public class ItemInfoDescription : MonoBehaviour
             return storedFluidItemId;
         }
 
+        if (installationObject is InputOutputModule module
+            && module.TryGetObjectInfoFluidStorageItemId(out int preferredFluidItemId))
+        {
+            return preferredFluidItemId;
+        }
+
         ItemManager itemManager = GameManager.Instance != null ? GameManager.Instance.ItemManger : null;
         if (installationObject is SteamGenerator
             && TryResolveItemSetByName(itemManager, SteamFluidItemName, out ItemManager.ItemSet steamItemSet))
@@ -2493,7 +2555,8 @@ public class ItemInfoDescription : MonoBehaviour
             if (definition != null
                 && definition.id >= 0
                 && definition.energyType == energyType
-                && definition.energyAmount > 0)
+                && (definition.energyAmount > 0
+                    || ItemDefinition.IsFluidFuelEnergyType(energyType)))
             {
                 return definition.id;
             }
@@ -2520,7 +2583,9 @@ public class ItemInfoDescription : MonoBehaviour
             return ItemDefinition.IsElectricityItemDefinition(definition);
         }
 
-        return definition.energyType == energyType && definition.energyAmount > 0;
+        return definition.energyType == energyType
+               && (definition.energyAmount > 0
+                   || ItemDefinition.IsFluidFuelEnergyType(energyType));
     }
 
     private static string ResolveEnergyTypeDisplayName(ItemDefinition.EnergyType energyType)
@@ -2537,6 +2602,12 @@ public class ItemInfoDescription : MonoBehaviour
                 return "Herbivore Food";
             case ItemDefinition.EnergyType.Fertilizer:
                 return "Fertilizer Energy";
+            case ItemDefinition.EnergyType.Diesel:
+                return "Diesel";
+            case ItemDefinition.EnergyType.HeavyOil:
+                return "Heavy Oil";
+            case ItemDefinition.EnergyType.LPGGas:
+                return "LPG Gas";
             default:
                 return "Energy";
         }
@@ -2863,6 +2934,11 @@ public class ItemInfoDescription : MonoBehaviour
         if (energyType == ItemDefinition.EnergyType.Electricity)
         {
             return $"{FormatKilowatts(amountPerSecond / 1000f)}kW / s";
+        }
+
+        if (ItemDefinition.IsFluidFuelEnergyType(energyType))
+        {
+            return FormatLitersPerSecond(amountPerSecond);
         }
 
         return $"{FormatGaugeNumber(amountPerSecond, false)} / s";

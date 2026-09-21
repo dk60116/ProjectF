@@ -9,6 +9,16 @@ public class Boiler : InputOutputModule, IFacilityFlowAdapter, IFacilityFlowStat
     private const float MaxWaterTemperatureCelsiusValue = 100f;
     private const float PassiveCoolingRateScale = 0.2f;
 
+    internal override bool TryGetRuntimePassiveFluidPass(
+        Vector2Int coordinate,
+        out Vector2Int otherCoordinate,
+        out Vector2Int externalDirection)
+    {
+        otherCoordinate = default;
+        externalDirection = default;
+        return false;
+    }
+
     [SerializeField]
     private List<InstallationFacingDirection> localPipeConnectionDirections =
         new List<InstallationFacingDirection> { InstallationFacingDirection.PositiveZ };
@@ -54,7 +64,7 @@ public class Boiler : InputOutputModule, IFacilityFlowAdapter, IFacilityFlowStat
                 out _,
                 out _,
                 out outputItemId,
-                out int outputLitersPerSecond,
+                out float outputLitersPerSecond,
                 out _,
                 out _))
         {
@@ -276,7 +286,7 @@ public class Boiler : InputOutputModule, IFacilityFlowAdapter, IFacilityFlowStat
                 out _,
                 out _,
                 out outputItemId,
-                out int outputLitersPerSecond,
+                out float outputLitersPerSecond,
                 out _,
                 out _))
         {
@@ -286,7 +296,7 @@ public class Boiler : InputOutputModule, IFacilityFlowAdapter, IFacilityFlowStat
         displayZeroCountItem = true;
         return TryResolveObjectInfoOutputAreaCounts(
             outputItemId,
-            Mathf.Max(1, outputLitersPerSecond),
+            Mathf.Max(1, Mathf.CeilToInt(outputLitersPerSecond)),
             out outputAreaCount,
             out outputAreaCapacity);
     }
@@ -543,9 +553,9 @@ public class Boiler : InputOutputModule, IFacilityFlowAdapter, IFacilityFlowStat
     {
         ref BoilerFlowState state = ref EnsureFlowState();
         int inputItemId = -1;
-        int inputLitersPerSecond = 0;
+        float inputLitersPerSecond = 0f;
         int outputItemId = -1;
-        int outputLitersPerSecond = 0;
+        float outputLitersPerSecond = 0f;
         bool valid = deltaTime > 0f
                      && TryGetBoilerFluidRecipe(
                          out inputItemId,
@@ -933,16 +943,16 @@ public class Boiler : InputOutputModule, IFacilityFlowAdapter, IFacilityFlowStat
 
     private bool TryGetBoilerFluidRecipe(
         out int inputItemId,
-        out int inputLiters,
+        out float inputLiters,
         out int outputItemId,
-        out int outputLitersPerSecond,
+        out float outputLitersPerSecond,
         out bool hasRecipe,
         out bool blockedByTargetFilter)
     {
         inputItemId = -1;
-        inputLiters = 0;
+        inputLiters = 0f;
         outputItemId = -1;
-        outputLitersPerSecond = 0;
+        outputLitersPerSecond = 0f;
         hasRecipe = false;
         blockedByTargetFilter = false;
 
@@ -952,9 +962,9 @@ public class Boiler : InputOutputModule, IFacilityFlowAdapter, IFacilityFlowStat
             if (!TryGetFluidRecipe(
                     recipeIndex,
                     out int candidateInputItemId,
-                    out int candidateInputLiters,
+                    out float candidateInputLiters,
                     out int candidateOutputItemId,
-                    out int candidateOutputCount)
+                    out float candidateOutputAmount)
                 || !IsFluidItemId(candidateInputItemId)
                 || !IsFluidItemId(candidateOutputItemId))
             {
@@ -971,7 +981,7 @@ public class Boiler : InputOutputModule, IFacilityFlowAdapter, IFacilityFlowStat
             inputItemId = candidateInputItemId;
             inputLiters = candidateInputLiters;
             outputItemId = candidateOutputItemId;
-            outputLitersPerSecond = Mathf.Max(1, candidateOutputCount);
+            outputLitersPerSecond = candidateOutputAmount;
             return true;
         }
 
@@ -981,14 +991,14 @@ public class Boiler : InputOutputModule, IFacilityFlowAdapter, IFacilityFlowStat
     private bool TryGetFluidRecipe(
         int recipeIndex,
         out int inputItemId,
-        out int inputLiters,
+        out float inputLiters,
         out int outputItemId,
-        out int outputCount)
+        out float outputAmount)
     {
         inputItemId = -1;
-        inputLiters = 0;
+        inputLiters = 0f;
         outputItemId = -1;
-        outputCount = 0;
+        outputAmount = 0f;
 
         IReadOnlyList<ItemIoEntry> inputs = InputList;
         IReadOnlyList<ItemIoEntry> outputs = OutputList;
@@ -1006,8 +1016,8 @@ public class Boiler : InputOutputModule, IFacilityFlowAdapter, IFacilityFlowStat
             return false;
         }
 
-        inputLiters = Mathf.Max(1, inputEntry.count);
-        outputCount = Mathf.Max(1, outputEntry.count);
+        inputLiters = inputEntry.ResolvedAmount;
+        outputAmount = outputEntry.ResolvedAmount;
         return true;
     }
 

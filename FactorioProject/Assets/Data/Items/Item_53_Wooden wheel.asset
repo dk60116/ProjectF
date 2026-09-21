@@ -13,7 +13,7 @@ MonoBehaviour:
   m_Name: Item_53_Wooden wheel
   m_EditorClassIdentifier: 
   itemName: Rail handcar
-  id: 105
+  id: 110
   mapObject: {fileID: 9071960459092625129, guid: 607edbe9224f7714e835516083eff7cc, type: 3}
   mapObjectArchetype: {fileID: 11400000, guid: 6f7cee623a26167408bd3aa90a5a2d35, type: 2}
   useMapColor: 1
@@ -47,6 +47,7 @@ MonoBehaviour:
   eatRewardChancePercent: 0
   isSeed: 0
   seedTargetResource: {fileID: 0}
+  useEnergyRequirements: []
   useEnergyType: 0
   useEnergyAmount: 0
   completeEnergy: 0

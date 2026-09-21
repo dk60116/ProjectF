@@ -291,9 +291,15 @@ internal static class WaterBucketItemGenerator
         target.bucketFillDurationSeconds = source.bucketFillDurationSeconds;
         target.energyType = source.energyType;
         target.energyAmount = source.energyAmount;
-        target.useEnergyType = source.useEnergyType;
-        target.useEnergyAmount = source.useEnergyAmount;
-        target.completeEnergy = source.completeEnergy;
+        var energyRequirements = new List<ItemDefinition.EnergyUseRequirement>(source.UseEnergyRequirementCount);
+        for (int i = 0; i < source.UseEnergyRequirementCount; i++)
+        {
+            if (source.TryGetUseEnergyRequirement(i, out ItemDefinition.EnergyUseRequirement requirement))
+            {
+                energyRequirements.Add(requirement);
+            }
+        }
+        target.ReplaceUseEnergyRequirements(energyRequirements);
         target.utilityPoleConnectionRadius = source.utilityPoleConnectionRadius;
         target.utilityPoleSupplyRadius = source.utilityPoleSupplyRadius;
         target.SetCraftingDurationSeconds(source.CraftingDurationSeconds);

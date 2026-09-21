@@ -1236,7 +1236,8 @@ public sealed partial class RobotArmInstance : IMapObjectTarget, IMapObjectSimul
             return true;
         }
 
-        if (dropBlock.TryAddConveyorObjectAnimatedAtPlacement(
+        if (CanPlaceConveyorDrop(dropBlock, itemId, dropReferenceWorldPosition)
+            && dropBlock.TryAddConveyorObjectAnimatedAtPlacement(
                 itemId,
                 dropReferenceWorldPosition,
                 dropStartWorldPosition,
@@ -1335,13 +1336,21 @@ public sealed partial class RobotArmInstance : IMapObjectTarget, IMapObjectSimul
             return true;
         }
 
-        if (dropBlock.CanAddConveyorObjectAtPlacement(itemId, dropReferenceWorldPosition))
+        if (CanPlaceConveyorDrop(dropBlock, itemId, dropReferenceWorldPosition))
         {
             return true;
         }
 
         return CanPlaceSingleLineDrop(dropBlock, dropCoordinate)
                && dropBlock.CanAddInputAreaCenterObjects(1, itemId);
+    }
+
+    private static bool CanPlaceConveyorDrop(Block dropBlock, int itemId, Vector3 referenceWorldPosition)
+    {
+        // Existing output-area stacks own the next belt slots. Recheck at commit,
+        // since a stack or a free slot may appear after the arm's planning phase.
+        return !dropBlock.CanTransferOneInputAreaCenterObjectToConveyor()
+               && dropBlock.CanAddConveyorObjectAtPlacement(itemId, referenceWorldPosition);
     }
 
     private bool CanPlaceHeldItemForCurrentPlan()

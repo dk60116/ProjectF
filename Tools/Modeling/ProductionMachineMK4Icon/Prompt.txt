@@ -1,0 +1,12 @@
+Use case: stylized-concept
+Asset type: production-ready game inventory/build icon for "Production Machine (MK4)"
+Input images: Images 1, 2, and 3 are STYLE AND SERIES REFERENCES for the existing Production Machine MK1, MK2, and MK3 icons. Match their compact stylized industrial design, bold dark outlines, matte off-white painted metal, charcoal steel, simple readable forms, and soft painted 3D shading. Do not copy one machine literally.
+Primary request: design the next-generation Production Machine MK4 as a compact 2x2-footprint factory machine. Its TOP/UPPER BODY must have an unmistakable square plan and square silhouette, not the wide horizontal press-bar silhouette of earlier models.
+Subject: a sturdy square base plate with four equal corner feet; four short vertical support/actuator columns at the corners; a large square upper housing centered over the base; a square central production chamber or platen visible below the upper housing; neat symmetric pipes/cables contained inside the square footprint. Slightly more advanced than MK3 but still mechanically plausible and visually simple.
+Composition/framing: single centered object, square 1:1 icon, three-quarter isometric view from slightly above so the square 2x2 footprint and square upper housing are obvious. Entire machine and all feet visible with even transparent padding. The machine should occupy about 82% of the canvas.
+Style/medium: clean hand-painted stylized 3D game icon, same visual family as the references, strong silhouette readable at 128px.
+Lighting/mood: soft neutral upper-left studio light, restrained highlights, soft contact shadow only under the machine.
+Color palette: mostly off-white/light gray painted panels and dark charcoal steel; very small muted brass/gold MK4 accents only, no bright saturated colors.
+Materials/textures: broad matte color fields, subtle edge shading, minimal surface noise, no photorealistic scratches.
+Constraints: genuinely transparent background; no text; no "MK4" lettering; no numbers; no logo; no border; no floor tile; no scene; no detached parts; no watermark. Keep all geometry inside a square 2x2 footprint. Symmetric front and balanced left/right.
+Avoid: wide 3x2 rectangular machine; long horizontal gantry; circular footprint; tall tower; sci-fi neon; blue glow; excessive pipes; realistic grunge; white or black opaque background.

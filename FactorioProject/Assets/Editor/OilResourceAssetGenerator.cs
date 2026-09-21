@@ -561,7 +561,7 @@ internal static class OilResourceAssetGenerator
         definition.fluidStorageLiters = 0f;
         definition.energyType = ItemDefinition.EnergyType.None;
         definition.energyAmount = 0;
-        definition.useEnergyType = ItemDefinition.EnergyType.None;
+        definition.ReplaceUseEnergyRequirements(null);
         definition.useEnergyAmount = 0f;
         definition.completeEnergy = 0f;
         EditorUtility.SetDirty(definition);

@@ -6,9 +6,6 @@ using UnityEngine;
 
 internal static class ProductionMachineRecipeAutoFill
 {
-    private const string ProductionMachineMk1Name = "Production machine (Mk1)";
-    private const string ProductionMachineMk2Name = "Production machine (MK2)";
-    private const string ProductionMachineMk3Name = "Production machine (MK3)";
     private const int CurrentCraftingTreeFileVersion = 5;
     private const int ItemNameCraftingTreeFileVersion = 5;
     private const int ItemIdCraftingTreeFileVersion = 4;
@@ -53,44 +50,23 @@ internal static class ProductionMachineRecipeAutoFill
         public string assetPath = string.Empty;
     }
 
-    private readonly struct RecipeEntry
+    private sealed class RecipeEntry
     {
-        public readonly ItemDefinition inputDefinition;
-        public readonly int inputCount;
-        public readonly ItemDefinition outputDefinition;
-        public readonly int outputCount;
+        public readonly List<InputOutputModule.ItemIoEntry> inputs;
+        public readonly List<InputOutputModule.ItemIoEntry> outputs;
 
         public RecipeEntry(
-            ItemDefinition inputDefinition,
-            int inputCount,
+            List<InputOutputModule.ItemIoEntry> inputs,
             ItemDefinition outputDefinition,
             int outputCount)
         {
-            this.inputDefinition = inputDefinition;
-            this.inputCount = Mathf.Max(1, inputCount);
-            this.outputDefinition = outputDefinition;
-            this.outputCount = Mathf.Max(1, outputCount);
+            this.inputs = inputs ?? new List<InputOutputModule.ItemIoEntry>();
+            this.outputs = new List<InputOutputModule.ItemIoEntry>
+            {
+                new InputOutputModule.ItemIoEntry(outputDefinition, Mathf.Max(1, outputCount))
+            };
         }
     }
-
-    private readonly struct MachineTier
-    {
-        public readonly string name;
-        public readonly int maxIngredientTypes;
-
-        public MachineTier(string name, int maxIngredientTypes)
-        {
-            this.name = name;
-            this.maxIngredientTypes = maxIngredientTypes;
-        }
-    }
-
-    private static readonly MachineTier[] MachineTiers =
-    {
-        new MachineTier(ProductionMachineMk1Name, 1),
-        new MachineTier(ProductionMachineMk2Name, 2),
-        new MachineTier(ProductionMachineMk3Name, 3)
-    };
 
     public static int SyncProductionMachines(ItemManager itemManager)
     {
@@ -101,16 +77,18 @@ internal static class ProductionMachineRecipeAutoFill
         }
 
         int syncedRecipeCount = 0;
-        for (int i = 0; i < MachineTiers.Length; i++)
+        HashSet<ProductionMachine> syncedMachines = new HashSet<ProductionMachine>();
+        for (int i = 0; i < definitions.Count; i++)
         {
-            MachineTier tier = MachineTiers[i];
-            ProductionMachine productionMachine = FindProductionMachine(definitions, tier.name);
-            if (productionMachine == null)
+            ProductionMachine productionMachine = ResolveProductionMachine(definitions[i].mapObject);
+            if (productionMachine == null
+                || !syncedMachines.Add(productionMachine)
+                || !TryGetMaximumIngredientTypes(productionMachine, out int maxIngredientTypes))
             {
                 continue;
             }
 
-            List<RecipeEntry> recipes = BuildInputRecipes(definitions, tier.maxIngredientTypes);
+            List<RecipeEntry> recipes = BuildInputRecipes(definitions, maxIngredientTypes);
             ApplyRecipes(productionMachine, recipes);
             syncedRecipeCount += recipes.Count;
         }
@@ -133,7 +111,7 @@ internal static class ProductionMachineRecipeAutoFill
 
         ProductionMachine productionMachine = ResolveProductionMachine(definition.mapObject);
         if (productionMachine == null
-            || !TryGetMaximumIngredientTypes(definition, productionMachine, out int maxIngredientTypes))
+            || !TryGetMaximumIngredientTypes(productionMachine, out int maxIngredientTypes))
         {
             return 0;
         }
@@ -144,34 +122,17 @@ internal static class ProductionMachineRecipeAutoFill
     }
 
     private static bool TryGetMaximumIngredientTypes(
-        ItemDefinition definition,
         ProductionMachine productionMachine,
         out int maxIngredientTypes)
     {
-        string definitionName = GetDefinitionDisplayName(definition);
-        GameObject prefabRoot = productionMachine.transform.root != null
-            ? productionMachine.transform.root.gameObject
-            : productionMachine.gameObject;
-        string prefabName = prefabRoot != null ? prefabRoot.name : productionMachine.name;
-
-        for (int i = 0; i < MachineTiers.Length; i++)
+        maxIngredientTypes = 0;
+        if (productionMachine == null)
         {
-            MachineTier tier = MachineTiers[i];
-            if (MachineNameMatches(definitionName, prefabName, tier.name))
-            {
-                maxIngredientTypes = tier.maxIngredientTypes;
-                return true;
-            }
+            return false;
         }
 
-        maxIngredientTypes = 0;
-        return false;
-    }
-
-    private static bool MachineNameMatches(string definitionName, string prefabName, string expectedName)
-    {
-        return string.Equals(definitionName, expectedName, StringComparison.OrdinalIgnoreCase)
-               || string.Equals(prefabName, expectedName, StringComparison.OrdinalIgnoreCase);
+        maxIngredientTypes = productionMachine.MaximumProductionIngredientTypes;
+        return maxIngredientTypes > 0;
     }
 
     private static List<ItemDefinition> CollectDefinitions(ItemManager itemManager)
@@ -192,37 +153,6 @@ internal static class ProductionMachineRecipeAutoFill
         }
 
         return results;
-    }
-
-    private static ProductionMachine FindProductionMachine(List<ItemDefinition> definitions, string machineName)
-    {
-        for (int i = 0; i < definitions.Count; i++)
-        {
-            ItemDefinition definition = definitions[i];
-            if (definition == null)
-            {
-                continue;
-            }
-
-            ProductionMachine productionMachine = ResolveProductionMachine(definition.mapObject);
-            if (productionMachine == null)
-            {
-                continue;
-            }
-
-            string definitionName = GetDefinitionDisplayName(definition);
-            GameObject prefabRoot = productionMachine.transform.root != null
-                ? productionMachine.transform.root.gameObject
-                : productionMachine.gameObject;
-            string prefabName = prefabRoot != null ? prefabRoot.name : productionMachine.name;
-            if (string.Equals(definitionName, machineName, StringComparison.OrdinalIgnoreCase)
-                || string.Equals(prefabName, machineName, StringComparison.OrdinalIgnoreCase))
-            {
-                return productionMachine;
-            }
-        }
-
-        return null;
     }
 
     private static ProductionMachine ResolveProductionMachine(MapObject mapObject)
@@ -246,7 +176,7 @@ internal static class ProductionMachineRecipeAutoFill
         DefinitionLookup definitionLookup = new DefinitionLookup(definitions);
         List<CraftingTreeJsonEntry> entries = LoadCraftingTreeEntries(definitions);
         HashSet<int> seenOutputItemIds = new HashSet<int>();
-        int allowedIngredientTypes = Mathf.Max(1, maxIngredientTypes);
+        int requiredIngredientTypes = Mathf.Max(1, maxIngredientTypes);
 
         for (int i = 0; i < entries.Count; i++)
         {
@@ -254,16 +184,7 @@ internal static class ProductionMachineRecipeAutoFill
             if (entry == null
                 || entry.ingredients == null
                 || entry.ingredients.Count <= 0
-                || entry.ingredients.Count > allowedIngredientTypes)
-            {
-                continue;
-            }
-
-            CraftingIngredientJsonEntry ingredient = entry.ingredients[0];
-            if (ingredient == null
-                || (ingredient.itemId < 0
-                    && string.IsNullOrWhiteSpace(ingredient.itemName)
-                    && string.IsNullOrWhiteSpace(ingredient.definitionAssetPath)))
+                || entry.ingredients.Count != requiredIngredientTypes)
             {
                 continue;
             }
@@ -273,15 +194,45 @@ internal static class ProductionMachineRecipeAutoFill
                 continue;
             }
 
-            ItemDefinition inputDefinition = definitionLookup.Resolve(
-                ingredient.itemName,
-                ingredient.definitionAssetPath,
-                ingredient.itemId);
             ItemDefinition outputDefinition = definitionLookup.Resolve(
                 entry.itemName,
                 entry.definitionAssetPath,
                 entry.itemId);
-            if (inputDefinition == null || outputDefinition == null)
+            if (outputDefinition == null)
+            {
+                continue;
+            }
+
+            var inputs = new List<InputOutputModule.ItemIoEntry>(entry.ingredients.Count);
+            bool hasInvalidIngredient = false;
+            for (int ingredientIndex = 0; ingredientIndex < entry.ingredients.Count; ingredientIndex++)
+            {
+                CraftingIngredientJsonEntry ingredient = entry.ingredients[ingredientIndex];
+                if (ingredient == null
+                    || ingredient.itemId < 0
+                    && string.IsNullOrWhiteSpace(ingredient.itemName)
+                    && string.IsNullOrWhiteSpace(ingredient.definitionAssetPath))
+                {
+                    hasInvalidIngredient = true;
+                    break;
+                }
+
+                ItemDefinition inputDefinition = definitionLookup.Resolve(
+                    ingredient.itemName,
+                    ingredient.definitionAssetPath,
+                    ingredient.itemId);
+                if (inputDefinition == null)
+                {
+                    hasInvalidIngredient = true;
+                    break;
+                }
+
+                inputs.Add(new InputOutputModule.ItemIoEntry(
+                    inputDefinition,
+                    Mathf.Max(1, ingredient.count)));
+            }
+
+            if (hasInvalidIngredient || inputs.Count == 0)
             {
                 continue;
             }
@@ -292,8 +243,7 @@ internal static class ProductionMachineRecipeAutoFill
             }
 
             recipes.Add(new RecipeEntry(
-                inputDefinition,
-                Mathf.Max(1, ingredient.count),
+                inputs,
                 outputDefinition,
                 Mathf.Max(1, entry.outputCount)));
         }
@@ -778,26 +728,30 @@ internal static class ProductionMachineRecipeAutoFill
         SerializedObject serializedMachine = new SerializedObject(productionMachine);
         serializedMachine.Update();
 
+        SerializedProperty pairsProperty = serializedMachine.FindProperty("inputOutputPairs");
         SerializedProperty inputListProperty = serializedMachine.FindProperty("inputList");
         SerializedProperty outputListProperty = serializedMachine.FindProperty("outputList");
         SerializedProperty legacyOutputProperty = serializedMachine.FindProperty("output");
-        if (inputListProperty == null || outputListProperty == null)
+        if (pairsProperty == null)
         {
             return;
         }
 
-        inputListProperty.ClearArray();
-        outputListProperty.ClearArray();
+        pairsProperty.ClearArray();
+        inputListProperty?.ClearArray();
+        outputListProperty?.ClearArray();
 
         for (int i = 0; i < recipes.Count; i++)
         {
             RecipeEntry recipe = recipes[i];
-
-            inputListProperty.InsertArrayElementAtIndex(i);
-            SetIoEntry(inputListProperty.GetArrayElementAtIndex(i), recipe.inputDefinition, recipe.inputCount);
-
-            outputListProperty.InsertArrayElementAtIndex(i);
-            SetIoEntry(outputListProperty.GetArrayElementAtIndex(i), recipe.outputDefinition, recipe.outputCount);
+            pairsProperty.InsertArrayElementAtIndex(i);
+            SerializedProperty pairProperty = pairsProperty.GetArrayElementAtIndex(i);
+            SerializedProperty inputsProperty = pairProperty.FindPropertyRelative("inputs");
+            SerializedProperty outputsProperty = pairProperty.FindPropertyRelative("outputs");
+            inputsProperty.ClearArray();
+            outputsProperty.ClearArray();
+            AddIoEntries(inputsProperty, recipe.inputs);
+            AddIoEntries(outputsProperty, recipe.outputs);
         }
 
         if (legacyOutputProperty != null)
@@ -821,7 +775,27 @@ internal static class ProductionMachineRecipeAutoFill
         }
     }
 
-    private static void SetIoEntry(SerializedProperty entryProperty, ItemDefinition definition, int count)
+    private static void AddIoEntries(
+        SerializedProperty entriesProperty,
+        IReadOnlyList<InputOutputModule.ItemIoEntry> entries)
+    {
+        if (entriesProperty == null || entries == null)
+        {
+            return;
+        }
+
+        for (int i = 0; i < entries.Count; i++)
+        {
+            entriesProperty.InsertArrayElementAtIndex(i);
+            InputOutputModule.ItemIoEntry entry = entries[i];
+            SetIoEntry(
+                entriesProperty.GetArrayElementAtIndex(i),
+                entry.itemDefinition,
+                entry.count);
+        }
+    }
+
+    private static void SetIoEntry(SerializedProperty entryProperty, ItemDefinition definition, float count)
     {
         if (entryProperty == null)
         {
@@ -837,7 +811,9 @@ internal static class ProductionMachineRecipeAutoFill
 
         if (countProperty != null)
         {
-            countProperty.intValue = Mathf.Max(1, count);
+            countProperty.floatValue = InputOutputModule.IsFluidItemDefinition(definition)
+                ? Mathf.Max(0.0001f, count)
+                : Mathf.Max(1, Mathf.RoundToInt(count));
         }
     }
 

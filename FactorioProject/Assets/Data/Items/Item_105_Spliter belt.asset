@@ -13,7 +13,7 @@ MonoBehaviour:
   m_Name: Item_105_Spliter belt
   m_EditorClassIdentifier: Assembly-CSharp::ItemDefinition
   itemName: Spliter belt
-  id: 46
+  id: 49
   mapObject: {fileID: 3055157777023880970, guid: 09f7fb2b66f582848aedabcf3fdc9f18, type: 3}
   mapObjectArchetype: {fileID: 11400000, guid: 0b0379e38bc863d4fb726d4be9acde04, type: 2}
   useMapColor: 1
@@ -47,6 +47,7 @@ MonoBehaviour:
   eatRewardChancePercent: 0
   isSeed: 0
   seedTargetResource: {fileID: 0}
+  useEnergyRequirements: []
   useEnergyType: 0
   useEnergyAmount: 0
   completeEnergy: 0
