@@ -168,6 +168,14 @@ public class TerrainDataEditorWindow : EditorWindow
         "oreScaleAtResourceCount"
     };
 
+    private static readonly string[] OilClusterGenerationPropertyPaths =
+    {
+        "oilClusterMinCount",
+        "oilClusterMaxCount",
+        "oilClusterMinSpacing",
+        "oilClusterMaxSpacing"
+    };
+
     private static readonly string[] AnimalGenerationPropertyPaths =
     {
         "generateAnimals",
@@ -303,6 +311,7 @@ public class TerrainDataEditorWindow : EditorWindow
         DrawPropertySection(serializedGenerator, "Tree Resources", "treeResources");
         DrawPropertySection(serializedGenerator, "Reed Resources", "reedResources");
         DrawPropertySection(serializedGenerator, "Oil Resources", "oilResources");
+        DrawPropertySection(serializedGenerator, "Oil Cluster Generation", OilClusterGenerationPropertyPaths);
         DrawPropertySection(serializedGenerator, "Resource Generation", ResourceGenerationPropertyPaths);
         DrawPropertySection(serializedGenerator, "Animal Generation", AnimalGenerationPropertyPaths);
         EditorGUILayout.LabelField(

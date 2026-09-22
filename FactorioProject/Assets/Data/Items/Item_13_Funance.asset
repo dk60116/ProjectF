@@ -13,7 +13,7 @@ MonoBehaviour:
   m_Name: Item_13_Funance
   m_EditorClassIdentifier: 
   itemName: Funance
-  id: 33
+  id: 34
   mapObject: {fileID: 3843491245406909261, guid: 482d646ee24530540a103d758c71b5b2, type: 3}
   mapObjectArchetype: {fileID: 11400000, guid: 39875aa15bdd75143a55d66e6fa7f0c2, type: 2}
   useMapColor: 1

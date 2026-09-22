@@ -178,7 +178,7 @@ public partial class TerrainGenerator : MonoBehaviour
         float bestScore = float.MinValue;
         for (int i = 0; i < oilResources.Count; i++)
         {
-            if (!TryEvaluateClusteredSingleResource(worldCoordinate, oilResources[i], out float score))
+            if (!TryEvaluateOilClusterResource(worldCoordinate, oilResources[i], out float score))
             {
                 continue;
             }
@@ -797,6 +797,259 @@ public partial class TerrainGenerator : MonoBehaviour
         }
 
         return found;
+    }
+
+    private bool TryEvaluateOilClusterResource(
+        Vector2Int worldCoordinate,
+        ResourceEntry entry,
+        out float score)
+    {
+        score = float.MinValue;
+        if (entry.Prefab == null || entry.spawnChance <= 0f)
+        {
+            return false;
+        }
+
+        int minCount = Mathf.Clamp(oilClusterMinCount, 1, 4);
+        int maxCount = Mathf.Clamp(oilClusterMaxCount, minCount, 4);
+        int minSpacing = Mathf.Clamp(oilClusterMinSpacing, 2, 8);
+        int maxSpacing = Mathf.Clamp(oilClusterMaxSpacing, minSpacing, 8);
+        int clusterCellSize = Mathf.Max(
+            (maxSpacing * 2) + 4,
+            Mathf.RoundToInt(resourcePatchCellSize * Mathf.Max(1f, entry.spacingMultiplier)));
+        int baseCellX = FloorDivide(worldCoordinate.x, clusterCellSize);
+        int baseCellY = FloorDivide(worldCoordinate.y, clusterCellSize);
+
+        float chanceWeight = Mathf.Pow(Mathf.Clamp01(entry.spawnChance), 1.35f);
+        float densityBoost = Mathf.Lerp(
+            1.2f,
+            2.6f,
+            Mathf.Clamp01(resourceDensityMultiplier));
+        float expectedClusterCount = (minCount + maxCount) * 0.5f;
+        float singleNodeDensity = chanceWeight
+                                  * densityBoost
+                                  * (1.55f / Mathf.Max(1f, entry.spacingMultiplier));
+        float clusterChance = Mathf.Clamp01(
+            singleNodeDensity
+            * clusterCellSize
+            * clusterCellSize
+            / Mathf.Max(1f, expectedClusterCount));
+
+        bool found = false;
+        for (int cellY = baseCellY - 1; cellY <= baseCellY + 1; cellY++)
+        {
+            for (int cellX = baseCellX - 1; cellX <= baseCellX + 1; cellX++)
+            {
+                if (Hash01(cellX, cellY, entry.salt) > clusterChance)
+                {
+                    continue;
+                }
+
+                int countRange = maxCount - minCount + 1;
+                int clusterCount = minCount + Mathf.Min(
+                    countRange - 1,
+                    Mathf.FloorToInt(Hash01(cellX, cellY, entry.salt + 11) * countRange));
+                int quarterTurns = Mathf.Min(
+                    3,
+                    Mathf.FloorToInt(Hash01(cellX, cellY, entry.salt + 23) * 4f));
+                bool mirror = Hash01(cellX, cellY, entry.salt + 37) < 0.5f;
+                int margin = maxSpacing + 1;
+                int centerRange = Mathf.Max(1, clusterCellSize - (margin * 2));
+                int clusterX = (cellX * clusterCellSize)
+                               + margin
+                               + Mathf.Min(
+                                   centerRange - 1,
+                                   Mathf.FloorToInt(
+                                       Hash01(cellX, cellY, entry.salt + 53) * centerRange));
+                int clusterY = (cellY * clusterCellSize)
+                               + margin
+                               + Mathf.Min(
+                                   centerRange - 1,
+                                   Mathf.FloorToInt(
+                                       Hash01(cellX, cellY, entry.salt + 67) * centerRange));
+
+                for (int memberIndex = 0; memberIndex < clusterCount; memberIndex++)
+                {
+                    Vector2Int memberOffset = ResolveOilClusterMemberOffset(
+                        cellX,
+                        cellY,
+                        entry.salt,
+                        memberIndex,
+                        minSpacing,
+                        maxSpacing);
+                    memberOffset = TransformOilClusterMemberOffset(
+                        memberOffset,
+                        quarterTurns,
+                        mirror);
+                    if (worldCoordinate.x != clusterX + memberOffset.x
+                        || worldCoordinate.y != clusterY + memberOffset.y)
+                    {
+                        continue;
+                    }
+
+                    float candidateScore = 1f
+                                           + (clusterCount * 0.01f)
+                                           + Hash01(cellX, cellY, entry.salt + 79) * 0.001f;
+                    if (candidateScore > score)
+                    {
+                        score = candidateScore;
+                        found = true;
+                    }
+                }
+            }
+        }
+
+        return found;
+    }
+
+    private Vector2Int ResolveOilClusterMemberOffset(
+        int cellX,
+        int cellY,
+        int salt,
+        int memberIndex,
+        int minSpacing,
+        int maxSpacing)
+    {
+        int clampedMemberIndex = Mathf.Clamp(memberIndex, 0, 3);
+        int clampedMinSpacing = Mathf.Clamp(minSpacing, 1, maxSpacing);
+        int clampedMaxSpacing = Mathf.Max(clampedMinSpacing, maxSpacing);
+        int coordinateRange = (clampedMaxSpacing * 2) + 1;
+
+        for (int shapeAttempt = 0; shapeAttempt < 16; shapeAttempt++)
+        {
+            Vector2Int first = Vector2Int.zero;
+            Vector2Int second = Vector2Int.zero;
+            Vector2Int third = Vector2Int.zero;
+            Vector2Int fourth = Vector2Int.zero;
+            bool shapeIsValid = true;
+
+            // Always resolve the full four-point shape so every member call uses
+            // the same retry attempt even when the active cluster is smaller.
+            for (int currentIndex = 1; currentIndex <= 3; currentIndex++)
+            {
+                Vector2Int candidate = Vector2Int.zero;
+                bool foundCandidate = false;
+
+                for (int candidateAttempt = 0; candidateAttempt < 32; candidateAttempt++)
+                {
+                    int attemptSalt = salt
+                                      + 101
+                                      + (shapeAttempt * 521)
+                                      + (currentIndex * 131)
+                                      + (candidateAttempt * 17);
+                    int x = -clampedMaxSpacing + Mathf.Min(
+                        coordinateRange - 1,
+                        Mathf.FloorToInt(Hash01(cellX, cellY, attemptSalt) * coordinateRange));
+                    int y = -clampedMaxSpacing + Mathf.Min(
+                        coordinateRange - 1,
+                        Mathf.FloorToInt(Hash01(cellX, cellY, attemptSalt + 7) * coordinateRange));
+                    Vector2Int randomizedCandidate = new Vector2Int(x, y);
+                    if (!IsOilClusterCandidateValid(
+                            randomizedCandidate,
+                            currentIndex,
+                            first,
+                            second,
+                            third,
+                            clampedMinSpacing,
+                            clampedMaxSpacing))
+                    {
+                        continue;
+                    }
+
+                    candidate = randomizedCandidate;
+                    foundCandidate = true;
+                    break;
+                }
+
+                if (!foundCandidate)
+                {
+                    shapeIsValid = false;
+                    break;
+                }
+
+                switch (currentIndex)
+                {
+                    case 1:
+                        second = candidate;
+                        break;
+                    case 2:
+                        third = candidate;
+                        break;
+                    case 3:
+                        fourth = candidate;
+                        break;
+                }
+            }
+
+            if (shapeIsValid)
+            {
+                return clampedMemberIndex switch
+                {
+                    1 => second,
+                    2 => third,
+                    3 => fourth,
+                    _ => first
+                };
+            }
+        }
+
+        int fallbackSpacing = clampedMinSpacing;
+        return clampedMemberIndex switch
+        {
+            1 => new Vector2Int(fallbackSpacing, 0),
+            2 => new Vector2Int(0, fallbackSpacing),
+            3 => new Vector2Int(fallbackSpacing, fallbackSpacing),
+            _ => Vector2Int.zero
+        };
+    }
+
+    private static bool IsOilClusterCandidateValid(
+        Vector2Int candidate,
+        int currentIndex,
+        Vector2Int first,
+        Vector2Int second,
+        Vector2Int third,
+        int minSpacing,
+        int maxSpacing)
+    {
+        return IsOilClusterSpacingValid(candidate, first, minSpacing, maxSpacing)
+               && (currentIndex <= 1
+                   || IsOilClusterSpacingValid(candidate, second, minSpacing, maxSpacing))
+               && (currentIndex <= 2
+                   || IsOilClusterSpacingValid(candidate, third, minSpacing, maxSpacing));
+    }
+
+    private static bool IsOilClusterSpacingValid(
+        Vector2Int candidate,
+        Vector2Int other,
+        int minSpacing,
+        int maxSpacing)
+    {
+        int gridDistance = Mathf.Max(
+            Mathf.Abs(candidate.x - other.x),
+            Mathf.Abs(candidate.y - other.y));
+        return gridDistance >= minSpacing && gridDistance <= maxSpacing;
+    }
+
+    private static Vector2Int TransformOilClusterMemberOffset(
+        Vector2Int offset,
+        int quarterTurns,
+        bool mirror)
+    {
+        int x = mirror ? -offset.x : offset.x;
+        int y = offset.y;
+
+        switch (quarterTurns & 3)
+        {
+            case 1:
+                return new Vector2Int(-y, x);
+            case 2:
+                return new Vector2Int(-x, -y);
+            case 3:
+                return new Vector2Int(y, -x);
+            default:
+                return new Vector2Int(x, y);
+        }
     }
 
     private bool TryEvaluateSparseResource(Vector2Int worldCoordinate, ResourceEntry entry, out float score)

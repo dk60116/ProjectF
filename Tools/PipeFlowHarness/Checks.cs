@@ -361,7 +361,9 @@ public static class Checks
         Check(Near(meter.GetLitersPerSecond(1, 2.02), 5), "multiple transfers in one bucket accumulate");
         Check(Near(meter.GetLitersPerSecond(2, 2.02), 0), "other fluid identity is excluded");
         meter.Record(2, 4, 2.03);
-        Check(Near(meter.GetLitersPerSecond(2, 2.04), 4), "fluid change clears old fluid samples");
+        Check(Near(meter.GetLitersPerSecond(2, 2.04), 4)
+              && Near(meter.GetLitersPerSecond(1, 2.04), 5),
+            "fluid outputs retain independent samples");
         Check(Near(meter.GetLitersPerSecond(2, 0), 0), "clock reset clears previous run data");
         meter.Record(1, 2, 0); meter.Reset();
         Check(Near(meter.GetLitersPerSecond(1, 0), 0), "pool reset clears measurements");

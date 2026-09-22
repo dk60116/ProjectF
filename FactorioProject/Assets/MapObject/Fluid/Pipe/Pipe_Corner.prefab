@@ -13,7 +13,7 @@ GameObject:
   - component: {fileID: 2422402244705379238}
   - component: {fileID: 8377798585880624651}
   - component: {fileID: 5149414848451845094}
-  m_Layer: 0
+  m_Layer: 7
   m_Name: Pipe_Corner
   m_TagString: Untagged
   m_Icon: {fileID: 0}

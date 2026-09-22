@@ -35,7 +35,7 @@ foreach ($name in @(
     'private static int AddConnectedFluidPipeCount(', 'private static bool IsBetterConnectedFluidPipeCount(',
     'private static bool IsConnectedFluidPipeCountFrozen(', 'private static int ResolveConnectedFluidPipeCount(',
     'private bool TryEnqueuePassiveFluidPassesAt(', 'private bool EnqueuePassiveFluidPassesAt(',
-    'internal virtual bool TryGetRuntimePassiveFluidPass(', 'protected bool TryGetPairedRuntimePipeInputPass(',
+    'internal virtual bool TryGetRuntimePassiveFluidPass(',
     'internal static bool HasRuntimePassiveFluidPassTowards(', 'private static bool HasPassiveFluidPassTowards(',
     'internal static bool HasRuntimePumpPipePassTowards(', 'private static bool HasPumpPipePassTowards(',
     'private static int GetDirectionMask(', 'private static bool DirectionMaskContains(',

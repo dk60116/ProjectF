@@ -13,7 +13,7 @@ MonoBehaviour:
   m_Name: Item_111_Crude Oil Refinery
   m_EditorClassIdentifier: Assembly-CSharp::ItemDefinition
   itemName: Crude Oil Refinery
-  id: 62
+  id: 63
   mapObject: {fileID: 950080818205513044, guid: aa977cfc0de120b4dad23fcfaeac4a10, type: 3}
   mapObjectArchetype: {fileID: 0}
   useMapColor: 0
@@ -35,10 +35,11 @@ MonoBehaviour:
   upgradeable: 1
   keepIoAreaItemsInPlaceWhileEditing: 0
   capacity: 10
-  storesFluid: 0
-  fluidStorageLiters: 0
+  storesFluid: 1
+  fluidStorageLiters: 30
   fluidDisplayColor: {r: 1, g: 1, b: 1, a: 1}
   fluidOutputLitersPerSecond: 1
+  pumpPressureLitersPerSecond: 5
   bucketFillDurationSeconds: 10
   undergroundPipeMaxDistance: 5
   energyType: 0
@@ -47,7 +48,10 @@ MonoBehaviour:
   eatRewardChancePercent: 0
   isSeed: 0
   seedTargetResource: {fileID: 0}
-  useEnergyRequirements: []
+  useEnergyRequirements:
+  - energyType: 2
+    useEnergyAmount: 550
+    completeEnergy: 0
   useEnergyType: 0
   useEnergyAmount: 0
   completeEnergy: 0

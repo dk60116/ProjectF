@@ -2,31 +2,64 @@ using System.Collections.Generic;
 using UnityEngine;
 
 /// <summary>
-/// Connects the two PipePass cells and starts a new pressure-loss section.
+/// Transfers fluid from the local -X inlet to the local +X outlet.
 /// The pump does not own fluid; producers and consumers still transfer the
 /// authoritative fluid directly through the connected network.
 /// </summary>
 public class Pump : InputOutputModule
 {
-    private const int MaxObjectInfoNetworkSearchNodes = 64;
+    public float PressureLitersPerSecond => ResolveInstalledDefinition() is ItemDefinition definition
+        ? definition.PumpPressureLitersPerSecond : 5f;
 
-    internal override bool TryGetRuntimePassiveFluidPass(
-        Vector2Int coordinate,
-        out Vector2Int otherCoordinate,
-        out Vector2Int externalDirection)
+    // A pump changes transport capacity only; it never changes a producer's budget.
+    internal static Pump ResolvePressureLimit(Pump current, Pump candidate)
     {
-        otherCoordinate = default;
-        externalDirection = default;
-        return false;
+        return candidate != null && (current == null || candidate.PressureLitersPerSecond < current.PressureLitersPerSecond
+                || candidate.PressureLitersPerSecond == current.PressureLitersPerSecond
+                && candidate.RuntimePlacementSequence < current.RuntimePlacementSequence)
+            ? candidate : current;
     }
 
-    private readonly Queue<Vector2Int> objectInfoSearchQueue = new Queue<Vector2Int>(8);
-    private readonly HashSet<Vector2Int> objectInfoSearchVisited = new HashSet<Vector2Int>();
-    private readonly List<RuntimePumpPipePass> objectInfoPumpPasses =
-        new List<RuntimePumpPipePass>(2);
-    private readonly List<InputOutputModule> objectInfoModules = new List<InputOutputModule>(4);
-    private readonly HashSet<InputOutputModule> objectInfoFluidSources =
-        new HashSet<InputOutputModule>();
+    internal static float LimitTransportRate(Pump pump, float sourceRate)
+    {
+        return pump != null ? Mathf.Min(sourceRate, pump.PressureLitersPerSecond) : sourceRate;
+    }
+
+    private long pressureBudgetTick = -1;
+    private double pressureBudgetLiters;
+
+    protected override void OnEnable()
+    {
+        pressureBudgetTick = -1;
+        pressureBudgetLiters = 0d;
+        base.OnEnable();
+    }
+
+    internal float LimitTransferVolume(float requestedLiters, float deltaTime)
+    {
+        long tick = MapObjectTickManager.CurrentSimulationTick;
+        double window = System.Math.Max(0d, deltaTime);
+        double capacity = PressureLitersPerSecond * window;
+        if (pressureBudgetTick != tick)
+        {
+            double elapsed = pressureBudgetTick < 0 || tick < pressureBudgetTick
+                ? window
+                : (tick - pressureBudgetTick) * (double)MapObjectTickManager.FixedSimulationDeltaSeconds;
+            pressureBudgetLiters = System.Math.Min(capacity,
+                System.Math.Max(0d, pressureBudgetLiters) + PressureLitersPerSecond * elapsed);
+            pressureBudgetTick = tick;
+        }
+        pressureBudgetLiters = System.Math.Min(pressureBudgetLiters, capacity);
+        return Mathf.Min(Mathf.Max(0f, requestedLiters), (float)System.Math.Max(0d, pressureBudgetLiters));
+    }
+
+    internal void RecordTransferredVolume(float acceptedLiters)
+    {
+        pressureBudgetLiters = System.Math.Max(0d, pressureBudgetLiters - Mathf.Max(0f, acceptedLiters));
+    }
+
+    private readonly Pipe.FluidNetworkSearchContext objectInfoNetworkContext =
+        new Pipe.FluidNetworkSearchContext();
     private readonly List<Vector2Int> fluidDockSeedCoordinates = new List<Vector2Int>(2);
     private readonly List<InstallationObject> fluidDockStorageScratch =
         new List<InstallationObject>(4);
@@ -43,7 +76,7 @@ public class Pump : InputOutputModule
         float deltaTime = plannedFluidDockDeltaTime;
         plannedFluidDockDeltaTime = 0f;
         base.ApplyManagedUpdateTick();
-        TryUnloadDockedWater(deltaTime);
+        TryUnloadDockedFluid(deltaTime);
     }
 
     protected override bool ShouldKeepRuntimeUpdateTickActive()
@@ -51,34 +84,37 @@ public class Pump : InputOutputModule
         return base.ShouldKeepRuntimeUpdateTickActive() || HasDockedFluidStorage();
     }
 
-    private bool TryUnloadDockedWater(float deltaTime)
+    private bool TryUnloadDockedFluid(float deltaTime)
     {
         if (deltaTime <= 0f
-            || !TryResolveDockedWaterSource(
+            || !TryResolveDockedFluidSource(
                 out InstallationObject sourceStorage,
-                out int waterItemId))
+                out int fluidItemId))
         {
             return false;
         }
 
-        float requestedLiters = ConnectedFluidStorageTransferLitersPerSecond * deltaTime;
-        float temperatureCelsius = sourceStorage.GetStoredFluidTemperatureCelsius(waterItemId);
+        if (!TryGetRuntimeFluidEndpoints(out _, out Vector2Int outputCoordinate)) return false;
+        fluidDockSeedCoordinates.Clear();
+        fluidDockSeedCoordinates.Add(ResolveRuntimeFluidDeliveryCoordinate(outputCoordinate));
+        float requestedLiters = PressureLitersPerSecond * deltaTime;
+        float temperatureCelsius = sourceStorage.GetStoredFluidTemperatureCelsius(fluidItemId);
         return TryTransferFluidFromStorageToConnectedStorage(
             sourceStorage,
-            waterItemId,
+            fluidItemId,
             requestedLiters,
             temperatureCelsius,
             fluidDockSeedCoordinates,
             out _);
     }
 
-    private bool TryResolveDockedWaterSource(
+    private bool TryResolveDockedFluidSource(
         out InstallationObject sourceStorage,
-        out int waterItemId)
+        out int fluidItemId)
     {
         sourceStorage = null;
-        waterItemId = WaterPump.ResolveWaterItemId(null);
-        if (waterItemId < 0 || !CollectFluidDockSeedCoordinates())
+        fluidItemId = -1;
+        if (!CollectFluidDockSeedCoordinates())
         {
             return false;
         }
@@ -87,6 +123,7 @@ public class Pump : InputOutputModule
         for (int i = 0; i < fluidDockSeedCoordinates.Count; i++)
         {
             Vector2Int dockCoordinate = fluidDockSeedCoordinates[i];
+            if (!AllowsRuntimeFluidTraversal(dockCoordinate, false)) continue;
             if (!TryGetRuntimePipePass(
                     dockCoordinate,
                     out _,
@@ -105,11 +142,12 @@ public class Pump : InputOutputModule
                  storageIndex++)
             {
                 if (fluidDockStorageScratch[storageIndex] is not Fluidtank candidate
+                    || candidate.StoredFluidItemId < 0
                     || !candidate.CanProvideMountedFluidToPump(
                         this,
                         dockCoordinate,
                         directionFromVehicleToPump,
-                        waterItemId,
+                        candidate.StoredFluidItemId,
                         0.0001f)
                     || bestMountedTank != null
                     && bestMountedTank.RuntimePlacementSequence
@@ -124,6 +162,7 @@ public class Pump : InputOutputModule
 
         fluidDockStorageScratch.Clear();
         sourceStorage = bestMountedTank;
+        fluidItemId = bestMountedTank != null ? bestMountedTank.StoredFluidItemId : -1;
         return sourceStorage != null;
     }
 
@@ -137,6 +176,11 @@ public class Pump : InputOutputModule
         for (int i = 0; i < fluidDockSeedCoordinates.Count; i++)
         {
             Vector2Int coordinate = fluidDockSeedCoordinates[i];
+            if (!AllowsRuntimeFluidTraversal(coordinate, false))
+            {
+                continue;
+            }
+
             fluidDockStorageScratch.Clear();
             CollectActiveInstallationsAtRuntimeGridCoordinate(
                 coordinate,
@@ -198,202 +242,15 @@ public class Pump : InputOutputModule
         fluidItemId = -1;
         temperatureCelsius = MapClimate.CurrentTemperatureCelsius;
         pressureLitersPerSecond = 0f;
-        if (!isActiveAndEnabled
-            || !TryGetPlacementRuntime(out Vector2Int anchorCoordinate, out int quarterTurns))
+        if (!isActiveAndEnabled || !TryGetRuntimeFluidEndpoints(out _, out Vector2Int outputCoordinate))
         {
             return false;
         }
 
-        objectInfoSearchQueue.Clear();
-        objectInfoSearchVisited.Clear();
-        IReadOnlyList<RectGridBlockPlacement> placements = RectGridPlacements;
-        for (int i = 0; i < placements.Count; i++)
-        {
-            RectGridBlockPlacement placement = placements[i];
-            if (placement.blockType == RectGridBlockType.PipeInput
-                && TryGetRectGridPlacementCoordinate(
-                    this,
-                    anchorCoordinate,
-                    quarterTurns,
-                    placement,
-                    out Vector2Int endpoint))
-            {
-                EnqueueObjectInfoCoordinate(endpoint);
-            }
-        }
-
-        bool foundFallbackFluid = false;
-        int searchedNodeCount = 0;
-        while (objectInfoSearchQueue.Count > 0
-               && searchedNodeCount++ < MaxObjectInfoNetworkSearchNodes)
-        {
-            Vector2Int coordinate = objectInfoSearchQueue.Dequeue();
-            if (TryGetObjectInfoFromPipe(
-                    coordinate,
-                    out fluidItemId,
-                    out temperatureCelsius,
-                    out pressureLitersPerSecond))
-            {
-                ClearObjectInfoScratch();
-                return true;
-            }
-
-            if (TryGetObjectInfoSourceAt(
-                    coordinate,
-                    out int sourceItemId,
-                    out float sourceTemperature,
-                    out float sourcePressure)
-                && (!foundFallbackFluid || sourcePressure > pressureLitersPerSecond))
-            {
-                fluidItemId = sourceItemId;
-                temperatureCelsius = sourceTemperature;
-                pressureLitersPerSecond = sourcePressure;
-                foundFallbackFluid = true;
-            }
-            else if (!foundFallbackFluid
-                     && TryGetRuntimePipeFluidStorageAtCoordinate(
-                         coordinate,
-                         this,
-                         false,
-                         out InstallationObject storage)
-                     && storage.StoredFluidItemId >= 0)
-            {
-                fluidItemId = storage.StoredFluidItemId;
-                temperatureCelsius = storage.GetStoredFluidTemperatureCelsius(fluidItemId);
-                foundFallbackFluid = true;
-            }
-
-            EnqueueConnectedPumpCoordinates(coordinate);
-        }
-
-        ClearObjectInfoScratch();
-        return foundFallbackFluid;
-    }
-
-    private bool TryGetObjectInfoFromPipe(
-        Vector2Int coordinate,
-        out int fluidItemId,
-        out float temperatureCelsius,
-        out float pressureLitersPerSecond)
-    {
-        fluidItemId = -1;
-        temperatureCelsius = MapClimate.CurrentTemperatureCelsius;
-        pressureLitersPerSecond = 0f;
-        if (PipeWorld.Current != null
-            && PipeWorld.Current.TryGetAtCoordinate(coordinate, out PipeRuntimeRecord record))
-        {
-            return record.TryGetObjectInfoFluidInfo(
-                coordinate,
-                out fluidItemId,
-                out temperatureCelsius,
-                out pressureLitersPerSecond);
-        }
-
-        if (!TryGetLoadedBlock(coordinate, out Block block)
-            || block == null
-            || !block.TryGetRuntimePipe(out Pipe pipe, out _))
-        {
-            return false;
-        }
-
-        return block.TryGetRuntimePipeRecord(out record)
-            ? record.TryGetObjectInfoFluidInfo(
-                coordinate,
-                out fluidItemId,
-                out temperatureCelsius,
-                out pressureLitersPerSecond)
-            : pipe.TryGetObjectInfoFluidInfo(
-                out fluidItemId,
-                out temperatureCelsius,
-                out pressureLitersPerSecond);
-    }
-
-    private bool TryGetObjectInfoSourceAt(
-        Vector2Int coordinate,
-        out int fluidItemId,
-        out float temperatureCelsius,
-        out float pressureLitersPerSecond)
-    {
-        pressureLitersPerSecond = 0f;
-        if (!TryGetFluidOutputInfoAtRuntimeGridCoordinate(
-                coordinate,
-                out fluidItemId,
-                out temperatureCelsius))
-        {
-            return false;
-        }
-
-        objectInfoFluidSources.Clear();
-        AppendFluidOutputSourcesAtCoordinate(
-            coordinate,
-            Vector2Int.zero,
-            objectInfoFluidSources);
-        foreach (InputOutputModule source in objectInfoFluidSources)
-        {
-            if (source != null)
-            {
-                pressureLitersPerSecond +=
-                    source.GetObjectInfoFluidPressureLitersPerSecond(fluidItemId);
-            }
-        }
-
-        objectInfoFluidSources.Clear();
-        return true;
-    }
-
-    private void EnqueueConnectedPumpCoordinates(Vector2Int coordinate)
-    {
-        objectInfoPumpPasses.Clear();
-        if (!CollectPumpPipePassesAtRuntimeCoordinate(coordinate, objectInfoPumpPasses))
-        {
-            return;
-        }
-
-        for (int i = 0; i < objectInfoPumpPasses.Count; i++)
-        {
-            RuntimePumpPipePass pass = objectInfoPumpPasses[i];
-            EnqueueObjectInfoCoordinate(pass.OtherCoordinate);
-            EnqueueObjectInfoCoordinate(coordinate + pass.ExternalDirection);
-        }
-
-        objectInfoModules.Clear();
-        CollectModulesAtRuntimeAreaCoordinate(coordinate, objectInfoModules);
-        CollectModulesAtRuntimeGridCoordinate(coordinate, objectInfoModules);
-        for (int passIndex = 0; passIndex < objectInfoPumpPasses.Count; passIndex++)
-        {
-            Pump sourcePump = objectInfoPumpPasses[passIndex].Pump;
-            for (int moduleIndex = 0; moduleIndex < objectInfoModules.Count; moduleIndex++)
-            {
-                if (objectInfoModules[moduleIndex] is Pump candidatePump
-                    && candidatePump.TryGetRuntimeInterlockedEndpoint(
-                        sourcePump,
-                        coordinate,
-                        out Vector2Int endpoint))
-                {
-                    EnqueueObjectInfoCoordinate(endpoint);
-                }
-            }
-        }
-
-        objectInfoModules.Clear();
-        objectInfoPumpPasses.Clear();
-    }
-
-    private void EnqueueObjectInfoCoordinate(Vector2Int coordinate)
-    {
-        if (objectInfoSearchVisited.Add(coordinate))
-        {
-            objectInfoSearchQueue.Enqueue(coordinate);
-        }
-    }
-
-    private void ClearObjectInfoScratch()
-    {
-        objectInfoSearchQueue.Clear();
-        objectInfoSearchVisited.Clear();
-        objectInfoPumpPasses.Clear();
-        objectInfoModules.Clear();
-        objectInfoFluidSources.Clear();
+        // Report delivery on the outlet; never report boosted pressure on the inlet.
+        return Pipe.TryGetNetworkFluidInfoAt(
+            outputCoordinate, objectInfoNetworkContext, false, default, true,
+            out fluidItemId, out temperatureCelsius, out pressureLitersPerSecond);
     }
 
     internal bool TryGetRuntimeInterlockedEndpoint(
@@ -406,44 +263,93 @@ public class Pump : InputOutputModule
             || otherPump == this
             || !gameObject.activeInHierarchy
             || !TryGetPlacementRuntime(out Vector2Int anchorCoordinate, out int quarterTurns)
-            || !IsRuntimeObjectCoordinate(otherPumpEndpoint))
+            || !otherPump.TryGetPlacementRuntime(out Vector2Int otherAnchorCoordinate, out int otherQuarterTurns))
         {
             return false;
         }
 
+        return TryGetInterlockedEndpointAt(
+            this, anchorCoordinate, quarterTurns,
+            otherPump, otherPump, otherAnchorCoordinate, otherQuarterTurns,
+            otherPumpEndpoint, out endpoint);
+    }
+
+    internal bool TryGetInterlockedEndpointAt(
+        MapObject footprintSource,
+        Vector2Int anchorCoordinate,
+        int quarterTurns,
+        Pump otherPump,
+        MapObject otherFootprintSource,
+        Vector2Int otherAnchorCoordinate,
+        int otherQuarterTurns,
+        Vector2Int otherPumpEndpoint,
+        out Vector2Int endpoint)
+    {
+        endpoint = default;
+        if (otherPump == null
+            || !TryGetRectGridBlockTypeAtCoordinate(
+                footprintSource, anchorCoordinate, quarterTurns, otherPumpEndpoint,
+                out RectGridBlockType ownBlockType)
+            || ownBlockType != RectGridBlockType.Object
+            || !otherPump.TryGetPipePassExternalDirection(
+                otherFootprintSource, otherAnchorCoordinate, otherQuarterTurns,
+                otherPumpEndpoint, out Vector2Int otherExternalDirection))
+        {
+            return false;
+        }
+
+        // Flush pump bodies share no Object cell. Each facing PipeInput marker
+        // overlaps the other pump's end Object cell, one grid step apart.
+        Vector2Int candidateEndpoint = otherPumpEndpoint - otherExternalDirection;
+        if (!TryGetPipePassExternalDirection(
+                footprintSource, anchorCoordinate, quarterTurns,
+                candidateEndpoint, out Vector2Int externalDirection)
+            || externalDirection != -otherExternalDirection
+            || !otherPump.TryGetRectGridBlockTypeAtCoordinate(
+                otherFootprintSource, otherAnchorCoordinate, otherQuarterTurns,
+                candidateEndpoint, out RectGridBlockType otherBlockType)
+            || otherBlockType != RectGridBlockType.Object)
+        {
+            return false;
+        }
+
+        endpoint = candidateEndpoint;
+        return true;
+    }
+
+    // The authored footprint runs from the lower local X/Y inlet cell to the
+    // higher local X/Y outlet cell. Placement rotation transforms both together.
+    internal bool TryGetRuntimeFluidEndpoints(out Vector2Int input, out Vector2Int output)
+    {
+        input = output = default;
+        if (!TryGetPlacementRuntime(out Vector2Int anchor, out int turns)) return false;
+        int first = -1, last = -1, count = 0;
         IReadOnlyList<RectGridBlockPlacement> placements = RectGridPlacements;
         for (int i = 0; i < placements.Count; i++)
         {
-            RectGridBlockPlacement placement = placements[i];
-            if (placement.blockType != RectGridBlockType.PipeInput
-                || !TryGetRectGridPlacementCoordinate(
-                    this,
-                    anchorCoordinate,
-                    quarterTurns,
-                    placement,
-                    out Vector2Int candidateEndpoint)
-                || !otherPump.IsRuntimeObjectCoordinate(candidateEndpoint))
-            {
-                continue;
-            }
-
-            endpoint = candidateEndpoint;
-            return true;
+            RectGridBlockPlacement cell = placements[i];
+            if (cell.blockType != RectGridBlockType.PipeInput) continue;
+            count++;
+            if (first < 0 || cell.x < placements[first].x
+                || cell.x == placements[first].x && cell.y < placements[first].y) first = i;
+            if (last < 0 || cell.x > placements[last].x
+                || cell.x == placements[last].x && cell.y > placements[last].y) last = i;
         }
-
-        return false;
+        return count == 2
+               && TryGetRectGridPlacementCoordinate(this, anchor, turns, placements[first], out input)
+               && TryGetRectGridPlacementCoordinate(this, anchor, turns, placements[last], out output);
     }
 
-    private bool IsRuntimeObjectCoordinate(Vector2Int coordinate)
+    internal bool AllowsRuntimeFluidTraversal(Vector2Int coordinate, bool upstream)
     {
-        return TryGetPlacementRuntime(out Vector2Int anchorCoordinate, out int quarterTurns)
-               && TryGetRectGridBlockTypeAtCoordinate(
-                   this,
-                   anchorCoordinate,
-                   quarterTurns,
-                   coordinate,
-                   out RectGridBlockType blockType)
-               && blockType == RectGridBlockType.Object;
+        if (!TryGetRuntimeFluidEndpoints(out Vector2Int input, out Vector2Int output)) return false;
+        if (coordinate != input && coordinate != output)
+        {
+            if (!TryGetPlacementRuntime(out Vector2Int anchor, out int turns)
+                || !TryGetBodyPipePassEndpointAt(this, anchor, turns, coordinate, out coordinate, out _))
+                return false;
+        }
+        return coordinate == (upstream ? output : input);
     }
 
     public bool TryGetRuntimePipePass(
@@ -454,12 +360,55 @@ public class Pump : InputOutputModule
         otherCoordinate = default;
         externalDirection = default;
         if (!TryGetPlacementRuntime(out Vector2Int anchorCoordinate, out int quarterTurns)
-            || !TryGetPipePassExternalDirection(
-                this,
+            || !TryGetPipePassAt(this, anchorCoordinate, quarterTurns, coordinate,
+                out otherCoordinate, out externalDirection))
+        {
+            return false;
+        }
+
+        // An end body installed on a machine input is a real delivery node as
+        // well as a source-search entrance. Keep both searches on that port.
+        bool connects = TryGetPipePassExternalDirection(
+                            this, anchorCoordinate, quarterTurns, coordinate, out _)
+                        || HasRuntimeFluidInputFacingAt(coordinate, externalDirection);
+        if (connects && AllowsRuntimeFluidTraversal(otherCoordinate, true))
+        {
+            otherCoordinate = ResolveRuntimeFluidDeliveryCoordinate(otherCoordinate);
+        }
+        return connects;
+    }
+
+    internal Vector2Int ResolveRuntimeFluidDeliveryCoordinate(Vector2Int outputCoordinate)
+    {
+        if (TryGetPlacementRuntime(out Vector2Int anchor, out int turns)
+            && TryGetPipePassExternalDirection(this, anchor, turns, outputCoordinate, out Vector2Int direction))
+        {
+            Vector2Int bodyCoordinate = outputCoordinate - direction;
+            if (HasRuntimeFluidInputFacingAt(bodyCoordinate, direction)) return bodyCoordinate;
+        }
+        return outputCoordinate;
+    }
+
+    internal bool TryGetPipePassAt(
+        MapObject footprintSource,
+        Vector2Int anchorCoordinate,
+        int quarterTurns,
+        Vector2Int coordinate,
+        out Vector2Int otherCoordinate,
+        out Vector2Int externalDirection)
+    {
+        otherCoordinate = default;
+        externalDirection = default;
+        Vector2Int endpointCoordinate = coordinate;
+        if (!TryGetPipePassExternalDirection(
+                footprintSource,
                 anchorCoordinate,
                 quarterTurns,
                 coordinate,
-                out externalDirection))
+                out externalDirection)
+            && !TryGetBodyPipePassEndpointAt(
+                footprintSource, anchorCoordinate, quarterTurns, coordinate,
+                out endpointCoordinate, out externalDirection))
         {
             return false;
         }
@@ -470,18 +419,58 @@ public class Pump : InputOutputModule
             RectGridBlockPlacement placement = placements[i];
             if (placement.blockType != RectGridBlockType.PipeInput
                 || !TryGetRectGridPlacementCoordinate(
-                    this,
+                    footprintSource != null ? footprintSource : this,
                     anchorCoordinate,
                     quarterTurns,
                     placement,
                     out Vector2Int candidateCoordinate)
-                || candidateCoordinate == coordinate)
+                || candidateCoordinate == endpointCoordinate)
             {
                 continue;
             }
 
             otherCoordinate = candidateCoordinate;
             return true;
+        }
+
+        return false;
+    }
+
+    // The end Object cell can occupy another facility's input area. It is an
+    // alias of the adjacent PipePass, not a side port or a separate fluid store.
+    internal bool TryGetBodyPipePassEndpointAt(
+        MapObject footprintSource,
+        Vector2Int anchorCoordinate,
+        int quarterTurns,
+        Vector2Int coordinate,
+        out Vector2Int endpointCoordinate,
+        out Vector2Int externalDirection)
+    {
+        endpointCoordinate = externalDirection = default;
+        MapObject anchorSource = footprintSource != null ? footprintSource : this;
+        if (!TryGetRectGridBlockTypeAtCoordinate(
+                anchorSource, anchorCoordinate, quarterTurns, coordinate,
+                out RectGridBlockType blockType)
+            || blockType != RectGridBlockType.Object)
+        {
+            return false;
+        }
+
+        IReadOnlyList<RectGridBlockPlacement> placements = RectGridPlacements;
+        for (int i = 0; i < placements.Count; i++)
+        {
+            RectGridBlockPlacement placement = placements[i];
+            if (placement.blockType == RectGridBlockType.PipeInput
+                && TryGetRectGridPlacementCoordinate(anchorSource, anchorCoordinate, quarterTurns,
+                    placement, out Vector2Int endpoint)
+                && TryGetPipePassExternalDirection(anchorSource, anchorCoordinate, quarterTurns,
+                    endpoint, out Vector2Int direction)
+                && endpoint - direction == coordinate)
+            {
+                endpointCoordinate = endpoint;
+                externalDirection = direction;
+                return true;
+            }
         }
 
         return false;

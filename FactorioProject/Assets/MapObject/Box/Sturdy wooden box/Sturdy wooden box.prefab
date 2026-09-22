@@ -619,7 +619,7 @@ MonoBehaviour:
   m_EditorClassIdentifier: 
   id: 0
   objectName: Sturdy wooden box
-  objId: 30
+  objId: 31
   itemDefinition: {fileID: 11400000, guid: f618ef8c86b605a418911317c85bd88d, type: 2}
   mapStatus:
     mapSizeX: 1
@@ -661,6 +661,7 @@ MonoBehaviour:
   - x: 0
     y: 0
     blockType: 1
+    itemDefinition: {fileID: 0}
   craftDuration: 5
   inputConsumeMoveInterval: 0.1
   outputMoveInterval: 0.1

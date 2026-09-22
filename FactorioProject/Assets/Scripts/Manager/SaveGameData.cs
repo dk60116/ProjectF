@@ -8,7 +8,8 @@ public sealed class SaveGameData
 {
     // Version 65 persists the independent buffered state of every configured
     // non-electric operational energy requirement.
-    public const int CurrentVersion = 65;
+    // Version 66 stores ProductionMachine's separately metered fluid ingredient buffers.
+    public const int CurrentVersion = 66;
 
     public int version = CurrentVersion;
     public long savedAtUtcTicks;

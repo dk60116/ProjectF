@@ -12,6 +12,7 @@ public static class Checks
         SerializedPlacementsKeepEveryPipeOutput();
         InputEnergyPlacementsRemainUnique();
         PipeOutputsAreNumberedByGridPosition();
+        PipeOutputsResolveTheirOwnWorldCells();
         Console.WriteLine($"RectGrid placement checks passed: {checks}");
     }
 
@@ -94,11 +95,56 @@ public static class Checks
             "an empty cell must not receive a pipe-output number");
     }
 
+    private static void PipeOutputsResolveTheirOwnWorldCells()
+    {
+        var firstFluid = new ItemDefinition { id = 11 };
+        var secondFluid = new ItemDefinition { id = 22 };
+        var module = new InputOutputModule
+        {
+            PlacementCenterCell = new UnityEngine.Vector2Int(0, 1)
+        };
+        module.LoadRaw(
+            Placement(2, 2, InputOutputModule.RectGridBlockType.Object),
+            Placement(1, 2, InputOutputModule.RectGridBlockType.Object),
+            Placement(3, 3, InputOutputModule.RectGridBlockType.PipeOutputItem, firstFluid),
+            Placement(3, 2, InputOutputModule.RectGridBlockType.PipeOutputItem, secondFluid));
+
+        var anchor = new UnityEngine.Vector2Int(100, 200);
+        Require(
+            module.TryGetRectGridBlockPlacementAtCoordinate(
+                module,
+                anchor,
+                0,
+                new UnityEngine.Vector2Int(102, 201),
+                out InputOutputModule.RectGridBlockPlacement firstPlacement)
+            && firstPlacement.itemDefinition == firstFluid,
+            "the first pipe output must resolve from the placement-center object anchor");
+        Require(
+            module.TryGetRectGridBlockPlacementAtCoordinate(
+                module,
+                anchor,
+                0,
+                new UnityEngine.Vector2Int(102, 200),
+                out InputOutputModule.RectGridBlockPlacement secondPlacement)
+            && secondPlacement.itemDefinition == secondFluid,
+            "each pipe output world cell must retain its own configured fluid");
+        Require(
+            module.TryGetRectGridBlockPlacementAtCoordinate(
+                module,
+                anchor,
+                1,
+                new UnityEngine.Vector2Int(101, 198),
+                out InputOutputModule.RectGridBlockPlacement rotatedPlacement)
+            && rotatedPlacement.itemDefinition == firstFluid,
+            "rotating the machine must preserve the pipe output's configured fluid");
+    }
+
     private static InputOutputModule.RectGridBlockPlacement Placement(
         int x,
         int y,
-        InputOutputModule.RectGridBlockType blockType) =>
-        new InputOutputModule.RectGridBlockPlacement(x, y, blockType);
+        InputOutputModule.RectGridBlockType blockType,
+        ItemDefinition itemDefinition = null) =>
+        new InputOutputModule.RectGridBlockPlacement(x, y, blockType, itemDefinition);
 
     private static int Count(
         IReadOnlyList<InputOutputModule.RectGridBlockPlacement> placements,

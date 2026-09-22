@@ -793,6 +793,21 @@ public partial class InstallationObject : MapObject, IMapObjectSimulationIdentit
         return consumedLiters > 0f;
     }
 
+    // Return an uncommitted withdrawal to its owner. This is not an external
+    // delivery: unloading-only vehicles and incoming-rate limits must not reject it.
+    internal void RestoreUnacceptedFluid(int fluidItemId, float liters, float temperatureCelsius)
+    {
+        long returnedUnits = DeterministicSimulationUnits.FromFloat(liters);
+        if (returnedUnits <= 0L) return;
+        long previousUnits = StoredFluidUnits;
+        long totalUnits = previousUnits + returnedUnits;
+        float restoredTemperature = previousUnits > 0L
+            ? (float)((GetStoredFluidTemperatureCelsius(fluidItemId) * (double)previousUnits
+                       + temperatureCelsius * (double)returnedUnits) / totalUnits)
+            : temperatureCelsius;
+        SetStoredFluidUnits(fluidItemId, totalUnits, restoredTemperature);
+    }
+
     public void SetStoredFluidLiters(float liters)
     {
         SetStoredFluid(storedFluidItemId, liters);

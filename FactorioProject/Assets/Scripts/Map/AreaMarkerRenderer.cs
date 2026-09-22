@@ -357,47 +357,98 @@ public sealed class AreaMarkerRenderer : MonoBehaviour
     {
         Vector3 position = markerMatrix.MultiplyPoint3x4(Vector3.zero);
         Vector2Int chunk = new Vector2Int(Mathf.FloorToInt(position.x / ChunkSize), Mathf.FloorToInt(position.z / ChunkSize));
+        int iconLayerIndex = -1;
+        int maximumLayerSortingOrder = int.MinValue;
         for (int i = 0; i < layers.Length; i++)
         {
             VisualLayer layer = layers[i];
+            maximumLayerSortingOrder = Mathf.Max(maximumLayerSortingOrder, layer.SortingOrder);
+            if (layer.IsIcon) iconLayerIndex = i;
             Sprite sprite = layer.IsIcon ? request.Icon : layer.Sprite;
             if (sprite == null) continue;
-            if (!sprites.TryGetValue(sprite, out SpriteGeometry geometry))
-            {
-                geometry = new SpriteGeometry(sprite);
-                sprites.Add(sprite, geometry);
-            }
-            MaterialKey materialKey = new MaterialKey(sprite.texture, layer.SortingOrder + sortingOffset,
-                layer.Layer, onTop);
-            BatchKey key = new BatchKey(materialKey, chunk, moving);
-            if (!batches.TryGetValue(key, out MarkerBatch batch))
-            {
-                if (!materials.TryGetValue(materialKey, out Material material))
-                {
-                    // Mesh submissions have no SpriteRenderer sortingOrder. Explicit queues keep
-                    // template layers ordered, elevated station markers after ordinary markers,
-                    // and depth-independent placement previews last (queue must stay <= 5000).
-                    int queue = onTop ? 5000 - layers.Length + 1 + i
-                        : 3000 + Mathf.Clamp(sortingOffset, 0, 1000) + i;
-                    material = new Material(sourceMaterial)
-                    {
-                        name = "AreaMarkerBatch",
-                        hideFlags = HideFlags.HideAndDontSave,
-                        mainTexture = sprite.texture,
-                        renderQueue = queue
-                    };
-                    material.SetInt("_ZTest", (int)(onTop ? CompareFunction.Always : CompareFunction.LessEqual));
-                    materials.Add(materialKey, material);
-                }
-                batch = new MarkerBatch(material);
-                batches.Add(key, batch);
-            }
             Matrix4x4 matrix = markerMatrix * (layer.IsIcon && request.IconRotationZ != 0f
                 ? layer.BeforeIconRotation * Matrix4x4.TRS(Vector3.zero,
                     Quaternion.Euler(0f, 0f, request.IconRotationZ), layer.Scale)
                 : layer.Transform);
-            batch.Append(geometry, matrix, layer.Color, layer.FlipX, layer.FlipY);
+            AppendLayer(sprite, layer, matrix, sortingOffset, i, onTop, moving, chunk);
         }
+
+        if (request.OverlayIcon != null && iconLayerIndex >= 0)
+        {
+            VisualLayer iconLayer = layers[iconLayerIndex];
+            Matrix4x4 overlayTransform = request.OverlayIconRotationZ != 0f
+                ? iconLayer.BeforeIconRotation * Matrix4x4.TRS(
+                    Vector3.zero,
+                    Quaternion.Euler(0f, 0f, request.OverlayIconRotationZ),
+                    iconLayer.Scale)
+                : iconLayer.Transform;
+            Matrix4x4 overlayMatrix = markerMatrix
+                                      * Matrix4x4.Translate(Vector3.up * 0.002f)
+                                      * overlayTransform;
+            int overlaySortingOffset = sortingOffset
+                                       + maximumLayerSortingOrder
+                                       - iconLayer.SortingOrder
+                                       + 1;
+            AppendLayer(
+                request.OverlayIcon,
+                iconLayer,
+                overlayMatrix,
+                overlaySortingOffset,
+                layers.Length,
+                onTop,
+                moving,
+                chunk);
+        }
+    }
+
+    private void AppendLayer(
+        Sprite sprite,
+        VisualLayer layer,
+        Matrix4x4 matrix,
+        int sortingOffset,
+        int renderOrder,
+        bool onTop,
+        bool moving,
+        Vector2Int chunk)
+    {
+        if (!sprites.TryGetValue(sprite, out SpriteGeometry geometry))
+        {
+            geometry = new SpriteGeometry(sprite);
+            sprites.Add(sprite, geometry);
+        }
+
+        MaterialKey materialKey = new MaterialKey(
+            sprite.texture,
+            layer.SortingOrder + sortingOffset,
+            layer.Layer,
+            onTop);
+        BatchKey key = new BatchKey(materialKey, chunk, moving);
+        if (!batches.TryGetValue(key, out MarkerBatch batch))
+        {
+            if (!materials.TryGetValue(materialKey, out Material material))
+            {
+                // Mesh submissions have no SpriteRenderer sortingOrder. Explicit queues keep
+                // template layers ordered, elevated station markers after ordinary markers,
+                // and depth-independent placement previews last (queue must stay <= 5000).
+                int queue = onTop
+                    ? Mathf.Min(5000, 5000 - layers.Length + 1 + renderOrder)
+                    : 3000 + Mathf.Clamp(sortingOffset, 0, 1000) + renderOrder;
+                material = new Material(sourceMaterial)
+                {
+                    name = "AreaMarkerBatch",
+                    hideFlags = HideFlags.HideAndDontSave,
+                    mainTexture = sprite.texture,
+                    renderQueue = queue
+                };
+                material.SetInt("_ZTest", (int)(onTop ? CompareFunction.Always : CompareFunction.LessEqual));
+                materials.Add(materialKey, material);
+            }
+
+            batch = new MarkerBatch(material);
+            batches.Add(key, batch);
+        }
+
+        batch.Append(geometry, matrix, layer.Color, layer.FlipX, layer.FlipY);
     }
 
     private void OnDestroy()

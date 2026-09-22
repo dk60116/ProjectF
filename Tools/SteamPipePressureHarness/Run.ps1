@@ -16,11 +16,19 @@ function Read-Member([string]$file, [string]$signature) {
 }
 $generated = "using System; using System.Collections.Generic;`npublic partial class Pipe {`n"
 foreach ($signature in @(
-    'private readonly struct ObjectInfoFluidSearchNode',
+    'internal readonly struct ObjectInfoFluidSearchNode',
+    'internal sealed class FluidNetworkSearchContext',
     'internal bool TryGetObjectInfoFluidInfoAtCoordinate(',
-    'private bool TrySearchFluidNetwork(',
-    'private void AppendObjectInfoFluidOutputSourcesAtCoordinate(',
-    'private void EnqueueObjectInfoFluidSearchCoordinate(',
+    'internal static bool TryGetNetworkFluidInfoAt(',
+    'private static bool TrySearchFluidNetwork(',
+    'private static void RecordPumpDistance(',
+    'private static void CollectPumpStoredFluid(',
+    'private static float ResolveNetworkPressure(',
+    'private static void AppendObjectInfoFluidOutputSourcesAtCoordinate(',
+    'private static void EnqueueObjectInfoFluidSearchCoordinate(',
+    'private static bool CanTraverseFluidTankBoundary(',
+    'private static bool HasPumpSearchExternalDirection(',
+    'private static void EnqueueInterlockedPumpFluidSearchCoordinates(',
     'private static int FreezeObjectInfoPressureDistance(',
     'private static int AddObjectInfoPipeDistance(',
     'private static bool IsBetterObjectInfoPressureDistance(',
@@ -29,9 +37,22 @@ foreach ($signature in @(
     'public static int AddRemoteTraversalPipeDistance(')) {
     $generated += (Read-Member 'Pipe.cs' $signature) + "`n"
 }
+$generated += "} public partial class Pump {`n"
+$generated += (Read-Member "../Pump.cs" "internal static Pump ResolvePressureLimit(") + "`n"
+$generated += (Read-Member "../Pump.cs" "internal static float LimitTransportRate(") + "`n"
+$generated += (Read-Member "../Pump.cs" "internal float LimitTransferVolume(") + "`n"
+$generated += (Read-Member "../Pump.cs" "internal void RecordTransferredVolume(") + "`n"
+$generated += (Read-Member "../Pump.cs" "internal bool AllowsRuntimeFluidTraversal(") + "`n"
+$pumpSource = [IO.File]::ReadAllText((Join-Path $base '../Pump.cs'))
+$pumpStart = $pumpSource.IndexOf('    public bool TryGetObjectInfoFluidInfo(')
+$pumpEnd = $pumpSource.IndexOf('    internal bool TryGetRuntimeInterlockedEndpoint(', $pumpStart)
+$generated += $pumpSource.Substring($pumpStart, $pumpEnd - $pumpStart)
 $generated += "} public partial class InputOutputModule {`n"
 foreach ($signature in @(
+    'protected bool TryGetRuntimeFluidInputPressure(',
+    'private bool TryGetFluidInputPressureAt(',
     'public static void AppendFluidOutputSourcesAtCoordinate(',
+    'internal static bool HasRuntimeFluidOutputTowardsPipe(',
     'internal static bool TryGetSteamGeneratorPipePassAtRuntimeCoordinate(',
     'private static void SelectSteamGeneratorPipePass(')) {
     $generated += (Read-Member 'InputOutputModule.cs' $signature) + "`n"
@@ -50,6 +71,28 @@ foreach ($signature in @(
     $generated += (Read-Member 'SteamGenerator.cs' $signature) + "`n"
 }
 $generated += "}"
+$generated += "public partial class Fluidtank {`n"
+foreach ($signature in @(
+    'private readonly struct FluidNetworkSearchNode',
+    'private bool EnsureConnectedTankCache()',
+    'private void ClearConnectedTankSources()',
+    'private void WakeConnectedFluidTankTicks()',
+    'public void ManagedUpdateTick(',
+    'private Fluidtank FindBestEqualizationSource()',
+    'private static float GetFluidFillRatio(',
+    'private static bool HasFluidNetworkNodeConnectionTowards(',
+    'private void EnqueueFluidNetworkSearchCoordinate(',
+    'private bool TryResolveFluidNetworkNode(',
+    'private bool TryResolveConnectionTowards(',
+    'private bool HasFluidNetworkConnectionTowardsIgnoringStorageCoordinate(',
+    'private bool CanConnectFixedTankPipe(',
+    'private bool CanConnectAdjacentFixedTank(',
+    'private int ResolveFixedTankNetworkFluidItemId(',
+    'private static bool CanDeployMountedPipeForFluid('
+)) {
+    $generated += (Read-Member 'Fluid tank.cs' $signature) + "`n"
+}
+$generated += "}`n"
 $worldSource = [IO.File]::ReadAllText((Join-Path $repo 'FactorioProject/Assets/Scripts/Map/PipeWorld.cs'))
 $recordStart = $worldSource.IndexOf('    public bool TryGetObjectInfoFluidInfo(', [StringComparison]::Ordinal)
 $recordEnd = $worldSource.IndexOf('    public bool TryGetConnectedFluidItemIdIgnoringStorageCoordinate(', $recordStart, [StringComparison]::Ordinal)

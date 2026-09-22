@@ -13,7 +13,7 @@ MonoBehaviour:
   m_Name: Item_41_Train station
   m_EditorClassIdentifier: 
   itemName: Train station
-  id: 108
+  id: 109
   mapObject: {fileID: 2696561144136662984, guid: 6e704ffa44d6f8e42a1e28a682f898aa, type: 3}
   mapObjectArchetype: {fileID: 11400000, guid: f692dd48e9d25464fa58f279ba490daf, type: 2}
   useMapColor: 1

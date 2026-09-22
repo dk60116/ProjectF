@@ -38,7 +38,17 @@ using System;
 using System.Collections.Generic;
 using UnityEngine;
 
-public partial class InputOutputModule
+public sealed class ItemDefinition
+{
+    public int id;
+}
+
+public class MapObject
+{
+    public Vector2Int PlacementCenterCell { get; set; }
+}
+
+public partial class InputOutputModule : MapObject
 {
     private SlotLayoutType slotLayoutType = SlotLayoutType.RectGrid;
     private int rectGridWidth = 5;
@@ -71,6 +81,11 @@ foreach ($signature in @(
     'public struct RectGridBlockPlacement',
     'public void SetRectGridBlock(',
     'public void RemoveRectGridBlockAt(',
+    'public RectGridBlockType GetRectGridBlockAt(',
+    'public bool TryGetRectGridObjectAnchorCell(',
+    'public bool TryGetRectGridPlacementCoordinate(',
+    'public bool TryGetRectGridBlockPlacementAtCoordinate(',
+    'public static Vector2Int RotateRectGridOffset(',
     'private void EnsureRectGridPlacementData()',
     'private bool IsValidRectGridCell(',
     'private int FindRectGridPlacementIndex(',

@@ -13,7 +13,7 @@ MonoBehaviour:
   m_Name: Item_22_Mortor
   m_EditorClassIdentifier: 
   itemName: Mortor
-  id: 37
+  id: 38
   mapObject: {fileID: 0}
   mapObjectArchetype: {fileID: 0}
   useMapColor: 0

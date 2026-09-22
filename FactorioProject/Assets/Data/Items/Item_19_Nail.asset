@@ -13,7 +13,7 @@ MonoBehaviour:
   m_Name: Item_19_Nail
   m_EditorClassIdentifier: 
   itemName: Nail
-  id: 34
+  id: 35
   mapObject: {fileID: 0}
   mapObjectArchetype: {fileID: 0}
   useMapColor: 0

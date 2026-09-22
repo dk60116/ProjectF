@@ -3,6 +3,10 @@ $repo = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '../..'))
 $probe = Join-Path ([IO.Path]::GetTempPath()) ('ProjectF-AreaMarker-' + [guid]::NewGuid().ToString('N'))
 New-Item -ItemType Directory -Path $probe | Out-Null
 $source = [IO.File]::ReadAllText((Join-Path $repo 'FactorioProject/Assets/Scripts/Map/AreaMarker.cs'))
+$placementSource = [IO.File]::ReadAllText((Join-Path $repo 'FactorioProject/Assets/Scripts/Object/MapObj/InstallationObject/InstallationPlacementController.cs'))
+if (-not $placementSource.Contains('PipeInputItemMarkerRectGridBlockTypes')) { throw 'Pipe input item marker type filter missing' }
+if (-not $placementSource.Contains('AddPipeInputItemAreaMarkerRequests(')) { throw 'Pipe input item icon marker builder missing' }
+if (-not $placementSource.Contains('GetArrowMarkerRotationZ(markerWorldPosition, referenceWorldPosition)')) { throw 'Pipe input arrow must point from the input area toward the machine' }
 $boundary = $source.IndexOf('internal sealed class InstallationPlacementAreaRegistry', [StringComparison]::Ordinal)
 if ($boundary -lt 0) { throw 'Area registry boundary missing' }
 [IO.File]::WriteAllText((Join-Path $probe 'AreaMarker.cs'), $source.Substring(0, $boundary))

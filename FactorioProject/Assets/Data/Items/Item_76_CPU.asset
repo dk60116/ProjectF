@@ -13,7 +13,7 @@ MonoBehaviour:
   m_Name: Item_76_CPU
   m_EditorClassIdentifier: Assembly-CSharp::ItemDefinition
   itemName: CPU
-  id: 44
+  id: 45
   mapObject: {fileID: 0}
   mapObjectArchetype: {fileID: 0}
   useMapColor: 0

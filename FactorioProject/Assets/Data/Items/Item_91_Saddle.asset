@@ -13,7 +13,7 @@ MonoBehaviour:
   m_Name: Item_91_Saddle
   m_EditorClassIdentifier: Assembly-CSharp::ItemDefinition
   itemName: Saddle
-  id: 76
+  id: 77
   mapObject: {fileID: 0}
   mapObjectArchetype: {fileID: 0}
   useMapColor: 0

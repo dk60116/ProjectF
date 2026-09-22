@@ -19,6 +19,16 @@ public sealed class PipeRuntimeRecord : IVirtualRenderBatchOwner
     };
     private readonly Vector2Int[] occupiedCoordinates;
     private readonly Bounds[] focusBounds;
+    private readonly PlayerCollisionPart[] playerCollisionParts;
+
+    private readonly struct PlayerCollisionPart
+    {
+        public readonly Vector2Int Coordinate;
+        public readonly Bounds Bounds;
+        public readonly int Layer;
+        public PlayerCollisionPart(Vector2Int coordinate, Bounds bounds, int layer)
+        { Coordinate = coordinate; Bounds = bounds; Layer = layer; }
+    }
     private readonly PipeConnections connections;
     private readonly List<VirtualRenderBatchEntry> fluidBatchEntries =
         new List<VirtualRenderBatchEntry>(2);
@@ -63,6 +73,7 @@ public sealed class PipeRuntimeRecord : IVirtualRenderBatchOwner
         }
         connections = new PipeConnections(endpoints, IsUnderground && TryGetPairCoordinates(out _, out _));
         focusBounds = BuildFocusBounds();
+        playerCollisionParts = BuildPlayerCollisionParts();
     }
 
     public BlockStateStore.InstallationSaveState State { get; }
@@ -252,6 +263,55 @@ public sealed class PipeRuntimeRecord : IVirtualRenderBatchOwner
             endpoints.Add(center + Vector3.left * 0.12f);
             endpoints.Add(center + Vector3.right * 0.12f);
         }
+    }
+
+    private PlayerCollisionPart[] BuildPlayerCollisionParts()
+    {
+        // Read authored solid boxes once at installation/load, independently of
+        // render batches and camera visibility. Keep each corner/T arm separate.
+        BoxCollider[] colliders = Prototype.GetComponentsInChildren<BoxCollider>(true);
+        var parts = new List<PlayerCollisionPart>(colliders.Length * (IsUnderground ? 2 : 1));
+        int endpoints = IsUnderground && TryGetPairCoordinates(out _, out _) ? 2 : 1;
+        for (int endpoint = 0; endpoint < endpoints; endpoint++)
+        {
+            Matrix4x4 root = GetRootMatrix(endpoint);
+            for (int i = 0; i < colliders.Length; i++)
+            {
+                BoxCollider collider = colliders[i];
+                if (!collider.enabled || collider.isTrigger) continue;
+                bool active = true;
+                for (Transform node = collider.transform; node != null && node != Prototype.transform; node = node.parent)
+                    if (!node.gameObject.activeSelf) { active = false; break; }
+                if (!active) continue;
+                Matrix4x4 localToRoot = Prototype.transform.worldToLocalMatrix * collider.transform.localToWorldMatrix;
+                parts.Add(new PlayerCollisionPart(occupiedCoordinates[endpoint],
+                    TransformBounds(new Bounds(collider.center, collider.size), root * localToRoot),
+                    collider.gameObject.layer));
+            }
+        }
+        return parts.ToArray();
+    }
+
+    internal bool TrySweepPlayer(Vector2Int coordinate, Vector2 start, Vector2 direction,
+        float maxDistance, float radius, float playerMinY, float playerMaxY, int collisionMask,
+        out float distance, out Vector2 normal)
+    {
+        distance = maxDistance;
+        normal = default;
+        if (PlacementPresentationSuppressed) return false;
+        bool hit = false;
+        for (int i = 0; i < playerCollisionParts.Length; i++)
+        {
+            PlayerCollisionPart part = playerCollisionParts[i];
+            if (part.Coordinate != coordinate || (collisionMask & (1 << part.Layer)) == 0
+                || part.Bounds.max.y <= playerMinY || part.Bounds.min.y >= playerMaxY) continue;
+            if (!PipePlayerCollision.Sweep(start, direction, distance, radius, part.Bounds,
+                    out float candidateDistance, out Vector2 candidateNormal)) continue;
+            distance = candidateDistance;
+            normal = candidateNormal;
+            hit = true;
+        }
+        return hit;
     }
 
     private Bounds[] BuildFocusBounds()
@@ -1136,5 +1196,74 @@ public sealed class PipeWorld : IDisposable
         }
 
         if (Application.isPlaying) UnityEngine.Object.Destroy(target); else UnityEngine.Object.DestroyImmediate(target);
+    }
+}
+
+// Horizontal capsule sweep against the solid boxes authored on pipe prefabs.
+// Rounded corners preserve clearance; this does not fill an elbow's empty quadrant.
+internal static class PipePlayerCollision
+{
+    private const float Epsilon = 0.00001f;
+    internal static bool Sweep(Vector2 start, Vector2 direction, float maxDistance, float radius,
+        Bounds bounds, out float distance, out Vector2 normal)
+    {
+        distance = maxDistance;
+        normal = default;
+        if (maxDistance <= 0f || direction.sqrMagnitude <= Epsilon) return false;
+        Vector2 min = new Vector2(bounds.min.x, bounds.min.z);
+        Vector2 max = new Vector2(bounds.max.x, bounds.max.z);
+        Vector2 nearest = new Vector2(Mathf.Clamp(start.x, min.x, max.x), Mathf.Clamp(start.y, min.y, max.y));
+        Vector2 offset = start - nearest;
+        if (offset.sqrMagnitude < radius * radius - Epsilon)
+        {
+            // Loading/installing over the player must allow escape, but no deeper movement.
+            if (offset.sqrMagnitude > Epsilon) normal = offset.normalized;
+            else
+            {
+                float edgeDistance = float.PositiveInfinity;
+                for (int axis = 0; axis < 2; axis++)
+                for (int sign = -1; sign <= 1; sign += 2)
+                {
+                    float gap = sign < 0 ? start[axis] - min[axis] : max[axis] - start[axis];
+                    if (gap >= edgeDistance) continue;
+                    edgeDistance = gap;
+                    normal = axis == 0 ? new Vector2(sign, 0f) : new Vector2(0f, sign);
+                }
+            }
+            distance = 0f;
+            return Vector2.Dot(direction, normal) < -Epsilon;
+        }
+
+        bool hit = false;
+        for (int axis = 0; axis < 2; axis++)
+        for (int sign = -1; sign <= 1; sign += 2)
+        {
+            if (direction[axis] * sign >= -Epsilon) continue;
+            float face = (sign < 0 ? min[axis] : max[axis]) + sign * radius;
+            float candidate = (face - start[axis]) / direction[axis];
+            float along = start[1 - axis] + direction[1 - axis] * candidate;
+            if (candidate < -Epsilon || candidate > distance || along < min[1 - axis] || along > max[1 - axis]) continue;
+            distance = Mathf.Max(0f, candidate);
+            normal = axis == 0 ? new Vector2(sign, 0f) : new Vector2(0f, sign);
+            hit = true;
+        }
+        for (int x = -1; x <= 1; x += 2)
+        for (int y = -1; y <= 1; y += 2)
+        {
+            Vector2 corner = new Vector2(x < 0 ? min.x : max.x, y < 0 ? min.y : max.y);
+            Vector2 relative = start - corner;
+            float projection = Vector2.Dot(relative, direction);
+            float discriminant = projection * projection - relative.sqrMagnitude + radius * radius;
+            if (discriminant < 0f) continue;
+            float candidate = -projection - Mathf.Sqrt(discriminant);
+            if (candidate < -Epsilon || candidate > distance) continue;
+            Vector2 contact = start + direction * candidate - corner;
+            if (contact.x * x < -Epsilon || contact.y * y < -Epsilon
+                || Vector2.Dot(direction, contact) >= -Epsilon) continue;
+            distance = Mathf.Max(0f, candidate);
+            normal = contact.normalized;
+            hit = true;
+        }
+        return hit;
     }
 }

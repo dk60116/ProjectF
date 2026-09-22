@@ -83,6 +83,54 @@ internal static class Checks
         Equal(2, child.EffectivePairs[1].inputs.Count, "child pair input cardinality retained");
         Equal(2, child.EffectivePairs[1].outputs.Count, "child pair output cardinality retained");
 
+        ItemDefinition parentItem = child.ParentItem;
+        child.Validate();
+        Equal(parentItem, child.ParentItem, "validation preserves a valid parent");
+
+        var loadingItem = Item(20);
+        var loadingChild = new InputOutputModule();
+        loadingChild.LoadPairs(multiPair);
+        loadingChild.LoadParentItem(loadingItem);
+        loadingChild.Validate();
+        Equal(loadingItem, loadingChild.ParentItem, "validation preserves an unresolved parent item");
+        Equal(0, loadingItem.MapObjectReads, "validation must not traverse another asset during deserialization");
+        Equal(1, loadingChild.EffectivePairs.Count, "unresolved parent still allows local recipes");
+        loadingItem.mapObject = parent;
+        loadingChild.Validate();
+        Equal(2, loadingChild.EffectivePairs.Count, "parent recipes recover when its prefab finishes loading");
+
+        var self = new InputOutputModule();
+        self.LoadPairs(parentPair);
+        self.SetParent(self);
+        ItemDefinition selfItem = self.ParentItem;
+        self.Validate();
+        Equal(selfItem, self.ParentItem, "validation reports no destructive repair of saved self reference");
+        Equal(1, self.EffectivePairs.Count, "self cycle is bounded without deleting saved data");
+
+        var cycleA = new InputOutputModule();
+        var cycleB = new InputOutputModule();
+        cycleA.LoadPairs(parentPair);
+        cycleB.LoadPairs(multiPair);
+        cycleA.SetParent(cycleB);
+        cycleB.SetParent(cycleA);
+        ItemDefinition cycleAItem = cycleA.ParentItem;
+        ItemDefinition cycleBItem = cycleB.ParentItem;
+        cycleA.Validate();
+        cycleB.Validate();
+        Equal(cycleAItem, cycleA.ParentItem, "validation preserves first cyclic asset reference");
+        Equal(cycleBItem, cycleB.ParentItem, "validation preserves second cyclic asset reference");
+        Equal(2, cycleA.EffectivePairs.Count, "cyclic recipes are included only once");
+        Equal(false, self.IsValidParentInputOutputModuleItem(selfItem), "editor rejects selecting self as parent");
+        Equal(false, cycleA.IsValidParentInputOutputModuleItem(cycleAItem), "editor rejects selecting an indirect cycle");
+        Equal(false, child.IsValidParentInputOutputModuleItem(cycleAItem), "editor rejects a parent chain with an existing cycle");
+        Equal(true, child.IsValidParentInputOutputModuleItem(parentItem), "editor accepts an acyclic parent");
+        Equal(false, child.IsValidParentInputOutputModuleItem(Item(21)), "editor rejects a non-module parent");
+        Equal(true, child.IsValidParentInputOutputModuleItem(null), "editor allows explicitly selecting None");
+        loadingChild.LoadParentItem(null);
+        loadingChild.Validate();
+        Equal<ItemDefinition>(null, loadingChild.ParentItem, "explicitly removing a parent remains removed");
+        Equal(1, loadingChild.EffectivePairs.Count, "removing parent invalidates inherited recipes");
+
         Console.WriteLine($"InputOutputPair harness passed: {checks} checks");
     }
 }

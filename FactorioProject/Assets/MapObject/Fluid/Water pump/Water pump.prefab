@@ -139,7 +139,7 @@ MonoBehaviour:
   m_EditorClassIdentifier: 
   id: 0
   objectName: Water pump
-  objId: 56
+  objId: 57
   itemDefinition: {fileID: 11400000, guid: 347029aa316390a4982b64441c83789c, type: 2}
   mapStatus:
     mapSizeX: 1
@@ -185,12 +185,15 @@ MonoBehaviour:
   - x: 0
     y: 0
     blockType: 6
+    itemDefinition: {fileID: 0}
   - x: 0
     y: 1
     blockType: 1
+    itemDefinition: {fileID: 0}
   - x: 0
     y: 2
     blockType: 7
+    itemDefinition: {fileID: 0}
   craftDuration: 5
   inputConsumeMoveInterval: 0.1
   outputMoveInterval: 0.1

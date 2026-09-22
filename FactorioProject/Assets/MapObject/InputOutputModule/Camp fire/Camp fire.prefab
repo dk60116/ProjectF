@@ -50,7 +50,7 @@ MonoBehaviour:
   m_EditorClassIdentifier: Assembly-CSharp::Campfire
   id: 0
   objectName: Camp fire
-  objId: 32
+  objId: 33
   itemDefinition: {fileID: 11400000, guid: 9f62310ff160eb14b82cc587cd98f19c, type: 2}
   mapStatus:
     mapSizeX: 1
@@ -94,9 +94,11 @@ MonoBehaviour:
   - x: 0
     y: 0
     blockType: 1
+    itemDefinition: {fileID: 0}
   - x: 0
     y: 1
     blockType: 2
+    itemDefinition: {fileID: 0}
   craftDuration: 5
   inputConsumeMoveInterval: 0.1
   outputMoveInterval: 0.1

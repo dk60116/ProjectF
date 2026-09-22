@@ -82,7 +82,7 @@ MonoBehaviour:
   m_EditorClassIdentifier: 
   id: 0
   objectName: Boiler
-  objId: 59
+  objId: 60
   itemDefinition: {fileID: 11400000, guid: 763440cffdd93a948a7d8e73c541f673, type: 2}
   mapStatus:
     mapSizeX: 1
@@ -146,18 +146,23 @@ MonoBehaviour:
   - x: 1
     y: 2
     blockType: 7
+    itemDefinition: {fileID: 0}
   - x: 1
     y: 1
     blockType: 1
+    itemDefinition: {fileID: 0}
   - x: 1
     y: 0
     blockType: 2
+    itemDefinition: {fileID: 0}
   - x: 0
     y: 1
     blockType: 11
+    itemDefinition: {fileID: 0}
   - x: 2
     y: 1
     blockType: 11
+    itemDefinition: {fileID: 0}
   craftDuration: 5
   inputConsumeMoveInterval: 0.1
   outputMoveInterval: 0.1

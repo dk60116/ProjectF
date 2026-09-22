@@ -81,7 +81,7 @@ MonoBehaviour:
   m_EditorClassIdentifier: 
   id: 0
   objectName: Electric mining machine
-  objId: 51
+  objId: 52
   itemDefinition: {fileID: 11400000, guid: b9735abb8886622408d77bb1f9a1f4c3, type: 2}
   mapStatus:
     mapSizeX: 2
@@ -133,18 +133,23 @@ MonoBehaviour:
   - x: 0
     y: 0
     blockType: 4
+    itemDefinition: {fileID: 0}
   - x: 0
     y: 2
     blockType: 1
+    itemDefinition: {fileID: 0}
   - x: 1
     y: 2
     blockType: 1
+    itemDefinition: {fileID: 0}
   - x: 0
     y: 1
     blockType: 1
+    itemDefinition: {fileID: 0}
   - x: 1
     y: 1
     blockType: 1
+    itemDefinition: {fileID: 0}
   craftDuration: 5
   inputConsumeMoveInterval: 0.1
   outputMoveInterval: 0.1

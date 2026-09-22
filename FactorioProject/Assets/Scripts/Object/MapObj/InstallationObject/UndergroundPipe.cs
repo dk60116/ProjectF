@@ -207,7 +207,7 @@ public class UndergroundPipe : Pipe
         return TryResolveRemoteCoordinate(first, second, coordinate, out remoteCoordinate);
     }
 
-    private static bool TryResolveRemoteCoordinate(
+    internal static bool TryResolveRemoteCoordinate(
         Vector2Int first,
         Vector2Int second,
         Vector2Int coordinate,

@@ -6,13 +6,15 @@ public readonly struct AreaMarkerSpawnRequest
     public readonly Vector3 WorldPosition;
     public readonly Sprite Icon;
     public readonly float IconRotationZ;
+    public readonly Sprite OverlayIcon;
+    public readonly float OverlayIconRotationZ;
     public readonly bool UsesRuntimeFluidIcon;
     public readonly Vector2Int RuntimeFluidCoordinate;
     public readonly Sprite FallbackIcon;
     public readonly int RuntimeFluidItemId;
 
     public AreaMarkerSpawnRequest(Vector3 worldPosition, Sprite icon, float iconRotationZ = 0f)
-        : this(worldPosition, icon, iconRotationZ, false, default, icon, -1)
+        : this(worldPosition, icon, iconRotationZ, null, 0f, false, default, icon, -1)
     {
     }
 
@@ -20,6 +22,8 @@ public readonly struct AreaMarkerSpawnRequest
         Vector3 worldPosition,
         Sprite icon,
         float iconRotationZ,
+        Sprite overlayIcon,
+        float overlayIconRotationZ,
         bool usesRuntimeFluidIcon,
         Vector2Int runtimeFluidCoordinate,
         Sprite fallbackIcon,
@@ -28,6 +32,8 @@ public readonly struct AreaMarkerSpawnRequest
         WorldPosition = worldPosition;
         Icon = icon;
         IconRotationZ = iconRotationZ;
+        OverlayIcon = overlayIcon;
+        OverlayIconRotationZ = overlayIconRotationZ;
         UsesRuntimeFluidIcon = usesRuntimeFluidIcon;
         RuntimeFluidCoordinate = runtimeFluidCoordinate;
         FallbackIcon = fallbackIcon;
@@ -43,6 +49,8 @@ public readonly struct AreaMarkerSpawnRequest
             worldPosition,
             fallbackIcon,
             0f,
+            null,
+            0f,
             true,
             fluidCoordinate,
             fallbackIcon,
@@ -55,10 +63,26 @@ public readonly struct AreaMarkerSpawnRequest
             WorldPosition,
             icon != null ? icon : FallbackIcon,
             IconRotationZ,
+            OverlayIcon,
+            OverlayIconRotationZ,
             UsesRuntimeFluidIcon,
             RuntimeFluidCoordinate,
             FallbackIcon,
             fluidItemId);
+    }
+
+    public AreaMarkerSpawnRequest WithOverlay(Sprite overlayIcon, float overlayIconRotationZ = 0f)
+    {
+        return new AreaMarkerSpawnRequest(
+            WorldPosition,
+            Icon,
+            IconRotationZ,
+            overlayIcon,
+            overlayIconRotationZ,
+            UsesRuntimeFluidIcon,
+            RuntimeFluidCoordinate,
+            FallbackIcon,
+            RuntimeFluidItemId);
     }
 }
 
@@ -138,6 +162,8 @@ public class InputOutputModuleAreaMarkerController : MonoBehaviour
                 AreaMarkerSpawnRequest b = markerRequests[i];
                 if (a.WorldPosition != b.WorldPosition
                     || a.IconRotationZ != b.IconRotationZ
+                    || a.OverlayIcon != b.OverlayIcon
+                    || a.OverlayIconRotationZ != b.OverlayIconRotationZ
                     || a.UsesRuntimeFluidIcon != b.UsesRuntimeFluidIcon
                     || a.RuntimeFluidCoordinate != b.RuntimeFluidCoordinate
                     || a.FallbackIcon != b.FallbackIcon

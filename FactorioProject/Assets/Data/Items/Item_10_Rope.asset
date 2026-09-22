@@ -13,7 +13,7 @@ MonoBehaviour:
   m_Name: Item_10_Rope
   m_EditorClassIdentifier: 
   itemName: Rope
-  id: 27
+  id: 28
   mapObject: {fileID: 0}
   mapObjectArchetype: {fileID: 0}
   useMapColor: 0

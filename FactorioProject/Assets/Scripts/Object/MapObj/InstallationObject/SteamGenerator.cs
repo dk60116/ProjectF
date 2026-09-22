@@ -6,16 +6,6 @@ public class SteamGenerator : InputOutputModule, IFacilityFlowAdapter, IFacility
 {
     private const float FluidEpsilon = 0.0001f;
 
-    internal override bool TryGetRuntimePassiveFluidPass(
-        Vector2Int coordinate,
-        out Vector2Int otherCoordinate,
-        out Vector2Int externalDirection)
-    {
-        otherCoordinate = default;
-        externalDirection = default;
-        return false;
-    }
-
     [SerializeField]
     private InstallationFacingDirection localPipeAreaConnectionDirection = InstallationFacingDirection.PositiveX;
 

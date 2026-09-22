@@ -66,9 +66,10 @@ public class OilDrillingMachine : InputOutputModule, IFacilityRuntimeWakeTarget
     public override float GetObjectInfoFluidPressureLitersPerSecond(int fluidItemId)
     {
         return isActiveAndEnabled
+               && isExtracting
                && TryGetObjectInfoOutputRate(out int outputItemId, out float litersPerSecond)
                && outputItemId == fluidItemId
-            ? Mathf.Max(0f, litersPerSecond)
+            ? Mathf.Max(0f, litersPerSecond * OperationalAnimationSpeedRatio)
             : 0f;
     }
 
@@ -204,7 +205,7 @@ public class OilDrillingMachine : InputOutputModule, IFacilityRuntimeWakeTarget
     {
         int oilItemId = ResolveOilItemId();
         return oilItemId >= 0
-               && OilLitersPerSecond * ResolveFluidOutputTransportRetention(oilItemId) > FluidEpsilon
+               && OilLitersPerSecond * ResolveFluidOutputTransportRetention(oilItemId, OilLitersPerSecond) > FluidEpsilon
                && TryResolveOilResource(out ResourceInstance resource)
                && resource.CanHarvest;
     }
@@ -275,7 +276,12 @@ public class OilDrillingMachine : InputOutputModule, IFacilityRuntimeWakeTarget
             return "No machine";
         }
 
-        if (!TryResolveOilResource(out ResourceInstance resource) || !resource.CanHarvest)
+        if (!TryResolveOilResource(out ResourceInstance resource))
+        {
+            return "No oil deposit";
+        }
+
+        if (!resource.CanHarvest)
         {
             return "Oil depleted";
         }
@@ -308,7 +314,7 @@ public class OilDrillingMachine : InputOutputModule, IFacilityRuntimeWakeTarget
     {
         int oilItemId = ResolveOilItemId();
         float effectiveOilLitersPerSecond = OilLitersPerSecond
-                                            * ResolveFluidOutputTransportRetention(oilItemId);
+                                            * ResolveFluidOutputTransportRetention(oilItemId, OilLitersPerSecond);
         if (!TryResolveOilResource(out ResourceInstance resource)
             || !resource.CanHarvest
             || effectiveOilLitersPerSecond <= FluidEpsilon
@@ -346,7 +352,7 @@ public class OilDrillingMachine : InputOutputModule, IFacilityRuntimeWakeTarget
                 requestedEnergyUnits)
             : producedUnits;
         FlushCompletedOil(resource);
-        return true;
+        return resource.CanHarvest && HasOilOutputSpace(resource);
     }
 
     private void FlushCompletedOil(ResourceInstance resource)

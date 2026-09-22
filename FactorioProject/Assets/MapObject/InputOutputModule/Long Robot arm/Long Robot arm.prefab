@@ -415,7 +415,7 @@ MonoBehaviour:
   m_EditorClassIdentifier: 
   id: 0
   objectName: Long Robot arm
-  objId: 65
+  objId: 66
   itemDefinition: {fileID: 11400000, guid: 3dcbbe571d74ad449bca45a7842feabe, type: 2}
   mapStatus:
     mapSizeX: 1
@@ -465,12 +465,15 @@ MonoBehaviour:
   - x: 0
     y: 2
     blockType: 1
+    itemDefinition: {fileID: 0}
   - x: 0
     y: 0
     blockType: 3
+    itemDefinition: {fileID: 0}
   - x: 0
     y: 4
     blockType: 4
+    itemDefinition: {fileID: 0}
   craftDuration: 5
   inputConsumeMoveInterval: 0.1
   outputMoveInterval: 0.1

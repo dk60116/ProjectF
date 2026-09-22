@@ -3,20 +3,31 @@ $repo = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '../..'))
 $itemSource = [IO.File]::ReadAllText((Join-Path $repo 'FactorioProject/Assets/Scripts/Object/ItemDefinition.cs'))
 $moduleSource = [IO.File]::ReadAllText((Join-Path $repo 'FactorioProject/Assets/Scripts/Object/MapObj/InstallationObject/InputOutputModule.cs'))
 if ($itemSource.Contains('OilBurn')) { throw 'Removed OilBurn energy type still exists.' }
-foreach ($requiredType in @('Diesel = 6', 'HeavyOil = 7', 'LPGGas = 8')) {
+foreach ($requiredType in @('Diesel = 6', 'HeavyOil = 7', 'PetroleumGas = 8')) {
     if (!$itemSource.Contains($requiredType)) { throw "Missing fluid fuel energy type: $requiredType" }
 }
 $energyAssetExpectations = @{
     'Item_4_Crude Oil.asset' = 'energyType: 0'
     'Item_4_Diesel Oil.asset' = 'energyType: 6'
     'Item_113_Heavy oil.asset' = 'energyType: 7'
-    'Item_114_LPG Gas.asset' = 'energyType: 8'
+    'Item_114_Petroleum gas.asset' = 'energyType: 8'
 }
 foreach ($entry in $energyAssetExpectations.GetEnumerator()) {
     $assetPath = Join-Path $repo ('FactorioProject/Assets/Data/Items/' + $entry.Key)
     if (![IO.File]::ReadAllText($assetPath).Contains($entry.Value)) {
         throw "Unexpected energy type in $($entry.Key): expected $($entry.Value)"
     }
+}
+$petroleumAsset = [IO.File]::ReadAllText((Join-Path $repo 'FactorioProject/Assets/Data/Items/Item_114_Petroleum gas.asset'))
+if (!$petroleumAsset.Contains('itemName: Petroleum gas')) { throw 'Petroleum gas display name is missing.' }
+$craftingTreeSource = [IO.File]::ReadAllBytes((Join-Path $repo 'FactorioProject/Assets/Data/CraftingTree/crafting_tree.bytes'))
+$craftingTreeCopy = [IO.File]::ReadAllBytes((Join-Path $repo 'FactorioProject/Assets/Resources/Data/CraftingTree/crafting_tree.bytes'))
+if (![Linq.Enumerable]::SequenceEqual([byte[]]$craftingTreeSource, [byte[]]$craftingTreeCopy)) {
+    throw 'Crafting tree resource copy differs from its source.'
+}
+$craftingTreeText = [Text.Encoding]::UTF8.GetString($craftingTreeSource)
+if (!$craftingTreeText.Contains('Petroleum gas') -or $craftingTreeText.Contains('LPG Gas')) {
+    throw 'Crafting tree still uses the old petroleum gas name.'
 }
 
 function Read-Member([string]$source, [string]$signature) {
@@ -52,7 +63,7 @@ public static class DeterministicSimulationUnits
 public class ItemDefinition
 {
     private const float KilowattsToWatts = 1000f;
-    public enum EnergyType { None = 0, Burn = 1, Electricity = 2, CarnivoreFood = 3, HerbivoreFood = 4, Fertilizer = 5, Diesel = 6, HeavyOil = 7, LPGGas = 8 }
+    public enum EnergyType { None = 0, Burn = 1, Electricity = 2, CarnivoreFood = 3, HerbivoreFood = 4, Fertilizer = 5, Diesel = 6, HeavyOil = 7, PetroleumGas = 8 }
     private List<EnergyUseRequirement> useEnergyRequirements = new List<EnergyUseRequirement>();
     public EnergyType useEnergyType = EnergyType.None;
     public float useEnergyAmount;

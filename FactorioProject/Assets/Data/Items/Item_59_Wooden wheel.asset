@@ -13,7 +13,7 @@ MonoBehaviour:
   m_Name: Item_59_Wooden wheel
   m_EditorClassIdentifier: Assembly-CSharp::ItemDefinition
   itemName: Wooden wheel
-  id: 104
+  id: 105
   mapObject: {fileID: 0}
   mapObjectArchetype: {fileID: 0}
   useMapColor: 0

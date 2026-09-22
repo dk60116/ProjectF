@@ -1118,7 +1118,7 @@ MonoBehaviour:
   m_EditorClassIdentifier: Assembly-CSharp::OilDrillingMachine
   id: 0
   objectName: Electric Oil machine
-  objId: 53
+  objId: 54
   itemDefinition: {fileID: 11400000, guid: f73deaa4f06e2164a9a37afae9ef1854, type: 2}
   mapStatus:
     mapSizeX: 2
@@ -1164,12 +1164,15 @@ MonoBehaviour:
   - x: 0
     y: 0
     blockType: 7
+    itemDefinition: {fileID: 0}
   - x: 1
     y: 0
     blockType: 1
+    itemDefinition: {fileID: 0}
   - x: 2
     y: 0
     blockType: 1
+    itemDefinition: {fileID: 0}
   craftDuration: 5
   inputConsumeMoveInterval: 0.1
   outputMoveInterval: 0.1

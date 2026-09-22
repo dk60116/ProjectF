@@ -740,6 +740,18 @@ public partial class TerrainGenerator : MonoBehaviour,
     [SerializeField, Min(6)]
     private int resourcePatchCellSize = 16;
 
+    [SerializeField, Range(1, 4)]
+    private int oilClusterMinCount = 1;
+
+    [SerializeField, Range(1, 4)]
+    private int oilClusterMaxCount = 4;
+
+    [SerializeField, Range(2, 8)]
+    private int oilClusterMinSpacing = 2;
+
+    [SerializeField, Range(2, 8)]
+    private int oilClusterMaxSpacing = 8;
+
     [SerializeField]
     private bool generateStarterResourcePatches = true;
 
@@ -1076,6 +1088,10 @@ public partial class TerrainGenerator : MonoBehaviour,
     private void NormalizeResourceGenerationSettings()
     {
         NormalizeOreBodyScaleSettings();
+        oilClusterMinCount = Mathf.Clamp(oilClusterMinCount, 1, 4);
+        oilClusterMaxCount = Mathf.Clamp(oilClusterMaxCount, oilClusterMinCount, 4);
+        oilClusterMinSpacing = Mathf.Clamp(oilClusterMinSpacing, 2, 8);
+        oilClusterMaxSpacing = Mathf.Clamp(oilClusterMaxSpacing, oilClusterMinSpacing, 8);
         oreScaleAtResourceCount = Mathf.Max(1, oreScaleAtResourceCount);
         NormalizeResourceEntries(
             oreResources,

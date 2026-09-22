@@ -48,7 +48,7 @@ MonoBehaviour:
   m_EditorClassIdentifier: Assembly-CSharp::Pump
   id: 0
   objectName: Pump
-  objId: 57
+  objId: 58
   itemDefinition: {fileID: 11400000, guid: 196392e04bd90304ba8d68b0932750f7, type: 2}
   mapStatus:
     mapSizeX: 2
@@ -96,15 +96,19 @@ MonoBehaviour:
   - x: 0
     y: 0
     blockType: 11
+    itemDefinition: {fileID: 0}
   - x: 1
     y: 0
     blockType: 1
+    itemDefinition: {fileID: 0}
   - x: 3
     y: 0
     blockType: 11
+    itemDefinition: {fileID: 0}
   - x: 2
     y: 0
     blockType: 1
+    itemDefinition: {fileID: 0}
   craftDuration: 5
   inputConsumeMoveInterval: 0.1
   outputMoveInterval: 0.1
@@ -149,7 +153,7 @@ BoxCollider:
   m_ProvidesContacts: 0
   m_Enabled: 1
   serializedVersion: 3
-  m_Size: {x: 0.5, y: 1, z: 1.5}
+  m_Size: {x: 1.9, y: 1, z: 0.6}
   m_Center: {x: 0, y: 0.5, z: 0}
 --- !u!1001 &7123376717247449561
 PrefabInstance:

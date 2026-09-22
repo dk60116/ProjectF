@@ -24,8 +24,8 @@ public class ItemDefinition : ScriptableObject
         Diesel = 6,
         [InspectorName("Heavy Oil")]
         HeavyOil = 7,
-        [InspectorName("LPG Gas")]
-        LPGGas = 8
+        [InspectorName("Petroleum gas")]
+        PetroleumGas = 8
     }
 
     [Serializable]
@@ -103,6 +103,9 @@ public class ItemDefinition : ScriptableObject
     [Min(0f)]
     [Tooltip("Water Pump, Oil drilling machine 등 유체 생산 설치물의 초당 출력량(L/s)입니다.")]
     public float fluidOutputLitersPerSecond = 1f;
+    [Min(0f)]
+    [Tooltip("Pump의 고유 압력(L/s)입니다. 채집 속도를 늘리지 않고 저장된 유체를 이 압력으로 공급합니다.")]
+    public float pumpPressureLitersPerSecond = 5f;
     [Min(0.1f)]
     [Tooltip("빈 Bucket을 물이 나오는 Pipe 출구에 설치했을 때 Water Bucket이 될 때까지의 시간(초)입니다.")]
     public float bucketFillDurationSeconds = DefaultBucketFillDurationSeconds;
@@ -161,6 +164,7 @@ public class ItemDefinition : ScriptableObject
         ? bucketFillDurationSeconds
         : DefaultBucketFillDurationSeconds;
     public float FluidOutputLitersPerSecond => Mathf.Max(0f, fluidOutputLitersPerSecond);
+    public float PumpPressureLitersPerSecond => Mathf.Max(0f, pumpPressureLitersPerSecond);
     public int UndergroundPipeMaxDistance => Mathf.Max(2, undergroundPipeMaxDistance);
     public ItemDefinition ManualTargetItem => isManual ? manualTargetItem : null;
     public MapObjectArchetype MapObjectArchetype => mapObjectArchetype;
@@ -339,7 +343,7 @@ public class ItemDefinition : ScriptableObject
     {
         return energyType == EnergyType.Diesel
                || energyType == EnergyType.HeavyOil
-               || energyType == EnergyType.LPGGas;
+               || energyType == EnergyType.PetroleumGas;
     }
 
     public static bool IsFoodEnergyItemDefinition(ItemDefinition definition)
@@ -526,6 +530,7 @@ public class ItemDefinition : ScriptableObject
         lightIntensityMultiplier = Mathf.Max(0.01f, lightIntensityMultiplier);
         bucketFillDurationSeconds = Mathf.Max(0.1f, bucketFillDurationSeconds);
         fluidOutputLitersPerSecond = Mathf.Max(0f, fluidOutputLitersPerSecond);
+        pumpPressureLitersPerSecond = Mathf.Max(0f, pumpPressureLitersPerSecond);
         if (useEnergyRequirements != null)
         {
             HashSet<EnergyType> seenTypes = new HashSet<EnergyType>();

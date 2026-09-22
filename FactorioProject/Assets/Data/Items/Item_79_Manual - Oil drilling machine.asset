@@ -13,7 +13,7 @@ MonoBehaviour:
   m_Name: Item_79_Manual - Oil drilling machine
   m_EditorClassIdentifier: Assembly-CSharp::ItemDefinition
   itemName: Manual - Oil drilling machine
-  id: 84
+  id: 85
   mapObject: {fileID: 0}
   mapObjectArchetype: {fileID: 0}
   useMapColor: 0

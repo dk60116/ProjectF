@@ -51,7 +51,7 @@ public class Pipe : InstallationObject
     [SerializeField]
     private InstallationFacingDirection localTeeThirdDirection = InstallationFacingDirection.NegativeZ;
 
-    private readonly struct ObjectInfoFluidSearchNode
+    internal readonly struct ObjectInfoFluidSearchNode
     {
         public readonly Vector2Int Coordinate;
         public readonly int PipeDistance;
@@ -63,17 +63,53 @@ public class Pipe : InstallationObject
         }
     }
 
-    private readonly Queue<ObjectInfoFluidSearchNode> objectInfoFluidSearchQueue =
-        new Queue<ObjectInfoFluidSearchNode>(32);
-    private readonly HashSet<Vector2Int> objectInfoFluidSearchVisited = new HashSet<Vector2Int>();
-    private readonly Dictionary<Vector2Int, int> objectInfoFluidSearchPipeDistances =
-        new Dictionary<Vector2Int, int>();
-    private readonly HashSet<int> objectInfoFluidItemIds = new HashSet<int>();
+    internal sealed class FluidNetworkSearchContext
+    {
+        public readonly Queue<ObjectInfoFluidSearchNode> Queue =
+            new Queue<ObjectInfoFluidSearchNode>(32);
+        public readonly HashSet<Vector2Int> Visited = new HashSet<Vector2Int>();
+        public readonly Dictionary<Vector2Int, int> PipeDistances =
+            new Dictionary<Vector2Int, int>();
+        public readonly Dictionary<InputOutputModule, int> OutputSourcePipeDistances =
+            new Dictionary<InputOutputModule, int>();
+        internal readonly HashSet<int> FluidItemIds = new HashSet<int>();
+        internal readonly HashSet<InputOutputModule> SourceScratch = new HashSet<InputOutputModule>();
+        internal readonly HashSet<InputOutputModule> Sources = new HashSet<InputOutputModule>();
+        internal readonly List<InstallationObject> StorageScratch = new List<InstallationObject>(4);
+        internal readonly List<InputOutputModule.RuntimePumpPipePass> PumpPasses =
+            new List<InputOutputModule.RuntimePumpPipePass>(2);
+        internal readonly List<InputOutputModule> PumpModules = new List<InputOutputModule>(4);
+
+        internal readonly Dictionary<Vector2Int, Pump> RoutePumps = new Dictionary<Vector2Int, Pump>();
+        internal readonly Dictionary<InputOutputModule, Pump> SourcePumps = new Dictionary<InputOutputModule, Pump>();
+        internal readonly Dictionary<InstallationObject, Pump> StoragePumps = new Dictionary<InstallationObject, Pump>();
+        internal readonly Dictionary<Pump, int> PumpDistances = new Dictionary<Pump, int>();
+        internal readonly Dictionary<Pump, float> PumpRates = new Dictionary<Pump, float>();
+        internal Pump CurrentPump;
+
+        public void Reset()
+        {
+            RoutePumps.Clear();
+            SourcePumps.Clear();
+            StoragePumps.Clear();
+            PumpDistances.Clear();
+            PumpRates.Clear();
+            CurrentPump = null;
+            Queue.Clear();
+            Visited.Clear();
+            PipeDistances.Clear();
+            OutputSourcePipeDistances.Clear();
+        }
+    }
+
+    // Fixed-tank compatibility resolves the fluid on each connected pipe while
+    // the primary network BFS is still active. Separate reusable contexts keep
+    // that nested lookup from clearing the primary queue and visited set.
+    private readonly FluidNetworkSearchContext primaryFluidSearchContext =
+        new FluidNetworkSearchContext();
+    private readonly FluidNetworkSearchContext fluidIdentitySearchContext =
+        new FluidNetworkSearchContext();
     private readonly HashSet<InputOutputModule> objectInfoFluidOutputSources = new HashSet<InputOutputModule>();
-    private readonly HashSet<InputOutputModule> objectInfoFluidOutputSourceScratch = new HashSet<InputOutputModule>();
-    private readonly Dictionary<InputOutputModule, int> objectInfoFluidOutputSourcePipeDistances =
-        new Dictionary<InputOutputModule, int>();
-    private readonly List<InstallationObject> objectInfoFluidStorageScratch = new List<InstallationObject>(4);
 
     [SerializeField]
     private MeshRenderer fluidDP;
@@ -245,30 +281,20 @@ public class Pipe : InstallationObject
             false,
             false,
             Vector2Int.zero,
+            primaryFluidSearchContext,
+            true,
             out fluidItemId,
             out temperatureCelsius,
-            includePressure ? objectInfoFluidOutputSources : null);
+            includePressure ? objectInfoFluidOutputSources : null,
+            this);
         if (includePressure && foundFluid)
         {
-            foreach (InputOutputModule source in objectInfoFluidOutputSources)
-            {
-                if (source != null)
-                {
-                    int pipeDistance = objectInfoFluidOutputSourcePipeDistances.TryGetValue(
-                        source,
-                        out int recordedDistance)
-                        ? recordedDistance
-                        : 0;
-                    float pressureRetention = CalculateFluidPressureRetention(pipeDistance);
-                    pressureLitersPerSecond +=
-                        source.GetObjectInfoFluidPressureLitersPerSecond(fluidItemId)
-                        * pressureRetention;
-                }
-            }
+            pressureLitersPerSecond = ResolveNetworkPressure(primaryFluidSearchContext,
+                objectInfoFluidOutputSources, fluidItemId);
         }
 
         objectInfoFluidOutputSources.Clear();
-        objectInfoFluidOutputSourcePipeDistances.Clear();
+        primaryFluidSearchContext.OutputSourcePipeDistances.Clear();
         if (includePressure && canUseInstanceCache)
         {
             cachedObjectInfoFluidItemId = foundFluid ? fluidItemId : -1;
@@ -295,8 +321,11 @@ public class Pipe : InstallationObject
             false,
             true,
             ignoredStorageCoordinate,
+            fluidIdentitySearchContext,
+            false,
             out fluidItemId,
-            out _);
+            out _,
+            fallbackPipe: this);
     }
 
     internal bool TryGetConnectedFluidItemIdIgnoringStorageCoordinateAt(
@@ -309,27 +338,58 @@ public class Pipe : InstallationObject
             false,
             true,
             ignoredStorageCoordinate,
+            fluidIdentitySearchContext,
+            false,
             out fluidItemId,
-            out _);
+            out _,
+            fallbackPipe: this);
     }
 
-    private bool TrySearchFluidNetwork(
+    internal static bool TryGetNetworkFluidInfoAt(
+        Vector2Int coordinate,
+        FluidNetworkSearchContext context,
+        bool hasIgnoredStorageCoordinate,
+        Vector2Int ignoredStorageCoordinate,
+        bool includePressure,
+        out int fluidItemId,
+        out float temperatureCelsius,
+        out float pressureLitersPerSecond)
+    {
+        context.Sources.Clear();
+        bool found = TrySearchFluidNetwork(
+            coordinate, false, hasIgnoredStorageCoordinate, ignoredStorageCoordinate,
+            context, !hasIgnoredStorageCoordinate, out fluidItemId, out temperatureCelsius,
+            includePressure ? context.Sources : null);
+        if (!found)
+        {
+            fluidItemId = -1;
+        }
+        pressureLitersPerSecond = 0f;
+        if (found && includePressure)
+        {
+            pressureLitersPerSecond = ResolveNetworkPressure(context, context.Sources, fluidItemId);
+        }
+        context.Sources.Clear();
+        return found;
+    }
+
+    private static bool TrySearchFluidNetwork(
         Vector2Int startCoordinate,
         bool cacheDisplayNetwork,
         bool hasIgnoredStorageCoordinate,
         Vector2Int ignoredStorageCoordinate,
+        FluidNetworkSearchContext searchContext,
+        bool evaluateFluidTankCompatibility,
         out int fluidItemId,
         out float temperatureCelsius,
-        ISet<InputOutputModule> outputSources = null)
+        ISet<InputOutputModule> outputSources = null,
+        Pipe fallbackPipe = null)
     {
         fluidItemId = -1;
         temperatureCelsius = MapClimate.CurrentTemperatureCelsius;
         TerrainGenerator terrain = TerrainGenerator.Active;
-        objectInfoFluidSearchQueue.Clear();
-        objectInfoFluidSearchVisited.Clear();
-        objectInfoFluidSearchPipeDistances.Clear();
-        objectInfoFluidOutputSourcePipeDistances.Clear();
-        EnqueueObjectInfoFluidSearchCoordinate(startCoordinate, 0);
+        searchContext.Reset();
+        EnqueueObjectInfoFluidSearchCoordinate(searchContext, startCoordinate, 0);
 
         bool foundFluid = false;
         bool foundMobileStorageFallbackFluid = false;
@@ -337,12 +397,12 @@ public class Pipe : InstallationObject
         float mobileStorageFallbackTemperatureCelsius = MapClimate.CurrentTemperatureCelsius;
         int searchedNodeCount = 0;
         bool collectPressureEndpoints = outputSources != null;
-        while (objectInfoFluidSearchQueue.Count > 0
+        while (searchContext.Queue.Count > 0
                && (collectPressureEndpoints || searchedNodeCount < MaxObjectInfoFluidSearchNodes))
         {
-            ObjectInfoFluidSearchNode searchNode = objectInfoFluidSearchQueue.Dequeue();
+            ObjectInfoFluidSearchNode searchNode = searchContext.Queue.Dequeue();
             Vector2Int coordinate = searchNode.Coordinate;
-            if (!objectInfoFluidSearchPipeDistances.TryGetValue(
+            if (!searchContext.PipeDistances.TryGetValue(
                     coordinate,
                     out int pipeDistance)
                 || pipeDistance != searchNode.PipeDistance)
@@ -350,12 +410,26 @@ public class Pipe : InstallationObject
                 continue;
             }
 
+            searchContext.RoutePumps.TryGetValue(coordinate, out searchContext.CurrentPump);
+            if (collectPressureEndpoints && searchContext.CurrentPump != null)
+            {
+                CollectPumpStoredFluid(searchContext, coordinate, pipeDistance);
+            }
             searchedNodeCount++;
 
+            // A caller resolving the network on one side of a storage must not
+            // cross that storage and discover a different network on its other
+            // side. Treat the ignored storage coordinate as a traversal wall,
+            // not only as a fluid-identity filter.
+            if (hasIgnoredStorageCoordinate && coordinate == ignoredStorageCoordinate)
+            {
+                continue;
+            }
+
             if (!foundFluid
-                && (!hasIgnoredStorageCoordinate || coordinate != ignoredStorageCoordinate)
                 && TryGetAuthoritativeFluidInfoAtPipeNetworkCoordinate(
                     coordinate,
+                    searchContext,
                     ref foundMobileStorageFallbackFluid,
                     ref mobileStorageFallbackFluidItemId,
                     ref mobileStorageFallbackTemperatureCelsius,
@@ -373,10 +447,16 @@ public class Pipe : InstallationObject
             Quaternion pipeRotation = Quaternion.identity;
             PipeRuntimeRecord runtimeRecord = null;
             PipeWorld.Current?.TryGetAtCoordinate(coordinate, out runtimeRecord);
-            bool hasPipe = coordinate == startCoordinate
-                ? TryResolveObjectInfoPipeAtStartCoordinate(startCoordinate, out pipe, out pipeRotation)
+            bool hasPipe = coordinate == startCoordinate && fallbackPipe != null
+                ? fallbackPipe.TryResolveObjectInfoPipeAtStartCoordinate(startCoordinate, out pipe, out pipeRotation)
                 : TryGetPipeAtCoordinate(terrain, coordinate, out pipe, out pipeRotation);
-            bool hasFixedFluidTank = HasFixedFluidTankAtPipeNetworkCoordinate(coordinate);
+            bool hasFixedFluidTank = TryGetFixedFluidTankAtPipeNetworkCoordinate(
+                coordinate,
+                searchContext,
+                out Fluidtank fixedFluidTank);
+            // A pump withdraws from this reservoir, not from producers beyond it.
+            // An empty reservoir therefore cannot lend its upstream source rate.
+            if (hasFixedFluidTank && searchContext.CurrentPump != null) continue;
             bool hasSteamGeneratorPass =
                 InputOutputModule.TryGetSteamGeneratorPipePassAtRuntimeCoordinate(
                     coordinate,
@@ -393,13 +473,9 @@ public class Pipe : InstallationObject
                                                        coordinate,
                                                        pipeRotation,
                                                        -steamPassExternalDirection)));
-            bool hasPumpPass =
-                InputOutputModule.TryGetPumpPipePassAtRuntimeCoordinate(
-                    coordinate,
-                    out _,
-                    out Vector2Int pumpPassOtherCoordinate,
-                    out Vector2Int pumpPassExternalDirection);
-            bool pipeConnectsToPumpPass = hasPumpPass;
+            searchContext.PumpPasses.Clear();
+            bool hasPumpPass = InputOutputModule.CollectPumpPipePassesAtRuntimeCoordinate(
+                coordinate, searchContext.PumpPasses);
             bool hasPassiveFluidPass =
                 InputOutputModule.TryGetPassiveFluidPassAtRuntimeCoordinate(
                     coordinate,
@@ -411,6 +487,7 @@ public class Pipe : InstallationObject
             if (outputSources != null)
             {
                 AppendObjectInfoFluidOutputSourcesAtCoordinate(
+                    searchContext,
                     coordinate,
                     Vector2Int.zero,
                     pipeDistance,
@@ -429,28 +506,38 @@ public class Pipe : InstallationObject
             if (pipeConnectsToSteamPass)
             {
                 EnqueueObjectInfoFluidSearchCoordinate(
+                    searchContext,
                     steamPassOtherCoordinate,
                     pipeDistance);
                 if (InputOutputModule.TryGetOverlappingSteamSourcePort(
                         steamGenerator, out Vector2Int sourceCoordinate))
                 {
-                    EnqueueObjectInfoFluidSearchCoordinate(sourceCoordinate, pipeDistance);
+                    EnqueueObjectInfoFluidSearchCoordinate(
+                        searchContext,
+                        sourceCoordinate,
+                        pipeDistance);
                 }
             }
 
-            if (pipeConnectsToPumpPass)
+            if (hasPumpPass)
             {
                 // Keep the loss between the inspected pipe and this pump, then
                 // stop adding the upstream section. The pump supplies a fresh
                 // pressure section on the inspected side.
-                EnqueueObjectInfoFluidSearchCoordinate(
-                    pumpPassOtherCoordinate,
-                    FreezeObjectInfoPressureDistance(pipeDistance));
+                for (int passIndex = 0; passIndex < searchContext.PumpPasses.Count; passIndex++)
+                {
+                    if (!searchContext.PumpPasses[passIndex].Pump.AllowsRuntimeFluidTraversal(coordinate, true)) continue;
+                    EnqueueObjectInfoFluidSearchCoordinate(searchContext,
+                        searchContext.PumpPasses[passIndex].OtherCoordinate,
+                        FreezeObjectInfoPressureDistance(pipeDistance), searchContext.PumpPasses[passIndex].Pump);
+                }
+                EnqueueInterlockedPumpFluidSearchCoordinates(searchContext, coordinate, pipeDistance);
             }
 
             if (hasPassiveFluidPass)
             {
                 EnqueueObjectInfoFluidSearchCoordinate(
+                    searchContext,
                     passivePassOtherCoordinate,
                     pipeDistance);
             }
@@ -458,10 +545,12 @@ public class Pipe : InstallationObject
             for (int i = 0; i < CardinalDirections.Length; i++)
             {
                 Vector2Int direction = CardinalDirections[i];
-                if (pipe != null && !hasPumpPass && !hasPassiveFluidPass
+                bool pipeConnectsToDirection = pipe != null
                     && (runtimeRecord != null
-                        ? !runtimeRecord.HasConnectionTowardsAt(coordinate, direction)
-                        : !pipe.HasConnectionTowardsAt(coordinate, pipeRotation, direction)))
+                        ? runtimeRecord.HasConnectionTowardsAt(coordinate, direction)
+                        : pipe.HasConnectionTowardsAt(coordinate, pipeRotation, direction));
+                if (pipe != null && !hasPumpPass && !hasPassiveFluidPass
+                    && !pipeConnectsToDirection)
                 {
                     continue;
                 }
@@ -470,7 +559,10 @@ public class Pipe : InstallationObject
                      || hasPumpPass
                      || hasPassiveFluidPass)
                     && !hasFixedFluidTank
-                    && !(hasPumpPass && direction == pumpPassExternalDirection)
+                    // A pipe installed on a Pump endpoint can turn sideways.
+                    // Preserve its connectors as well as the Pump's axial port.
+                    && !(hasPumpPass && (HasPumpSearchExternalDirection(searchContext, direction)
+                                         || pipeConnectsToDirection))
                     && !(hasPassiveFluidPass && direction == passivePassExternalDirection)
                     && !(hasSteamGeneratorPass && direction == steamPassExternalDirection))
                 {
@@ -478,10 +570,60 @@ public class Pipe : InstallationObject
                 }
 
                 Vector2Int neighborCoordinate = coordinate + direction;
-                if (!foundFluid
-                    && (!hasIgnoredStorageCoordinate || neighborCoordinate != ignoredStorageCoordinate)
+                if (hasIgnoredStorageCoordinate
+                    && neighborCoordinate == ignoredStorageCoordinate)
+                {
+                    continue;
+                }
+
+                bool hasNeighborPipe = TryGetPipeAtCoordinate(terrain, neighborCoordinate, out Pipe neighborPipe, out Quaternion neighborRotation);
+                bool hasNeighborFixedFluidTank = TryGetFixedFluidTankAtPipeNetworkCoordinate(
+                    neighborCoordinate,
+                    searchContext,
+                    out Fluidtank neighborFixedFluidTank);
+                bool hasNeighborSteamGeneratorPass =
+                    InputOutputModule.TryGetSteamGeneratorPipePassAtRuntimeCoordinate(
+                        neighborCoordinate,
+                        out _,
+                        out _,
+                        out Vector2Int neighborSteamPassExternalDirection)
+                    && neighborSteamPassExternalDirection == -direction;
+                bool hasNeighborPumpPass = InputOutputModule.HasRuntimePumpPipePassTowards(neighborCoordinate, -direction);
+                bool hasNeighborPassiveFluidPass =
+                    InputOutputModule.HasRuntimePassiveFluidPassTowards(
+                        neighborCoordinate,
+                        -direction);
+                PipeRuntimeRecord neighborRuntimeRecord = null;
+                PipeWorld.Current?.TryGetAtCoordinate(neighborCoordinate, out neighborRuntimeRecord);
+                bool fluidTankBoundaryCanConnect = CanTraverseFluidTankBoundary(
+                    fixedFluidTank,
+                    coordinate,
+                    direction,
+                    neighborFixedFluidTank,
+                    evaluateFluidTankCompatibility);
+                bool neighborConnects = fluidTankBoundaryCanConnect
+                                        && (hasNeighborSteamGeneratorPass
+                                            || hasNeighborPumpPass
+                                            || hasNeighborPassiveFluidPass
+                                            || (hasNeighborPipe || hasNeighborFixedFluidTank)
+                                            && (!hasNeighborPipe
+                                                || (neighborRuntimeRecord != null
+                                                    ? neighborRuntimeRecord.HasConnectionTowardsAt(
+                                                        neighborCoordinate,
+                                                        -direction)
+                                                    : neighborPipe.HasConnectionTowardsAt(
+                                                        neighborCoordinate,
+                                                        neighborRotation,
+                                                        -direction))));
+                bool neighborOutputFacesPipe = !neighborConnects && !foundFluid
+                    && fluidTankBoundaryCanConnect
+                    && InputOutputModule.HasRuntimeFluidOutputTowardsPipe(
+                        neighborCoordinate, -direction);
+                if ((neighborConnects || neighborOutputFacesPipe)
+                    && !foundFluid
                     && TryGetAuthoritativeFluidInfoAtPipeNetworkCoordinate(
                         neighborCoordinate,
+                        searchContext,
                         ref foundMobileStorageFallbackFluid,
                         ref mobileStorageFallbackFluidItemId,
                         ref mobileStorageFallbackTemperatureCelsius,
@@ -495,45 +637,10 @@ public class Pipe : InstallationObject
                     }
                 }
 
-                bool hasNeighborPipe = TryGetPipeAtCoordinate(terrain, neighborCoordinate, out Pipe neighborPipe, out Quaternion neighborRotation);
-                bool hasNeighborFixedFluidTank = HasFixedFluidTankAtPipeNetworkCoordinate(
-                    neighborCoordinate);
-                bool hasNeighborSteamGeneratorPass =
-                    InputOutputModule.TryGetSteamGeneratorPipePassAtRuntimeCoordinate(
-                        neighborCoordinate,
-                        out _,
-                        out _,
-                        out Vector2Int neighborSteamPassExternalDirection)
-                    && neighborSteamPassExternalDirection == -direction;
-                bool hasNeighborPumpPass =
-                    InputOutputModule.TryGetPumpPipePassAtRuntimeCoordinate(
-                        neighborCoordinate,
-                        out _,
-                        out _,
-                        out Vector2Int neighborPumpPassExternalDirection)
-                    && neighborPumpPassExternalDirection == -direction;
-                bool hasNeighborPassiveFluidPass =
-                    InputOutputModule.HasRuntimePassiveFluidPassTowards(
-                        neighborCoordinate,
-                        -direction);
-                PipeRuntimeRecord neighborRuntimeRecord = null;
-                PipeWorld.Current?.TryGetAtCoordinate(neighborCoordinate, out neighborRuntimeRecord);
-                bool neighborConnects = hasNeighborSteamGeneratorPass
-                                        || hasNeighborPumpPass
-                                        || hasNeighborPassiveFluidPass
-                                        || (hasNeighborPipe || hasNeighborFixedFluidTank)
-                                        && (!hasNeighborPipe
-                                            || (neighborRuntimeRecord != null
-                                                ? neighborRuntimeRecord.HasConnectionTowardsAt(
-                                                    neighborCoordinate,
-                                                    -direction)
-                                                : neighborPipe.HasConnectionTowardsAt(
-                                                    neighborCoordinate,
-                                                    neighborRotation,
-                                                    -direction)));
                 if (neighborConnects)
                 {
                     EnqueueObjectInfoFluidSearchCoordinate(
+                        searchContext,
                         neighborCoordinate,
                         AddObjectInfoPipeDistance(
                             pipeDistance,
@@ -546,6 +653,7 @@ public class Pipe : InstallationObject
                 else if (!hasNeighborPipe && !hasNeighborFixedFluidTank && outputSources != null)
                 {
                     AppendObjectInfoFluidOutputSourcesAtCoordinate(
+                        searchContext,
                         neighborCoordinate,
                         -direction,
                         pipeDistance,
@@ -561,6 +669,7 @@ public class Pipe : InstallationObject
             if (hasRemoteConnection)
             {
                 EnqueueObjectInfoFluidSearchCoordinate(
+                    searchContext,
                     remoteCoordinate,
                     IsObjectInfoPressureDistanceFrozen(pipeDistance)
                         ? pipeDistance
@@ -583,7 +692,7 @@ public class Pipe : InstallationObject
 
         if (cacheDisplayNetwork)
         {
-            foreach (Vector2Int coordinate in objectInfoFluidSearchVisited)
+            foreach (Vector2Int coordinate in searchContext.Visited)
             {
                 FluidDisplayNetworkItemCache[coordinate] = fluidItemId;
             }
@@ -592,13 +701,117 @@ public class Pipe : InstallationObject
         return foundFluid;
     }
 
-    private void AppendObjectInfoFluidOutputSourcesAtCoordinate(
+    private static bool HasPumpSearchExternalDirection(FluidNetworkSearchContext context, Vector2Int direction)
+    {
+        for (int i = 0; i < context.PumpPasses.Count; i++)
+        {
+            if (context.PumpPasses[i].ExternalDirection == direction) return true;
+        }
+        return false;
+    }
+
+    private static void EnqueueInterlockedPumpFluidSearchCoordinates(
+        FluidNetworkSearchContext context, Vector2Int coordinate, int pipeDistance)
+    {
+        context.PumpModules.Clear();
+        InputOutputModule.CollectModulesAtRuntimeAreaCoordinate(coordinate, context.PumpModules);
+        InputOutputModule.CollectModulesAtRuntimeGridCoordinate(coordinate, context.PumpModules);
+        for (int i = 0; i < context.PumpPasses.Count; i++)
+        {
+            Pump source = context.PumpPasses[i].Pump;
+            for (int j = 0; j < context.PumpModules.Count; j++)
+            {
+                if (context.PumpModules[j] is Pump candidate
+                    && !source.AllowsRuntimeFluidTraversal(coordinate, true)
+                    && candidate.TryGetRuntimeInterlockedEndpoint(source, coordinate, out Vector2Int endpoint)
+                    && candidate.AllowsRuntimeFluidTraversal(endpoint, true))
+                {
+                    EnqueueObjectInfoFluidSearchCoordinate(context, endpoint, FreezeObjectInfoPressureDistance(pipeDistance), candidate);
+                }
+            }
+        }
+        context.PumpModules.Clear();
+    }
+
+    private static void RecordPumpDistance(FluidNetworkSearchContext context, Pump pump, int distance)
+    {
+        if (pump == null) return;
+        distance = ResolveObjectInfoPressureDistance(distance);
+        if (!context.PumpDistances.TryGetValue(pump, out int previous) || distance < previous)
+            context.PumpDistances[pump] = distance;
+    }
+
+    private static void CollectPumpStoredFluid(FluidNetworkSearchContext context, Vector2Int coordinate, int distance)
+    {
+        Pump pump = context.CurrentPump;
+        if (pump == null) return;
+        context.StorageScratch.Clear();
+        CollectActiveInstallationsAtRuntimeGridCoordinate(coordinate, context.StorageScratch);
+        if (InputOutputModule.TryGetRuntimePipeDisplayFluidStorageAtCoordinate(coordinate, null, out InstallationObject areaStorage)
+            && areaStorage != null
+            && CanDisplayStoredFluidAtCoordinate(areaStorage, coordinate, context.FluidItemIds)
+            && !context.StorageScratch.Contains(areaStorage))
+            context.StorageScratch.Add(areaStorage);
+        for (int i = 0; i < context.StorageScratch.Count; i++)
+        {
+            InstallationObject storage = context.StorageScratch[i];
+            if (storage != null
+                && storage.StoredFluidLiters > 0.0001f
+                && CanDisplayStoredFluidAtCoordinate(storage, coordinate, context.FluidItemIds))
+            {
+                context.StoragePumps[storage] = pump;
+                RecordPumpDistance(context, pump, distance);
+            }
+        }
+        context.StorageScratch.Clear();
+    }
+
+    private static float ResolveNetworkPressure(FluidNetworkSearchContext context,
+        IEnumerable<InputOutputModule> sources, int fluidItemId)
+    {
+        float pressure = 0f;
+        context.PumpRates.Clear();
+        foreach (InputOutputModule source in sources)
+        {
+            if (source == null) continue;
+            float rate = source.GetObjectInfoFluidPressureLitersPerSecond(fluidItemId);
+            context.SourcePumps.TryGetValue(source, out Pump pump);
+            if (pump == null)
+            {
+                context.OutputSourcePipeDistances.TryGetValue(source, out int distance);
+                pressure += rate * CalculateFluidPressureRetention(distance);
+            }
+            else
+            {
+                context.PumpRates.TryGetValue(pump, out float previous);
+                context.PumpRates[pump] = Pump.LimitTransportRate(pump, previous + rate);
+            }
+        }
+        // Only real reserves can supply the pump independently of collection.
+        // Consumers still remove the requested volume from these same storages.
+        foreach (var pair in context.StoragePumps)
+        {
+            if (pair.Key.StoredFluidItemId == fluidItemId && pair.Key.StoredFluidLiters > 0.0001f)
+                context.PumpRates[pair.Value] = pair.Value.PressureLitersPerSecond;
+        }
+        foreach (var pair in context.PumpRates)
+        {
+            context.PumpDistances.TryGetValue(pair.Key, out int distance);
+            pressure += pair.Value * CalculateFluidPressureRetention(distance);
+        }
+        return pressure;
+    }
+
+    private static void AppendObjectInfoFluidOutputSourcesAtCoordinate(
+        FluidNetworkSearchContext searchContext,
         Vector2Int coordinate,
         Vector2Int directionToPipe,
         int pipeDistance,
         ISet<InputOutputModule> outputSources)
     {
+        CollectPumpStoredFluid(searchContext, coordinate, pipeDistance);
         pipeDistance = ResolveObjectInfoPressureDistance(pipeDistance);
+        HashSet<InputOutputModule> objectInfoFluidOutputSourceScratch = searchContext.SourceScratch;
         objectInfoFluidOutputSourceScratch.Clear();
         InputOutputModule.AppendFluidOutputSourcesAtCoordinate(
             coordinate,
@@ -607,28 +820,71 @@ public class Pipe : InstallationObject
         foreach (InputOutputModule source in objectInfoFluidOutputSourceScratch)
         {
             outputSources.Add(source);
-            if (!objectInfoFluidOutputSourcePipeDistances.TryGetValue(
+            if (!searchContext.OutputSourcePipeDistances.TryGetValue(
                     source,
                     out int previousDistance)
                 || pipeDistance < previousDistance)
             {
-                objectInfoFluidOutputSourcePipeDistances[source] = pipeDistance;
+                searchContext.OutputSourcePipeDistances[source] = pipeDistance;
+                searchContext.SourcePumps[source] = searchContext.CurrentPump;
+                RecordPumpDistance(searchContext, searchContext.CurrentPump, pipeDistance);
             }
         }
 
         objectInfoFluidOutputSourceScratch.Clear();
     }
 
-    private bool HasFixedFluidTankAtPipeNetworkCoordinate(Vector2Int coordinate)
+    private static bool CanTraverseFluidTankBoundary(
+        Fluidtank fixedFluidTank,
+        Vector2Int coordinate,
+        Vector2Int direction,
+        Fluidtank neighborFixedFluidTank,
+        bool evaluateNetworkCompatibility = true)
     {
-        return TryGetFixedFluidTankAtPipeNetworkCoordinate(coordinate, out _);
+        if (fixedFluidTank == null && neighborFixedFluidTank == null)
+        {
+            return true;
+        }
+
+        if (evaluateNetworkCompatibility)
+        {
+            return fixedFluidTank != null
+                ? fixedFluidTank.HasFluidNetworkConnectionTowards(coordinate, direction)
+                : neighborFixedFluidTank.HasFluidNetworkConnectionTowards(
+                    coordinate + direction,
+                    -direction);
+        }
+
+        if (fixedFluidTank == null || neighborFixedFluidTank == null)
+        {
+            return true;
+        }
+
+        // A nested tank-side identity lookup must not recursively launch
+        // another network search. Direct stored identities are sufficient to
+        // reject known mismatches while an empty tank remains able to join and
+        // inherit the established fluid identity of its neighbor.
+        int fluidItemId = fixedFluidTank.StoredFluidItemId;
+        int neighborFluidItemId = neighborFixedFluidTank.StoredFluidItemId;
+        return fluidItemId < 0
+               || neighborFluidItemId < 0
+               || fluidItemId == neighborFluidItemId;
     }
 
     internal bool TryGetFixedFluidTankAtPipeNetworkCoordinate(
         Vector2Int coordinate,
         out Fluidtank fixedTank)
     {
+        return TryGetFixedFluidTankAtPipeNetworkCoordinate(coordinate, primaryFluidSearchContext, out fixedTank);
+    }
+
+    private static bool TryGetFixedFluidTankAtPipeNetworkCoordinate(
+        Vector2Int coordinate,
+        FluidNetworkSearchContext context,
+        out Fluidtank fixedTank)
+    {
         fixedTank = null;
+        List<InstallationObject> objectInfoFluidStorageScratch = context.StorageScratch;
         objectInfoFluidStorageScratch.Clear();
         if (!CollectActiveInstallationsAtRuntimeGridCoordinate(
                 coordinate,
@@ -653,8 +909,9 @@ public class Pipe : InstallationObject
         return false;
     }
 
-    private bool TryGetAuthoritativeFluidInfoAtPipeNetworkCoordinate(
+    private static bool TryGetAuthoritativeFluidInfoAtPipeNetworkCoordinate(
         Vector2Int coordinate,
+        FluidNetworkSearchContext context,
         ref bool foundMobileStorageFallbackFluid,
         ref int mobileStorageFallbackFluidItemId,
         ref float mobileStorageFallbackTemperatureCelsius,
@@ -663,6 +920,7 @@ public class Pipe : InstallationObject
     {
         if (!TryGetFluidInfoAtPipeNetworkCoordinate(
                 coordinate,
+                context,
                 out int candidateFluidItemId,
                 out float candidateTemperatureCelsius,
                 out bool isMobileStorageFallbackFluid))
@@ -801,9 +1059,13 @@ public class Pipe : InstallationObject
         return true;
     }
 
-    private void EnqueueObjectInfoFluidSearchCoordinate(Vector2Int coordinate, int pipeDistance)
+    private static void EnqueueObjectInfoFluidSearchCoordinate(
+        FluidNetworkSearchContext searchContext,
+        Vector2Int coordinate,
+        int pipeDistance,
+        Pump crossedPump = null)
     {
-        if (objectInfoFluidSearchPipeDistances.TryGetValue(
+        if (searchContext.PipeDistances.TryGetValue(
                 coordinate,
                 out int previousDistance)
             && !IsBetterObjectInfoPressureDistance(pipeDistance, previousDistance))
@@ -811,9 +1073,10 @@ public class Pipe : InstallationObject
             return;
         }
 
-        objectInfoFluidSearchPipeDistances[coordinate] = pipeDistance;
-        objectInfoFluidSearchVisited.Add(coordinate);
-        objectInfoFluidSearchQueue.Enqueue(
+        searchContext.RoutePumps[coordinate] = Pump.ResolvePressureLimit(searchContext.CurrentPump, crossedPump);
+        searchContext.PipeDistances[coordinate] = pipeDistance;
+        searchContext.Visited.Add(coordinate);
+        searchContext.Queue.Enqueue(
             new ObjectInfoFluidSearchNode(coordinate, pipeDistance));
     }
 
@@ -861,14 +1124,16 @@ public class Pipe : InstallationObject
         return decodedDistance >= int.MaxValue ? int.MaxValue : (int)decodedDistance;
     }
 
-    private bool TryGetFluidInfoAtPipeNetworkCoordinate(
+    private static bool TryGetFluidInfoAtPipeNetworkCoordinate(
         Vector2Int coordinate,
+        FluidNetworkSearchContext context,
         out int fluidItemId,
         out float temperatureCelsius,
         out bool isMobileStorageFallbackFluid)
     {
         if (TryGetStoredFluidInfoAtCoordinate(
                 coordinate,
+                context,
                 out fluidItemId,
                 out temperatureCelsius,
                 out isMobileStorageFallbackFluid))
@@ -898,8 +1163,9 @@ public class Pipe : InstallationObject
         return TryGetSourceFluidInfoAtCoordinate(coordinate, out fluidItemId, out temperatureCelsius);
     }
 
-    private bool TryGetStoredFluidInfoAtCoordinate(
+    private static bool TryGetStoredFluidInfoAtCoordinate(
         Vector2Int coordinate,
+        FluidNetworkSearchContext context,
         out int fluidItemId,
         out float temperatureCelsius,
         out bool isMobileStorageFallbackFluid)
@@ -909,10 +1175,11 @@ public class Pipe : InstallationObject
         isMobileStorageFallbackFluid = false;
         if (InputOutputModule.TryGetRuntimePipeDisplayFluidStorageAtCoordinate(
                 coordinate,
-                this,
+                null,
                 out InstallationObject areaStorage)
             && areaStorage != null
-            && areaStorage.StoredFluidItemId >= 0)
+            && CanDisplayStoredFluidAtCoordinate(
+                areaStorage, coordinate, context.FluidItemIds))
         {
             fluidItemId = areaStorage.StoredFluidItemId;
             temperatureCelsius = areaStorage.GetStoredFluidTemperatureCelsius(fluidItemId);
@@ -922,6 +1189,7 @@ public class Pipe : InstallationObject
 
         if (TryGetRuntimeStoredFluidInfoAtCoordinate(
                 coordinate,
+                context,
                 out fluidItemId,
                 out temperatureCelsius,
                 out isMobileStorageFallbackFluid))
@@ -936,7 +1204,7 @@ public class Pipe : InstallationObject
             || !(block.MapObject is InstallationObject bodyStorage)
             || bodyStorage is Pipe
             || bodyStorage.StoredFluidItemId < 0
-            || !CanDisplayStoredFluidAtCoordinate(bodyStorage, coordinate))
+            || !CanDisplayStoredFluidAtCoordinate(bodyStorage, coordinate, context.FluidItemIds))
         {
             return false;
         }
@@ -947,8 +1215,9 @@ public class Pipe : InstallationObject
         return true;
     }
 
-    private bool TryGetRuntimeStoredFluidInfoAtCoordinate(
+    private static bool TryGetRuntimeStoredFluidInfoAtCoordinate(
         Vector2Int coordinate,
+        FluidNetworkSearchContext context,
         out int fluidItemId,
         out float temperatureCelsius,
         out bool isMobileStorageFallbackFluid)
@@ -956,6 +1225,7 @@ public class Pipe : InstallationObject
         fluidItemId = -1;
         temperatureCelsius = MapClimate.CurrentTemperatureCelsius;
         isMobileStorageFallbackFluid = false;
+        List<InstallationObject> objectInfoFluidStorageScratch = context.StorageScratch;
         objectInfoFluidStorageScratch.Clear();
         if (!CollectActiveInstallationsAtRuntimeGridCoordinate(
                 coordinate,
@@ -972,7 +1242,7 @@ public class Pipe : InstallationObject
             if (storage == null
                 || storage is Pipe
                 || storage.StoredFluidItemId < 0
-                || !CanDisplayStoredFluidAtCoordinate(storage, coordinate))
+                || !CanDisplayStoredFluidAtCoordinate(storage, coordinate, context.FluidItemIds))
             {
                 continue;
             }
@@ -1015,7 +1285,7 @@ public class Pipe : InstallationObject
                || storage is Fluidtank fluidTank && fluidTank.IsFlatCarMounted;
     }
 
-    private bool TryGetSourceFluidInfoAtCoordinate(
+    private static bool TryGetSourceFluidInfoAtCoordinate(
         Vector2Int coordinate,
         out int fluidItemId,
         out float temperatureCelsius)
@@ -1041,6 +1311,12 @@ public class Pipe : InstallationObject
 
     internal bool CanDisplayStoredFluidAtCoordinate(InstallationObject storage, Vector2Int coordinate)
     {
+        return CanDisplayStoredFluidAtCoordinate(storage, coordinate, primaryFluidSearchContext.FluidItemIds);
+    }
+
+    private static bool CanDisplayStoredFluidAtCoordinate(
+        InstallationObject storage, Vector2Int coordinate, HashSet<int> itemIds)
+    {
         if (storage == null || storage.StoredFluidItemId < 0)
         {
             return false;
@@ -1055,7 +1331,7 @@ public class Pipe : InstallationObject
         return module.CanExposeStoredFluidAtRuntimePipeCoordinate(
             coordinate,
             storage.StoredFluidItemId,
-            objectInfoFluidItemIds);
+            itemIds);
     }
 
     private static bool TryGetPipeAtCoordinate(
@@ -1231,8 +1507,11 @@ public class Pipe : InstallationObject
             true,
             false,
             Vector2Int.zero,
+            primaryFluidSearchContext,
+            true,
             out fluidItemId,
-            out _);
+            out _,
+            fallbackPipe: this);
     }
 
     internal bool TryGetDirectFluidDisplaySource(
@@ -1256,6 +1535,7 @@ public class Pipe : InstallationObject
             Vector2Int coordinate = coordinates[coordinateIndex];
             if (TryGetAuthoritativeFluidInfoAtPipeNetworkCoordinate(
                     coordinate,
+                    primaryFluidSearchContext,
                     ref foundMobileStorageFallbackFluid,
                     ref mobileStorageFallbackFluidItemId,
                     ref mobileStorageFallbackTemperatureCelsius,
@@ -1272,6 +1552,7 @@ public class Pipe : InstallationObject
                 if (!record.HasConnectionTowardsAt(coordinate, direction)
                     || !TryGetAuthoritativeFluidInfoAtPipeNetworkCoordinate(
                         coordinate + direction,
+                        primaryFluidSearchContext,
                         ref foundMobileStorageFallbackFluid,
                         ref mobileStorageFallbackFluidItemId,
                         ref mobileStorageFallbackTemperatureCelsius,

@@ -140,7 +140,7 @@ MonoBehaviour:
   m_EditorClassIdentifier: 
   id: 0
   objectName: Mining Machine
-  objId: 50
+  objId: 51
   itemDefinition: {fileID: 11400000, guid: 71b40722fa5571a4cbbbcaa98dbb05e1, type: 2}
   mapStatus:
     mapSizeX: 1
@@ -186,12 +186,15 @@ MonoBehaviour:
   - x: 0
     y: 0
     blockType: 4
+    itemDefinition: {fileID: 0}
   - x: 0
     y: 1
     blockType: 1
+    itemDefinition: {fileID: 0}
   - x: 0
     y: 2
     blockType: 2
+    itemDefinition: {fileID: 0}
   craftDuration: 5
   inputConsumeMoveInterval: 0.1
   outputMoveInterval: 0.1

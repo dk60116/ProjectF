@@ -9,6 +9,31 @@ namespace ProjectF.Conveyors
         private const float Epsilon = 0.00001f;
         internal const float RaisedHalfLength = 1.13f;
 
+        // Corner inputs/outputs are open edges. The two opposite edges prevent
+        // entry from outside, with the same escape/slide rules as raised belts.
+        public static bool SweepCorner(Vector2 start, Vector2 direction, float maxDistance,
+            Vector2 center, Vector2Int input, Vector2Int output, float radius,
+            out float distance, out Vector2 normal)
+        {
+            distance = maxDistance;
+            normal = Vector2.zero;
+            if (input == Vector2Int.zero || output == Vector2Int.zero
+                || input.x * output.x + input.y * output.y != 0) return false;
+            bool blocked = false;
+            for (int edge = 0; edge < 2; edge++)
+            {
+                Vector2Int port = edge == 0 ? input : output;
+                Vector2 outward = new Vector2(-port.x, -port.y);
+                Vector2 axis = new Vector2(-outward.y, outward.x);
+                if (!Sweep(start, direction, distance, center + outward * 0.5f,
+                        axis, outward, 0.5f, radius, out float hitDistance, out Vector2 hitNormal)) continue;
+                distance = hitDistance;
+                normal = hitNormal;
+                blocked = true;
+            }
+            return blocked;
+        }
+
         public static bool Sweep(Vector2 start, Vector2 direction, float maxDistance,
             Vector2 center, Vector2 axis, Vector2 outward, float halfLength, float radius,
             out float distance, out Vector2 normal)

@@ -246,6 +246,8 @@ public partial class BlockStateStore
                || state.activeOutputCount > 0
                || state.oilDrillingProgressUnits > 0L
                || state.oilDrillingProgressLiters > 0f
+               || state.productionInputFluidUnits != null
+                  && state.productionInputFluidUnits.Count > 0
                || state.seedPlanterPlantElapsedUnits > 0L
                || state.seedPlanterPlantElapsedSeconds > 0f
                || state.steamGeneratorHasGenerationReserve;

@@ -9,16 +9,6 @@ public class Boiler : InputOutputModule, IFacilityFlowAdapter, IFacilityFlowStat
     private const float MaxWaterTemperatureCelsiusValue = 100f;
     private const float PassiveCoolingRateScale = 0.2f;
 
-    internal override bool TryGetRuntimePassiveFluidPass(
-        Vector2Int coordinate,
-        out Vector2Int otherCoordinate,
-        out Vector2Int externalDirection)
-    {
-        otherCoordinate = default;
-        externalDirection = default;
-        return false;
-    }
-
     [SerializeField]
     private List<InstallationFacingDirection> localPipeConnectionDirections =
         new List<InstallationFacingDirection> { InstallationFacingDirection.PositiveZ };
@@ -565,7 +555,7 @@ public class Boiler : InputOutputModule, IFacilityFlowAdapter, IFacilityFlowStat
                          out _,
                          out _);
         float effectiveOutputRate = valid
-            ? outputLitersPerSecond * ResolveFluidOutputTransportRetention(outputItemId)
+            ? outputLitersPerSecond * ResolveFluidOutputTransportRetention(outputItemId, outputLitersPerSecond)
             : 0f;
         bool canPull = valid
                        && inputItemId >= 0

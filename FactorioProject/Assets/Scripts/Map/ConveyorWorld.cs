@@ -147,6 +147,25 @@ public sealed class ConveyorRuntimeRecord
         return Prototype.TryGetOutputDirection(WorldRotation, out direction);
     }
 
+    internal bool TrySweepCornerPlayer(Vector2Int coordinate, Vector2 start, Vector2 direction,
+        float maxDistance, float radius, float playerMinY, float playerMaxY, int collisionMask,
+        out float distance, out Vector2 normal)
+    {
+        distance = maxDistance;
+        normal = default;
+        // The low belt surface remains walkable; a higher bridge must not collide
+        // with the corner below it. Rendering/camera visibility is irrelevant.
+        float topY = WorldPosition.y + Belt2FPathLowHeight * Mathf.Abs(WorldScale.y);
+        if (!IsCorner || PlacementPresentationSuppressed || !Covers(coordinate)
+            || playerMinY >= topY || playerMaxY <= WorldPosition.y
+            || (collisionMask & (1 << Prototype.gameObject.layer)) == 0
+            || !TryGetInputDirection(out Vector2Int input)
+            || !TryGetOutputDirection(out Vector2Int output)) return false;
+        return ConveyorSideBarrier.SweepCorner(start, direction, maxDistance,
+            new Vector2(AnchorCoordinate.x, AnchorCoordinate.y), input, output, radius,
+            out distance, out normal);
+    }
+
     public bool IsBridgeCenter(Vector2Int coordinate) => IsBelt2F && coordinate == AnchorCoordinate;
 
     internal bool ReleaseBridgeCenterOccupancy(Vector2Int coordinate)

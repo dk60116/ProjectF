@@ -189,10 +189,6 @@ public class ItemDataEditorWindow : EditorWindow
     private string editingFolderId;
     private string editingFolderName;
     private bool folderNameFocusPending;
-    private ItemDefinition[] cachedInputOutputDefinitionOptions = Array.Empty<ItemDefinition>();
-    private GUIContent[] cachedInputOutputDefinitionOptionContents = Array.Empty<GUIContent>();
-    private readonly Dictionary<int, int> cachedInputOutputDefinitionOptionIndexes = new Dictionary<int, int>();
-    private int cachedInputOutputDefinitionOptionsVersion = -1;
     private ItemDefinition[] cachedParentInputOutputModuleItemOptions = Array.Empty<ItemDefinition>();
     private GUIContent[] cachedParentInputOutputModuleItemOptionContents = Array.Empty<GUIContent>();
     private readonly Dictionary<int, int> cachedParentInputOutputModuleItemOptionIndexes = new Dictionary<int, int>();
@@ -219,7 +215,11 @@ public class ItemDataEditorWindow : EditorWindow
     private static GUIStyle placementCenterLabelStyle;
     private static GUIStyle rectGridPaletteLabelStyle;
     private static GUIStyle rectGridBlockLabelStyle;
-    private GUIStyle manualTargetPopupWithIconStyle;
+    private GUIStyle itemDefinitionPopupTextStyle;
+    private InputOutputModule selectedRectGridTarget;
+    private Vector2Int selectedRectGridCell = new Vector2Int(-1, -1);
+    private readonly List<ItemDefinition> rectGridBlockDefinitionOptions = new List<ItemDefinition>();
+    private readonly HashSet<ItemDefinition> rectGridBlockDefinitionOptionSet = new HashSet<ItemDefinition>();
 
     internal readonly struct ItemListRow
     {
@@ -289,7 +289,7 @@ public class ItemDataEditorWindow : EditorWindow
         }
     }
 
-    private sealed class ManualTargetItemPopupContent : PopupWindowContent
+    private sealed class ItemDefinitionPopupContent : PopupWindowContent
     {
         private const float PopupWidth = 340f;
         private const float RowHeight = 28f;
@@ -298,8 +298,9 @@ public class ItemDataEditorWindow : EditorWindow
         private readonly ItemDefinition selectedDefinition;
         private readonly Action<ItemDefinition> selectionCallback;
         private Vector2 scrollPosition;
+        private static GUIStyle selectedRowLabelStyle;
 
-        public ManualTargetItemPopupContent(
+        public ItemDefinitionPopupContent(
             ItemDefinition[] definitions,
             ItemDefinition selectedDefinition,
             Action<ItemDefinition> selectionCallback)
@@ -351,7 +352,14 @@ public class ItemDataEditorWindow : EditorWindow
                     rowRect.y,
                     rowRect.width - 38f,
                     RowHeight);
-                GUI.Label(labelRect, label);
+                if (isSelected)
+                {
+                    DrawWhiteLabel(labelRect, label, GetSelectedRowLabelStyle());
+                }
+                else
+                {
+                    GUI.Label(labelRect, label);
+                }
 
                 if (GUI.Button(rowRect, GUIContent.none, GUIStyle.none))
                 {
@@ -362,6 +370,17 @@ public class ItemDataEditorWindow : EditorWindow
             }
 
             EditorGUILayout.EndScrollView();
+        }
+
+        private static GUIStyle GetSelectedRowLabelStyle()
+        {
+            if (selectedRowLabelStyle == null)
+            {
+                selectedRowLabelStyle = new GUIStyle(EditorStyles.label);
+                SetGuiStyleTextColor(selectedRowLabelStyle, Color.white);
+            }
+
+            return selectedRowLabelStyle;
         }
     }
 
@@ -385,7 +404,7 @@ public class ItemDataEditorWindow : EditorWindow
     private class ItemDataJsonFile
     {
         public string format = "ProjectF.ItemData";
-        public int version = 20;
+        public int version = 21;
         public List<ItemDataJsonEntry> items = new List<ItemDataJsonEntry>();
     }
 
@@ -430,6 +449,7 @@ public class ItemDataEditorWindow : EditorWindow
         public bool storesFluid;
         public float fluidStorageLiters;
         public float fluidOutputLitersPerSecond = -1f;
+        public float pumpPressureLitersPerSecond = -1f;
         public int undergroundPipeMaxDistance = -1;
         public bool hasFluidDisplayColor;
         public Color fluidDisplayColor = Color.white;
@@ -511,6 +531,7 @@ public class ItemDataEditorWindow : EditorWindow
         public int x;
         public int y;
         public string blockType;
+        public InputOutputJsonEntry itemDefinition;
     }
 
     [MenuItem("Window/ProjectF/Item Data")]
@@ -588,6 +609,7 @@ public class ItemDataEditorWindow : EditorWindow
         pendingFolderOrderedDefinitions.Clear();
         CancelFolderNameEditing();
         ClearSelectedSerializedObjectCaches();
+        ClearRectGridBlockSelection();
     }
 
     private void OnFocus()
@@ -652,10 +674,6 @@ public class ItemDataEditorWindow : EditorWindow
         cachedVisibleDefinitionsSearchText = string.Empty;
         cachedVisibleDefinitionsVersion = -1;
         InvalidateItemFolderPresentationCache();
-        cachedInputOutputDefinitionOptions = Array.Empty<ItemDefinition>();
-        cachedInputOutputDefinitionOptionContents = Array.Empty<GUIContent>();
-        cachedInputOutputDefinitionOptionIndexes.Clear();
-        cachedInputOutputDefinitionOptionsVersion = -1;
         cachedParentInputOutputModuleItemOptions = Array.Empty<ItemDefinition>();
         cachedParentInputOutputModuleItemOptionContents = Array.Empty<GUIContent>();
         cachedParentInputOutputModuleItemOptionIndexes.Clear();
@@ -3246,6 +3264,7 @@ public class ItemDataEditorWindow : EditorWindow
             GetMultiSelectedDefinitionProperty(serializedObject, "storesFluid");
         SerializedProperty fluidStorageLitersProperty =
             GetMultiSelectedDefinitionProperty(serializedObject, "fluidStorageLiters");
+        SerializedProperty pumpPressureLitersPerSecondProperty = GetMultiSelectedDefinitionProperty(serializedObject, "pumpPressureLitersPerSecond");
         SerializedProperty fluidOutputLitersPerSecondProperty =
             GetMultiSelectedDefinitionProperty(serializedObject, "fluidOutputLitersPerSecond");
         SerializedProperty fluidDisplayColorProperty =
@@ -3473,6 +3492,14 @@ public class ItemDataEditorWindow : EditorWindow
                         "Fill Duration (sec)",
                         "Pipe 출구에서 빈 Bucket이 Water Bucket으로 완전히 차는 시간입니다."),
                     0.1f);
+            }
+
+            if (pumpPressureLitersPerSecondProperty != null
+                && selectedItemDefinitionsInOrder.Count > 0
+                && selectedItemDefinitionsInOrder.TrueForAll(item => item != null && item.mapObject is Pump))
+            {
+                DrawMultiClampedFloatProperty(pumpPressureLitersPerSecondProperty,
+                    new GUIContent("Pump Pressure (L/s)", "채집 속도와 별개인 Pump의 고유 유체 압력입니다."), 0f);
             }
 
             if (fluidOutputLitersPerSecondProperty != null && AllSelectedDefinitionsAreFluidOutputMachines())
@@ -3713,7 +3740,7 @@ public class ItemDataEditorWindow : EditorWindow
 
         ItemDefinition.EnergyType nextEnergyType = ItemDefinition.EnergyType.None;
         for (int typeValue = (int)ItemDefinition.EnergyType.Burn;
-             typeValue <= (int)ItemDefinition.EnergyType.LPGGas;
+             typeValue <= (int)ItemDefinition.EnergyType.PetroleumGas;
              typeValue++)
         {
             bool alreadyUsed = false;
@@ -4024,6 +4051,7 @@ public class ItemDataEditorWindow : EditorWindow
         SerializedProperty capacityProperty = GetSelectedDefinitionProperty(serializedObject, "capacity");
         SerializedProperty storesFluidProperty = GetSelectedDefinitionProperty(serializedObject, "storesFluid");
         SerializedProperty fluidStorageLitersProperty = GetSelectedDefinitionProperty(serializedObject, "fluidStorageLiters");
+        SerializedProperty pumpPressureLitersPerSecondProperty = GetSelectedDefinitionProperty(serializedObject, "pumpPressureLitersPerSecond");
         SerializedProperty fluidOutputLitersPerSecondProperty = GetSelectedDefinitionProperty(serializedObject, "fluidOutputLitersPerSecond");
         SerializedProperty fluidDisplayColorProperty = GetSelectedDefinitionProperty(serializedObject, "fluidDisplayColor");
         SerializedProperty bucketFillDurationSecondsProperty = GetSelectedDefinitionProperty(serializedObject, "bucketFillDurationSeconds");
@@ -4238,6 +4266,13 @@ public class ItemDataEditorWindow : EditorWindow
                     new GUIContent(
                         "Fill Duration (sec)",
                         "Pipe 출구에서 빈 Bucket이 Water Bucket으로 완전히 차는 시간입니다."));
+            }
+
+            if (pumpPressureLitersPerSecondProperty != null && definition.mapObject is Pump)
+            {
+                pumpPressureLitersPerSecondProperty.floatValue = Mathf.Max(0f, pumpPressureLitersPerSecondProperty.floatValue);
+                EditorGUILayout.PropertyField(pumpPressureLitersPerSecondProperty,
+                    new GUIContent("Pump Pressure (L/s)", "채집 속도와 별개인 Pump의 고유 유체 압력입니다."));
             }
 
             if (fluidOutputLitersPerSecondProperty != null && IsFluidOutputMachine(definition))
@@ -4791,6 +4826,8 @@ public class ItemDataEditorWindow : EditorWindow
                 EditorUtility.SetDirty(owner);
             }
 
+            SaveMapObjectPrefabAssetIfNeeded(mapObject);
+
             if (conveyorObjectApplied && conveyorBeltForSpeed != null)
             {
                 EditorUtility.SetDirty(conveyorBeltForSpeed);
@@ -4801,6 +4838,26 @@ public class ItemDataEditorWindow : EditorWindow
             }
 
             Repaint();
+        }
+    }
+
+    private static void SaveMapObjectPrefabAssetIfNeeded(MapObject mapObject)
+    {
+        if (mapObject == null || mapObject.gameObject == null)
+        {
+            return;
+        }
+
+        GameObject prefabRoot = mapObject.transform != null && mapObject.transform.root != null
+            ? mapObject.transform.root.gameObject
+            : mapObject.gameObject;
+        if (prefabRoot != null && PrefabUtility.IsPartOfPrefabAsset(prefabRoot))
+        {
+            PrefabUtility.SavePrefabAsset(prefabRoot, out bool savedSuccessfully);
+            if (!savedSuccessfully)
+            {
+                Debug.LogError($"Item Data: '{AssetDatabase.GetAssetPath(prefabRoot)}' 프리팹 저장에 실패했습니다.", mapObject);
+            }
         }
     }
 
@@ -5185,9 +5242,9 @@ public class ItemDataEditorWindow : EditorWindow
                 "Parent IOModule Item에는 MapObject가 InputOutputModule인 아이템만 지정할 수 있습니다.",
                 MessageType.Error);
         }
-        else if (parentModule == inputOutputModule)
+        else if (parentItem != null && !inputOutputModule.IsValidParentInputOutputModuleItem(parentItem))
         {
-            EditorGUILayout.HelpBox("현재 아이템 자신은 부모로 지정할 수 없습니다.", MessageType.Error);
+            EditorGUILayout.HelpBox("Parent IOModule에 순환 참조가 있습니다. 부모를 다시 지정해 주세요.", MessageType.Error);
         }
 
         if (parentModule != null)
@@ -5284,7 +5341,10 @@ public class ItemDataEditorWindow : EditorWindow
         }
 
         GUILayout.Space(8f);
-        DrawInputOutputRectGridFields(mapObjectSerializedObject, inheritedPairCount + pairCount);
+        DrawInputOutputRectGridFields(
+            mapObjectSerializedObject,
+            parentModule,
+            inheritedPairCount + pairCount);
     }
 
     private static string GetInputOutputPairSummary(InputOutputModule.InputOutputPair pair)
@@ -5330,8 +5390,9 @@ public class ItemDataEditorWindow : EditorWindow
             return null;
         }
 
-        EnsureParentInputOutputModuleItemOptionCache(definitions);
         ItemDefinition currentItem = parentItemProperty.objectReferenceValue as ItemDefinition;
+        EnsureParentInputOutputModuleItemOptionCache(definitions);
+        EnsureCurrentParentInputOutputModuleItemOption(currentItem);
         int currentIndex = currentItem != null
                            && cachedParentInputOutputModuleItemOptionIndexes.TryGetValue(
                                currentItem.GetInstanceID(),
@@ -5345,29 +5406,33 @@ public class ItemDataEditorWindow : EditorWindow
             new GUIContent(
                 "Parent IOModule",
                 "부모로 사용할 IOModule 아이템입니다. 부모의 Pair 뒤에 현재 아이템의 Local Pair가 추가됩니다."));
+        EditorGUI.BeginChangeCheck();
         int nextIndex = EditorGUI.Popup(
             popupRect,
             currentIndex,
             cachedParentInputOutputModuleItemOptionContents);
-        ItemDefinition nextItem = nextIndex > 0 && nextIndex < cachedParentInputOutputModuleItemOptions.Length
-            ? cachedParentInputOutputModuleItemOptions[nextIndex]
-            : null;
-        if (nextItem != null && nextItem.mapObject == currentModule)
+        bool selectionChanged = EditorGUI.EndChangeCheck();
+        ItemDefinition nextItem = currentItem;
+        if (selectionChanged)
         {
-            nextItem = currentItem;
+            nextItem = nextIndex > 0 && nextIndex < cachedParentInputOutputModuleItemOptions.Length
+                ? cachedParentInputOutputModuleItemOptions[nextIndex]
+                : null;
         }
 
         if (ItemDefinitionDragAndDropUtility.HandleDropTarget(popupRect, this, out ItemDefinition droppedItem))
         {
-            nextItem = droppedItem != null
-                       && droppedItem.mapObject is InputOutputModule droppedModule
-                       && droppedModule != currentModule
-                ? droppedItem
-                : currentItem;
+            nextItem = droppedItem;
         }
 
         if (nextItem != currentItem)
         {
+            if (currentModule == null || !currentModule.IsValidParentInputOutputModuleItem(nextItem))
+            {
+                ShowNotification(new GUIContent("부모는 순환 참조가 없는 IOModule 아이템이어야 합니다."));
+                return currentItem;
+            }
+
             parentItemProperty.objectReferenceValue = nextItem;
             currentItem = nextItem;
         }
@@ -5500,7 +5565,10 @@ public class ItemDataEditorWindow : EditorWindow
         }
     }
 
-    private void DrawInputOutputRectGridFields(SerializedObject mapObjectSerializedObject, int pairCount)
+    private void DrawInputOutputRectGridFields(
+        SerializedObject mapObjectSerializedObject,
+        InputOutputModule parentModule,
+        int pairCount)
     {
         if (mapObjectSerializedObject == null)
         {
@@ -5563,6 +5631,7 @@ public class ItemDataEditorWindow : EditorWindow
 
         if (GUILayout.Button("Rebuild RectGrid", GUILayout.Width(124f)))
         {
+            ClearRectGridBlockSelection();
             mapObjectSerializedObject.ApplyModifiedProperties();
             inputOutputModule.ConfigureRectGrid(rectGridWidthProperty.intValue, rectGridHeightProperty.intValue);
             EditorUtility.SetDirty(inputOutputModule);
@@ -5570,6 +5639,8 @@ public class ItemDataEditorWindow : EditorWindow
             {
                 EditorUtility.SetDirty(inputOutputModule.gameObject);
             }
+
+            SaveMapObjectPrefabAssetIfNeeded(inputOutputModule);
 
             mapObjectSerializedObject.Update();
         }
@@ -5581,12 +5652,19 @@ public class ItemDataEditorWindow : EditorWindow
             {
                 EditorUtility.SetDirty(inputOutputModule.gameObject);
             }
+
+            SaveMapObjectPrefabAssetIfNeeded(inputOutputModule);
         }
 
         mapObjectSerializedObject.Update();
         rectGridCellsProperty = mapObjectSerializedObject.FindProperty("rectGridCells");
         EditorGUILayout.LabelField($"Cells: {rectGridCellsProperty.arraySize}", EditorStyles.miniLabel);
-        DrawRectGridPreview(mapObjectSerializedObject, inputOutputModule, rectGridWidthProperty.intValue, rectGridHeightProperty.intValue);
+        DrawRectGridPreview(
+            mapObjectSerializedObject,
+            inputOutputModule,
+            parentModule,
+            rectGridWidthProperty.intValue,
+            rectGridHeightProperty.intValue);
     }
 
     private static SerializedProperty GetMapObjectFocusRadiusProperty(SerializedObject serializedMapObject, MapObject mapObject)
@@ -5708,7 +5786,12 @@ public class ItemDataEditorWindow : EditorWindow
         }
     }
 
-    private void DrawRectGridPreview(SerializedObject mapObjectSerializedObject, InputOutputModule inputOutputModule, int width, int height)
+    private void DrawRectGridPreview(
+        SerializedObject mapObjectSerializedObject,
+        InputOutputModule inputOutputModule,
+        InputOutputModule parentModule,
+        int width,
+        int height)
     {
         width = Mathf.Max(1, width);
         height = Mathf.Max(1, height);
@@ -5742,6 +5825,11 @@ public class ItemDataEditorWindow : EditorWindow
                 if (blockType != InputOutputModule.RectGridBlockType.None)
                 {
                     DrawPlacedRectGridBlock(cellRect, inputOutputModule, blockType, cell);
+                    if (IsRectGridBlockSelected(inputOutputModule, cell))
+                    {
+                        DrawRectGridSelectionOutline(cellRect);
+                    }
+
                     InputOutputRectGridBlockDragAndDropUtility.HandlePlacedBlockDrag(
                         cellRect,
                         blockType,
@@ -5750,11 +5838,13 @@ public class ItemDataEditorWindow : EditorWindow
                         this);
                 }
 
+                HandleRectGridBlockSelection(inputOutputModule, cellRect, cell, blockType);
                 HandleRectGridCellDrop(mapObjectSerializedObject, inputOutputModule, cellRect, cell);
             }
         }
 
         HandleRectGridRemoveDrop(mapObjectSerializedObject, inputOutputModule, previewRect);
+        DrawSelectedRectGridBlockDetails(mapObjectSerializedObject, inputOutputModule, parentModule);
 
         GUILayout.Space(8f);
         EditorGUILayout.LabelField("Blocks", EditorStyles.miniBoldLabel);
@@ -5811,6 +5901,242 @@ public class ItemDataEditorWindow : EditorWindow
         GUI.Label(insetRect, GetRectGridBlockDisplayLabel(inputOutputModule, blockType, cell), GetRectGridBlockLabelStyle());
     }
 
+    private void HandleRectGridBlockSelection(
+        InputOutputModule inputOutputModule,
+        Rect cellRect,
+        Vector2Int cell,
+        InputOutputModule.RectGridBlockType blockType)
+    {
+        Event current = Event.current;
+        if (current == null
+            || current.type != EventType.MouseUp
+            || current.button != 0
+            || !cellRect.Contains(current.mousePosition))
+        {
+            return;
+        }
+
+        if (blockType == InputOutputModule.RectGridBlockType.None)
+        {
+            ClearRectGridBlockSelection();
+        }
+        else
+        {
+            selectedRectGridTarget = inputOutputModule;
+            selectedRectGridCell = cell;
+        }
+
+        Repaint();
+    }
+
+    private bool IsRectGridBlockSelected(InputOutputModule inputOutputModule, Vector2Int cell)
+    {
+        return selectedRectGridTarget == inputOutputModule && selectedRectGridCell == cell;
+    }
+
+    private void ClearRectGridBlockSelection()
+    {
+        selectedRectGridTarget = null;
+        selectedRectGridCell = new Vector2Int(-1, -1);
+    }
+
+    private void DrawSelectedRectGridBlockDetails(
+        SerializedObject mapObjectSerializedObject,
+        InputOutputModule inputOutputModule,
+        InputOutputModule parentModule)
+    {
+        if (selectedRectGridTarget != inputOutputModule)
+        {
+            return;
+        }
+
+        InputOutputModule.RectGridBlockType blockType = inputOutputModule.GetRectGridBlockAt(
+            selectedRectGridCell.x,
+            selectedRectGridCell.y);
+        if (blockType == InputOutputModule.RectGridBlockType.None)
+        {
+            ClearRectGridBlockSelection();
+            return;
+        }
+
+        SerializedProperty placementProperty = FindRectGridPlacementProperty(
+            mapObjectSerializedObject,
+            selectedRectGridCell);
+        if (placementProperty == null)
+        {
+            ClearRectGridBlockSelection();
+            return;
+        }
+
+        EditorGUILayout.Space(6f);
+        EditorGUILayout.BeginVertical(EditorStyles.helpBox);
+        EditorGUILayout.LabelField("Selected Block", EditorStyles.miniBoldLabel);
+        EditorGUILayout.LabelField("Cell", $"{selectedRectGridCell.x}, {selectedRectGridCell.y}");
+        EditorGUILayout.LabelField("Type", GetRectGridBlockLabel(blockType));
+
+        bool supportsItemDefinition = InputOutputModule.IsInputItemBlockType(blockType)
+            || InputOutputModule.IsOutputBlockType(blockType);
+        if (supportsItemDefinition)
+        {
+            SerializedProperty itemDefinitionProperty = placementProperty.FindPropertyRelative("itemDefinition");
+            if (itemDefinitionProperty != null)
+            {
+                CollectRectGridBlockDefinitionOptions(
+                    mapObjectSerializedObject,
+                    parentModule,
+                    blockType);
+                Rect rowRect = EditorGUILayout.GetControlRect();
+                Rect popupRect = EditorGUI.PrefixLabel(
+                    rowRect,
+                    new GUIContent(
+                        "Item / Fluid",
+                        "이 블록이 받거나 내보낼 아이템 또는 유체입니다. None이면 IOPair 자동 매핑을 사용합니다."));
+                DrawInputOutputDefinitionPopup(
+                    itemDefinitionProperty,
+                    rectGridBlockDefinitionOptions,
+                    popupRect);
+            }
+
+            EditorGUILayout.HelpBox(
+                InputOutputModule.IsInputItemBlockType(blockType)
+                    ? "IOPair Input 목록에서 허용할 아이템 또는 유체를 지정합니다. None이면 기존 IOPair 입력을 자동 사용합니다."
+                    : "IOPair Output 목록에서 내보낼 아이템 또는 유체를 지정합니다. None이면 기존 IOPair 출력을 자동 사용합니다.",
+                MessageType.Info);
+        }
+        else
+        {
+            EditorGUILayout.HelpBox("이 블록 타입에는 아이템/유체 설정이 없습니다.", MessageType.None);
+        }
+
+        EditorGUILayout.EndVertical();
+    }
+
+    private void CollectRectGridBlockDefinitionOptions(
+        SerializedObject mapObjectSerializedObject,
+        InputOutputModule parentModule,
+        InputOutputModule.RectGridBlockType blockType)
+    {
+        rectGridBlockDefinitionOptions.Clear();
+        rectGridBlockDefinitionOptionSet.Clear();
+
+        bool useInputs = InputOutputModule.IsInputItemBlockType(blockType);
+        if (parentModule != null)
+        {
+            AppendRectGridBlockDefinitionOptions(parentModule.InputOutputPairs, useInputs);
+        }
+
+        SerializedProperty localPairsProperty = mapObjectSerializedObject?.FindProperty("inputOutputPairs");
+        AppendRectGridBlockDefinitionOptions(localPairsProperty, useInputs);
+    }
+
+    private void AppendRectGridBlockDefinitionOptions(
+        IReadOnlyList<InputOutputModule.InputOutputPair> pairs,
+        bool useInputs)
+    {
+        if (pairs == null)
+        {
+            return;
+        }
+
+        for (int pairIndex = 0; pairIndex < pairs.Count; pairIndex++)
+        {
+            InputOutputModule.InputOutputPair pair = pairs[pairIndex];
+            if (pair == null)
+            {
+                continue;
+            }
+
+            IReadOnlyList<InputOutputModule.ItemIoEntry> entries = useInputs
+                ? pair.inputs
+                : pair.outputs;
+            if (entries == null)
+            {
+                continue;
+            }
+
+            for (int entryIndex = 0; entryIndex < entries.Count; entryIndex++)
+            {
+                AddRectGridBlockDefinitionOption(entries[entryIndex].itemDefinition);
+            }
+        }
+    }
+
+    private void AppendRectGridBlockDefinitionOptions(
+        SerializedProperty pairsProperty,
+        bool useInputs)
+    {
+        if (pairsProperty == null || !pairsProperty.isArray)
+        {
+            return;
+        }
+
+        string entriesPropertyName = useInputs ? "inputs" : "outputs";
+        for (int pairIndex = 0; pairIndex < pairsProperty.arraySize; pairIndex++)
+        {
+            SerializedProperty entriesProperty = pairsProperty
+                .GetArrayElementAtIndex(pairIndex)
+                .FindPropertyRelative(entriesPropertyName);
+            if (entriesProperty == null || !entriesProperty.isArray)
+            {
+                continue;
+            }
+
+            for (int entryIndex = 0; entryIndex < entriesProperty.arraySize; entryIndex++)
+            {
+                SerializedProperty definitionProperty = entriesProperty
+                    .GetArrayElementAtIndex(entryIndex)
+                    .FindPropertyRelative("itemDefinition");
+                AddRectGridBlockDefinitionOption(
+                    definitionProperty?.objectReferenceValue as ItemDefinition);
+            }
+        }
+    }
+
+    private void AddRectGridBlockDefinitionOption(ItemDefinition definition)
+    {
+        if (definition != null && rectGridBlockDefinitionOptionSet.Add(definition))
+        {
+            rectGridBlockDefinitionOptions.Add(definition);
+        }
+    }
+
+    private static SerializedProperty FindRectGridPlacementProperty(
+        SerializedObject mapObjectSerializedObject,
+        Vector2Int cell)
+    {
+        SerializedProperty placementsProperty = mapObjectSerializedObject?.FindProperty("rectGridPlacements");
+        if (placementsProperty == null)
+        {
+            return null;
+        }
+
+        for (int i = 0; i < placementsProperty.arraySize; i++)
+        {
+            SerializedProperty placementProperty = placementsProperty.GetArrayElementAtIndex(i);
+            SerializedProperty xProperty = placementProperty.FindPropertyRelative("x");
+            SerializedProperty yProperty = placementProperty.FindPropertyRelative("y");
+            if (xProperty != null
+                && yProperty != null
+                && xProperty.intValue == cell.x
+                && yProperty.intValue == cell.y)
+            {
+                return placementProperty;
+            }
+        }
+
+        return null;
+    }
+
+    private static void DrawRectGridSelectionOutline(Rect rect)
+    {
+        const float thickness = 2f;
+        Color color = new Color(1f, 0.82f, 0.2f, 1f);
+        EditorGUI.DrawRect(new Rect(rect.xMin, rect.yMin, rect.width, thickness), color);
+        EditorGUI.DrawRect(new Rect(rect.xMin, rect.yMax - thickness, rect.width, thickness), color);
+        EditorGUI.DrawRect(new Rect(rect.xMin, rect.yMin, thickness, rect.height), color);
+        EditorGUI.DrawRect(new Rect(rect.xMax - thickness, rect.yMin, thickness, rect.height), color);
+    }
+
     private void HandleRectGridCellDrop(
         SerializedObject mapObjectSerializedObject,
         InputOutputModule inputOutputModule,
@@ -5844,10 +6170,16 @@ public class ItemDataEditorWindow : EditorWindow
                 if (payload.hasSourceCell)
                 {
                     inputOutputModule.MoveOrSwapRectGridBlock(payload.SourceCell, cell);
+                    if (IsRectGridBlockSelected(inputOutputModule, payload.SourceCell))
+                    {
+                        selectedRectGridCell = cell;
+                    }
                 }
                 else
                 {
                     inputOutputModule.SetRectGridBlock(cell.x, cell.y, payload.blockType);
+                    selectedRectGridTarget = inputOutputModule;
+                    selectedRectGridCell = cell;
                 }
 
                 MarkRectGridObjectDirty(mapObjectSerializedObject, inputOutputModule);
@@ -5888,6 +6220,11 @@ public class ItemDataEditorWindow : EditorWindow
                 DragAndDrop.AcceptDrag();
                 Undo.RecordObject(inputOutputModule, "Remove RectGrid Block");
                 inputOutputModule.RemoveRectGridBlockAt(payload.SourceCell.x, payload.SourceCell.y);
+                if (IsRectGridBlockSelected(inputOutputModule, payload.SourceCell))
+                {
+                    ClearRectGridBlockSelection();
+                }
+
                 MarkRectGridObjectDirty(mapObjectSerializedObject, inputOutputModule);
                 current.Use();
                 break;
@@ -6225,25 +6562,11 @@ public class ItemDataEditorWindow : EditorWindow
         EditorGUILayout.BeginHorizontal();
         EditorGUILayout.PrefixLabel(label);
 
-        ItemDefinition currentDefinition = itemDefinitionProperty.objectReferenceValue as ItemDefinition;
-        ItemDefinition[] dropdownDefinitions = GetInputOutputDefinitionOptions(definitions);
-        GUIContent[] dropdownOptions = GetInputOutputDefinitionOptionContents(definitions);
-        int currentIndex = GetInputOutputDefinitionOptionIndex(currentDefinition);
         Rect popupRect = GUILayoutUtility.GetRect(GUIContent.none, EditorStyles.popup, GUILayout.ExpandWidth(true));
-        int nextIndex = EditorGUI.Popup(popupRect, currentIndex, dropdownOptions);
-        ItemDefinition nextDefinition = nextIndex > 0 && nextIndex < dropdownDefinitions.Length
-            ? dropdownDefinitions[nextIndex]
-            : null;
-        if (ItemDefinitionDragAndDropUtility.HandleDropTarget(popupRect, this, out ItemDefinition droppedDefinition))
-        {
-            nextDefinition = droppedDefinition;
-        }
-
-        if (nextDefinition != currentDefinition)
-        {
-            itemDefinitionProperty.objectReferenceValue = nextDefinition;
-            currentDefinition = nextDefinition;
-        }
+        ItemDefinition currentDefinition = DrawInputOutputDefinitionPopup(
+            itemDefinitionProperty,
+            definitions,
+            popupRect);
 
         EditorGUILayout.EndHorizontal();
 
@@ -6274,6 +6597,99 @@ public class ItemDataEditorWindow : EditorWindow
         }
     }
 
+    private ItemDefinition DrawInputOutputDefinitionPopup(
+        SerializedProperty itemDefinitionProperty,
+        List<ItemDefinition> definitions,
+        Rect popupRect)
+    {
+        ItemDefinition currentDefinition = itemDefinitionProperty.objectReferenceValue as ItemDefinition;
+        UnityEngine.Object[] editedTargets = itemDefinitionProperty.serializedObject.targetObjects;
+        string propertyPath = itemDefinitionProperty.propertyPath;
+        bool openDropdown = DrawItemDefinitionDropdownButton(popupRect, currentDefinition);
+
+        if (openDropdown)
+        {
+            ItemDefinition[] dropdownDefinitions = BuildInputOutputDefinitionOptions(definitions);
+            PopupWindow.Show(
+                popupRect,
+                new ItemDefinitionPopupContent(
+                    dropdownDefinitions,
+                    currentDefinition,
+                    nextDefinition => ApplyInputOutputDefinitionSelection(
+                        editedTargets,
+                        propertyPath,
+                        nextDefinition)));
+        }
+
+        ItemDefinition nextDefinition = currentDefinition;
+        if (ItemDefinitionDragAndDropUtility.HandleDropTarget(popupRect, this, out ItemDefinition droppedDefinition))
+        {
+            if (droppedDefinition == null || definitions.Contains(droppedDefinition))
+            {
+                nextDefinition = droppedDefinition;
+            }
+            else
+            {
+                ShowNotification(new GUIContent("해당 IOPair 목록에 없는 아이템입니다."));
+            }
+        }
+
+        if (nextDefinition != currentDefinition)
+        {
+            itemDefinitionProperty.objectReferenceValue = nextDefinition;
+        }
+
+        return nextDefinition;
+    }
+
+    private void ApplyInputOutputDefinitionSelection(
+        UnityEngine.Object[] editedTargets,
+        string propertyPath,
+        ItemDefinition nextDefinition)
+    {
+        if (editedTargets == null || editedTargets.Length == 0 || string.IsNullOrEmpty(propertyPath))
+        {
+            return;
+        }
+
+        SerializedObject serializedTargets = new SerializedObject(editedTargets);
+        serializedTargets.Update();
+        SerializedProperty itemDefinitionProperty = serializedTargets.FindProperty(propertyPath);
+        if (itemDefinitionProperty == null
+            || itemDefinitionProperty.objectReferenceValue == nextDefinition)
+        {
+            return;
+        }
+
+        itemDefinitionProperty.objectReferenceValue = nextDefinition;
+        if (!serializedTargets.ApplyModifiedProperties())
+        {
+            return;
+        }
+
+        for (int i = 0; i < editedTargets.Length; i++)
+        {
+            UnityEngine.Object editedTarget = editedTargets[i];
+            if (editedTarget == null)
+            {
+                continue;
+            }
+
+            EditorUtility.SetDirty(editedTarget);
+            if (editedTarget is InputOutputModule inputOutputModule)
+            {
+                if (inputOutputModule.gameObject != null)
+                {
+                    EditorUtility.SetDirty(inputOutputModule.gameObject);
+                }
+
+                SaveMapObjectPrefabAssetIfNeeded(inputOutputModule);
+            }
+        }
+
+        Repaint();
+    }
+
     private void DrawManualTargetItemField(
         SerializedProperty targetItemProperty,
         List<ItemDefinition> definitions)
@@ -6285,7 +6701,6 @@ public class ItemDataEditorWindow : EditorWindow
 
         ItemDefinition currentDefinition =
             targetItemProperty.objectReferenceValue as ItemDefinition;
-        ItemDefinition[] dropdownDefinitions = GetInputOutputDefinitionOptions(definitions);
         UnityEngine.Object[] editedTargets = targetItemProperty.serializedObject.targetObjects;
 
         Rect rowRect = EditorGUILayout.GetControlRect();
@@ -6297,36 +6712,15 @@ public class ItemDataEditorWindow : EditorWindow
 
         bool previousMixedValue = EditorGUI.showMixedValue;
         EditorGUI.showMixedValue = targetItemProperty.hasMultipleDifferentValues;
-        bool hasIcon = currentDefinition != null && currentDefinition.icon != null;
-        GUIStyle popupStyle = hasIcon
-            ? GetManualTargetPopupWithIconStyle()
-            : EditorStyles.popup;
-        string selectedLabel = currentDefinition != null
-            ? $"[{currentDefinition.id}] {GetDefinitionDisplayName(currentDefinition)}"
-            : "(None)";
-        bool openDropdown = EditorGUI.DropdownButton(
-            popupRect,
-            new GUIContent(selectedLabel),
-            FocusType.Keyboard,
-            popupStyle);
+        bool openDropdown = DrawItemDefinitionDropdownButton(popupRect, currentDefinition);
         EditorGUI.showMixedValue = previousMixedValue;
-
-        if (hasIcon)
-        {
-            const float iconSize = 16f;
-            Rect iconRect = new Rect(
-                popupRect.x + 3f,
-                popupRect.y + (popupRect.height - iconSize) * 0.5f,
-                iconSize,
-                iconSize);
-            DrawItemIcon(iconRect, currentDefinition);
-        }
 
         if (openDropdown)
         {
+            ItemDefinition[] dropdownDefinitions = BuildInputOutputDefinitionOptions(definitions);
             PopupWindow.Show(
                 popupRect,
-                new ManualTargetItemPopupContent(
+                new ItemDefinitionPopupContent(
                     dropdownDefinitions,
                     currentDefinition,
                     nextDefinition => ApplyManualTargetItemSelection(editedTargets, nextDefinition)));
@@ -6384,15 +6778,78 @@ public class ItemDataEditorWindow : EditorWindow
         return true;
     }
 
-    private GUIStyle GetManualTargetPopupWithIconStyle()
+    private bool DrawItemDefinitionDropdownButton(
+        Rect popupRect,
+        ItemDefinition currentDefinition)
     {
-        if (manualTargetPopupWithIconStyle == null)
+        bool openDropdown = EditorGUI.DropdownButton(
+            popupRect,
+            GUIContent.none,
+            FocusType.Keyboard,
+            EditorStyles.popup);
+
+        bool hasIcon = currentDefinition != null && currentDefinition.icon != null;
+        float textLeft = popupRect.x + 5f;
+        if (hasIcon)
         {
-            manualTargetPopupWithIconStyle = new GUIStyle(EditorStyles.popup);
-            manualTargetPopupWithIconStyle.padding.left = 23;
+            const float iconSize = 16f;
+            Rect iconRect = new Rect(
+                popupRect.x + 3f,
+                popupRect.y + (popupRect.height - iconSize) * 0.5f,
+                iconSize,
+                iconSize);
+            DrawItemIcon(iconRect, currentDefinition);
+            textLeft = iconRect.xMax + 4f;
         }
 
-        return manualTargetPopupWithIconStyle;
+        string selectedLabel = currentDefinition != null
+            ? $"[{currentDefinition.id}] {GetDefinitionDisplayName(currentDefinition)}"
+            : "(None)";
+        Rect labelRect = new Rect(
+            textLeft,
+            popupRect.y,
+            Mathf.Max(0f, popupRect.xMax - textLeft - 18f),
+            popupRect.height);
+        DrawWhiteLabel(labelRect, selectedLabel, GetItemDefinitionPopupTextStyle());
+        return openDropdown;
+    }
+
+    private static void DrawWhiteLabel(Rect rect, string text, GUIStyle style)
+    {
+        Color previousColor = GUI.color;
+        Color previousContentColor = GUI.contentColor;
+        GUI.color = Color.white;
+        GUI.contentColor = Color.white;
+        GUI.Label(rect, text, style);
+        GUI.contentColor = previousContentColor;
+        GUI.color = previousColor;
+    }
+
+    private GUIStyle GetItemDefinitionPopupTextStyle()
+    {
+        if (itemDefinitionPopupTextStyle == null)
+        {
+            itemDefinitionPopupTextStyle = new GUIStyle(EditorStyles.label)
+            {
+                alignment = TextAnchor.MiddleLeft,
+                clipping = TextClipping.Clip
+            };
+            SetGuiStyleTextColor(itemDefinitionPopupTextStyle, Color.white);
+        }
+
+        return itemDefinitionPopupTextStyle;
+    }
+
+    private static void SetGuiStyleTextColor(GUIStyle style, Color color)
+    {
+        style.normal.textColor = color;
+        style.hover.textColor = color;
+        style.active.textColor = color;
+        style.focused.textColor = color;
+        style.onNormal.textColor = color;
+        style.onHover.textColor = color;
+        style.onActive.textColor = color;
+        style.onFocused.textColor = color;
     }
 
     private void DrawReferencedItemPreview(ItemDefinition definition)
@@ -6549,34 +7006,6 @@ public class ItemDataEditorWindow : EditorWindow
         targetCountProperty.floatValue = Mathf.Max(0.0001f, sourceCountProperty.floatValue);
     }
 
-    private ItemDefinition[] GetInputOutputDefinitionOptions(List<ItemDefinition> definitions)
-    {
-        EnsureInputOutputDefinitionOptionCache(definitions);
-        return cachedInputOutputDefinitionOptions;
-    }
-
-    private GUIContent[] GetInputOutputDefinitionOptionContents(List<ItemDefinition> definitions)
-    {
-        EnsureInputOutputDefinitionOptionCache(definitions);
-        return cachedInputOutputDefinitionOptionContents;
-    }
-
-    private void EnsureInputOutputDefinitionOptionCache(List<ItemDefinition> definitions)
-    {
-        if (cachedInputOutputDefinitionOptionsVersion == definitionsCacheVersion)
-        {
-            return;
-        }
-
-        cachedInputOutputDefinitionOptions = BuildInputOutputDefinitionOptions(definitions);
-        cachedInputOutputDefinitionOptionContents =
-            BuildInputOutputDefinitionOptionContents(cachedInputOutputDefinitionOptions);
-        BuildInputOutputDefinitionOptionIndexes(
-            cachedInputOutputDefinitionOptions,
-            cachedInputOutputDefinitionOptionIndexes);
-        cachedInputOutputDefinitionOptionsVersion = definitionsCacheVersion;
-    }
-
     private void EnsureParentInputOutputModuleItemOptionCache(List<ItemDefinition> definitions)
     {
         if (cachedParentInputOutputModuleItemOptionsVersion == definitionsCacheVersion)
@@ -6604,6 +7033,23 @@ public class ItemDataEditorWindow : EditorWindow
             cachedParentInputOutputModuleItemOptions,
             cachedParentInputOutputModuleItemOptionIndexes);
         cachedParentInputOutputModuleItemOptionsVersion = definitionsCacheVersion;
+    }
+
+    private void EnsureCurrentParentInputOutputModuleItemOption(ItemDefinition currentItem)
+    {
+        if (currentItem == null
+            || cachedParentInputOutputModuleItemOptionIndexes.ContainsKey(currentItem.GetInstanceID()))
+        {
+            return;
+        }
+
+        int optionIndex = cachedParentInputOutputModuleItemOptions.Length;
+        Array.Resize(ref cachedParentInputOutputModuleItemOptions, optionIndex + 1);
+        Array.Resize(ref cachedParentInputOutputModuleItemOptionContents, optionIndex + 1);
+        cachedParentInputOutputModuleItemOptions[optionIndex] = currentItem;
+        cachedParentInputOutputModuleItemOptionContents[optionIndex] =
+            new GUIContent($"{GetDefinitionDisplayName(currentItem)} (Current)");
+        cachedParentInputOutputModuleItemOptionIndexes[currentItem.GetInstanceID()] = optionIndex;
     }
 
     private void DrawSeedTargetResourceField(SerializedProperty targetResourceProperty)
@@ -6767,18 +7213,6 @@ public class ItemDataEditorWindow : EditorWindow
                 optionIndexes[definition.GetInstanceID()] = i;
             }
         }
-    }
-
-    private int GetInputOutputDefinitionOptionIndex(ItemDefinition currentDefinition)
-    {
-        if (currentDefinition == null)
-        {
-            return 0;
-        }
-
-        return cachedInputOutputDefinitionOptionIndexes.TryGetValue(currentDefinition.GetInstanceID(), out int optionIndex)
-            ? optionIndex
-            : 0;
     }
 
     private void SaveItemData()
@@ -7622,6 +8056,7 @@ public class ItemDataEditorWindow : EditorWindow
             capacity = definition.capacity > 0 ? definition.capacity : 10,
             storesFluid = definition.storesFluid,
             fluidStorageLiters = definition.storesFluid ? Mathf.Max(0f, definition.fluidStorageLiters) : 0f,
+            pumpPressureLitersPerSecond = definition.mapObject is Pump ? definition.PumpPressureLitersPerSecond : -1f,
             fluidOutputLitersPerSecond = IsFluidOutputMachine(definition)
                 ? definition.FluidOutputLitersPerSecond
                 : -1f,
@@ -7826,7 +8261,8 @@ public class ItemDataEditorWindow : EditorWindow
         {
             x = placement.x,
             y = placement.y,
-            blockType = placement.blockType.ToString()
+            blockType = placement.blockType.ToString(),
+            itemDefinition = BuildDefinitionReferenceJsonEntry(placement.itemDefinition)
         };
     }
 
@@ -7964,6 +8400,10 @@ public class ItemDataEditorWindow : EditorWindow
         }
         definition.storesFluid = entry.storesFluid;
         definition.fluidStorageLiters = entry.storesFluid ? Mathf.Max(0f, entry.fluidStorageLiters) : 0f;
+        if (entry.pumpPressureLitersPerSecond >= 0f)
+        {
+            definition.pumpPressureLitersPerSecond = Mathf.Max(0f, entry.pumpPressureLitersPerSecond);
+        }
         if (entry.fluidOutputLitersPerSecond >= 0f)
         {
             definition.fluidOutputLitersPerSecond = Mathf.Max(0f, entry.fluidOutputLitersPerSecond);
@@ -8461,7 +8901,10 @@ public class ItemDataEditorWindow : EditorWindow
             {
                 for (int i = 0; i < entry.rectGridBlocks.Count; i++)
                 {
-                    ApplyRectGridBlockPlacementJson(rectGridPlacementsProperty, entry.rectGridBlocks[i]);
+                    ApplyRectGridBlockPlacementJson(
+                        rectGridPlacementsProperty,
+                        entry.rectGridBlocks[i],
+                        definitions);
                 }
             }
         }
@@ -8528,7 +8971,10 @@ public class ItemDataEditorWindow : EditorWindow
         }
     }
 
-    private static void ApplyRectGridBlockPlacementJson(SerializedProperty rectGridPlacementsProperty, RectGridBlockPlacementJsonEntry entry)
+    private static void ApplyRectGridBlockPlacementJson(
+        SerializedProperty rectGridPlacementsProperty,
+        RectGridBlockPlacementJsonEntry entry,
+        List<ItemDefinition> definitions)
     {
         if (rectGridPlacementsProperty == null || entry == null || string.IsNullOrWhiteSpace(entry.blockType)
             || !Enum.TryParse(entry.blockType, true, out InputOutputModule.RectGridBlockType parsedBlockType)
@@ -8543,6 +8989,7 @@ public class ItemDataEditorWindow : EditorWindow
         SerializedProperty xProperty = placementProperty.FindPropertyRelative("x");
         SerializedProperty yProperty = placementProperty.FindPropertyRelative("y");
         SerializedProperty blockTypeProperty = placementProperty.FindPropertyRelative("blockType");
+        SerializedProperty itemDefinitionProperty = placementProperty.FindPropertyRelative("itemDefinition");
         if (xProperty != null)
         {
             xProperty.intValue = Mathf.Max(0, entry.x);
@@ -8556,6 +9003,13 @@ public class ItemDataEditorWindow : EditorWindow
         if (blockTypeProperty != null)
         {
             blockTypeProperty.enumValueIndex = (int)parsedBlockType;
+        }
+
+        if (itemDefinitionProperty != null)
+        {
+            itemDefinitionProperty.objectReferenceValue = ResolveDefinitionReference(
+                definitions,
+                entry.itemDefinition);
         }
     }
 

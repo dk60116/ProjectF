@@ -21,6 +21,17 @@ public partial class PlayerController
         int maxY = Mathf.FloorToInt(Mathf.Max(start.y, end.y) + radius + 0.5f);
         float nearestDistance = blocked ? blockingHit.distance : distance;
         ConveyorWorld conveyorWorld = ConveyorWorld.Current;
+        PipeWorld pipeWorld = PipeWorld.Current;
+        CacheDefaultCapsuleColliderCenter();
+        bool hasCapsule = cachedCapsuleCollider != null && cachedCapsuleCollider.enabled;
+        float playerMinY = 0f, playerMaxY = 0f;
+        if (hasCapsule)
+        {
+            GetPlayerMovementCapsuleWorldGeometry(out Vector3 first, out Vector3 second, out float capsuleRadius);
+            playerMinY = Mathf.Min(first.y, second.y) + originOffset.y - capsuleRadius;
+            playerMaxY = Mathf.Max(first.y, second.y) + originOffset.y + capsuleRadius;
+        }
+        int collisionMask = GetPlayerMovementCollisionMask();
 
         // Coverage remains available while the belt's render root is suspended.
         // Raised sides block entry only; stepping off and low landings stay open.
@@ -29,6 +40,34 @@ public partial class PlayerController
             for (int x = minX; x <= maxX; x++)
             {
                 Vector2Int coordinate = new Vector2Int(x, y);
+                if (hasCapsule && pipeWorld != null
+                    && pipeWorld.TryGetAtCoordinate(coordinate, out PipeRuntimeRecord pipe)
+                    && pipe.TrySweepPlayer(coordinate, start, flatDirection, nearestDistance, radius,
+                        playerMinY, playerMaxY, collisionMask, out float pipeDistance, out Vector2 pipeNormal))
+                {
+                    nearestDistance = pipeDistance;
+                    blockingHit = new RaycastHit
+                    {
+                        distance = pipeDistance,
+                        normal = new Vector3(pipeNormal.x, 0f, pipeNormal.y)
+                    };
+                    blocked = true;
+                }
+
+                if (hasCapsule && conveyorWorld != null
+                    && conveyorWorld.TryGetAtCoordinate(coordinate, out ConveyorRuntimeRecord corner)
+                    && corner.TrySweepCornerPlayer(coordinate, start, flatDirection, nearestDistance, radius,
+                        playerMinY, playerMaxY, collisionMask, out float cornerDistance, out Vector2 cornerNormal))
+                {
+                    nearestDistance = cornerDistance;
+                    blockingHit = new RaycastHit
+                    {
+                        distance = cornerDistance,
+                        normal = new Vector3(cornerNormal.x, 0f, cornerNormal.y)
+                    };
+                    blocked = true;
+                }
+
                 ConveyorRuntimeRecord dataOnlyBelt = null;
                 ConvayorBelt2F sceneBelt = null;
                 Vector2Int flow;

@@ -88,7 +88,8 @@ internal static class ProductionMachineRecipeAutoFill
                 continue;
             }
 
-            List<RecipeEntry> recipes = BuildInputRecipes(definitions, maxIngredientTypes);
+            List<RecipeEntry> recipes = BuildInputRecipes(
+                definitions, productionMachine, maxIngredientTypes);
             ApplyRecipes(productionMachine, recipes);
             syncedRecipeCount += recipes.Count;
         }
@@ -116,7 +117,8 @@ internal static class ProductionMachineRecipeAutoFill
             return 0;
         }
 
-        List<RecipeEntry> recipes = BuildInputRecipes(definitions, maxIngredientTypes);
+        List<RecipeEntry> recipes = BuildInputRecipes(
+            definitions, productionMachine, maxIngredientTypes);
         ApplyRecipes(productionMachine, recipes);
         return recipes.Count;
     }
@@ -170,7 +172,10 @@ internal static class ProductionMachineRecipeAutoFill
         return mapObject.GetComponentInChildren<ProductionMachine>(true);
     }
 
-    private static List<RecipeEntry> BuildInputRecipes(List<ItemDefinition> definitions, int maxIngredientTypes)
+    private static List<RecipeEntry> BuildInputRecipes(
+        List<ItemDefinition> definitions,
+        ProductionMachine productionMachine,
+        int maxIngredientTypes)
     {
         List<RecipeEntry> recipes = new List<RecipeEntry>();
         DefinitionLookup definitionLookup = new DefinitionLookup(definitions);
@@ -184,12 +189,16 @@ internal static class ProductionMachineRecipeAutoFill
             if (entry == null
                 || entry.ingredients == null
                 || entry.ingredients.Count <= 0
-                || entry.ingredients.Count != requiredIngredientTypes)
+                || entry.ingredients.Count > requiredIngredientTypes)
             {
                 continue;
             }
 
-            if (!IsCraftableByHandOrWorkableObject(entry, definitionLookup))
+            bool explicitlyAssigned = IsCraftableByProductionMachine(
+                entry, definitionLookup, productionMachine);
+            if (!explicitlyAssigned
+                && (entry.ingredients.Count != requiredIngredientTypes
+                    || !IsCraftableByHandOrWorkableObject(entry, definitionLookup)))
             {
                 continue;
             }
@@ -272,6 +281,33 @@ internal static class ProductionMachineRecipeAutoFill
                 mapObjectEntry.assetPath,
                 mapObjectEntry.itemId);
             if (IsWorkableMapObject(mapObject))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private static bool IsCraftableByProductionMachine(
+        CraftingTreeJsonEntry entry,
+        DefinitionLookup definitionLookup,
+        ProductionMachine productionMachine)
+    {
+        IReadOnlyList<CraftingMapObjectJsonEntry> mapObjects = GetCraftingMapObjectEntries(entry);
+        for (int i = 0; i < mapObjects.Count; i++)
+        {
+            CraftingMapObjectJsonEntry mapObjectEntry = mapObjects[i];
+            if (mapObjectEntry == null)
+            {
+                continue;
+            }
+
+            MapObject mapObject = definitionLookup.ResolveMapObject(
+                mapObjectEntry.mapObjectName,
+                mapObjectEntry.assetPath,
+                mapObjectEntry.itemId);
+            if (ResolveProductionMachine(mapObject) == productionMachine)
             {
                 return true;
             }

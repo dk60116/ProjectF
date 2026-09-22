@@ -49,6 +49,15 @@ public class Fluidtank : InstallationObject, IMapObjectUpdateTick, IMapObjectUpd
         new List<InputOutputModule.RuntimePumpPipePass>(2);
     private readonly HashSet<int> adjacentOutputFluidItemIdsScratch = new HashSet<int>();
     private readonly List<Fluidtank> connectedTankCache = new List<Fluidtank>(4);
+    private readonly List<Fluidtank> connectedTankDependents = new List<Fluidtank>(4);
+    private readonly List<InputOutputModule.RuntimePumpPipePass> connectedPumpPassScratch =
+        new List<InputOutputModule.RuntimePumpPipePass>(2);
+    private readonly Pipe.FluidNetworkSearchContext connectedFluidIdentityContext =
+        new Pipe.FluidNetworkSearchContext();
+    private readonly Dictionary<Vector2Int, Pump> fluidNetworkSearchPumps = new Dictionary<Vector2Int, Pump>();
+    private readonly Dictionary<Fluidtank, Pump> connectedTankPumps = new Dictionary<Fluidtank, Pump>();
+    private Pump fluidNetworkSearchCurrentPump;
+
     private readonly struct FluidNetworkSearchNode
     {
         public readonly Vector2Int Coordinate;
@@ -425,6 +434,8 @@ public class Fluidtank : InstallationObject, IMapObjectUpdateTick, IMapObjectUpd
         runtimeTickSleeping = false;
         ResetMountedPipeTransferReadiness();
         ActiveFluidTanks.Remove(this);
+        ClearConnectedTankSources();
+        connectedTankDependents.Clear();
         if (ActiveFluidTanks.Count == 0)
         {
             PlacementRuntimeChanged -= HandlePlacementTopologyChanged;
@@ -477,17 +488,29 @@ public class Fluidtank : InstallationObject, IMapObjectUpdateTick, IMapObjectUpd
             out int recordedDistance)
             ? recordedDistance
             : 0;
+        connectedTankPumps.TryGetValue(sourceTank, out Pump pressurePump);
         float transferLiters = Mathf.Min(
-            ConnectedFluidStorageTransferLitersPerSecond
+            Pump.LimitTransportRate(pressurePump, ConnectedFluidStorageTransferLitersPerSecond)
             * CalculateFluidPressureRetention(sourcePipeDistance)
             * deltaTime,
             AvailableFluidStorageLiters,
             sourceTank.StoredFluidLiters,
-            CalculateFluidEqualizationTransferLiters(sourceTank, this));
+            pressurePump != null ? sourceTank.StoredFluidLiters
+                : CalculateFluidEqualizationTransferLiters(sourceTank, this));
         if (fluidItemId < 0 || transferLiters <= 0.0001f)
         {
             SetRuntimeTickSleeping(true);
             return;
+        }
+
+        if (pressurePump != null)
+        {
+            transferLiters = pressurePump.LimitTransferVolume(transferLiters, deltaTime);
+            if (transferLiters <= 0.0001f)
+            {
+                SetRuntimeTickSleeping(false);
+                return;
+            }
         }
 
         using (MapObjectTickProfiler.SampleNamed(
@@ -511,14 +534,11 @@ public class Fluidtank : InstallationObject, IMapObjectUpdateTick, IMapObjectUpd
                 consumedLiters,
                 transferTemperatureCelsius,
                 out float acceptedLiters);
+            pressurePump?.RecordTransferredVolume(acceptedLiters);
             float rejectedLiters = consumedLiters - Mathf.Max(0f, acceptedLiters);
             if (rejectedLiters > 0.0001f)
             {
-                sourceTank.TryAddFluidLiters(
-                    fluidItemId,
-                    rejectedLiters,
-                    transferTemperatureCelsius,
-                    out _);
+                sourceTank.RestoreUnacceptedFluid(fluidItemId, rejectedLiters, transferTemperatureCelsius);
             }
         }
 
@@ -683,9 +703,11 @@ public class Fluidtank : InstallationObject, IMapObjectUpdateTick, IMapObjectUpd
             return;
         }
 
-        for (int i = 0; i < connectedTankCache.Count; i++)
+        // Source discovery is directional. Wake tanks that can draw from this
+        // reservoir, including receivers on the opposite side of a Pump.
+        for (int i = 0; i < connectedTankDependents.Count; i++)
         {
-            Fluidtank tank = connectedTankCache[i];
+            Fluidtank tank = connectedTankDependents[i];
             if (tank != null && tank.runtimeTickSleeping)
             {
                 tank.WakeRuntimeTick();
@@ -734,6 +756,16 @@ public class Fluidtank : InstallationObject, IMapObjectUpdateTick, IMapObjectUpd
         SetSleepAwakeDebugSleeping(runtimeTickSleeping);
     }
 
+    private void ClearConnectedTankSources()
+    {
+        for (int i = 0; i < connectedTankCache.Count; i++)
+        {
+            Fluidtank source = connectedTankCache[i];
+            if (source != null) source.connectedTankDependents.Remove(this);
+        }
+        connectedTankCache.Clear();
+    }
+
     private bool EnsureConnectedTankCache()
     {
         if (connectedTankCacheTopologyVersion == fluidNetworkTopologyVersion)
@@ -741,8 +773,11 @@ public class Fluidtank : InstallationObject, IMapObjectUpdateTick, IMapObjectUpd
             return connectedTankCache.Count > 0;
         }
 
-        connectedTankCache.Clear();
+        ClearConnectedTankSources();
         connectedTankPipeDistances.Clear();
+        connectedTankPumps.Clear();
+        fluidNetworkSearchPumps.Clear();
+        fluidNetworkSearchCurrentPump = null;
         fluidNetworkSearchQueue.Clear();
         fluidNetworkSearchPipeCounts.Clear();
 
@@ -765,6 +800,7 @@ public class Fluidtank : InstallationObject, IMapObjectUpdateTick, IMapObjectUpd
                 continue;
             }
 
+            fluidNetworkSearchPumps.TryGetValue(coordinate, out fluidNetworkSearchCurrentPump);
             if (!TryResolveFluidNetworkNode(coordinate, out Fluidtank tank, out Pipe pipe))
             {
                 continue;
@@ -775,6 +811,7 @@ public class Fluidtank : InstallationObject, IMapObjectUpdateTick, IMapObjectUpd
                 if (!connectedTankCache.Contains(tank))
                 {
                     connectedTankCache.Add(tank);
+                    tank.connectedTankDependents.Add(this);
                 }
 
                 int pipeDistance = Mathf.Max(0, pipeCount - 1);
@@ -784,19 +821,15 @@ public class Fluidtank : InstallationObject, IMapObjectUpdateTick, IMapObjectUpd
                     || pipeDistance < previousDistance)
                 {
                     connectedTankPipeDistances[tank] = pipeDistance;
+                    connectedTankPumps[tank] = fluidNetworkSearchCurrentPump;
                 }
+                if (fluidNetworkSearchCurrentPump != null) continue;
             }
 
             for (int directionIndex = 0; directionIndex < FluidCardinalDirections.Length; directionIndex++)
             {
                 Vector2Int direction = FluidCardinalDirections[directionIndex];
-                if ((tank != null
-                     && !tank.HasFluidNetworkConnectionTowards(coordinate, direction))
-                    || (pipe != null
-                        && !pipe.HasConnectionTowardsAt(
-                            coordinate,
-                            ResolvePipeRuntimeRotation(coordinate, pipe),
-                            direction)))
+                if (!HasFluidNetworkNodeConnectionTowards(coordinate, tank, pipe, direction))
                 {
                     continue;
                 }
@@ -806,13 +839,7 @@ public class Fluidtank : InstallationObject, IMapObjectUpdateTick, IMapObjectUpd
                         nextCoordinate,
                         out Fluidtank nextTank,
                         out Pipe nextPipe)
-                    || nextTank != null
-                    && !nextTank.HasFluidNetworkConnectionTowards(nextCoordinate, -direction)
-                    || (nextPipe != null
-                        && !nextPipe.HasConnectionTowardsAt(
-                            nextCoordinate,
-                            ResolvePipeRuntimeRotation(nextCoordinate, nextPipe),
-                            -direction)))
+                    || !HasFluidNetworkNodeConnectionTowards(nextCoordinate, nextTank, nextPipe, -direction))
                 {
                     continue;
                 }
@@ -821,6 +848,19 @@ public class Fluidtank : InstallationObject, IMapObjectUpdateTick, IMapObjectUpd
                     nextCoordinate,
                     pipeCount + (nextPipe != null ? 1 : 0));
             }
+
+            connectedPumpPassScratch.Clear();
+            InputOutputModule.CollectPumpPipePassesAtRuntimeCoordinate(coordinate, connectedPumpPassScratch);
+            for (int i = 0; i < connectedPumpPassScratch.Count; i++)
+            {
+                InputOutputModule.RuntimePumpPipePass pass = connectedPumpPassScratch[i];
+                if (pass.Pump.AllowsRuntimeFluidTraversal(coordinate, true)
+                    && (tank == null || tank.HasFluidNetworkConnectionTowards(coordinate, -pass.ExternalDirection)))
+                {
+                    EnqueueFluidNetworkSearchCoordinate(pass.OtherCoordinate, pipeCount, pass.Pump);
+                }
+            }
+            connectedPumpPassScratch.Clear();
 
             Vector2Int remoteCoordinate = default;
             bool hasRemote = pipe != null
@@ -845,7 +885,28 @@ public class Fluidtank : InstallationObject, IMapObjectUpdateTick, IMapObjectUpd
         return connectedTankCache.Count > 0;
     }
 
-    private void EnqueueFluidNetworkSearchCoordinate(Vector2Int coordinate, int pipeCount)
+    private static bool HasFluidNetworkNodeConnectionTowards(
+        Vector2Int coordinate, Fluidtank tank, Pipe pipe, Vector2Int direction)
+    {
+        if (tank != null)
+        {
+            return tank.HasFluidNetworkConnectionTowards(coordinate, direction);
+        }
+        if (InputOutputModule.HasRuntimePumpPipePassTowards(coordinate, direction))
+        {
+            return true;
+        }
+        if (pipe == null)
+        {
+            return false;
+        }
+        return PipeWorld.Current != null
+               && PipeWorld.Current.TryGetMatchingAtCoordinate(coordinate, pipe, out PipeRuntimeRecord record)
+            ? record.HasConnectionTowardsAt(coordinate, direction)
+            : pipe.HasConnectionTowardsAt(coordinate, ResolvePipeRuntimeRotation(coordinate, pipe), direction);
+    }
+
+    private void EnqueueFluidNetworkSearchCoordinate(Vector2Int coordinate, int pipeCount, Pump crossedPump = null)
     {
         if (fluidNetworkSearchPipeCounts.TryGetValue(
                 coordinate,
@@ -855,6 +916,7 @@ public class Fluidtank : InstallationObject, IMapObjectUpdateTick, IMapObjectUpd
             return;
         }
 
+        fluidNetworkSearchPumps[coordinate] = Pump.ResolvePressureLimit(fluidNetworkSearchCurrentPump, crossedPump);
         fluidNetworkSearchPipeCounts[coordinate] = pipeCount;
         fluidNetworkSearchQueue.Enqueue(new FluidNetworkSearchNode(coordinate, pipeCount));
     }
@@ -878,7 +940,8 @@ public class Fluidtank : InstallationObject, IMapObjectUpdateTick, IMapObjectUpd
                 coordinate,
                 adjacentInstallationScratch))
         {
-            return pipe != null;
+            return pipe != null
+                   || InputOutputModule.TryGetPumpPipePassAtRuntimeCoordinate(coordinate, out _, out _, out _);
         }
 
         for (int i = 0; i < adjacentInstallationScratch.Count; i++)
@@ -896,14 +959,15 @@ public class Fluidtank : InstallationObject, IMapObjectUpdateTick, IMapObjectUpd
             }
         }
 
-        return pipe != null;
+        return pipe != null
+               || InputOutputModule.TryGetPumpPipePassAtRuntimeCoordinate(coordinate, out _, out _, out _);
     }
 
     private Fluidtank FindBestEqualizationSource()
     {
         int requiredFluidItemId = StoredFluidItemId;
         float currentFillRatio = GetFluidFillRatio(this);
-        float bestFillRatio = currentFillRatio;
+        float bestFillRatio = -1f;
         Fluidtank bestSource = null;
 
         for (int i = 0; i < connectedTankCache.Count; i++)
@@ -917,7 +981,9 @@ public class Fluidtank : InstallationObject, IMapObjectUpdateTick, IMapObjectUpd
             }
 
             float candidateFillRatio = GetFluidFillRatio(candidate);
-            if (candidateFillRatio <= bestFillRatio + FluidFillRatioEpsilon)
+            bool isPumped = connectedTankPumps.TryGetValue(candidate, out Pump pump) && pump != null;
+            if ((!isPumped && candidateFillRatio <= currentFillRatio + FluidFillRatioEpsilon)
+                || candidateFillRatio <= bestFillRatio + FluidFillRatioEpsilon)
             {
                 continue;
             }
@@ -1065,26 +1131,108 @@ public class Fluidtank : InstallationObject, IMapObjectUpdateTick, IMapObjectUpd
             return false;
         }
 
-        int preferredFluidItemId = StoredFluidItemId;
         if (isFlatCarMountedPresentation)
         {
             return CanDeployMountedPipeForFluid(
-                preferredFluidItemId,
+                StoredFluidItemId,
                 neighborFluidItemId);
         }
 
-        // Adjacent fixed tanks form one storage bank regardless of which
-        // individual tank currently owns the liters. Mobile tanks are checked
-        // above because their docking pipe requires a pipe-side fluid identity
-        // and must reject a different fluid once the tank contains fluid.
         if (neighborTank != null)
         {
-            return true;
+            return CanConnectAdjacentFixedTank(
+                tankCoordinate,
+                directionFromTank,
+                neighborTank);
         }
 
-        return preferredFluidItemId < 0
-               || neighborFluidItemId < 0
-               || preferredFluidItemId == neighborFluidItemId;
+        return CanConnectFixedTankPipe(
+            tankCoordinate,
+            directionFromTank,
+            neighborFluidItemId);
+    }
+
+    private bool CanConnectFixedTankPipe(
+        Vector2Int tankCoordinate,
+        Vector2Int directionFromTank,
+        int pipeFluidItemId)
+    {
+        int tankNetworkFluidItemId = ResolveFixedTankNetworkFluidItemId(
+            tankCoordinate,
+            tankCoordinate + directionFromTank,
+            out bool hasConflict);
+        return !hasConflict
+               && (tankNetworkFluidItemId < 0
+                   || pipeFluidItemId < 0
+                   || tankNetworkFluidItemId == pipeFluidItemId);
+    }
+
+    private bool CanConnectAdjacentFixedTank(
+        Vector2Int tankCoordinate,
+        Vector2Int directionFromTank,
+        Fluidtank neighborTank)
+    {
+        if (neighborTank == null || neighborTank.IsFlatCarMounted)
+        {
+            return false;
+        }
+
+        Vector2Int neighborCoordinate = tankCoordinate + directionFromTank;
+        int localFluidItemId = ResolveFixedTankNetworkFluidItemId(
+            tankCoordinate,
+            neighborCoordinate,
+            out bool localConflict);
+        int neighborFluidItemId = neighborTank.ResolveFixedTankNetworkFluidItemId(
+            neighborCoordinate,
+            tankCoordinate,
+            out bool neighborConflict);
+        return !localConflict
+               && !neighborConflict
+               && (localFluidItemId < 0
+                   || neighborFluidItemId < 0
+                   || localFluidItemId == neighborFluidItemId);
+    }
+
+    private int ResolveFixedTankNetworkFluidItemId(
+        Vector2Int tankCoordinate,
+        Vector2Int ignoredNeighborCoordinate,
+        out bool hasConflict)
+    {
+        hasConflict = false;
+        int resolvedFluidItemId = StoredFluidItemId;
+        for (int directionIndex = 0; directionIndex < FluidCardinalDirections.Length; directionIndex++)
+        {
+            Vector2Int direction = FluidCardinalDirections[directionIndex];
+            if (tankCoordinate + direction == ignoredNeighborCoordinate
+                || !TryResolveConnectionTowards(
+                    tankCoordinate,
+                    direction,
+                    tankCoordinate,
+                    out Fluidtank adjacentTank,
+                    out int candidateFluidItemId)
+                // An adjacent tank is evaluated at its own boundary. Including
+                // its stored identity here lets a rejected, different-fluid
+                // neighbor poison every other valid side of this tank.
+                || adjacentTank != null
+                || candidateFluidItemId < 0)
+            {
+                continue;
+            }
+
+            if (resolvedFluidItemId < 0)
+            {
+                resolvedFluidItemId = candidateFluidItemId;
+                continue;
+            }
+
+            if (resolvedFluidItemId != candidateFluidItemId)
+            {
+                hasConflict = true;
+                return resolvedFluidItemId;
+            }
+        }
+
+        return resolvedFluidItemId;
     }
 
     public bool CanDockMountedPipeTowards(
@@ -1193,36 +1341,23 @@ public class Fluidtank : InstallationObject, IMapObjectUpdateTick, IMapObjectUpd
             adjacentInstallationScratch.Clear();
         }
 
-        if (connectedPipe != null)
+        if (connectedPipe != null
+            || InputOutputModule.HasRuntimePumpPipePassTowards(neighborCoordinate, -directionFromTank))
         {
-            PipeWorld world = PipeWorld.Current;
-            if (world != null
-                && world.TryGetAtCoordinate(
-                    neighborCoordinate,
-                    out PipeRuntimeRecord runtimePipe))
-            {
-                runtimePipe.TryGetConnectedFluidItemIdIgnoringStorageCoordinate(
-                    neighborCoordinate,
-                    ignoredStorageCoordinate,
-                    out neighborFluidItemId);
-            }
-            else
-            {
-                connectedPipe.TryGetConnectedFluidItemIdIgnoringStorageCoordinate(
-                    ignoredStorageCoordinate,
-                    out neighborFluidItemId);
-            }
+            Pipe.TryGetNetworkFluidInfoAt(
+                neighborCoordinate, connectedFluidIdentityContext, true, ignoredStorageCoordinate, false,
+                out neighborFluidItemId, out _, out _);
             return true;
         }
 
-        // A standard Pump endpoint is a real fluid-network connector even
-        // though it is not represented by a Pipe object. Without this check a
-        // tank adjacent to the last Pump rejects the route after the producer
-        // has already traversed the complete pump chain.
-        if (InputOutputModule.HasRuntimePumpPipePassTowards(
-                neighborCoordinate,
-                -directionFromTank))
+        // A tank may occupy the virtual PipePass cell, just as a surface pipe can.
+        if (InputOutputModule.TryGetPumpPipePassAtRuntimeCoordinate(
+                tankCoordinate, out _, out Vector2Int otherEndpoint, out Vector2Int externalDirection)
+            && externalDirection == -directionFromTank)
         {
+            Pipe.TryGetNetworkFluidInfoAt(
+                otherEndpoint, connectedFluidIdentityContext, true, ignoredStorageCoordinate, false,
+                out neighborFluidItemId, out _, out _);
             return true;
         }
 

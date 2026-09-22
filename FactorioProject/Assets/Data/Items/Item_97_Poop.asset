@@ -13,7 +13,7 @@ MonoBehaviour:
   m_Name: Item_97_Poop
   m_EditorClassIdentifier: Assembly-CSharp::ItemDefinition
   itemName: Poop
-  id: 103
+  id: 104
   mapObject: {fileID: 0}
   mapObjectArchetype: {fileID: 0}
   useMapColor: 0

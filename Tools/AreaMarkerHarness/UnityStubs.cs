@@ -18,13 +18,16 @@ namespace UnityEngine
         public static void DestroyImmediate(Object value) => Destroy(value);
     }
     public enum HideFlags { HideAndDontSave }
-    public class GameObject : Object { public int layer; }
+    public class GameObject : Object { public int layer; public bool activeInHierarchy = true; }
     public class MonoBehaviour : Object
     {
         public Transform transform = new Transform();
+        public GameObject gameObject = new GameObject();
         public bool isActiveAndEnabled = true;
         public SpriteRenderer[] Renderers = Array.Empty<SpriteRenderer>();
         public T[] GetComponentsInChildren<T>(bool includeInactive) => Renderers.Cast<T>().ToArray();
+        public T GetComponent<T>() where T : class => this as T;
+        public T GetComponentInChildren<T>(bool includeInactive) where T : class => this as T;
     }
     public class Transform
     {
@@ -92,7 +95,11 @@ namespace UnityEngine
     public static class Mathf
     {
         public static float Max(float a, float b) => Math.Max(a, b);
+        public static int Max(int a, int b) => Math.Max(a, b);
+        public static float Min(float a, float b) => Math.Min(a, b);
+        public static int Min(int a, int b) => Math.Min(a, b);
         public static int FloorToInt(float value) => (int)MathF.Floor(value);
+        public static int CeilToInt(float value) => (int)MathF.Ceiling(value);
         public static int Clamp(int value, int min, int max) => Math.Clamp(value, min, max);
     }
     public class Texture : Object { }
@@ -162,6 +169,7 @@ namespace UnityEngine
         public static void RenderMesh(RenderParams parameters, Mesh mesh, int submesh, Matrix4x4 matrix) => Calls.Add((parameters, mesh));
     }
     public static class Application { public static bool isPlaying = true; }
+    public static class Time { public static float unscaledTime; }
 }
 namespace UnityEngine.Rendering
 {
@@ -186,4 +194,80 @@ public class GameManager
     public static GameManager Instance;
     public Player Player;
     public bool InstallationPlacementActive, MapEditActive;
+}
+public class ItemDefinition
+{
+    public UnityEngine.Sprite icon;
+}
+public class InputOutputModule : UnityEngine.MonoBehaviour
+{
+    public int StoredFluidItemId = -1;
+    public static ItemDefinition ResolveItemDefinition(int itemId) => null;
+    public static bool TryGetFluidOutputInfoAtRuntimeGridCoordinate(
+        UnityEngine.Vector2Int coordinate,
+        out int fluidItemId,
+        out float liters)
+    {
+        fluidItemId = -1;
+        liters = 0f;
+        return false;
+    }
+}
+public sealed class Pump : InputOutputModule
+{
+    public bool TryGetObjectInfoFluidInfo(out int fluidItemId, out float liters, out float capacity)
+    {
+        fluidItemId = -1;
+        liters = 0f;
+        capacity = 0f;
+        return false;
+    }
+}
+public sealed class PipeRuntimeRecord
+{
+    public bool TryGetObjectInfoFluidInfo(
+        UnityEngine.Vector2Int coordinate,
+        out int fluidItemId,
+        out float liters,
+        out float capacity,
+        bool includeConnected)
+    {
+        fluidItemId = -1;
+        liters = 0f;
+        capacity = 0f;
+        return false;
+    }
+}
+public sealed class PipeWorld
+{
+    public static PipeWorld Current;
+    public bool TryGetAtCoordinate(UnityEngine.Vector2Int coordinate, out PipeRuntimeRecord record)
+    {
+        record = null;
+        return false;
+    }
+}
+public sealed class RobotArmWorld
+{
+    public static RobotArmWorld Current;
+    public int MarkerVisibilityCandidateCount;
+    public int Count;
+    public int VisibleMarkerCount;
+    internal bool RefreshAreaMarkers(AreaMarkerVisibilityContext context) => false;
+    public void AppendAreaMarkers(AreaMarkerRenderer renderer) { }
+}
+public static class MapObjectTickManager
+{
+    public static bool WaitingForWorldLoad;
+}
+public static class ProjectFApplicationLifecycle
+{
+    public static bool IsQuitting;
+}
+public static class MapObjectTickProfiler
+{
+    public readonly struct Scope : IDisposable { public void Dispose() { } }
+    public static Scope SampleLateUpdateCaller<T>() => new Scope();
+    public static Scope SampleNamed(string category, string owner, string name) => new Scope();
+    public static void AddRuntimeCounter(string category, string name, int value) { }
 }

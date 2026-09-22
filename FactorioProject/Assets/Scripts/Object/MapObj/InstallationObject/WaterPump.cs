@@ -151,7 +151,7 @@ public class WaterPump : InputOutputModule, IFacilityFlowAdapter, IFacilityFlowS
         float litersPerSecond = WaterLitersPerSecond;
         if (waterItemId >= 0 && litersPerSecond > 0f)
         {
-            litersPerSecond *= ResolveFluidOutputTransportRetention(waterItemId);
+            litersPerSecond *= ResolveFluidOutputTransportRetention(waterItemId, litersPerSecond);
         }
 
         batch.ConfigurePump(

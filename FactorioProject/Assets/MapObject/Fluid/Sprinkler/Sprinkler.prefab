@@ -355,7 +355,7 @@ MonoBehaviour:
   m_EditorClassIdentifier: Assembly-CSharp::Sprinkler
   id: 0
   objectName: Sprinkler
-  objId: 61
+  objId: 62
   itemDefinition: {fileID: 11400000, guid: e3e51ef812b2cca4a8b0033722dde4a1, type: 2}
   mapStatus:
     mapSizeX: 2
@@ -401,12 +401,15 @@ MonoBehaviour:
   - x: 0
     y: 0
     blockType: 6
+    itemDefinition: {fileID: 0}
   - x: 2
     y: 0
     blockType: 1
+    itemDefinition: {fileID: 0}
   - x: 1
     y: 0
     blockType: 1
+    itemDefinition: {fileID: 0}
   craftDuration: 5
   inputConsumeMoveInterval: 0.1
   outputMoveInterval: 0.1
