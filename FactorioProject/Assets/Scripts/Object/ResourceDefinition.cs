@@ -11,15 +11,13 @@ public enum MapMarkerSize
 }
 
 [Serializable]
-public sealed class ResourceDropEntry
+public sealed class ResourceDropItem
 {
     [SerializeField] private ItemDefinition itemDefinition;
     [SerializeField, Min(0)] private int amount = 1;
-    [SerializeField, Range(ResourceDefinition.MinGrowth, ResourceDefinition.MaxGrowth)]
-    private int minimumGrowth = ResourceDefinition.MinGrowth;
-    [SerializeField, Range(ResourceDefinition.MinGrowth, ResourceDefinition.MaxGrowth)]
-    private int maximumGrowth = ResourceDefinition.MaxGrowth;
-    [SerializeField, Range(0f, 1f)] private float dropChance = 1f;
+    [SerializeField, Range(0f, 1f)]
+    [Tooltip("Ore and oil use this as a normalized composition weight. Trees use it as an independent drop chance.")]
+    private float dropChance = 1f;
 
     public ItemDefinition ItemDefinition
     {
@@ -32,6 +30,28 @@ public sealed class ResourceDropEntry
         get => Mathf.Max(0, amount);
         set => amount = Mathf.Max(0, value);
     }
+
+    public float DropChance
+    {
+        get => Mathf.Clamp01(dropChance);
+        set => dropChance = Mathf.Clamp01(value);
+    }
+
+    public void Normalize()
+    {
+        Amount = amount;
+        DropChance = dropChance;
+    }
+}
+
+[Serializable]
+public sealed class ResourceDropEntry
+{
+    [SerializeField, Range(ResourceDefinition.MinGrowth, ResourceDefinition.MaxGrowth)]
+    private int minimumGrowth = ResourceDefinition.MinGrowth;
+    [SerializeField, Range(ResourceDefinition.MinGrowth, ResourceDefinition.MaxGrowth)]
+    private int maximumGrowth = ResourceDefinition.MaxGrowth;
+    [SerializeField] private List<ResourceDropItem> items = new List<ResourceDropItem>();
 
     public int MinimumGrowth
     {
@@ -61,10 +81,12 @@ public sealed class ResourceDropEntry
             ResourceDefinition.MaxGrowth);
     }
 
-    public float DropChance
+    public IReadOnlyList<ResourceDropItem> Items => items ??= new List<ResourceDropItem>();
+
+    public void AddItem(ResourceDropItem item)
     {
-        get => Mathf.Clamp01(dropChance);
-        set => dropChance = Mathf.Clamp01(value);
+        items ??= new List<ResourceDropItem>();
+        items.Add(item ?? new ResourceDropItem());
     }
 
     public bool Matches(float growth)
@@ -74,10 +96,14 @@ public sealed class ResourceDropEntry
 
     public void Normalize()
     {
-        Amount = amount;
         MinimumGrowth = minimumGrowth;
         MaximumGrowth = maximumGrowth;
-        DropChance = dropChance;
+        items ??= new List<ResourceDropItem>();
+        for (int i = 0; i < items.Count; i++)
+        {
+            items[i] ??= new ResourceDropItem();
+            items[i].Normalize();
+        }
     }
 }
 

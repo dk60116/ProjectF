@@ -26,36 +26,42 @@ MonoBehaviour:
   totalGrowthFertilizerAmount: 200
   growthDurationPerLevelSeconds: 7
   dropItems:
-  - itemDefinition: {fileID: 11400000, guid: cc54448c2b8e64c40a4458e259ad7222, type: 2}
-    amount: 1
-    minimumGrowth: 4
+  - minimumGrowth: 4
     maximumGrowth: 10
-    dropChance: 1
-  - itemDefinition: {fileID: 11400000, guid: cc54448c2b8e64c40a4458e259ad7222, type: 2}
-    amount: 1
-    minimumGrowth: 5
+    items:
+    - itemDefinition: {fileID: 11400000, guid: cc54448c2b8e64c40a4458e259ad7222, type: 2}
+      amount: 1
+      dropChance: 1
+  - minimumGrowth: 5
     maximumGrowth: 10
-    dropChance: 1
-  - itemDefinition: {fileID: 11400000, guid: cc54448c2b8e64c40a4458e259ad7222, type: 2}
-    amount: 1
-    minimumGrowth: 6
+    items:
+    - itemDefinition: {fileID: 11400000, guid: cc54448c2b8e64c40a4458e259ad7222, type: 2}
+      amount: 1
+      dropChance: 1
+  - minimumGrowth: 6
     maximumGrowth: 10
-    dropChance: 1
-  - itemDefinition: {fileID: 11400000, guid: 0b21f1cf2a22a094e88ddb0300d635c2, type: 2}
-    amount: 1
-    minimumGrowth: 8
+    items:
+    - itemDefinition: {fileID: 11400000, guid: cc54448c2b8e64c40a4458e259ad7222, type: 2}
+      amount: 1
+      dropChance: 1
+  - minimumGrowth: 8
     maximumGrowth: 10
-    dropChance: 1
-  - itemDefinition: {fileID: 11400000, guid: 0b21f1cf2a22a094e88ddb0300d635c2, type: 2}
-    amount: 1
-    minimumGrowth: 9
+    items:
+    - itemDefinition: {fileID: 11400000, guid: 0b21f1cf2a22a094e88ddb0300d635c2, type: 2}
+      amount: 1
+      dropChance: 1
+  - minimumGrowth: 9
     maximumGrowth: 10
-    dropChance: 1
-  - itemDefinition: {fileID: 11400000, guid: 0b21f1cf2a22a094e88ddb0300d635c2, type: 2}
-    amount: 1
-    minimumGrowth: 10
+    items:
+    - itemDefinition: {fileID: 11400000, guid: 0b21f1cf2a22a094e88ddb0300d635c2, type: 2}
+      amount: 1
+      dropChance: 1
+  - minimumGrowth: 10
     maximumGrowth: 10
-    dropChance: 1
+    items:
+    - itemDefinition: {fileID: 11400000, guid: 0b21f1cf2a22a094e88ddb0300d635c2, type: 2}
+      amount: 1
+      dropChance: 1
   defaultResourceCount: 1
   defaultGetCount: 4
   defaultMaxGauge: 10

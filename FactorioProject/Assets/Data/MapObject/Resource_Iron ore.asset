@@ -15,7 +15,7 @@ MonoBehaviour:
   resourceName: Iron ore
   resourceIcon: {fileID: 21300000, guid: 4bb14f536f9358e4ca45d0d05df50b65, type: 3}
   mapColorMode: 1
-  mapColor: {r: 0.5849056, g: 0.5849056, b: 0.5849056, a: 1}
+  mapColor: {r: 0.6745283, g: 0.90926677, b: 1, a: 1}
   mapMarkerSize: 0
   prefab: {fileID: 2667034222479840192, guid: 14f483af5ebd67544b8067e0db8985d3, type: 3}
   harvestMode: 1
@@ -25,7 +25,13 @@ MonoBehaviour:
   totalGrowthWaterLiters: 0
   totalGrowthFertilizerAmount: 0
   growthDurationPerLevelSeconds: 0
-  dropItems: []
+  dropItems:
+  - minimumGrowth: 0
+    maximumGrowth: 10
+    items:
+    - itemDefinition: {fileID: 11400000, guid: 97f6dea012d4db649abc845562a30b93, type: 2}
+      amount: 1
+      dropChance: 1
   defaultResourceCount: 1
   defaultGetCount: 1
   defaultMaxGauge: 10

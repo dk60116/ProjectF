@@ -13,7 +13,7 @@ MonoBehaviour:
   m_Name: Item_16_Iron plate
   m_EditorClassIdentifier: 
   itemName: Iron plate
-  id: 22
+  id: 24
   mapObject: {fileID: 0}
   mapObjectArchetype: {fileID: 0}
   useMapColor: 0
@@ -39,6 +39,7 @@ MonoBehaviour:
   fluidStorageLiters: 0
   fluidDisplayColor: {r: 1, g: 1, b: 1, a: 1}
   fluidOutputLitersPerSecond: 1
+  pumpPressureLitersPerSecond: 5
   bucketFillDurationSeconds: 10
   undergroundPipeMaxDistance: 5
   energyType: 0

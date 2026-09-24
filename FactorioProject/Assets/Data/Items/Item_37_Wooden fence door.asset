@@ -13,7 +13,7 @@ MonoBehaviour:
   m_Name: Item_37_Wooden fence door
   m_EditorClassIdentifier: 
   itemName: Wooden Fence Door
-  id: 75
+  id: 78
   mapObject: {fileID: 3131218003902393541, guid: f792eb3818b43ab4aa29e8e6a5a7e454, type: 3}
   mapObjectArchetype: {fileID: 11400000, guid: 4ab69ee0ed80ada4791d4debd9db12c9, type: 2}
   useMapColor: 1
@@ -41,6 +41,7 @@ MonoBehaviour:
   fluidStorageLiters: 0
   fluidDisplayColor: {r: 1, g: 1, b: 1, a: 1}
   fluidOutputLitersPerSecond: 1
+  pumpPressureLitersPerSecond: 5
   bucketFillDurationSeconds: 10
   undergroundPipeMaxDistance: 5
   energyType: 0

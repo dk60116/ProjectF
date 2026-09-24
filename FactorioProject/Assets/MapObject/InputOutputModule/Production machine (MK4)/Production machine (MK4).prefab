@@ -49,7 +49,7 @@ MonoBehaviour:
   m_EditorClassIdentifier: 
   id: 0
   objectName: Production machine (MK4)
-  objId: 70
+  objId: 73
   itemDefinition: {fileID: 11400000, guid: e288a378c27b2794da788e40d427075d, type: 2}
   mapStatus:
     mapSizeX: 2
@@ -77,16 +77,40 @@ MonoBehaviour:
   parentInputOutputModuleItem: {fileID: 11400000, guid: cdc8e149b82cd7947b30ef76b473abfc, type: 2}
   inputOutputPairs:
   - inputs:
-    - itemDefinition: {fileID: 11400000, guid: 7a8ea2c79da84f048815b5cbfe397fd1, type: 2}
-      count: 2
-    - itemDefinition: {fileID: 11400000, guid: e38b0f871b2a4ef4b80c9d5864a2b5e0, type: 2}
+    - itemDefinition: {fileID: 11400000, guid: 22f7c943800c7d14987cc0b65ed337f6, type: 2}
+      count: 6
+    - itemDefinition: {fileID: 11400000, guid: a42f84aea6bbe46419a3777181e987a1, type: 2}
+      count: 8
+    - itemDefinition: {fileID: 11400000, guid: ee57335a932a96a49963ace76adef614, type: 2}
       count: 3
-    - itemDefinition: {fileID: 11400000, guid: 21883f622876a3f47a1c1f90a4b0004e, type: 2}
-      count: 2
     - itemDefinition: {fileID: 11400000, guid: a2393aedc145bbd4a8de4f74073c1eca, type: 2}
-      count: 2
+      count: 10
     outputs:
-    - itemDefinition: {fileID: 11400000, guid: a74ba1d8dd011f34ca2a0c33b1aa5725, type: 2}
+    - itemDefinition: {fileID: 11400000, guid: d4d9ce93c017a2e4d8c5891bb4f4e91c, type: 2}
+      count: 1
+  - inputs:
+    - itemDefinition: {fileID: 11400000, guid: 7a8ea2c79da84f048815b5cbfe397fd1, type: 2}
+      count: 3
+    - itemDefinition: {fileID: 11400000, guid: a025b03cf674e024884437c532dfe480, type: 2}
+      count: 5
+    - itemDefinition: {fileID: 11400000, guid: ee57335a932a96a49963ace76adef614, type: 2}
+      count: 5
+    - itemDefinition: {fileID: 11400000, guid: 0fff3b18f5681864380d5935d5e1cd08, type: 2}
+      count: 3
+    outputs:
+    - itemDefinition: {fileID: 11400000, guid: f73deaa4f06e2164a9a37afae9ef1854, type: 2}
+      count: 1
+  - inputs:
+    - itemDefinition: {fileID: 11400000, guid: cdc8e149b82cd7947b30ef76b473abfc, type: 2}
+      count: 1
+    - itemDefinition: {fileID: 11400000, guid: d920f99b12ae8ba4eb521eb6252da50a, type: 2}
+      count: 4
+    - itemDefinition: {fileID: 11400000, guid: 0fff3b18f5681864380d5935d5e1cd08, type: 2}
+      count: 2
+    - itemDefinition: {fileID: 11400000, guid: 6a913ce143edf9c42b1a4c2b72cbdde8, type: 2}
+      count: 1
+    outputs:
+    - itemDefinition: {fileID: 11400000, guid: e288a378c27b2794da788e40d427075d, type: 2}
       count: 1
   - inputs:
     - itemDefinition: {fileID: 11400000, guid: a42f84aea6bbe46419a3777181e987a1, type: 2}

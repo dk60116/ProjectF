@@ -72,19 +72,24 @@ namespace ProjectF.MapObjects
                 : null;
             for (int i = 0; dropItems != null && i < dropItems.Count; i++)
             {
-                ItemDefinition itemDefinition = dropItems[i]?.ItemDefinition;
-                if (itemDefinition == null
-                    || !string.Equals(
-                        itemDefinition.itemName,
-                        AppleItemName,
-                        StringComparison.OrdinalIgnoreCase))
+                ResourceDropEntry entry = dropItems[i];
+                IReadOnlyList<ResourceDropItem> items = entry?.Items;
+                for (int itemIndex = 0; items != null && itemIndex < items.Count; itemIndex++)
                 {
-                    continue;
-                }
+                    ItemDefinition itemDefinition = items[itemIndex]?.ItemDefinition;
+                    if (itemDefinition == null
+                        || !string.Equals(
+                            itemDefinition.itemName,
+                            AppleItemName,
+                            StringComparison.OrdinalIgnoreCase))
+                    {
+                        continue;
+                    }
 
-                itemId = itemDefinition.id;
-                itemCount = RollNextConfiguredHarvestDropCount(itemId);
-                return itemId >= 0 && itemCount > 0;
+                    itemId = itemDefinition.id;
+                    itemCount = RollNextConfiguredHarvestDropCount(itemId);
+                    return itemId >= 0 && itemCount > 0;
+                }
             }
 
             return false;
@@ -96,27 +101,50 @@ namespace ProjectF.MapObjects
             IReadOnlyList<ResourceDropEntry> drops = Definition != null ? Definition.DropItems : null;
             for (int i = 0; drops != null && i < drops.Count; i++)
             {
-                ItemDefinition seed = drops[i]?.ItemDefinition;
-                if (seed == null || !seed.isSeed || seed.id < 0)
-                    continue;
-
-                bool alreadyCollected = false;
-                for (int j = 0; j < i; j++)
+                IReadOnlyList<ResourceDropItem> items = drops[i]?.Items;
+                for (int itemIndex = 0; items != null && itemIndex < items.Count; itemIndex++)
                 {
-                    if (drops[j]?.ItemDefinition != null && drops[j].ItemDefinition.id == seed.id)
+                    ItemDefinition seed = items[itemIndex]?.ItemDefinition;
+                    if (seed == null
+                        || !seed.isSeed
+                        || seed.id < 0
+                        || WasDropItemSeenBefore(drops, i, itemIndex, seed.id))
                     {
-                        alreadyCollected = true;
-                        break;
+                        continue;
+                    }
+
+                    // Use the same growth/probability/depletion roll as other configured tree rewards.
+                    int count = RollNextConfiguredHarvestDropCount(seed.id);
+                    if (count > 0)
+                    {
+                        results.Add(new KeyValuePair<int, int>(seed.id, count));
                     }
                 }
-                if (alreadyCollected)
-                    continue;
-
-                // Use the same growth/probability/depletion roll as other configured tree rewards.
-                int count = RollNextConfiguredHarvestDropCount(seed.id);
-                if (count > 0)
-                    results.Add(new KeyValuePair<int, int>(seed.id, count));
             }
+        }
+
+        private static bool WasDropItemSeenBefore(
+            IReadOnlyList<ResourceDropEntry> entries,
+            int currentEntryIndex,
+            int currentItemIndex,
+            int itemId)
+        {
+            for (int entryIndex = 0; entryIndex <= currentEntryIndex; entryIndex++)
+            {
+                IReadOnlyList<ResourceDropItem> items = entries[entryIndex]?.Items;
+                int itemLimit = entryIndex == currentEntryIndex
+                    ? currentItemIndex
+                    : items?.Count ?? 0;
+                for (int itemIndex = 0; items != null && itemIndex < itemLimit; itemIndex++)
+                {
+                    if (items[itemIndex]?.ItemDefinition?.id == itemId)
+                    {
+                        return true;
+                    }
+                }
+            }
+
+            return false;
         }
 
         public void SetGrowth(float value)
@@ -364,20 +392,25 @@ namespace ProjectF.MapObjects
             for (int i = 0; dropItems != null && i < dropItems.Count; i++)
             {
                 ResourceDropEntry entry = dropItems[i];
-                ItemDefinition itemDefinition = entry?.ItemDefinition;
-                if (itemDefinition == null
-                    || entry.Amount <= 0
-                    || entry.DropChance <= 0f
-                    || !string.Equals(
-                        itemDefinition.itemName,
-                        AppleItemName,
-                        StringComparison.OrdinalIgnoreCase))
+                IReadOnlyList<ResourceDropItem> items = entry?.Items;
+                for (int itemIndex = 0; items != null && itemIndex < items.Count; itemIndex++)
                 {
-                    continue;
-                }
+                    ResourceDropItem item = items[itemIndex];
+                    ItemDefinition itemDefinition = item?.ItemDefinition;
+                    if (itemDefinition == null
+                        || item.Amount <= 0
+                        || item.DropChance <= 0f
+                        || !string.Equals(
+                            itemDefinition.itemName,
+                            AppleItemName,
+                            StringComparison.OrdinalIgnoreCase))
+                    {
+                        continue;
+                    }
 
-                minimumGrowth = Mathf.Min(minimumGrowth, entry.MinimumGrowth);
-                found = true;
+                    minimumGrowth = Mathf.Min(minimumGrowth, entry.MinimumGrowth);
+                    found = true;
+                }
             }
 
             return found;

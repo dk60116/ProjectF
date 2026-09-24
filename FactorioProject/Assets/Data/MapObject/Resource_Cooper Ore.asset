@@ -26,11 +26,12 @@ MonoBehaviour:
   totalGrowthFertilizerAmount: 0
   growthDurationPerLevelSeconds: 0
   dropItems:
-  - itemDefinition: {fileID: 11400000, guid: 9f4a67f687b990743914d4045038aa8e, type: 2}
-    amount: 1
-    minimumGrowth: 0
+  - minimumGrowth: 0
     maximumGrowth: 10
-    dropChance: 1
+    items:
+    - itemDefinition: {fileID: 11400000, guid: 9f4a67f687b990743914d4045038aa8e, type: 2}
+      amount: 1
+      dropChance: 1
   defaultResourceCount: 1
   defaultGetCount: 1
   defaultMaxGauge: 10

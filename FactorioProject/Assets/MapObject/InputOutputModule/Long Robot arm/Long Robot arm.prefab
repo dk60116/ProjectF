@@ -415,7 +415,7 @@ MonoBehaviour:
   m_EditorClassIdentifier: 
   id: 0
   objectName: Long Robot arm
-  objId: 66
+  objId: 69
   itemDefinition: {fileID: 11400000, guid: 3dcbbe571d74ad449bca45a7842feabe, type: 2}
   mapStatus:
     mapSizeX: 1

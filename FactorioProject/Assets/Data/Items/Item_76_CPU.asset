@@ -13,14 +13,14 @@ MonoBehaviour:
   m_Name: Item_76_CPU
   m_EditorClassIdentifier: Assembly-CSharp::ItemDefinition
   itemName: CPU
-  id: 45
+  id: 48
   mapObject: {fileID: 0}
   mapObjectArchetype: {fileID: 0}
   useMapColor: 0
   mapColor: {r: 1, g: 1, b: 1, a: 1}
   mapMarkerSize: 1
   portableMesh: {fileID: 4300000, guid: 8f957552c378891429b37cfa8a4678d2, type: 2}
-  portableMat: {fileID: 2100000, guid: e18a1b4c03ce71e4b933769d18bbaf03, type: 2}
+  portableMat: {fileID: 2100000, guid: 40a1655ae44e90e4ab861fe78c0afaba, type: 2}
   icon: {fileID: 21300000, guid: 20b8294ab69359c4888a20262c65887b, type: 3}
   oneItem: 0
   interactionButtonList: []
@@ -39,6 +39,7 @@ MonoBehaviour:
   fluidStorageLiters: 0
   fluidDisplayColor: {r: 1, g: 1, b: 1, a: 1}
   fluidOutputLitersPerSecond: 1
+  pumpPressureLitersPerSecond: 5
   bucketFillDurationSeconds: 10
   undergroundPipeMaxDistance: 5
   energyType: 0

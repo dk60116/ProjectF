@@ -10,18 +10,18 @@ MonoBehaviour:
   m_Enabled: 1
   m_EditorHideFlags: 0
   m_Script: {fileID: 11500000, guid: ccc5c26867f3fd3479193fd24dec463e, type: 3}
-  m_Name: Item_17_CooperPlate
-  m_EditorClassIdentifier: 
-  itemName: CooperPlate
-  id: 23
+  m_Name: Item_25_Silicon
+  m_EditorClassIdentifier: Assembly-CSharp::ItemDefinition
+  itemName: Silicon
+  id: 30
   mapObject: {fileID: 0}
   mapObjectArchetype: {fileID: 0}
   useMapColor: 0
   mapColor: {r: 1, g: 1, b: 1, a: 1}
   mapMarkerSize: 1
-  portableMesh: {fileID: 4300000, guid: ae2adc0685fa9a64994b8105637502b4, type: 2}
-  portableMat: {fileID: 2100000, guid: 0efa5e6334133404ea33edadb00bb5ae, type: 2}
-  icon: {fileID: 21300000, guid: 81e5db3c65898a6409a8fc7873104ac5, type: 3}
+  portableMesh: {fileID: 4300000, guid: 16f68b71027ebd448b57fa438a173f81, type: 2}
+  portableMat: {fileID: 2100000, guid: 604046f9c8a510144b2c00a307191367, type: 2}
+  icon: {fileID: 21300000, guid: 956519ec37a7cc24fbaa5cd219953197, type: 3}
   oneItem: 0
   interactionButtonList: []
   lightMode: 0
@@ -39,6 +39,7 @@ MonoBehaviour:
   fluidStorageLiters: 0
   fluidDisplayColor: {r: 1, g: 1, b: 1, a: 1}
   fluidOutputLitersPerSecond: 1
+  pumpPressureLitersPerSecond: 5
   bucketFillDurationSeconds: 10
   undergroundPipeMaxDistance: 5
   energyType: 0

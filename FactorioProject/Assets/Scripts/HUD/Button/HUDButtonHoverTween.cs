@@ -29,7 +29,9 @@ public sealed class HUDButtonHoverTween : MonoBehaviour, IPointerEnterHandler, I
     private Vector2 hoverBaseSize;
     private Vector3 hoverBaseLocalScale;
     private Vector3 hoverBaseWorldCenter;
+    private Vector3 hoverBaseReferenceCenter;
     private Vector3 hoverBaseAnchoredPosition;
+    private Transform hoverCenterReference;
     private readonly Vector3[] worldCorners = new Vector3[4];
     private bool hasHoverBaseSize;
     private bool hasHoverBaseGeometry;
@@ -45,6 +47,8 @@ public sealed class HUDButtonHoverTween : MonoBehaviour, IPointerEnterHandler, I
         public Vector3 baseLocalScale;
         public Vector3 baseAnchoredPosition;
         public Vector3 baseWorldCenter;
+        public Vector3 baseReferenceCenter;
+        public Transform centerReference;
     }
 
     private void Awake()
@@ -71,6 +75,7 @@ public sealed class HUDButtonHoverTween : MonoBehaviour, IPointerEnterHandler, I
         pointerInside = false;
         hasHoverBaseSize = false;
         hasHoverBaseGeometry = false;
+        hoverCenterReference = null;
     }
 
     private void Update()
@@ -251,6 +256,7 @@ public sealed class HUDButtonHoverTween : MonoBehaviour, IPointerEnterHandler, I
             RestoreHoverGeometryIfOwned();
             hasHoverBaseSize = false;
             hasHoverBaseGeometry = false;
+            hoverCenterReference = null;
         }
     }
 
@@ -281,6 +287,7 @@ public sealed class HUDButtonHoverTween : MonoBehaviour, IPointerEnterHandler, I
         {
             hasHoverBaseGeometry = false;
             hoverBaseSize = Vector2.zero;
+            hoverCenterReference = null;
             return;
         }
 
@@ -288,6 +295,10 @@ public sealed class HUDButtonHoverTween : MonoBehaviour, IPointerEnterHandler, I
         hoverBaseLocalScale = resolvedSizeTarget.localScale;
         hoverBaseAnchoredPosition = resolvedSizeTarget.anchoredPosition3D;
         hoverBaseWorldCenter = GetWorldCenter(resolvedSizeTarget);
+        hoverCenterReference = resolvedSizeTarget.parent;
+        hoverBaseReferenceCenter = hoverCenterReference != null
+            ? hoverCenterReference.InverseTransformPoint(hoverBaseWorldCenter)
+            : hoverBaseWorldCenter;
         hasHoverBaseGeometry = true;
     }
 
@@ -298,7 +309,10 @@ public sealed class HUDButtonHoverTween : MonoBehaviour, IPointerEnterHandler, I
             return;
         }
 
-        Vector3 centerOffset = hoverBaseWorldCenter - GetWorldCenter(resolvedSizeTarget);
+        Vector3 expectedWorldCenter = hoverCenterReference != null
+            ? hoverCenterReference.TransformPoint(hoverBaseReferenceCenter)
+            : hoverBaseWorldCenter;
+        Vector3 centerOffset = expectedWorldCenter - GetWorldCenter(resolvedSizeTarget);
         if (centerOffset.sqrMagnitude > 0.000001f)
         {
             resolvedSizeTarget.position += centerOffset;
@@ -364,12 +378,18 @@ public sealed class HUDButtonHoverTween : MonoBehaviour, IPointerEnterHandler, I
                 continue;
             }
 
+            Vector3 baseWorldCenter = GetWorldCenter(compensationTarget);
+            Transform centerReference = resolvedSizeTarget.parent;
             nestedButtonCompensations.Add(new NestedButtonSizeCompensation
             {
                 target = compensationTarget,
                 baseLocalScale = compensationTarget.localScale,
                 baseAnchoredPosition = compensationTarget.anchoredPosition3D,
-                baseWorldCenter = GetWorldCenter(compensationTarget)
+                baseWorldCenter = baseWorldCenter,
+                centerReference = centerReference,
+                baseReferenceCenter = centerReference != null
+                    ? centerReference.InverseTransformPoint(baseWorldCenter)
+                    : baseWorldCenter
             });
         }
     }
@@ -478,7 +498,10 @@ public sealed class HUDButtonHoverTween : MonoBehaviour, IPointerEnterHandler, I
                 DivideOrFallback(compensation.baseLocalScale.y, parentScaleRatio.y),
                 DivideOrFallback(compensation.baseLocalScale.z, parentScaleRatio.z));
 
-            Vector3 centerOffset = compensation.baseWorldCenter - GetWorldCenter(compensation.target);
+            Vector3 expectedWorldCenter = compensation.centerReference != null
+                ? compensation.centerReference.TransformPoint(compensation.baseReferenceCenter)
+                : compensation.baseWorldCenter;
+            Vector3 centerOffset = expectedWorldCenter - GetWorldCenter(compensation.target);
             if (centerOffset.sqrMagnitude > 0.000001f)
             {
                 compensation.target.position += centerOffset;

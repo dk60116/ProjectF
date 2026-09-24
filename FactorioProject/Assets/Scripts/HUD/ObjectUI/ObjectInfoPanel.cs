@@ -406,6 +406,12 @@ public class ObjectInfoPanel : MonoBehaviour
             return null;
         }
 
+        ResourceDefinition definition = resource.Definition;
+        if (definition != null && !string.IsNullOrWhiteSpace(definition.resourceName))
+        {
+            return definition.resourceName.Trim();
+        }
+
         if (!string.IsNullOrWhiteSpace(resource.ObjectName))
         {
             return resource.ObjectName.Trim();

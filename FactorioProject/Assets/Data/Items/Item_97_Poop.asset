@@ -13,7 +13,7 @@ MonoBehaviour:
   m_Name: Item_97_Poop
   m_EditorClassIdentifier: Assembly-CSharp::ItemDefinition
   itemName: Poop
-  id: 104
+  id: 107
   mapObject: {fileID: 0}
   mapObjectArchetype: {fileID: 0}
   useMapColor: 0
@@ -40,6 +40,7 @@ MonoBehaviour:
   fluidStorageLiters: 0
   fluidDisplayColor: {r: 1, g: 1, b: 1, a: 1}
   fluidOutputLitersPerSecond: 1
+  pumpPressureLitersPerSecond: 5
   bucketFillDurationSeconds: 10
   undergroundPipeMaxDistance: 5
   energyType: 5

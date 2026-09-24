@@ -13,7 +13,7 @@ MonoBehaviour:
   m_Name: Item_32_Steam generator
   m_EditorClassIdentifier: 
   itemName: Steam generator
-  id: 61
+  id: 64
   mapObject: {fileID: 7245704639458897854, guid: 51e722e4dbe80d84e91d00b9220f57e0, type: 3}
   mapObjectArchetype: {fileID: 11400000, guid: a68bffaed81a994479fe9c83d5784f7e, type: 2}
   useMapColor: 1
@@ -39,6 +39,7 @@ MonoBehaviour:
   fluidStorageLiters: 50
   fluidDisplayColor: {r: 1, g: 1, b: 1, a: 1}
   fluidOutputLitersPerSecond: 1
+  pumpPressureLitersPerSecond: 5
   bucketFillDurationSeconds: 10
   undergroundPipeMaxDistance: 5
   energyType: 0

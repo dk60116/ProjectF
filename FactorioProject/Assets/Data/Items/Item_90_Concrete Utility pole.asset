@@ -13,7 +13,7 @@ MonoBehaviour:
   m_Name: Item_90_Concrete Utility pole
   m_EditorClassIdentifier: Assembly-CSharp::ItemDefinition
   itemName: Concrete Utility pole
-  id: 42
+  id: 45
   mapObject: {fileID: 2570451748998091923, guid: db1c88c08b1b0f24a9ffca7c01daac56, type: 3}
   mapObjectArchetype: {fileID: 11400000, guid: b6afbb5a50fdc964f9a0a944e4abe3e2, type: 2}
   useMapColor: 1
@@ -39,6 +39,7 @@ MonoBehaviour:
   fluidStorageLiters: 0
   fluidDisplayColor: {r: 1, g: 1, b: 1, a: 1}
   fluidOutputLitersPerSecond: 1
+  pumpPressureLitersPerSecond: 5
   bucketFillDurationSeconds: 10
   undergroundPipeMaxDistance: 5
   energyType: 0

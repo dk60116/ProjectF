@@ -9,6 +9,7 @@ Coverage:
 - 1,000 markers sharing two layers, scratch-list ownership, unchanged configuration/frame reuse.
 - Visibility transitions, disable/re-enable, duplicate registration, clearing and native resource disposal.
 - Parent movement/reconfiguration, icon rotation with non-uniform scale, atlas UV and alpha preservation.
+- Pipe input and output marker builders use their matching recipe direction; virtual outputs include crude oil from an oil drilling machine.
 - Moving preview changes leave placed mesh uploads untouched.
 - Normal, station and preview depth/queue configuration; negative chunk coordinates and absent icons.
 - More than 65,535 vertices in one batch with valid 32-bit triangle indices.

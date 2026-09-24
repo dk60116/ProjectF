@@ -388,9 +388,9 @@ public sealed class ResourceDataEditorWindow : EditorWindow
         currentGauge.intValue = Mathf.Clamp(currentGauge.intValue, 0, maxGauge.intValue);
 
         GUILayout.Space(8f);
-        DrawFarmingDropItemsSection(serializedDefinition);
+        bool dropItemsChanged = DrawFarmingDropItemsSection(serializedDefinition);
 
-        bool changed = EditorGUI.EndChangeCheck();
+        bool changed = EditorGUI.EndChangeCheck() || dropItemsChanged;
         serializedDefinition.ApplyModifiedProperties();
         if (changed)
         {
@@ -493,15 +493,21 @@ public sealed class ResourceDataEditorWindow : EditorWindow
         EditorGUI.indentLevel--;
     }
 
-    private void DrawFarmingDropItemsSection(SerializedObject serializedDefinition)
+    private bool DrawFarmingDropItemsSection(SerializedObject serializedDefinition)
     {
         SerializedProperty dropItems = serializedDefinition.FindProperty("dropItems");
         if (dropItems == null)
         {
-            return;
+            return false;
         }
 
-        EditorGUILayout.LabelField("Farming Drop Items", EditorStyles.miniBoldLabel);
+        bool dataChanged = false;
+        bool usesDeterministicComposition = selectedDefinition != null
+                                            && selectedDefinition.placementCategory
+                                            != ResourceDefinition.PlacementCategory.Tree;
+        EditorGUILayout.LabelField(
+            usesDeterministicComposition ? "Resource Composition" : "Farming Drop Items",
+            EditorStyles.miniBoldLabel);
         int removeIndex = -1;
         int moveFromIndex = -1;
         int moveToIndex = -1;
@@ -509,11 +515,9 @@ public sealed class ResourceDataEditorWindow : EditorWindow
         for (int i = 0; i < dropItems.arraySize; i++)
         {
             SerializedProperty entry = dropItems.GetArrayElementAtIndex(i);
-            SerializedProperty itemDefinition = entry.FindPropertyRelative("itemDefinition");
-            SerializedProperty amount = entry.FindPropertyRelative("amount");
             SerializedProperty minimumGrowth = entry.FindPropertyRelative("minimumGrowth");
             SerializedProperty maximumGrowth = entry.FindPropertyRelative("maximumGrowth");
-            SerializedProperty dropChance = entry.FindPropertyRelative("dropChance");
+            SerializedProperty items = entry.FindPropertyRelative("items");
 
             EditorGUILayout.BeginVertical("box");
             EditorGUILayout.BeginHorizontal();
@@ -537,24 +541,12 @@ public sealed class ResourceDataEditorWindow : EditorWindow
                 }
             }
 
-            if (GUILayout.Button("Remove", EditorStyles.miniButtonRight, GUILayout.Width(64f)))
+            if (GUILayout.Button("Remove Entry", EditorStyles.miniButtonRight, GUILayout.Width(88f)))
             {
                 removeIndex = i;
             }
 
             EditorGUILayout.EndHorizontal();
-
-            ItemDefinition currentItem =
-                itemDefinition.objectReferenceValue as ItemDefinition;
-            int entryIndex = i;
-            dropItemDropdown.Draw(
-                "Item",
-                currentItem,
-                selectedItem => ApplyDropItemSelection(entryIndex, selectedItem));
-
-            amount.intValue = Mathf.Max(
-                0,
-                EditorGUILayout.IntField("Amount", amount.intValue));
             minimumGrowth.intValue = EditorGUILayout.IntSlider(
                 "Minimum Growth",
                 minimumGrowth.intValue,
@@ -565,20 +557,74 @@ public sealed class ResourceDataEditorWindow : EditorWindow
                 maximumGrowth.intValue,
                 minimumGrowth.intValue,
                 ResourceDefinition.MaxGrowth);
-            float chancePercent = EditorGUILayout.Slider(
-                "Drop Chance (%)",
-                Mathf.Clamp01(dropChance.floatValue) * 100f,
-                0f,
-                100f);
-            dropChance.floatValue = chancePercent * 0.01f;
 
-            if (currentItem != null)
+            int removeItemIndex = -1;
+            for (int itemIndex = 0; items != null && itemIndex < items.arraySize; itemIndex++)
             {
-                Rect itemNameRect = EditorGUILayout.GetControlRect();
-                GUI.Label(
-                    itemNameRect,
-                    $"Item ID {currentItem.id} · {currentItem.itemName}",
-                    EditorStyles.whiteLabel);
+                SerializedProperty item = items.GetArrayElementAtIndex(itemIndex);
+                SerializedProperty itemDefinition = item.FindPropertyRelative("itemDefinition");
+                SerializedProperty amount = item.FindPropertyRelative("amount");
+                SerializedProperty dropChance = item.FindPropertyRelative("dropChance");
+
+                EditorGUILayout.BeginVertical(EditorStyles.helpBox);
+                EditorGUILayout.BeginHorizontal();
+                EditorGUILayout.LabelField($"Item {itemIndex + 1}", EditorStyles.miniBoldLabel);
+                GUILayout.FlexibleSpace();
+                if (GUILayout.Button("Remove Item", EditorStyles.miniButton, GUILayout.Width(88f)))
+                {
+                    removeItemIndex = itemIndex;
+                }
+
+                EditorGUILayout.EndHorizontal();
+
+                ItemDefinition currentItem =
+                    itemDefinition.objectReferenceValue as ItemDefinition;
+                int entryIndex = i;
+                int nestedItemIndex = itemIndex;
+                dropItemDropdown.Draw(
+                    "Item",
+                    currentItem,
+                    selectedItem => ApplyDropItemSelection(
+                        entryIndex,
+                        nestedItemIndex,
+                        selectedItem));
+
+                amount.intValue = Mathf.Max(
+                    0,
+                    EditorGUILayout.IntField("Amount", amount.intValue));
+                float chancePercent = EditorGUILayout.Slider(
+                    usesDeterministicComposition
+                        ? "Composition Weight (%)"
+                        : "Drop Chance (%)",
+                    Mathf.Clamp01(dropChance.floatValue) * 100f,
+                    0f,
+                    100f);
+                dropChance.floatValue = chancePercent * 0.01f;
+
+                if (currentItem != null)
+                {
+                    Rect itemNameRect = EditorGUILayout.GetControlRect();
+                    GUI.Label(
+                        itemNameRect,
+                        $"Item ID {currentItem.id} · {currentItem.itemName}",
+                        EditorStyles.whiteLabel);
+                }
+
+                EditorGUILayout.EndVertical();
+            }
+
+            if (removeItemIndex >= 0)
+            {
+                items.DeleteArrayElementAtIndex(removeItemIndex);
+                dataChanged = true;
+            }
+
+            if (GUILayout.Button("Add Item"))
+            {
+                int newItemIndex = items.arraySize;
+                items.InsertArrayElementAtIndex(newItemIndex);
+                InitializeDropItem(items.GetArrayElementAtIndex(newItemIndex));
+                dataChanged = true;
             }
 
             EditorGUILayout.EndVertical();
@@ -587,39 +633,77 @@ public sealed class ResourceDataEditorWindow : EditorWindow
         if (removeIndex >= 0)
         {
             dropItems.DeleteArrayElementAtIndex(removeIndex);
+            dataChanged = true;
         }
         else if (moveFromIndex >= 0 && moveToIndex >= 0)
         {
             dropItems.MoveArrayElement(moveFromIndex, moveToIndex);
+            dataChanged = true;
         }
 
-        if (GUILayout.Button("Add Drop Item"))
+        if (GUILayout.Button("Add Entry"))
         {
             int newIndex = dropItems.arraySize;
             dropItems.InsertArrayElementAtIndex(newIndex);
             SerializedProperty entry = dropItems.GetArrayElementAtIndex(newIndex);
-            entry.FindPropertyRelative("itemDefinition").objectReferenceValue = null;
-            entry.FindPropertyRelative("amount").intValue = 1;
             entry.FindPropertyRelative("minimumGrowth").intValue =
                 ResourceDefinition.MinGrowth;
             entry.FindPropertyRelative("maximumGrowth").intValue =
                 ResourceDefinition.MaxGrowth;
-            entry.FindPropertyRelative("dropChance").floatValue = 1f;
+            SerializedProperty items = entry.FindPropertyRelative("items");
+            items.arraySize = 1;
+            InitializeDropItem(items.GetArrayElementAtIndex(0));
+            dataChanged = true;
         }
 
-        string growthDescription = selectedDefinition != null
-                                   && selectedDefinition.placementCategory
-                                   == ResourceDefinition.PlacementCategory.Tree
-            ? "Tree Growth 조건을 만족한 항목만"
-            : "Tree가 아닌 리소스는 Growth 10으로 판정하며, 조건을 만족한 항목만";
-        EditorGUILayout.HelpBox(
-            $"{growthDescription} 목록 순서대로 확률 판정 후 고정 수량으로 지급됩니다. "
-            + "목록이 비어 있으면 기존 에셋의 단일 출력 데이터를 사용합니다. "
-            + "광산·시추 기계의 단일 출력은 기존 Output 설정을 계속 사용합니다.",
-            MessageType.Info);
+        if (usesDeterministicComposition)
+        {
+            float totalWeightPercent = 0f;
+            for (int i = 0; i < dropItems.arraySize; i++)
+            {
+                SerializedProperty entry = dropItems.GetArrayElementAtIndex(i);
+                SerializedProperty items = entry.FindPropertyRelative("items");
+                for (int itemIndex = 0; items != null && itemIndex < items.arraySize; itemIndex++)
+                {
+                    SerializedProperty item = items.GetArrayElementAtIndex(itemIndex);
+                    SerializedProperty itemDefinition = item.FindPropertyRelative("itemDefinition");
+                    SerializedProperty amount = item.FindPropertyRelative("amount");
+                    SerializedProperty chance = item.FindPropertyRelative("dropChance");
+                    if (itemDefinition.objectReferenceValue != null && amount.intValue > 0)
+                    {
+                        totalWeightPercent += Mathf.Clamp01(chance.floatValue) * 100f;
+                    }
+                }
+            }
+
+            EditorGUILayout.HelpBox(
+                $"Active composition weight: {totalWeightPercent:0.##}%. Weights are normalized, so "
+                + "Stone 90 and Quartz 10 produce a 90% / 10% deposit. Each resource unit is assigned "
+                + "exactly one item in a deterministic sequence shared by manual and machine mining.",
+                totalWeightPercent > 0f ? MessageType.Info : MessageType.Warning);
+        }
+        else
+        {
+            EditorGUILayout.HelpBox(
+                "Tree entries that match the current Growth are evaluated independently in list order. "
+                + "An empty list uses the legacy single output data.",
+                MessageType.Info);
+        }
+
+        return dataChanged;
     }
 
-    private void ApplyDropItemSelection(int entryIndex, ItemDefinition selectedItem)
+    private static void InitializeDropItem(SerializedProperty item)
+    {
+        item.FindPropertyRelative("itemDefinition").objectReferenceValue = null;
+        item.FindPropertyRelative("amount").intValue = 1;
+        item.FindPropertyRelative("dropChance").floatValue = 1f;
+    }
+
+    private void ApplyDropItemSelection(
+        int entryIndex,
+        int itemIndex,
+        ItemDefinition selectedItem)
     {
         if (selectedDefinition == null)
         {
@@ -629,13 +713,23 @@ public sealed class ResourceDataEditorWindow : EditorWindow
         SerializedObject serializedDefinition = new SerializedObject(selectedDefinition);
         serializedDefinition.Update();
         SerializedProperty dropItems = serializedDefinition.FindProperty("dropItems");
-        if (dropItems == null || entryIndex < 0 || entryIndex >= dropItems.arraySize)
+        if (dropItems == null
+            || entryIndex < 0
+            || entryIndex >= dropItems.arraySize)
         {
             return;
         }
 
-        SerializedProperty itemDefinition = dropItems
+        SerializedProperty items = dropItems
             .GetArrayElementAtIndex(entryIndex)
+            .FindPropertyRelative("items");
+        if (items == null || itemIndex < 0 || itemIndex >= items.arraySize)
+        {
+            return;
+        }
+
+        SerializedProperty itemDefinition = items
+            .GetArrayElementAtIndex(itemIndex)
             .FindPropertyRelative("itemDefinition");
         if (itemDefinition.objectReferenceValue == selectedItem)
         {
@@ -832,6 +926,11 @@ public sealed class ResourceDataEditorWindow : EditorWindow
         Undo.RecordObject(prefab, "Apply Resource Definition Defaults");
         SerializedObject serializedPrefab = new SerializedObject(prefab);
         serializedPrefab.Update();
+        SerializedProperty objectName = serializedPrefab.FindProperty("objectName");
+        if (objectName != null && !string.IsNullOrWhiteSpace(selectedDefinition.resourceName))
+        {
+            objectName.stringValue = selectedDefinition.resourceName.Trim();
+        }
         serializedPrefab.FindProperty("definition").objectReferenceValue = selectedDefinition;
         serializedPrefab.FindProperty("harvestMode").enumValueIndex = (int)selectedDefinition.harvestMode;
 

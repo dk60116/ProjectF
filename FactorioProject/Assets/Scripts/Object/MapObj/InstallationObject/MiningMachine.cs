@@ -47,13 +47,11 @@ public class MiningMachine : InputOutputModule
         for (int i = 0; i < miningCoordinates.Count; i++)
         {
             if (!TryResolveMiningResource(terrain, miningCoordinates[i], out ResourceInstance resource)
-                || !resource.TryPeekMachineHarvestOutput(out int outputItemId, out _)
-                || outputItemId < 0)
+                || !resource.AppendMachineHarvestOutputItemIds(outputItemIds))
             {
                 continue;
             }
 
-            outputItemIds.Add(outputItemId);
             foundAny = true;
         }
 
@@ -446,14 +444,11 @@ public class MiningMachine : InputOutputModule
         for (int i = 0; i < miningResourceCandidates.Count; i++)
         {
             ResourceInstance resource = miningResourceCandidates[i];
-            if (resource == null
-                || !resource.TryPeekMachineHarvestOutput(out int outputItemId, out _)
-                || outputItemId < 0)
+            if (resource == null || !resource.AppendMachineHarvestOutputItemIds(outputItemIds))
             {
                 continue;
             }
 
-            outputItemIds.Add(outputItemId);
             foundAny = true;
         }
 

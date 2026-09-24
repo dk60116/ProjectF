@@ -13,7 +13,7 @@ MonoBehaviour:
   m_Name: Item_34_Production machine (Mk1)
   m_EditorClassIdentifier: 
   itemName: Production machine (Mk1)
-  id: 67
+  id: 70
   mapObject: {fileID: 1982885657640665004, guid: e735d910cbfef014488e2c2cd7333b0f, type: 3}
   mapObjectArchetype: {fileID: 11400000, guid: 20dd20270d9c5a04b81cc58b90dbdd5f, type: 2}
   useMapColor: 1
@@ -39,6 +39,7 @@ MonoBehaviour:
   fluidStorageLiters: 0
   fluidDisplayColor: {r: 1, g: 1, b: 1, a: 1}
   fluidOutputLitersPerSecond: 1
+  pumpPressureLitersPerSecond: 5
   bucketFillDurationSeconds: 10
   undergroundPipeMaxDistance: 5
   energyType: 0

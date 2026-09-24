@@ -213,12 +213,12 @@ public class ResourceInstance : IMapObjectTarget, IMapObjectSimulationIdentity, 
     public int MaxGauge => released ? 1 : Mathf.Max(1, resourceStatus.maxGauge);
     public int ResourceCount => released ? 0 : Mathf.Max(0, resourceStatus.resourceCount);
     public int GetCount => released ? 1 : Mathf.Max(1, resourceStatus.getCount);
-    public int RemainingHarvestOutputCount => released ? 0 : Mathf.Max(
-        0,
-        ResourceCount * GetHarvestOutputCountPerResource());
-    public int RemainingMachineHarvestOutputCount => Mathf.Max(
-        0,
-        ResourceCount * GetCount);
+    public int RemainingHarvestOutputCount => released
+        ? 0
+        : CalculateRemainingHarvestOutputCount(false);
+    public int RemainingMachineHarvestOutputCount => released
+        ? 0
+        : CalculateRemainingHarvestOutputCount(true);
     public bool CanHarvest => IsRuntimeActive && ResourceCount > 0 && HasHarvestableOutputAtCurrentState();
     public ResourceDefinition Definition => definition;
     public ResourceDefinition.PlacementCategory PlacementCategory => definition != null
@@ -445,7 +445,63 @@ public class ResourceInstance : IMapObjectTarget, IMapObjectSimulationIdentity, 
 
     public bool TryPeekMachineHarvestOutput(out int outputItemId, out int outputCount)
     {
+        if (UsesDeterministicDropComposition())
+        {
+            return TryPeekConfiguredHarvestOutput(out outputItemId, out outputCount);
+        }
+
         return TryPeekDefaultHarvestOutput(out outputItemId, out outputCount);
+    }
+
+    public bool AppendMachineHarvestOutputItemIds(ISet<int> outputItemIds)
+    {
+        if (outputItemIds == null)
+        {
+            return false;
+        }
+
+        if (!UsesDeterministicDropComposition())
+        {
+            int defaultOutputItemId = ResolveOutputItemId();
+            if (defaultOutputItemId < 0)
+            {
+                return false;
+            }
+
+            outputItemIds.Add(defaultOutputItemId);
+            return true;
+        }
+
+        bool foundAny = false;
+        float growth = ResolveDropGrowth();
+        IReadOnlyList<ResourceDropEntry> dropItems = definition.DropItems;
+        for (int i = 0; i < dropItems.Count; i++)
+        {
+            ResourceDropEntry entry = dropItems[i];
+            if (entry == null || !entry.Matches(growth))
+            {
+                continue;
+            }
+
+            IReadOnlyList<ResourceDropItem> items = entry.Items;
+            for (int itemIndex = 0; itemIndex < items.Count; itemIndex++)
+            {
+                ResourceDropItem item = items[itemIndex];
+                ItemDefinition itemDefinition = item?.ItemDefinition;
+                if (itemDefinition == null
+                    || itemDefinition.id < 0
+                    || item.Amount <= 0
+                    || item.DropChance <= 0f)
+                {
+                    continue;
+                }
+
+                outputItemIds.Add(itemDefinition.id);
+                foundAny = true;
+            }
+        }
+
+        return foundAny;
     }
 
     public bool TryPeekHarvestOutput(out int outputItemId, out int outputCount)
@@ -596,6 +652,32 @@ public class ResourceInstance : IMapObjectTarget, IMapObjectSimulationIdentity, 
             0,
             initialResourceCount - ResourceCount - depletedResourceCount);
 
+        if (UsesDeterministicDropComposition())
+        {
+            for (int depletionIndex = 0;
+                 depletionIndex < depletedResourceCount;
+                 depletionIndex++)
+            {
+                if (!TryResolveCompositionDrop(
+                        firstDepletionOrdinal + depletionIndex,
+                        growth,
+                        out int itemId,
+                        out int amount))
+                {
+                    continue;
+                }
+
+                harvestRewardBuffer.Add(new HarvestReward
+                {
+                    itemId = itemId,
+                    amount = amount
+                });
+            }
+
+            StartConfiguredHarvestDropSequence(resourceFullyDepleted);
+            return;
+        }
+
         for (int depletionIndex = 0;
              dropItems != null && depletionIndex < depletedResourceCount;
              depletionIndex++)
@@ -605,24 +687,38 @@ public class ResourceInstance : IMapObjectTarget, IMapObjectSimulationIdentity, 
             for (int entryIndex = 0; entryIndex < dropItems.Count; entryIndex++)
             {
                 ResourceDropEntry entry = dropItems[entryIndex];
-                ItemDefinition itemDefinition = entry?.ItemDefinition;
-                if (itemDefinition == null
-                    || itemDefinition.id < 0
-                    || entry.Amount <= 0
-                    || !entry.Matches(growth)
-                    || random.NextDouble() >= entry.DropChance)
+                if (entry == null || !entry.Matches(growth))
                 {
                     continue;
                 }
 
-                harvestRewardBuffer.Add(new HarvestReward
+                IReadOnlyList<ResourceDropItem> items = entry.Items;
+                for (int itemIndex = 0; itemIndex < items.Count; itemIndex++)
                 {
-                    itemId = itemDefinition.id,
-                    amount = entry.Amount
-                });
+                    ResourceDropItem item = items[itemIndex];
+                    ItemDefinition itemDefinition = item?.ItemDefinition;
+                    if (itemDefinition == null
+                        || itemDefinition.id < 0
+                        || item.Amount <= 0
+                        || random.NextDouble() >= item.DropChance)
+                    {
+                        continue;
+                    }
+
+                    harvestRewardBuffer.Add(new HarvestReward
+                    {
+                        itemId = itemDefinition.id,
+                        amount = item.Amount
+                    });
+                }
             }
         }
 
+        StartConfiguredHarvestDropSequence(resourceFullyDepleted);
+    }
+
+    private void StartConfiguredHarvestDropSequence(bool resourceFullyDepleted)
+    {
         if (harvestRewardBuffer.Count == 0)
         {
             if (resourceFullyDepleted)
@@ -674,8 +770,24 @@ public class ResourceInstance : IMapObjectTarget, IMapObjectSimulationIdentity, 
                && definition.DropItems.Count > 0;
     }
 
+    private bool UsesDeterministicDropComposition()
+    {
+        return HasConfiguredDropItems()
+               && definition.placementCategory != ResourceDefinition.PlacementCategory.Tree;
+    }
+
     private bool HasHarvestableOutputAtCurrentState()
     {
+        if (UsesDeterministicDropComposition())
+        {
+            int depletionOrdinal = Mathf.Max(0, initialResourceCount - ResourceCount);
+            return TryResolveCompositionDrop(
+                depletionOrdinal,
+                ResolveDropGrowth(),
+                out _,
+                out _);
+        }
+
         if (!(this is ProjectF.MapObjects.TreeInstance))
         {
             return true;
@@ -700,24 +812,43 @@ public class ResourceInstance : IMapObjectTarget, IMapObjectSimulationIdentity, 
             return false;
         }
 
+        if (UsesDeterministicDropComposition())
+        {
+            int depletionOrdinal = Mathf.Max(0, initialResourceCount - ResourceCount);
+            return TryResolveCompositionDrop(
+                depletionOrdinal,
+                ResolveDropGrowth(),
+                out outputItemId,
+                out outputCount);
+        }
+
         IReadOnlyList<ResourceDropEntry> dropItems = definition.DropItems;
         float growth = ResolveDropGrowth();
         for (int i = 0; dropItems != null && i < dropItems.Count; i++)
         {
             ResourceDropEntry entry = dropItems[i];
-            ItemDefinition itemDefinition = entry?.ItemDefinition;
-            if (itemDefinition == null
-                || itemDefinition.id < 0
-                || entry.Amount <= 0
-                || entry.DropChance <= 0f
-                || !entry.Matches(growth))
+            if (entry == null || !entry.Matches(growth))
             {
                 continue;
             }
 
-            outputItemId = itemDefinition.id;
-            outputCount = entry.Amount;
-            return true;
+            IReadOnlyList<ResourceDropItem> items = entry.Items;
+            for (int itemIndex = 0; itemIndex < items.Count; itemIndex++)
+            {
+                ResourceDropItem item = items[itemIndex];
+                ItemDefinition itemDefinition = item?.ItemDefinition;
+                if (itemDefinition == null
+                    || itemDefinition.id < 0
+                    || item.Amount <= 0
+                    || item.DropChance <= 0f)
+                {
+                    continue;
+                }
+
+                outputItemId = itemDefinition.id;
+                outputCount = item.Amount;
+                return true;
+            }
         }
 
         return false;
@@ -730,22 +861,98 @@ public class ResourceInstance : IMapObjectTarget, IMapObjectSimulationIdentity, 
             return GetCount;
         }
 
+        if (UsesDeterministicDropComposition())
+        {
+            int depletionOrdinal = Mathf.Max(0, initialResourceCount - ResourceCount);
+            return TryResolveCompositionDrop(
+                depletionOrdinal,
+                ResolveDropGrowth(),
+                out _,
+                out int selectedAmount)
+                ? selectedAmount
+                : 0;
+        }
+
         int count = 0;
         float growth = ResolveDropGrowth();
         IReadOnlyList<ResourceDropEntry> dropItems = definition.DropItems;
         for (int i = 0; i < dropItems.Count; i++)
         {
             ResourceDropEntry entry = dropItems[i];
-            if (entry?.ItemDefinition != null
-                && entry.ItemDefinition.id >= 0
-                && entry.DropChance > 0f
-                && entry.Matches(growth))
+            if (entry == null || !entry.Matches(growth))
             {
-                count += entry.Amount;
+                continue;
+            }
+
+            IReadOnlyList<ResourceDropItem> items = entry.Items;
+            for (int itemIndex = 0; itemIndex < items.Count; itemIndex++)
+            {
+                ResourceDropItem item = items[itemIndex];
+                if (item?.ItemDefinition != null
+                    && item.ItemDefinition.id >= 0
+                    && item.DropChance > 0f)
+                {
+                    count += item.Amount;
+                }
             }
         }
 
         return count;
+    }
+
+    private int CalculateRemainingHarvestOutputCount(bool forMachine)
+    {
+        if (!UsesDeterministicDropComposition())
+        {
+            int countPerResource = forMachine
+                ? GetCount
+                : GetHarvestOutputCountPerResource();
+            return Mathf.Max(0, ResourceCount * countPerResource);
+        }
+
+        long remainingOutputCount = 0L;
+        int firstDepletionOrdinal = Mathf.Max(0, initialResourceCount - ResourceCount);
+        float growth = ResolveDropGrowth();
+        for (int offset = 0; offset < ResourceCount; offset++)
+        {
+            if (TryResolveCompositionDrop(
+                    firstDepletionOrdinal + offset,
+                    growth,
+                    out _,
+                    out int amount))
+            {
+                remainingOutputCount += amount;
+            }
+        }
+
+        return remainingOutputCount >= int.MaxValue
+            ? int.MaxValue
+            : (int)remainingOutputCount;
+    }
+
+    private bool TryResolveCompositionDrop(
+        int depletionOrdinal,
+        float growth,
+        out int outputItemId,
+        out int outputCount)
+    {
+        outputItemId = -1;
+        outputCount = 0;
+        if (!UsesDeterministicDropComposition()
+            || !ResourceDropSequence.TrySelect(
+                definition.DropItems,
+                growth,
+                depletionOrdinal,
+                Mathf.Max(1, initialResourceCount),
+                BuildHarvestDropSeed(0),
+                out ResourceDropItem selectedItem))
+        {
+            return false;
+        }
+
+        outputItemId = selectedItem.ItemDefinition.id;
+        outputCount = selectedItem.Amount;
+        return outputItemId >= 0 && outputCount > 0;
     }
 
     protected int RollNextConfiguredHarvestDropCount(int targetItemId)
@@ -763,20 +970,29 @@ public class ResourceInstance : IMapObjectTarget, IMapObjectSimulationIdentity, 
         for (int i = 0; i < dropItems.Count; i++)
         {
             ResourceDropEntry entry = dropItems[i];
-            ItemDefinition itemDefinition = entry?.ItemDefinition;
-            if (itemDefinition == null
-                || itemDefinition.id < 0
-                || entry.Amount <= 0
-                || entry.DropChance <= 0f
-                || !entry.Matches(growth))
+            if (entry == null || !entry.Matches(growth))
             {
                 continue;
             }
 
-            bool dropped = random.NextDouble() < entry.DropChance;
-            if (dropped && itemDefinition.id == targetItemId)
+            IReadOnlyList<ResourceDropItem> items = entry.Items;
+            for (int itemIndex = 0; itemIndex < items.Count; itemIndex++)
             {
-                count += entry.Amount;
+                ResourceDropItem item = items[itemIndex];
+                ItemDefinition itemDefinition = item?.ItemDefinition;
+                if (itemDefinition == null
+                    || itemDefinition.id < 0
+                    || item.Amount <= 0
+                    || item.DropChance <= 0f)
+                {
+                    continue;
+                }
+
+                bool dropped = random.NextDouble() < item.DropChance;
+                if (dropped && itemDefinition.id == targetItemId)
+                {
+                    count += item.Amount;
+                }
             }
         }
 

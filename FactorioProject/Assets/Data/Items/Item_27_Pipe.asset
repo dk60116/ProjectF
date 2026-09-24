@@ -13,7 +13,7 @@ MonoBehaviour:
   m_Name: Item_27_Pipe
   m_EditorClassIdentifier: 
   itemName: Pipe
-  id: 55
+  id: 58
   mapObject: {fileID: 196921536911978296, guid: 32693525afd78b34f9eb8e41424827a3, type: 3}
   mapObjectArchetype: {fileID: 11400000, guid: d688881f703090440ba5d7c527a5dcf5, type: 2}
   useMapColor: 1
@@ -39,6 +39,7 @@ MonoBehaviour:
   fluidStorageLiters: 0
   fluidDisplayColor: {r: 1, g: 1, b: 1, a: 1}
   fluidOutputLitersPerSecond: 1
+  pumpPressureLitersPerSecond: 5
   bucketFillDurationSeconds: 10
   undergroundPipeMaxDistance: 5
   energyType: 0

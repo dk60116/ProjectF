@@ -15,7 +15,7 @@ MonoBehaviour:
   resourceName: Stone
   resourceIcon: {fileID: 21300000, guid: b0981d2465375c04a8da2e2ff90fef39, type: 3}
   mapColorMode: 1
-  mapColor: {r: 0.4056604, g: 0.4056604, b: 0.4056604, a: 1}
+  mapColor: {r: 0.6603774, g: 0.6603774, b: 0.6603774, a: 1}
   mapMarkerSize: 0
   prefab: {fileID: 5150821752848007095, guid: 124d7ac73b9d32a4d9ea2cac71121101, type: 3}
   harvestMode: 1
@@ -26,11 +26,12 @@ MonoBehaviour:
   totalGrowthFertilizerAmount: 0
   growthDurationPerLevelSeconds: 0
   dropItems:
-  - itemDefinition: {fileID: 11400000, guid: fc1cba8967b6adc48867e456639cad4a, type: 2}
-    amount: 1
-    minimumGrowth: 0
+  - minimumGrowth: 0
     maximumGrowth: 10
-    dropChance: 1
+    items:
+    - itemDefinition: {fileID: 11400000, guid: fc1cba8967b6adc48867e456639cad4a, type: 2}
+      amount: 1
+      dropChance: 1
   defaultResourceCount: 1
   defaultGetCount: 1
   defaultMaxGauge: 10

@@ -1029,7 +1029,7 @@ MonoBehaviour:
   m_EditorClassIdentifier: Assembly-CSharp::CrudeOilRefinery
   id: 0
   objectName: Crude Oil Refinery
-  objId: 63
+  objId: 66
   itemDefinition: {fileID: 11400000, guid: f2a55fe33263d054f82c1737d7d85898, type: 2}
   mapStatus:
     mapSizeX: 2

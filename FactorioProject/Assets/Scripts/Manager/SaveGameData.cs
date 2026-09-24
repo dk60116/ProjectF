@@ -9,7 +9,8 @@ public sealed class SaveGameData
     // Version 65 persists the independent buffered state of every configured
     // non-electric operational energy requirement.
     // Version 66 stores ProductionMachine's separately metered fluid ingredient buffers.
-    public const int CurrentVersion = 66;
+    // Version 67 stores recursive player crafting plans and reserved intermediate outputs.
+    public const int CurrentVersion = 67;
 
     public int version = CurrentVersion;
     public long savedAtUtcTicks;
@@ -443,6 +444,10 @@ public sealed class PlayerCraftingQueueEntrySaveData
     public float remainingTime;
     public float duration;
     public List<PlayerCraftingIngredientSaveData> refundIngredients = new List<PlayerCraftingIngredientSaveData>();
+    public int planId;
+    public bool isPlanFinal;
+    public int reservedOutputCount;
+    public bool planLedgerTransformed;
 }
 
 [Serializable]

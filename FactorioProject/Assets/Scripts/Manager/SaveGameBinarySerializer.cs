@@ -1493,7 +1493,7 @@ public static class SaveGameBinarySerializer
 
         if (version >= 4)
         {
-            player.craftingQueue = ReadList(reader, () => ReadPlayerCraftingQueueEntry(reader));
+            player.craftingQueue = ReadList(reader, () => ReadPlayerCraftingQueueEntry(reader, version));
         }
 
         if (version >= 27)
@@ -1574,11 +1574,15 @@ public static class SaveGameBinarySerializer
         writer.Write(entry.remainingTime);
         writer.Write(entry.duration);
         WriteList(writer, entry.refundIngredients, WritePlayerCraftingIngredient);
+        writer.Write(entry.planId);
+        writer.Write(entry.isPlanFinal);
+        writer.Write(entry.reservedOutputCount);
+        writer.Write(entry.planLedgerTransformed);
     }
 
-    private static PlayerCraftingQueueEntrySaveData ReadPlayerCraftingQueueEntry(BinaryReader reader)
+    private static PlayerCraftingQueueEntrySaveData ReadPlayerCraftingQueueEntry(BinaryReader reader, int version)
     {
-        return new PlayerCraftingQueueEntrySaveData
+        PlayerCraftingQueueEntrySaveData entry = new PlayerCraftingQueueEntrySaveData
         {
             itemId = reader.ReadInt32(),
             outputCount = reader.ReadInt32(),
@@ -1587,6 +1591,16 @@ public static class SaveGameBinarySerializer
             duration = reader.ReadSingle(),
             refundIngredients = ReadList(reader, () => ReadPlayerCraftingIngredient(reader))
         };
+
+        if (version >= 67)
+        {
+            entry.planId = reader.ReadInt32();
+            entry.isPlanFinal = reader.ReadBoolean();
+            entry.reservedOutputCount = reader.ReadInt32();
+            entry.planLedgerTransformed = reader.ReadBoolean();
+        }
+
+        return entry;
     }
 
     private static void WritePlayerCraftingIngredient(BinaryWriter writer, PlayerCraftingIngredientSaveData ingredient)

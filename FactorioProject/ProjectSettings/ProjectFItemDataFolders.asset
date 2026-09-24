@@ -24,11 +24,11 @@ MonoBehaviour:
   - id: 52f654e67171467f864fb2b0973e4063
     displayName: Resource
     expanded: 1
-    anchorItemGuid: 22f7c943800c7d14987cc0b65ed337f6
+    anchorItemGuid: c7d14445b92c7d0468e83d73c68f384f
   - id: f15266f7c0944b46a765791c0cac6402
     displayName: Workable
     expanded: 1
-    anchorItemGuid: 97f6dea012d4db649abc845562a30b93
+    anchorItemGuid: 22f7c943800c7d14987cc0b65ed337f6
   - id: 4008c2a9919643788ee7eedfdd9a2060
     displayName: Processing
     expanded: 1
@@ -369,4 +369,12 @@ MonoBehaviour:
   - itemGuid: f5fb20334a270ef4b9daa71e32edbfe7
     folderId: 839eaa9b00424dc59d967a096e100401
   - itemGuid: d920f99b12ae8ba4eb521eb6252da50a
+    folderId: 4008c2a9919643788ee7eedfdd9a2060
+  - itemGuid: 10f561e50ba416e43acc7c19a3e74feb
+    folderId: f15266f7c0944b46a765791c0cac6402
+  - itemGuid: 60e9b284bddea2d4d8dec70d48624f68
+    folderId: 52f654e67171467f864fb2b0973e4063
+  - itemGuid: c2523ea97a8bd7c4d84ce14047c89771
+    folderId: 4008c2a9919643788ee7eedfdd9a2060
+  - itemGuid: f258fbd8cc06e274fb34717e13970102
     folderId: 4008c2a9919643788ee7eedfdd9a2060

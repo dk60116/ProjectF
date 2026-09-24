@@ -13,7 +13,7 @@ MonoBehaviour:
   m_Name: Item_13_Funance
   m_EditorClassIdentifier: 
   itemName: Funance
-  id: 34
+  id: 37
   mapObject: {fileID: 3843491245406909261, guid: 482d646ee24530540a103d758c71b5b2, type: 3}
   mapObjectArchetype: {fileID: 11400000, guid: 39875aa15bdd75143a55d66e6fa7f0c2, type: 2}
   useMapColor: 1
@@ -39,6 +39,7 @@ MonoBehaviour:
   fluidStorageLiters: 0
   fluidDisplayColor: {r: 1, g: 1, b: 1, a: 1}
   fluidOutputLitersPerSecond: 1
+  pumpPressureLitersPerSecond: 5
   bucketFillDurationSeconds: 10
   undergroundPipeMaxDistance: 5
   energyType: 0

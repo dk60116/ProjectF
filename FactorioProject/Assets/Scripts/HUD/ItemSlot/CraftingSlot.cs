@@ -73,18 +73,25 @@ public class CraftingSlot : ItemSlot, IPointerEnterHandler, IPointerExitHandler
     private int requiredCraftingMapObjectId = -1;
     private int requiredManualItemId = -1;
     private Func<int, bool> externalCreateAction;
+    private Func<int, List<CraftingTreeRuntime.IngredientEntry>, bool> externalQueuedCreateAction;
     private Func<int, bool> externalCanCreate;
+    private bool showExternalCreateButton = true;
+    private bool ingredientToggleEnabled = true;
     private int externallyProvidedIngredientItemId = -1;
     private int externallyProvidedIngredientCount;
     private bool createActionReady = true;
+    private bool HasExternalCreateAction => externalCreateAction != null || externalQueuedCreateAction != null;
     private readonly List<CraftingTreeRuntime.IngredientEntry> ingredientBuffer = new List<CraftingTreeRuntime.IngredientEntry>();
     private readonly List<int> requiredCraftingMapObjectIds = new List<int>();
     private readonly List<HUDButtonHoverTween> hoverTweenBuffer = new List<HUDButtonHoverTween>();
     private readonly Dictionary<RectTransform, Vector2> ingredientLayoutSizes = new Dictionary<RectTransform, Vector2>();
     private readonly List<WorkableObject> workableMaterialSources = new List<WorkableObject>(4);
     private readonly List<BoxObject> workableBoxSources = new List<BoxObject>(8);
+    private readonly Dictionary<int, int> externalOwnedItemCountCache = new Dictionary<int, int>();
+    private bool externalAvailabilityScanActive;
 
     public float ExpandDuration => Mathf.Max(0f, expandDuration);
+    public Sprite CreateActionIcon => createIcon != null ? createIcon.sprite : null;
 
     private void Awake()
     {
@@ -387,7 +394,10 @@ public class CraftingSlot : ItemSlot, IPointerEnterHandler, IPointerExitHandler
         }
 
         button.onClick.RemoveListener(ToggleIngredients);
-        button.onClick.AddListener(ToggleIngredients);
+        if (ingredientToggleEnabled)
+        {
+            button.onClick.AddListener(ToggleIngredients);
+        }
     }
 
     private void BindCreateButton()
@@ -414,7 +424,7 @@ public class CraftingSlot : ItemSlot, IPointerEnterHandler, IPointerExitHandler
             return;
         }
 
-        bool usesExternalCreateAction = externalCreateAction != null;
+        bool usesExternalCreateAction = HasExternalCreateAction;
         BagSlot parentBagSlot = usesExternalCreateAction ? null : GetComponentInParent<BagSlot>();
         if (parentBagSlot != null && !parentBagSlot.CanCraftItem(craftItemId))
         {
@@ -449,7 +459,10 @@ public class CraftingSlot : ItemSlot, IPointerEnterHandler, IPointerExitHandler
                 return;
             }
 
-            if (!externalCreateAction(craftItemId))
+            bool created = externalQueuedCreateAction != null
+                ? externalQueuedCreateAction(craftItemId, externalConsumedIngredients)
+                : externalCreateAction(craftItemId);
+            if (!created)
             {
                 RefundIngredients(externalConsumedIngredients);
             }
@@ -537,6 +550,7 @@ public class CraftingSlot : ItemSlot, IPointerEnterHandler, IPointerExitHandler
         Func<int, bool> canCreate = null)
     {
         externalCreateAction = createAction;
+        externalQueuedCreateAction = null;
         externalCanCreate = canCreate;
         externallyProvidedIngredientItemId = providedIngredientItemId;
         externallyProvidedIngredientCount = Mathf.Max(0, providedIngredientCount);
@@ -545,10 +559,61 @@ public class CraftingSlot : ItemSlot, IPointerEnterHandler, IPointerExitHandler
         RefreshIngredientsIfVisible();
     }
 
+    public void ConfigureExternalQueuedCreateAction(
+        Func<int, List<CraftingTreeRuntime.IngredientEntry>, bool> createAction,
+        Func<int, bool> canCreate = null)
+    {
+        externalCreateAction = null;
+        externalQueuedCreateAction = createAction;
+        externalCanCreate = canCreate;
+        externallyProvidedIngredientItemId = -1;
+        externallyProvidedIngredientCount = 0;
+        SetTargetButtonHoverEnabled(false);
+        RefreshCraftingMapObjectState();
+        RefreshIngredientsIfVisible();
+    }
+
+    public void SetExternalCreateButtonVisible(bool visible)
+    {
+        showExternalCreateButton = visible;
+        if (HasExternalCreateAction && !visible && createButton != null)
+        {
+            createButton.gameObject.SetActive(false);
+        }
+
+        RefreshIngredientsIfVisible();
+    }
+
+    public void SetIngredientToggleEnabled(bool enabled)
+    {
+        ingredientToggleEnabled = enabled;
+        BindButton();
+        if (!enabled)
+        {
+            SetTargetButtonHoverEnabled(false);
+        }
+    }
+
+    public void BeginExternalAvailabilityScan()
+    {
+        externalOwnedItemCountCache.Clear();
+        Player player = GameManager.Instance != null ? GameManager.Instance.Player : null;
+        RefreshWorkableMaterialSources(player);
+        externalAvailabilityScanActive = true;
+    }
+
+    public void EndExternalAvailabilityScan()
+    {
+        externalAvailabilityScanActive = false;
+        externalOwnedItemCountCache.Clear();
+    }
+
     public void ClearExternalCreateAction()
     {
         externalCreateAction = null;
+        externalQueuedCreateAction = null;
         externalCanCreate = null;
+        showExternalCreateButton = true;
         externallyProvidedIngredientItemId = -1;
         externallyProvidedIngredientCount = 0;
         createActionReady = true;
@@ -558,7 +623,7 @@ public class CraftingSlot : ItemSlot, IPointerEnterHandler, IPointerExitHandler
 
     public void ShowIngredientsForExternalUse()
     {
-        if (externalCreateAction == null || !HasItem)
+        if (!HasExternalCreateAction || !HasItem)
         {
             HideIngredientsImmediate();
             return;
@@ -597,10 +662,10 @@ public class CraftingSlot : ItemSlot, IPointerEnterHandler, IPointerExitHandler
 
         bool hasAllIngredients = RefreshIngredientSlotDisplays();
 
-        bool handReady = externalCreateAction != null
+        bool handReady = HasExternalCreateAction
             ? externalCanCreate == null || externalCanCreate(ItemId)
             : CanPrepareHandForCrafting(ItemId);
-        BagSlot parentBagSlot = externalCreateAction == null
+        BagSlot parentBagSlot = !HasExternalCreateAction
             ? GetComponentInParent<BagSlot>()
             : null;
         bool manualAccessReady = parentBagSlot == null
@@ -608,9 +673,10 @@ public class CraftingSlot : ItemSlot, IPointerEnterHandler, IPointerExitHandler
         bool craftingAccessReady = parentBagSlot == null || parentBagSlot.CanCraftItem(ItemId);
         bool createButtonReady = hasAllIngredients && handReady && craftingAccessReady;
         createActionReady = createButtonReady;
-        bool hasManualRequirement = externalCreateAction == null && requiredManualItemId >= 0;
-        bool showRequiredMapObject = externalCreateAction == null && requiredCraftingMapObjectId >= 0;
-        bool showCreateSlot = manualAccessReady || hasManualRequirement || showRequiredMapObject;
+        bool hasManualRequirement = !HasExternalCreateAction && requiredManualItemId >= 0;
+        bool showRequiredMapObject = !HasExternalCreateAction && requiredCraftingMapObjectId >= 0;
+        bool showCreateSlot = (!HasExternalCreateAction || showExternalCreateButton)
+                              && (manualAccessReady || hasManualRequirement || showRequiredMapObject);
         bool createButtonChangedVisibility = SetCreateButtonVisible(showCreateSlot);
         if (createButton != null)
         {
@@ -715,7 +781,7 @@ public class CraftingSlot : ItemSlot, IPointerEnterHandler, IPointerExitHandler
     {
         ingredientBuffer.Clear();
         bool hasRecipeIngredients = CraftingTreeRuntime.TryGetIngredients(itemId, ingredientBuffer);
-        if (!hasRecipeIngredients || externalCreateAction == null)
+        if (!hasRecipeIngredients || !HasExternalCreateAction)
         {
             return hasRecipeIngredients;
         }
@@ -794,7 +860,7 @@ public class CraftingSlot : ItemSlot, IPointerEnterHandler, IPointerExitHandler
             }
         }
 
-        return ingredientBuffer.Count > 0 || externalCreateAction != null;
+        return ingredientBuffer.Count > 0 || HasExternalCreateAction;
     }
 
     private bool CanPrepareHandForCrafting(int craftItemId)
@@ -991,8 +1057,25 @@ public class CraftingSlot : ItemSlot, IPointerEnterHandler, IPointerExitHandler
 
     private bool TryConsumeIngredients(out List<CraftingTreeRuntime.IngredientEntry> consumedIngredients)
     {
+        return TryConsumeIngredients(ingredientBuffer, out consumedIngredients);
+    }
+
+    public bool TryConsumeExternalIngredients(
+        IReadOnlyList<CraftingTreeRuntime.IngredientEntry> ingredients,
+        out List<CraftingTreeRuntime.IngredientEntry> consumedIngredients)
+    {
+        return TryConsumeIngredients(ingredients, out consumedIngredients);
+    }
+
+    private bool TryConsumeIngredients(
+        IReadOnlyList<CraftingTreeRuntime.IngredientEntry> ingredients,
+        out List<CraftingTreeRuntime.IngredientEntry> consumedIngredients)
+    {
         consumedIngredients = new List<CraftingTreeRuntime.IngredientEntry>();
-        if (GameManager.Instance == null || GameManager.Instance.Player == null)
+        if (ingredients == null
+            || ingredients.Count == 0
+            || GameManager.Instance == null
+            || GameManager.Instance.Player == null)
         {
             return false;
         }
@@ -1006,9 +1089,9 @@ public class CraftingSlot : ItemSlot, IPointerEnterHandler, IPointerExitHandler
             : player.transform.position;
         RefreshWorkableMaterialSources(player);
 
-        for (int i = 0; i < ingredientBuffer.Count; i++)
+        for (int i = 0; i < ingredients.Count; i++)
         {
-            CraftingTreeRuntime.IngredientEntry entry = ingredientBuffer[i];
+            CraftingTreeRuntime.IngredientEntry entry = ingredients[i];
             if (entry.count > 0
                 && GetOwnedIngredientCount(
                     entry.itemId,
@@ -1021,9 +1104,9 @@ public class CraftingSlot : ItemSlot, IPointerEnterHandler, IPointerExitHandler
             }
         }
 
-        for (int i = 0; i < ingredientBuffer.Count; i++)
+        for (int i = 0; i < ingredients.Count; i++)
         {
-            CraftingTreeRuntime.IngredientEntry entry = ingredientBuffer[i];
+            CraftingTreeRuntime.IngredientEntry entry = ingredients[i];
             int remaining = Mathf.Max(0, entry.count);
             if (remaining <= 0)
             {
@@ -1194,7 +1277,7 @@ public class CraftingSlot : ItemSlot, IPointerEnterHandler, IPointerExitHandler
                 }
             }
 
-            SetTargetButtonHoverEnabled(externalCreateAction == null);
+            SetTargetButtonHoverEnabled(!HasExternalCreateAction);
         }
         finally
         {
@@ -1400,7 +1483,7 @@ public class CraftingSlot : ItemSlot, IPointerEnterHandler, IPointerExitHandler
 
     private float ResolveCreateButtonVisualAlpha()
     {
-        if (externalCreateAction == null
+        if (!HasExternalCreateAction
             && ((blockedByCraftingMapObject && requiredCraftingMapObjectId >= 0)
                 || (blockedByRequiredManual && requiredManualItemId >= 0)))
         {
@@ -1913,7 +1996,7 @@ public class CraftingSlot : ItemSlot, IPointerEnterHandler, IPointerExitHandler
         requiredCraftingMapObjectId = -1;
         requiredManualItemId = -1;
 
-        if (!HasItem || externalCreateAction != null)
+        if (!HasItem || HasExternalCreateAction)
         {
             RefreshCraftingMapObjectVisuals();
             return;
@@ -1967,12 +2050,12 @@ public class CraftingSlot : ItemSlot, IPointerEnterHandler, IPointerExitHandler
 
         isRefreshingCraftingMapObjectVisuals = true;
 
-        bool showMissingManual = externalCreateAction == null
+        bool showMissingManual = !HasExternalCreateAction
                                  && HasItem
                                  && blockedByRequiredManual
                                  && requiredManualItemId >= 0;
         bool showRequiredMapObject = !showMissingManual
-                                     && externalCreateAction == null
+                                     && !HasExternalCreateAction
                                      && HasItem
                                      && blockedByCraftingMapObject
                                      && requiredCraftingMapObjectId >= 0;
@@ -2033,6 +2116,11 @@ public class CraftingSlot : ItemSlot, IPointerEnterHandler, IPointerExitHandler
             : null;
     }
 
+    public int GetOwnedIngredientCountForExternalUse(int itemId)
+    {
+        return GetOwnedIngredientCount(itemId);
+    }
+
     private int GetOwnedIngredientCount(int itemId)
     {
         if (itemId < 0)
@@ -2045,6 +2133,12 @@ public class CraftingSlot : ItemSlot, IPointerEnterHandler, IPointerExitHandler
             return 0;
         }
 
+        if (externalAvailabilityScanActive
+            && externalOwnedItemCountCache.TryGetValue(itemId, out int cachedCount))
+        {
+            return cachedCount;
+        }
+
         Player player = GameManager.Instance.Player;
         PlayerBag bag = player.GetBag();
         PlayerBag handBag = player.GetHandBag();
@@ -2052,8 +2146,18 @@ public class CraftingSlot : ItemSlot, IPointerEnterHandler, IPointerExitHandler
         Vector3 origin = player.BodyTransform != null
             ? player.BodyTransform.position
             : player.transform.position;
-        RefreshWorkableMaterialSources(player);
-        return GetOwnedIngredientCount(itemId, bag, handBag, terrain, origin);
+        if (!externalAvailabilityScanActive)
+        {
+            RefreshWorkableMaterialSources(player);
+        }
+
+        int ownedCount = GetOwnedIngredientCount(itemId, bag, handBag, terrain, origin);
+        if (externalAvailabilityScanActive)
+        {
+            externalOwnedItemCountCache[itemId] = ownedCount;
+        }
+
+        return ownedCount;
     }
 
     private int GetOwnedIngredientCount(
@@ -2123,6 +2227,11 @@ public class CraftingSlot : ItemSlot, IPointerEnterHandler, IPointerExitHandler
         {
             BoxObject.CopyActiveInstances(workableBoxSources);
         }
+    }
+
+    public void RefundExternalIngredients(IReadOnlyList<CraftingTreeRuntime.IngredientEntry> ingredients)
+    {
+        RefundIngredients(ingredients);
     }
 
     private int RemoveWorkableBoxItems(int itemId, int count)

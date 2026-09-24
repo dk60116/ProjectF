@@ -13,7 +13,7 @@ MonoBehaviour:
   m_Name: Item_29_Electric mining machine
   m_EditorClassIdentifier: 
   itemName: Electric mining machine
-  id: 52
+  id: 55
   mapObject: {fileID: 8277338630082605383, guid: 12170bb063a8276498a87aedd657b542, type: 3}
   mapObjectArchetype: {fileID: 11400000, guid: fa44b8da2e7608d458f39083ef6f3834, type: 2}
   useMapColor: 0
@@ -39,6 +39,7 @@ MonoBehaviour:
   fluidStorageLiters: 0
   fluidDisplayColor: {r: 1, g: 1, b: 1, a: 1}
   fluidOutputLitersPerSecond: 1
+  pumpPressureLitersPerSecond: 5
   bucketFillDurationSeconds: 10
   undergroundPipeMaxDistance: 5
   energyType: 0

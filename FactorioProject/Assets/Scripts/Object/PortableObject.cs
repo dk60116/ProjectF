@@ -514,10 +514,17 @@ public sealed class PortableObject : IDisposable
         int count = 0;
         if (HasOwnOutlineRequest && focusStack != null)
         {
+            int itemId = ItemId;
             for (int i = 0; i < focusStack.Count && count < destination.Length; i++)
             {
                 PortableObject member = focusStack[i];
-                if (member != null && member.focusOutlineOwner == this)
+                if (member == null) continue;
+                if (member.ItemId == itemId)
+                {
+                    // New stack members can arrive without SetFocusStack being called again.
+                    member.AcquireFocusOutlineOwner(this);
+                }
+                if (member.focusOutlineOwner == this)
                     count = member.CopyOwnOutlineMaskRenderers(destination, count);
             }
         }

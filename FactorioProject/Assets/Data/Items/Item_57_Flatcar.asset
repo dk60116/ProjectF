@@ -13,7 +13,7 @@ MonoBehaviour:
   m_Name: Item_57_Flatcar
   m_EditorClassIdentifier: Assembly-CSharp::ItemDefinition
   itemName: Flatcar
-  id: 110
+  id: 113
   mapObject: {fileID: 8246531933118439867, guid: a34b33398bb75a84aaa6febe564ccb3e, type: 3}
   mapObjectArchetype: {fileID: 11400000, guid: c2e78d408e7e09d4aa21f39280633b66, type: 2}
   useMapColor: 1
@@ -39,6 +39,7 @@ MonoBehaviour:
   fluidStorageLiters: 0
   fluidDisplayColor: {r: 1, g: 1, b: 1, a: 1}
   fluidOutputLitersPerSecond: 1
+  pumpPressureLitersPerSecond: 5
   bucketFillDurationSeconds: 10
   undergroundPipeMaxDistance: 5
   energyType: 0

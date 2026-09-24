@@ -28,6 +28,7 @@ public static class CraftingTreeRuntime
     }
 
     private static readonly Dictionary<int, List<int>> CraftableByIngredient = new Dictionary<int, List<int>>();
+    private static readonly Dictionary<int, List<int>> CraftableByRequiredMapObject = new Dictionary<int, List<int>>();
     private static readonly Dictionary<int, List<IngredientEntry>> IngredientsByItem = new Dictionary<int, List<IngredientEntry>>();
     private static readonly Dictionary<int, List<int>> RequiredCraftingMapObjectIdsByItem = new Dictionary<int, List<int>>();
     private static readonly Dictionary<int, int> OutputCountByItem = new Dictionary<int, int>();
@@ -52,9 +53,28 @@ public static class CraftingTreeRuntime
         return results.Count > 0;
     }
 
+    public static bool TryGetCraftableItemIdsForMapObject(int mapObjectItemId, List<int> results)
+    {
+        if (results == null)
+        {
+            return false;
+        }
+
+        EnsureLoaded();
+        results.Clear();
+
+        if (CraftableByRequiredMapObject.TryGetValue(mapObjectItemId, out List<int> craftables))
+        {
+            results.AddRange(craftables);
+        }
+
+        return results.Count > 0;
+    }
+
     public static void ForceReload()
     {
         CraftableByIngredient.Clear();
+        CraftableByRequiredMapObject.Clear();
         IngredientsByItem.Clear();
         RequiredCraftingMapObjectIdsByItem.Clear();
         OutputCountByItem.Clear();
@@ -79,6 +99,20 @@ public static class CraftingTreeRuntime
         }
 
         return results.Count > 0;
+    }
+
+    public static bool TryGetIngredientsView(int itemId, out IReadOnlyList<IngredientEntry> ingredients)
+    {
+        EnsureLoaded();
+        if (IngredientsByItem.TryGetValue(itemId, out List<IngredientEntry> recipeIngredients)
+            && recipeIngredients.Count > 0)
+        {
+            ingredients = recipeIngredients;
+            return true;
+        }
+
+        ingredients = null;
+        return false;
     }
 
     public static int GetOutputCount(int itemId)
@@ -167,6 +201,13 @@ public static class CraftingTreeRuntime
                         if (requiredCraftingMapObjectIds != null && requiredCraftingMapObjectIds.Count > 0)
                         {
                             RequiredCraftingMapObjectIdsByItem[itemId] = requiredCraftingMapObjectIds;
+                            for (int requiredIndex = 0; requiredIndex < requiredCraftingMapObjectIds.Count; requiredIndex++)
+                            {
+                                AddCraftable(
+                                    CraftableByRequiredMapObject,
+                                    requiredCraftingMapObjectIds[requiredIndex],
+                                    itemId);
+                            }
                         }
 
                         OutputCountByItem[itemId] = outputCount;
@@ -184,7 +225,7 @@ public static class CraftingTreeRuntime
                             continue;
                         }
 
-                        AddCraftable(ingredientId, itemId);
+                        AddCraftable(CraftableByIngredient, ingredientId, itemId);
 
                         if (ingredientList == null)
                         {
@@ -207,6 +248,11 @@ public static class CraftingTreeRuntime
         }
 
         foreach (List<int> list in CraftableByIngredient.Values)
+        {
+            list.Sort();
+        }
+
+        foreach (List<int> list in CraftableByRequiredMapObject.Values)
         {
             list.Sort();
         }
@@ -236,17 +282,25 @@ public static class CraftingTreeRuntime
         return File.ReadAllBytes(path);
     }
 
-    private static void AddCraftable(int ingredientId, int itemId)
+    private static void AddCraftable(
+        Dictionary<int, List<int>> lookup,
+        int sourceItemId,
+        int craftableItemId)
     {
-        if (!CraftableByIngredient.TryGetValue(ingredientId, out List<int> list))
+        if (lookup == null || sourceItemId < 0 || craftableItemId < 0)
         {
-            list = new List<int>();
-            CraftableByIngredient.Add(ingredientId, list);
+            return;
         }
 
-        if (!list.Contains(itemId))
+        if (!lookup.TryGetValue(sourceItemId, out List<int> list))
         {
-            list.Add(itemId);
+            list = new List<int>();
+            lookup.Add(sourceItemId, list);
+        }
+
+        if (!list.Contains(craftableItemId))
+        {
+            list.Add(craftableItemId);
         }
     }
 

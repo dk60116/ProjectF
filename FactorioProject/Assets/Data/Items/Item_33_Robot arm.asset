@@ -13,7 +13,7 @@ MonoBehaviour:
   m_Name: Item_33_Robot arm
   m_EditorClassIdentifier: 
   itemName: Robot arm
-  id: 65
+  id: 68
   mapObject: {fileID: 5617472291595085519, guid: 7c64585bed65e8843aa24eb07a5f02f3, type: 3}
   mapObjectArchetype: {fileID: 11400000, guid: fa30f8a080e23ad429eec1fcc63230da, type: 2}
   useMapColor: 1
@@ -39,6 +39,7 @@ MonoBehaviour:
   fluidStorageLiters: 0
   fluidDisplayColor: {r: 1, g: 1, b: 1, a: 1}
   fluidOutputLitersPerSecond: 1
+  pumpPressureLitersPerSecond: 5
   bucketFillDurationSeconds: 10
   undergroundPipeMaxDistance: 5
   energyType: 1

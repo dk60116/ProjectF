@@ -190,6 +190,7 @@ public class InstallationPlacementController : MonoBehaviour
         new List<RectGridPlacementCell>(4);
     private readonly List<RectGridPlacementCell> areaMarkerPipeOutputCellScratch =
         new List<RectGridPlacementCell>(4);
+    private readonly HashSet<int> areaMarkerOutputItemIdsScratch = new HashSet<int>();
     private readonly Queue<Vector2Int> pipeFluidCompatibilityQueue = new Queue<Vector2Int>(64);
     private readonly HashSet<Vector2Int> pipeFluidCompatibilityVisited = new HashSet<Vector2Int>();
     private readonly List<InstallationObject> pipeFluidEndpointInstallationsScratch =
@@ -21298,7 +21299,7 @@ public class InstallationPlacementController : MonoBehaviour
             return;
         }
 
-        Sprite fallbackFluidIcon = ResolvePipePassMarkerIcon(footprintSource);
+        Sprite fallbackFluidIcon = ResolvePipeOutputMarkerIcon(footprintSource);
         for (int i = 0; i < areaMarkerPipeOutputCellScratch.Count; i++)
         {
             RectGridPlacementCell cell = areaMarkerPipeOutputCellScratch[i];
@@ -21425,6 +21426,41 @@ public class InstallationPlacementController : MonoBehaviour
         }
 
         return ResolveFallbackPipePassMarkerIcon();
+    }
+
+    private Sprite ResolvePipeOutputMarkerIcon(MapObject footprintSource)
+    {
+        if (!TryGetInputOutputModule(footprintSource, out InputOutputModule inputOutputModule))
+        {
+            return ResolveFallbackPipePassMarkerIcon();
+        }
+
+        areaMarkerOutputItemIdsScratch.Clear();
+        if (!inputOutputModule.TryAppendConfiguredOutputItemIds(areaMarkerOutputItemIdsScratch))
+        {
+            areaMarkerOutputItemIdsScratch.Clear();
+            return ResolveFallbackPipePassMarkerIcon();
+        }
+
+        int selectedItemId = int.MaxValue;
+        Sprite selectedIcon = null;
+        foreach (int outputItemId in areaMarkerOutputItemIdsScratch)
+        {
+            ItemDefinition outputDefinition = ResolveItemDefinition(outputItemId);
+            if (outputItemId >= selectedItemId
+                || outputDefinition == null
+                || outputDefinition.icon == null
+                || !InputOutputModule.IsFluidItemDefinition(outputDefinition))
+            {
+                continue;
+            }
+
+            selectedItemId = outputItemId;
+            selectedIcon = outputDefinition.icon;
+        }
+
+        areaMarkerOutputItemIdsScratch.Clear();
+        return selectedIcon != null ? selectedIcon : ResolveFallbackPipePassMarkerIcon();
     }
 
     private bool TryResolvePipePassFluidIcon(MapObject footprintSource, out Sprite icon)

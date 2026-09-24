@@ -34,6 +34,7 @@ public partial class PlayerHUD : BagSlot
     private const string SaddleItemName = "Saddle";
     private const string PitchforkItemName = "Pitchfork";
     private readonly List<CraftingQueueEntry> craftingQueue = new List<CraftingQueueEntry>();
+    private int nextCraftingPlanId = 1;
     private bool craftingQueueDirty;
     private float craftingIngredientRefreshTimer;
     private float craftingAccessRefreshTimer;
@@ -162,6 +163,10 @@ public partial class PlayerHUD : BagSlot
         public float remainingTime;
         public float duration;
         public readonly List<CraftingTreeRuntime.IngredientEntry> refundIngredients;
+        public int planId;
+        public bool isPlanFinal;
+        public int reservedOutputCount;
+        public bool planLedgerTransformed;
 
         public CraftingQueueEntry(int itemId, int outputCount, float duration, List<CraftingTreeRuntime.IngredientEntry> refundIngredients = null)
         {
@@ -215,6 +220,7 @@ public partial class PlayerHUD : BagSlot
 
     private void OnDisable()
     {
+        CloseWorkableCraftingPanel();
         CollapseExpandedBagSlot(true);
         UnbindCurrentBag();
         SetHandItemGaugeVisible(false);
@@ -3715,6 +3721,21 @@ public partial class PlayerHUD : BagSlot
 
         if (currentInteractionMapObject != null)
         {
+            if (currentInteractionMapObject is WorkableObject workableObject)
+            {
+                PlayerController playerController = currentPlayer != null
+                    ? currentPlayer.GetComponent<PlayerController>()
+                    : null;
+                if (playerController != null
+                    && playerController.IsWithinInteractionRange(workableObject))
+                {
+                    ToggleWorkableCraftingPanel(workableObject);
+                }
+
+                UpdateInteractionButtonState();
+                return;
+            }
+
             if (currentInteractionMapObject is IPlayerMapObjectInteraction playerInteraction)
             {
                 PlayerController playerController = currentPlayer != null
@@ -4491,6 +4512,77 @@ public partial class PlayerHUD : BagSlot
         return true;
     }
 
+    public int AvailableCraftingQueueSlots => craftingWaitingQueue == null
+        ? 0
+        : Mathf.Max(0, craftingWaitingQueue.Count - craftingQueue.Count);
+
+    public bool CanPlanCraftingItem(int itemId)
+    {
+        return itemId >= 0
+               && !IsInventoryEditLocked()
+               && RefreshCraftingAccessAndCanCraftItem(itemId);
+    }
+
+    public bool TryEnqueueCraftingPlan(
+        IReadOnlyList<CraftingPlanStep> steps,
+        IReadOnlyList<CraftingTreeRuntime.IngredientEntry> consumedIngredients)
+    {
+        if (steps == null
+            || steps.Count == 0
+            || consumedIngredients == null
+            || consumedIngredients.Count == 0
+            || steps.Count > AvailableCraftingQueueSlots
+            || IsInventoryEditLocked())
+        {
+            return false;
+        }
+
+        for (int i = 0; i < steps.Count; i++)
+        {
+            CraftingPlanStep step = steps[i];
+            if (step == null
+                || step.ItemId < 0
+                || step.OutputCount <= 0
+                || step.ReservedOutputCount < 0
+                || step.ReservedOutputCount > step.OutputCount
+                || !RefreshCraftingAccessAndCanCraftItem(step.ItemId))
+            {
+                return false;
+            }
+        }
+
+        int planId = nextCraftingPlanId++;
+        if (nextCraftingPlanId <= 0)
+        {
+            nextCraftingPlanId = 1;
+        }
+
+        int finalStepIndex = steps.Count - 1;
+        for (int i = 0; i < steps.Count; i++)
+        {
+            CraftingPlanStep step = steps[i];
+            bool isFinal = i == finalStepIndex;
+            List<CraftingTreeRuntime.IngredientEntry> refundLedger = isFinal
+                ? new List<CraftingTreeRuntime.IngredientEntry>(consumedIngredients)
+                : null;
+            CraftingQueueEntry entry = new CraftingQueueEntry(
+                step.ItemId,
+                step.OutputCount,
+                GetCraftingDurationSeconds(step.ItemId),
+                refundLedger)
+            {
+                planId = planId,
+                isPlanFinal = isFinal,
+                reservedOutputCount = isFinal ? 0 : step.ReservedOutputCount
+            };
+            craftingQueue.Add(entry);
+        }
+
+        craftingQueueDirty = true;
+        RefreshCraftingQueueSlots(true);
+        return true;
+    }
+
     public bool CanEnqueueCrafting(int itemId)
     {
         if (itemId < 0
@@ -4530,7 +4622,14 @@ public partial class PlayerHUD : BagSlot
                 outputCount = Mathf.Max(1, entry.outputCount),
                 remainingOutputCount = Mathf.Max(0, entry.remainingOutputCount),
                 remainingTime = Mathf.Max(0f, entry.remainingTime),
-                duration = Mathf.Max(0.01f, entry.duration)
+                duration = Mathf.Max(0.01f, entry.duration),
+                planId = entry.planId,
+                isPlanFinal = entry.isPlanFinal,
+                reservedOutputCount = Mathf.Clamp(
+                    entry.reservedOutputCount,
+                    0,
+                    entry.remainingOutputCount),
+                planLedgerTransformed = entry.planLedgerTransformed
             };
 
             CopyCraftingRefundIngredients(entry.refundIngredients, saveData.refundIngredients);
@@ -4541,6 +4640,7 @@ public partial class PlayerHUD : BagSlot
     public void ApplyCraftingQueueSaveState(IReadOnlyList<PlayerCraftingQueueEntrySaveData> savedEntries)
     {
         craftingQueue.Clear();
+        nextCraftingPlanId = 1;
         int maxQueueCount = craftingWaitingQueue != null && craftingWaitingQueue.Count > 0
             ? craftingWaitingQueue.Count
             : int.MaxValue;
@@ -4576,11 +4676,27 @@ public partial class PlayerHUD : BagSlot
                     refundIngredients)
                 {
                     remainingOutputCount = remainingOutputCount,
-                    remainingTime = Mathf.Clamp(savedEntry.remainingTime, 0f, duration)
+                    remainingTime = Mathf.Clamp(savedEntry.remainingTime, 0f, duration),
+                    planId = Mathf.Max(0, savedEntry.planId),
+                    isPlanFinal = savedEntry.isPlanFinal,
+                    reservedOutputCount = Mathf.Clamp(
+                        savedEntry.reservedOutputCount,
+                        0,
+                        remainingOutputCount),
+                    planLedgerTransformed = savedEntry.planLedgerTransformed
                 };
 
                 craftingQueue.Add(entry);
+                if (entry.planId >= nextCraftingPlanId)
+                {
+                    nextCraftingPlanId = entry.planId + 1;
+                }
             }
+        }
+
+        if (nextCraftingPlanId <= 0)
+        {
+            nextCraftingPlanId = 1;
         }
 
         craftingQueueDirty = true;
@@ -4674,7 +4790,7 @@ public partial class PlayerHUD : BagSlot
         {
             CraftingQueueEntry entry = craftingQueue[0];
             if (entry.remainingTime > 0f
-                && !IsCraftOutputBlocked(entry.itemId)
+                && !IsCraftOutputBlocked(entry)
                 && !IsCraftingAccessBlocked(entry.itemId, deltaTime))
             {
                 entry.remainingTime = Mathf.Max(0f, entry.remainingTime - Mathf.Max(0f, deltaTime));
@@ -4682,6 +4798,7 @@ public partial class PlayerHUD : BagSlot
 
             if (entry.remainingTime <= 0f)
             {
+                ApplyCraftingPlanLedgerTransformation(entry);
                 bool deliveredAny = TryDeliverCraftedItems(entry);
                 if (entry.remainingOutputCount <= 0)
                 {
@@ -4728,8 +4845,22 @@ public partial class PlayerHUD : BagSlot
         craftingAccessBlocked = false;
     }
 
-    private bool IsCraftOutputBlocked(int itemId)
+    private bool IsCraftOutputBlocked(CraftingQueueEntry entry)
     {
+        if (entry == null)
+        {
+            return true;
+        }
+
+        int deliverableOutputCount = Mathf.Max(
+            0,
+            entry.remainingOutputCount - entry.reservedOutputCount);
+        if (deliverableOutputCount <= 0)
+        {
+            return false;
+        }
+
+        int itemId = entry.itemId;
         if (itemId < 0 || GameManager.Instance == null || GameManager.Instance.Player == null)
         {
             return true;
@@ -4742,6 +4873,127 @@ public partial class PlayerHUD : BagSlot
         }
 
         return !player.CanClearHandIntoBag();
+    }
+
+    private void ApplyCraftingPlanLedgerTransformation(CraftingQueueEntry entry)
+    {
+        if (entry == null
+            || entry.planId <= 0
+            || entry.isPlanFinal
+            || entry.planLedgerTransformed)
+        {
+            return;
+        }
+
+        CraftingQueueEntry finalEntry = FindCraftingPlanFinalEntry(entry.planId);
+        if (finalEntry == null
+            || !CraftingTreeRuntime.TryGetIngredientsView(
+                entry.itemId,
+                out IReadOnlyList<CraftingTreeRuntime.IngredientEntry> ingredients))
+        {
+            entry.planId = 0;
+            entry.reservedOutputCount = 0;
+            entry.planLedgerTransformed = true;
+            return;
+        }
+
+        for (int i = 0; i < ingredients.Count; i++)
+        {
+            CraftingTreeRuntime.IngredientEntry ingredient = ingredients[i];
+            SubtractCraftingRefundIngredient(
+                finalEntry.refundIngredients,
+                ingredient.itemId,
+                ingredient.count);
+        }
+
+        int reservedCount = Mathf.Clamp(
+            entry.reservedOutputCount,
+            0,
+            entry.remainingOutputCount);
+        AddCraftingRefundIngredient(finalEntry.refundIngredients, entry.itemId, reservedCount);
+        entry.remainingOutputCount -= reservedCount;
+        entry.reservedOutputCount = 0;
+        entry.planLedgerTransformed = true;
+        craftingQueueDirty = true;
+    }
+
+    private CraftingQueueEntry FindCraftingPlanFinalEntry(int planId)
+    {
+        if (planId <= 0)
+        {
+            return null;
+        }
+
+        for (int i = 0; i < craftingQueue.Count; i++)
+        {
+            CraftingQueueEntry candidate = craftingQueue[i];
+            if (candidate != null && candidate.planId == planId && candidate.isPlanFinal)
+            {
+                return candidate;
+            }
+        }
+
+        return null;
+    }
+
+    private static void AddCraftingRefundIngredient(
+        List<CraftingTreeRuntime.IngredientEntry> ingredients,
+        int itemId,
+        int count)
+    {
+        if (ingredients == null || itemId < 0 || count <= 0)
+        {
+            return;
+        }
+
+        for (int i = 0; i < ingredients.Count; i++)
+        {
+            CraftingTreeRuntime.IngredientEntry ingredient = ingredients[i];
+            if (ingredient.itemId != itemId)
+            {
+                continue;
+            }
+
+            ingredients[i] = new CraftingTreeRuntime.IngredientEntry(
+                itemId,
+                ingredient.count + count);
+            return;
+        }
+
+        ingredients.Add(new CraftingTreeRuntime.IngredientEntry(itemId, count));
+    }
+
+    private static void SubtractCraftingRefundIngredient(
+        List<CraftingTreeRuntime.IngredientEntry> ingredients,
+        int itemId,
+        int count)
+    {
+        int remaining = Mathf.Max(0, count);
+        if (ingredients == null || itemId < 0 || remaining <= 0)
+        {
+            return;
+        }
+
+        for (int i = ingredients.Count - 1; i >= 0 && remaining > 0; i--)
+        {
+            CraftingTreeRuntime.IngredientEntry ingredient = ingredients[i];
+            if (ingredient.itemId != itemId)
+            {
+                continue;
+            }
+
+            int removed = Mathf.Min(ingredient.count, remaining);
+            int nextCount = ingredient.count - removed;
+            remaining -= removed;
+            if (nextCount > 0)
+            {
+                ingredients[i] = new CraftingTreeRuntime.IngredientEntry(itemId, nextCount);
+            }
+            else
+            {
+                ingredients.RemoveAt(i);
+            }
+        }
     }
 
     private bool TryDeliverCraftedItems(CraftingQueueEntry entry)
@@ -4838,7 +5090,9 @@ public partial class PlayerHUD : BagSlot
 
                 float fillValue = i == 0 ? currentFill : 1f;
                 slot.SetFill(fillValue);
-                bool canCancel = entry.remainingTime > 0f && !IsInventoryEditLocked();
+                bool canCancel = entry.remainingTime > 0f
+                                 && !IsInventoryEditLocked()
+                                 && (entry.planId <= 0 || entry.isPlanFinal);
                 slot.BindCancelAction(canCancel ? () => CancelCraftingQueueAt(capturedIndex) : null);
                 slot.SetCancelInteractable(canCancel);
             }
@@ -4869,9 +5123,31 @@ public partial class PlayerHUD : BagSlot
         }
 
         CraftingQueueEntry entry = craftingQueue[index];
-        if (entry == null || entry.remainingTime <= 0f)
+        if (entry == null
+            || entry.remainingTime <= 0f
+            || (entry.planId > 0 && !entry.isPlanFinal))
         {
             return false;
+        }
+
+        if (entry.planId > 0)
+        {
+            int planId = entry.planId;
+            CraftingQueueEntry finalEntry = FindCraftingPlanFinalEntry(planId);
+            RefundCraftingIngredients(finalEntry ?? entry);
+            for (int i = craftingQueue.Count - 1; i >= 0; i--)
+            {
+                CraftingQueueEntry candidate = craftingQueue[i];
+                if (candidate != null && candidate.planId == planId)
+                {
+                    craftingQueue.RemoveAt(i);
+                }
+            }
+
+            craftingQueueDirty = true;
+            ResetCraftingAccessState();
+            RefreshCraftingQueueSlots(true);
+            return true;
         }
 
         RefundCraftingIngredients(entry);
