@@ -38,6 +38,12 @@ namespace ProjectF.Rendering
 
         internal InstallationVisualState(InstallationObject owner) { Owner = owner; }
 
+        internal static bool IsParticleEffectActive(ParticleSystem effect)
+        {
+            // A grouping particle can have emission disabled while Play(true) runs its children.
+            return effect.emission.enabled ? effect.isEmitting : effect.isPlaying;
+        }
+
         internal bool Tick(
             CameraRenderCulling culling,
             float deltaTime,
@@ -115,7 +121,7 @@ namespace ProjectF.Rendering
             var state = new ParticleState
             {
                 Effect = effect,
-                Requested = effect.isEmitting && effect.main.loop,
+                Requested = IsParticleEffectActive(effect) && effect.main.loop,
                 Speed = effect.main.simulationSpeed
             };
             particles.Add(state);
@@ -151,10 +157,10 @@ namespace ProjectF.Rendering
                 main.simulationSpeed = state.Speed;
             if (state.Requested)
             {
-                if (effect.gameObject.activeInHierarchy && !effect.isEmitting)
+                if (effect.gameObject.activeInHierarchy && !IsParticleEffectActive(effect))
                     effect.Play(true);
             }
-            else if (clear || effect.isEmitting || effect.isPaused)
+            else if (clear || IsParticleEffectActive(effect) || effect.isPaused)
             {
                 effect.Stop(true, clear
                     ? ParticleSystemStopBehavior.StopEmittingAndClear

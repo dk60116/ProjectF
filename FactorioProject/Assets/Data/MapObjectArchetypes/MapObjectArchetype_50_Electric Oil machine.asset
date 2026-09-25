@@ -15,7 +15,7 @@ MonoBehaviour:
   schemaVersion: 1
   itemDefinition: {fileID: 11400000, guid: f73deaa4f06e2164a9a37afae9ef1854, type: 2}
   sourcePrefab: {fileID: 8277338630082605383, guid: 0e8fab6e5b4c5334ba12a3440074b228, type: 3}
-  itemId: 50
+  itemId: 58
   itemName: Electric Oil machine
   sourcePrefabGuid: 0e8fab6e5b4c5334ba12a3440074b228
   sourceContentHash:

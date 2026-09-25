@@ -15,7 +15,7 @@ MonoBehaviour:
   schemaVersion: 1
   itemDefinition: {fileID: 11400000, guid: 9f4a67f687b990743914d4045038aa8e, type: 2}
   sourcePrefab: {fileID: 3654828918463552362, guid: c972d3bc9888d61498a3bbabd03743e6, type: 3}
-  itemId: 14
+  itemId: 17
   itemName: Cooper ore
   sourcePrefabGuid: c972d3bc9888d61498a3bbabd03743e6
   sourceContentHash:

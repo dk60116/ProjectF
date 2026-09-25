@@ -13,7 +13,7 @@ MonoBehaviour:
   m_Name: Item_108_Production machine (MK3)
   m_EditorClassIdentifier: Assembly-CSharp::ItemDefinition
   itemName: Production machine (MK3)
-  id: 72
+  id: 73
   mapObject: {fileID: 1982885657640665004, guid: 5e35bf91a3c489b42b8cff7e865635b6, type: 3}
   mapObjectArchetype: {fileID: 0}
   useMapColor: 1

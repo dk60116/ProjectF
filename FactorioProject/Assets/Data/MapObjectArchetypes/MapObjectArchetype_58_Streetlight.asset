@@ -15,7 +15,7 @@ MonoBehaviour:
   schemaVersion: 1
   itemDefinition: {fileID: 11400000, guid: f26efb1d776a4df469e75c19a5a1181b, type: 2}
   sourcePrefab: {fileID: 666971777691185006, guid: ae1df0edda6375e4d8677bb94970dfbf, type: 3}
-  itemId: 58
+  itemId: 68
   itemName: Streetlight
   sourcePrefabGuid: ae1df0edda6375e4d8677bb94970dfbf
   sourceContentHash:

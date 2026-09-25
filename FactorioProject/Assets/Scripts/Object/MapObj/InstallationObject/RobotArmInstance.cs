@@ -72,6 +72,7 @@ public sealed partial class RobotArmInstance : IMapObjectTarget, IMapObjectSimul
     private Predicate<int> cachedPickupItemFilter;
     private Func<Vector3> cachedDropTransferStartProvider;
     private Vector3 cachedDropTransferStartWorldPosition;
+    private bool electricPowerBlocked;
     private Predicate<int> PickupItemFilter => cachedPickupItemFilter ?? (cachedPickupItemFilter = AcceptsPickupItem);
     private Func<Vector3> DropTransferStartProvider =>
         cachedDropTransferStartProvider
@@ -151,6 +152,14 @@ public sealed partial class RobotArmInstance : IMapObjectTarget, IMapObjectSimul
         runtimeWakePending = true;
         runtimeSleepCheckTimer = 0f;
         World.ScheduleTick(this, wake: true);
+    }
+
+    internal bool IsElectricPowerBlocked => electricPowerBlocked;
+
+    internal void WakeForElectricPowerChange()
+    {
+        electricPowerBlocked = false;
+        WakeRuntimeSleep();
     }
     private void SetRuntimeSleeping(bool sleeping, bool force = false)
     {
@@ -1861,9 +1870,15 @@ public sealed partial class RobotArmInstance : IMapObjectTarget, IMapObjectSimul
                 out float consumedEnergy))
         {
             lastElectricPowerSupplyRatio = 0f;
+            if (!UtilityPole.HasElectricityAvailable(this))
+            {
+                electricPowerBlocked = true;
+                SetRuntimeSleeping(true);
+            }
             return 0f;
         }
 
+        electricPowerBlocked = false;
         lastElectricPowerSupplyRatio = Mathf.Clamp01(consumedEnergy / requestedEnergy);
         return deltaTime * lastElectricPowerSupplyRatio;
     }

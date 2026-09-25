@@ -15,7 +15,7 @@ MonoBehaviour:
   schemaVersion: 1
   itemDefinition: {fileID: 11400000, guid: e110bd69d6c9d9d49aa13090a2202fd1, type: 2}
   sourcePrefab: {fileID: 3131218003902393541, guid: f792eb3818b43ab4aa29e8e6a5a7e454, type: 3}
-  itemId: 67
+  itemId: 79
   itemName: Wooden Fence Door
   sourcePrefabGuid: f792eb3818b43ab4aa29e8e6a5a7e454
   sourceContentHash:

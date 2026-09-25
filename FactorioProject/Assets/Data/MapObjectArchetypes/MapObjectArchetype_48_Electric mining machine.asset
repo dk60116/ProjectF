@@ -15,7 +15,7 @@ MonoBehaviour:
   schemaVersion: 1
   itemDefinition: {fileID: 11400000, guid: b9735abb8886622408d77bb1f9a1f4c3, type: 2}
   sourcePrefab: {fileID: 8277338630082605383, guid: 12170bb063a8276498a87aedd657b542, type: 3}
-  itemId: 48
+  itemId: 56
   itemName: Electric mining machine
   sourcePrefabGuid: 12170bb063a8276498a87aedd657b542
   sourceContentHash:

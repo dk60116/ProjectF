@@ -129,6 +129,12 @@ public class ProductionMachine : InputOutputModule
         return false;
     }
 
+    protected override bool ShouldKeepRuntimeUpdateTickActiveWithoutOperationalEnergy()
+    {
+        // Ingredient intake continues while the energy used for crafting is unavailable.
+        return ShouldKeepRuntimeUpdateTickActive();
+    }
+
     protected override void AppendDedicatedFluidStorageRuntimeCoordinates(List<Vector2Int> coordinates)
     {
         if (coordinates == null
@@ -679,11 +685,6 @@ public class ProductionMachine : InputOutputModule
             return;
         }
 
-        if (!CanResolveOutputTarget(outputItemId, outputCount))
-        {
-            return;
-        }
-
         if (!TryEnsureCraftStartEnergy(installedDefinition))
         {
             return;
@@ -765,7 +766,7 @@ public class ProductionMachine : InputOutputModule
                 resolvedProductionIngredients,
                 out _,
                 out int outputItemId,
-                out int outputCount))
+                out _))
         {
             return "No recipe";
         }
@@ -804,11 +805,6 @@ public class ProductionMachine : InputOutputModule
             }
 
             return "No input item";
-        }
-
-        if (!CanResolveOutputTarget(outputItemId, outputCount))
-        {
-            return "Output full";
         }
 
         if (!HasOperationalEnergyAvailable(installedDefinition))

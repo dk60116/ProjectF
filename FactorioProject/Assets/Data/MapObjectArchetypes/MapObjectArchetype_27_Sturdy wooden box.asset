@@ -15,7 +15,7 @@ MonoBehaviour:
   schemaVersion: 1
   itemDefinition: {fileID: 11400000, guid: f618ef8c86b605a418911317c85bd88d, type: 2}
   sourcePrefab: {fileID: 6524911674366201629, guid: 4c4bd387a46e24b488d86f0bb4d12e69, type: 3}
-  itemId: 27
+  itemId: 34
   itemName: Sturdy wooden box
   sourcePrefabGuid: 4c4bd387a46e24b488d86f0bb4d12e69
   sourceContentHash:

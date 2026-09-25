@@ -15,7 +15,7 @@ MonoBehaviour:
   schemaVersion: 1
   itemDefinition: {fileID: 11400000, guid: 76038fd87aa315c40ad6ad9af1c04071, type: 2}
   sourcePrefab: {fileID: 7543741037075201388, guid: 0376f79f038416846b7ac71c7870f4eb, type: 3}
-  itemId: 12
+  itemId: 15
   itemName: Coal
   sourcePrefabGuid: 0376f79f038416846b7ac71c7870f4eb
   sourceContentHash:

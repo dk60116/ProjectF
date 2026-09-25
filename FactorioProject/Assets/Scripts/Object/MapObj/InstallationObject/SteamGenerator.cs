@@ -47,14 +47,14 @@ public class SteamGenerator : InputOutputModule, IFacilityFlowAdapter, IFacility
         StopGenerationVisuals(true);
         if (isActiveAndEnabled)
         {
-            UtilityPole.NotifyElectricPowerSourceStateChanged();
+            UtilityPole.NotifyElectricPowerSourceStateChanged(this);
         }
     }
 
     protected override void OnEnable()
     {
         base.OnEnable();
-        UtilityPole.NotifyElectricPowerSourceStateChanged();
+        UtilityPole.NotifyElectricPowerSourceStateChanged(this);
     }
 
     protected override void OnDisable()
@@ -63,7 +63,7 @@ public class SteamGenerator : InputOutputModule, IFacilityFlowAdapter, IFacility
 
         StopGenerationVisuals(true);
         base.OnDisable();
-        UtilityPole.NotifyElectricPowerSourceStateChanged();
+        UtilityPole.NotifyElectricPowerSourceStateChanged(this);
     }
 
     protected override bool ShouldAutoPullFluidFromConnectedStorage()
@@ -661,7 +661,7 @@ public class SteamGenerator : InputOutputModule, IFacilityFlowAdapter, IFacility
         }
         if (stateChanged)
         {
-            UtilityPole.NotifyElectricPowerSourceStateChanged();
+            UtilityPole.NotifyElectricPowerSourceStateChanged(this);
         }
     }
 

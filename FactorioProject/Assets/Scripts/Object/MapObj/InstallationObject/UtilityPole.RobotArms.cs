@@ -452,6 +452,22 @@ public partial class UtilityPole
             networkRuntimeEvaluationCount);
         MapObjectTickProfiler.AddRuntimeCounter(
             "ElectricPower",
+            "RuntimeCleanSkips",
+            networkRuntimeCleanSkipCount);
+        MapObjectTickProfiler.AddRuntimeCounter(
+            "ElectricPower",
+            "RuntimeNetworkRefreshes",
+            networkRuntimeNetworkRefreshCount);
+        MapObjectTickProfiler.AddRuntimeCounter(
+            "ElectricPower",
+            "LastDirtyNetworks",
+            lastNetworkRuntimeDirtyNetworkCount);
+        MapObjectTickProfiler.AddRuntimeCounter(
+            "ElectricPower",
+            "LastRemappedConsumers",
+            lastNetworkRuntimeRemappedConsumerCount);
+        MapObjectTickProfiler.AddRuntimeCounter(
+            "ElectricPower",
             "DeferredRuntimeInvalidations",
             networkRuntimeDeferredInvalidationCount);
         MapObjectTickProfiler.AddRuntimeCounter(

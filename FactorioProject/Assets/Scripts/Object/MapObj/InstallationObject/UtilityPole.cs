@@ -58,6 +58,14 @@ public partial class UtilityPole : InstallationObject
         new Dictionary<InstallationObject, PreviewConsumerRuntime>();
     private static readonly Dictionary<InstallationObject, ElectricNetwork> suppliedConsumerNetworks =
         new Dictionary<InstallationObject, ElectricNetwork>();
+    private static readonly Dictionary<InstallationObject, List<ElectricNetwork>> electricNetworksByInstallation =
+        new Dictionary<InstallationObject, List<ElectricNetwork>>();
+    private static readonly Stack<List<ElectricNetwork>> electricNetworkListPool =
+        new Stack<List<ElectricNetwork>>();
+    private static readonly HashSet<InstallationObject> dirtySuppliedConsumers =
+        new HashSet<InstallationObject>();
+    private static readonly List<InstallationObject> dirtySuppliedConsumerOrder =
+        new List<InstallationObject>();
     private static readonly Dictionary<UtilityPole, ElectricNetwork> electricNetworkByPole =
         new Dictionary<UtilityPole, ElectricNetwork>();
     private static readonly Dictionary<Vector2Int, List<UtilityPole>> supplyPolesByCoordinate =
@@ -74,7 +82,11 @@ public partial class UtilityPole : InstallationObject
     private static bool topologyRefreshPending;
     private static bool electricRuntimeWakePending;
     private static long networkRuntimeEvaluationCount;
+    private static long networkRuntimeCleanSkipCount;
+    private static long networkRuntimeNetworkRefreshCount;
     private static long networkRuntimeDeferredInvalidationCount;
+    private static int lastNetworkRuntimeDirtyNetworkCount;
+    private static int lastNetworkRuntimeRemappedConsumerCount;
     private static long electricRuntimeWakeBatchCount;
     private static long electricRuntimeWakeCoalescedCount;
     private static bool networksDirty = true;
@@ -810,10 +822,36 @@ public partial class UtilityPole : InstallationObject
         RequestElectricRuntimeModulesWake();
     }
 
-    public static void NotifyElectricPowerSourceStateChanged()
+    public static void NotifyElectricPowerSourceStateChanged(SteamGenerator source)
     {
-        InvalidateNetworkRuntimeForNextTick();
+        InvalidateInstallationNetworksForNextTick(source);
         RequestElectricRuntimeModulesWake();
+    }
+
+    public static void NotifyElectricPowerConsumerStateChanged(InstallationObject consumer)
+    {
+        InvalidateInstallationNetworksForNextTick(consumer);
+        RequestElectricRuntimeModulesWake();
+    }
+
+    internal static bool TryCaptureElectricPowerDemand(
+        InstallationObject consumer,
+        out float wattsPerSecond)
+    {
+        return TryGetElectricPowerDemand(consumer, out wattsPerSecond);
+    }
+
+    internal static void NotifyElectricPowerConsumerStateChangedIfNeeded(
+        InstallationObject consumer,
+        bool previouslyHadDemand,
+        float previousWattsPerSecond)
+    {
+        bool hasDemand = TryGetElectricPowerDemand(consumer, out float wattsPerSecond);
+        if (hasDemand != previouslyHadDemand
+            || hasDemand && Mathf.Abs(wattsPerSecond - previousWattsPerSecond) > EnergyEpsilon)
+        {
+            NotifyElectricPowerConsumerStateChanged(consumer);
+        }
     }
 
     public static void NotifyFreeElectroEnergyChanged()
@@ -824,6 +862,40 @@ public partial class UtilityPole : InstallationObject
 
     private static void InvalidateNetworkRuntimeForNextTick()
     {
+        MarkAllNetworkRuntimeDirty();
+        InvalidateNetworkRuntimeEvaluationForNextTick();
+    }
+
+    private static void InvalidateInstallationNetworksForNextTick(InstallationObject installationObject)
+    {
+        if (installationObject == null || networksDirty)
+        {
+            if (networksDirty)
+            {
+                InvalidateNetworkRuntimeForNextTick();
+            }
+
+            return;
+        }
+
+        if (!electricNetworksByInstallation.TryGetValue(
+                installationObject,
+                out List<ElectricNetwork> installationNetworks))
+        {
+            return;
+        }
+
+        for (int i = 0; i < installationNetworks.Count; i++)
+        {
+            MarkNetworkRuntimeDirty(installationNetworks[i]);
+        }
+
+        dirtySuppliedConsumers.Add(installationObject);
+        InvalidateNetworkRuntimeEvaluationForNextTick();
+    }
+
+    private static void InvalidateNetworkRuntimeEvaluationForNextTick()
+    {
         long currentSimulationTick = MapObjectTickManager.CurrentSimulationTick;
         if (networkRuntimeEvaluatedSimulationTick == currentSimulationTick)
         {
@@ -832,6 +904,22 @@ public partial class UtilityPole : InstallationObject
         }
 
         networkRuntimeEvaluatedSimulationTick = -1L;
+    }
+
+    private static void MarkAllNetworkRuntimeDirty()
+    {
+        for (int i = 0; i < networks.Count; i++)
+        {
+            MarkNetworkRuntimeDirty(networks[i]);
+        }
+    }
+
+    private static void MarkNetworkRuntimeDirty(ElectricNetwork network)
+    {
+        if (network != null)
+        {
+            network.RuntimeDirty = true;
+        }
     }
 
     internal static void BeginSimulationPowerMutationBatch()
@@ -879,6 +967,8 @@ public partial class UtilityPole : InstallationObject
         electricRuntimeWakePending = false;
         electricRuntimeWakeBatchCount++;
         InputOutputModule.WakeElectricRuntimeModules();
+        LoggingMachine.WakeElectricRuntimeMachines();
+        RobotArmWorld.Current?.WakeElectricRuntimeArms();
     }
 
     private static bool IsFreeElectroEnergyEnabled()
@@ -989,8 +1079,10 @@ public partial class UtilityPole : InstallationObject
 
         if (membershipChanged)
         {
-            networkRuntimeEvaluatedSimulationTick = -1L;
-            RefreshNetworkRuntimeValues(true);
+            dirtySuppliedConsumers.Add(installationObject);
+            RebuildElectricNetworkInstallationIndex();
+            InvalidateNetworkRuntimeEvaluationForNextTick();
+            RefreshNetworkRuntimeValues();
             RequestElectricRuntimeModulesWake();
         }
 
@@ -3196,8 +3288,11 @@ public partial class UtilityPole : InstallationObject
             "Utility Pole Network Rebuild");
         EnsurePoleConnectionsEvaluated();
         ClearPoleSupplyCoordinateCache();
+        ClearElectricNetworkInstallationIndex();
         networks.Clear();
         suppliedConsumerNetworks.Clear();
+        dirtySuppliedConsumers.Clear();
+        dirtySuppliedConsumerOrder.Clear();
         activePoleScratch.Clear();
         visitedPoles.Clear();
         poleQueue.Clear();
@@ -3419,6 +3514,8 @@ public partial class UtilityPole : InstallationObject
         {
             RefreshNetworkTopologyRuntimeValues(networks[networkIndex]);
         }
+
+        RebuildElectricNetworkInstallationIndex();
     }
 
     private static void RefreshNetworkTopologyRuntimeValues(ElectricNetwork network)
@@ -3477,6 +3574,8 @@ public partial class UtilityPole : InstallationObject
                 network.StaticRequiredWatts += requiredWatts;
             }
         }
+
+        MarkNetworkRuntimeDirty(network);
     }
 
     private static void RefreshNetworkRuntimeValues(bool force = false)
@@ -3490,16 +3589,55 @@ public partial class UtilityPole : InstallationObject
         networkRuntimeEvaluatedSimulationTick = currentSimulationTick;
         networkRuntimeEvaluationCount++;
         RefreshRobotArmConsumers();
+        if (force)
+        {
+            MarkAllNetworkRuntimeDirty();
+        }
+
+        int dirtyNetworkCount = 0;
+        for (int i = 0; i < networks.Count; i++)
+        {
+            if (networks[i] != null && networks[i].RuntimeDirty)
+            {
+                dirtyNetworkCount++;
+            }
+        }
+
+        lastNetworkRuntimeDirtyNetworkCount = dirtyNetworkCount;
+        lastNetworkRuntimeRemappedConsumerCount = 0;
+        if (dirtyNetworkCount <= 0)
+        {
+            networkRuntimeCleanSkipCount++;
+            return;
+        }
+
         using var sample = MapObjectTickProfiler.SampleNamed("Runtime", nameof(UtilityPole), "Electric Network Runtime");
         for (int i = 0; i < networks.Count; i++)
         {
-            RefreshNetworkRuntimeValues(networks[i]);
+            ElectricNetwork network = networks[i];
+            if (network == null || !network.RuntimeDirty)
+            {
+                continue;
+            }
+
+            network.RuntimeDirty = false;
+            for (int consumerIndex = 0; consumerIndex < network.PoweredConsumers.Count; consumerIndex++)
+            {
+                InstallationObject consumer = network.PoweredConsumers[consumerIndex];
+                if (consumer != null)
+                {
+                    dirtySuppliedConsumers.Add(consumer);
+                }
+            }
+
+            RefreshNetworkRuntimeValues(network);
         }
 
-        // 발전기 가동 상태와 수요량은 매 프레임 달라질 수 있다. 소비자가 여러 전력망의
-        // 공급 범위에 걸친 경우에도 현재 공급률이 가장 높은 망을 사용하도록 런타임 값과
-        // 소비자 매핑을 같은 시점에 갱신한다.
-        RefreshSuppliedConsumerNetworks();
+        networkRuntimeNetworkRefreshCount += dirtyNetworkCount;
+
+        // A dirty network can change the preferred source for consumers shared with
+        // otherwise clean networks. Re-evaluate only consumers touched by dirty networks.
+        lastNetworkRuntimeRemappedConsumerCount = RefreshDirtySuppliedConsumerNetworks();
         AdvanceRobotArmNetworkRuntimeVersion();
     }
 
@@ -3684,32 +3822,112 @@ public partial class UtilityPole : InstallationObject
                && configuredGeneratorWatts > EnergyEpsilon;
     }
 
-    private static void RefreshSuppliedConsumerNetworks()
+    private static int RefreshDirtySuppliedConsumerNetworks()
     {
-        suppliedConsumerNetworks.Clear();
-        for (int i = 0; i < networks.Count; i++)
+        dirtySuppliedConsumerOrder.Clear();
+        foreach (InstallationObject consumer in dirtySuppliedConsumers)
         {
-            ElectricNetwork network = networks[i];
-            if (network == null || !network.HasPowerSource)
+            dirtySuppliedConsumerOrder.Add(consumer);
+        }
+
+        dirtySuppliedConsumerOrder.Sort(CompareSimulationOrder);
+        int remappedCount = dirtySuppliedConsumerOrder.Count;
+        for (int consumerIndex = 0; consumerIndex < dirtySuppliedConsumerOrder.Count; consumerIndex++)
+        {
+            InstallationObject consumer = dirtySuppliedConsumerOrder[consumerIndex];
+            if (consumer == null
+                || !electricNetworksByInstallation.TryGetValue(
+                    consumer,
+                    out List<ElectricNetwork> candidateNetworks))
             {
+                suppliedConsumerNetworks.Remove(consumer);
                 continue;
             }
 
-            for (int consumerIndex = 0; consumerIndex < network.PoweredConsumers.Count; consumerIndex++)
+            ElectricNetwork bestNetwork = null;
+            for (int networkIndex = 0; networkIndex < candidateNetworks.Count; networkIndex++)
             {
-                InstallationObject installationObject = network.PoweredConsumers[consumerIndex];
-                if (installationObject == null)
+                ElectricNetwork candidate = candidateNetworks[networkIndex];
+                if (candidate == null
+                    || !candidate.HasPowerSource
+                    || !candidate.PoweredConsumers.Contains(consumer))
                 {
                     continue;
                 }
 
-                if (!suppliedConsumerNetworks.TryGetValue(installationObject, out ElectricNetwork currentNetwork)
-                    || ResolveNetworkScore(network) > ResolveNetworkScore(currentNetwork))
+                if (bestNetwork == null
+                    || ResolveNetworkScore(candidate) > ResolveNetworkScore(bestNetwork))
                 {
-                    suppliedConsumerNetworks[installationObject] = network;
+                    bestNetwork = candidate;
                 }
             }
+
+            if (bestNetwork != null)
+            {
+                suppliedConsumerNetworks[consumer] = bestNetwork;
+            }
+            else
+            {
+                suppliedConsumerNetworks.Remove(consumer);
+            }
         }
+
+        dirtySuppliedConsumers.Clear();
+        dirtySuppliedConsumerOrder.Clear();
+        return remappedCount;
+    }
+
+    private static void RebuildElectricNetworkInstallationIndex()
+    {
+        ClearElectricNetworkInstallationIndex();
+        for (int networkIndex = 0; networkIndex < networks.Count; networkIndex++)
+        {
+            ElectricNetwork network = networks[networkIndex];
+            if (network == null)
+            {
+                continue;
+            }
+
+            for (int installationIndex = 0;
+                 installationIndex < network.OrderedSuppliedInstallations.Count;
+                 installationIndex++)
+            {
+                InstallationObject installation = network.OrderedSuppliedInstallations[installationIndex];
+                if (installation == null)
+                {
+                    continue;
+                }
+
+                if (!electricNetworksByInstallation.TryGetValue(
+                        installation,
+                        out List<ElectricNetwork> installationNetworks))
+                {
+                    installationNetworks = electricNetworkListPool.Count > 0
+                        ? electricNetworkListPool.Pop()
+                        : new List<ElectricNetwork>(1);
+                    electricNetworksByInstallation.Add(installation, installationNetworks);
+                }
+
+                installationNetworks.Add(network);
+            }
+        }
+    }
+
+    private static void ClearElectricNetworkInstallationIndex()
+    {
+        foreach (KeyValuePair<InstallationObject, List<ElectricNetwork>> entry in electricNetworksByInstallation)
+        {
+            List<ElectricNetwork> installationNetworks = entry.Value;
+            if (installationNetworks == null)
+            {
+                continue;
+            }
+
+            installationNetworks.Clear();
+            electricNetworkListPool.Push(installationNetworks);
+        }
+
+        electricNetworksByInstallation.Clear();
     }
 
     private static ElectricNetwork ResolveBestNetworkForConsumer(InstallationObject consumer)
@@ -3905,6 +4123,7 @@ public partial class UtilityPole : InstallationObject
         public readonly List<InstallationObject> RuntimeConsumers = new List<InstallationObject>();
         public readonly List<SteamGenerator> PowerSources = new List<SteamGenerator>();
         public float StaticRequiredWatts;
+        public bool RuntimeDirty = true;
         public ProjectF.Simulation.PowerSupplySnapshot Power;
         public float ProductionWatts { get => Power.ProductionWatts; set => Power.ProductionWatts = value; }
         public float RequiredWatts { get => Power.RequiredWatts; set => Power.RequiredWatts = value; }
@@ -3919,6 +4138,7 @@ public partial class UtilityPole : InstallationObject
             RuntimeConsumers.Clear();
             PowerSources.Clear();
             StaticRequiredWatts = 0f;
+            RuntimeDirty = true;
             ClearPowerRuntime();
         }
 

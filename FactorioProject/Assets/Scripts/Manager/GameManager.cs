@@ -1104,6 +1104,12 @@ public sealed class RuntimeItemGiveReceiver : MonoBehaviour
             case ToolCommand.ListSaveSlots:
                 request.Result = GetSaveSlotsResult();
                 break;
+            case ToolCommand.ManagedMemoryBaseline:
+                request.Result = ResetManagedMemoryBaseline();
+                break;
+            case ToolCommand.ManagedMemorySnapshot:
+                request.Result = CaptureManagedMemorySnapshot();
+                break;
             case ToolCommand.PerfSnapshot:
                 request.Result = GetPerfSnapshotResult(request.Count);
                 break;
@@ -1508,6 +1514,27 @@ public sealed class RuntimeItemGiveReceiver : MonoBehaviour
             return true;
         }
 
+        if (parts.Length == 2
+            && string.Equals(parts[0], "memory", StringComparison.OrdinalIgnoreCase))
+        {
+            itemId = 0;
+            count = 0;
+            if (string.Equals(parts[1], "baseline", StringComparison.OrdinalIgnoreCase))
+            {
+                command = ToolCommand.ManagedMemoryBaseline;
+                return true;
+            }
+
+            if (string.Equals(parts[1], "snapshot", StringComparison.OrdinalIgnoreCase))
+            {
+                command = ToolCommand.ManagedMemorySnapshot;
+                return true;
+            }
+
+            error = "usage: memory <baseline|snapshot>";
+            return false;
+        }
+
         if (parts.Length == 1
             && (string.Equals(parts[0], "saveslots", StringComparison.OrdinalIgnoreCase)
                 || string.Equals(parts[0], "slots", StringComparison.OrdinalIgnoreCase)))
@@ -1805,7 +1832,7 @@ public sealed class RuntimeItemGiveReceiver : MonoBehaviour
 
         if (parts.Length < 2 || !string.Equals(parts[0], "give", StringComparison.OrdinalIgnoreCase))
         {
-            error = "usage: give <itemId> [count] | clear <belt|floor|io|mapobj> | profileclone | animalstress [count] | animalcollision [count] | animalthreat [radius] | beltstress [count] | beltline [auto|itemId] [count] | beltitems [count] | beltcheck | save <slot> | load <slot> | reset [slot] [randomSeed] | seed <int> | saveslots | simulation pause <true|false> | time <status|set|scale|pause|next sunrise|check> | debug <showConveyorSlotDots|showSleepAwake|showBeltItemLine|showBeltPipeSplit|hideBeltItems|hideBelts|disableCameraCulling|showRailLine|showDirections|freeCamera|freeCameraPlayerCulling|showAnimalHerdAreas|animalAIPaused|mapObjectTickProfiling> <true|false> | camera size <minSize> <maxSize> | perf [maxRows] | ping | status | counts";
+            error = "usage: give <itemId> [count] | clear <belt|floor|io|mapobj> | profileclone | animalstress [count] | animalcollision [count] | animalthreat [radius] | beltstress [count] | beltline [auto|itemId] [count] | beltitems [count] | beltcheck | save <slot> | load <slot> | reset [slot] [randomSeed] | seed <int> | saveslots | simulation pause <true|false> | time <status|set|scale|pause|next sunrise|check> | debug <showConveyorSlotDots|showSleepAwake|showBeltItemLine|showBeltPipeSplit|hideBeltItems|hideBelts|disableCameraCulling|showRailLine|showDirections|freeCamera|freeCameraPlayerCulling|showAnimalHerdAreas|animalAIPaused|mapObjectTickProfiling> <true|false> | camera size <minSize> <maxSize> | memory <baseline|snapshot> | perf [maxRows] | ping | status | counts";
             return false;
         }
 
@@ -2244,6 +2271,39 @@ public sealed class RuntimeItemGiveReceiver : MonoBehaviour
             $"perfData={encodedJson}");
     }
 
+    private static ToolResult ResetManagedMemoryBaseline()
+    {
+        long managedHeapBytes = ManagedMemoryDiagnostics.ResetTrend();
+        return ToolResult.Success(
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            "managed memory baseline reset",
+            $"managedHeapBytes={managedHeapBytes.ToString(CultureInfo.InvariantCulture)}");
+    }
+
+    private static ToolResult CaptureManagedMemorySnapshot()
+    {
+        if (!ManagedMemoryDiagnostics.TryCaptureSnapshot(out string path, out string error))
+        {
+            return ToolResult.Error(0, 0, error);
+        }
+
+        string encodedPath = Convert.ToBase64String(Encoding.UTF8.GetBytes(path));
+        return ToolResult.Success(
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            "managed memory snapshot started",
+            $"snapshotPathBase64={encodedPath}");
+    }
+
     private void AppendFrameRuntimeProfilerCounters()
     {
         float fps = currentFps;
@@ -2349,6 +2409,7 @@ public sealed class RuntimeItemGiveReceiver : MonoBehaviour
         MapObjectTickProfiler.AddRuntimeCounter("GC", "Gen0Delta", gen0Delta);
         MapObjectTickProfiler.AddRuntimeCounter("GC", "Gen1Delta", gen1Delta);
         MapObjectTickProfiler.AddRuntimeCounter("GC", "Gen2Delta", gen2Delta);
+        ManagedMemoryDiagnostics.AppendProfilerCounters();
     }
 
     private static void AppendEditorRenderRuntimeProfilerCounters()
@@ -5385,6 +5446,8 @@ public sealed class RuntimeItemGiveReceiver : MonoBehaviour
         LoadSlot,
         ResetMap,
         ListSaveSlots,
+        ManagedMemoryBaseline,
+        ManagedMemorySnapshot,
         PerfSnapshot
     }
 

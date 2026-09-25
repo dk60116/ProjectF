@@ -15,7 +15,7 @@ MonoBehaviour:
   schemaVersion: 1
   itemDefinition: {fileID: 11400000, guid: 9f62310ff160eb14b82cc587cd98f19c, type: 2}
   sourcePrefab: {fileID: 1218127140146215825, guid: d1bcd749f595cfb4b819a990cfe8e6a4, type: 3}
-  itemId: 29
+  itemId: 36
   itemName: Camp fire
   sourcePrefabGuid: d1bcd749f595cfb4b819a990cfe8e6a4
   sourceContentHash:

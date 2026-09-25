@@ -48,7 +48,7 @@ MonoBehaviour:
   m_EditorClassIdentifier: Assembly-CSharp::Pump
   id: 0
   objectName: Pump
-  objId: 61
+  objId: 62
   itemDefinition: {fileID: 11400000, guid: 196392e04bd90304ba8d68b0932750f7, type: 2}
   mapStatus:
     mapSizeX: 2

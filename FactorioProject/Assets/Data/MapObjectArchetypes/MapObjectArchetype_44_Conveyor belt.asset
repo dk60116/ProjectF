@@ -15,7 +15,7 @@ MonoBehaviour:
   schemaVersion: 1
   itemDefinition: {fileID: 11400000, guid: add9dc54988936d4ab2eec894a7447f2, type: 2}
   sourcePrefab: {fileID: 7247929509108097568, guid: 790a740c46ac28740b0b3566df1479dd, type: 3}
-  itemId: 44
+  itemId: 52
   itemName: Conveyor belt
   sourcePrefabGuid: 790a740c46ac28740b0b3566df1479dd
   sourceContentHash:

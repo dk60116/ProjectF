@@ -15,7 +15,7 @@ MonoBehaviour:
   schemaVersion: 1
   itemDefinition: {fileID: 11400000, guid: 4d68593c4bba3a34487b0f60cff9fd9e, type: 2}
   sourcePrefab: {fileID: 6151593433542269344, guid: d719f22bffbaf23419a1efce8f6354f9, type: 3}
-  itemId: 104
+  itemId: 116
   itemName: Steam train
   sourcePrefabGuid: d719f22bffbaf23419a1efce8f6354f9
   sourceContentHash:

@@ -13,7 +13,7 @@ MonoBehaviour:
   m_Name: Item_48_Flatcar
   m_EditorClassIdentifier: 
   itemName: Beef steak
-  id: 102
+  id: 103
   mapObject: {fileID: 0}
   mapObjectArchetype: {fileID: 0}
   useMapColor: 0

@@ -13,7 +13,7 @@ MonoBehaviour:
   m_Name: Item_81_Underground Pipe
   m_EditorClassIdentifier: Assembly-CSharp::ItemDefinition
   itemName: Underground Pipe
-  id: 59
+  id: 60
   mapObject: {fileID: 5559195666338308925, guid: 2fe61d390dd7fa2499184f75e8cda8be, type: 3}
   mapObjectArchetype: {fileID: 11400000, guid: fded8a5f73fdddd45b14fe1833c79c8b, type: 2}
   useMapColor: 1

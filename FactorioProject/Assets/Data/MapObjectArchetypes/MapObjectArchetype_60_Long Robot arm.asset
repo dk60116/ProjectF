@@ -15,7 +15,7 @@ MonoBehaviour:
   schemaVersion: 1
   itemDefinition: {fileID: 11400000, guid: 3dcbbe571d74ad449bca45a7842feabe, type: 2}
   sourcePrefab: {fileID: 5617472291595085519, guid: 67e59f493a6d8be4f88637abe49568e4, type: 3}
-  itemId: 60
+  itemId: 70
   itemName: Long Robot arm
   sourcePrefabGuid: 67e59f493a6d8be4f88637abe49568e4
   sourceContentHash:

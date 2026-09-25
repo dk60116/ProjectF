@@ -15,7 +15,7 @@ MonoBehaviour:
   schemaVersion: 1
   itemDefinition: {fileID: 11400000, guid: 9b769dd46a0b9fe4f91ace461114fcd2, type: 2}
   sourcePrefab: {fileID: 2696065824665056805, guid: 27727148c8ab1b546aa4e1dd6f389261, type: 3}
-  itemId: 86
+  itemId: 98
   itemName: Book desk
   sourcePrefabGuid: 27727148c8ab1b546aa4e1dd6f389261
   sourceContentHash:

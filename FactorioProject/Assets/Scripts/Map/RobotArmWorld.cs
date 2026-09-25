@@ -334,6 +334,17 @@ public sealed class RobotArmWorld : IDisposable, IMapObjectUpdateTick, IMapObjec
     }
 
     public void WakeAll() { foreach (var arm in ordered) arm.WakeRuntimeSleep(); }
+    internal void WakeElectricRuntimeArms()
+    {
+        for (int i = 0; i < ordered.Count; i++)
+        {
+            RobotArmInstance arm = ordered[i];
+            if (arm.IsElectricPowerBlocked)
+            {
+                arm.WakeForElectricPowerChange();
+            }
+        }
+    }
     internal void ScheduleTick(RobotArmInstance arm, bool wake = false)
     {
         if (wake) wakeRequests++;

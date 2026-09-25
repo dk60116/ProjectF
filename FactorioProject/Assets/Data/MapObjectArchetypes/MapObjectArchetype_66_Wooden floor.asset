@@ -15,7 +15,7 @@ MonoBehaviour:
   schemaVersion: 1
   itemDefinition: {fileID: 11400000, guid: 5184d5acd736fa943a532c1ee9009150, type: 2}
   sourcePrefab: {fileID: 7127730791152802602, guid: 11ccb5c2f0d669b4db92fe65a3360904, type: 3}
-  itemId: 66
+  itemId: 78
   itemName: Wooden floor
   sourcePrefabGuid: 11ccb5c2f0d669b4db92fe65a3360904
   sourceContentHash:

@@ -66,14 +66,14 @@ public class MiningMachine : InputOutputModule
             "Mining Start");
         ItemDefinition installedDefinition = ResolveInstalledDefinition();
         if (installedDefinition == null
+            || !HasRuntimeOutputCoordinates
             || !TryResolveNextMiningResource(
                 out ResourceInstance resource,
                 out int resourceIndex,
                 out int outputItemId,
                 out int outputCount,
                 -1,
-                -1,
-                true))
+                -1))
         {
             return;
         }
@@ -113,30 +113,22 @@ public class MiningMachine : InputOutputModule
             return "Working";
         }
 
+        if (!HasRuntimeOutputCoordinates)
+        {
+            return "No output area";
+        }
+
         if (!TryResolveNextMiningResource(
                 out _,
                 out _,
                 out int outputItemId,
                 out int outputCount,
                 -1,
-                -1,
-                false)
+                -1)
             || outputItemId < 0
             || outputCount <= 0)
         {
             return "No resource";
-        }
-
-        if (!TryResolveNextMiningResource(
-                out _,
-                out _,
-                out _,
-                out _,
-                -1,
-                -1,
-                true))
-        {
-            return "Output full";
         }
 
         if (!HasOperationalEnergyAvailable(installedDefinition))
@@ -279,8 +271,7 @@ public class MiningMachine : InputOutputModule
                 out outputItemId,
                 out int outputCount,
                 -1,
-                -1,
-                false)
+                -1)
             || outputItemId < 0)
         {
             return false;
@@ -326,8 +317,7 @@ public class MiningMachine : InputOutputModule
         out int outputItemId,
         out int outputCount,
         int requiredOutputItemId,
-        int requiredOutputCount,
-        bool requireOutputBlock)
+        int requiredOutputCount)
     {
         resource = null;
         resourceIndex = -1;
@@ -347,9 +337,6 @@ public class MiningMachine : InputOutputModule
 
         int candidateCount = miningResourceCandidates.Count;
         int startIndex = NormalizeMiningResourceIndex(nextMiningResourceIndex, candidateCount);
-        int lastQueriedOutputItemId = int.MinValue;
-        int lastQueriedOutputCount = int.MinValue;
-        bool lastOutputQuerySucceeded = false;
         for (int offset = 0; offset < candidateCount; offset++)
         {
             int candidateIndex = (startIndex + offset) % candidateCount;
@@ -370,28 +357,6 @@ public class MiningMachine : InputOutputModule
             if (requiredOutputCount > 0 && candidateOutputCount != requiredOutputCount)
             {
                 continue;
-            }
-
-            if (requireOutputBlock)
-            {
-                if (candidateOutputItemId != lastQueriedOutputItemId
-                    || candidateOutputCount != lastQueriedOutputCount)
-                {
-                    using var outputSample = MapObjectTickProfiler.SampleNamed(
-                        "Runtime",
-                        nameof(MiningMachine),
-                        "Mining Output Query");
-                    lastQueriedOutputItemId = candidateOutputItemId;
-                    lastQueriedOutputCount = candidateOutputCount;
-                    lastOutputQuerySucceeded = CanResolveOutputTarget(
-                        candidateOutputItemId,
-                        candidateOutputCount);
-                }
-
-                if (!lastOutputQuerySucceeded)
-                {
-                    continue;
-                }
             }
 
             resource = candidate;
@@ -429,8 +394,7 @@ public class MiningMachine : InputOutputModule
             out _,
             out _,
             requiredOutputItemId,
-            requiredOutputCount,
-            false);
+            requiredOutputCount);
     }
 
     private bool AppendMiningResourceOutputItemIds(ISet<int> outputItemIds)
@@ -585,6 +549,7 @@ public class MiningMachine : InputOutputModule
     private bool CanContinueWorkAnimation(ItemDefinition installedDefinition)
     {
         return installedDefinition != null
+               && HasRuntimeOutputCoordinates
                && HasOperationalEnergyAvailable(installedDefinition)
                && TryResolveNextMiningResource(
                    out _,
@@ -592,8 +557,7 @@ public class MiningMachine : InputOutputModule
                    out int outputItemId,
                    out int outputCount,
                    -1,
-                   -1,
-                   true)
+                   -1)
                && outputItemId >= 0
                && outputCount > 0;
     }

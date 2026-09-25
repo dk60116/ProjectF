@@ -15,7 +15,7 @@ MonoBehaviour:
   schemaVersion: 1
   itemDefinition: {fileID: 11400000, guid: 97f6dea012d4db649abc845562a30b93, type: 2}
   sourcePrefab: {fileID: 2667034222479840192, guid: 14f483af5ebd67544b8067e0db8985d3, type: 3}
-  itemId: 15
+  itemId: 18
   itemName: Iron ore
   sourcePrefabGuid: 14f483af5ebd67544b8067e0db8985d3
   sourceContentHash:

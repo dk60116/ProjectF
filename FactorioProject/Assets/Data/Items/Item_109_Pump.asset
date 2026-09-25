@@ -13,7 +13,7 @@ MonoBehaviour:
   m_Name: Item_109_Pump
   m_EditorClassIdentifier: Assembly-CSharp::ItemDefinition
   itemName: Pump
-  id: 61
+  id: 62
   mapObject: {fileID: 6057075815099229333, guid: a19b4bc2ba75c494db5a48a4bbf18037, type: 3}
   mapObjectArchetype: {fileID: 0}
   useMapColor: 1

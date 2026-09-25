@@ -13,7 +13,7 @@ MonoBehaviour:
   m_Name: Item_39_Utility pole
   m_EditorClassIdentifier: 
   itemName: Utility pole
-  id: 44
+  id: 45
   mapObject: {fileID: 2570451748998091923, guid: 7d1bdc86a2c93b7458f5a0d441e08e32, type: 3}
   mapObjectArchetype: {fileID: 11400000, guid: 3b4efd18e10cb144ca635e8bfd8eae9a, type: 2}
   useMapColor: 1

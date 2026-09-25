@@ -754,6 +754,8 @@ public class InputOutputModule : InstallationObject,
     private float plannedModuleDeltaTime;
     private bool stagedModuleTickPlanned;
     private bool managedRuntimeVisualsDirty;
+    private bool outputDrainCheckPending;
+    private bool hasStoredOutputOnConveyor;
 
     public ItemDefinition ParentInputOutputModuleItem => parentInputOutputModuleItem;
 
@@ -1734,9 +1736,19 @@ public class InputOutputModule : InstallationObject,
             {
                 if (module == null
                     || !module.gameObject.activeInHierarchy
-                    || !module.runtimeSleeping
-                    || !module.ContainsRuntimeAreaCoordinate(coordinate)
-                    || (outputOnly && !module.ContainsRuntimeOutputCoordinate(coordinate))
+                    || !module.ContainsRuntimeAreaCoordinate(coordinate))
+                {
+                    continue;
+                }
+
+                bool isOutputCoordinate = module.ContainsRuntimeOutputCoordinate(coordinate);
+                if (isOutputCoordinate && (!outputOnly || module.hasStoredOutputOnConveyor))
+                {
+                    module.outputDrainCheckPending = true;
+                }
+
+                if (!module.runtimeSleeping
+                    || (outputOnly && !isOutputCoordinate)
                     || !runtimeWakeSet.Add(module))
                 {
                     continue;
@@ -2553,17 +2565,26 @@ public class InputOutputModule : InstallationObject,
         bool foundAny = false;
         for (int recipeIndex = 0; recipeIndex < recipeCount; recipeIndex++)
         {
-            if (!TryGetRecipePair(recipeIndex, out int inputItemId, out _, out int outputItemId, out _)
-                || inputItemId < 0
+            if (!TryGetRecipePair(recipeIndex, out _, out _, out int outputItemId, out _)
                 || !IsRecipeOutputAvailable(outputItemId)
-                || !TryResolveRuntimeInputItemArea(recipeIndex, inputItemId, out RuntimeInputItemArea inputArea)
-                || inputArea.coordinate != coordinate)
+                || !TryGetInputOutputPair(recipeIndex, out InputOutputPair pair))
             {
                 continue;
             }
 
-            inputItemIds.Add(inputItemId);
-            foundAny = true;
+            for (int inputIndex = 0; inputIndex < pair.inputs.Count; inputIndex++)
+            {
+                int inputItemId = pair.inputs[inputIndex].itemDefinition != null
+                    ? pair.inputs[inputIndex].itemDefinition.id
+                    : -1;
+                if (inputItemId < 0 || !ContainsRuntimeInputItemArea(coordinate, inputItemId))
+                {
+                    continue;
+                }
+
+                inputItemIds.Add(inputItemId);
+                foundAny = true;
+            }
         }
 
         return foundAny;
@@ -2655,9 +2676,12 @@ public class InputOutputModule : InstallationObject,
     {
         runtimeSleeping = false;
         EnsureEffectivePairData();
-        // Belt transport applies after planning and may have just opened a slot.
-        // Drain stored output before producing or accepting competing arm output.
-        TryDrainOneOutputAreaItemToConveyor();
+        // Output changes and vacated conveyor lanes request a drain. A successful
+        // transfer keeps the request pending until the stored stack is exhausted.
+        if (outputDrainCheckPending)
+        {
+            outputDrainCheckPending = TryDrainOneOutputAreaItemToConveyor(out hasStoredOutputOnConveyor);
+        }
 
         if ((plannedModuleCommands & PlannedModuleCommand.PullFluid) != 0 && CanStoreFluid)
         {
@@ -2736,6 +2760,12 @@ public class InputOutputModule : InstallationObject,
         return ShouldKeepFluidRuntimeUpdateTickActive();
     }
 
+    // Energy-dependent work can pause while fluid intake and output transport continue.
+    protected virtual bool ShouldKeepRuntimeUpdateTickActiveWithoutOperationalEnergy()
+    {
+        return ShouldKeepFluidRuntimeUpdateTickActive();
+    }
+
     protected virtual bool ShouldAutoPullFluidFromConnectedStorage()
     {
         return true;
@@ -2760,12 +2790,23 @@ public class InputOutputModule : InstallationObject,
             return;
         }
 
-        // A completed craft whose output is blocked is woken by mutations at its
-        // registered output coordinates. Keeping it scheduled would only repeat
-        // the same area scan every update interval while nothing has changed.
-        if (HasDrainableOutputAreaConveyorItem()
-            || ShouldKeepRuntimeUpdateTickActive()
-            || (hasActiveCraft && !waitingForOutput))
+        // Output mutations and conveyor lane vacancies wake a blocked producer.
+        if (outputDrainCheckPending)
+        {
+            SetRuntimeSleeping(false);
+            return;
+        }
+
+        ItemDefinition installedDefinition = ResolveInstalledDefinition();
+        if (RequiresOperationalEnergy(installedDefinition)
+            && !HasOperationalEnergyAvailable(installedDefinition))
+        {
+            SetRuntimeSleeping(!ShouldKeepRuntimeUpdateTickActiveWithoutOperationalEnergy());
+            return;
+        }
+
+        if ((hasActiveCraft && !waitingForOutput)
+            || ShouldKeepRuntimeUpdateTickActive())
         {
             SetRuntimeSleeping(false);
             return;
@@ -5654,14 +5695,13 @@ public class InputOutputModule : InstallationObject,
         bool hasRecipe = false;
         bool blockedByInputArea = false;
         bool blockedByInputItem = false;
-        bool blockedByOutput = false;
         bool blockedByEnergy = false;
         bool blockedByTargetFilter = false;
         bool hasFilterAllowedRecipe = false;
 
         for (int recipeIndex = 0; recipeIndex < recipeCount; recipeIndex++)
         {
-            if (!TryGetRecipePair(recipeIndex, out int inputItemId, out int inputCount, out int outputItemId, out int outputCount))
+            if (!TryGetRecipePair(recipeIndex, out _, out _, out int outputItemId, out _))
             {
                 continue;
             }
@@ -5675,21 +5715,14 @@ public class InputOutputModule : InstallationObject,
 
             hasFilterAllowedRecipe = true;
 
-            if (!TryResolveRuntimeInputItemArea(recipeIndex, inputItemId, out RuntimeInputItemArea inputArea))
+            bool missingInputArea = false;
+            if (!TryGetInputOutputPair(recipeIndex, out InputOutputPair pair)
+                || !HasAllRecipeInputs(pair, out missingInputArea))
             {
-                blockedByInputArea = true;
-                continue;
-            }
-
-            if (GetRuntimeInputAreaCenterItemCount(inputArea.coordinate, inputItemId) < inputCount)
-            {
-                blockedByInputItem = true;
-                continue;
-            }
-
-            if (!CanResolveOutputTarget(outputItemId, outputCount))
-            {
-                blockedByOutput = true;
+                if (missingInputArea)
+                    blockedByInputArea = true;
+                else
+                    blockedByInputItem = true;
                 continue;
             }
 
@@ -5706,11 +5739,6 @@ public class InputOutputModule : InstallationObject,
         if (!hasRecipe)
         {
             return "No recipe";
-        }
-
-        if (blockedByOutput)
-        {
-            return "Output full";
         }
 
         if (blockedByEnergy)
@@ -6778,7 +6806,7 @@ public class InputOutputModule : InstallationObject,
         int recipeCount = GetEffectiveRecipeCount();
         for (int recipeIndex = 0; recipeIndex < recipeCount; recipeIndex++)
         {
-            if (!TryGetRecipePair(recipeIndex, out int inputItemId, out int inputCount, out int outputItemId, out int outputCount))
+            if (!TryGetRecipePair(recipeIndex, out _, out _, out int outputItemId, out int outputCount))
             {
                 continue;
             }
@@ -6788,17 +6816,8 @@ public class InputOutputModule : InstallationObject,
                 continue;
             }
 
-            if (!TryResolveRuntimeInputItemArea(recipeIndex, inputItemId, out RuntimeInputItemArea inputArea))
-            {
-                continue;
-            }
-
-            if (GetRuntimeInputAreaCenterItemCount(inputArea.coordinate, inputItemId) < inputCount)
-            {
-                continue;
-            }
-
-            if (!CanResolveOutputTarget(outputItemId, outputCount))
+            if (!TryGetInputOutputPair(recipeIndex, out InputOutputPair pair)
+                || !HasAllRecipeInputs(pair, out _))
             {
                 continue;
             }
@@ -6808,12 +6827,7 @@ public class InputOutputModule : InstallationObject,
                 continue;
             }
 
-            if (ConsumeRuntimeInputAreaCenterObjects(
-                    inputArea.coordinate,
-                    inputItemId,
-                    inputCount,
-                    ResolveConsumeTargetWorldPosition(),
-                    inputConsumeMoveInterval) != inputCount)
+            if (!ConsumeRecipeInputs(pair))
             {
                 continue;
             }
@@ -6823,37 +6837,133 @@ public class InputOutputModule : InstallationObject,
         }
     }
 
-    private bool TryResolveRuntimeInputItemArea(int recipeIndex, int inputItemId, out RuntimeInputItemArea inputArea)
+    private bool HasAllRecipeInputs(InputOutputPair pair, out bool missingArea)
     {
-        inputArea = default;
-        if (inputItemId < 0 || runtimeInputItemAreas == null || runtimeInputItemAreas.Count <= 0)
+        missingArea = false;
+        if (pair?.inputs == null || pair.inputs.Count == 0)
         {
+            missingArea = true;
             return false;
         }
 
-        if (recipeIndex >= 0 && recipeIndex < runtimeInputItemAreas.Count)
+        for (int inputIndex = 0; inputIndex < pair.inputs.Count; inputIndex++)
         {
-            RuntimeInputItemArea indexedArea = runtimeInputItemAreas[recipeIndex];
-            if (indexedArea.itemId == inputItemId)
+            int itemId = pair.inputs[inputIndex].itemDefinition != null
+                ? pair.inputs[inputIndex].itemDefinition.id
+                : -1;
+            if (itemId < 0)
             {
-                inputArea = indexedArea;
-                return true;
+                missingArea = true;
+                return false;
             }
-        }
 
-        for (int i = 0; i < runtimeInputItemAreas.Count; i++)
-        {
-            RuntimeInputItemArea candidateArea = runtimeInputItemAreas[i];
-            if (candidateArea.itemId != inputItemId)
+            if (!IsFirstRecipeInputWithItemId(pair.inputs, inputIndex, itemId))
             {
                 continue;
             }
 
-            inputArea = candidateArea;
-            return true;
+            int requiredCount = CountRecipeInputItems(pair.inputs, itemId);
+            if (CountAvailableRecipeInputItems(itemId, requiredCount, out bool hasArea)
+                < requiredCount)
+            {
+                missingArea = !hasArea;
+                return false;
+            }
         }
 
-        return false;
+        return true;
+    }
+
+    private bool ConsumeRecipeInputs(InputOutputPair pair)
+    {
+        Vector3 targetPosition = ResolveConsumeTargetWorldPosition();
+        for (int inputIndex = 0; inputIndex < pair.inputs.Count; inputIndex++)
+        {
+            int itemId = pair.inputs[inputIndex].itemDefinition.id;
+            if (!IsFirstRecipeInputWithItemId(pair.inputs, inputIndex, itemId))
+            {
+                continue;
+            }
+
+            int remainingCount = CountRecipeInputItems(pair.inputs, itemId);
+            for (int areaIndex = 0; areaIndex < runtimeInputItemAreas.Count && remainingCount > 0; areaIndex++)
+            {
+                RuntimeInputItemArea area = runtimeInputItemAreas[areaIndex];
+                if (area.itemId != itemId)
+                {
+                    continue;
+                }
+
+                remainingCount -= ConsumeRuntimeInputAreaCenterObjects(
+                    area.coordinate,
+                    itemId,
+                    remainingCount,
+                    targetPosition,
+                    inputConsumeMoveInterval);
+            }
+
+            if (remainingCount > 0)
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    private int CountAvailableRecipeInputItems(int itemId, int requiredCount, out bool hasArea)
+    {
+        hasArea = false;
+        int availableCount = 0;
+        for (int areaIndex = 0; areaIndex < runtimeInputItemAreas.Count; areaIndex++)
+        {
+            RuntimeInputItemArea area = runtimeInputItemAreas[areaIndex];
+            if (area.itemId != itemId)
+            {
+                continue;
+            }
+
+            hasArea = true;
+            availableCount += Mathf.Min(
+                requiredCount - availableCount,
+                GetRuntimeInputAreaCenterItemCount(area.coordinate, itemId));
+            if (availableCount >= requiredCount)
+            {
+                break;
+            }
+        }
+
+        return availableCount;
+    }
+
+    private static bool IsFirstRecipeInputWithItemId(
+        IReadOnlyList<ItemIoEntry> inputs,
+        int inputIndex,
+        int itemId)
+    {
+        for (int i = 0; i < inputIndex; i++)
+        {
+            if (inputs[i].itemDefinition != null && inputs[i].itemDefinition.id == itemId)
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    private static int CountRecipeInputItems(IReadOnlyList<ItemIoEntry> inputs, int itemId)
+    {
+        int count = 0;
+        for (int i = 0; i < inputs.Count; i++)
+        {
+            if (inputs[i].itemDefinition != null && inputs[i].itemDefinition.id == itemId)
+            {
+                count += inputs[i].ResolvedItemCount;
+            }
+        }
+
+        return count;
     }
 
     protected virtual bool TryCompleteActiveCraft()
@@ -7449,17 +7559,6 @@ public class InputOutputModule : InstallationObject,
         return true;
     }
 
-    protected bool CanResolveOutputTarget(int outputItemId, int outputCount)
-    {
-        ItemDefinition outputDefinition = ResolveItemDefinition(outputItemId);
-        if (outputDefinition != null && outputDefinition.oneItem && outputCount > 1)
-        {
-            return CanDistributeSingleItemStacks(outputItemId, outputCount);
-        }
-
-        return TryResolveOutputTarget(outputItemId, outputCount, out _);
-    }
-
     protected bool TryResolveOutputTarget(int outputItemId, int outputCount, out RuntimeAreaOutputTarget target)
     {
         target = default;
@@ -7774,30 +7873,21 @@ public class InputOutputModule : InstallationObject,
         return false;
     }
 
-    private bool HasDrainableOutputAreaConveyorItem()
+    private bool TryDrainOneOutputAreaItemToConveyor(out bool hasStoredOutput)
     {
+        hasStoredOutput = false;
         for (int i = 0; i < runtimeOutputCoordinates.Count; i++)
         {
             if (TryGetLoadedBlock(runtimeOutputCoordinates[i], out Block block)
                 && block != null
-                && block.CanTransferOneInputAreaCenterObjectToConveyor())
+                && block.IsRuntimeConveyor
+                && block.HasInputAreaCenterObjects())
             {
-                return true;
-            }
-        }
-
-        return false;
-    }
-
-    private bool TryDrainOneOutputAreaItemToConveyor()
-    {
-        for (int i = 0; i < runtimeOutputCoordinates.Count; i++)
-        {
-            if (TryGetLoadedBlock(runtimeOutputCoordinates[i], out Block block)
-                && block != null
-                && block.TryTransferOneInputAreaCenterObjectToConveyor())
-            {
-                return true;
+                hasStoredOutput = true;
+                if (block.TryTransferOneInputAreaCenterObjectToConveyor())
+                {
+                    return true;
+                }
             }
         }
 
@@ -10269,6 +10359,8 @@ public class InputOutputModule : InstallationObject,
 
     private void RegisterRuntimeAreaCoordinates()
     {
+        outputDrainCheckPending = true;
+        hasStoredOutputOnConveyor = false;
         RegisterRuntimeAreaCoordinates(runtimeInputEnergyCoordinates);
         RegisterRuntimeInputItemAreaCoordinates();
         RegisterRuntimeAreaCoordinates(runtimeOutputCoordinates);

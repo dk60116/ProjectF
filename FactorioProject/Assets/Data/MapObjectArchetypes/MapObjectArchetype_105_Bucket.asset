@@ -15,7 +15,7 @@ MonoBehaviour:
   schemaVersion: 1
   itemDefinition: {fileID: 11400000, guid: 5e897bd260b82084fb272c968673a461, type: 2}
   sourcePrefab: {fileID: 3525437405879595132, guid: f2ee43aae45a6ad40af89ae6e4f8259a, type: 3}
-  itemId: 105
+  itemId: 117
   itemName: Bucket
   sourcePrefabGuid: f2ee43aae45a6ad40af89ae6e4f8259a
   sourceContentHash:

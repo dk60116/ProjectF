@@ -13,9 +13,9 @@ MonoBehaviour:
   m_Name: MapObjectArchetype_99_Handcart
   m_EditorClassIdentifier: Assembly-CSharp::ProjectF.MapObjects.MapObjectArchetype
   schemaVersion: 1
-  itemDefinition: {fileID: 11400000, guid: e50f8db30407552438483841405afcb2, type: 2}
+  itemDefinition: {fileID: 11400000, guid: 8d6cbd303db81d64d99a93e7494044fb, type: 2}
   sourcePrefab: {fileID: 1311924932887929831, guid: ee02ddd42c01fdd46b2f5e3d7b8bdd2f, type: 3}
-  itemId: 99
+  itemId: 111
   itemName: Handcart
   sourcePrefabGuid: ee02ddd42c01fdd46b2f5e3d7b8bdd2f
   sourceContentHash:

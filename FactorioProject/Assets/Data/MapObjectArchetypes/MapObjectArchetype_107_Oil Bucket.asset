@@ -15,7 +15,7 @@ MonoBehaviour:
   schemaVersion: 1
   itemDefinition: {fileID: 11400000, guid: 639f657a2950b1444bd7dbb5bee0719a, type: 2}
   sourcePrefab: {fileID: 3525437405879595132, guid: 8d2fb53ebe5fa2d448cf0d63b521f261, type: 3}
-  itemId: 107
+  itemId: 119
   itemName: Oil Bucket
   sourcePrefabGuid: 8d2fb53ebe5fa2d448cf0d63b521f261
   sourceContentHash:

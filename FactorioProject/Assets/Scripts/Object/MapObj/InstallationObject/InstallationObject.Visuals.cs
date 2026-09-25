@@ -68,7 +68,7 @@ public partial class InstallationObject
         }
         if (active)
         {
-            if (!effect.isEmitting)
+            if (!InstallationVisualState.IsParticleEffectActive(effect))
                 effect.Play(true);
         }
         else

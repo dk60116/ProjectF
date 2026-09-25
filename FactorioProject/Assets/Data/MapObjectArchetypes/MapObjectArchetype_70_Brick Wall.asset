@@ -15,7 +15,7 @@ MonoBehaviour:
   schemaVersion: 1
   itemDefinition: {fileID: 11400000, guid: 7795dfaf3b2a492cae3ffb24dfc67efb, type: 2}
   sourcePrefab: {fileID: 2276685300360839919, guid: 9b80960e4abf8cc4a901548259cc9e2b, type: 3}
-  itemId: 70
+  itemId: 82
   itemName: Brick Wall
   sourcePrefabGuid: 9b80960e4abf8cc4a901548259cc9e2b
   sourceContentHash:

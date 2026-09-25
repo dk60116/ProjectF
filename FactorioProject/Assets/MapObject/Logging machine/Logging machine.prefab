@@ -263,8 +263,8 @@ MonoBehaviour:
   m_EditorClassIdentifier: Assembly-CSharp::LoggingMachine
   id: 0
   objectName: Logging machine
-  objId: 74
-  itemDefinition: {fileID: 11400000, guid: 355b51bd6602a584481abc0b5a11aae8, type: 2}
+  objId: 76
+  itemDefinition: {fileID: 11400000, guid: b53715335b2e27a46b55215dff4fdaac, type: 2}
   mapStatus:
     mapSizeX: 1
     mapSizeY: 1

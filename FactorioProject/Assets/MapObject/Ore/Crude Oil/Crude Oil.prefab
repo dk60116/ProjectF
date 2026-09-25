@@ -49,7 +49,7 @@ MonoBehaviour:
   m_EditorClassIdentifier: Assembly-CSharp::Resource
   id: 0
   objectName: Crude Oil
-  objId: 4
+  objId: 3
   itemDefinition: {fileID: 11400000, guid: 2e352f106be1f394da21ef84da75b7e9, type: 2}
   mapStatus:
     mapSizeX: 1

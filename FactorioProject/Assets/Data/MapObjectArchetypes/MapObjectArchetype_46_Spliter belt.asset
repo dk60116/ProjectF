@@ -15,7 +15,7 @@ MonoBehaviour:
   schemaVersion: 1
   itemDefinition: {fileID: 11400000, guid: 00a0cf5cedb5c624a9af78a08be87a5f, type: 2}
   sourcePrefab: {fileID: 3055157777023880970, guid: 09f7fb2b66f582848aedabcf3fdc9f18, type: 3}
-  itemId: 46
+  itemId: 54
   itemName: Spliter belt
   sourcePrefabGuid: 09f7fb2b66f582848aedabcf3fdc9f18
   sourceContentHash:

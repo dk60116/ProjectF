@@ -15,7 +15,7 @@ MonoBehaviour:
   schemaVersion: 1
   itemDefinition: {fileID: 11400000, guid: 21883f622876a3f47a1c1f90a4b0004e, type: 2}
   sourcePrefab: {fileID: 5617472291595085519, guid: 7c64585bed65e8843aa24eb07a5f02f3, type: 3}
-  itemId: 59
+  itemId: 69
   itemName: Robot arm
   sourcePrefabGuid: 7c64585bed65e8843aa24eb07a5f02f3
   sourceContentHash:

@@ -15,7 +15,7 @@ MonoBehaviour:
   schemaVersion: 1
   itemDefinition: {fileID: 11400000, guid: 7ad57ef598401784aaa7e239c9a50507, type: 2}
   sourcePrefab: {fileID: 3843491245406909261, guid: 482d646ee24530540a103d758c71b5b2, type: 3}
-  itemId: 30
+  itemId: 37
   itemName: Funance
   sourcePrefabGuid: 482d646ee24530540a103d758c71b5b2
   sourceContentHash:

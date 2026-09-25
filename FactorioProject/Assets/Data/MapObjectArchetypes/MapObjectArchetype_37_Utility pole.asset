@@ -15,7 +15,7 @@ MonoBehaviour:
   schemaVersion: 1
   itemDefinition: {fileID: 11400000, guid: c0075e53760e0bc4e8a7625ac98e2167, type: 2}
   sourcePrefab: {fileID: 2570451748998091923, guid: 7d1bdc86a2c93b7458f5a0d441e08e32, type: 3}
-  itemId: 37
+  itemId: 45
   itemName: Utility pole
   sourcePrefabGuid: 7d1bdc86a2c93b7458f5a0d441e08e32
   sourceContentHash:

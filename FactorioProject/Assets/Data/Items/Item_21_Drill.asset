@@ -13,7 +13,7 @@ MonoBehaviour:
   m_Name: Item_21_Drill
   m_EditorClassIdentifier: 
   itemName: Drill
-  id: 40
+  id: 41
   mapObject: {fileID: 0}
   mapObjectArchetype: {fileID: 0}
   useMapColor: 0

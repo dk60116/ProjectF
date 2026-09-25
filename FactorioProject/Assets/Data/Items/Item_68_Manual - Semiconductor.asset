@@ -13,7 +13,7 @@ MonoBehaviour:
   m_Name: Item_68_Manual - Semiconductor
   m_EditorClassIdentifier: Assembly-CSharp::ItemDefinition
   itemName: Manual - Semiconductor
-  id: 90
+  id: 91
   mapObject: {fileID: 0}
   mapObjectArchetype: {fileID: 0}
   useMapColor: 0

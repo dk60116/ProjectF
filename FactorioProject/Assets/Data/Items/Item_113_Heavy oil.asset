@@ -13,7 +13,7 @@ MonoBehaviour:
   m_Name: Item_113_Heavy oil
   m_EditorClassIdentifier: Assembly-CSharp::ItemDefinition
   itemName: Heavy oil
-  id: 6
+  id: 5
   mapObject: {fileID: 0}
   mapObjectArchetype: {fileID: 0}
   useMapColor: 0

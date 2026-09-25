@@ -15,7 +15,7 @@ MonoBehaviour:
   schemaVersion: 1
   itemDefinition: {fileID: 11400000, guid: c7d14445b92c7d0468e83d73c68f384f, type: 2}
   sourcePrefab: {fileID: 7839628250064023149, guid: 0ed46c02cba6bea47936497891a6fa2b, type: 3}
-  itemId: 16
+  itemId: 20
   itemName: Workbench
   sourcePrefabGuid: 0ed46c02cba6bea47936497891a6fa2b
   sourceContentHash:

@@ -37,6 +37,7 @@ internal sealed class ProfilerForm : Form
     private readonly CheckBox enableProfilingCheckBox = new CheckBox();
     private readonly Button refreshButton = new Button();
     private readonly Button refreshCountsButton = new Button();
+    private readonly Button memorySnapshotButton = new Button();
     private readonly Button simulationPauseButton = new Button();
     private readonly Button openTextWindowButton = new Button();
     private readonly Button openBeltTickWindowButton = new Button();
@@ -144,6 +145,10 @@ internal sealed class ProfilerForm : Form
         StyleButton(refreshButton, "Refresh");
         refreshButton.Click += async (_, _) => await RefreshNowAsync();
 
+        StyleButton(memorySnapshotButton, "Memory Snapshot");
+        memorySnapshotButton.Width = 152;
+        memorySnapshotButton.Click += async (_, _) => await CaptureMemorySnapshotAsync();
+
         StyleButton(simulationPauseButton, "Pause Game");
         simulationPauseButton.Width = 104;
         simulationPauseButton.Click += async (_, _) => await SetSimulationPausedAsync(!simulationPaused);
@@ -165,6 +170,7 @@ internal sealed class ProfilerForm : Form
         controlPanel.Controls.Add(enableProfilingCheckBox);
         controlPanel.Controls.Add(refreshButton);
         controlPanel.Controls.Add(refreshCountsButton);
+        controlPanel.Controls.Add(memorySnapshotButton);
         controlPanel.Controls.Add(simulationPauseButton);
         controlPanel.Controls.Add(openTextWindowButton);
         controlPanel.Controls.Add(openBeltTickWindowButton);
@@ -441,6 +447,33 @@ internal sealed class ProfilerForm : Form
     private async Task RefreshNowAsync()
     {
         await PollAsync(true);
+    }
+
+    private async Task CaptureMemorySnapshotAsync()
+    {
+        SetBusy(true);
+        try
+        {
+            await WaitForActivePollAsync();
+            const string command = "memory snapshot";
+            string response = await SendProtocolLineAsync(BuildHost(), BuildPort(), command);
+            AppendLog($"> {command}");
+            AppendLog(response);
+            if (response.StartsWith("ok ", StringComparison.OrdinalIgnoreCase)
+                && TryReadProtocolToken(response, "snapshotPathBase64", out string encodedPath))
+            {
+                string path = Encoding.UTF8.GetString(Convert.FromBase64String(encodedPath));
+                AppendLog($"Snapshot requested: {path}");
+            }
+        }
+        catch (Exception exception) when (IsProtocolException(exception))
+        {
+            AppendLog($"memory snapshot failed: {exception.Message}");
+        }
+        finally
+        {
+            SetBusy(false);
+        }
     }
 
     private async Task SetSimulationPausedAsync(bool paused)
@@ -1510,6 +1543,7 @@ internal sealed class ProfilerForm : Form
         enableProfilingCheckBox.Enabled = !busy;
         refreshButton.Enabled = !busy;
         refreshCountsButton.Enabled = !busy;
+        memorySnapshotButton.Enabled = !busy;
         simulationPauseButton.Enabled = !busy;
         UpdateSnapshotWindowButtonsEnabled(busy);
         Cursor = busy ? Cursors.WaitCursor : Cursors.Default;

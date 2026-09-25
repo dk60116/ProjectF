@@ -15,7 +15,7 @@ MonoBehaviour:
   schemaVersion: 1
   itemDefinition: {fileID: 11400000, guid: e3e51ef812b2cca4a8b0033722dde4a1, type: 2}
   sourcePrefab: {fileID: 3543931225916085951, guid: 5c9d27cd414052a4fab2eee000e42bdd, type: 3}
-  itemId: 57
+  itemId: 66
   itemName: Sprinkler
   sourcePrefabGuid: 5c9d27cd414052a4fab2eee000e42bdd
   sourceContentHash:

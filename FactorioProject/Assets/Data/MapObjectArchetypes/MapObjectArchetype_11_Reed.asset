@@ -15,7 +15,7 @@ MonoBehaviour:
   schemaVersion: 1
   itemDefinition: {fileID: 11400000, guid: eac1a52a94dced248b2c431dae676dfb, type: 2}
   sourcePrefab: {fileID: 5596077993400562758, guid: 24eb9727d7e44e846927e90bd34ba20f, type: 3}
-  itemId: 11
+  itemId: 14
   itemName: Reed
   sourcePrefabGuid: 24eb9727d7e44e846927e90bd34ba20f
   sourceContentHash:

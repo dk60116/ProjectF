@@ -15,7 +15,7 @@ MonoBehaviour:
   schemaVersion: 1
   itemDefinition: {fileID: 11400000, guid: 8b08ee1c220ce654abcb75d3541c7312, type: 2}
   sourcePrefab: {fileID: 233042269004523433, guid: 8a8b5c428315cb54ab566ee8f1a55423, type: 3}
-  itemId: 54
+  itemId: 63
   itemName: Fluid tank
   sourcePrefabGuid: 8a8b5c428315cb54ab566ee8f1a55423
   sourceContentHash:

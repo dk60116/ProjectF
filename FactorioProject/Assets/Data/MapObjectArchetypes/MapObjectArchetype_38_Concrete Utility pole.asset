@@ -15,7 +15,7 @@ MonoBehaviour:
   schemaVersion: 1
   itemDefinition: {fileID: 11400000, guid: 8780f845ccb846a4197150948b3297b2, type: 2}
   sourcePrefab: {fileID: 2570451748998091923, guid: db1c88c08b1b0f24a9ffca7c01daac56, type: 3}
-  itemId: 38
+  itemId: 46
   itemName: Concrete Utility pole
   sourcePrefabGuid: db1c88c08b1b0f24a9ffca7c01daac56
   sourceContentHash:

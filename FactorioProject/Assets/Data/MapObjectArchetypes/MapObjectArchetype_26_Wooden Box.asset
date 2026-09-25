@@ -15,7 +15,7 @@ MonoBehaviour:
   schemaVersion: 1
   itemDefinition: {fileID: 11400000, guid: 4a87d679024ea8a44b02ecc16293a962, type: 2}
   sourcePrefab: {fileID: 6524911674366201629, guid: 7ce21f04ec369dd4595efc204633050b, type: 3}
-  itemId: 26
+  itemId: 33
   itemName: Wooden Box
   sourcePrefabGuid: 7ce21f04ec369dd4595efc204633050b
   sourceContentHash:

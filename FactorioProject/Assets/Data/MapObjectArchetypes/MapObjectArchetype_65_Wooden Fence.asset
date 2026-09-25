@@ -15,7 +15,7 @@ MonoBehaviour:
   schemaVersion: 1
   itemDefinition: {fileID: 11400000, guid: 09ddda540280b014fadbf0bbfc3394d7, type: 2}
   sourcePrefab: {fileID: 2276685300360839919, guid: a7060f381d0a25d4ab7f902bf30be7ef, type: 3}
-  itemId: 65
+  itemId: 77
   itemName: Wooden Fence
   sourcePrefabGuid: a7060f381d0a25d4ab7f902bf30be7ef
   sourceContentHash:

@@ -13,7 +13,7 @@ MonoBehaviour:
   m_Name: Item_74_Bucket
   m_EditorClassIdentifier: Assembly-CSharp::ItemDefinition
   itemName: Bucket
-  id: 116
+  id: 117
   mapObject: {fileID: 3525437405879595132, guid: f2ee43aae45a6ad40af89ae6e4f8259a, type: 3}
   mapObjectArchetype: {fileID: 11400000, guid: 930b92f3954794648987bf4543b2f853, type: 2}
   useMapColor: 1

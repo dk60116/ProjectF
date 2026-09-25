@@ -21085,28 +21085,43 @@ public class InstallationPlacementController : MonoBehaviour
             return true;
         }
 
-        IReadOnlyList<InputOutputModule.ItemIoEntry> inputList = inputOutputModule.InputList;
-        int recipeCount = inputList != null ? inputList.Count : 0;
-        if (recipeCount <= 0)
+        IReadOnlyList<InputOutputModule.InputOutputPair> recipes = inputOutputModule.InputOutputPairs;
+        if (recipes == null || recipes.Count <= 0)
         {
             return bindings.Count > 0;
         }
 
-        bool useSharedSingleInputArea = inputItemCells.Count == 1 && recipeCount > 1;
-        int bindingCount = useSharedSingleInputArea
-            ? recipeCount
-            : Mathf.Min(inputItemCells.Count, recipeCount);
-
-        for (int i = 0; i < bindingCount; i++)
+        List<int> recipeInputItemIds = new List<int>();
+        for (int recipeIndex = 0; recipeIndex < recipes.Count; recipeIndex++)
         {
-            ItemDefinition itemDefinition = inputList[i].itemDefinition;
-            if (itemDefinition == null || itemDefinition.id < 0)
+            InputOutputModule.InputOutputPair recipe = recipes[recipeIndex];
+            if (recipe?.inputs == null)
             {
                 continue;
             }
 
-            RectGridPlacementCell cell = inputItemCells[useSharedSingleInputArea ? 0 : i];
-            bindings.Add(new InputOutputModuleItemAreaBinding(cell.coordinate, itemDefinition.id));
+            for (int inputIndex = 0; inputIndex < recipe.inputs.Count; inputIndex++)
+            {
+                ItemDefinition itemDefinition = recipe.inputs[inputIndex].itemDefinition;
+                if (itemDefinition == null || itemDefinition.id < 0
+                    || recipeInputItemIds.Contains(itemDefinition.id))
+                {
+                    continue;
+                }
+
+                recipeInputItemIds.Add(itemDefinition.id);
+            }
+        }
+
+        for (int cellIndex = 0; cellIndex < inputItemCells.Count; cellIndex++)
+        {
+            Vector2Int coordinate = inputItemCells[cellIndex].coordinate;
+            for (int itemIndex = 0; itemIndex < recipeInputItemIds.Count; itemIndex++)
+            {
+                bindings.Add(new InputOutputModuleItemAreaBinding(
+                    coordinate,
+                    recipeInputItemIds[itemIndex]));
+            }
         }
 
         return bindings.Count > 0;

@@ -15,7 +15,7 @@ MonoBehaviour:
   schemaVersion: 1
   itemDefinition: {fileID: 11400000, guid: 2cbd885291664af429fdc0ef3784d40d, type: 2}
   sourcePrefab: {fileID: 2696561144136662984, guid: 6e704ffa44d6f8e42a1e28a682f898aa, type: 3}
-  itemId: 101
+  itemId: 113
   itemName: Train station
   sourcePrefabGuid: 6e704ffa44d6f8e42a1e28a682f898aa
   sourceContentHash:

@@ -469,23 +469,37 @@ public sealed class FacilitySimulationWorld :
 
     private void ApplyTarget(ref Entry entry, IMapObjectUpdateTick target)
     {
-        if (entry.PendingFlowIndex >= 0 && entry.FlowAdapter != null)
+        InstallationObject installationObject = target as InstallationObject;
+        bool previouslyHadElectricDemand = UtilityPole.TryCaptureElectricPowerDemand(
+            installationObject,
+            out float previousElectricDemandWatts);
+        try
         {
-            entry.FlowAdapter.ApplyFacilityFlow(flowBatch, entry.PendingFlowIndex);
-            entry.Persistence?.MarkPersistenceStateDirty();
-            return;
-        }
+            if (entry.PendingFlowIndex >= 0 && entry.FlowAdapter != null)
+            {
+                entry.FlowAdapter.ApplyFacilityFlow(flowBatch, entry.PendingFlowIndex);
+                entry.Persistence?.MarkPersistenceStateDirty();
+                return;
+            }
 
-        if (entry.Staged != null)
+            if (entry.Staged != null)
+            {
+                entry.Staged.ApplyManagedUpdateTick();
+                entry.Persistence?.MarkPersistenceStateDirty();
+                return;
+            }
+
+            target.ManagedUpdateTick(entry.PendingDeltaTime);
+            entry.Persistence?.MarkPersistenceStateDirty();
+            lastDirectCount++;
+        }
+        finally
         {
-            entry.Staged.ApplyManagedUpdateTick();
-            entry.Persistence?.MarkPersistenceStateDirty();
-            return;
+            UtilityPole.NotifyElectricPowerConsumerStateChangedIfNeeded(
+                installationObject,
+                previouslyHadElectricDemand,
+                previousElectricDemandWatts);
         }
-
-        target.ManagedUpdateTick(entry.PendingDeltaTime);
-        entry.Persistence?.MarkPersistenceStateDirty();
-        lastDirectCount++;
     }
 
     private FacilityTypeProfile GetOrCreateTypeProfile(Type type)

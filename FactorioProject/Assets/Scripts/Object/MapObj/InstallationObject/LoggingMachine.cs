@@ -17,6 +17,13 @@ public class LoggingMachine : InstallationObject,
     };
 
     private static readonly int WorkAnimatorBoolHash = Animator.StringToHash("bWork");
+    private static readonly HashSet<LoggingMachine> activeElectricMachines = new HashSet<LoggingMachine>();
+
+    [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.SubsystemRegistration)]
+    private static void ResetActiveElectricMachines()
+    {
+        activeElectricMachines.Clear();
+    }
     public const int DefaultMinimumGrowth = 10;
     public const int DefaultMaximumGrowth = ResourceDefinition.MaxGrowth;
     private const float DefaultTickIntervalSeconds = 0.1f;
@@ -50,6 +57,7 @@ public class LoggingMachine : InstallationObject,
     private bool workAnimatorParameterChecked;
     private bool hasWorkAnimatorParameter;
     private bool hasElectricDemand;
+    private bool electricPowerBlocked;
     private bool isWorking;
     private int currentDirectionIndex;
     private float currentHingeAngle;
@@ -202,6 +210,7 @@ public class LoggingMachine : InstallationObject,
     protected override void OnEnable()
     {
         base.OnEnable();
+        activeElectricMachines.Add(this);
         ResolveHingeReference();
         ResetRuntimeState(true);
         FacilitySimulationWorld.Register(this);
@@ -213,6 +222,7 @@ public class LoggingMachine : InstallationObject,
     {
         if (ProjectFApplicationLifecycle.IsQuitting) return;
 
+        activeElectricMachines.Remove(this);
         FacilityRuntimeWakeRegistry.Unregister(this);
         FacilitySimulationWorld.Unregister(this);
         SetWorking(false);
@@ -264,15 +274,19 @@ public class LoggingMachine : InstallationObject,
             hasElectricDemand = activeTree != null || HasAnyAdjacentTree();
             if (!hasElectricDemand)
             {
+                electricPowerBlocked = false;
                 SetWorking(false);
                 return;
             }
 
             if (!UtilityPole.HasElectricityAvailable(this))
             {
+                electricPowerBlocked = true;
                 SetWorking(false);
                 return;
             }
+
+            electricPowerBlocked = false;
 
             UpdateHingeRotation(deltaTime);
             if (!IsHingeAligned())
@@ -362,12 +376,24 @@ public class LoggingMachine : InstallationObject,
         }
     }
 
+    internal static void WakeElectricRuntimeMachines()
+    {
+        foreach (LoggingMachine machine in activeElectricMachines)
+        {
+            if (machine != null && machine.electricPowerBlocked)
+            {
+                machine.WakeRuntimeTick();
+            }
+        }
+    }
+
     private void RefreshRuntimeTickSleepState()
     {
         bool shouldRemainScheduled = Application.isPlaying
                                      && isActiveAndEnabled
                                      && TryGetPlacementRuntime(out _, out _)
-                                     && hasElectricDemand;
+                                     && hasElectricDemand
+                                     && !electricPowerBlocked;
         if (FacilitySimulationWorld.IsScheduled(this) != shouldRemainScheduled)
         {
             FacilitySimulationWorld.SetScheduled(this, shouldRemainScheduled);
@@ -1066,6 +1092,7 @@ public class LoggingMachine : InstallationObject,
     {
         activeTree = null;
         hasElectricDemand = false;
+        electricPowerBlocked = false;
         currentDirectionIndex = 0;
         currentHingeAngle = 0f;
         emptyDirectionElapsed = 0f;

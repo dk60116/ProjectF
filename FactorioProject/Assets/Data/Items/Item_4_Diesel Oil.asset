@@ -13,7 +13,7 @@ MonoBehaviour:
   m_Name: Item_4_Diesel Oil
   m_EditorClassIdentifier: Assembly-CSharp::ItemDefinition
   itemName: Diesel Oil
-  id: 5
+  id: 4
   mapObject: {fileID: 0}
   mapObjectArchetype: {fileID: 0}
   useMapColor: 0

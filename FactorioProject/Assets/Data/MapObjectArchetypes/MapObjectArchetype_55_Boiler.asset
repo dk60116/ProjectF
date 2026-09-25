@@ -15,7 +15,7 @@ MonoBehaviour:
   schemaVersion: 1
   itemDefinition: {fileID: 11400000, guid: 763440cffdd93a948a7d8e73c541f673, type: 2}
   sourcePrefab: {fileID: 3506764276934423664, guid: 19c50aebdae9359439841e55c9844e07, type: 3}
-  itemId: 55
+  itemId: 64
   itemName: Boiler
   sourcePrefabGuid: 19c50aebdae9359439841e55c9844e07
   sourceContentHash:

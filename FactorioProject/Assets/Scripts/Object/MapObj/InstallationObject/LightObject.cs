@@ -74,6 +74,7 @@ public class LightObject : InstallationObject, IItemLightPowerStateProvider
     {
         BindLightController();
         ApplyLightTexture(observedLightController != null && observedLightController.IsLightActive);
+        UtilityPole.NotifyElectricPowerConsumerStateChanged(this);
     }
 
     private void BindLightController()

@@ -15,7 +15,7 @@ MonoBehaviour:
   schemaVersion: 1
   itemDefinition: {fileID: 11400000, guid: fde3e14d2afafaf4a9603cedda8d94d6, type: 2}
   sourcePrefab: {fileID: 7245704639458897854, guid: 51e722e4dbe80d84e91d00b9220f57e0, type: 3}
-  itemId: 56
+  itemId: 65
   itemName: Steam generator
   sourcePrefabGuid: 51e722e4dbe80d84e91d00b9220f57e0
   sourceContentHash:

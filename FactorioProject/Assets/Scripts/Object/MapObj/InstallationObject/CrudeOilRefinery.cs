@@ -335,6 +335,12 @@ public class CrudeOilRefinery : InputOutputModule
         return true;
     }
 
+    protected override bool ShouldKeepRuntimeUpdateTickActiveWithoutOperationalEnergy()
+    {
+        // Fluid ports still accept and route deliveries when refining cannot run.
+        return true;
+    }
+
     protected override bool ShouldPlayWorkAnimation()
     {
         return false;

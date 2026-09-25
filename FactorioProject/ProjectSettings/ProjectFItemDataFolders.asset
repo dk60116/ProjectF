@@ -28,7 +28,7 @@ MonoBehaviour:
   - id: f15266f7c0944b46a765791c0cac6402
     displayName: Workable
     expanded: 1
-    anchorItemGuid: 22f7c943800c7d14987cc0b65ed337f6
+    anchorItemGuid: c2c3df56b3d7ac04db2063fb6b297ee7
   - id: 4008c2a9919643788ee7eedfdd9a2060
     displayName: Processing
     expanded: 1
@@ -44,7 +44,7 @@ MonoBehaviour:
   - id: 9da9232414d34842a422459405ef2921
     displayName: Fire
     expanded: 1
-    anchorItemGuid: a42f84aea6bbe46419a3777181e987a1
+    anchorItemGuid: fae2696b5392f8946ad224e1317329af
   - id: a6f688d669d74bd985df11be9ee89c0c
     displayName: Iron tool
     expanded: 1
@@ -140,8 +140,6 @@ MonoBehaviour:
     folderId: 839eaa9b00424dc59d967a096e100401
   - itemGuid: f40db410eac38e44386c4ef5c3396514
     folderId: 839eaa9b00424dc59d967a096e100401
-  - itemGuid: 763e6b55158c49c4db58cb49480d65f2
-    folderId: 839eaa9b00424dc59d967a096e100401
   - itemGuid: cc54448c2b8e64c40a4458e259ad7222
     folderId: 52f654e67171467f864fb2b0973e4063
   - itemGuid: eac1a52a94dced248b2c431dae676dfb
@@ -158,8 +156,6 @@ MonoBehaviour:
     folderId: f15266f7c0944b46a765791c0cac6402
   - itemGuid: 2d6039a716731b14c94f2980e22b1089
     folderId: f15266f7c0944b46a765791c0cac6402
-  - itemGuid: 22f7c943800c7d14987cc0b65ed337f6
-    folderId: 4008c2a9919643788ee7eedfdd9a2060
   - itemGuid: 1e1fcabb313ee6840a8a369650290ace
     folderId: 4008c2a9919643788ee7eedfdd9a2060
   - itemGuid: c386ddb4f7fc1904fbb047de3bff6a99
@@ -270,8 +266,6 @@ MonoBehaviour:
     folderId: c0a50a74f8524258abc5a4b4fcd867b6
   - itemGuid: 9b769dd46a0b9fe4f91ace461114fcd2
     folderId: d4d72b0cf2fb491db21ccbc3248c91b8
-  - itemGuid: e50f8db30407552438483841405afcb2
-    folderId: c46f2864503448c084f910219612a1ce
   - itemGuid: 5e897bd260b82084fb272c968673a461
     folderId: 396fb7fc138646ebbfad2b1ca8b35460
   - itemGuid: 0c3d44b3dc7f48e0a6408d9ac6a60bd2
@@ -288,7 +282,7 @@ MonoBehaviour:
     folderId: abe4f914cb684037afb8c746f6debe44
   - itemGuid: c18fd5542121a734f9c3199b5e56920f
     folderId: 6dc3503fe92247e6803d4e2740a6bcf7
-  - itemGuid: ad734838df0981d44927836700989123
+  - itemGuid: 827234b8c265100479a8144a7fc410c2
     folderId: 63b13fc99f8747da9db46e2210011669
   - itemGuid: 5b385518a4029674bb9746d7f8e9f701
     folderId: c2ff1d1024d34b038c46326dedd7a5d0
@@ -326,8 +320,6 @@ MonoBehaviour:
     folderId: ad364d8d416344a58de79b3411a95650
   - itemGuid: a2d64ede116b3754d97a23cc6bf0cfa1
     folderId: 7fb122de610a4516b8853a54b74e65f0
-  - itemGuid: 355b51bd6602a584481abc0b5a11aae8
-    folderId: 719b89eaec88471098afae6081a59668
   - itemGuid: 54e23bd29f0575344993817082d9f96f
     folderId: ad364d8d416344a58de79b3411a95650
   - itemGuid: a96ac784c75abe5439593ca5c53454c8
@@ -354,7 +346,7 @@ MonoBehaviour:
     folderId: 719b89eaec88471098afae6081a59668
   - itemGuid: 196392e04bd90304ba8d68b0932750f7
     folderId: abe4f914cb684037afb8c746f6debe44
-  - itemGuid: a878c590dc22bd145a8db135c6191eaf
+  - itemGuid: 6a01bf8dd0f187d498b250aaaec3951a
     folderId: 6dc3503fe92247e6803d4e2740a6bcf7
   - itemGuid: e288a378c27b2794da788e40d427075d
     folderId: 719b89eaec88471098afae6081a59668
@@ -378,3 +370,13 @@ MonoBehaviour:
     folderId: 4008c2a9919643788ee7eedfdd9a2060
   - itemGuid: f258fbd8cc06e274fb34717e13970102
     folderId: 4008c2a9919643788ee7eedfdd9a2060
+  - itemGuid: c2647e3a39ee9714e87f93f2427fa513
+    folderId: 9da9232414d34842a422459405ef2921
+  - itemGuid: b53715335b2e27a46b55215dff4fdaac
+    folderId: 719b89eaec88471098afae6081a59668
+  - itemGuid: 8491fc4d05dd467439571df5ff6141b2
+    folderId: 839eaa9b00424dc59d967a096e100401
+  - itemGuid: c2c3df56b3d7ac04db2063fb6b297ee7
+    folderId: 4008c2a9919643788ee7eedfdd9a2060
+  - itemGuid: 8d6cbd303db81d64d99a93e7494044fb
+    folderId: c46f2864503448c084f910219612a1ce
