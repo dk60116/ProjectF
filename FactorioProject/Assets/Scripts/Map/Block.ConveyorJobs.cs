@@ -153,7 +153,10 @@ public partial class Block
         // Several lanes in the same block can change during one native tick.
         // Invalidate presentation and observers once without copying lane data.
         MarkBeltJobItemVisualDirty(refreshActivity);
-        NotifyRuntimeItemStackChanged(wakeRuntimeDependents, false);
+        if (!TryTransferOneDroppedFloorObjectToConveyor())
+        {
+            NotifyRuntimeItemStackChanged(wakeRuntimeDependents, false);
+        }
     }
 
     internal void CaptureBeltJobItemVisualState(out int itemCount, out bool hasDynamicVisuals)

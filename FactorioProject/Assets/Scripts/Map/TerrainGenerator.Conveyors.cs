@@ -314,6 +314,7 @@ public partial class TerrainGenerator : MonoBehaviour
         }
 
         InputOutputModule.WakeRuntimeOutputModulesAtCoordinate(destinationBlock.Coordinate);
+        destinationBlock.TryTransferOneDroppedFloorObjectToConveyor();
         if (destinationBlock.UsesBeltJobs) { WakeBeltJobBlock(destinationBlock); return; }
         destinationBlock.WakeConveyorVacatedLanePredecessor(destinationLaneIndex);
         destinationBlock.WakeSplitterInputs();

@@ -23,6 +23,12 @@ public partial class UtilityPole
         new Dictionary<RobotArmInstance, RobotArmElectricBinding>();
     private static readonly Stack<RobotArmElectricBinding> robotArmBindingPool =
         new Stack<RobotArmElectricBinding>();
+    private static readonly Dictionary<ElectricNetwork, List<RobotArmInstance>> robotArmsByNetwork =
+        new Dictionary<ElectricNetwork, List<RobotArmInstance>>();
+    private static readonly Stack<List<RobotArmInstance>> robotArmNetworkListPool =
+        new Stack<List<RobotArmInstance>>();
+    private static readonly HashSet<RobotArmInstance> robotArmWakeScratch =
+        new HashSet<RobotArmInstance>();
     private static readonly List<RobotArmInstance> robotArmOrderScratch = new List<RobotArmInstance>();
     private static readonly Dictionary<ElectricNetwork, float> robotArmDemand =
         new Dictionary<ElectricNetwork, float>();
@@ -91,7 +97,7 @@ public partial class UtilityPole
             }
         }
 
-        robotArmOrderScratch.Sort((left, right) => left.SimulationId.CompareTo(right.SimulationId));
+        robotArmOrderScratch.Sort(CompareRobotArmSimulationOrder);
         for (int armIndex = 0; armIndex < robotArmOrderScratch.Count; armIndex++)
         {
             RobotArmInstance arm = robotArmOrderScratch[armIndex];
@@ -131,6 +137,7 @@ public partial class UtilityPole
                 }
 
                 binding.Networks.Add(network);
+                AddRobotArmNetworkBinding(network, arm);
                 if (hasDemand)
                 {
                     robotArmDemand.TryGetValue(network, out float total);
@@ -152,6 +159,7 @@ public partial class UtilityPole
 
     private static void ReleaseRobotArmBindings()
     {
+        ClearRobotArmsByNetwork();
         foreach (KeyValuePair<RobotArmInstance, RobotArmElectricBinding> entry in robotArmBindings)
         {
             RobotArmElectricBinding binding = entry.Value;
@@ -165,6 +173,109 @@ public partial class UtilityPole
         }
 
         robotArmBindings.Clear();
+    }
+
+    private static void AddRobotArmNetworkBinding(ElectricNetwork network, RobotArmInstance arm)
+    {
+        if (network == null || arm == null)
+        {
+            return;
+        }
+
+        if (!robotArmsByNetwork.TryGetValue(network, out List<RobotArmInstance> arms))
+        {
+            arms = robotArmNetworkListPool.Count > 0
+                ? robotArmNetworkListPool.Pop()
+                : new List<RobotArmInstance>(4);
+            robotArmsByNetwork.Add(network, arms);
+        }
+
+        arms.Add(arm);
+    }
+
+    private static void ClearRobotArmsByNetwork()
+    {
+        foreach (KeyValuePair<ElectricNetwork, List<RobotArmInstance>> entry in robotArmsByNetwork)
+        {
+            List<RobotArmInstance> arms = entry.Value;
+            if (arms == null)
+            {
+                continue;
+            }
+
+            arms.Clear();
+            robotArmNetworkListPool.Push(arms);
+        }
+
+        robotArmsByNetwork.Clear();
+    }
+
+    private static int WakeElectricRuntimeArmsForNetworks(
+        HashSet<ElectricNetwork> wakeNetworks,
+        out int candidateCount)
+    {
+        candidateCount = 0;
+        RobotArmWorld world = RobotArmWorld.Current;
+        if (world == null || wakeNetworks == null || wakeNetworks.Count == 0)
+        {
+            return 0;
+        }
+
+        robotArmWakeScratch.Clear();
+        robotArmOrderScratch.Clear();
+        for (int networkIndex = 0; networkIndex < networks.Count; networkIndex++)
+        {
+            ElectricNetwork network = networks[networkIndex];
+            if (network == null
+                || !wakeNetworks.Contains(network)
+                || !robotArmsByNetwork.TryGetValue(network, out List<RobotArmInstance> arms))
+            {
+                continue;
+            }
+
+            for (int i = 0; i < arms.Count; i++)
+            {
+                RobotArmInstance arm = arms[i];
+                if (arm != null && robotArmWakeScratch.Add(arm))
+                {
+                    robotArmOrderScratch.Add(arm);
+                }
+            }
+        }
+
+        candidateCount = robotArmOrderScratch.Count;
+        int wokenCount = 0;
+        for (int i = 0; i < robotArmOrderScratch.Count; i++)
+        {
+            if (world.WakeElectricRuntimeArm(robotArmOrderScratch[i]))
+            {
+                wokenCount++;
+            }
+        }
+
+        robotArmWakeScratch.Clear();
+        robotArmOrderScratch.Clear();
+        return wokenCount;
+    }
+
+    private static int CompareRobotArmSimulationOrder(RobotArmInstance left, RobotArmInstance right)
+    {
+        if (ReferenceEquals(left, right))
+        {
+            return 0;
+        }
+
+        if (left == null)
+        {
+            return 1;
+        }
+
+        if (right == null)
+        {
+            return -1;
+        }
+
+        return left.SimulationId.CompareTo(right.SimulationId);
     }
 
     private static void RenderRobotArmPowerLines(bool previewPolesOnly)
@@ -476,8 +587,32 @@ public partial class UtilityPole
             electricRuntimeWakeBatchCount);
         MapObjectTickProfiler.AddRuntimeCounter(
             "ElectricPower",
+            "TargetedWakeBatches",
+            electricRuntimeTargetedWakeBatchCount);
+        MapObjectTickProfiler.AddRuntimeCounter(
+            "ElectricPower",
+            "FullWakeBatches",
+            electricRuntimeFullWakeBatchCount);
+        MapObjectTickProfiler.AddRuntimeCounter(
+            "ElectricPower",
             "CoalescedRuntimeWakes",
             electricRuntimeWakeCoalescedCount);
+        MapObjectTickProfiler.AddRuntimeCounter(
+            "ElectricPower",
+            "LastWakeNetworks",
+            lastElectricRuntimeWakeNetworkCount);
+        MapObjectTickProfiler.AddRuntimeCounter(
+            "ElectricPower",
+            "LastWakeConsumers",
+            lastElectricRuntimeWakeConsumerCandidateCount);
+        MapObjectTickProfiler.AddRuntimeCounter(
+            "ElectricPower",
+            "LastWakeRobotArms",
+            lastElectricRuntimeWakeRobotArmCandidateCount);
+        MapObjectTickProfiler.AddRuntimeCounter(
+            "ElectricPower",
+            "LastActuallyWoken",
+            lastElectricRuntimeActuallyWokenCount);
         MapObjectTickProfiler.AddRuntimeCounter(
             "ElectricPower",
             "RuntimeWakePending",

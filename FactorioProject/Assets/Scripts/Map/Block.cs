@@ -465,6 +465,16 @@ public partial class Block
             {
                 currentConveyorBelt.RefreshEndpointVisualsAndNeighbors();
             }
+
+            // Data-only conveyor registration can make ConveyorWorld report this cell as a
+            // conveyor before BindRuntimeConveyor calls SetMapObject. Reconcile pre-existing
+            // floor items only after the authoritative bind has completed.
+            if (isConveyor)
+            {
+                TransferDroppedFloorObjectsToAvailableConveyorSlots();
+            }
+
+            RefreshStoredItemSurfaceTransforms();
         }
         else if (wasFluidDirectionObject || isFluidDirectionObject)
         {
@@ -971,7 +981,7 @@ public partial class Block
                && CanAddConveyorObjectAtPlacement(topObject.ItemId, topObject.WorldPosition);
     }
 
-    public bool TryTransferOneInputAreaCenterObjectToConveyor()
+    public bool TryTransferOneInputAreaCenterObjectToConveyor(bool forceAnimatedPlacement = false)
     {
         if (!CanTransferOneInputAreaCenterObjectToConveyor())
         {
@@ -990,7 +1000,8 @@ public partial class Block
                 out _,
                 movementReleaseDelay: 0f,
                 useJumpArc: false,
-                moveDuration: PortableObject.MoveToDuration))
+                moveDuration: PortableObject.MoveToDuration,
+                forceAnimatedPlacement: forceAnimatedPlacement))
         {
             inputAreaCenterStack.Add(sourceObject);
             return false;
@@ -2338,7 +2349,8 @@ public partial class Block
         Func<Vector3> startWorldPositionProvider = null,
         float movementReleaseDelay = 0f,
         bool useJumpArc = true,
-        float moveDuration = PortableObject.MoveToDuration)
+        float moveDuration = PortableObject.MoveToDuration,
+        bool forceAnimatedPlacement = false)
     {
         return TryAddConveyorObjectAnimatedWithPlacementReference(
             objectId,
@@ -2350,7 +2362,8 @@ public partial class Block
             startWorldPositionProvider,
             movementReleaseDelay,
             useJumpArc,
-            moveDuration);
+            moveDuration,
+            forceAnimatedPlacement);
     }
 
     public bool CanAddConveyorObjectAtPlacement(int objectId, Vector3 placementReferenceWorldPosition)
@@ -2430,13 +2443,16 @@ public partial class Block
         Func<Vector3> startWorldPositionProvider = null,
         float movementReleaseDelay = 0f,
         bool useJumpArc = true,
-        float moveDuration = PortableObject.MoveToDuration)
+        float moveDuration = PortableObject.MoveToDuration,
+        bool forceAnimatedPlacement = false)
     {
         targetPortableObject = null;
         EnsureFloorObjectsInitialized();
         CleanupConveyorStack();
+        bool snapPlacementImmediately = !forceAnimatedPlacement
+            && ShouldSnapConveyorPlacementImmediately(delay, startWorldPositionProvider);
         bool useVirtualDataSlot = ShouldUseVirtualConveyorItemRendering()
-            && (UsesBeltJobs || ShouldSnapConveyorPlacementImmediately(delay, startWorldPositionProvider));
+            && (UsesBeltJobs || snapPlacementImmediately);
 
         if (objectId < 0
             || !IsConveyorStackingEnabled()
@@ -2450,7 +2466,7 @@ public partial class Block
         {
             SetConveyorItemAtLane(laneIndex, objectId, null, ConveyorPickupGateState.Settled());
             float nativePlacementDuration = 0f;
-            if (UsesBeltJobs && !ShouldSnapConveyorPlacementImmediately(delay, startWorldPositionProvider))
+            if (UsesBeltJobs && !snapPlacementImmediately)
             {
                 nativePlacementDuration = Mathf.Max(0f, delay) + Mathf.Max(0f, moveDuration);
                 Vector3 start = startWorldPositionProvider != null ? startWorldPositionProvider() : startWorldPosition;
@@ -2496,7 +2512,7 @@ public partial class Block
         WakeConveyorMoveAttempts();
         RefreshConveyorActivityRegistration();
 
-        if (ShouldSnapConveyorPlacementImmediately(delay, startWorldPositionProvider))
+        if (snapPlacementImmediately)
         {
             CompleteConveyorItemPlacement(laneIndex, portableObject, false);
             onComplete?.Invoke();
@@ -8003,8 +8019,101 @@ public partial class Block
 
     private Vector3 GetFloorObjectLocalPosition(Transform anchor, int stackIndex)
     {
-        float baseHeight = anchor == RuntimeObjectRoot ? FloorObjectBaseHeight : 0f;
+        float baseHeight = anchor == RuntimeObjectRoot ? ResolveStoredItemSurfaceHeight() : 0f;
         return new Vector3(0f, baseHeight + stackIndex * floorObjectVerticalSpacing, 0f);
+    }
+
+    private float ResolveStoredItemSurfaceHeight()
+    {
+        return IsConveyorStackingEnabled() ? ConveyorLaneHeight : FloorObjectBaseHeight;
+    }
+
+    private void TransferDroppedFloorObjectsToAvailableConveyorSlots()
+    {
+        while (TryTransferOneDroppedFloorObjectToConveyor())
+        {
+        }
+    }
+
+    internal bool TryTransferOneDroppedFloorObjectToConveyor()
+    {
+        EnsureFloorObjectsInitialized();
+        if (!IsConveyorStackingEnabled())
+        {
+            return false;
+        }
+
+        for (int stackIndex = 0; stackIndex < floorStacks.Count; stackIndex++)
+        {
+            List<PortableObject> stack = floorStacks[stackIndex];
+            CleanupPortableStack(stack);
+            if (stack == null || stack.Count <= 0)
+            {
+                continue;
+            }
+
+            int objectIndex = stack.Count - 1;
+            PortableObject sourceObject = stack[objectIndex];
+            Vector3 sourceWorldPosition = sourceObject.WorldPosition;
+            if (!TryAddConveyorObjectAnimatedAtPlacement(
+                    sourceObject.ItemId,
+                    sourceWorldPosition,
+                    sourceWorldPosition,
+                    0f,
+                    out _,
+                    useJumpArc: false,
+                    forceAnimatedPlacement: true))
+            {
+                return false;
+            }
+
+            stack.RemoveAt(objectIndex);
+            ReleaseFloorObject(sourceObject);
+            NotifyRuntimeItemStackChanged();
+            return true;
+        }
+
+        return false;
+    }
+
+    private void RefreshStoredItemSurfaceTransforms()
+    {
+        childReferencesCached = false;
+        Transform floorAnchor = ResolveFloorObjectDropAnchor();
+        if (floorAnchor != null)
+        {
+            for (int stackIndex = 0; stackIndex < floorStacks.Count; stackIndex++)
+            {
+                List<PortableObject> stack = floorStacks[stackIndex];
+                if (stack == null)
+                {
+                    continue;
+                }
+
+                for (int objectIndex = 0; objectIndex < stack.Count; objectIndex++)
+                {
+                    PortableObject portableObject = stack[objectIndex];
+                    if (portableObject == null)
+                    {
+                        continue;
+                    }
+
+                    ConfigureFloorObjectTransform(portableObject, floorAnchor, objectIndex);
+                    portableObject.SetBatchedRendering(true);
+                }
+            }
+        }
+
+        if (inputAreaCenterAnchor == null)
+        {
+            return;
+        }
+
+        inputAreaCenterAnchor.position = WorldPosition + Vector3.up * ResolveStoredItemSurfaceHeight();
+        for (int objectIndex = 0; objectIndex < inputAreaCenterStack.Count; objectIndex++)
+        {
+            ApplyInputAreaCenterObjectVisibility(inputAreaCenterStack[objectIndex], objectIndex);
+        }
     }
 
     private Vector3 GetFloorObjectWorldPosition(Transform anchor, int stackIndex)

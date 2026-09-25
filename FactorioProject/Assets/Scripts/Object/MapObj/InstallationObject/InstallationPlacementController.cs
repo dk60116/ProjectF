@@ -28962,7 +28962,8 @@ public class InstallationPlacementController : MonoBehaviour
 
     private static bool AllowsPlacementOverDroppedFloorObjects(MapObject mapObject)
     {
-        return TryResolveBoxObject(mapObject, out _);
+        return mapObject is ConveyorBelt
+               || TryResolveBoxObject(mapObject, out _);
     }
 
     private static bool IsFreightCarLoadInstallDefinition(ItemDefinition definition)

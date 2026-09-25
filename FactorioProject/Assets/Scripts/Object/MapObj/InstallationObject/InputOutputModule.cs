@@ -1772,14 +1772,16 @@ public class InputOutputModule : InstallationObject,
 
     public static void WakeElectricRuntimeModules()
     {
+        WakeElectricRuntimeModules(out _);
+    }
+
+    internal static int WakeElectricRuntimeModules(out int candidateCount)
+    {
+        candidateCount = activeRuntimeModules.Count;
         runtimeWakeScratch.Clear();
         foreach (InputOutputModule module in activeRuntimeModules)
         {
-            if (module == null
-                || !module.gameObject.activeInHierarchy
-                || !module.runtimeSleeping
-                || module.waitingForOutput
-                || !module.RequiresElectricOperationalEnergy())
+            if (!CanWakeElectricRuntimeModule(module))
             {
                 continue;
             }
@@ -1792,7 +1794,32 @@ public class InputOutputModule : InstallationObject,
             runtimeWakeScratch[i]?.WakeRuntimeUpdate();
         }
 
+        int wokenCount = runtimeWakeScratch.Count;
         runtimeWakeScratch.Clear();
+        return wokenCount;
+    }
+
+    internal static bool WakeKnownElectricRuntimeModule(InputOutputModule module)
+    {
+        if (module == null
+            || !module.gameObject.activeInHierarchy
+            || !module.runtimeSleeping
+            || module.waitingForOutput)
+        {
+            return false;
+        }
+
+        module.WakeRuntimeUpdate();
+        return true;
+    }
+
+    private static bool CanWakeElectricRuntimeModule(InputOutputModule module)
+    {
+        return module != null
+               && module.gameObject.activeInHierarchy
+               && module.runtimeSleeping
+               && !module.waitingForOutput
+               && module.RequiresElectricOperationalEnergy();
     }
 
     private static void HandleInstallationPlacementRuntimeChanged(InstallationObject installationObject)
@@ -7187,7 +7214,8 @@ public class InputOutputModule : InstallationObject,
                 startWorldPosition,
                 startWorldPosition,
                 delay,
-                out outputObject);
+                out outputObject,
+                forceAnimatedPlacement: true);
         }
 
         if (!outputBlock.TryAddInputAreaCenterObjectAnimated(
@@ -7884,7 +7912,7 @@ public class InputOutputModule : InstallationObject,
                 && block.HasInputAreaCenterObjects())
             {
                 hasStoredOutput = true;
-                if (block.TryTransferOneInputAreaCenterObjectToConveyor())
+                if (block.TryTransferOneInputAreaCenterObjectToConveyor(forceAnimatedPlacement: true))
                 {
                     return true;
                 }

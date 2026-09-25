@@ -47,6 +47,9 @@ public sealed class FacilitySimulationWorld :
     private bool parallelPlanPending;
     private int lastStagedCount;
     private int lastDirectCount;
+    private long electricDemandCheckCount;
+    private long electricDemandChangeCount;
+    private long electricDemandCheckElapsedTicks;
 
     public long SimulationId => long.MaxValue - 30L;
     public int RegisteredCount => registeredCount;
@@ -169,6 +172,14 @@ public sealed class FacilitySimulationWorld :
             "FacilityECS",
             "LastDirectEntities",
             world != null ? world.lastDirectCount : 0);
+        MapObjectTickProfiler.AddRuntimeCounter(
+            "FacilityECS",
+            "ElectricDemandChecks",
+            world != null ? world.electricDemandCheckCount : 0);
+        MapObjectTickProfiler.AddRuntimeCounter(
+            "FacilityECS",
+            "ElectricDemandChanges",
+            world != null ? world.electricDemandChangeCount : 0);
         MapObjectTickProfiler.AddRuntimeCounter(
             "FacilityStateECS",
             "PumpEntities",
@@ -407,6 +418,7 @@ public sealed class FacilitySimulationWorld :
             nameof(FacilitySimulationWorld),
             "Facility ECS Apply");
         bool profileTypes = MapObjectTickProfiler.IsDetailedEnabled;
+        electricDemandCheckElapsedTicks = 0L;
         touchedTypeProfiles.Clear();
         if (profileTypes)
         {
@@ -450,6 +462,15 @@ public sealed class FacilitySimulationWorld :
             UtilityPole.EndSimulationPowerMutationBatch();
         }
 
+        if (electricDemandCheckElapsedTicks > 0L)
+        {
+            MapObjectTickProfiler.RecordNamedElapsedTicks(
+                "Runtime",
+                nameof(FacilitySimulationWorld),
+                "Electric Demand State Check",
+                electricDemandCheckElapsedTicks);
+        }
+
         FlushTypeProfiles();
 
         due.Clear();
@@ -469,10 +490,6 @@ public sealed class FacilitySimulationWorld :
 
     private void ApplyTarget(ref Entry entry, IMapObjectUpdateTick target)
     {
-        InstallationObject installationObject = target as InstallationObject;
-        bool previouslyHadElectricDemand = UtilityPole.TryCaptureElectricPowerDemand(
-            installationObject,
-            out float previousElectricDemandWatts);
         try
         {
             if (entry.PendingFlowIndex >= 0 && entry.FlowAdapter != null)
@@ -495,10 +512,42 @@ public sealed class FacilitySimulationWorld :
         }
         finally
         {
-            UtilityPole.NotifyElectricPowerConsumerStateChangedIfNeeded(
-                installationObject,
-                previouslyHadElectricDemand,
-                previousElectricDemandWatts);
+            RefreshElectricDemandState(ref entry, target as InstallationObject);
+        }
+    }
+
+    private void RefreshElectricDemandState(
+        ref Entry entry,
+        InstallationObject installationObject)
+    {
+        if (!entry.TracksElectricDemand)
+        {
+            return;
+        }
+
+        bool measureElapsed = MapObjectTickProfiler.IsDetailedEnabled;
+        long startTimestamp = measureElapsed ? MapObjectTickProfiler.BeginSample() : 0L;
+        electricDemandCheckCount++;
+        bool hasDemand = UtilityPole.TryCaptureElectricPowerDemand(
+            installationObject,
+            out float demandWatts);
+        if (UtilityPole.HasElectricPowerDemandChanged(
+                entry.HasElectricDemand,
+                entry.ElectricDemandWatts,
+                hasDemand,
+                demandWatts))
+        {
+            electricDemandChangeCount++;
+            UtilityPole.NotifyElectricPowerConsumerStateChanged(installationObject);
+        }
+
+        entry.HasElectricDemand = hasDemand;
+        entry.ElectricDemandWatts = hasDemand ? demandWatts : 0f;
+        if (measureElapsed)
+        {
+            electricDemandCheckElapsedTicks += Math.Max(
+                0L,
+                MapObjectTickProfiler.BeginSample() - startTimestamp);
         }
     }
 
@@ -632,6 +681,9 @@ public sealed class FacilitySimulationWorld :
         lastPumpFlowCount = lastBoilerFlowCount = lastSteamGeneratorFlowCount = 0;
         lastParallelPlanCount = 0;
         lastParallelPlanJobCount = 0;
+        electricDemandCheckCount = 0L;
+        electricDemandChangeCount = 0L;
+        electricDemandCheckElapsedTicks = 0L;
     }
 
     private void ResetSchedules(long simulationTick)
@@ -699,6 +751,9 @@ public sealed class FacilitySimulationWorld :
         public bool Registered;
         public bool Scheduled;
         public bool RequiresPowerEvaluation;
+        public bool TracksElectricDemand;
+        public bool HasElectricDemand;
+        public float ElectricDemandWatts;
 
         public Entry(IMapObjectUpdateTick target, int intervalTicks, long currentTick)
         {
@@ -710,6 +765,14 @@ public sealed class FacilitySimulationWorld :
             TypeName = target?.GetType().FullName ?? string.Empty;
             RequiresPowerEvaluation = target is InputOutputModule module
                                       && module.RequiresFacilityPowerEvaluation;
+            InstallationObject installationObject = target as InstallationObject;
+            TracksElectricDemand = UtilityPole.TracksRuntimeElectricPowerDemand(installationObject);
+            float electricDemandWatts = 0f;
+            HasElectricDemand = TracksElectricDemand
+                                && UtilityPole.TryCaptureElectricPowerDemand(
+                                    installationObject,
+                                    out electricDemandWatts);
+            ElectricDemandWatts = HasElectricDemand ? electricDemandWatts : 0f;
             IntervalTicks = Math.Max(1, intervalTicks);
             LastExecutedTick = 0L;
             NextDueTick = 0L;

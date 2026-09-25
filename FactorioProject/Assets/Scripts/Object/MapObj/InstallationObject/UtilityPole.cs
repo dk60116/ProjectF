@@ -66,6 +66,12 @@ public partial class UtilityPole : InstallationObject
         new HashSet<InstallationObject>();
     private static readonly List<InstallationObject> dirtySuppliedConsumerOrder =
         new List<InstallationObject>();
+    private static readonly HashSet<ElectricNetwork> electricRuntimeWakeNetworks =
+        new HashSet<ElectricNetwork>();
+    private static readonly HashSet<InstallationObject> electricRuntimeWakeConsumerScratch =
+        new HashSet<InstallationObject>();
+    private static readonly List<InstallationObject> electricRuntimeWakeConsumerOrder =
+        new List<InstallationObject>();
     private static readonly Dictionary<UtilityPole, ElectricNetwork> electricNetworkByPole =
         new Dictionary<UtilityPole, ElectricNetwork>();
     private static readonly Dictionary<Vector2Int, List<UtilityPole>> supplyPolesByCoordinate =
@@ -81,6 +87,7 @@ public partial class UtilityPole : InstallationObject
     private static int topologyRefreshBatchDepth;
     private static bool topologyRefreshPending;
     private static bool electricRuntimeWakePending;
+    private static bool electricRuntimeWakeAllPending;
     private static long networkRuntimeEvaluationCount;
     private static long networkRuntimeCleanSkipCount;
     private static long networkRuntimeNetworkRefreshCount;
@@ -89,6 +96,12 @@ public partial class UtilityPole : InstallationObject
     private static int lastNetworkRuntimeRemappedConsumerCount;
     private static long electricRuntimeWakeBatchCount;
     private static long electricRuntimeWakeCoalescedCount;
+    private static long electricRuntimeTargetedWakeBatchCount;
+    private static long electricRuntimeFullWakeBatchCount;
+    private static int lastElectricRuntimeWakeNetworkCount;
+    private static int lastElectricRuntimeWakeConsumerCandidateCount;
+    private static int lastElectricRuntimeWakeRobotArmCandidateCount;
+    private static int lastElectricRuntimeActuallyWokenCount;
     private static bool networksDirty = true;
     private static bool poleConnectionsDirty = true;
     private static bool previewPoleConnectionsDirty = true;
@@ -825,13 +838,11 @@ public partial class UtilityPole : InstallationObject
     public static void NotifyElectricPowerSourceStateChanged(SteamGenerator source)
     {
         InvalidateInstallationNetworksForNextTick(source);
-        RequestElectricRuntimeModulesWake();
     }
 
     public static void NotifyElectricPowerConsumerStateChanged(InstallationObject consumer)
     {
         InvalidateInstallationNetworksForNextTick(consumer);
-        RequestElectricRuntimeModulesWake();
     }
 
     internal static bool TryCaptureElectricPowerDemand(
@@ -841,17 +852,20 @@ public partial class UtilityPole : InstallationObject
         return TryGetElectricPowerDemand(consumer, out wattsPerSecond);
     }
 
-    internal static void NotifyElectricPowerConsumerStateChangedIfNeeded(
-        InstallationObject consumer,
-        bool previouslyHadDemand,
-        float previousWattsPerSecond)
+    internal static bool TracksRuntimeElectricPowerDemand(InstallationObject consumer)
     {
-        bool hasDemand = TryGetElectricPowerDemand(consumer, out float wattsPerSecond);
-        if (hasDemand != previouslyHadDemand
-            || hasDemand && Mathf.Abs(wattsPerSecond - previousWattsPerSecond) > EnergyEpsilon)
-        {
-            NotifyElectricPowerConsumerStateChanged(consumer);
-        }
+        return HasRuntimeElectricPowerDemand(consumer);
+    }
+
+    internal static bool HasElectricPowerDemandChanged(
+        bool previouslyHadDemand,
+        float previousWattsPerSecond,
+        bool hasDemand,
+        float wattsPerSecond)
+    {
+        return hasDemand != previouslyHadDemand
+               || hasDemand
+               && Mathf.Abs(wattsPerSecond - previousWattsPerSecond) > EnergyEpsilon;
     }
 
     public static void NotifyFreeElectroEnergyChanged()
@@ -868,13 +882,15 @@ public partial class UtilityPole : InstallationObject
 
     private static void InvalidateInstallationNetworksForNextTick(InstallationObject installationObject)
     {
-        if (installationObject == null || networksDirty)
+        if (installationObject == null)
         {
-            if (networksDirty)
-            {
-                InvalidateNetworkRuntimeForNextTick();
-            }
+            return;
+        }
 
+        if (networksDirty)
+        {
+            InvalidateNetworkRuntimeForNextTick();
+            RequestElectricRuntimeModulesWake();
             return;
         }
 
@@ -887,11 +903,17 @@ public partial class UtilityPole : InstallationObject
 
         for (int i = 0; i < installationNetworks.Count; i++)
         {
-            MarkNetworkRuntimeDirty(installationNetworks[i]);
+            ElectricNetwork network = installationNetworks[i];
+            MarkNetworkRuntimeDirty(network);
+            if (network != null && !electricRuntimeWakeAllPending)
+            {
+                electricRuntimeWakeNetworks.Add(network);
+            }
         }
 
         dirtySuppliedConsumers.Add(installationObject);
         InvalidateNetworkRuntimeEvaluationForNextTick();
+        RequestElectricRuntimeNetworkWake();
     }
 
     private static void InvalidateNetworkRuntimeEvaluationForNextTick()
@@ -944,6 +966,18 @@ public partial class UtilityPole : InstallationObject
 
     private static void RequestElectricRuntimeModulesWake()
     {
+        electricRuntimeWakeAllPending = true;
+        electricRuntimeWakeNetworks.Clear();
+        RequestElectricRuntimeWakeFlush();
+    }
+
+    private static void RequestElectricRuntimeNetworkWake()
+    {
+        RequestElectricRuntimeWakeFlush();
+    }
+
+    private static void RequestElectricRuntimeWakeFlush()
+    {
         if (electricRuntimeWakePending)
         {
             electricRuntimeWakeCoalescedCount++;
@@ -966,9 +1000,87 @@ public partial class UtilityPole : InstallationObject
 
         electricRuntimeWakePending = false;
         electricRuntimeWakeBatchCount++;
-        InputOutputModule.WakeElectricRuntimeModules();
-        LoggingMachine.WakeElectricRuntimeMachines();
-        RobotArmWorld.Current?.WakeElectricRuntimeArms();
+        lastElectricRuntimeWakeNetworkCount = electricRuntimeWakeAllPending
+            ? networks.Count
+            : electricRuntimeWakeNetworks.Count;
+        lastElectricRuntimeWakeConsumerCandidateCount = 0;
+        lastElectricRuntimeWakeRobotArmCandidateCount = 0;
+        lastElectricRuntimeActuallyWokenCount = 0;
+        using var sample = MapObjectTickProfiler.SampleNamed(
+            "Runtime",
+            nameof(UtilityPole),
+            "Electric Runtime Wake");
+        if (electricRuntimeWakeAllPending)
+        {
+            electricRuntimeFullWakeBatchCount++;
+            lastElectricRuntimeActuallyWokenCount += InputOutputModule.WakeElectricRuntimeModules(
+                out int moduleCandidateCount);
+            lastElectricRuntimeActuallyWokenCount += LoggingMachine.WakeElectricRuntimeMachines(
+                out int loggingCandidateCount);
+            lastElectricRuntimeWakeConsumerCandidateCount = moduleCandidateCount + loggingCandidateCount;
+            RobotArmWorld robotArmWorld = RobotArmWorld.Current;
+            if (robotArmWorld != null)
+            {
+                lastElectricRuntimeActuallyWokenCount += robotArmWorld.WakeElectricRuntimeArms(
+                    out lastElectricRuntimeWakeRobotArmCandidateCount);
+            }
+        }
+        else
+        {
+            electricRuntimeTargetedWakeBatchCount++;
+            WakeElectricRuntimeConsumersForNetworks();
+            lastElectricRuntimeActuallyWokenCount += WakeElectricRuntimeArmsForNetworks(
+                electricRuntimeWakeNetworks,
+                out lastElectricRuntimeWakeRobotArmCandidateCount);
+        }
+
+        electricRuntimeWakeAllPending = false;
+        electricRuntimeWakeNetworks.Clear();
+    }
+
+    private static void WakeElectricRuntimeConsumersForNetworks()
+    {
+        electricRuntimeWakeConsumerScratch.Clear();
+        electricRuntimeWakeConsumerOrder.Clear();
+        for (int networkIndex = 0; networkIndex < networks.Count; networkIndex++)
+        {
+            ElectricNetwork network = networks[networkIndex];
+            if (network == null || !electricRuntimeWakeNetworks.Contains(network))
+            {
+                continue;
+            }
+
+            for (int consumerIndex = 0; consumerIndex < network.PoweredConsumers.Count; consumerIndex++)
+            {
+                InstallationObject consumer = network.PoweredConsumers[consumerIndex];
+                if ((consumer is InputOutputModule || consumer is LoggingMachine)
+                    && electricRuntimeWakeConsumerScratch.Add(consumer))
+                {
+                    electricRuntimeWakeConsumerOrder.Add(consumer);
+                }
+            }
+        }
+
+        lastElectricRuntimeWakeConsumerCandidateCount = electricRuntimeWakeConsumerOrder.Count;
+        for (int i = 0; i < electricRuntimeWakeConsumerOrder.Count; i++)
+        {
+            InstallationObject consumer = electricRuntimeWakeConsumerOrder[i];
+            if (consumer is InputOutputModule module)
+            {
+                if (InputOutputModule.WakeKnownElectricRuntimeModule(module))
+                {
+                    lastElectricRuntimeActuallyWokenCount++;
+                }
+            }
+            else if (consumer is LoggingMachine loggingMachine
+                     && LoggingMachine.WakeElectricRuntimeMachine(loggingMachine))
+            {
+                lastElectricRuntimeActuallyWokenCount++;
+            }
+        }
+
+        electricRuntimeWakeConsumerScratch.Clear();
+        electricRuntimeWakeConsumerOrder.Clear();
     }
 
     private static bool IsFreeElectroEnergyEnabled()

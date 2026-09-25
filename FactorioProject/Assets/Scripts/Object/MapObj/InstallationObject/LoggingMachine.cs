@@ -376,15 +376,30 @@ public class LoggingMachine : InstallationObject,
         }
     }
 
-    internal static void WakeElectricRuntimeMachines()
+    internal static int WakeElectricRuntimeMachines(out int candidateCount)
     {
+        candidateCount = activeElectricMachines.Count;
+        int wokenCount = 0;
         foreach (LoggingMachine machine in activeElectricMachines)
         {
-            if (machine != null && machine.electricPowerBlocked)
+            if (WakeElectricRuntimeMachine(machine))
             {
-                machine.WakeRuntimeTick();
+                wokenCount++;
             }
         }
+
+        return wokenCount;
+    }
+
+    internal static bool WakeElectricRuntimeMachine(LoggingMachine machine)
+    {
+        if (machine == null || !machine.electricPowerBlocked)
+        {
+            return false;
+        }
+
+        machine.WakeRuntimeTick();
+        return true;
     }
 
     private void RefreshRuntimeTickSleepState()
