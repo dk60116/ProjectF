@@ -1189,7 +1189,11 @@ public sealed partial class RobotArmInstance : IMapObjectTarget, IMapObjectSimul
 
         if (ShouldUseSavedDropCoordinate(terrainGenerator, dropCoordinate, dropBlock))
         {
-            return TryPlaceHeldItemInSavedCoordinate(dropCoordinate, itemId, true);
+            return TryPlaceHeldItemInSavedCoordinate(
+                dropCoordinate,
+                itemId,
+                true,
+                IsConveyorDropBlock(dropBlock));
         }
 
         if (!hasLoadedDropBlock)
@@ -1221,6 +1225,24 @@ public sealed partial class RobotArmInstance : IMapObjectTarget, IMapObjectSimul
             }
         }
 
+        // A belt cell owns this output exclusively. If its lanes are full, wait
+        // for a vacancy instead of falling through to a floor/input-area stack.
+        if (IsConveyorDropBlock(dropBlock))
+        {
+            return CanPlaceConveyorDrop(dropBlock, itemId, dropReferenceWorldPosition)
+                   && dropBlock.TryAddConveyorObjectAnimatedAtPlacement(
+                       itemId,
+                       dropReferenceWorldPosition,
+                       dropStartWorldPosition,
+                       0f,
+                       out _,
+                       null,
+                       dropStartProvider,
+                       ItemMoveDuration,
+                       false,
+                       ItemMoveDuration);
+        }
+
         if (IsFarmlandFertilizerDropTarget(
                 terrainGenerator,
                 dropBlock,
@@ -1241,22 +1263,6 @@ public sealed partial class RobotArmInstance : IMapObjectTarget, IMapObjectSimul
 
         if (boxObject != null
             && boxObject.TryPutOneContainedObject(itemId, dropStartWorldPosition, 0f, out _, false, ItemMoveDuration))
-        {
-            return true;
-        }
-
-        if (CanPlaceConveyorDrop(dropBlock, itemId, dropReferenceWorldPosition)
-            && dropBlock.TryAddConveyorObjectAnimatedAtPlacement(
-                itemId,
-                dropReferenceWorldPosition,
-                dropStartWorldPosition,
-                0f,
-                out _,
-                null,
-                dropStartProvider,
-                ItemMoveDuration,
-                false,
-                ItemMoveDuration))
         {
             return true;
         }
@@ -1290,7 +1296,11 @@ public sealed partial class RobotArmInstance : IMapObjectTarget, IMapObjectSimul
             out FreightCar freightCar);
         if (ShouldUseSavedDropCoordinate(terrainGenerator, dropCoordinate, dropBlock))
         {
-            return TryPlaceHeldItemInSavedCoordinate(dropCoordinate, heldItemId, false);
+            return TryPlaceHeldItemInSavedCoordinate(
+                dropCoordinate,
+                heldItemId,
+                false,
+                IsConveyorDropBlock(dropBlock));
         }
 
         if (!hasLoadedDropBlock)
@@ -1323,6 +1333,11 @@ public sealed partial class RobotArmInstance : IMapObjectTarget, IMapObjectSimul
             }
         }
 
+        if (IsConveyorDropBlock(dropBlock))
+        {
+            return CanPlaceConveyorDrop(dropBlock, itemId, dropReferenceWorldPosition);
+        }
+
         if (IsFarmlandFertilizerDropTarget(
                 terrainGenerator,
                 dropBlock,
@@ -1341,11 +1356,6 @@ public sealed partial class RobotArmInstance : IMapObjectTarget, IMapObjectSimul
         }
 
         if (boxObject != null && boxObject.CanPutOneContainedObject(itemId))
-        {
-            return true;
-        }
-
-        if (CanPlaceConveyorDrop(dropBlock, itemId, dropReferenceWorldPosition))
         {
             return true;
         }
@@ -1408,7 +1418,11 @@ public sealed partial class RobotArmInstance : IMapObjectTarget, IMapObjectSimul
         return gameManager != null && gameManager.PlayerInteractionLocked;
     }
 
-    private bool TryPlaceHeldItemInSavedCoordinate(Vector2Int dropCoordinate, int itemId, bool mutate)
+    private bool TryPlaceHeldItemInSavedCoordinate(
+        Vector2Int dropCoordinate,
+        int itemId,
+        bool mutate,
+        bool conveyorOnly)
     {
         if (itemId < 0)
         {
@@ -1466,6 +1480,11 @@ public sealed partial class RobotArmInstance : IMapObjectTarget, IMapObjectSimul
         else if (stateStore.CanAddSavedConveyorItem(dropCoordinate, itemId, referenceWorldPosition))
         {
             return true;
+        }
+
+        if (conveyorOnly)
+        {
+            return false;
         }
 
         if (!CanPlaceSavedSingleLineDrop(stateStore, dropCoordinate)
@@ -1580,7 +1599,7 @@ public sealed partial class RobotArmInstance : IMapObjectTarget, IMapObjectSimul
 
         // Floor stacks and belt lanes can be virtualized independently.
         return terrainGenerator != null
-               && (IsConveyorBeltMapObject(dropBlock.MapObject)
+               && (IsConveyorDropBlock(dropBlock)
                    ? terrainGenerator.IsConveyorItemCoordinateVirtualized(coordinate)
                    : terrainGenerator.IsFloorObjectCoordinateVirtualized(coordinate));
     }
@@ -1608,7 +1627,7 @@ public sealed partial class RobotArmInstance : IMapObjectTarget, IMapObjectSimul
 
     private static bool CanPlaceSingleLineDrop(Block dropBlock, Vector2Int coordinate)
     {
-        if (dropBlock == null || IsConveyorBeltMapObject(dropBlock.MapObject))
+        if (dropBlock == null || IsConveyorDropBlock(dropBlock))
         {
             return false;
         }
@@ -1708,6 +1727,12 @@ public sealed partial class RobotArmInstance : IMapObjectTarget, IMapObjectSimul
     private static bool IsConveyorBeltMapObject(IMapObjectTarget mapObject)
     {
         return mapObject is ConveyorBelt;
+    }
+
+    private static bool IsConveyorDropBlock(Block block)
+    {
+        return block != null
+               && (block.IsRuntimeConveyor || IsConveyorBeltMapObject(block.MapObject));
     }
 
     private static bool TryResolveFreightCar(IMapObjectTarget mapObject, out FreightCar freightCar)

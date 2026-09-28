@@ -7,7 +7,7 @@ using UnityEngine.EventSystems;
 using UnityEngine.Serialization;
 using UnityEngine.UI;
 
-public class CraftingSlot : ItemSlot, IPointerEnterHandler, IPointerExitHandler
+public class CraftingSlot : ItemSlot
 {
     private const float DefaultIngredientSpacing = 10f;
     private const float DefaultIngredientChildSize = 80f;
@@ -93,8 +93,24 @@ public class CraftingSlot : ItemSlot, IPointerEnterHandler, IPointerExitHandler
     public float ExpandDuration => Mathf.Max(0f, expandDuration);
     public Sprite CreateActionIcon => createIcon != null ? createIcon.sprite : null;
 
-    private void Awake()
+    public override bool TryGetTooltipItemId(Transform hitTransform, out int tooltipItemId)
     {
+        if (hitTransform != null
+            && createButton != null
+            && mapObjectIcon != null
+            && mapObjectIcon.enabled
+            && (hitTransform == createButton.transform || hitTransform.IsChildOf(createButton.transform))
+            && TryGetDisplayedRequiredItemId(out tooltipItemId))
+        {
+            return true;
+        }
+
+        return base.TryGetTooltipItemId(hitTransform, out tooltipItemId);
+    }
+
+    protected override void Awake()
+    {
+        base.Awake();
         CacheReferences();
         HideImmediate();
         HideIngredientsImmediate();
@@ -104,11 +120,12 @@ public class CraftingSlot : ItemSlot, IPointerEnterHandler, IPointerExitHandler
 
     private void OnDisable()
     {
+        InventoryItemTooltip.Hide(this);
         RestoreTargetIconRenderOrder();
         HideIngredientsImmediate();
     }
 
-    public void OnPointerEnter(PointerEventData eventData)
+    public override void OnPointerEnter(PointerEventData eventData)
     {
         CacheReferences();
         if (rectTransform != null
@@ -119,11 +136,13 @@ public class CraftingSlot : ItemSlot, IPointerEnterHandler, IPointerExitHandler
                 eventData.enterEventCamera))
         {
             RaiseTargetIconRenderOrder();
+            base.OnPointerEnter(eventData);
         }
     }
 
-    public void OnPointerExit(PointerEventData eventData)
+    public override void OnPointerExit(PointerEventData eventData)
     {
+        base.OnPointerExit(eventData);
         RestoreTargetIconRenderOrder();
     }
 
@@ -245,6 +264,7 @@ public class CraftingSlot : ItemSlot, IPointerEnterHandler, IPointerExitHandler
     public void Hide()
     {
         CacheReferences();
+        InventoryItemTooltip.Hide(this);
         RestoreTargetIconRenderOrder();
         ResetHoverTweensImmediate();
 
@@ -261,6 +281,7 @@ public class CraftingSlot : ItemSlot, IPointerEnterHandler, IPointerExitHandler
     public void HideImmediate()
     {
         CacheReferences();
+        InventoryItemTooltip.Hide(this);
         RestoreTargetIconRenderOrder();
         ResetHoverTweensImmediate();
         rectTransform.DOKill();
@@ -1471,6 +1492,7 @@ public class CraftingSlot : ItemSlot, IPointerEnterHandler, IPointerExitHandler
             return;
         }
 
+        sequence.AppendCallback(() => revealGroup.blocksRaycasts = targetAlpha > 0f);
         sequence.Append(
             revealGroup.DOFade(targetAlpha, duration)
                 .SetEase(Ease.OutQuad)
@@ -1547,7 +1569,8 @@ public class CraftingSlot : ItemSlot, IPointerEnterHandler, IPointerExitHandler
 
         revealGroup.alpha = Mathf.Clamp01(alpha);
         revealGroup.interactable = interactive;
-        revealGroup.blocksRaycasts = interactive;
+        // Disabled crafting controls still need pointer events for item-name tooltips.
+        revealGroup.blocksRaycasts = revealGroup.alpha > 0f;
     }
 
     private static void ResetRevealCanvasGroup(GameObject target, float alpha, bool interactive)
@@ -1658,6 +1681,7 @@ public class CraftingSlot : ItemSlot, IPointerEnterHandler, IPointerExitHandler
         }
         else
         {
+            InventoryItemTooltip.Hide(this);
             RestoreTargetIconRenderOrder();
             rectTransform.localScale = Vector3.zero;
             canvasGroup.alpha = 0f;
@@ -2050,18 +2074,8 @@ public class CraftingSlot : ItemSlot, IPointerEnterHandler, IPointerExitHandler
 
         isRefreshingCraftingMapObjectVisuals = true;
 
-        bool showMissingManual = !HasExternalCreateAction
-                                 && HasItem
-                                 && blockedByRequiredManual
-                                 && requiredManualItemId >= 0;
-        bool showRequiredMapObject = !showMissingManual
-                                     && !HasExternalCreateAction
-                                     && HasItem
-                                     && blockedByCraftingMapObject
-                                     && requiredCraftingMapObjectId >= 0;
-        bool showRequirementIcon = showMissingManual || showRequiredMapObject;
-        bool showBlockedState = showMissingManual
-                                || (showRequiredMapObject && blockedByCraftingMapObject);
+        bool showRequirementIcon = TryGetDisplayedRequiredItemId(out int displayedRequiredItemId);
+        bool showBlockedState = showRequirementIcon;
         try
         {
             SetCreateButtonHoverEnabled(!showBlockedState);
@@ -2080,10 +2094,7 @@ public class CraftingSlot : ItemSlot, IPointerEnterHandler, IPointerExitHandler
             {
                 if (showRequirementIcon)
                 {
-                    int requiredItemId = showMissingManual
-                        ? requiredManualItemId
-                        : requiredCraftingMapObjectId;
-                    mapObjectIcon.sprite = ResolveRequiredItemIcon(requiredItemId);
+                    mapObjectIcon.sprite = ResolveRequiredItemIcon(displayedRequiredItemId);
                     mapObjectIcon.enabled = mapObjectIcon.sprite != null;
                 }
                 else
@@ -2102,6 +2113,29 @@ public class CraftingSlot : ItemSlot, IPointerEnterHandler, IPointerExitHandler
         {
             isRefreshingCraftingMapObjectVisuals = false;
         }
+    }
+
+    private bool TryGetDisplayedRequiredItemId(out int requiredItemId)
+    {
+        requiredItemId = -1;
+        if (HasExternalCreateAction || !HasItem)
+        {
+            return false;
+        }
+
+        if (blockedByRequiredManual && requiredManualItemId >= 0)
+        {
+            requiredItemId = requiredManualItemId;
+            return true;
+        }
+
+        if (blockedByCraftingMapObject && requiredCraftingMapObjectId >= 0)
+        {
+            requiredItemId = requiredCraftingMapObjectId;
+            return true;
+        }
+
+        return false;
     }
 
     private Sprite ResolveRequiredItemIcon(int itemId)

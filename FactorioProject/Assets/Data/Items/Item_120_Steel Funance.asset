@@ -13,7 +13,7 @@ MonoBehaviour:
   m_Name: Item_120_Steel Funance
   m_EditorClassIdentifier: Assembly-CSharp::ItemDefinition
   itemName: Steel Funance
-  id: 38
+  id: 40
   mapObject: {fileID: 3843491245406909261, guid: 2089176be5a3410428d471926164db6c, type: 3}
   mapObjectArchetype: {fileID: 0}
   useMapColor: 1

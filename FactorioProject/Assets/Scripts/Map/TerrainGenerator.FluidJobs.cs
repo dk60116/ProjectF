@@ -698,6 +698,34 @@ public partial class TerrainGenerator
             "OutputSleepWaiterLinks",
             InputOutputModule.FluidOutputSleepWaiterLinkCount);
         MapObjectTickProfiler.AddRuntimeCounter(
+            "FluidOutputCache",
+            "StorageStateVersion",
+            InputOutputModule.FluidStorageStateVersion);
+        MapObjectTickProfiler.AddRuntimeCounter(
+            "FluidOutputCache",
+            "AvailabilityHits",
+            InputOutputModule.FluidOutputAvailabilityCacheHitCount);
+        MapObjectTickProfiler.AddRuntimeCounter(
+            "FluidOutputCache",
+            "AvailabilityMisses",
+            InputOutputModule.FluidOutputAvailabilityCacheMissCount);
+        MapObjectTickProfiler.AddRuntimeCounter(
+            "FluidOutputCache",
+            "RetentionHits",
+            InputOutputModule.FluidOutputRetentionCacheHitCount);
+        MapObjectTickProfiler.AddRuntimeCounter(
+            "FluidOutputCache",
+            "RetentionMisses",
+            InputOutputModule.FluidOutputRetentionCacheMissCount);
+        MapObjectTickProfiler.AddRuntimeCounter(
+            "FluidOutputCache",
+            "SelectionHits",
+            InputOutputModule.FluidOutputSelectionCacheHitCount);
+        MapObjectTickProfiler.AddRuntimeCounter(
+            "FluidOutputCache",
+            "SelectionMisses",
+            InputOutputModule.FluidOutputSelectionCacheMissCount);
+        MapObjectTickProfiler.AddRuntimeCounter(
             "FluidJobs",
             "LastCompletedTick",
             fluidShadowCompletedTick);

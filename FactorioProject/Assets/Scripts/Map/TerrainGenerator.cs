@@ -1041,10 +1041,36 @@ public partial class TerrainGenerator : MonoBehaviour,
         NormalizeAnimalGenerationSettings();
         InvalidateTerrainGenerationCaches();
 #if UNITY_EDITOR
+        ValidateOreResourceSalts();
         PopulateGeneratedSurfaceBlendEditorDefaults();
 #endif
         ApplyGeneratedSurfaceRuntimeMaterialSettings();
     }
+
+#if UNITY_EDITOR
+    private void ValidateOreResourceSalts()
+    {
+        if (oreResources == null)
+        {
+            return;
+        }
+
+        for (int i = 0; i < oreResources.Count; i++)
+        {
+            ResourceEntry current = oreResources[i];
+            for (int j = 0; j < i; j++)
+            {
+                ResourceEntry previous = oreResources[j];
+                if (current.salt == previous.salt)
+                {
+                    Debug.LogWarning(
+                        $"Ore resource salt {current.salt} is shared by '{previous.name}' and '{current.name}'. Assign a unique salt to keep their generated patches independent.",
+                        this);
+                }
+            }
+        }
+    }
+#endif
 
     private void Awake()
     {

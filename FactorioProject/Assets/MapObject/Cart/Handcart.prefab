@@ -173,7 +173,7 @@ MonoBehaviour:
   m_EditorClassIdentifier: Assembly-CSharp::Handcart
   id: 0
   objectName: Handcart
-  objId: 111
+  objId: 113
   itemDefinition: {fileID: 11400000, guid: 8d6cbd303db81d64d99a93e7494044fb, type: 2}
   mapStatus:
     mapSizeX: 1

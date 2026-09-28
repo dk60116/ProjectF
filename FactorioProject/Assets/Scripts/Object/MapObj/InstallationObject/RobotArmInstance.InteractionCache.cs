@@ -289,7 +289,7 @@ public sealed partial class RobotArmInstance
         IMapObjectTarget mapObject = dropBlock != null ? dropBlock.MapObject : null;
         if (mapObject == null
             || IsOreMapObject(mapObject)
-            || IsConveyorBeltMapObject(mapObject))
+            || IsConveyorDropBlock(dropBlock))
         {
             return false;
         }

@@ -24,14 +24,28 @@ public sealed class GameSceneLoadingScreen : MonoBehaviour
     [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.SubsystemRegistration)]
     private static void ResetStaticState()
     {
+        SceneManager.sceneLoaded -= HandleSceneLoaded;
         active = null;
     }
 
     [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.AfterSceneLoad)]
-    private static void EnterGameFromLoadingScene()
+    private static void InitializeLoadingSceneEntry()
+    {
+        SceneManager.sceneLoaded -= HandleSceneLoaded;
+        SceneManager.sceneLoaded += HandleSceneLoaded;
+        TryEnterGameFromLoadingScene(SceneManager.GetActiveScene());
+    }
+
+    private static void HandleSceneLoaded(Scene scene, LoadSceneMode mode)
+    {
+        TryEnterGameFromLoadingScene(scene);
+    }
+
+    private static void TryEnterGameFromLoadingScene(Scene scene)
     {
         if (!Application.isPlaying
-            || SceneManager.GetActiveScene().name != LoadingSceneName
+            || !scene.IsValid()
+            || scene.name != LoadingSceneName
             || active != null)
         {
             return;

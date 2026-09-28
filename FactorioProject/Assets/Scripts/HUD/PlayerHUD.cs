@@ -181,8 +181,10 @@ public partial class PlayerHUD : BagSlot
         }
     }
 
-    private void Awake()
+    protected override void Awake()
     {
+        // PlayerHUD reuses BagSlot utilities but is not an item-bearing slot itself.
+        id = -1;
         SubscribeSlotEvents();
         ResolveHudReferences(true);
         ClearObjectInfoPanelState();
@@ -196,6 +198,12 @@ public partial class PlayerHUD : BagSlot
         RefreshBag(null);
         RefreshCraftingQueueSlots(true);
         EnsureMapPaperBinding();
+    }
+
+    public override bool TryGetTooltipItemId(Transform hitTransform, out int tooltipItemId)
+    {
+        tooltipItemId = -1;
+        return false;
     }
 
     private void Start()

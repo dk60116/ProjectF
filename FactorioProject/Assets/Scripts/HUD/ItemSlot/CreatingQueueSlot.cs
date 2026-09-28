@@ -12,8 +12,9 @@ public class CreatingQueueSlot : ItemSlot
     private Button cancelButton;
     private Action cancelAction;
 
-    private void Awake()
+    protected override void Awake()
     {
+        base.Awake();
         ResolveCancelButton();
     }
 

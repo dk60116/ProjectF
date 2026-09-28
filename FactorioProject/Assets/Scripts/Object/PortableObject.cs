@@ -1,6 +1,6 @@
-using DG.Tweening;
 using System;
 using System.Collections.Generic;
+using ProjectF.Rendering;
 using UnityEngine;
 using UnityEngine.Rendering;
 
@@ -29,7 +29,7 @@ public sealed class PortableObject : IDisposable
     private PortableItemRenderer portableItemRenderer;
     private DroppedItemPickupGate pickupGate;
     private AnimalTemporaryDropping temporaryDropping;
-    private Tween moveTween;
+    private PortableMoveScheduler.MoveState moveState;
     private string objectName;
     private ItemDefinition cachedItemDefinition;
     private Mesh cachedMesh;
@@ -262,9 +262,10 @@ public sealed class PortableObject : IDisposable
 
     public void SetWorldPosition(Vector3 position)
     {
-        Mutate((ref PortableObjectComponent c) => c.WorldPosition = position);
-        if (view != null) view.transform.position = position;
-        MarkPortableItemRenderDataDirty();
+        if (world == null || !world.IsAlive(handle)) return;
+        bool stateChanged = world.SetWorldPosition(handle, position);
+        if (view != null && view.transform.position != position) view.transform.position = position;
+        if (stateChanged) MarkPortableItemRenderDataDirty();
     }
 
     public void SetWorldPose(Vector3 position, Quaternion rotation)
@@ -401,7 +402,7 @@ public sealed class PortableObject : IDisposable
     public void MoveTo(Transform target, Action onComplete = null)
     {
         if (target == null) { onComplete?.Invoke(); return; }
-        MoveTo(() => target != null ? target.position : WorldPosition, 0f, null, onComplete, true);
+        StartMove(target, default, false, null, 0f, null, onComplete, true, true, MoveToDuration, true);
     }
 
     public void MoveTo(Transform target, float delay = 0f, Func<Vector3> startPositionProvider = null,
@@ -409,13 +410,14 @@ public sealed class PortableObject : IDisposable
         float moveDuration = MoveToDuration, bool trackStartPositionDuringMove = true)
     {
         if (target == null) { onComplete?.Invoke(); return; }
-        MoveTo(() => target != null ? target.position : WorldPosition, delay, startPositionProvider,
+        StartMove(target, default, false, null, delay, startPositionProvider,
             onComplete, deactivateOnComplete, useJumpArc, moveDuration, trackStartPositionDuringMove);
     }
 
     public void MoveTo(Vector3 targetPosition, float delay = 0f, Action onComplete = null,
         bool deactivateOnComplete = true, bool useJumpArc = true, float moveDuration = MoveToDuration) =>
-        MoveTo(() => targetPosition, delay, null, onComplete, deactivateOnComplete, useJumpArc, moveDuration);
+        StartMove(null, targetPosition, true, null, delay, null, onComplete,
+            deactivateOnComplete, useJumpArc, moveDuration, true);
 
     public void MoveTo(Func<Vector3> targetPositionProvider, float delay = 0f,
         Func<Vector3> startPositionProvider = null, Action onComplete = null,
@@ -423,60 +425,231 @@ public sealed class PortableObject : IDisposable
         float moveDuration = MoveToDuration, bool trackStartPositionDuringMove = true)
     {
         if (!IsAlive || targetPositionProvider == null) { onComplete?.Invoke(); return; }
-        moveTween?.Kill();
-        moveTween = null;
+        StartMove(null, default, false, targetPositionProvider, delay, startPositionProvider,
+            onComplete, deactivateOnComplete, useJumpArc, moveDuration, trackStartPositionDuringMove);
+    }
+
+    private void StartMove(
+        Transform targetTransform,
+        Vector3 fixedTargetPosition,
+        bool hasFixedTargetPosition,
+        Func<Vector3> targetPositionProvider,
+        float delay,
+        Func<Vector3> startPositionProvider,
+        Action onComplete,
+        bool deactivateOnComplete,
+        bool useJumpArc,
+        float moveDuration,
+        bool trackStartPositionDuringMove)
+    {
+        if (!IsAlive)
+        {
+            onComplete?.Invoke();
+            return;
+        }
+
+        CancelScheduledMove();
         SetSleepAwakeSleeping(false);
         ClearBeltItemLineDebugColor();
         SetBatchedRendering(true);
-        Mutate((ref PortableObjectComponent c) => c.Moving = true);
-        Sequence sequence = DOTween.Sequence().SetTarget(this);
-        moveTween = sequence;
+        SetMoving(true);
         if (delay > 0f)
         {
             SetBodyRendererTemporarilyHidden(true);
-            sequence.Append(DOVirtual.DelayedCall(delay, () =>
-            {
-                if (startPositionProvider != null) SetWorldPosition(startPositionProvider());
-                SetBodyRendererTemporarilyHidden(false);
-            }));
         }
+
         Vector3 launchStart = startPositionProvider != null ? startPositionProvider() : WorldPosition;
         SetWorldPosition(launchStart);
-        float safeDuration = Mathf.Max(0.001f, moveDuration);
-        sequence.Append(DOVirtual.Float(0f, 1f, safeDuration, t =>
+        PortableMoveScheduler scheduler = PortableMoveScheduler.Resolve();
+        if (scheduler == null)
         {
-            Vector3 start = trackStartPositionDuringMove && startPositionProvider != null
-                ? startPositionProvider() : launchStart;
-            Vector3 position = Vector3.Lerp(start, targetPositionProvider(), t);
-            if (useJumpArc) position += Vector3.up * (4f * t * (1f - t));
-            SetWorldPosition(position);
-        }).SetEase(Ease.Linear));
-        sequence.OnComplete(() =>
+            CompleteMoveImmediately(
+                targetTransform,
+                fixedTargetPosition,
+                hasFixedTargetPosition,
+                targetPositionProvider,
+                deactivateOnComplete,
+                onComplete);
+            return;
+        }
+
+        moveState = scheduler.Schedule(
+            this,
+            targetTransform,
+            fixedTargetPosition,
+            targetPositionProvider,
+            startPositionProvider,
+            launchStart,
+            Mathf.Max(0f, delay),
+            Mathf.Max(0.001f, moveDuration),
+            deactivateOnComplete,
+            useJumpArc,
+            trackStartPositionDuringMove,
+            onComplete);
+    }
+
+    internal bool UpdateScheduledMove(
+        PortableMoveScheduler scheduler,
+        PortableMoveScheduler.MoveState state,
+        float now)
+    {
+        if (!ReferenceEquals(moveState, state) || !IsAlive)
         {
-            if (!IsAlive) return;
-            moveTween = null;
-            Mutate((ref PortableObjectComponent c) => c.Moving = false);
-            SetWorldPosition(targetPositionProvider());
-            if (deactivateOnComplete) SetCachedActive(false);
+            return true;
+        }
+
+        float elapsed = now - state.StartTime;
+        if (elapsed < state.Delay)
+        {
+            return false;
+        }
+
+        if (!state.DelayCompleted)
+        {
+            state.DelayCompleted = true;
+            if (state.StartPositionProvider != null)
+            {
+                Vector3 delayedStart = state.StartPositionProvider();
+                if (!scheduler.ShouldSkipIntermediateUpdate(state, delayedStart))
+                {
+                    SetWorldPosition(delayedStart);
+                }
+            }
+
             SetBodyRendererTemporarilyHidden(false);
-            onComplete?.Invoke();
-        });
-        sequence.OnKill(() =>
+        }
+
+        float t = Mathf.Clamp01((elapsed - state.Delay) / state.Duration);
+        Vector3 start = state.TrackStartPositionDuringMove && state.StartPositionProvider != null
+            ? state.StartPositionProvider()
+            : state.LaunchStart;
+        Vector3 target = ResolveMoveTarget(state);
+        Vector3 position = Vector3.LerpUnclamped(start, target, t);
+        if (state.UseJumpArc)
         {
-            if (!IsAlive) return;
-            moveTween = null;
-            Mutate((ref PortableObjectComponent c) => c.Moving = false);
-            SetBodyRendererTemporarilyHidden(false);
-        });
+            position.y += 4f * t * (1f - t);
+        }
+
+        // Culling skips only intermediate world/render writes. The absolute move clock keeps
+        // advancing, so re-entry resumes at the current point and completion stays on time.
+        if (t < 1f)
+        {
+            if (!scheduler.ShouldSkipIntermediateUpdate(state, position))
+            {
+                SetWorldPosition(position);
+            }
+
+            return false;
+        }
+
+        moveState = null;
+        SetMoving(false);
+        SetWorldPosition(ResolveMoveTarget(state));
+        if (state.DeactivateOnComplete)
+        {
+            SetCachedActive(false);
+        }
+
+        SetBodyRendererTemporarilyHidden(false);
+        Action onComplete = state.OnComplete;
+        state.OnComplete = null;
+        onComplete?.Invoke();
+        return true;
     }
 
     public void CancelMove()
     {
-        moveTween?.Kill();
-        moveTween = null;
-        if (IsAlive) Mutate((ref PortableObjectComponent c) => c.Moving = false);
-        SetBodyRendererTemporarilyHidden(false);
+        CancelScheduledMove();
         MoveCancelled?.Invoke(this);
+    }
+
+    private void CancelScheduledMove()
+    {
+        PortableMoveScheduler.MoveState previousState = moveState;
+        moveState = null;
+        if (previousState != null)
+        {
+            previousState.Active = false;
+        }
+
+        if (IsAlive)
+        {
+            SetMoving(false);
+        }
+
+        SetBodyRendererTemporarilyHidden(false);
+    }
+
+    private void CompleteMoveImmediately(
+        Transform targetTransform,
+        Vector3 fixedTargetPosition,
+        bool hasFixedTargetPosition,
+        Func<Vector3> targetPositionProvider,
+        bool deactivateOnComplete,
+        Action onComplete)
+    {
+        SetMoving(false);
+        Vector3 targetPosition = targetPositionProvider != null
+            ? targetPositionProvider()
+            : targetTransform != null
+                ? targetTransform.position
+                : hasFixedTargetPosition ? fixedTargetPosition : WorldPosition;
+        SetWorldPosition(targetPosition);
+        if (deactivateOnComplete)
+        {
+            SetCachedActive(false);
+        }
+
+        SetBodyRendererTemporarilyHidden(false);
+        onComplete?.Invoke();
+    }
+
+    private Vector3 ResolveMoveTarget(PortableMoveScheduler.MoveState state)
+    {
+        if (state.TargetPositionProvider != null)
+        {
+            return state.TargetPositionProvider();
+        }
+
+        if (state.HasTargetTransform)
+        {
+            return state.TargetTransform != null ? state.TargetTransform.position : WorldPosition;
+        }
+
+        return state.FixedTargetPosition;
+    }
+
+    internal bool CanCullMoveIntermediateUpdates(Transform targetTransform)
+    {
+        if (presentationPinned || RequiresIndividualPresentation(ResolveItemDefinition()))
+        {
+            return false;
+        }
+
+        // UI-bound moves must keep updating even when their world coordinates are outside
+        // the gameplay camera frustum. This lookup runs once when the move is scheduled.
+        return targetTransform == null || targetTransform.GetComponentInParent<Canvas>(true) == null;
+    }
+
+    private void SetMoving(bool moving)
+    {
+        world?.SetMoving(handle, moving);
+    }
+
+    internal void HandleMoveSchedulerDestroyed(PortableMoveScheduler.MoveState state)
+    {
+        if (!ReferenceEquals(moveState, state))
+        {
+            return;
+        }
+
+        moveState = null;
+        if (IsAlive)
+        {
+            SetMoving(false);
+        }
+
+        SetBodyRendererTemporarilyHidden(false);
     }
 
     public bool TryGetWorldFocusBounds(out Bounds bounds)
@@ -904,6 +1077,286 @@ public sealed class PortableObject : IDisposable
         pickupOutlineVisible = false;
         ReleaseFocusStackOutlineMembers(restore);
         focusStack = null;
+    }
+}
+
+internal sealed class PortableMoveScheduler : MonoBehaviour
+{
+    internal sealed class MoveState
+    {
+        internal PortableObject Owner;
+        internal Transform TargetTransform;
+        internal Func<Vector3> TargetPositionProvider;
+        internal Func<Vector3> StartPositionProvider;
+        internal Action OnComplete;
+        internal Vector3 FixedTargetPosition;
+        internal Vector3 LaunchStart;
+        internal float StartTime;
+        internal float Delay;
+        internal float Duration;
+        internal bool Active;
+        internal bool HasTargetTransform;
+        internal bool DelayCompleted;
+        internal bool DeactivateOnComplete;
+        internal bool UseJumpArc;
+        internal bool TrackStartPositionDuringMove;
+        internal bool CullIntermediateUpdates;
+        internal int Layer;
+
+        internal void Reset()
+        {
+            Owner = null;
+            TargetTransform = null;
+            TargetPositionProvider = null;
+            StartPositionProvider = null;
+            OnComplete = null;
+            FixedTargetPosition = default;
+            LaunchStart = default;
+            StartTime = 0f;
+            Delay = 0f;
+            Duration = 0f;
+            Active = false;
+            HasTargetTransform = false;
+            DelayCompleted = false;
+            DeactivateOnComplete = false;
+            UseJumpArc = false;
+            TrackStartPositionDuringMove = false;
+            CullIntermediateUpdates = false;
+            Layer = 0;
+        }
+    }
+
+    private const float MoveCullCellSize = 1f;
+    private const int MoveCullPaddingCells = 2;
+    private static readonly Vector3 MoveCullBoundsSize = new Vector3(2f, 3f, 2f);
+    private static PortableMoveScheduler current;
+    private readonly List<MoveState> activeMoves = new List<MoveState>(128);
+    private readonly Stack<MoveState> pooledMoves = new Stack<MoveState>(128);
+    private readonly CameraRenderCulling cameraCulling = new CameraRenderCulling();
+    private Camera renderCamera;
+    private bool hasVisibleCellRange;
+    private float visibleMinimumX;
+    private float visibleMinimumZ;
+    private float visibleMaximumX;
+    private float visibleMaximumZ;
+    private int lastVisibilityChecks;
+    private int lastCulledUpdates;
+    private long totalCulledUpdates;
+
+    internal static PortableMoveScheduler Resolve()
+    {
+        if (current != null)
+        {
+            return current;
+        }
+
+        GameObject host = GameManager.Instance != null
+            ? GameManager.Instance.gameObject
+            : TerrainGenerator.Active != null ? TerrainGenerator.Active.gameObject : null;
+        if (host == null)
+        {
+            return null;
+        }
+
+        PortableMoveScheduler scheduler = host.GetComponent<PortableMoveScheduler>();
+        if (scheduler == null)
+        {
+            scheduler = host.AddComponent<PortableMoveScheduler>();
+        }
+
+        current = scheduler;
+        return scheduler;
+    }
+
+    internal MoveState Schedule(
+        PortableObject owner,
+        Transform targetTransform,
+        Vector3 fixedTargetPosition,
+        Func<Vector3> targetPositionProvider,
+        Func<Vector3> startPositionProvider,
+        Vector3 launchStart,
+        float delay,
+        float duration,
+        bool deactivateOnComplete,
+        bool useJumpArc,
+        bool trackStartPositionDuringMove,
+        Action onComplete)
+    {
+        MoveState state = pooledMoves.Count > 0 ? pooledMoves.Pop() : new MoveState();
+        state.Owner = owner;
+        state.TargetTransform = targetTransform;
+        state.TargetPositionProvider = targetPositionProvider;
+        state.StartPositionProvider = startPositionProvider;
+        state.OnComplete = onComplete;
+        state.FixedTargetPosition = fixedTargetPosition;
+        state.LaunchStart = launchStart;
+        state.StartTime = Time.time;
+        state.Delay = delay;
+        state.Duration = duration;
+        state.Active = true;
+        state.HasTargetTransform = targetTransform != null;
+        state.DelayCompleted = delay <= 0f;
+        state.DeactivateOnComplete = deactivateOnComplete;
+        state.UseJumpArc = useJumpArc;
+        state.TrackStartPositionDuringMove = trackStartPositionDuringMove;
+        state.CullIntermediateUpdates = owner.CanCullMoveIntermediateUpdates(targetTransform);
+        state.Layer = owner.Layer;
+        activeMoves.Add(state);
+        enabled = true;
+        return state;
+    }
+
+    private void Awake()
+    {
+        if (current == null || current == this)
+        {
+            current = this;
+            enabled = false;
+            return;
+        }
+
+        Destroy(this);
+    }
+
+    private void Update()
+    {
+        using var callerSample = MapObjectTickProfiler.SampleUpdateCaller<PortableMoveScheduler>();
+        RefreshCameraCulling();
+        lastVisibilityChecks = 0;
+        lastCulledUpdates = 0;
+        float now = Time.time;
+        for (int moveIndex = activeMoves.Count - 1; moveIndex >= 0; moveIndex--)
+        {
+            MoveState state = activeMoves[moveIndex];
+            if (state.Active
+                && !ReferenceEquals(state.Owner, null)
+                && !state.Owner.UpdateScheduledMove(this, state, now))
+            {
+                continue;
+            }
+
+            RemoveAndPool(moveIndex, state);
+        }
+
+        if (activeMoves.Count == 0)
+        {
+            lastVisibilityChecks = 0;
+            lastCulledUpdates = 0;
+            enabled = false;
+        }
+    }
+
+    internal bool ShouldSkipIntermediateUpdate(MoveState state, Vector3 worldPosition)
+    {
+        if (!state.CullIntermediateUpdates || !cameraCulling.Enabled)
+        {
+            return false;
+        }
+
+        lastVisibilityChecks++;
+        if (!cameraCulling.IsLayerVisible(state.Layer))
+        {
+            RecordCulledUpdate();
+            return true;
+        }
+
+        if (hasVisibleCellRange
+            && (worldPosition.x < visibleMinimumX || worldPosition.x > visibleMaximumX
+                || worldPosition.z < visibleMinimumZ || worldPosition.z > visibleMaximumZ))
+        {
+            RecordCulledUpdate();
+            return true;
+        }
+
+        if (cameraCulling.Intersects(new Bounds(worldPosition, MoveCullBoundsSize)))
+        {
+            return false;
+        }
+
+        RecordCulledUpdate();
+        return true;
+    }
+
+    internal static void AppendProfilerCounters()
+    {
+        PortableMoveScheduler scheduler = current;
+        int eligibleMoves = 0;
+        if (scheduler != null)
+        {
+            for (int i = 0; i < scheduler.activeMoves.Count; i++)
+            {
+                if (scheduler.activeMoves[i].Active && scheduler.activeMoves[i].CullIntermediateUpdates)
+                {
+                    eligibleMoves++;
+                }
+            }
+        }
+
+        MapObjectTickProfiler.AddRuntimeCounter(
+            "PortableMove", "ActiveMoves", scheduler != null ? scheduler.activeMoves.Count : 0);
+        MapObjectTickProfiler.AddRuntimeCounter("PortableMove", "CullEligibleMoves", eligibleMoves);
+        MapObjectTickProfiler.AddRuntimeCounter(
+            "PortableMove", "LastVisibilityChecks", scheduler != null ? scheduler.lastVisibilityChecks : 0);
+        MapObjectTickProfiler.AddRuntimeCounter(
+            "PortableMove", "LastCulledUpdates", scheduler != null ? scheduler.lastCulledUpdates : 0);
+        MapObjectTickProfiler.AddRuntimeCounter(
+            "PortableMove", "TotalCulledUpdates", scheduler != null ? scheduler.totalCulledUpdates : 0L);
+    }
+
+    private void RecordCulledUpdate()
+    {
+        lastCulledUpdates++;
+        totalCulledUpdates++;
+    }
+
+    private void RefreshCameraCulling()
+    {
+        if (renderCamera == null || !renderCamera.isActiveAndEnabled)
+        {
+            renderCamera = Camera.main;
+        }
+
+        cameraCulling.Update(renderCamera);
+        hasVisibleCellRange = cameraCulling.TryGetVisibleCellRange(
+            MoveCullCellSize,
+            MoveCullPaddingCells,
+            out Vector2Int minimum,
+            out Vector2Int maximum);
+        if (!hasVisibleCellRange)
+        {
+            return;
+        }
+
+        visibleMinimumX = minimum.x * MoveCullCellSize;
+        visibleMinimumZ = minimum.y * MoveCullCellSize;
+        visibleMaximumX = (maximum.x + 1) * MoveCullCellSize;
+        visibleMaximumZ = (maximum.y + 1) * MoveCullCellSize;
+    }
+
+    private void OnDestroy()
+    {
+        for (int moveIndex = 0; moveIndex < activeMoves.Count; moveIndex++)
+        {
+            MoveState state = activeMoves[moveIndex];
+            state.Owner?.HandleMoveSchedulerDestroyed(state);
+            state.Reset();
+        }
+
+        activeMoves.Clear();
+        pooledMoves.Clear();
+        if (current == this)
+        {
+            current = null;
+        }
+    }
+
+    private void RemoveAndPool(int moveIndex, MoveState state)
+    {
+        int lastIndex = activeMoves.Count - 1;
+        activeMoves[moveIndex] = activeMoves[lastIndex];
+        activeMoves.RemoveAt(lastIndex);
+        state.Reset();
+        pooledMoves.Push(state);
     }
 }
 

@@ -13,7 +13,7 @@ MonoBehaviour:
   m_Name: Item_115_Plastic plate
   m_EditorClassIdentifier: Assembly-CSharp::ItemDefinition
   itemName: Plastic plate
-  id: 29
+  id: 30
   mapObject: {fileID: 0}
   mapObjectArchetype: {fileID: 0}
   useMapColor: 0

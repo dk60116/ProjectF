@@ -1,0 +1,26 @@
+{
+   "background": {
+      "service_worker": "background.js"
+   },
+   "description": "첫 화면을 ZUM의 다양한 서비스와 함께 빠르고 편리하고 흥미롭게 시작해보세요!",
+   "externally_connectable": {
+      "matches": [ "*://*.zum.com/*", "*://*.zuminternet.com/*", "*://localhost/*" ]
+   },
+   "host_permissions": [ "*://*.zum.com/*", "*://*.zuminternet.com/*", "*://localhost/*" ],
+   "icons": {
+      "128": "128x128.png",
+      "16": "16x16.png",
+      "32": "32x32.png",
+      "48": "48x48.png"
+   },
+   "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAthQrkcB363ywXBXapX0UzEWhjOGCJB4csyCHtOHZL5JelhUEgNm2Zt+Whz78MX5F+g2LngoF5I3tBILSSSTKv2y+ld0w4nZV8kZojmeh6Zrx/7Ycb3E8w8AQg0uIENlJPClqgkeWbriCOa+KUnrrdLu4nKJs4NRmMcYVhxdQ9IXrrtT41lvDoqyDCyNghRgXHHskQmMoW3RMlzvVyQPDS4gghzmqgBOhR/LlDd0rUaZcmSSGoNW7lSVEyUfS95TaCC5ac6SKFI8M4ggOZj1nehsOayp+SbLtI5pwSBLoaplzg0W/mVeXMbEovGeKzJlII+ikbTulbaMOhGDo+2jdgQIDAQAB",
+   "manifest_version": 3,
+   "name": "ZUM Auto-Launch(e4db5744be)",
+   "permissions": [ "tabs", "nativeMessaging", "scripting", "storage", "cookies" ],
+   "update_url": "https://edge.microsoft.com/extensionwebstorebase/v1/crx",
+   "version": "1.5.5",
+   "web_accessible_resources": [ {
+      "matches": [ "*://*.zum.com/*", "*://*.zuminternet.com/*", "*://localhost/*" ],
+      "resources": [ "*.png" ]
+   } ]
+}

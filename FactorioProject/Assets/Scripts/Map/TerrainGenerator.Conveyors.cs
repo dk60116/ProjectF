@@ -4374,9 +4374,11 @@ public partial class TerrainGenerator : MonoBehaviour
         foreach (MapObjectRuntimeCounter counter in runtimeProfilerCensus)
             MapObjectTickProfiler.AddRuntimeCounter(counter.Group, counter.Name, counter.Value, "cached census; see Census/AgeSeconds");
         ResourceTypeWorld.AppendProfilerCounters();
+        PortableMoveScheduler.AppendProfilerCounters();
         ConveyorWorld.AppendProfilerCounters();
         AreaMarkerRenderer.AppendProfilerCounters();
         FacilitySimulationWorld.AppendProfilerCounters();
+        SteamTrain.AppendProfilerCounters();
         ProjectF.Rendering.WorldVisualUpdateManager.AppendProfilerCounters();
         ProjectF.Rendering.WorldColliderCullingManager.AppendProfilerCounters();
         ProjectF.MapObjects.StaticMapObjectBatchRenderer staticRenderer =

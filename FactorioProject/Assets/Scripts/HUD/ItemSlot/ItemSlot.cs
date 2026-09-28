@@ -1,13 +1,14 @@
 using TMPro;
 using ProjectF.Attributes;
 using UnityEngine;
+using UnityEngine.EventSystems;
 using UnityEngine.UI;
 using UnityEngine.Serialization;
 
-public class ItemSlot : MonoBehaviour
+public class ItemSlot : MonoBehaviour, IPointerEnterHandler, IPointerExitHandler
 {
     [SerializeField, ReadOnly]
-    protected int id;
+    protected int id = -1;
 
     [SerializeField]
     private Image frame;
@@ -25,10 +26,10 @@ public class ItemSlot : MonoBehaviour
     [SerializeField]
     private bool keepIconWhenEmpty;
 
-    private void Awake()
+    protected virtual void Awake()
     {
         ResolveReferences();
-        Clear();
+        SetItemDisplay(-1, 0, 0, false);
     }
 
     private void OnValidate()
@@ -80,6 +81,7 @@ public class ItemSlot : MonoBehaviour
     {
         ResolveReferences();
         id = itemId;
+        InventoryItemTooltip.Refresh(this, id);
 
         bool hasItem = itemId >= 0 && (allowZeroCount || itemCount > 0);
         bool shouldShowCount = hasItem && showCount;
@@ -208,6 +210,7 @@ public class ItemSlot : MonoBehaviour
     {
         ResolveReferences();
         id = itemId;
+        InventoryItemTooltip.Refresh(this, id);
 
         bool hasIcon = displayIcon != null;
         if (icon != null)
@@ -288,6 +291,34 @@ public class ItemSlot : MonoBehaviour
     public bool HasItem => id >= 0;
 
     public virtual bool CanDragDrop => false;
+
+    public virtual bool TryGetTooltipItemId(Transform hitTransform, out int tooltipItemId)
+    {
+        tooltipItemId = ItemId;
+        return isActiveAndEnabled && tooltipItemId >= 0;
+    }
+
+    public virtual void OnPointerEnter(PointerEventData eventData)
+    {
+        Transform hitTransform = eventData != null && eventData.pointerCurrentRaycast.gameObject != null
+            ? eventData.pointerCurrentRaycast.gameObject.transform
+            : transform;
+        if (!TryGetTooltipItemId(hitTransform, out int tooltipItemId))
+        {
+            InventoryItemTooltip.Hide(this);
+            return;
+        }
+
+        InventoryItemTooltip.Show(
+            this,
+            tooltipItemId,
+            eventData != null ? eventData.position : (Vector2)Input.mousePosition);
+    }
+
+    public virtual void OnPointerExit(PointerEventData eventData)
+    {
+        InventoryItemTooltip.Hide(this);
+    }
 
     private void ResolveReferences()
     {

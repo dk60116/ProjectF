@@ -13,7 +13,7 @@ MonoBehaviour:
   m_Name: Item_116_Anvilbench
   m_EditorClassIdentifier: Assembly-CSharp::ItemDefinition
   itemName: Anvilbench
-  id: 22
+  id: 23
   mapObject: {fileID: 7839628250064023149, guid: 6168af2f119e8f040a9678762a5df929, type: 3}
   mapObjectArchetype: {fileID: 0}
   useMapColor: 0

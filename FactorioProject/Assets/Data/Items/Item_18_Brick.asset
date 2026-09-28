@@ -13,7 +13,7 @@ MonoBehaviour:
   m_Name: Item_18_Brick
   m_EditorClassIdentifier: 
   itemName: Brick
-  id: 26
+  id: 27
   mapObject: {fileID: 0}
   mapObjectArchetype: {fileID: 0}
   useMapColor: 0

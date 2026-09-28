@@ -1,0 +1,7 @@
+newmtl M_Gold_bar_P
+Ka 0.20 0.16 0.05
+Kd 1.00 1.00 1.00
+Ks 0.45 0.36 0.14
+Ns 60.0
+illum 2
+map_Kd Gold_bar_P_TB.png

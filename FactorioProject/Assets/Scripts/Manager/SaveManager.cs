@@ -94,6 +94,48 @@ public class SaveManager : MonoBehaviour
         ClearPendingRuntimeLoadState();
     }
 
+    internal static void PrepareNewMapForNextSceneLoad(int slotIndex)
+    {
+        slotIndex = NormalizeSlotIndex(slotIndex);
+        ClearPendingRuntimeLoadState();
+        pendingRuntimeLoadSlot = slotIndex;
+        pendingRuntimeStartNewMap = true;
+        PlayerPrefs.SetInt(RecentSlotPlayerPrefsKey, slotIndex);
+        PlayerPrefs.Save();
+    }
+
+    internal static bool PrepareSavedMapForNextSceneLoad(int slotIndex)
+    {
+        slotIndex = NormalizeSlotIndex(slotIndex);
+        if (!File.Exists(GetSlotPathForIndex(slotIndex)))
+        {
+            return false;
+        }
+
+        ClearPendingRuntimeLoadState();
+        SlotLoadTimingLog.Begin(slotIndex, "main-menu-continue");
+        pendingRuntimeLoadSlot = slotIndex;
+        pendingRuntimeReadAfterSceneLoad = true;
+        PlayerPrefs.SetInt(RecentSlotPlayerPrefsKey, slotIndex);
+        PlayerPrefs.Save();
+        return true;
+    }
+
+    internal static bool TryGetSavedSlotLabel(int slotIndex, out string label)
+    {
+        slotIndex = NormalizeSlotIndex(slotIndex);
+        string path = GetSlotPathForIndex(slotIndex);
+        if (!File.Exists(path))
+        {
+            label = string.Empty;
+            return false;
+        }
+
+        DateTime savedAt = File.GetLastWriteTime(path);
+        label = $"Slot {slotIndex + 1}    {savedAt:yyyy-MM-dd HH:mm}";
+        return true;
+    }
+
     private IEnumerator Start()
     {
         CaptureDefaultPlayerState();
@@ -1179,7 +1221,7 @@ public class SaveManager : MonoBehaviour
 
     public string GetSlotPath(int slotIndex)
     {
-        return Path.Combine(GetSaveDirectory(), $"slot_{NormalizeSlotIndex(slotIndex) + 1:00}{SaveFileExtension}");
+        return GetSlotPathForIndex(slotIndex);
     }
 
     private void ApplySaveData(SaveGameData data, Action onRestored)
@@ -1392,10 +1434,22 @@ public class SaveManager : MonoBehaviour
     {
         if (string.IsNullOrEmpty(cachedSaveDirectory))
         {
-            cachedSaveDirectory = Path.Combine(Application.persistentDataPath, "Saves");
+            cachedSaveDirectory = GetSaveDirectoryPath();
         }
 
         return cachedSaveDirectory;
+    }
+
+    private static string GetSlotPathForIndex(int slotIndex)
+    {
+        return Path.Combine(
+            GetSaveDirectoryPath(),
+            $"slot_{NormalizeSlotIndex(slotIndex) + 1:00}{SaveFileExtension}");
+    }
+
+    private static string GetSaveDirectoryPath()
+    {
+        return Path.Combine(Application.persistentDataPath, "Saves");
     }
 
     private void RefreshSaveFileExistenceCache()

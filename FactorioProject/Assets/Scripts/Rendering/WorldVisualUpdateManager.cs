@@ -14,8 +14,16 @@ namespace ProjectF.Rendering
         private const int SpatialPaddingCells = 2;
         private static WorldVisualUpdateManager instance;
         private readonly List<InstallationVisualState> targets = new List<InstallationVisualState>();
-        private readonly Dictionary<Vector2Int, List<InstallationVisualState>> targetsByCell =
-            new Dictionary<Vector2Int, List<InstallationVisualState>>();
+        private sealed class SpatialCellBucket
+        {
+            internal readonly List<InstallationVisualState> Targets = new List<InstallationVisualState>(4);
+            internal Bounds WorldBounds;
+            internal bool HasWorldBounds;
+            internal bool BoundsDirty = true;
+        }
+
+        private readonly Dictionary<Vector2Int, SpatialCellBucket> targetsByCell =
+            new Dictionary<Vector2Int, SpatialCellBucket>();
         private readonly HashSet<InstallationVisualState> pendingVisibility = new HashSet<InstallationVisualState>();
         private readonly HashSet<InstallationVisualState> visibleTargets = new HashSet<InstallationVisualState>();
         private readonly HashSet<InstallationVisualState> continuousVisibilityTargets =
@@ -26,6 +34,9 @@ namespace ProjectF.Rendering
         private bool candidateCacheDirty = true;
         private long candidateRebuildCount;
         private long candidateCacheHitCount;
+        private int lastCameraScanCandidateCount;
+        private int lastCameraScanRejectedCount;
+        private int lastIntersectingCandidateCellCount;
 
         public int RegisteredCount => targets.Count;
         public int VisibleCount { get; private set; }
@@ -77,6 +88,12 @@ namespace ProjectF.Rendering
                 instance != null ? instance.candidateRebuildCount : 0L);
             MapObjectTickProfiler.AddRuntimeCounter("InstallationVisuals", "CandidateCacheHits",
                 instance != null ? instance.candidateCacheHitCount : 0L);
+            MapObjectTickProfiler.AddRuntimeCounter("InstallationVisuals", "CameraScanCandidates",
+                instance != null ? instance.lastCameraScanCandidateCount : 0);
+            MapObjectTickProfiler.AddRuntimeCounter("InstallationVisuals", "CameraScanRejected",
+                instance != null ? instance.lastCameraScanRejectedCount : 0);
+            MapObjectTickProfiler.AddRuntimeCounter("InstallationVisuals", "IntersectingCandidateCells",
+                instance != null ? instance.lastIntersectingCandidateCellCount : 0);
         }
 
         internal static void Register(InstallationVisualState target)
@@ -169,6 +186,9 @@ namespace ProjectF.Rendering
                 LastCandidateCount = 0;
                 LastCandidateCellCount = 0;
                 LastVisibilityRefreshCount = 0;
+                lastCameraScanCandidateCount = 0;
+                lastCameraScanRejectedCount = 0;
+                lastIntersectingCandidateCellCount = 0;
                 return;
             }
 
@@ -179,10 +199,15 @@ namespace ProjectF.Rendering
             LastVisualUpdateCount = 0;
             LastDeferredCulledCount = 0;
             LastVisibilityRefreshCount = 0;
+            bool visibilityPrecomputed = false;
             if (cameraChanged || candidateCacheDirty)
             {
-                BuildCandidates(cameraChanged);
                 candidateCacheDirty = false;
+                BuildCandidates(cameraChanged);
+                if (cameraChanged)
+                {
+                    visibilityPrecomputed = PrefilterCameraCandidates();
+                }
                 candidateRebuildCount++;
             }
             else
@@ -201,10 +226,14 @@ namespace ProjectF.Rendering
 
                 bool pendingRefresh = pendingVisibility.Contains(target);
                 bool continuousRefresh = target.RequiresContinuousVisibilityRefresh;
-                bool refreshVisibility = cameraChanged || pendingRefresh || continuousRefresh;
+                bool refreshVisibility = !visibilityPrecomputed
+                                         && (cameraChanged || pendingRefresh || continuousRefresh);
                 if (pendingRefresh || continuousRefresh)
                 {
-                    RefreshSpatialIndex(target);
+                    if (!visibilityPrecomputed)
+                    {
+                        RefreshSpatialIndex(target);
+                    }
                 }
 
                 bool wasVisible = target.Visible;
@@ -227,6 +256,11 @@ namespace ProjectF.Rendering
                     // steady-state cache contains only visible, pending, and mobile targets.
                     candidateCacheDirty = true;
                 }
+                else if (pendingRefresh && !target.Visible)
+                {
+                    // A pending target that remains culled is needed for this refresh only.
+                    candidateCacheDirty = true;
+                }
             }
             VisibleCount = visibleTargets.Count;
             CulledCount = Mathf.Max(0, targets.Count - VisibleCount);
@@ -247,6 +281,7 @@ namespace ProjectF.Rendering
             }
 
             LastCandidateCellCount = 0;
+            lastIntersectingCandidateCellCount = 0;
             if (!culling.TryGetVisibleCellRange(SpatialCellSize, SpatialPaddingCells,
                     out Vector2Int minimum, out Vector2Int maximum))
             {
@@ -264,12 +299,59 @@ namespace ProjectF.Rendering
 
             for (int y = minimum.y; y <= maximum.y; y++)
             for (int x = minimum.x; x <= maximum.x; x++)
-                if (targetsByCell.TryGetValue(new Vector2Int(x, y), out List<InstallationVisualState> cellTargets))
-                    for (int i = 0; i < cellTargets.Count; i++) AddCandidate(cellTargets[i]);
+                if (targetsByCell.TryGetValue(new Vector2Int(x, y), out SpatialCellBucket bucket)
+                    && CellMayBeVisible(bucket))
+                {
+                    lastIntersectingCandidateCellCount++;
+                    for (int i = 0; i < bucket.Targets.Count; i++) AddCandidate(bucket.Targets[i]);
+                }
         }
 
         private void AddCandidate(InstallationVisualState target)
         { if (target != null && candidateSet.Add(target)) candidates.Add(target); }
+
+        private bool PrefilterCameraCandidates()
+        {
+            lastCameraScanCandidateCount = candidates.Count;
+            lastCameraScanRejectedCount = 0;
+            for (int candidateIndex = candidates.Count - 1; candidateIndex >= 0; candidateIndex--)
+            {
+                InstallationVisualState target = candidates[candidateIndex];
+                if (target == null || target.Owner == null || !target.Owner.isActiveAndEnabled)
+                {
+                    continue;
+                }
+
+                bool pendingRefresh = pendingVisibility.Contains(target);
+                bool continuousRefresh = target.RequiresContinuousVisibilityRefresh;
+                if (pendingRefresh || continuousRefresh)
+                {
+                    RefreshSpatialIndex(target);
+                }
+
+                bool visible = target.RefreshVisibility(culling);
+                LastVisibilityRefreshCount++;
+                if (visible)
+                {
+                    visibleTargets.Add(target);
+                    continue;
+                }
+
+                visibleTargets.Remove(target);
+                if (pendingRefresh || continuousRefresh)
+                {
+                    continue;
+                }
+
+                candidateSet.Remove(target);
+                int lastIndex = candidates.Count - 1;
+                candidates[candidateIndex] = candidates[lastIndex];
+                candidates.RemoveAt(lastIndex);
+                lastCameraScanRejectedCount++;
+            }
+
+            return true;
+        }
 
         private static Vector2Int GetSpatialCell(InstallationVisualState target)
         {
@@ -282,24 +364,58 @@ namespace ProjectF.Rendering
         {
             Vector2Int cell = GetSpatialCell(target);
             target.SpatialCell = cell;
-            if (!targetsByCell.TryGetValue(cell, out List<InstallationVisualState> values))
-                targetsByCell.Add(cell, values = new List<InstallationVisualState>(4));
-            values.Add(target);
+            if (!targetsByCell.TryGetValue(cell, out SpatialCellBucket bucket))
+                targetsByCell.Add(cell, bucket = new SpatialCellBucket());
+            bucket.Targets.Add(target);
+            bucket.BoundsDirty = true;
         }
 
         private void RemoveFromSpatialIndex(InstallationVisualState target)
         {
-            if (!targetsByCell.TryGetValue(target.SpatialCell, out List<InstallationVisualState> values)) return;
-            values.Remove(target);
-            if (values.Count == 0) targetsByCell.Remove(target.SpatialCell);
+            if (!targetsByCell.TryGetValue(target.SpatialCell, out SpatialCellBucket bucket)) return;
+            bucket.Targets.Remove(target);
+            bucket.BoundsDirty = true;
+            if (bucket.Targets.Count == 0) targetsByCell.Remove(target.SpatialCell);
         }
 
         private void RefreshSpatialIndex(InstallationVisualState target)
         {
             Vector2Int cell = GetSpatialCell(target);
-            if (cell == target.SpatialCell) return;
+            if (cell == target.SpatialCell)
+            {
+                if (targetsByCell.TryGetValue(cell, out SpatialCellBucket bucket))
+                    bucket.BoundsDirty = true;
+                return;
+            }
             RemoveFromSpatialIndex(target);
             AddToSpatialIndex(target);
+        }
+
+        private bool CellMayBeVisible(SpatialCellBucket bucket)
+        {
+            if (bucket.BoundsDirty)
+            {
+                bucket.HasWorldBounds = false;
+                for (int i = 0; i < bucket.Targets.Count; i++)
+                {
+                    InstallationVisualState target = bucket.Targets[i];
+                    if (target == null || !target.TryGetWorldBounds(out Bounds targetBounds))
+                    {
+                        continue;
+                    }
+
+                    if (bucket.HasWorldBounds) bucket.WorldBounds.Encapsulate(targetBounds);
+                    else
+                    {
+                        bucket.WorldBounds = targetBounds;
+                        bucket.HasWorldBounds = true;
+                    }
+                }
+                bucket.BoundsDirty = false;
+            }
+
+            // Missing bounds are kept conservative so stale/null entries can still unregister.
+            return !bucket.HasWorldBounds || culling.Intersects(bucket.WorldBounds);
         }
 
         private void OnDisable()
@@ -316,6 +432,8 @@ namespace ProjectF.Rendering
             VisibleCount = targets.Count;
             CulledCount = LastTickedCount = LastVisualUpdateCount = LastDeferredCulledCount = 0;
             LastCandidateCount = LastCandidateCellCount = LastVisibilityRefreshCount = 0;
+            lastCameraScanCandidateCount = lastCameraScanRejectedCount = 0;
+            lastIntersectingCandidateCellCount = 0;
         }
 
         private void OnDestroy()

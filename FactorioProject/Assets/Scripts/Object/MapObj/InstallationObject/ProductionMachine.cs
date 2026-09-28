@@ -273,6 +273,7 @@ public class ProductionMachine : InputOutputModule
         productionFluidUnits[fluidItemId] = storedUnits + acceptedUnits;
         acceptedLiters = DeterministicSimulationUnits.ToFloat(acceptedUnits);
         MarkPersistenceStateDirty();
+        NotifyFluidInputAvailabilityIncreased(this);
         WakeRuntimeUpdate();
         return true;
     }
@@ -721,6 +722,7 @@ public class ProductionMachine : InputOutputModule
             long requiredUnits = GetRequiredProductionFluidUnits(outputItemId, ingredient);
             productionFluidUnits[ingredient.itemId] = GetProductionFluidUnits(ingredient.itemId) - requiredUnits;
             MarkPersistenceStateDirty();
+            NotifyFluidOutputCapacityIncreased(this);
         }
 
         BeginActiveCraft(outputPairIndex, outputItemId, outputCount, installedDefinition);

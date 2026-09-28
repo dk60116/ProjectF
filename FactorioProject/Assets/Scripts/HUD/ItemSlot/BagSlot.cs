@@ -5,7 +5,7 @@ using UnityEngine;
 using UnityEngine.EventSystems;
 using UnityEngine.UI;
 
-public class BagSlot : ItemSlot, IBeginDragHandler, IDragHandler, IEndDragHandler, IPointerEnterHandler, IPointerExitHandler
+public class BagSlot : ItemSlot, IBeginDragHandler, IDragHandler, IEndDragHandler
 {
     private static BagSlot expandedSlot;
     private static BagSlot hoveredDropSlot;
@@ -214,8 +214,9 @@ public class BagSlot : ItemSlot, IBeginDragHandler, IDragHandler, IEndDragHandle
         }
     }
 
-    private void Awake()
+    protected override void Awake()
     {
+        base.Awake();
         CacheReferences();
         CollapseCraftingSlots(true);
         BindSlotClick();
@@ -228,6 +229,7 @@ public class BagSlot : ItemSlot, IBeginDragHandler, IDragHandler, IEndDragHandle
 
     private void OnDisable()
     {
+        InventoryItemTooltip.Hide(this);
         UnregisterActiveBagSlot(this);
         ClearHoveredDropSlot(this);
 
@@ -240,6 +242,7 @@ public class BagSlot : ItemSlot, IBeginDragHandler, IDragHandler, IEndDragHandle
 
     private void OnDestroy()
     {
+        InventoryItemTooltip.Hide(this);
         ReleaseAutomaticPickupPreviewSlot();
         EndDragVisual();
         DestroyDragGhost();
@@ -256,6 +259,7 @@ public class BagSlot : ItemSlot, IBeginDragHandler, IDragHandler, IEndDragHandle
         if (!shouldDisplayItem)
         {
             Clear();
+            InventoryItemTooltip.Hide(this);
             RefreshCraftingItems(itemId, itemCount);
             if (isCraftingExpanded)
             {
@@ -280,6 +284,7 @@ public class BagSlot : ItemSlot, IBeginDragHandler, IDragHandler, IEndDragHandle
 
         if (!visible)
         {
+            InventoryItemTooltip.Hide(this);
             ReleaseAutomaticPickupPreviewSlot();
             ClearPickupPreview();
         }
@@ -522,6 +527,7 @@ public class BagSlot : ItemSlot, IBeginDragHandler, IDragHandler, IEndDragHandle
 
     public void OnBeginDrag(PointerEventData eventData)
     {
+        InventoryItemTooltip.Hide(this);
         if (!IsDragSourceBagSlot(eventData))
         {
             return;
@@ -600,7 +606,7 @@ public class BagSlot : ItemSlot, IBeginDragHandler, IDragHandler, IEndDragHandle
         DropItem();
     }
 
-    public void OnPointerEnter(PointerEventData eventData)
+    public override void OnPointerEnter(PointerEventData eventData)
     {
         if (!Input.GetMouseButton(0))
         {
@@ -609,10 +615,12 @@ public class BagSlot : ItemSlot, IBeginDragHandler, IDragHandler, IEndDragHandle
 
         SetHoveredDropSlot(this);
         RefreshPickupPreview();
+        base.OnPointerEnter(eventData);
     }
 
-    public void OnPointerExit(PointerEventData eventData)
+    public override void OnPointerExit(PointerEventData eventData)
     {
+        base.OnPointerExit(eventData);
         ClearHoveredDropSlot(this);
         ClearPickupPreview();
     }
@@ -632,6 +640,7 @@ public class BagSlot : ItemSlot, IBeginDragHandler, IDragHandler, IEndDragHandle
 
         if (hoveredDropSlot != this)
         {
+            InventoryItemTooltip.Hide(this);
             if (pickupPreviewActive && automaticPickupPreviewSlot != this)
             {
                 ClearPickupPreview();
@@ -643,6 +652,7 @@ public class BagSlot : ItemSlot, IBeginDragHandler, IDragHandler, IEndDragHandle
 
         if (!IsPointerOverSlot())
         {
+            InventoryItemTooltip.Hide(this);
             ClearHoveredDropSlot(this);
             ClearPickupPreview();
             ResetHeldSlotInput();
@@ -1166,6 +1176,17 @@ public class BagSlot : ItemSlot, IBeginDragHandler, IDragHandler, IEndDragHandle
 
     public bool IsCraftingExpanded => isCraftingExpanded;
     public override bool CanDragDrop => true;
+
+    public override bool TryGetTooltipItemId(Transform hitTransform, out int tooltipItemId)
+    {
+        if (isDragging)
+        {
+            tooltipItemId = -1;
+            return false;
+        }
+
+        return base.TryGetTooltipItemId(hitTransform, out tooltipItemId);
+    }
 
     private bool CanDragItem()
     {

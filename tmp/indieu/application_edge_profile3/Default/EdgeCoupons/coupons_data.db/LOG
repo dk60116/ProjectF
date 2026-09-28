@@ -1,0 +1,5 @@
+2026/09/28-01:37:18.730 3ad94 Creating DB C:\Git\ProjectF\tmp\indieu\application_edge_profile3\Default\EdgeCoupons/coupons_data.db since it was missing.
+2026/09/28-01:37:18.808 3ad94 Reusing MANIFEST C:\Git\ProjectF\tmp\indieu\application_edge_profile3\Default\EdgeCoupons/coupons_data.db/MANIFEST-000001
+2026/09/28-01:37:20.171 3af14 Level-0 table #5: started
+2026/09/28-01:37:20.177 3af14 Level-0 table #5: 683284 bytes OK
+2026/09/28-01:37:20.181 3af14 Delete type=0 #3

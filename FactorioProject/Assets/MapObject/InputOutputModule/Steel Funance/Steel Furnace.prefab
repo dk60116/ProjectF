@@ -4929,7 +4929,7 @@ MonoBehaviour:
   m_EditorClassIdentifier: 
   id: 0
   objectName: Steel Funance
-  objId: 38
+  objId: 40
   itemDefinition: {fileID: 11400000, guid: c2647e3a39ee9714e87f93f2427fa513, type: 2}
   mapStatus:
     mapSizeX: 1

@@ -231,7 +231,7 @@ MonoBehaviour:
   m_EditorClassIdentifier: 
   id: 0
   objectName: Production machine (MK3)
-  objId: 73
+  objId: 75
   itemDefinition: {fileID: 11400000, guid: cdc8e149b82cd7947b30ef76b473abfc, type: 2}
   mapStatus:
     mapSizeX: 3
@@ -297,6 +297,16 @@ MonoBehaviour:
     - itemDefinition: {fileID: 11400000, guid: 00a0cf5cedb5c624a9af78a08be87a5f, type: 2}
       count: 1
   - inputs:
+    - itemDefinition: {fileID: 11400000, guid: 771a4a8c595dbe74b9187ca84001cfcb, type: 2}
+      count: 1
+    - itemDefinition: {fileID: 11400000, guid: a2393aedc145bbd4a8de4f74073c1eca, type: 2}
+      count: 2
+    - itemDefinition: {fileID: 11400000, guid: c2c3df56b3d7ac04db2063fb6b297ee7, type: 2}
+      count: 2
+    outputs:
+    - itemDefinition: {fileID: 11400000, guid: 71b40722fa5571a4cbbbcaa98dbb05e1, type: 2}
+      count: 1
+  - inputs:
     - itemDefinition: {fileID: 11400000, guid: 7a8ea2c79da84f048815b5cbfe397fd1, type: 2}
       count: 2
     - itemDefinition: {fileID: 11400000, guid: 1e1fcabb313ee6840a8a369650290ace, type: 2}
@@ -305,16 +315,6 @@ MonoBehaviour:
       count: 2
     outputs:
     - itemDefinition: {fileID: 11400000, guid: b9735abb8886622408d77bb1f9a1f4c3, type: 2}
-      count: 1
-  - inputs:
-    - itemDefinition: {fileID: 11400000, guid: a42f84aea6bbe46419a3777181e987a1, type: 2}
-      count: 8
-    - itemDefinition: {fileID: 11400000, guid: ee57335a932a96a49963ace76adef614, type: 2}
-      count: 3
-    - itemDefinition: {fileID: 11400000, guid: a2393aedc145bbd4a8de4f74073c1eca, type: 2}
-      count: 10
-    outputs:
-    - itemDefinition: {fileID: 11400000, guid: d4d9ce93c017a2e4d8c5891bb4f4e91c, type: 2}
       count: 1
   - inputs:
     - itemDefinition: {fileID: 11400000, guid: 347029aa316390a4982b64441c83789c, type: 2}
@@ -337,21 +337,11 @@ MonoBehaviour:
     - itemDefinition: {fileID: 11400000, guid: f2a55fe33263d054f82c1737d7d85898, type: 2}
       count: 1
   - inputs:
-    - itemDefinition: {fileID: 11400000, guid: 7a8ea2c79da84f048815b5cbfe397fd1, type: 2}
-      count: 2
-    - itemDefinition: {fileID: 11400000, guid: 21883f622876a3f47a1c1f90a4b0004e, type: 2}
-      count: 2
-    - itemDefinition: {fileID: 11400000, guid: a2393aedc145bbd4a8de4f74073c1eca, type: 2}
-      count: 2
-    outputs:
-    - itemDefinition: {fileID: 11400000, guid: a74ba1d8dd011f34ca2a0c33b1aa5725, type: 2}
-      count: 1
-  - inputs:
     - itemDefinition: {fileID: 11400000, guid: a025b03cf674e024884437c532dfe480, type: 2}
       count: 4
     - itemDefinition: {fileID: 11400000, guid: 7a8ea2c79da84f048815b5cbfe397fd1, type: 2}
       count: 2
-    - itemDefinition: {fileID: 11400000, guid: a74ba1d8dd011f34ca2a0c33b1aa5725, type: 2}
+    - itemDefinition: {fileID: 11400000, guid: b53715335b2e27a46b55215dff4fdaac, type: 2}
       count: 1
     outputs:
     - itemDefinition: {fileID: 11400000, guid: 29927129db7b22842886fe756c71a712, type: 2}
@@ -365,6 +355,26 @@ MonoBehaviour:
       count: 2
     outputs:
     - itemDefinition: {fileID: 11400000, guid: cdc8e149b82cd7947b30ef76b473abfc, type: 2}
+      count: 1
+  - inputs:
+    - itemDefinition: {fileID: 11400000, guid: 7a8ea2c79da84f048815b5cbfe397fd1, type: 2}
+      count: 2
+    - itemDefinition: {fileID: 11400000, guid: 21883f622876a3f47a1c1f90a4b0004e, type: 2}
+      count: 2
+    - itemDefinition: {fileID: 11400000, guid: a2393aedc145bbd4a8de4f74073c1eca, type: 2}
+      count: 2
+    outputs:
+    - itemDefinition: {fileID: 11400000, guid: b53715335b2e27a46b55215dff4fdaac, type: 2}
+      count: 1
+  - inputs:
+    - itemDefinition: {fileID: 11400000, guid: f0e8b5357a13bc04cbc5e8603014446c, type: 2}
+      count: 1
+    - itemDefinition: {fileID: 11400000, guid: 09af47ed2a67de34dad96a547b0f030b, type: 2}
+      count: 2
+    - itemDefinition: {fileID: 11400000, guid: e9950cff3cab70041b1997e87d6e22b1, type: 2}
+      count: 1
+    outputs:
+    - itemDefinition: {fileID: 11400000, guid: 3bdd8115056e76d4a878ff2231e3340c, type: 2}
       count: 1
   - inputs:
     - itemDefinition: {fileID: 11400000, guid: e38b0f871b2a4ef4b80c9d5864a2b5e0, type: 2}
@@ -415,6 +425,26 @@ MonoBehaviour:
       count: 1
     outputs:
     - itemDefinition: {fileID: 11400000, guid: 863b50f11678afd4b8c52ff2d7224e4f, type: 2}
+      count: 1
+  - inputs:
+    - itemDefinition: {fileID: 11400000, guid: f618ef8c86b605a418911317c85bd88d, type: 2}
+      count: 6
+    - itemDefinition: {fileID: 11400000, guid: 9807425657e17b14387ed43757f8bbbb, type: 2}
+      count: 2
+    - itemDefinition: {fileID: 11400000, guid: a2393aedc145bbd4a8de4f74073c1eca, type: 2}
+      count: 2
+    outputs:
+    - itemDefinition: {fileID: 11400000, guid: 8d6cbd303db81d64d99a93e7494044fb, type: 2}
+      count: 1
+  - inputs:
+    - itemDefinition: {fileID: 11400000, guid: a025b03cf674e024884437c532dfe480, type: 2}
+      count: 2
+    - itemDefinition: {fileID: 11400000, guid: c2c3df56b3d7ac04db2063fb6b297ee7, type: 2}
+      count: 3
+    - itemDefinition: {fileID: 11400000, guid: fc1cba8967b6adc48867e456639cad4a, type: 2}
+      count: 5
+    outputs:
+    - itemDefinition: {fileID: 11400000, guid: ced5cba395785e94897ab6dcb83d274a, type: 2}
       count: 1
   - inputs:
     - itemDefinition: {fileID: 11400000, guid: 1e1fcabb313ee6840a8a369650290ace, type: 2}

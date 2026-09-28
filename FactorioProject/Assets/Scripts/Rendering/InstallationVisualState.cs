@@ -51,18 +51,42 @@ namespace ProjectF.Rendering
         {
             if (refreshVisibility)
             {
-                Capture();
-                Matrix4x4 matrix = Owner.transform.localToWorldMatrix;
-                if (!hasMatrix || !lastMatrix.Equals(matrix))
-                {
-                    lastMatrix = matrix;
-                    hasMatrix = true;
-                    worldBounds = VirtualRenderBatchCollection.CalculateWorldBounds(localBounds, matrix);
-                }
-                SetVisible(culling.IsAnyLayerVisible(layerMask) && culling.Intersects(worldBounds));
+                RefreshVisibility(culling);
             }
 
             return Visible && Owner.RunManagedVisualUpdate(deltaTime);
+        }
+
+        internal bool RefreshVisibility(CameraRenderCulling culling)
+        {
+            if (!TryGetWorldBounds(out Bounds bounds))
+            {
+                return false;
+            }
+
+            SetVisible(culling.IsAnyLayerVisible(layerMask) && culling.Intersects(bounds));
+            return Visible;
+        }
+
+        internal bool TryGetWorldBounds(out Bounds bounds)
+        {
+            bounds = default;
+            if (Owner == null)
+            {
+                return false;
+            }
+
+            Capture();
+            Matrix4x4 matrix = Owner.transform.localToWorldMatrix;
+            if (!hasMatrix || !lastMatrix.Equals(matrix))
+            {
+                lastMatrix = matrix;
+                hasMatrix = true;
+                worldBounds = VirtualRenderBatchCollection.CalculateWorldBounds(localBounds, matrix);
+            }
+
+            bounds = worldBounds;
+            return true;
         }
 
         private void Capture()

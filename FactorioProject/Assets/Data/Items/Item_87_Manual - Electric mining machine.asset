@@ -13,7 +13,7 @@ MonoBehaviour:
   m_Name: Item_87_Manual - Electric mining machine
   m_EditorClassIdentifier: Assembly-CSharp::ItemDefinition
   itemName: Manual - Electric mining machine
-  id: 89
+  id: 91
   mapObject: {fileID: 0}
   mapObjectArchetype: {fileID: 0}
   useMapColor: 0

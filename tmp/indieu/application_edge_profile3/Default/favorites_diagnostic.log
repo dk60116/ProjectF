@@ -1,0 +1,19 @@
+2026-09-27 16:37:16.310: [INFO] CurrentProfilePath: C:\Git\ProjectF\tmp\indieu\application_edge_profile3\Default
+2026-09-27 16:37:16.310: [INFO] Profiles total count: 1
+2026-09-27 16:37:16.314: [INFO] Profile: name=프로필 1 path=C:\Git\ProjectF\tmp\indieu\application_edge_profile3\Default lastActive=2026-09-27T16:37:16.286Z
+2026-09-27 16:37:16.314: [INFO] LastUsedProfileDir: C:\Git\ProjectF\tmp\indieu\application_edge_profile3\Default
+2026-09-27 16:37:16.314: [INFO] MostRecentlyActiveProfile: name=프로필 1 path=C:\Git\ProjectF\tmp\indieu\application_edge_profile3\Default lastActive=2026-09-27T16:37:16.286Z
+2026-09-27 16:37:16.314: [INFO] OnDoneLoading sync enabled: 0
+2026-09-27 16:37:16.314: [INFO] BookmarkModelLoaded, ids_reassigned: 0
+2026-09-27 16:37:16.314: [INFO] BookmarksLoadDropped droppedNodes=0
+2026-09-27 16:37:16.314: [INFO] BookmarksSnapshot Startup total=0 bar=0 other=0 mobile=0 showBar=0 showBarNTP=1
+2026-09-27 16:37:16.335: [INFO] RecordSyncInitDuration has_sync_been_enabled: 0 state: 0
+2026-09-27 16:37:16.590: [INFO] VisibilityChanged: 0
+2026-09-27 16:37:17.267: [INFO] RecordSyncInitDuration has_sync_been_enabled: 0 state: 0
+2026-09-27 16:37:17.271: [INFO] RecordSyncInitDuration has_sync_been_enabled: 0 state: 3
+2026-09-27 16:37:17.275: [INFO] Primary account changed.
+2026-09-27 16:37:17.275: [INFO] OnPrimaryAccountChanged PrimaryAccountChangeEvent::Type::kSet
+2026-09-27 16:37:17.284: [INFO] RecordSyncInitDuration has_sync_been_enabled: 0 state: 3
+2026-09-27 16:37:19.002: [INFO] BookmarkNodeAdded, ABU: 0
+2026-09-27 16:37:19.002: [INFO] BookmarkNodeAdded, ABU: 0
+2026-09-27 16:37:23.321: [INFO] BookmarksSnapshot Shutdown total=2 bar=1 other=1 mobile=0 showBar=0 showBarNTP=1

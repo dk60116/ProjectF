@@ -13,7 +13,7 @@ MonoBehaviour:
   m_Name: Item_16_Iron plate
   m_EditorClassIdentifier: 
   itemName: Iron plate
-  id: 24
+  id: 25
   mapObject: {fileID: 0}
   mapObjectArchetype: {fileID: 0}
   useMapColor: 0

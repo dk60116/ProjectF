@@ -1,0 +1,42 @@
+{
+   "action": {
+      "default_icon": "assets/icons/icon-34.png"
+   },
+   "background": {
+      "service_worker": "background.bundle.js"
+   },
+   "content_scripts": [ {
+      "css": [ "content.styles.css" ],
+      "js": [ "contentScript.bundle.js" ],
+      "matches": [ "\u003Call_urls>" ]
+   } ],
+   "declarative_net_request": {
+      "rule_resources": [ {
+         "enabled": true,
+         "id": "ruleset_1",
+         "path": "rules.json"
+      } ]
+   },
+   "description": "Powering your web experience with a reliable, endpoint protection layer.",
+   "externally_connectable": {
+      "matches": [ "https://*.reasonlabs.com/*", "https://onlinesecurity-app.com/*", "https://onlinesecurityext.com/*", "https://insights.onlinesecurityext.com/*", "https://app.getmozo.com/*" ]
+   },
+   "host_permissions": [ "\u003Call_urls>" ],
+   "icons": {
+      "128": "assets/icons/icon-128.png"
+   },
+   "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEA0mL+cdKGADDY/9Jcnf1BaMY/BmO/EZYL9e7bTxVIeoijjo5HEdJxlEN9Y8bUrnZvO+YUNWAbYexeeYyJV7e9RBaZgyGhrMc9ehA6swh9nwC+TiwH2DcwZDsl1UYKgUYco8OnqlBdLZ+zNOiaC91EkIpKxQ2PUXJWrI3sepO0Si1NpbWKe57xTeZr5Gx9gu7o7kOSG1kwNk4u06RxWuSBulU39+4Nm98c5SO/Q3n29Af7w0Rp9EnjYYt5dODzuy8cmpYoW8QK1NXhC3SXu0AadW+q+QHgIFk+GVxf8/OzGSIZsbs8ZhcxPMHG8kpRo1qXDhwi5Y1DepBcYfhccNCB4wIDAQAB",
+   "manifest_version": 3,
+   "name": "Online Security",
+   "permissions": [ "storage", "unlimitedStorage", "management", "tabs", "declarativeNetRequest", "downloads", "downloads.shelf", "downloads.open", "notifications", "webNavigation", "contextMenus", "contentSettings", "browsingData", "history", "nativeMessaging", "idle", "alarms", "cookies" ],
+   "update_url": "https://edge.microsoft.com/extensionwebstorebase/v1/crx",
+   "version": "7.6.0",
+   "version_name": "7.6.0",
+   "web_accessible_resources": [ {
+      "matches": [ "\u003Call_urls>" ],
+      "resources": [ "assets/images/*", "assets/fonts/*", "assets/icons/*", "content.styles.css" ]
+   }, {
+      "matches": [ "https://*.reasonlabs.com/*", "https://onlinesecurity-app.com/*", "https://onlinesecurityext.com/*", "https://insights.onlinesecurityext.com/*", "https://app.getmozo.com/*" ],
+      "resources": [ "index.html" ]
+   } ]
+}

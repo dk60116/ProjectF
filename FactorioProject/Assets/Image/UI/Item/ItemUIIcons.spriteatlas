@@ -243,6 +243,7 @@ SpriteAtlas:
     - 1c5af457d79a02240a489621d09a6284: 21300000
     - 830a31673ce526a4bba4622f264e32fd: 21300000
     - d830ad6735f87f54499c4772be68650d: 21300000
+    - a71b6177b55e400fbafe239935e2189a: 21300000
     - de1de8772e6bd95418f5e646676e941b: 21300000
     - b6c8bfd785901674d9f07965da9cc348: 21300000
     - 7b654ce797ed8754f8f5bfc320ab51fb: 21300000
@@ -396,6 +397,7 @@ SpriteAtlas:
   - {fileID: 21300000, guid: 1c5af457d79a02240a489621d09a6284, type: 3}
   - {fileID: 21300000, guid: 830a31673ce526a4bba4622f264e32fd, type: 3}
   - {fileID: 21300000, guid: d830ad6735f87f54499c4772be68650d, type: 3}
+  - {fileID: 21300000, guid: a71b6177b55e400fbafe239935e2189a, type: 3}
   - {fileID: 21300000, guid: de1de8772e6bd95418f5e646676e941b, type: 3}
   - {fileID: 21300000, guid: b6c8bfd785901674d9f07965da9cc348, type: 3}
   - {fileID: 21300000, guid: 7b654ce797ed8754f8f5bfc320ab51fb, type: 3}
@@ -548,6 +550,7 @@ SpriteAtlas:
   - Production machine (Mk1)_Icon
   - PC_Icon
   - Iron ore_Icon
+  - GoldOre
   - Reed_Icon
   - Electric mining machine_Icon
   - Alighting

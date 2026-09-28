@@ -11,6 +11,10 @@ public class SteamTrain : RailHandcar,
     private static readonly Dictionary<Vector2Int, List<SteamTrain>> WaterPipeReceiversByCoordinate =
         new Dictionary<Vector2Int, List<SteamTrain>>();
     private static ulong nextAutoDriveControllerRevision;
+    private static ulong autoDriveControllerSelectionRevision;
+    private static long autoDriveControllerCacheHits;
+    private static long autoDriveControllerCacheMisses;
+    private static long autoDriveControllerCandidateChecks;
 
     public readonly struct AutoDriveDebugRouteSegment
     {
@@ -170,6 +174,12 @@ public class SteamTrain : RailHandcar,
     private ulong autoDriveControllerRevision;
     private ulong autoDriveConnectedTrainGraphRevision;
     private bool autoDriveConnectedTrainCacheValid;
+    private long autoDriveControllerCacheTick = long.MinValue;
+    private ulong autoDriveControllerCacheGraphRevision;
+    private ulong autoDriveControllerCacheSelectionRevision;
+    private SteamTrain autoDriveControllerCache;
+    private SteamTrain autoDriveControllerCacheSource;
+    private bool autoDriveControllerCacheValid;
 
     public float ObjectInfoStoredBurnEnergy => DeterministicSimulationUnits.ToFloat(storedBurnEnergyUnits);
     public float ManagedUpdateTickIntervalSeconds => MapObjectTickManager.FixedSimulationDeltaSeconds;
@@ -233,9 +243,24 @@ public class SteamTrain : RailHandcar,
     }
 
     [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.SubsystemRegistration)]
-    private static void ResetWaterPipeReceiverRegistry()
+    private static void ResetStaticRuntimeState()
     {
         WaterPipeReceiversByCoordinate.Clear();
+        nextAutoDriveControllerRevision = 0;
+        autoDriveControllerSelectionRevision = 0;
+        autoDriveControllerCacheHits = 0L;
+        autoDriveControllerCacheMisses = 0L;
+        autoDriveControllerCandidateChecks = 0L;
+    }
+
+    internal static void AppendProfilerCounters()
+    {
+        MapObjectTickProfiler.AddRuntimeCounter(
+            "SteamTrainControllerCache", "Hits", autoDriveControllerCacheHits);
+        MapObjectTickProfiler.AddRuntimeCounter(
+            "SteamTrainControllerCache", "Misses", autoDriveControllerCacheMisses);
+        MapObjectTickProfiler.AddRuntimeCounter(
+            "SteamTrainControllerCache", "CandidateChecks", autoDriveControllerCandidateChecks);
     }
 
     internal static bool TryGetWaterPipeReceiverAtCoordinate(
@@ -570,6 +595,7 @@ public class SteamTrain : RailHandcar,
         {
             autoDriveEnabled = false;
             autoDriveControllerRevision = 0;
+            NotifyAutoDriveControllerSelectionChanged();
             RefreshAutoDriveTickSchedule();
             ResetAutoDriveRuntimeState();
             SetAutoDriveStatus(AutoDriveStatus.NoTarget, string.Empty, string.Empty);
@@ -811,6 +837,10 @@ public class SteamTrain : RailHandcar,
         else
         {
             autoDriveControllerRevision = 0;
+            if (routeSettingsChanged)
+            {
+                NotifyAutoDriveControllerSelectionChanged();
+            }
         }
 
         RefreshAutoDriveTickSchedule();
@@ -886,6 +916,7 @@ public class SteamTrain : RailHandcar,
         else
         {
             autoDriveControllerRevision = 0;
+            NotifyAutoDriveControllerSelectionChanged();
         }
 
         RefreshAutoDriveTickSchedule();
@@ -1653,6 +1684,7 @@ public class SteamTrain : RailHandcar,
     {
         autoDriveEnabled = false;
         autoDriveControllerRevision = 0;
+        NotifyAutoDriveControllerSelectionChanged();
         RefreshAutoDriveTickSchedule();
         autoDriveTargetAStationName = string.Empty;
         autoDriveTargetBStationName = string.Empty;
@@ -1673,6 +1705,19 @@ public class SteamTrain : RailHandcar,
         }
 
         autoDriveControllerRevision = nextAutoDriveControllerRevision;
+        NotifyAutoDriveControllerSelectionChanged();
+    }
+
+    private static void NotifyAutoDriveControllerSelectionChanged()
+    {
+        unchecked
+        {
+            autoDriveControllerSelectionRevision++;
+            if (autoDriveControllerSelectionRevision == 0)
+            {
+                autoDriveControllerSelectionRevision = 1;
+            }
+        }
     }
 
     private bool IsPrimaryAutoDriveControllerForConsist()
@@ -1682,9 +1727,11 @@ public class SteamTrain : RailHandcar,
             return false;
         }
 
-        for (int i = 0; i < autoDriveConnectedTrainScratch.Count; i++)
+        SteamTrain cacheSource = autoDriveControllerCacheSource ?? this;
+        List<Train> connectedTrains = cacheSource.autoDriveConnectedTrainScratch;
+        for (int i = 0; i < connectedTrains.Count; i++)
         {
-            if (autoDriveConnectedTrainScratch[i] is SteamTrain candidate
+            if (connectedTrains[i] is SteamTrain candidate
                 && candidate != this
                 && candidate.lastManualDriveSimulationTick
                 == MapObjectTickManager.CurrentSimulationTick)
@@ -1698,10 +1745,24 @@ public class SteamTrain : RailHandcar,
 
     private SteamTrain ResolveAutoDriveControllerForConsist()
     {
+        long simulationTick = MapObjectTickManager.CurrentSimulationTick;
+        ulong graphRevision = Train.ConnectionGraphRevision;
+        ulong selectionRevision = autoDriveControllerSelectionRevision;
+        if (autoDriveControllerCacheValid
+            && autoDriveControllerCacheTick == simulationTick
+            && autoDriveControllerCacheGraphRevision == graphRevision
+            && autoDriveControllerCacheSelectionRevision == selectionRevision)
+        {
+            autoDriveControllerCacheHits++;
+            return autoDriveControllerCache;
+        }
+
+        autoDriveControllerCacheMisses++;
         CollectAutoDriveConnectedTrains();
         SteamTrain controller = null;
         for (int i = 0; i < autoDriveConnectedTrainScratch.Count; i++)
         {
+            autoDriveControllerCandidateChecks++;
             SteamTrain candidate = autoDriveConnectedTrainScratch[i] as SteamTrain;
             if (candidate == null)
             {
@@ -1723,7 +1784,42 @@ public class SteamTrain : RailHandcar,
             }
         }
 
+        for (int i = 0; i < autoDriveConnectedTrainScratch.Count; i++)
+        {
+            if (autoDriveConnectedTrainScratch[i] is SteamTrain candidate)
+            {
+                candidate.CacheAutoDriveControllerForTick(
+                    simulationTick,
+                    graphRevision,
+                    selectionRevision,
+                    controller,
+                    this);
+            }
+        }
+
+        CacheAutoDriveControllerForTick(
+            simulationTick,
+            graphRevision,
+            selectionRevision,
+            controller,
+            this);
+
         return controller;
+    }
+
+    private void CacheAutoDriveControllerForTick(
+        long simulationTick,
+        ulong graphRevision,
+        ulong selectionRevision,
+        SteamTrain controller,
+        SteamTrain cacheSource)
+    {
+        autoDriveControllerCacheTick = simulationTick;
+        autoDriveControllerCacheGraphRevision = graphRevision;
+        autoDriveControllerCacheSelectionRevision = selectionRevision;
+        autoDriveControllerCache = controller;
+        autoDriveControllerCacheSource = cacheSource;
+        autoDriveControllerCacheValid = true;
     }
 
     private SteamTrain ResolveTrainFilterSettingsOwnerForConsist()
@@ -1776,6 +1872,7 @@ public class SteamTrain : RailHandcar,
         StopMovementParticle(false);
         autoDriveEnabled = false;
         autoDriveControllerRevision = 0;
+        NotifyAutoDriveControllerSelectionChanged();
         RefreshAutoDriveTickSchedule();
         ResetAutoDriveRuntimeState();
         SetAutoDriveStatus(AutoDriveStatus.Idle, string.Empty, string.Empty);
@@ -4165,6 +4262,13 @@ public class SteamTrain : RailHandcar,
         autoDriveConnectedTrainQueue.Clear();
         autoDriveConnectedTrainGraphRevision = 0;
         autoDriveConnectedTrainCacheValid = false;
+        autoDriveControllerCacheTick = long.MinValue;
+        autoDriveControllerCacheGraphRevision = 0;
+        autoDriveControllerCacheSelectionRevision = 0;
+        autoDriveControllerCache = null;
+        autoDriveControllerCacheSource = null;
+        autoDriveControllerCacheValid = false;
+        NotifyAutoDriveControllerSelectionChanged();
     }
 
     private int CountConnectedTrainsWithinAutoDriveGroup(Train train)

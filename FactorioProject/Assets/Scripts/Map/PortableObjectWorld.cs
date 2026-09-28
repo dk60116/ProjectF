@@ -123,6 +123,34 @@ public sealed class PortableObjectWorld : IDisposable
         return true;
     }
 
+    internal bool SetWorldPosition(PortableObjectHandle handle, Vector3 position)
+    {
+        if (!IsAlive(handle) || components[handle.Index].WorldPosition == position)
+        {
+            return false;
+        }
+
+        PortableObjectComponent component = components[handle.Index];
+        component.WorldPosition = position;
+        components[handle.Index] = component;
+        version++;
+        return true;
+    }
+
+    internal bool SetMoving(PortableObjectHandle handle, bool moving)
+    {
+        if (!IsAlive(handle) || components[handle.Index].Moving == moving)
+        {
+            return false;
+        }
+
+        PortableObjectComponent component = components[handle.Index];
+        component.Moving = moving;
+        components[handle.Index] = component;
+        version++;
+        return true;
+    }
+
     public bool Release(PortableObjectHandle handle)
     {
         if (!IsAlive(handle))
