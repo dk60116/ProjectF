@@ -13,7 +13,7 @@ MonoBehaviour:
   m_Name: Item_3_Stone
   m_EditorClassIdentifier: 
   itemName: Stone
-  id: 16
+  id: 17
   mapObject: {fileID: 5150821752848007095, guid: 124d7ac73b9d32a4d9ea2cac71121101, type: 3}
   mapObjectArchetype: {fileID: 11400000, guid: 7c79779d165dc7d448c08aaa66aabae0, type: 2}
   useMapColor: 0
@@ -36,6 +36,7 @@ MonoBehaviour:
   upgradeable: 1
   keepIoAreaItemsInPlaceWhileEditing: 0
   capacity: 10
+  isFluid: 0
   storesFluid: 0
   fluidStorageLiters: 0
   fluidDisplayColor: {r: 1, g: 1, b: 1, a: 1}

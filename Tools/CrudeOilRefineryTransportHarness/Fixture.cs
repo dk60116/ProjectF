@@ -23,6 +23,7 @@ namespace UnityEngine
 public class ItemDefinition
 {
     public int id;
+    public bool IsFluid = true;
     public static float ResolveUseEnergyRatePerSecond(ItemDefinition definition) => 1f;
 }
 public static class MapClimate { public static float CurrentTemperatureCelsius => 20f; }
@@ -45,7 +46,16 @@ public class Pump
 public class InputOutputModule : InstallationObject
 {
     private static readonly Dictionary<(Vector2Int, Vector2Int), InputOutputModule> directSources = new();
-    public float MockPressure;
+    public bool isActiveAndEnabled = true;
+    public readonly record struct ItemIoEntry(ItemDefinition itemDefinition, float count)
+    {
+        public bool IsFluid => itemDefinition != null && itemDefinition.IsFluid;
+        public float ResolvedAmount => Mathf.Max(0.0001f, count);
+    }
+    public sealed class InputOutputPair { public List<ItemIoEntry> outputs = new(); }
+    protected readonly List<InputOutputPair> pairs = new() { new() };
+    public IReadOnlyList<InputOutputPair> InputOutputPairs => pairs;
+    protected virtual bool IsRecipeOutputAllowedByItemFilter(int itemId) => true;
     public static void RegisterDirectSource(
         Vector2Int coordinate, Vector2Int direction, InputOutputModule source) =>
         directSources[(coordinate, direction)] = source;
@@ -115,9 +125,15 @@ public class InputOutputModule : InstallationObject
 
     public virtual bool TryGetElectricPowerDemand(out float wattsPerSecond)
     { wattsPerSecond = 0f; return false; }
-    public virtual float GetObjectInfoFluidPressureLitersPerSecond(int fluidItemId) => MockPressure;
+    // MODULE_PRESSURE
     // PUMP_RATIO
     // MODULE_RETENTION
+}
+
+public class FixedPressureSource : InputOutputModule
+{
+    public float MockPressure;
+    public override float GetObjectInfoFluidPressureLitersPerSecond(int fluidItemId) => MockPressure;
 }
 
 public class CrudeOilRefinery : InputOutputModule
@@ -141,16 +157,13 @@ public class CrudeOilRefinery : InputOutputModule
     }
 
     private readonly List<FluidFlowPort> outputPorts = new();
-    private readonly Dictionary<int, float> deliveredRates = new();
     private bool ResolveFluidFlowPorts() => true;
-    public float GetObjectInfoFluidOutputLitersPerSecond(int itemId) =>
-        deliveredRates.TryGetValue(itemId, out float rate) ? rate : 0f;
 
     public void AddOutput(Vector2Int coordinate, int itemId, int pipeDistance,
-        float deliveredRate, bool hasSpace = true)
+        float configuredRate, bool hasSpace = true)
     {
-        outputPorts.Add(new FluidFlowPort(coordinate, itemId));
-        deliveredRates[itemId] = deliveredRate;
+        outputPorts.Add(new FluidFlowPort(coordinate, itemId, configuredRate));
+        pairs[0].outputs.Add(new ItemIoEntry(new ItemDefinition { id = itemId }, configuredRate));
         AddConnection(coordinate, pipeDistance, itemId, hasSpace);
     }
 
@@ -258,7 +271,6 @@ public class CrudeOilRefinery : InputOutputModule
     // REFINERY_RECORD_DELIVERY
     public void Tick(float delta = 1f) => UpdateContinuousRefining(delta);
     // REFINERY_TICK
-    // REFINERY_PRESSURE
 }
 
 internal static class Checks
@@ -279,7 +291,7 @@ internal static class Checks
         var refinery = new CrudeOilRefinery();
         refinery.ConfigureInput();
         for (int i = 0; i < 3; i++)
-            refinery.AddOutput(new(i, 0), i + 1, i == blocked ? 100 : distance, 0);
+            refinery.AddOutput(new(i, 0), i + 1, i == blocked ? 100 : distance, 1f);
         return refinery;
     }
 
@@ -302,8 +314,8 @@ internal static class Checks
         Expect(disconnected.Emitted[2] + disconnected.Emitted[3], 2f, "connected outputs work without the first outlet");
         var mixedDistance = new CrudeOilRefinery();
         mixedDistance.ConfigureInput();
-        mixedDistance.AddOutput(new(0,0), 1, 50, 0f);
-        mixedDistance.AddOutput(new(1,0), 2, 0, 0f);
+        mixedDistance.AddOutput(new(0,0), 1, 50, 1f);
+        mixedDistance.AddOutput(new(1,0), 2, 0, 1f);
         mixedDistance.Tick();
         Expect(mixedDistance.Emitted[1], .5f, "long output route uses its own pressure loss");
         Expect(mixedDistance.Emitted[2], 1f, "long output route never throttles the other output");
@@ -333,7 +345,7 @@ internal static class Checks
         Expect(allBlocked.InputConsumed, 2f, "all-discarded refining still consumes inputs");
         var missing = new CrudeOilRefinery();
         missing.ConfigureInput(0f);
-        missing.AddOutput(new(0,0), 1, 0, 0);
+        missing.AddOutput(new(0,0), 1, 0, 1f);
         missing.Tick();
         Expect(missing.EnergyConsumed, 0f, "missing input prevents energy consumption");
         Expect(missing.EmissionAttempts.Count, 0, "missing input cannot create products");
@@ -349,7 +361,7 @@ internal static class Checks
         var limitedInput = new CrudeOilRefinery { InputPressureLitersPerSecond = 1f };
         limitedInput.ConfigureInput(2f);
         for (int i = 0; i < 3; i++)
-            limitedInput.AddOutput(new(i, 0), i + 1, 0, 0f);
+            limitedInput.AddOutput(new(i, 0), i + 1, 0, 1f);
         for (int i = 0; i < 10; i++)
         {
             limitedInput.Tick(.1f);
@@ -367,7 +379,7 @@ internal static class Checks
         var burstyInput = new CrudeOilRefinery { InputPressureLitersPerSecond = .75f };
         burstyInput.ConfigureInput(1f);
         for (int i = 0; i < 3; i++)
-            burstyInput.AddOutput(new(i, 0), i + 1, 0, 0f);
+            burstyInput.AddOutput(new(i, 0), i + 1, 0, 1f);
         burstyInput.Tick(.1f);
         Expect(burstyInput.Working ? 1f : 0f, 0f,
             "one-liter source batch waits for a reserve before starting");
@@ -390,7 +402,7 @@ internal static class Checks
         var storedInput = new CrudeOilRefinery { InputPressureLitersPerSecond = .75f,
             GenericStoredLiters = 2f };
         storedInput.ConfigureInput(0f);
-        storedInput.AddOutput(new(0, 0), 1, 0, 0f);
+        storedInput.AddOutput(new(0, 0), 1, 0, 1f);
         for (int i = 0; i < 10; i++)
         {
             storedInput.Tick(.1f);
@@ -401,7 +413,7 @@ internal static class Checks
             "refining must consume the configured StoreFluid stock");
         var noPipePressure = new CrudeOilRefinery();
         noPipePressure.ConfigureInput(0f);
-        noPipePressure.AddOutput(new(0, 0), 1, 0, 0f);
+        noPipePressure.AddOutput(new(0, 0), 1, 0, 1f);
         noPipePressure.DeliverInput(1f, 1f);
         noPipePressure.Tick(.1f);
         Expect(noPipePressure.Working ? 1f : 0f, 0f,
@@ -417,7 +429,7 @@ internal static class Checks
             ConnectedInputLiters = 10f
         };
         connectedTank.ConfigureInput(0f);
-        connectedTank.AddOutput(new(0, 0), 1, 0, 0f);
+        connectedTank.AddOutput(new(0, 0), 1, 0, 1f);
         for (int i = 0; i < 10; i++)
         {
             connectedTank.Tick(.1f);
@@ -436,7 +448,7 @@ internal static class Checks
         var twoInputs = new CrudeOilRefinery();
         twoInputs.ConfigureInput(2f);
         twoInputs.AddInput(11, 10f, 25f);
-        twoInputs.AddOutput(new(0, 0), 1, 0, 0f);
+        twoInputs.AddOutput(new(0, 0), 1, 0, 1f);
         twoInputs.InputPressureByItemId[10] = .75f;
         twoInputs.InputPressureByItemId[11] = 15f;
         for (int i = 0; i < 40; i++)
@@ -450,7 +462,7 @@ internal static class Checks
         }
         Expect(twoInputs.InputConsumed, 18f,
             "two-input refinery consumes crude and water in recipe proportion");
-        var directSource = new InputOutputModule { MockPressure = .75f };
+        var directSource = new FixedPressureSource { MockPressure = .75f };
         InputOutputModule.RegisterDirectSource(new(0, 0), new(-1, 0), directSource);
         var directRefinery = new CrudeOilRefinery();
         directRefinery.ConfigureInput(0f);
@@ -472,7 +484,7 @@ internal static class Checks
         Vector2Int far = new(1, 0);
         Vector2Int limit = new(2, 0);
         refinery.AddOutput(near, 1, 0, 2f);
-        refinery.AddOutput(far, 2, 50, 0.5f);
+        refinery.AddOutput(far, 2, 50, 1f);
         refinery.AddOutput(limit, 3, 100, 0.1f);
         Expect(refinery.Retention(near, 1), 1f, "zero-pipe route retains full output");
         Expect(refinery.Retention(far, 2), 0.5f, "fifty-pipe route halves output");
@@ -481,12 +493,18 @@ internal static class Checks
         Expect(refinery.GetObjectInfoFluidPressureLitersPerSecond(1), 2f,
             "near output reports its own source pressure");
         Expect(refinery.GetObjectInfoFluidPressureLitersPerSecond(2), 1f,
-            "distant output avoids double attenuation in the pressure display");
+            "source pressure uses configured amount before distance loss");
         Expect(refinery.GetObjectInfoFluidPressureLitersPerSecond(2)
                * 0.5f, 0.5f,
-            "tank-end pressure matches delivered output");
-        Expect(refinery.GetObjectInfoFluidPressureLitersPerSecond(3), 0f,
-            "blocked route reports zero even while an old sample remains");
+            "pipe applies distance loss once to configured pressure");
+        Expect(refinery.GetObjectInfoFluidPressureLitersPerSecond(3), 0.1f,
+            "blocked route does not erase configured source pressure");
+        Expect(refinery.GetObjectInfoFluidPressureLitersPerSecond(3) * refinery.Retention(limit, 3), 0f,
+            "hundred-pipe route still delivers zero pressure");
+        Expect(refinery.GetObjectInfoFluidPressureLitersPerSecond(99), 0f, "unconfigured fluid has no pressure");
+        refinery.isActiveAndEnabled = false;
+        Expect(refinery.GetObjectInfoFluidPressureLitersPerSecond(1), 0f, "disabled refinery has no pressure");
+        refinery.isActiveAndEnabled = true;
 
         refinery.AddConnection(far, 25, 2, false);
         Expect(refinery.Retention(far, 2), 0.5f, "full closer tank is ignored");

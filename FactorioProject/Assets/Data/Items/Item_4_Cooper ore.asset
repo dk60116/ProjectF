@@ -13,7 +13,7 @@ MonoBehaviour:
   m_Name: Item_4_Cooper ore
   m_EditorClassIdentifier: 
   itemName: Cooper ore
-  id: 17
+  id: 18
   mapObject: {fileID: 3654828918463552362, guid: c972d3bc9888d61498a3bbabd03743e6, type: 3}
   mapObjectArchetype: {fileID: 11400000, guid: 5c52a2b2285cef64aa240451ecf7fac3, type: 2}
   useMapColor: 0
@@ -36,6 +36,7 @@ MonoBehaviour:
   upgradeable: 1
   keepIoAreaItemsInPlaceWhileEditing: 0
   capacity: 10
+  isFluid: 0
   storesFluid: 0
   fluidStorageLiters: 0
   fluidDisplayColor: {r: 1, g: 1, b: 1, a: 1}

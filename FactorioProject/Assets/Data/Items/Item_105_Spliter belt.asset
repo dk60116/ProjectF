@@ -13,7 +13,7 @@ MonoBehaviour:
   m_Name: Item_105_Spliter belt
   m_EditorClassIdentifier: Assembly-CSharp::ItemDefinition
   itemName: Spliter belt
-  id: 56
+  id: 58
   mapObject: {fileID: 3055157777023880970, guid: 09f7fb2b66f582848aedabcf3fdc9f18, type: 3}
   mapObjectArchetype: {fileID: 11400000, guid: 0b0379e38bc863d4fb726d4be9acde04, type: 2}
   useMapColor: 1
@@ -35,6 +35,7 @@ MonoBehaviour:
   upgradeable: 1
   keepIoAreaItemsInPlaceWhileEditing: 0
   capacity: 10
+  isFluid: 0
   storesFluid: 0
   fluidStorageLiters: 0
   fluidDisplayColor: {r: 1, g: 1, b: 1, a: 1}

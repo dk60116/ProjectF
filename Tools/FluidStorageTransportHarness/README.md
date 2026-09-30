@@ -4,6 +4,15 @@ Extracts and executes the production output-cache BFS, directed boiler/generator
 traversal, storage lookup, output transfer, placement wake handlers, and
 `InstallationObject.TryAddFluidLiters`. Assertions check transferred liters AND
 the resulting stored liters; receiver caches are not prepopulated by the tests.
+Pump port admission, traversal direction and shared pressure budgets also use
+the production methods, including end bodies docked onto maker output ports.
+Input regressions extract the source-cache BFS, per-port connection cache,
+`TryConsumeConnectedFluidInputAtCoordinate` and `InstallationObject.TryConsumeFluidLiters`.
+Tank to Pump to maker input is checked at overlapping endpoints, adjacent ports,
+docked outlet bodies and through ordinary pipes, in all four orientations.
+Checks verify actual tank stock removal, edited Pump rates, a shared per-tick
+volume budget and empty reservoirs. Input pressure and full-batch crafting gates
+are covered separately by SteamPipePressureHarness and ProductionMachineFluidInputHarness.
 
 Cases cover four cardinal orientations: pump to tank, boiler to generator,
 full generator to downstream tank, registered storage without a Block owner,
@@ -12,6 +21,23 @@ CanStoreFluid objects after the upstream producer sleeps with an empty cache.
 Also covers the slot_01 layout (generator tail overlapping a corner pipe, then
 a perpendicular generator), a corner at a boiler output, and rejection of an
 overlapping pipe with no connector facing the source, in all four orientations.
+Also executes `ProductionMachine.TryCompleteActiveCraft` through an output port
+overlapping a Pump inlet body, six interlocked pumps and a downstream tank.
+Checks the first delivery, conservation of the crafted batch, complete draining,
+and rejection of a maker output facing away from the Pump inlet.
+Ordinary pipe cases also cover a straight eight-pipe route and a perpendicular
+pipe at the maker output. The production `UpdateActiveCraft` and `ProductionProcess`
+run with the MK3 energy budget (100 kW, 3600 kJ): no delivery during the 36 second
+craft, first delivery at energy completion, then draining the entire 36 L batch
+at recipe Count 1 L/s before permitting the next craft.
+Deterministic unit conversion is extracted from production, and the simulation
+tick rate is read from `SimulationTickWorld` instead of using fixture constants.
+Connection diagnostics compare a lateral pipe chain beside a virtual output
+cell (no transfer, completed batch retained), the same lateral route with a
+corner pipe occupying the output cell (transfer), and an external-facing chain
+without a pipe occupying the output cell (transfer), in all four orientations.
+These reproduce the source-level admission rules; they do not establish which
+pipe records are present in a player's current scene.
 The earlier lookup-only harness was replaced because it could pass while actual
 storage transport remained broken.
 
@@ -21,4 +47,4 @@ storage transport remained broken.
 
 The harness is standalone and does not launch Unity. Scene registries, port
 geometry and scheduling are test doubles; actual save loading, editor execution,
-production budgets, and power/recipe evaluation are not covered here.
+power network allocation and the complete maker intake/crafting cycle are not covered here.

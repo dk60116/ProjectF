@@ -3260,6 +3260,8 @@ public class ItemDataEditorWindow : EditorWindow
             GetMultiSelectedDefinitionProperty(serializedObject, "keepIoAreaItemsInPlaceWhileEditing");
         SerializedProperty capacityProperty =
             GetMultiSelectedDefinitionProperty(serializedObject, "capacity");
+        SerializedProperty isFluidProperty =
+            GetMultiSelectedDefinitionProperty(serializedObject, "isFluid");
         SerializedProperty storesFluidProperty =
             GetMultiSelectedDefinitionProperty(serializedObject, "storesFluid");
         SerializedProperty fluidStorageLitersProperty =
@@ -3448,18 +3450,17 @@ public class ItemDataEditorWindow : EditorWindow
             }
         }
 
-        if (storesFluidProperty != null
+        if (isFluidProperty != null
+            || storesFluidProperty != null
             || fluidDisplayColorProperty != null
             || (fluidOutputLitersPerSecondProperty != null && AllSelectedDefinitionsAreFluidOutputMachines()))
         {
             EditorGUILayout.Space(8f);
             EditorGUILayout.LabelField("Fluid", EditorStyles.boldLabel);
 
-            if (fluidDisplayColorProperty != null && AllSelectedDefinitionsAreFluidItems())
+            if (isFluidProperty != null)
             {
-                EditorGUILayout.PropertyField(
-                    fluidDisplayColorProperty,
-                    new GUIContent("Pipe DP Color"));
+                EditorGUILayout.PropertyField(isFluidProperty, new GUIContent("Fluid Item"));
             }
 
             if (storesFluidProperty != null)
@@ -3482,6 +3483,14 @@ public class ItemDataEditorWindow : EditorWindow
                         new GUIContent("Fluid Storage Liters"),
                         0f);
                 }
+            }
+
+            if (fluidDisplayColorProperty != null
+                && isFluidProperty != null
+                && !isFluidProperty.hasMultipleDifferentValues
+                && isFluidProperty.boolValue)
+            {
+                EditorGUILayout.PropertyField(fluidDisplayColorProperty, new GUIContent("Pipe DP Color"));
             }
 
             if (bucketFillDurationSecondsProperty != null && AllSelectedDefinitionsAreEmptyBuckets())
@@ -3884,24 +3893,6 @@ public class ItemDataEditorWindow : EditorWindow
         return true;
     }
 
-    private bool AllSelectedDefinitionsAreFluidItems()
-    {
-        if (selectedItemDefinitionsInOrder.Count <= 0)
-        {
-            return false;
-        }
-
-        for (int i = 0; i < selectedItemDefinitionsInOrder.Count; i++)
-        {
-            if (!InputOutputModule.IsFluidItemDefinition(selectedItemDefinitionsInOrder[i]))
-            {
-                return false;
-            }
-        }
-
-        return true;
-    }
-
     private bool AllSelectedDefinitionsAreEmptyBuckets()
     {
         if (selectedItemDefinitionsInOrder.Count <= 0)
@@ -4049,6 +4040,7 @@ public class ItemDataEditorWindow : EditorWindow
         SerializedProperty keepIoAreaItemsInPlaceWhileEditingProperty =
             GetSelectedDefinitionProperty(serializedObject, "keepIoAreaItemsInPlaceWhileEditing");
         SerializedProperty capacityProperty = GetSelectedDefinitionProperty(serializedObject, "capacity");
+        SerializedProperty isFluidProperty = GetSelectedDefinitionProperty(serializedObject, "isFluid");
         SerializedProperty storesFluidProperty = GetSelectedDefinitionProperty(serializedObject, "storesFluid");
         SerializedProperty fluidStorageLitersProperty = GetSelectedDefinitionProperty(serializedObject, "fluidStorageLiters");
         SerializedProperty pumpPressureLitersPerSecondProperty = GetSelectedDefinitionProperty(serializedObject, "pumpPressureLitersPerSecond");
@@ -4227,16 +4219,16 @@ public class ItemDataEditorWindow : EditorWindow
                 seedTargetResourceProperty.objectReferenceValue = null;
             }
         }
-        if (storesFluidProperty != null
+        if (isFluidProperty != null
+            || storesFluidProperty != null
             || fluidDisplayColorProperty != null
             || (fluidOutputLitersPerSecondProperty != null && IsFluidOutputMachine(definition)))
         {
             EditorGUILayout.Space(8f);
             EditorGUILayout.LabelField("Fluid", EditorStyles.boldLabel);
-            bool isFluidItem = InputOutputModule.IsFluidItemDefinition(definition);
-            if (fluidDisplayColorProperty != null && isFluidItem)
+            if (isFluidProperty != null)
             {
-                EditorGUILayout.PropertyField(fluidDisplayColorProperty, new GUIContent("Pipe DP Color"));
+                EditorGUILayout.PropertyField(isFluidProperty, new GUIContent("Fluid Item"));
             }
 
             if (storesFluidProperty != null)
@@ -4254,6 +4246,13 @@ public class ItemDataEditorWindow : EditorWindow
                 {
                     fluidStorageLitersProperty.floatValue = 0f;
                 }
+            }
+
+            if (fluidDisplayColorProperty != null
+                && isFluidProperty != null
+                && isFluidProperty.boolValue)
+            {
+                EditorGUILayout.PropertyField(fluidDisplayColorProperty, new GUIContent("Pipe DP Color"));
             }
 
             if (bucketFillDurationSecondsProperty != null && Bucket.IsEmptyBucketDefinition(definition))

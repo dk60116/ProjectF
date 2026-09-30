@@ -191,7 +191,7 @@ MonoBehaviour:
   itemFilterMaskInitialized: 0
   itemFilterMaskWords: 
   harvestMode: 1
-  definition: {fileID: 11400000, guid: 4742b0512bd1ff147ae256500b8bd046, type: 2}
+  definition: {fileID: 11400000, guid: 8b9cbb9a6653bb44485c3da4614be46c, type: 2}
   resourceStatus:
     outputId: 13
     outputItemName: Stone

@@ -11,12 +11,15 @@ public class ItemInfoDescription : MonoBehaviour
     {
         public readonly GameObject root;
         public readonly UnityEngine.UI.Image fill;
+        public readonly UnityEngine.UI.Image convertedFill;
         public readonly TMPro.TextMeshProUGUI text;
 
-        public ProductionFluidGauge(GameObject root, UnityEngine.UI.Image fill, TMPro.TextMeshProUGUI text)
+        public ProductionFluidGauge(GameObject root, UnityEngine.UI.Image fill,
+            UnityEngine.UI.Image convertedFill, TMPro.TextMeshProUGUI text)
         {
             this.root = root;
             this.fill = fill;
+            this.convertedFill = convertedFill;
             this.text = text;
         }
     }
@@ -30,6 +33,8 @@ public class ItemInfoDescription : MonoBehaviour
     private const float GaugeFillLerpSpeed = 12f;
     private const float GaugeFillSnapThreshold = 0.0025f;
     private const float PlantInfoRefreshIntervalSeconds = 0.2f;
+    private const float ProductionInfoRefreshIntervalSeconds = 0.1f;
+    private const string ConvertedFluidFillName = "Production Converted Fluid";
     private const float PlantGrowthRequirementEpsilon = 0.0001f;
     private static readonly Color FluidGaugeFillColor = new Color(0.08f, 0.55f, 1f, 1f);
     private static readonly Color PlantFertilizerGaugeFillColor = new Color(0.16f, 0.82f, 0.28f, 1f);
@@ -70,6 +75,7 @@ public class ItemInfoDescription : MonoBehaviour
     private readonly List<int> handcartItemCounts = new List<int>(6);
     private readonly List<FreightCar.CargoInfo> freightCargo = new List<FreightCar.CargoInfo>(6);
     private readonly List<ProductionFluidGauge> additionalProductionFluidGauges = new List<ProductionFluidGauge>(2);
+    private Image productionFluidConvertedFill;
     private FreightCar liveGaugeFreightCar;
     private float nextFreightInfoRefreshTime;
     private readonly List<int> defaultItemOriginalSiblingIndices = new List<int>();
@@ -82,6 +88,7 @@ public class ItemInfoDescription : MonoBehaviour
     private UtilityPole liveGaugeUtilityPole;
     private LightObject liveGaugeLightObject;
     private InputOutputModule liveGaugeModule;
+    private float nextProductionInfoRefreshTime;
     private RailHandcar liveGaugeRailHandcar;
 
     private void Awake()
@@ -103,9 +110,11 @@ public class ItemInfoDescription : MonoBehaviour
         UpdateGaugeFill(energyFill);
         UpdateGaugeFill(workFill);
         UpdateGaugeFill(defaultFill);
+        UpdateGaugeFill(productionFluidConvertedFill);
         for (int i = 0; i < additionalProductionFluidGauges.Count; i++)
         {
             UpdateGaugeFill(additionalProductionFluidGauges[i].fill);
+            UpdateGaugeFill(additionalProductionFluidGauges[i].convertedFill);
         }
     }
 
@@ -120,7 +129,9 @@ public class ItemInfoDescription : MonoBehaviour
         SetGauge(energyGauge, energyFill, energyText, false, 0f, Color.white, 0f, 0f);
         SetGauge(workGauge, workFill, workText, false, 0f, Color.white, 0f, 0f);
         SetGauge(defaultGauge, defaultFill, defaultGaugeText, false, 0f, Color.white, 0f, 0f);
+        SetProductionConvertedFill(productionFluidConvertedFill, false, 0f, Color.white);
 
+        HideAdditionalProductionFluidGauges(0);
         ClearItemSlots(defaultItem, defaultItemSlot);
         ClearItemSlot(energyItem, energyItemSlot);
         ClearItemSlot(inputItem, inputItemSlot);
@@ -816,10 +827,6 @@ public class ItemInfoDescription : MonoBehaviour
         int nextDefaultItemIndex = SetEnergyAndFluidDefaultItemSlots(module, energyInputItemId);
 
         ProductionMachine productionMachine = module as ProductionMachine;
-        if (productionMachine != null)
-        {
-            RefreshProductionFluidGauges(productionMachine);
-        }
         if (productionMachine != null
             && TrySetProductionMachineItemSlots(
                 productionMachine,
@@ -897,6 +904,13 @@ public class ItemInfoDescription : MonoBehaviour
         if (productionMachine == null
             || !productionMachine.TryGetObjectInfoProductionIngredientCount(out int ingredientCount))
         {
+            ClearItemSlot(inputItem, inputItemSlot);
+            ClearItemSlot(outputItem, outputItemSlot);
+            for (int i = Mathf.Max(0, defaultItemStartIndex); defaultItem != null && i < defaultItem.Count; i++)
+            {
+                ClearItemSlot(GetListItem(defaultItem, i), GetListItem(defaultItemSlot, i));
+            }
+            RefreshProductionFluidGauges(null);
             return false;
         }
 
@@ -950,7 +964,14 @@ public class ItemInfoDescription : MonoBehaviour
             displayedAny = true;
         }
 
-        if (productionMachine.TryGetObjectInfoProductionOutput(
+        if (productionMachine.TryGetObjectInfoProductionFluidOutput(
+                out int fluidOutputItemId, out float litersPerSecond, out _, out _))
+        {
+            SetFluidOutputRateItemSlot(outputItem, outputItemSlot, fluidOutputItemId,
+                litersPerSecond, productionMachine.GetStoredFluidTemperatureCelsius(fluidOutputItemId));
+            displayedAny = true;
+        }
+        else if (productionMachine.TryGetObjectInfoProductionOutput(
                 out int outputItemId,
                 out int outputAreaCount,
                 out int outputAreaCapacity))
@@ -967,30 +988,38 @@ public class ItemInfoDescription : MonoBehaviour
             displayedAny = true;
         }
 
+        for (int i = nextDefaultItemIndex; defaultItem != null && i < defaultItem.Count; i++)
+        {
+            ClearItemSlot(GetListItem(defaultItem, i), GetListItem(defaultItemSlot, i));
+        }
+        RefreshProductionFluidGauges(productionMachine);
         return displayedAny;
     }
 
     private void RefreshProductionFluidGauges(ProductionMachine machine)
     {
         int visibleCount = 0;
+        GameObject previousGaugeRoot = defaultGauge;
         if (machine != null
             && machine.TryGetObjectInfoProductionIngredientCount(out int ingredientCount))
         {
             for (int i = 0; i < ingredientCount; i++)
             {
-                if (!machine.TryGetObjectInfoProductionFluidIngredient(
-                        i, out int fluidItemId, out float storedLiters, out float requiredLiters))
+                if (!machine.TryGetObjectInfoProductionFluidGauge(i, out ProductionMachine.FluidGaugeState state))
                 {
                     continue;
                 }
 
                 GameObject root;
                 UnityEngine.UI.Image fill;
+                UnityEngine.UI.Image convertedFill;
                 TMPro.TextMeshProUGUI text;
                 if (visibleCount == 0)
                 {
                     root = defaultGauge;
                     fill = defaultFill;
+                    EnsureProductionConvertedFill(fill, ref productionFluidConvertedFill);
+                    convertedFill = productionFluidConvertedFill;
                     text = defaultGaugeText;
                 }
                 else
@@ -1004,24 +1033,13 @@ public class ItemInfoDescription : MonoBehaviour
                     ProductionFluidGauge gauge = additionalProductionFluidGauges[extraIndex];
                     root = gauge.root;
                     fill = gauge.fill;
+                    convertedFill = gauge.convertedFill;
                     text = gauge.text;
+                    MoveItemAfter(root, previousGaugeRoot);
                 }
 
-                ItemDefinition definition = InputOutputModule.ResolveItemDefinition(fluidItemId);
-                Color color = definition != null ? definition.fluidDisplayColor : FluidGaugeFillColor;
-                color.a = color.a > 0f ? color.a : 1f;
-                string name = ResolveItemDisplayName(fluidItemId);
-                if (text != null)
-                {
-                    text.enableAutoSizing = true;
-                    text.fontSizeMin = 10f;
-                    text.fontSizeMax = 15f;
-                    text.enableWordWrapping = false;
-                }
-                SetGauge(root, fill, text, true,
-                    requiredLiters > 0f ? storedLiters / requiredLiters : 0f,
-                    color, storedLiters, requiredLiters, true,
-                    $"{name}: {FormatFluidLiters(storedLiters)} / {FormatFluidLiters(requiredLiters)} L");
+                SetProductionFluidGauge(root, fill, convertedFill, text, state);
+                previousGaugeRoot = root;
                 visibleCount++;
             }
         }
@@ -1029,9 +1047,88 @@ public class ItemInfoDescription : MonoBehaviour
         if (visibleCount == 0)
         {
             SetGauge(defaultGauge, defaultFill, defaultGaugeText, false, 0f, Color.white, 0f, 0f);
+            SetProductionConvertedFill(productionFluidConvertedFill, false, 0f, Color.white);
         }
 
         HideAdditionalProductionFluidGauges(Mathf.Max(0, visibleCount - 1));
+    }
+
+    private static void SetProductionFluidGauge(
+        GameObject root, Image fill, Image convertedFill, TextMeshProUGUI text,
+        ProductionMachine.FluidGaugeState state)
+    {
+        int displayItemId = state.outputItemId >= 0 ? state.outputItemId : state.inputItemId;
+        string label = state.isConverting
+            ? $"{ResolveItemDisplayName(state.inputItemId)} → {ResolveItemDisplayName(displayItemId)}"
+            : ResolveItemDisplayName(displayItemId);
+        if (text != null)
+        {
+            text.enableAutoSizing = true;
+            text.fontSizeMin = 10f;
+            text.fontSizeMax = 15f;
+            text.enableWordWrapping = false;
+        }
+        SetGauge(root, fill, text, true,
+            state.fillAmount,
+            ResolveProductionFluidGaugeColor(state.isConverting ? state.inputItemId : displayItemId),
+            state.currentLiters, state.totalLiters, true,
+            $"{label}: {FormatFluidLiters(state.currentLiters)} / {FormatFluidLiters(state.totalLiters)} L");
+        SetProductionConvertedFill(convertedFill, state.isConverting, state.convertedFillAmount,
+            ResolveProductionFluidGaugeColor(state.outputItemId));
+    }
+
+    private static Color ResolveProductionFluidGaugeColor(int itemId)
+    {
+        ItemDefinition definition = InputOutputModule.ResolveItemDefinition(itemId);
+        Color color = definition != null ? definition.fluidDisplayColor : FluidGaugeFillColor;
+        color.a = color.a > 0f ? color.a : 1f;
+        return color;
+    }
+
+    private static void SetProductionConvertedFill(Image fill, bool active, float amount, Color color)
+    {
+        if (fill != null)
+        {
+            SetGauge(fill.gameObject, fill, null, active, amount, color, 0f, 0f);
+        }
+    }
+
+    private static void EnsureProductionConvertedFill(Image fill, ref Image convertedFill)
+    {
+        if (fill == null)
+        {
+            return;
+        }
+        if (convertedFill == null)
+        {
+            Transform existing = fill.transform.Find(ConvertedFluidFillName);
+            if (existing != null)
+            {
+                convertedFill = existing.GetComponent<Image>();
+            }
+            else
+            {
+                GameObject overlay = new GameObject(ConvertedFluidFillName, typeof(RectTransform), typeof(Image));
+                overlay.transform.SetParent(fill.transform, false);
+                RectTransform rect = (RectTransform)overlay.transform;
+                rect.anchorMin = Vector2.zero;
+                rect.anchorMax = Vector2.one;
+                rect.offsetMin = rect.offsetMax = Vector2.zero;
+                convertedFill = overlay.GetComponent<Image>();
+                convertedFill.sprite = fill.sprite;
+                convertedFill.material = fill.material;
+                convertedFill.type = Image.Type.Filled;
+                convertedFill.fillMethod = Image.FillMethod.Horizontal;
+                convertedFill.fillOrigin = 0;
+                convertedFill.raycastTarget = false;
+                convertedFill.fillAmount = 0f;
+            }
+        }
+        // The gauge label can be a child of Fill. Draw the color layer before it.
+        if (convertedFill != null && convertedFill.transform.GetSiblingIndex() != 0)
+        {
+            convertedFill.transform.SetAsFirstSibling();
+        }
     }
 
     private bool EnsureAdditionalProductionFluidGauge(int index)
@@ -1048,9 +1145,11 @@ public class ItemInfoDescription : MonoBehaviour
             root.transform.SetSiblingIndex(defaultGauge.transform.GetSiblingIndex()
                                            + additionalProductionFluidGauges.Count + 1);
             UnityEngine.UI.Image fill = null;
+            UnityEngine.UI.Image convertedFill = null;
             TMPro.TextMeshProUGUI text = null;
             ResolveGaugeReferences(root, ref fill, ref text);
-            additionalProductionFluidGauges.Add(new ProductionFluidGauge(root, fill, text));
+            EnsureProductionConvertedFill(fill, ref convertedFill);
+            additionalProductionFluidGauges.Add(new ProductionFluidGauge(root, fill, convertedFill, text));
         }
 
         return true;
@@ -1062,6 +1161,7 @@ public class ItemInfoDescription : MonoBehaviour
         {
             ProductionFluidGauge gauge = additionalProductionFluidGauges[i];
             SetGauge(gauge.root, gauge.fill, gauge.text, false, 0f, Color.white, 0f, 0f);
+            SetProductionConvertedFill(gauge.convertedFill, false, 0f, Color.white);
         }
     }
 
@@ -1117,6 +1217,7 @@ public class ItemInfoDescription : MonoBehaviour
         liveGaugeUtilityPole = null;
         liveGaugeLightObject = null;
         liveGaugeModule = null;
+        nextProductionInfoRefreshTime = 0f;
         liveGaugeRailHandcar = null;
     }
 
@@ -1430,22 +1531,31 @@ public class ItemInfoDescription : MonoBehaviour
             return;
         }
 
-        if (showElectricPowerGauge)
+        if (module is ProductionMachine productionMachine)
         {
+            productionMachine.GetObjectInfoStatus(out string statusText, out bool isProducing);
+            SetDefaultStatus(statusText, isProducing);
             SetWorkProgressGauge(workGauge, workFill, workText, module);
-            if (!(module is ProductionMachine))
+            if (Time.unscaledTime >= nextProductionInfoRefreshTime)
             {
-                SetGauge(defaultGauge, defaultFill, defaultGaugeText, false, 0f, Color.white, 0f, 0f);
+                nextProductionInfoRefreshTime = Time.unscaledTime + ProductionInfoRefreshIntervalSeconds;
+                TrySetProductionMachineItemSlots(productionMachine, nextDefaultItemIndex);
             }
             return;
         }
 
-        bool showEnergyGauge = !(module is ProductionMachine);
+        if (showElectricPowerGauge)
+        {
+            SetWorkProgressGauge(workGauge, workFill, workText, module);
+            SetGauge(defaultGauge, defaultFill, defaultGaugeText, false, 0f, Color.white, 0f, 0f);
+            return;
+        }
+
         SetGauge(
             energyGauge,
             energyFill,
             energyText,
-            showEnergyGauge,
+            true,
             module.ObjectInfoEnergyGaugeFillAmount,
             module.ObjectInfoEnergyGaugeFillColor,
             module.ObjectInfoStoredEnergy,
@@ -1538,7 +1648,7 @@ public class ItemInfoDescription : MonoBehaviour
                 continue;
             }
 
-            string amountText = $"{FormatLitersPerSecond(litersPerSecond)} 쨌 {(isBlocked ? "Blocked" : "Ready")}";
+            string amountText = $"{FormatLitersPerSecond(litersPerSecond)} ({(isBlocked ? "Blocked" : "Ready")})";
             if (i == 0)
             {
                 SetRefineryFluidItemSlot(
@@ -1600,7 +1710,7 @@ public class ItemInfoDescription : MonoBehaviour
         slot.SetCustomDisplay(
             itemId,
             itemSet.icon,
-            $"{role} 쨌 {displayName}",
+            $"{role}: {displayName}",
             amountText);
     }
 
@@ -3017,6 +3127,11 @@ public class ItemInfoDescription : MonoBehaviour
             && defaultItemIndex < defaultItem.Count
             ? defaultItem[defaultItemIndex]
             : null;
+        MoveItemAfter(root, precedingRoot);
+    }
+
+    private static void MoveItemAfter(GameObject root, GameObject precedingRoot)
+    {
         if (root == null || precedingRoot == null || root == precedingRoot)
         {
             return;

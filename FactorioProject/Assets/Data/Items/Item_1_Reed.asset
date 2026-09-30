@@ -13,7 +13,7 @@ MonoBehaviour:
   m_Name: Item_1_Reed
   m_EditorClassIdentifier: 
   itemName: Reed
-  id: 14
+  id: 15
   mapObject: {fileID: 5596077993400562758, guid: 24eb9727d7e44e846927e90bd34ba20f, type: 3}
   mapObjectArchetype: {fileID: 11400000, guid: bbd71924b14136c4b9a5a221e12b884c, type: 2}
   useMapColor: 0
@@ -36,6 +36,7 @@ MonoBehaviour:
   upgradeable: 1
   keepIoAreaItemsInPlaceWhileEditing: 0
   capacity: 10
+  isFluid: 0
   storesFluid: 0
   fluidStorageLiters: 0
   fluidDisplayColor: {r: 1, g: 1, b: 1, a: 1}

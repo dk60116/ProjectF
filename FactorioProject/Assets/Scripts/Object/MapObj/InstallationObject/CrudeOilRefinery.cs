@@ -86,37 +86,6 @@ public class CrudeOilRefinery : InputOutputModule
     public int ObjectInfoInputCount => ResolveFluidFlowPorts() ? inputPorts.Count : 0;
     public int ObjectInfoOutputCount => ResolveFluidFlowPorts() ? outputPorts.Count : 0;
 
-    public override float GetObjectInfoFluidPressureLitersPerSecond(int fluidItemId)
-    {
-        float deliveredRate = GetObjectInfoFluidOutputLitersPerSecond(fluidItemId);
-        if (deliveredRate <= FluidEpsilon || !ResolveFluidFlowPorts())
-        {
-            return deliveredRate;
-        }
-
-        // The pipe applies its own distance loss while displaying pressure.
-        // Recover the rate at this output from the volume measured at its tank.
-        float retention = 0f;
-        int matchingPorts = 0;
-        for (int i = 0; i < outputPorts.Count; i++)
-        {
-            FluidFlowPort port = outputPorts[i];
-            if (port.ItemId != fluidItemId)
-            {
-                continue;
-            }
-
-            matchingPorts++;
-            retention = ResolveFluidOutputTransportRetentionAtCoordinate(
-                port.Coordinate,
-                fluidItemId);
-        }
-
-        return matchingPorts == 1
-            ? retention > FluidEpsilon ? deliveredRate / retention : 0f
-            : deliveredRate;
-    }
-
     public override PersistentState CapturePersistentState()
     {
         PersistentState state = base.CapturePersistentState();

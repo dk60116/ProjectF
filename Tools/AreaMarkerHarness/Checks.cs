@@ -47,6 +47,7 @@ static class Checks
         BatchAndLifecycle();
         PreviewIsolationAndGeometry();
         RenderModesAndPartitions();
+        ProductionOutputIcons();
         LargeBatch();
         Console.WriteLine($"PASS AreaMarker harness: {passed} checks (CPU facade; no Unity/GPU execution)");
         return 0;
@@ -62,6 +63,112 @@ static class Checks
         Require(AreaMarkerVisibilityContext.ShouldShow(5, true, false, false, false, origin, origin), "Forced preview visible without player");
         Require(AreaMarkerVisibilityContext.ShouldShow(5, false, true, false, false, origin, origin), "Selected object visible without player");
         Require(AreaMarkerVisibilityContext.ShouldShow(5, false, false, true, false, origin, origin), "Edit/placement mode visible without player");
+    }
+
+    private static AreaMarkerSpawnRequest Marker(InputOutputModuleAreaMarkerController owner) =>
+        ((List<AreaMarkerSpawnRequest>)typeof(InputOutputModuleAreaMarkerController)
+            .GetField("requests",BindingFlags.Instance|BindingFlags.NonPublic).GetValue(owner))[0];
+
+    private static void ProductionOutputIcons()
+    {
+        AreaMarkerRenderer renderer = Setup();
+        var inputIcon = new Sprite { texture=new Texture() };
+        var lubricantIcon = new Sprite { texture=new Texture() };
+        var nextIcon = new Sprite { texture=new Texture() };
+        var solidIcon = new Sprite { texture=new Texture() };
+        var fallbackIcon = new Sprite { texture=new Texture() };
+        InputOutputModule.Definitions.Clear();
+        InputOutputModule.Definitions[7]=new ItemDefinition { icon=inputIcon };
+        InputOutputModule.Definitions[8]=new ItemDefinition { icon=lubricantIcon };
+        InputOutputModule.Definitions[9]=new ItemDefinition { icon=nextIcon };
+        InputOutputModule.Definitions[10]=new ItemDefinition();
+        InputOutputModule.Definitions[31]=new ItemDefinition { icon=solidIcon, fluid=false };
+        var outputCoordinate = new Vector2Int(1,0);
+        var inputCoordinate = new Vector2Int(-1,0);
+        var machine = new ProductionMachine { SelectedOutput=8, StoredFluidItemId=7 };
+        machine.ConfiguredOutputIds.UnionWith(new[] {7,8,9});
+        machine.OutputCoordinates.Add(outputCoordinate);
+        var builder = new PlacementMarkerProbe { FallbackIcon=fallbackIcon };
+        builder.Cells.Add(new PlacementMarkerProbe.RectGridPlacementCell
+        {
+            coordinate=outputCoordinate,
+            placement=new PlacementMarkerProbe.CellPlacement { itemDefinition=InputOutputModule.Definitions[7] }
+        });
+        var requests=builder.Build(machine,Icon);
+        Require(requests.Count==1 && requests[0].Icon==lubricantIcon,
+            "output builder chooses selected Lubricant instead of lower-ID Heavy Oil or stale cell input");
+        Require(requests[0].UsesRuntimeFluidIcon && requests[0].RuntimeFluidCoordinate==outputCoordinate,
+            "production output icon has a live coordinate binding");
+        Require(requests[0].OverlayIcon==Icon && requests[0].OverlayIconRotationZ==90f,
+            "output arrow still points away from the machine");
+        Require(requests[0].FallbackIcon==fallbackIcon,"cleared recipe uses a neutral fallback instead of its old output icon");
+        var preview=builder.Build(machine,Icon,true);
+        Require(!preview[0].UsesRuntimeFluidIcon && preview[0].Icon==lubricantIcon,
+            "placement preview shows the recipe output without sampling the world at its unregistered port");
+        PipeWorld.Current=new PipeWorld();
+        var wrongOutputPipe=new PipeRuntimeRecord { FluidItemId=7 };
+        PipeWorld.Current.Records[outputCoordinate]=wrongOutputPipe;
+        PipeWorld.Current.Records[inputCoordinate]=new PipeRuntimeRecord { FluidItemId=7 };
+        var owner=new InputOutputModuleAreaMarkerController();
+        owner.Configure(renderer,requests,true);
+        Set(owner,"runtimeFluidModule",machine);
+        Time.unscaledTime=1f; Tick(renderer);
+        Require(Marker(owner).RuntimeFluidItemId==8 && Marker(owner).Icon==lubricantIcon,
+            "output controller uses its recipe despite input reserve and wrong overlapping pipe fluid");
+        Require(wrongOutputPipe.Queries==0,"output marker cannot import input identity from the pipe network");
+        machine.SelectedOutput=9;
+        Time.unscaledTime+=.21f; Tick(renderer);
+        Require(Marker(owner).RuntimeFluidItemId==9 && Marker(owner).Icon==nextIcon,
+            "selected output changes update the existing marker without placement rebuild");
+        machine.ActiveOutput=8;
+        Time.unscaledTime+=.21f; Tick(renderer);
+        Require(Marker(owner).RuntimeFluidItemId==8 && Marker(owner).Icon==lubricantIcon,
+            "active batch keeps its output icon while another target is selected");
+        machine.ActiveOutput=-1;
+        Time.unscaledTime+=.21f; Tick(renderer);
+        Require(Marker(owner).RuntimeFluidItemId==9,"after the batch drains the selected output resumes");
+        machine.SelectedOutput=-1;
+        Time.unscaledTime+=.21f; Tick(renderer);
+        Require(Marker(owner).RuntimeFluidItemId==-1 && Marker(owner).Icon==fallbackIcon,
+            "cleared recipe cannot fall back to stored Heavy Oil or a previous output");
+        machine.SelectedOutput=10;
+        Time.unscaledTime+=.21f; Tick(renderer);
+        Require(Marker(owner).RuntimeFluidItemId==10 && Marker(owner).Icon==fallbackIcon,
+            "missing output sprite uses the neutral fallback");
+        machine.SelectedOutput=31;
+        var solidRequests=builder.Build(machine,Icon);
+        Require(solidRequests[0].Icon==fallbackIcon && solidRequests[0].OverlayIcon==Icon,
+            "solid recipe uses a neutral PipeOutput icon and keeps its direction arrow");
+        var solidPreview=builder.Build(machine,Icon,true);
+        Require(solidPreview[0].Icon==fallbackIcon,
+            "solid recipe cannot display an item icon on the PipeOutput preview");
+        Time.unscaledTime+=.21f; Tick(renderer);
+        Require(Marker(owner).RuntimeFluidItemId==-1 && Marker(owner).Icon==fallbackIcon,
+            "existing PipeOutput replaces fluid icons with neutral fallback for solid recipes");
+        machine.ActiveOutput=8;
+        Time.unscaledTime+=.21f; Tick(renderer);
+        Require(Marker(owner).RuntimeFluidItemId==8 && Marker(owner).Icon==lubricantIcon,
+            "active fluid batch retains its icon when the next selected recipe is solid");
+        machine.ActiveOutput=31; machine.SelectedOutput=8;
+        Time.unscaledTime+=.21f; Tick(renderer);
+        Require(Marker(owner).RuntimeFluidItemId==-1 && Marker(owner).Icon==fallbackIcon,
+            "active solid batch cannot display an item icon even with a fluid recipe selected");
+        machine.ActiveOutput=-1;
+        Time.unscaledTime+=.21f; Tick(renderer);
+        Require(Marker(owner).RuntimeFluidItemId==8 && Marker(owner).Icon==lubricantIcon,
+            "PipeOutput restores fluid icons after the solid batch finishes");
+        var inputRequest=AreaMarkerSpawnRequest.CreateRuntimeFluid(new Vector3(-1,0,0),inputCoordinate,fallbackIcon);
+        owner.Configure(renderer,new[] {inputRequest},true);
+        Set(owner,"runtimeFluidModule",machine);
+        Time.unscaledTime+=.21f; Tick(renderer);
+        Require(Marker(owner).RuntimeFluidItemId==7 && Marker(owner).Icon==inputIcon,
+            "input area still displays its incoming fluid");
+        var ordinary=new InputOutputModule(); ordinary.ConfiguredOutputIds.Add(8);
+        var ordinaryRequests=builder.Build(ordinary,Icon);
+        Require(!ordinaryRequests[0].UsesRuntimeFluidIcon && ordinaryRequests[0].Icon==inputIcon,
+            "other installations retain their explicit per-port item icon");
+        owner.Configure(null,null); Call(renderer,"OnDestroy");
+        PipeWorld.Current=null; InputOutputModule.Definitions.Clear();
     }
 
     private static void BatchAndLifecycle()
@@ -200,5 +307,31 @@ static class Checks
         Require(Graphics.Calls.All(c => c.Mesh.Vertices.Count == 68000 && c.Mesh.Triangles.Max() == 67999), "Indices cross 16-bit vertex limit correctly");
         Require(Graphics.Calls.All(c => c.Mesh.indexFormat == UnityEngine.Rendering.IndexFormat.UInt32), "32-bit mesh indices selected");
         Call(renderer, "OnDestroy");
+    }
+}
+
+public partial class PlacementMarkerProbe
+{
+    public sealed class CellPlacement { public ItemDefinition itemDefinition; }
+    public struct RectGridPlacementCell { public Vector2Int coordinate; public CellPlacement placement; }
+    public readonly List<RectGridPlacementCell> Cells = new();
+    private readonly List<RectGridPlacementCell> areaMarkerPipeOutputCellScratch = new();
+    private readonly HashSet<int> areaMarkerOutputItemIdsScratch = new();
+    private static readonly int[] PipeOutputMarkerRectGridBlockTypes = Array.Empty<int>();
+    public Sprite FallbackIcon;
+    private Sprite ResolveFallbackPipePassMarkerIcon() => FallbackIcon;
+    private static ItemDefinition ResolveItemDefinition(int id) => InputOutputModule.ResolveItemDefinition(id);
+    private static bool TryGetInputOutputModule(MapObject source,out InputOutputModule module)
+    { module=source as InputOutputModule; return module!=null; }
+    private bool TryBuildRectGridPlacementCells(Vector2Int anchor,MapObject source,int turns,int[] types,List<RectGridPlacementCell> cells)
+    { cells.AddRange(Cells); return cells.Count>0; }
+    private static Vector3 GetAreaMarkerWorldPosition(Vector2Int coordinate) => new(coordinate.x,0,coordinate.y);
+    private static Vector3 ResolveNearestAreaMarkerReferenceWorldPosition(Vector3 marker,IReadOnlyList<Vector3> references) => references[0];
+    private static float GetArrowMarkerRotationZ(Vector3 start,Vector3 end) => end.x>start.x ? 90f : 270f;
+    public List<AreaMarkerSpawnRequest> Build(MapObject source,Sprite arrow,bool preview=false)
+    {
+        var requests=new List<AreaMarkerSpawnRequest>();
+        AddPipeOutputAreaMarkerRequests(requests,default,source,0,arrow,new[] {Vector3.zero},preview);
+        return requests;
     }
 }

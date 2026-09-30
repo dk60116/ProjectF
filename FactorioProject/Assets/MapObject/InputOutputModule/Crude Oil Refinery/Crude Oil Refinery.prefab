@@ -1029,7 +1029,7 @@ MonoBehaviour:
   m_EditorClassIdentifier: Assembly-CSharp::CrudeOilRefinery
   id: 0
   objectName: Crude Oil Refinery
-  objId: 69
+  objId: 71
   itemDefinition: {fileID: 11400000, guid: f2a55fe33263d054f82c1737d7d85898, type: 2}
   mapStatus:
     mapSizeX: 2
@@ -1063,9 +1063,9 @@ MonoBehaviour:
       count: 2
     outputs:
     - itemDefinition: {fileID: 11400000, guid: 2651f8611470b89479eaef2d5cd4490d, type: 2}
-      count: 0.8
+      count: 1
     - itemDefinition: {fileID: 11400000, guid: 3014913027f97b04aa800f6ce5da8a81, type: 2}
-      count: 0.5
+      count: 1
     - itemDefinition: {fileID: 11400000, guid: f5fb20334a270ef4b9daa71e32edbfe7, type: 2}
       count: 2
   inputList: []

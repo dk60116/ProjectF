@@ -11,7 +11,7 @@ $stream = [System.IO.File]::OpenRead($binaryPath)
 $reader = [System.IO.BinaryReader]::new($stream, [System.Text.Encoding]::UTF8, $false)
 try {
     $version = $reader.ReadInt32()
-    if ($version -ne 5) {
+    if ($version -notin @(5, 6)) {
         throw "지원하지 않는 제작 트리 버전: $version"
     }
 
@@ -33,12 +33,12 @@ try {
             $null = $recipeNamesByMapObject[$mapObjectName].Add($itemName)
         }
 
-        $null = $reader.ReadInt32()
+        $null = if ($version -ge 6) { $reader.ReadSingle() } else { $reader.ReadInt32() }
         $ingredientCount = $reader.ReadInt32()
         $ingredientNames = [System.Collections.Generic.List[string]]::new()
         for ($ingredientIndex = 0; $ingredientIndex -lt $ingredientCount; $ingredientIndex++) {
             $ingredientNames.Add($reader.ReadString())
-            $null = $reader.ReadInt32()
+            $null = if ($version -ge 6) { $reader.ReadSingle() } else { $reader.ReadInt32() }
         }
 
         $ingredientsByItem[$itemName] = $ingredientNames

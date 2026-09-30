@@ -10,10 +10,10 @@ MonoBehaviour:
   m_Enabled: 1
   m_EditorHideFlags: 0
   m_Script: {fileID: 11500000, guid: ccc5c26867f3fd3479193fd24dec463e, type: 3}
-  m_Name: Item_113_Heavy oil
+  m_Name: Item_113_Heavy Oil
   m_EditorClassIdentifier: Assembly-CSharp::ItemDefinition
-  itemName: Heavy oil
-  id: 5
+  itemName: Heavy Oil
+  id: 7
   mapObject: {fileID: 0}
   mapObjectArchetype: {fileID: 0}
   useMapColor: 0
@@ -35,6 +35,7 @@ MonoBehaviour:
   upgradeable: 1
   keepIoAreaItemsInPlaceWhileEditing: 0
   capacity: 10
+  isFluid: 1
   storesFluid: 0
   fluidStorageLiters: 0
   fluidDisplayColor: {r: 0.107689574, g: 0.41509432, b: 0.21702419, a: 1}

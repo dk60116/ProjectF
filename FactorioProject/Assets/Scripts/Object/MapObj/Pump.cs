@@ -1,13 +1,21 @@
 using System.Collections.Generic;
 using UnityEngine;
+using UnityEngine.Serialization;
 
 /// <summary>
-/// Transfers fluid from the local -X inlet to the local +X outlet.
+/// Transfers fluid from the local +X inlet to the local -X outlet.
 /// The pump does not own fluid; producers and consumers still transfer the
 /// authoritative fluid directly through the connected network.
 /// </summary>
 public class Pump : InputOutputModule
 {
+    [SerializeField, FormerlySerializedAs("pipeArrow")]
+    private SpriteRenderer pumpArrow;
+
+    private const float ArrowColorRefreshIntervalSeconds = 0.2f;
+    private float nextArrowColorRefreshTime = float.NegativeInfinity;
+    private int displayedArrowFluidItemId = int.MinValue;
+
     public float PressureLitersPerSecond => ResolveInstalledDefinition() is ItemDefinition definition
         ? definition.PumpPressureLitersPerSecond : 5f;
 
@@ -32,7 +40,46 @@ public class Pump : InputOutputModule
     {
         pressureBudgetTick = -1;
         pressureBudgetLiters = 0d;
+        displayedArrowFluidItemId = int.MinValue;
+        nextArrowColorRefreshTime = float.NegativeInfinity;
+        if (pumpArrow != null) pumpArrow.enabled = false;
         base.OnEnable();
+    }
+
+    protected override bool RequiresManagedVisualUpdate => base.RequiresManagedVisualUpdate
+        || pumpArrow != null && Time.unscaledTime >= nextArrowColorRefreshTime;
+
+    protected override void OnManagedVisualsResumed()
+    {
+        base.OnManagedVisualsResumed();
+        nextArrowColorRefreshTime = float.NegativeInfinity;
+    }
+
+    protected override void OnPlacementRuntimeChanged()
+    {
+        base.OnPlacementRuntimeChanged();
+        nextArrowColorRefreshTime = float.NegativeInfinity;
+    }
+
+    protected override void TickManagedVisuals(float deltaTime)
+    {
+        base.TickManagedVisuals(deltaTime);
+        if (pumpArrow == null || Time.unscaledTime < nextArrowColorRefreshTime) return;
+
+        nextArrowColorRefreshTime = Time.unscaledTime + ArrowColorRefreshIntervalSeconds;
+        int fluidItemId = -1;
+        if (TryGetRuntimeFluidEndpoints(out _, out Vector2Int outputCoordinate))
+        {
+            Pipe.TryGetNetworkFluidInfoAt(
+                outputCoordinate, objectInfoNetworkContext, false, default, false,
+                out fluidItemId, out _, out _);
+        }
+        bool hasFluid = fluidItemId >= 0;
+        if (pumpArrow.enabled != hasFluid) pumpArrow.enabled = hasFluid;
+        if (displayedArrowFluidItemId == fluidItemId) return;
+
+        if (hasFluid) pumpArrow.color = Pipe.ResolveFluidDisplayColor(fluidItemId);
+        displayedArrowFluidItemId = fluidItemId;
     }
 
     internal float LimitTransferVolume(float requestedLiters, float deltaTime)
@@ -317,8 +364,8 @@ public class Pump : InputOutputModule
         return true;
     }
 
-    // The authored footprint runs from the lower local X/Y inlet cell to the
-    // higher local X/Y outlet cell. Placement rotation transforms both together.
+    // Higher local X/Y is the inlet; lower local X/Y is the outlet.
+    // Placement rotation transforms both together, including existing installations.
     internal bool TryGetRuntimeFluidEndpoints(out Vector2Int input, out Vector2Int output)
     {
         input = output = default;
@@ -336,8 +383,8 @@ public class Pump : InputOutputModule
                 || cell.x == placements[last].x && cell.y > placements[last].y) last = i;
         }
         return count == 2
-               && TryGetRectGridPlacementCoordinate(this, anchor, turns, placements[first], out input)
-               && TryGetRectGridPlacementCoordinate(this, anchor, turns, placements[last], out output);
+               && TryGetRectGridPlacementCoordinate(this, anchor, turns, placements[last], out input)
+               && TryGetRectGridPlacementCoordinate(this, anchor, turns, placements[first], out output);
     }
 
     internal bool AllowsRuntimeFluidTraversal(Vector2Int coordinate, bool upstream)
@@ -366,11 +413,13 @@ public class Pump : InputOutputModule
             return false;
         }
 
-        // An end body installed on a machine input is a real delivery node as
-        // well as a source-search entrance. Keep both searches on that port.
+        // End bodies can dock onto a machine port. The inlet body receives
+        // a facing output; the outlet body delivers to a facing input.
         bool connects = TryGetPipePassExternalDirection(
                             this, anchorCoordinate, quarterTurns, coordinate, out _)
-                        || HasRuntimeFluidInputFacingAt(coordinate, externalDirection);
+                        || HasRuntimeFluidInputFacingAt(coordinate, externalDirection)
+                        || (AllowsRuntimeFluidTraversal(coordinate, false)
+                            && HasRuntimeFluidOutputTowardsPipe(coordinate, -externalDirection));
         if (connects && AllowsRuntimeFluidTraversal(otherCoordinate, true))
         {
             otherCoordinate = ResolveRuntimeFluidDeliveryCoordinate(otherCoordinate);

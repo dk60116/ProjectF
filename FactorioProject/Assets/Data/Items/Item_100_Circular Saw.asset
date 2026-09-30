@@ -13,7 +13,7 @@ MonoBehaviour:
   m_Name: Item_100_Circular Saw
   m_EditorClassIdentifier: Assembly-CSharp::ItemDefinition
   itemName: Circular Saw
-  id: 45
+  id: 47
   mapObject: {fileID: 0}
   mapObjectArchetype: {fileID: 0}
   useMapColor: 0
@@ -35,6 +35,7 @@ MonoBehaviour:
   upgradeable: 1
   keepIoAreaItemsInPlaceWhileEditing: 0
   capacity: 10
+  isFluid: 0
   storesFluid: 0
   fluidStorageLiters: 0
   fluidDisplayColor: {r: 1, g: 1, b: 1, a: 1}

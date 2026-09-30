@@ -35,6 +35,7 @@ MonoBehaviour:
   upgradeable: 1
   keepIoAreaItemsInPlaceWhileEditing: 0
   capacity: 10
+  isFluid: 1
   storesFluid: 0
   fluidStorageLiters: 0
   fluidDisplayColor: {r: 0.45882356, g: 0.6627451, b: 0.7490196, a: 1}

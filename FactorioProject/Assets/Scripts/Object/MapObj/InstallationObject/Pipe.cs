@@ -482,6 +482,11 @@ public class Pipe : InstallationObject
                     out _,
                     out Vector2Int passivePassOtherCoordinate,
                     out Vector2Int passivePassExternalDirection);
+            Vector2Int outputExternalDirection = Vector2Int.zero;
+            bool hasDirectedOutput = !hasFixedFluidTank && !hasSteamGeneratorPass
+                && !hasPumpPass && !hasPassiveFluidPass
+                && InputOutputModule.TryGetRuntimeFluidOutputDirectionAtCoordinate(
+                    coordinate, out outputExternalDirection);
             // An outlet reached through a dense generator connection may have
             // no pipe or pass-through at its own coordinate. Still collect it.
             if (outputSources != null)
@@ -545,6 +550,9 @@ public class Pipe : InstallationObject
             for (int i = 0; i < CardinalDirections.Length; i++)
             {
                 Vector2Int direction = CardinalDirections[i];
+                // A pipe on a producer output belongs to the outward network.
+                // Its other connectors must not import pressure from input ports.
+                if (hasDirectedOutput && direction != outputExternalDirection) continue;
                 bool pipeConnectsToDirection = pipe != null
                     && (runtimeRecord != null
                         ? runtimeRecord.HasConnectionTowardsAt(coordinate, direction)
@@ -593,6 +601,11 @@ public class Pipe : InstallationObject
                     InputOutputModule.HasRuntimePassiveFluidPassTowards(
                         neighborCoordinate,
                         -direction);
+                bool neighborOutputFacesDirection = hasNeighborFixedFluidTank
+                    || hasNeighborSteamGeneratorPass || hasNeighborPumpPass || hasNeighborPassiveFluidPass
+                    || !InputOutputModule.TryGetRuntimeFluidOutputDirectionAtCoordinate(
+                        neighborCoordinate, out Vector2Int neighborOutputDirection)
+                    || neighborOutputDirection == -direction;
                 PipeRuntimeRecord neighborRuntimeRecord = null;
                 PipeWorld.Current?.TryGetAtCoordinate(neighborCoordinate, out neighborRuntimeRecord);
                 bool fluidTankBoundaryCanConnect = CanTraverseFluidTankBoundary(
@@ -601,7 +614,7 @@ public class Pipe : InstallationObject
                     direction,
                     neighborFixedFluidTank,
                     evaluateFluidTankCompatibility);
-                bool neighborConnects = fluidTankBoundaryCanConnect
+                bool neighborConnects = fluidTankBoundaryCanConnect && neighborOutputFacesDirection
                                         && (hasNeighborSteamGeneratorPass
                                             || hasNeighborPumpPass
                                             || hasNeighborPassiveFluidPass

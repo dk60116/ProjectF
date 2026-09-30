@@ -13,7 +13,7 @@ MonoBehaviour:
   m_Name: Item_52_Wooden wheel
   m_EditorClassIdentifier: 
   itemName: Pork
-  id: 101
+  id: 104
   mapObject: {fileID: 0}
   mapObjectArchetype: {fileID: 0}
   useMapColor: 0
@@ -35,6 +35,7 @@ MonoBehaviour:
   upgradeable: 1
   keepIoAreaItemsInPlaceWhileEditing: 0
   capacity: 10
+  isFluid: 0
   storesFluid: 0
   fluidStorageLiters: 0
   fluidDisplayColor: {r: 1, g: 1, b: 1, a: 1}

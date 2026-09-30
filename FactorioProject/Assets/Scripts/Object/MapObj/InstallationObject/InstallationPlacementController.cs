@@ -8048,7 +8048,8 @@ public class InstallationPlacementController : MonoBehaviour
             footprintSource,
             quarterTurns,
             arrowIcon,
-            areaMarkerPrimaryWorldPositionScratch);
+            areaMarkerPrimaryWorldPositionScratch,
+            isInstallPreview);
 
         FillRectGridBlockWorldPositions(
             anchorCoordinate,
@@ -21296,7 +21297,8 @@ public class InstallationPlacementController : MonoBehaviour
         MapObject footprintSource,
         int quarterTurns,
         Sprite arrowIcon,
-        IReadOnlyList<Vector3> referenceWorldPositions)
+        IReadOnlyList<Vector3> referenceWorldPositions,
+        bool isInstallPreview = false)
     {
         if (markerRequests == null || footprintSource == null)
         {
@@ -21315,6 +21317,9 @@ public class InstallationPlacementController : MonoBehaviour
         }
 
         Sprite fallbackFluidIcon = ResolvePipeOutputMarkerIcon(footprintSource);
+        bool usesProductionRecipe = footprintSource is ProductionMachine;
+        bool usesLiveOutputIcon = usesProductionRecipe && !isInstallPreview;
+        Sprite emptyRecipeIcon = usesLiveOutputIcon ? ResolveFallbackPipePassMarkerIcon() : null;
         for (int i = 0; i < areaMarkerPipeOutputCellScratch.Count; i++)
         {
             RectGridPlacementCell cell = areaMarkerPipeOutputCellScratch[i];
@@ -21322,12 +21327,14 @@ public class InstallationPlacementController : MonoBehaviour
             Vector3 referenceWorldPosition = ResolveNearestAreaMarkerReferenceWorldPosition(
                 markerWorldPosition,
                 referenceWorldPositions);
-            Sprite fluidIcon = cell.placement.itemDefinition != null
+            Sprite fluidIcon = !usesProductionRecipe && cell.placement.itemDefinition != null
                 ? cell.placement.itemDefinition.icon
                 : null;
-            AreaMarkerSpawnRequest request = new AreaMarkerSpawnRequest(
-                markerWorldPosition,
-                fluidIcon != null ? fluidIcon : fallbackFluidIcon);
+            AreaMarkerSpawnRequest request = usesLiveOutputIcon
+                ? AreaMarkerSpawnRequest.CreateRuntimeFluid(
+                    markerWorldPosition, cell.coordinate, emptyRecipeIcon).WithRuntimeFluid(-1, fallbackFluidIcon)
+                : new AreaMarkerSpawnRequest(
+                    markerWorldPosition, fluidIcon != null ? fluidIcon : fallbackFluidIcon);
             markerRequests.Add(request.WithOverlay(
                 arrowIcon,
                 GetArrowMarkerRotationZ(referenceWorldPosition, markerWorldPosition)));
@@ -21448,6 +21455,17 @@ public class InstallationPlacementController : MonoBehaviour
         if (!TryGetInputOutputModule(footprintSource, out InputOutputModule inputOutputModule))
         {
             return ResolveFallbackPipePassMarkerIcon();
+        }
+
+        if (inputOutputModule is ProductionMachine productionMachine)
+        {
+            ItemDefinition outputDefinition = productionMachine.TryGetObjectInfoProductionOutput(
+                out int outputItemId, out _, out _)
+                ? ResolveItemDefinition(outputItemId)
+                : null;
+            return InputOutputModule.IsFluidItemDefinition(outputDefinition) && outputDefinition.icon != null
+                ? outputDefinition.icon
+                : ResolveFallbackPipePassMarkerIcon();
         }
 
         areaMarkerOutputItemIdsScratch.Clear();

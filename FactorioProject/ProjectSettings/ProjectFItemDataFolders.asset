@@ -133,6 +133,10 @@ MonoBehaviour:
     displayName: Farm
     expanded: 1
     anchorItemGuid: a49bdf81c3424dfa9a1ae44a787e40ce
+  - id: 37bdc5671ec7441ba7524d20a937f221
+    displayName: Oil can
+    expanded: 1
+    anchorItemGuid: 
   itemAssignments:
   - itemGuid: e9950cff3cab70041b1997e87d6e22b1
     folderId: 839eaa9b00424dc59d967a096e100401
@@ -384,3 +388,21 @@ MonoBehaviour:
     folderId: 4008c2a9919643788ee7eedfdd9a2060
   - itemGuid: 31c39fc847ce8d24690f003515a30757
     folderId: 52f654e67171467f864fb2b0973e4063
+  - itemGuid: be5f6e0dd2aa87245a262285cfb5d369
+    folderId: 4008c2a9919643788ee7eedfdd9a2060
+  - itemGuid: b3b818c383ac7a24e86994e0e69641bb
+    folderId: 37bdc5671ec7441ba7524d20a937f221
+  - itemGuid: 7f2a2e4d57ee0fe4da72c59d6aba4f07
+    folderId: 37bdc5671ec7441ba7524d20a937f221
+  - itemGuid: d4fd6491aaf976b4cbc029f939d8294b
+    folderId: 37bdc5671ec7441ba7524d20a937f221
+  - itemGuid: 35de25c1b78551f46a6ab4a7d318fcf5
+    folderId: 63b13fc99f8747da9db46e2210011669
+  - itemGuid: a27c459dc28ce88459ab7c9f65bab9cf
+    folderId: c46f2864503448c084f910219612a1ce
+  - itemGuid: e79c2cfe4fca10741ab037f259395482
+    folderId: c46f2864503448c084f910219612a1ce
+  - itemGuid: 866f95485287143418d5d991a5f725ee
+    folderId: 839eaa9b00424dc59d967a096e100401
+  - itemGuid: 6948a22979bb56948883b25e4d85e66b
+    folderId: 37bdc5671ec7441ba7524d20a937f221

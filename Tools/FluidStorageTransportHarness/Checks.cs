@@ -6,15 +6,11 @@ public class MapObject { }
 public class FakeObject { public bool activeInHierarchy = true; }
 public class FakeTransform { public Quaternion rotation = Quaternion.identity; }
 public static class MapClimate { public static float CurrentTemperatureCelsius => 20; }
+public static class MapObjectTickManager { public static long CurrentSimulationTick; public const float FixedSimulationDeltaSeconds = ProjectF.Simulation.SimulationTickWorld.FixedSimulationDeltaSeconds; }
 public static class MapObjectTickProfiler
 {
     public static Scope SampleNamed(string a, string b, string c) => default;
     public readonly struct Scope : IDisposable { public void Dispose() { } }
-}
-public static class DeterministicSimulationUnits
-{
-    public static long FromFloat(float value) => (long)Math.Round(value * 1000000d);
-    public static float ToFloat(long value) => value / 1000000f;
 }
 public partial class InstallationObject : MapObject
 {
@@ -23,6 +19,7 @@ public partial class InstallationObject : MapObject
     public bool isActiveAndEnabled => gameObject.activeInHierarchy;
     public readonly List<Vector2Int> RuntimeOccupiedCoordinates = new();
     public Vector2Int Anchor;
+    public long RuntimePlacementSequence;
     public float FluidStorageCapacityLiters = 50;
     private long storedFluidUnits;
     private int storedFluidItemId = -1;
@@ -37,6 +34,9 @@ public partial class InstallationObject : MapObject
     public bool CanAcceptFluidItem(int id, float requested = 0) => AvailableFluidStorageLiters >= requested && (storedFluidItemId < 0 || id == storedFluidItemId);
     protected float LimitIncomingFluidLiters(int id, float requested) => requested;
     private void RecordFluidIn(float liters) { }
+    private void RecordFluidOut(float liters) { }
+    public bool CanProvideFluidItem(int id, float requested = 0) => StoredFluidItemId == id && StoredFluidLiters > 0 && StoredFluidLiters >= requested;
+    public float GetStoredFluidTemperatureCelsius(int id) => storedFluidTemperatureCelsius;
     private void OnStoredFluidAccepted(int id, float before, float accepted, float temperature) => storedFluidTemperatureCelsius = temperature;
     private float NormalizeFluidTemperatureCelsius(float value) => value;
     private void NotifyStoredFluidChanged(int id, float before) { }
@@ -105,8 +105,11 @@ public class SteamTrain : InstallationObject
     public bool CanAcceptWaterFromPipeDirection(Vector2Int d, int id, bool space) => true;
 }
 public class WaterPump : InputOutputModule { public static int ResolveWaterItemId(object o) => 1; }
-public class Pump : InputOutputModule
+public partial class Pump : InputOutputModule
 {
+    public float PressureLitersPerSecond = 100f;
+    private long pressureBudgetTick = -1;
+    private double pressureBudgetLiters;
     private Vector2Int first, second, firstExternal, secondExternal;
     private readonly HashSet<Vector2Int> body = new();
     private bool hasPass;
@@ -130,11 +133,26 @@ public class Pump : InputOutputModule
         if (otherPump.body.Contains(second)) { endpoint = second; return true; }
         return false;
     }
-    public bool TryGetRuntimePipePass(Vector2Int coordinate, out Vector2Int other, out Vector2Int external)
+    internal bool TryGetRuntimeFluidEndpoints(out Vector2Int input, out Vector2Int output)
+    { input = first; output = second; return hasPass; }
+    internal bool TryGetBodyPipePassEndpointAt(MapObject source, Vector2Int anchor, int turns, Vector2Int c, out Vector2Int endpoint, out Vector2Int external)
     {
-        if (hasPass && coordinate == first) { other = second; external = firstExternal; return true; }
-        if (hasPass && coordinate == second) { other = first; external = secondExternal; return true; }
-        other = external = default; return false;
+        endpoint = external = default;
+        if (!body.Contains(c)) return false;
+        if (c == first - firstExternal) { endpoint = first; external = firstExternal; return true; }
+        if (c == second - secondExternal) { endpoint = second; external = secondExternal; return true; }
+        return false;
+    }
+    public bool TryGetPipePassExternalDirection(MapObject source, Vector2Int anchor, int turns, Vector2Int c, out Vector2Int d)
+    { d = c == first ? firstExternal : c == second ? secondExternal : default; return hasPass && d != default; }
+    internal bool TryGetPipePassAt(MapObject source, Vector2Int anchor, int turns, Vector2Int c, out Vector2Int other, out Vector2Int external)
+    {
+        other = external = default;
+        var endpoint = c;
+        if (!TryGetPipePassExternalDirection(source, anchor, turns, c, out external)
+            && !TryGetBodyPipePassEndpointAt(source, anchor, turns, c, out endpoint, out external)) return false;
+        other = endpoint == first ? second : first;
+        return true;
     }
 }
 public class Boiler : InputOutputModule
@@ -159,9 +177,41 @@ public partial class SteamGenerator : InputOutputModule
 }
 public partial class InputOutputModule : InstallationObject
 {
+    public struct ItemIoEntry
+    {
+        public ItemDefinition itemDefinition;
+        public float ResolvedAmount;
+        public bool IsFluid => itemDefinition != null && itemDefinition.id == 1;
+    }
+    public sealed class InputOutputPair { public List<ItemIoEntry> outputs = new(); }
+    private ProjectF.Simulation.ProductionProcess production;
+    protected bool IsActiveCraftRunning => production.Active;
+    private bool hasActiveCraft => production.Active;
+    private bool waitingForOutput => production.WaitingForOutput;
+    protected int ActiveOutputItemId => production.OutputItemId;
+    protected int ActiveOutputCount => production.OutputCount;
+    protected int ActiveRecipeIndex => production.RecipeIndex;
+    private readonly ItemDefinition installedDefinition = new() { ElectricityRate = 100000f, CompleteEnergy = 3600000f };
+    public float OutputRate = 2f, CraftSeconds = 1f;
+    public InputOutputModule() => production.Begin(0,1,2,0);
+    protected void BeginWorkingCraft()
+    { OutputRate = 1f; CraftSeconds = installedDefinition.CompleteEnergy / installedDefinition.ElectricityRate; production.Begin(0,1,1,DeterministicSimulationUnits.SecondsToTicks(CraftSeconds)); }
+    protected float ResolveInitialCraftDuration(ItemDefinition definition) => CraftSeconds;
+    protected int ResolveProductionTargetPairIndex(int id) => 0;
+    protected void AdvanceCraft(float dt) => UpdateActiveCraft(dt);
+    protected ItemDefinition ResolveInstalledDefinition() => installedDefinition;
+    private static bool RequiresOperationalEnergy(ItemDefinition definition) => true;
+    private bool TryConsumeOperatingEnergy(float dt, out float consumed) { consumed = installedDefinition.ElectricityRate * dt; return consumed > 0; }
+    private float ResolveCompleteEnergy(ItemDefinition definition) => definition.CompleteEnergy;
+    protected virtual bool TryCompleteActiveCraft() => false;
+    protected void ClearActiveCraft() => production.Clear();
+    protected void MarkPersistenceStateDirty() { }
+    protected bool TryGetInputOutputPair(int index, out InputOutputPair pair)
+    { pair = new(); pair.outputs.Add(new ItemIoEntry { itemDefinition = new ItemDefinition { id = 1 }, ResolvedAmount = OutputRate }); return true; }
     private static readonly Vector2Int[] FluidCardinalDirections = { Vector2Int.up, Vector2Int.right, Vector2Int.down, Vector2Int.left };
     private static readonly Dictionary<Vector2Int, HashSet<InputOutputModule>> registeredRuntimeAreaCoordinates = new(), registeredRuntimeGridCoordinates = new();
     private static readonly HashSet<InputOutputModule> activeRuntimeModules = new();
+    private static readonly Dictionary<Vector2Int, HashSet<InputOutputModule>> registeredRuntimeFluidOutputCoordinates = new();
     private readonly Dictionary<Vector2Int, Vector2Int> ports = new();
     private readonly List<Vector2Int> runtimeOutputCoordinates = new();
     private readonly Queue<ConnectedFluidSearchNode> connectedFluidSearchQueue = new();
@@ -171,7 +221,32 @@ public partial class InputOutputModule : InstallationObject
     private readonly HashSet<InstallationObject> connectedFluidStorageCandidates = new();
     private readonly List<InstallationObject> fluidStorageBodyScratch = new();
     private readonly List<FluidOutputConnection> cachedFluidOutputConnections = new();
-    private readonly Dictionary<InstallationObject, int> cachedFluidOutputConnectionIndices = new();
+    private readonly Dictionary<FluidStorageEndpointKey, int> cachedFluidOutputConnectionIndices = new();
+    private readonly List<Vector2Int> cachedFluidOutputSeedCoordinates = new();
+    private readonly Dictionary<Vector2Int, Pump> connectedFluidSearchPumps = new();
+    private readonly List<Vector2Int> connectedFluidSeedCoordinates = new(), connectedFluidSeedCoordinateScratch = new();
+    private readonly List<InstallationObject> cachedConnectedFluidSourceStorages = new();
+    private readonly Dictionary<InstallationObject, int> cachedConnectedFluidSourcePipeDistances = new();
+    private readonly Dictionary<InstallationObject, Pump> connectedFluidSourcePumps = new();
+    private readonly Dictionary<Vector2Int, FluidPortConnectionCache> fluidInputPortConnectionCaches = new();
+    private int cachedConnectedFluidSourceStoragesTopologyVersion = -1;
+    private bool UsesConnectedTankNetworkStorage => false;
+    private Pump connectedFluidSearchCurrentPump;
+    private readonly List<FluidOutputTransferCandidate> fluidOutputTransferCandidates = new();
+    protected float ManagedUpdateTickIntervalSeconds => .1f;
+    private static int fluidStorageStateVersion;
+    private static long fluidOutputSelectionCacheHitCount, fluidOutputSelectionCacheMissCount, fluidOutputRetentionCacheHitCount, fluidOutputRetentionCacheMissCount;
+    private long cachedFluidOutputSelectionTick = -1, cachedFluidOutputRetentionTick = -1;
+    private int cachedFluidOutputSelectionStateVersion, cachedFluidOutputSelectionTopologyVersion, cachedFluidOutputSelectionItemId;
+    private int cachedFluidOutputRetentionStateVersion, cachedFluidOutputRetentionTopologyVersion, cachedFluidOutputRetentionItemId;
+    private bool cachedFluidOutputSelectionFound;
+    private FluidOutputConnection cachedFluidOutputSelection;
+    private float cachedFluidOutputRetentionSourceRate, cachedFluidOutputRetention;
+    internal bool UsesDedicatedFluidStorageAtRuntimeCoordinate(Vector2Int c) => false;
+    internal float GetDedicatedAvailableFluidStorageLitersAtRuntimeCoordinate(Vector2Int c, int id) => 0;
+    internal float GetDedicatedFluidStorageFillRatioAtRuntimeCoordinate(Vector2Int c, int id) => 0;
+    internal bool CanAcceptDedicatedFluidAtRuntimeCoordinate(Vector2Int c, int id, float liters) => false;
+    internal bool TryAddDedicatedFluidAtRuntimeCoordinate(Vector2Int c, int id, float liters, float temperature, out float accepted) { accepted = 0; return false; }
     private readonly HashSet<SteamGenerator> directedSteamChainVisited = new();
     private readonly Queue<DirectedSteamPort> directedSteamPortSearchQueue = new();
     private readonly HashSet<DirectedSteamPort> directedSteamVisitedPorts = new();
@@ -196,8 +271,16 @@ public partial class InputOutputModule : InstallationObject
     private readonly List<Vector2Int> runtimeGridCoordinates = new(), runtimePipeInputCoordinates = new();
     public static void Placed(InstallationObject storage) => HandleInstallationPlacementRuntimeChanged(storage);
     public float Emit(float amount) { TryEmitFluidOutputToConnectedStorages(1, amount, 100, out float accepted); return accepted; }
+    public void InputPort(Vector2Int c, Vector2Int d) => Port(c, d);
+    public float Pull(Vector2Int c, float amount)
+    { TryConsumeConnectedFluidInputAtCoordinate(c, 1, amount, out float consumed, out _); return consumed; }
     public float TransportRetention(int itemId) => ResolveFluidOutputTransportRetention(itemId);
-    public void Output(Vector2Int c, Vector2Int d) { runtimeOutputCoordinates.Add(c); Port(c, d); }
+    public void Output(Vector2Int c, Vector2Int d)
+    {
+        runtimeOutputCoordinates.Add(c); Port(c, d);
+        if (!registeredRuntimeFluidOutputCoordinates.TryGetValue(c, out var set)) registeredRuntimeFluidOutputCoordinates[c] = set = new();
+        set.Add(this);
+    }
     public void Grid(Vector2Int c)
     {
         runtimeGridCoordinates.Add(c);
@@ -210,11 +293,21 @@ public partial class InputOutputModule : InstallationObject
     { ports[c] = d; if (!registeredRuntimeAreaCoordinates.TryGetValue(c, out var set)) registeredRuntimeAreaCoordinates[c] = set = new(); set.Add(this); activeRuntimeModules.Add(this); }
     private bool TryGetRuntimePipeAreaExternalDirection(Vector2Int c, out Vector2Int d) => ports.TryGetValue(c, out d);
     public bool TryGetRuntimePipeOutputExternalDirection(Vector2Int c, out Vector2Int d) => TryGetRuntimePipeAreaExternalDirection(c, out d);
+    private bool ContainsRuntimeOutputCoordinate(Vector2Int c) => runtimeOutputCoordinates.Contains(c);
+    internal static bool HasRuntimeFluidInputFacingAt(Vector2Int c, Vector2Int direction)
+    {
+        if (!registeredRuntimeAreaCoordinates.TryGetValue(c, out var modules)) return false;
+        foreach (var module in modules)
+            if (module is not Pump && !module.ContainsRuntimeOutputCoordinate(c)
+                && module.TryGetRuntimePipeAreaExternalDirection(c, out var external)
+                && external == -direction) return true;
+        return false;
+    }
     private bool TryGetLoadedBlock(Vector2Int c, out Block block) => World.Blocks.TryGetValue(c, out block);
     private static bool ContainsCoordinate(IReadOnlyList<Vector2Int> values, Vector2Int c) { for (int i=0;i<values.Count;i++) if(values[i]==c) return true; return false; }
-    private static bool IsFluidItemId(int id) => id == 1;
+    public static bool IsFluidItemId(int id) => id == 1;
     private void RecordFluidNetworkOutput(int id, float accepted) { }
-    public static void Reset() { registeredRuntimeAreaCoordinates.Clear(); registeredRuntimeGridCoordinates.Clear(); activeRuntimeModules.Clear(); fluidTopologyVersion++; }
+    public static void Reset() { registeredRuntimeAreaCoordinates.Clear(); registeredRuntimeGridCoordinates.Clear(); registeredRuntimeFluidOutputCoordinates.Clear(); activeRuntimeModules.Clear(); fluidTopologyVersion++; MapObjectTickManager.CurrentSimulationTick++; }
     internal static bool TryGetPumpPipePassAtRuntimeCoordinate(Vector2Int coordinate, out Pump pump, out Vector2Int other, out Vector2Int external)
     {
         pump = null; other = external = default;
@@ -232,6 +325,31 @@ public partial class InputOutputModule : InstallationObject
         return storage != null;
     }
 }
+public class ItemDefinition
+{
+    public int id;
+    public float ElectricityRate, CompleteEnergy;
+    public static float ResolveUseEnergyRatePerSecond(ItemDefinition definition) => definition.ElectricityRate;
+}
+public static class CraftingTreeRuntime
+{
+    public static bool TryGetIngredientsView(int id, out IReadOnlyList<int> inputs) { inputs = null; return false; }
+    public static float GetOutputAmount(int id) => 1f;
+    public static int GetOutputCount(int id) => 1;
+}
+public partial class ProductionMachine : InputOutputModule
+{
+    private static void NotifyFluidOutputCapacityIncreased(InputOutputModule source) { }
+    private long productionFluidOutputUnits = -1;
+    private float productionFluidOutputDeltaTime;
+    public float Remaining => DeterministicSimulationUnits.ToFloat(Math.Max(0, productionFluidOutputUnits));
+    public bool Pending => IsActiveCraftRunning;
+    public void CompleteTick()
+    { MapObjectTickManager.CurrentSimulationTick += DeterministicSimulationUnits.DeltaTimeToTicks(.1f); productionFluidOutputDeltaTime = .1f; if (Pending) TryCompleteActiveCraft(); }
+    public void StartWorking() => BeginWorkingCraft();
+    public void WorkingTick()
+    { MapObjectTickManager.CurrentSimulationTick += DeterministicSimulationUnits.DeltaTimeToTicks(.1f); productionFluidOutputDeltaTime = .1f; AdvanceCraft(.1f); }
+}
 public static class Checks
 {
     private static int passed, failed;
@@ -243,6 +361,104 @@ public static class Checks
     {
         foreach(var d in new[]{Vector2Int.right,Vector2Int.up,Vector2Int.left,Vector2Int.down})
         {
+            foreach (int layout in new[] { 0, 1, 2, 3 })
+            {
+                World.Reset();
+                var sourceTank = new Fluidtank(); World.Place(sourceTank, -d);
+                sourceTank.TryAddFluidLiters(1, 10f, 25f, out _);
+                var supplyPump = new Pump { PressureLitersPerSecond = 5f };
+                supplyPump.Pass(default, -d, d*3, d);
+                supplyPump.Body(d, d*2);
+                Vector2Int machineInput = layout == 0 ? d*3 : layout == 1 ? d*4 : layout == 2 ? d*2 : d*6;
+                var receiver = new ProductionMachine(); receiver.InputPort(machineInput, -d);
+                if (layout == 3) Pipes(d*3, d, 4);
+                Check(receiver.Pull(machineInput, .5f), .5f, $"tank / Pump / maker intake {d}, layout={layout}");
+                Check(sourceTank.StoredFluidLiters, 9.5f, "maker intake removes real tank stock");
+                Check(receiver.Pull(machineInput, .5f), 0f, "same tick cannot reuse Pump throughput budget");
+                MapObjectTickManager.CurrentSimulationTick += DeterministicSimulationUnits.DeltaTimeToTicks(.1f);
+                supplyPump.PressureLitersPerSecond = 2.5f;
+                Check(receiver.Pull(machineInput, .5f), .25f, "maker intake follows edited Pump pressure");
+                sourceTank.TryConsumeFluidLiters(1, 50f, out _);
+                MapObjectTickManager.CurrentSimulationTick += DeterministicSimulationUnits.DeltaTimeToTicks(.1f);
+                Check(receiver.Pull(machineInput, .5f), 0f, "empty tank supplies no fluid to maker");
+            }
+            World.Reset(); var pipeMaker = new ProductionMachine(); pipeMaker.Output(default,d);
+            Pipes(default,d,8);
+            var pipeTank = new Fluidtank(); World.Place(pipeTank,d*8);
+            pipeMaker.CompleteTick();
+            Check(pipeTank.StoredFluidLiters,.186f,$"maker / 8 ordinary pipes / tank first delivery {d}");
+            Check(pipeMaker.Remaining + pipeTank.StoredFluidLiters,2f,"ordinary pipes preserve crafted volume");
+            for (int tick=0; tick<20 && pipeMaker.Pending; tick++) pipeMaker.CompleteTick();
+            Check(pipeTank.StoredFluidLiters,2f,"ordinary pipes deliver entire recipe batch");
+            Check(pipeMaker.Pending ? 1 : 0,0,"ordinary pipe output finishes craft");
+
+            World.Reset(); pipeMaker = new ProductionMachine(); pipeMaker.Output(default,d); pipeMaker.StartWorking();
+            Pipes(default,d,8); pipeTank = new Fluidtank(); World.Place(pipeTank,d*8);
+            for (int tick=0; tick<359; tick++) pipeMaker.WorkingTick();
+            Check(pipeTank.StoredFluidLiters,0,$"Working phase retains output until 36 second craft finishes {d}");
+            pipeMaker.WorkingTick();
+            Check(pipeTank.StoredFluidLiters,.093f,"energy completion starts ordinary pipe delivery at Count 1 L/s");
+            Check(pipeMaker.Remaining + pipeTank.StoredFluidLiters,36f,"36 second craft creates 36 L at Count 1");
+            for (int tick=0; tick<400 && pipeMaker.Pending; tick++) pipeMaker.WorkingTick();
+            Check(pipeTank.StoredFluidLiters,36f,"ordinary pipe batch drains after actual production advance");
+
+            World.Reset(); pipeMaker = new ProductionMachine(); pipeMaker.Output(default,d);
+            var sideDirection = new Vector2Int(-d.y,d.x);
+            PipeRuntimeRecord.Add(default,-d,sideDirection);
+            Pipes(sideDirection,sideDirection,7);
+            pipeTank = new Fluidtank(); World.Place(pipeTank,sideDirection*8);
+            for (int tick=0; tick<20 && pipeMaker.Pending; tick++) pipeMaker.CompleteTick();
+            Check(pipeTank.StoredFluidLiters,2f,$"maker output / perpendicular ordinary pipe / tank {d}");
+
+            // Keep the same lateral route but leave the output cell virtual.
+            // The port itself exposes only the direction away from the maker.
+            World.Reset(); pipeMaker = new ProductionMachine(); pipeMaker.Output(default,d);
+            Pipes(sideDirection,sideDirection,8);
+            pipeTank = new Fluidtank(); World.Place(pipeTank,sideDirection*9);
+            pipeMaker.CompleteTick();
+            Check(pipeTank.StoredFluidLiters,0,$"virtual output beside lateral pipe chain cannot turn sideways {d}");
+            Check(pipeMaker.Remaining,2f,"unreachable receiver leaves actual output batch buffered");
+
+            World.Reset(); pipeMaker = new ProductionMachine(); pipeMaker.Output(default,d);
+            Pipes(d,d,8);
+            pipeTank = new Fluidtank(); World.Place(pipeTank,d*9);
+            for (int tick=0; tick<20 && pipeMaker.Pending; tick++) pipeMaker.CompleteTick();
+            Check(pipeTank.StoredFluidLiters,2f,$"virtual output with pipe chain on external side delivers {d}");
+
+            World.Reset(); pipeMaker = new ProductionMachine(); pipeMaker.Output(default,d);
+            PipeRuntimeRecord.Add(default,-d,sideDirection);
+            Pipes(sideDirection,sideDirection,8);
+            pipeTank = new Fluidtank(); World.Place(pipeTank,sideDirection*9);
+            for (int tick=0; tick<20 && pipeMaker.Pending; tick++) pipeMaker.CompleteTick();
+            Check(pipeTank.StoredFluidLiters,2f,$"corner pipe on output cell connects same lateral route {d}");
+
+            World.Reset(); var maker = new InputOutputModule(); maker.Output(default,d);
+            var dockedPump = new Pump(); dockedPump.Pass(-d,-d,d*2,d); dockedPump.Body(default,d);
+            var dockedTank = new Fluidtank(); World.Place(dockedTank,d*3);
+            Check(maker.Emit(.2f),.2f,$"maker output overlapping Pump inlet body {d}");
+            Check(dockedTank.StoredFluidLiters,.2f,"docked output reaches actual tank");
+
+            World.Reset(); var craftingMaker = new ProductionMachine(); craftingMaker.Output(default,d);
+            dockedPump = new Pump { PressureLitersPerSecond = 5f };
+            dockedPump.Pass(-d,-d,d*2,d); dockedPump.Body(default,d);
+            for (int i = 0; i < 5; i++)
+            {
+                var nextPump = new Pump { PressureLitersPerSecond = 5f };
+                nextPump.Pass(d*(i*2+1),-d,d*(i*2+4),d); nextPump.Body(d*(i*2+2),d*(i*2+3));
+            }
+            dockedTank = new Fluidtank(); World.Place(dockedTank,d*13);
+            craftingMaker.CompleteTick();
+            Check(dockedTank.StoredFluidLiters,.2f,$"completed recipe / docked inlet / 6 interlocked pumps / tank {d}");
+            Check(craftingMaker.Remaining + dockedTank.StoredFluidLiters,2f,"transport preserves crafted volume");
+            for (int tick=0; tick<12 && craftingMaker.Pending; tick++) craftingMaker.CompleteTick();
+            Check(dockedTank.StoredFluidLiters,2f,"entire recipe output reaches downstream tank");
+            Check(craftingMaker.Pending ? 1 : 0,0,"drained craft completes");
+
+            World.Reset(); maker = new InputOutputModule(); maker.Output(default,-d);
+            dockedPump = new Pump(); dockedPump.Pass(-d,-d,d*2,d); dockedPump.Body(default,d);
+            dockedTank = new Fluidtank(); World.Place(dockedTank,d*3);
+            Check(maker.Emit(.2f),0,$"back-facing machine output cannot dock onto Pump body {d}");
+
             World.Reset(); var pump = new Pump(); pump.Output(default,d); Pipes(default,d,3);
             var tank = new Fluidtank(); World.Place(tank,d*3);
             Check(pump.Emit(3),3,$"pump / 3 pipes / tank {d}"); Check(tank.StoredFluidLiters,3,"tank actual storage");

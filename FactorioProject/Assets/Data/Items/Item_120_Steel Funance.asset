@@ -13,7 +13,7 @@ MonoBehaviour:
   m_Name: Item_120_Steel Funance
   m_EditorClassIdentifier: Assembly-CSharp::ItemDefinition
   itemName: Steel Funance
-  id: 40
+  id: 42
   mapObject: {fileID: 3843491245406909261, guid: 2089176be5a3410428d471926164db6c, type: 3}
   mapObjectArchetype: {fileID: 0}
   useMapColor: 1
@@ -35,6 +35,7 @@ MonoBehaviour:
   upgradeable: 1
   keepIoAreaItemsInPlaceWhileEditing: 0
   capacity: 10
+  isFluid: 0
   storesFluid: 0
   fluidStorageLiters: 0
   fluidDisplayColor: {r: 1, g: 1, b: 1, a: 1}

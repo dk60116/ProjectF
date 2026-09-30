@@ -1,3 +1,4 @@
+using ProjectF.Crafting;
 using System;
 using System.Collections.Generic;
 using System.IO;
@@ -8,7 +9,7 @@ using UnityEditor;
 
 public static class CraftingTreeRuntime
 {
-    private const int CurrentCraftingTreeFileVersion = 5;
+    private const int CurrentCraftingTreeFileVersion = CraftingTreeQuantity.FileVersion;
     private const int ItemNameCraftingTreeFileVersion = 5;
     private const int ItemIdCraftingTreeFileVersion = 4;
     private const int MultiCraftingMapObjectGuidFileVersion = 3;
@@ -18,12 +19,13 @@ public static class CraftingTreeRuntime
     public struct IngredientEntry
     {
         public int itemId;
-        public int count;
+        public float amount;
+        public int count => CraftingTreeQuantity.ToItemCount(amount);
 
-        public IngredientEntry(int itemId, int count)
+        public IngredientEntry(int itemId, float amount)
         {
             this.itemId = itemId;
-            this.count = count;
+            this.amount = amount;
         }
     }
 
@@ -31,7 +33,7 @@ public static class CraftingTreeRuntime
     private static readonly Dictionary<int, List<int>> CraftableByRequiredMapObject = new Dictionary<int, List<int>>();
     private static readonly Dictionary<int, List<IngredientEntry>> IngredientsByItem = new Dictionary<int, List<IngredientEntry>>();
     private static readonly Dictionary<int, List<int>> RequiredCraftingMapObjectIdsByItem = new Dictionary<int, List<int>>();
-    private static readonly Dictionary<int, int> OutputCountByItem = new Dictionary<int, int>();
+    private static readonly Dictionary<int, float> OutputCountByItem = new Dictionary<int, float>();
     private static bool loadAttempted;
     private static bool loaded;
 
@@ -115,7 +117,9 @@ public static class CraftingTreeRuntime
         return false;
     }
 
-    public static int GetOutputCount(int itemId)
+    public static int GetOutputCount(int itemId) => CraftingTreeQuantity.ToItemCount(GetOutputAmount(itemId));
+
+    public static float GetOutputAmount(int itemId)
     {
         EnsureLoaded();
 
@@ -124,9 +128,9 @@ public static class CraftingTreeRuntime
             return 1;
         }
 
-        if (OutputCountByItem.TryGetValue(itemId, out int outputCount))
+        if (OutputCountByItem.TryGetValue(itemId, out float outputCount))
         {
-            return Mathf.Max(1, outputCount);
+            return outputCount;
         }
 
         return 1;
@@ -192,8 +196,8 @@ public static class CraftingTreeRuntime
                 {
                     int itemId = ReadItemId(reader, version, itemIdsByName);
                     List<int> requiredCraftingMapObjectIds = ReadCraftingMapObjectRuntimeIds(reader, version, itemIdsByName);
-                    int outputCount = version >= OutputCountCraftingTreeFileVersion
-                        ? Mathf.Max(1, reader.ReadInt32())
+                    float outputCount = version >= OutputCountCraftingTreeFileVersion
+                        ? CraftingTreeQuantity.Read(reader, version)
                         : 1;
 
                     if (itemId >= 0)
@@ -218,7 +222,7 @@ public static class CraftingTreeRuntime
                     for (int j = 0; j < ingredientCount; j++)
                     {
                         int ingredientId = ReadItemId(reader, version, itemIdsByName);
-                        int ingredientCountValue = reader.ReadInt32();
+                        float ingredientCountValue = CraftingTreeQuantity.Read(reader, version);
 
                         if (itemId < 0 || ingredientId < 0)
                         {
@@ -232,7 +236,7 @@ public static class CraftingTreeRuntime
                             ingredientList = new List<IngredientEntry>(ingredientCount);
                         }
 
-                        ingredientList.Add(new IngredientEntry(ingredientId, Mathf.Max(1, ingredientCountValue)));
+                        ingredientList.Add(new IngredientEntry(ingredientId, ingredientCountValue));
                     }
 
                     if (ingredientList != null && ingredientList.Count > 0)

@@ -13,7 +13,7 @@ MonoBehaviour:
   m_Name: Item_116_Anvilbench
   m_EditorClassIdentifier: Assembly-CSharp::ItemDefinition
   itemName: Anvilbench
-  id: 23
+  id: 24
   mapObject: {fileID: 7839628250064023149, guid: 6168af2f119e8f040a9678762a5df929, type: 3}
   mapObjectArchetype: {fileID: 0}
   useMapColor: 0
@@ -35,6 +35,7 @@ MonoBehaviour:
   upgradeable: 1
   keepIoAreaItemsInPlaceWhileEditing: 0
   capacity: 10
+  isFluid: 0
   storesFluid: 0
   fluidStorageLiters: 0
   fluidDisplayColor: {r: 1, g: 1, b: 1, a: 1}

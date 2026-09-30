@@ -13,7 +13,7 @@ MonoBehaviour:
   m_Name: Item_53_Rail handcar
   m_EditorClassIdentifier: 
   itemName: Camp fire
-  id: 38
+  id: 40
   mapObject: {fileID: 1218127140146215825, guid: d1bcd749f595cfb4b819a990cfe8e6a4, type: 3}
   mapObjectArchetype: {fileID: 11400000, guid: f31f801effc042c488f054da301ceab0, type: 2}
   useMapColor: 1
@@ -35,6 +35,7 @@ MonoBehaviour:
   upgradeable: 1
   keepIoAreaItemsInPlaceWhileEditing: 0
   capacity: 10
+  isFluid: 0
   storesFluid: 0
   fluidStorageLiters: 0
   fluidDisplayColor: {r: 1, g: 1, b: 1, a: 1}

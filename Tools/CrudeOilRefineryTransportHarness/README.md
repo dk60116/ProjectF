@@ -2,9 +2,10 @@
 
 Run `./Tools/CrudeOilRefineryTransportHarness/Run.ps1` from the repository root.
 The harness extracts the production pipe-retention, per-output connection lookup,
-and refinery pressure methods. It tests separate output fluids, 0/50/100-pipe
-routes, full storage, and agreement between delivered volume and the pressure
-shown at a distant tank. It also extracts and executes the production continuous-refining tick. Each output
+and shared producer pressure methods. Output configuration defines native pressure in L/s.
+It tests separate output fluids, 0/50/100-pipe routes, full storage, disabled sources,
+fractional configured amounts and applying distance loss once to native pressure.
+It also extracts and executes the production continuous-refining tick. Each output
 has an independent transport limit: disconnected/full/incompatible or partially
 accepted byproducts are discarded without stopping other ports. Inputs and energy
 remain required, and discarded quantities are not queued for later delivery.

@@ -13,7 +13,7 @@ MonoBehaviour:
   m_Name: Item_111_Crude Oil Refinery
   m_EditorClassIdentifier: Assembly-CSharp::ItemDefinition
   itemName: Crude Oil Refinery
-  id: 69
+  id: 71
   mapObject: {fileID: 950080818205513044, guid: aa977cfc0de120b4dad23fcfaeac4a10, type: 3}
   mapObjectArchetype: {fileID: 0}
   useMapColor: 1
@@ -35,6 +35,7 @@ MonoBehaviour:
   upgradeable: 1
   keepIoAreaItemsInPlaceWhileEditing: 0
   capacity: 10
+  isFluid: 0
   storesFluid: 1
   fluidStorageLiters: 30
   fluidDisplayColor: {r: 1, g: 1, b: 1, a: 1}

@@ -22,6 +22,22 @@ if (-not $placementSource.Contains('TryAppendConfiguredOutputItemIds(areaMarkerO
 $boundary = $source.IndexOf('internal sealed class InstallationPlacementAreaRegistry', [StringComparison]::Ordinal)
 if ($boundary -lt 0) { throw 'Area registry boundary missing' }
 [IO.File]::WriteAllText((Join-Path $probe 'AreaMarker.cs'), $source.Substring(0, $boundary))
+function PlacementMember([string]$signature) {
+    $start = $placementSource.IndexOf($signature, [StringComparison]::Ordinal)
+    if ($start -lt 0) { throw "Missing placement member: $signature" }
+    $end = $placementSource.IndexOf('{', $start) + 1
+    $depth = 1
+    while ($depth -gt 0 -and $end -lt $placementSource.Length) {
+        if ($placementSource[$end] -eq '{') { $depth++ }
+        if ($placementSource[$end] -eq '}') { $depth-- }
+        $end++
+    }
+    $placementSource.Substring($start, $end - $start)
+}
+$placementProbe = "using System.Collections.Generic; using UnityEngine; public partial class PlacementMarkerProbe {`n"
+$placementProbe += (PlacementMember 'private void AddPipeOutputAreaMarkerRequests(') + "`n"
+$placementProbe += (PlacementMember 'private Sprite ResolvePipeOutputMarkerIcon(') + "`n}"
+[IO.File]::WriteAllText((Join-Path $probe 'PlacementMarkerProbe.cs'), $placementProbe)
 Copy-Item -LiteralPath (Join-Path $repo 'FactorioProject/Assets/Scripts/Map/AreaMarkerRenderer.cs') -Destination $probe
 Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'Checks.cs') -Destination $probe
 Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'UnityStubs.cs') -Destination $probe

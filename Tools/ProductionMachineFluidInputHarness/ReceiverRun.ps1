@@ -10,7 +10,19 @@ if ($start -lt 0 -or $end -lt 0) { throw 'Missing ProductionMachine fluid receiv
 
 $generated = "using System; using System.Collections.Generic; using UnityEngine;`n"
 $generated += "public partial class ProductionMachine : InputOutputModule {`n"
-$generated += $source.Substring($start, $end - $start) + "`n}"
+$generated += $source.Substring($start, $end - $start) + "`n"
+foreach ($range in @(
+    @('private long GetRequiredProductionFluidUnits(', 'private bool HasProductionFluidInputPort('),
+    @('protected override void TryStartNextCraft(', 'protected override bool TryCompleteActiveCraft('),
+    @('private bool TryResolveProductionIngredientBlocks(', 'private void PullProductionFluidIngredients('),
+    @('private void PullProductionFluidIngredients(', 'private long GetProductionFluidUnits('),
+    @('private float ResolveProductionFluidBatchLiters(', 'private float ResolveProductionFluidOutputRate('))) {
+    $rangeStart = $source.IndexOf($range[0], [StringComparison]::Ordinal)
+    $rangeEnd = $source.IndexOf($range[1], $rangeStart, [StringComparison]::Ordinal)
+    if ($rangeStart -lt 0 -or $rangeEnd -lt 0) { throw 'Missing fluid batch quota calculation' }
+    $generated += $source.Substring($rangeStart, $rangeEnd - $rangeStart) + "`n"
+}
+$generated += '}'
 $probeDir = Join-Path ([IO.Path]::GetTempPath()) ('ProjectF-ProductionFluidReceiver-' + [Guid]::NewGuid().ToString('N'))
 New-Item -ItemType Directory -Path $probeDir | Out-Null
 Set-Content -LiteralPath (Join-Path $probeDir 'Production.cs') -Value $generated

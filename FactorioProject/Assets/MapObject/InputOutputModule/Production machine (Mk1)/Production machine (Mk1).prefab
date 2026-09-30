@@ -506,7 +506,7 @@ MonoBehaviour:
   m_EditorClassIdentifier: 
   id: 0
   objectName: Production machine (Mk1)
-  objId: 73
+  objId: 75
   itemDefinition: {fileID: 11400000, guid: a74ba1d8dd011f34ca2a0c33b1aa5725, type: 2}
   mapStatus:
     mapSizeX: 1
@@ -640,6 +640,12 @@ MonoBehaviour:
       count: 2
     outputs:
     - itemDefinition: {fileID: 11400000, guid: a10ec264242e79b42b1d48d44ad69394, type: 2}
+      count: 1
+  - inputs:
+    - itemDefinition: {fileID: 11400000, guid: d920f99b12ae8ba4eb521eb6252da50a, type: 2}
+      count: 3
+    outputs:
+    - itemDefinition: {fileID: 11400000, guid: b3b818c383ac7a24e86994e0e69641bb, type: 2}
       count: 1
   inputList: []
   outputList: []

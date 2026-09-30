@@ -1,4 +1,5 @@
-﻿using System;
+using ProjectF.Crafting;
+using System;
 using System.Collections.Generic;
 using System.IO;
 using UnityEditor;
@@ -6,7 +7,7 @@ using UnityEngine;
 
 internal static class CraftingTreeItemIdRemapper
 {
-    private const int CurrentCraftingTreeFileVersion = 5;
+    private const int CurrentCraftingTreeFileVersion = CraftingTreeQuantity.FileVersion;
     private const int ItemNameCraftingTreeFileVersion = 5;
     private const int ItemIdCraftingTreeFileVersion = 4;
 
@@ -26,7 +27,7 @@ internal static class CraftingTreeItemIdRemapper
         public int itemId = -1;
         public string itemName = string.Empty;
         public string definitionAssetPath = string.Empty;
-        public int outputCount = 1;
+        public float outputCount = 1;
         public List<CraftingIngredientJsonEntry> ingredients = new List<CraftingIngredientJsonEntry>();
         public List<CraftingMapObjectJsonEntry> craftingMapObjects = new List<CraftingMapObjectJsonEntry>();
         public List<CraftingMapObjectJsonEntry> requiredMapObjects = new List<CraftingMapObjectJsonEntry>();
@@ -38,7 +39,7 @@ internal static class CraftingTreeItemIdRemapper
         public int itemId = -1;
         public string itemName = string.Empty;
         public string definitionAssetPath = string.Empty;
-        public int count = 1;
+        public float count = 1;
     }
 
     [Serializable]
@@ -52,13 +53,13 @@ internal static class CraftingTreeItemIdRemapper
     private struct BinaryIngredientEntry
     {
         public int itemId;
-        public int count;
+        public float count;
     }
 
     private sealed class BinaryRecipeEntry
     {
         public int itemId;
-        public int outputCount;
+        public float outputCount;
         public readonly List<int> requiredMapObjectItemIds = new List<int>();
         public readonly List<BinaryIngredientEntry> ingredients = new List<BinaryIngredientEntry>();
     }
@@ -73,7 +74,7 @@ internal static class CraftingTreeItemIdRemapper
     internal sealed class CapturedRecipeEntry
     {
         public DefinitionReference item;
-        public int outputCount = 1;
+        public float outputCount = 1;
         public readonly List<CapturedMapObjectEntry> mapObjects = new List<CapturedMapObjectEntry>();
         public readonly List<CapturedIngredientEntry> ingredients = new List<CapturedIngredientEntry>();
     }
@@ -81,7 +82,7 @@ internal static class CraftingTreeItemIdRemapper
     internal sealed class CapturedIngredientEntry
     {
         public DefinitionReference item;
-        public int count = 1;
+        public float count = 1;
     }
 
     internal sealed class CapturedMapObjectEntry
@@ -184,7 +185,7 @@ internal static class CraftingTreeItemIdRemapper
             CapturedRecipeEntry capturedEntry = new CapturedRecipeEntry
             {
                 item = targetReference,
-                outputCount = Mathf.Max(1, sourceEntry.outputCount)
+                outputCount = CraftingTreeQuantity.Normalize(sourceEntry.outputCount)
             };
 
             for (int mapObjectIndex = 0; mapObjectIndex < sourceEntry.requiredMapObjectItemIds.Count; mapObjectIndex++)
@@ -212,7 +213,7 @@ internal static class CraftingTreeItemIdRemapper
                 capturedEntry.ingredients.Add(new CapturedIngredientEntry
                 {
                     item = ingredientReference,
-                    count = Mathf.Max(1, sourceIngredient.count)
+                    count = CraftingTreeQuantity.Normalize(sourceIngredient.count)
                 });
             }
 
@@ -258,7 +259,7 @@ internal static class CraftingTreeItemIdRemapper
                 CapturedRecipeEntry capturedEntry = new CapturedRecipeEntry
                 {
                     item = targetReference,
-                    outputCount = Mathf.Max(1, sourceEntry.outputCount)
+                    outputCount = CraftingTreeQuantity.Normalize(sourceEntry.outputCount)
                 };
 
                 List<CraftingMapObjectJsonEntry> mapObjects = GetJsonMapObjectEntries(sourceEntry);
@@ -293,7 +294,7 @@ internal static class CraftingTreeItemIdRemapper
                         capturedEntry.ingredients.Add(new CapturedIngredientEntry
                         {
                             item = ingredientReference,
-                            count = Mathf.Max(1, sourceIngredient.count)
+                            count = CraftingTreeQuantity.Normalize(sourceIngredient.count)
                         });
                     }
                 }
@@ -325,7 +326,7 @@ internal static class CraftingTreeItemIdRemapper
             BinaryRecipeEntry entry = new BinaryRecipeEntry
             {
                 itemId = targetDefinition.id,
-                outputCount = Mathf.Max(1, capturedEntry.outputCount)
+                outputCount = CraftingTreeQuantity.Normalize(capturedEntry.outputCount, targetDefinition)
             };
 
             HashSet<int> seenMapObjectIds = new HashSet<int>();
@@ -351,7 +352,7 @@ internal static class CraftingTreeItemIdRemapper
                 entry.ingredients.Add(new BinaryIngredientEntry
                 {
                     itemId = ingredientDefinition.id,
-                    count = Mathf.Max(1, capturedIngredient.count)
+                    count = CraftingTreeQuantity.Normalize(capturedIngredient.count, ingredientDefinition)
                 });
             }
 
@@ -491,7 +492,7 @@ internal static class CraftingTreeItemIdRemapper
             itemId = sourceEntry.itemId,
             itemName = GetDefinitionDisplayName(targetDefinition),
             definitionAssetPath = GetDefinitionAssetPath(targetDefinition),
-            outputCount = Mathf.Max(1, sourceEntry.outputCount)
+            outputCount = CraftingTreeQuantity.Normalize(sourceEntry.outputCount)
         };
 
         for (int mapObjectIndex = 0; mapObjectIndex < sourceEntry.requiredMapObjectItemIds.Count; mapObjectIndex++)
@@ -510,7 +511,7 @@ internal static class CraftingTreeItemIdRemapper
                 itemId = ingredient.itemId,
                 itemName = GetDefinitionDisplayName(ingredientDefinition),
                 definitionAssetPath = GetDefinitionAssetPath(ingredientDefinition),
-                count = Mathf.Max(1, ingredient.count)
+                count = CraftingTreeQuantity.Normalize(ingredient.count)
             });
         }
 
@@ -849,8 +850,8 @@ internal static class CraftingTreeItemIdRemapper
             using (BinaryReader reader = new BinaryReader(stream))
             {
                 int version = reader.ReadInt32();
-                if (version != ItemIdCraftingTreeFileVersion
-                    && version != ItemNameCraftingTreeFileVersion)
+                if (version < ItemIdCraftingTreeFileVersion
+                    || version > CurrentCraftingTreeFileVersion)
                 {
                     Debug.LogWarning($"CraftingTreeItemIdRemapper: unsupported crafting tree version {version} at '{path}'.");
                     return false;
@@ -874,7 +875,7 @@ internal static class CraftingTreeItemIdRemapper
                         }
                     }
 
-                    entry.outputCount = Mathf.Max(1, reader.ReadInt32());
+                    entry.outputCount = CraftingTreeQuantity.Read(reader, version);
 
                     int ingredientCount = Mathf.Max(0, reader.ReadInt32());
                     for (int ingredientIndex = 0; ingredientIndex < ingredientCount; ingredientIndex++)
@@ -882,7 +883,7 @@ internal static class CraftingTreeItemIdRemapper
                         entry.ingredients.Add(new BinaryIngredientEntry
                         {
                             itemId = ReadItemId(reader, version, identitiesByKey),
-                            count = Mathf.Max(1, reader.ReadInt32())
+                            count = CraftingTreeQuantity.Read(reader, version)
                         });
                     }
 
@@ -954,13 +955,13 @@ internal static class CraftingTreeItemIdRemapper
                     writer.Write(GetRequiredItemName(entry.requiredMapObjectItemIds[mapObjectIndex], definitions));
                 }
 
-                writer.Write(Mathf.Max(1, entry.outputCount));
+                writer.Write(CraftingTreeQuantity.Normalize(entry.outputCount, FindDefinitionById(definitions, entry.itemId)));
                 writer.Write(entry.ingredients.Count);
                 for (int ingredientIndex = 0; ingredientIndex < entry.ingredients.Count; ingredientIndex++)
                 {
                     BinaryIngredientEntry ingredient = entry.ingredients[ingredientIndex];
                     writer.Write(GetRequiredItemName(ingredient.itemId, definitions));
-                    writer.Write(Mathf.Max(1, ingredient.count));
+                    writer.Write(CraftingTreeQuantity.Normalize(ingredient.count, FindDefinitionById(definitions, ingredient.itemId)));
                 }
             }
         }

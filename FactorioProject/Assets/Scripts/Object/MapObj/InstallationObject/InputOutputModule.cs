@@ -50,7 +50,33 @@ public class InputOutputModule : InstallationObject,
 
     public virtual float GetObjectInfoFluidPressureLitersPerSecond(int fluidItemId)
     {
-        return GetObjectInfoFluidOutputLitersPerSecond(fluidItemId);
+        if (!isActiveAndEnabled || fluidItemId < 0
+            || !IsRecipeOutputAllowedByItemFilter(fluidItemId))
+        {
+            return 0f;
+        }
+
+        // Output fluid amounts define native pressure in L/s, independently of
+        // recent deliveries. Alternative recipes do not add pressure together.
+        IReadOnlyList<InputOutputPair> pairs = InputOutputPairs;
+        float pressure = 0f;
+        for (int pairIndex = 0; pairIndex < pairs.Count; pairIndex++)
+        {
+            InputOutputPair pair = pairs[pairIndex];
+            if (pair == null || pair.outputs == null) continue;
+
+            float recipePressure = 0f;
+            for (int outputIndex = 0; outputIndex < pair.outputs.Count; outputIndex++)
+            {
+                ItemIoEntry output = pair.outputs[outputIndex];
+                if (output.IsFluid && output.itemDefinition.id == fluidItemId)
+                {
+                    recipePressure += output.ResolvedAmount;
+                }
+            }
+            pressure = Mathf.Max(pressure, recipePressure);
+        }
+        return pressure;
     }
 
     public static void AppendFluidOutputSourcesAtCoordinate(
@@ -466,6 +492,8 @@ public class InputOutputModule : InstallationObject,
         public List<float> refineryInputFluidTemperatures = new List<float>();
         public List<int> productionInputFluidItemIds = new List<int>();
         public List<long> productionInputFluidUnits = new List<long>();
+        // Version 68 preserves partially delivered ProductionMachine output batches.
+        public long productionOutputFluidUnits = -1L;
         // Legacy binary save slot; continuous sprinkler watering no longer uses a spray timer.
         public float sprinklerSprayElapsedSeconds;
         public float seedPlanterPlantElapsedSeconds;
@@ -504,6 +532,7 @@ public class InputOutputModule : InstallationObject,
             refineryInputFluidTemperatures.Clear();
             productionInputFluidItemIds.Clear();
             productionInputFluidUnits.Clear();
+            productionOutputFluidUnits = -1L;
             steamGeneratorHasGenerationReserve = false;
             hasDeterministicUnits = true;
         }
@@ -549,6 +578,7 @@ public class InputOutputModule : InstallationObject,
                 refineryInputFluidTemperatures = new List<float>(refineryInputFluidTemperatures ?? new List<float>()),
                 productionInputFluidItemIds = new List<int>(productionInputFluidItemIds ?? new List<int>()),
                 productionInputFluidUnits = new List<long>(productionInputFluidUnits ?? new List<long>()),
+                productionOutputFluidUnits = productionOutputFluidUnits,
                 sprinklerSprayElapsedSeconds = sprinklerSprayElapsedSeconds,
                 seedPlanterPlantElapsedSeconds = seedPlanterPlantElapsedSeconds,
                 steamGeneratorHasGenerationReserve = steamGeneratorHasGenerationReserve
@@ -2250,7 +2280,8 @@ public class InputOutputModule : InstallationObject,
 
             foreach (int itemId in module.runtimeFluidOutputItemIdScratch)
             {
-                if (!IsFluidItemId(itemId))
+                if (!IsFluidItemId(itemId)
+                    || !module.IsRecipeOutputAllowedByItemFilter(itemId))
                 {
                     continue;
                 }
@@ -8243,20 +8274,7 @@ public class InputOutputModule : InstallationObject,
 
     public static bool IsFluidItemDefinition(ItemDefinition definition)
     {
-        if (definition == null)
-        {
-            return false;
-        }
-
-        string itemName = definition.itemName;
-        return string.Equals(itemName, "Water", System.StringComparison.OrdinalIgnoreCase)
-               || string.Equals(itemName, "Steam", System.StringComparison.OrdinalIgnoreCase)
-               || string.Equals(itemName, "Oil", System.StringComparison.OrdinalIgnoreCase)
-               || string.Equals(itemName, "Crude Oil", System.StringComparison.OrdinalIgnoreCase)
-               || string.Equals(itemName, "Diesel", System.StringComparison.OrdinalIgnoreCase)
-               || string.Equals(itemName, "Diesel Oil", System.StringComparison.OrdinalIgnoreCase)
-               || string.Equals(itemName, "Heavy Oil", System.StringComparison.OrdinalIgnoreCase)
-               || string.Equals(itemName, "Petroleum gas", System.StringComparison.OrdinalIgnoreCase);
+        return definition != null && definition.isFluid;
     }
 
     private static bool TryGetFluidFuelEnergyType(
@@ -10468,6 +10486,7 @@ public class InputOutputModule : InstallationObject,
     }
 
     protected int ActiveOutputItemId => activeOutputItemId;
+    protected int ActiveRecipeIndex => activeRecipeIndex;
     protected int ActiveOutputCount => activeOutputCount;
     protected bool IsActiveCraftRunning => hasActiveCraft;
     protected bool IsWaitingForOutput => waitingForOutput;

@@ -1,4 +1,5 @@
-﻿using System;
+using ProjectF.Crafting;
+using System;
 using System.Collections.Generic;
 using System.IO;
 using UnityEditor;
@@ -6,7 +7,7 @@ using UnityEngine;
 
 internal static class ProductionMachineRecipeAutoFill
 {
-    private const int CurrentCraftingTreeFileVersion = 5;
+    private const int CurrentCraftingTreeFileVersion = CraftingTreeQuantity.FileVersion;
     private const int ItemNameCraftingTreeFileVersion = 5;
     private const int ItemIdCraftingTreeFileVersion = 4;
     private const int MultiCraftingMapObjectGuidFileVersion = 3;
@@ -27,7 +28,7 @@ internal static class ProductionMachineRecipeAutoFill
         public int itemId = -1;
         public string itemName = string.Empty;
         public string definitionAssetPath = string.Empty;
-        public int outputCount = 1;
+        public float outputCount = 1;
         public List<CraftingIngredientJsonEntry> ingredients = new List<CraftingIngredientJsonEntry>();
         public List<CraftingMapObjectJsonEntry> craftingMapObjects = new List<CraftingMapObjectJsonEntry>();
         public List<CraftingMapObjectJsonEntry> requiredMapObjects = new List<CraftingMapObjectJsonEntry>();
@@ -39,7 +40,7 @@ internal static class ProductionMachineRecipeAutoFill
         public int itemId = -1;
         public string itemName = string.Empty;
         public string definitionAssetPath = string.Empty;
-        public int count = 1;
+        public float count = 1;
     }
 
     [Serializable]
@@ -58,12 +59,12 @@ internal static class ProductionMachineRecipeAutoFill
         public RecipeEntry(
             List<InputOutputModule.ItemIoEntry> inputs,
             ItemDefinition outputDefinition,
-            int outputCount)
+            float outputCount)
         {
             this.inputs = inputs ?? new List<InputOutputModule.ItemIoEntry>();
             this.outputs = new List<InputOutputModule.ItemIoEntry>
             {
-                new InputOutputModule.ItemIoEntry(outputDefinition, Mathf.Max(1, outputCount))
+                new InputOutputModule.ItemIoEntry(outputDefinition, CraftingTreeQuantity.Normalize(outputCount, outputDefinition))
             };
         }
     }
@@ -238,7 +239,7 @@ internal static class ProductionMachineRecipeAutoFill
 
                 inputs.Add(new InputOutputModule.ItemIoEntry(
                     inputDefinition,
-                    Mathf.Max(1, ingredient.count)));
+                    CraftingTreeQuantity.Normalize(ingredient.count, inputDefinition)));
             }
 
             if (hasInvalidIngredient || inputs.Count == 0)
@@ -254,7 +255,7 @@ internal static class ProductionMachineRecipeAutoFill
             recipes.Add(new RecipeEntry(
                 inputs,
                 outputDefinition,
-                Mathf.Max(1, entry.outputCount)));
+                CraftingTreeQuantity.Normalize(entry.outputCount, outputDefinition)));
         }
 
         return recipes;
@@ -551,7 +552,7 @@ internal static class ProductionMachineRecipeAutoFill
                     entry.requiredMapObjects.AddRange(mapObjects);
 
                     entry.outputCount = version >= OutputCountCraftingTreeFileVersion
-                        ? Mathf.Max(1, reader.ReadInt32())
+                        ? CraftingTreeQuantity.Read(reader, version)
                         : 1;
 
                     int ingredientCount = Mathf.Max(0, reader.ReadInt32());
@@ -559,7 +560,7 @@ internal static class ProductionMachineRecipeAutoFill
                     {
                         CraftingIngredientJsonEntry ingredient = new CraftingIngredientJsonEntry();
                         ReadItemReference(reader, version, definitions, ingredient);
-                        ingredient.count = Mathf.Max(1, reader.ReadInt32());
+                        ingredient.count = CraftingTreeQuantity.Read(reader, version);
                         entry.ingredients.Add(ingredient);
                     }
 
@@ -847,9 +848,7 @@ internal static class ProductionMachineRecipeAutoFill
 
         if (countProperty != null)
         {
-            countProperty.floatValue = InputOutputModule.IsFluidItemDefinition(definition)
-                ? Mathf.Max(0.0001f, count)
-                : Mathf.Max(1, Mathf.RoundToInt(count));
+            countProperty.floatValue = CraftingTreeQuantity.Normalize(count, definition);
         }
     }
 

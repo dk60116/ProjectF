@@ -1,3 +1,4 @@
+using ProjectF.Crafting;
 using System;
 using System.Collections.Generic;
 using System.IO;
@@ -9,7 +10,7 @@ public class CraftingTreeEditorWindow : EditorWindow
     private const float SidebarWidth = 260f;
     private const float ItemListRowHeight = 28f;
     private const float ItemFolderIndent = 14f;
-    private const int CurrentCraftingTreeFileVersion = 5;
+    private const int CurrentCraftingTreeFileVersion = CraftingTreeQuantity.FileVersion;
     private const int ItemNameCraftingTreeFileVersion = 5;
     private const int ItemIdCraftingTreeFileVersion = 4;
     private const int MultiCraftingMapObjectGuidFileVersion = 3;
@@ -23,7 +24,7 @@ public class CraftingTreeEditorWindow : EditorWindow
     private string itemSearchText = string.Empty;
     private readonly Dictionary<int, List<IngredientEntry>> recipeByItemId = new Dictionary<int, List<IngredientEntry>>();
     private readonly Dictionary<int, List<MapObject>> craftingMapObjectsByItemId = new Dictionary<int, List<MapObject>>();
-    private readonly Dictionary<int, int> outputCountByItemId = new Dictionary<int, int>();
+    private readonly Dictionary<int, float> outputCountByItemId = new Dictionary<int, float>();
     private readonly List<ItemDefinition> synchronizedDefinitions = new List<ItemDefinition>();
     private readonly List<ItemDefinition> filteredDefinitions = new List<ItemDefinition>();
     private readonly List<ItemDataEditorWindow.ItemListRow> cachedItemListRows =
@@ -68,7 +69,7 @@ public class CraftingTreeEditorWindow : EditorWindow
         public int itemId = -1;
         public string itemName;
         public string definitionAssetPath;
-        public int outputCount = 1;
+        public float outputCount = 1;
         public List<CraftingIngredientJsonEntry> ingredients = new List<CraftingIngredientJsonEntry>();
         public List<CraftingMapObjectJsonEntry> craftingMapObjects = new List<CraftingMapObjectJsonEntry>();
         public List<CraftingMapObjectJsonEntry> requiredMapObjects = new List<CraftingMapObjectJsonEntry>();
@@ -80,7 +81,7 @@ public class CraftingTreeEditorWindow : EditorWindow
         public int itemId = -1;
         public string itemName;
         public string definitionAssetPath;
-        public int count = 1;
+        public float count = 1;
     }
 
     [Serializable]
@@ -94,9 +95,9 @@ public class CraftingTreeEditorWindow : EditorWindow
     private struct IngredientEntry
     {
         public int itemId;
-        public int count;
+        public float count;
 
-        public IngredientEntry(int itemId, int count)
+        public IngredientEntry(int itemId, float count)
         {
             this.itemId = itemId;
             this.count = count;
@@ -563,10 +564,10 @@ public class CraftingTreeEditorWindow : EditorWindow
         EditorGUILayout.LabelField("Output", EditorStyles.boldLabel);
         EditorGUILayout.BeginHorizontal();
         EditorGUILayout.LabelField("Count", GUILayout.Width(80f));
-        int currentValue = GetEditableOutputCount(targetDefinition.id);
-        int newValue = DrawPositiveCountField(
+        float currentValue = GetEditableOutputCount(targetDefinition.id);
+        float newValue = DrawPositiveCountField(
             $"CraftingTree.OutputCount.{targetDefinition.id}",
-            currentValue);
+            currentValue, targetDefinition);
         if (newValue != currentValue)
         {
             outputCountByItemId[targetDefinition.id] = newValue;
@@ -616,13 +617,13 @@ public class CraftingTreeEditorWindow : EditorWindow
                     }
 
                     IngredientEntry currentEntry = recipe[ingredientIndex];
-                    recipe[ingredientIndex] = new IngredientEntry(selectedDefinition.id, currentEntry.count);
+                    recipe[ingredientIndex] = new IngredientEntry(selectedDefinition.id, CraftingTreeQuantity.Normalize(currentEntry.count, selectedDefinition));
                     Repaint();
                 });
             int newItemId = nextDefinition != null ? nextDefinition.id : entry.itemId;
-            int newCount = DrawPositiveCountField(
+            float newCount = DrawPositiveCountField(
                 $"CraftingTree.IngredientCount.{targetDefinition.id}.{i}",
-                entry.count);
+                entry.count, nextDefinition);
 
             if (GUILayout.Button("X", GUILayout.Width(24f)))
             {
@@ -810,7 +811,7 @@ public class CraftingTreeEditorWindow : EditorWindow
             }
 
             int targetItemId = targetDefinition.id;
-            outputCountByItemId[targetItemId] = Mathf.Max(1, entry.outputCount);
+            outputCountByItemId[targetItemId] = CraftingTreeQuantity.Normalize(entry.outputCount, targetDefinition);
 
             List<MapObject> resolvedMapObjects = ResolveCraftingMapObjects(entry, mapObjectCandidates);
             if (resolvedMapObjects.Count > 0)
@@ -831,7 +832,7 @@ public class CraftingTreeEditorWindow : EditorWindow
                         continue;
                     }
 
-                    recipe.Add(new IngredientEntry(ingredientDefinition.id, Mathf.Max(1, ingredientEntry.count)));
+                    recipe.Add(new IngredientEntry(ingredientDefinition.id, CraftingTreeQuantity.Normalize(ingredientEntry.count, ingredientDefinition)));
                 }
             }
 
@@ -865,7 +866,7 @@ public class CraftingTreeEditorWindow : EditorWindow
                     writer.Write(GetPersistedItemName(mapObjectDefinition, definitions));
                 }
 
-                writer.Write(GetOutputCount(itemId));
+                writer.Write(GetOutputCount(itemId, definitions));
 
                 List<IngredientEntry> recipe = GetOrCreateRecipe(itemId);
                 writer.Write(recipe.Count);
@@ -873,7 +874,7 @@ public class CraftingTreeEditorWindow : EditorWindow
                 {
                     ItemDefinition ingredientDefinition = FindDefinitionById(definitions, recipe[j].itemId);
                     writer.Write(GetPersistedItemName(ingredientDefinition, definitions));
-                    writer.Write(NormalizeCraftingCount(recipe[j].count));
+                    writer.Write(CraftingTreeQuantity.Normalize(recipe[j].count, ingredientDefinition));
                 }
             }
         }
@@ -914,8 +915,8 @@ public class CraftingTreeEditorWindow : EditorWindow
                     craftingMapObjectsByItemId[itemId] = mapObjects;
                 }
 
-                int outputCount = version >= OutputCountCraftingTreeFileVersion
-                    ? Mathf.Max(1, reader.ReadInt32())
+                float outputCount = version >= OutputCountCraftingTreeFileVersion
+                    ? CraftingTreeQuantity.Normalize(CraftingTreeQuantity.Read(reader, version), FindDefinitionById(definitions, itemId))
                     : 1;
                 if (itemId >= 0)
                 {
@@ -927,7 +928,7 @@ public class CraftingTreeEditorWindow : EditorWindow
                 for (int j = 0; j < ingredientCount; j++)
                 {
                     int ingredientId = ReadItemId(reader, version, definitions);
-                    int count = NormalizeCraftingCount(reader.ReadInt32());
+                    float count = CraftingTreeQuantity.Normalize(CraftingTreeQuantity.Read(reader, version), FindDefinitionById(definitions, ingredientId));
                     if (ingredientId >= 0)
                     {
                         recipe.Add(new IngredientEntry(ingredientId, count));
@@ -1000,7 +1001,7 @@ public class CraftingTreeEditorWindow : EditorWindow
         entry.itemId = itemId;
         entry.itemName = targetDefinition != null ? GetDefinitionDisplayName(targetDefinition) : string.Empty;
         entry.definitionAssetPath = targetDefinition != null ? AssetDatabase.GetAssetPath(targetDefinition) : string.Empty;
-        entry.outputCount = GetOutputCount(itemId);
+        entry.outputCount = GetOutputCount(itemId, definitions);
 
         List<MapObject> mapObjects = GetCraftingMapObjects(itemId);
         if (mapObjects != null)
@@ -1026,7 +1027,7 @@ public class CraftingTreeEditorWindow : EditorWindow
                 itemId = ingredient.itemId,
                 itemName = ingredientDefinition != null ? GetDefinitionDisplayName(ingredientDefinition) : string.Empty,
                 definitionAssetPath = ingredientDefinition != null ? AssetDatabase.GetAssetPath(ingredientDefinition) : string.Empty,
-                count = Mathf.Max(1, ingredient.count)
+                count = CraftingTreeQuantity.Normalize(ingredient.count, ingredientDefinition)
             });
         }
 
@@ -1431,47 +1432,41 @@ public class CraftingTreeEditorWindow : EditorWindow
         return null;
     }
 
-    private int GetOutputCount(int itemId)
+    private float GetOutputCount(int itemId, List<ItemDefinition> definitions)
     {
-        if (outputCountByItemId.TryGetValue(itemId, out int value))
-        {
-            return NormalizeCraftingCount(value);
-        }
-
-        return 1;
+        float amount = GetEditableOutputCount(itemId);
+        return CraftingTreeQuantity.Normalize(amount,
+            FindDefinitionById(definitions, itemId));
     }
 
-    private int GetEditableOutputCount(int itemId)
-    {
-        return outputCountByItemId.TryGetValue(itemId, out int value) ? value : 1;
-    }
+    private float GetEditableOutputCount(int itemId) =>
+        outputCountByItemId.TryGetValue(itemId, out float value) ? value : 1f;
 
-    private static int DrawPositiveCountField(string controlName, int currentValue)
+    private static float DrawPositiveCountField(string controlName, float currentValue, ItemDefinition definition)
     {
-        int editedValue = currentValue;
+        bool isFluid = InputOutputModule.IsFluidItemDefinition(definition);
+        float editedValue = currentValue;
         if (GUILayout.Button("-", EditorStyles.miniButton, GUILayout.Width(24f)))
         {
             GUI.FocusControl(null);
-            editedValue = editedValue <= 1 ? 1 : editedValue - 1;
+            editedValue = CraftingTreeQuantity.Normalize(editedValue - 1f, definition);
         }
 
         GUI.SetNextControlName(controlName);
-        editedValue = EditorGUILayout.IntField(editedValue, GUILayout.Width(60f));
+        editedValue = isFluid
+            ? EditorGUILayout.FloatField(editedValue, GUILayout.Width(80f))
+            : EditorGUILayout.IntField(Mathf.RoundToInt(editedValue), GUILayout.Width(60f));
         bool isEditing = string.Equals(
-            GUI.GetNameOfFocusedControl(),
-            controlName,
-            StringComparison.Ordinal);
+            GUI.GetNameOfFocusedControl(), controlName, StringComparison.Ordinal);
         if (!isEditing)
         {
-            editedValue = NormalizeCraftingCount(editedValue);
+            editedValue = CraftingTreeQuantity.Normalize(editedValue, definition);
         }
 
         if (GUILayout.Button("+", EditorStyles.miniButton, GUILayout.Width(24f)))
         {
             GUI.FocusControl(null);
-            editedValue = editedValue >= int.MaxValue
-                ? int.MaxValue
-                : NormalizeCraftingCount(editedValue) + 1;
+            editedValue = CraftingTreeQuantity.Normalize(editedValue + 1f, definition);
         }
 
         return editedValue;
@@ -1479,11 +1474,13 @@ public class CraftingTreeEditorWindow : EditorWindow
 
     private void NormalizeAllCraftingCounts()
     {
+        List<ItemDefinition> definitions = GetSynchronizedDefinitions(FindItemManager());
         List<int> outputItemIds = new List<int>(outputCountByItemId.Keys);
         for (int i = 0; i < outputItemIds.Count; i++)
         {
             int itemId = outputItemIds[i];
-            outputCountByItemId[itemId] = NormalizeCraftingCount(outputCountByItemId[itemId]);
+            outputCountByItemId[itemId] = CraftingTreeQuantity.Normalize(
+                outputCountByItemId[itemId], FindDefinitionById(definitions, itemId));
         }
 
         foreach (KeyValuePair<int, List<IngredientEntry>> pair in recipeByItemId)
@@ -1497,18 +1494,14 @@ public class CraftingTreeEditorWindow : EditorWindow
             for (int ingredientIndex = 0; ingredientIndex < recipe.Count; ingredientIndex++)
             {
                 IngredientEntry ingredient = recipe[ingredientIndex];
-                int normalizedCount = NormalizeCraftingCount(ingredient.count);
+                float normalizedCount = CraftingTreeQuantity.Normalize(
+                    ingredient.count, FindDefinitionById(definitions, ingredient.itemId));
                 if (normalizedCount != ingredient.count)
                 {
                     recipe[ingredientIndex] = new IngredientEntry(ingredient.itemId, normalizedCount);
                 }
             }
         }
-    }
-
-    private static int NormalizeCraftingCount(int count)
-    {
-        return Mathf.Max(1, count);
     }
 
     private static void AppendCraftingMapObject(List<MapObject> results, MapObject mapObject)

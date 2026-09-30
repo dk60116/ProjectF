@@ -23,11 +23,11 @@ public static class Checks
             var firstPort = firstBody - axis;
             var secondPort = secondBody + axis;
             Require(pump.TryGetRuntimeFluidEndpoints(out var inlet, out var outlet)
-                && inlet == firstPort && outlet == secondPort, "Rotated footprint must preserve inlet/outlet roles");
-            Require(pump.AllowsRuntimeFluidTraversal(firstPort, false)
-                && !pump.AllowsRuntimeFluidTraversal(firstPort, true), "Inlet permits delivery downstream only");
-            Require(pump.AllowsRuntimeFluidTraversal(secondPort, true)
-                && !pump.AllowsRuntimeFluidTraversal(secondPort, false), "Outlet permits source lookup upstream only");
+                && inlet == secondPort && outlet == firstPort, "Rotated footprint must reverse inlet/outlet roles");
+            Require(pump.AllowsRuntimeFluidTraversal(secondPort, false)
+                && !pump.AllowsRuntimeFluidTraversal(secondPort, true), "Inlet permits delivery downstream only");
+            Require(pump.AllowsRuntimeFluidTraversal(firstPort, true)
+                && !pump.AllowsRuntimeFluidTraversal(firstPort, false), "Outlet permits source lookup upstream only");
             foreach (bool left in new[] { true, false })
             {
                 var body = left ? firstBody : secondBody;
@@ -58,15 +58,15 @@ public static class Checks
                 InputOutputModule.ClearAreas();
                 InputOutputModule.Register(body, Area(body, outward, T.PipeInput));
                 Require(pump.TryGetRuntimePipePass(body, out _, out _), "Facing Pipe Pass must route through body inlet");
-                if (!left)
+                if (left)
                 {
                     foreach (var type in new[] { T.PipeInput, T.PipeInputItem, T.PipeInputEnergy, T.DoubleInputItem })
                     {
                         InputOutputModule.ClearAreas();
                         InputOutputModule.Register(body, Area(body, outward, type));
-                        Require(pump.TryGetRuntimePipePass(firstPort, out remote, out _)
+                        Require(pump.TryGetRuntimePipePass(secondPort, out remote, out _)
                             && remote == body, "Forward Pump delivery must reach the machine's actual input cell");
-                        Require(pump.ResolveRuntimeFluidDeliveryCoordinate(secondPort) == body,
+                        Require(pump.ResolveRuntimeFluidDeliveryCoordinate(firstPort) == body,
                             "Vehicle unloading must use the same direct delivery cell");
                         Require(pump.AllowsRuntimeFluidTraversal(body, true),
                             "Direct machine input must permit upstream withdrawal");
@@ -85,6 +85,18 @@ public static class Checks
             Require(controller2.Resolve(new(firstBody), pump, out anchor, out _)
                 && anchor.Coordinate == firstBody, "Clicking Pipe Pass must retain body-first placement");
         }
+        // slot_04: preserve the installed footprint while reversing its flow.
+        InputOutputModule.ClearAreas();
+        var savedPump = new Pump { Anchor = new(-12, -3), Turns = 3, ObjectAnchorX = 2 };
+        var machineInput = new Vector2Int(-12, -4);
+        InputOutputModule.Register(machineInput, Area(machineInput, new(0, -1), T.DoubleInputItem));
+        Require(savedPump.TryGetRuntimeFluidEndpoints(out var savedInlet, out var savedOutlet)
+            && savedInlet == new Vector2Int(-12, -2) && savedOutlet == new Vector2Int(-12, -5),
+            "Existing slot_04 pump takes tank fluid from above and delivers below");
+        Require(savedPump.TryGetRuntimePipePass(savedInlet, out var delivery, out _) && delivery == machineInput,
+            "Reversed existing pump delivers to the actual maker input body");
+        Require(savedPump.AllowsRuntimeFluidTraversal(machineInput, true),
+            "Maker can withdraw upstream through the reversed outlet body");
         Console.WriteLine($"Pump input placement checks passed: {checks}");
     }
 }

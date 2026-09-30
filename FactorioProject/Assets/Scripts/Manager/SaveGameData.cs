@@ -10,7 +10,8 @@ public sealed class SaveGameData
     // non-electric operational energy requirement.
     // Version 66 stores ProductionMachine's separately metered fluid ingredient buffers.
     // Version 67 stores recursive player crafting plans and reserved intermediate outputs.
-    public const int CurrentVersion = 67;
+    // Version 68 stores the remaining volume of completed production fluid outputs.
+    public const int CurrentVersion = 68;
 
     public int version = CurrentVersion;
     public long savedAtUtcTicks;

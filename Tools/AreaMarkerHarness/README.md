@@ -10,6 +10,7 @@ Coverage:
 - Visibility transitions, disable/re-enable, duplicate registration, clearing and native resource disposal.
 - Parent movement/reconfiguration, icon rotation with non-uniform scale, atlas UV and alpha preservation.
 - Pipe input and output marker builders use their matching recipe direction; virtual outputs include crude oil from an oil drilling machine.
+- Production pipe output icons follow fluid recipes and active fluid batches, refresh after target changes, and ignore input reserves, lower-ID output candidates and overlapping pipe fluids. Solid recipes/batches, cleared recipes and missing sprites use a neutral fallback in placed markers and previews; input markers retain incoming fluid icons.
 - Moving preview changes leave placed mesh uploads untouched.
 - Normal, station and preview depth/queue configuration; negative chunk coordinates and absent icons.
 - More than 65,535 vertices in one batch with valid 32-bit triangle indices.

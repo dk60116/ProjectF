@@ -21,6 +21,9 @@ public class ProductionMachine : InputOutputModule
     private readonly Dictionary<int, long> productionFluidUnits = new Dictionary<int, long>();
     private readonly List<Vector2Int> productionFluidInputCoordinates = new List<Vector2Int>(4);
     private readonly List<int> productionFluidSaveItemIds = new List<int>(2);
+    // -1 means the completed craft has not yet materialized its output batch.
+    private long productionFluidOutputUnits = -1L;
+    private float productionFluidOutputDeltaTime;
     private int maximumProductionIngredientTypes = LegacyMaximumProductionIngredientTypes;
     public int MaximumProductionIngredientTypes => ResolveMaximumProductionIngredientTypes();
 
@@ -34,6 +37,7 @@ public class ProductionMachine : InputOutputModule
     public override PersistentState CapturePersistentState()
     {
         PersistentState state = base.CapturePersistentState();
+        state.productionOutputFluidUnits = productionFluidOutputUnits;
         productionFluidSaveItemIds.Clear();
         foreach (KeyValuePair<int, long> entry in productionFluidUnits)
         {
@@ -62,6 +66,9 @@ public class ProductionMachine : InputOutputModule
         }
 
         base.ApplyPersistentState(state);
+        productionFluidOutputUnits = IsWaitingForOutput && IsFluidItemId(ActiveOutputItemId)
+            ? Math.Max(-1L, state.productionOutputFluidUnits) : -1L;
+        productionFluidOutputDeltaTime = 0f;
         productionFluidUnits.Clear();
         if (state.productionInputFluidItemIds == null
             || state.productionInputFluidUnits == null)
@@ -88,6 +95,8 @@ public class ProductionMachine : InputOutputModule
         productionFluidUnits.Clear();
         productionFluidInputCoordinates.Clear();
         productionFluidSaveItemIds.Clear();
+        productionFluidOutputUnits = -1L;
+        productionFluidOutputDeltaTime = 0f;
         base.PrepareForPool();
     }
 
@@ -99,11 +108,26 @@ public class ProductionMachine : InputOutputModule
         }
 
         PullProductionFluidIngredients(deltaTime);
-        ApplyPlannedBaseModuleTick(deltaTime);
+        productionFluidOutputDeltaTime = deltaTime;
+        try
+        {
+            ApplyPlannedBaseModuleTick(deltaTime);
+        }
+        finally
+        {
+            productionFluidOutputDeltaTime = 0f;
+        }
     }
 
     protected override bool ShouldKeepRuntimeUpdateTickActive()
     {
+        if (IsWaitingForOutput && IsFluidItemId(ActiveOutputItemId))
+        {
+            return TryGetFluidOutputAvailableLiters(ActiveOutputItemId, 1f, out float availableLiters)
+                && availableLiters > 0.0001f
+                && ResolveFluidOutputTransportRetention(
+                    ActiveOutputItemId, ResolveProductionFluidOutputRate(ActiveOutputItemId)) > 0f;
+        }
         if (base.ShouldKeepRuntimeUpdateTickActive())
         {
             return true;
@@ -172,7 +196,8 @@ public class ProductionMachine : InputOutputModule
 
     internal override float GetDedicatedFluidStorageFillRatioAtRuntimeCoordinate(Vector2Int coordinate)
     {
-        if (!UsesDedicatedFluidStorageAtRuntimeCoordinate(coordinate)
+        if (IsActiveCraftRunning
+            || !UsesDedicatedFluidStorageAtRuntimeCoordinate(coordinate)
             || !TryResolveSelectedProductionRecipe(
                 resolvedProductionIngredients, out _, out int outputItemId, out _))
         {
@@ -208,7 +233,8 @@ public class ProductionMachine : InputOutputModule
 
     internal override float GetDedicatedAvailableFluidStorageLitersAtRuntimeCoordinate(Vector2Int coordinate)
     {
-        if (!UsesDedicatedFluidStorageAtRuntimeCoordinate(coordinate)
+        if (IsActiveCraftRunning
+            || !UsesDedicatedFluidStorageAtRuntimeCoordinate(coordinate)
             || !TryResolveSelectedProductionRecipe(
                 resolvedProductionIngredients, out _, out int outputItemId, out _))
         {
@@ -281,7 +307,8 @@ public class ProductionMachine : InputOutputModule
     private bool TryGetProductionFluidIngredientRequiredUnits(int fluidItemId, out long requiredUnits)
     {
         requiredUnits = 0L;
-        if (!IsFluidItemId(fluidItemId)
+        if (IsActiveCraftRunning
+            || !IsFluidItemId(fluidItemId)
             || !TryResolveSelectedProductionRecipe(
                 resolvedProductionIngredients, out _, out int outputItemId, out _))
         {
@@ -464,7 +491,7 @@ public class ProductionMachine : InputOutputModule
         if (IsFluidItemId(itemId))
         {
             float requiredLiters = ResolveFluidIngredientRequiredLiters(
-                outputItemId, itemId, ingredient.count);
+                outputItemId, ingredient.amount);
             long storedUnits = GetProductionFluidUnits(itemId);
             requiredCount = Mathf.CeilToInt(requiredLiters);
             areaCount = storedUnits >= DeterministicSimulationUnits.FromFloat(requiredLiters)
@@ -485,6 +512,53 @@ public class ProductionMachine : InputOutputModule
         }
 
         return itemId >= 0;
+    }
+
+    public readonly struct FluidGaugeState
+    {
+        public readonly int inputItemId, outputItemId;
+        public readonly float fillAmount, convertedFillAmount, currentLiters, totalLiters;
+        public readonly bool isConverting;
+
+        public FluidGaugeState(int inputItemId, int outputItemId, float fillAmount,
+            float convertedFillAmount, float currentLiters, float totalLiters, bool isConverting)
+        {
+            this.inputItemId = inputItemId;
+            this.outputItemId = outputItemId;
+            this.fillAmount = fillAmount;
+            this.convertedFillAmount = convertedFillAmount;
+            this.currentLiters = currentLiters;
+            this.totalLiters = totalLiters;
+            this.isConverting = isConverting;
+        }
+    }
+
+    public bool TryGetObjectInfoProductionFluidGauge(int ingredientIndex, out FluidGaugeState state)
+    {
+        state = default;
+        if (!TryGetObjectInfoProductionFluidIngredient(
+                ingredientIndex, out int inputId, out float storedLiters, out float requiredLiters))
+        {
+            return false;
+        }
+
+        if (IsActiveCraftRunning && TryGetObjectInfoProductionFluidOutput(
+                out int outputId, out _, out float outputLiters, out float batchLiters))
+        {
+            float converted = IsWaitingForOutput ? 1f : Mathf.Clamp01(ObjectInfoWorkGaugeFillAmount);
+            state = IsWaitingForOutput
+                ? new FluidGaugeState(inputId, outputId, Mathf.Clamp01(outputLiters / batchLiters),
+                    0f, outputLiters, batchLiters, false)
+                : new FluidGaugeState(inputId, outputId, 1f, converted,
+                    batchLiters * converted, batchLiters, true);
+        }
+        else
+        {
+            float inputLiters = IsActiveCraftRunning ? requiredLiters : storedLiters;
+            state = new FluidGaugeState(inputId, -1, Mathf.Clamp01(inputLiters / requiredLiters),
+                0f, inputLiters, requiredLiters, false);
+        }
+        return true;
     }
 
     public bool TryGetObjectInfoProductionFluidIngredient(
@@ -513,8 +587,30 @@ public class ProductionMachine : InputOutputModule
         fluidItemId = ingredient.itemId;
         storedLiters = DeterministicSimulationUnits.ToFloat(GetProductionFluidUnits(fluidItemId));
         requiredLiters = ResolveFluidIngredientRequiredLiters(
-            outputItemId, fluidItemId, ingredient.count);
+            outputItemId, ingredient.amount);
         return requiredLiters > 0f;
+    }
+
+    public bool TryGetObjectInfoProductionFluidOutput(
+        out int fluidItemId,
+        out float litersPerSecond,
+        out float storedLiters,
+        out float batchLiters)
+    {
+        fluidItemId = -1;
+        litersPerSecond = storedLiters = batchLiters = 0f;
+        if (!TryResolveObjectInfoProductionIngredients(
+                resolvedProductionIngredients, out _, out int outputItemId, out _)
+            || !IsFluidItemId(outputItemId))
+        {
+            return false;
+        }
+
+        fluidItemId = outputItemId;
+        litersPerSecond = ResolveProductionFluidOutputRate(outputItemId);
+        batchLiters = ResolveProductionFluidBatchLiters(litersPerSecond);
+        storedLiters = DeterministicSimulationUnits.ToFloat(productionFluidOutputUnits);
+        return batchLiters > 0f;
     }
 
     public bool TryGetObjectInfoProductionOutput(
@@ -616,6 +712,10 @@ public class ProductionMachine : InputOutputModule
 
     protected override bool IsRecipeOutputAllowedByItemFilter(int outputItemId)
     {
+        if ((IsActiveCraftRunning || IsWaitingForOutput) && IsFluidItemId(ActiveOutputItemId))
+        {
+            return outputItemId == ActiveOutputItemId;
+        }
         return IsProductionTargetSelected(outputItemId);
     }
 
@@ -666,6 +766,10 @@ public class ProductionMachine : InputOutputModule
 
     protected override void TryStartNextCraft()
     {
+        if (IsActiveCraftRunning)
+        {
+            return;
+        }
         ItemDefinition installedDefinition = ResolveInstalledDefinition();
         if (installedDefinition == null || !HasRuntimeOutputCoordinates)
         {
@@ -722,10 +826,106 @@ public class ProductionMachine : InputOutputModule
             long requiredUnits = GetRequiredProductionFluidUnits(outputItemId, ingredient);
             productionFluidUnits[ingredient.itemId] = GetProductionFluidUnits(ingredient.itemId) - requiredUnits;
             MarkPersistenceStateDirty();
-            NotifyFluidOutputCapacityIncreased(this);
         }
 
         BeginActiveCraft(outputPairIndex, outputItemId, outputCount, installedDefinition);
+    }
+
+    protected override bool TryCompleteActiveCraft()
+    {
+        if (!IsActiveCraftRunning || !IsFluidItemId(ActiveOutputItemId))
+        {
+            productionFluidOutputUnits = -1L;
+            bool wasActive = IsActiveCraftRunning;
+            bool completed = base.TryCompleteActiveCraft();
+            if (wasActive && completed)
+            {
+                NotifyFluidOutputCapacityIncreased(this);
+            }
+            return completed;
+        }
+
+        float outputRate = ResolveProductionFluidOutputRate(ActiveOutputItemId);
+        if (productionFluidOutputUnits < 0L)
+        {
+            // Fluid recipe Count is L/s. The configured Complete/Use duration
+            // determines one batch; backpressure delays delivery, not production volume.
+            productionFluidOutputUnits = DeterministicSimulationUnits.FromFloat(
+                ResolveProductionFluidBatchLiters(outputRate));
+            MarkPersistenceStateDirty();
+        }
+
+        float deltaTime = productionFluidOutputDeltaTime;
+        productionFluidOutputDeltaTime = 0f;
+        float maxLiters = outputRate * Mathf.Max(0f, deltaTime)
+            * ResolveFluidOutputTransportRetention(ActiveOutputItemId, outputRate);
+        long requestedUnits = Math.Min(productionFluidOutputUnits,
+            DeterministicSimulationUnits.FromFloat(maxLiters));
+        if (requestedUnits > 0L)
+        {
+            // The common transport path handles compatible receivers, shared
+            // Pump budgets and partial acceptance. Debit only delivered volume.
+            TryEmitFluidOutputToConnectedStorages(
+                ActiveOutputItemId,
+                DeterministicSimulationUnits.ToFloat(requestedUnits),
+                GetStoredFluidTemperatureCelsius(ActiveOutputItemId),
+                out float acceptedLiters);
+            long acceptedUnits = Math.Min(productionFluidOutputUnits,
+                DeterministicSimulationUnits.FromFloat(acceptedLiters));
+            if (acceptedUnits > 0L)
+            {
+                productionFluidOutputUnits -= acceptedUnits;
+                MarkPersistenceStateDirty();
+            }
+        }
+
+        if (productionFluidOutputUnits > 0L) return false;
+        productionFluidOutputUnits = -1L;
+        ClearActiveCraft();
+        NotifyFluidOutputCapacityIncreased(this);
+        return true;
+    }
+
+    public override float GetObjectInfoFluidPressureLitersPerSecond(int fluidItemId)
+    {
+        if (!isActiveAndEnabled || !IsActiveCraftRunning || !IsWaitingForOutput
+            || fluidItemId != ActiveOutputItemId || productionFluidOutputUnits == 0L
+            || !IsRecipeOutputAllowedByItemFilter(fluidItemId))
+        {
+            return 0f;
+        }
+
+        // A negative reserve is a completed batch awaiting materialization.
+        // Recipe rate remains available to the production UI during Working.
+        return ResolveProductionFluidOutputRate(fluidItemId);
+    }
+
+    private float ResolveProductionFluidBatchLiters(float litersPerSecond)
+    {
+        return litersPerSecond * ResolveInitialCraftDuration(ResolveInstalledDefinition());
+    }
+
+    private float ResolveProductionFluidOutputRate(int outputItemId)
+    {
+        if (!IsFluidItemId(outputItemId)) return 0f;
+        // Machine pairs are generated copies. The binary crafting tree owns Count.
+        if (CraftingTreeRuntime.TryGetIngredientsView(outputItemId, out _))
+            return CraftingTreeRuntime.GetOutputAmount(outputItemId);
+
+        int pairIndex = IsActiveCraftRunning && outputItemId == ActiveOutputItemId
+            ? ActiveRecipeIndex : ResolveProductionTargetPairIndex(outputItemId);
+        if (TryGetInputOutputPair(pairIndex, out InputOutputPair pair) && pair.outputs != null)
+        {
+            float liters = 0f;
+            for (int i = 0; i < pair.outputs.Count; i++)
+            {
+                ItemIoEntry output = pair.outputs[i];
+                if (output.IsFluid && output.itemDefinition.id == outputItemId)
+                    liters += output.ResolvedAmount;
+            }
+            if (liters > 0f) return liters;
+        }
+        return outputItemId == ActiveOutputItemId ? Mathf.Max(0, ActiveOutputCount) : 0f;
     }
 
     protected override string ResolveObjectInfoStatus(out bool isProducing)
@@ -740,6 +940,11 @@ public class ProductionMachine : InputOutputModule
 
         if (IsWaitingForOutput)
         {
+            if (IsFluidItemId(ActiveOutputItemId) && ShouldKeepRuntimeUpdateTickActive())
+            {
+                isProducing = true;
+                return "Outputting";
+            }
             return "Output full";
         }
 
@@ -980,7 +1185,7 @@ public class ProductionMachine : InputOutputModule
             {
                 ingredients.Add(new CraftingTreeRuntime.IngredientEntry(
                     inputItemId,
-                    inputEntry.ResolvedItemCount));
+                    inputEntry.ResolvedAmount));
             }
         }
 
@@ -1036,7 +1241,7 @@ public class ProductionMachine : InputOutputModule
 
     private void PullProductionFluidIngredients(float deltaTime)
     {
-        if (deltaTime <= 0f
+        if (IsActiveCraftRunning || deltaTime <= 0f
             || !TryResolveSelectedProductionRecipe(
                 resolvedProductionIngredients, out _, out int outputItemId, out _))
         {
@@ -1107,31 +1312,18 @@ public class ProductionMachine : InputOutputModule
         CraftingTreeRuntime.IngredientEntry ingredient) =>
         Math.Max(1L, DeterministicSimulationUnits.FromFloat(
             ResolveFluidIngredientRequiredLiters(
-                outputItemId, ingredient.itemId, ingredient.count)));
+                outputItemId, ingredient.amount)));
 
     private float ResolveFluidIngredientRequiredLiters(
         int outputItemId,
-        int fluidItemId,
-        int fallbackCount)
+        float ingredientAmount)
     {
-        int pairIndex = ResolveProductionTargetPairIndex(outputItemId);
-        if (!TryGetInputOutputPair(pairIndex, out InputOutputPair pair)
-            || pair.inputs == null)
-        {
-            return Mathf.Max(1, fallbackCount);
-        }
-
-        float requiredLiters = 0f;
-        for (int i = 0; i < pair.inputs.Count; i++)
-        {
-            ItemIoEntry entry = pair.inputs[i];
-            if (entry.itemDefinition != null && entry.itemDefinition.id == fluidItemId)
-            {
-                requiredLiters += entry.ResolvedAmount;
-            }
-        }
-
-        return requiredLiters > 0f ? requiredLiters : Mathf.Max(1, fallbackCount);
+        float requiredLiters = Mathf.Max(0.0001f, ingredientAmount);
+        // A fluid-producing recipe uses input/output Count as a per-second amount.
+        // Intake capacity, consumption and the displayed denominator share this batch total.
+        return IsFluidItemId(outputItemId)
+            ? ResolveProductionFluidBatchLiters(requiredLiters)
+            : requiredLiters;
     }
 
     private bool HasProductionFluidInputPort()
@@ -1163,7 +1355,7 @@ public class ProductionMachine : InputOutputModule
                 continue;
             }
 
-            int mergedCount = Mathf.Max(1, ingredient.count);
+            float mergedAmount = ingredient.amount;
             for (int j = i + 1; j < ingredients.Count; j++)
             {
                 CraftingTreeRuntime.IngredientEntry candidate = ingredients[j];
@@ -1172,12 +1364,12 @@ public class ProductionMachine : InputOutputModule
                     continue;
                 }
 
-                mergedCount += Mathf.Max(1, candidate.count);
+                mergedAmount += candidate.amount;
                 ingredients.RemoveAt(j);
                 j--;
             }
 
-            ingredients[i] = new CraftingTreeRuntime.IngredientEntry(ingredient.itemId, mergedCount);
+            ingredients[i] = new CraftingTreeRuntime.IngredientEntry(ingredient.itemId, mergedAmount);
         }
     }
 
@@ -1217,6 +1409,9 @@ public class ProductionMachine : InputOutputModule
 
     private int ResolveProductionOutputCount(int outputPairIndex, int outputItemId)
     {
+        if (CraftingTreeRuntime.TryGetIngredientsView(outputItemId, out _))
+            return CraftingTreeRuntime.GetOutputCount(outputItemId);
+
         if (TryGetInputOutputPair(outputPairIndex, out InputOutputPair pair)
             && pair.outputs != null)
         {

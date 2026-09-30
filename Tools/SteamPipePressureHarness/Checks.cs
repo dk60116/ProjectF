@@ -89,7 +89,31 @@ public partial class InputOutputModule : InstallationObject
     protected static readonly Dictionary<Vector2Int, HashSet<InputOutputModule>> registeredRuntimeFluidOutputCoordinates = new();
     public Vector2Int Anchor, Direction;
     public readonly HashSet<Vector2Int> Outputs = new();
-    public virtual float GetObjectInfoFluidPressureLitersPerSecond(int id) => 0;
+    public sealed class ItemDefinition { public int id; public bool IsFluid = true; }
+    public readonly record struct ItemIoEntry(ItemDefinition itemDefinition, float count)
+    {
+        public bool IsFluid => itemDefinition != null && itemDefinition.IsFluid;
+        public float ResolvedAmount => Mathf.Max(0.0001f, count);
+    }
+    public sealed class InputOutputPair { public List<ItemIoEntry> outputs = new(); }
+    public readonly List<InputOutputPair> ConfiguredPairs = new();
+    public IReadOnlyList<InputOutputPair> InputOutputPairs => ConfiguredPairs;
+    public int SelectedFluid = -1;
+    protected virtual bool IsRecipeOutputAllowedByItemFilter(int fluid) => SelectedFluid < 0 || SelectedFluid == fluid;
+    private readonly HashSet<int> runtimeFluidOutputItemIdScratch = new();
+    public bool TryGetRuntimeOutputItemIdsAtCoordinate(Vector2Int coordinate, ISet<int> items)
+    {
+        if (!Outputs.Contains(coordinate)) return false;
+        foreach (var pair in ConfiguredPairs)
+        {
+            if (pair?.outputs == null) continue;
+            foreach (var output in pair.outputs)
+                if (output.itemDefinition != null) items.Add(output.itemDefinition.id);
+        }
+        if (TerrainGenerator.Active.Fluids.TryGetValue(coordinate, out int fluid)) items.Add(fluid);
+        return items.Count > 0;
+    }
+    public static bool IsFluidItemId(int id) => id >= 0;
     private bool ContainsRuntimeOutputCoordinate(Vector2Int coordinate) => Outputs.Contains(coordinate);
     private bool TryGetRuntimePipeAreaExternalDirection(Vector2Int coordinate, out Vector2Int direction)
     { direction = Direction; return Outputs.Contains(coordinate); }
@@ -154,6 +178,33 @@ public class Boiler : InputOutputModule
     public bool TryGetRuntimePipeOutputExternalDirection(Vector2Int coordinate, out Vector2Int direction)
     { direction = Direction; return Outputs.Contains(coordinate); }
     public override float GetObjectInfoFluidPressureLitersPerSecond(int id) => isActiveAndEnabled && id == 1 ? Rate : 0;
+}
+public class ConfiguredFluidProducer : InputOutputModule
+{
+    public ConfiguredFluidProducer(Vector2Int output, Vector2Int direction, float amount)
+    {
+        Anchor = output - direction;
+        Direction = direction;
+        Outputs.Add(output);
+        Register(registeredRuntimeFluidOutputCoordinates, output, this);
+        Register(registeredRuntimeAreaCoordinates, output, this);
+        ConfiguredPairs.Add(new InputOutputPair { outputs = new() { new(new ItemDefinition { id = 1 }, amount) } });
+    }
+}
+public partial class ProductionMachine : ConfiguredFluidProducer
+{
+    private bool IsActiveCraftRunning, IsWaitingForOutput;
+    private int ActiveOutputItemId = 1;
+    private long productionFluidOutputUnits = -1L;
+    public ProductionMachine(Vector2Int output, Vector2Int direction, float amount)
+        : base(output,direction,amount) { }
+    private float ResolveProductionFluidOutputRate(int fluid) => base.GetObjectInfoFluidPressureLitersPerSecond(fluid);
+    public void SetPhase(int phase, long remainingUnits = -1L)
+    {
+        IsActiveCraftRunning = phase > 0;
+        IsWaitingForOutput = phase == 2;
+        productionFluidOutputUnits = remainingUnits;
+    }
 }
 public partial class SteamGenerator : InputOutputModule
 {
@@ -269,6 +320,7 @@ public partial class Pipe : InstallationObject
         temperature = 100;
         if (TerrainGenerator.Active.Tanks.TryGetValue(coordinate, out Fluidtank tank) && tank.StoredFluidItemId >= 0)
         { id = tank.StoredFluidItemId; return true; }
+        if (TryGetSourceFluidInfoAtCoordinate(coordinate, out id, out temperature)) return true;
         return TerrainGenerator.Active.Fluids.TryGetValue(coordinate, out id);
     }
 }
@@ -313,6 +365,98 @@ public partial class Fluidtank : InstallationObject
 public static class Checks
 {
     private static int passed, failed;
+    private static void CheckConfiguredOutputPressure()
+    {
+        InputOutputModule.Reset();
+        var origin = new Vector2Int(0, 0);
+        var source = new ConfiguredFluidProducer(origin, Vector2Int.right, .75f);
+        Assert(Math.Abs(source.GetObjectInfoFluidPressureLitersPerSecond(1) - .75f) < .001f,
+            "configured fractional Output amount supplies pressure before any delivery");
+        var sourcePipe = new Pipe(origin, Vector2Int.left, Vector2Int.right);
+        Expect(sourcePipe, origin, .75f, "configured Output supplies native pressure to its pipe");
+        var next = new Pipe(new(1, 0), Vector2Int.left, Vector2Int.right);
+        Expect(next, new(1, 0), .7425f, "configured Output pressure loses one percent per pipe");
+        source.ConfiguredPairs[0].outputs[0] = new(new InputOutputModule.ItemDefinition { id = 1 }, 12f);
+        Expect(sourcePipe, origin, 12f, "edited Output amount changes native pressure");
+        var pump = new Pump(new(2, 0), Vector2Int.left, new(5, 0), Vector2Int.right);
+        var outlet = new Pipe(new(6, 0), Vector2Int.left, Vector2Int.right);
+        Expect(outlet, new(6, 0), 5f, "Pump caps configured Output pressure at its transport limit");
+        source.SelectedFluid = 2;
+        Assert(!sourcePipe.TryGetObjectInfoFluidInfoAtCoordinate(origin, out _, out _, out float inactivePressure)
+            && inactivePressure == 0f, "unselected production output contributes no fluid or pressure");
+        source.SelectedFluid = -1;
+        source.gameObject.activeInHierarchy = false;
+        Assert(!sourcePipe.TryGetObjectInfoFluidInfoAtCoordinate(origin, out _, out _, out float disabledPressure)
+            && disabledPressure == 0f, "disabled producer contributes no fluid or configured pressure");
+        source.gameObject.activeInHierarchy = true;
+        source.ConfiguredPairs[0].outputs.Add(new(new InputOutputModule.ItemDefinition { id = 2 }, .125f));
+        Assert(Math.Abs(source.GetObjectInfoFluidPressureLitersPerSecond(2) - .125f) < .001f,
+            "multiple fluids use their own Output amounts");
+        Assert(source.GetObjectInfoFluidPressureLitersPerSecond(99) == 0f
+            && source.GetObjectInfoFluidPressureLitersPerSecond(-1) == 0f,
+            "unknown and invalid fluids have no configured pressure");
+        source.ConfiguredPairs[0].outputs.Add(new(new InputOutputModule.ItemDefinition { id = 1 }, 2f));
+        source.ConfiguredPairs.Add(new() { outputs = new() { new(new InputOutputModule.ItemDefinition { id = 1 }, 10f) } });
+        Assert(source.GetObjectInfoFluidPressureLitersPerSecond(1) == 14f,
+            "simultaneous outputs add within a recipe and alternative recipes do not stack");
+        source.ConfiguredPairs[0].outputs.Add(new(null, 100f));
+        source.ConfiguredPairs[0].outputs.Add(new(new InputOutputModule.ItemDefinition { id = 3, IsFluid = false }, 100f));
+        source.ConfiguredPairs.Add(null);
+        source.ConfiguredPairs.Add(new() { outputs = null });
+        Assert(source.GetObjectInfoFluidPressureLitersPerSecond(3) == 0f
+            && source.GetObjectInfoFluidPressureLitersPerSecond(1) == 14f,
+            "missing entries and solid outputs contribute no fluid pressure");
+    }
+    private static void CheckProductionPhasePressure()
+    {
+        InputOutputModule.Reset();
+        var origin = new Vector2Int(0,0);
+        var machine = new ProductionMachine(origin,Vector2Int.right,.25f);
+        var output = new Pipe(origin,Vector2Int.left,Vector2Int.right);
+        var downstream = new Pipe(new(1,0),Vector2Int.left,Vector2Int.right);
+        Expect(output,origin,0f,"idle maker output pipe has no pressure");
+        machine.SetPhase(1);
+        Expect(output,origin,0f,"Working maker output pipe has no pressure");
+        Expect(downstream,new(1,0),0f,"Working maker cannot supply downstream pressure");
+        machine.SetPhase(2);
+        Expect(output,origin,.25f,"Outputting completed batch supplies configured pressure");
+        Expect(downstream,new(1,0),.2475f,"Outputting pressure retains normal pipe loss");
+        machine.SetPhase(2,5L);
+        Expect(output,origin,.25f,"partial output reserve continues pressure");
+        machine.SetPhase(2,0L);
+        Expect(output,origin,0f,"empty output reserve supplies no pressure");
+        machine.SetPhase(0);
+        Expect(downstream,new(1,0),0f,"drained maker stops downstream pressure");
+        machine.SetPhase(1);
+        Expect(downstream,new(1,0),0f,"next production cycle starts without downstream pressure");
+    }
+    private static void CheckProducerOutputBoundary()
+    {
+        foreach (var direction in new[] { Vector2Int.right, Vector2Int.up, Vector2Int.left, Vector2Int.down })
+        {
+            InputOutputModule.Reset();
+            var origin = new Vector2Int(10, 20);
+            var machine = new ConfiguredFluidProducer(origin, direction, 2f) { SelectedFluid = 1 };
+            // The first configured fluid is not the selected output.
+            machine.ConfiguredPairs[0].outputs.Insert(0, new(new InputOutputModule.ItemDefinition { id = 2 }, .125f));
+            _ = new Boiler(origin - direction * 2, direction) { Rate = 30f };
+            var input = new Pipe(origin - direction, direction, -direction);
+            var output = new Pipe(origin, direction, -direction);
+            var downstream = new Pipe(origin + direction, direction, -direction);
+            Expect(input, origin - direction, 30f, $"producer input retains its input supply / {direction}");
+            Expect(output, origin, 2f, $"OutputPipe uses selected Output amount instead of 30 L/s input / {direction}");
+            Expect(downstream, origin + direction, 1.98f, $"downstream uses Output pressure with distance loss / {direction}");
+            _ = new Pump(origin + direction * 2, -direction, origin + direction * 5, direction);
+            var pumpedOutput = new Pipe(origin + direction * 6, direction, -direction);
+            Expect(pumpedOutput, origin + direction * 6, 2f, $"Pump receives producer Output pressure / {direction}");
+            machine.SelectedFluid = 2;
+            bool found = output.TryGetObjectInfoFluidInfoAtCoordinate(origin, out int fluid, out _, out float pressure);
+            Assert(found && fluid == 2 && Math.Abs(pressure - .125f) < .001f,
+                $"changing target updates output fluid and its own pressure / {direction}");
+            Expect(input, origin - direction, 30f, $"output target change does not alter input pressure / {direction}");
+        }
+    }
+
     private static void Expect(Pipe pipe, Vector2Int coordinate, float expected, string label)
     {
         bool hasFluid = pipe.TryGetObjectInfoFluidInfoAtCoordinate(coordinate, out int id, out _, out float pressure);
@@ -322,6 +466,9 @@ public static class Checks
     }
     public static int Main()
     {
+        CheckConfiguredOutputPressure();
+        CheckProductionPhasePressure();
+        CheckProducerOutputBoundary();
         foreach (var direction in new[] { Vector2Int.right, Vector2Int.up, Vector2Int.left, Vector2Int.down })
         {
             foreach (int count in new[] { 1, 3 })

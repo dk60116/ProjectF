@@ -1,5 +1,21 @@
 # Steam pipe pressure regression
 
+Production phase regressions extract ProductionMachine's pressure override and
+query the actual pipe search: idle, Working and drained batches contribute zero;
+Outputting retains the configured fractional rate and normal downstream loss.
+Recipe UI rate is checked separately from live pressure in the output harness.
+
+Configured producer pressure checks extract the production InputOutputModule pressure method.
+Output fluid counts define L/s before any delivery; fractional amounts, per-fluid values,
+edited configuration, selected targets, disabled sources, alternative recipes, pipe loss
+and the Pump transport cap are checked through the production network search.
+
+Producer output boundaries are tested in all four orientations with a 30 L/s input
+and a 2 L/s configured output. Pipes overlapping output ports cannot import input
+pressure or export output pressure inward. Downstream pipes apply distance loss,
+and Pumps receive the output rate. The production output identity lookup is also
+extracted to verify that changing the selected target changes both fluid and pressure.
+
 Run `powershell -NoProfile -ExecutionPolicy Bypass -File Tools/SteamPipePressureHarness/Run.ps1` with .NET 9 installed. No Unity process is launched or controlled.
 
 The harness extracts the production pipe BFS, pressure aggregation, output registry lookup, generator pass and directed connection rules, and runtime pipe record query. Fixtures match the generator prefab's input/body/body/tail offsets (-1/0/1/2). Unity placement/rotation APIs, world registries, fluid identity lookup and the boiler's 30 L/s rate are test doubles.

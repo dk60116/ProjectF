@@ -13,7 +13,8 @@ $treePath = Join-Path $repo 'FactorioProject/Assets/Data/CraftingTree/crafting_t
 $treeStream = [IO.File]::OpenRead($treePath)
 $treeReader = [IO.BinaryReader]::new($treeStream)
 try {
-    if ($treeReader.ReadInt32() -ne 5) { throw 'Unexpected crafting tree format.' }
+    $treeVersion = $treeReader.ReadInt32()
+    if ($treeVersion -notin @(5, 6)) { throw 'Unexpected crafting tree format.' }
     $recipeCount = $treeReader.ReadInt32()
     $expectedMk3InputCounts = [System.Collections.Generic.List[int]]::new()
     for ($recipeIndex = 0; $recipeIndex -lt $recipeCount; $recipeIndex++) {
@@ -26,11 +27,11 @@ try {
             if ($mapName -notin @('Workbench', 'Anvil')) { $allowedMapObjects = $false }
             if ($mapName -eq 'Production machine (MK3)') { $explicitMk3 = $true }
         }
-        $null = $treeReader.ReadInt32()
+        $null = if ($treeVersion -ge 6) { $treeReader.ReadSingle() } else { $treeReader.ReadInt32() }
         $ingredientCount = $treeReader.ReadInt32()
         for ($ingredientIndex = 0; $ingredientIndex -lt $ingredientCount; $ingredientIndex++) {
             $null = $treeReader.ReadString()
-            $null = $treeReader.ReadInt32()
+            $null = if ($treeVersion -ge 6) { $treeReader.ReadSingle() } else { $treeReader.ReadInt32() }
         }
         if (($ingredientCount -eq 3 -and $allowedMapObjects) -or
             ($ingredientCount -ge 1 -and $ingredientCount -le 3 -and $explicitMk3)) {

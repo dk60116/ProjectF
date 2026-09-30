@@ -24,6 +24,7 @@ foreach ($signature in @(
     'private static void RecordPumpDistance(',
     'private static void CollectPumpStoredFluid(',
     'private static float ResolveNetworkPressure(',
+    'private static bool TryGetSourceFluidInfoAtCoordinate(',
     'private static void AppendObjectInfoFluidOutputSourcesAtCoordinate(',
     'private static void EnqueueObjectInfoFluidSearchCoordinate(',
     'private static bool CanTraverseFluidTankBoundary(',
@@ -49,9 +50,13 @@ $pumpEnd = $pumpSource.IndexOf('    internal bool TryGetRuntimeInterlockedEndpoi
 $generated += $pumpSource.Substring($pumpStart, $pumpEnd - $pumpStart)
 $generated += "} public partial class InputOutputModule {`n"
 foreach ($signature in @(
+    'public virtual float GetObjectInfoFluidPressureLitersPerSecond(',
     'protected bool TryGetRuntimeFluidInputPressure(',
     'private bool TryGetFluidInputPressureAt(',
     'public static void AppendFluidOutputSourcesAtCoordinate(',
+    'internal static bool TryGetRuntimeFluidOutputDirectionAtCoordinate(',
+    'public static bool TryGetFluidOutputInfoAtRuntimeGridCoordinate(',
+    'private static bool TryGetFluidOutputInfoAtRuntimeGridCoordinate(',
     'internal static bool HasRuntimeFluidOutputTowardsPipe(',
     'internal static bool TryGetSteamGeneratorPipePassAtRuntimeCoordinate(',
     'private static void SelectSteamGeneratorPipePass(')) {
@@ -63,6 +68,8 @@ $moduleSource = [IO.File]::ReadAllText((Join-Path $base 'InputOutputModule.cs'))
 if ($moduleSource.Contains('internal static bool TryGetOverlappingSteamSourcePort(')) {
     $generated += (Read-Member 'InputOutputModule.cs' 'internal static bool TryGetOverlappingSteamSourcePort(') + "`n"
 }
+$generated += "} public partial class ProductionMachine {`n"
+$generated += (Read-Member 'ProductionMachine.cs' 'public override float GetObjectInfoFluidPressureLitersPerSecond(') + "`n"
 $generated += "} public partial class SteamGenerator {`n"
 foreach ($signature in @(
     'public bool TryGetRuntimeSteamPass(',

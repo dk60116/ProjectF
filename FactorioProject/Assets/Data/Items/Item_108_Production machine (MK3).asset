@@ -13,7 +13,7 @@ MonoBehaviour:
   m_Name: Item_108_Production machine (MK3)
   m_EditorClassIdentifier: Assembly-CSharp::ItemDefinition
   itemName: Production machine (MK3)
-  id: 75
+  id: 77
   mapObject: {fileID: 1982885657640665004, guid: 5e35bf91a3c489b42b8cff7e865635b6, type: 3}
   mapObjectArchetype: {fileID: 0}
   useMapColor: 1
@@ -35,6 +35,7 @@ MonoBehaviour:
   upgradeable: 0
   keepIoAreaItemsInPlaceWhileEditing: 0
   capacity: 10
+  isFluid: 0
   storesFluid: 0
   fluidStorageLiters: 0
   fluidDisplayColor: {r: 1, g: 1, b: 1, a: 1}

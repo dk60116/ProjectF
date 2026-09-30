@@ -13,7 +13,7 @@ MonoBehaviour:
   m_Name: Item_101_Electric Oil machine
   m_EditorClassIdentifier: Assembly-CSharp::ItemDefinition
   itemName: Electric Oil machine
-  id: 60
+  id: 62
   mapObject: {fileID: 8277338630082605383, guid: 0e8fab6e5b4c5334ba12a3440074b228, type: 3}
   mapObjectArchetype: {fileID: 11400000, guid: 6e01647ff894e804b942cec28892e1d2, type: 2}
   useMapColor: 0
@@ -35,6 +35,7 @@ MonoBehaviour:
   upgradeable: 1
   keepIoAreaItemsInPlaceWhileEditing: 0
   capacity: 10
+  isFluid: 0
   storesFluid: 0
   fluidStorageLiters: 0
   fluidDisplayColor: {r: 1, g: 1, b: 1, a: 1}

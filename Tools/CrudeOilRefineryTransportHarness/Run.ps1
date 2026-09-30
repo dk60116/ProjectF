@@ -24,8 +24,8 @@ $fixture = $fixture.Replace('// MODULE_RETENTION',
     (Read-Member ($base + 'InputOutputModule.cs') 'protected float ResolveFluidOutputTransportRetentionAtCoordinate('))
 $fixture = $fixture.Replace('// PUMP_RATIO', (Read-Member ($base + 'InputOutputModule.cs') 'private static float ResolvePumpTransportRatio('))
 $fixture = $fixture.Replace('// PUMP_LIMIT', (Read-Member ($base + '../Pump.cs') 'internal static float LimitTransportRate('))
-$fixture = $fixture.Replace('// REFINERY_PRESSURE',
-    (Read-Member ($base + 'CrudeOilRefinery.cs') 'public override float GetObjectInfoFluidPressureLitersPerSecond('))
+$fixture = $fixture.Replace('// MODULE_PRESSURE',
+    (Read-Member ($base + 'InputOutputModule.cs') 'public virtual float GetObjectInfoFluidPressureLitersPerSecond('))
 
 $fixture = $fixture.Replace('// REFINERY_TICK',
     (Read-Member ($base + 'CrudeOilRefinery.cs') 'private void UpdateContinuousRefining('))

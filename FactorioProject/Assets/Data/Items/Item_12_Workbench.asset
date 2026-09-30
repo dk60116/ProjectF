@@ -13,7 +13,7 @@ MonoBehaviour:
   m_Name: Item_12_Workbench
   m_EditorClassIdentifier: 
   itemName: Workbench
-  id: 21
+  id: 22
   mapObject: {fileID: 7839628250064023149, guid: 0ed46c02cba6bea47936497891a6fa2b, type: 3}
   mapObjectArchetype: {fileID: 11400000, guid: 8f1722db7d84e7e4988fa8ad1c8cf9ef, type: 2}
   useMapColor: 1
@@ -36,6 +36,7 @@ MonoBehaviour:
   upgradeable: 1
   keepIoAreaItemsInPlaceWhileEditing: 0
   capacity: 10
+  isFluid: 0
   storesFluid: 0
   fluidStorageLiters: 0
   fluidDisplayColor: {r: 1, g: 1, b: 1, a: 1}

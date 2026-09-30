@@ -31,9 +31,11 @@ public partial class InputOutputModule : MapObject
     public readonly List<RectGridBlockPlacement> RectGridPlacements = new();
     public Vector2Int Anchor, InwardDirection;
     public int Turns, Fluid = 1;
+    public int ObjectAnchorX = 1;
     public bool isActiveAndEnabled = true;
     protected static readonly Dictionary<Vector2Int, HashSet<InputOutputModule>> registeredRuntimeAreaCoordinates = new();
     public static void ClearAreas() => registeredRuntimeAreaCoordinates.Clear();
+    internal static bool HasRuntimeFluidOutputTowardsPipe(Vector2Int coordinate, Vector2Int direction) => false;
     public static void Register(Vector2Int coordinate, InputOutputModule module)
     {
         if (!registeredRuntimeAreaCoordinates.TryGetValue(coordinate, out var modules))
@@ -52,7 +54,7 @@ public partial class InputOutputModule : MapObject
     public bool TryGetRectGridPlacementCoordinate(MapObject source, Vector2Int anchor, int turns,
         RectGridBlockPlacement placement, out Vector2Int coordinate)
     {
-        coordinate = anchor + Rotate(new(placement.x - (this is Pump ? 1 : 0), placement.y), turns);
+        coordinate = anchor + Rotate(new(placement.x - (this is Pump ? ObjectAnchorX : 0), placement.y), turns);
         return true;
     }
     public bool TryGetRectGridBlockTypeAtCoordinate(MapObject source, Vector2Int anchor, int turns,

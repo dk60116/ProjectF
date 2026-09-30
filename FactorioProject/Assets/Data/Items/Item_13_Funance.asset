@@ -13,7 +13,7 @@ MonoBehaviour:
   m_Name: Item_13_Funance
   m_EditorClassIdentifier: 
   itemName: Funance
-  id: 39
+  id: 41
   mapObject: {fileID: 3843491245406909261, guid: 482d646ee24530540a103d758c71b5b2, type: 3}
   mapObjectArchetype: {fileID: 11400000, guid: 39875aa15bdd75143a55d66e6fa7f0c2, type: 2}
   useMapColor: 1
@@ -35,6 +35,7 @@ MonoBehaviour:
   upgradeable: 1
   keepIoAreaItemsInPlaceWhileEditing: 0
   capacity: 10
+  isFluid: 0
   storesFluid: 0
   fluidStorageLiters: 0
   fluidDisplayColor: {r: 1, g: 1, b: 1, a: 1}

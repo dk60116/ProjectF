@@ -277,7 +277,7 @@ MonoBehaviour:
   m_EditorClassIdentifier: 
   id: 0
   objectName: Anvilbench
-  objId: 23
+  objId: 24
   itemDefinition: {fileID: 11400000, guid: 10f561e50ba416e43acc7c19a3e74feb, type: 2}
   mapStatus:
     mapSizeX: 1

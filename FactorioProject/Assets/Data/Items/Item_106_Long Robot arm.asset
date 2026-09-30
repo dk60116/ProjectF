@@ -13,7 +13,7 @@ MonoBehaviour:
   m_Name: Item_106_Long Robot arm
   m_EditorClassIdentifier: Assembly-CSharp::ItemDefinition
   itemName: Long Robot arm
-  id: 72
+  id: 74
   mapObject: {fileID: 5617472291595085519, guid: 67e59f493a6d8be4f88637abe49568e4, type: 3}
   mapObjectArchetype: {fileID: 11400000, guid: 9017e43225375b7439732c5f9232ade7, type: 2}
   useMapColor: 1
@@ -35,6 +35,7 @@ MonoBehaviour:
   upgradeable: 1
   keepIoAreaItemsInPlaceWhileEditing: 1
   capacity: 10
+  isFluid: 0
   storesFluid: 0
   fluidStorageLiters: 0
   fluidDisplayColor: {r: 1, g: 1, b: 1, a: 1}
@@ -48,9 +49,12 @@ MonoBehaviour:
   eatRewardChancePercent: 0
   isSeed: 0
   seedTargetResource: {fileID: 0}
-  useEnergyRequirements: []
-  useEnergyType: 2
-  useEnergyAmount: 20
+  useEnergyRequirements:
+  - energyType: 2
+    useEnergyAmount: 20
+    completeEnergy: 0
+  useEnergyType: 0
+  useEnergyAmount: 0
   completeEnergy: 0
   utilityPoleConnectionRadius: 6
   utilityPoleSupplyRadius: 3

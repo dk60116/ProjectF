@@ -4,6 +4,7 @@ using System.Collections.Generic;
 namespace UnityEngine
 {
     public readonly record struct Vector2Int(int x, int y);
+    public readonly record struct Vector3(float x, float y, float z);
     public static class Mathf
     {
         public static float Max(float a, float b) => Math.Max(a, b);
@@ -20,11 +21,21 @@ public static class DeterministicSimulationUnits
 
 public static class CraftingTreeRuntime
 {
-    public readonly record struct IngredientEntry(int itemId, int count);
+    public readonly record struct IngredientEntry(int itemId, float amount)
+    { public int count => Math.Max(1, (int)Math.Ceiling(amount)); }
 }
+
+public sealed class ItemDefinition { public int id; }
 
 public class InputOutputModule
 {
+    protected virtual void TryStartNextCraft() { }
+    protected static void NotifyFluidOutputCapacityIncreased(InputOutputModule source) { }
+    public readonly record struct ItemIoEntry(ItemDefinition itemDefinition, float ResolvedAmount);
+    public sealed class InputOutputPair { public List<ItemIoEntry> inputs; }
+    public int FluidInputNotifications;
+    protected static void NotifyFluidInputAvailabilityIncreased(InputOutputModule source) =>
+        source.FluidInputNotifications++;
     public enum RectGridBlockType { None, InputItem, PipeInputItem, DoubleInputItem, PipeInput }
     public readonly record struct RectGridBlockPlacement(int x, int y, RectGridBlockType blockType);
     protected readonly List<RectGridBlockPlacement> placements = new();
@@ -81,10 +92,42 @@ public partial class ProductionMachine
 {
     private readonly Dictionary<int, long> productionFluidUnits = new();
     private readonly List<CraftingTreeRuntime.IngredientEntry> resolvedProductionIngredients = new();
+    private readonly List<UnityEngine.Vector2Int> resolvedProductionInputCoordinates = new();
+    private readonly HashSet<UnityEngine.Vector2Int> resolvedProductionInputCoordinateSet = new();
+    private readonly List<UnityEngine.Vector2Int> productionFluidInputCoordinates = new();
     public bool HasRecipe = true;
     public bool IncludeSecondFluid;
+    public bool FluidOutput;
+    public float FirstInputAmount = 1f, SecondInputAmount = 2f;
     public int PersistenceMarks;
     public int WakeCalls;
+    public int CraftStarts, StartEnergyChecks;
+    public bool StartEnergyAvailable = true;
+    public bool CraftActive;
+    private bool IsActiveCraftRunning => CraftActive;
+    public int PressureQueries, SourceTransfers;
+    public void Pull(float dt) => PullProductionFluidIngredients(dt);
+    private void CollectProductionFluidInputCoordinates()
+    {
+        productionFluidInputCoordinates.Clear();
+        foreach(var placement in placements)
+            productionFluidInputCoordinates.Add(new(placement.x,placement.y));
+    }
+    private bool TryGetRuntimeFluidInputPressure(UnityEngine.Vector2Int coordinate, int id, out float rate)
+    { PressureQueries++; rate=100; return true; }
+    private bool TryConsumeConnectedFluidInputAtCoordinate(UnityEngine.Vector2Int coordinate, int id, float requested,
+        out float consumed, out float temperature) { SourceTransfers++; consumed=requested; temperature=20; return true; }
+    private bool HasRuntimeOutputCoordinates => true;
+    private float InputConsumeMoveInterval => .1f;
+    private bool TryEnsureCraftStartEnergy(ItemDefinition definition) { StartEnergyChecks++; return StartEnergyAvailable; }
+    private UnityEngine.Vector3 ResolveConsumeTargetWorldPosition() => default;
+    private int ConsumeRuntimeInputAreaCenterObjects(UnityEngine.Vector2Int coordinate, int itemId, int count,
+        UnityEngine.Vector3 position, float interval) => count;
+    private bool TryResolveRuntimeInputItemBlock(int itemId, int count, ISet<UnityEngine.Vector2Int> excluded,
+        out object block, out UnityEngine.Vector2Int coordinate) { block=null; coordinate=default; return false; }
+    private void BeginActiveCraft(int index, int itemId, int count, ItemDefinition definition)
+    { CraftStarts++; CraftActive=true; }
+    public void TryStart() => TryStartNextCraft();
     public void AddPort(UnityEngine.Vector2Int coordinate, RectGridBlockType blockType = RectGridBlockType.DoubleInputItem) =>
         placements.Add(new RectGridBlockPlacement(coordinate.x, coordinate.y, blockType));
     public List<UnityEngine.Vector2Int> CollectPorts()
@@ -100,18 +143,19 @@ public partial class ProductionMachine
         out int recipeIndex, out int outputItemId, out int outputCount)
     {
         ingredients.Clear();
-        ingredients.Add(new CraftingTreeRuntime.IngredientEntry(1, 1));
+        ingredients.Add(new CraftingTreeRuntime.IngredientEntry(1, FirstInputAmount));
         if (IncludeSecondFluid)
-            ingredients.Add(new CraftingTreeRuntime.IngredientEntry(2, 2));
+            ingredients.Add(new CraftingTreeRuntime.IngredientEntry(2, SecondInputAmount));
         recipeIndex = 0;
-        outputItemId = 100;
+        outputItemId = FluidOutput ? 3 : 100;
         outputCount = 1;
         return HasRecipe;
     }
-    private static bool IsFluidItemId(int itemId) => itemId == 1 || itemId == 2;
-    private static long GetRequiredProductionFluidUnits(
-        int outputItemId, CraftingTreeRuntime.IngredientEntry ingredient) =>
-        DeterministicSimulationUnits.FromFloat(ingredient.count);
+    private static bool IsFluidItemId(int itemId) => itemId == 1 || itemId == 2 || itemId == 3;
+    private int ResolveProductionTargetPairIndex(int itemId) => 0;
+    private bool TryGetInputOutputPair(int index, out InputOutputPair pair) { pair=null; return false; }
+    private ItemDefinition ResolveInstalledDefinition() => new();
+    private float ResolveInitialCraftDuration(ItemDefinition definition) => 36;
     private long GetProductionFluidUnits(int fluidItemId) =>
         productionFluidUnits.TryGetValue(fluidItemId, out long units) ? units : 0L;
     private void MarkPersistenceStateDirty() => PersistenceMarks++;
@@ -155,7 +199,7 @@ public static class ReceiverChecks
         Require(!machine.CanAcceptDedicatedFluidAtRuntimeCoordinate(port, 1, 0.001f)
                 && machine.GetDedicatedAvailableFluidStorageLitersAtRuntimeCoordinate(port) == 0f,
             "a full ingredient buffer must block further input");
-        Require(machine.PersistenceMarks == 2 && machine.WakeCalls == 2,
+        Require(machine.PersistenceMarks == 2 && machine.WakeCalls == 2 && machine.FluidInputNotifications == 2,
             "both transfers must persist and wake the machine");
         machine.IncludeSecondFluid = true;
         Require(machine.GetDedicatedAvailableFluidStorageLitersAtRuntimeCoordinate(port, 1) == 0f
@@ -167,6 +211,60 @@ public static class ReceiverChecks
         machine.HasRecipe = false;
         Require(!machine.CanAcceptDedicatedFluidAtRuntimeCoordinate(port, 1, 0.001f),
             "without a selected recipe, the receiver must remain closed");
+        var fluidMaker = new ProductionMachine { FluidOutput=true, IncludeSecondFluid=true };
+        fluidMaker.AddPort(port);
+        Require(fluidMaker.GetDedicatedAvailableFluidStorageLitersAtRuntimeCoordinate(port,2)==72,
+            "a 36 second fluid recipe accepts its full 2 L/s times 36 second input batch");
+        Require(fluidMaker.TryAddDedicatedFluidAtRuntimeCoordinate(port,2,18,20,out accepted)
+                && accepted==18 && fluidMaker.GetDedicatedFluidStorageFillRatioAtRuntimeCoordinate(port,2)==.25f,
+            "fluid receiver fill uses the same 72 L denominator as the gauge");
+        Require(fluidMaker.TryAddDedicatedFluidAtRuntimeCoordinate(port,2,100,20,out accepted)
+                && accepted==54 && fluidMaker.Stored(2)==72000,
+            "fluid intake caps at the exact whole-batch requirement");
+        Require(!fluidMaker.CanAcceptDedicatedFluidAtRuntimeCoordinate(port,2,.001f),
+            "complete fluid input batch blocks additional intake");
+        var gate = new ProductionMachine { FluidOutput=true, IncludeSecondFluid=true };
+        gate.AddPort(port);
+        gate.TryStart();
+        Require(gate.CraftStarts==0 && gate.StartEnergyChecks==0,"empty fluids cannot start or reserve start energy");
+        gate.TryAddDedicatedFluidAtRuntimeCoordinate(port,1,36,20,out _);
+        gate.TryAddDedicatedFluidAtRuntimeCoordinate(port,2,71.999f,20,out _);
+        gate.TryStart();
+        Require(gate.CraftStarts==0 && gate.Stored(1)==36000 && gate.Stored(2)==71999,
+            "all fluid ingredients must be full; 71.999 of 72 L cannot start or consume other inputs");
+        gate.TryAddDedicatedFluidAtRuntimeCoordinate(port,2,.001f,20,out _);
+        gate.StartEnergyAvailable=false; gate.TryStart();
+        Require(gate.CraftStarts==0 && gate.Stored(2)==72000,"full input remains stored when start energy is unavailable");
+        gate.StartEnergyAvailable=true; gate.TryStart();
+        Require(gate.CraftStarts==1 && gate.Stored(1)==0 && gate.Stored(2)==0,
+            "exactly full fluids start once and are entirely committed at the start");
+        gate.TryStart();
+        Require(gate.CraftStarts==1,"consumed empty buffers cannot begin a second craft");
+        Require(gate.GetDedicatedAvailableFluidStorageLitersAtRuntimeCoordinate(port)==0
+                && gate.GetDedicatedAvailableFluidStorageLitersAtRuntimeCoordinate(port,2)==0
+                && !gate.CanAcceptDedicatedFluidAtRuntimeCoordinate(port,2,1),
+            "an active craft advertises no input capacity to sending pipes");
+        Require(!gate.TryAddDedicatedFluidAtRuntimeCoordinate(port,2,1,20,out accepted) && accepted==0,
+            "pipe-driven input rejects fluid throughout crafting and output waiting");
+        gate.Pull(.1f);
+        Require(gate.PressureQueries==0 && gate.SourceTransfers==0 && gate.Stored(2)==0,
+            "active production cannot pull the next batch from its upstream source");
+        gate.CraftActive=false; gate.Pull(.1f);
+        Require(gate.SourceTransfers==2 && gate.Stored(1)==10000 && gate.Stored(2)==10000,
+            "after output completion the next receiving phase can pull both fluids again");
+        var fractional = new ProductionMachine { FluidOutput=true, IncludeSecondFluid=true, FirstInputAmount=.25f, SecondInputAmount=.5f };
+        fractional.AddPort(port);
+        Require(fractional.GetDedicatedAvailableFluidStorageLitersAtRuntimeCoordinate(port,1)==9f
+            && fractional.GetDedicatedAvailableFluidStorageLitersAtRuntimeCoordinate(port,2)==18f,
+            "fractional input rates keep exact 36 second batch capacities");
+        fractional.TryAddDedicatedFluidAtRuntimeCoordinate(port,1,9f,20,out _);
+        fractional.TryAddDedicatedFluidAtRuntimeCoordinate(port,2,17.999f,20,out _);
+        fractional.TryStart();
+        Require(fractional.CraftStarts==0, "fractional batch cannot start below full quota");
+        fractional.TryAddDedicatedFluidAtRuntimeCoordinate(port,2,.001f,20,out _);
+        fractional.TryStart();
+        Require(fractional.CraftStarts==1 && fractional.Stored(1)==0 && fractional.Stored(2)==0,
+            "full fractional batch consumes exactly 9 and 18 L");
         Console.WriteLine($"Production fluid receiver checks passed: {checks}");
     }
 

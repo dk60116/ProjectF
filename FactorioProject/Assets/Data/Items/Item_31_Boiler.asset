@@ -13,7 +13,7 @@ MonoBehaviour:
   m_Name: Item_31_Boiler
   m_EditorClassIdentifier: 
   itemName: Boiler
-  id: 66
+  id: 68
   mapObject: {fileID: 3506764276934423664, guid: 19c50aebdae9359439841e55c9844e07, type: 3}
   mapObjectArchetype: {fileID: 11400000, guid: 39a10f8a4c6063142b7daba263403ad5, type: 2}
   useMapColor: 0
@@ -35,6 +35,7 @@ MonoBehaviour:
   upgradeable: 1
   keepIoAreaItemsInPlaceWhileEditing: 0
   capacity: 10
+  isFluid: 0
   storesFluid: 1
   fluidStorageLiters: 50
   fluidDisplayColor: {r: 1, g: 1, b: 1, a: 1}

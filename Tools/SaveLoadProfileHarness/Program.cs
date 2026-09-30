@@ -11,6 +11,11 @@ internal static class Program
     private static int Main(string[] args)
     {
         RegisterAssemblyResolver();
+        if (args.Length == 2 && args[0] == "--fluid-output" && File.Exists(args[1]))
+        {
+            FluidOutputSaveReport.Write(SaveGameBinarySerializer.ReadFromFile(Path.GetFullPath(args[1])));
+            return 0;
+        }
         if (args.Length == 1 && string.Equals(args[0], "--self-check", StringComparison.Ordinal))
         {
             if (!SaveGameBinarySerializer.RunTerrainCloneRegionRoundTripSelfCheck(
@@ -27,7 +32,7 @@ internal static class Program
         if ((args.Length != 1 && args.Length != 3) || !File.Exists(args[0]))
         {
             Console.Error.WriteLine(
-                "Usage: SaveLoadProfileHarness --self-check | <save-file> [chunk-size load-radius]");
+                "Usage: SaveLoadProfileHarness --self-check | --fluid-output <save-file> | <save-file> [chunk-size load-radius]");
             return 1;
         }
 

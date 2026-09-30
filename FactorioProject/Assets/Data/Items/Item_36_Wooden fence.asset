@@ -13,7 +13,7 @@ MonoBehaviour:
   m_Name: Item_36_Wooden fence
   m_EditorClassIdentifier: 
   itemName: Wooden Fence
-  id: 79
+  id: 81
   mapObject: {fileID: 2276685300360839919, guid: a7060f381d0a25d4ab7f902bf30be7ef, type: 3}
   mapObjectArchetype: {fileID: 11400000, guid: a316a7519b6cf4c489a5e4f5eeb14361, type: 2}
   useMapColor: 1
@@ -35,6 +35,7 @@ MonoBehaviour:
   upgradeable: 1
   keepIoAreaItemsInPlaceWhileEditing: 0
   capacity: 10
+  isFluid: 0
   storesFluid: 0
   fluidStorageLiters: 0
   fluidDisplayColor: {r: 1, g: 1, b: 1, a: 1}

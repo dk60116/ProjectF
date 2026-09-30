@@ -96,6 +96,8 @@ public class ItemDefinition : ScriptableObject
     public bool keepIoAreaItemsInPlaceWhileEditing;
     [Min(1)]
     public int capacity = 10;
+    [Tooltip("액체 아이템이면 체크합니다. 설치물이 액체를 저장하는지 여부는 Stores Fluid로 별도 지정합니다.")]
+    public bool isFluid;
     public bool storesFluid;
     [Min(0f)]
     public float fluidStorageLiters = 0f;

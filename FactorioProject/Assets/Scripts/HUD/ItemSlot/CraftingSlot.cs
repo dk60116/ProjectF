@@ -828,16 +828,16 @@ public class CraftingSlot : ItemSlot
             }
 
             int providedCount = Mathf.Min(entry.count, remainingProvidedCount);
-            entry.count -= providedCount;
+            int remainingCount = entry.count - providedCount;
             remainingProvidedCount -= providedCount;
-            if (entry.count <= 0)
+            if (remainingCount <= 0)
             {
                 ingredientBuffer.RemoveAt(i);
                 i--;
             }
             else
             {
-                ingredientBuffer[i] = entry;
+                ingredientBuffer[i] = new CraftingTreeRuntime.IngredientEntry(entry.itemId, remainingCount);
             }
         }
     }

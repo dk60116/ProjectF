@@ -322,7 +322,7 @@ MonoBehaviour:
   m_EditorClassIdentifier: 
   id: 0
   objectName: Production machine (MK2)
-  objId: 74
+  objId: 76
   itemDefinition: {fileID: 11400000, guid: 29927129db7b22842886fe756c71a712, type: 2}
   mapStatus:
     mapSizeX: 2
@@ -462,6 +462,14 @@ MonoBehaviour:
     - itemDefinition: {fileID: 11400000, guid: 7a8ea2c79da84f048815b5cbfe397fd1, type: 2}
       count: 1
   - inputs:
+    - itemDefinition: {fileID: 11400000, guid: 6a913ce143edf9c42b1a4c2b72cbdde8, type: 2}
+      count: 2
+    - itemDefinition: {fileID: 11400000, guid: 3a62c6f5c700cfe48a5cade4afb5f5da, type: 2}
+      count: 1
+    outputs:
+    - itemDefinition: {fileID: 11400000, guid: b683f0f1cfeadca4196e5a3df399b945, type: 2}
+      count: 1
+  - inputs:
     - itemDefinition: {fileID: 11400000, guid: a2393aedc145bbd4a8de4f74073c1eca, type: 2}
       count: 2
     - itemDefinition: {fileID: 11400000, guid: 1e1fcabb313ee6840a8a369650290ace, type: 2}
@@ -556,6 +564,22 @@ MonoBehaviour:
       count: 2
     outputs:
     - itemDefinition: {fileID: 11400000, guid: 5e8eb859a7abfe04b919401e00125622, type: 2}
+      count: 1
+  - inputs:
+    - itemDefinition: {fileID: 11400000, guid: f0e8b5357a13bc04cbc5e8603014446c, type: 2}
+      count: 5
+    - itemDefinition: {fileID: 11400000, guid: 5e8eb859a7abfe04b919401e00125622, type: 2}
+      count: 1
+    outputs:
+    - itemDefinition: {fileID: 11400000, guid: 827234b8c265100479a8144a7fc410c2, type: 2}
+      count: 1
+  - inputs:
+    - itemDefinition: {fileID: 11400000, guid: d920f99b12ae8ba4eb521eb6252da50a, type: 2}
+      count: 20
+    - itemDefinition: {fileID: 11400000, guid: 5e8eb859a7abfe04b919401e00125622, type: 2}
+      count: 2
+    outputs:
+    - itemDefinition: {fileID: 11400000, guid: 35de25c1b78551f46a6ab4a7d318fcf5, type: 2}
       count: 1
   - inputs:
     - itemDefinition: {fileID: 11400000, guid: f258fbd8cc06e274fb34717e13970102, type: 2}

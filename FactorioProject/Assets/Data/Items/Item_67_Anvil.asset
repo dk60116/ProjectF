@@ -13,7 +13,7 @@ MonoBehaviour:
   m_Name: Item_67_Anvil
   m_EditorClassIdentifier: Assembly-CSharp::ItemDefinition
   itemName: Anvil
-  id: 22
+  id: 23
   mapObject: {fileID: 7839628250064023149, guid: 5968b61eb9fd64e43862673d6f548d51, type: 3}
   mapObjectArchetype: {fileID: 11400000, guid: 838b2f2ac31acba438f649a65409527f, type: 2}
   useMapColor: 1
@@ -36,6 +36,7 @@ MonoBehaviour:
   upgradeable: 1
   keepIoAreaItemsInPlaceWhileEditing: 0
   capacity: 10
+  isFluid: 0
   storesFluid: 0
   fluidStorageLiters: 0
   fluidDisplayColor: {r: 1, g: 1, b: 1, a: 1}

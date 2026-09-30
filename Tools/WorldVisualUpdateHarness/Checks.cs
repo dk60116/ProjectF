@@ -365,10 +365,12 @@ namespace UnityEngine
         public int Plays, Stops;
         private float speed = 1f;
         public MainModule main => new MainModule(this);
+        public EmissionModule emission => new EmissionModule { enabled = true };
         public void Play(bool children) { Plays++; isPlaying = isEmitting = true; isPaused = false; }
         public void Stop(bool children, ParticleSystemStopBehavior behavior)
         { Stops++; isPlaying = isEmitting = isPaused = false; }
         public struct MinMaxCurve { public float constantMax; }
+        public struct EmissionModule { public bool enabled; }
         public struct MainModule
         {
             private ParticleSystem effect;

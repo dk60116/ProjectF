@@ -13,7 +13,7 @@ MonoBehaviour:
   m_Name: Item_35_Production machine (MK2)
   m_EditorClassIdentifier: 
   itemName: Production machine (MK2)
-  id: 74
+  id: 76
   mapObject: {fileID: 1982885657640665004, guid: 45a90e6ed2798e145ae9c40b00d00502, type: 3}
   mapObjectArchetype: {fileID: 11400000, guid: 9258c54df9b6e944787957dadf09e3f2, type: 2}
   useMapColor: 1
@@ -35,6 +35,7 @@ MonoBehaviour:
   upgradeable: 0
   keepIoAreaItemsInPlaceWhileEditing: 0
   capacity: 10
+  isFluid: 0
   storesFluid: 0
   fluidStorageLiters: 0
   fluidDisplayColor: {r: 1, g: 1, b: 1, a: 1}

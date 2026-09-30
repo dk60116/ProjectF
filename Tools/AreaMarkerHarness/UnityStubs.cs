@@ -198,11 +198,19 @@ public class GameManager
 public class ItemDefinition
 {
     public UnityEngine.Sprite icon;
+    public bool fluid = true;
 }
-public class InputOutputModule : UnityEngine.MonoBehaviour
+public class MapObject : UnityEngine.MonoBehaviour { }
+public class InputOutputModule : MapObject
 {
     public int StoredFluidItemId = -1;
-    public static ItemDefinition ResolveItemDefinition(int itemId) => null;
+    public readonly HashSet<UnityEngine.Vector2Int> OutputCoordinates = new();
+    public readonly HashSet<int> ConfiguredOutputIds = new();
+    public static readonly Dictionary<int,ItemDefinition> Definitions = new();
+    public bool IsRuntimeOutputCoordinate(UnityEngine.Vector2Int coordinate) => OutputCoordinates.Contains(coordinate);
+    public bool TryAppendConfiguredOutputItemIds(ISet<int> ids) { foreach(int id in ConfiguredOutputIds) ids.Add(id); return ids.Count>0; }
+    public static bool IsFluidItemDefinition(ItemDefinition definition) => definition?.fluid == true;
+    public static ItemDefinition ResolveItemDefinition(int itemId) => Definitions.TryGetValue(itemId,out var definition) ? definition : null;
     public static bool TryGetFluidOutputInfoAtRuntimeGridCoordinate(
         UnityEngine.Vector2Int coordinate,
         out int fluidItemId,
@@ -211,6 +219,18 @@ public class InputOutputModule : UnityEngine.MonoBehaviour
         fluidItemId = -1;
         liters = 0f;
         return false;
+    }
+}
+public sealed class ProductionMachine : InputOutputModule
+{
+    public int SelectedOutput = -1, ActiveOutput = -1;
+    public int OutputQueries;
+    public bool TryGetObjectInfoProductionOutput(out int itemId, out int count, out int capacity)
+    {
+        OutputQueries++;
+        itemId = ActiveOutput >= 0 ? ActiveOutput : SelectedOutput;
+        count=0; capacity=1;
+        return itemId>=0;
     }
 }
 public sealed class Pump : InputOutputModule
@@ -225,6 +245,8 @@ public sealed class Pump : InputOutputModule
 }
 public sealed class PipeRuntimeRecord
 {
+    public int FluidItemId = -1;
+    public int Queries;
     public bool TryGetObjectInfoFluidInfo(
         UnityEngine.Vector2Int coordinate,
         out int fluidItemId,
@@ -232,19 +254,20 @@ public sealed class PipeRuntimeRecord
         out float capacity,
         bool includeConnected)
     {
-        fluidItemId = -1;
+        Queries++;
+        fluidItemId = FluidItemId;
         liters = 0f;
         capacity = 0f;
-        return false;
+        return fluidItemId >= 0;
     }
 }
 public sealed class PipeWorld
 {
     public static PipeWorld Current;
+    public readonly Dictionary<UnityEngine.Vector2Int, PipeRuntimeRecord> Records = new();
     public bool TryGetAtCoordinate(UnityEngine.Vector2Int coordinate, out PipeRuntimeRecord record)
     {
-        record = null;
-        return false;
+        return Records.TryGetValue(coordinate,out record);
     }
 }
 public sealed class RobotArmWorld

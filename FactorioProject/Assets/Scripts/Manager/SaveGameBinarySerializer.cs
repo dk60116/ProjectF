@@ -1205,6 +1205,7 @@ public static class SaveGameBinarySerializer
         WriteLongList(writer, state.energyGaugeCapacityUnitsByType);
         WriteIntList(writer, state.productionInputFluidItemIds);
         WriteLongList(writer, state.productionInputFluidUnits);
+        writer.Write(state.productionOutputFluidUnits);
     }
 
     private static InputOutputModule.PersistentState ReadInputOutputState(BinaryReader reader, int version)
@@ -1291,6 +1292,10 @@ public static class SaveGameBinarySerializer
         {
             state.productionInputFluidItemIds = ReadIntList(reader);
             state.productionInputFluidUnits = ReadLongList(reader);
+        }
+        if (version >= 68)
+        {
+            state.productionOutputFluidUnits = reader.ReadInt64();
         }
 
         return state;

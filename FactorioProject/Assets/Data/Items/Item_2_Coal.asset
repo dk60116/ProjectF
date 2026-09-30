@@ -13,7 +13,7 @@ MonoBehaviour:
   m_Name: Item_2_Coal
   m_EditorClassIdentifier: 
   itemName: Coal
-  id: 15
+  id: 16
   mapObject: {fileID: 7543741037075201388, guid: 0376f79f038416846b7ac71c7870f4eb, type: 3}
   mapObjectArchetype: {fileID: 11400000, guid: 988a7f8c3ff7e33489d3b2a689d5d348, type: 2}
   useMapColor: 0
@@ -36,6 +36,7 @@ MonoBehaviour:
   upgradeable: 1
   keepIoAreaItemsInPlaceWhileEditing: 0
   capacity: 10
+  isFluid: 0
   storesFluid: 0
   fluidStorageLiters: 0
   fluidDisplayColor: {r: 1, g: 1, b: 1, a: 1}

@@ -301,6 +301,16 @@ public class InputOutputModuleAreaMarkerController : MonoBehaviour
     private bool TryResolveRuntimeFluidItemId(Vector2Int coordinate, out int fluidItemId)
     {
         fluidItemId = -1;
+        if (runtimeFluidModule is ProductionMachine productionMachine
+            && runtimeFluidModule.IsRuntimeOutputCoordinate(coordinate))
+        {
+            // Pipe output markers follow fluid recipes/batches. Solid outputs
+            // use the neutral pipe icon, even when an overlapping pipe has fluid.
+            return productionMachine.TryGetObjectInfoProductionOutput(out fluidItemId, out _, out _)
+                   && InputOutputModule.IsFluidItemDefinition(
+                       InputOutputModule.ResolveItemDefinition(fluidItemId));
+        }
+
         PipeWorld pipeWorld = PipeWorld.Current;
         if (pipeWorld != null
             && pipeWorld.TryGetAtCoordinate(coordinate, out PipeRuntimeRecord pipeRecord)
