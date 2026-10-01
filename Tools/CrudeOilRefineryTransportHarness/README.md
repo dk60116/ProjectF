@@ -14,8 +14,8 @@ Steady half-rate input and whole-liter deliveries at 0.75 L/s verify that the
 refinery builds a startup reserve, then keeps working at proportional throughput.
 The tests also cover drawing from generic StoreFluid stock, using observed
 delivery rate when pipe pressure is unavailable, dividing the configured 30 L
-capacity between dedicated recipe input buffers, and scaling electricity demand
-and outputs. A connected tank bypasses local startup buffering and can supply
+capacity between dedicated recipe input buffers, full configured electric demand
+during work and input waits, and zero demand for invalid ports. A connected tank bypasses local startup buffering and can supply
 the refinery continuously at its pressure limit. An adjacent producer also
 supplies its rate when no pipe node is present.
 Port configuration, storage acceptance and energy supply are fixtures; Unity

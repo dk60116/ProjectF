@@ -1,5 +1,10 @@
 # Steam pipe pressure regression
 
+Underground/Pump regressions check both tunnel ends beside and overlapping Pump
+ports in four orientations using data-only pipe records. Upstream tunnels retain
+the Pump's 5 L/s supply after a reservoir, while downstream tunnels retain their
+distance loss. Remote connections and Pump passes must both remain searchable.
+
 Production phase regressions extract ProductionMachine's pressure override and
 query the actual pipe search: idle, Working and drained batches contribute zero;
 Outputting retains the configured fractional rate and normal downstream loss.

@@ -224,7 +224,7 @@ public class Boiler : InputOutputModule, IFacilityFlowAdapter, IFacilityFlowStat
             || StoredFluidLiters <= FluidEpsilon
             || !CanProvideFluidItem(inputItemId))
         {
-            return "No water";
+            return "Waiting for water";
         }
 
         if (WaterTemperatureCelsius + FluidEpsilon < MaxWaterTemperatureCelsiusValue)
@@ -238,7 +238,7 @@ public class Boiler : InputOutputModule, IFacilityFlowAdapter, IFacilityFlowStat
 
             if (!IsWaterStorageFull(inputItemId))
             {
-                return "Filling water";
+                return "Waiting for water";
             }
 
             isProducing = true;
@@ -254,7 +254,7 @@ public class Boiler : InputOutputModule, IFacilityFlowAdapter, IFacilityFlowStat
 
         if (!TryResolveFluidOutputStorage(outputItemId, FluidEpsilon, out _))
         {
-            return "Output full";
+            return "Waiting for output";
         }
 
         isProducing = true;

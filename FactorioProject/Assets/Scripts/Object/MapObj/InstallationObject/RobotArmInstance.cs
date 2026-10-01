@@ -297,7 +297,8 @@ public sealed partial class RobotArmInstance : IMapObjectTarget, IMapObjectSimul
 
             if (runtimeSleeping)
             {
-                return "Output full";
+                statusLevel = ObjectInfoStatusLevel.Warning;
+                return "Waiting for output";
             }
 
             statusLevel = ObjectInfoStatusLevel.Working;
@@ -327,7 +328,7 @@ public sealed partial class RobotArmInstance : IMapObjectTarget, IMapObjectSimul
         }
 
         statusLevel = ObjectInfoStatusLevel.Warning;
-        return "No input item";
+        return "Waiting for input item";
     }
 
     public TransferState CaptureTransferState()

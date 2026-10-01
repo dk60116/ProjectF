@@ -267,6 +267,13 @@ public class OilDrillingMachine : InputOutputModule, IFacilityRuntimeWakeTarget
         return outputItemId >= 0;
     }
 
+    protected override bool HasOperationalTarget()
+    {
+        return OilLitersPerSecond > 0f
+               && TryResolveOilResource(out ResourceInstance resource)
+               && resource.CanHarvest;
+    }
+
     protected override string ResolveObjectInfoStatus(out bool isProducing)
     {
         isProducing = false;
@@ -288,12 +295,7 @@ public class OilDrillingMachine : InputOutputModule, IFacilityRuntimeWakeTarget
 
         if (!HasOilOutputSpace(resource))
         {
-            return "Output full";
-        }
-
-        if (!HasOperationalEnergyAvailable(installedDefinition))
-        {
-            return "No energy";
+            return "Waiting for output";
         }
 
         isProducing = OilLitersPerSecond > 0f;

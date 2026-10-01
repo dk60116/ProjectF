@@ -8,9 +8,9 @@ namespace ProjectF.EditorTools
 {
     internal static class ImageAssetResizeUtility
     {
-        private const int TargetSize = 256;
         private const int JpegQuality = 95;
-        private const string MenuPath = "Assets/ProjectF/이미지를 256x256으로 변경 (덮어쓰기)";
+        private const string Resize128MenuPath = "Assets/ProjectF/Resize Images to 128x128 (Overwrite)";
+        private const string Resize256MenuPath = "Assets/ProjectF/Resize Images to 256x256 (Overwrite)";
 
         private static readonly HashSet<string> SupportedExtensions =
             new HashSet<string>(StringComparer.OrdinalIgnoreCase)
@@ -21,8 +21,19 @@ namespace ProjectF.EditorTools
                 ".tga"
             };
 
-        [MenuItem(MenuPath, false, 2001)]
-        private static void ResizeSelectedImages()
+        [MenuItem(Resize128MenuPath, false, 2001)]
+        private static void ResizeSelectedImagesTo128()
+        {
+            ResizeSelectedImages(128);
+        }
+
+        [MenuItem(Resize256MenuPath, false, 2002)]
+        private static void ResizeSelectedImagesTo256()
+        {
+            ResizeSelectedImages(256);
+        }
+
+        private static void ResizeSelectedImages(int targetSize)
         {
             List<string> assetPaths = GetSelectedImageAssetPaths();
             if (assetPaths.Count <= 0)
@@ -38,11 +49,11 @@ namespace ProjectF.EditorTools
                 {
                     string assetPath = assetPaths[i];
                     EditorUtility.DisplayProgressBar(
-                        "이미지를 256x256으로 변경",
+                        $"Resize Images to {targetSize}x{targetSize}",
                         assetPath,
                         (float)i / assetPaths.Count);
 
-                    if (TryResizeAndOverwrite(assetPath, out string error))
+                    if (TryResizeAndOverwrite(assetPath, targetSize, out string error))
                     {
                         resizedCount++;
                     }
@@ -65,11 +76,12 @@ namespace ProjectF.EditorTools
             }
             else
             {
-                Debug.Log($"Resized and overwrote {resizedCount} image file(s) at {TargetSize}x{TargetSize}.");
+                Debug.Log($"Resized and overwrote {resizedCount} image file(s) at {targetSize}x{targetSize}.");
             }
         }
 
-        [MenuItem(MenuPath, true)]
+        [MenuItem(Resize128MenuPath, true)]
+        [MenuItem(Resize256MenuPath, true)]
         private static bool ValidateResizeSelectedImages()
         {
             return GetSelectedImageAssetPaths().Count > 0;
@@ -103,13 +115,13 @@ namespace ProjectF.EditorTools
             return paths;
         }
 
-        private static bool TryResizeAndOverwrite(string assetPath, out string error)
+        private static bool TryResizeAndOverwrite(string assetPath, int targetSize, out string error)
         {
             error = null;
             string absolutePath = ToAbsolutePath(assetPath);
             if (!File.Exists(absolutePath))
             {
-                error = "파일을 찾을 수 없음";
+                error = "File not found";
                 return false;
             }
 
@@ -144,14 +156,14 @@ namespace ProjectF.EditorTools
 
                 if (sourceTexture == null || sourceTexture.width <= 0 || sourceTexture.height <= 0)
                 {
-                    error = "이미지를 디코딩할 수 없음";
+                    error = "Unable to decode image";
                     return false;
                 }
 
                 previousFilterMode = sourceTexture.filterMode;
                 sourceTexture.filterMode = FilterMode.Bilinear;
                 restoreSourceFilterMode = sourceTexture != decodedTexture;
-                resizedTexture = CreateResizedTexture(sourceTexture, linear);
+                resizedTexture = CreateResizedTexture(sourceTexture, targetSize, linear);
                 if (restoreSourceFilterMode)
                 {
                     sourceTexture.filterMode = previousFilterMode;
@@ -160,14 +172,14 @@ namespace ProjectF.EditorTools
 
                 if (resizedTexture == null)
                 {
-                    error = "이미지 크기 변경 실패";
+                    error = "Failed to resize image";
                     return false;
                 }
 
                 byte[] outputBytes = EncodeTexture(resizedTexture, extension);
                 if (outputBytes == null || outputBytes.Length <= 0)
                 {
-                    error = "이미지 인코딩 실패";
+                    error = "Failed to encode image";
                     return false;
                 }
 
@@ -201,14 +213,14 @@ namespace ProjectF.EditorTools
             }
         }
 
-        private static Texture2D CreateResizedTexture(Texture2D source, bool linear)
+        private static Texture2D CreateResizedTexture(Texture2D source, int targetSize, bool linear)
         {
             RenderTextureReadWrite readWrite = linear
                 ? RenderTextureReadWrite.Linear
                 : RenderTextureReadWrite.sRGB;
             RenderTexture renderTexture = RenderTexture.GetTemporary(
-                TargetSize,
-                TargetSize,
+                targetSize,
+                targetSize,
                 0,
                 RenderTextureFormat.ARGB32,
                 readWrite);
@@ -220,15 +232,15 @@ namespace ProjectF.EditorTools
                 Graphics.Blit(source, renderTexture);
                 RenderTexture.active = renderTexture;
                 result = new Texture2D(
-                    TargetSize,
-                    TargetSize,
+                    targetSize,
+                    targetSize,
                     TextureFormat.RGBA32,
                     false,
                     linear)
                 {
                     hideFlags = HideFlags.HideAndDontSave
                 };
-                result.ReadPixels(new Rect(0f, 0f, TargetSize, TargetSize), 0, 0);
+                result.ReadPixels(new Rect(0f, 0f, targetSize, targetSize), 0, 0);
                 result.Apply(false, false);
                 return result;
             }

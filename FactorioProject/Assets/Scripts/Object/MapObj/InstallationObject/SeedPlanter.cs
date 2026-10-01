@@ -357,7 +357,11 @@ public class SeedPlanter : InputOutputModule
     public override bool TryGetElectricPowerDemand(out float wattsPerSecond)
     {
         wattsPerSecond = 0f;
-        return requestingPower && TryGetElectricPowerRequirement(out wattsPerSecond);
+        bool waiting = operatingState == OperatingState.NoSeeds
+                       || operatingState == OperatingState.LoadingSeed
+                       || operatingState == OperatingState.TargetOccupied;
+        return (requestingPower || waiting)
+               && TryGetElectricPowerRequirement(out wattsPerSecond);
     }
 
     public bool TryCollectPlantableSeedItemIds(ICollection<int> itemIds)
@@ -386,11 +390,8 @@ public class SeedPlanter : InputOutputModule
 
     public void GetObjectInfoStatus(out string statusText, out bool isPlanting, out bool isWarning)
     {
-        statusText = ResolveObjectInfoStatus(out isPlanting);
-        isWarning = operatingState == OperatingState.NoSeeds
-                    || operatingState == OperatingState.NoPower
-                    || operatingState == OperatingState.InvalidGround
-                    || operatingState == OperatingState.TargetOccupied;
+        base.GetObjectInfoStatus(out statusText, out isPlanting);
+        isWarning = IsWaitingObjectInfoStatus(statusText);
     }
 
     public static float ResolvePlantDuration(ItemDefinition definition)
@@ -478,13 +479,13 @@ public class SeedPlanter : InputOutputModule
             case OperatingState.Planting:
                 return "Planting";
             case OperatingState.NoSeeds:
-                return "No seeds";
+                return "Waiting for seeds";
             case OperatingState.NoPower:
                 return "No power";
             case OperatingState.InvalidGround:
                 return "Invalid ground";
             case OperatingState.TargetOccupied:
-                return "Target occupied";
+                return "Waiting for output";
             default:
                 return "Ready";
         }

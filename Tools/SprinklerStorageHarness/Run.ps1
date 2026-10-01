@@ -45,6 +45,13 @@ $generated += "}`npublic partial class InputOutputModule {`n"
 foreach ($signature in @(
     'protected IReadOnlyList<InstallationObject> GetConnectedFluidSourceStorages()',
     'private bool EnsureConnectedFluidSourceStorageCache()',
+    'private bool EnsureConnectedFluidSourceStorageCache(IReadOnlyList<Vector2Int>',
+    'private static bool CoordinatesMatch(',
+    'private static void AddUniqueCoordinates(',
+    'private static int AddConnectedFluidPipeCount(',
+    'private static int ResolveConnectedFluidPipeCount(',
+    'private static bool IsBetterConnectedFluidPipeCount(',
+    'private static bool IsConnectedFluidPipeCountFrozen(',
     'private void AddConnectedFluidStorageCacheCandidate(',
     'private void EnqueueConnectedFluidSearchCoordinate(',
     'private bool TryGetConnectedFluidNodeAtCoordinate(',

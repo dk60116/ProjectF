@@ -25,6 +25,7 @@ public static class Checks
         PipeTraversalContinuesAcrossCompatiblePipeTankBoundary();
         FluidIdentitySearchAllowsEmptyTankToJoinKnownFluid();
         FluidIdentitySearchRejectsKnownFluidMismatch();
+        BlueprintChecks.Run(Require);
         Console.WriteLine($"Fluid tank network checks passed: {checks}");
     }
 

@@ -37,6 +37,23 @@ public static class Checks
     }
     public static void Main()
     {
+        var waiting = Restore(0, loaded: false);
+        waiting.ApplyManagedUpdateTick();
+        waiting.GetObjectInfoStatus(out string waitingText, out bool planting, out bool warning);
+        Check(waitingText == "Waiting for seeds" && !planting && warning,
+            "seed input wait is a warning with Waiting text");
+        Check(waiting.TryGetElectricPowerDemand(out float standbyWatts) && standbyWatts == 45000f,
+            "seed input wait draws full configured UseAmount");
+        waiting.SupplyRatio = 0f;
+        waiting.GetObjectInfoStatus(out string noPowerText, out planting, out warning);
+        Check(noPowerText == "No energy" && !planting && !warning,
+            "power outage overrides seed wait warning");
+        waiting.ApplyManagedUpdateTick();
+        Check(waiting.EnergyCalls == 0 && waiting.ConsumedSeeds == 0,
+            "power outage cannot spend energy or seeds");
+        TerrainGenerator.Active.Farmland = false;
+        waiting.ApplyManagedUpdateTick();
+        Check(!waiting.TryGetElectricPowerDemand(out _), "invalid planting target has no standby demand");
         foreach (float supply in new[] { 1f, 0f })
         {
             var planter = Restore(Duration, supply);

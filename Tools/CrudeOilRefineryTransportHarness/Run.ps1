@@ -26,11 +26,13 @@ $fixture = $fixture.Replace('// PUMP_RATIO', (Read-Member ($base + 'InputOutputM
 $fixture = $fixture.Replace('// PUMP_LIMIT', (Read-Member ($base + '../Pump.cs') 'internal static float LimitTransportRate('))
 $fixture = $fixture.Replace('// MODULE_PRESSURE',
     (Read-Member ($base + 'InputOutputModule.cs') 'public virtual float GetObjectInfoFluidPressureLitersPerSecond('))
+$fixture = $fixture.Replace('// MODULE_DEMAND',
+    (Read-Member ($base + 'InputOutputModule.cs') 'public virtual bool TryGetElectricPowerDemand('))
 
 $fixture = $fixture.Replace('// REFINERY_TICK',
     (Read-Member ($base + 'CrudeOilRefinery.cs') 'private void UpdateContinuousRefining('))
-$fixture = $fixture.Replace('// REFINERY_DEMAND',
-    (Read-Member ($base + 'CrudeOilRefinery.cs') 'public override bool TryGetElectricPowerDemand('))
+$fixture = $fixture.Replace('// REFINERY_TARGET',
+    (Read-Member ($base + 'CrudeOilRefinery.cs') 'protected override bool HasOperationalTarget('))
 $fixture = $fixture.Replace('// REFINERY_CAPACITY',
     (Read-Member ($base + 'CrudeOilRefinery.cs') 'private float GetInputBufferCapacityLiters('))
 $fixture = $fixture.Replace('// REFINERY_OPERATIONAL_PRESSURE',

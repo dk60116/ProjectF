@@ -1168,6 +1168,8 @@ public class ItemInfoDescription : MonoBehaviour
     private void SetDefaultStatus(string text, bool isProducing, bool isWarning = false)
     {
         SetDefaultText(defaultStatusLineIndex, text, !string.IsNullOrEmpty(text));
+        isWarning = (isWarning || InputOutputModule.IsWaitingObjectInfoStatus(text))
+                    && text != "No energy" && text != "No power" && text != "No target";
         Color signColor = isProducing
             ? ProducingSignColor
             : isWarning

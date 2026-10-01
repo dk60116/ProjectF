@@ -73,35 +73,50 @@ internal static class Phase34Checks
         require(power.SupplyRatio == .5f && power.GetConsumerRatio(60, true) == .5f, "half-power demand publication");
         require(power.GetConsumerRatio(60, false) == .25f, "new demand is counted only once");
         var craft = ProductionProcess.Empty;
-        craft.Begin(3, 12, 4, 60);
+        craft.Begin(3, 12, 4, 0);
         long grant = power.GrantEnergy(unit, 60);
         require(grant == unit / 2, "integer energy grant retains partial power");
-        for (int i = 0; i < 60; i++) craft.Advance(1, true, grant, 60 * unit, 60 * unit);
-        require(craft.Active && !craft.WaitingForOutput && craft.RemainingTicks == 30, "half power preserves partial production progress");
+        for (int i = 0; i < 60; i++) craft.Advance(1, true, grant, 60 * unit);
+        require(craft.Active && !craft.WaitingForOutput && craft.ConsumedEnergyUnits == 30 * unit,
+            "half power preserves partial production progress");
+        require(craft.RemainingTicks == 0,
+            "energy production does not maintain a second countdown");
+        require(ProductionProcess.RemainingEnergyTicks(60 * unit, craft.ConsumedEnergyUnits, 60 * unit) == 30,
+            "remaining energy converts to time only when requested");
         var beforeOutage = craft;
-        for (int i = 0; i < 120; i++) craft.Advance(1, true, 0, 60 * unit, 60 * unit);
+        for (int i = 0; i < 120; i++) craft.Advance(1, true, 0, 60 * unit);
         require(craft.Equals(beforeOutage), "power loss consumes no progress or pending output");
         var restored = craft;
         for (int i = 0; i < 60; i++)
         {
-            craft.Advance(1, true, grant, 60 * unit, 60 * unit);
-            restored.Advance(1, true, grant, 60 * unit, 60 * unit);
+            craft.Advance(1, true, grant, 60 * unit);
+            restored.Advance(1, true, grant, 60 * unit);
             require(craft.Equals(restored), "production checkpoint resumes identically without any scene");
         }
         require(craft.WaitingForOutput && craft.RemainingTicks == 0 && craft.OutputCount == 4, "completed batch retains its output reservation");
         var blocked = craft;
-        craft.Advance(9999, true, unit * 9999, unit * 60, unit * 60);
+        craft.Advance(9999, true, unit * 9999, unit * 60);
         require(craft.Equals(blocked), "blocked output cannot advance or consume energy again");
         craft.Clear();
         require(!craft.Active && craft.OutputItemId == -1 && craft.OutputCount == 0, "explicit successful output clears the batch once");
         craft.Begin(0, 10, 1, 6);
-        for (int i = 0; i < 5; i++) require(!craft.Advance(1, false, 0, 0, 0), "time-only recipe waits for all its ticks");
-        require(craft.Advance(1, false, 0, 0, 0), "time-only recipe completes at the exact tick");
+        for (int i = 0; i < 5; i++) require(!craft.Advance(1, false, 0, 0), "time-only recipe waits for all its ticks");
+        require(craft.Advance(1, false, 0, 0), "time-only recipe completes at the exact tick");
         craft.Begin(0, -1, 1, 6); require(!craft.Active, "invalid output cannot start a craft");
         power.HasPowerSource = false;
         require(power.GrantEnergy(unit, 60) == 0 && power.SupplyRatio == 0, "disconnected power cannot grant energy");
+        // Warm both production paths before measuring their steady-state allocation.
+        for (int i = 0; i < 10000; i++)
+        {
+            craft.Begin(0, 10, 1, 1); craft.Advance(1, false, 0, 0); craft.Clear();
+            craft.Begin(0, 10, 1, 0); craft.Advance(1, true, unit, unit); craft.Clear();
+        }
         long allocated = GC.GetAllocatedBytesForCurrentThread();
-        for (int i = 0; i < 10000; i++) { craft.Begin(0, 10, 1, 1); craft.Advance(1, false, 0, 0, 0); craft.Clear(); }
+        for (int i = 0; i < 10000; i++)
+        {
+            craft.Begin(0, 10, 1, 1); craft.Advance(1, false, 0, 0); craft.Clear();
+            craft.Begin(0, 10, 1, 0); craft.Advance(1, true, unit, unit); craft.Clear();
+        }
         require(GC.GetAllocatedBytesForCurrentThread() == allocated, "production state loop allocates no managed memory");
     }
     private static void Calendar(Action<bool, string> require)

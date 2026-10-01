@@ -4,33 +4,20 @@ $sourcePath = Join-Path $repo 'FactorioProject/Assets/Scripts/Object/MapObj/Inst
 $source = [IO.File]::ReadAllText($sourcePath)
 $pipeSourcePath = Join-Path $repo 'FactorioProject/Assets/Scripts/Object/MapObj/InstallationObject/Pipe.cs'
 $pipeSource = [IO.File]::ReadAllText($pipeSourcePath)
+$placementSource = [IO.File]::ReadAllText((Join-Path $repo 'FactorioProject/Assets/Scripts/Object/MapObj/InstallationObject/InstallationPlacementController.cs'))
 
-function Read-Member([string]$signature) {
-    $start = $source.IndexOf($signature, [StringComparison]::Ordinal)
+function Read-Member([string]$signature, [string]$memberSource = $source) {
+    $start = $memberSource.IndexOf($signature, [StringComparison]::Ordinal)
     if ($start -lt 0) { throw "Missing production member: $signature" }
-    $end = $source.IndexOf('{', $start) + 1
+    $end = $memberSource.IndexOf('{', $start) + 1
     $depth = 1
-    while ($depth -gt 0 -and $end -lt $source.Length) {
-        if ($source[$end] -eq '{') { $depth++ }
-        if ($source[$end] -eq '}') { $depth-- }
+    while ($depth -gt 0 -and $end -lt $memberSource.Length) {
+        if ($memberSource[$end] -eq '{') { $depth++ }
+        if ($memberSource[$end] -eq '}') { $depth-- }
         $end++
     }
     if ($depth -ne 0) { throw "Unbalanced production member: $signature" }
-    $source.Substring($start, $end - $start)
-}
-
-function Read-PipeMember([string]$signature) {
-    $start = $pipeSource.IndexOf($signature, [StringComparison]::Ordinal)
-    if ($start -lt 0) { throw "Missing production member: $signature" }
-    $end = $pipeSource.IndexOf('{', $start) + 1
-    $depth = 1
-    while ($depth -gt 0 -and $end -lt $pipeSource.Length) {
-        if ($pipeSource[$end] -eq '{') { $depth++ }
-        if ($pipeSource[$end] -eq '}') { $depth-- }
-        $end++
-    }
-    if ($depth -ne 0) { throw "Unbalanced production member: $signature" }
-    $pipeSource.Substring($start, $end - $start)
+    $memberSource.Substring($start, $end - $start)
 }
 
 $generated = @'
@@ -66,7 +53,13 @@ namespace UnityEngine
     }
 }
 
-public partial class Fluidtank
+public class MapObject { public readonly UnityEngine.Transform transform = new(); }
+public class InstallationObject : MapObject
+{
+    public int StoredFluidItemId { get; set; } = -1;
+}
+
+public partial class Fluidtank : InstallationObject
 {
     private static readonly Vector2Int[] FluidCardinalDirections =
     {
@@ -80,7 +73,6 @@ public partial class Fluidtank
     private readonly Dictionary<Vector2Int, Fluidtank> adjacentTanks = new Dictionary<Vector2Int, Fluidtank>();
     private bool networkConnectionAllowed = true;
 
-    public int StoredFluidItemId { get; set; } = -1;
     public bool IsFlatCarMounted { get; set; }
 
     public void SetConnectedFluid(Vector2Int direction, int fluidItemId)
@@ -133,6 +125,22 @@ $generated += "`n" + (Read-Member 'private bool CanConnectAdjacentFixedTank(')
 $generated += "`n" + (Read-Member 'private bool CanConnectFixedTankPipe(')
 $generated += "`n" + (Read-Member 'private int ResolveFixedTankNetworkFluidItemId(')
 $generated += "`n}`n"
+$generated += "`npublic partial class InstallationPlacementController {`n"
+foreach ($signature in @('private void RefreshFluidTankBlueprintPipeVisuals(',
+    'private bool HasFluidTankBlueprintConnection(',
+    'private int ResolveFluidTankBlueprintNetworkFluidItemId(',
+    'private bool TryResolveFluidTankBlueprintConnection(',
+    'private List<Vector2Int> GetPipeVariantFixedConnectionDirections(',
+    'private List<Vector2Int> GetFixedFluidConnectorNeighborConnectionDirections(',
+    'private List<Vector2Int> GetFluidTankNeighborConnectionDirections(',
+    'private bool CanPipeConnectionMatchFluidTank(',
+    'private int ResolveProposedStoredFluidItemId(',
+    'private bool TryGetFluidTankPlacementSnapshotAtCoordinate(',
+    'private bool SnapshotIsActiveFluidTank(',
+    'private static int ResolveSnapshotStoredFluidItemId(')) {
+    $generated += (Read-Member $signature $placementSource) + "`n"
+}
+$generated += "}`n"
 $generated += @'
 
 public partial class Pipe
@@ -160,13 +168,14 @@ public partial class Pipe
             false);
     }
 '@
-$generated += "`n" + (Read-PipeMember 'private static bool CanTraverseFluidTankBoundary(')
+$generated += "`n" + (Read-Member 'private static bool CanTraverseFluidTankBoundary(' $pipeSource)
 $generated += "`n}`n"
 
 $probeDir = Join-Path ([IO.Path]::GetTempPath()) ('ProjectF-FluidTankNetwork-' + [Guid]::NewGuid().ToString('N'))
 New-Item -ItemType Directory -Path $probeDir | Out-Null
 Set-Content -LiteralPath (Join-Path $probeDir 'Production.cs') -Value $generated
 Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'Checks.cs') -Destination $probeDir
+Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'BlueprintChecks.cs') -Destination $probeDir
 Set-Content -LiteralPath (Join-Path $probeDir 'Probe.csproj') -Value '<Project Sdk="Microsoft.NET.Sdk"><PropertyGroup><OutputType>Exe</OutputType><TargetFramework>net9.0</TargetFramework></PropertyGroup></Project>'
 dotnet run --configuration Release --project (Join-Path $probeDir 'Probe.csproj')
 exit $LASTEXITCODE

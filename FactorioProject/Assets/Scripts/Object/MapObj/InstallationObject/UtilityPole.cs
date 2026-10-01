@@ -554,6 +554,13 @@ public partial class UtilityPole : InstallationObject
             return false;
         }
 
+        if (consumer is InputOutputModule module
+            && !module.TryGetElectricPowerDemand(out requiredWatts))
+        {
+            requiredWatts = 0f;
+            return true;
+        }
+
         if (IsFreeElectroEnergyEnabled())
         {
             suppliedWatts = requiredWatts;

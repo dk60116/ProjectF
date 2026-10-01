@@ -7,6 +7,8 @@ namespace ProjectF.Simulation
     public struct ProductionProcess
     {
         public bool Active, WaitingForOutput;
+        // Only time-based recipes maintain a countdown. Energy-based recipes
+        // derive remaining time from ConsumedEnergyUnits when a snapshot needs it.
         public long RemainingTicks, ConsumedEnergyUnits;
         public int RecipeIndex, OutputItemId, OutputCount;
 
@@ -26,7 +28,7 @@ namespace ProjectF.Simulation
         // Accepted energy is supplied by an IO adapter; probing demand never consumes it.
         // Completion remains pending until the output port accepts the complete batch.
         public bool Advance(long elapsedTicks, bool energyRequired, long acceptedEnergyUnits,
-            long completeEnergyUnits, long energyRateUnits)
+            long completeEnergyUnits)
         {
             if (!Active) return false;
             if (WaitingForOutput) return true;
@@ -35,7 +37,6 @@ namespace ProjectF.Simulation
                 if (acceptedEnergyUnits <= 0) return false;
                 ConsumedEnergyUnits = acceptedEnergyUnits > long.MaxValue - Math.Max(0, ConsumedEnergyUnits)
                     ? long.MaxValue : Math.Max(0, ConsumedEnergyUnits) + acceptedEnergyUnits;
-                RemainingTicks = RemainingEnergyTicks(completeEnergyUnits, ConsumedEnergyUnits, energyRateUnits);
                 if (ConsumedEnergyUnits < completeEnergyUnits) return false;
             }
             else
@@ -43,6 +44,7 @@ namespace ProjectF.Simulation
                 RemainingTicks = Math.Max(0, RemainingTicks - Math.Max(0, elapsedTicks));
                 if (RemainingTicks > 0) return false;
             }
+            RemainingTicks = 0;
             WaitingForOutput = true;
             return true;
         }

@@ -928,6 +928,14 @@ public class ProductionMachine : InputOutputModule
         return outputItemId == ActiveOutputItemId ? Mathf.Max(0, ActiveOutputCount) : 0f;
     }
 
+    protected override bool HasOperationalTarget()
+    {
+        return IsActiveCraftRunning || IsWaitingForOutput
+               || HasRuntimeOutputCoordinates
+               && TryResolveSelectedProductionRecipe(
+                   resolvedProductionIngredients, out _, out _, out _);
+    }
+
     protected override string ResolveObjectInfoStatus(out bool isProducing)
     {
         isProducing = false;
@@ -945,16 +953,11 @@ public class ProductionMachine : InputOutputModule
                 isProducing = true;
                 return "Outputting";
             }
-            return "Output full";
+            return "Waiting for output";
         }
 
         if (IsActiveCraftRunning)
         {
-            if (!HasOperationalEnergyAvailable(installedDefinition))
-            {
-                return "No energy";
-            }
-
             isProducing = true;
             return "Working";
         }
@@ -1007,16 +1010,11 @@ public class ProductionMachine : InputOutputModule
                     && GetProductionFluidUnits(ingredient.itemId)
                     < GetRequiredProductionFluidUnits(outputItemId, ingredient))
                 {
-                    return "No input fluid";
+                    return "Waiting for input fluid";
                 }
             }
 
-            return "No input item";
-        }
-
-        if (!HasOperationalEnergyAvailable(installedDefinition))
-        {
-            return "No energy";
+            return "Waiting for input item";
         }
 
         isProducing = true;

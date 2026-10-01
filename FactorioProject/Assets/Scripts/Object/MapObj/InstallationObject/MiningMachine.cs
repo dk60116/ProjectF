@@ -87,6 +87,13 @@ public class MiningMachine : InputOutputModule
         BeginActiveCraft(-1, outputItemId, outputCount, installedDefinition);
     }
 
+    protected override bool HasOperationalTarget()
+    {
+        return IsActiveCraftRunning || IsWaitingForOutput
+               || HasRuntimeOutputCoordinates
+               && TryResolveNextMiningResource(out _, out _, out _, out _, -1, -1);
+    }
+
     protected override string ResolveObjectInfoStatus(out bool isProducing)
     {
         isProducing = false;
@@ -99,16 +106,11 @@ public class MiningMachine : InputOutputModule
 
         if (IsWaitingForOutput)
         {
-            return "Output full";
+            return "Waiting for output";
         }
 
         if (IsActiveCraftRunning)
         {
-            if (!HasOperationalEnergyAvailable(installedDefinition))
-            {
-                return "No energy";
-            }
-
             isProducing = true;
             return "Working";
         }
@@ -129,11 +131,6 @@ public class MiningMachine : InputOutputModule
             || outputCount <= 0)
         {
             return "No resource";
-        }
-
-        if (!HasOperationalEnergyAvailable(installedDefinition))
-        {
-            return "No energy";
         }
 
         isProducing = true;

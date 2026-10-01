@@ -1012,6 +1012,30 @@ public partial class TerrainGenerator : MonoBehaviour
         }
 
         int quarterTurns = ((savedState.quarterTurns % 4) + 4) % 4;
+        if (pipePrototype is not UndergroundPipe
+            && placementController != null
+            && (savedState.conveyorVariantKind >= 0 || savedState.pipeConnectionMask >= 0))
+        {
+            if (!placementController.TryResolvePipeLoadPlacement(
+                    definition,
+                    savedState.anchorCoordinate,
+                    quarterTurns,
+                    savedState.conveyorVariantKind,
+                    savedState.pipeConnectionMask,
+                    out MapObject savedPipePrefab,
+                    out quarterTurns,
+                    out int savedPipeVariantKind)
+                || savedPipePrefab is not Pipe savedPipe)
+            {
+                return false;
+            }
+
+            // Data-only and scene restorations use the same persisted geometry.
+            resolvedSource = savedPipe;
+            pipePrototype = savedPipe;
+            savedState.quarterTurns = quarterTurns;
+            savedState.conveyorVariantKind = savedPipeVariantKind;
+        }
         Quaternion rotation = placementController != null
             ? placementController.GetInstalledObjectRotation(resolvedSource, quarterTurns)
             : resolvedSource.transform.rotation * Quaternion.Euler(0f, quarterTurns * 90f, 0f);
@@ -1138,7 +1162,6 @@ public partial class TerrainGenerator : MonoBehaviour
         }
 
         int restoreQuarterTurns = ((savedState.quarterTurns % 4) + 4) % 4;
-        bool resolvedPipeBeforeActivation = false;
         if (definition.mapObject is Pipe && !restoresUndergroundPipe)
         {
             if (placementController == null
@@ -1164,7 +1187,6 @@ public partial class TerrainGenerator : MonoBehaviour
                 placementController.GetInstalledObjectRotation(
                     resolvedPipe,
                     restoreQuarterTurns));
-            resolvedPipeBeforeActivation = true;
         }
 
         // Variant kind and quarter-turns are one persisted state. Re-resolving a wall
@@ -1184,39 +1206,6 @@ public partial class TerrainGenerator : MonoBehaviour
             restoreQuarterTurns = resolvedFenceQuarterTurns;
             savedState.quarterTurns = restoreQuarterTurns;
             savedState.conveyorVariantKind = resolvedFenceVariantKind;
-        }
-        else if (!restoresUndergroundPipe
-            && !resolvedPipeBeforeActivation
-            && savedState.conveyorVariantKind < 0
-            && placementController != null
-            && placementController.TryResolvePipeLoadPlacement(
-                definition,
-                savedState.anchorCoordinate,
-                restoreQuarterTurns,
-                out MapObject resolvedPipePrefab,
-                out int resolvedPipeQuarterTurns,
-                out int resolvedPipeVariantKind)
-            && resolvedPipePrefab != null)
-        {
-            sourcePrefab = resolvedPipePrefab;
-            restoreQuarterTurns = resolvedPipeQuarterTurns;
-            savedState.quarterTurns = restoreQuarterTurns;
-            savedState.conveyorVariantKind = resolvedPipeVariantKind;
-        }
-
-        if (!restoresUndergroundPipe
-            && !resolvedPipeBeforeActivation
-            && placementController != null
-            && sourcePrefab is Pipe savedPipePrefab
-            && savedState.pipeConnectionMask >= 0
-            && placementController.TryResolvePipeQuarterTurnsFromConnectionMask(
-                savedPipePrefab,
-                savedState.pipeConnectionMask,
-                restoreQuarterTurns,
-                out int connectionMaskQuarterTurns))
-        {
-            restoreQuarterTurns = connectionMaskQuarterTurns;
-            savedState.quarterTurns = restoreQuarterTurns;
         }
 
         Quaternion rotation = placementController != null

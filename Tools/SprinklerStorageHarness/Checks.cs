@@ -113,11 +113,14 @@ public partial class InputOutputModule : InstallationObject
     private int connectedFluidSearchCurrentPipeCount;
     private readonly HashSet<InstallationObject> connectedFluidStorageCandidates = new();
     private readonly List<Vector2Int> connectedFluidSeedCoordinates = new();
+    private readonly List<Vector2Int> connectedFluidSeedCoordinateScratch = new();
+    private readonly Dictionary<Vector2Int, Pump> connectedFluidSearchPumps = new();
+    private readonly Dictionary<InstallationObject, Pump> connectedFluidSourcePumps = new();
+    private Pump connectedFluidSearchCurrentPump;
     private static readonly Vector2Int[] FluidCardinalDirections = { new(1, 0), new(-1, 0), new(0, 1), new(0, -1) };
     public readonly Dictionary<Vector2Int, InstallationObject> Nodes = new();
     public bool UseGraph;
     public int CacheBuilds;
-    public float ReportedConsumption;
     protected virtual bool UsesConnectedTankNetworkStorage => false;
     protected virtual bool ShouldKeepRuntimeUpdateTickActive() => false;
     public IReadOnlyList<InstallationObject> Sources => GetConnectedFluidSourceStorages();
@@ -130,7 +133,7 @@ public partial class InputOutputModule : InstallationObject
     }
     private void CollectRuntimePipeAreaCoordinates(List<Vector2Int> coordinates)
     {
-        CacheBuilds++;
+        if (cachedConnectedFluidSourceStoragesTopologyVersion != fluidTopologyVersion) CacheBuilds++;
         if (UseGraph) { coordinates.Add(Vector2Int.zero); return; }
         Nodes.Clear();
         for (int i = 0; i < Connections.Count; i++)
@@ -141,6 +144,13 @@ public partial class InputOutputModule : InstallationObject
         }
     }
     private void EnqueueSteamGeneratorPipePassCoordinatesAt(Vector2Int coordinate) { }
+    private bool TryEnqueuePassiveFluidPassesAt(Vector2Int coordinate, out int mask)
+    { mask = 0; return false; }
+    private bool TryEnqueuePumpPressureResetPassesAt(Vector2Int coordinate, bool input, out int mask)
+    { mask = 0; return false; }
+    private static bool DirectionMaskContains(int mask, int index) => (mask & (1 << index)) != 0;
+    private static bool HasRuntimePumpPipePassTowards(Vector2Int coordinate, Vector2Int direction) => false;
+    private static bool HasRuntimePassiveFluidPassTowards(Vector2Int coordinate, Vector2Int direction) => false;
     private void EnqueueFluidStoragePipePassCoordinatesAt(Vector2Int coordinate)
         => EnqueueConnectedFluidSearchCoordinate(coordinate, connectedFluidSearchCurrentPipeCount);
     private static bool ContainsCoordinate(List<Vector2Int> list, Vector2Int coordinate) => list.Contains(coordinate);
@@ -165,8 +175,6 @@ public partial class InputOutputModule : InstallationObject
     }
     private static bool CanFluidStorageConnectToDirection(InstallationObject storage, Vector2Int coordinate, Vector2Int direction) => false;
     private bool TryGetRuntimePipeAreaExternalDirection(Vector2Int coordinate, out Vector2Int direction) { direction = default; return false; }
-    protected void RecordFluidNetworkConsumption(int fluidItemId, float consumedLiters)
-        => ReportedConsumption += consumedLiters;
     protected virtual bool ShouldAutoPullFluidFromConnectedStorage() => true;
     protected virtual string ResolveObjectInfoStatus(out bool producing) { producing = false; return ""; }
     private float plannedDeltaTime;
@@ -184,6 +192,11 @@ public partial class InputOutputModule : InstallationObject
     protected void ApplyPlannedBaseModuleTick(float deltaTime) { }
 }
 public class Pump : InputOutputModule
+{
+    public static int ResolveWaterItemId(object _) => 1;
+    public static Pump ResolvePressureLimit(Pump current, Pump crossed) => crossed ?? current;
+}
+public class WaterPump : InputOutputModule
 {
     public static int ResolveWaterItemId(object _) => 1;
 }
@@ -263,14 +276,13 @@ public static class Checks
         Check(s.Status == "Ready", "status uses tank water with empty local storage");
         Check(!s.AutoPull, "water is not reserved in the local reservoir by automatic equalization");
         Check(s.Spray(30) && Near(tank.StoredFluidLiters, 30) && Near(s.StoredFluidLiters, 0), "low fill ratio tank supplies a whole spray directly");
-        Check(Near(s.ReportedConsumption, 30), "successful spray reports actual water consumption for network pressure");
         Check(tank.Changes == 1, "withdrawal notifies the actual storage owner");
         s.GetWaterStorageInfo(out stored, out _);
         Check(Near(stored, 30) && s.CacheBuilds == 1, "amounts stay live without rebuilding topology");
 
         var second = new Sprinkler();
         second.Connections.Add(tank);
-        Check(second.Spray(30) && !s.Spray(30) && s.Status == "No water", "two sprinklers cannot double spend shared water");
+        Check(second.Spray(30) && !s.Spray(30) && s.Status == "Waiting for water", "two sprinklers cannot double spend shared water");
         Check(!RequiresRuntimeTick(second), "empty sprinkler water supply puts its tick to sleep");
 
         var a = Tank(8);
@@ -314,29 +326,33 @@ public static class Checks
         network.Nodes[new(2, 0)] = new Pipe();
         network.Nodes[new(3, 0)] = last;
         network.GetWaterStorageInfo(out stored, out capacity);
-        Check(Near(stored, 100) && Near(capacity, 500), "traverse the first tank and intervening pipe to the entire tank bank");
-        Check(ItemInfoDescription.Display(network, stored, capacity) == "100L / 300L (+200L)", "display separates internal capacity and total connected tank capacity");
-        Check(network.Spray(60) && Near(last.StoredFluidLiters, 40), "consume from a tank behind another tank");
-        network.Nodes[new(0, 1)] = new Pipe(); network.Nodes[new(1, 1)] = new Pipe();
+        Check(Near(stored, 10) && Near(capacity, 400), "tank terminates a route at its actual reservoir");
+        Check(ItemInfoDescription.Display(network, stored, capacity) == "10L / 300L (+100L)", "display separates internal capacity and reachable tank capacity");
+        Check(!network.Spray(60) && Near(last.StoredFluidLiters, 90), "cannot withdraw through a tank from a downstream reservoir");
+        Check(network.Spray(10), "first reservoir remains available");
+        network.Nodes[new(0, 1)] = new Pipe(); network.Nodes[new(1, 1)] = new Pipe(); network.Nodes[new(2, 1)] = new Pipe();
         network.TopologyVersion++;
         network.GetWaterStorageInfo(out stored, out capacity);
-        Check(Near(stored, 40) && Near(capacity, 500), "looped paths count each tank only once, including empty tanks");
+        Check(Near(stored, 90) && Near(capacity, 500), "independent pipe route reaches the second tank once");
+        Check(network.Spray(40) && Near(last.StoredFluidLiters, 50), "separate pipe route can withdraw from the second tank");
         network.Nodes.Remove(new(2, 0)); network.TopologyVersion++;
         network.GetWaterStorageInfo(out stored, out capacity);
         Check(Near(stored, 0) && Near(capacity, 400), "removing an intermediate pipe excludes all downstream tanks");
         network.Nodes[new(2, 0)] = new Pipe(); network.TopologyVersion++;
-        first.BlockedDirections.Add(new(1, 0));
+        network.Nodes.Remove(new(0, 1)); network.Nodes.Remove(new(1, 1)); network.Nodes.Remove(new(2, 1));
+        first.BlockedDirections.Add(new(-1, 0));
         network.GetWaterStorageInfo(out stored, out capacity);
-        Check(Near(capacity, 400), "tank traversal respects blocked connector directions");
+        Check(Near(capacity, 300), "tank lookup respects blocked connector directions");
         first.BlockedDirections.Clear(); network.TopologyVersion++;
         network.Nodes[new(2, 0)] = new Pipe { Remote = new(10, 0) };
+        network.Nodes[new(0, 1)] = new Pipe(); network.Nodes[new(1, 1)] = new Pipe(); network.Nodes[new(2, 1)] = new Pipe();
         network.Nodes.Remove(new(3, 0));
         network.Nodes[new(10, 0)] = new Pipe(); network.Nodes[new(11, 0)] = last;
         network.GetWaterStorageInfo(out stored, out capacity);
-        Check(Near(stored, 40) && Near(capacity, 500), "underground pipe endpoint after a tank reaches the remote tank");
+        Check(Near(stored, 50) && Near(capacity, 500), "independent underground pipe route reaches the remote tank");
         var ordinaryModule = new InputOutputModule { UseGraph = true };
         foreach (var node in network.Nodes) ordinaryModule.Nodes.Add(node.Key, node.Value);
-        Check(ordinaryModule.Sources.Count == 2, "ordinary fluid modules traverse connected fixed tanks");
+        Check(ordinaryModule.Sources.Count == 2, "ordinary fluid modules resolve reservoirs through separate pipe routes");
         var distanceModule = new InputOutputModule { UseGraph = true };
         var distanceStorage = Tank(10);
         distanceModule.Nodes[Vector2Int.zero] = new Pipe();

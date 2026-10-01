@@ -14,12 +14,15 @@ function Read-Member([string]$signature) {
     }
     $source.Substring($start, $end - $start)
 }
-$generated = "using System; using ProjectF.Simulation;`npublic partial class CraftAdapterProbe {`n"
+$generated = "using System; using System.Collections.Generic; using ProjectF.Simulation;`npublic partial class CraftAdapterProbe {`n"
 $start = $source.IndexOf('private ProjectF.Simulation.ProductionProcess production', [StringComparison]::Ordinal)
 $end = $source.IndexOf('private TerrainGenerator cachedTerrain', $start, [StringComparison]::Ordinal)
 if ($start -lt 0 -or $end -le $start) { throw 'Missing production state/forwarding properties' }
 $generated += $source.Substring($start, $end - $start)
-foreach ($signature in @('private void UpdateActiveCraft(', 'protected void BeginActiveCraft(',
+foreach ($signature in @('public struct PersistentInputItemAreaState', 'public sealed class PersistentState',
+    'public virtual PersistentState CapturePersistentState(', 'public virtual void ApplyPersistentState(',
+    'private long ResolveRemainingCraftTicks(', 'private long ResolveConsumedEnergyUnitsFromRemainingTicks(',
+    'private void UpdateActiveCraft(', 'protected void BeginActiveCraft(',
     'protected void ClearActiveCraft()', 'protected virtual bool TryCompleteActiveCraft()')) {
     $generated += (Read-Member $signature) + "`n"
 }

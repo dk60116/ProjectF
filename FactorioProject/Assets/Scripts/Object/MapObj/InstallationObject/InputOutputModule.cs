@@ -1004,6 +1004,9 @@ public class InputOutputModule : InstallationObject,
 
     public virtual PersistentState CapturePersistentState()
     {
+        // Preserve the existing save fields without maintaining a second clock
+        // for energy-based production on every tick.
+        long savedRemainingCraftTicks = ResolveRemainingCraftTicks();
         PersistentState state = new PersistentState
         {
             hasDeterministicUnits = true,
@@ -1013,8 +1016,8 @@ public class InputOutputModule : InstallationObject,
             energyGaugeCapacityUnits = energyGaugeCapacityUnits,
             hasActiveCraft = hasActiveCraft,
             waitingForOutput = waitingForOutput,
-            remainingCraftTime = DeterministicSimulationUnits.TicksToSeconds(remainingCraftTicks),
-            remainingCraftTicks = remainingCraftTicks,
+            remainingCraftTime = DeterministicSimulationUnits.TicksToSeconds(savedRemainingCraftTicks),
+            remainingCraftTicks = savedRemainingCraftTicks,
             activeCraftConsumedEnergy = DeterministicSimulationUnits.ToFloat(activeCraftConsumedEnergyUnits),
             activeCraftConsumedEnergyUnits = activeCraftConsumedEnergyUnits,
             activeRecipeIndex = activeRecipeIndex,
@@ -1117,18 +1120,20 @@ public class InputOutputModule : InstallationObject,
         }
         hasActiveCraft = state.hasActiveCraft;
         waitingForOutput = state.waitingForOutput;
-        remainingCraftTicks = state.hasDeterministicUnits
+        long savedRemainingCraftTicks = state.hasDeterministicUnits
             ? System.Math.Max(0L, state.remainingCraftTicks)
             : DeterministicSimulationUnits.SecondsToTicks(state.remainingCraftTime);
         activeCraftConsumedEnergyUnits = state.hasDeterministicUnits
             ? System.Math.Max(0L, state.activeCraftConsumedEnergyUnits)
             : DeterministicSimulationUnits.FromFloat(state.activeCraftConsumedEnergy);
+        ItemDefinition installedDefinition = ResolveInstalledDefinition();
         if (hasActiveCraft && !waitingForOutput && activeCraftConsumedEnergyUnits <= 0L)
         {
             activeCraftConsumedEnergyUnits = ResolveConsumedEnergyUnitsFromRemainingTicks(
-                ResolveInstalledDefinition(),
-                remainingCraftTicks);
+                installedDefinition,
+                savedRemainingCraftTicks);
         }
+        remainingCraftTicks = RequiresOperationalEnergy(installedDefinition) ? 0L : savedRemainingCraftTicks;
         activeRecipeIndex = state.activeRecipeIndex;
         activeOutputItemId = state.activeOutputItemId;
         activeOutputCount = Mathf.Max(0, state.activeOutputCount);
@@ -3596,7 +3601,9 @@ public class InputOutputModule : InstallationObject,
                 }
             }
 
-            if (hasPipe && !hasPumpPressureResetPass && !hasPassiveFluidPass
+            // A pipe overlapping a Pump endpoint retains its own remote route.
+            // Crossing the Pump resets pressure; it does not replace the tunnel.
+            if (hasPipe && !hasPassiveFluidPass
                 && TryGetConnectedPipeRemoteCoordinate(
                     pipe,
                     pipeRecord,
@@ -5669,13 +5676,45 @@ public class InputOutputModule : InstallationObject,
 
     public virtual bool TryGetElectricPowerDemand(out float wattsPerSecond)
     {
-        wattsPerSecond = 0f;
-        if (!hasActiveCraft || waitingForOutput)
+        if (!TryGetElectricPowerRequirement(out wattsPerSecond))
         {
             return false;
         }
 
-        return TryGetElectricPowerRequirement(out wattsPerSecond);
+        // Standby uses the configured UseAmount too. Target checks must not query
+        // electric supply: this method runs while UtilityPole evaluates the network.
+        if (!HasOperationalTarget())
+        {
+            wattsPerSecond = 0f;
+            return false;
+        }
+
+        return true;
+    }
+
+    protected virtual bool HasOperationalTarget()
+    {
+        if (hasActiveCraft || waitingForOutput)
+        {
+            return true;
+        }
+
+        if (!HasRuntimeOutputCoordinates)
+        {
+            return false;
+        }
+
+        int recipeCount = GetEffectiveRecipeCount();
+        for (int i = 0; i < recipeCount; i++)
+        {
+            if (TryGetRecipePair(i, out _, out _, out int outputItemId, out _)
+                && IsRecipeOutputAvailable(outputItemId))
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     public int RuntimeAreaMaxObjects => Mathf.Max(1, runtimeAreaMaxObjects);
@@ -5694,7 +5733,7 @@ public class InputOutputModule : InstallationObject,
     {
         get
         {
-            ResolveObjectInfoStatus(out bool isWorking);
+            GetObjectInfoStatus(out _, out bool isWorking);
             return isWorking;
         }
     }
@@ -5783,6 +5822,18 @@ public class InputOutputModule : InstallationObject,
     public virtual void GetObjectInfoStatus(out string statusText, out bool isProducing)
     {
         statusText = ResolveObjectInfoStatus(out isProducing);
+        if ((isProducing || IsWaitingObjectInfoStatus(statusText))
+            && !HasOperationalEnergyAvailable(ResolveInstalledDefinition()))
+        {
+            statusText = "No energy";
+            isProducing = false;
+        }
+    }
+
+    public static bool IsWaitingObjectInfoStatus(string statusText)
+    {
+        return statusText != null
+               && statusText.StartsWith("Waiting", StringComparison.Ordinal);
     }
 
     protected virtual string ResolveObjectInfoStatus(out bool isProducing)
@@ -5797,16 +5848,11 @@ public class InputOutputModule : InstallationObject,
 
         if (waitingForOutput)
         {
-            return "Output full";
+            return "Waiting for output";
         }
 
         if (hasActiveCraft)
         {
-            if (!HasOperationalEnergyAvailable(installedDefinition))
-            {
-                return "No energy";
-            }
-
             isProducing = true;
             return "Working";
         }
@@ -5825,7 +5871,6 @@ public class InputOutputModule : InstallationObject,
         bool hasRecipe = false;
         bool blockedByInputArea = false;
         bool blockedByInputItem = false;
-        bool blockedByEnergy = false;
         bool blockedByTargetFilter = false;
         bool hasFilterAllowedRecipe = false;
 
@@ -5856,12 +5901,6 @@ public class InputOutputModule : InstallationObject,
                 continue;
             }
 
-            if (!HasOperationalEnergyAvailable(installedDefinition))
-            {
-                blockedByEnergy = true;
-                continue;
-            }
-
             isProducing = true;
             return "Working";
         }
@@ -5871,11 +5910,6 @@ public class InputOutputModule : InstallationObject,
             return "No recipe";
         }
 
-        if (blockedByEnergy)
-        {
-            return "No energy";
-        }
-
         if (blockedByTargetFilter && !hasFilterAllowedRecipe)
         {
             return "No target";
@@ -5883,7 +5917,7 @@ public class InputOutputModule : InstallationObject,
 
         if (blockedByInputItem)
         {
-            return "No input item";
+            return "Waiting for input item";
         }
 
         if (blockedByInputArea)
@@ -6910,16 +6944,11 @@ public class InputOutputModule : InstallationObject,
         long completeEnergyUnits = energyRequired
             ? DeterministicSimulationUnits.FromFloat(ResolveCompleteEnergy(installedDefinition))
             : 0L;
-        long energyRateUnits = energyRequired
-            ? DeterministicSimulationUnits.FromFloat(
-                Mathf.Max(0.0001f, ItemDefinition.ResolveUseEnergyRatePerSecond(installedDefinition)))
-            : 0L;
         if (production.Advance(
-                DeterministicSimulationUnits.DeltaTimeToTicks(deltaTime),
+                energyRequired ? 0L : DeterministicSimulationUnits.DeltaTimeToTicks(deltaTime),
                 energyRequired,
                 acceptedEnergyUnits,
-                completeEnergyUnits,
-                energyRateUnits))
+                completeEnergyUnits))
         {
             TryCompleteActiveCraft();
         }
@@ -9218,7 +9247,7 @@ public class InputOutputModule : InstallationObject,
                 }
             }
 
-            if (hasPipe && !hasPumpPressureResetPass && !hasPassiveFluidPass
+            if (hasPipe && !hasPassiveFluidPass
                 && TryGetConnectedPipeRemoteCoordinate(
                     pipe,
                     pipeRecord,
@@ -9981,6 +10010,26 @@ public class InputOutputModule : InstallationObject,
         return Mathf.Max(0.1f, ResolveCompleteEnergy(installedDefinition) / energyRate);
     }
 
+    private long ResolveRemainingCraftTicks()
+    {
+        if (!hasActiveCraft || waitingForOutput)
+        {
+            return 0L;
+        }
+
+        ItemDefinition installedDefinition = ResolveInstalledDefinition();
+        if (!RequiresOperationalEnergy(installedDefinition))
+        {
+            return Math.Max(0L, remainingCraftTicks);
+        }
+
+        return ProjectF.Simulation.ProductionProcess.RemainingEnergyTicks(
+            DeterministicSimulationUnits.FromFloat(ResolveCompleteEnergy(installedDefinition)),
+            activeCraftConsumedEnergyUnits,
+            DeterministicSimulationUnits.FromFloat(
+                Mathf.Max(0.0001f, ItemDefinition.ResolveUseEnergyRatePerSecond(installedDefinition))));
+    }
+
     private long ResolveConsumedEnergyUnitsFromRemainingTicks(
         ItemDefinition installedDefinition,
         long savedRemainingCraftTicks)
@@ -10480,7 +10529,9 @@ public class InputOutputModule : InstallationObject,
         }
 
         production.Begin(recipeIndex, outputItemId, outputCount,
-            DeterministicSimulationUnits.SecondsToTicks(ResolveInitialCraftDuration(installedDefinition)));
+            RequiresOperationalEnergy(installedDefinition)
+                ? 0L
+                : DeterministicSimulationUnits.SecondsToTicks(ResolveInitialCraftDuration(installedDefinition)));
         lastOperationalEnergySupplyRatio = 1f;
         WakeRuntimeUpdate();
     }

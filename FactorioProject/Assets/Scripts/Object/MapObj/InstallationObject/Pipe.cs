@@ -675,7 +675,9 @@ public class Pipe : InstallationObject
             }
 
             Vector2Int remoteCoordinate = default;
-            bool hasRemoteConnection = pipe != null && !hasPumpPass && !hasPassiveFluidPass
+            // Underground endpoints can share a Pump port. Keep both edges:
+            // the directed Pump pass and the pipe's remote endpoint connection.
+            bool hasRemoteConnection = pipe != null && !hasPassiveFluidPass
                 && (runtimeRecord != null
                     ? runtimeRecord.TryGetRemoteConnectionCoordinate(coordinate, out remoteCoordinate)
                     : pipe.TryGetRemoteConnectionCoordinate(coordinate, out remoteCoordinate));

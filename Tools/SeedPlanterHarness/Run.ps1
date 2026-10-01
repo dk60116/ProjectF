@@ -14,6 +14,21 @@ if ($depth -ne 0) { throw 'Unbalanced production class.' }
 $probeDir = Join-Path ([IO.Path]::GetTempPath()) ('ProjectF-SeedPlanter-' + [Guid]::NewGuid().ToString('N'))
 New-Item -ItemType Directory -Path $probeDir | Out-Null
 Set-Content -LiteralPath (Join-Path $probeDir 'Units.cs') -Value ("using System;`n" + $source.Substring($start, $end - $start).Replace('ProjectF.Simulation.SimulationTickWorld.', 'MapObjectTickManager.'))
+$moduleSource = [IO.File]::ReadAllText((Join-Path $repo 'FactorioProject/Assets/Scripts/Object/MapObj/InstallationObject/InputOutputModule.cs'))
+$statusSource = "using System;`npublic partial class InputOutputModule {`n"
+foreach ($signature in @('public virtual void GetObjectInfoStatus(', 'public static bool IsWaitingObjectInfoStatus(')) {
+    $start = $moduleSource.IndexOf($signature, [StringComparison]::Ordinal)
+    if ($start -lt 0) { throw "Missing production member: $signature" }
+    $end = $moduleSource.IndexOf('{', $start) + 1
+    $depth = 1
+    while ($depth -gt 0 -and $end -lt $moduleSource.Length) {
+        if ($moduleSource[$end] -eq '{') { $depth++ }
+        if ($moduleSource[$end] -eq '}') { $depth-- }
+        $end++
+    }
+    $statusSource += $moduleSource.Substring($start, $end - $start) + "`n"
+}
+Set-Content -LiteralPath (Join-Path $probeDir 'Status.cs') -Value ($statusSource + '}')
 $includes = @(
     (Join-Path $repo 'FactorioProject/Assets/Scripts/Object/MapObj/InstallationObject/SeedPlanter.cs'),
     (Join-Path $PSScriptRoot 'Stubs.cs'),

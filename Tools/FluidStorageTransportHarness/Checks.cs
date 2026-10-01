@@ -357,10 +357,54 @@ public static class Checks
     { bool ok = Math.Abs(actual - expected) < .0001f; Console.WriteLine($"{(ok ? "PASS" : "FAIL")} {label}: {actual} L (expected {expected})"); if(ok) passed++; else failed++; }
     private static void Pipes(Vector2Int start, Vector2Int d, int count)
     { for (int i=0;i<count;i++) PipeRuntimeRecord.Add(start + d*i, d, -d); }
+    private static void UndergroundPair(Vector2Int first, Vector2Int second, Vector2Int direction)
+    {
+        PipeRuntimeRecord.Add(first, -direction).Remote = second;
+        PipeRuntimeRecord.Add(second, direction).Remote = first;
+    }
+    private static void SetupPumpUnderground(Vector2Int direction, bool overlap, bool tunnelAtInlet,
+        out Vector2Int sourceCoordinate, out Vector2Int receiverCoordinate)
+    {
+        var pump = new Pump { PressureLitersPerSecond = 5f };
+        pump.Pass(default, -direction, direction*3, direction);
+        Vector2Int first = tunnelAtInlet ? direction*(overlap ? -5 : -6) : direction*(overlap ? 3 : 4);
+        Vector2Int second = first + direction*5;
+        UndergroundPair(first, second, direction);
+        sourceCoordinate = tunnelAtInlet ? first - direction : -direction;
+        receiverCoordinate = tunnelAtInlet ? direction*4 : second + direction;
+    }
+    private static void CheckPumpUnderground(Vector2Int direction)
+    {
+        foreach (bool overlap in new[] { false, true })
+        foreach (bool tunnelAtInlet in new[] { false, true })
+        {
+            World.Reset();
+            SetupPumpUnderground(direction, overlap, tunnelAtInlet, out var sourceCoordinate, out var receiverCoordinate);
+            var source = new Fluidtank(); World.Place(source, sourceCoordinate);
+            source.TryAddFluidLiters(1, 10, 20, out _);
+            var receiver = new ProductionMachine(); receiver.InputPort(receiverCoordinate, -direction);
+            Check(receiver.Pull(receiverCoordinate, .5f), .5f,
+                $"tank / underground / Pump intake {direction}, overlap={overlap}, inletTunnel={tunnelAtInlet}");
+            Check(source.StoredFluidLiters, 9.5f, "underground/Pump route debits actual source stock");
+
+            World.Reset();
+            SetupPumpUnderground(direction, overlap, tunnelAtInlet, out sourceCoordinate, out receiverCoordinate);
+            var producer = new InputOutputModule(); producer.Output(sourceCoordinate, direction);
+            var destination = new Fluidtank(); World.Place(destination, receiverCoordinate);
+            Check(producer.Emit(.5f), .5f,
+                $"producer / underground / Pump output {direction}, overlap={overlap}, inletTunnel={tunnelAtInlet}");
+            Check(destination.StoredFluidLiters, .5f, "underground/Pump output credits actual receiver stock");
+
+            var reverseReceiver = new ProductionMachine(); reverseReceiver.InputPort(sourceCoordinate, direction);
+            Check(reverseReceiver.Pull(sourceCoordinate, .5f), 0,
+                "an underground endpoint must not permit reverse flow through a Pump");
+        }
+    }
     public static int Main()
     {
         foreach(var d in new[]{Vector2Int.right,Vector2Int.up,Vector2Int.left,Vector2Int.down})
         {
+            CheckPumpUnderground(d);
             foreach (int layout in new[] { 0, 1, 2, 3 })
             {
                 World.Reset();

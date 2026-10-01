@@ -281,9 +281,11 @@ public class PipeWorld
 public partial class PipeRuntimeRecord
 {
     public Pipe Prototype;
+    public Vector2Int? Remote;
     public readonly HashSet<Vector2Int> Connections = new();
     public bool HasConnectionTowardsAt(Vector2Int coordinate, Vector2Int direction) => Connections.Contains(direction);
-    public bool TryGetRemoteConnectionCoordinate(Vector2Int coordinate, out Vector2Int remote) { remote = default; return false; }
+    public bool TryGetRemoteConnectionCoordinate(Vector2Int coordinate, out Vector2Int remote)
+    { remote = Remote ?? default; return Remote.HasValue; }
 }
 public partial class Pipe : InstallationObject
 {
@@ -464,11 +466,38 @@ public static class Checks
         Console.WriteLine($"{(ok ? "PASS" : "FAIL")} {label}: fluid={id}, pressure={pressure:F2}, expected={expected:F2}");
         if (ok) passed++; else failed++;
     }
+    private static void CheckPumpUndergroundPressure()
+    {
+        foreach (var direction in new[] { Vector2Int.right, Vector2Int.up, Vector2Int.left, Vector2Int.down })
+        foreach (bool overlap in new[] { false, true })
+        foreach (bool inletTunnel in new[] { false, true })
+        {
+            InputOutputModule.Reset();
+            var pump = new Pump(default, -direction, direction*3, direction);
+            Vector2Int first = inletTunnel ? direction*(overlap ? -5 : -6) : direction*(overlap ? 3 : 4);
+            Vector2Int second = first + direction*5;
+            var prototype = new Pipe(first, -direction);
+            var inlet = new PipeRuntimeRecord { Prototype = prototype, Remote = second };
+            inlet.Connections.Add(-direction);
+            var outlet = new PipeRuntimeRecord { Prototype = prototype, Remote = first };
+            outlet.Connections.Add(direction);
+            PipeWorld.Current.Records[first] = inlet;
+            PipeWorld.Current.Records[second] = outlet;
+            Vector2Int sourceCoordinate = inletTunnel ? first - direction : -direction;
+            _ = new Fluidtank(sourceCoordinate, 1) { StoredFluidLiters = 10 };
+            Vector2Int outputCoordinate = inletTunnel ? direction*4 : second + direction;
+            var outputPipe = new Pipe(outputCoordinate, direction, -direction);
+            Expect(outputPipe, outputCoordinate, inletTunnel ? 5f : 4.7f,
+                $"Pump / underground pressure, overlap={overlap}, inletTunnel={inletTunnel}, {direction}");
+        }
+    }
+
     public static int Main()
     {
         CheckConfiguredOutputPressure();
         CheckProductionPhasePressure();
         CheckProducerOutputBoundary();
+        CheckPumpUndergroundPressure();
         foreach (var direction in new[] { Vector2Int.right, Vector2Int.up, Vector2Int.left, Vector2Int.down })
         {
             foreach (int count in new[] { 1, 3 })

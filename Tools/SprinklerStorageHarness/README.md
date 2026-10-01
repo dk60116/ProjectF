@@ -18,7 +18,7 @@ references are supplied once, and plants outside the range receive no water. Emp
 or saturated ranges still consume the configured whole-range spray amount.
 
 Unity objects, notifications, and coordinate/connector lookup are managed test doubles.
-Traversal checks include serial tanks, pipes beyond tanks, cycles, disconnection,
+Traversal checks ensure tanks terminate routes at their own reservoir and include independent pipe routes, cycles, disconnection,
 blocked connector directions, and underground endpoints. They use the production
 search and deduplication methods. Actual pipe placement, connector lookup, UI rendering, and save/load execution
 require in-game verification. This harness does not launch Unity.

@@ -328,7 +328,7 @@ public class Sprinkler : InputOutputModule
         GetWaterStorageInfo(out float availableWaterLiters, out _);
         if (availableWaterLiters <= WaterEpsilon)
         {
-            return "No water";
+            return "Waiting for water";
         }
 
         return "Ready";
@@ -339,7 +339,7 @@ public class Sprinkler : InputOutputModule
         out bool isWatering,
         out bool isWarning)
     {
-        statusText = ResolveObjectInfoStatus(out isWatering);
+        base.GetObjectInfoStatus(out statusText, out isWatering);
         isWarning = !isWatering
                     && TryGetPlacementRuntime(out _, out _);
     }

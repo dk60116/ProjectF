@@ -1,5 +1,12 @@
 # Fluid storage transport harness
 
+Pump/underground regressions use data-only pipe records with paired remote
+endpoints. In all four orientations, both inlet and outlet tunnels are checked
+beside a Pump and overlapping its port. Production source/output searches must
+transfer real fluid, debit/credit storage and reject reverse flow. The original
+inlet overlap lost its remote edge and transferred zero. Pipe geometry/world
+registration are fixtures; no Unity placement or UI is executed.
+
 Extracts and executes the production output-cache BFS, directed boiler/generator
 traversal, storage lookup, output transfer, placement wake handlers, and
 `InstallationObject.TryAddFluidLiters`. Assertions check transferred liters AND

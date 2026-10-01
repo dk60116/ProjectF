@@ -123,8 +123,10 @@ public class InputOutputModule : InstallationObject
     public float Retention(Vector2Int coordinate, int fluidItemId, float sourceRate = 0f) =>
         ResolveFluidOutputTransportRetentionAtCoordinate(coordinate, fluidItemId, sourceRate);
 
-    public virtual bool TryGetElectricPowerDemand(out float wattsPerSecond)
-    { wattsPerSecond = 0f; return false; }
+    protected virtual bool HasOperationalTarget() => false;
+    protected bool TryGetElectricPowerRequirement(out float wattsPerSecond)
+    { wattsPerSecond = 10f; return true; }
+    // MODULE_DEMAND
     // MODULE_PRESSURE
     // PUMP_RATIO
     // MODULE_RETENTION
@@ -158,6 +160,8 @@ public class CrudeOilRefinery : InputOutputModule
 
     private readonly List<FluidFlowPort> outputPorts = new();
     private bool ResolveFluidFlowPorts() => true;
+    public bool PortsValid = true;
+    private bool TryResolveFluidFlowPorts(bool apply) => PortsValid;
 
     public void AddOutput(Vector2Int coordinate, int itemId, int pipeDistance,
         float configuredRate, bool hasSpace = true)
@@ -195,13 +199,11 @@ public class CrudeOilRefinery : InputOutputModule
     public bool SharedOutputStorage;
     private int sharedStoredFluid = -1;
     private bool isRefining;
-    private float throughputRatio, productionOpportunityRatio;
+    private float throughputRatio;
     public bool Working => isRefining;
     public float Throughput => throughputRatio;
     private void SetRefineryStatus(RefineryState state, ItemDefinition definition = null) {}
     private ItemDefinition ResolveInstalledDefinition() => new();
-    private bool TryGetElectricPowerRequirement(out float wattsPerSecond)
-    { wattsPerSecond = 10f; return true; }
     private FluidInputBuffer GetOrCreateInputBuffer(int id) => buffers[id];
     private float GetStoredLiters(FluidInputBuffer buffer) => buffer.Liters;
     private float GetConfiguredStoredInputLiters(FluidFlowPort port) =>
@@ -266,7 +268,7 @@ public class CrudeOilRefinery : InputOutputModule
         buffers[10].Liters += liters;
         RecordInputDelivery(buffers[10], liters);
     }
-    // REFINERY_DEMAND
+    // REFINERY_TARGET
     // REFINERY_CAPACITY
     // REFINERY_RECORD_DELIVERY
     public void Tick(float delta = 1f) => UpdateContinuousRefining(delta);
@@ -348,6 +350,11 @@ internal static class Checks
         missing.AddOutput(new(0,0), 1, 0, 1f);
         missing.Tick();
         Expect(missing.EnergyConsumed, 0f, "missing input prevents energy consumption");
+        Expect(missing.TryGetElectricPowerDemand(out float standbyWatts) ? standbyWatts : 0f,
+            10f, "input wait retains full configured electric draw");
+        missing.PortsValid = false;
+        Expect(missing.TryGetElectricPowerDemand(out float invalidWatts) ? invalidWatts : 0f,
+            0f, "invalid refinery ports cannot draw electricity");
         Expect(missing.EmissionAttempts.Count, 0, "missing input cannot create products");
         var noEnergy = Scenario();
         noEnergy.EnergyRatio = 0f;
@@ -371,7 +378,7 @@ internal static class Checks
             Expect(limitedInput.EnergyConsumed, (i + 1) * .05f,
                 "input supply scales energy consumption");
             Expect(limitedInput.TryGetElectricPowerDemand(out float watts) ? watts : 0f,
-                5f, "electric demand follows input-limited throughput");
+                10f, "electric demand includes full configured standby draw");
             limitedInput.RefillInput(.1f);
         }
         Expect(limitedInput.InputConsumed, 1f, "steady half-rate input is conserved");

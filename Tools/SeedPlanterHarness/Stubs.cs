@@ -8,7 +8,7 @@ public static class ProjectFApplicationLifecycle
     public static bool IsQuitting => false;
 }
 
-public class InputOutputModule
+public partial class InputOutputModule
 {
     public class PersistentState
     {

@@ -14,11 +14,17 @@ public static class Checks
         StraightExtensionBeatsForeignBranches();
         ParallelLinesKeepTheirFluids();
         ExistingIdentityAndEndpointsRemainStable();
+        PreviewKeepsConnectedFluidIdentity();
+        PreviewCannotEraseInstalledNetworkIdentity();
+        SharedRuntimePrefabRespectsCandidateRotation();
         ManualAndUndergroundPortsAreRespected();
         UndergroundFluidTravelsThroughInstalledPair();
         PumpEndpointsUsePipeCompatibility();
         ProposedPumpUsesBothEndpointFluids();
         PumpBodyInputUsesNetworkFluid();
+        VariantChecks.Run(Require);
+        LoadingMustKeepSavedShapes();
+        TankCornerMustRejectForeignSidePipe();
         Console.WriteLine($"Pipe placement checks passed: {checks}");
     }
 
@@ -61,6 +67,131 @@ public static class Checks
 
     private const int OrangeFluid = 112;
     private const int GreenFluid = 113;
+
+    private static void TankCornerMustRejectForeignSidePipe()
+    {
+        var directions = new[] { Vector2Int.up, Vector2Int.right, Vector2Int.down, Vector2Int.left };
+        for (int turns = 0; turns < 4; turns++)
+        foreach (bool exposedSide in new[] { false, true })
+        foreach (bool storedTankFluid in new[] { false, true })
+        {
+            var controller = new InstallationPlacementController();
+            var prototype = VariantChecks.Prototypes();
+            var preview = Neighbor(-1, PipeVariantKind.Straight, RotateMask(5, turns), true);
+            controller.SetPipe(Vector2Int.zero, preview);
+            controller.SetPipe(directions[turns], Neighbor(-1, PipeVariantKind.Straight, RotateMask(5, turns), true));
+            var foreign = Neighbor(OrangeFluid, exposedSide ? PipeVariantKind.Tee : PipeVariantKind.Straight,
+                RotateMask(exposedSide ? 11 : 10, turns));
+            foreign.StraightVariantPrefab = prototype;
+            foreign.CornerVariantPrefab = prototype.CornerVariantPrefab;
+            foreign.TeeVariantPrefab = prototype.TeeVariantPrefab;
+            foreign.CrossVariantPrefab = prototype.CrossVariantPrefab;
+            controller.SetPipe(directions[(2 + turns) & 3], foreign);
+            var tankDirection = directions[(3 + turns) & 3];
+            controller.SetTank(tankDirection, storedTankFluid ? GreenFluid : -1);
+            if (!storedTankFluid) controller.SetFluidSource(tankDirection + tankDirection, GreenFluid);
+            var selected = controller.ResolvePreviewVariant(prototype, preview, turns + 1, out int selectedTurns);
+            Require(selected.VariantKind == PipeVariantKind.Corner
+                    && selected.GetConnectionMask(new Quaternion(selectedTurns)) == RotateMask(9, turns),
+                "an untyped preview must bend into the neighboring tank and avoid the foreign side pipe");
+            controller.SetPipe(Vector2Int.zero,
+                Neighbor(-1, PipeVariantKind.Corner, RotateMask(9, turns)));
+            var committed = controller.ResolvePreviewVariant(prototype, null, selectedTurns, out int committedTurns);
+            Require(committed.GetConnectionMask(new Quaternion(committedTurns)) == RotateMask(9, turns),
+                "post-placement alignment must keep the tank corner and reject the exposed foreign side");
+        }
+    }
+
+    private static void LoadingMustKeepSavedShapes()
+    {
+        for (int turns = 0; turns < 4; turns++)
+        {
+            PipeWorld.Current = new();
+            var controller = new InstallationPlacementController();
+            var prototype = VariantChecks.Prototypes();
+            // During load, source/neighbor information may temporarily disagree.
+            // Saved shape restoration must not become an installation operation.
+            controller.SetFluidSource(Vector2Int.zero, GreenFluid);
+            controller.SetNeighbor((1 + turns) & 3,
+                Neighbor(OrangeFluid, PipeVariantKind.Cross, 15));
+            for (int kind = 0; kind <= 3; kind++)
+            {
+                var saved = (Pipe)InstallationPlacementController.ResolvePipeVariantPrefab(prototype, kind);
+                int mask = saved.GetConnectionMask(new Quaternion(turns));
+                for (int metadataKind = 0; metadataKind < 3; metadataKind++)
+                {
+                    Pipe restored = controller.ResolveSavedPipe(prototype, turns,
+                        metadataKind == 2 ? -1 : kind, metadataKind == 1 ? -1 : mask, out int restoredTurns);
+                    Require(restored.GetConnectionMask(new Quaternion(restoredTurns)) == mask,
+                        $"load preserves saved shape despite incomplete fluid topology, kind {kind}, rotation {turns}, metadata {metadataKind}");
+                }
+            }
+
+            controller.SetInstalledPipe(Vector2Int.zero, prototype, -1);
+            controller.SetSavedShape(Vector2Int.zero, 0, 10);
+            var legacy = Vector2Int.left;
+            controller.SetInstalledPipe(legacy, prototype, -1);
+            controller.SetSavedShape(legacy, -1, -1);
+            controller.NormalizeLoadedLegacyPipeVariants(new[] { Vector2Int.zero, legacy });
+            Require(controller.LastProtectedAnchors.Contains(Vector2Int.zero)
+                    && !controller.LastLegacyAnchors.Contains(Vector2Int.zero),
+                "post-load normalization must protect a saved straight even when fluid checks fail");
+            Require(controller.LastLegacyAnchors.Contains(legacy),
+                "metadata-free legacy pipes must still be eligible for normalization");
+
+            controller.SetSavedShape(Vector2Int.zero, 0, -1);
+            controller.NormalizeLoadedLegacyPipeVariants(new[] { Vector2Int.zero, legacy });
+            Require(controller.LastProtectedAnchors.Contains(Vector2Int.zero),
+                "saved variant/rotation without a mask is still persisted geometry");
+
+            // Actual Pipe.prefab geometry is a Z straight; the saved drill output
+            // is variant 0, turns 3, mask 10 at (9,-4) in slot_01.
+            prototype.Mask = 5;
+            prototype.CornerVariantPrefab.Mask = 12;
+            prototype.TeeVariantPrefab.Mask = 14;
+            Pipe savedOutput = controller.ResolveSavedPipe(prototype, 3, 0, 10, out int outputTurns);
+            Require(savedOutput.VariantKind == PipeVariantKind.Straight
+                    && savedOutput.GetConnectionMask(new Quaternion(outputTurns)) == 10,
+                "the recorded slot_01 drill output remains a horizontal straight on load");
+        }
+        PipeWorld.Current = null;
+    }
+
+    private static void PreviewCannotEraseInstalledNetworkIdentity()
+    {
+        for (int turns = 0; turns < 4; turns++)
+        {
+            PipeWorld.Current = new();
+            var controller = new InstallationPlacementController();
+            var forward = new[] { Vector2Int.right, Vector2Int.down, Vector2Int.left, Vector2Int.up }[turns];
+            var side = new[] { Vector2Int.up, Vector2Int.right, Vector2Int.down, Vector2Int.left }[turns];
+            // The real straight network is green. Its source is beyond a blueprint
+            // whose temporary corner no longer faces this installed end.
+            var livePrototype = Neighbor(-1, PipeVariantKind.Straight, RotateMask(10, turns));
+            controller.SetInstalledPipe(forward, livePrototype, -1);
+            controller.SetInstalledPipe(forward + forward, livePrototype, -1);
+            controller.SetInstalledPipe(forward + forward + forward, livePrototype, GreenFluid);
+            controller.SetPipe(forward + forward,
+                Neighbor(-1, PipeVariantKind.Corner, RotateMask(3, turns), true));
+            controller.SetFluidSource(forward + forward + forward, GreenFluid);
+            controller.SetPipe(side, Neighbor(-1, PipeVariantKind.Tee, RotateMask(7, turns), true));
+            controller.SetPipe(side + side, Neighbor(-1, PipeVariantKind.Straight, RotateMask(5, turns), true));
+            controller.SetFluidSource(side + side, OrangeFluid);
+            Require(controller.Select(preview: true) == GreenFluid,
+                $"a temporary blueprint corner must not erase the installed green network, rotation {turns}");
+            Pipe selected = controller.ResolveVariant(VariantChecks.Prototypes(), turns, 0,
+                out int selectedTurns, preview: true);
+            Require(selected.GetConnectionMask(new Quaternion(selectedTurns)) == RotateMask(10, turns),
+                "the preview shape must remain straight rather than bending into the orange branch");
+            controller.BeginBlueprintResolution();
+            Require(controller.Select() == GreenFluid,
+                "the complete blueprint solver must retain installed identity even without an ignored preview");
+            controller.EndBlueprintResolution();
+            Require(controller.Select() == OrangeFluid,
+                "the blueprint identity snapshot must not affect committed topology repair");
+        }
+        PipeWorld.Current = null;
+    }
 
     private static Pipe Neighbor(int fluid, PipeVariantKind kind, int mask,
         bool preview = false, long sequence = 1) => new Pipe
@@ -131,7 +262,7 @@ public static class Checks
         Require(controller.Select() == OrangeFluid, "a single corner remains a valid extension");
         controller.SetNeighbor(1, Neighbor(GreenFluid, PipeVariantKind.Corner, 9, true, 20));
         Require(controller.Select(preview: true) == GreenFluid,
-            "equally ranked candidates must still prefer the active blueprint");
+            "the newer candidate still breaks a tie when no anchor fluid is established");
         controller.SetNeighbor(0, Neighbor(OrangeFluid, PipeVariantKind.Corner, 6));
         Require(controller.Select() == OrangeFluid,
             "compatible neighbor count must still break equal-geometry ties");
@@ -155,6 +286,59 @@ public static class Checks
         controller.SetNeighbor(0, Neighbor(GreenFluid, PipeVariantKind.Straight, 10));
         Require(controller.Select() == OrangeFluid,
             "an exposed underground port must still beat a closed side branch");
+    }
+
+    private static void PreviewKeepsConnectedFluidIdentity()
+    {
+        for (int turns = 0; turns < 4; turns++)
+        {
+            var controller = new InstallationPlacementController();
+            controller.SetNeighbor((3 + turns) & 3,
+                Neighbor(OrangeFluid, PipeVariantKind.Straight, RotateMask(10, turns), sequence: 1));
+            controller.SetNeighbor(turns,
+                Neighbor(GreenFluid, PipeVariantKind.Straight, RotateMask(5, turns), preview: true, sequence: 50));
+            int committed = controller.Select(OrangeFluid);
+            Require(controller.Select(OrangeFluid, preview: true) == committed && committed == OrangeFluid,
+                "an equally aligned preview must not steal the connected fluid that commit retains");
+
+            controller.SetNeighbor((3 + turns) & 3,
+                Neighbor(OrangeFluid, PipeVariantKind.Straight, RotateMask(10, turns), sequence: 100));
+            Require(controller.Select(preview: true) == controller.Select(),
+                "a new preview and commit use the same ordering even before the anchor has a fluid identity");
+        }
+    }
+
+    private static void SharedRuntimePrefabRespectsCandidateRotation()
+    {
+        for (int existingTurns = 0; existingTurns < 4; existingTurns++)
+        for (int candidateTurns = 0; candidateTurns < 4; candidateTurns++)
+        foreach (var kind in new[] { PipeVariantKind.Straight, PipeVariantKind.Corner, PipeVariantKind.Tee })
+        {
+            var pipe = new Pipe { VariantKind = kind, Mask = kind == PipeVariantKind.Straight ? 10 : kind == PipeVariantKind.Corner ? 3 : 11 };
+            PipeWorld.Current = new();
+            PipeWorld.Current.Records[Vector2Int.zero] = new PipeRuntimeRecord
+            { Prototype = pipe, Rotation = new Quaternion(existingTurns), First = Vector2Int.zero, Second = Vector2Int.zero };
+            var controller = new InstallationPlacementController();
+            foreach (var direction in new[] { Vector2Int.up, Vector2Int.right, Vector2Int.down, Vector2Int.left })
+                Require(controller.CandidatePort(Vector2Int.zero, pipe, new Quaternion(candidateTurns), direction)
+                        == pipe.HasConnectionTowards(new Quaternion(candidateTurns), direction),
+                    "a data-only pipe sharing the candidate prefab must not override the proposed rotation");
+        }
+
+        var prototype = new Pipe { VariantKind = PipeVariantKind.Corner, Mask = 12 };
+        PipeWorld.Current = new();
+        PipeWorld.Current.Records[Vector2Int.zero] = new PipeRuntimeRecord
+            { Prototype = prototype, Rotation = default, First = Vector2Int.zero, Second = Vector2Int.zero };
+        var shared = new InstallationPlacementController();
+        shared.SetPipe(Vector2Int.zero, prototype);
+        shared.SetNeighbor(1, Neighbor(OrangeFluid, PipeVariantKind.Straight, 10));
+        shared.SetNeighbor(2, Neighbor(GreenFluid, PipeVariantKind.Straight, 5));
+        shared.SetFluidSource(Vector2Int.zero, OrangeFluid);
+        Require(shared.CanPlaceAt(prototype, new Quaternion(2), 12),
+            "rotating a shared corner away from water must validate the proposed oil-facing ports");
+        Require(!shared.CanPlaceAt(prototype, default, 12),
+            "the old corner pointing into water still fails oil compatibility");
+        PipeWorld.Current = null;
     }
 
     private static void Require(bool condition, string message)

@@ -3,6 +3,20 @@ namespace ProjectF.Tools.SaveLoadProfileHarness;
 // Reads the player's saved state instead of replacing connections with a fixture.
 internal static class FluidOutputSaveReport
 {
+    internal static void WritePipeTopology(SaveGameData data)
+    {
+        Console.WriteLine($"Save version={data.version} savedUtc={new DateTime(data.savedAtUtcTicks, DateTimeKind.Utc):O}");
+        foreach (var entry in data.map.installations)
+        {
+            var state = entry?.state;
+            if (state == null || !(state.itemName == "Pipe" || state.itemName.Contains("Oil", StringComparison.OrdinalIgnoreCase)
+                || state.itemName.Contains("Refinery", StringComparison.OrdinalIgnoreCase))) continue;
+            var r = state.worldRotation;
+            Console.WriteLine($"{state.itemName} ({state.anchorCoordinate.x},{state.anchorCoordinate.y}) variant={state.conveyorVariantKind} turns={state.quarterTurns} mask={state.pipeConnectionMask} pose={state.hasWorldPose} rotation=({r.x},{r.y},{r.z},{r.w}) fluid={state.storedFluidItemId}");
+            if (state.inputOutputState == null) continue;
+            foreach (var p in state.inputOutputState.outputCoordinates) Console.WriteLine($"  output=({p.x},{p.y})");
+        }
+    }
     internal static void Write(SaveGameData data)
     {
         Console.WriteLine($"Save version={data.version} savedUtc={new DateTime(data.savedAtUtcTicks, DateTimeKind.Utc):O}");

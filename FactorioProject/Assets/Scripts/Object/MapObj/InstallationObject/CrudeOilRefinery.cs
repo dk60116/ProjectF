@@ -75,7 +75,6 @@ public class CrudeOilRefinery : InputOutputModule
     private readonly HashSet<InputOutputModule> directInputPressureSources =
         new HashSet<InputOutputModule>();
     private bool isRefining;
-    private float productionOpportunityRatio;
     private float throughputRatio;
     private RefineryState refineryState;
     private int refineryStatusItemId = -1;
@@ -170,17 +169,9 @@ public class CrudeOilRefinery : InputOutputModule
         RefreshRuntimeUpdateSleepState();
     }
 
-    public override bool TryGetElectricPowerDemand(out float wattsPerSecond)
+    protected override bool HasOperationalTarget()
     {
-        wattsPerSecond = 0f;
-        if (productionOpportunityRatio <= FluidEpsilon
-            || !TryGetElectricPowerRequirement(out wattsPerSecond))
-        {
-            return false;
-        }
-
-        wattsPerSecond *= productionOpportunityRatio;
-        return true;
+        return TryResolveFluidFlowPorts(false);
     }
 
     protected override bool ShouldAutoPullFluidFromConnectedStorage()
@@ -338,7 +329,6 @@ public class CrudeOilRefinery : InputOutputModule
     {
         isRefining = false;
         throughputRatio = 0f;
-        productionOpportunityRatio = 0f;
         SetVisualParticleActive(particleEffect, false, clear: true);
     }
 
@@ -476,7 +466,6 @@ public class CrudeOilRefinery : InputOutputModule
         bool wasRefining = isRefining;
         isRefining = false;
         throughputRatio = 0f;
-        productionOpportunityRatio = 0f;
 
         if (!Application.isPlaying || deltaTime <= 0f)
         {
@@ -536,7 +525,6 @@ public class CrudeOilRefinery : InputOutputModule
             }
         }
 
-        productionOpportunityRatio = inputRatio;
         ItemDefinition installedDefinition = ResolveInstalledDefinition();
         float requestedEnergy = installedDefinition != null
             ? ItemDefinition.ResolveUseEnergyRatePerSecond(installedDefinition) * deltaTime * inputRatio
@@ -797,8 +785,16 @@ public class CrudeOilRefinery : InputOutputModule
 
     private bool ResolveFluidFlowPorts()
     {
-        inputPorts.Clear();
-        outputPorts.Clear();
+        return TryResolveFluidFlowPorts(true);
+    }
+
+    private bool TryResolveFluidFlowPorts(bool apply)
+    {
+        if (apply)
+        {
+            inputPorts.Clear();
+            outputPorts.Clear();
+        }
         if (!TryGetInputOutputPair(0, out InputOutputPair pair)
             || pair.inputs == null
             || pair.inputs.Count <= 0
@@ -823,7 +819,7 @@ public class CrudeOilRefinery : InputOutputModule
                 return false;
             }
 
-            inputPorts.Add(port);
+            if (apply) inputPorts.Add(port);
         }
 
         for (int i = 0; i < pair.outputs.Count; i++)
@@ -839,15 +835,10 @@ public class CrudeOilRefinery : InputOutputModule
                 return false;
             }
 
-            outputPorts.Add(port);
+            if (apply) outputPorts.Add(port);
         }
 
-        if (inputPorts.Count <= 0 || outputPorts.Count <= 0)
-        {
-            return false;
-        }
-
-        SynchronizeInputBuffersWithPorts();
+        if (apply) SynchronizeInputBuffersWithPorts();
         return true;
     }
 
@@ -946,8 +937,8 @@ public class CrudeOilRefinery : InputOutputModule
         refineryStatus = state switch
         {
             RefineryState.InvalidPorts => "Invalid fluid ports",
-            RefineryState.MissingInput => $"No {ResolveFluidName(definition)}",
-            RefineryState.InsufficientInput => $"Insufficient {ResolveFluidName(definition)}",
+            RefineryState.MissingInput => $"Waiting for {ResolveFluidName(definition)}",
+            RefineryState.InsufficientInput => $"Waiting for {ResolveFluidName(definition)}",
             RefineryState.NoEnergy => "No energy",
             RefineryState.Working => "Working",
             _ => "Idle"
