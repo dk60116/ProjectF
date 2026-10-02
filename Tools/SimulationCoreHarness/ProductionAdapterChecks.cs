@@ -9,11 +9,14 @@ public static class Mathf
 {
     public static float Max(float a, float b) => Math.Max(a, b);
     public static int Max(int a, int b) => Math.Max(a, b);
+    public static float Clamp01(float value) => Math.Clamp(value, 0f, 1f);
+    public static float Clamp(float value, float min, float max) => Math.Clamp(value, min, max);
 }
 public sealed class ItemDefinition
 {
     public bool Powered = true;
     public float Duration = 1, CompleteEnergy = 60, Rate = 60;
+    public float CraftingDurationSeconds => Duration;
     public static float ResolveUseEnergyRatePerSecond(ItemDefinition item) => item.Rate;
 }
 public partial class CraftAdapterProbe
@@ -37,6 +40,10 @@ public partial class CraftAdapterProbe
     public void Start(int output = 12, int count = 2) => BeginActiveCraft(3, output, count, Definition);
     public void Clear() => ClearActiveCraft();
     public long RemainingTimeTicks => ResolveRemainingCraftTicks();
+    public float WorkProgress => ResolveCraftProgressGaugeFillAmount();
+    public float CurrentWork => ResolveObjectInfoCurrentUseEnergy();
+    public float RequiredWork => ResolveObjectInfoCompleteEnergy();
+    protected float CraftDurationSeconds => Definition.Duration;
     private static void AddUniqueCoordinates(IReadOnlyList<Vector2Int> source, List<Vector2Int> target)
     { if (source == null) return; foreach (var coordinate in source) if (!target.Contains(coordinate)) target.Add(coordinate); }
     private bool ContainsRuntimeInputItemArea(Vector2Int coordinate, int item) => false;
@@ -46,10 +53,10 @@ public partial class CraftAdapterProbe
     private void RegisterRuntimeAreaCoordinates() { }
     private void ConfigureRuntimeGridCoordinates(List<Vector2Int> coordinates) { }
     private void MarkManagedRuntimeVisualsDirty() { }
-    private ItemDefinition ResolveInstalledDefinition() => Definition;
-    private bool RequiresOperationalEnergy(ItemDefinition definition) => definition.Powered;
-    private float ResolveCompleteEnergy(ItemDefinition definition) => definition.CompleteEnergy;
-    private float ResolveInitialCraftDuration(ItemDefinition definition) => definition.Duration;
+    protected ItemDefinition ResolveInstalledDefinition() => Definition;
+    protected bool RequiresOperationalEnergy(ItemDefinition definition) => definition.Powered;
+    protected virtual float ResolveCompleteEnergy(ItemDefinition definition) => definition.CompleteEnergy;
+    protected virtual float ResolveInitialCraftDuration(ItemDefinition definition, int outputItemId = -1) => definition.Duration;
     private void WakeRuntimeUpdate() => WakeCount++;
     private Vector3 ResolveConsumeTargetWorldPosition() => default;
     private bool TryConsumeOperatingEnergy(float dt, out float consumed)
@@ -68,6 +75,21 @@ public partial class CraftAdapterProbe
         return true;
     }
 }
+public partial class ProductTimeProbe : CraftAdapterProbe
+{
+    public int SelectedProduct = 13;
+    public readonly Dictionary<int, ItemDefinition> Products = new()
+    {
+        [12] = new ItemDefinition { Duration = 2f },
+        [13] = new ItemDefinition { Duration = .5f },
+        [14] = new ItemDefinition { Duration = .01f }
+    };
+    private bool IsActiveCraftRunning => State.Active;
+    private int ActiveOutputItemId => State.OutputItemId;
+    private int ResolveSelectedProductionTargetItemId() => SelectedProduct;
+    private ItemDefinition ResolveItemDefinition(int id) => Products.TryGetValue(id, out var item) ? item : null;
+    public float FluidBatchLiters(float rate, int productId) => ResolveProductionFluidBatchLiters(rate, productId);
+}
 internal static class ProductionAdapterChecks
 {
     private static int passed;
@@ -75,6 +97,7 @@ internal static class ProductionAdapterChecks
     { if (!result) throw new Exception(name); passed++; }
     public static void Main()
     {
+        CheckProductCraftingTime();
         var machine = new CraftAdapterProbe();
         machine.Tick(1f / 60);
         Require(machine.EnergyRequests == 0 && machine.OutputAttempts == 0, "idle adapter has no side effects");
@@ -165,5 +188,62 @@ internal static class ProductionAdapterChecks
         Require(fractional.Produced == 2 && fractionalRestore.Produced == 2,
             "fractional energy completion matches across save restore");
         Console.WriteLine($"PASS {passed} production adapter checks (extracted production methods, IO test doubles)");
+    }
+
+    private static void CheckProductCraftingTime()
+    {
+        foreach (float oldComplete in new[] { 1f, 3600000f })
+        {
+            var machine = new ProductTimeProbe();
+            machine.Definition.CompleteEnergy = oldComplete;
+            machine.Power.ProductionWatts = 60;
+            machine.Start(12);
+            Require(machine.RequiredWork == 120f, "completion budget is item CraftingTime times use rate, independent of CompleteEnergy");
+            machine.Tick(1f);
+            Require(machine.State.Active && machine.WorkProgress == .5f && machine.RemainingTimeTicks == 60,
+                "full power advances half of a two-second product in one second");
+            machine.Tick(1f);
+            Require(machine.Produced == 2 && !machine.State.Active, "full power completes at item time for any old CompleteEnergy");
+            machine.Start(13);
+            machine.Tick(.25f);
+            Require(machine.State.Active && machine.WorkProgress == .5f, "different product changes nominal duration to half a second");
+            machine.Tick(.25f);
+            Require(machine.Produced == 4, "output Count does not multiply one recipe's CraftingTime");
+        }
+        var slow = new ProductTimeProbe();
+        slow.Definition.CompleteEnergy = 1f;
+        Require(slow.FluidBatchLiters(3f, 12) == 6f && slow.FluidBatchLiters(3f, 13) == 1.5f,
+            "fluid input/output batch volume uses its explicit product CraftingTime");
+        slow.Start(12);
+        slow.Tick(1f);
+        Require(slow.FluidBatchLiters(3f, 12) == 6f,
+            "insufficient power extends production time without increasing fluid batch volume");
+        Require(slow.State.Active && slow.WorkProgress == .25f && slow.RemainingTimeTicks == 90,
+            "half power advances a quarter of a two-second product in one second");
+        var saved = slow.CapturePersistentState();
+        var restored = new ProductTimeProbe();
+        restored.ApplyPersistentState(saved);
+        Require(restored.WorkProgress == .25f && restored.RequiredWork == 120f,
+            "restored product duration uses the saved output, not another selected target");
+        slow.Power.HasPowerSource = false;
+        slow.Tick(1f);
+        Require(slow.WorkProgress == .25f, "no power preserves accumulated item-time progress");
+        slow.Power.HasPowerSource = true;
+        for (int i = 0; i < 3; i++) { slow.Tick(1f); restored.Tick(1f); }
+        Require(slow.Produced == 2 && restored.Produced == 2, "half power takes four seconds and resumes consistently after save");
+        var timed = new ProductTimeProbe();
+        timed.Definition.Powered = false;
+        timed.Start(13);
+        timed.Tick(.25f);
+        Require(timed.State.Active && timed.WorkProgress == .5f && timed.RequiredWork == .5f,
+            "unpowered product countdown and UI also use product time");
+        saved = timed.CapturePersistentState();
+        var timedRestore = new ProductTimeProbe();
+        timedRestore.Definition.Powered = false;
+        timedRestore.ApplyPersistentState(saved);
+        timedRestore.Tick(.25f);
+        Require(timedRestore.Produced == 2 && timedRestore.EnergyRequests == 0, "unpowered item-time save resumes without consuming energy");
+        timed.Start(14);
+        Require(timed.State.RemainingTicks == 1, "sub-0.1-second CraftingTime retains simulation tick precision");
     }
 }

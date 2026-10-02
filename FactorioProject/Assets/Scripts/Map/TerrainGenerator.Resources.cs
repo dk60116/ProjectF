@@ -17,6 +17,9 @@ public partial class TerrainGenerator : MonoBehaviour
     private bool TryGetResourcePrefab(Vector2Int worldCoordinate, out Resource prefab)
     {
         prefab = null;
+        if (IsBenchmarkMap)
+            return false;
+
         worldCoordinate = ResolveProfilingCloneTerrainSource(worldCoordinate);
 
         if (keepStartSafeZoneClearOfResources && IsStartSafeZoneCoordinate(worldCoordinate))
@@ -1516,6 +1519,9 @@ public partial class TerrainGenerator : MonoBehaviour
 
     private bool IsBlockedForWater(Vector2Int worldCoordinate)
     {
+        if (IsBenchmarkMap)
+            return true;
+
         if (bufferedWaterBlockCache.TryGetValue(worldCoordinate, out bool cachedBlocked))
         {
             return cachedBlocked;

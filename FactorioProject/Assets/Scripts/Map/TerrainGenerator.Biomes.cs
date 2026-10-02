@@ -45,6 +45,9 @@ public partial class TerrainGenerator : MonoBehaviour
 
     private TerrainBiome GetTileBiome(Vector2Int worldCoordinate)
     {
+        if (IsBenchmarkMap)
+            return TerrainBiome.Dirt;
+
         if (tileBiomeCache.TryGetValue(worldCoordinate, out TerrainBiome cachedBiome))
         {
             return cachedBiome;
@@ -179,6 +182,9 @@ public partial class TerrainGenerator : MonoBehaviour
 
     private bool IsRawWaterTileBiome(Vector2Int worldCoordinate)
     {
+        if (IsBenchmarkMap)
+            return false;
+
         if (rawWaterCache.TryGetValue(worldCoordinate, out bool cachedWater))
         {
             return cachedWater;

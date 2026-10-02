@@ -1,0 +1,15 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net9.0-windows</TargetFramework>
+    <UseWindowsForms>true</UseWindowsForms>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <AssemblyName>BenchmarkTool</AssemblyName>
+    <RootNamespace>ProjectF.Tools.BenchmarkTool</RootNamespace>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Remove="Tests/**/*.cs" />
+    <Compile Include="../../FactorioProject/Assets/Scripts/Diagnostics/BenchmarkLayout.cs" Link="BenchmarkLayout.cs" />
+  </ItemGroup>
+</Project>

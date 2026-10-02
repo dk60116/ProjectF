@@ -163,7 +163,7 @@ public class OilDrillingMachine : InputOutputModule, IFacilityRuntimeWakeTarget
 
     protected override void OnManagedRuntimeVisualsFlushed()
     {
-        ApplyAnimatorPlayback(isExtracting);
+        ApplyAnimatorPlayback(IsBenchmarkWorking || isExtracting);
     }
 
     protected override bool RequiresManagedVisualUpdate =>
@@ -172,7 +172,7 @@ public class OilDrillingMachine : InputOutputModule, IFacilityRuntimeWakeTarget
     protected override void TickManagedVisuals(float deltaTime)
     {
         base.TickManagedVisuals(deltaTime);
-        if (!Application.isPlaying || !isExtracting || !hasPumpjackVisual)
+        if (!Application.isPlaying || (!IsBenchmarkWorking && !isExtracting) || !hasPumpjackVisual)
         {
             return;
         }

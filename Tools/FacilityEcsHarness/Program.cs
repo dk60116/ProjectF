@@ -107,6 +107,17 @@ FacilitySimulationWorld.SetParallelFlowPlanner(null);
 Require(parallelPlanner.Disposed,
     "replacing the parallel planner releases its persistent native-buffer owner");
 
+var benchmarkFlow = new BenchmarkFlowProbe { IsBenchmarkWorking = true };
+FacilitySimulationWorld.Register(benchmarkFlow, true);
+for (int i = 0; i < 6; i++) MapObjectTickManager.Step();
+Require(benchmarkFlow.GenericCalls == 1 && benchmarkFlow.FlowCalls == 0,
+    "forced flow facility runs the benchmark IO adapter on the normal schedule");
+benchmarkFlow.IsBenchmarkWorking = false;
+for (int i = 0; i < 6; i++) MapObjectTickManager.Step();
+Require(benchmarkFlow.GenericCalls == 1 && benchmarkFlow.FlowCalls == 1,
+    "disabling force restores the specialized fluid flow adapter");
+FacilitySimulationWorld.Unregister(benchmarkFlow);
+
 var steamFlow = new ProjectF.Simulation.FacilityFlowBatch(1);
 int steamIndex = steamFlow.ReserveSlot();
 steamFlow.ConfigureSteamGenerator(steamIndex, 2, 10f, 0.1f, true, 1f);
@@ -266,6 +277,20 @@ sealed class PowerProbe : InputOutputModule,
         log.Add($"P{SimulationId}");
     }
     public void ApplyManagedUpdateTick() => log.Add($"A{SimulationId}");
+}
+
+sealed class BenchmarkFlowProbe : InputOutputModule, IMapObjectStagedUpdateTick,
+    IMapObjectUpdateTickInterval, IMapObjectSimulationIdentity, ProjectF.Simulation.IFacilityFlowAdapter
+{
+    public long SimulationId => 17;
+    public float ManagedUpdateTickIntervalSeconds => .1f;
+    public int GenericCalls, FlowCalls;
+    public override void ManagedUpdateTick(float deltaTime) { }
+    public void PlanManagedUpdateTick(float deltaTime) { }
+    public void ApplyManagedUpdateTick() => GenericCalls++;
+    public void CaptureFacilityFlow(ProjectF.Simulation.FacilityFlowBatch batch, int index, float deltaTime, long tick)
+        => batch.ConfigurePump(index, 1, 60, deltaTime, tick, true, 0, 0, -1);
+    public void ApplyFacilityFlow(ProjectF.Simulation.FacilityFlowBatch batch, int index) => FlowCalls++;
 }
 
 sealed class FluidProbe : IMapObjectUpdateTick,

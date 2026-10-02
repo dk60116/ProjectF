@@ -33,7 +33,7 @@ dotnet build FactorioProject/Assembly-CSharp.csproj --no-restore -v:q -p:BuildPr
 
 `SimulationTickWorld`는 스케줄러야. 모든 생산 설비가 엔진 밖으로 이전됐다는 뜻은 아니야. 명령 큐는 원자적 롤백이나 파일 저장을 제공하지 않고, 모든 게임 입력이 이 큐를 사용하도록 바뀐 것도 아니야.
 
-`RunProductionAdapter.ps1`은 실제 InputOutputModule의 상태 필드/접근자와 Begin/Update/Complete/Clear, DTO 저장·복원, 남은 시간 환산을 추출해서 코어 연결을 검사해. 반출력·정전·소수 에너지·배출 대기·시간 기반 제작과 이전 시간 저장값에서의 에너지 복원을 확인해. 남은 시간은 DTO 캡처 시 한 번 계산하고 런타임 상태를 변경하지 않아. 레시피 정의·전력 공급·출력 포트·공간 등록·깨움은 테스트 대역이야. 실제 인벤토리·채굴 공정, 바이너리 저장 복원 전체를 검증하지 않아. `ProductionAdapterChecks.cs`는 별도 진입점이므로 기본 코어 하네스에서 제외해.
+`RunProductionAdapter.ps1`은 실제 InputOutputModule의 상태 필드/접근자와 Begin/Update/Complete/Clear, DTO 저장·복원, 남은 시간 환산을 추출해서 코어 연결을 검사해. 반출력·정전·소수 에너지·배출 대기·시간 기반 제작과 이전 시간 저장값에서의 에너지 복원을 확인해. ProductionMachine의 시간/완료 기준과 유체 배치량 계산도 추출해 아이템 CraftingTime, CompleteEnergy 무시, 전력 부족 감속, 제품별 저장·복원을 확인해. 다른 모듈의 기존 에너지 완료 기준도 함께 검사해. 남은 시간은 DTO 캡처 시 한 번 계산하고 런타임 상태를 변경하지 않아. 레시피 정의·전력 공급·출력 포트·공간 등록·깨움은 테스트 대역이야. 실제 인벤토리·채굴 공정, 바이너리 저장 복원 전체를 검증하지 않아. `ProductionAdapterChecks.cs`는 별도 진입점이므로 기본 코어 하네스에서 제외해.
 
 `CheckBoundaries.ps1`은 코어 엔진 참조와 세 물류 월드 및 동물 AI 월드의 생명주기 경계를 검사하는 소스 계약 검사야. 실제 Unity에서 View를 생성·파괴한 실행 검사는 아니야. 동물 월드의 실제 스케줄러/View 분리 경로는 AnimalAIOptimizationHarness가 Unity API 대역과 함께 추가 검사해.
 

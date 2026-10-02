@@ -53,6 +53,11 @@ public static class MapObjectTickManager
 
 public static class UtilityPole
 {
+    public static bool TracksRuntimeElectricPowerDemand(InstallationObject installation) => false;
+    public static bool TryCaptureElectricPowerDemand(InstallationObject installation, out float watts) { watts = 0; return false; }
+    public static bool HasElectricPowerDemandChanged(bool previous, float previousWatts, bool current, float currentWatts)
+        => previous != current || previousWatts != currentWatts;
+    public static void NotifyElectricPowerConsumerStateChanged(InstallationObject installation) { }
     public static int PrepareCalls;
     public static int MutationBatchDepth;
     public static void PrepareSimulationPowerTick() => PrepareCalls++;
@@ -73,8 +78,10 @@ public static class MapObjectTickProfiler
     public readonly struct Scope : IDisposable { public void Dispose() { } }
 }
 
-public abstract class InputOutputModule : IMapObjectUpdateTick
+public abstract class InstallationObject { }
+public abstract class InputOutputModule : InstallationObject, IMapObjectUpdateTick
 {
+    public bool IsBenchmarkWorking { get; set; }
     public static int CoordinateWakeCalls;
     public static void WakeRuntimeModulesAtCoordinate(UnityEngine.Vector2Int coordinate)
         => CoordinateWakeCalls++;

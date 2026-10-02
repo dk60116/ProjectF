@@ -665,6 +665,8 @@ public class SteamGenerator : InputOutputModule, IFacilityFlowAdapter, IFacility
         }
     }
 
+    internal void SetBenchmarkGeneration(bool active) => SetGenerationOutputScale(active ? 1f : 0f);
+
     private bool IsGenerationActive =>
         GenerationOutputScale > FluidEpsilon;
 

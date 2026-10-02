@@ -78,6 +78,12 @@ public sealed class EditorToolBuildSync : IPostprocessBuildWithReport
             Path.Combine(buildDirectory, "Tools", "MapObjectProfiler"),
             repositoryRoot,
             true);
+        PublishTool(
+            "BenchmarkTool",
+            Path.Combine(repositoryRoot, "Tools", "BenchmarkTool", "BenchmarkTool.csproj"),
+            Path.Combine(buildDirectory, "Tools", "BenchmarkTool"),
+            repositoryRoot,
+            false);
     }
 
     private static bool PublishTool(

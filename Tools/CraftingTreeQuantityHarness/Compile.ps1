@@ -19,6 +19,11 @@ foreach ($name in @('Assembly-CSharp', 'Assembly-CSharp-Editor')) {
     }
     if ($name -eq 'Assembly-CSharp') {
         $sources.Add((Join-Path $project 'Assets/Scripts/Manager/CraftingTreeQuantity.cs')) | Out-Null
+        foreach ($relative in @('Diagnostics/BenchmarkLayout.cs', 'Diagnostics/BenchmarkCommand.cs', 'Diagnostics/BenchmarkRuntime.cs',
+            'Manager/RuntimeItemGiveReceiver.Benchmark.cs', 'Map/TerrainGenerator.Benchmark.cs', 'Map/TerrainGenerator.Benchmark.Spawning.cs',
+            'Object/MapObj/InstallationObject/InputOutputModule.Benchmark.cs', 'Object/MapObj/InstallationObject/LoggingMachine.Benchmark.cs')) {
+            $sources.Add((Join-Path $project ('Assets/Scripts/' + $relative))) | Out-Null
+        }
     }
     foreach ($path in $sources) {
         $node = $generated.CreateElement('Compile'); $node.SetAttribute('Include', $path)
@@ -52,7 +57,7 @@ foreach ($name in @('Assembly-CSharp', 'Assembly-CSharp-Editor')) {
     $log = Join-Path $probe "$name.log"
     dotnet build $path --nologo --verbosity quiet *> $log
     if ($LASTEXITCODE -ne 0) {
-        Get-Content -LiteralPath $log | Select-String 'error |오류 '
+        Get-Content -LiteralPath $log | Select-String -SimpleMatch 'error '
         Write-Output "Compile log: $log"
         exit $LASTEXITCODE
     }

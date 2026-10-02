@@ -16,8 +16,8 @@ MonoBehaviour:
   id: 68
   mapObject: {fileID: 3506764276934423664, guid: 19c50aebdae9359439841e55c9844e07, type: 3}
   mapObjectArchetype: {fileID: 11400000, guid: 39a10f8a4c6063142b7daba263403ad5, type: 2}
-  useMapColor: 0
-  mapColor: {r: 1, g: 1, b: 1, a: 1}
+  useMapColor: 1
+  mapColor: {r: 0.9245283, g: 0.21368816, b: 0.21368816, a: 1}
   mapMarkerSize: 1
   portableMesh: {fileID: 4300000, guid: 628cea7c87ae22644b204243295f4429, type: 2}
   portableMat: {fileID: 2100000, guid: 1dfbd69284c27484dab13e0668a01836, type: 2}
@@ -49,10 +49,13 @@ MonoBehaviour:
   eatRewardChancePercent: 0
   isSeed: 0
   seedTargetResource: {fileID: 0}
-  useEnergyRequirements: []
-  useEnergyType: 1
-  useEnergyAmount: 1
-  completeEnergy: 10
+  useEnergyRequirements:
+  - energyType: 1
+    useEnergyAmount: 1
+    completeEnergy: 10
+  useEnergyType: 0
+  useEnergyAmount: 0
+  completeEnergy: 0
   utilityPoleConnectionRadius: 6
   utilityPoleSupplyRadius: 3
   sprinklerRangeRadius: 3

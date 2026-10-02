@@ -1,4 +1,5 @@
 using System;
+using System.Collections;
 using System.Collections.Generic;
 using ProjectF.Conveyors;
 using ProjectF.Rendering;
@@ -761,6 +762,10 @@ public sealed class ConveyorWorld : IDisposable, IVirtualRenderBatchOwner
     private readonly CameraRenderCulling animatedPartCulling = new CameraRenderCulling();
     private Camera mainCamera;
     private bool batchesDirty = true;
+    private int bulkUpdateDepth;
+
+    internal void BeginBulkUpdate() => bulkUpdateDepth++;
+    internal void EndBulkUpdate() { if (bulkUpdateDepth > 0) bulkUpdateDepth--; }
 
     public static ConveyorWorld Current => current;
     public int InstalledBeltCount => recordsByStorageKey.Count;
@@ -919,7 +924,7 @@ public sealed class ConveyorWorld : IDisposable, IVirtualRenderBatchOwner
 
     internal void SynchronizeForWorldPresentation()
     {
-        if (disposed || !batchesDirty)
+        if (disposed || bulkUpdateDepth > 0 || !batchesDirty)
         {
             return;
         }
@@ -940,6 +945,13 @@ public sealed class ConveyorWorld : IDisposable, IVirtualRenderBatchOwner
         Quaternion worldRotation,
         Vector3 worldScale)
     {
+        return Register(state, prototype, worldPosition, worldRotation, worldScale, null);
+    }
+
+    internal ConveyorRuntimeRecord Register(
+        BlockStateStore.InstallationSaveState state, ConveyorBelt prototype,
+        Vector3 worldPosition, Quaternion worldRotation, Vector3 worldScale, VisualPart[] visualParts)
+    {
         if (state == null
             || prototype == null
             || prototype.gameObject.scene.IsValid())
@@ -955,7 +967,7 @@ public sealed class ConveyorWorld : IDisposable, IVirtualRenderBatchOwner
             worldPosition,
             worldRotation,
             worldScale,
-            CaptureVisualParts(prototype, worldPosition, worldRotation));
+            visualParts ?? CaptureVisualParts(prototype, worldPosition, worldRotation));
         recordsByStorageKey.Add(storageKey, record);
         AddCoordinateMappings(record);
         CreateSplitterCollider(record, prototype);
@@ -1125,7 +1137,7 @@ public sealed class ConveyorWorld : IDisposable, IVirtualRenderBatchOwner
         // Saved-world restoration mutates the record set many times while chunks stream in.
         // Keep batchesDirty set and rebuild the complete presentation once the world becomes
         // ready instead of rescanning every belt after each partial chunk batch.
-        if (MapObjectTickManager.WaitingForWorldLoad)
+        if (MapObjectTickManager.WaitingForWorldLoad || bulkUpdateDepth > 0)
         {
             LastVisibleAnimatedRecordCount = 0;
             LastCulledAnimatedRecordCount = 0;
@@ -1169,73 +1181,95 @@ public sealed class ConveyorWorld : IDisposable, IVirtualRenderBatchOwner
 
     private void RebuildBatches()
     {
-        batchesDirty = false;
-        batches.Clear();
-        batchEntries.Clear();
-        animatedVisualEntries.Clear();
-        foreach (ConveyorRuntimeRecord record in recordsByStorageKey.Values)
-        {
-            if (record == null
-                || !record.HasValidPrototype
-                || record.PlacementPresentationSuppressed)
-            {
-                continue;
-            }
+        var work = RebuildBatchesCore(false);
+        using (work as IDisposable) { while (work.MoveNext()) { } }
+    }
 
-            Matrix4x4 rootMatrix = Matrix4x4.TRS(
-                record.WorldPosition,
-                record.WorldRotation,
-                record.WorldScale * record.PlacementPresentationScale);
-            VisualPart[] parts = record.VisualParts;
-            for (int i = 0; i < parts.Length; i++)
+    internal IEnumerator PrepareBenchmarkPresentation()
+    {
+        if (disposed || !batchesDirty) yield break;
+        var work = RebuildBatchesCore(true);
+        using (work as IDisposable) { while (work.MoveNext()) yield return null; }
+    }
+
+    private IEnumerator RebuildBatchesCore(bool spreadAcrossFrames)
+    {
+        bool completed = false;
+        long started = System.Diagnostics.Stopwatch.GetTimestamp();
+        try
+        {
+            batches.Clear();
+            batchEntries.Clear();
+            animatedVisualEntries.Clear();
+            foreach (ConveyorRuntimeRecord record in recordsByStorageKey.Values)
             {
-                VisualPart part = parts[i];
-                if (part.Mesh == null
-                    || part.Material == null
-                    || !ShouldRenderPart(record, part))
+                if (spreadAcrossFrames && ProjectF.Benchmark.BenchmarkLayout.IsWorkSliceExpired(started,
+                    System.Diagnostics.Stopwatch.GetTimestamp(), System.Diagnostics.Stopwatch.Frequency))
+                { yield return null; started = System.Diagnostics.Stopwatch.GetTimestamp(); }
+                if (record == null
+                    || !record.HasValidPrototype
+                    || record.PlacementPresentationSuppressed)
                 {
                     continue;
                 }
 
-                Matrix4x4 matrix = rootMatrix * ResolveLocalToRoot(record, part);
-                Material renderMaterial = ResolveRenderMaterial(
-                    part.Material,
-                    HasOddNegativeScale(matrix),
-                    out bool invertCulling);
-                if (!renderMaterial.enableInstancing)
+                Matrix4x4 rootMatrix = Matrix4x4.TRS(
+                    record.WorldPosition,
+                    record.WorldRotation,
+                    record.WorldScale * record.PlacementPresentationScale);
+                VisualPart[] parts = record.VisualParts;
+                for (int i = 0; i < parts.Length; i++)
                 {
-                    renderMaterial.enableInstancing = true;
-                }
+                    VisualPart part = parts[i];
+                    if (part.Mesh == null
+                        || part.Material == null
+                        || !ShouldRenderPart(record, part))
+                    {
+                        continue;
+                    }
 
-                Vector3 position = new Vector3(matrix.m03, matrix.m13, matrix.m23);
-                VirtualRenderBatchKey key = new VirtualRenderBatchKey(
-                    part.Mesh,
-                    renderMaterial,
-                    part.Layer,
-                    part.SubMeshIndex,
-                    ShadowCastingMode.Off,
-                    false,
-                    part.HasUvScroll,
-                    batchCellX: Mathf.FloorToInt(position.x / BatchCellSize),
-                    batchCellZ: Mathf.FloorToInt(position.z / BatchCellSize),
-                    invertCulling: invertCulling);
-                int batchEntryIndex = batchEntries.Count;
-                batches.AddOwnedMatrix(
-                    this,
-                    batchEntries,
-                    key,
-                    matrix,
-                    new Vector4(
-                        0f,
-                        part.HasUvScroll ? part.UvScrollY : 0f,
-                        part.UvLengthScale,
-                        part.UvLengthOffset));
-                if (part.WheelChannel >= 0)
-                {
-                    animatedVisualEntries.Add(new AnimatedVisualEntry(record, part, batchEntryIndex));
+                    Matrix4x4 matrix = rootMatrix * ResolveLocalToRoot(record, part);
+                    Material renderMaterial = ResolveRenderMaterial(
+                        part.Material,
+                        HasOddNegativeScale(matrix),
+                        out bool invertCulling);
+                    if (!renderMaterial.enableInstancing)
+                    {
+                        renderMaterial.enableInstancing = true;
+                    }
+
+                    Vector3 position = new Vector3(matrix.m03, matrix.m13, matrix.m23);
+                    VirtualRenderBatchKey key = new VirtualRenderBatchKey(
+                        part.Mesh,
+                        renderMaterial,
+                        part.Layer,
+                        part.SubMeshIndex,
+                        ShadowCastingMode.Off,
+                        false,
+                        part.HasUvScroll,
+                        batchCellX: Mathf.FloorToInt(position.x / BatchCellSize),
+                        batchCellZ: Mathf.FloorToInt(position.z / BatchCellSize),
+                        invertCulling: invertCulling);
+                    int batchEntryIndex = batchEntries.Count;
+                    batches.AddOwnedMatrix(
+                        this,
+                        batchEntries,
+                        key,
+                        matrix,
+                        new Vector4(
+                            0f,
+                            part.HasUvScroll ? part.UvScrollY : 0f,
+                            part.UvLengthScale,
+                            part.UvLengthOffset));
+                    if (part.WheelChannel >= 0)
+                    {
+                        animatedVisualEntries.Add(new AnimatedVisualEntry(record, part, batchEntryIndex));
+                    }
                 }
             }
+            completed = true;
         }
+        finally { batchesDirty = !completed; }
     }
 
     private Material ResolveRenderMaterial(
@@ -1279,7 +1313,7 @@ public sealed class ConveyorWorld : IDisposable, IVirtualRenderBatchOwner
         return mirroredMaterial;
     }
 
-    private VisualPart[] CaptureVisualParts(
+    internal VisualPart[] CaptureVisualParts(
         ConveyorBelt source,
         Vector3 targetWorldPosition,
         Quaternion targetWorldRotation)

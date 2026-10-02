@@ -126,12 +126,12 @@ public class Sprinkler : InputOutputModule
     }
 
     protected override bool RequiresManagedVisualUpdate =>
-        base.RequiresManagedVisualUpdate || isOperating;
+        base.RequiresManagedVisualUpdate || isOperating || IsBenchmarkWorking;
 
     protected override void TickManagedVisuals(float deltaTime)
     {
         base.TickManagedVisuals(deltaTime);
-        if (!Application.isPlaying || !isOperating || nozzleTransform == null)
+        if (!Application.isPlaying || (!isOperating && !IsBenchmarkWorking) || nozzleTransform == null)
         {
             return;
         }
@@ -768,7 +768,7 @@ public class Sprinkler : InputOutputModule
                 continue;
             }
 
-            SetVisualParticleActive(effect, isOperating, clear: true);
+            SetVisualParticleActive(effect, isOperating || IsBenchmarkWorking, clear: true);
         }
     }
 

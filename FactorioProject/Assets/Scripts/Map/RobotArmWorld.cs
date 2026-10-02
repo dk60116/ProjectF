@@ -373,6 +373,7 @@ public sealed class RobotArmWorld : IDisposable, IMapObjectUpdateTick, IMapObjec
     }
     internal bool RefreshAreaMarkers(in AreaMarkerVisibilityContext context)
     {
+        if (Terrain.IsBenchmarkPlacementInProgress) return false;
         bool changed = markersDirty;
         markersDirty = false;
         BuildMarkerCandidates(context);
@@ -392,6 +393,7 @@ public sealed class RobotArmWorld : IDisposable, IMapObjectUpdateTick, IMapObjec
     }
     internal void AppendAreaMarkers(AreaMarkerRenderer renderer)
     {
+        if (Terrain.IsBenchmarkPlacementInProgress) return;
         Sprite icon = UIManager.Instance != null ? UIManager.Instance.ArrowImage : null;
         foreach (var arm in ordered)
         {

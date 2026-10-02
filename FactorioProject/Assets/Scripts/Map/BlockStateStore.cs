@@ -1216,7 +1216,7 @@ public partial class BlockStateStore : MonoBehaviour
         if (trainPresentationChanged) MarkMapMarkersChanged();
     }
 
-    public void RemoveInstallation(Vector2Int storageKey)
+    public void RemoveInstallation(Vector2Int storageKey, bool removeUtilityPoleReferences = true)
     {
         RobotArmWorld.Current?.Remove(storageKey);
         Vector2Int removedAnchor = storageKey;
@@ -1243,7 +1243,7 @@ public partial class BlockStateStore : MonoBehaviour
         ConveyorWorld.Current?.Remove(storageKey);
         PipeWorld.Current?.Remove(storageKey);
         BuildingWorld.Current?.Remove(storageKey);
-        RemoveUtilityPoleConnectionReferences(removedAnchor);
+        if (removeUtilityPoleReferences) RemoveUtilityPoleConnectionReferences(removedAnchor);
         if (markerChanged) MarkMapMarkersChanged();
     }
 
@@ -1267,6 +1267,39 @@ public partial class BlockStateStore : MonoBehaviour
         }
 
         installationObject.BindRuntimeMapObjectHandle(default);
+    }
+
+    internal IEnumerator RemoveConveyorInstallations(HashSet<int> conveyorItemIds)
+    {
+        // ConveyorWorld has been cleared by the bulk caller. Keep all remaining
+        // saved/live/virtual indices on the regular removal path, but clean pole
+        // references in one pass instead of rescanning the save for every belt.
+        var keys = new List<Vector2Int>();
+        var anchors = new HashSet<Vector2Int>();
+        foreach (var pair in savedInstallationStates)
+        {
+            var state = pair.Value;
+            // Variant IDs are also used by pipes and fences; item identity
+            // determines whether an installation is a conveyor.
+            if (state == null || !conveyorItemIds.Contains(state.itemId)) continue;
+            keys.Add(pair.Key);
+        }
+        long started = System.Diagnostics.Stopwatch.GetTimestamp();
+        try
+        {
+            for (int i = 0; i < keys.Count; i++)
+            {
+                if (savedInstallationStates.TryGetValue(keys[i], out var state)) anchors.Add(state.anchorCoordinate);
+                RemoveInstallation(keys[i], false);
+                if ((i & 63) == 63 && ProjectF.Benchmark.BenchmarkLayout.IsWorkSliceExpired(started,
+                    System.Diagnostics.Stopwatch.GetTimestamp(), System.Diagnostics.Stopwatch.Frequency))
+                {
+                    yield return null;
+                    started = System.Diagnostics.Stopwatch.GetTimestamp();
+                }
+            }
+        }
+        finally { if (anchors.Count > 0) RemoveUtilityPoleConnectionReferences(default, anchors); }
     }
 
     public void ClearStates()
@@ -1732,7 +1765,7 @@ public partial class BlockStateStore : MonoBehaviour
         connectedAnchors.Sort(CompareCoordinate);
     }
 
-    private void RemoveUtilityPoleConnectionReferences(Vector2Int removedAnchor)
+    private void RemoveUtilityPoleConnectionReferences(Vector2Int removedAnchor, HashSet<Vector2Int> removedAnchors = null)
     {
         foreach (KeyValuePair<Vector2Int, InstallationSaveState> pair in savedInstallationStates)
         {
@@ -1744,7 +1777,7 @@ public partial class BlockStateStore : MonoBehaviour
 
             for (int i = connectedAnchors.Count - 1; i >= 0; i--)
             {
-                if (connectedAnchors[i] == removedAnchor)
+                if (removedAnchors != null ? removedAnchors.Contains(connectedAnchors[i]) : connectedAnchors[i] == removedAnchor)
                 {
                     connectedAnchors.RemoveAt(i);
                 }

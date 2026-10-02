@@ -202,7 +202,7 @@ public partial class TerrainGenerator : MonoBehaviour
     private bool BeginChunkAnimalSpawnWork(Vector2Int chunkCoordinate)
     {
         CancelChunkAnimalSpawnWork();
-        if (!generateAnimals || animalDensity <= 0f)
+        if (IsBenchmarkMap || !generateAnimals || animalDensity <= 0f)
         {
             return true;
         }

@@ -325,7 +325,7 @@ public class CrudeOilRefinery : InputOutputModule
 
     protected override void OnManagedRuntimeVisualsFlushed()
     {
-        SetVisualParticleActive(particleEffect, isRefining || emittedThisTick);
+        SetVisualParticleActive(particleEffect, IsBenchmarkWorking || isRefining || emittedThisTick);
     }
 
     private void StopRefineryParticle()

@@ -196,13 +196,13 @@ public partial class InputOutputModule : InstallationObject
     public InputOutputModule() => production.Begin(0,1,2,0);
     protected void BeginWorkingCraft()
     { OutputRate = 1f; CraftSeconds = installedDefinition.CompleteEnergy / installedDefinition.ElectricityRate; production.Begin(0,1,1,DeterministicSimulationUnits.SecondsToTicks(CraftSeconds)); }
-    protected float ResolveInitialCraftDuration(ItemDefinition definition) => CraftSeconds;
+    protected virtual float ResolveInitialCraftDuration(ItemDefinition definition, int outputItemId = -1) => CraftSeconds;
     protected int ResolveProductionTargetPairIndex(int id) => 0;
     protected void AdvanceCraft(float dt) => UpdateActiveCraft(dt);
     protected ItemDefinition ResolveInstalledDefinition() => installedDefinition;
-    private static bool RequiresOperationalEnergy(ItemDefinition definition) => true;
+    protected static bool RequiresOperationalEnergy(ItemDefinition definition) => true;
     private bool TryConsumeOperatingEnergy(float dt, out float consumed) { consumed = installedDefinition.ElectricityRate * dt; return consumed > 0; }
-    private float ResolveCompleteEnergy(ItemDefinition definition) => definition.CompleteEnergy;
+    protected virtual float ResolveCompleteEnergy(ItemDefinition definition) => definition.CompleteEnergy;
     protected virtual bool TryCompleteActiveCraft() => false;
     protected void ClearActiveCraft() => production.Clear();
     protected void MarkPersistenceStateDirty() { }
@@ -257,6 +257,10 @@ public partial class InputOutputModule : InstallationObject
     private bool fluidOutputCapacityBlocked;
     private static long ignoredNonFluidPlacementChangeCount, fluidPlacementInvalidationCount;
     private static readonly List<InputOutputModule> runtimeWakeScratch = new();
+    // These transport cases exercise normal placement; bulk deferral is covered
+    // with the actual batch methods in BenchmarkTool/RunBulkChecks.ps1.
+    private static int runtimePipeTopologyBatchDepth = 0;
+    private static bool deferredPipeTopologyWake;
     public bool Sleeping;
     public float Tick(float liters) => Sleeping ? 0 : Emit(liters);
     protected void WakeRuntimeUpdate() => Sleeping = false;

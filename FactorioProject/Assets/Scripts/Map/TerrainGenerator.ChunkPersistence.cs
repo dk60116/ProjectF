@@ -698,7 +698,7 @@ public partial class TerrainGenerator : MonoBehaviour
         return null;
     }
 
-    private static Vector2Int GetWorldBlockCoordinate(Vector3 worldPosition)
+    internal static Vector2Int GetWorldBlockCoordinate(Vector3 worldPosition)
     {
         return new Vector2Int(
             Mathf.RoundToInt(worldPosition.x),

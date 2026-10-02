@@ -4,6 +4,11 @@ using UnityEngine;
 using RobotArmState = RobotArm.RobotArmState;
 using ProjectF.Runtime;
 
+namespace ProjectF.Benchmark
+{
+    public static class BenchmarkRuntime { public static bool ForceWorking; }
+}
+
 // World IO and power supply are doubles. Wake/plan/apply/sleep/demand/scheduling/slot storage are production code.
 public static class Application { public static bool isPlaying = true; }
 public static class MapObjectTickManager { public const int DefaultSimulationTicksPerSecond = 60; public const float FixedSimulationDeltaSeconds = 1f / 60f; }

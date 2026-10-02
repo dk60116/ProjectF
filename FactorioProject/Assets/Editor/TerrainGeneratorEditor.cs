@@ -12,6 +12,10 @@ public class TerrainGeneratorEditor : Editor
         serializedObject.ApplyModifiedProperties();
 
         EditorGUILayout.Space();
+        if (((TerrainGenerator)target).IsBenchmarkMap)
+        {
+            EditorGUILayout.HelpBox("Seed 0: Infinite empty benchmark terrain. Map Size is ignored; water, resources and animals are disabled.", MessageType.Info);
+        }
         EditorGUILayout.HelpBox(
             "에디터에서 생성한 청크는 미리보기이며 씬에 저장되지 않습니다. 기존에 저장된 청크는 Clear Preview로 즉시 제거하거나, Generate 또는 Reset 후 씬을 저장하면 제거됩니다.",
             MessageType.Info);

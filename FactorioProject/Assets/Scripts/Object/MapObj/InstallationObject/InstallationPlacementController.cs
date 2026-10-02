@@ -8471,7 +8471,7 @@ public class InstallationPlacementController : MonoBehaviour
         inputOutputModule.ConfigureRuntimeFocusCoordinates(focusCoordinates);
     }
 
-    private List<Vector2Int> GetInstalledObjectBlockingCoordinates(
+    internal List<Vector2Int> GetInstalledObjectBlockingCoordinates(
         Vector2Int anchorCoordinate,
         MapObject footprintSource,
         int quarterTurns)
@@ -8529,6 +8529,17 @@ public class InstallationPlacementController : MonoBehaviour
         InputOutputModule.PersistentState persistentState = null,
         long placementSequence = 0,
         IReadOnlyList<Vector2Int> occupiedCoordinatesOverride = null)
+        => ConfigureInstalledObjectRuntimeCore(installedObject, anchorCoordinate, quarterTurns, persistentState,
+            placementSequence, occupiedCoordinatesOverride, false);
+
+    internal void ConfigureBenchmarkInstalledObjectRuntime(MapObject installedObject, Vector2Int anchorCoordinate,
+        int quarterTurns, IReadOnlyList<Vector2Int> blockingCoordinates)
+        => ConfigureInstalledObjectRuntimeCore(installedObject, anchorCoordinate, quarterTurns, null, 0,
+            blockingCoordinates, true);
+
+    private void ConfigureInstalledObjectRuntimeCore(MapObject installedObject, Vector2Int anchorCoordinate,
+        int quarterTurns, InputOutputModule.PersistentState persistentState, long placementSequence,
+        IReadOnlyList<Vector2Int> occupiedCoordinatesOverride, bool coordinatesAreBlocking)
     {
         if (installedObject == null)
         {
@@ -8542,7 +8553,7 @@ public class InstallationPlacementController : MonoBehaviour
         if (installedObject is InstallationObject installationObject)
         {
             IReadOnlyList<Vector2Int> occupiedCoordinates =
-                ResolveInstalledObjectRuntimeOccupiedCoordinates(
+                coordinatesAreBlocking ? occupiedCoordinatesOverride : ResolveInstalledObjectRuntimeOccupiedCoordinates(
                     installedObject,
                     anchorCoordinate,
                     quarterTurns,

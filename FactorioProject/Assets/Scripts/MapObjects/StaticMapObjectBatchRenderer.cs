@@ -1,4 +1,6 @@
+using System.Collections;
 using System.Collections.Generic;
+using ProjectF.Benchmark;
 using UnityEngine;
 
 namespace ProjectF.MapObjects
@@ -32,6 +34,34 @@ namespace ProjectF.MapObjects
         private int lastSynchronizationFrame = -1;
         private int lastSynchronizedActiveInstallationCount;
         private int lastSynchronizedDataOnlyInstallationCount;
+        internal long BenchmarkSyncDone { get; private set; }
+        internal long BenchmarkSyncTotal { get; private set; }
+
+        internal IEnumerator PrepareBenchmarkPresentation()
+        {
+            ResolveDependencies();
+            if (virtualWorld == null || itemManager == null) yield break;
+            int installationVersion = virtualWorld.InstallationVersion;
+            int activeVersion = InstallationObject.StaticRenderActiveInstanceVersion;
+            var work = SynchronizeHostsCore(true);
+            bool completed = false;
+            try
+            {
+                while (work.MoveNext()) yield return null;
+                completed = true;
+                cachedInstallationVersion = installationVersion;
+                cachedActiveInstanceVersion = activeVersion;
+            }
+            finally
+            {
+                (work as System.IDisposable)?.Dispose();
+                if (!completed)
+                {
+                    foreach (var host in hostsByItemId.Values) if (host != null) host.AbortSynchronization();
+                    InvalidateSyncVersions();
+                }
+            }
+        }
 
         public int ActiveTypeCount => hostsByItemId.Count;
         public int UnsupportedActiveTypeCount => rejectedTypeIds.Count;
@@ -89,6 +119,7 @@ namespace ProjectF.MapObjects
 
         public void SynchronizeForWorldPresentation()
         {
+            if (TerrainGenerator.Active != null && TerrainGenerator.Active.IsBenchmarkPlacementInProgress) return;
             ResolveDependencies();
             if (virtualWorld == null || itemManager == null)
             {
@@ -127,7 +158,8 @@ namespace ProjectF.MapObjects
                 "Static Installation Render (inclusive)");
             // InstallationVersion changes repeatedly while saved chunks are restored. Preserve
             // the stale cached versions so the first ready frame performs one complete sync.
-            if (MapObjectTickManager.WaitingForWorldLoad)
+            if (MapObjectTickManager.WaitingForWorldLoad
+                || TerrainGenerator.Active != null && TerrainGenerator.Active.IsBenchmarkPlacementInProgress)
             {
                 SuspendHostRendering();
                 return;
@@ -192,6 +224,13 @@ namespace ProjectF.MapObjects
 
         private void SynchronizeHosts()
         {
+            var work = SynchronizeHostsCore(false);
+            using (work as System.IDisposable) { while (work.MoveNext()) { } }
+        }
+
+        private IEnumerator SynchronizeHostsCore(bool spreadAcrossFrames)
+        {
+            long started = System.Diagnostics.Stopwatch.GetTimestamp();
             synchronizationCount++;
             lastSynchronizationFrame = Time.frameCount;
             CopyHostsToScratch();
@@ -201,10 +240,17 @@ namespace ProjectF.MapObjects
             }
 
             InstallationObject.CopyActiveInstances(activeInstallations);
+            virtualWorld.CopyInstallationRecords(dataOnlyInstallations, true);
+            BenchmarkSyncDone = 0;
+            BenchmarkSyncTotal = activeInstallations.Count + (long)dataOnlyInstallations.Count;
             lastSynchronizedActiveInstallationCount = activeInstallations.Count;
             rejectedTypeIds.Clear();
             for (int i = 0; i < activeInstallations.Count; i++)
             {
+                BenchmarkSyncDone++;
+                if (spreadAcrossFrames && BenchmarkLayout.IsWorkSliceExpired(started,
+                    System.Diagnostics.Stopwatch.GetTimestamp(), System.Diagnostics.Stopwatch.Frequency))
+                { yield return null; started = System.Diagnostics.Stopwatch.GetTimestamp(); }
                 InstallationObject installationObject = activeInstallations[i];
                 MapObjectHandle handle = installationObject != null
                     ? installationObject.RuntimeMapObjectHandle
@@ -232,10 +278,13 @@ namespace ProjectF.MapObjects
 
             // Data-only entities have no source GameObject to enumerate. Their authoritative
             // pose and generation-safe handle are sufficient to build the presentation batch.
-            virtualWorld.CopyInstallationRecords(dataOnlyInstallations, true);
             lastSynchronizedDataOnlyInstallationCount = dataOnlyInstallations.Count;
             for (int i = 0; i < dataOnlyInstallations.Count; i++)
             {
+                BenchmarkSyncDone++;
+                if (spreadAcrossFrames && BenchmarkLayout.IsWorkSliceExpired(started,
+                    System.Diagnostics.Stopwatch.GetTimestamp(), System.Diagnostics.Stopwatch.Frequency))
+                { yield return null; started = System.Diagnostics.Stopwatch.GetTimestamp(); }
                 VirtualObjectRecord record = dataOnlyInstallations[i];
                 if (record == null
                     || record.kind != VirtualObjectKind.Installation

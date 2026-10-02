@@ -532,6 +532,7 @@ public sealed partial class RobotArmInstance : IMapObjectTarget, IMapObjectSimul
 
     private bool ShouldRuntimeSleep()
     {
+        if (ProjectF.Benchmark.BenchmarkRuntime.ForceWorking) return false;
         if (!Application.isPlaying
             || !IsRuntimeActive
             || !HasPlacementRuntime())
@@ -829,6 +830,8 @@ public sealed partial class RobotArmInstance : IMapObjectTarget, IMapObjectSimul
         using var sample = MapObjectTickProfiler.SampleNamed("Runtime", nameof(RobotArm), "Robot Arm Pickup Transfer");
         pickedItemId = -1;
         pickupWorldPosition = GetHandRestWorldPosition();
+        if (ProjectF.Benchmark.BenchmarkRuntime.ForceWorking)
+        { pickedItemId = ProjectF.Benchmark.BenchmarkRuntime.FallbackItemId; return pickedItemId >= 0; }
         if (!TryResolvePickupCandidate(
                 out Block pickupBlock,
                 out BoxObject boxObject,
@@ -880,6 +883,7 @@ public sealed partial class RobotArmInstance : IMapObjectTarget, IMapObjectSimul
 
     private bool CanPickupOneItemForCurrentPlan()
     {
+        if (ProjectF.Benchmark.BenchmarkRuntime.ForceWorking) return true;
         if (!stagedTickPlanned)
         {
             return CanPickupOneItem();
@@ -1170,6 +1174,8 @@ public sealed partial class RobotArmInstance : IMapObjectTarget, IMapObjectSimul
 
     private bool TryPlaceHeldItem()
     {
+        if (ProjectF.Benchmark.BenchmarkRuntime.ForceWorking && heldItemId >= 0)
+            return ProjectF.Benchmark.BenchmarkRuntime.EmitItem(ResolveTerrainGenerator(), heldItemId, GetHandWorldPosition());
         using var sample = MapObjectTickProfiler.SampleNamed("Runtime", nameof(RobotArm), "Robot Arm Drop Transfer");
         if (heldItemId < 0
             || IsDropSuppressedByPlacementMode()
@@ -1375,6 +1381,7 @@ public sealed partial class RobotArmInstance : IMapObjectTarget, IMapObjectSimul
 
     private bool CanPlaceHeldItemForCurrentPlan()
     {
+        if (ProjectF.Benchmark.BenchmarkRuntime.ForceWorking) return true;
         if (!stagedTickPlanned)
         {
             return CanPlaceHeldItem();

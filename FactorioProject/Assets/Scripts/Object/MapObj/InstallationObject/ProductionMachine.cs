@@ -608,7 +608,7 @@ public class ProductionMachine : InputOutputModule
 
         fluidItemId = outputItemId;
         litersPerSecond = ResolveProductionFluidOutputRate(outputItemId);
-        batchLiters = ResolveProductionFluidBatchLiters(litersPerSecond);
+        batchLiters = ResolveProductionFluidBatchLiters(litersPerSecond, outputItemId);
         storedLiters = DeterministicSimulationUnits.ToFloat(productionFluidOutputUnits);
         return batchLiters > 0f;
     }
@@ -848,10 +848,10 @@ public class ProductionMachine : InputOutputModule
         float outputRate = ResolveProductionFluidOutputRate(ActiveOutputItemId);
         if (productionFluidOutputUnits < 0L)
         {
-            // Fluid recipe Count is L/s. The configured Complete/Use duration
+            // Fluid recipe Count is L/s. The product's CraftingTime
             // determines one batch; backpressure delays delivery, not production volume.
             productionFluidOutputUnits = DeterministicSimulationUnits.FromFloat(
-                ResolveProductionFluidBatchLiters(outputRate));
+                ResolveProductionFluidBatchLiters(outputRate, ActiveOutputItemId));
             MarkPersistenceStateDirty();
         }
 
@@ -900,9 +900,27 @@ public class ProductionMachine : InputOutputModule
         return ResolveProductionFluidOutputRate(fluidItemId);
     }
 
-    private float ResolveProductionFluidBatchLiters(float litersPerSecond)
+    protected override float ResolveInitialCraftDuration(ItemDefinition installedDefinition, int outputItemId = -1)
     {
-        return litersPerSecond * ResolveInitialCraftDuration(ResolveInstalledDefinition());
+        if (outputItemId < 0)
+            outputItemId = IsActiveCraftRunning ? ActiveOutputItemId : ResolveSelectedProductionTargetItemId();
+        ItemDefinition product = ResolveItemDefinition(outputItemId);
+        return product != null ? product.CraftingDurationSeconds : CraftDurationSeconds;
+    }
+
+    protected override float ResolveCompleteEnergy(ItemDefinition installedDefinition)
+    {
+        // Production machines use the product's CraftingTime. Express it as an
+        // energy budget so the existing minimum supply ratio still slows progress.
+        return RequiresOperationalEnergy(installedDefinition)
+            ? ItemDefinition.ResolveUseEnergyRatePerSecond(installedDefinition)
+              * ResolveInitialCraftDuration(installedDefinition)
+            : 0f;
+    }
+
+    private float ResolveProductionFluidBatchLiters(float litersPerSecond, int outputItemId)
+    {
+        return litersPerSecond * ResolveInitialCraftDuration(ResolveInstalledDefinition(), outputItemId);
     }
 
     private float ResolveProductionFluidOutputRate(int outputItemId)
@@ -1320,7 +1338,7 @@ public class ProductionMachine : InputOutputModule
         // A fluid-producing recipe uses input/output Count as a per-second amount.
         // Intake capacity, consumption and the displayed denominator share this batch total.
         return IsFluidItemId(outputItemId)
-            ? ResolveProductionFluidBatchLiters(requiredLiters)
+            ? ResolveProductionFluidBatchLiters(requiredLiters, outputItemId)
             : requiredLiters;
     }
 

@@ -22,8 +22,17 @@ $generated += $source.Substring($start, $end - $start)
 foreach ($signature in @('public struct PersistentInputItemAreaState', 'public sealed class RefineryOutputState', 'public sealed class PersistentState',
     'public virtual PersistentState CapturePersistentState(', 'public virtual void ApplyPersistentState(',
     'private long ResolveRemainingCraftTicks(', 'private long ResolveConsumedEnergyUnitsFromRemainingTicks(',
+    'private float ResolveCraftProgressGaugeFillAmount(', 'private float ResolveObjectInfoCurrentUseEnergy(',
+    'private float ResolveObjectInfoCompleteEnergy(',
     'protected void UpdateActiveCraft(', 'protected void BeginActiveCraft(',
     'protected void ClearActiveCraft()', 'protected virtual bool TryCompleteActiveCraft()')) {
+    $generated += (Read-Member $signature) + "`n"
+}
+$generated += "}`n"
+$source = [IO.File]::ReadAllText((Join-Path $repo 'FactorioProject/Assets/Scripts/Object/MapObj/InstallationObject/ProductionMachine.cs'))
+$generated += "public partial class ProductTimeProbe {`n"
+foreach ($signature in @('protected override float ResolveInitialCraftDuration(', 'protected override float ResolveCompleteEnergy(',
+    'private float ResolveProductionFluidBatchLiters(')) {
     $generated += (Read-Member $signature) + "`n"
 }
 $generated += "}`n"

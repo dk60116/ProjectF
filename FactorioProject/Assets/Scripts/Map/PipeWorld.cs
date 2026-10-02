@@ -1,4 +1,5 @@
 using System;
+using System.Collections;
 using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.Rendering;
@@ -874,7 +875,7 @@ public sealed class PipeWorld : IDisposable
 
     internal void SynchronizeForWorldPresentation()
     {
-        if (disposed)
+        if (disposed || Owner != null && Owner.IsBenchmarkPlacementInProgress)
         {
             return;
         }
@@ -892,7 +893,7 @@ public sealed class PipeWorld : IDisposable
 
     internal void Render()
     {
-        if (MapObjectTickManager.WaitingForWorldLoad)
+        if (MapObjectTickManager.WaitingForWorldLoad || Owner != null && Owner.IsBenchmarkPlacementInProgress)
         {
             bodyBatches.SuspendRendering();
             fluidBatches.SuspendRendering();
@@ -916,13 +917,35 @@ public sealed class PipeWorld : IDisposable
 
     private void RebuildBodyBatches()
     {
-        bodyDirty = false;
-        bodyBatches.Clear();
-        bodyOwner.Entries.Clear();
-        foreach (PipeRuntimeRecord record in recordsByStorageKey.Values)
+        var work = RebuildBodyBatchesCore(false);
+        using (work as IDisposable) { while (work.MoveNext()) { } }
+    }
+
+    internal IEnumerator PrepareBenchmarkPresentation()
+    {
+        if (disposed || !bodyDirty) yield break;
+        var work = RebuildBodyBatchesCore(true);
+        using (work as IDisposable) { while (work.MoveNext()) yield return null; }
+    }
+
+    private IEnumerator RebuildBodyBatchesCore(bool spreadAcrossFrames)
+    {
+        bool completed = false;
+        long started = System.Diagnostics.Stopwatch.GetTimestamp();
+        try
         {
-            AddRecordParts(record, false, bodyBatches, bodyOwner, bodyOwner.Entries);
+            bodyBatches.Clear();
+            bodyOwner.Entries.Clear();
+            foreach (PipeRuntimeRecord record in recordsByStorageKey.Values)
+            {
+                if (spreadAcrossFrames && ProjectF.Benchmark.BenchmarkLayout.IsWorkSliceExpired(started,
+                    System.Diagnostics.Stopwatch.GetTimestamp(), System.Diagnostics.Stopwatch.Frequency))
+                { yield return null; started = System.Diagnostics.Stopwatch.GetTimestamp(); }
+                AddRecordParts(record, false, bodyBatches, bodyOwner, bodyOwner.Entries);
+            }
+            completed = true;
         }
+        finally { bodyDirty = !completed; }
     }
 
     private void AddRecordParts(

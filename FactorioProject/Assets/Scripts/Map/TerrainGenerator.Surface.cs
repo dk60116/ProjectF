@@ -359,6 +359,28 @@ public partial class TerrainGenerator : MonoBehaviour
         return mesh;
     }
 
+    private ChunkSurfaceBuildData BuildBenchmarkChunkSurface(Vector2Int origin, int size)
+    {
+        var surface = reusableChunkSurfaceBuildData;
+        reusableChunkSurfaceBuildData = null;
+        surface ??= new ChunkSurfaceBuildData(GeneratedSurfaceMaterialCount, 1);
+        surface.Reset(origin, null);
+        float y = GetBiomeSurfaceY(TerrainBiome.Dirt, generatedSurfaceYOffset, waterSurfaceDepth);
+        for (int i = 0; i < 4; i++)
+        {
+            float x = i == 1 || i == 2 ? size - 0.5f : -0.5f;
+            float z = i >= 2 ? size - 0.5f : -0.5f;
+            surface.vertices.Add(new Vector3(x, y, z));
+            surface.normals.Add(Vector3.up);
+            surface.uvs.Add(new Vector2(x, z));
+            surface.colors.Add(new Color(0f, 1f, 0f, 0f));
+        }
+        var triangles = surface.trianglesByBiome[GetGeneratedSurfaceTriangleBucket(TerrainBiome.Dirt)];
+        triangles.Add(0); triangles.Add(2); triangles.Add(1);
+        triangles.Add(0); triangles.Add(3); triangles.Add(2);
+        return surface;
+    }
+
     private ChunkSurfaceBuildData BuildCurvedChunkSurface(Vector2Int origin, int chunkSizeInBlocks)
     {
         ChunkSurfaceWorkerInput input = CreateChunkSurfaceWorkerInput(origin, chunkSizeInBlocks);

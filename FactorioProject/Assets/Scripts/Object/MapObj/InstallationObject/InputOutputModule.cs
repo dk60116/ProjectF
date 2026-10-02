@@ -3,7 +3,7 @@ using System.Collections.Generic;
 using ProjectF.Simulation;
 using UnityEngine;
 
-public class InputOutputModule : InstallationObject,
+public partial class InputOutputModule : InstallationObject,
     IMapObjectUpdateTick,
     IMapObjectUpdateTickInterval,
     IMapObjectStagedUpdateTick,
@@ -1023,7 +1023,7 @@ public class InputOutputModule : InstallationObject,
         RegisterRuntimeGridCoordinates();
         RegisterRuntimeFluidSpatialCoordinates();
         WakeRuntimeUpdate();
-        RuntimePipeTopologyChanged?.Invoke(this);
+        NotifyRuntimePipeTopologyObservers(this);
     }
 
     public void ConfigureRuntimeFocusCoordinates(IReadOnlyList<Vector2Int> coordinates)
@@ -1150,6 +1150,10 @@ public class InputOutputModule : InstallationObject,
         }
         hasActiveCraft = state.hasActiveCraft;
         waitingForOutput = state.waitingForOutput;
+        // Restore the product before resolving its duration/completion requirement.
+        activeRecipeIndex = state.activeRecipeIndex;
+        activeOutputItemId = state.activeOutputItemId;
+        activeOutputCount = Mathf.Max(0, state.activeOutputCount);
         long savedRemainingCraftTicks = state.hasDeterministicUnits
             ? System.Math.Max(0L, state.remainingCraftTicks)
             : DeterministicSimulationUnits.SecondsToTicks(state.remainingCraftTime);
@@ -1164,9 +1168,6 @@ public class InputOutputModule : InstallationObject,
                 savedRemainingCraftTicks);
         }
         remainingCraftTicks = RequiresOperationalEnergy(installedDefinition) ? 0L : savedRemainingCraftTicks;
-        activeRecipeIndex = state.activeRecipeIndex;
-        activeOutputItemId = state.activeOutputItemId;
-        activeOutputCount = Mathf.Max(0, state.activeOutputCount);
         cachedTerrain = null;
         cachedBlockStateStore = null;
         MarkManagedRuntimeVisualsDirty();
@@ -1976,17 +1977,58 @@ public class InputOutputModule : InstallationObject,
         Pipe.InvalidateFluidDisplayNetworkCache();
     }
 
+    private static int runtimePipeTopologyBatchDepth;
+    private static bool deferredPipeTopologyWake, deferredPipeTopologyNotification;
+    private static readonly HashSet<Vector2Int> deferredPipeTopologyCoordinates = new HashSet<Vector2Int>();
+    private static readonly List<Vector2Int> pipeTopologyBatchScratch = new List<Vector2Int>();
+
+    internal static void BeginRuntimePipeTopologyBatch() => runtimePipeTopologyBatchDepth++;
+
+    internal static void EndRuntimePipeTopologyBatch()
+    {
+        if (runtimePipeTopologyBatchDepth <= 0 || --runtimePipeTopologyBatchDepth > 0) return;
+        bool wake = deferredPipeTopologyWake, notify = deferredPipeTopologyNotification;
+        deferredPipeTopologyWake = deferredPipeTopologyNotification = false;
+        pipeTopologyBatchScratch.Clear();
+        foreach (var coordinate in deferredPipeTopologyCoordinates) pipeTopologyBatchScratch.Add(coordinate);
+        deferredPipeTopologyCoordinates.Clear();
+        try
+        {
+            if (pipeTopologyBatchScratch.Count > 0) NotifyRuntimePipeTopologyChanged(pipeTopologyBatchScratch);
+            else
+            {
+                if (wake || notify) InvalidateFluidTopologyCache();
+                if (wake) WakeRuntimeFluidTopologyModules();
+                if (notify) NotifyRuntimePipeTopologyObservers(null);
+            }
+        }
+        finally { pipeTopologyBatchScratch.Clear(); }
+    }
+
+    private static void NotifyRuntimePipeTopologyObservers(InputOutputModule module)
+    {
+        if (runtimePipeTopologyBatchDepth > 0) { deferredPipeTopologyNotification = true; return; }
+        RuntimePipeTopologyChanged?.Invoke(module);
+    }
+
     internal static void NotifyRuntimePipeTopologyChanged(IReadOnlyList<Vector2Int> coordinates)
     {
+        if (runtimePipeTopologyBatchDepth > 0)
+        {
+            deferredPipeTopologyWake = deferredPipeTopologyNotification = true;
+            for (int i = 0; coordinates != null && i < coordinates.Count; i++) deferredPipeTopologyCoordinates.Add(coordinates[i]);
+            return;
+        }
         InvalidateFluidTopologyCache();
         WakeRuntimeModulesAtCoordinates(coordinates);
 
         WakeRuntimeFluidTopologyModules();
-        RuntimePipeTopologyChanged?.Invoke(null);
+        NotifyRuntimePipeTopologyObservers(null);
     }
 
     private static void WakeRuntimeFluidTopologyModules()
     {
+        if (runtimePipeTopologyBatchDepth > 0) { deferredPipeTopologyWake = true; return; }
         // Installing/removing either a pipe OR a storage can change the far end
         // of a sleeping producer's route. Local-coordinate wakes miss it, and an
         // empty output cache has no storage-capacity waiter to wake it later.
@@ -2800,6 +2842,11 @@ public class InputOutputModule : InstallationObject,
         }
 
         stagedModuleTickPlanned = false;
+        if (IsBenchmarkWorking)
+        {
+            ApplyBenchmarkWork(deltaTime);
+            return false;
+        }
         return true;
     }
 
@@ -2920,6 +2967,8 @@ public class InputOutputModule : InstallationObject,
         {
             return;
         }
+
+        if (IsBenchmarkWorking) { SetRuntimeSleeping(false); return; }
 
         // Output mutations and conveyor lane vacancies wake a blocked producer.
         if (outputDrainCheckPending)
@@ -4995,7 +5044,7 @@ public class InputOutputModule : InstallationObject,
             }
             else
             {
-                RuntimePipeTopologyChanged?.Invoke(this);
+                NotifyRuntimePipeTopologyObservers(this);
             }
         }
     }
@@ -5027,7 +5076,7 @@ public class InputOutputModule : InstallationObject,
             }
             else
             {
-                RuntimePipeTopologyChanged?.Invoke(this);
+                NotifyRuntimePipeTopologyObservers(this);
             }
         }
         ReleaseEnergyGaugeVisual();
@@ -5851,6 +5900,7 @@ public class InputOutputModule : InstallationObject,
 
     public virtual void GetObjectInfoStatus(out string statusText, out bool isProducing)
     {
+        if (IsBenchmarkWorking) { statusText = "Working (Benchmark)"; isProducing = true; return; }
         statusText = ResolveObjectInfoStatus(out isProducing);
         if ((isProducing || IsWaitingObjectInfoStatus(statusText))
             && !HasOperationalEnergyAvailable(ResolveInstalledDefinition()))
@@ -8420,6 +8470,7 @@ public class InputOutputModule : InstallationObject,
 
     protected bool HasOperationalEnergyAvailable(ItemDefinition installedDefinition)
     {
+        if (IsBenchmarkWorking) return true;
         if (!RequiresOperationalEnergy(installedDefinition))
         {
             return true;
@@ -10005,7 +10056,7 @@ public class InputOutputModule : InstallationObject,
             || blockType == RectGridBlockType.DoublePipeOutputItem;
     }
 
-    private float ResolveCompleteEnergy(ItemDefinition installedDefinition)
+    protected virtual float ResolveCompleteEnergy(ItemDefinition installedDefinition)
     {
         return ResolveCompleteEnergy(installedDefinition, CraftDurationSeconds);
     }
@@ -10027,7 +10078,7 @@ public class InputOutputModule : InstallationObject,
                * ItemDefinition.ResolveUseEnergyRatePerSecond(installedDefinition);
     }
 
-    protected float ResolveInitialCraftDuration(ItemDefinition installedDefinition)
+    protected virtual float ResolveInitialCraftDuration(ItemDefinition installedDefinition, int outputItemId = -1)
     {
         if (!RequiresOperationalEnergy(installedDefinition))
         {
@@ -10255,6 +10306,7 @@ public class InputOutputModule : InstallationObject,
 
     private bool ShouldPlayActiveCraftVisuals()
     {
+        if (IsBenchmarkWorking) return IsActiveCraftRunning;
         return IsActiveCraftRunning
                && !IsWaitingForOutput
                && OperationalAnimationSpeedRatio > 0.0001f
@@ -10275,7 +10327,7 @@ public class InputOutputModule : InstallationObject,
 
     protected void RefreshWorkAnimatorState(bool force = false)
     {
-        SetWorkAnimatorState(ShouldPlayWorkAnimation(), force);
+        SetWorkAnimatorState(IsBenchmarkWorking || ShouldPlayWorkAnimation(), force);
     }
 
     protected void SetWorkAnimatorState(bool isWorking, bool force = false)
@@ -10402,7 +10454,8 @@ public class InputOutputModule : InstallationObject,
                 : 0f;
         }
 
-        long durationTicks = DeterministicSimulationUnits.SecondsToTicks(Mathf.Max(0.1f, craftDuration));
+        long durationTicks = DeterministicSimulationUnits.SecondsToTicks(
+            ResolveInitialCraftDuration(installedDefinition, activeOutputItemId));
         return durationTicks > 0L
             ? Mathf.Clamp01(1f - (float)((double)Math.Max(0L, remainingCraftTicks) / durationTicks))
             : 0f;
@@ -10427,7 +10480,7 @@ public class InputOutputModule : InstallationObject,
                     completeEnergy);
         }
 
-        float duration = Mathf.Max(0.1f, craftDuration);
+        float duration = ResolveInitialCraftDuration(installedDefinition, activeOutputItemId);
         return waitingForOutput
             ? duration
             : Mathf.Clamp(
@@ -10445,7 +10498,7 @@ public class InputOutputModule : InstallationObject,
         }
 
         return hasActiveCraft || waitingForOutput
-            ? Mathf.Max(0.1f, craftDuration)
+            ? ResolveInitialCraftDuration(installedDefinition, activeOutputItemId)
             : 0f;
     }
 
@@ -10561,7 +10614,7 @@ public class InputOutputModule : InstallationObject,
         production.Begin(recipeIndex, outputItemId, outputCount,
             RequiresOperationalEnergy(installedDefinition)
                 ? 0L
-                : DeterministicSimulationUnits.SecondsToTicks(ResolveInitialCraftDuration(installedDefinition)));
+                : DeterministicSimulationUnits.SecondsToTicks(ResolveInitialCraftDuration(installedDefinition, outputItemId)));
         lastOperationalEnergySupplyRatio = 1f;
         WakeRuntimeUpdate();
     }

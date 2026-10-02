@@ -722,7 +722,7 @@ public class GameManager : MonoBehaviour
     }
 }
 
-public sealed class RuntimeItemGiveReceiver : MonoBehaviour
+public sealed partial class RuntimeItemGiveReceiver : MonoBehaviour
 {
     public const int DefaultPort = 50877;
     private const int MaxItemsPerRequest = 1000;
@@ -985,6 +985,9 @@ public sealed class RuntimeItemGiveReceiver : MonoBehaviour
     private void OnDestroy()
     {
         StopServer();
+        if (benchmarkRoutine != null) StopCoroutine(benchmarkRoutine);
+        (benchmarkWork as IDisposable)?.Dispose();
+        ProjectF.Benchmark.BenchmarkRuntime.SetForceWorking(false);
     }
 
     private void Update()
@@ -1023,6 +1026,9 @@ public sealed class RuntimeItemGiveReceiver : MonoBehaviour
     {
         switch (request.Command)
         {
+            case ToolCommand.Benchmark:
+                request.Result = ProcessBenchmarkRequest(request.RawLine);
+                break;
             case ToolCommand.Ping:
                 request.Result = ToolResult.Ping();
                 break;
@@ -1357,7 +1363,8 @@ public sealed class RuntimeItemGiveReceiver : MonoBehaviour
                 cameraMaxSize,
                 seedValue,
                 randomizeSeed,
-                timeParameters);
+                timeParameters,
+                line);
             EnqueueRequest(request);
             try
             {
@@ -1411,6 +1418,12 @@ public sealed class RuntimeItemGiveReceiver : MonoBehaviour
         }
 
         string[] parts = line.Trim().Split(new[] { ' ', '\t' }, StringSplitOptions.RemoveEmptyEntries);
+        if (string.Equals(parts[0], "benchmark", StringComparison.OrdinalIgnoreCase))
+        {
+            if (!ProjectF.Benchmark.BenchmarkCommand.TryParse(parts, out _, out error)) return false;
+            command = ToolCommand.Benchmark;
+            return true;
+        }
         if (parts.Length == 1 && string.Equals(parts[0], "ping", StringComparison.OrdinalIgnoreCase))
         {
             command = ToolCommand.Ping;
@@ -2109,6 +2122,7 @@ public sealed class RuntimeItemGiveReceiver : MonoBehaviour
             activeSceneMonoBehaviourTotal);
         float censusAge = float.IsNegativeInfinity(cachedStatusWorldStatsTime) ? -1f : Time.unscaledTime - cachedStatusWorldStatsTime;
         extraTokens += " worldStatsAgeSeconds=" + censusAge.ToString("0.###", CultureInfo.InvariantCulture);
+        extraTokens += " " + BuildBenchmarkStatusTokens();
         return ToolResult.Status(
             fps,
             frameMs,
@@ -5416,6 +5430,7 @@ public sealed class RuntimeItemGiveReceiver : MonoBehaviour
 
     private enum ToolCommand
     {
+        Benchmark,
         Give,
         Ping,
         Status,
@@ -5499,7 +5514,8 @@ public sealed class RuntimeItemGiveReceiver : MonoBehaviour
             float cameraMaxSize,
             int seedValue,
             bool randomizeSeed,
-            TimeToolParameters timeParameters)
+            TimeToolParameters timeParameters,
+            string rawLine = null)
         {
             Command = command;
             ItemId = itemId;
@@ -5512,6 +5528,7 @@ public sealed class RuntimeItemGiveReceiver : MonoBehaviour
             SeedValue = seedValue;
             RandomizeSeed = randomizeSeed;
             TimeParameters = timeParameters;
+            RawLine = rawLine;
         }
 
         public ToolCommand Command { get; }
@@ -5525,6 +5542,7 @@ public sealed class RuntimeItemGiveReceiver : MonoBehaviour
         public int SeedValue { get; }
         public bool RandomizeSeed { get; }
         public TimeToolParameters TimeParameters { get; }
+        public string RawLine { get; }
         private ManualResetEventSlim Completion { get; } = new ManualResetEventSlim(false);
         public ToolResult Result { get; set; }
 

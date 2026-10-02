@@ -376,7 +376,7 @@ public sealed class FacilitySimulationWorld :
             if (!entry.Registered || !entry.Scheduled || entry.Staged == null) continue;
             entry.Staged.PlanManagedUpdateTick(entry.PendingDeltaTime);
             lastStagedCount++;
-            if (entry.FlowAdapter != null)
+            if (entry.FlowAdapter != null && !(target is InputOutputModule benchmarkModule && benchmarkModule.IsBenchmarkWorking))
             {
                 int flowIndex = flowBatch.ReserveSlot();
                 entry.PendingFlowIndex = flowIndex;

@@ -3,6 +3,7 @@ using UnityEngine;
 public partial class TerrainGenerator : MonoBehaviour
 {
     public bool IsChunkStreamingBusy => chunkStreamingScheduler != null && chunkStreamingScheduler.IsBusy;
+    private int CompletedChunkGenerationCount => chunkStreamingScheduler != null ? chunkStreamingScheduler.CompletedGenerationCount : 0;
 
     private void QueueChunkGeneration(Vector2Int chunkCoordinate, int normalizedChunkSize)
     {

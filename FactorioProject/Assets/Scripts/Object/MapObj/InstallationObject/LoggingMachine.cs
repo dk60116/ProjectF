@@ -2,7 +2,7 @@ using System;
 using System.Collections.Generic;
 using UnityEngine;
 
-public class LoggingMachine : InstallationObject,
+public partial class LoggingMachine : InstallationObject,
     IMapObjectUpdateTick,
     IMapObjectUpdateTickInterval,
     IItemLightWorkStateProvider,
@@ -268,6 +268,12 @@ public class LoggingMachine : InstallationObject,
                 || !TryGetPlacementRuntime(out _, out _))
             {
                 SetWorking(false);
+                return;
+            }
+
+            if (ProjectF.Benchmark.BenchmarkRuntime.ForceWorking)
+            {
+                ApplyBenchmarkWork(deltaTime);
                 return;
             }
 

@@ -72,7 +72,7 @@ public sealed class RobotArmWorldView : MonoBehaviour
     {
         using var callerSample = MapObjectTickProfiler.SampleLateUpdateCaller<RobotArmWorldView>();
         if (world == null) return;
-        if (MapObjectTickManager.WaitingForWorldLoad)
+        if (MapObjectTickManager.WaitingForWorldLoad || world.Terrain.IsBenchmarkPlacementInProgress)
         {
             batches.SuspendRendering();
             VisibleCount = MatrixCount = 0;

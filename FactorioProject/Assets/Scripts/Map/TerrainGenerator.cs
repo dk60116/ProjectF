@@ -82,6 +82,8 @@ public partial class TerrainGenerator : MonoBehaviour,
     }
 
     public int CurrentSeed => seed;
+    // Seed 0 reserves an empty, streamed world for factory benchmarks.
+    public bool IsBenchmarkMap => seed == 0;
     public long SimulationId => long.MinValue;
     public float ManagedUpdateTickIntervalSeconds => MapObjectTickManager.FixedSimulationDeltaSeconds;
     public int TerrainGenerationVersion => terrainGenerationVersion;
@@ -440,6 +442,7 @@ public partial class TerrainGenerator : MonoBehaviour,
     [SerializeField, Min(4)]
     private int chunkSize = 16;
 
+    [Tooltip("Finite map width. Ignored when Seed is 0.")]
     [SerializeField, Min(MinMapSize)]
     private int mapSize = 256;
 
@@ -488,6 +491,7 @@ public partial class TerrainGenerator : MonoBehaviour,
     private bool generateOnStart = true;
 
     [SerializeField]
+    [Tooltip("Seed 0 generates infinite empty benchmark terrain.")]
     private int seed = 12345;
 
     [SerializeField, Range(0f, 1f)]
@@ -1810,6 +1814,7 @@ public partial class TerrainGenerator : MonoBehaviour,
         MapSaveData mapSaveData,
         Action onWorldReady = null)
     {
+        ProjectF.Benchmark.BenchmarkRuntime.SetForceWorking(false);
         BeginWorldFinalization(true, mapSaveData, onWorldReady);
         try { LoadSavedWorldRecordsAndChunks(terrainSaveData, mapSaveData); }
         catch (Exception exception) { FailWorldRestoration(exception); throw; }
@@ -2981,6 +2986,7 @@ public partial class TerrainGenerator : MonoBehaviour,
 
     public void Generate()
     {
+        ProjectF.Benchmark.BenchmarkRuntime.SetForceWorking(false);
         try
         {
             ClearProfilingCloneTerrainSources();
@@ -3089,16 +3095,19 @@ public partial class TerrainGenerator : MonoBehaviour,
 
     private int GetMapMinCoordinate()
     {
-        return -(GetNormalizedMapSize() / 2);
+        return IsBenchmarkMap ? int.MinValue : -(GetNormalizedMapSize() / 2);
     }
 
     private int GetMapMaxExclusiveCoordinate()
     {
-        return GetMapMinCoordinate() + GetNormalizedMapSize();
+        return IsBenchmarkMap ? int.MaxValue : GetMapMinCoordinate() + GetNormalizedMapSize();
     }
 
     private bool IsCoordinateInsideMapBounds(Vector2Int worldCoordinate)
     {
+        if (IsBenchmarkMap)
+            return true;
+
         int min = GetMapMinCoordinate();
         int maxExclusive = GetMapMaxExclusiveCoordinate();
         return worldCoordinate.x >= min
@@ -3109,6 +3118,9 @@ public partial class TerrainGenerator : MonoBehaviour,
 
     private bool DoesChunkIntersectMapBounds(Vector2Int chunkCoordinate, int normalizedChunkSize)
     {
+        if (IsBenchmarkMap)
+            return true;
+
         int chunkSizeInBlocks = Mathf.Max(4, normalizedChunkSize);
         int chunkMinX = chunkCoordinate.x * chunkSizeInBlocks;
         int chunkMinY = chunkCoordinate.y * chunkSizeInBlocks;
@@ -3125,6 +3137,9 @@ public partial class TerrainGenerator : MonoBehaviour,
 
     private Vector2Int ClampChunkCoordinateToMapBounds(Vector2Int chunkCoordinate, int normalizedChunkSize)
     {
+        if (IsBenchmarkMap)
+            return chunkCoordinate;
+
         GetMapChunkRange(normalizedChunkSize, out Vector2Int minChunk, out Vector2Int maxChunk);
         return new Vector2Int(
             Mathf.Clamp(chunkCoordinate.x, minChunk.x, maxChunk.x),
@@ -3134,6 +3149,15 @@ public partial class TerrainGenerator : MonoBehaviour,
     private void GetMapChunkRange(int normalizedChunkSize, out Vector2Int minChunk, out Vector2Int maxChunk)
     {
         int chunkSizeInBlocks = Mathf.Max(4, normalizedChunkSize);
+        if (IsBenchmarkMap)
+        {
+            // Keep full chunks and their surface sampling margin inside integer coordinates.
+            int minimum = int.MinValue / chunkSizeInBlocks + 1;
+            int maximum = int.MaxValue / chunkSizeInBlocks - 1;
+            minChunk = new Vector2Int(minimum, minimum);
+            maxChunk = new Vector2Int(maximum, maximum);
+            return;
+        }
         int mapMin = GetMapMinCoordinate();
         int mapMaxInclusive = GetMapMaxExclusiveCoordinate() - 1;
         minChunk = new Vector2Int(
@@ -3236,6 +3260,10 @@ public partial class TerrainGenerator : MonoBehaviour,
 
         loadedChunks.EnsureCapacity(chunkCapacity);
         loadedBlocks.EnsureChunkCapacity(chunkCapacity);
+
+        // No ambient resources or biome/water caches are needed on the empty map.
+        if (IsBenchmarkMap)
+            return;
 
         if (Application.isPlaying)
         {
@@ -3647,7 +3675,13 @@ public partial class TerrainGenerator : MonoBehaviour,
         Mesh generatedSurfaceMesh = null;
         Bounds generatedSurfaceBounds = default;
         int generatedSurfaceSubMeshMask = 0;
-        if (Application.isPlaying)
+        if (IsBenchmarkMap)
+        {
+            // Seed 0 is uniformly flat dirt. It needs no biome contour jobs,
+            // subdivisions, oil deformation or asynchronous mesh copy.
+            chunkSurface = BuildBenchmarkChunkSurface(origin, normalizedChunkSize);
+        }
+        else if (Application.isPlaying)
         {
             diagnosticAllocatedBytesAtStart = BeginChunkGenerationDiagnosticStage(
                 out diagnosticStageStartTime);

@@ -41,7 +41,9 @@ internal sealed class TerrainIslandPreviewPanel : IDisposable
         int targetMapSize = target != null ? target.CurrentMapSize : 0;
         string previewInfo = target == null
             ? "No TerrainGenerator"
-            : isGenerating
+            : target.IsBenchmarkMap
+                ? "Infinite benchmark terrain  |  Seed 0"
+                : isGenerating
                 ? $"Map {targetMapSize} x {targetMapSize}  |  Building {Mathf.Min(nextRow, resolution)} / {resolution}"
                 : $"Map {targetMapSize} x {targetMapSize}  |  Seed {target.CurrentSeed}";
         EditorGUILayout.LabelField(previewInfo, EditorStyles.miniLabel);

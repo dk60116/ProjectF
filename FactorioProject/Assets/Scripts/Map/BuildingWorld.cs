@@ -586,7 +586,7 @@ public sealed class BuildingWorld : IDisposable
 
     internal void Render(float deltaTime)
     {
-        if (MapObjectTickManager.WaitingForWorldLoad)
+        if (MapObjectTickManager.WaitingForWorldLoad || Owner != null && Owner.IsBenchmarkPlacementInProgress)
         {
             batches.SuspendRendering();
             return;

@@ -1092,7 +1092,8 @@ public partial class UtilityPole : InstallationObject
 
     private static bool IsFreeElectroEnergyEnabled()
     {
-        return GameManager.Instance != null && GameManager.Instance.FreeElectroEnergy;
+        return ProjectF.Benchmark.BenchmarkRuntime.ForceWorking
+               || GameManager.Instance != null && GameManager.Instance.FreeElectroEnergy;
     }
 
     private static void HandleInstallationPlacementRuntimeChanged(InstallationObject installationObject)
@@ -1479,6 +1480,7 @@ public partial class UtilityPole : InstallationObject
 
     internal static void FlushDeferredVisualRefreshes()
     {
+        if (topologyRefreshBatchDepth > 0) return;
         FlushDeferredConnectionLineVisualRefresh();
         FlushDeferredPreviewConsumerLineVisualRefresh();
     }
