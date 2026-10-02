@@ -59,7 +59,7 @@ foreach ($name in @(
     'private float GetFluidOutputConnectionAvailableLiters(', 'private float GetFluidOutputConnectionFillRatio(',
     'private float LimitFluidOutputTransfer(', 'private bool TryAddFluidToOutputConnection(',
     'private bool TryTransferFluidOutputConnection(',
-    'private void UpdateActiveCraft(',
+    'protected void UpdateActiveCraft(',
     'private void BuildDirectedBoilerSteamOutputCache(', 'private static void AddDirectedBoilerSteamChains(',
     'private static void EnqueueDirectedSteamPort(', 'private static void TryAppendDirectedSteamGeneratorAtPort(',
     'private static void EnqueueDirectedSteamPipesAtPort(', 'private static bool TryFindDirectedSteamGenerator(',

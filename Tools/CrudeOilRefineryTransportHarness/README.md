@@ -1,26 +1,23 @@
-# Crude oil refinery transport regression
+# Crude oil refinery batch and transport regression
 
 Run `./Tools/CrudeOilRefineryTransportHarness/Run.ps1` from the repository root.
-The harness extracts the production pipe-retention, per-output connection lookup,
-and shared producer pressure methods. Output configuration defines native pressure in L/s.
-It tests separate output fluids, 0/50/100-pipe routes, full storage, disabled sources,
-fractional configured amounts and applying distance loss once to native pressure.
-It also extracts and executes the production continuous-refining tick. Each output
-has an independent transport limit: disconnected/full/incompatible or partially
-accepted byproducts are discarded without stopping other ports. Inputs and energy
-remain required, and discarded quantities are not queued for later delivery.
-All-blocked, partial-energy, missing-input and shared-receiver cases are included.
-Steady half-rate input and whole-liter deliveries at 0.75 L/s verify that the
-refinery builds a startup reserve, then keeps working at proportional throughput.
-The tests also cover drawing from generic StoreFluid stock, using observed
-delivery rate when pipe pressure is unavailable, dividing the configured 30 L
-capacity between dedicated recipe input buffers, full configured electric demand
-during work and input waits, and zero demand for invalid ports. A connected tank bypasses local startup buffering and can supply
-the refinery continuously at its pressure limit. An adjacent producer also
-supplies its rate when no pipe node is present.
-Port configuration, storage acceptance and energy supply are fixtures; Unity
-placement and live flow are not simulated.
 
-Pump rate cases use the production transport ratio and rate limiter: a slower
-source stays unchanged, a faster source is capped at 5 L/s, downstream pipe loss
-is applied after the cap, and edited/zero pump settings change the transfer rate.
+The harness compiles the complete production refinery source, the shared
+ProductionProcess, deterministic units, and the production craft advancement,
+pipe retention, pressure and pump limit methods against small transport fixtures.
+
+Checks cover complete intake before atomic consumption, full waiting power,
+separate input capacities derived from nominal duration, intake rejection during
+processing and output, blocked/disconnected/partial outputs without fluid loss,
+energy pauses and slowdown without changing batch volume, weighted temperature,
+time-based completion, pressure only while outputting, and snapshots during
+collection, processing and partially completed output. Transport checks retain
+per-port distance loss, fluid isolation and pump limits.
+Intake boundary regressions cover integer deficits below/at/above the shared
+0.0001 L transport cutoff, preventing a full-looking buffer from waiting forever
+and ensuring a deliverable shortage still requires real supply. Consumption never
+creates negative stock when an undeliverable rounding tail is tolerated.
+
+Port placement, storage receivers and energy supply are fixtures. Unity rendering
+and live scene transport are not exercised. Binary save round trips are checked
+separately by SaveLoadProfileHarness `--refinery-self-check`.

@@ -19,10 +19,10 @@ $start = $source.IndexOf('private ProjectF.Simulation.ProductionProcess producti
 $end = $source.IndexOf('private TerrainGenerator cachedTerrain', $start, [StringComparison]::Ordinal)
 if ($start -lt 0 -or $end -le $start) { throw 'Missing production state/forwarding properties' }
 $generated += $source.Substring($start, $end - $start)
-foreach ($signature in @('public struct PersistentInputItemAreaState', 'public sealed class PersistentState',
+foreach ($signature in @('public struct PersistentInputItemAreaState', 'public sealed class RefineryOutputState', 'public sealed class PersistentState',
     'public virtual PersistentState CapturePersistentState(', 'public virtual void ApplyPersistentState(',
     'private long ResolveRemainingCraftTicks(', 'private long ResolveConsumedEnergyUnitsFromRemainingTicks(',
-    'private void UpdateActiveCraft(', 'protected void BeginActiveCraft(',
+    'protected void UpdateActiveCraft(', 'protected void BeginActiveCraft(',
     'protected void ClearActiveCraft()', 'protected virtual bool TryCompleteActiveCraft()')) {
     $generated += (Read-Member $signature) + "`n"
 }

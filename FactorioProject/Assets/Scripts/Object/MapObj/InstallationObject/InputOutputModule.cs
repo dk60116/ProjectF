@@ -453,6 +453,18 @@ public class InputOutputModule : InstallationObject,
     }
 
     [System.Serializable]
+    public sealed class RefineryOutputState
+    {
+        public int itemId;
+        public float litersPerSecond;
+        public long totalUnits;
+        // -1 is reserved at batch start, materialized on completion.
+        public long remainingUnits = -1L;
+
+        public RefineryOutputState Clone() => (RefineryOutputState)MemberwiseClone();
+    }
+
+    [System.Serializable]
     public sealed class PersistentState
     {
         public List<Vector2Int> inputEnergyCoordinates = new List<Vector2Int>();
@@ -490,6 +502,10 @@ public class InputOutputModule : InstallationObject,
         public List<int> refineryInputFluidItemIds = new List<int>();
         public List<long> refineryInputFluidUnits = new List<long>();
         public List<float> refineryInputFluidTemperatures = new List<float>();
+        // Version 69 stores refinery intake and each independently draining output.
+        public float refineryBatchDuration;
+        public float refineryBatchTemperature;
+        public List<RefineryOutputState> refineryOutputs = new List<RefineryOutputState>();
         public List<int> productionInputFluidItemIds = new List<int>();
         public List<long> productionInputFluidUnits = new List<long>();
         // Version 68 preserves partially delivered ProductionMachine output batches.
@@ -530,6 +546,9 @@ public class InputOutputModule : InstallationObject,
             refineryInputFluidItemIds.Clear();
             refineryInputFluidUnits.Clear();
             refineryInputFluidTemperatures.Clear();
+            refineryBatchDuration = 0f;
+            refineryBatchTemperature = 0f;
+            refineryOutputs.Clear();
             productionInputFluidItemIds.Clear();
             productionInputFluidUnits.Clear();
             productionOutputFluidUnits = -1L;
@@ -576,6 +595,9 @@ public class InputOutputModule : InstallationObject,
                 refineryInputFluidItemIds = new List<int>(refineryInputFluidItemIds ?? new List<int>()),
                 refineryInputFluidUnits = new List<long>(refineryInputFluidUnits ?? new List<long>()),
                 refineryInputFluidTemperatures = new List<float>(refineryInputFluidTemperatures ?? new List<float>()),
+                refineryBatchDuration = refineryBatchDuration,
+                refineryBatchTemperature = refineryBatchTemperature,
+                refineryOutputs = CloneRefineryOutputs(refineryOutputs),
                 productionInputFluidItemIds = new List<int>(productionInputFluidItemIds ?? new List<int>()),
                 productionInputFluidUnits = new List<long>(productionInputFluidUnits ?? new List<long>()),
                 productionOutputFluidUnits = productionOutputFluidUnits,
@@ -583,6 +605,14 @@ public class InputOutputModule : InstallationObject,
                 seedPlanterPlantElapsedSeconds = seedPlanterPlantElapsedSeconds,
                 steamGeneratorHasGenerationReserve = steamGeneratorHasGenerationReserve
             };
+        }
+
+        private static List<RefineryOutputState> CloneRefineryOutputs(List<RefineryOutputState> source)
+        {
+            var result = new List<RefineryOutputState>(source?.Count ?? 0);
+            if (source != null)
+                for (int i = 0; i < source.Count; i++) result.Add(source[i].Clone());
+            return result;
         }
 
         public long ResolveOilDrillingProgressUnits()
@@ -6915,7 +6945,7 @@ public class InputOutputModule : InstallationObject,
         return mapSizeX * mapSizeY;
     }
 
-    private void UpdateActiveCraft(float deltaTime)
+    protected void UpdateActiveCraft(float deltaTime)
     {
         if (!hasActiveCraft)
         {

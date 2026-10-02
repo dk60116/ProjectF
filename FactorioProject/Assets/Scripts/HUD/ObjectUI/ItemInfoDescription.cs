@@ -37,6 +37,7 @@ public class ItemInfoDescription : MonoBehaviour
     private const string ConvertedFluidFillName = "Production Converted Fluid";
     private const float PlantGrowthRequirementEpsilon = 0.0001f;
     private static readonly Color FluidGaugeFillColor = new Color(0.08f, 0.55f, 1f, 1f);
+    private const float MinimumFluidGaugeBrightness = 0.25f;
     private static readonly Color PlantFertilizerGaugeFillColor = new Color(0.16f, 0.82f, 0.28f, 1f);
     private static readonly Color PlantGrowthGaugeFillColor = Color.white;
     private static readonly Color ElectricGaugeFillColor = new Color(1f, 0.72f, 0.08f, 1f);
@@ -1070,17 +1071,21 @@ public class ItemInfoDescription : MonoBehaviour
         }
         SetGauge(root, fill, text, true,
             state.fillAmount,
-            ResolveProductionFluidGaugeColor(state.isConverting ? state.inputItemId : displayItemId),
+            ResolveFluidItemGaugeFillColor(state.isConverting ? state.inputItemId : displayItemId),
             state.currentLiters, state.totalLiters, true,
             $"{label}: {FormatFluidLiters(state.currentLiters)} / {FormatFluidLiters(state.totalLiters)} L");
         SetProductionConvertedFill(convertedFill, state.isConverting, state.convertedFillAmount,
-            ResolveProductionFluidGaugeColor(state.outputItemId));
+            ResolveFluidItemGaugeFillColor(state.outputItemId));
     }
 
-    private static Color ResolveProductionFluidGaugeColor(int itemId)
+    private static Color ResolveFluidItemGaugeFillColor(int itemId)
     {
         ItemDefinition definition = InputOutputModule.ResolveItemDefinition(itemId);
         Color color = definition != null ? definition.fluidDisplayColor : FluidGaugeFillColor;
+        float lift = Mathf.Max(0f, MinimumFluidGaugeBrightness - Mathf.Max(color.r, color.g, color.b));
+        color.r += lift;
+        color.g += lift;
+        color.b += lift;
         color.a = color.a > 0f ? color.a : 1f;
         return color;
     }
@@ -1578,20 +1583,18 @@ public class ItemInfoDescription : MonoBehaviour
 
         refinery.GetObjectInfoStatus(out string statusText, out bool isProducing);
         SetDefaultStatus(statusText, isProducing);
-        float throughputRatio = refinery.ObjectInfoThroughputRatio;
+        float processingRatio = refinery.ObjectInfoProcessingRatio;
         SetGauge(
             workGauge,
             workFill,
             workText,
             true,
-            throughputRatio,
+            processingRatio,
             FluidGaugeFillColor,
-            throughputRatio * 100f,
+            processingRatio * 100f,
             100f,
             true,
-            $"Throughput: {FormatGaugeNumber(throughputRatio * 100f, true)}%");
-        SetGauge(defaultGauge, defaultFill, defaultGaugeText, false, 0f, Color.white, 0f, 0f);
-        HideAdditionalProductionFluidGauges(0);
+            $"Processing: {FormatGaugeNumber(processingRatio * 100f, true)}%");
         SetCrudeOilRefineryItemSlots(refinery, defaultItemStartIndex);
     }
 
@@ -1600,6 +1603,7 @@ public class ItemInfoDescription : MonoBehaviour
         int defaultItemStartIndex)
     {
         int nextDefaultItemIndex = Mathf.Max(0, defaultItemStartIndex);
+        int gaugeIndex = 0;
         GameObject previousInputRoot = inputItem;
         int inputCount = refinery.ObjectInfoInputCount;
         for (int i = 0; i < inputCount; i++)
@@ -1609,7 +1613,7 @@ public class ItemInfoDescription : MonoBehaviour
                     out int itemId,
                     out float requiredLitersPerSecond,
                     out float supplyLitersPerSecond,
-                    out _))
+                    out float bufferedLiters))
             {
                 continue;
             }
@@ -1625,6 +1629,8 @@ public class ItemInfoDescription : MonoBehaviour
                     itemId,
                     inputFlowText,
                     "Input");
+                previousInputRoot = SetRefineryFluidGauge(gaugeIndex++, inputItem, itemId, bufferedLiters,
+                    refinery.GetObjectInfoRequiredInputLiters(i));
                 continue;
             }
 
@@ -1635,6 +1641,8 @@ public class ItemInfoDescription : MonoBehaviour
                 inputFlowText,
                 "Input");
             previousInputRoot = GetListItem(defaultItem, nextDefaultItemIndex++);
+            previousInputRoot = SetRefineryFluidGauge(gaugeIndex++, previousInputRoot, itemId, bufferedLiters,
+                refinery.GetObjectInfoRequiredInputLiters(i));
         }
 
         GameObject previousOutputRoot = outputItem;
@@ -1645,12 +1653,14 @@ public class ItemInfoDescription : MonoBehaviour
                     i,
                     out int itemId,
                     out float litersPerSecond,
-                    out bool isBlocked))
+                    out bool isBlocked,
+                    out float remainingLiters,
+                    out float totalLiters))
             {
                 continue;
             }
 
-            string amountText = $"{FormatLitersPerSecond(litersPerSecond)} ({(isBlocked ? "Blocked" : "Ready")})";
+            string amountText = FormatLitersPerSecond(litersPerSecond) + (isBlocked ? " (Blocked)" : string.Empty);
             if (i == 0)
             {
                 SetRefineryFluidItemSlot(
@@ -1659,6 +1669,7 @@ public class ItemInfoDescription : MonoBehaviour
                     itemId,
                     amountText,
                     "Output");
+                previousOutputRoot = SetRefineryFluidGauge(gaugeIndex++, outputItem, itemId, remainingLiters, totalLiters);
                 continue;
             }
 
@@ -1669,13 +1680,51 @@ public class ItemInfoDescription : MonoBehaviour
                 amountText,
                 "Output");
             previousOutputRoot = GetListItem(defaultItem, nextDefaultItemIndex++);
+            previousOutputRoot = SetRefineryFluidGauge(gaugeIndex++, previousOutputRoot, itemId, remainingLiters, totalLiters);
         }
+        if (gaugeIndex == 0)
+            SetGauge(defaultGauge, defaultFill, defaultGaugeText, false, 0f, Color.white, 0f, 0f);
+        HideAdditionalProductionFluidGauges(Mathf.Max(0, gaugeIndex - 1));
 
         int slotCount = defaultItemSlot != null ? defaultItemSlot.Count : 0;
         for (int i = nextDefaultItemIndex; i < slotCount; i++)
         {
             ClearItemSlot(GetListItem(defaultItem, i), GetListItem(defaultItemSlot, i));
         }
+    }
+
+    private GameObject SetRefineryFluidGauge(int index, GameObject itemRoot, int itemId,
+        float currentLiters, float totalLiters)
+    {
+        GameObject root = defaultGauge;
+        Image fill = defaultFill;
+        TextMeshProUGUI text = defaultGaugeText;
+        if (index == 0)
+        {
+            SetProductionConvertedFill(productionFluidConvertedFill, false, 0f, Color.white);
+        }
+        else
+        {
+            if (!EnsureAdditionalProductionFluidGauge(index - 1)) return itemRoot;
+            ProductionFluidGauge gauge = additionalProductionFluidGauges[index - 1];
+            root = gauge.root;
+            fill = gauge.fill;
+            text = gauge.text;
+            SetProductionConvertedFill(gauge.convertedFill, false, 0f, Color.white);
+        }
+        MoveItemAfter(root, itemRoot);
+        if (text != null)
+        {
+            text.enableAutoSizing = true;
+            text.fontSizeMin = 10f;
+            text.fontSizeMax = 15f;
+            text.enableWordWrapping = false;
+        }
+        SetGauge(root, fill, text, true,
+            totalLiters > 0f ? Mathf.Clamp01(currentLiters / totalLiters) : 0f,
+            ResolveFluidItemGaugeFillColor(itemId), currentLiters, totalLiters, true,
+            $"{FormatFluidLiters(currentLiters)} / {FormatFluidLiters(totalLiters)} L");
+        return root != null ? root : itemRoot;
     }
 
     private void SetRefineryDefaultFluidItemSlot(
@@ -2765,9 +2814,7 @@ public class ItemInfoDescription : MonoBehaviour
         ItemDefinition definition = InputOutputModule.ResolveItemDefinition(fluidItemId);
         if (InputOutputModule.IsFluidItemDefinition(definition))
         {
-            Color color = definition.fluidDisplayColor;
-            color.a = color.a > 0f ? color.a : 1f;
-            return color;
+            return ResolveFluidItemGaugeFillColor(fluidItemId);
         }
 
         return FluidGaugeFillColor;

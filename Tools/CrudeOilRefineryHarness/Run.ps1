@@ -45,12 +45,9 @@ foreach ($guid in $outputGuids) {
     Require ($placements -match "blockType: 7\s+itemDefinition: \{fileID: 11400000, guid: $guid") "Output $guid is not assigned to its own PipeOutputItem RectArea"
 }
 
-$inputPreflight = $refinerySource.IndexOf('TryGetConnectedFluidInputAvailableLitersAtCoordinate(', [StringComparison]::Ordinal)
-$energyConsume = $refinerySource.IndexOf('TryConsumeOperatingEnergy(', [StringComparison]::Ordinal)
-$inputConsume = $refinerySource.IndexOf('TryConsumeInputPort(', [StringComparison]::Ordinal)
-$outputEmit = $refinerySource.IndexOf('TryEmitFluidOutputAtCoordinate(', [StringComparison]::Ordinal)
-Require ($inputPreflight -ge 0 -and $inputPreflight -lt $energyConsume) 'Input availability must be checked before consuming power'
-Require ($energyConsume -lt $inputConsume -and $inputConsume -lt $outputEmit) 'Refinery commit order must be power, inputs, then outputs'
+Require ($refinerySource.Contains('UpdateBatchRefining(deltaTime);')) 'Refinery must run the batch adapter'
+Require (-not $refinerySource.Contains('UpdateContinuousRefining(')) 'Obsolete continuous refining must be removed'
+Require ($refinerySource.Contains('UpdateActiveCraft(deltaTime);')) 'Refinery must reuse the production process'
 Require ($refinerySource.Contains('IReadOnlyList<RectGridBlockPlacement> placements = RectGridPlacements;')) 'Refinery ports must resolve from the current RectGrid placements'
 Require ($refinerySource.Contains('TryGetRectGridPlacementCoordinate(')) 'Refinery ports must follow runtime RectArea rotation and position'
 Require ($moduleSource.Contains('fluidInputPortConnectionCaches')) 'Per-input-port fluid connection caches are missing'
@@ -61,7 +58,7 @@ Require ($moduleSource.Contains('TryAddFluidToOutputConnection(')) 'Fluid produc
 Require ($moduleSource.Contains('refineryInputFluidUnits')) 'Refinery input-port buffers are not persisted'
 Require (-not $refinerySource.Contains('RefineryState.OutputFull') -and -not $refinerySource.Contains('FluidOutputCoordinatesShareStorage(')) 'Unavailable outputs must not block independent byproducts'
 Require ($refinerySource.Contains('TryAddDedicatedFluidAtRuntimeCoordinate(')) 'Refinery InputPipeArea does not accept direct pipe output'
-Require ($refinerySource.Contains('TryConsumeInputPort(')) 'Refinery does not consume its direct input-port buffer'
+Require ($refinerySource.Contains('BeginRefineryBatch();')) 'Refinery must consume verified inputs as one batch'
 $objectInfoInputStart = $refinerySource.IndexOf('public bool TryGetObjectInfoInput(', [StringComparison]::Ordinal)
 $objectInfoInputEnd = $refinerySource.IndexOf('public bool TryGetObjectInfoOutput(', $objectInfoInputStart, [StringComparison]::Ordinal)
 Require ($objectInfoInputStart -ge 0 -and $objectInfoInputEnd -gt $objectInfoInputStart) 'Refinery input object-info method is missing'
@@ -82,5 +79,9 @@ Require ($uiSource.Contains('previousOutputRoot = GetListItem(defaultItem, nextD
 Require ($uiSource.Contains('RefreshCrudeOilRefineryInfo(')) 'Crude Oil Refinery details UI is missing'
 Require ($uiSource.Contains('ObjectInfoInputCount') -and $uiSource.Contains('ObjectInfoOutputCount')) 'Crude Oil Refinery UI does not enumerate every recipe fluid'
 Require ($prefab.Contains('  animator: {fileID: 0}')) 'Crude Oil Refinery must remain animation-free'
+
+Require ($uiSource.Contains('Processing: {FormatGaugeNumber(processingRatio * 100f, true)}%')) 'Processing gauge is missing'
+Require ($uiSource.Contains('GetObjectInfoRequiredInputLiters(i)')) 'Input gauges must use full batch quantity'
+Require ($uiSource.Contains('remainingLiters, totalLiters')) 'Output gauges must show saved batch remainder'
 
 Write-Host "Crude Oil Refinery checks passed: $checks"

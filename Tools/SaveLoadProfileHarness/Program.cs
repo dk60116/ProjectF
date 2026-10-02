@@ -11,6 +11,12 @@ internal static class Program
     private static int Main(string[] args)
     {
         RegisterAssemblyResolver();
+        if (args.Length == 1 && args[0] == "--refinery-self-check")
+        {
+            CheckRefinerySaveRoundTrip();
+            Console.WriteLine("PASS refinery input, process, output remainder and clone save round trips");
+            return 0;
+        }
         if (args.Length == 2 && args[0] == "--pipe-topology" && File.Exists(args[1]))
         {
             FluidOutputSaveReport.WritePipeTopology(SaveGameBinarySerializer.ReadFromFile(Path.GetFullPath(args[1])));
@@ -37,7 +43,7 @@ internal static class Program
         if ((args.Length != 1 && args.Length != 3) || !File.Exists(args[0]))
         {
             Console.Error.WriteLine(
-                "Usage: SaveLoadProfileHarness --self-check | --fluid-output <save-file> | --pipe-topology <save-file> | <save-file> [chunk-size load-radius]");
+                "Usage: SaveLoadProfileHarness --self-check | --refinery-self-check | --fluid-output <save-file> | --pipe-topology <save-file> | <save-file> [chunk-size load-radius]");
             return 1;
         }
 
@@ -281,6 +287,63 @@ internal static class Program
         }
 
         return output.Length;
+    }
+
+    private static void CheckRefinerySaveRoundTrip()
+    {
+        const long fluidUnitsPerLiter = 60_000_000L;
+        var write = typeof(SaveGameBinarySerializer).GetMethod("WriteInputOutputState", BindingFlags.Static | BindingFlags.NonPublic);
+        var read = typeof(SaveGameBinarySerializer).GetMethod("ReadInputOutputState", BindingFlags.Static | BindingFlags.NonPublic);
+        foreach (bool outputting in new[] { false, true })
+        {
+            var state = new InputOutputModule.PersistentState
+            {
+                hasDeterministicUnits = true, hasActiveCraft = true, waitingForOutput = outputting,
+                activeRecipeIndex = 0, activeOutputItemId = 1, activeOutputCount = 1,
+                activeCraftConsumedEnergyUnits = 1375L * fluidUnitsPerLiter,
+                refineryBatchDuration = 5f, refineryBatchTemperature = 70f
+            };
+            state.refineryInputFluidItemIds.Add(10);
+            state.refineryInputFluidUnits.Add(25L * fluidUnitsPerLiter / 2L);
+            state.refineryInputFluidTemperatures.Add(80f);
+            for (int i = 0; i < 3; i++)
+                state.refineryOutputs.Add(new InputOutputModule.RefineryOutputState
+                {
+                    itemId = i + 1, litersPerSecond = i == 2 ? 2f : .5f,
+                    totalUnits = (i == 2 ? 10L * fluidUnitsPerLiter : 5L * fluidUnitsPerLiter / 2L),
+                    remainingUnits = outputting ? (i == 0 ? 0L : 5L * fluidUnitsPerLiter / 4L) : -1L
+                });
+            using var bytes = new MemoryStream();
+            using (var writer = new BinaryWriter(bytes, Encoding.UTF8, true)) write.Invoke(null, new object[] { writer, state });
+            bytes.Position = 0;
+            using var reader = new BinaryReader(bytes, Encoding.UTF8, true);
+            var restored = (InputOutputModule.PersistentState)read.Invoke(null, new object[] { reader, SaveGameData.CurrentVersion });
+            if (bytes.Position != bytes.Length || !restored.hasActiveCraft || restored.waitingForOutput != outputting
+                || restored.activeCraftConsumedEnergyUnits != state.activeCraftConsumedEnergyUnits
+                || restored.refineryBatchDuration != 5f || restored.refineryBatchTemperature != 70f
+                || restored.refineryInputFluidUnits[0] != state.refineryInputFluidUnits[0]
+                || restored.refineryInputFluidTemperatures[0] != 80f || restored.refineryInputFluidItemIds[0] != 10
+                || restored.refineryOutputs.Count != 3)
+                throw new InvalidOperationException("Refinery state did not survive binary save round trip");
+            for (int i = 0; i < 3; i++)
+                if (restored.refineryOutputs[i].itemId != state.refineryOutputs[i].itemId
+                    || restored.refineryOutputs[i].litersPerSecond != state.refineryOutputs[i].litersPerSecond
+                    || restored.refineryOutputs[i].totalUnits != state.refineryOutputs[i].totalUnits
+                    || restored.refineryOutputs[i].remainingUnits != state.refineryOutputs[i].remainingUnits)
+                    throw new InvalidOperationException("Refinery output lost its rate or remainder");
+            var clone = restored.Clone();
+            clone.refineryOutputs[0].remainingUnits = 123L;
+            if (restored.refineryOutputs[0].remainingUnits == 123L)
+                throw new InvalidOperationException("Refinery output snapshot clone shares mutable state");
+            clone.ClearStoredEnergyAndProduction();
+            if (clone.refineryOutputs.Count != 0 || clone.refineryInputFluidUnits.Count != 0 || clone.refineryBatchDuration != 0f)
+                throw new InvalidOperationException("Refinery batch was not cleared with production");
+            // The older reader consumes only the version 68 prefix; its new fields default empty.
+            bytes.Position = 0;
+            var legacy = (InputOutputModule.PersistentState)read.Invoke(null, new object[] { reader, 68 });
+            if (legacy.refineryOutputs.Count != 0 || legacy.refineryBatchDuration != 0f || bytes.Position >= bytes.Length)
+                throw new InvalidOperationException("Legacy refinery read did not respect the version boundary");
+        }
     }
 
     private static void RegisterAssemblyResolver()

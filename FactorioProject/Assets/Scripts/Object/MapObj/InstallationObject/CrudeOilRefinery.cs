@@ -4,7 +4,10 @@ using UnityEngine;
 public class CrudeOilRefinery : InputOutputModule
 {
     private const float FluidEpsilon = 0.0001f;
-    private const float InputBufferSeconds = 2f;
+    // The shared transport path cannot deliver <= 0.0001 L. Use the same
+    // boundary for batch readiness, and debit actual stock without rounding it up.
+    private static readonly long InputCompletionToleranceUnits =
+        DeterministicSimulationUnits.FromFloat(FluidEpsilon);
     private const float InputPressureRefreshIntervalSeconds = 0.25f;
 
     private enum RefineryState
@@ -12,9 +15,10 @@ public class CrudeOilRefinery : InputOutputModule
         Idle,
         InvalidPorts,
         MissingInput,
-        InsufficientInput,
         NoEnergy,
-        Working
+        Working,
+        Outputting,
+        WaitingForOutput
     }
 
     private readonly struct FluidFlowPort
@@ -41,9 +45,6 @@ public class CrudeOilRefinery : InputOutputModule
         public readonly int ItemId;
         public long StoredUnits;
         public float TemperatureCelsius;
-        public float LastDeliveryTime = -1f;
-        public float LastDeliveryLiters;
-        public float ObservedSupplyLitersPerSecond;
 
         public FluidInputBuffer(int itemId)
         {
@@ -66,7 +67,6 @@ public class CrudeOilRefinery : InputOutputModule
         }
     }
 
-    private readonly FluidTransferPreview inputTransferPreview = new FluidTransferPreview();
     private readonly List<FluidFlowPort> inputPorts = new List<FluidFlowPort>(2);
     private readonly List<FluidFlowPort> outputPorts = new List<FluidFlowPort>(3);
     private readonly List<FluidInputBuffer> inputBuffers = new List<FluidInputBuffer>(2);
@@ -75,15 +75,20 @@ public class CrudeOilRefinery : InputOutputModule
     private readonly HashSet<InputOutputModule> directInputPressureSources =
         new HashSet<InputOutputModule>();
     private bool isRefining;
-    private float throughputRatio;
+    private readonly List<RefineryOutputState> batchOutputs = new List<RefineryOutputState>(3);
+    private float batchDuration;
+    private float batchTemperature;
+    private float outputDeltaTime;
+    private bool emittedThisTick;
     private RefineryState refineryState;
     private int refineryStatusItemId = -1;
     private string refineryStatus = "Idle";
 
     public bool IsRefining => isRefining;
-    public float ObjectInfoThroughputRatio => throughputRatio;
+    public float ObjectInfoProcessingRatio => ObjectInfoWorkGaugeFillAmount;
     public int ObjectInfoInputCount => ResolveFluidFlowPorts() ? inputPorts.Count : 0;
-    public int ObjectInfoOutputCount => ResolveFluidFlowPorts() ? outputPorts.Count : 0;
+    public int ObjectInfoOutputCount => IsActiveCraftRunning ? batchOutputs.Count
+        : ResolveFluidFlowPorts() ? outputPorts.Count : 0;
 
     public override PersistentState CapturePersistentState()
     {
@@ -99,6 +104,9 @@ public class CrudeOilRefinery : InputOutputModule
             state.refineryInputFluidTemperatures.Add(buffer.TemperatureCelsius);
         }
 
+        state.refineryBatchDuration = batchDuration;
+        state.refineryBatchTemperature = batchTemperature;
+        for (int i = 0; i < batchOutputs.Count; i++) state.refineryOutputs.Add(batchOutputs[i].Clone());
         return state;
     }
 
@@ -107,6 +115,12 @@ public class CrudeOilRefinery : InputOutputModule
         StopRefineryParticle();
         base.ApplyPersistentState(state);
         inputBuffers.Clear();
+        batchOutputs.Clear();
+        batchDuration = state != null ? state.refineryBatchDuration : 0f;
+        batchTemperature = state != null ? state.refineryBatchTemperature : MapClimate.CurrentTemperatureCelsius;
+        if (state?.refineryOutputs != null)
+            for (int i = 0; i < state.refineryOutputs.Count; i++) batchOutputs.Add(state.refineryOutputs[i].Clone());
+        if (IsActiveCraftRunning && batchOutputs.Count == 0) ClearActiveCraft();
         if (state == null || state.refineryInputFluidItemIds == null)
         {
             return;
@@ -141,6 +155,8 @@ public class CrudeOilRefinery : InputOutputModule
         inputPorts.Clear();
         outputPorts.Clear();
         inputBuffers.Clear();
+        batchOutputs.Clear();
+        batchDuration = outputDeltaTime = 0f;
         inputPressureCaches.Clear();
         directInputPressureSources.Clear();
         refineryState = RefineryState.Idle;
@@ -164,7 +180,7 @@ public class CrudeOilRefinery : InputOutputModule
             return;
         }
 
-        UpdateContinuousRefining(deltaTime);
+        UpdateBatchRefining(deltaTime);
         MarkManagedRuntimeVisualsDirty();
         RefreshRuntimeUpdateSleepState();
     }
@@ -225,7 +241,8 @@ public class CrudeOilRefinery : InputOutputModule
             coordinate,
             out FluidFlowPort port,
             out FluidInputBuffer buffer)
-            ? Mathf.Max(0f, GetInputBufferCapacityLiters(port) - GetStoredLiters(buffer))
+            && !IsActiveCraftRunning
+            ? DeterministicSimulationUnits.ToFloat(GetAvailableInputUnits(port, buffer))
             : 0f;
     }
 
@@ -234,7 +251,7 @@ public class CrudeOilRefinery : InputOutputModule
         int fluidItemId,
         float requestedLiters)
     {
-        return TryGetInputPortAndBuffer(
+        return !IsActiveCraftRunning && TryGetInputPortAndBuffer(
                    coordinate,
                    out FluidFlowPort port,
                    out FluidInputBuffer buffer)
@@ -251,7 +268,7 @@ public class CrudeOilRefinery : InputOutputModule
         out float acceptedLiters)
     {
         acceptedLiters = 0f;
-        if (requestedLiters <= FluidEpsilon
+        if (IsActiveCraftRunning || requestedLiters <= FluidEpsilon
             || !TryGetInputPortAndBuffer(
                 coordinate,
                 out FluidFlowPort port,
@@ -261,9 +278,7 @@ public class CrudeOilRefinery : InputOutputModule
             return false;
         }
 
-        long capacityUnits = DeterministicSimulationUnits.FromFloat(
-            GetInputBufferCapacityLiters(port));
-        long availableUnits = System.Math.Max(0L, capacityUnits - buffer.StoredUnits);
+        long availableUnits = GetAvailableInputUnits(port, buffer);
         long acceptedUnits = System.Math.Min(
             availableUnits,
             DeterministicSimulationUnits.FromFloat(requestedLiters));
@@ -281,7 +296,6 @@ public class CrudeOilRefinery : InputOutputModule
                + (incomingTemperature * acceptedLiters)) / totalLiters
             : incomingTemperature;
         buffer.StoredUnits += acceptedUnits;
-        RecordInputDelivery(buffer, acceptedLiters);
         MarkPersistenceStateDirty();
         NotifyFluidInputAvailabilityIncreased(this);
         Pipe.InvalidateFluidDisplayNetworkCache(this);
@@ -306,35 +320,23 @@ public class CrudeOilRefinery : InputOutputModule
         return false;
     }
 
-    protected override void OnStoredFluidAccepted(
-        int fluidItemId,
-        float previousStoredLiters,
-        float acceptedLiters,
-        float incomingTemperatureCelsius)
-    {
-        base.OnStoredFluidAccepted(
-            fluidItemId, previousStoredLiters, acceptedLiters, incomingTemperatureCelsius);
-        if (fluidItemId >= 0 && acceptedLiters > FluidEpsilon)
-        {
-            RecordInputDelivery(GetOrCreateInputBuffer(fluidItemId), acceptedLiters);
-        }
-    }
+    // All refinery intake goes through a typed port, never the shared tank store.
+    public override bool CanAcceptFluidItem(int fluidItemId, float requestedLiters = 0f) => false;
 
     protected override void OnManagedRuntimeVisualsFlushed()
     {
-        SetVisualParticleActive(particleEffect, isRefining);
+        SetVisualParticleActive(particleEffect, isRefining || emittedThisTick);
     }
 
     private void StopRefineryParticle()
     {
-        isRefining = false;
-        throughputRatio = 0f;
+        isRefining = emittedThisTick = false;
         SetVisualParticleActive(particleEffect, false, clear: true);
     }
 
     protected override string ResolveObjectInfoStatus(out bool isProducing)
     {
-        isProducing = isRefining;
+        isProducing = refineryState == RefineryState.Working || refineryState == RefineryState.Outputting;
         return refineryStatus;
     }
 
@@ -427,228 +429,256 @@ public class CrudeOilRefinery : InputOutputModule
     }
 
     public bool TryGetObjectInfoOutput(
-        int index,
-        out int itemId,
-        out float litersPerSecond,
-        out bool isBlocked)
+        int index, out int itemId, out float litersPerSecond, out bool isBlocked,
+        out float remainingLiters, out float totalLiters)
     {
         itemId = -1;
-        litersPerSecond = 0f;
-        isBlocked = true;
-        if (!ResolveFluidFlowPorts() || index < 0 || index >= outputPorts.Count)
+        litersPerSecond = remainingLiters = totalLiters = 0f;
+        isBlocked = false;
+        ResolveFluidFlowPorts();
+        if (IsActiveCraftRunning)
         {
-            return false;
+            if (index < 0 || index >= batchOutputs.Count) return false;
+            RefineryOutputState output = batchOutputs[index];
+            itemId = output.itemId;
+            litersPerSecond = output.litersPerSecond;
+            remainingLiters = DeterministicSimulationUnits.ToFloat(System.Math.Max(0L, output.remainingUnits));
+            totalLiters = DeterministicSimulationUnits.ToFloat(output.totalUnits);
+            if (IsWaitingForOutput && output.remainingUnits > 0L)
+                isBlocked = !TryGetBatchOutputPort(itemId, out FluidFlowPort port)
+                    || ResolveFluidOutputTransportRetentionAtCoordinate(port.Coordinate, itemId, litersPerSecond) <= FluidEpsilon;
         }
-
-        FluidFlowPort port = outputPorts[index];
-        itemId = port.ItemId;
-        litersPerSecond = port.LitersPerSecond;
-        float transportRatio = ResolveFluidOutputTransportRetentionAtCoordinate(
-            port.Coordinate,
-            port.ItemId,
-            port.LitersPerSecond);
-        float requiredLiters = port.LitersPerSecond * ManagedUpdateTickIntervalSeconds
-                               * transportRatio;
-        float availableLiters = 0f;
-        isBlocked = transportRatio <= FluidEpsilon
-                    || requiredLiters > FluidEpsilon
-                    && (!TryGetFluidOutputAvailableLitersAtCoordinate(
-                            port.Coordinate,
-                            port.ItemId,
-                            requiredLiters,
-                            out availableLiters)
-                        || availableLiters + FluidEpsilon < requiredLiters);
+        else
+        {
+            if (index < 0 || index >= outputPorts.Count) return false;
+            FluidFlowPort port = outputPorts[index];
+            itemId = port.ItemId;
+            litersPerSecond = port.LitersPerSecond;
+            totalLiters = litersPerSecond * ResolveInitialCraftDuration(ResolveInstalledDefinition());
+        }
         return itemId >= 0;
     }
 
-    private void UpdateContinuousRefining(float deltaTime)
+    public float GetObjectInfoRequiredInputLiters(int index) =>
+        ResolveFluidFlowPorts() && index >= 0 && index < inputPorts.Count
+            ? GetInputBufferCapacityLiters(inputPorts[index]) : 0f;
+
+    public override float GetObjectInfoFluidPressureLitersPerSecond(int fluidItemId)
     {
-        bool wasRefining = isRefining;
-        isRefining = false;
-        throughputRatio = 0f;
+        if (!isActiveAndEnabled || !IsActiveCraftRunning || !IsWaitingForOutput
+            || !HasOperationalEnergyAvailable(ResolveInstalledDefinition())) return 0f;
+        for (int i = 0; i < batchOutputs.Count; i++)
+            if (batchOutputs[i].itemId == fluidItemId && batchOutputs[i].remainingUnits != 0L)
+                return batchOutputs[i].litersPerSecond;
+        return 0f;
+    }
 
-        if (!Application.isPlaying || deltaTime <= 0f)
-        {
-            SetRefineryStatus(RefineryState.Idle);
-            return;
-        }
+    public override float GetStoredFluidTemperatureCelsius(int fluidItemId)
+    {
+        if (IsActiveCraftRunning)
+            for (int i = 0; i < batchOutputs.Count; i++)
+                if (batchOutputs[i].itemId == fluidItemId) return batchTemperature;
+        FluidInputBuffer input = FindInputBuffer(fluidItemId);
+        return input != null && input.StoredUnits > 0L ? input.TemperatureCelsius
+            : base.GetStoredFluidTemperatureCelsius(fluidItemId);
+    }
 
+    private void UpdateBatchRefining(float deltaTime)
+    {
+        isRefining = emittedThisTick = false;
+        outputDeltaTime = 0f;
+        if (!Application.isPlaying || deltaTime <= 0f) return;
         if (!ResolveFluidFlowPorts())
         {
             SetRefineryStatus(RefineryState.InvalidPorts);
             return;
         }
 
-        inputTransferPreview.Clear();
-        float inputRatio = 1f;
-        for (int i = 0; i < inputPorts.Count; i++)
+        if (IsActiveCraftRunning && !IsWaitingForOutput)
         {
-            FluidFlowPort port = inputPorts[i];
-            float requestedLiters = port.LitersPerSecond * deltaTime;
-            float localLiters = GetStoredLiters(GetOrCreateInputBuffer(port.ItemId))
-                                + GetConfiguredStoredInputLiters(port);
-            float availableLiters = localLiters;
-            float connectedLiters = 0f;
-            if (availableLiters + FluidEpsilon < requestedLiters)
-            {
-                TryGetConnectedFluidInputAvailableLitersAtCoordinate(
-                    port.Coordinate,
-                    port.ItemId,
-                    requestedLiters - availableLiters,
-                    out connectedLiters,
-                    inputTransferPreview);
-                availableLiters += connectedLiters;
-            }
-
-            if (requestedLiters <= FluidEpsilon || availableLiters <= FluidEpsilon)
-            {
-                SetRefineryStatus(RefineryState.MissingInput, port.Definition);
-                return;
-            }
-
-            float inputPressure = GetOperationalInputPressure(port);
-            if (!wasRefining && connectedLiters <= FluidEpsilon
-                && localLiters + FluidEpsilon
-                < GetStartupInputLiters(port, inputPressure, deltaTime))
-            {
-                SetRefineryStatus(RefineryState.InsufficientInput, port.Definition);
-                return;
-            }
-
-            inputRatio = Mathf.Min(inputRatio, Mathf.Clamp01(availableLiters / requestedLiters));
-            if (inputPressure > FluidEpsilon)
-            {
-                // Sources can deliver fluid in whole-liter bursts. Consume the
-                // local buffer at the incoming flow rate so production stays steady.
-                inputRatio = Mathf.Min(inputRatio,
-                    Mathf.Clamp01(inputPressure / port.LitersPerSecond));
-            }
+            // The shared ProductionProcess consumes energy once and advances only
+            // accumulated energy (or elapsed ticks for an unpowered recipe).
+            UpdateActiveCraft(deltaTime);
+            isRefining = OperationalAnimationSpeedRatio > FluidEpsilon;
+            SetRefineryStatus(isRefining ? RefineryState.Working : RefineryState.NoEnergy);
+            MarkPersistenceStateDirty();
+            if (IsWaitingForOutput) Pipe.InvalidateFluidDisplayNetworkCache(this);
+            return;
         }
 
-        ItemDefinition installedDefinition = ResolveInstalledDefinition();
-        float requestedEnergy = installedDefinition != null
-            ? ItemDefinition.ResolveUseEnergyRatePerSecond(installedDefinition) * deltaTime * inputRatio
-            : 0f;
-        if (!TryConsumeOperatingEnergy(deltaTime * inputRatio, out float consumedEnergy))
+        bool powered = TryConsumeOperatingEnergy(deltaTime, out _);
+        if (IsActiveCraftRunning)
+        {
+            if (!powered)
+            {
+                SetRefineryStatus(RefineryState.NoEnergy);
+                return;
+            }
+            outputDeltaTime = deltaTime;
+            bool finished = TryCompleteActiveCraft();
+            SetRefineryStatus(emittedThisTick ? RefineryState.Outputting
+                : finished ? RefineryState.MissingInput : RefineryState.WaitingForOutput);
+            return;
+        }
+
+        CollectBatchInputs(deltaTime);
+        if (!powered)
         {
             SetRefineryStatus(RefineryState.NoEnergy);
             return;
         }
-
-        float energyRatio = requestedEnergy > FluidEpsilon
-            ? Mathf.Clamp01(consumedEnergy / requestedEnergy)
-            : 1f;
-        if (energyRatio <= FluidEpsilon)
-        {
-            SetRefineryStatus(RefineryState.NoEnergy);
-            return;
-        }
-
-        float totalConsumedLiters = 0f;
-        float weightedTemperature = 0f;
-        float productionRatio = inputRatio * energyRatio;
         for (int i = 0; i < inputPorts.Count; i++)
         {
             FluidFlowPort port = inputPorts[i];
-            float requestedLiters = port.LitersPerSecond * deltaTime * productionRatio;
-            if (!TryConsumeInputPort(
-                    port,
-                    requestedLiters,
-                    out float consumedLiters,
-                    out float temperatureCelsius))
+            FluidInputBuffer buffer = GetOrCreateInputBuffer(port.ItemId);
+            if (buffer.StoredUnits <= 0L
+                || GetAvailableInputUnits(port, buffer) > InputCompletionToleranceUnits)
             {
                 SetRefineryStatus(RefineryState.MissingInput, port.Definition);
                 return;
             }
-
-            totalConsumedLiters += consumedLiters;
-            weightedTemperature += consumedLiters * temperatureCelsius;
         }
-
-        float outputTemperature = totalConsumedLiters > FluidEpsilon
-            ? weightedTemperature / totalConsumedLiters
-            : MapClimate.CurrentTemperatureCelsius;
-        for (int i = 0; i < outputPorts.Count; i++)
-        {
-            FluidFlowPort port = outputPorts[i];
-            float requestedLiters = port.LitersPerSecond * deltaTime * productionRatio;
-            // Each byproduct has its own transport limit. Unconnected, full or
-            // incompatible receivers discard this output without stopping others.
-            requestedLiters *= ResolveFluidOutputTransportRetentionAtCoordinate(
-                port.Coordinate, port.ItemId, port.LitersPerSecond * productionRatio);
-            TryEmitFluidOutputAtCoordinate(
-                port.Coordinate,
-                port.ItemId,
-                requestedLiters,
-                outputTemperature,
-                out _);
-        }
-
-        throughputRatio = productionRatio;
-        isRefining = true;
+        BeginRefineryBatch();
+        // Collection/start is a distinct step; do not spend this tick's energy twice.
         SetRefineryStatus(RefineryState.Working);
     }
 
-    private bool TryConsumeInputPort(
-        FluidFlowPort port,
-        float requestedLiters,
-        out float consumedLiters,
-        out float temperatureCelsius)
+    private void CollectBatchInputs(float deltaTime)
     {
-        consumedLiters = 0f;
-        temperatureCelsius = MapClimate.CurrentTemperatureCelsius;
-        FluidInputBuffer buffer = GetOrCreateInputBuffer(port.ItemId);
-        float weightedTemperature = 0f;
-        long requestedUnits = DeterministicSimulationUnits.FromFloat(requestedLiters);
-        long bufferedUnits = System.Math.Min(
-            System.Math.Max(0L, buffer.StoredUnits),
-            requestedUnits);
-        if (bufferedUnits > 0L)
+        for (int i = 0; i < inputPorts.Count; i++)
         {
-            float bufferedLiters = DeterministicSimulationUnits.ToFloat(bufferedUnits);
-            consumedLiters += bufferedLiters;
-            weightedTemperature += bufferedLiters * buffer.TemperatureCelsius;
-            buffer.StoredUnits -= bufferedUnits;
-            if (buffer.StoredUnits <= 0L)
+            FluidFlowPort port = inputPorts[i];
+            long availableUnits = GetAvailableInputUnits(port, GetOrCreateInputBuffer(port.ItemId));
+            if (availableUnits <= InputCompletionToleranceUnits) continue;
+            long requestedUnits = System.Math.Min(availableUnits,
+                DeterministicSimulationUnits.FromFloat(port.LitersPerSecond * deltaTime));
+            float requested = DeterministicSimulationUnits.ToFloat(requestedUnits);
+            if (requested <= FluidEpsilon) continue;
+            // Migrate any legacy shared-store fluid into its typed input buffer.
+            if (GetConfiguredStoredInputLiters(port) > FluidEpsilon)
             {
-                buffer.StoredUnits = 0L;
-                buffer.TemperatureCelsius = MapClimate.CurrentTemperatureCelsius;
+                float temperature = base.GetStoredFluidTemperatureCelsius(port.ItemId);
+                TryConsumeFluidLiters(port.ItemId, requested, out float stored);
+                TryAddDedicatedFluidAtRuntimeCoordinate(port.Coordinate, port.ItemId,
+                    stored, temperature, out _);
+                requested -= stored;
             }
-
-            MarkPersistenceStateDirty();
-            NotifyFluidOutputCapacityIncreased(this);
+            if (requested <= FluidEpsilon) continue;
+            TryConsumeConnectedFluidInputAtCoordinate(port.Coordinate, port.ItemId, requested,
+                out float consumed, out float incomingTemperature);
+            TryAddDedicatedFluidAtRuntimeCoordinate(port.Coordinate, port.ItemId,
+                consumed, incomingTemperature, out _);
         }
+    }
 
-        float remainingLiters = Mathf.Max(0f, requestedLiters - consumedLiters);
-        if (remainingLiters > FluidEpsilon && GetConfiguredStoredInputLiters(port) > FluidEpsilon)
+    private void BeginRefineryBatch()
+    {
+        batchDuration = ResolveInitialCraftDuration(ResolveInstalledDefinition());
+        float total = 0f, weightedTemperature = 0f;
+        // All inputs were verified before any is removed.
+        for (int i = 0; i < inputPorts.Count; i++)
         {
-            float storedTemperature = GetStoredFluidTemperatureCelsius(port.ItemId);
-            if (TryConsumeFluidLiters(port.ItemId, remainingLiters, out float storedLiters))
+            FluidFlowPort port = inputPorts[i];
+            FluidInputBuffer buffer = GetOrCreateInputBuffer(port.ItemId);
+            long units = System.Math.Min(System.Math.Max(0L, buffer.StoredUnits),
+                DeterministicSimulationUnits.FromFloat(port.LitersPerSecond * batchDuration));
+            float liters = DeterministicSimulationUnits.ToFloat(units);
+            total += liters;
+            weightedTemperature += liters * buffer.TemperatureCelsius;
+            buffer.StoredUnits -= units;
+        }
+        batchTemperature = total > FluidEpsilon ? weightedTemperature / total
+            : MapClimate.CurrentTemperatureCelsius;
+        batchOutputs.Clear();
+        for (int i = 0; i < outputPorts.Count; i++)
+        {
+            FluidFlowPort port = outputPorts[i];
+            batchOutputs.Add(new RefineryOutputState
             {
-                consumedLiters += storedLiters;
-                weightedTemperature += storedLiters * storedTemperature;
-                remainingLiters = Mathf.Max(0f, requestedLiters - consumedLiters);
+                itemId = port.ItemId, litersPerSecond = port.LitersPerSecond,
+                totalUnits = DeterministicSimulationUnits.FromFloat(port.LitersPerSecond * batchDuration)
+            });
+        }
+        BeginActiveCraft(0, batchOutputs[0].itemId, 1, ResolveInstalledDefinition());
+        MarkPersistenceStateDirty();
+        NotifyFluidInputAvailabilityIncreased(this);
+        Pipe.InvalidateFluidDisplayNetworkCache(this);
+    }
+
+    protected override bool TryCompleteActiveCraft()
+    {
+        if (!IsActiveCraftRunning || !IsWaitingForOutput) return false;
+        bool pending = false;
+        bool pressureChanged = false;
+        float deltaTime = outputDeltaTime;
+        outputDeltaTime = 0f;
+        for (int i = 0; i < batchOutputs.Count; i++)
+        {
+            RefineryOutputState output = batchOutputs[i];
+            if (output.remainingUnits < 0L)
+            {
+                output.remainingUnits = output.totalUnits;
+                MarkPersistenceStateDirty();
+            }
+            if (output.remainingUnits > 0L && deltaTime > 0f
+                && TryGetBatchOutputPort(output.itemId, out FluidFlowPort port))
+            {
+                float requested = output.litersPerSecond * deltaTime
+                    * ResolveFluidOutputTransportRetentionAtCoordinate(
+                        port.Coordinate, output.itemId, output.litersPerSecond);
+                long requestedUnits = System.Math.Min(output.remainingUnits,
+                    DeterministicSimulationUnits.FromFloat(requested));
+                if (requestedUnits > 0L)
+                {
+                    TryEmitFluidOutputAtCoordinate(port.Coordinate, output.itemId,
+                        DeterministicSimulationUnits.ToFloat(requestedUnits), batchTemperature,
+                        out float accepted);
+                    long acceptedUnits = System.Math.Min(requestedUnits,
+                        DeterministicSimulationUnits.FromFloat(accepted));
+                    if (acceptedUnits > 0L)
+                    {
+                        output.remainingUnits -= acceptedUnits;
+                        pressureChanged |= output.remainingUnits == 0L;
+                        emittedThisTick = true;
+                        MarkPersistenceStateDirty();
+                    }
+                }
+            }
+            pending |= output.remainingUnits > 0L;
+        }
+        if (pressureChanged) Pipe.InvalidateFluidDisplayNetworkCache(this);
+        if (pending) return false;
+        batchOutputs.Clear();
+        batchDuration = 0f;
+        ClearActiveCraft();
+        MarkPersistenceStateDirty();
+        NotifyFluidOutputCapacityIncreased(this);
+        Pipe.InvalidateFluidDisplayNetworkCache(this);
+        return true;
+    }
+
+    private bool TryGetBatchOutputPort(int itemId, out FluidFlowPort port)
+    {
+        // Resolve against physical typed ports, so rotation/relocation and recipe
+        // changes cannot route a saved batch into another fluid's outlet.
+        if (TryGetPlacementRuntime(out Vector2Int anchor, out int turns))
+        {
+            IReadOnlyList<RectGridBlockPlacement> placements = RectGridPlacements;
+            for (int i = 0; i < placements.Count; i++)
+            {
+                RectGridBlockPlacement placement = placements[i];
+                if ((placement.blockType == RectGridBlockType.PipeOutputItem
+                     || placement.blockType == RectGridBlockType.DoublePipeOutputItem)
+                    && placement.itemDefinition != null && placement.itemDefinition.id == itemId
+                    && TryGetRectGridPlacementCoordinate(this, anchor, turns, placement, out Vector2Int coordinate))
+                {
+                    port = new FluidFlowPort(coordinate, placement.itemDefinition, 0f);
+                    return true;
+                }
             }
         }
-
-        if (remainingLiters > FluidEpsilon)
-        {
-            TryConsumeConnectedFluidInputAtCoordinate(
-                port.Coordinate,
-                port.ItemId,
-                remainingLiters,
-                out float connectedLiters,
-                out float connectedTemperature);
-            consumedLiters += connectedLiters;
-            weightedTemperature += connectedLiters * connectedTemperature;
-        }
-
-        if (consumedLiters > FluidEpsilon)
-        {
-            temperatureCelsius = weightedTemperature / consumedLiters;
-        }
-
-        return consumedLiters + FluidEpsilon >= requestedLiters;
+        port = default;
+        return false;
     }
 
     private bool TryGetInputPortAndBuffer(
@@ -673,11 +703,6 @@ public class CrudeOilRefinery : InputOutputModule
 
             port = candidate;
             buffer = GetOrCreateInputBuffer(candidate.ItemId);
-            long capacityUnits = DeterministicSimulationUnits.FromFloat(
-                GetInputBufferCapacityLiters(candidate));
-            buffer.StoredUnits = System.Math.Min(
-                System.Math.Max(0L, buffer.StoredUnits),
-                capacityUnits);
             return true;
         }
 
@@ -720,62 +745,14 @@ public class CrudeOilRefinery : InputOutputModule
 
     private float GetInputBufferCapacityLiters(FluidFlowPort port)
     {
-        float configuredLiters = FluidStorageCapacityLiters;
-        if (configuredLiters > FluidEpsilon)
-        {
-            float totalInputRate = 0f;
-            for (int i = 0; i < inputPorts.Count; i++)
-            {
-                totalInputRate += inputPorts[i].LitersPerSecond;
-            }
-
-            if (totalInputRate > FluidEpsilon)
-            {
-                return Mathf.Max(0f,
-                    configuredLiters * port.LitersPerSecond / totalInputRate);
-            }
-        }
-
-        return Mathf.Max(1f, port.LitersPerSecond * InputBufferSeconds);
+        return port.LitersPerSecond * (IsActiveCraftRunning && batchDuration > 0f ? batchDuration
+            : ResolveInitialCraftDuration(ResolveInstalledDefinition()));
     }
 
-    private float GetOperationalInputPressure(FluidFlowPort port)
+    private long GetAvailableInputUnits(FluidFlowPort port, FluidInputBuffer buffer)
     {
-        float pressure = GetObjectInfoInputPressure(port);
-        return pressure > FluidEpsilon
-            ? pressure
-            : GetOrCreateInputBuffer(port.ItemId).ObservedSupplyLitersPerSecond;
-    }
-
-    private float GetStartupInputLiters(
-        FluidFlowPort port, float inputPressure, float deltaTime)
-    {
-        float fillRate = inputPressure > FluidEpsilon
-            ? inputPressure
-            : port.LitersPerSecond;
-        return Mathf.Min(
-            GetInputBufferCapacityLiters(port),
-            Mathf.Max(port.LitersPerSecond * deltaTime,
-                Mathf.Min(2f, fillRate * InputBufferSeconds)));
-    }
-
-    private static void RecordInputDelivery(FluidInputBuffer buffer, float liters)
-    {
-        float now = (float)MapObjectTickManager.CurrentSimulationTimeSeconds;
-        float elapsed = now - buffer.LastDeliveryTime;
-        if (buffer.LastDeliveryTime >= 0f && elapsed >= 0f && elapsed <= FluidEpsilon)
-        {
-            buffer.LastDeliveryLiters += liters;
-            return;
-        }
-
-        if (buffer.LastDeliveryTime >= 0f && elapsed > FluidEpsilon)
-        {
-            buffer.ObservedSupplyLitersPerSecond = buffer.LastDeliveryLiters / elapsed;
-        }
-
-        buffer.LastDeliveryLiters = liters;
-        buffer.LastDeliveryTime = now;
+        long requiredUnits = DeterministicSimulationUnits.FromFloat(GetInputBufferCapacityLiters(port));
+        return System.Math.Max(0L, requiredUnits - System.Math.Max(0L, buffer.StoredUnits));
     }
 
     private static float GetStoredLiters(FluidInputBuffer buffer) =>
@@ -932,15 +909,18 @@ public class CrudeOilRefinery : InputOutputModule
             return;
         }
 
+        if (state == RefineryState.NoEnergy || refineryState == RefineryState.NoEnergy)
+            Pipe.InvalidateFluidDisplayNetworkCache(this);
         refineryState = state;
         refineryStatusItemId = itemId;
         refineryStatus = state switch
         {
             RefineryState.InvalidPorts => "Invalid fluid ports",
             RefineryState.MissingInput => $"Waiting for {ResolveFluidName(definition)}",
-            RefineryState.InsufficientInput => $"Waiting for {ResolveFluidName(definition)}",
             RefineryState.NoEnergy => "No energy",
             RefineryState.Working => "Working",
+            RefineryState.Outputting => "Outputting",
+            RefineryState.WaitingForOutput => "Waiting for output",
             _ => "Idle"
         };
     }

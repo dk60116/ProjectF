@@ -29,24 +29,20 @@ $fixture = $fixture.Replace('// MODULE_PRESSURE',
 $fixture = $fixture.Replace('// MODULE_DEMAND',
     (Read-Member ($base + 'InputOutputModule.cs') 'public virtual bool TryGetElectricPowerDemand('))
 
-$fixture = $fixture.Replace('// REFINERY_TICK',
-    (Read-Member ($base + 'CrudeOilRefinery.cs') 'private void UpdateContinuousRefining('))
-$fixture = $fixture.Replace('// REFINERY_TARGET',
-    (Read-Member ($base + 'CrudeOilRefinery.cs') 'protected override bool HasOperationalTarget('))
-$fixture = $fixture.Replace('// REFINERY_CAPACITY',
-    (Read-Member ($base + 'CrudeOilRefinery.cs') 'private float GetInputBufferCapacityLiters('))
-$fixture = $fixture.Replace('// REFINERY_OPERATIONAL_PRESSURE',
-    (Read-Member ($base + 'CrudeOilRefinery.cs') 'private float GetOperationalInputPressure('))
-$fixture = $fixture.Replace('// REFINERY_STARTUP_VOLUME',
-    (Read-Member ($base + 'CrudeOilRefinery.cs') 'private float GetStartupInputLiters('))
-$fixture = $fixture.Replace('// REFINERY_RECORD_DELIVERY',
-    (Read-Member ($base + 'CrudeOilRefinery.cs') 'private static void RecordInputDelivery('))
-$fixture = $fixture.Replace('// REFINERY_DIRECT_PRESSURE',
-    (Read-Member ($base + 'CrudeOilRefinery.cs') 'private float GetDirectInputPressure('))
+$fixture = $fixture.Replace('// REFINERY_OUTPUT_STATE',
+    (Read-Member ($base + 'InputOutputModule.cs') 'public sealed class RefineryOutputState'))
+$fixture = $fixture.Replace('// ADVANCE_CRAFT',
+    (Read-Member ($base + 'InputOutputModule.cs') 'protected void UpdateActiveCraft('))
+$refinery = [IO.File]::ReadAllText((Join-Path $repositoryRoot ($base + 'CrudeOilRefinery.cs')))
+$fixture = $fixture.Replace('// REFINERY_IMPLEMENTATION', $refinery.Substring($refinery.IndexOf('public class CrudeOilRefinery')))
+$fixture += [IO.File]::ReadAllText((Join-Path $PSScriptRoot 'Checks.cs'))
 
 $probeDir = Join-Path ([IO.Path]::GetTempPath()) ('ProjectF-RefineryTransport-' + [Guid]::NewGuid().ToString('N'))
 New-Item -ItemType Directory -Path $probeDir | Out-Null
 Set-Content -LiteralPath (Join-Path $probeDir 'Production.cs') -Value $fixture
+Copy-Item -LiteralPath (Join-Path $repositoryRoot 'FactorioProject/Assets/Scripts/Simulation/Core/ProductionProcess.cs') -Destination (Join-Path $probeDir 'ProductionProcess.cs')
+$units = (Read-Member 'FactorioProject/Assets/Scripts/Simulation/Core/SimulationTickContracts.cs' 'public static class DeterministicSimulationUnits')
+Set-Content -LiteralPath (Join-Path $probeDir 'Units.cs') -Value ('using System; using UnityEngine; namespace ProjectF.Simulation { public static class SimulationTickWorld { public const int DefaultSimulationTicksPerSecond = 60; public const float FixedSimulationDeltaSeconds = 1f / 60f; } }' + $units)
 Set-Content -LiteralPath (Join-Path $probeDir 'Probe.csproj') -Value '<Project Sdk="Microsoft.NET.Sdk"><PropertyGroup><OutputType>Exe</OutputType><TargetFramework>net9.0</TargetFramework></PropertyGroup></Project>'
 dotnet run --configuration Release --project (Join-Path $probeDir 'Probe.csproj')
 exit $LASTEXITCODE

@@ -1206,6 +1206,18 @@ public static class SaveGameBinarySerializer
         WriteIntList(writer, state.productionInputFluidItemIds);
         WriteLongList(writer, state.productionInputFluidUnits);
         writer.Write(state.productionOutputFluidUnits);
+        WriteIntList(writer, state.refineryInputFluidItemIds);
+        WriteLongList(writer, state.refineryInputFluidUnits);
+        WriteList(writer, state.refineryInputFluidTemperatures, (binaryWriter, value) => binaryWriter.Write(value));
+        writer.Write(state.refineryBatchDuration);
+        writer.Write(state.refineryBatchTemperature);
+        WriteList(writer, state.refineryOutputs, (binaryWriter, output) =>
+        {
+            binaryWriter.Write(output.itemId);
+            binaryWriter.Write(output.litersPerSecond);
+            binaryWriter.Write(output.totalUnits);
+            binaryWriter.Write(output.remainingUnits);
+        });
     }
 
     private static InputOutputModule.PersistentState ReadInputOutputState(BinaryReader reader, int version)
@@ -1296,6 +1308,21 @@ public static class SaveGameBinarySerializer
         if (version >= 68)
         {
             state.productionOutputFluidUnits = reader.ReadInt64();
+        }
+        if (version >= 69)
+        {
+            state.refineryInputFluidItemIds = ReadIntList(reader);
+            state.refineryInputFluidUnits = ReadLongList(reader);
+            state.refineryInputFluidTemperatures = ReadList(reader, () => reader.ReadSingle());
+            state.refineryBatchDuration = reader.ReadSingle();
+            state.refineryBatchTemperature = reader.ReadSingle();
+            state.refineryOutputs = ReadList(reader, () => new InputOutputModule.RefineryOutputState
+            {
+                itemId = reader.ReadInt32(),
+                litersPerSecond = reader.ReadSingle(),
+                totalUnits = reader.ReadInt64(),
+                remainingUnits = reader.ReadInt64()
+            });
         }
 
         return state;
