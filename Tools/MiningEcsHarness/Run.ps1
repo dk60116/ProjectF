@@ -4,7 +4,7 @@ $probe = Join-Path ([IO.Path]::GetTempPath()) ('ProjectF-MiningEcs-' + [guid]::N
 New-Item -ItemType Directory -Path $probe | Out-Null
 $files = @('Simulation/Core/ProductionProcess.cs', 'Simulation/Core/MiningProcess.cs',
     'Simulation/Core/SimulationTickContracts.cs', 'Map/MiningMachineInstance.cs', 'Map/MiningItemOutput.cs',
-    'Map/IDataElectricConsumer.cs')
+    'Map/IDataItemProducer.cs', 'Map/IDataElectricConsumer.cs')
 foreach ($relative in $files) { Copy-Item -LiteralPath (Join-Path $repo ('FactorioProject/Assets/Scripts/' + $relative)) -Destination $probe }
 Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'Checks.cs') -Destination $probe
 Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'BoundaryStubs.cs') -Destination $probe
@@ -57,7 +57,7 @@ foreach ($signature in @('public bool RegisterDataOnlyInstallation(', 'internal 
 $store += "}`n"
 [IO.File]::WriteAllText((Join-Path $probe 'StoreProduction.cs'), $store)
 $power = "using System; using System.Collections.Generic; using UnityEngine; public static partial class PowerDemandProbe {`n"
-$power += (Member 'Object/MapObj/InstallationObject/UtilityPole.RobotArms.cs' 'internal static void InvalidateDataConsumerDemand(') + "`n}"
+$power += (Member 'Map/UtilityPoleRuntime.Consumers.cs' 'internal static void InvalidateDataConsumerDemand(') + "`n}"
 [IO.File]::WriteAllText((Join-Path $probe 'PowerProduction.cs'), $power)
 $view = 'Simulation/Presentation/MiningWorldView.cs'
 $viewSource = [IO.File]::ReadAllText((Join-Path $repo ('FactorioProject/Assets/Scripts/' + $view)))

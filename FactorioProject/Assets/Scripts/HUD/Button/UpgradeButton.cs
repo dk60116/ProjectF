@@ -19,7 +19,7 @@ public class UpgradeButton : MonoBehaviour
 
     private readonly List<ItemDefinition> upgradeDefinitions = new List<ItemDefinition>();
     private readonly List<CraftingSlot> upgradeSets = new List<CraftingSlot>();
-    private InstallationObject focusedObject;
+    private IMapObjectTarget focusedObject;
     private ItemDefinition focusedDefinition;
     private InstallationPlacementController placementController;
     private bool isExpanded;
@@ -53,7 +53,7 @@ public class UpgradeButton : MonoBehaviour
     }
 
     public void Bind(
-        MapObject target,
+        IMapObjectTarget target,
         bool openedByDirectClick,
         InstallationPlacementController controller)
     {
@@ -62,6 +62,15 @@ public class UpgradeButton : MonoBehaviour
             ? controller
             : placementController;
 
+        if (openedByDirectClick && (target is ProductionFacilityInstance || target is ProjectF.Power.UtilityPoleRuntime) && target.IsTargetActive)
+        {
+            bool changed = !ReferenceEquals(focusedObject, target);
+            focusedObject = target; focusedDefinition = target.BoundItemDefinition;
+            CollectUpgradeDefinitions(focusedDefinition);
+            if (changed || upgradeDefinitions.Count == 0) HideUpgradeSets();
+            SetButtonVisible(upgradeDefinitions.Count > 0);
+            return;
+        }
         if (!openedByDirectClick
             || !(target is InstallationObject installationObject)
             || !installationObject.gameObject.activeInHierarchy
@@ -212,7 +221,19 @@ public class UpgradeButton : MonoBehaviour
             }
         }
 
-        InstallationObject previousObject = focusedObject;
+        if (focusedObject is ProjectF.Power.UtilityPoleRuntime pole)
+        {
+            if (placementController == null || !placementController.TryUpgradeDataUtilityPole(pole, targetDefinition, out var upgraded)) return false;
+            GetComponentInParent<PlayerHUD>()?.ReplaceFocusedObjectAfterUpgrade(pole, upgraded);
+            return true;
+        }
+        if (focusedObject is ProductionFacilityInstance facility)
+        {
+            if (placementController == null || !placementController.TryUpgradeDataProduction(facility, targetDefinition, out var upgraded)) return false;
+            GetComponentInParent<PlayerHUD>()?.ReplaceFocusedObjectAfterUpgrade(facility, upgraded);
+            return true;
+        }
+        InstallationObject previousObject = focusedObject as InstallationObject;
         if (placementController == null
             || !placementController.TryUpgradeInstalledObject(
                 previousObject,

@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Text.RegularExpressions;
@@ -297,10 +297,10 @@ public static partial class Checks
             "drop transfers must reuse a cached position provider without per-transfer closures");
         string robotArmPowerSource = File.ReadAllText(Path.Combine(
             args[0],
-            "FactorioProject/Assets/Scripts/Object/MapObj/InstallationObject/UtilityPole.RobotArms.cs"));
+            "FactorioProject/Assets/Scripts/Map/UtilityPoleRuntime.Consumers.cs"));
         string utilityPoleSource = File.ReadAllText(Path.Combine(
             args[0],
-            "FactorioProject/Assets/Scripts/Object/MapObj/InstallationObject/UtilityPole.cs"));
+            "FactorioProject/Assets/Scripts/Map/UtilityPoleRuntime.cs"));
         Require(robotArmPowerSource.Contains("binding.Networks.Count == 1")
                 && robotArmPowerSource.Contains(
                     "binding.EvaluatedRuntimeVersion == robotArmNetworkRuntimeVersion"),

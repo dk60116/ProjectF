@@ -1,3 +1,4 @@
+﻿using ProjectF.Power;
 using System;
 using System.Collections;
 using System.Collections.Generic;
@@ -788,6 +789,8 @@ public partial class BlockStateStore : MonoBehaviour
     {
         RobotArmWorld.Current?.FlushSaveStates();
         MiningWorld.Current?.FlushSaveStates();
+        UtilityPoleWorld.Current?.FlushSaveStates();
+        ProductionWorld.Current?.FlushSaveStates();
         List<InstallationSaveState> snapshot = new List<InstallationSaveState>(savedInstallationStates.Count);
         foreach (KeyValuePair<Vector2Int, InstallationSaveState> pair in savedInstallationStates)
         {
@@ -1127,6 +1130,7 @@ public partial class BlockStateStore : MonoBehaviour
 
     public void CaptureLiveUtilityPoleTopologyIfComplete()
     {
+        UtilityPoleWorld.Current?.FlushSaveStates();
         if (HasVirtualizedUtilityPoleTopology())
         {
             // Rebuilding from only the remaining live poles would create
@@ -1181,6 +1185,8 @@ public partial class BlockStateStore : MonoBehaviour
         }
     }
 
+    internal bool CanCaptureUtilityPoleTopology => !HasVirtualizedUtilityPoleTopology();
+
     private bool HasVirtualizedUtilityPoleTopology()
     {
         foreach (KeyValuePair<Vector2Int, InstallationSaveState> pair in savedInstallationStates)
@@ -1190,6 +1196,8 @@ public partial class BlockStateStore : MonoBehaviour
             {
                 continue;
             }
+
+            if (UtilityPoleWorld.Current != null && UtilityPoleWorld.Current.TryGet(pair.Key, out var dataPole) && dataPole.IsRuntimeActive) continue;
 
             if (!liveInstallationStates.TryGetValue(pair.Key, out LiveInstallationRecord liveRecord)
                 || liveRecord?.installationObject == null
@@ -1233,6 +1241,8 @@ public partial class BlockStateStore : MonoBehaviour
     {
         RobotArmWorld.Current?.Remove(storageKey);
         MiningWorld.Current?.Remove(storageKey);
+        UtilityPoleWorld.Current?.Remove(storageKey);
+        ProductionWorld.Current?.Remove(storageKey);
         Vector2Int removedAnchor = storageKey;
         bool markerChanged = savedInstallationStates.ContainsKey(storageKey);
         if (liveInstallationStates.TryGetValue(storageKey, out LiveInstallationRecord liveRecord))
@@ -1344,6 +1354,8 @@ public partial class BlockStateStore : MonoBehaviour
         BuildingWorld.Current?.ClearRecords();
         RobotArmWorld.Current?.ClearRecords();
         MiningWorld.Current?.ClearRecords();
+        UtilityPoleWorld.Current?.ClearRecords();
+        ProductionWorld.Current?.ClearRecords();
         ResolveVirtualObjectWorld()?.Clear();
         MarkMapMarkersChanged();
     }
@@ -1362,6 +1374,8 @@ public partial class BlockStateStore : MonoBehaviour
         mapSaveData.resources ??= new List<ResourceSaveEntry>();
         RobotArmWorld.Current?.FlushSaveStates();
         MiningWorld.Current?.FlushSaveStates();
+        UtilityPoleWorld.Current?.FlushSaveStates();
+        ProductionWorld.Current?.FlushSaveStates();
         mapSaveData.floorObjects ??= new List<FloorObjectSaveEntry>();
         mapSaveData.installations ??= new List<InstallationSaveEntry>();
         mapSaveData.conveyorItems ??= new List<ConveyorItemBlockSaveEntry>();

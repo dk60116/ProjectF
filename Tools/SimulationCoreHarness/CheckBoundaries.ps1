@@ -150,8 +150,8 @@ if (-not $fluidWakeIsStorageIndexed) {
     throw 'Steady-state fluid changes still use broad coordinate or global module wake propagation'
 }
 Write-Output 'PASS sleeping fluid facilities wake through storage-indexed input/output waiters (source contract)'
-$utilityPoleText = [IO.File]::ReadAllText((Join-Path $installationRoot 'UtilityPole.cs'))
-$utilityRobotArmText = [IO.File]::ReadAllText((Join-Path $installationRoot 'UtilityPole.RobotArms.cs'))
+$utilityPoleText = [IO.File]::ReadAllText((Join-Path $repo 'FactorioProject/Assets/Scripts/Map/UtilityPoleRuntime.cs'))
+$utilityRobotArmText = [IO.File]::ReadAllText((Join-Path $repo 'FactorioProject/Assets/Scripts/Map/UtilityPoleRuntime.Consumers.cs'))
 $powerRuntimeIsTickBatched =
     ($utilityPoleText -match 'InvalidateNetworkRuntimeForNextTick\(\)') -and
     ($utilityPoleText -match 'networkRuntimeEvaluatedSimulationTick == currentSimulationTick') -and

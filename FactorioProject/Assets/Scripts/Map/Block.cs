@@ -7798,10 +7798,14 @@ public partial class Block
 
     private bool BlocksFloorObjectStacking(int itemId = -1, ResourceInstance harvestedResource = null)
     {
-        if (mapObject is InstallationObject installationObject
-            && installationObject != null
-            && installationObject.gameObject != null
-            && installationObject.gameObject.activeInHierarchy)
+        // Installed data-only objects refer to inactive prototypes. Their runtime
+        // records, rather than the prototype's GameObject, own cell occupancy.
+        if (TryGetRuntimePipeRecord(out _)
+            || TryGetRuntimeConveyorRecord(out _)
+            || (mapObject is InstallationObject installationObject
+                && installationObject != null
+                && installationObject.gameObject != null
+                && installationObject.gameObject.activeInHierarchy))
         {
             return true;
         }

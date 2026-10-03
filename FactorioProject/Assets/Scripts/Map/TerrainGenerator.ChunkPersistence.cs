@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections;
 using System.Collections.Generic;
 using System.Threading.Tasks;
@@ -852,7 +852,9 @@ public partial class TerrainGenerator : MonoBehaviour
                 return;
             }
 
-            if (TryRestoreDataOnlyMining(savedState)
+            if (TryRestoreDataOnlyUtilityPole(savedState)
+                || TryRestoreDataOnlyProduction(savedState)
+                || TryRestoreDataOnlyMining(savedState)
                 || TryRestoreDataOnlyRobotArm(savedState)
                 || TryRestoreDataOnlyConveyor(savedState)
                 || TryRestoreDataOnlyPipe(savedState)
@@ -1947,7 +1949,7 @@ public partial class TerrainGenerator : MonoBehaviour
         }
     }
 
-    private InstallationPlacementController ResolveInstallationPlacementController()
+    internal InstallationPlacementController ResolveInstallationPlacementController()
     {
         if (installationRestoreController != null)
         {

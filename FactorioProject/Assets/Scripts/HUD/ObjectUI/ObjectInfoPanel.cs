@@ -1,3 +1,4 @@
+﻿using ProjectF.Power;
 using System.Collections.Generic;
 using TMPro;
 using UnityEngine;
@@ -216,6 +217,11 @@ public class ObjectInfoPanel : MonoBehaviour
             return;
         }
 
+        if (mapObject is ProductionFacilityInstance production)
+        {
+            if (infoLine != null) { infoLine.gameObject.SetActive(true); infoLine.ShowProductionFacility(production); }
+            return;
+        }
         if (mapObject is MiningMachineInstance miner)
         {
             if (infoLine != null) { infoLine.gameObject.SetActive(true); infoLine.ShowMiningMachine(miner); }
@@ -233,9 +239,11 @@ public class ObjectInfoPanel : MonoBehaviour
             return;
         }
 
+        if (mapObject is UtilityPoleRuntime dataPole)
+        { ShowUtilityPoleInfo(dataPole, underlyingResource); return; }
         if (mapObject is UtilityPole utilityPole)
         {
-            ShowUtilityPoleInfo(utilityPole, underlyingResource);
+            ShowUtilityPoleInfo(utilityPole.Runtime, underlyingResource);
             return;
         }
 
@@ -780,7 +788,7 @@ public class ObjectInfoPanel : MonoBehaviour
         infoLine.ShowLoggingMachine(loggingMachine, underlyingResource);
     }
 
-    private void ShowUtilityPoleInfo(UtilityPole utilityPole, ResourceInstance underlyingResource)
+    private void ShowUtilityPoleInfo(UtilityPoleRuntime utilityPole, ResourceInstance underlyingResource)
     {
         if (infoLine == null)
         {

@@ -116,6 +116,7 @@ public partial class InputOutputModule : InstallationObject,
         out Vector2Int directionToPipe)
     {
         directionToPipe = Vector2Int.zero;
+        if (ProductionWorld.Current != null && ProductionWorld.Current.TryGetOutputDirection(coordinate, out directionToPipe)) return true;
         if (!registeredRuntimeFluidOutputCoordinates.TryGetValue(
                 coordinate,
                 out HashSet<InputOutputModule> modules))
@@ -151,6 +152,7 @@ public partial class InputOutputModule : InstallationObject,
         Vector2Int coordinate,
         Vector2Int directionToPipe)
     {
+        if (ProductionWorld.Current != null && ProductionWorld.Current.TryGetOutputDirection(coordinate, out var dataDirection) && dataDirection == directionToPipe) return true;
         if (directionToPipe == Vector2Int.zero
             || !registeredRuntimeFluidOutputCoordinates.TryGetValue(
                 coordinate,
@@ -1254,6 +1256,7 @@ public partial class InputOutputModule : InstallationObject,
     private readonly struct FluidOutputConnection
     {
         public readonly InstallationObject Storage;
+        public readonly ProductionFacilityInstance DataStorage;
         public readonly Vector2Int Coordinate;
         public readonly int PipeDistance;
         public readonly Pump PressurePump;
@@ -1264,11 +1267,30 @@ public partial class InputOutputModule : InstallationObject,
             int pipeDistance,
             Pump pressurePump = null)
         {
+            DataStorage = null;
             PressurePump = pressurePump;
             Storage = storage;
             Coordinate = coordinate;
             PipeDistance = pipeDistance;
         }
+        public FluidOutputConnection(ProductionFacilityInstance storage, Vector2Int coordinate, int distance, Pump pump)
+        { Storage = null; DataStorage = storage; Coordinate = coordinate; PipeDistance = distance; PressurePump = pump; }
+    }
+
+    internal void WakeDataFluidOutput() => WakeRuntimeUpdate();
+    internal static void NotifyDataFluidStorageChanged()
+    {
+        unchecked { fluidStorageStateVersion++; }
+    }
+    private void AddDataFluidOutputCandidate(Vector2Int coordinate, Vector2Int direction, int distance)
+    {
+        var world = ProductionWorld.Current;
+        if (world == null || !world.TryGetFluidReceiver(coordinate, direction, out var receiver)) return;
+        var key = new FluidStorageEndpointKey(null, coordinate);
+        if (cachedFluidOutputConnectionIndices.ContainsKey(key)) return;
+        world.RegisterNativeProducer(receiver, this);
+        cachedFluidOutputConnectionIndices.Add(key, cachedFluidOutputConnections.Count);
+        cachedFluidOutputConnections.Add(new FluidOutputConnection(receiver, coordinate, distance, connectedFluidSearchCurrentPump));
     }
 
     private readonly struct FluidStorageEndpointKey : IEquatable<FluidStorageEndpointKey>
@@ -1365,6 +1387,7 @@ public partial class InputOutputModule : InstallationObject,
         out InputOutputModule module)
     {
         module = null;
+        if (ProductionWorld.Current != null && ProductionWorld.Current.CoordinateIsBlockType(coordinate, blockType)) return true;
         if (MiningWorld.Current != null && MiningWorld.Current.CoordinateIsBlockType(coordinate, blockType)) return true;
         if (blockType == RectGridBlockType.None
             || !registeredRuntimeGridCoordinates.TryGetValue(coordinate, out HashSet<InputOutputModule> modules)
@@ -1566,6 +1589,7 @@ public partial class InputOutputModule : InstallationObject,
 
     internal static bool HasRuntimeFluidInputFacingAt(Vector2Int coordinate, Vector2Int direction)
     {
+        if (ProductionWorld.Current != null && ProductionWorld.Current.TryGetFluidReceiver(coordinate, -direction, out _)) return true;
         if (!registeredRuntimeAreaCoordinates.TryGetValue(coordinate, out HashSet<InputOutputModule> modules))
         {
             return false;
@@ -1822,6 +1846,9 @@ public partial class InputOutputModule : InstallationObject,
 
     private static void WakeRuntimeModulesAtCoordinate(Vector2Int coordinate, bool outputOnly)
     {
+        // Item mutations must wake data-owned facilities as well as scene components.
+        MiningWorld.Current?.Wake(coordinate);
+        ProductionWorld.Current?.Wake(coordinate);
         runtimeWakeScratch.Clear();
         runtimeWakeSet.Clear();
         CollectRuntimeModulesAtCoordinate(coordinate, outputOnly);
@@ -2264,7 +2291,8 @@ public partial class InputOutputModule : InstallationObject,
     public static bool TryGetOutputItemIdsAtRuntimeGridCoordinate(Vector2Int coordinate, ISet<int> outputItemIds)
     {
         bool found = TryGetRuntimeCoordinateValues(coordinate, outputItemIds, TryAppendRuntimeOutputItemIdsCollector);
-        return (MiningWorld.Current != null && MiningWorld.Current.AppendOutputItemIds(coordinate, outputItemIds)) || found;
+        return (ProductionWorld.Current != null && ProductionWorld.Current.AppendOutputItemIds(coordinate, outputItemIds))
+            || (MiningWorld.Current != null && MiningWorld.Current.AppendOutputItemIds(coordinate, outputItemIds)) || found;
     }
 
     public static bool TryGetFluidOutputInfoAtRuntimeGridCoordinate(
@@ -2274,6 +2302,7 @@ public partial class InputOutputModule : InstallationObject,
     {
         fluidItemId = -1;
         temperatureCelsius = MapClimate.CurrentTemperatureCelsius;
+        if (ProductionWorld.Current != null && ProductionWorld.Current.TryOutputFluidInfo(coordinate, out fluidItemId)) return true;
 
         if (!registeredRuntimeFluidOutputCoordinates.TryGetValue(
                 coordinate,
@@ -2291,19 +2320,22 @@ public partial class InputOutputModule : InstallationObject,
 
     public static bool TryGetInputItemIdsAtRuntimeGridCoordinate(Vector2Int coordinate, ISet<int> inputItemIds)
     {
-        return TryGetRuntimeCoordinateValues(coordinate, inputItemIds, TryAppendRuntimeInputItemIdsCollector);
+        bool found = TryGetRuntimeCoordinateValues(coordinate, inputItemIds, TryAppendRuntimeInputItemIdsCollector);
+        return (ProductionWorld.Current?.AppendInputItemIds(coordinate, inputItemIds, false) ?? false) | found;
     }
 
     public static bool TryGetAcceptedInputItemIdsAtRuntimeGridCoordinate(Vector2Int coordinate, ISet<int> inputItemIds)
     {
-        return TryGetRuntimeCoordinateValues(coordinate, inputItemIds, TryAppendAcceptedRuntimeInputItemIdsCollector);
+        bool found = TryGetRuntimeCoordinateValues(coordinate, inputItemIds, TryAppendAcceptedRuntimeInputItemIdsCollector);
+        return (ProductionWorld.Current?.AppendInputItemIds(coordinate, inputItemIds, true) ?? false) | found;
     }
 
     public static bool TryGetInputEnergyTypesAtRuntimeGridCoordinate(
         Vector2Int coordinate,
         ISet<ItemDefinition.EnergyType> energyTypes)
     {
-        return TryGetRuntimeCoordinateValues(coordinate, energyTypes, TryAppendRuntimeInputEnergyTypesCollector);
+        bool found = TryGetRuntimeCoordinateValues(coordinate, energyTypes, TryAppendRuntimeInputEnergyTypesCollector);
+        return (ProductionWorld.Current?.AppendEnergyTypes(coordinate, energyTypes) ?? false) | found;
     }
 
     private static readonly RuntimeCoordinateValueCollector<int> TryAppendRuntimeOutputItemIdsCollector = TryAppendRuntimeOutputItemIds;
@@ -8891,7 +8923,7 @@ public partial class InputOutputModule : InstallationObject,
                           && TrySelectFluidOutputConnectionWithAnySpaceFromCache(
                               fluidItemId,
                               out FluidOutputConnection connection)
-                          && connection.Storage != null
+                          && (connection.Storage != null || connection.DataStorage != null)
             ? CalculateFluidPressureRetention(connection.PipeDistance)
               * ResolvePumpTransportRatio(connection.PressurePump, sourceLitersPerSecond)
             : 1f;
@@ -9177,7 +9209,7 @@ public partial class InputOutputModule : InstallationObject,
             foundTarget = true;
         }
 
-        if (!foundTarget || bestConnection.Storage == null)
+        if (!foundTarget || bestConnection.Storage == null && bestConnection.DataStorage == null)
         {
             return false;
         }
@@ -9265,6 +9297,7 @@ public partial class InputOutputModule : InstallationObject,
             AddFluidOutputStorageCacheCandidatesAtCoordinate(
                 coordinate,
                 Mathf.Max(0, connectedFluidSearchCurrentPipeCount - 1));
+            AddDataFluidOutputCandidate(coordinate, Vector2Int.zero, Mathf.Max(0, connectedFluidSearchCurrentPipeCount - 1));
 
             bool isOutputSeed = ContainsCoordinate(cachedFluidOutputSeedCoordinates, coordinate);
             bool hasPipe = TryGetConnectedPipeAtCoordinate(
@@ -9331,6 +9364,7 @@ public partial class InputOutputModule : InstallationObject,
                 }
 
                 Vector2Int nextCoordinate = coordinate + direction;
+                AddDataFluidOutputCandidate(nextCoordinate, -direction, Mathf.Max(0, connectedFluidSearchCurrentPipeCount - 1));
                 if (!TryGetConnectedFluidNodeAtCoordinate(
                         nextCoordinate,
                         -direction,
@@ -9732,17 +9766,6 @@ public partial class InputOutputModule : InstallationObject,
         return targetStorage != null;
     }
 
-    private bool TrySelectFluidOutputStorageWithAnySpaceFromCache(
-        int fluidItemId,
-        out InstallationObject targetStorage)
-    {
-        bool found = TrySelectFluidOutputConnectionWithAnySpaceFromCache(
-            fluidItemId,
-            out FluidOutputConnection connection);
-        targetStorage = connection.Storage;
-        return found;
-    }
-
     private bool TrySelectFluidOutputConnectionWithAnySpaceFromCache(
         int fluidItemId,
         out FluidOutputConnection targetConnection)
@@ -9766,24 +9789,23 @@ public partial class InputOutputModule : InstallationObject,
 
         fluidOutputSelectionCacheMissCount++;
         targetConnection = default;
-        InstallationObject targetStorage = null;
+        bool foundTarget = false;
         float bestTargetFillRatio = float.PositiveInfinity;
         for (int i = 0; i < cachedFluidOutputConnections.Count; i++)
         {
             FluidOutputConnection connection = cachedFluidOutputConnections[i];
-            InstallationObject storage = connection.Storage;
             if (!CanUseFluidOutputConnectionWithAnySpace(connection, fluidItemId))
             {
                 continue;
             }
 
             float fillRatio = GetFluidOutputConnectionFillRatio(connection, fluidItemId);
-            if (targetStorage != null && fillRatio >= bestTargetFillRatio)
+            if (foundTarget && fillRatio >= bestTargetFillRatio)
             {
                 continue;
             }
 
-            targetStorage = storage;
+            foundTarget = true;
             targetConnection = connection;
             bestTargetFillRatio = fillRatio;
         }
@@ -9792,7 +9814,7 @@ public partial class InputOutputModule : InstallationObject,
         cachedFluidOutputSelectionStateVersion = fluidStorageStateVersion;
         cachedFluidOutputSelectionTopologyVersion = fluidTopologyVersion;
         cachedFluidOutputSelectionItemId = fluidItemId;
-        cachedFluidOutputSelectionFound = targetStorage != null;
+        cachedFluidOutputSelectionFound = foundTarget;
         cachedFluidOutputSelection = targetConnection;
         return cachedFluidOutputSelectionFound;
     }
@@ -9852,7 +9874,10 @@ public partial class InputOutputModule : InstallationObject,
         FluidOutputConnection first,
         FluidOutputConnection second)
     {
-        int storageOrder = CompareSimulationOrder(first.Storage, second.Storage);
+        int storageOrder = first.DataStorage != null || second.DataStorage != null
+            ? (first.DataStorage?.SimulationId ?? first.Storage.RuntimePlacementSequence).CompareTo(
+                second.DataStorage?.SimulationId ?? second.Storage.RuntimePlacementSequence)
+            : CompareSimulationOrder(first.Storage, second.Storage);
         if (storageOrder != 0)
         {
             return storageOrder;
@@ -9887,6 +9912,7 @@ public partial class InputOutputModule : InstallationObject,
         FluidOutputConnection connection,
         int fluidItemId)
     {
+        if (connection.DataStorage != null) return connection.DataStorage.World.AvailableInput(connection.DataStorage, connection.Coordinate, fluidItemId) > 0;
         InstallationObject storage = connection.Storage;
         if (storage == null || storage == this || !storage.gameObject.activeInHierarchy)
         {
@@ -9910,6 +9936,7 @@ public partial class InputOutputModule : InstallationObject,
     private float GetFluidOutputConnectionAvailableLiters(
         FluidOutputConnection connection, int fluidItemId)
     {
+        if (connection.DataStorage != null) return connection.DataStorage.World.AvailableInput(connection.DataStorage, connection.Coordinate, fluidItemId);
         if (connection.Storage is InputOutputModule module
             && module.UsesDedicatedFluidStorageAtRuntimeCoordinate(connection.Coordinate))
         {
@@ -9927,6 +9954,12 @@ public partial class InputOutputModule : InstallationObject,
     private float GetFluidOutputConnectionFillRatio(
         FluidOutputConnection connection, int fluidItemId)
     {
+        if (connection.DataStorage != null)
+        {
+            float available = connection.DataStorage.World.AvailableInput(connection.DataStorage, connection.Coordinate, fluidItemId);
+            float stored = DeterministicSimulationUnits.ToFloat(connection.DataStorage.FluidUnits(fluidItemId));
+            return available + stored > 0 ? stored / (available + stored) : 1;
+        }
         if (connection.Storage is InputOutputModule module
             && module.UsesDedicatedFluidStorageAtRuntimeCoordinate(connection.Coordinate))
         {
@@ -9956,7 +9989,9 @@ public partial class InputOutputModule : InstallationObject,
         acceptedLiters = 0f;
         if (requestedLiters <= 0f) return false;
         bool transferred;
-        if (connection.Storage is InputOutputModule module
+        if (connection.DataStorage != null)
+            transferred = connection.DataStorage.World.Receive(connection.DataStorage, connection.Coordinate, fluidItemId, requestedLiters, out acceptedLiters);
+        else if (connection.Storage is InputOutputModule module
             && module.UsesDedicatedFluidStorageAtRuntimeCoordinate(connection.Coordinate))
         {
             transferred = module.TryAddDedicatedFluidAtRuntimeCoordinate(
@@ -10655,6 +10690,10 @@ public partial class InputOutputModule : InstallationObject,
     protected bool IsWaitingForOutput => waitingForOutput;
     protected bool HasRuntimeOutputCoordinates => runtimeOutputCoordinates != null && runtimeOutputCoordinates.Count > 0;
     protected IReadOnlyList<Vector2Int> RuntimeOutputCoordinates => runtimeOutputCoordinates;
+    internal ParticleSystem DataCraftParticleEffect => playParticleEffectWhileCrafting ? particleEffect : null;
+    internal Vector3 DataConsumeTargetWorldPosition => ResolveConsumeTargetWorldPosition();
+    internal float DataInputConsumeMoveInterval => InputConsumeMoveInterval;
+
     protected float InputConsumeMoveInterval => Mathf.Max(0f, inputConsumeMoveInterval);
 
     protected virtual bool IsRecipeOutputAllowedByItemFilter(int outputItemId)

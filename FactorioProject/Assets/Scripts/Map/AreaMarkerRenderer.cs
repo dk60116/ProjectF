@@ -34,6 +34,7 @@ public sealed class AreaMarkerRenderer : MonoBehaviour
     private bool movingDirty = true;
     private RobotArmWorld lastArmWorld;
     private MiningWorld lastMiningWorld;
+    private ProductionWorld lastProductionWorld;
     private int registeredOwnerMarkerCount;
     private int visibleOwnerMarkerCount;
     private float maximumIndexedVisibleRange;
@@ -173,6 +174,9 @@ public sealed class AreaMarkerRenderer : MonoBehaviour
             MiningWorld miners = MiningWorld.Current;
             if (!ReferenceEquals(lastMiningWorld, miners)) { lastMiningWorld = miners; staticDirty = true; }
             if (miners != null && miners.RefreshAreaMarkers(context)) staticDirty = true;
+            ProductionWorld production = ProductionWorld.Current;
+            if (!ReferenceEquals(lastProductionWorld, production)) { lastProductionWorld = production; staticDirty = true; }
+            if (production != null && production.RefreshAreaMarkers(context)) staticDirty = true;
             RemoveInvalidOwners();
             BuildVisibilityCandidates(context);
             for (int i = 0; i < visibilityCandidates.Count; i++)
@@ -338,7 +342,7 @@ public sealed class AreaMarkerRenderer : MonoBehaviour
             if (owner != null && owner.IsVisible && IsDirty(owner.UsesMovingBatches)) owner.AppendMarkers(this);
         }
         emptyBatches.Clear();
-        if (staticDirty) { RobotArmWorld.Current?.AppendAreaMarkers(this); MiningWorld.Current?.AppendAreaMarkers(this); }
+        if (staticDirty) { RobotArmWorld.Current?.AppendAreaMarkers(this); MiningWorld.Current?.AppendAreaMarkers(this); ProductionWorld.Current?.AppendAreaMarkers(this); }
         foreach (KeyValuePair<BatchKey, MarkerBatch> pair in batches)
         {
             if (!IsDirty(pair.Key.Moving)) continue;

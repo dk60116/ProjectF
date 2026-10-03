@@ -25,7 +25,12 @@ foreach ($name in @('Assembly-CSharp', 'Assembly-CSharp-Editor')) {
             $sources.Add((Join-Path $project ('Assets/Scripts/' + $relative))) | Out-Null
         }
         foreach ($relative in @('Rendering/InstallationMaterialVariants.cs', 'Rendering/InstallationBatchRenderer.cs',
-            'Rendering/InstallationRigidAnimationTemplate.cs', 'Map/IDataElectricConsumer.cs', 'Map/MiningWorld.cs',
+            'Rendering/ProductionEffectTemplate.cs', 'Rendering/SpriteMeshCache.cs', 'Rendering/InstallationRigidAnimationTemplate.cs', 'Map/IDataElectricConsumer.cs', 'Map/MiningWorld.cs',
+            'Map/IProductionFacilityInfo.cs', 'Map/ProductionFacilityInstance.Info.cs', 'Map/ProductionFacilityInstance.cs', 'Map/ProductionRenderTemplate.cs', 'Map/ProductionWorld.cs', 'Map/ProductionWorld.Fluid.cs',
+            'Map/UtilityPoleRuntime.cs', 'Map/UtilityPoleRuntime.Identity.cs', 'Map/UtilityPoleRuntime.Consumers.cs',
+            'Map/UtilityPoleWorld.cs', 'Map/UtilityPoleRenderTemplate.cs', 'Map/TerrainGenerator.UtilityPoles.cs',
+            'Simulation/Presentation/UtilityPoleWorldView.cs', 'Rendering/UtilityPoleWireRenderer.cs',
+            'Map/IDataItemProducer.cs', 'Map/TerrainGenerator.Production.cs', 'Simulation/Presentation/ProductionWorldView.cs',
             'Map/MiningMachineInstance.cs', 'Map/MiningRenderTemplate.cs', 'Map/MiningItemOutput.cs',
             'Map/TerrainGenerator.Mining.cs', 'Simulation/Core/MiningProcess.cs', 'Simulation/Presentation/MiningWorldView.cs',
             'Map/Block.DeferredOutputs.cs', 'Map/PortableItemRenderer.DeferredOutputs.cs', 'Simulation/Core/OutputStackBatch.cs',

@@ -37,15 +37,19 @@ namespace ProjectF.Rendering
                 restMatrices[i] = (node.ParentIndex < 0 ? Matrix4x4.identity : restMatrices[node.ParentIndex])
                     * Matrix4x4.TRS(node.LocalPosition, node.LocalRotation.normalized, node.LocalScale);
             }
-            tracks = new Track[clip.TransformCurves.Count];
-            for (int i = 0; i < tracks.Length; i++)
+            var resolvedTracks = new List<Track>(clip.TransformCurves.Count);
+            for (int i = 0; i < clip.TransformCurves.Count; i++)
             {
                 var curve = clip.TransformCurves[i];
-                tracks[i] = new Track(byPath[curve.Path], Channel(curve.Property), curve.Curve);
-                if (tracks[i].Channel >= 10) eulerAnimated[tracks[i].Node] = true;
+                // Native Animator also ignores bindings whose target was removed from a variant.
+                if (!byPath.TryGetValue(curve.Path, out int node)) continue;
+                var track = new Track(node, Channel(curve.Property), curve.Curve);
+                resolvedTracks.Add(track);
+                if (track.Channel >= 10) eulerAnimated[track.Node] = true;
             }
+            tracks = resolvedTracks.ToArray();
         }
-        internal static InstallationRigidAnimationTemplate Create(MapObjectArchetype source)
+        internal static InstallationRigidAnimationTemplate Create(MapObjectArchetype source, bool ignoreMissingNodes = false)
         {
             if (source == null || source.Nodes.Count == 0 || source.AnimationClips.Count != 1) return null;
             var clip = source.AnimationClips[0];
@@ -57,7 +61,7 @@ namespace ProjectF.Rendering
             for (int i = 0; i < clip.TransformCurves.Count; i++)
             {
                 var curve = clip.TransformCurves[i];
-                if (curve.Curve == null || !paths.Contains(curve.Path) || Channel(curve.Property) < 0) return null;
+                if (curve.Curve == null || (!ignoreMissingNodes && !paths.Contains(curve.Path)) || Channel(curve.Property) < 0) return null;
             }
             return new InstallationRigidAnimationTemplate(source);
         }

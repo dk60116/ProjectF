@@ -142,6 +142,8 @@ namespace UnityEngine
     }
     public class MaterialPropertyBlock
     {
+        public static bool CreationAllowed = true;
+        public MaterialPropertyBlock() { if (!CreationAllowed) throw new InvalidOperationException("Native API in MonoBehaviour constructor"); }
         readonly Dictionary<int, object> values = new(); public bool isEmpty => values.Count == 0;
         public void Clear() => values.Clear(); public bool HasProperty(int id) => values.ContainsKey(id);
         public void Copy(MaterialPropertyBlock source) { Clear(); foreach(var pair in source.values) values.Add(pair.Key,pair.Value); }

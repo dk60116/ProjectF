@@ -26,15 +26,18 @@ namespace ProjectF.Rendering
         }
         private readonly Dictionary<Material, List<Variant>> variants = new Dictionary<Material, List<Variant>>();
         private readonly List<Value> scratch = new List<Value>(16);
-        private readonly MaterialPropertyBlock global = new MaterialPropertyBlock();
-        private readonly MaterialPropertyBlock indexed = new MaterialPropertyBlock();
+        private MaterialPropertyBlock global, indexed;
         private static readonly int MainTex = Shader.PropertyToID("_MainTex");
         private static readonly int ColorId = Shader.PropertyToID("_Color");
         internal int Count { get; private set; }
 
-        internal Material Resolve(Renderer renderer, Material source, int subMesh, SpriteRenderer sprite = null)
+        internal Material Resolve(Renderer renderer, Material source, int subMesh, SpriteRenderer sprite = null, Sprite iconOverride = null)
         {
             if (source == null || source.shader == null) return null;
+            // Hosts construct this managed cache in field initializers. Native Unity objects
+            // must wait until renderer submission on the main thread.
+            global ??= new MaterialPropertyBlock();
+            indexed ??= new MaterialPropertyBlock();
             scratch.Clear();
             global.Clear(); indexed.Clear();
             renderer.GetPropertyBlock(global);
@@ -61,10 +64,11 @@ namespace ProjectF.Rendering
                     scratch.Add(value);
                 }
             }
-            if (sprite != null && sprite.sprite != null)
+            Sprite resolvedSprite = iconOverride != null ? iconOverride : sprite != null ? sprite.sprite : null;
+            if (sprite != null && resolvedSprite != null)
             {
                 if (source.HasProperty(MainTex)) Set(new Value { Id = MainTex,
-                    Type = ShaderPropertyType.Texture, Texture = sprite.sprite.texture });
+                    Type = ShaderPropertyType.Texture, Texture = resolvedSprite.texture });
                 if (source.HasProperty(ColorId))
                 {
                     Color tint = source.GetColor(ColorId);

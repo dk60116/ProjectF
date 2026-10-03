@@ -16,6 +16,7 @@ public interface IMapObjectUpdateTickDeadline
 /// </summary>
 public sealed class FacilitySimulationWorld :
     IMapObjectUpdateTick,
+    IMapObjectUpdateTickInterval,
     IMapObjectStagedUpdateTick,
     IMapObjectSimulationIdentity
 {
@@ -57,6 +58,9 @@ public sealed class FacilitySimulationWorld :
     private long electricDemandChangeCount;
     private long electricDemandCheckElapsedTicks;
 
+    // Absolute due buckets must be serviced on every simulation tick, even if native
+    // map objects use a larger default interval. Otherwise a missed bucket never runs.
+    public float ManagedUpdateTickIntervalSeconds => MapObjectTickManager.FixedSimulationDeltaSeconds;
     public long SimulationId => long.MaxValue - 30L;
     public int RegisteredCount => registeredCount;
     public int ScheduledCount => scheduledCount;

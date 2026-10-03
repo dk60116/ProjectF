@@ -76,12 +76,13 @@ public sealed class MiningWorld : IDisposable
             SampleTick = MapObjectTickManager.CurrentSimulationTick } });
         var miner = new MiningMachineInstance(this, slot.Index, slot.Generation, handle, prototype, placement, template);
         byKey.Add(key, miner); miner.OrderIndex = instances.Count; instances.Add(miner);
+        // Block binding can wake the miner synchronously; initialize scheduling first.
+        FacilitySimulationWorld.Register(miner, false);
         Observe(placement.occupiedCoordinates, miner); Observe(miner.OutputCoordinates, miner); Observe(placement.inputOutputState.gridCoordinates, miner);
         Vector2Int cell = Cell(miner.WorldPosition);
         if (!cells.TryGetValue(cell, out var members)) cells.Add(cell, members = new List<MiningMachineInstance>(8));
         members.Add(miner); Bind(miner); MarkerCount += miner.OutputCoordinates.Count; markersDirty = true;
         UtilityPole.InvalidateRobotArmConsumers();
-        FacilitySimulationWorld.Register(miner, false);
         miner.Wake();
         return miner;
     }

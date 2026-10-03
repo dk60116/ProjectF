@@ -28,7 +28,7 @@ foreach ($signature in @('protected override bool HasOperationalTarget(',
     $generated += (Member ($base + 'ProductionMachine.cs') $signature) + "`n"
 }
 $generated += "} public static partial class UtilityPole {`n" +
-    (Member ($base + 'UtilityPole.cs') 'public static bool TryGetElectricPowerInfo(') + "`n}"
+    (Member 'FactorioProject/Assets/Scripts/Map/UtilityPoleRuntime.cs' 'public static bool TryGetElectricPowerInfo(') + "`n}"
 $generated += "public partial class ItemInfoDescription {`n" +
     (Member 'FactorioProject/Assets/Scripts/HUD/ObjectUI/ItemInfoDescription.cs' 'private void SetDefaultStatus(') + "`n}"
 $probe = Join-Path ([IO.Path]::GetTempPath()) ('ProjectF-IOStatus-' + [Guid]::NewGuid().ToString('N'))

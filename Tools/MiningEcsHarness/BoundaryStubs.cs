@@ -31,7 +31,8 @@ public class MapObject
     public static bool IsItemAllowedByFilterMask(int item, bool initialized, IReadOnlyList<ulong> words) => item >= 0
         && (!initialized || (item >> 6) >= words.Count || (words[item >> 6] & (1UL << (item & 63))) != 0);
 }
-public class MiningMachine
+public class MiningMachine : InputOutputModule { }
+public partial class InputOutputModule
 {
     public readonly GaugeGameObject gameObject = new();
     public string ObjectName => "Electric miner";
@@ -224,3 +225,6 @@ namespace ProjectF.Benchmark
     public static class BenchmarkRuntime
     { public static bool ForceWorking; public static int FallbackItemId = 1; public static void EmitItem(TerrainGenerator terrain, int id, Vector3 point) { } public static void RecordItems(int count) { } }
 }
+
+public partial class ProductionWorld { public static ProductionWorld Current; public void FlushSaveStates() { } }
+public sealed class UtilityPoleWorld { public static UtilityPoleWorld Current; public void FlushSaveStates() { } }

@@ -11,6 +11,7 @@ public partial class InputOutputModule : InstallationObject
     public bool RecipeValid = true, TargetSelected = true, InputsReady;
     public bool InputAreaPresent = true, EnergyAvailable = true, MachinePresent = true;
     public int EnergyQueries;
+    protected bool IsBenchmarkWorking => false;
     public float UseAmount = 100000f;
     public bool HasRuntimeOutputCoordinates => runtimeOutputCoordinates.Count > 0;
     protected ItemDefinition ResolveInstalledDefinition() => MachinePresent ? new() : null;

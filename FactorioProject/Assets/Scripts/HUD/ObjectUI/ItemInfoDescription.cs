@@ -1,3 +1,4 @@
+﻿using ProjectF.Power;
 using System.Collections.Generic;
 using System.Globalization;
 using TMPro;
@@ -86,8 +87,9 @@ public class ItemInfoDescription : MonoBehaviour
     private PlantResource liveGaugePlant;
     private LoggingMachine liveGaugeLoggingMachine;
     private MiningMachineInstance liveGaugeMiner;
+    private ProductionFacilityInstance liveGaugeProduction;
     private RobotArmInstance liveGaugeRobotArm;
-    private UtilityPole liveGaugeUtilityPole;
+    private UtilityPoleRuntime liveGaugeUtilityPole;
     private LightObject liveGaugeLightObject;
     private InputOutputModule liveGaugeModule;
     private float nextProductionInfoRefreshTime;
@@ -431,6 +433,35 @@ public class ItemInfoDescription : MonoBehaviour
         SetEnergyUseRateDefaultItemSlot(0, ItemDefinition.EnergyType.Electricity, miner.Template.Watts, -1);
         RefreshMiningMachineInfo(miner);
     }
+    public void ShowProductionFacility(ProductionFacilityInstance facility)
+    {
+        BeginObjectDisplay((ResourceInstance)null);
+        liveGaugeProduction = facility;
+        RefreshProductionFacilityInfo(facility);
+    }
+    private void RefreshProductionFacilityInfo(ProductionFacilityInstance facility)
+    {
+        facility.GetObjectInfoStatus(out string status, out bool working, out bool warning);
+        SetDefaultStatus(status, working, warning);
+        if (!TrySetElectricPowerGauge(energyGauge, energyFill, energyText, facility))
+        {
+            facility.GetFuelGauge(out long current, out long capacity);
+            SetGauge(energyGauge, energyFill, energyText, capacity > 0, capacity > 0 ? (float)((double)current / capacity) : 0,
+                BurnEnergyGaugeFillColor, DeterministicSimulationUnits.ToFloat(current), DeterministicSimulationUnits.ToFloat(capacity));
+        }
+        float progress = facility.WorkProgress;
+        SetGauge(workGauge, workFill, workText, true, progress, facility.Template.WorkGaugeFillColor, progress * 100, 100, true);
+        int slot = 0;
+        var definition = facility.BoundItemDefinition;
+        for (int i = 0; i < definition.UseEnergyRequirementCount; i++)
+            if (definition.TryGetUseEnergyRequirement(i, out var energy) && energy.energyType != ItemDefinition.EnergyType.None
+                && SetEnergyUseRateDefaultItemSlot(slot, energy.energyType,
+                    ItemDefinition.ResolveUseEnergyRatePerSecond(definition, energy.energyType), -1)) slot++;
+        if (facility.TryGetFuelInputInfo(out int fuelItem, out int fuelCount, out int fuelCapacity, out int burnEnergy))
+            SetBurnEnergyInputItemSlot(energyItem, energyItemSlot, fuelItem, fuelCount, burnEnergy, fuelCapacity);
+        else ClearItemSlot(energyItem, energyItemSlot);
+        TrySetProductionMachineItemSlots(facility, slot);
+    }
     private void RefreshMiningMachineInfo(MiningMachineInstance miner)
     {
         miner.GetObjectInfoStatus(out string status, out bool working, out bool warning);
@@ -548,7 +579,7 @@ public class ItemInfoDescription : MonoBehaviour
         conveyorItemIds.Add(itemId);
     }
 
-    public void ShowUtilityPole(UtilityPole utilityPole, ResourceInstance underlyingResource = null)
+    public void ShowUtilityPole(UtilityPoleRuntime utilityPole, ResourceInstance underlyingResource = null)
     {
         BeginObjectDisplay(underlyingResource);
         liveGaugeUtilityPole = utilityPole;
@@ -922,10 +953,9 @@ public class ItemInfoDescription : MonoBehaviour
         }
     }
 
-    private bool TrySetProductionMachineItemSlots(ProductionMachine productionMachine, int defaultItemStartIndex)
+    private bool TrySetProductionMachineItemSlots(IProductionFacilityInfo productionMachine, int defaultItemStartIndex)
     {
-        if (productionMachine == null
-            || !productionMachine.TryGetObjectInfoProductionIngredientCount(out int ingredientCount))
+        if (productionMachine == null)
         {
             ClearItemSlot(inputItem, inputItemSlot);
             ClearItemSlot(outputItem, outputItemSlot);
@@ -935,6 +965,12 @@ public class ItemInfoDescription : MonoBehaviour
             }
             RefreshProductionFluidGauges(null);
             return false;
+        }
+
+        if (!productionMachine.TryGetObjectInfoProductionIngredientCount(out int ingredientCount))
+        {
+            ingredientCount = 0;
+            ClearItemSlot(inputItem, inputItemSlot);
         }
 
         bool displayedAny = false;
@@ -964,7 +1000,7 @@ public class ItemInfoDescription : MonoBehaviour
                     ingredientRequiredCount,
                     ingredientAreaCount,
                     ingredientAreaCapacity,
-                    ResolveModuleFluidTemperature(productionMachine, ingredientItemId),
+                    productionMachine.GetStoredFluidTemperatureCelsius(ingredientItemId),
                     hasFluidAmounts ? storedLiters : (float?)null,
                     hasFluidAmounts ? requiredLiters : (float?)null);
             }
@@ -977,7 +1013,7 @@ public class ItemInfoDescription : MonoBehaviour
                     ingredientRequiredCount,
                     ingredientAreaCount,
                     ingredientAreaCapacity,
-                    ResolveModuleFluidTemperature(productionMachine, ingredientItemId),
+                    productionMachine.GetStoredFluidTemperatureCelsius(ingredientItemId),
                     hasFluidAmounts ? storedLiters : (float?)null,
                     hasFluidAmounts ? requiredLiters : (float?)null);
                 previousIngredientRoot = GetListItem(defaultItem, nextDefaultItemIndex);
@@ -1007,8 +1043,12 @@ public class ItemInfoDescription : MonoBehaviour
                 outputAreaCapacity,
                 true,
                 true,
-                ResolveModuleFluidTemperature(productionMachine, outputItemId));
+                productionMachine.GetStoredFluidTemperatureCelsius(outputItemId));
             displayedAny = true;
+        }
+        else
+        {
+            ClearItemSlot(outputItem, outputItemSlot);
         }
 
         for (int i = nextDefaultItemIndex; defaultItem != null && i < defaultItem.Count; i++)
@@ -1019,7 +1059,7 @@ public class ItemInfoDescription : MonoBehaviour
         return displayedAny;
     }
 
-    private void RefreshProductionFluidGauges(ProductionMachine machine)
+    private void RefreshProductionFluidGauges(IProductionFacilityInfo machine)
     {
         int visibleCount = 0;
         GameObject previousGaugeRoot = defaultGauge;
@@ -1242,7 +1282,7 @@ public class ItemInfoDescription : MonoBehaviour
         nextPlantInfoRefreshTime = 0f;
         liveGaugePlant = null;
         liveGaugeLoggingMachine = null;
-        liveGaugeRobotArm = null; liveGaugeMiner = null;
+        liveGaugeRobotArm = null; liveGaugeMiner = null; liveGaugeProduction = null;
         liveGaugeUtilityPole = null;
         liveGaugeLightObject = null;
         liveGaugeModule = null;
@@ -1290,7 +1330,7 @@ public class ItemInfoDescription : MonoBehaviour
             return;
         }
 
-        if (liveGaugeUtilityPole != null && liveGaugeUtilityPole.gameObject.activeInHierarchy)
+        if (liveGaugeUtilityPole != null && liveGaugeUtilityPole.IsRuntimeActive)
         {
             RefreshUtilityPoleGaugeTarget(liveGaugeUtilityPole);
             return;
@@ -1317,6 +1357,7 @@ public class ItemInfoDescription : MonoBehaviour
             return;
         }
 
+        if (liveGaugeProduction != null && liveGaugeProduction.IsRuntimeActive) { RefreshProductionFacilityInfo(liveGaugeProduction); return; }
         if (liveGaugeMiner != null && liveGaugeMiner.IsRuntimeActive) { RefreshMiningMachineInfo(liveGaugeMiner); return; }
         if (liveGaugeRobotArm != null && liveGaugeRobotArm.IsRuntimeActive)
         {
@@ -1961,7 +2002,7 @@ public class ItemInfoDescription : MonoBehaviour
                 : string.Empty);
     }
 
-    private void RefreshUtilityPoleGaugeTarget(UtilityPole utilityPole)
+    private void RefreshUtilityPoleGaugeTarget(UtilityPoleRuntime utilityPole)
     {
         float productionKilowatts = 0f;
         float requiredKilowatts = 0f;

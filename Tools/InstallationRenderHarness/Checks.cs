@@ -22,7 +22,11 @@ static class Checks
         shader.Add("_MainTex", UnityEngine.Rendering.ShaderPropertyType.Texture);
         shader.Add("_Flags", UnityEngine.Rendering.ShaderPropertyType.Int);
         var material = new Material { shader = shader, name = "shared" };
-        var host = new InstallationBatchRenderer(); Method(host, "Awake")();
+        MaterialPropertyBlock.CreationAllowed = false;
+        var host = new InstallationBatchRenderer();
+        using (var constructorCache = new InstallationMaterialVariants()) { }
+        Check(true, "Host and shared material cache constructors call no native Unity API");
+        MaterialPropertyBlock.CreationAllowed = true; Method(host, "Awake")();
         Action render = Method(host, "LateUpdate");
         var owner = Make(material); InstallationBatchRenderer.Register(owner);
         var body = (MeshRenderer)owner.Renderers[0];

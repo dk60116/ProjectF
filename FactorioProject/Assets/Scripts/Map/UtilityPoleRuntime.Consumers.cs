@@ -1,7 +1,9 @@
-using System.Collections.Generic;
+﻿using System.Collections.Generic;
 using UnityEngine;
 
-public partial class UtilityPole
+namespace ProjectF.Power
+{
+public sealed partial class UtilityPoleRuntime
 {
     private sealed class RobotArmElectricBinding
     {
@@ -22,6 +24,7 @@ public partial class UtilityPole
     private static bool robotArmConsumersDirty = true;
     private static RobotArmWorld robotArmConsumerWorld;
     private static MiningWorld miningConsumerWorld;
+    private static ProductionWorld productionConsumerWorld;
     private static readonly Dictionary<IDataElectricConsumer, RobotArmElectricBinding> robotArmBindings =
         new Dictionary<IDataElectricConsumer, RobotArmElectricBinding>();
     private static readonly Stack<RobotArmElectricBinding> robotArmBindingPool =
@@ -68,15 +71,16 @@ public partial class UtilityPole
     private static void RefreshRobotArmConsumers()
     {
         RobotArmWorld world = RobotArmWorld.Current;
-        if (!robotArmConsumersDirty && robotArmConsumerWorld == world && miningConsumerWorld == MiningWorld.Current)
+        if (!robotArmConsumersDirty && robotArmConsumerWorld == world && miningConsumerWorld == MiningWorld.Current && productionConsumerWorld == ProductionWorld.Current)
         {
             return;
         }
 
-        bool worldChanged = robotArmConsumerWorld != world || miningConsumerWorld != MiningWorld.Current;
+        bool worldChanged = robotArmConsumerWorld != world || miningConsumerWorld != MiningWorld.Current || productionConsumerWorld != ProductionWorld.Current;
         robotArmConsumersDirty = false;
         robotArmConsumerWorld = world;
         miningConsumerWorld = MiningWorld.Current;
+        productionConsumerWorld = ProductionWorld.Current;
         if (worldChanged)
         {
             robotArmPowerBindingCacheHits = 0L;
@@ -99,6 +103,9 @@ public partial class UtilityPole
         if (miningConsumerWorld != null)
             for (int i = 0; i < miningConsumerWorld.Instances.Count; i++)
                 robotArmOrderScratch.Add(miningConsumerWorld.Instances[i]);
+        if (productionConsumerWorld != null)
+            for (int i = 0; i < productionConsumerWorld.Instances.Count; i++)
+                robotArmOrderScratch.Add(productionConsumerWorld.Instances[i]);
         robotArmOrderScratch.Sort(CompareRobotArmSimulationOrder);
         for (int armIndex = 0; armIndex < robotArmOrderScratch.Count; armIndex++)
         {
@@ -108,14 +115,14 @@ public partial class UtilityPole
             for (int coordinateIndex = 0; coordinateIndex < occupiedCoordinates.Count; coordinateIndex++)
             {
                 Vector2Int coordinate = occupiedCoordinates[coordinateIndex];
-                if (!supplyPolesByCoordinate.TryGetValue(coordinate, out List<UtilityPole> poles))
+                if (!supplyPolesByCoordinate.TryGetValue(coordinate, out List<UtilityPoleRuntime> poles))
                 {
                     continue;
                 }
 
                 for (int poleIndex = 0; poleIndex < poles.Count; poleIndex++)
                 {
-                    UtilityPole pole = poles[poleIndex];
+                    UtilityPoleRuntime pole = poles[poleIndex];
                     if (pole != null && electricNetworkByPole.TryGetValue(pole, out ElectricNetwork network))
                     {
                         robotArmNetworkScratch.Add(network);
@@ -284,6 +291,7 @@ public partial class UtilityPole
             ? RobotArmWorld.Current.Instances : System.Array.Empty<IDataElectricConsumer>();
         RenderDataConsumerPowerLines(instances, previewPolesOnly);
         if (MiningWorld.Current != null) RenderDataConsumerPowerLines(MiningWorld.Current.Instances, previewPolesOnly);
+        if (ProductionWorld.Current != null) RenderDataConsumerPowerLines(ProductionWorld.Current.Instances, previewPolesOnly);
     }
     private static void RenderDataConsumerPowerLines(IReadOnlyList<IDataElectricConsumer> instances, bool previewPolesOnly)
     {
@@ -296,7 +304,7 @@ public partial class UtilityPole
                 || !TryResolveRobotArmPowerLinePole(
                     arm,
                     previewPolesOnly,
-                    out UtilityPole supplyingPole))
+                    out UtilityPoleRuntime supplyingPole))
             {
                 continue;
             }
@@ -315,7 +323,7 @@ public partial class UtilityPole
     private static bool TryResolveRobotArmPowerLinePole(
         IDataElectricConsumer arm,
         bool previewPolesOnly,
-        out UtilityPole supplyingPole)
+        out UtilityPoleRuntime supplyingPole)
     {
         supplyingPole = null;
         if (arm == null || !arm.IsRuntimeActive)
@@ -330,14 +338,14 @@ public partial class UtilityPole
         for (int coordinateIndex = 0; coordinateIndex < occupiedCoordinates.Count; coordinateIndex++)
         {
             Vector2Int coordinate = occupiedCoordinates[coordinateIndex];
-            if (!supplyPolesByCoordinate.TryGetValue(coordinate, out List<UtilityPole> poles))
+            if (!supplyPolesByCoordinate.TryGetValue(coordinate, out List<UtilityPoleRuntime> poles))
             {
                 continue;
             }
 
             for (int poleIndex = 0; poleIndex < poles.Count; poleIndex++)
             {
-                UtilityPole pole = poles[poleIndex];
+                UtilityPoleRuntime pole = poles[poleIndex];
                 if (pole != null && consumerPoleScratch.Add(pole))
                 {
                     TrySelectConsumerPowerLinePole(
@@ -351,9 +359,9 @@ public partial class UtilityPole
 
         if (previewPolesOnly)
         {
-            foreach (KeyValuePair<UtilityPole, PreviewPoleRuntime> entry in previewPoleRuntimes)
+            foreach (KeyValuePair<UtilityPoleRuntime, PreviewPoleRuntime> entry in previewPoleRuntimes)
             {
-                UtilityPole previewPole = entry.Key;
+                UtilityPoleRuntime previewPole = entry.Key;
                 if (!IsValidPreviewPole(previewPole)
                     || !consumerPoleScratch.Add(previewPole)
                     || !PoleSuppliesRobotArm(previewPole, arm))
@@ -374,7 +382,7 @@ public partial class UtilityPole
                && (!previewPolesOnly || IsPreviewPole(supplyingPole));
     }
 
-    private static bool PoleSuppliesRobotArm(UtilityPole pole, IDataElectricConsumer arm)
+    private static bool PoleSuppliesRobotArm(UtilityPoleRuntime pole, IDataElectricConsumer arm)
     {
         if (pole == null
             || arm == null
@@ -485,6 +493,7 @@ public partial class UtilityPole
         int woken = 0; candidates = 0;
         WakeDataConsumers(RobotArmWorld.Current?.Instances, ref candidates, ref woken);
         WakeDataConsumers(MiningWorld.Current?.Instances, ref candidates, ref woken);
+        WakeDataConsumers(ProductionWorld.Current?.Instances, ref candidates, ref woken);
         return woken;
     }
     private static void WakeDataConsumers(IReadOnlyList<IDataElectricConsumer> consumers, ref int candidates, ref int woken)
@@ -668,4 +677,6 @@ public partial class UtilityPole
             "RuntimeWakePending",
             electricRuntimeWakePending ? 1 : 0);
     }
+}
+
 }

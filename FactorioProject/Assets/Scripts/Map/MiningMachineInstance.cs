@@ -5,7 +5,7 @@ using ProjectF.MapObjects;
 using ProjectF.Simulation;
 
 public sealed class MiningMachineInstance : IMapObjectTarget, IDataElectricConsumer,
-    IMapObjectUpdateTick, IMapObjectUpdateTickDeadline
+    IMapObjectUpdateTick, IMapObjectUpdateTickDeadline, IDataItemProducer
 {
     internal readonly MiningWorld World;
     internal readonly int Index;
@@ -16,6 +16,9 @@ public sealed class MiningMachineInstance : IMapObjectTarget, IDataElectricConsu
     private Bounds cachedCullBounds;
     private bool geometryCached;
     private ref MiningWorld.State Data => ref World.GetState(Index, Generation);
+    TerrainGenerator IDataItemProducer.Terrain => World.Terrain;
+    BlockStateStore IDataItemProducer.Store => World.Store;
+    InputOutputModule IDataItemProducer.OutputPrototype => Prototype;
     public MapObjectHandle Handle { get; }
     public MiningMachine Prototype { get; }
     public BlockStateStore.InstallationSaveState Placement { get; }

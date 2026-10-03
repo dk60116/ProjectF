@@ -6,6 +6,7 @@ New-Item -ItemType Directory -Path $probe | Out-Null
 $files = @((Join-Path $PSScriptRoot 'Checks.cs'), (Join-Path $PSScriptRoot 'UnityBoundaries.cs'),
     (Join-Path $scripts 'Rendering/InstallationBatchRenderer.cs'),
     (Join-Path $scripts 'Rendering/InstallationMaterialVariants.cs'),
+    (Join-Path $scripts 'Rendering/SpriteMeshCache.cs'),
     (Join-Path $scripts 'Rendering/InstallationRigidAnimationTemplate.cs'),
     (Join-Path $scripts 'MapObjects/MapObjectHandle.cs'))
 $compile = ($files | ForEach-Object { '<Compile Include="' + [Security.SecurityElement]::Escape($_) + '" />' }) -join "`n"

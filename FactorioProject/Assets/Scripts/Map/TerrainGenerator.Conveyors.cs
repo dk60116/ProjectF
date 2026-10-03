@@ -4470,6 +4470,7 @@ public partial class TerrainGenerator : MonoBehaviour
 
         RobotArmWorld.AppendProfilerCounters();
         MiningWorld.AppendProfilerCounters();
+        ProductionWorld.AppendProfilerCounters();
         PipeWorld.AppendProfilerCounters();
         BuildingWorld.AppendProfilerCounters();
         AppendFluidJobRuntimeProfilerCounters();

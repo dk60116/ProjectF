@@ -91,3 +91,5 @@ public abstract class InputOutputModule : InstallationObject, IMapObjectUpdateTi
 
 public interface IDataElectricConsumer { }
 public sealed class MiningWorld { public static MiningWorld Current => null; public void Wake(UnityEngine.Vector2Int coordinate) { } }
+
+public sealed class ProductionWorld { public static ProductionWorld Current => null; public void Wake(UnityEngine.Vector2Int coordinate) { } }

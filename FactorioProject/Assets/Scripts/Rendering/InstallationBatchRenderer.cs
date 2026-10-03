@@ -34,7 +34,7 @@ namespace ProjectF.Rendering
         private readonly List<InstallationObject> visible = new List<InstallationObject>(256);
         private readonly List<Renderer> rendererScratch = new List<Renderer>(16);
         private readonly List<Material> materialScratch = new List<Material>(4);
-        private readonly Dictionary<Sprite, Mesh> spriteMeshes = new Dictionary<Sprite, Mesh>();
+        private readonly SpriteMeshCache spriteMeshes = new SpriteMeshCache();
         private readonly VirtualRenderBatchCollection batches = new VirtualRenderBatchCollection();
         private readonly InstallationMaterialVariants materials = new InstallationMaterialVariants();
         private readonly Dictionary<MapObjectArchetype, InstallationRigidAnimationTemplate> animations =
@@ -216,7 +216,7 @@ namespace ProjectF.Rendering
                 }
                 // The source stays available to gameplay adapters; only its native draw is suppressed.
                 renderer.forceRenderingOff = true;
-                Mesh mesh = part.Sprite != null ? GetSpriteMesh(part.Sprite.sprite) : part.Filter.sharedMesh;
+                Mesh mesh = part.Sprite != null ? spriteMeshes.Get(part.Sprite.sprite) : part.Filter.sharedMesh;
                 if (mesh == null) continue;
                 Matrix4x4 matrix = renderer.transform.localToWorldMatrix;
                 if (record.Animation != null && part.AnimationNode >= 0)
@@ -234,21 +234,6 @@ namespace ProjectF.Rendering
                     batches.AddMatrix(key, matrix); MatrixCount++;
                 }
             }
-        }
-        private Mesh GetSpriteMesh(Sprite sprite)
-        {
-            if (sprite == null) return null;
-            if (spriteMeshes.TryGetValue(sprite, out Mesh mesh)) return mesh;
-            Vector2[] source = sprite.vertices;
-            var vertices = new Vector3[source.Length]; var normals = new Vector3[source.Length];
-            var colors = new Color32[source.Length];
-            for (int i = 0; i < source.Length; i++)
-            { vertices[i] = source[i]; normals[i] = Vector3.back; colors[i] = new Color32(255, 255, 255, 255); }
-            ushort[] indices = sprite.triangles; var triangles = new int[indices.Length];
-            for (int i = 0; i < indices.Length; i++) triangles[i] = indices[i];
-            mesh = new Mesh { name = sprite.name + " (installation sprite)", vertices = vertices,
-                normals = normals, colors32 = colors, uv = sprite.uv, triangles = triangles };
-            mesh.RecalculateBounds(); spriteMeshes.Add(sprite, mesh); return mesh;
         }
         private void OnEnable()
         {
@@ -279,8 +264,7 @@ namespace ProjectF.Rendering
                 if (record.Animation != null) RefreshWorkAnimator(record);
             }
             records.Clear(); animations.Clear(); SharedAnimationCount = 0; batches.Dispose(); materials.Dispose();
-            foreach (Mesh mesh in spriteMeshes.Values) InstallationMaterialVariants.Destroy(mesh);
-            spriteMeshes.Clear();
+            spriteMeshes.Dispose();
         }
         public static void AppendProfilerCounters()
         {

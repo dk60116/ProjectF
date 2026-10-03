@@ -1,3 +1,4 @@
+﻿using ProjectF.Power;
 using System.Collections.Generic;
 using DG.Tweening;
 using ProjectF.MapObjects;
@@ -2187,6 +2188,12 @@ public class InstallationPlacementController : MonoBehaviour
             anchorCoordinate = splitterRecord.AnchorCoordinate;
             return true;
         }
+        if (UtilityPoleWorld.Current != null && UtilityPoleWorld.Current.TryRaycast(ray, maxDistance, out var pole, out _)
+            && TryMaterializeDataOnlyUtilityPoleForEditing(pole, out installationObject))
+        { anchorCoordinate = pole.AnchorCoordinate; return true; }
+        if (ProductionWorld.Current != null && ProductionWorld.Current.TryRaycast(ray, maxDistance, out var production, out _)
+            && TryMaterializeDataOnlyProductionForEditing(production, out installationObject))
+        { anchorCoordinate = production.AnchorCoordinate; return true; }
         if (MiningWorld.Current != null && MiningWorld.Current.TryRaycast(ray, maxDistance, out var miner, out _)
             && TryMaterializeDataOnlyMiningForEditing(miner, out installationObject))
         { anchorCoordinate = miner.AnchorCoordinate; return true; }
@@ -2428,6 +2435,12 @@ public class InstallationPlacementController : MonoBehaviour
             return true;
         }
 
+        if (block.MapObject is UtilityPoleRuntime dataPole && dataPole.IsRuntimeActive
+            && TryMaterializeDataOnlyUtilityPoleForEditing(dataPole, out installationObject))
+        { anchorCoordinate = dataPole.AnchorCoordinate; return true; }
+        if (block.MapObject is ProductionFacilityInstance dataProduction && dataProduction.IsRuntimeActive
+            && TryMaterializeDataOnlyProductionForEditing(dataProduction, out installationObject))
+        { anchorCoordinate = dataProduction.AnchorCoordinate; return true; }
         if (block.MapObject is MiningMachineInstance dataMiner && dataMiner.IsRuntimeActive
             && TryMaterializeDataOnlyMiningForEditing(dataMiner, out installationObject))
         { anchorCoordinate = dataMiner.AnchorCoordinate; return true; }
@@ -2640,7 +2653,7 @@ public class InstallationPlacementController : MonoBehaviour
             SetUtilityPoleRangeVisualRequested(selectedEditableInstallation, false);
             SetSprinklerRangeVisualRequested(selectedEditableInstallation, false);
             ClearSelectedEditableTint();
-            RestoreDataMiningEditorProxy(selectedEditableInstallation);
+            RestoreDataFacilityEditorProxy(selectedEditableInstallation);
         }
 
         selectedEditableInstallation = installationObject;
@@ -2660,21 +2673,24 @@ public class InstallationPlacementController : MonoBehaviour
         SetUtilityPoleRangeVisualRequested(selectedEditableInstallation, false);
         SetSprinklerRangeVisualRequested(selectedEditableInstallation, false);
         ClearSelectedEditableTint();
-        RestoreDataMiningEditorProxy(selectedEditableInstallation);
+        RestoreDataFacilityEditorProxy(selectedEditableInstallation);
         selectedEditableInstallation = null;
         selectedEditableAnchorCoordinate = Vector2Int.zero;
         RefreshInstallOrEditWorkableRangeVisualRequest();
         RefreshMapEditButtonState();
     }
 
-    private void RestoreDataMiningEditorProxy(InstallationObject installation)
+    private void RestoreDataFacilityEditorProxy(InstallationObject installation)
     {
-        if (!(installation is MiningMachine miner) || !MiningWorld.Supports(miner)
+        if (!(installation is InputOutputModule) && !(installation is UtilityPole)
             || activeInstallationEditSession != null && activeInstallationEditSession.originalInstallation == installation
             || !installation.TryGetPlacementRuntime(out _, out _)) return;
         TerrainGenerator terrain = ResolveInstallPreviewTerrain();
-        if (terrain != null && terrain.ConvertMiningPresentation(miner, null, out _))
-            terrain.ReleaseInstallationObject(miner);
+        if (terrain == null) return;
+        bool converted = installation is UtilityPole pole && terrain.ConvertUtilityPolePresentation(pole, null, out _)
+            || installation is MiningMachine miner && terrain.ConvertMiningPresentation(miner, null, out _)
+            || installation is InputOutputModule module && terrain.ConvertProductionPresentation(module, null, out _);
+        if (converted) terrain.ReleaseInstallationObject(installation);
     }
 
     private void CleanupSelectedEditableInstallation()
@@ -21762,7 +21778,7 @@ public class InstallationPlacementController : MonoBehaviour
         return false;
     }
 
-    private Sprite ResolveFallbackPipePassMarkerIcon()
+    internal Sprite ResolveFallbackPipePassMarkerIcon()
     {
         if (pipePassMarkerIcon != null)
         {
@@ -21793,7 +21809,7 @@ public class InstallationPlacementController : MonoBehaviour
         return pipePassMarkerIcon;
     }
 
-    private Sprite ResolveInputEnergyMarkerIcon(MapObject installedObject)
+    internal Sprite ResolveInputEnergyMarkerIcon(MapObject installedObject)
     {
         ItemDefinition installationDefinition = ResolveItemDefinition(installedObject);
         if (!ItemDefinition.TryGetPrimaryUseEnergyRequirement(installationDefinition, out _))
@@ -33756,6 +33772,42 @@ public class InstallationPlacementController : MonoBehaviour
         return occupiedCoordinates != null && occupiedCoordinates.Count > 0;
     }
 
+    public bool TryUpgradeDataUtilityPole(UtilityPoleRuntime current, ItemDefinition definition, out IMapObjectTarget upgraded)
+    {
+        upgraded = null;
+        UtilityPole.BeginTopologyRefreshBatch();
+        try
+        {
+            if (!TryMaterializeDataOnlyUtilityPoleForEditing(current, out var proxy)) return false;
+            if (!TryUpgradeInstalledObject(proxy, definition, out var replacement))
+            { RestoreDataFacilityEditorProxy(proxy); return false; }
+            if (UtilityPoleWorld.Current != null && UtilityPoleWorld.Current.TryGet(current.StorageKey, out var entity))
+            { upgraded = entity; if (replacement != null) ResolveInstallPreviewTerrain()?.ReleaseInstallationObject(replacement); }
+            else upgraded = replacement;
+            return upgraded != null;
+        }
+        finally { UtilityPole.EndTopologyRefreshBatch(false); }
+    }
+
+    public bool TryUpgradeDataProduction(ProductionFacilityInstance current, ItemDefinition definition, out IMapObjectTarget upgraded)
+    {
+        upgraded = null;
+        if (!TryMaterializeDataOnlyProductionForEditing(current, out var proxy)) return false;
+        if (!TryUpgradeInstalledObject(proxy, definition, out var replacement))
+        {
+            RestoreDataFacilityEditorProxy(proxy);
+            return false;
+        }
+        var terrain = ResolveInstallPreviewTerrain();
+        if (ProductionWorld.Current != null && ProductionWorld.Current.TryGet(current.StorageKey, out var entity))
+        {
+            upgraded = entity;
+            if (replacement != null) terrain.ReleaseInstallationObject(replacement);
+        }
+        else upgraded = replacement;
+        return upgraded != null;
+    }
+
     public bool TryUpgradeInstalledObject(
         InstallationObject currentObject,
         ItemDefinition targetDefinition,
@@ -38350,6 +38402,27 @@ public class InstallationPlacementController : MonoBehaviour
         return true;
     }
 
+    private bool TryMaterializeDataOnlyUtilityPoleForEditing(UtilityPoleRuntime pole, out InstallationObject installationObject)
+    {
+        installationObject = null; TerrainGenerator terrain = ResolveInstallPreviewTerrain();
+        if (terrain == null || pole == null || !pole.IsRuntimeActive) return false;
+        var proxy = terrain.CreateInstallationObject(pole.Prototype, terrain.transform) as UtilityPole;
+        if (proxy == null) return false;
+        UtilityPole.BeginTopologyRefreshBatch();
+        try
+        {
+            pole.Persist(); proxy.transform.SetPositionAndRotation(pole.WorldPosition, pole.WorldRotation);
+            proxy.transform.localScale = pole.Template.Scale;
+            pole.World.Remove(pole.StorageKey);
+            ConfigureInstalledObjectRuntime(proxy, pole.AnchorCoordinate, pole.RuntimeQuarterTurns,
+                placementSequence: pole.SimulationId, occupiedCoordinatesOverride: pole.RuntimeOccupiedCoordinates);
+            proxy.ApplyItemFilterMask(pole.Placement.itemFilterMaskWords, pole.Placement.itemFilterMaskInitialized);
+            foreach (var coordinate in pole.RuntimeOccupiedCoordinates)
+                if (terrain.TryGetLoadedBlock(coordinate, out var block)) block.SetMapObject(proxy);
+            installationObject = proxy; return true;
+        }
+        finally { UtilityPole.EndTopologyRefreshBatch(false); }
+    }
     private bool TryMaterializeDataOnlyMiningForEditing(MiningMachineInstance miner, out InstallationObject installationObject)
     {
         installationObject = null;
@@ -38366,6 +38439,27 @@ public class InstallationPlacementController : MonoBehaviour
         proxy.ApplyItemFilterMask(miner.Placement.itemFilterMaskWords, miner.Placement.itemFilterMaskInitialized);
         miner.World.Remove(miner.StorageKey);
         foreach (var coordinate in miner.RuntimeOccupiedCoordinates)
+            if (terrain.TryGetLoadedBlock(coordinate, out var block)) block.SetMapObject(proxy);
+        installationObject = proxy;
+        return true;
+    }
+
+    private bool TryMaterializeDataOnlyProductionForEditing(ProductionFacilityInstance facility, out InstallationObject installationObject)
+    {
+        installationObject = null;
+        TerrainGenerator terrain = ResolveInstallPreviewTerrain();
+        if (terrain == null || facility == null || !facility.IsRuntimeActive) return false;
+        facility.Persist();
+        var proxy = terrain.CreateInstallationObject(facility.Prototype, terrain.transform) as InputOutputModule;
+        if (proxy == null) return false;
+        proxy.transform.SetPositionAndRotation(facility.WorldPosition, facility.WorldRotation);
+        proxy.transform.localScale = facility.Template.Scale;
+        ConfigureInstalledObjectRuntime(proxy, facility.AnchorCoordinate, facility.Placement.quarterTurns,
+            placementSequence: facility.SimulationId, occupiedCoordinatesOverride: facility.RuntimeOccupiedCoordinates);
+        proxy.ApplyPersistentState(facility.Placement.inputOutputState);
+        proxy.ApplyItemFilterMask(facility.Placement.itemFilterMaskWords, facility.Placement.itemFilterMaskInitialized);
+        facility.World.Remove(facility.StorageKey);
+        foreach (var coordinate in facility.RuntimeOccupiedCoordinates)
             if (terrain.TryGetLoadedBlock(coordinate, out var block)) block.SetMapObject(proxy);
         installationObject = proxy;
         return true;
@@ -41199,10 +41293,19 @@ public class InstallationPlacementController : MonoBehaviour
         }
 
         TerrainGenerator terrain = ResolveInstallPreviewTerrain();
+        if (installationObject is UtilityPole polePresentation && terrain != null
+            && terrain.ConvertUtilityPolePresentation(polePresentation, sourcePrefab as UtilityPole, out var registeredPole))
+        { dataOnlyPresentation = new DataOnlyPlacementPresentation(registeredPole); return true; }
         if (installationObject is MiningMachine miningPresentation && terrain != null
             && terrain.ConvertMiningPresentation(miningPresentation, sourcePrefab as MiningMachine, out var registeredMiner))
         {
             dataOnlyPresentation = new DataOnlyPlacementPresentation(registeredMiner);
+            return true;
+        }
+        if (installationObject is InputOutputModule productionPresentation && terrain != null
+            && terrain.ConvertProductionPresentation(productionPresentation, sourcePrefab as InputOutputModule, out var registeredProduction))
+        {
+            dataOnlyPresentation = new DataOnlyPlacementPresentation(registeredProduction);
             return true;
         }
         if (installationObject is RobotArm armPresentation && terrain != null
@@ -41324,10 +41427,12 @@ public class InstallationPlacementController : MonoBehaviour
         private readonly RobotArmInstance robotArm;
         private readonly BuildingRuntimeRecord building;
         private readonly MiningMachineInstance miner;
+        private readonly ProductionFacilityInstance production;
+        private readonly UtilityPoleRuntime pole;
 
         internal DataOnlyPlacementPresentation(ConveyorRuntimeRecord conveyor)
-        {
-            miner = null;
+        { pole = null;
+            miner = null; production = null;
             this.conveyor = conveyor;
             pipe = null;
             robotArm = null;
@@ -41335,38 +41440,46 @@ public class InstallationPlacementController : MonoBehaviour
         }
 
         internal DataOnlyPlacementPresentation(PipeRuntimeRecord pipe)
-        {
+        { pole = null;
             conveyor = null;
-            miner = null;
+            miner = null; production = null;
             this.pipe = pipe;
             robotArm = null;
             building = null;
         }
 
         internal DataOnlyPlacementPresentation(RobotArmInstance robotArm)
-        {
+        { pole = null;
             conveyor = null;
             pipe = null;
-            miner = null;
+            miner = null; production = null;
             this.robotArm = robotArm;
             building = null;
         }
 
         internal DataOnlyPlacementPresentation(BuildingRuntimeRecord building)
-        {
+        { pole = null;
             conveyor = null;
             pipe = null;
             robotArm = null;
-            miner = null;
+            miner = null; production = null;
             this.building = building;
         }
 
         internal DataOnlyPlacementPresentation(MiningMachineInstance miner)
-        { this.miner = miner; conveyor = null; pipe = null; robotArm = null; building = null; }
+        { pole = null; production = null; this.miner = miner; conveyor = null; pipe = null; robotArm = null; building = null; }
+
+        internal DataOnlyPlacementPresentation(ProductionFacilityInstance production)
+        { pole = null; this.production = production; miner = null; conveyor = null; pipe = null; robotArm = null; building = null; }
+
+        internal DataOnlyPlacementPresentation(UtilityPoleRuntime pole)
+        { this.pole = pole; production = null; miner = null; conveyor = null; pipe = null; robotArm = null; building = null; }
 
         internal void SetSuppressed(bool suppressed)
         {
-            if (miner != null) miner.PlacementPresentationSuppressed = suppressed;
+            if (pole != null) pole.PlacementPresentationSuppressed = suppressed;
+            else if (production != null) production.PlacementPresentationSuppressed = suppressed;
+            else if (miner != null) miner.PlacementPresentationSuppressed = suppressed;
             else if (conveyor != null)
             {
                 ConveyorWorld.Current?.SetPlacementPresentationSuppressed(conveyor, suppressed);
@@ -41387,7 +41500,9 @@ public class InstallationPlacementController : MonoBehaviour
 
         internal void SetScale(float scale)
         {
-            if (miner != null) miner.PlacementPresentationScale = Mathf.Max(0, scale);
+            if (pole != null) pole.PlacementPresentationScale = Mathf.Max(0, scale);
+            else if (production != null) production.PlacementPresentationScale = Mathf.Max(0, scale);
+            else if (miner != null) miner.PlacementPresentationScale = Mathf.Max(0, scale);
             else if (conveyor != null)
             {
                 ConveyorWorld.Current?.SetPlacementPresentationScale(conveyor, scale);

@@ -118,6 +118,8 @@ public partial class InstallationObject : MapObject, IMapObjectSimulationIdentit
             : (100 - clampedDistance) * FluidPressureLossPerPipe;
     }
 
+    internal static float FluidPressureRetention(int pipeDistance) => CalculateFluidPressureRetention(pipeDistance);
+
     public const InstallationMapFilter DefaultMapFilter =
         InstallationMapFilter.Ground
         | InstallationMapFilter.Ore
@@ -692,13 +694,14 @@ public partial class InstallationObject : MapObject, IMapObjectSimulationIdentit
             LimitIncomingFluidLiters(fluidItemId, requestedLiters),
             0f,
             requestedLiters);
-        if (limitedRequestedLiters <= 0.0001f)
+        if (limitedRequestedLiters <= 0f)
         {
             return false;
         }
 
         long requestedUnits = DeterministicSimulationUnits.FromFloat(limitedRequestedLiters);
         long acceptedUnits = Math.Min(requestedUnits, availableUnits);
+        if (acceptedUnits <= 0L) return false;
         acceptedLiters = DeterministicSimulationUnits.ToFloat(acceptedUnits);
         storedFluidUnits += acceptedUnits;
         if (acceptedUnits > 0L && fluidItemId >= 0)

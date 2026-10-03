@@ -85,10 +85,13 @@ public class Pipe : InstallationObject
         internal readonly Dictionary<InstallationObject, Pump> StoragePumps = new Dictionary<InstallationObject, Pump>();
         internal readonly Dictionary<Pump, int> PumpDistances = new Dictionary<Pump, int>();
         internal readonly Dictionary<Pump, float> PumpRates = new Dictionary<Pump, float>();
+        internal bool TraverseAsInput = true;
+        internal readonly Dictionary<ProductionFacilityInstance, (int Distance, Pump Pump)> DataSources = new Dictionary<ProductionFacilityInstance, (int, Pump)>();
         internal Pump CurrentPump;
 
         public void Reset()
         {
+            DataSources.Clear();
             RoutePumps.Clear();
             SourcePumps.Clear();
             StoragePumps.Clear();
@@ -531,7 +534,7 @@ public class Pipe : InstallationObject
                 // pressure section on the inspected side.
                 for (int passIndex = 0; passIndex < searchContext.PumpPasses.Count; passIndex++)
                 {
-                    if (!searchContext.PumpPasses[passIndex].Pump.AllowsRuntimeFluidTraversal(coordinate, true)) continue;
+                    if (!searchContext.PumpPasses[passIndex].Pump.AllowsRuntimeFluidTraversal(coordinate, searchContext.TraverseAsInput)) continue;
                     EnqueueObjectInfoFluidSearchCoordinate(searchContext,
                         searchContext.PumpPasses[passIndex].OtherCoordinate,
                         FreezeObjectInfoPressureDistance(pipeDistance), searchContext.PumpPasses[passIndex].Pump);
@@ -737,9 +740,9 @@ public class Pipe : InstallationObject
             for (int j = 0; j < context.PumpModules.Count; j++)
             {
                 if (context.PumpModules[j] is Pump candidate
-                    && !source.AllowsRuntimeFluidTraversal(coordinate, true)
+                    && !source.AllowsRuntimeFluidTraversal(coordinate, context.TraverseAsInput)
                     && candidate.TryGetRuntimeInterlockedEndpoint(source, coordinate, out Vector2Int endpoint)
-                    && candidate.AllowsRuntimeFluidTraversal(endpoint, true))
+                    && candidate.AllowsRuntimeFluidTraversal(endpoint, context.TraverseAsInput))
                 {
                     EnqueueObjectInfoFluidSearchCoordinate(context, endpoint, FreezeObjectInfoPressureDistance(pipeDistance), candidate);
                 }
@@ -748,7 +751,7 @@ public class Pipe : InstallationObject
         context.PumpModules.Clear();
     }
 
-    private static void RecordPumpDistance(FluidNetworkSearchContext context, Pump pump, int distance)
+    internal static void RecordPumpDistance(FluidNetworkSearchContext context, Pump pump, int distance)
     {
         if (pump == null) return;
         distance = ResolveObjectInfoPressureDistance(distance);
@@ -802,6 +805,16 @@ public class Pipe : InstallationObject
                 context.PumpRates[pump] = Pump.LimitTransportRate(pump, previous + rate);
             }
         }
+        foreach (var pair in context.DataSources)
+        {
+            float rate = pair.Key.GetFluidPressure(fluidItemId);
+            if (pair.Value.Pump == null) pressure += rate * CalculateFluidPressureRetention(pair.Value.Distance);
+            else
+            {
+                context.PumpRates.TryGetValue(pair.Value.Pump, out float previous);
+                context.PumpRates[pair.Value.Pump] = Pump.LimitTransportRate(pair.Value.Pump, previous + rate);
+            }
+        }
         // Only real reserves can supply the pump independently of collection.
         // Consumers still remove the requested volume from these same storages.
         foreach (var pair in context.StoragePumps)
@@ -826,6 +839,7 @@ public class Pipe : InstallationObject
     {
         CollectPumpStoredFluid(searchContext, coordinate, pipeDistance);
         pipeDistance = ResolveObjectInfoPressureDistance(pipeDistance);
+        ProductionWorld.Current?.AppendFluidSources(coordinate, directionToPipe, pipeDistance, searchContext);
         HashSet<InputOutputModule> objectInfoFluidOutputSourceScratch = searchContext.SourceScratch;
         objectInfoFluidOutputSourceScratch.Clear();
         InputOutputModule.AppendFluidOutputSourcesAtCoordinate(

@@ -1,3 +1,4 @@
+﻿using ProjectF.Power;
 using System;
 using System.Collections.Generic;
 using ProjectF.Benchmark;
@@ -26,7 +27,9 @@ public partial class TerrainGenerator
             Rotation = placement.GetInstalledObjectRotation(source, turns), Scale = source.transform.localScale,
             RequiresPlacementResolution = source is Train || source is Railload };
         if (!(source is ConveyorBelt || source is Pipe || source is Building || source is RobotArm
-            || source is MiningMachine miner && MiningWorld.Supports(miner)))
+            || source is MiningMachine miner && MiningWorld.Supports(miner)
+            || source is InputOutputModule production && ProductionWorld.Supports(production)
+            || source is UtilityPole pole && UtilityPoleWorld.Supports(pole)))
         {
             template.FootprintOffsets = placement.GetInstalledObjectFootprintCoordinates(Vector2Int.zero, source, turns).ToArray();
             template.BlockingOffsets = placement.GetInstalledObjectBlockingCoordinates(Vector2Int.zero, source, turns).ToArray();
@@ -136,12 +139,14 @@ public partial class TerrainGenerator
                 var area = io.inputItemAreas[i]; area.coordinate += coordinate; io.inputItemAreas[i] = area;
             }
         }
+        if (template.Prototype is UtilityPole pole) return RegisterDataOnlyUtilityPoleState(pole, state) != null;
         if (template.Prototype is Pipe pipe)
             return RegisterDataOnlyPipeState(state, pipe, state.worldPosition, template.Rotation, template.Scale);
         if (template.Prototype is Building building)
             return RegisterDataOnlyBuildingState(state, building, state.worldPosition, template.Rotation, template.Scale, out _);
         if (template.Prototype is RobotArm arm) return RegisterDataOnlyRobotArm(arm, state) != null;
         if (template.Prototype is MiningMachine miner) return RegisterDataOnlyMiningState(miner, state) != null;
+        if (template.Prototype is InputOutputModule production) return RegisterDataOnlyProductionState(production, state) != null;
         if (!(template.Prototype is ConveyorBelt belt)) return false;
         if (!resourceStateStore.RegisterDataOnlyInstallation(state, out var stored)) return false;
         // Integer tile translations preserve the modulo-one UV phase, allowing

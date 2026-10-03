@@ -546,13 +546,14 @@ public class InputOutputModuleEnergyAreaController : MonoBehaviour
             return false;
         }
 
+        bool data = ProductionWorld.Current?.IsEnergyArea(coordinate, energyType) ?? false;
         if (!registeredEnergyAreas.TryGetValue(coordinate, out Dictionary<ItemDefinition.EnergyType, int> energyCounts)
             || energyCounts == null)
         {
-            return false;
+            return data;
         }
 
-        return energyCounts.TryGetValue(energyType, out int count) && count > 0;
+        return data || energyCounts.TryGetValue(energyType, out int count) && count > 0;
     }
 
     public static bool TryGetAcceptedEnergyTypes(Vector2Int coordinate, ISet<ItemDefinition.EnergyType> acceptedEnergyTypes)
@@ -562,14 +563,13 @@ public class InputOutputModuleEnergyAreaController : MonoBehaviour
             return false;
         }
 
+        bool foundAny = ProductionWorld.Current?.AppendEnergyTypes(coordinate, acceptedEnergyTypes) ?? false;
         if (!registeredEnergyAreas.TryGetValue(coordinate, out Dictionary<ItemDefinition.EnergyType, int> energyCounts)
             || energyCounts == null
             || energyCounts.Count <= 0)
         {
-            return false;
+            return foundAny;
         }
-
-        bool foundAny = false;
         foreach (KeyValuePair<ItemDefinition.EnergyType, int> pair in energyCounts)
         {
             if (pair.Key == ItemDefinition.EnergyType.None || pair.Value <= 0)
@@ -586,6 +586,7 @@ public class InputOutputModuleEnergyAreaController : MonoBehaviour
 
     public static bool CoordinateIsEnergyArea(Vector2Int coordinate)
     {
+        if (ProductionWorld.Current?.IsEnergyArea(coordinate) == true) return true;
         if (!registeredEnergyAreas.TryGetValue(coordinate, out Dictionary<ItemDefinition.EnergyType, int> energyCounts)
             || energyCounts == null
             || energyCounts.Count <= 0)
@@ -606,7 +607,7 @@ public class InputOutputModuleEnergyAreaController : MonoBehaviour
 
     public static bool CoordinateBlocksInstallationPlacement(Vector2Int coordinate)
     {
-        return placementBlockingAreas.Contains(coordinate);
+        return (ProductionWorld.Current?.IsEnergyArea(coordinate) ?? false) || placementBlockingAreas.Contains(coordinate);
     }
 
     private void RegisterCoordinates()
@@ -788,6 +789,7 @@ public class InputOutputModuleItemAreaController : MonoBehaviour
 
     public static bool CoordinateAcceptsItemId(Vector2Int coordinate, int itemId)
     {
+        if (itemId >= 0 && ProductionWorld.Current?.IsDirectItemArea(coordinate, itemId) == true) return true;
         if (itemId < 0)
         {
             return false;
@@ -809,14 +811,14 @@ public class InputOutputModuleItemAreaController : MonoBehaviour
             return false;
         }
 
+        bool foundAny = ProductionWorld.Current?.IsDirectItemArea(coordinate) == true
+            && ProductionWorld.Current.AppendInputItemIds(coordinate, acceptedItemIds, false);
         if (!registeredItemAreas.TryGetValue(coordinate, out Dictionary<int, int> itemCounts)
             || itemCounts == null
             || itemCounts.Count <= 0)
         {
-            return false;
+            return foundAny;
         }
-
-        bool foundAny = false;
         foreach (KeyValuePair<int, int> pair in itemCounts)
         {
             if (pair.Key < 0 || pair.Value <= 0)
@@ -833,6 +835,7 @@ public class InputOutputModuleItemAreaController : MonoBehaviour
 
     public static bool CoordinateIsItemArea(Vector2Int coordinate)
     {
+        if (ProductionWorld.Current?.IsDirectItemArea(coordinate) == true) return true;
         if (!registeredItemAreas.TryGetValue(coordinate, out Dictionary<int, int> itemCounts)
             || itemCounts == null
             || itemCounts.Count <= 0)
@@ -853,7 +856,7 @@ public class InputOutputModuleItemAreaController : MonoBehaviour
 
     public static bool CoordinateBlocksInstallationPlacement(Vector2Int coordinate)
     {
-        return placementBlockingAreas.Contains(coordinate);
+        return (ProductionWorld.Current?.IsDirectItemArea(coordinate) ?? false) || placementBlockingAreas.Contains(coordinate);
     }
 
     private void RegisterCoordinates()
@@ -992,12 +995,13 @@ public class InputOutputModuleOutputAreaController : MonoBehaviour
 
     public static bool CoordinateIsOutputArea(Vector2Int coordinate)
     {
-        return registeredOutputAreas.TryGetValue(coordinate, out int count) && count > 0;
+        return (ProductionWorld.Current?.IsDirectOutputArea(coordinate) ?? false)
+            || registeredOutputAreas.TryGetValue(coordinate, out int count) && count > 0;
     }
 
     public static bool CoordinateBlocksInstallationPlacement(Vector2Int coordinate)
     {
-        return placementBlockingAreas.Contains(coordinate);
+        return (ProductionWorld.Current?.IsDirectOutputArea(coordinate) ?? false) || placementBlockingAreas.Contains(coordinate);
     }
 
     private void RegisterCoordinates()

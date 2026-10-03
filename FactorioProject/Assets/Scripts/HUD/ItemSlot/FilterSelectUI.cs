@@ -190,7 +190,7 @@ public partial class FilterSelectUI : MonoBehaviour
 
     private void ApplyBulkButtonVisibility()
     {
-        bool isProductionTargetFilter = TryResolveProductionMachine(boundTarget, out _);
+        bool isProductionTargetFilter = boundTarget.TryGetProductionTargetSelection(out _);
         if (allBtuuon != null && allBtuuon.gameObject.activeSelf == isProductionTargetFilter)
         {
             allBtuuon.gameObject.SetActive(!isProductionTargetFilter);
@@ -282,7 +282,7 @@ public partial class FilterSelectUI : MonoBehaviour
         }
 
         int filterBitCount = GetFilterBitCount();
-        bool isProductionTargetFilter = TryResolveProductionMachine(boundTarget, out ProductionMachine productionMachine);
+        bool isProductionTargetFilter = boundTarget.TryGetProductionTargetSelection(out IProductionTargetSelection productionMachine);
 
         for (int i = 0; i < slotList.Count; i++)
         {
@@ -433,7 +433,7 @@ public partial class FilterSelectUI : MonoBehaviour
         List<ItemDefinition> definitions,
         List<ItemDefinition> results)
     {
-        if (!TryResolveProductionMachine(target, out ProductionMachine productionMachine))
+        if (!target.TryGetProductionTargetSelection(out IProductionTargetSelection productionMachine))
         {
             return false;
         }
@@ -724,7 +724,7 @@ public partial class FilterSelectUI : MonoBehaviour
 
     private bool TryApplyProductionTargetSelection(IMapObjectTarget target, int changedItemId, bool changedState)
     {
-        if (!TryResolveProductionMachine(target, out ProductionMachine productionMachine))
+        if (!target.TryGetProductionTargetSelection(out IProductionTargetSelection productionMachine))
         {
             return false;
         }
@@ -746,7 +746,7 @@ public partial class FilterSelectUI : MonoBehaviour
 
     private bool TryApplyProductionTargetBulkSelection(IMapObjectTarget target, bool isEnabled)
     {
-        if (!TryResolveProductionMachine(target, out ProductionMachine productionMachine))
+        if (!target.TryGetProductionTargetSelection(out IProductionTargetSelection productionMachine))
         {
             return false;
         }
@@ -808,30 +808,6 @@ public partial class FilterSelectUI : MonoBehaviour
         HashSet<int> allowedItemIds = new HashSet<int>();
         HashSet<ItemDefinition.EnergyType> allowedEnergyTypes = new HashSet<ItemDefinition.EnergyType>();
         return TryBuildAreaRestrictedFilter(target, allowedItemIds, allowedEnergyTypes);
-    }
-
-    private static bool TryResolveProductionMachine(IMapObjectTarget target, out ProductionMachine productionMachine)
-    {
-        productionMachine = null;
-        if (target == null)
-        {
-            return false;
-        }
-
-        productionMachine = target as ProductionMachine;
-        if (productionMachine != null)
-        {
-            return true;
-        }
-
-        productionMachine = target.GetComponent<ProductionMachine>();
-        if (productionMachine != null)
-        {
-            return true;
-        }
-
-        productionMachine = target.GetComponentInChildren<ProductionMachine>(true);
-        return productionMachine != null;
     }
 
     private static void OverwriteTargetFilterMask(IMapObjectTarget target, int totalFilterBitCount, ISet<int> enabledItemIds)

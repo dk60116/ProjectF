@@ -1,4 +1,4 @@
-using System.Collections;
+﻿using System.Collections;
 using System.Reflection;
 using System.Runtime.Loader;
 using System.Text.RegularExpressions;
@@ -282,7 +282,7 @@ internal static class Program
     private static void CheckRuntimeOptimizationContracts()
     {
         string utilityPole = File.ReadAllText(
-            "FactorioProject/Assets/Scripts/Object/MapObj/InstallationObject/UtilityPole.cs");
+            "FactorioProject/Assets/Scripts/Map/UtilityPoleRuntime.cs");
         string terrain = File.ReadAllText(
             "FactorioProject/Assets/Scripts/Map/TerrainGenerator.cs");
         string tickWorld = File.ReadAllText(

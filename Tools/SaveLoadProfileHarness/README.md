@@ -8,6 +8,7 @@ dotnet run --project Tools/SaveLoadProfileHarness/SaveLoadProfileHarness.csproj 
 dotnet run --project Tools/SaveLoadProfileHarness/SaveLoadProfileHarness.csproj -- --refinery-self-check
 dotnet run --project Tools/SaveLoadProfileHarness/SaveLoadProfileHarness.csproj -p:CompiledAssemblyDirectory=../../FactorioProject/Library/ScriptAssemblies -- --fluid-output <save-file>
 dotnet run --project Tools/SaveLoadProfileHarness/SaveLoadProfileHarness.csproj -p:CompiledAssemblyDirectory=../../FactorioProject/Library/ScriptAssemblies -- --pipe-topology <save-file>
+dotnet run --project Tools/SaveLoadProfileHarness/SaveLoadProfileHarness.csproj -p:CompiledAssemblyDirectory=../../FactorioProject/Library/ScriptAssemblies -- --furnace <save-file>
 ```
 
 - 파일을 변경하지 않음

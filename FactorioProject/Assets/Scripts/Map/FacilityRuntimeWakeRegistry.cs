@@ -94,7 +94,6 @@ public static class FacilityRuntimeWakeRegistry
 
     public static void NotifyCoordinateChanged(Vector2Int coordinate)
     {
-        MiningWorld.Current?.Wake(coordinate);
         InputOutputModule.WakeRuntimeModulesAtCoordinate(coordinate);
         if (!TargetsByCoordinate.TryGetValue(
                 coordinate,

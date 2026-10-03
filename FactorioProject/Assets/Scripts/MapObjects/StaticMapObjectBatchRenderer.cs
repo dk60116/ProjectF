@@ -1,3 +1,4 @@
+﻿using ProjectF.Power;
 using System.Collections;
 using System.Collections.Generic;
 using ProjectF.Benchmark;
@@ -237,6 +238,10 @@ namespace ProjectF.MapObjects
                 if (record == null
                     || record.kind != VirtualObjectKind.Installation
                     || record.HasAttachedView
+                    || record.installationState != null && UtilityPoleWorld.Current != null
+                        && UtilityPoleWorld.Current.TryGet(BlockStateStore.GetInstallationStorageKey(record.installationState), out _)
+                    || record.installationState != null && ProductionWorld.Current != null
+                        && ProductionWorld.Current.TryGet(BlockStateStore.GetInstallationStorageKey(record.installationState), out _)
                     || record.installationState != null && MiningWorld.Current != null
                         && MiningWorld.Current.TryGet(BlockStateStore.GetInstallationStorageKey(record.installationState), out _)
                     || !record.mapObjectHandle.IsValid

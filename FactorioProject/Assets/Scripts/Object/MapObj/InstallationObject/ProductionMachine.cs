@@ -2,7 +2,7 @@ using System;
 using System.Collections.Generic;
 using UnityEngine;
 
-public class ProductionMachine : InputOutputModule
+public class ProductionMachine : InputOutputModule, IProductionTargetSelection, IProductionFacilityInfo
 {
     private const int LegacyMaximumProductionIngredientTypes = 2;
 
@@ -26,6 +26,7 @@ public class ProductionMachine : InputOutputModule
     private float productionFluidOutputDeltaTime;
     private int maximumProductionIngredientTypes = LegacyMaximumProductionIngredientTypes;
     public int MaximumProductionIngredientTypes => ResolveMaximumProductionIngredientTypes();
+    internal SpriteRenderer[] TargetIconDisplays => targetIconDisplays != null ? targetIconDisplays.ToArray() : System.Array.Empty<SpriteRenderer>();
 
     protected override void OnEnable()
     {

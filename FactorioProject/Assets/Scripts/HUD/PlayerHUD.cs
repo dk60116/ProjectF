@@ -1,3 +1,4 @@
+﻿using ProjectF.Power;
 using System;
 using System.Collections;
 using System.Collections.Generic;
@@ -127,7 +128,7 @@ public partial class PlayerHUD : BagSlot
     private object clickedObjectInfoTarget;
     private Block clickedObjectInfoFallbackBlock;
     private InputOutputModuleAreaMarkerController currentObjectInfoAreaMarkerController;
-    private UtilityPole currentObjectInfoSupplyRangePole;
+    private UtilityPoleRuntime currentObjectInfoSupplyRangePole;
     private Sprinkler currentObjectInfoSprinklerRange;
     private object lastYellowObjectInfoFocusTarget;
     private bool currentObjectInfoOpenedByYellowFocus;
@@ -2838,7 +2839,7 @@ public partial class PlayerHUD : BagSlot
         SetObjectInfoAreaMarkerVisibility(target as IMapObjectTarget, !openedByYellowFocus);
         SetObjectInfoSelectionFocus(target, !openedByYellowFocus);
         upgradeButton?.Bind(
-            target as MapObject,
+            target as IMapObjectTarget,
             !openedByYellowFocus,
             installationPlacementController);
         TrainFilter.MarkRouteSelectionDirty();
@@ -2884,8 +2885,8 @@ public partial class PlayerHUD : BagSlot
     }
 
     public void ReplaceFocusedObjectAfterUpgrade(
-        InstallationObject previousObject,
-        InstallationObject upgradedObject)
+        IMapObjectTarget previousObject,
+        IMapObjectTarget upgradedObject)
     {
         if (!ReferenceEquals(currentObjectInfoTarget, previousObject)
             || upgradedObject == null)
@@ -2964,6 +2965,7 @@ public partial class PlayerHUD : BagSlot
     {
         RobotArmWorld.Current?.SetSelectedMarkerArm(requested ? target as RobotArmInstance : null);
         MiningWorld.Current?.SetSelectedMarkerMiner(requested ? target as MiningMachineInstance : null);
+        ProductionWorld.Current?.SetSelectedMarkerFacility(requested ? target as ProductionFacilityInstance : null);
         InputOutputModuleAreaMarkerController nextController = requested
             ? ResolveAreaMarkerController(target)
             : null;
@@ -3023,7 +3025,7 @@ public partial class PlayerHUD : BagSlot
 
     private void SetObjectInfoSupplyRangeVisual(IMapObjectTarget target, bool requested)
     {
-        UtilityPole nextPole = requested ? ResolveUtilityPole(target) : null;
+        UtilityPoleRuntime nextPole = requested ? ResolveUtilityPole(target) : null;
         if (currentObjectInfoSupplyRangePole == nextPole)
         {
             if (nextPole != null)
@@ -3046,26 +3048,11 @@ public partial class PlayerHUD : BagSlot
         }
     }
 
-    private static UtilityPole ResolveUtilityPole(IMapObjectTarget target)
+    private static UtilityPoleRuntime ResolveUtilityPole(IMapObjectTarget target)
     {
-        if (target == null)
-        {
-            return null;
-        }
-
-        UtilityPole pole = target as UtilityPole;
-        if (pole != null)
-        {
-            return pole;
-        }
-
-        pole = target.GetComponent<UtilityPole>();
-        if (pole != null)
-        {
-            return pole;
-        }
-
-        return target.GetComponentInChildren<UtilityPole>(true);
+        if (target is UtilityPoleRuntime data) return data;
+        var native = target as UtilityPole ?? target.GetComponent<UtilityPole>() ?? target.GetComponentInChildren<UtilityPole>(true);
+        return native != null ? native.Runtime : null;
     }
 
     private void SetObjectInfoSprinklerRangeVisual(IMapObjectTarget target, bool requested)
@@ -4153,6 +4140,8 @@ public partial class PlayerHUD : BagSlot
         }
 
         if (target is ResourceInstance resource) return resource.IsRuntimeActive;
+        if (target is UtilityPoleRuntime pole) return pole.IsTargetActive;
+        if (target is ProductionFacilityInstance production) return production.IsTargetActive;
         if (target is MiningMachineInstance miner) return miner.IsTargetActive;
         if (target is RobotArmInstance robotArm) return robotArm.IsTargetActive;
         if (target is PortableObject portableObject)

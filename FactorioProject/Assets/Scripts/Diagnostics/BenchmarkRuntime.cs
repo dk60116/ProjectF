@@ -40,6 +40,7 @@ namespace ProjectF.Benchmark
             installations.Clear();
             RobotArmWorld.Current?.WakeAll();
             MiningWorld.Current?.WakeAll();
+        ProductionWorld.Current?.WakeAll();
             UtilityPole.NotifyFreeElectroEnergyChanged();
         }
 

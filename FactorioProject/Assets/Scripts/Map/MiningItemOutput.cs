@@ -12,7 +12,7 @@ internal static class MiningItemOutput
         internal Reservation(Block block, Vector2Int coordinate, int capacity, bool saved, bool distributed = false)
         { Block = block; Coordinate = coordinate; Capacity = capacity; Saved = saved; Distributed = distributed; }
     }
-    internal static bool TryReserve(MiningMachineInstance miner, int itemId, int count, out Reservation reservation)
+    internal static bool TryReserve(IDataItemProducer miner, int itemId, int count, out Reservation reservation)
     {
         reservation = default;
         ItemDefinition item = InputOutputModule.ResolveItemDefinition(itemId);
@@ -34,14 +34,14 @@ internal static class MiningItemOutput
         }
         return false;
     }
-    private static bool TryReserveCoordinate(MiningMachineInstance miner, int itemId, int count, Vector2Int coordinate,
+    private static bool TryReserveCoordinate(IDataItemProducer miner, int itemId, int count, Vector2Int coordinate,
         bool requireExisting, out Reservation reservation)
     {
         reservation = default;
-        if (miner.Prototype.TryGetRectGridBlockPlacementAtCoordinate(miner.Prototype, miner.AnchorCoordinate,
+        if (miner.OutputPrototype.TryGetRectGridBlockPlacementAtCoordinate(miner.OutputPrototype, miner.AnchorCoordinate,
             miner.Placement.quarterTurns, coordinate, out var placement) && placement.itemDefinition != null
             && placement.itemDefinition.id >= 0 && placement.itemDefinition.id != itemId) return false;
-        bool loaded = miner.World.Terrain.TryGetLoadedBlock(coordinate, out Block block) && block != null;
+        bool loaded = miner.Terrain.TryGetLoadedBlock(coordinate, out Block block) && block != null;
         if (loaded && block.IsRuntimeConveyor)
         {
             block.EnsureConveyorTransportInteractionBoundary();
@@ -50,7 +50,7 @@ internal static class MiningItemOutput
             { reservation = new Reservation(block, coordinate, 0, false); return true; }
             return false;
         }
-        int capacity = ItemDefinition.ResolveStackCapacity(InputOutputModule.ResolveItemDefinition(itemId), miner.Prototype.RuntimeAreaMaxObjects);
+        int capacity = ItemDefinition.ResolveStackCapacity(InputOutputModule.ResolveItemDefinition(itemId), miner.OutputPrototype.RuntimeAreaMaxObjects);
         bool savedBox = false;
         if (loaded)
         {
@@ -60,8 +60,8 @@ internal static class MiningItemOutput
             reservation = new Reservation(block, coordinate, block.GetInputAreaCenterCapacity(itemId), false); return true;
         }
         // An unloaded belt owns lane state. Never write into its saved floor stack.
-        if (miner.World.Store.TryGetInstallationAnchorAtCoordinate(coordinate, out var anchor)
-            && miner.World.Store.TryGetInstallationState(anchor, out var installed))
+        if (miner.Store.TryGetInstallationAnchorAtCoordinate(coordinate, out var anchor)
+            && miner.Store.TryGetInstallationState(anchor, out var installed))
         {
             var definition = InputOutputModule.ResolveItemDefinition(installed.itemId);
             savedBox = definition?.mapObject is BoxObject;
@@ -71,11 +71,11 @@ internal static class MiningItemOutput
             if (definition != null && definition.capacity > 0) capacity = ItemDefinition.ResolveStackCapacity(InputOutputModule.ResolveItemDefinition(itemId), definition.capacity);
         }
         if (ProjectF.Benchmark.BenchmarkRuntime.ForceWorking && !savedBox) capacity = int.MaxValue;
-        if (!miner.World.Store.CanAddSavedCenterItems(coordinate, itemId, count, capacity)
-            || requireExisting && miner.World.Store.GetSavedCenterTopItemId(coordinate) != itemId) return false;
+        if (!miner.Store.CanAddSavedCenterItems(coordinate, itemId, count, capacity)
+            || requireExisting && miner.Store.GetSavedCenterTopItemId(coordinate) != itemId) return false;
         reservation = new Reservation(null, coordinate, capacity, true); return true;
     }
-    internal static bool Emit(MiningMachineInstance miner, Reservation target, int itemId,
+    internal static bool Emit(IDataItemProducer miner, Reservation target, int itemId,
         ref int remaining, Vector3 start)
     {
         if (target.Distributed)
@@ -91,13 +91,13 @@ internal static class MiningItemOutput
         }
         if (target.Saved)
         {
-            if (!miner.World.Store.TryAddSavedCenterItems(target.Coordinate, itemId, remaining, target.Capacity)) return false;
+            if (!miner.Store.TryAddSavedCenterItems(target.Coordinate, itemId, remaining, target.Capacity)) return false;
             remaining = 0; return true;
         }
         int emitted = 0;
         while (remaining > 0)
         {
-            bool success = InputOutputModule.TryEmitOutputItemToBlock(target.Block, itemId, start, emitted * miner.Prototype.OutputMoveInterval, out _);
+            bool success = InputOutputModule.TryEmitOutputItemToBlock(target.Block, itemId, start, emitted * miner.OutputPrototype.OutputMoveInterval, out _);
             if (!success) return false;
             remaining--; emitted++;
         }

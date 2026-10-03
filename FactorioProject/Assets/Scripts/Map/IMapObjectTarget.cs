@@ -19,13 +19,30 @@ public interface IMapObjectTarget
 
 public static class MapObjectTargetExtensions
 {
+    public static bool TryGetProductionTargetSelection(this IMapObjectTarget target, out IProductionTargetSelection selection)
+    {
+        selection = null;
+        if (target == null) return false;
+        if (target is ProductionFacilityInstance facility)
+        {
+            if (!(facility.Prototype is ProductionMachine)) return false;
+            selection = facility;
+            return true;
+        }
+        ProductionMachine machine = target as ProductionMachine
+            ?? target.GetComponent<ProductionMachine>() ?? target.GetComponentInChildren<ProductionMachine>(true);
+        selection = machine;
+        return machine != null;
+    }
     public static bool IsItemFilterEnabled(this IMapObjectTarget target, int itemId, int count) =>
+        target is ProductionFacilityInstance facility ? facility.IsItemFilterEnabled(itemId, count) :
         target is MiningMachineInstance miner ? miner.IsItemFilterEnabled(itemId, count) :
         target is RobotArmInstance arm ? arm.IsItemFilterEnabled(itemId, count) :
         target?.SceneObject != null && target.SceneObject.IsItemFilterEnabled(itemId, count);
     public static void SetItemFilterEnabled(this IMapObjectTarget target, int itemId, int count, bool enabled)
     {
-        if (target is MiningMachineInstance miner) miner.SetItemFilterEnabled(itemId, count, enabled);
+        if (target is ProductionFacilityInstance facility) facility.SetItemFilterEnabled(itemId, count, enabled);
+        else if (target is MiningMachineInstance miner) miner.SetItemFilterEnabled(itemId, count, enabled);
         else if (target is RobotArmInstance arm) arm.SetItemFilterEnabled(itemId, count, enabled);
         else target?.SceneObject?.SetItemFilterEnabled(itemId, count, enabled);
     }
