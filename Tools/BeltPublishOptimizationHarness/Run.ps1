@@ -18,6 +18,7 @@ function Read-Member([string]$path, [string]$signature) {
 
 $conveyors = 'FactorioProject/Assets/Scripts/Map/TerrainGenerator.Conveyors.cs'
 $blockJobs = 'FactorioProject/Assets/Scripts/Map/Block.ConveyorJobs.cs'
+$nativeJobs = 'FactorioProject/Assets/Scripts/Map/TerrainGenerator.ConveyorJobs.cs'
 $source = "using System; using System.Collections.Generic; using UnityEngine;`npublic partial class TerrainGenerator {`n"
 foreach ($signature in @(
     'internal void MarkBeltJobItemVisualDirty(',
@@ -27,12 +28,16 @@ foreach ($signature in @(
     $source += (Read-Member $conveyors $signature) + "`n"
 }
 $source += "}`npublic partial class Block {`n"
-$source += (Read-Member $blockJobs 'internal void CaptureBeltJobItemVisualState(') + "`n}`n"
+foreach ($signature in @('internal void RecordBeltJobLaneChange(', 'internal int GetBeltJobLaneOccupancyVersion(',
+    'internal void NotifyBeltJobVisualPublished(', 'internal bool NotifyBeltJobRuntimePublished(', 'private bool HasBeltJobFloorIngress()')) {
+    $source += (Read-Member $blockJobs $signature) + "`n"
+}
+$source += "}`npublic partial class TerrainGenerator {`n" + (Read-Member $nativeJobs 'private void CapturePublishedBeltVisualState(') + "`n}`n"
 
 $probe = Join-Path ([IO.Path]::GetTempPath()) ('ProjectF-BeltPublish-' + [guid]::NewGuid().ToString('N'))
 New-Item -ItemType Directory -Path $probe | Out-Null
 [IO.File]::WriteAllText((Join-Path $probe 'Production.cs'), $source)
 Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'Checks.cs') -Destination $probe
-[IO.File]::WriteAllText((Join-Path $probe 'Probe.csproj'), '<Project Sdk="Microsoft.NET.Sdk"><PropertyGroup><OutputType>Exe</OutputType><TargetFramework>net9.0</TargetFramework></PropertyGroup></Project>')
+[IO.File]::WriteAllText((Join-Path $probe 'Probe.csproj'), '<Project Sdk="Microsoft.NET.Sdk"><PropertyGroup><OutputType>Exe</OutputType><TargetFramework>net9.0</TargetFramework><TieredCompilation>false</TieredCompilation></PropertyGroup></Project>')
 dotnet run --configuration Release --project (Join-Path $probe 'Probe.csproj')
 exit $LASTEXITCODE

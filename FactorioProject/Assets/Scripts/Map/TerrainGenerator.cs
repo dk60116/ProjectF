@@ -1448,7 +1448,7 @@ public partial class TerrainGenerator : MonoBehaviour,
     {
         if (Application.isPlaying)
         {
-            return cachedLoadedConveyorItemCount + CountOwnedConveyorItems();
+            return cachedLoadedConveyorItemCount + beltJobLoadedItemCount + CountOwnedConveyorItems();
         }
 
         int count = 0;
@@ -2193,6 +2193,7 @@ public partial class TerrainGenerator : MonoBehaviour,
         HashSet<InstallationObject> savedInstallations,
         int entriesPerFrame)
     {
+        ExpandBeltJobDirtyPersistenceBlocks();
         int processed = 0;
         if (!persistenceDirtyTrackingReady)
         {
@@ -2366,6 +2367,7 @@ public partial class TerrainGenerator : MonoBehaviour,
 
     private void ResetPersistenceDirtyTracking()
     {
+        MarkAllBeltPublicationChunksPersistenceDirty();
         persistenceDirtyBlocks.Clear();
         // Conveyor item entries are removed from the detached store when views are
         // restored. Capture occupied belts once even if they remain asleep forever;

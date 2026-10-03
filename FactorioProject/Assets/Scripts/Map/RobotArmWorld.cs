@@ -16,6 +16,7 @@ public sealed class RobotArmWorld : IDisposable, IMapObjectUpdateTick, IMapObjec
     private readonly ResourceStateSlots<RobotArmRuntimeState> states = new ResourceStateSlots<RobotArmRuntimeState>();
     private readonly Dictionary<Vector2Int, RobotArmInstance> byKey = new Dictionary<Vector2Int, RobotArmInstance>();
     private readonly Dictionary<Vector2Int, List<RobotArmInstance>> observers = new Dictionary<Vector2Int, List<RobotArmInstance>>();
+    private readonly List<Block> beltWakeScratch = new List<Block>();
     private readonly List<RobotArmInstance> ordered = new List<RobotArmInstance>();
     private readonly Dictionary<Vector2Int, List<RobotArmInstance>> markerArmsByCell =
         new Dictionary<Vector2Int, List<RobotArmInstance>>();
@@ -220,11 +221,12 @@ public sealed class RobotArmWorld : IDisposable, IMapObjectUpdateTick, IMapObjec
         if (!observers.TryGetValue(coordinate, out var list)) return;
         for (int i = 0; i < list.Count; i++) list[i].WakeRuntimeSleep();
     }
-    internal void Wake(IReadOnlyList<Block> changedBlocks)
+    internal void WakePublishedBelts(TerrainGenerator terrain)
     {
-        for (int blockIndex = 0; changedBlocks != null && blockIndex < changedBlocks.Count; blockIndex++)
+        terrain.CollectPublishedBeltObservers(observers, beltWakeScratch);
+        for (int blockIndex = 0; blockIndex < beltWakeScratch.Count; blockIndex++)
         {
-            Block block = changedBlocks[blockIndex];
+            Block block = beltWakeScratch[blockIndex];
             if (block == null || !observers.TryGetValue(block.Coordinate, out var list)) continue;
             for (int observerIndex = 0; observerIndex < list.Count; observerIndex++)
             {
@@ -234,6 +236,7 @@ public sealed class RobotArmWorld : IDisposable, IMapObjectUpdateTick, IMapObjec
                 arm?.WakeRuntimeSleep();
             }
         }
+        beltWakeScratch.Clear();
     }
     private void Unobserve(Vector2Int coordinate, RobotArmInstance arm)
     {

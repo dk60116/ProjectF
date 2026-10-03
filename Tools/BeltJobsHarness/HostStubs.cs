@@ -17,10 +17,18 @@ public class Block
     public Spliterbelt Splitter;
     private readonly int[] indices = { -1, -1, -1, -1 };
     private readonly int[] occupancyVersions = new int[4];
+    public int BeltJobPublicationIndex { get; set; } = -1;
+    public int PublishedItemCount;
+    public bool PublishedDynamic;
+    public int VisualPublications, RuntimePublications;
+    public BlockHandle RuntimeHandle => new(new Vector2Int((int)Math.Floor(Coordinate.x / 8d), (int)Math.Floor(Coordinate.y / 8d)));
+    public Vector3 WorldPosition => new(Coordinate.x, 0, Coordinate.y);
+    public static int PublicationCacheInvalidations;
+    public static void InvalidateBeltJobPublicationCaches() => PublicationCacheInvalidations++;
     public Block(int x, int y = 0) { Coordinate = new(x, y); }
     public int BeltJobIndex(int lane) => indices[lane];
     public void BindBeltJobLane(TerrainGenerator owner, int lane, int index) => indices[lane] = index;
-    public void UnbindBeltJobs() => Array.Fill(indices, -1);
+    public void UnbindBeltJobs() { Array.Fill(indices, -1); BeltJobPublicationIndex = -1; }
     public bool HasBeltJobStoredItem(int lane) => Items[lane].ItemId >= 0;
     public void PrepareBeltJobStorage() { }
     public Spliterbelt GetBeltJobSplitter(int lane) => lane == 2 ? Splitter : null;
@@ -46,12 +54,19 @@ public class Block
         if (occupancyMayHaveChanged) occupancyVersions[lane]++;
     }
     public int GetBeltJobLaneOccupancyVersion(int lane) => occupancyVersions[lane];
-    public void NotifyBeltJobPublished(
-        bool notifyTransportObservers = true,
-        bool refreshActivity = true) => OnPublished?.Invoke();
+    public void NotifyBeltJobVisualPublished(
+        int itemCount, bool hasDynamicVisuals, bool refreshActivity)
+    { PublishedItemCount = itemCount; PublishedDynamic = hasDynamicVisuals; VisualPublications++; }
+    public bool NotifyBeltJobRuntimePublished()
+    { if (OnPublished == null) return false; RuntimePublications++; OnPublished.Invoke(); return true; }
     public Vector3 TransportLanePosition(int lane) => new(Coordinate.x, lane, Coordinate.y);
     public Vector3 EvaluateBeltJobSegment(int lane, Block target, int targetLane, float progress)
         => Vector3.Lerp(TransportLanePosition(lane), target.TransportLanePosition(targetLane), progress);
+    public int VisualPathCaptures;
+    public ProjectF.Rendering.BeltItemVisualPath CaptureBeltJobVisualPath(int lane, Block target, int targetLane)
+    { VisualPathCaptures++; return ProjectF.Rendering.BeltItemVisualPath.Line(TransportLanePosition(lane), target.TransportLanePosition(targetLane)); }
+    internal void CaptureBeltJobVisualSurface(int lane, ref ProjectF.Rendering.BeltItemVisualPathCache cache)
+    { cache.RequiresSurface = cache.RotateOnSurface = false; }
 }
 
 public class ConveyorRuntimeRecord
@@ -80,6 +95,19 @@ public sealed class Spliterbelt : ConveyorRuntimeRecord { }
 
 public partial class TerrainGenerator : IDisposable
 {
+    public readonly HashSet<Block> SavedDirtyBlocks = new();
+    private void MarkPersistenceStateDirty(Block block) => SavedDirtyBlocks.Add(block);
+    private void RemoveCachedConveyorBlockItemCount(BlockHandle handle) { }
+    public void ExpandPersistence() => ExpandBeltJobDirtyPersistenceBlocks();
+    public int NativeItemCount => beltJobLoadedItemCount;
+    public int PendingVisualBlocks => beltPublicationPendingVisualBlocks;
+    public int VisualFlushedBlocks => beltJobLastVisualPublishedBlocks;
+    public void ResetPersistenceBaseline() => MarkAllBeltPublicationChunksPersistenceDirty();
+    public void PublishAllChanges()
+    {
+        for (int i = 0; i < beltJobNodes.Count; i++) RecordBeltJobLaneChange(i, true);
+        NotifyBeltJobPublishedBlocks();
+    }
     private double harnessAccumulator;
     private bool worldReadyForPresentation = true;
     private bool IsConveyorRuntimeRefreshDeferred => false;
@@ -171,11 +199,17 @@ public static class MapObjectTickProfiler
 public sealed class RobotArmWorld
 {
     public static RobotArmWorld Current { get; } = new();
-    public void Wake(IReadOnlyList<Block> changedBlocks) { }
+    public void WakePublishedBelts(TerrainGenerator terrain) { }
 }
 public static class InputOutputModule
 {
-    public static void WakeRuntimeModulesForChangedBlocks(IReadOnlyList<Block> changedBlocks) { }
+    public static Action<TerrainGenerator> OnWake;
+    public static void WakeRuntimeModulesForPublishedBelts(TerrainGenerator terrain) => OnWake?.Invoke(terrain);
+}
+public sealed class MiningWorld
+{
+    public static MiningWorld Current;
+    public void WakePublishedBelts(TerrainGenerator terrain) { }
 }
 public static class MapObjectTickManager
 {

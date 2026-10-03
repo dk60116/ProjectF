@@ -109,6 +109,13 @@ namespace ProjectF.Conveyors
             // A staged consumer may inspect the authoritative lane after Schedule but
             // before the owner reaches Apply. Fence the writer before exposing data.
             Complete();
+            return ReadLaneAfterComplete(index);
+        }
+
+        // Batch presentation readers fence once, then reuse the same deferred-time
+        // interpretation as IO/checkpoint readers without per-slot completion checks.
+        internal BeltLaneState ReadLaneAfterComplete(int index)
+        {
             BeltLaneState state = Buffers.Lanes[index];
             BeltGroupState group = Buffers.GroupStates[FindGroup(index)];
             if (state.ItemId >= 0 && state.Remaining > 0 && group.DeferredUnits > 0

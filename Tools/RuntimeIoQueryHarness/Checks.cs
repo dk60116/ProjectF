@@ -24,11 +24,21 @@ public sealed class Block
     public Block(Vector2Int coordinate) { Coordinate = coordinate; }
 }
 public static class MapClimate { public static float CurrentTemperatureCelsius => 20f; }
+public sealed class MiningWorld
+{
+    public static MiningWorld Current;
+    public bool AppendOutputItemIds(Vector2Int coordinate, ISet<int> result) => false;
+}
 public sealed class TerrainGenerator
 {
     public static TerrainGenerator Active = new TerrainGenerator();
     public readonly Dictionary<Vector2Int, Block> Blocks = new();
     public bool TryGetLoadedBlock(Vector2Int coordinate, out Block block) => Blocks.TryGetValue(coordinate, out block);
+    public void CollectPublishedBeltObservers<T>(Dictionary<Vector2Int, T> observers, List<Block> result)
+    {
+        result.Clear();
+        foreach (var pair in observers) if (Blocks.TryGetValue(pair.Key, out var block)) result.Add(block);
+    }
 }
 public static class InputOutputModuleItemAreaController
 {
@@ -49,6 +59,7 @@ public partial class InputOutputModule
     private static readonly Dictionary<Vector2Int, HashSet<InputOutputModule>> registeredRuntimeFluidOutputCoordinates = new();
     private static readonly List<InputOutputModule> runtimeWakeScratch = new();
     private static readonly HashSet<InputOutputModule> runtimeWakeSet = new();
+    private static readonly List<Block> runtimeBeltWakeBlocks = new();
     public readonly ModuleObject gameObject = new();
     private readonly List<Vector2Int> runtimeInputEnergyCoordinates = new();
     private readonly List<Vector2Int> runtimeOutputCoordinates = new();
@@ -62,6 +73,11 @@ public partial class InputOutputModule
     public int WakeCount;
     public Action NestedQuery;
     private bool runtimeSleeping;
+    private bool outputDrainCheckPending, hasStoredOutputOnConveyor;
+    public bool OutputDrainPending => outputDrainCheckPending;
+    private bool IsRecipeOutputAllowedByItemFilter(int itemId) => true;
+    private bool TryGetRuntimeOutputItemIdsAtCoordinate(Vector2Int coordinate, ISet<int> result)
+        => runtimeOutputCoordinates.Contains(coordinate) && AppendOutputItemIds(result);
     private static readonly ItemDefinition fuel = new() { energyType = ItemDefinition.EnergyType.Chemical, energyAmount = 10 };
     private static readonly ItemDefinition solid = new();
     private static ItemDefinition ResolveItemDefinition(int id) => id == 3 ? fuel : solid;
@@ -143,7 +159,8 @@ public static class Checks
         var consumer = new InputOutputModule(); consumer.Accepted.Add(1); consumer.Place(cell, input: true);
         producer.SetSleeping(false);
         consumer.SetSleeping(true);
-        InputOutputModule.WakeRuntimeModulesForChangedBlocks(new[] { new Block(cell), new Block(cell) });
+        TerrainGenerator.Active.Blocks[cell] = new Block(cell);
+        InputOutputModule.WakeRuntimeModulesForPublishedBelts(TerrainGenerator.Active);
         Require(producer.WakeCount == 0, "already scheduled module was redundantly woken");
         Require(consumer.WakeCount == 1, "sleeping module was not woken exactly once");
         var irrelevant = new List<InputOutputModule>();

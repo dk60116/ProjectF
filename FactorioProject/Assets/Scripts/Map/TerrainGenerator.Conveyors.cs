@@ -1759,7 +1759,7 @@ public partial class TerrainGenerator : MonoBehaviour
         conveyorItemVisualDirtyBlocks.Add(handle);
     }
 
-    internal void MarkBeltJobItemVisualDirty(Block block, bool refreshActivity)
+    internal void MarkBeltJobItemVisualDirty(Block block, bool refreshActivity, int itemCount, bool hasDynamicVisuals)
     {
         if (!Application.isPlaying || block == null)
         {
@@ -1771,7 +1771,6 @@ public partial class TerrainGenerator : MonoBehaviour
             return;
         }
 
-        if (persistenceDirtyTrackingReady) persistenceDirtyBlocks.Add(handle);
         if (refreshActivity && IsConveyorRuntimeRefreshDeferred)
         {
             QueueDeferredConveyorRuntimeRefresh(block);
@@ -1785,10 +1784,8 @@ public partial class TerrainGenerator : MonoBehaviour
             return;
         }
 
-        block.CaptureBeltJobItemVisualState(out int itemCount, out bool hasDynamicVisuals);
         if (!refreshActivity)
         {
-            CacheConveyorBlockItemCount(handle, itemCount);
             SetDynamicConveyorItemVisualBlockTracked(handle, hasDynamicVisuals);
             if (!hasDynamicVisuals) conveyorItemVisualDirtyBlocks.Add(handle);
             return;
@@ -1808,7 +1805,6 @@ public partial class TerrainGenerator : MonoBehaviour
             return;
         }
 
-        CacheConveyorBlockItemCount(handle, itemCount);
         bool added = conveyorItemVisualBlocks.Add(handle);
         SetDynamicConveyorItemVisualBlockTracked(handle, hasDynamicVisuals);
         if (!hasDynamicVisuals) conveyorItemVisualDirtyBlocks.Add(handle);
@@ -1931,7 +1927,7 @@ public partial class TerrainGenerator : MonoBehaviour
 
     private int CaptureConveyorBlockItemCount(Block block)
     {
-        return block != null && block.IsRuntimeConveyor && !block.OwnsConveyorTransport
+        return block != null && block.IsRuntimeConveyor && !block.OwnsConveyorTransport && !block.HasBoundBeltJobLanes
             ? block.GetRuntimeConveyorItemCount()
             : 0;
     }
@@ -4553,6 +4549,7 @@ public partial class TerrainGenerator : MonoBehaviour
         MapObjectTickProfiler.AddRuntimeCounter("ConveyorItemRender", "DynamicMatrixUpdates", itemRenderer != null ? itemRenderer.DynamicVirtualConveyorMatrixUpdates : 0);
         MapObjectTickProfiler.AddRuntimeCounter("ConveyorItemRender", "DynamicMatrixRebuilds", itemRenderer != null ? itemRenderer.DynamicVirtualConveyorMatrixRebuilds : 0);
         MapObjectTickProfiler.AddRuntimeCounter("ConveyorItemRender", "DynamicTransformJobItems", itemRenderer != null ? itemRenderer.DynamicVirtualConveyorTransformJobItems : 0);
+        MapObjectTickProfiler.AddRuntimeCounter("ConveyorItemRender", "DynamicNativePathItems", itemRenderer != null ? itemRenderer.DynamicVirtualConveyorNativePathItems : 0);
         MapObjectTickProfiler.AddRuntimeCounter("ConveyorItemRender", "DynamicTransformJobScheduled", itemRenderer != null && itemRenderer.DynamicVirtualConveyorTransformJobScheduled ? 1 : 0);
         MapObjectTickProfiler.AddRuntimeCounter("ConveyorItemRender", "MembershipChanges", itemRenderer != null ? itemRenderer.VirtualConveyorMembershipChanges : 0);
         MapObjectTickProfiler.AddRuntimeCounter("ConveyorItemRender", "DynamicMembershipChanges", itemRenderer != null ? itemRenderer.DynamicVirtualConveyorMembershipChanges : 0);

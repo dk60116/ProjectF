@@ -8857,13 +8857,6 @@ public partial class Block
         TerrainGenerator.Active?.MarkConveyorItemVisualDirty(this);
     }
 
-    private void MarkBeltJobItemVisualDirty(bool refreshActivity)
-    {
-        InvalidateConveyorCanMoveCaches();
-        IncrementConveyorItemVisualVersion();
-        TerrainGenerator.Active?.MarkBeltJobItemVisualDirty(this, refreshActivity);
-    }
-
     private void IncrementConveyorItemVisualVersion()
     {
         unchecked

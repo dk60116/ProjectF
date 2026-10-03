@@ -15,6 +15,7 @@ namespace ProjectF.Rendering
         private JobHandle scheduledHandle;
         private int resultCount;
         private bool hasScheduledJob;
+        public int NativePathItemCount { get; private set; }
 
         public bool ScheduleMatrices(
             List<VirtualConveyorItemRenderData> renderItems,
@@ -26,6 +27,7 @@ namespace ProjectF.Rendering
 
             int itemCount = renderItems != null ? renderItems.Count : 0;
             resultCount = itemCount;
+            NativePathItemCount = 0;
             if (itemCount <= 0)
             {
                 return false;
@@ -33,29 +35,32 @@ namespace ProjectF.Rendering
 
             float safeCellSize = Mathf.Max(1f, batchCellSize);
             EnsureOutputCapacity(itemCount);
-            if (!useBurstJobs || itemCount < Mathf.Max(1, minimumJobItemCount))
-            {
-                BuildMatricesOnMainThread(renderItems, outputs, safeCellSize);
-                return false;
-            }
-
             EnsureInputCapacity(itemCount);
             for (int i = 0; i < itemCount; i++)
             {
                 VirtualConveyorItemRenderData renderData = renderItems[i];
+                if (renderData.VisualPath.Kind != 0) NativePathItemCount++;
                 inputs[i] = new TransformInput
                 {
                     Position = renderData.Position,
-                    Rotation = renderData.Rotation
+                    Rotation = renderData.Rotation,
+                    Path = renderData.VisualPath,
+                    Progress = renderData.VisualProgress
                 };
             }
 
-            scheduledHandle = new BuildTransformMatricesJob
+            var job = new BuildTransformMatricesJob
             {
                 Inputs = inputs,
                 Outputs = outputs,
                 InverseBatchCellSize = 1f / safeCellSize
-            }.Schedule(itemCount, 64);
+            };
+            if (!useBurstJobs || itemCount < Mathf.Max(1, minimumJobItemCount))
+            {
+                for (int i = 0; i < itemCount; i++) job.Execute(i);
+                return false;
+            }
+            scheduledHandle = job.Schedule(itemCount, 64);
             hasScheduledJob = true;
             return true;
         }
@@ -105,6 +110,7 @@ namespace ProjectF.Rendering
         {
             CompleteScheduled();
             resultCount = 0;
+            NativePathItemCount = 0;
             if (inputs.IsCreated)
             {
                 inputs.Dispose();
@@ -156,32 +162,12 @@ namespace ProjectF.Rendering
                 NativeArrayOptions.UninitializedMemory);
         }
 
-        private static void BuildMatricesOnMainThread(
-            List<VirtualConveyorItemRenderData> renderItems,
-            NativeArray<TransformOutput> targetOutputs,
-            float batchCellSize)
-        {
-            for (int i = 0; i < renderItems.Count; i++)
-            {
-                VirtualConveyorItemRenderData renderData = renderItems[i];
-                int cellX = Mathf.FloorToInt(renderData.Position.x / batchCellSize);
-                int cellZ = Mathf.FloorToInt(renderData.Position.z / batchCellSize);
-                targetOutputs[i] = new TransformOutput
-                {
-                    Matrix = float4x4.TRS(
-                        renderData.Position,
-                        renderData.Rotation,
-                        new float3(1f)),
-                    BatchCellX = cellX,
-                    BatchCellZ = cellZ
-                };
-            }
-        }
-
         private struct TransformInput
         {
             public float3 Position;
             public quaternion Rotation;
+            public BeltItemVisualPath Path;
+            public float Progress;
         }
 
         private struct TransformOutput
@@ -208,11 +194,12 @@ namespace ProjectF.Rendering
             public void Execute(int index)
             {
                 TransformInput input = Inputs[index];
+                float3 position = input.Path.Kind != 0 ? (float3)input.Path.Evaluate(input.Progress) : input.Position;
                 Outputs[index] = new TransformOutput
                 {
-                    Matrix = float4x4.TRS(input.Position, input.Rotation, new float3(1f)),
-                    BatchCellX = (int)math.floor(input.Position.x * InverseBatchCellSize),
-                    BatchCellZ = (int)math.floor(input.Position.z * InverseBatchCellSize)
+                    Matrix = float4x4.TRS(position, input.Rotation, new float3(1f)),
+                    BatchCellX = (int)math.floor(position.x * InverseBatchCellSize),
+                    BatchCellZ = (int)math.floor(position.z * InverseBatchCellSize)
                 };
             }
         }

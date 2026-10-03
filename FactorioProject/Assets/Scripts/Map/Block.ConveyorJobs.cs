@@ -1,11 +1,16 @@
 using ProjectF.Conveyors;
+using ProjectF.Rendering;
+using System.Collections.Generic;
 using UnityEngine;
 
 public partial class Block
 {
     private TerrainGenerator beltJobOwner;
     private int beltJobLane0 = -1, beltJobLane1 = -1, beltJobLane2 = -1, beltJobLane3 = -1;
+    private int beltJobOccupancyVersion0, beltJobOccupancyVersion1, beltJobOccupancyVersion2, beltJobOccupancyVersion3;
+    internal int BeltJobPublicationIndex { get; set; } = -1;
     internal bool UsesBeltJobs => Application.isPlaying && TerrainGenerator.Active != null;
+    internal bool HasBoundBeltJobLanes => beltJobOwner != null;
 
     internal int BeltJobIndex(int lane) => lane == 0 ? beltJobLane0 : lane == 1 ? beltJobLane1
         : lane == 2 ? beltJobLane2 : lane == 3 ? beltJobLane3 : -1;
@@ -23,6 +28,7 @@ public partial class Block
     {
         beltJobOwner = null;
         beltJobLane0 = beltJobLane1 = beltJobLane2 = beltJobLane3 = -1;
+        BeltJobPublicationIndex = -1;
     }
 
     private void QueueBeltJobWrite(
@@ -138,47 +144,45 @@ public partial class Block
     internal void RecordBeltJobLaneChange(int lane, bool occupancyMayHaveChanged)
     {
         if (!occupancyMayHaveChanged || lane < 0 || lane >= ConveyorStackLaneLimit) return;
-        int[] versions = EnsureConveyorRuntimeArrays().LaneOccupancyVersions;
+        // Native lanes do not need the legacy runtime arrays just to version occupancy.
+        ref int version = ref (lane == 0 ? ref beltJobOccupancyVersion0 : ref (lane == 1
+            ? ref beltJobOccupancyVersion1 : ref (lane == 2 ? ref beltJobOccupancyVersion2 : ref beltJobOccupancyVersion3)));
         unchecked
         {
-            versions[lane]++;
-            if (versions[lane] == 0) versions[lane] = 1;
+            version++;
+            if (version == 0) version = 1;
         }
     }
 
-    internal void NotifyBeltJobPublished(
-        bool wakeRuntimeDependents = true,
-        bool refreshActivity = true)
+    internal static void InvalidateBeltJobPublicationCaches() => InvalidateConveyorCanMoveCaches();
+
+    internal void NotifyBeltJobVisualPublished(
+        int itemCount,
+        bool hasDynamicVisuals,
+        bool refreshActivity)
     {
         // Several lanes in the same block can change during one native tick.
-        // Invalidate presentation and observers once without copying lane data.
-        MarkBeltJobItemVisualDirty(refreshActivity);
-        if (!TryTransferOneDroppedFloorObjectToConveyor())
-        {
-            NotifyRuntimeItemStackChanged(wakeRuntimeDependents, false);
-        }
+        // Invalidate presentation once when the changed chunk is visible.
+        IncrementConveyorItemVisualVersion();
+        TerrainGenerator.Active?.MarkBeltJobItemVisualDirty(this, refreshActivity, itemCount, hasDynamicVisuals);
     }
 
-    internal void CaptureBeltJobItemVisualState(out int itemCount, out bool hasDynamicVisuals)
+    internal bool NotifyBeltJobRuntimePublished()
     {
-        itemCount = 0;
-        hasDynamicVisuals = false;
-        if (!Application.isPlaying
-            || !IsConveyorStackingEnabled()
-            || !ShouldUseVirtualConveyorItemRendering())
-        {
-            return;
-        }
+        // Most native belts have no floor items. Do not initialize/normalize their
+        // managed slot storage on every handoff. Real floor ingress stays immediate.
+        if (HasBeltJobFloorIngress() && TryTransferOneDroppedFloorObjectToConveyor()) return true;
+        if (RuntimeItemStackChanged == null) return false;
+        RuntimeItemStackChanged.Invoke(this);
+        return true;
+    }
 
-        for (int lane = 0; lane < ConveyorStackLaneLimit; lane++)
-        {
-            if (!TryReadBeltJobLane(lane, out BeltLaneState state) || state.ItemId < 0) continue;
-            itemCount++;
-            hasDynamicVisuals |= state.Remaining > 0;
-        }
-
-        if (!hasDynamicVisuals)
-            hasDynamicVisuals = HasNonBeltCpuRenderedConveyorMotionStates();
+    private bool HasBeltJobFloorIngress()
+    {
+        if (deferredFloorOutput.Count > 0) return true;
+        for (int i = 0; i < floorStacks.Count; i++)
+            if (floorStacks[i] != null && floorStacks[i].Count > 0) return true;
+        return false;
     }
 
     private bool TryReadBeltJobLane(int lane, out BeltLaneState state)
@@ -202,27 +206,82 @@ public partial class Block
 
     internal int GetBeltJobLaneOccupancyVersion(int lane)
     {
-        ConveyorRuntimeArrays runtimeArrays = conveyorRuntimeArrays;
-        return runtimeArrays != null
-            && lane >= 0
-            && lane < runtimeArrays.LaneOccupancyVersions.Length
-                ? runtimeArrays.LaneOccupancyVersions[lane]
-                : 0;
+        return lane == 0 ? beltJobOccupancyVersion0 : lane == 1 ? beltJobOccupancyVersion1
+            : lane == 2 ? beltJobOccupancyVersion2 : lane == 3 ? beltJobOccupancyVersion3 : 0;
     }
 
     internal Vector3 EvaluateBeltJobSegment(int sourceLane, Block destination, int targetLane, float progress)
     {
-        Vector3 from = GetConveyorLaneWorldPosition(sourceLane);
+        return CaptureBeltJobVisualPath(sourceLane, destination, targetLane).Evaluate(progress);
+    }
+
+    internal BeltItemVisualPath CaptureBeltJobVisualPath(int sourceLane, Block destination, int targetLane)
+    {
         if (destination == this && IsCornerConveyor() && sourceLane == ConveyorSingleLineBackLaneIndex)
-            return EvaluateConveyorCornerPathWorldPosition(sourceLane, targetLane, progress);
-        Vector3 to = destination.GetConveyorLaneWorldPosition(targetLane);
-        if (TryGetConveyorLinearMoveViaWorldPosition(sourceLane, destination, targetLane, from, out Vector3 via))
         {
-            float first = Vector3.Distance(from, via), second = Vector3.Distance(via, to);
-            float distance = (first + second) * progress;
-            return distance <= first ? Vector3.Lerp(from, via, first > 0 ? distance / first : 1f)
-                : Vector3.Lerp(via, to, second > 0 ? (distance - first) / second : 1f);
+            if (TryGetConveyorCornerArcParameters(sourceLane, targetLane,
+                    out Vector2 center, out float start, out float delta, out float radius))
+                return BeltItemVisualPath.Arc(
+                    BlockLocalToWorld(new Vector3(center.x, GetConveyorLaneHeight(), center.y)), start, delta, radius);
+            Vector3 fallback = GetDefaultConveyorLaneWorldPosition(targetLane);
+            return BeltItemVisualPath.Line(fallback, fallback);
         }
-        return Vector3.Lerp(from, to, progress);
+        Vector3 from = GetConveyorLaneWorldPosition(sourceLane);
+        Vector3 to = destination.GetConveyorLaneWorldPosition(targetLane);
+        return TryGetConveyorLinearMoveViaWorldPosition(sourceLane, destination, targetLane, from, out Vector3 via)
+            ? BeltItemVisualPath.Through(from, via, to)
+            : BeltItemVisualPath.Line(from, to);
+    }
+
+    internal void CaptureBeltJobVisualSurface(int lane, ref BeltItemVisualPathCache cache)
+    {
+        cache.RotateOnSurface = HasRuntimeBelt2FConveyor();
+        cache.RequiresSurface = cache.RotateOnSurface
+            || TryGetConveyorItemBelt2FRecord(lane, out _)
+            || TryGetConveyorItemBelt2F(lane, out _);
+    }
+
+    internal void AppendDynamicVirtualConveyorItemRenderData(
+        List<VirtualConveyorItemRenderData> results, BeltItemVisualPathCache[] pathCaches)
+    {
+        if (beltJobOwner == null)
+        {
+            AppendDynamicVirtualConveyorItemRenderData(results);
+            return;
+        }
+        // Native ownership does not require materializing/normalizing legacy floor slots.
+        GameManager manager = GameManager.Instance;
+        bool showSleep = manager != null && manager.ShowSleepAwake;
+        bool showLine = manager != null && manager.ShowBeltItemLine;
+        for (int lane = 0; lane < ConveyorStackLaneLimit; lane++)
+        {
+            if (!beltJobOwner.TryReadBeltJobLaneForRendering(this, lane, out BeltLaneState state) || state.ItemId < 0)
+                continue;
+            PortableObject portable = GetConveyorPortableObjectAtLane(lane);
+            if (portable != null)
+            {
+                if (portable.IsMovingToTarget) continue;
+                ApplyConveyorObjectVirtualRenderingSuppressionIfNeeded(portable);
+                if (portable.HasActiveOutline) continue;
+            }
+            float progress = beltJobOwner.GetBeltJobVisualProgress(this, lane, state);
+            BeltItemVisualPath path = beltJobOwner.GetBeltJobVisualPath(this, lane, state, ref pathCaches[lane]);
+            Vector3 position = path.End;
+            Quaternion rotation = Quaternion.identity;
+            if (pathCaches[lane].RequiresSurface)
+            {
+                position = path.Evaluate(progress);
+                if (state.Origin >= 0 || state.Remaining <= 0)
+                    position = ConformConveyorItemToBelt2FPath(lane, position);
+                if (pathCaches[lane].RotateOnSurface) rotation = GetConveyorItemVisualWorldRotation(lane, position);
+                path = default;
+            }
+            bool useLineColor = TryGetBeltItemLineDebugColorFast(
+                beltJobOwner, showLine, lane, out Color32 lineColor);
+            results.Add(new VirtualConveyorItemRenderData(
+                state.ItemId, position, rotation, RuntimeLayer,
+                showSleep && IsConveyorItemSleepAwakeSleeping(lane), useLineColor, lineColor,
+                default, path, progress));
+        }
     }
 }

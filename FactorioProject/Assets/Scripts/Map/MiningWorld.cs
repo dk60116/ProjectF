@@ -23,6 +23,7 @@ public sealed class MiningWorld : IDisposable
     private readonly ResourceStateSlots<State> states = new ResourceStateSlots<State>();
     private readonly Dictionary<Vector2Int, MiningMachineInstance> byKey = new Dictionary<Vector2Int, MiningMachineInstance>();
     private readonly Dictionary<Vector2Int, List<MiningMachineInstance>> observers = new Dictionary<Vector2Int, List<MiningMachineInstance>>();
+    private readonly List<Block> beltWakeScratch = new List<Block>();
     private readonly Dictionary<Vector2Int, List<MiningMachineInstance>> cells = new Dictionary<Vector2Int, List<MiningMachineInstance>>();
     private readonly List<MiningMachineInstance> instances = new List<MiningMachineInstance>();
     private readonly Dictionary<MiningMachine, MiningRenderTemplate> templates = new Dictionary<MiningMachine, MiningRenderTemplate>();
@@ -130,8 +131,12 @@ public sealed class MiningWorld : IDisposable
         if (!observers.TryGetValue(coordinate, out var list)) return;
         for (int i = 0; i < list.Count; i++) list[i].Wake();
     }
-    internal void Wake(IReadOnlyList<Block> changed)
-    { for (int i = 0; changed != null && i < changed.Count; i++) if (changed[i] != null) Wake(changed[i].Coordinate); }
+    internal void WakePublishedBelts(TerrainGenerator terrain)
+    {
+        terrain.CollectPublishedBeltObservers(observers, beltWakeScratch);
+        for (int i = 0; i < beltWakeScratch.Count; i++) Wake(beltWakeScratch[i].Coordinate);
+        beltWakeScratch.Clear();
+    }
     public void WakeAll() { for (int i = 0; i < instances.Count; i++) instances[i].Wake(); }
     public void Remove(Vector2Int key)
     {

@@ -3,6 +3,7 @@
     <OutputType>Exe</OutputType>
     <TargetFramework>net9.0</TargetFramework>
     <ImplicitUsings>enable</ImplicitUsings>
+    <TieredCompilation>false</TieredCompilation>
   </PropertyGroup>
   <ItemGroup>
     <Compile Include="../../FactorioProject/Assets/Scripts/Simulation/Logistics/BeltSimulationWorld.cs" Link="BeltSimulationWorld.cs" />
@@ -13,5 +14,7 @@
     <Compile Include="../../FactorioProject/Assets/Scripts/Map/BeltSplitGraph.cs" Link="BeltSplitGraph.cs" />
     <Compile Include="../../FactorioProject/Assets/Scripts/Map/TerrainGenerator.ConveyorJobs.cs" Link="TerrainGenerator.ConveyorJobs.cs" />
     <Compile Include="../../FactorioProject/Assets/Scripts/Map/TerrainGenerator.ConveyorJobs.Save.cs" Link="TerrainGenerator.ConveyorJobs.Save.cs" />
+    <Compile Include="../../FactorioProject/Assets/Scripts/Map/TerrainGenerator.ConveyorJobs.Publication.cs" Link="TerrainGenerator.ConveyorJobs.Publication.cs" />
+    <Compile Include="../../FactorioProject/Assets/Scripts/Rendering/BeltItemVisualPath.cs" Link="BeltItemVisualPath.cs" />
   </ItemGroup>
 </Project>

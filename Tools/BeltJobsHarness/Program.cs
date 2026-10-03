@@ -410,5 +410,134 @@ using (var host = new TerrainGenerator())
     Require(host.BeltJobLaneCount == 2 && host.Read(detached, 1).ItemId == 81,
         "topology rebuild retains an occupied lane that no longer belongs to the connection graph");
 }
+using (var host = new TerrainGenerator())
+{
+    Block a = new Block(900), b = new Block(901), unchanged = new Block(902);
+    host.Add(a); host.Add(b); host.Add(unchanged); host.Frame(0);
+    var watched = new Dictionary<UnityEngine.Vector2Int, int> { [unchanged.Coordinate] = 1, [b.Coordinate] = 1, [a.Coordinate] = 1 };
+    var collected = new List<Block>();
+    InputOutputModule.OnWake = terrain => terrain.CollectPublishedBeltObservers(watched, collected);
+    int invalidations = Block.PublicationCacheInvalidations;
+    host.Put(b, 0, 81, tick * 5); host.Put(a, 0, 80, tick * 5); host.StepBeltSimulation();
+    Require(Block.PublicationCacheInvalidations == invalidations + 1, "capacity caches invalidate once per batch before observers run");
+    Require(collected.Count == 2 && ReferenceEquals(collected[0], a) && ReferenceEquals(collected[1], b),
+        "sparse publication wakes only changed observer coordinates in stable order");
+    host.FlushBeltJobPresentation(null);
+    Require(a.PublishedItemCount == 1 && a.PublishedDynamic && b.PublishedItemCount == 1,
+        "native summaries preserve stock and movement without managed mirrors");
+    Require(a.Items[0].ItemId < 0 && b.Items[0].ItemId < 0, "publication leaves authoritative items in native storage");
+    for (int i = 0; i < 4; i++) host.StepBeltSimulation();
+    host.FlushBeltJobPresentation(null);
+    Require(a.PublishedItemCount == 1 && !a.PublishedDynamic && b.PublishedItemCount == 1 && !b.PublishedDynamic,
+        "arrival-only changes publish settled native summaries without losing items");
+    host.CollectPublishedBeltObservers(watched, collected);
+    Require(collected.Count == 0, "publication flags are cleared after observers and block callbacks");
+    InputOutputModule.OnWake = null;
+}
+using (var host = new TerrainGenerator())
+{
+    Block a = new Block(910), b = new Block(911), c = new Block(912), unchanged = new Block(913);
+    host.Add(a); host.Add(b); host.Add(c); host.Add(unchanged); host.Frame(0);
+    var watched = new Dictionary<UnityEngine.Vector2Int, int> { [c.Coordinate] = 1 };
+    var collected = new List<Block>();
+    InputOutputModule.OnWake = terrain => terrain.CollectPublishedBeltObservers(watched, collected);
+    host.Put(b, 0, 82, tick * 5); host.Put(c, 0, 83, tick * 5); host.Put(a, 0, 84, tick * 5); host.StepBeltSimulation();
+    Require(collected.Count == 1 && ReferenceEquals(collected[0], c), "dense handoffs query the smaller observer registry");
+    host.Remove(c); host.Frame(0);
+    Require(c.BeltJobPublicationIndex == -1, "removal and topology rebuild discard publication bindings");
+    InputOutputModule.OnWake = null;
+}
+using (var host = new TerrainGenerator())
+{
+    Block near = new Block(-8), nearTarget = new Block(-7), far = new Block(80), farTarget = new Block(81);
+    near.Edges[0].Add((nearTarget, 0)); far.Edges[0].Add((farTarget, 0));
+    near.Items[0] = far.Items[0] = new BeltLaneState { ItemId = 90, Origin = -1, GateBits = 8 };
+    int notifications = 0;
+    farTarget.OnPublished = () => notifications++;
+    host.Add(near); host.Add(nearTarget); host.Add(far); host.Add(farTarget); host.Frame(0);
+    Require(host.NativeItemCount == 2 && host.PendingVisualBlocks == 4, "native stock remains exact before any camera publication");
+    var view = new ProjectF.Rendering.CameraRenderCulling { MaximumX = 0 };
+    host.FlushBeltJobPresentation(view);
+    Require(host.VisualFlushedBlocks == 2 && far.VisualPublications == 0 && host.PendingVisualBlocks == 2,
+        "only visible chunks cross into managed presentation, including negative chunk coordinates");
+    for (int i = 0; i < 8; i++) host.StepBeltSimulation();
+    Require(notifications > 0 && farTarget.VisualPublications == 0 && host.NativeItemCount == 2,
+        "off-screen event subscribers run on native changes while simulation and stock stay authoritative");
+    host.FlushBeltJobPresentation(view);
+    Require(near.PublishedItemCount == 0 && nearTarget.PublishedItemCount == 1 && !nearTarget.PublishedDynamic,
+        "coalesced visual changes retain the latest empty source and settled destination");
+    view.MinimumX = 75; view.MaximumX = 90;
+    host.FlushBeltJobPresentation(view);
+    Require(host.VisualFlushedBlocks == 2 && far.PublishedItemCount == 0 && farTarget.PublishedItemCount == 1
+        && !farTarget.PublishedDynamic && host.PendingVisualBlocks == 0,
+        "camera re-entry publishes the latest state once instead of replaying off-screen movements");
+    host.ExpandPersistence();
+    Require(host.SavedDirtyBlocks.Count == 4 && host.SavedDirtyBlocks.Contains(far),
+        "checkpoint expansion includes invisible items and vacated source cells");
+    host.SavedDirtyBlocks.Clear(); host.Put(nearTarget, 0, -1); host.StepBeltSimulation(); host.ExpandPersistence();
+    Require(host.NativeItemCount == 1 && host.SavedDirtyBlocks.Count == 2 && !host.SavedDirtyBlocks.Contains(far),
+        "external removals update stock and dirty only their owning chunk after a checkpoint");
+    host.SavedDirtyBlocks.Clear(); host.ResetPersistenceBaseline(); host.ExpandPersistence();
+    Require(host.SavedDirtyBlocks.Count == 4, "checkpoint baseline includes asleep off-screen belts");
+    host.SavedDirtyBlocks.Clear(); host.Put(farTarget, 0, 91); host.StepBeltSimulation(); host.ExpandPersistence();
+    Require(host.SavedDirtyBlocks.Contains(farTarget), "a mutation after checkpoint expansion remains dirty for the next save");
+    host.Remove(farTarget); host.Frame(0);
+    Require(host.NativeItemCount == 0 && farTarget.BeltJobPublicationIndex == -1,
+        "topology rebuild drops removed native stock and presentation bindings");
+}
+using (var host = new TerrainGenerator())
+{
+    const int count = 100000;
+    var bulk = new Block[count];
+    for (int i = 0; i < count; i++)
+    {
+        bulk[i] = new Block(i % 400, i / 400);
+        bulk[i].Items[0] = new BeltLaneState { ItemId = 92, Origin = -1, GateBits = 8 };
+        host.Add(bulk[i]);
+    }
+    host.Frame(0);
+    // Warm the full production publication path, excluding topology construction.
+    for (int i = 0; i < 3; i++) host.PublishAllChanges();
+    var watch = new System.Diagnostics.Stopwatch();
+    long allocated = GC.GetAllocatedBytesForCurrentThread();
+    watch.Start();
+    host.PublishAllChanges();
+    watch.Stop();
+    allocated = GC.GetAllocatedBytesForCurrentThread() - allocated;
+    Require(allocated == 0, "warmed native chunk publication must not allocate managed memory");
+    Require(host.NativeItemCount == count && host.PendingVisualBlocks == count && bulk.All(b => b.VisualPublications == 0),
+        "100k synchronized changes perform no per-block visual publication before visibility is resolved");
+    var view = new ProjectF.Rendering.CameraRenderCulling { MinimumX = -10, MaximumX = 6 };
+    host.FlushBeltJobPresentation(view);
+    Require(host.VisualFlushedBlocks == 2000 && host.PendingVisualBlocks == 98000,
+        "100k synchronized changes publish only the visible 8-column chunk strip");
+    host.ExpandPersistence();
+    Require(host.SavedDirtyBlocks.Count == count, "100k native stock remains fully checkpointable off screen");
+    Console.WriteLine($"100k coalesced host publication: {watch.Elapsed.TotalMilliseconds:F2} ms; managed allocation={allocated} B; visible flush={host.VisualFlushedBlocks} (engine boundaries doubled)");
+}
+using (var host = new TerrainGenerator())
+{
+    Block source = new Block(-1), target = new Block(0);
+    source.Edges[0].Add((target, 0));
+    source.Items[0] = new BeltLaneState { ItemId = 93, Origin = -1, GateBits = 8 };
+    host.Add(source); host.Add(target); host.Frame(0); host.StepBeltSimulation();
+    host.ExpandPersistence();
+    Require(host.SavedDirtyBlocks.Contains(source) && host.SavedDirtyBlocks.Contains(target) && host.NativeItemCount == 1,
+        "cross-chunk handoff dirties both sides without duplicating native stock");
+    BeltSimulationSnapshot checkpoint = host.CaptureBeltSimulationSnapshot();
+    // Occupied map.conveyorItems checkpoints accompany the global empty-lane snapshot.
+    checkpoint.Lanes.Add(host.CaptureBeltJobLane(target, 0));
+    using var restored = new TerrainGenerator();
+    Block restoredSource = new Block(-1), restoredTarget = new Block(0);
+    restoredSource.Edges[0].Add((restoredTarget, 0));
+    restored.Add(restoredSource); restored.Add(restoredTarget); restored.Frame(0);
+    restored.RestoreBeltSimulationSnapshot(checkpoint);
+    Require(restored.NativeItemCount == 1 && restored.ComputeBeltSimulationChecksum() == host.ComputeBeltSimulationChecksum(),
+        "checkpoint restore preserves off-screen native items, origin, cursor and clock");
+    restored.FlushBeltJobPresentation(null);
+    Require(restoredSource.PublishedItemCount == 0 && restoredTarget.PublishedItemCount == 1,
+        "first visibility after checkpoint restore reflects the native item exactly once");
+}
 checks += WorldChecks.Run();
+checks += VisualChecks.Run();
 Console.WriteLine($"PASS: {checks} deterministic belt kernel, host and viewless world checks; serial/reverse/parallel states match.");

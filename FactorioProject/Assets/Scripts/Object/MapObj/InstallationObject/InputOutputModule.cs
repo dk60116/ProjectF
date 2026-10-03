@@ -190,6 +190,7 @@ public partial class InputOutputModule : InstallationObject,
         = new Dictionary<Vector2Int, HashSet<InputOutputModule>>();
     private static readonly Dictionary<Vector2Int, HashSet<InputOutputModule>> registeredRuntimeAreaCoordinates
         = new Dictionary<Vector2Int, HashSet<InputOutputModule>>();
+    private static readonly List<Block> runtimeBeltWakeBlocks = new List<Block>();
     private static readonly Dictionary<Vector2Int, HashSet<InputOutputModule>> registeredRuntimeFluidOutputCoordinates
         = new Dictionary<Vector2Int, HashSet<InputOutputModule>>();
     private static readonly Dictionary<Vector2Int, HashSet<InputOutputModule>> registeredRuntimeFluidStorageCoordinates
@@ -1827,16 +1828,18 @@ public partial class InputOutputModule : InstallationObject,
         WakeCollectedRuntimeModules();
     }
 
-    internal static void WakeRuntimeModulesForChangedBlocks(IReadOnlyList<Block> changedBlocks)
+    internal static void WakeRuntimeModulesForPublishedBelts(TerrainGenerator terrain)
     {
+        terrain.CollectPublishedBeltObservers(registeredRuntimeAreaCoordinates, runtimeBeltWakeBlocks);
         runtimeWakeScratch.Clear();
         runtimeWakeSet.Clear();
-        for (int i = 0; changedBlocks != null && i < changedBlocks.Count; i++)
+        for (int i = 0; i < runtimeBeltWakeBlocks.Count; i++)
         {
-            Block block = changedBlocks[i];
+            Block block = runtimeBeltWakeBlocks[i];
             if (block != null) CollectRuntimeModulesAtCoordinate(block.Coordinate, false);
         }
 
+        runtimeBeltWakeBlocks.Clear();
         WakeCollectedRuntimeModules();
     }
 

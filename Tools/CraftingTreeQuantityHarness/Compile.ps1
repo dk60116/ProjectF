@@ -28,7 +28,8 @@ foreach ($name in @('Assembly-CSharp', 'Assembly-CSharp-Editor')) {
             'Rendering/InstallationRigidAnimationTemplate.cs', 'Map/IDataElectricConsumer.cs', 'Map/MiningWorld.cs',
             'Map/MiningMachineInstance.cs', 'Map/MiningRenderTemplate.cs', 'Map/MiningItemOutput.cs',
             'Map/TerrainGenerator.Mining.cs', 'Simulation/Core/MiningProcess.cs', 'Simulation/Presentation/MiningWorldView.cs',
-            'Map/Block.DeferredOutputs.cs', 'Map/PortableItemRenderer.DeferredOutputs.cs', 'Simulation/Core/OutputStackBatch.cs')) {
+            'Map/Block.DeferredOutputs.cs', 'Map/PortableItemRenderer.DeferredOutputs.cs', 'Simulation/Core/OutputStackBatch.cs',
+            'Map/TerrainGenerator.ConveyorJobs.Publication.cs', 'Rendering/BeltItemVisualPath.cs')) {
             $sources.Add((Join-Path $project ('Assets/Scripts/' + $relative))) | Out-Null
         }
     }

@@ -52,7 +52,9 @@ public readonly struct VirtualConveyorItemRenderData
         bool useSleepAwakeDarkTint,
         bool useBeltItemLineDebugColor = false,
         Color32 beltItemLineDebugColor = default,
-        ConveyorItemGpuMotionData gpuMotion = default)
+        ConveyorItemGpuMotionData gpuMotion = default,
+        BeltItemVisualPath visualPath = default,
+        float visualProgress = 0f)
         : this(
             itemId,
             position,
@@ -65,7 +67,9 @@ public readonly struct VirtualConveyorItemRenderData
             false,
             0,
             0,
-            gpuMotion)
+            gpuMotion,
+            visualPath,
+            visualProgress)
     {
     }
 
@@ -81,7 +85,9 @@ public readonly struct VirtualConveyorItemRenderData
         bool hasResolvedBatchCell,
         int batchCellX,
         int batchCellZ,
-        ConveyorItemGpuMotionData gpuMotion)
+        ConveyorItemGpuMotionData gpuMotion,
+        BeltItemVisualPath visualPath,
+        float visualProgress)
     {
         ItemId = itemId;
         Position = position;
@@ -95,6 +101,8 @@ public readonly struct VirtualConveyorItemRenderData
         BatchCellX = batchCellX;
         BatchCellZ = batchCellZ;
         GpuMotion = gpuMotion;
+        VisualPath = visualPath;
+        VisualProgress = visualProgress;
     }
 
     public readonly int ItemId;
@@ -109,6 +117,8 @@ public readonly struct VirtualConveyorItemRenderData
     public readonly int BatchCellX;
     public readonly int BatchCellZ;
     public readonly ConveyorItemGpuMotionData GpuMotion;
+    public readonly BeltItemVisualPath VisualPath;
+    public readonly float VisualProgress;
 
     public VirtualConveyorItemRenderData WithResolvedTransform(
         Matrix4x4 matrix,
@@ -127,7 +137,9 @@ public readonly struct VirtualConveyorItemRenderData
             true,
             batchCellX,
             batchCellZ,
-            GpuMotion);
+            GpuMotion,
+            VisualPath,
+            VisualProgress);
     }
 
     public VirtualConveyorItemRenderData WithResolvedMatrix(Matrix4x4 matrix)
@@ -144,7 +156,9 @@ public readonly struct VirtualConveyorItemRenderData
             false,
             0,
             0,
-            GpuMotion);
+            GpuMotion,
+            VisualPath,
+            VisualProgress);
     }
 }
 
@@ -315,6 +329,8 @@ public sealed partial class PortableItemRenderer : MonoBehaviour
     public int DynamicVirtualConveyorCullCacheRefreshes => lastDynamicVirtualConveyorCullCacheRefreshes;
     public int DynamicVirtualConveyorCullCachedBlocks => lastDynamicVirtualConveyorCullCachedBlocks;
     public int DynamicVirtualConveyorTransformJobItems => lastDynamicVirtualConveyorTransformJobItems;
+    public int DynamicVirtualConveyorNativePathItems => lastDynamicVirtualConveyorTransformJobItems > 0
+        ? conveyorItemTransformJobProcessor.NativePathItemCount : 0;
     public int DynamicVirtualConveyorCullSourceChunks => lastDynamicVirtualConveyorCullSourceChunks;
     public int DynamicVirtualConveyorCullVisibleChunks => lastDynamicVirtualConveyorCullVisibleChunks;
     public int VirtualConveyorMembershipChanges => lastVirtualConveyorMembershipChanges;
@@ -738,6 +754,7 @@ public sealed partial class PortableItemRenderer : MonoBehaviour
         }
 
         return cachedRenderAssetItemManager != itemManager
+               || terrainGenerator.HasBeltJobPresentationChanges
                || cachedVirtualConveyorVisualBlockSetVersion != terrainGenerator.ConveyorItemVisualBlockSetVersion
                || cachedDynamicVirtualConveyorVisualBlockSetVersion != terrainGenerator.DynamicConveyorItemVisualBlockSetVersion
                || terrainGenerator.ConveyorItemVisualDirtyBlockCount > 0
@@ -831,6 +848,9 @@ public sealed partial class PortableItemRenderer : MonoBehaviour
             }
         }
 
+        long publicationStart = BeginRuntimeProfileSample(out bool profilePublication);
+        terrainGenerator.FlushBeltJobPresentation(itemCameraCulling);
+        EndRuntimeProfileSample(profilePublication, "Conveyor Item Publish Visible Chunks", publicationStart);
         terrainGenerator.CopyConveyorItemVisualDirtyBlocks(dirtyVirtualConveyorRenderBlocks);
 
         // Membership changes are already queued in ConveyorItemVisualDirtyBlocks.
@@ -1515,6 +1535,7 @@ public sealed partial class PortableItemRenderer : MonoBehaviour
             ProfileBreakdown = MapObjectTickProfiler.IsDetailedEnabled
         };
         ResetDynamicVirtualConveyorRenderCounters();
+        TerrainGenerator.Active?.BeginBeltItemRendering();
         lastDynamicVirtualConveyorCullSourceBlocks = activeDynamicVirtualConveyorRenderBlocks.Count;
         lastDynamicVirtualConveyorCullSourceChunks = dynamicVirtualConveyorRenderChunks.Count;
         dynamicVirtualConveyorRenderItems.Clear();
@@ -1565,7 +1586,7 @@ public sealed partial class PortableItemRenderer : MonoBehaviour
             phaseStartTimestamp = profile.ProfileBreakdown ? MapObjectTickProfiler.BeginSample() : 0L;
             BlockHandle handle = dynamicRenderBlocks[i];
             if (!TryResolveConveyorBlock(handle, out Block block)
-                || !block.HasDynamicVirtualConveyorItemVisuals())
+                || (!block.HasBoundBeltJobLanes && !block.HasDynamicVirtualConveyorItemVisuals()))
             {
                 profile.CullTicks += MeasureRuntimeProfilePhase(profile.ProfileBreakdown, phaseStartTimestamp);
                 RemoveDynamicVirtualConveyorBlockRenderCache(handle);
@@ -1582,18 +1603,13 @@ public sealed partial class PortableItemRenderer : MonoBehaviour
 
             phaseStartTimestamp = profile.ProfileBreakdown ? MapObjectTickProfiler.BeginSample() : 0L;
             DynamicBlockRenderCache blockCache = GetOrCreateDynamicVirtualConveyorBlockRenderCache(handle);
-            if (blockCache.version != block.ConveyorItemVisualVersion)
-            {
-                RemoveDynamicVirtualConveyorBlockBatchEntries(blockCache);
-                blockCache.itemKeyCaches.Clear();
-                blockCache.version = block.ConveyorItemVisualVersion;
-                blockCache.isValid = false;
-            }
+            // Movement/occupancy versions do not define mesh/material identity.
+            // Sync compares the actual count and render keys before replacing entries.
             profile.CacheTicks += MeasureRuntimeProfilePhase(profile.ProfileBreakdown, phaseStartTimestamp);
 
             phaseStartTimestamp = profile.ProfileBreakdown ? MapObjectTickProfiler.BeginSample() : 0L;
             int firstItemIndex = dynamicVirtualConveyorRenderItems.Count;
-            block.AppendDynamicVirtualConveyorItemRenderData(dynamicVirtualConveyorRenderItems);
+            block.AppendDynamicVirtualConveyorItemRenderData(dynamicVirtualConveyorRenderItems, blockCache.pathCaches);
             dynamicVirtualConveyorRenderWorkItems.Add(new DynamicBlockRenderWork(
                 blockCache,
                 firstItemIndex,
@@ -1690,7 +1706,7 @@ public sealed partial class PortableItemRenderer : MonoBehaviour
             foreach (BlockHandle handle in chunk.Blocks)
             {
                 if (!TryResolveConveyorBlock(handle, out Block block)
-                    || !block.HasDynamicVirtualConveyorItemVisuals())
+                    || (!block.HasBoundBeltJobLanes && !block.HasDynamicVirtualConveyorItemVisuals()))
                 {
                     RemoveDynamicVirtualConveyorBlockRenderCache(handle);
                     continue;
@@ -2189,7 +2205,7 @@ public sealed partial class PortableItemRenderer : MonoBehaviour
         public readonly List<VirtualRenderBatchEntry> batchEntries = new List<VirtualRenderBatchEntry>(4);
         public readonly List<DynamicItemRenderKeyCache> itemKeyCaches =
             new List<DynamicItemRenderKeyCache>(4);
-        public int version = int.MinValue;
+        public readonly BeltItemVisualPathCache[] pathCaches = new BeltItemVisualPathCache[Block.ConveyorCellItemUnit];
         public bool isValid;
 
         public int BatchEntryCount => batchEntries.Count;

@@ -70,6 +70,19 @@ Job 완료만으로 Tick을 증가시키지 않아. 기존 호스트의 결과 �
 
 MapObject Profiler에는 전체 `Belt Jobs Tick`과 그 안의 `Belt Jobs Schedule`, `Belt Jobs Complete`, `Belt Jobs Publish`가 별도 행으로 표시된다. 부모와 자식 시간은 겹치므로 합산하지 않는다. `BeltJobs` 카운터에는 그룹/슬롯 수, 가장 큰 그룹, 수면 그룹, 대기 중 입력, 마지막 틱 이동 수, 변경 슬롯, 프레임 처리 틱, 누적 지연과 토폴로지 재구축 횟수가 표시된다. Unity Profiler에서는 `Belt Jobs.Bake`, `Belt Jobs.Tick`, `Belt Jobs.Schedule`, `Belt Jobs.Complete`, `Belt Jobs.Publish`와 `BeltSimulationJob`을 확인한다.
 
+## 청크 단위 결과 반영
+
+아이템 렌더 상태 조회·경로 캐시 검사는 `VisualChecks.cs`에도 포함돼. 같은 경로의 반복 조회에서 경로 생성 횟수, GC 할당, 대기 중 입력 명령, 토폴로지 재구축 및 논리 상태 불변을 확인해. 위치→행렬→배치 연결 검사는 `Tools/BeltItemRenderingHarness/README.md`를 참고해.
+
+화면 밖에서도 네이티브 이동과 입출력 관찰자 깨우기는 매 틱 유지한다. 표시 변경은 청크 안에서 셀별로 합치고, `PortableItemRenderer`가 보이는 청크의 최신 상태를 반영한다. `Conveyor Item Publish Visible Chunks`가 이 비용이고, `Belt Jobs Publish Blocks`는 즉시 필요한 바닥 아이템 유입과 이벤트 구독자 처리 비용이다.
+
+- `PendingVisualBlocks`: 화면 밖에서 합쳐 둔 표시 변경 수. 시뮬레이션 대기량이 아니다.
+- `LastFrameVisualPublishedBlocks`: 실제로 표시 상태를 반영한 셀 수.
+- `LastTickRuntimeNotifications`: 즉시 실행한 바닥 유입/이벤트 알림 수.
+- `LoadedItemCount`: 네이티브 아이템 총수. 내부 칸 이동으로 변하지 않고 외부 삽입/제거와 토폴로지 재구축 때 갱신한다.
+
+저장 변경은 청크별로 기록하고 기존 저장 진입점에서 셀로 펼친다. 빈 출발 셀, 화면 밖의 아이템, 저장 도중 발생한 후속 변경도 포함한다. 하네스는 음수 좌표, 화면 재진입, 정지한 아이템, 삭제 후 재구축, 저장 기준점 초기화 및 10만 개 동시 변경의 추가 할당 0바이트를 검사한다. .NET 측정은 Unity의 FPS나 Burst 실행 시간 측정이 아니다.
+
 1. 직선·커브·합류·분배기·2F 경사/교차에 아이템을 흘려보낸다. 로봇팔 및 OutputArea 입출력도 함께 확인한다.
 2. 출구를 막았다가 아이템을 회수하여 다시 흐르는지 확인한다. 분배기는 한쪽 출구만 막아 반대쪽 배출도 확인한다.
 3. 아이템이 이동하는 중간에 벨트를 추가·회전·철거하고 저장/로드한다.

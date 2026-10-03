@@ -44,7 +44,7 @@ foreach ($signature in @(
     'private void UnregisterRuntimeInputItemAreaCoordinates()',
     'private static void RegisterRuntimeCoordinate(',
     'private static void UnregisterRuntimeCoordinate(',
-    'internal static void WakeRuntimeModulesForChangedBlocks(',
+    'internal static void WakeRuntimeModulesForPublishedBelts(',
     'private static void CollectRuntimeModulesAtCoordinate(',
     'private static void WakeCollectedRuntimeModules()'
 )) { $source += (Member $signature) + "`n" }
