@@ -24,6 +24,16 @@ foreach ($name in @('Assembly-CSharp', 'Assembly-CSharp-Editor')) {
             'Object/MapObj/InstallationObject/InputOutputModule.Benchmark.cs', 'Object/MapObj/InstallationObject/LoggingMachine.Benchmark.cs')) {
             $sources.Add((Join-Path $project ('Assets/Scripts/' + $relative))) | Out-Null
         }
+        foreach ($relative in @('Rendering/InstallationMaterialVariants.cs', 'Rendering/InstallationBatchRenderer.cs',
+            'Rendering/InstallationRigidAnimationTemplate.cs', 'Map/IDataElectricConsumer.cs', 'Map/MiningWorld.cs',
+            'Map/MiningMachineInstance.cs', 'Map/MiningRenderTemplate.cs', 'Map/MiningItemOutput.cs',
+            'Map/TerrainGenerator.Mining.cs', 'Simulation/Core/MiningProcess.cs', 'Simulation/Presentation/MiningWorldView.cs',
+            'Map/Block.DeferredOutputs.cs', 'Map/PortableItemRenderer.DeferredOutputs.cs', 'Simulation/Core/OutputStackBatch.cs')) {
+            $sources.Add((Join-Path $project ('Assets/Scripts/' + $relative))) | Out-Null
+        }
+    }
+    if ($name -eq 'Assembly-CSharp-Editor') {
+        $sources.Add((Join-Path $project 'Assets/Editor/InstallationArchetypeBuildPreparation.cs')) | Out-Null
     }
     foreach ($path in $sources) {
         $node = $generated.CreateElement('Compile'); $node.SetAttribute('Include', $path)

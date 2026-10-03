@@ -12,15 +12,15 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: a4d286e989be41fe853b78a59ca3a4e8, type: 3}
   m_Name: MapObjectArchetype_26_Wooden Box
   m_EditorClassIdentifier: Assembly-CSharp::ProjectF.MapObjects.MapObjectArchetype
-  schemaVersion: 1
+  schemaVersion: 2
   itemDefinition: {fileID: 11400000, guid: 4a87d679024ea8a44b02ecc16293a962, type: 2}
   sourcePrefab: {fileID: 6524911674366201629, guid: 7ce21f04ec369dd4595efc204633050b, type: 3}
-  itemId: 33
+  itemId: 37
   itemName: Wooden Box
   sourcePrefabGuid: 7ce21f04ec369dd4595efc204633050b
   sourceContentHash:
     serializedVersion: 2
-    Hash: 7215f942b7131ec3468a30256b72e063
+    Hash: 6d34bf80976ad9b7ca8f52b269531a10
   sourceRuntimeType: BoxObject, Assembly-CSharp, Version=0.0.0.0, Culture=neutral,
     PublicKeyToken=null
   mapStatus:

@@ -12,15 +12,15 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: a4d286e989be41fe853b78a59ca3a4e8, type: 3}
   m_Name: MapObjectArchetype_67_Wooden Fence Door
   m_EditorClassIdentifier: Assembly-CSharp::ProjectF.MapObjects.MapObjectArchetype
-  schemaVersion: 1
+  schemaVersion: 2
   itemDefinition: {fileID: 11400000, guid: e110bd69d6c9d9d49aa13090a2202fd1, type: 2}
   sourcePrefab: {fileID: 3131218003902393541, guid: f792eb3818b43ab4aa29e8e6a5a7e454, type: 3}
-  itemId: 79
+  itemId: 83
   itemName: Wooden Fence Door
   sourcePrefabGuid: f792eb3818b43ab4aa29e8e6a5a7e454
   sourceContentHash:
     serializedVersion: 2
-    Hash: e5a0cd264e2241b78f22a9c5914fc877
+    Hash: 19fb789898d289745ffd56c82248ba9f
   sourceRuntimeType: FenceDoor, Assembly-CSharp, Version=0.0.0.0, Culture=neutral,
     PublicKeyToken=null
   mapStatus:

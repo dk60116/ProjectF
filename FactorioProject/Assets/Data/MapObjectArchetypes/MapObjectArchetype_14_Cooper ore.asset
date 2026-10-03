@@ -12,15 +12,15 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: a4d286e989be41fe853b78a59ca3a4e8, type: 3}
   m_Name: MapObjectArchetype_14_Cooper ore
   m_EditorClassIdentifier: Assembly-CSharp::ProjectF.MapObjects.MapObjectArchetype
-  schemaVersion: 1
+  schemaVersion: 2
   itemDefinition: {fileID: 11400000, guid: 9f4a67f687b990743914d4045038aa8e, type: 2}
   sourcePrefab: {fileID: 3654828918463552362, guid: c972d3bc9888d61498a3bbabd03743e6, type: 3}
-  itemId: 17
+  itemId: 18
   itemName: Cooper ore
   sourcePrefabGuid: c972d3bc9888d61498a3bbabd03743e6
   sourceContentHash:
     serializedVersion: 2
-    Hash: a1b1dcc744df22adbb11bae0a0d72153
+    Hash: 6c420d7f91031f99d2d58b37e5804fa2
   sourceRuntimeType: Resource, Assembly-CSharp, Version=0.0.0.0, Culture=neutral,
     PublicKeyToken=null
   mapStatus:

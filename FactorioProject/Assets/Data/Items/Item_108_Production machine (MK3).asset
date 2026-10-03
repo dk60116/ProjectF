@@ -15,7 +15,7 @@ MonoBehaviour:
   itemName: Production machine (MK3)
   id: 77
   mapObject: {fileID: 1982885657640665004, guid: 5e35bf91a3c489b42b8cff7e865635b6, type: 3}
-  mapObjectArchetype: {fileID: 0}
+  mapObjectArchetype: {fileID: 11400000, guid: 1bb84239e37654e478fa192ba8232136, type: 2}
   useMapColor: 1
   mapColor: {r: 0.039215688, g: 0.77254903, b: 0.4627451, a: 1}
   mapMarkerSize: 2

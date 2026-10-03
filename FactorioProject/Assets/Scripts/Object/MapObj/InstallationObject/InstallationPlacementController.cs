@@ -2187,6 +2187,9 @@ public class InstallationPlacementController : MonoBehaviour
             anchorCoordinate = splitterRecord.AnchorCoordinate;
             return true;
         }
+        if (MiningWorld.Current != null && MiningWorld.Current.TryRaycast(ray, maxDistance, out var miner, out _)
+            && TryMaterializeDataOnlyMiningForEditing(miner, out installationObject))
+        { anchorCoordinate = miner.AnchorCoordinate; return true; }
         if (BuildingWorld.Current != null
             && BuildingWorld.Current.TryRaycast(
                 ray,
@@ -2425,6 +2428,9 @@ public class InstallationPlacementController : MonoBehaviour
             return true;
         }
 
+        if (block.MapObject is MiningMachineInstance dataMiner && dataMiner.IsRuntimeActive
+            && TryMaterializeDataOnlyMiningForEditing(dataMiner, out installationObject))
+        { anchorCoordinate = dataMiner.AnchorCoordinate; return true; }
         if (block.MapObject is RobotArmInstance dataArm && dataArm.IsRuntimeActive)
         {
             TerrainGenerator terrain = ResolveInstallPreviewTerrain();
@@ -2634,6 +2640,7 @@ public class InstallationPlacementController : MonoBehaviour
             SetUtilityPoleRangeVisualRequested(selectedEditableInstallation, false);
             SetSprinklerRangeVisualRequested(selectedEditableInstallation, false);
             ClearSelectedEditableTint();
+            RestoreDataMiningEditorProxy(selectedEditableInstallation);
         }
 
         selectedEditableInstallation = installationObject;
@@ -2653,10 +2660,21 @@ public class InstallationPlacementController : MonoBehaviour
         SetUtilityPoleRangeVisualRequested(selectedEditableInstallation, false);
         SetSprinklerRangeVisualRequested(selectedEditableInstallation, false);
         ClearSelectedEditableTint();
+        RestoreDataMiningEditorProxy(selectedEditableInstallation);
         selectedEditableInstallation = null;
         selectedEditableAnchorCoordinate = Vector2Int.zero;
         RefreshInstallOrEditWorkableRangeVisualRequest();
         RefreshMapEditButtonState();
+    }
+
+    private void RestoreDataMiningEditorProxy(InstallationObject installation)
+    {
+        if (!(installation is MiningMachine miner) || !MiningWorld.Supports(miner)
+            || activeInstallationEditSession != null && activeInstallationEditSession.originalInstallation == installation
+            || !installation.TryGetPlacementRuntime(out _, out _)) return;
+        TerrainGenerator terrain = ResolveInstallPreviewTerrain();
+        if (terrain != null && terrain.ConvertMiningPresentation(miner, null, out _))
+            terrain.ReleaseInstallationObject(miner);
     }
 
     private void CleanupSelectedEditableInstallation()
@@ -4485,6 +4503,12 @@ public class InstallationPlacementController : MonoBehaviour
                 out InstallationEditSession editSession,
                 selectedCoordinate))
         {
+            if (installationObject is MiningMachine miningPresentation)
+            {
+                TerrainGenerator terrain = ResolveInstallPreviewTerrain();
+                if (terrain != null && terrain.ConvertMiningPresentation(miningPresentation, null, out _))
+                    terrain.ReleaseInstallationObject(miningPresentation);
+            }
             if (installationObject is RobotArm armPresentation)
             {
                 TerrainGenerator terrain = ResolveInstallPreviewTerrain();
@@ -38326,6 +38350,27 @@ public class InstallationPlacementController : MonoBehaviour
         return true;
     }
 
+    private bool TryMaterializeDataOnlyMiningForEditing(MiningMachineInstance miner, out InstallationObject installationObject)
+    {
+        installationObject = null;
+        TerrainGenerator terrain = ResolveInstallPreviewTerrain();
+        if (terrain == null || miner == null || !miner.IsRuntimeActive) return false;
+        miner.Persist();
+        var proxy = terrain.CreateInstallationObject(miner.Prototype, terrain.transform) as MiningMachine;
+        if (proxy == null) return false;
+        proxy.transform.SetPositionAndRotation(miner.WorldPosition, miner.WorldRotation);
+        proxy.transform.localScale = miner.Template.Scale;
+        ConfigureInstalledObjectRuntime(proxy, miner.AnchorCoordinate, miner.Placement.quarterTurns,
+            placementSequence: miner.SimulationId, occupiedCoordinatesOverride: miner.RuntimeOccupiedCoordinates);
+        proxy.ApplyPersistentState(miner.Placement.inputOutputState);
+        proxy.ApplyItemFilterMask(miner.Placement.itemFilterMaskWords, miner.Placement.itemFilterMaskInitialized);
+        miner.World.Remove(miner.StorageKey);
+        foreach (var coordinate in miner.RuntimeOccupiedCoordinates)
+            if (terrain.TryGetLoadedBlock(coordinate, out var block)) block.SetMapObject(proxy);
+        installationObject = proxy;
+        return true;
+    }
+
     private bool TryMaterializeDataOnlyBuildingForEditing(
         BuildingRuntimeRecord record,
         out InstallationObject installationObject)
@@ -41154,6 +41199,12 @@ public class InstallationPlacementController : MonoBehaviour
         }
 
         TerrainGenerator terrain = ResolveInstallPreviewTerrain();
+        if (installationObject is MiningMachine miningPresentation && terrain != null
+            && terrain.ConvertMiningPresentation(miningPresentation, sourcePrefab as MiningMachine, out var registeredMiner))
+        {
+            dataOnlyPresentation = new DataOnlyPlacementPresentation(registeredMiner);
+            return true;
+        }
         if (installationObject is RobotArm armPresentation && terrain != null
             && terrain.ConvertRobotArmPresentation(
                 armPresentation,
@@ -41272,9 +41323,11 @@ public class InstallationPlacementController : MonoBehaviour
         private readonly PipeRuntimeRecord pipe;
         private readonly RobotArmInstance robotArm;
         private readonly BuildingRuntimeRecord building;
+        private readonly MiningMachineInstance miner;
 
         internal DataOnlyPlacementPresentation(ConveyorRuntimeRecord conveyor)
         {
+            miner = null;
             this.conveyor = conveyor;
             pipe = null;
             robotArm = null;
@@ -41284,6 +41337,7 @@ public class InstallationPlacementController : MonoBehaviour
         internal DataOnlyPlacementPresentation(PipeRuntimeRecord pipe)
         {
             conveyor = null;
+            miner = null;
             this.pipe = pipe;
             robotArm = null;
             building = null;
@@ -41293,6 +41347,7 @@ public class InstallationPlacementController : MonoBehaviour
         {
             conveyor = null;
             pipe = null;
+            miner = null;
             this.robotArm = robotArm;
             building = null;
         }
@@ -41302,12 +41357,17 @@ public class InstallationPlacementController : MonoBehaviour
             conveyor = null;
             pipe = null;
             robotArm = null;
+            miner = null;
             this.building = building;
         }
 
+        internal DataOnlyPlacementPresentation(MiningMachineInstance miner)
+        { this.miner = miner; conveyor = null; pipe = null; robotArm = null; building = null; }
+
         internal void SetSuppressed(bool suppressed)
         {
-            if (conveyor != null)
+            if (miner != null) miner.PlacementPresentationSuppressed = suppressed;
+            else if (conveyor != null)
             {
                 ConveyorWorld.Current?.SetPlacementPresentationSuppressed(conveyor, suppressed);
             }
@@ -41327,7 +41387,8 @@ public class InstallationPlacementController : MonoBehaviour
 
         internal void SetScale(float scale)
         {
-            if (conveyor != null)
+            if (miner != null) miner.PlacementPresentationScale = Mathf.Max(0, scale);
+            else if (conveyor != null)
             {
                 ConveyorWorld.Current?.SetPlacementPresentationScale(conveyor, scale);
             }
@@ -41361,12 +41422,6 @@ public class InstallationPlacementController : MonoBehaviour
         List<RendererVisibilityState> rendererStates = null;
         if (installedObject != null)
         {
-            if (installedObject is InstallationObject installationObject
-                && ShouldTrackMapObjectTypeVisualTransition(installationObject))
-            {
-                installationObject.SetMapObjectTypeVisualTransition(true);
-            }
-
             SetConveyorBeltVirtualRendering(installedObject, false);
             installedTransform.DOKill();
             installedTransform.localScale = Vector3.zero;
@@ -41492,10 +41547,6 @@ public class InstallationPlacementController : MonoBehaviour
                 }
 
                 SetConveyorBeltVirtualRendering(installedObject, true);
-                if (installedObject is InstallationObject installationObject)
-                {
-                    installationObject.SetMapObjectTypeVisualTransition(false);
-                }
             }
         };
 
@@ -41720,17 +41771,6 @@ public class InstallationPlacementController : MonoBehaviour
         {
             RefreshTrainInstallPreviewTints();
         }
-    }
-
-    private static bool ShouldTrackMapObjectTypeVisualTransition(InstallationObject installationObject)
-    {
-        StaticMapObjectBatchRenderer typeRuntime = GameManager.Instance != null
-            ? GameManager.Instance.StaticMapObjectRenderer
-            : null;
-        return installationObject != null
-               && typeRuntime != null
-               && typeRuntime.isActiveAndEnabled
-               && typeRuntime.SupportsItemType(installationObject.ResolveItemId());
     }
 
     private void SetInstallButtonVisible(bool isVisible, bool isInteractable = true)

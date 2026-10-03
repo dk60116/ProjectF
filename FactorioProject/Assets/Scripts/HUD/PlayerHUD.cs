@@ -2963,6 +2963,7 @@ public partial class PlayerHUD : BagSlot
     private void SetObjectInfoAreaMarkerVisibility(IMapObjectTarget target, bool requested)
     {
         RobotArmWorld.Current?.SetSelectedMarkerArm(requested ? target as RobotArmInstance : null);
+        MiningWorld.Current?.SetSelectedMarkerMiner(requested ? target as MiningMachineInstance : null);
         InputOutputModuleAreaMarkerController nextController = requested
             ? ResolveAreaMarkerController(target)
             : null;
@@ -4152,6 +4153,7 @@ public partial class PlayerHUD : BagSlot
         }
 
         if (target is ResourceInstance resource) return resource.IsRuntimeActive;
+        if (target is MiningMachineInstance miner) return miner.IsTargetActive;
         if (target is RobotArmInstance robotArm) return robotArm.IsTargetActive;
         if (target is PortableObject portableObject)
         {

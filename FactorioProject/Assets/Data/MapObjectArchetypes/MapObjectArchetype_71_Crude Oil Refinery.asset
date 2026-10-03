@@ -1,0 +1,686 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: a4d286e989be41fe853b78a59ca3a4e8, type: 3}
+  m_Name: MapObjectArchetype_71_Crude Oil Refinery
+  m_EditorClassIdentifier: Assembly-CSharp::ProjectF.MapObjects.MapObjectArchetype
+  schemaVersion: 2
+  itemDefinition: {fileID: 11400000, guid: f2a55fe33263d054f82c1737d7d85898, type: 2}
+  sourcePrefab: {fileID: 950080818205513044, guid: aa977cfc0de120b4dad23fcfaeac4a10, type: 3}
+  itemId: 71
+  itemName: Crude Oil Refinery
+  sourcePrefabGuid: aa977cfc0de120b4dad23fcfaeac4a10
+  sourceContentHash:
+    serializedVersion: 2
+    Hash: 85ec5306f0291df697e8c3ff7b719388
+  sourceRuntimeType: CrudeOilRefinery, Assembly-CSharp, Version=0.0.0.0, Culture=neutral,
+    PublicKeyToken=null
+  mapStatus:
+    mapSizeX: 2
+    mapSizeY: 3
+    centerCellX: 0
+    centerCellY: 1
+  focusMode: 1
+  defaultRootScale: {x: 1, y: 1, z: 1}
+  defaultRootRotation: {x: 0, y: 0, z: 0, w: 1}
+  localRenderBounds:
+    m_Center: {x: 0, y: 1.2268627, z: -0.004032731}
+    m_Extent: {x: 1.1010001, y: 1.4678628, z: 1.5969676}
+  hasRenderBounds: 1
+  featureFlags: 72
+  nodes:
+  - hierarchyPath: 0:Crude Oil Refinery
+    animationPath: 
+    parentIndex: -1
+    localPosition: {x: 0, y: 0, z: 0}
+    localRotation: {x: 0, y: 0, z: 0, w: 1}
+    localScale: {x: 1, y: 1, z: 1}
+    defaultLocalToRoot:
+      e00: 1
+      e01: 0
+      e02: 0
+      e03: 0
+      e10: 0
+      e11: 1
+      e12: 0
+      e13: 0
+      e20: 0
+      e21: 0
+      e22: 1
+      e23: 0
+      e30: 0
+      e31: 0
+      e32: 0
+      e33: 1
+    activeByDefault: 1
+    hasAnimatedTransform: 0
+  - hierarchyPath: 0:Crude Oil Refinery/0:Body
+    animationPath: Body
+    parentIndex: 0
+    localPosition: {x: 0, y: 0, z: 0}
+    localRotation: {x: 0, y: 0, z: 0, w: 1}
+    localScale: {x: 1, y: 1, z: 1}
+    defaultLocalToRoot:
+      e00: 1
+      e01: 0
+      e02: 0
+      e03: 0
+      e10: 0
+      e11: 1
+      e12: 0
+      e13: 0
+      e20: 0
+      e21: 0
+      e22: 1
+      e23: 0
+      e30: 0
+      e31: 0
+      e32: 0
+      e33: 1
+    activeByDefault: 1
+    hasAnimatedTransform: 0
+  - hierarchyPath: 0:Crude Oil Refinery/1:Pipe
+    animationPath: Pipe
+    parentIndex: 0
+    localPosition: {x: -0.496, y: 0.409, z: -0.989}
+    localRotation: {x: -0, y: -0, z: 0.7071068, w: 0.7071068}
+    localScale: {x: 1, y: 1, z: 1}
+    defaultLocalToRoot:
+      e00: -0.00000011920929
+      e01: -1.0000001
+      e02: 0
+      e03: -0.496
+      e10: 1.0000001
+      e11: -0.00000011920929
+      e12: 0
+      e13: 0.409
+      e20: 0
+      e21: 0
+      e22: 1
+      e23: -0.989
+      e30: 0
+      e31: 0
+      e32: 0
+      e33: 1
+    activeByDefault: 1
+    hasAnimatedTransform: 0
+  - hierarchyPath: 0:Crude Oil Refinery/1:Pipe/0:Cylinder
+    animationPath: Pipe/Cylinder
+    parentIndex: 2
+    localPosition: {x: 0, y: 0, z: -0.487}
+    localRotation: {x: 0.70710707, y: -0, z: -0, w: 0.70710653}
+    localScale: {x: 1, y: 1, z: 1}
+    defaultLocalToRoot:
+      e00: -0.00000011920929
+      e01: 0.00000083446514
+      e02: 1.0000001
+      e03: -0.496
+      e10: 1.0000001
+      e11: 9.947598e-14
+      e12: 0.00000011920929
+      e13: 0.409
+      e20: 0
+      e21: 1
+      e22: -0.000000834465
+      e23: -1.4760001
+      e30: 0
+      e31: 0
+      e32: 0
+      e33: 1
+    activeByDefault: 1
+    hasAnimatedTransform: 0
+  - hierarchyPath: 0:Crude Oil Refinery/1:Pipe/1:Cylinder (1)
+    animationPath: Pipe/Cylinder (1)
+    parentIndex: 2
+    localPosition: {x: -0.5250001, y: 0, z: -0.006}
+    localRotation: {x: 0.5, y: 0.5, z: -0.5, w: 0.5}
+    localScale: {x: 1, y: 1, z: 1}
+    defaultLocalToRoot:
+      e00: 0
+      e01: -0.00000011920929
+      e02: 1.0000001
+      e03: -0.49599993
+      e10: 0
+      e11: 1.0000001
+      e12: 0.00000011920929
+      e13: -0.116000146
+      e20: -1
+      e21: 0
+      e22: 0
+      e23: -0.995
+      e30: 0
+      e31: 0
+      e32: 0
+      e33: 1
+    activeByDefault: 1
+    hasAnimatedTransform: 0
+  - hierarchyPath: 0:Crude Oil Refinery/1:Pipe/2:Fluid DP
+    animationPath: Pipe/Fluid DP
+    parentIndex: 2
+    localPosition: {x: 0, y: 0, z: 0}
+    localRotation: {x: 0, y: 0, z: 0, w: 1}
+    localScale: {x: 1, y: 1, z: 1}
+    defaultLocalToRoot:
+      e00: -0.00000011920929
+      e01: -1.0000001
+      e02: 0
+      e03: -0.496
+      e10: 1.0000001
+      e11: -0.00000011920929
+      e12: 0
+      e13: 0.409
+      e20: 0
+      e21: 0
+      e22: 1
+      e23: -0.989
+      e30: 0
+      e31: 0
+      e32: 0
+      e33: 1
+    activeByDefault: 1
+    hasAnimatedTransform: 0
+  - hierarchyPath: 0:Crude Oil Refinery/2:Pipe (1)
+    animationPath: Pipe (1)
+    parentIndex: 0
+    localPosition: {x: 0.504, y: 0.40900013, z: -0.989}
+    localRotation: {x: -0, y: -0, z: 0.7071068, w: 0.7071068}
+    localScale: {x: 1, y: 1, z: 1}
+    defaultLocalToRoot:
+      e00: -0.00000011920929
+      e01: -1.0000001
+      e02: 0
+      e03: 0.504
+      e10: 1.0000001
+      e11: -0.00000011920929
+      e12: 0
+      e13: 0.40900013
+      e20: 0
+      e21: 0
+      e22: 1
+      e23: -0.989
+      e30: 0
+      e31: 0
+      e32: 0
+      e33: 1
+    activeByDefault: 1
+    hasAnimatedTransform: 0
+  - hierarchyPath: 0:Crude Oil Refinery/2:Pipe (1)/0:Cylinder
+    animationPath: Pipe (1)/Cylinder
+    parentIndex: 6
+    localPosition: {x: 0, y: 0, z: -0.487}
+    localRotation: {x: 0.70710707, y: -0, z: -0, w: 0.70710653}
+    localScale: {x: 1, y: 1, z: 1}
+    defaultLocalToRoot:
+      e00: -0.00000011920929
+      e01: 0.00000083446514
+      e02: 1.0000001
+      e03: 0.504
+      e10: 1.0000001
+      e11: 9.947598e-14
+      e12: 0.00000011920929
+      e13: 0.40900013
+      e20: 0
+      e21: 1
+      e22: -0.000000834465
+      e23: -1.4760001
+      e30: 0
+      e31: 0
+      e32: 0
+      e33: 1
+    activeByDefault: 1
+    hasAnimatedTransform: 0
+  - hierarchyPath: 0:Crude Oil Refinery/2:Pipe (1)/1:Cylinder (1)
+    animationPath: Pipe (1)/Cylinder (1)
+    parentIndex: 6
+    localPosition: {x: -0.5250001, y: 0, z: -0.006}
+    localRotation: {x: 0.5, y: 0.5, z: -0.5, w: 0.5}
+    localScale: {x: 1, y: 1, z: 1}
+    defaultLocalToRoot:
+      e00: 0
+      e01: -0.00000011920929
+      e02: 1.0000001
+      e03: 0.50400007
+      e10: 0
+      e11: 1.0000001
+      e12: 0.00000011920929
+      e13: -0.11600003
+      e20: -1
+      e21: 0
+      e22: 0
+      e23: -0.995
+      e30: 0
+      e31: 0
+      e32: 0
+      e33: 1
+    activeByDefault: 1
+    hasAnimatedTransform: 0
+  - hierarchyPath: 0:Crude Oil Refinery/2:Pipe (1)/2:Fluid DP
+    animationPath: Pipe (1)/Fluid DP
+    parentIndex: 6
+    localPosition: {x: 0, y: 0, z: 0}
+    localRotation: {x: 0, y: 0, z: 0, w: 1}
+    localScale: {x: 1, y: 1, z: 1}
+    defaultLocalToRoot:
+      e00: -0.00000011920929
+      e01: -1.0000001
+      e02: 0
+      e03: 0.504
+      e10: 1.0000001
+      e11: -0.00000011920929
+      e12: 0
+      e13: 0.40900013
+      e20: 0
+      e21: 0
+      e22: 1
+      e23: -0.989
+      e30: 0
+      e31: 0
+      e32: 0
+      e33: 1
+    activeByDefault: 1
+    hasAnimatedTransform: 0
+  - hierarchyPath: 0:Crude Oil Refinery/3:Pipe (2)
+    animationPath: Pipe (2)
+    parentIndex: 0
+    localPosition: {x: 0.5, y: 0.4, z: 1}
+    localRotation: {x: 0.7071068, y: 0, z: 0.7071068, w: 0}
+    localScale: {x: 1, y: 1, z: 1}
+    defaultLocalToRoot:
+      e00: -0.00000011920929
+      e01: 0
+      e02: 1.0000001
+      e03: 0.5
+      e10: 0
+      e11: -1.0000002
+      e12: 0
+      e13: 0.4
+      e20: 1.0000001
+      e21: 0
+      e22: -0.00000011920929
+      e23: 1
+      e30: 0
+      e31: 0
+      e32: 0
+      e33: 1
+    activeByDefault: 1
+    hasAnimatedTransform: 0
+  - hierarchyPath: 0:Crude Oil Refinery/3:Pipe (2)/0:Fluid DP
+    animationPath: Pipe (2)/Fluid DP
+    parentIndex: 10
+    localPosition: {x: 0, y: 0, z: 0}
+    localRotation: {x: 0.7071068, y: -0, z: -0, w: 0.7071068}
+    localScale: {x: 1, y: 1, z: 1}
+    defaultLocalToRoot:
+      e00: -0.00000011920929
+      e01: 1.0000002
+      e02: -0.0000001192093
+      e03: 0.5
+      e10: 0
+      e11: 0.00000011920932
+      e12: 1.0000004
+      e13: 0.4
+      e20: 1.0000001
+      e21: -0.0000001192093
+      e22: 1.4210855e-14
+      e23: 1
+      e30: 0
+      e31: 0
+      e32: 0
+      e33: 1
+    activeByDefault: 1
+    hasAnimatedTransform: 0
+  - hierarchyPath: 0:Crude Oil Refinery/4:Pipe (3)
+    animationPath: Pipe (3)
+    parentIndex: 0
+    localPosition: {x: 0.5, y: 0.4, z: 0}
+    localRotation: {x: 0.7071068, y: 0, z: 0.7071068, w: 0}
+    localScale: {x: 1, y: 1, z: 1}
+    defaultLocalToRoot:
+      e00: -0.00000011920929
+      e01: 0
+      e02: 1.0000001
+      e03: 0.5
+      e10: 0
+      e11: -1.0000002
+      e12: 0
+      e13: 0.4
+      e20: 1.0000001
+      e21: 0
+      e22: -0.00000011920929
+      e23: 0
+      e30: 0
+      e31: 0
+      e32: 0
+      e33: 1
+    activeByDefault: 1
+    hasAnimatedTransform: 0
+  - hierarchyPath: 0:Crude Oil Refinery/4:Pipe (3)/0:Fluid DP
+    animationPath: Pipe (3)/Fluid DP
+    parentIndex: 12
+    localPosition: {x: 0, y: 0, z: 0}
+    localRotation: {x: 0.7071068, y: -0, z: -0, w: 0.7071068}
+    localScale: {x: 1, y: 1, z: 1}
+    defaultLocalToRoot:
+      e00: -0.00000011920929
+      e01: 1.0000002
+      e02: -0.0000001192093
+      e03: 0.5
+      e10: 0
+      e11: 0.00000011920932
+      e12: 1.0000004
+      e13: 0.4
+      e20: 1.0000001
+      e21: -0.0000001192093
+      e22: 1.4210855e-14
+      e23: 0
+      e30: 0
+      e31: 0
+      e32: 0
+      e33: 1
+    activeByDefault: 1
+    hasAnimatedTransform: 0
+  - hierarchyPath: 0:Crude Oil Refinery/5:Pipe (4)
+    animationPath: Pipe (4)
+    parentIndex: 0
+    localPosition: {x: -0.5, y: 0.4, z: 0}
+    localRotation: {x: 0.7071068, y: 0, z: 0.7071068, w: 0}
+    localScale: {x: 1, y: 1, z: 1}
+    defaultLocalToRoot:
+      e00: -0.00000011920929
+      e01: 0
+      e02: 1.0000001
+      e03: -0.5
+      e10: 0
+      e11: -1.0000002
+      e12: 0
+      e13: 0.4
+      e20: 1.0000001
+      e21: 0
+      e22: -0.00000011920929
+      e23: 0
+      e30: 0
+      e31: 0
+      e32: 0
+      e33: 1
+    activeByDefault: 1
+    hasAnimatedTransform: 0
+  - hierarchyPath: 0:Crude Oil Refinery/5:Pipe (4)/0:Fluid DP
+    animationPath: Pipe (4)/Fluid DP
+    parentIndex: 14
+    localPosition: {x: 0, y: 0, z: 0}
+    localRotation: {x: 0.7071068, y: -0, z: -0, w: 0.7071068}
+    localScale: {x: 1, y: 1, z: 1}
+    defaultLocalToRoot:
+      e00: -0.00000011920929
+      e01: 1.0000002
+      e02: -0.0000001192093
+      e03: -0.5
+      e10: 0
+      e11: 0.00000011920932
+      e12: 1.0000004
+      e13: 0.4
+      e20: 1.0000001
+      e21: -0.0000001192093
+      e22: 1.4210855e-14
+      e23: 0
+      e30: 0
+      e31: 0
+      e32: 0
+      e33: 1
+    activeByDefault: 1
+    hasAnimatedTransform: 0
+  - hierarchyPath: 0:Crude Oil Refinery/6:Smoke
+    animationPath: Smoke
+    parentIndex: 0
+    localPosition: {x: 0.21, y: 2.655, z: -0.703}
+    localRotation: {x: -0, y: -0, z: -0, w: 1}
+    localScale: {x: 1, y: 1, z: 1}
+    defaultLocalToRoot:
+      e00: 1
+      e01: 0
+      e02: 0
+      e03: 0.21
+      e10: 0
+      e11: 1
+      e12: 0
+      e13: 2.655
+      e20: 0
+      e21: 0
+      e22: 1
+      e23: -0.703
+      e30: 0
+      e31: 0
+      e32: 0
+      e33: 1
+    activeByDefault: 1
+    hasAnimatedTransform: 0
+  - hierarchyPath: 0:Crude Oil Refinery/6:Smoke/0:Smoke
+    animationPath: Smoke/Smoke
+    parentIndex: 16
+    localPosition: {x: 0, y: 0, z: 0}
+    localRotation: {x: -0.7071068, y: -0, z: -0, w: 0.7071068}
+    localScale: {x: 1, y: 1, z: 1}
+    defaultLocalToRoot:
+      e00: 1
+      e01: 0
+      e02: 0
+      e03: 0.21
+      e10: 0
+      e11: -0.00000011920929
+      e12: 1.0000001
+      e13: 2.655
+      e20: 0
+      e21: -1.0000001
+      e22: -0.00000011920929
+      e23: -0.703
+      e30: 0
+      e31: 0
+      e32: 0
+      e33: 1
+    activeByDefault: 1
+    hasAnimatedTransform: 0
+  renderParts:
+  - kind: 0
+    nodeIndex: 1
+    mesh: {fileID: 8055211903431642861, guid: e9e4f035236f6844da05b558aa96bb4a, type: 3}
+    material: {fileID: 2100000, guid: 6080e4760fe1cdf488ed3a0b4d5dca98, type: 2}
+    subMeshIndex: 0
+    localBounds:
+      m_Center: {x: 0.000000059604645, y: 1.3473628, z: 0.15574747}
+      m_Extent: {x: 1.0096874, y: 1.3473628, z: 1.4371874}
+    layer: 0
+    renderingLayerMask: 1
+    shadowCastingMode: 1
+    receiveShadows: 1
+    enabledByDefault: 1
+  - kind: 0
+    nodeIndex: 2
+    mesh: {fileID: 4300000, guid: 1fb058edd28ea644480fea2bd505e917, type: 2}
+    material: {fileID: 2100000, guid: f8dcf2a2c290e6545b35da5512403502, type: 2}
+    subMeshIndex: 0
+    localBounds:
+      m_Center: {x: -0.16999999, y: 0, z: -0.17}
+      m_Extent: {x: 0.33, y: 0.16, z: 0.32999998}
+    layer: 0
+    renderingLayerMask: 1
+    shadowCastingMode: 1
+    receiveShadows: 1
+    enabledByDefault: 1
+  - kind: 0
+    nodeIndex: 3
+    mesh: {fileID: 4300000, guid: e0f6b7921e91fbe439915112b074b2bc, type: 2}
+    material: {fileID: 2100000, guid: f8dcf2a2c290e6545b35da5512403502, type: 2}
+    subMeshIndex: 0
+    localBounds:
+      m_Center: {x: 0.000000029802322, y: 0, z: -0.000000059604645}
+      m_Extent: {x: 0.24000004, y: 0.125, z: 0.24000008}
+    layer: 0
+    renderingLayerMask: 1
+    shadowCastingMode: 1
+    receiveShadows: 1
+    enabledByDefault: 1
+  - kind: 0
+    nodeIndex: 4
+    mesh: {fileID: 4300000, guid: e0f6b7921e91fbe439915112b074b2bc, type: 2}
+    material: {fileID: 2100000, guid: f8dcf2a2c290e6545b35da5512403502, type: 2}
+    subMeshIndex: 0
+    localBounds:
+      m_Center: {x: 0.000000029802322, y: 0, z: -0.000000059604645}
+      m_Extent: {x: 0.24000004, y: 0.125, z: 0.24000008}
+    layer: 0
+    renderingLayerMask: 1
+    shadowCastingMode: 1
+    receiveShadows: 1
+    enabledByDefault: 1
+  - kind: 0
+    nodeIndex: 5
+    mesh: {fileID: 4300000, guid: 77e31e6e76324d4591f76d4a3d27e801, type: 2}
+    material: {fileID: 2100000, guid: 0615416a612e1a04c9c3000c9227de9a, type: 2}
+    subMeshIndex: 0
+    localBounds:
+      m_Center: {x: -0.0675, y: 0, z: -0.0675}
+      m_Extent: {x: 0.1725, y: 0.105, z: 0.1725}
+    layer: 7
+    renderingLayerMask: 1
+    shadowCastingMode: 0
+    receiveShadows: 1
+    enabledByDefault: 0
+  - kind: 0
+    nodeIndex: 6
+    mesh: {fileID: 4300000, guid: 1fb058edd28ea644480fea2bd505e917, type: 2}
+    material: {fileID: 2100000, guid: f8dcf2a2c290e6545b35da5512403502, type: 2}
+    subMeshIndex: 0
+    localBounds:
+      m_Center: {x: -0.16999999, y: 0, z: -0.17}
+      m_Extent: {x: 0.33, y: 0.16, z: 0.32999998}
+    layer: 0
+    renderingLayerMask: 1
+    shadowCastingMode: 1
+    receiveShadows: 1
+    enabledByDefault: 1
+  - kind: 0
+    nodeIndex: 7
+    mesh: {fileID: 4300000, guid: e0f6b7921e91fbe439915112b074b2bc, type: 2}
+    material: {fileID: 2100000, guid: f8dcf2a2c290e6545b35da5512403502, type: 2}
+    subMeshIndex: 0
+    localBounds:
+      m_Center: {x: 0.000000029802322, y: 0, z: -0.000000059604645}
+      m_Extent: {x: 0.24000004, y: 0.125, z: 0.24000008}
+    layer: 0
+    renderingLayerMask: 1
+    shadowCastingMode: 1
+    receiveShadows: 1
+    enabledByDefault: 1
+  - kind: 0
+    nodeIndex: 8
+    mesh: {fileID: 4300000, guid: e0f6b7921e91fbe439915112b074b2bc, type: 2}
+    material: {fileID: 2100000, guid: f8dcf2a2c290e6545b35da5512403502, type: 2}
+    subMeshIndex: 0
+    localBounds:
+      m_Center: {x: 0.000000029802322, y: 0, z: -0.000000059604645}
+      m_Extent: {x: 0.24000004, y: 0.125, z: 0.24000008}
+    layer: 0
+    renderingLayerMask: 1
+    shadowCastingMode: 1
+    receiveShadows: 1
+    enabledByDefault: 1
+  - kind: 0
+    nodeIndex: 9
+    mesh: {fileID: 4300000, guid: 77e31e6e76324d4591f76d4a3d27e801, type: 2}
+    material: {fileID: 2100000, guid: 0615416a612e1a04c9c3000c9227de9a, type: 2}
+    subMeshIndex: 0
+    localBounds:
+      m_Center: {x: -0.0675, y: 0, z: -0.0675}
+      m_Extent: {x: 0.1725, y: 0.105, z: 0.1725}
+    layer: 7
+    renderingLayerMask: 1
+    shadowCastingMode: 0
+    receiveShadows: 1
+    enabledByDefault: 0
+  - kind: 0
+    nodeIndex: 10
+    mesh: {fileID: 4300000, guid: 00229c059a0c6a843aaa1229d433de63, type: 2}
+    material: {fileID: 2100000, guid: e9b9bcbd81df44978d94f1f395fdad3b, type: 2}
+    subMeshIndex: 0
+    localBounds:
+      m_Center: {x: 0.000000029802322, y: 0.000000059604645, z: 0}
+      m_Extent: {x: 0.24000004, y: 0.24000013, z: 0.601}
+    layer: 7
+    renderingLayerMask: 1
+    shadowCastingMode: 1
+    receiveShadows: 1
+    enabledByDefault: 1
+  - kind: 0
+    nodeIndex: 11
+    mesh: {fileID: 4300000, guid: 02564e891c39de84b929f5dc7077d62a, type: 2}
+    material: {fileID: 2100000, guid: 0615416a612e1a04c9c3000c9227de9a, type: 2}
+    subMeshIndex: 0
+    localBounds:
+      m_Center: {x: 0.000000011175871, y: 0, z: -0.000000029802322}
+      m_Extent: {x: 0.10000001, y: 0.2, z: 0.10000003}
+    layer: 7
+    renderingLayerMask: 1
+    shadowCastingMode: 0
+    receiveShadows: 1
+    enabledByDefault: 0
+  - kind: 0
+    nodeIndex: 12
+    mesh: {fileID: 4300000, guid: 00229c059a0c6a843aaa1229d433de63, type: 2}
+    material: {fileID: 2100000, guid: e9b9bcbd81df44978d94f1f395fdad3b, type: 2}
+    subMeshIndex: 0
+    localBounds:
+      m_Center: {x: 0.000000029802322, y: 0.000000059604645, z: 0}
+      m_Extent: {x: 0.24000004, y: 0.24000013, z: 0.601}
+    layer: 7
+    renderingLayerMask: 1
+    shadowCastingMode: 1
+    receiveShadows: 1
+    enabledByDefault: 1
+  - kind: 0
+    nodeIndex: 13
+    mesh: {fileID: 4300000, guid: 02564e891c39de84b929f5dc7077d62a, type: 2}
+    material: {fileID: 2100000, guid: 0615416a612e1a04c9c3000c9227de9a, type: 2}
+    subMeshIndex: 0
+    localBounds:
+      m_Center: {x: 0.000000011175871, y: 0, z: -0.000000029802322}
+      m_Extent: {x: 0.10000001, y: 0.2, z: 0.10000003}
+    layer: 7
+    renderingLayerMask: 1
+    shadowCastingMode: 0
+    receiveShadows: 1
+    enabledByDefault: 0
+  - kind: 0
+    nodeIndex: 14
+    mesh: {fileID: 4300000, guid: 00229c059a0c6a843aaa1229d433de63, type: 2}
+    material: {fileID: 2100000, guid: e9b9bcbd81df44978d94f1f395fdad3b, type: 2}
+    subMeshIndex: 0
+    localBounds:
+      m_Center: {x: 0.000000029802322, y: 0.000000059604645, z: 0}
+      m_Extent: {x: 0.24000004, y: 0.24000013, z: 0.601}
+    layer: 7
+    renderingLayerMask: 1
+    shadowCastingMode: 1
+    receiveShadows: 1
+    enabledByDefault: 1
+  - kind: 0
+    nodeIndex: 15
+    mesh: {fileID: 4300000, guid: 02564e891c39de84b929f5dc7077d62a, type: 2}
+    material: {fileID: 2100000, guid: 0615416a612e1a04c9c3000c9227de9a, type: 2}
+    subMeshIndex: 0
+    localBounds:
+      m_Center: {x: 0.000000011175871, y: 0, z: -0.000000029802322}
+      m_Extent: {x: 0.10000001, y: 0.2, z: 0.10000003}
+    layer: 7
+    renderingLayerMask: 1
+    shadowCastingMode: 0
+    receiveShadows: 1
+    enabledByDefault: 0
+  animationClips: []

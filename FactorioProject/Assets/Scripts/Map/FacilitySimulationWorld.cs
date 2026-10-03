@@ -3,6 +3,12 @@ using System.Collections.Generic;
 using ProjectF.Simulation;
 using UnityEngine;
 
+// Absolute deadlines allow data-owned facilities to sleep between state changes.
+public interface IMapObjectUpdateTickDeadline
+{
+    long NextUpdateTick { get; }
+}
+
 /// <summary>
 /// Owns fluid and powered-facility scheduling independently of each installation view.
 /// Facility adapters still perform engine-facing IO, but only this data world is registered
@@ -283,8 +289,9 @@ public sealed class FacilitySimulationWorld :
     {
         if (!entryIndexByTarget.TryGetValue(target, out int entryIndex)) return;
         ref Entry entry = ref entries[entryIndex];
+        long previousDueTick = entry.NextDueTick;
         entry.ResetSchedule(MapObjectTickManager.CurrentSimulationTick);
-        if (entry.Scheduled) ScheduleEntry(entryIndex);
+        if (entry.Scheduled && previousDueTick != entry.NextDueTick) ScheduleEntry(entryIndex);
     }
 
     private bool IsScheduledInternal(IMapObjectUpdateTick target)
@@ -764,7 +771,7 @@ public sealed class FacilitySimulationWorld :
             SimulationId = target is IMapObjectSimulationIdentity identity ? identity.SimulationId : 0L;
             TypeName = target?.GetType().FullName ?? string.Empty;
             RequiresPowerEvaluation = target is InputOutputModule module
-                                      && module.RequiresFacilityPowerEvaluation;
+                                      && module.RequiresFacilityPowerEvaluation || target is IDataElectricConsumer;
             InstallationObject installationObject = target as InstallationObject;
             TracksElectricDemand = UtilityPole.TracksRuntimeElectricPowerDemand(installationObject);
             float electricDemandWatts = 0f;
@@ -793,7 +800,9 @@ public sealed class FacilitySimulationWorld :
         public void MarkExecuted(long currentTick)
         {
             LastExecutedTick = currentTick;
-            NextDueTick = currentTick > long.MaxValue - IntervalTicks
+            NextDueTick = Target is IMapObjectUpdateTickDeadline
+                ? ResolveNextDueTick(Target, currentTick, IntervalTicks)
+                : currentTick > long.MaxValue - IntervalTicks
                 ? long.MaxValue
                 : currentTick + IntervalTicks;
         }
@@ -820,6 +829,8 @@ public sealed class FacilitySimulationWorld :
         long currentTick,
         int intervalTicks)
     {
+        if (target is IMapObjectUpdateTickDeadline deadline)
+            return Math.Max(currentTick + 1L, deadline.NextUpdateTick);
         long firstCandidate = currentTick >= long.MaxValue ? long.MaxValue : currentTick + 1L;
         if (intervalTicks <= 1 || firstCandidate == long.MaxValue) return firstCandidate;
 

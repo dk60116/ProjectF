@@ -12,15 +12,15 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: a4d286e989be41fe853b78a59ca3a4e8, type: 3}
   m_Name: MapObjectArchetype_101_Train station
   m_EditorClassIdentifier: Assembly-CSharp::ProjectF.MapObjects.MapObjectArchetype
-  schemaVersion: 1
+  schemaVersion: 2
   itemDefinition: {fileID: 11400000, guid: 2cbd885291664af429fdc0ef3784d40d, type: 2}
   sourcePrefab: {fileID: 2696561144136662984, guid: 6e704ffa44d6f8e42a1e28a682f898aa, type: 3}
-  itemId: 113
+  itemId: 120
   itemName: Train station
   sourcePrefabGuid: 6e704ffa44d6f8e42a1e28a682f898aa
   sourceContentHash:
     serializedVersion: 2
-    Hash: d9b692042b724ba9d99c6c638d52fe64
+    Hash: 4450317d1eed9f388a0e42048ce2b240
   sourceRuntimeType: Trainstation, Assembly-CSharp, Version=0.0.0.0, Culture=neutral,
     PublicKeyToken=null
   mapStatus:

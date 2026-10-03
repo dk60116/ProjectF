@@ -57,6 +57,8 @@ public class PlayerCamera : MonoBehaviour
 
     [SerializeField, Min(0f)]
     private float freeCameraLookSensitivity = 2.4f;
+    [SerializeField, Min(200f)]
+    private float freeCameraFarClipPlane = 20000f;
 
     private Transform focusTarget;
     private PlayerController playerController;
@@ -73,6 +75,7 @@ public class PlayerCamera : MonoBehaviour
     private bool savedCameraOrthographic;
     private float savedCameraFieldOfView;
     private float savedCameraOrthographicSize;
+    private float savedCameraFarClipPlane;
     private Matrix4x4 savedPlayerCullingMatrix;
     private Vector3 savedPlayerCullingFocus;
     private float freeCameraYaw;
@@ -197,6 +200,7 @@ public class PlayerCamera : MonoBehaviour
         savedCameraOrthographic = cachedCamera.orthographic;
         savedCameraFieldOfView = cachedCamera.fieldOfView;
         savedCameraOrthographicSize = cachedCamera.orthographicSize;
+        savedCameraFarClipPlane = cachedCamera.farClipPlane;
         ResolveTarget();
         savedPlayerCullingMatrix = cachedCamera.cullingMatrix;
         savedPlayerCullingFocus = ResolveFollowFocusPosition();
@@ -230,6 +234,7 @@ public class PlayerCamera : MonoBehaviour
         }
 
         cachedCamera.orthographic = false;
+        cachedCamera.farClipPlane = Mathf.Max(savedCameraFarClipPlane, freeCameraFarClipPlane);
     }
 
     private void RestoreFreeCameraProjectionState()
@@ -242,6 +247,7 @@ public class PlayerCamera : MonoBehaviour
 
         cachedCamera.orthographic = savedCameraOrthographic;
         cachedCamera.fieldOfView = savedCameraFieldOfView;
+        cachedCamera.farClipPlane = savedCameraFarClipPlane;
         if (savedCameraOrthographic)
         {
             cachedCamera.orthographicSize = ClampOrthographicSize(savedCameraOrthographicSize);
@@ -572,6 +578,7 @@ public class PlayerCamera : MonoBehaviour
         freeCameraMoveSpeed = Mathf.Max(0f, freeCameraMoveSpeed);
         freeCameraFastMoveMultiplier = Mathf.Max(1f, freeCameraFastMoveMultiplier);
         freeCameraLookSensitivity = Mathf.Max(MinFreeCameraLookSensitivity, freeCameraLookSensitivity);
+        freeCameraFarClipPlane = Mathf.Max(200f, freeCameraFarClipPlane);
     }
 
     private void ClampOrthographicZoomState()

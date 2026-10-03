@@ -12,15 +12,15 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: a4d286e989be41fe853b78a59ca3a4e8, type: 3}
   m_Name: MapObjectArchetype_62_Production machine (MK2)
   m_EditorClassIdentifier: Assembly-CSharp::ProjectF.MapObjects.MapObjectArchetype
-  schemaVersion: 1
+  schemaVersion: 2
   itemDefinition: {fileID: 11400000, guid: 29927129db7b22842886fe756c71a712, type: 2}
   sourcePrefab: {fileID: 1982885657640665004, guid: 45a90e6ed2798e145ae9c40b00d00502, type: 3}
-  itemId: 72
+  itemId: 76
   itemName: Production machine (MK2)
   sourcePrefabGuid: 45a90e6ed2798e145ae9c40b00d00502
   sourceContentHash:
     serializedVersion: 2
-    Hash: c3cc01b59d4212a89a3b45e2d7548b5a
+    Hash: b4b30ec80ab52386025b79b49486b107
   sourceRuntimeType: ProductionMachine, Assembly-CSharp, Version=0.0.0.0, Culture=neutral,
     PublicKeyToken=null
   mapStatus:
@@ -32,8 +32,8 @@ MonoBehaviour:
   defaultRootScale: {x: 1, y: 1, z: 1}
   defaultRootRotation: {x: 0, y: 0, z: 0, w: 1}
   localRenderBounds:
-    m_Center: {x: -0.021226287, y: 0.4716109, z: -0.0026009083}
-    m_Extent: {x: 0.65575373, y: 0.4716109, z: 0.3356044}
+    m_Center: {x: -0.0053631663, y: 0.49519143, z: -0.002600938}
+    m_Extent: {x: 0.67161685, y: 0.4951915, z: 0.35380447}
   hasRenderBounds: 1
   featureFlags: 2113
   nodes:
@@ -190,11 +190,11 @@ MonoBehaviour:
   - hierarchyPath: 0:Production machine (MK2)/0:Body/2:Cube
     animationPath: Body/Cube
     parentIndex: 1
-    localPosition: {x: 0, y: 0.13, z: 0.228}
+    localPosition: {x: 0, y: 0.13, z: 0.242}
     localRotation: {x: -0, y: -0, z: -0, w: 1}
-    localScale: {x: 0.47644898, y: 0.18097514, z: 0.056313094}
+    localScale: {x: 0.5, y: 0.18097514, z: 0.056313094}
     defaultLocalToRoot:
-      e00: 0.61938363
+      e00: 0.65
       e01: 0
       e02: 0
       e03: 0
@@ -205,7 +205,7 @@ MonoBehaviour:
       e20: 0
       e21: 0
       e22: 0.07320702
-      e23: 0.29639998
+      e23: 0.3146
       e30: 0
       e31: 0
       e32: 0
@@ -215,9 +215,9 @@ MonoBehaviour:
   - hierarchyPath: 0:Production machine (MK2)/0:Body/2:Cube/0:Icon
     animationPath: Body/Cube/Icon
     parentIndex: 6
-    localPosition: {x: 0, y: 0.018702127, z: 0.62}
+    localPosition: {x: 0, y: 0.018702127, z: 0.62000006}
     localRotation: {x: -0, y: -0, z: -0, w: 1}
-    localScale: {x: 0.16145083, y: 0.42504779, z: 13.659892}
+    localScale: {x: 0.15384617, y: 0.42504779, z: 13.659892}
     defaultLocalToRoot:
       e00: 0.10000001
       e01: 0
@@ -230,7 +230,7 @@ MonoBehaviour:
       e20: 0
       e21: 0
       e22: 1
-      e23: 0.34178835
+      e23: 0.35998833
       e30: 0
       e31: 0
       e32: 0
@@ -240,22 +240,22 @@ MonoBehaviour:
   - hierarchyPath: 0:Production machine (MK2)/0:Body/3:Cube (1)
     animationPath: Body/Cube (1)
     parentIndex: 1
-    localPosition: {x: 0.00000023763452, y: 0.13, z: -0.232}
+    localPosition: {x: 0, y: 0.13, z: -0.246}
     localRotation: {x: -0, y: -1, z: -0, w: 0.0000029504295}
-    localScale: {x: 0.47644898, y: 0.18097514, z: 0.056313094}
+    localScale: {x: 0.5, y: 0.18097514, z: 0.056313094}
     defaultLocalToRoot:
-      e00: -0.61938363
+      e00: -0.65
       e01: 0
       e02: -0.0000004319843
-      e03: 0.00000030892488
+      e03: 0
       e10: 0
       e11: 0.23526767
       e12: 0
       e13: 0.16899998
-      e20: 0.0000036548956
+      e20: 0.0000038355583
       e21: 0
       e22: -0.07320702
-      e23: -0.30159998
+      e23: -0.3198
       e30: 0
       e31: 0
       e32: 0
@@ -265,22 +265,22 @@ MonoBehaviour:
   - hierarchyPath: 0:Production machine (MK2)/0:Body/3:Cube (1)/0:Icon
     animationPath: Body/Cube (1)/Icon
     parentIndex: 8
-    localPosition: {x: -0, y: 0.018702127, z: 0.66}
+    localPosition: {x: 0, y: 0.018702127, z: 0.66}
     localRotation: {x: -0, y: -0, z: -0, w: 1}
-    localScale: {x: 0.16145083, y: 0.42504779, z: 13.659892}
+    localScale: {x: 0.15384617, y: 0.42504779, z: 13.659892}
     defaultLocalToRoot:
       e00: -0.10000001
       e01: 0
       e02: -0.000005900859
-      e03: 0.000000023815216
+      e03: -0.00000028510965
       e10: 0
       e11: 0.1
       e12: 0
       e13: 0.1734
-      e20: 0.0000005900859
+      e20: 0.00000059008596
       e21: 0
       e22: -1
-      e23: -0.34991664
+      e23: -0.36811662
       e30: 0
       e31: 0
       e32: 0
@@ -294,8 +294,8 @@ MonoBehaviour:
     material: {fileID: 2100000, guid: 9a6a2c38e536a7a468f1a0caf945cf1c, type: 2}
     subMeshIndex: 0
     localBounds:
-      m_Center: {x: 0.0002593994, y: 0.36277762, z: -0.00012207031}
-      m_Extent: {x: 0.48783866, y: 0.36277762, z: 0.25299072}
+      m_Center: {x: 0.00027236342, y: 0.38091648, z: -0.00012817979}
+      m_Extent: {x: 0.5122305, y: 0.38091654, z: 0.26564026}
     layer: 0
     renderingLayerMask: 1
     shadowCastingMode: 1
@@ -373,3 +373,160 @@ MonoBehaviour:
     looping: 1
     transformCurveCount: 6
     objectReferenceCurveCount: 0
+    transformCurves:
+    - path: Body/Gear
+      property: localEulerAnglesRaw.x
+      curve:
+        serializedVersion: 2
+        m_Curve:
+        - serializedVersion: 3
+          time: 0
+          value: 0
+          inSlope: 0
+          outSlope: 0
+          tangentMode: 136
+          weightedMode: 0
+          inWeight: 0.33333334
+          outWeight: 0.33333334
+        - serializedVersion: 3
+          time: 2
+          value: 360
+          inSlope: 0
+          outSlope: 0
+          tangentMode: 136
+          weightedMode: 0
+          inWeight: 0.33333334
+          outWeight: 0.33333334
+        m_PreInfinity: 2
+        m_PostInfinity: 2
+        m_RotationOrder: 4
+    - path: Body/Gear
+      property: localEulerAnglesRaw.y
+      curve:
+        serializedVersion: 2
+        m_Curve:
+        - serializedVersion: 3
+          time: 0
+          value: 0
+          inSlope: 0
+          outSlope: 0
+          tangentMode: 136
+          weightedMode: 0
+          inWeight: 0.33333334
+          outWeight: 0.33333334
+        - serializedVersion: 3
+          time: 2
+          value: 0
+          inSlope: 0
+          outSlope: 0
+          tangentMode: 136
+          weightedMode: 0
+          inWeight: 0.33333334
+          outWeight: 0.33333334
+        m_PreInfinity: 2
+        m_PostInfinity: 2
+        m_RotationOrder: 4
+    - path: Body/Gear
+      property: localEulerAnglesRaw.z
+      curve:
+        serializedVersion: 2
+        m_Curve:
+        - serializedVersion: 3
+          time: 0
+          value: 90
+          inSlope: 0
+          outSlope: 0
+          tangentMode: 136
+          weightedMode: 0
+          inWeight: 0.33333334
+          outWeight: 0.33333334
+        - serializedVersion: 3
+          time: 2
+          value: 90
+          inSlope: 0
+          outSlope: 0
+          tangentMode: 136
+          weightedMode: 0
+          inWeight: 0.33333334
+          outWeight: 0.33333334
+        m_PreInfinity: 2
+        m_PostInfinity: 2
+        m_RotationOrder: 4
+    - path: Body/Gear (1)
+      property: localEulerAnglesRaw.x
+      curve:
+        serializedVersion: 2
+        m_Curve:
+        - serializedVersion: 3
+          time: 0
+          value: 0
+          inSlope: 0
+          outSlope: 0
+          tangentMode: 136
+          weightedMode: 0
+          inWeight: 0.33333334
+          outWeight: 0.33333334
+        - serializedVersion: 3
+          time: 2
+          value: 360
+          inSlope: 0
+          outSlope: 0
+          tangentMode: 136
+          weightedMode: 0
+          inWeight: 0.33333334
+          outWeight: 0.33333334
+        m_PreInfinity: 2
+        m_PostInfinity: 2
+        m_RotationOrder: 4
+    - path: Body/Gear (1)
+      property: localEulerAnglesRaw.y
+      curve:
+        serializedVersion: 2
+        m_Curve:
+        - serializedVersion: 3
+          time: 0
+          value: 0
+          inSlope: 0
+          outSlope: 0
+          tangentMode: 136
+          weightedMode: 0
+          inWeight: 0.33333334
+          outWeight: 0.33333334
+        - serializedVersion: 3
+          time: 2
+          value: 0
+          inSlope: 0
+          outSlope: 0
+          tangentMode: 136
+          weightedMode: 0
+          inWeight: 0.33333334
+          outWeight: 0.33333334
+        m_PreInfinity: 2
+        m_PostInfinity: 2
+        m_RotationOrder: 4
+    - path: Body/Gear (1)
+      property: localEulerAnglesRaw.z
+      curve:
+        serializedVersion: 2
+        m_Curve:
+        - serializedVersion: 3
+          time: 0
+          value: 90
+          inSlope: 0
+          outSlope: 0
+          tangentMode: 136
+          weightedMode: 0
+          inWeight: 0.33333334
+          outWeight: 0.33333334
+        - serializedVersion: 3
+          time: 2
+          value: 90
+          inSlope: 0
+          outSlope: 0
+          tangentMode: 136
+          weightedMode: 0
+          inWeight: 0.33333334
+          outWeight: 0.33333334
+        m_PreInfinity: 2
+        m_PostInfinity: 2
+        m_RotationOrder: 4

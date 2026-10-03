@@ -216,6 +216,11 @@ public class ObjectInfoPanel : MonoBehaviour
             return;
         }
 
+        if (mapObject is MiningMachineInstance miner)
+        {
+            if (infoLine != null) { infoLine.gameObject.SetActive(true); infoLine.ShowMiningMachine(miner); }
+            return;
+        }
         if (mapObject is RobotArmInstance robotArm)
         {
             ShowRobotArmInfo(robotArm, underlyingResource);

@@ -812,22 +812,24 @@ public partial class Block
         }
 
         CleanupPortableStack(inputAreaCenterStack);
-        if (itemId >= 0 && !IsStackCompatible(inputAreaCenterStack, itemId))
+        if (itemId >= 0 && (!IsStackCompatible(inputAreaCenterStack, itemId)
+            || deferredCenterOutput.Count > 0 && deferredCenterOutput.ItemId != itemId))
         {
             return false;
         }
 
-        return ResolveInputAreaCenterCapacity(itemId) - inputAreaCenterStack.Count >= count;
+        return ResolveInputAreaCenterCapacity(itemId) - inputAreaCenterStack.Count - deferredCenterOutput.Count >= count;
     }
 
     public bool HasInputAreaCenterObjects()
     {
         CleanupPortableStack(inputAreaCenterStack);
-        return inputAreaCenterStack.Count > 0;
+        return inputAreaCenterStack.Count > 0 || deferredCenterOutput.Count > 0;
     }
 
     public bool HasInputAreaCenterItem(int itemId)
     {
+        if (deferredCenterOutput.Count > 0 && deferredCenterOutput.ItemId == itemId) return true;
         CleanupPortableStack(inputAreaCenterStack);
         if (itemId < 0 || inputAreaCenterStack.Count <= 0)
         {
@@ -841,17 +843,12 @@ public partial class Block
     public int GetInputAreaCenterItemCount(int itemId = -1)
     {
         CleanupPortableStack(inputAreaCenterStack);
-        if (inputAreaCenterStack.Count <= 0)
-        {
-            return 0;
-        }
-
         if (itemId < 0)
         {
-            return inputAreaCenterStack.Count;
+            return inputAreaCenterStack.Count + deferredCenterOutput.Count;
         }
 
-        int count = 0;
+        int count = deferredCenterOutput.Count > 0 && deferredCenterOutput.ItemId == itemId ? deferredCenterOutput.Count : 0;
         for (int i = 0; i < inputAreaCenterStack.Count; i++)
         {
             PortableObject portableObject = inputAreaCenterStack[i];
@@ -866,6 +863,7 @@ public partial class Block
 
     public int GetInputAreaCenterItemId()
     {
+        if (deferredCenterOutput.Count > 0) return deferredCenterOutput.ItemId;
         CleanupPortableStack(inputAreaCenterStack);
         if (inputAreaCenterStack.Count <= 0)
         {
@@ -969,6 +967,7 @@ public partial class Block
 
     public bool CanTransferOneInputAreaCenterObjectToConveyor()
     {
+        MaterializeDeferredOutputs(int.MaxValue);
         CleanupPortableStack(inputAreaCenterStack);
         if (!IsRuntimeConveyor || inputAreaCenterStack.Count <= 0)
         {
@@ -1014,6 +1013,13 @@ public partial class Block
 
     public bool TryConsumeOneInputAreaCenterObject(int expectedItemId, out int consumedItemId)
     {
+        if (deferredCenterOutput.TryRemoveTop(expectedItemId, out consumedItemId))
+        {
+            deferredOutputRenderer?.RemoveDeferredOutputItems(1);
+            if (DeferredOutputCount == 0) deferredOutputRenderer?.RemoveDeferredOutputBlock(this);
+            NotifyRuntimeItemStackChanged(); return true;
+        }
+        if (deferredCenterOutput.Count > 0) return false;
         consumedItemId = -1;
         CleanupPortableStack(inputAreaCenterStack);
         if (inputAreaCenterStack.Count <= 0)
@@ -1060,6 +1066,7 @@ public partial class Block
         float delay = 0f,
         Action onComplete = null)
     {
+        MaterializeDeferredOutputs(int.MaxValue);
         consumedItemId = -1;
         CleanupPortableStack(inputAreaCenterStack);
         if (inputAreaCenterStack.Count <= 0)
@@ -1236,24 +1243,11 @@ public partial class Block
         portableObject.SetCachedActive(inputAreaCenterObjectsVisible);
 
         int objectIndex = inputAreaCenterStack.Count;
-        Vector3 finalLocalPosition = new Vector3(0f, objectIndex * InputAreaCenterVerticalSpacing, 0f);
-        Vector3 finalWorldPosition = inputAreaCenterAnchor.TransformPoint(finalLocalPosition);
         inputAreaCenterStack.Add(portableObject);
         NotifyRuntimeItemStackChanged();
-        DroppedItemPickupGate gate = portableObject.GetOrAddPickupGate();
-
-        portableObject.MoveTo(() => inputAreaCenterAnchor != null ? inputAreaCenterAnchor.TransformPoint(finalLocalPosition) : finalWorldPosition, delay, startWorldPositionProvider, () =>
-        {
-            if (portableObject == null || inputAreaCenterAnchor == null)
-            {
-                onComplete?.Invoke();
-                return;
-            }
-
-            ApplyInputAreaCenterObjectVisibility(portableObject, objectIndex);
-            gate?.MarkSettled();
-            onComplete?.Invoke();
-        }, false, useJumpArc, moveDuration, false);
+        portableObject.GetOrAddPickupGate();
+        portableObject.MoveToBlockStack(this, true, objectIndex, delay, startWorldPositionProvider,
+            onComplete, useJumpArc, moveDuration);
 
         targetPortableObject = portableObject;
         return true;
@@ -1268,7 +1262,7 @@ public partial class Block
     {
         get
         {
-            EnsureFloorObjectsInitialized();
+            EnsureFloorObjectsInitialized(false);
             return type == BlockType.Ground
                    && !BlocksFloorObjectStacking()
                    && ResolveFloorObjectDropAnchor() != null;
@@ -1284,7 +1278,8 @@ public partial class Block
     {
         get
         {
-            EnsureFloorObjectsInitialized();
+            if (deferredFloorOutput.Count > 0) return true;
+            EnsureFloorObjectsInitialized(false);
             for (int stackIndex = 0; stackIndex < floorStacks.Count; stackIndex++)
             {
                 List<PortableObject> stack = floorStacks[stackIndex];
@@ -1308,7 +1303,8 @@ public partial class Block
 
     public bool HasFloorObjectItem(int itemId)
     {
-        EnsureFloorObjectsInitialized();
+        if (deferredFloorOutput.Count > 0 && deferredFloorOutput.ItemId == itemId) return true;
+        EnsureFloorObjectsInitialized(false);
 
         if (itemId < 0)
         {
@@ -1333,13 +1329,13 @@ public partial class Block
 
     public int CountFloorObjects(int itemId)
     {
-        EnsureFloorObjectsInitialized();
+        EnsureFloorObjectsInitialized(false);
         if (itemId < 0)
         {
             return 0;
         }
 
-        int count = 0;
+        int count = deferredFloorOutput.Count > 0 && deferredFloorOutput.ItemId == itemId ? deferredFloorOutput.Count : 0;
         for (int stackIndex = 0; stackIndex < floorStacks.Count; stackIndex++)
         {
             List<PortableObject> stack = floorStacks[stackIndex];
@@ -1363,7 +1359,7 @@ public partial class Block
 
     public int RemoveFloorObjects(int itemId, int count)
     {
-        EnsureFloorObjectsInitialized();
+        EnsureFloorObjectsInitialized(false);
         if (itemId < 0 || count <= 0)
         {
             return 0;
@@ -1371,6 +1367,9 @@ public partial class Block
 
         int remaining = count;
         bool stateChanged = false;
+        while (remaining > 0 && deferredFloorOutput.TryRemoveTop(itemId, out _)) { remaining--; stateChanged = true; }
+        deferredOutputRenderer?.RemoveDeferredOutputItems(count - remaining);
+        if (DeferredOutputCount == 0) deferredOutputRenderer?.RemoveDeferredOutputBlock(this);
         for (int stackIndex = 0; stackIndex < floorStacks.Count && remaining > 0; stackIndex++)
         {
             List<PortableObject> stack = floorStacks[stackIndex];
@@ -1547,27 +1546,44 @@ public partial class Block
         portableObject.SetCachedActive(true);
 
         int objectIndex = stack.Count;
-        Vector3 finalWorldPosition = GetFloorObjectWorldPosition(anchor, objectIndex);
         stack.Add(portableObject);
         NotifyRuntimeItemStackChanged();
-        DroppedItemPickupGate gate = portableObject.GetOrAddPickupGate();
-
-        portableObject.MoveTo(() => anchor != null ? GetFloorObjectWorldPosition(anchor, objectIndex) : finalWorldPosition, delay, startWorldPositionProvider, () =>
-        {
-            if (portableObject == null || anchor == null)
-            {
-                onComplete?.Invoke();
-                return;
-            }
-
-            ConfigureFloorObjectTransform(portableObject, anchor, objectIndex);
-            portableObject.SetBatchedRendering(true);
-            gate?.MarkSettled();
-            onComplete?.Invoke();
-        }, false, true, PortableObject.MoveToDuration, false);
+        portableObject.GetOrAddPickupGate();
+        portableObject.MoveToBlockStack(this, false, objectIndex, delay, startWorldPositionProvider,
+            onComplete, true, PortableObject.MoveToDuration);
 
         targetPortableObject = portableObject;
         return true;
+    }
+
+    internal Vector3 GetItemStackPlacementPosition(bool centerStack, int stackIndex)
+    {
+        if (centerStack)
+            return inputAreaCenterAnchor != null
+                ? inputAreaCenterAnchor.TransformPoint(new Vector3(0f, stackIndex * InputAreaCenterVerticalSpacing, 0f))
+                : WorldPosition + Vector3.up * (ResolveInputAreaCenterHeight() + stackIndex * InputAreaCenterVerticalSpacing);
+        return GetFloorObjectWorldPosition(ResolveFloorObjectDropAnchor(), stackIndex);
+    }
+
+    internal void CompleteItemStackPlacement(PortableObject item, bool centerStack, int stackIndex)
+    {
+        // A removed/reused item must never settle into its previous owner's stack.
+        List<PortableObject> stack = centerStack ? inputAreaCenterStack : floorStacks.Count > 0 ? floorStacks[0] : null;
+        if (item == null || stack == null || (uint)stackIndex >= (uint)stack.Count
+            || !ReferenceEquals(stack[stackIndex], item)) return;
+        if (centerStack)
+        {
+            if (inputAreaCenterAnchor == null) return;
+            ApplyInputAreaCenterObjectVisibility(item, stackIndex);
+        }
+        else
+        {
+            Transform anchor = ResolveFloorObjectDropAnchor();
+            if (anchor == null) return;
+            ConfigureFloorObjectTransform(item, anchor, stackIndex);
+            item.SetBatchedRendering(true);
+        }
+        item.PickupGate?.MarkSettled();
     }
 
     public bool TryTakeSettledFloorObject(
@@ -3019,11 +3035,11 @@ public partial class Block
 
     public List<int> CaptureFloorObjectState()
     {
-        EnsureFloorObjectsInitialized();
+        EnsureFloorObjectsInitialized(false);
         CleanupConveyorStack();
 
         List<int> itemIds = new List<int>();
-        int floorStackItemCount = 0;
+        int floorStackItemCount = deferredFloorOutput.Count;
         for (int stackIndex = 0; stackIndex < floorStacks.Count; stackIndex++)
         {
             List<PortableObject> stack = floorStacks[stackIndex];
@@ -3045,7 +3061,7 @@ public partial class Block
             for (int stackIndex = 0; stackIndex < floorStacks.Count; stackIndex++)
             {
                 List<PortableObject> stack = floorStacks[stackIndex];
-                int stackItemCount = 0;
+                int stackItemCount = stackIndex == 0 ? deferredFloorOutput.Count : 0;
                 for (int objectIndex = 0; objectIndex < stack.Count; objectIndex++)
                 {
                     if (ShouldPersistFloorObject(stack[objectIndex]))
@@ -3063,10 +3079,12 @@ public partial class Block
                         itemIds.Add(portableObject.ItemId);
                     }
                 }
+                if (stackIndex == 0)
+                    for (int i = 0; i < deferredFloorOutput.Count; i++) itemIds.Add(deferredFloorOutput.ItemId);
             }
         }
 
-        int centerStackCount = 0;
+        int centerStackCount = deferredCenterOutput.Count;
         for (int i = 0; i < inputAreaCenterStack.Count; i++)
         {
             if (inputAreaCenterStack[i] != null)
@@ -3088,6 +3106,7 @@ public partial class Block
                     itemIds.Add(portableObject.ItemId);
                 }
             }
+            for (int i = 0; i < deferredCenterOutput.Count; i++) itemIds.Add(deferredCenterOutput.ItemId);
         }
 
         bool hasConveyorObjects = false;
@@ -3220,10 +3239,11 @@ public partial class Block
 
     public bool HasVirtualizableFloorObjectState()
     {
-        EnsureFloorObjectsInitialized();
+        EnsureFloorObjectsInitialized(false);
         CleanupConveyorStack();
 
-        bool hasFloorObjects = false;
+        if (deferredCenterOutput.Count > 0) return false;
+        bool hasFloorObjects = deferredFloorOutput.Count > 0;
         for (int stackIndex = 0; stackIndex < floorStacks.Count; stackIndex++)
         {
             List<PortableObject> stack = floorStacks[stackIndex];
@@ -5800,6 +5820,7 @@ public partial class Block
         out int itemId,
         out float distanceSqr)
     {
+        MaterializeDeferredOutputs(int.MaxValue);
         stack = null;
         topObject = null;
         itemId = -1;
@@ -6226,8 +6247,9 @@ public partial class Block
         return transferred;
     }
 
-    private void EnsureFloorObjectsInitialized()
+    private void EnsureFloorObjectsInitialized(bool materializeOutputs = true)
     {
+        if (materializeOutputs) MaterializeDeferredOutputs(int.MaxValue);
         int floorStackCount = ResolveFloorObjectDropAnchor() != null ? 1 : 0;
         while (floorStacks.Count < floorStackCount)
         {
@@ -7538,6 +7560,7 @@ public partial class Block
 
     private void ResetFloorObjects(bool notifyRuntime = true, bool releaseToPool = true)
     {
+        ClearDeferredOutputs();
         ReleaseConveyorTransport();
         if (floorStacks.Count == 0
             && inputAreaCenterStack.Count == 0
@@ -7669,7 +7692,7 @@ public partial class Block
 
     private int GetAvailableFloorCapacity(int itemId, ResourceInstance harvestedResource = null)
     {
-        EnsureFloorObjectsInitialized();
+        EnsureFloorObjectsInitialized(false);
 
         if (BlocksFloorObjectStacking(itemId, harvestedResource))
         {
@@ -7685,12 +7708,13 @@ public partial class Block
         int maxPerStack = ResolveFloorStackCapacity(itemId);
         List<PortableObject> stack = floorStacks[0];
         if (stack == null
-            || (itemId >= 0 && !IsStackCompatible(stack, itemId) && stack.Count > 0))
+            || (itemId >= 0 && ((!IsStackCompatible(stack, itemId) && stack.Count > 0)
+                || deferredFloorOutput.Count > 0 && deferredFloorOutput.ItemId != itemId)))
         {
             return 0;
         }
 
-        return Mathf.Max(0, maxPerStack - stack.Count);
+        return Mathf.Max(0, maxPerStack - stack.Count - deferredFloorOutput.Count);
     }
 
     private bool TryGetAvailableFloorStack(
@@ -7748,6 +7772,7 @@ public partial class Block
 
     private int ResolveFloorStackCapacity(int itemId)
     {
+        if (ProjectF.Benchmark.BenchmarkRuntime.ForceWorking) return int.MaxValue;
         int defaultCapacity = Mathf.Max(1, maxFloorObjectsPerStack);
         if (itemId < 0)
         {
@@ -13600,6 +13625,7 @@ public partial class Block
 
     public bool TryPickupOneInputAreaCenterObjectToBag(Player player, Vector3 playerPosition, float pickupRadius, int preferredSlotIndex, int preferredItemId = -1)
     {
+        MaterializeDeferredOutputs(int.MaxValue);
         if (player == null || pickupRadius <= 0f || inputAreaCenterStack.Count == 0 || IsClosedBoxContentPickupBlocked())
         {
             return false;
@@ -13696,6 +13722,7 @@ public partial class Block
         out int previewPickupCount,
         out PortableObject previewPortableObject)
     {
+        MaterializeDeferredOutputs(int.MaxValue);
         previewItemId = -1;
         previewPickupCount = 0;
         previewPortableObject = null;
@@ -13765,6 +13792,7 @@ public partial class Block
 
     public bool TryPickupOneInputAreaCenterObjectToHand(Player player, Vector3 playerPosition, float pickupRadius)
     {
+        MaterializeDeferredOutputs(int.MaxValue);
         if (player == null || pickupRadius <= 0f || inputAreaCenterStack.Count == 0 || IsClosedBoxContentPickupBlocked())
         {
             return false;
@@ -13830,6 +13858,7 @@ public partial class Block
 
     private void EnsureInputAreaCenterAnchorInitialized()
     {
+        if (!materializingDeferredOutput) MaterializeDeferredOutputs(int.MaxValue);
         CacheChildReferences();
         if (inputAreaCenterAnchor != null)
         {
@@ -13857,6 +13886,7 @@ public partial class Block
 
     private int ResolveInputAreaCenterCapacity(int itemId = -1)
     {
+        if (ProjectF.Benchmark.BenchmarkRuntime.ForceWorking && !(mapObject is BoxObject)) return int.MaxValue;
         int defaultCapacity;
         if (TryGetInstalledItemAreaCapacity(out int capacity))
         {

@@ -12,15 +12,15 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: a4d286e989be41fe853b78a59ca3a4e8, type: 3}
   m_Name: MapObjectArchetype_106_Water Bucket
   m_EditorClassIdentifier: Assembly-CSharp::ProjectF.MapObjects.MapObjectArchetype
-  schemaVersion: 1
+  schemaVersion: 2
   itemDefinition: {fileID: 11400000, guid: 0c3d44b3dc7f48e0a6408d9ac6a60bd2, type: 2}
   sourcePrefab: {fileID: 3525437405879595132, guid: 1bdc2cf4c67c4d27941cd3bbf8ff1f0b, type: 3}
-  itemId: 118
+  itemId: 125
   itemName: Water Bucket
   sourcePrefabGuid: 1bdc2cf4c67c4d27941cd3bbf8ff1f0b
   sourceContentHash:
     serializedVersion: 2
-    Hash: 446678eb052810dfcb73e28078872b64
+    Hash: 3058f6ad4416236efcf1571b9d77746c
   sourceRuntimeType: Bucket, Assembly-CSharp, Version=0.0.0.0, Culture=neutral, PublicKeyToken=null
   mapStatus:
     mapSizeX: 1

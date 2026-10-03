@@ -8,28 +8,31 @@ public partial class UtilityPole
         internal readonly List<ElectricNetwork> Networks = new List<ElectricNetwork>(1);
         internal ElectricNetwork BestNetwork;
         internal ulong EvaluatedRuntimeVersion;
+        internal float DemandWatts;
 
         internal void Reset()
         {
             Networks.Clear();
             BestNetwork = null;
             EvaluatedRuntimeVersion = 0UL;
+            DemandWatts = 0f;
         }
     }
 
     private static bool robotArmConsumersDirty = true;
     private static RobotArmWorld robotArmConsumerWorld;
-    private static readonly Dictionary<RobotArmInstance, RobotArmElectricBinding> robotArmBindings =
-        new Dictionary<RobotArmInstance, RobotArmElectricBinding>();
+    private static MiningWorld miningConsumerWorld;
+    private static readonly Dictionary<IDataElectricConsumer, RobotArmElectricBinding> robotArmBindings =
+        new Dictionary<IDataElectricConsumer, RobotArmElectricBinding>();
     private static readonly Stack<RobotArmElectricBinding> robotArmBindingPool =
         new Stack<RobotArmElectricBinding>();
-    private static readonly Dictionary<ElectricNetwork, List<RobotArmInstance>> robotArmsByNetwork =
-        new Dictionary<ElectricNetwork, List<RobotArmInstance>>();
-    private static readonly Stack<List<RobotArmInstance>> robotArmNetworkListPool =
-        new Stack<List<RobotArmInstance>>();
-    private static readonly HashSet<RobotArmInstance> robotArmWakeScratch =
-        new HashSet<RobotArmInstance>();
-    private static readonly List<RobotArmInstance> robotArmOrderScratch = new List<RobotArmInstance>();
+    private static readonly Dictionary<ElectricNetwork, List<IDataElectricConsumer>> robotArmsByNetwork =
+        new Dictionary<ElectricNetwork, List<IDataElectricConsumer>>();
+    private static readonly Stack<List<IDataElectricConsumer>> robotArmNetworkListPool =
+        new Stack<List<IDataElectricConsumer>>();
+    private static readonly HashSet<IDataElectricConsumer> robotArmWakeScratch =
+        new HashSet<IDataElectricConsumer>();
+    private static readonly List<IDataElectricConsumer> robotArmOrderScratch = new List<IDataElectricConsumer>();
     private static readonly Dictionary<ElectricNetwork, float> robotArmDemand =
         new Dictionary<ElectricNetwork, float>();
     private static readonly HashSet<ElectricNetwork> robotArmNetworkScratch =
@@ -49,7 +52,7 @@ public partial class UtilityPole
         RequestDeferredPreviewConsumerLineVisualRefresh();
     }
 
-    internal static void UnregisterRobotArmConsumer(RobotArmInstance arm)
+    internal static void UnregisterRobotArmConsumer(IDataElectricConsumer arm)
     {
         if (arm != null
             && robotArmBindings.Remove(arm, out RobotArmElectricBinding binding)
@@ -65,14 +68,15 @@ public partial class UtilityPole
     private static void RefreshRobotArmConsumers()
     {
         RobotArmWorld world = RobotArmWorld.Current;
-        if (!robotArmConsumersDirty && robotArmConsumerWorld == world)
+        if (!robotArmConsumersDirty && robotArmConsumerWorld == world && miningConsumerWorld == MiningWorld.Current)
         {
             return;
         }
 
-        bool worldChanged = robotArmConsumerWorld != world;
+        bool worldChanged = robotArmConsumerWorld != world || miningConsumerWorld != MiningWorld.Current;
         robotArmConsumersDirty = false;
         robotArmConsumerWorld = world;
+        miningConsumerWorld = MiningWorld.Current;
         if (worldChanged)
         {
             robotArmPowerBindingCacheHits = 0L;
@@ -81,26 +85,24 @@ public partial class UtilityPole
         ReleaseRobotArmBindings();
         robotArmDemand.Clear();
         robotArmSingleNetworkBindingCount = 0;
-        if (world == null)
-        {
-            return;
-        }
-
         robotArmOrderScratch.Clear();
-        IReadOnlyList<RobotArmInstance> instances = world.Instances;
+        IReadOnlyList<IDataElectricConsumer> instances = world != null ? world.Instances : System.Array.Empty<IDataElectricConsumer>();
         for (int i = 0; i < instances.Count; i++)
         {
-            RobotArmInstance arm = instances[i];
+            IDataElectricConsumer arm = instances[i];
             if (arm != null && arm.IsRuntimeActive)
             {
                 robotArmOrderScratch.Add(arm);
             }
         }
 
+        if (miningConsumerWorld != null)
+            for (int i = 0; i < miningConsumerWorld.Instances.Count; i++)
+                robotArmOrderScratch.Add(miningConsumerWorld.Instances[i]);
         robotArmOrderScratch.Sort(CompareRobotArmSimulationOrder);
         for (int armIndex = 0; armIndex < robotArmOrderScratch.Count; armIndex++)
         {
-            RobotArmInstance arm = robotArmOrderScratch[armIndex];
+            IDataElectricConsumer arm = robotArmOrderScratch[armIndex];
             robotArmNetworkScratch.Clear();
             IReadOnlyList<Vector2Int> occupiedCoordinates = arm.RuntimeOccupiedCoordinates;
             for (int coordinateIndex = 0; coordinateIndex < occupiedCoordinates.Count; coordinateIndex++)
@@ -126,6 +128,7 @@ public partial class UtilityPole
                 : new RobotArmElectricBinding();
             binding.Reset();
             bool hasDemand = arm.TryGetElectricPowerDemand(out float watts);
+            binding.DemandWatts = hasDemand ? watts : 0f;
 
             // networks is topology ordered. Demand accumulation therefore remains deterministic.
             for (int networkIndex = 0; networkIndex < networks.Count; networkIndex++)
@@ -160,7 +163,7 @@ public partial class UtilityPole
     private static void ReleaseRobotArmBindings()
     {
         ClearRobotArmsByNetwork();
-        foreach (KeyValuePair<RobotArmInstance, RobotArmElectricBinding> entry in robotArmBindings)
+        foreach (KeyValuePair<IDataElectricConsumer, RobotArmElectricBinding> entry in robotArmBindings)
         {
             RobotArmElectricBinding binding = entry.Value;
             if (binding == null)
@@ -175,18 +178,18 @@ public partial class UtilityPole
         robotArmBindings.Clear();
     }
 
-    private static void AddRobotArmNetworkBinding(ElectricNetwork network, RobotArmInstance arm)
+    private static void AddRobotArmNetworkBinding(ElectricNetwork network, IDataElectricConsumer arm)
     {
         if (network == null || arm == null)
         {
             return;
         }
 
-        if (!robotArmsByNetwork.TryGetValue(network, out List<RobotArmInstance> arms))
+        if (!robotArmsByNetwork.TryGetValue(network, out List<IDataElectricConsumer> arms))
         {
             arms = robotArmNetworkListPool.Count > 0
                 ? robotArmNetworkListPool.Pop()
-                : new List<RobotArmInstance>(4);
+                : new List<IDataElectricConsumer>(4);
             robotArmsByNetwork.Add(network, arms);
         }
 
@@ -195,9 +198,9 @@ public partial class UtilityPole
 
     private static void ClearRobotArmsByNetwork()
     {
-        foreach (KeyValuePair<ElectricNetwork, List<RobotArmInstance>> entry in robotArmsByNetwork)
+        foreach (KeyValuePair<ElectricNetwork, List<IDataElectricConsumer>> entry in robotArmsByNetwork)
         {
-            List<RobotArmInstance> arms = entry.Value;
+            List<IDataElectricConsumer> arms = entry.Value;
             if (arms == null)
             {
                 continue;
@@ -215,8 +218,7 @@ public partial class UtilityPole
         out int candidateCount)
     {
         candidateCount = 0;
-        RobotArmWorld world = RobotArmWorld.Current;
-        if (world == null || wakeNetworks == null || wakeNetworks.Count == 0)
+        if (wakeNetworks == null || wakeNetworks.Count == 0)
         {
             return 0;
         }
@@ -228,14 +230,14 @@ public partial class UtilityPole
             ElectricNetwork network = networks[networkIndex];
             if (network == null
                 || !wakeNetworks.Contains(network)
-                || !robotArmsByNetwork.TryGetValue(network, out List<RobotArmInstance> arms))
+                || !robotArmsByNetwork.TryGetValue(network, out List<IDataElectricConsumer> arms))
             {
                 continue;
             }
 
             for (int i = 0; i < arms.Count; i++)
             {
-                RobotArmInstance arm = arms[i];
+                IDataElectricConsumer arm = arms[i];
                 if (arm != null && robotArmWakeScratch.Add(arm))
                 {
                     robotArmOrderScratch.Add(arm);
@@ -247,10 +249,8 @@ public partial class UtilityPole
         int wokenCount = 0;
         for (int i = 0; i < robotArmOrderScratch.Count; i++)
         {
-            if (world.WakeElectricRuntimeArm(robotArmOrderScratch[i]))
-            {
-                wokenCount++;
-            }
+            IDataElectricConsumer consumer = robotArmOrderScratch[i];
+            if (WakeDataElectricConsumer(consumer)) wokenCount++;
         }
 
         robotArmWakeScratch.Clear();
@@ -258,7 +258,7 @@ public partial class UtilityPole
         return wokenCount;
     }
 
-    private static int CompareRobotArmSimulationOrder(RobotArmInstance left, RobotArmInstance right)
+    private static int CompareRobotArmSimulationOrder(IDataElectricConsumer left, IDataElectricConsumer right)
     {
         if (ReferenceEquals(left, right))
         {
@@ -280,16 +280,16 @@ public partial class UtilityPole
 
     private static void RenderRobotArmPowerLines(bool previewPolesOnly)
     {
-        RobotArmWorld world = RobotArmWorld.Current;
-        if (world == null)
-        {
-            return;
-        }
-
-        IReadOnlyList<RobotArmInstance> instances = world.Instances;
+        IReadOnlyList<IDataElectricConsumer> instances = RobotArmWorld.Current != null
+            ? RobotArmWorld.Current.Instances : System.Array.Empty<IDataElectricConsumer>();
+        RenderDataConsumerPowerLines(instances, previewPolesOnly);
+        if (MiningWorld.Current != null) RenderDataConsumerPowerLines(MiningWorld.Current.Instances, previewPolesOnly);
+    }
+    private static void RenderDataConsumerPowerLines(IReadOnlyList<IDataElectricConsumer> instances, bool previewPolesOnly)
+    {
         for (int i = 0; i < instances.Count; i++)
         {
-            RobotArmInstance arm = instances[i];
+            IDataElectricConsumer arm = instances[i];
             if (arm == null
                 || !arm.IsRuntimeActive
                 || !arm.TryGetElectricPowerRequirement(out _)
@@ -313,7 +313,7 @@ public partial class UtilityPole
     }
 
     private static bool TryResolveRobotArmPowerLinePole(
-        RobotArmInstance arm,
+        IDataElectricConsumer arm,
         bool previewPolesOnly,
         out UtilityPole supplyingPole)
     {
@@ -374,7 +374,7 @@ public partial class UtilityPole
                && (!previewPolesOnly || IsPreviewPole(supplyingPole));
     }
 
-    private static bool PoleSuppliesRobotArm(UtilityPole pole, RobotArmInstance arm)
+    private static bool PoleSuppliesRobotArm(UtilityPole pole, IDataElectricConsumer arm)
     {
         if (pole == null
             || arm == null
@@ -397,7 +397,7 @@ public partial class UtilityPole
         return false;
     }
 
-    private static ElectricNetwork ResolveRobotArmNetwork(RobotArmInstance arm)
+    private static ElectricNetwork ResolveRobotArmNetwork(IDataElectricConsumer arm)
     {
         EnsureNetworksEvaluated();
         if (arm == null
@@ -451,7 +451,7 @@ public partial class UtilityPole
             if (robotArmNetworkRuntimeVersion == 0UL)
             {
                 robotArmNetworkRuntimeVersion = 1UL;
-                foreach (KeyValuePair<RobotArmInstance, RobotArmElectricBinding> entry in robotArmBindings)
+                foreach (KeyValuePair<IDataElectricConsumer, RobotArmElectricBinding> entry in robotArmBindings)
                 {
                     if (entry.Value != null)
                     {
@@ -462,6 +462,56 @@ public partial class UtilityPole
         }
     }
 
+    internal static void InvalidateDataConsumerDemand(IDataElectricConsumer consumer)
+    {
+        if (!robotArmBindings.TryGetValue(consumer, out var binding)) return;
+        float demand = consumer.TryGetElectricPowerDemand(out float watts) ? watts : 0f;
+        float delta = demand - binding.DemandWatts;
+        if (Mathf.Abs(delta) <= EnergyEpsilon) return;
+        binding.DemandWatts = demand;
+        for (int i = 0; i < binding.Networks.Count; i++)
+        {
+            ElectricNetwork network = binding.Networks[i];
+            robotArmDemand.TryGetValue(network, out float total);
+            robotArmDemand[network] = Mathf.Max(0f, total + delta);
+            MarkNetworkRuntimeDirty(network);
+            if (network != null && !electricRuntimeWakeAllPending) electricRuntimeWakeNetworks.Add(network);
+        }
+        InvalidateNetworkRuntimeEvaluationForNextTick();
+        RequestElectricRuntimeNetworkWake();
+    }
+    internal static int WakeAllDataElectricConsumers(out int candidates)
+    {
+        int woken = 0; candidates = 0;
+        WakeDataConsumers(RobotArmWorld.Current?.Instances, ref candidates, ref woken);
+        WakeDataConsumers(MiningWorld.Current?.Instances, ref candidates, ref woken);
+        return woken;
+    }
+    private static void WakeDataConsumers(IReadOnlyList<IDataElectricConsumer> consumers, ref int candidates, ref int woken)
+    {
+        if (consumers == null) return;
+        candidates += consumers.Count;
+        for (int i = 0; i < consumers.Count; i++)
+            if (WakeDataElectricConsumer(consumers[i])) woken++;
+    }
+    private static bool WakeDataElectricConsumer(IDataElectricConsumer consumer)
+    {
+        if (consumer == null || !consumer.IsRuntimeActive) return false;
+        // Arms already sample power while moving. Only their power-blocked sleepers need a wake.
+        if (consumer is RobotArmInstance arm ? !arm.IsElectricPowerBlocked : !consumer.TryGetElectricPowerDemand(out _)) return false;
+        consumer.WakeForElectricPowerChange(); return true;
+    }
+    public static bool TryGetElectricSupplyRatio(IDataElectricConsumer consumer, float watts, out float ratio)
+    {
+        ratio = 0f;
+        if (consumer == null || !consumer.IsRuntimeActive) return false;
+        if (IsFreeElectroEnergyEnabled()) { ratio = 1f; return true; }
+        ElectricNetwork network = ResolveRobotArmNetwork(consumer);
+        if (network == null) return false;
+        ratio = network.Power.GetConsumerRatio(watts, true);
+        return true;
+    }
+
     internal static void PrepareRobotArmPowerTick()
     {
         // Evaluate the shared network once before the entity loop. Individual arms then
@@ -469,7 +519,7 @@ public partial class UtilityPole
         PrepareSimulationPowerTick();
     }
 
-    public static bool HasElectricityAvailable(RobotArmInstance arm)
+    public static bool HasElectricityAvailable(IDataElectricConsumer arm)
     {
         if (IsFreeElectroEnergyEnabled())
         {
@@ -480,7 +530,7 @@ public partial class UtilityPole
         return network != null && network.ProductionWatts > EnergyEpsilon;
     }
 
-    public static bool TryGetElectricPowerInfo(RobotArmInstance arm, out float supplied, out float required)
+    public static bool TryGetElectricPowerInfo(IDataElectricConsumer arm, out float supplied, out float required)
     {
         supplied = required = 0f;
         if (arm == null || !arm.IsRuntimeActive || !arm.TryGetElectricPowerRequirement(out required))
@@ -504,7 +554,7 @@ public partial class UtilityPole
     }
 
     public static bool TryConsumeElectricity(
-        RobotArmInstance arm,
+        IDataElectricConsumer arm,
         float requested,
         float deltaTime,
         out float consumed)
@@ -519,7 +569,7 @@ public partial class UtilityPole
     }
 
     internal static bool TryConsumeRobotArmElectricity(
-        RobotArmInstance arm,
+        IDataElectricConsumer arm,
         float requiredWatts,
         float requestedEnergy,
         out float consumedEnergy)

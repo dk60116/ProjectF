@@ -852,7 +852,8 @@ public partial class TerrainGenerator : MonoBehaviour
                 return;
             }
 
-            if (TryRestoreDataOnlyRobotArm(savedState)
+            if (TryRestoreDataOnlyMining(savedState)
+                || TryRestoreDataOnlyRobotArm(savedState)
                 || TryRestoreDataOnlyConveyor(savedState)
                 || TryRestoreDataOnlyPipe(savedState)
                 || TryRestoreDataOnlyBuilding(savedState))

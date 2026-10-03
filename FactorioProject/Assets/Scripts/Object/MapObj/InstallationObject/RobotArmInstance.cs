@@ -6,7 +6,7 @@ using RobotArmState = RobotArm.RobotArmState;
 using TransferState = RobotArm.TransferState;
 
 // Entity identity; mutable simulation components live in RobotArmWorld's slot array.
-public sealed partial class RobotArmInstance : IMapObjectTarget, IMapObjectSimulationIdentity
+public sealed partial class RobotArmInstance : IMapObjectTarget, IDataElectricConsumer
 {
     internal readonly RobotArmWorld World;
     internal readonly int Index;
@@ -90,7 +90,7 @@ public sealed partial class RobotArmInstance : IMapObjectTarget, IMapObjectSimul
     public MapObject.MapObjectStatus Status => Prototype.Status;
     public Vector3 WorldPosition => Placement.worldPosition;
     public Quaternion WorldRotation => Placement.worldRotation;
-    internal Vector3 PowerLineWorldPosition => Template.PowerLineWorld(this);
+    public Vector3 PowerLineWorldPosition => Template.PowerLineWorld(this);
     public ItemDefinition BoundItemDefinition => InputOutputModule.ResolveItemDefinition(Placement.itemId);
     public int ResolveItemId() => Placement.itemId;
     public int ResolvedItemId => ResolveItemId();
@@ -156,7 +156,7 @@ public sealed partial class RobotArmInstance : IMapObjectTarget, IMapObjectSimul
 
     internal bool IsElectricPowerBlocked => electricPowerBlocked;
 
-    internal void WakeForElectricPowerChange()
+    public void WakeForElectricPowerChange()
     {
         electricPowerBlocked = false;
         WakeRuntimeSleep();

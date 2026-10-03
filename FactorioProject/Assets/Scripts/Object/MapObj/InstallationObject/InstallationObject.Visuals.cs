@@ -13,7 +13,7 @@ public partial class InstallationObject
 
     private void RegisterManagedVisualUpdates()
     {
-        if (!Application.isPlaying || !UsesManagedVisualUpdates)
+        if (!Application.isPlaying || (!UsesManagedVisualUpdates && !InstallationBatchRenderer.Supports(this)))
             return;
         if (managedVisualState == null)
             managedVisualState = new InstallationVisualState(this);
@@ -50,6 +50,12 @@ public partial class InstallationObject
         return true;
     }
     internal void RefreshManagedVisualState() => OnManagedVisualsResumed();
+    protected void SetManagedWorkAnimatorActive(Animator animator, bool active)
+    {
+        if (!Application.isPlaying || animator == null || !UsesManagedVisualUpdates) return;
+        if (managedVisualState == null) managedVisualState = new InstallationVisualState(this);
+        managedVisualState.SetWorkAnimatorActive(animator, active);
+    }
     protected virtual void TickManagedVisuals(float deltaTime) { }
     protected virtual void OnManagedVisualsResumed() { }
 

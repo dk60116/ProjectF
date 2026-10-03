@@ -12,15 +12,15 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: a4d286e989be41fe853b78a59ca3a4e8, type: 3}
   m_Name: MapObjectArchetype_56_Steam generator
   m_EditorClassIdentifier: Assembly-CSharp::ProjectF.MapObjects.MapObjectArchetype
-  schemaVersion: 1
+  schemaVersion: 2
   itemDefinition: {fileID: 11400000, guid: fde3e14d2afafaf4a9603cedda8d94d6, type: 2}
   sourcePrefab: {fileID: 7245704639458897854, guid: 51e722e4dbe80d84e91d00b9220f57e0, type: 3}
-  itemId: 65
+  itemId: 69
   itemName: Steam generator
   sourcePrefabGuid: 51e722e4dbe80d84e91d00b9220f57e0
   sourceContentHash:
     serializedVersion: 2
-    Hash: d3cccc00b7fc64aa5ac3a87c8df299da
+    Hash: 775fadd2a21b268fedd3b35a7f8d0a6d
   sourceRuntimeType: SteamGenerator, Assembly-CSharp, Version=0.0.0.0, Culture=neutral,
     PublicKeyToken=null
   mapStatus:

@@ -1218,6 +1218,9 @@ public static class SaveGameBinarySerializer
             binaryWriter.Write(output.totalUnits);
             binaryWriter.Write(output.remainingUnits);
         });
+        writer.Write(state.miningResourceCursor);
+        WriteVector2Int(writer, state.miningResourceCoordinate);
+        writer.Write(state.miningPendingHarvestedItems);
     }
 
     private static InputOutputModule.PersistentState ReadInputOutputState(BinaryReader reader, int version)
@@ -1325,6 +1328,12 @@ public static class SaveGameBinarySerializer
             });
         }
 
+        if (version >= 70)
+        {
+            state.miningResourceCursor = reader.ReadInt32();
+            state.miningResourceCoordinate = ReadVector2Int(reader);
+            state.miningPendingHarvestedItems = reader.ReadInt32();
+        }
         return state;
     }
 

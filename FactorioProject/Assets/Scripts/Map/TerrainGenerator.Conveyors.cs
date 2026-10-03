@@ -4449,10 +4449,6 @@ public partial class TerrainGenerator : MonoBehaviour
             staticRenderer != null ? staticRenderer.LastSynchronizationFrame : -1);
         MapObjectTickProfiler.AddRuntimeCounter(
             "StaticInstallationRender",
-            "LastSynchronizedActive",
-            staticRenderer != null ? staticRenderer.LastSynchronizedActiveInstallationCount : 0);
-        MapObjectTickProfiler.AddRuntimeCounter(
-            "StaticInstallationRender",
             "LastSynchronizedDataOnly",
             staticRenderer != null ? staticRenderer.LastSynchronizedDataOnlyInstallationCount : 0);
         MapObjectTickProfiler.AddRuntimeCounter("World", "LoadedChunks", loadedChunks.Count);
@@ -4477,6 +4473,7 @@ public partial class TerrainGenerator : MonoBehaviour
         MapObjectTickProfiler.AddRuntimeCounter("World", "BlockDataChunks", loadedBlocks.ChunkCount);
 
         RobotArmWorld.AppendProfilerCounters();
+        MiningWorld.AppendProfilerCounters();
         PipeWorld.AppendProfilerCounters();
         BuildingWorld.AppendProfilerCounters();
         AppendFluidJobRuntimeProfilerCounters();
@@ -4501,6 +4498,9 @@ public partial class TerrainGenerator : MonoBehaviour
         MapObjectTickProfiler.AddRuntimeCounter("Conveyor", "DirectionVisualBlocks", activeBeltDirectionVisualList.Count);
 
         PortableItemRenderer itemRenderer = portableItemRenderer;
+        MapObjectTickProfiler.AddRuntimeCounter("ItemOutput", "DeferredBlocks", itemRenderer != null ? itemRenderer.DeferredOutputBlockCount : 0);
+        MapObjectTickProfiler.AddRuntimeCounter("ItemOutput", "DeferredItems", itemRenderer != null ? itemRenderer.DeferredOutputItemCount : 0);
+        MapObjectTickProfiler.AddRuntimeCounter("ItemOutput", "MaterializedThisFrame", itemRenderer != null ? itemRenderer.LastMaterializedOutputCount : 0);
         MapObjectTickProfiler.AddRuntimeCounter("ConveyorItemRender", "ItemBatchCellSize", itemRenderer != null ? itemRenderer.VirtualConveyorItemBatchCellSize : 0f);
         MapObjectTickProfiler.AddRuntimeCounter("ConveyorItemRender", "PortableRegistered", itemRenderer != null ? itemRenderer.RegisteredPortableObjectCount : 0);
         MapObjectTickProfiler.AddRuntimeCounter("ConveyorItemRender", "PortableDirtyRequests", itemRenderer != null ? itemRenderer.PortableObjectDirtyRequestCount : 0);

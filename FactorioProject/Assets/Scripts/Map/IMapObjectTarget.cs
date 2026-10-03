@@ -20,11 +20,13 @@ public interface IMapObjectTarget
 public static class MapObjectTargetExtensions
 {
     public static bool IsItemFilterEnabled(this IMapObjectTarget target, int itemId, int count) =>
+        target is MiningMachineInstance miner ? miner.IsItemFilterEnabled(itemId, count) :
         target is RobotArmInstance arm ? arm.IsItemFilterEnabled(itemId, count) :
         target?.SceneObject != null && target.SceneObject.IsItemFilterEnabled(itemId, count);
     public static void SetItemFilterEnabled(this IMapObjectTarget target, int itemId, int count, bool enabled)
     {
-        if (target is RobotArmInstance arm) arm.SetItemFilterEnabled(itemId, count, enabled);
+        if (target is MiningMachineInstance miner) miner.SetItemFilterEnabled(itemId, count, enabled);
+        else if (target is RobotArmInstance arm) arm.SetItemFilterEnabled(itemId, count, enabled);
         else target?.SceneObject?.SetItemFilterEnabled(itemId, count, enabled);
     }
     public static T GetComponent<T>(this IMapObjectTarget target) where T : Component => target?.SceneObject != null ? target.SceneObject.GetComponent<T>() : null;
@@ -35,20 +37,9 @@ public static class MapObjectTargetExtensions
     public static void GetComponentsInChildren<T>(this IMapObjectTarget target, bool includeInactive, System.Collections.Generic.List<T> results) where T : Component
     { results.Clear(); if (target?.SceneObject != null) target.SceneObject.GetComponentsInChildren(includeInactive, results); }
     // Unity destroyed-object semantics must be explicit at interface/object boundaries.
-    public static bool IsAlive(this IMapObjectTarget target) => target is ResourceInstance resource
-        ? resource.IsRuntimeActive
-        : target is RobotArmInstance arm
-            ? arm.IsRuntimeActive
-            : target is BuildingRuntimeRecord building
-                ? building.IsRuntimeActive
-                : target is MapObject component && component != null;
-    public static bool IsAliveTarget(object target) => target is PortableObject portableObject
-        ? portableObject.IsAlive
-        : target is ResourceInstance resource
-            ? resource.IsRuntimeActive
-            : target is RobotArmInstance arm
-                ? arm.IsRuntimeActive
-                : target is BuildingRuntimeRecord building
-                    ? building.IsRuntimeActive
-                    : target is Object unityObject && unityObject != null;
+    public static bool IsAlive(this IMapObjectTarget target) => target is MapObject component
+        ? component != null : target != null && target.IsTargetActive;
+    public static bool IsAliveTarget(object target) => target is PortableObject portable
+        ? portable.IsAlive : target is IMapObjectTarget map ? map.IsAlive()
+        : target is Object unityObject && unityObject != null;
 }

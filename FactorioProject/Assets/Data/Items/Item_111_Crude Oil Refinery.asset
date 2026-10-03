@@ -15,7 +15,7 @@ MonoBehaviour:
   itemName: Crude Oil Refinery
   id: 71
   mapObject: {fileID: 950080818205513044, guid: aa977cfc0de120b4dad23fcfaeac4a10, type: 3}
-  mapObjectArchetype: {fileID: 0}
+  mapObjectArchetype: {fileID: 11400000, guid: 5cf6e2838f300cc43b2aadcbb086a117, type: 2}
   useMapColor: 1
   mapColor: {r: 0.033241354, g: 0.7830189, b: 0.66420305, a: 1}
   mapMarkerSize: 1

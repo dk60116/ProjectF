@@ -1,0 +1,393 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: a4d286e989be41fe853b78a59ca3a4e8, type: 3}
+  m_Name: MapObjectArchetype_77_Production machine (MK3)
+  m_EditorClassIdentifier: Assembly-CSharp::ProjectF.MapObjects.MapObjectArchetype
+  schemaVersion: 2
+  itemDefinition: {fileID: 11400000, guid: cdc8e149b82cd7947b30ef76b473abfc, type: 2}
+  sourcePrefab: {fileID: 1982885657640665004, guid: 5e35bf91a3c489b42b8cff7e865635b6, type: 3}
+  itemId: 77
+  itemName: Production machine (MK3)
+  sourcePrefabGuid: 5e35bf91a3c489b42b8cff7e865635b6
+  sourceContentHash:
+    serializedVersion: 2
+    Hash: b609653d858f84fa22525c1d7445463b
+  sourceRuntimeType: ProductionMachine, Assembly-CSharp, Version=0.0.0.0, Culture=neutral,
+    PublicKeyToken=null
+  mapStatus:
+    mapSizeX: 3
+    mapSizeY: 1
+    centerCellX: 1
+    centerCellY: 0
+  focusMode: 1
+  defaultRootScale: {x: 1, y: 1, z: 1}
+  defaultRootRotation: {x: 0, y: 0, z: 0, w: 1}
+  localRenderBounds:
+    m_Center: {x: -0.0029175282, y: 0.4553708, z: -0.004409462}
+    m_Extent: {x: 1.2148726, y: 0.4553708, z: 0.37821257}
+  hasRenderBounds: 1
+  featureFlags: 2113
+  nodes:
+  - hierarchyPath: 0:Production machine (MK3)
+    animationPath: 
+    parentIndex: -1
+    localPosition: {x: 0, y: 0, z: 0}
+    localRotation: {x: 0, y: 0, z: 0, w: 1}
+    localScale: {x: 1, y: 1, z: 1}
+    defaultLocalToRoot:
+      e00: 1
+      e01: 0
+      e02: 0
+      e03: 0
+      e10: 0
+      e11: 1
+      e12: 0
+      e13: 0
+      e20: 0
+      e21: 0
+      e22: 1
+      e23: 0
+      e30: 0
+      e31: 0
+      e32: 0
+      e33: 1
+    activeByDefault: 1
+    hasAnimatedTransform: 0
+  - hierarchyPath: 0:Production machine (MK3)/0:Body
+    animationPath: Body
+    parentIndex: 0
+    localPosition: {x: 0, y: 0, z: 0}
+    localRotation: {x: 0, y: -0, z: -0, w: 1}
+    localScale: {x: 1, y: 1, z: 1}
+    defaultLocalToRoot:
+      e00: 1
+      e01: 0
+      e02: 0
+      e03: 0
+      e10: 0
+      e11: 1
+      e12: 0
+      e13: 0
+      e20: 0
+      e21: 0
+      e22: 1
+      e23: 0
+      e30: 0
+      e31: 0
+      e32: 0
+      e33: 1
+    activeByDefault: 1
+    hasAnimatedTransform: 0
+  - hierarchyPath: 0:Production machine (MK3)/0:Body/0:Cube
+    animationPath: Body/Cube
+    parentIndex: 1
+    localPosition: {x: -0, y: 0.13, z: 0.337}
+    localRotation: {x: 0.00007410406, y: -0.00014571846, z: 0.0013710404, w: 0.9999991}
+    localScale: {x: 1.25, y: 0.23526767, z: 0.07320702}
+    defaultLocalToRoot:
+      e00: 1.2499952
+      e01: -0.00064512744
+      e02: -0.000021320333
+      e03: 0
+      e10: 0.0034275707
+      e11: 0.23526679
+      e12: -0.0000108791155
+      e13: 0.13
+      e20: 0.0003645498
+      e21: 0.00003477454
+      e22: 0.07320701
+      e23: 0.337
+      e30: 0
+      e31: 0
+      e32: 0
+      e33: 1
+    activeByDefault: 1
+    hasAnimatedTransform: 0
+  - hierarchyPath: 0:Production machine (MK3)/0:Body/0:Cube/0:Icon
+    animationPath: Body/Cube/Icon
+    parentIndex: 2
+    localPosition: {x: -0.035199866, y: 0.01921493, z: 0.6601751}
+    localRotation: {x: -0, y: -0, z: -2.8296473e-11, w: 1}
+    localScale: {x: 0.080000006, y: 0.4250478, z: 13.659893}
+    defaultLocalToRoot:
+      e00: 0.09999963
+      e01: -0.00027420998
+      e02: -0.00029123347
+      e03: -0.044026136
+      e10: 0.00027420567
+      e11: 0.09999964
+      e12: -0.00014860755
+      e13: 0.1343928
+      e20: 0.000029163986
+      e21: 0.000014780842
+      e22: 1
+      e23: 0.3853173
+      e30: 0
+      e31: 0
+      e32: 0
+      e33: 1
+    activeByDefault: 1
+    hasAnimatedTransform: 0
+  - hierarchyPath: 0:Production machine (MK3)/0:Body/1:Cube (1)
+    animationPath: Body/Cube (1)
+    parentIndex: 1
+    localPosition: {x: -0, y: 0.13, z: -0.346}
+    localRotation: {x: 0.0013701336, y: 0.9999991, z: -0.000078458776, w: -0.00000016391277}
+    localScale: {x: 1.25, y: 0.23526767, z: 0.07320702}
+    defaultLocalToRoot:
+      e00: -1.2499955
+      e01: 0.00064469565
+      e02: -0.000000039738474
+      e03: 0
+      e10: 0.0034253309
+      e11: 0.23526679
+      e12: -0.000011487423
+      e13: 0.13
+      e20: 0.00000014103406
+      e21: -0.0000369177
+      e22: -0.073207036
+      e23: -0.346
+      e30: 0
+      e31: 0
+      e32: 0
+      e33: 1
+    activeByDefault: 1
+    hasAnimatedTransform: 0
+  - hierarchyPath: 0:Production machine (MK3)/0:Body/1:Cube (1)/0:Icon
+    animationPath: Body/Cube (1)/Icon
+    parentIndex: 4
+    localPosition: {x: 0, y: 0.018702095, z: 0.66000086}
+    localRotation: {x: -0, y: -0, z: -0, w: 1}
+    localScale: {x: 0.080000006, y: 0.4250478, z: 13.659894}
+    defaultLocalToRoot:
+      e00: -0.099999644
+      e01: 0.00027402648
+      e02: -0.00000054282333
+      e03: 0.000012030932
+      e10: 0.00027402648
+      e11: 0.09999964
+      e12: -0.00015691698
+      e13: 0.1343924
+      e20: 0.000000011282726
+      e21: -0.000015691787
+      e22: -1.0000004
+      e23: -0.3943174
+      e30: 0
+      e31: 0
+      e32: 0
+      e33: 1
+    activeByDefault: 1
+    hasAnimatedTransform: 0
+  renderParts:
+  - kind: 0
+    nodeIndex: 1
+    mesh: {fileID: -6613499916710432490, guid: acdc047288661424da20c838f14eac27, type: 3}
+    material: {fileID: 2100000, guid: 99ed4319ee8761f4496a0a9f160adfc1, type: 2}
+    subMeshIndex: 0
+    localBounds:
+      m_Center: {x: -0.0029175878, y: 0.4553708, z: -0.0022828877}
+      m_Extent: {x: 1.2148726, y: 0.4553708, z: 0.3613356}
+    layer: 0
+    renderingLayerMask: 1
+    shadowCastingMode: 1
+    receiveShadows: 1
+    enabledByDefault: 1
+  - kind: 0
+    nodeIndex: 2
+    mesh: {fileID: 10202, guid: 0000000000000000e000000000000000, type: 0}
+    material: {fileID: 2100000, guid: 725e65d5106f350489eaffecf7f6fe4e, type: 2}
+    subMeshIndex: 0
+    localBounds:
+      m_Center: {x: 0, y: 0, z: 0}
+      m_Extent: {x: 0.5, y: 0.5, z: 0.5}
+    layer: 0
+    renderingLayerMask: 1
+    shadowCastingMode: 1
+    receiveShadows: 1
+    enabledByDefault: 1
+  - kind: 0
+    nodeIndex: 4
+    mesh: {fileID: 10202, guid: 0000000000000000e000000000000000, type: 0}
+    material: {fileID: 2100000, guid: 725e65d5106f350489eaffecf7f6fe4e, type: 2}
+    subMeshIndex: 0
+    localBounds:
+      m_Center: {x: 0, y: 0, z: 0}
+      m_Extent: {x: 0.5, y: 0.5, z: 0.5}
+    layer: 0
+    renderingLayerMask: 1
+    shadowCastingMode: 1
+    receiveShadows: 1
+    enabledByDefault: 1
+  animationClips:
+  - clip: {fileID: 7400000, guid: f17992b736c836843a064bf9eea02e80, type: 2}
+    lengthSeconds: 2
+    frameRate: 60
+    looping: 1
+    transformCurveCount: 6
+    objectReferenceCurveCount: 0
+    transformCurves:
+    - path: Body/Gear
+      property: localEulerAnglesRaw.x
+      curve:
+        serializedVersion: 2
+        m_Curve:
+        - serializedVersion: 3
+          time: 0
+          value: 0
+          inSlope: 0
+          outSlope: 0
+          tangentMode: 136
+          weightedMode: 0
+          inWeight: 0.33333334
+          outWeight: 0.33333334
+        - serializedVersion: 3
+          time: 2
+          value: 360
+          inSlope: 0
+          outSlope: 0
+          tangentMode: 136
+          weightedMode: 0
+          inWeight: 0.33333334
+          outWeight: 0.33333334
+        m_PreInfinity: 2
+        m_PostInfinity: 2
+        m_RotationOrder: 4
+    - path: Body/Gear
+      property: localEulerAnglesRaw.y
+      curve:
+        serializedVersion: 2
+        m_Curve:
+        - serializedVersion: 3
+          time: 0
+          value: 0
+          inSlope: 0
+          outSlope: 0
+          tangentMode: 136
+          weightedMode: 0
+          inWeight: 0.33333334
+          outWeight: 0.33333334
+        - serializedVersion: 3
+          time: 2
+          value: 0
+          inSlope: 0
+          outSlope: 0
+          tangentMode: 136
+          weightedMode: 0
+          inWeight: 0.33333334
+          outWeight: 0.33333334
+        m_PreInfinity: 2
+        m_PostInfinity: 2
+        m_RotationOrder: 4
+    - path: Body/Gear
+      property: localEulerAnglesRaw.z
+      curve:
+        serializedVersion: 2
+        m_Curve:
+        - serializedVersion: 3
+          time: 0
+          value: 90
+          inSlope: 0
+          outSlope: 0
+          tangentMode: 136
+          weightedMode: 0
+          inWeight: 0.33333334
+          outWeight: 0.33333334
+        - serializedVersion: 3
+          time: 2
+          value: 90
+          inSlope: 0
+          outSlope: 0
+          tangentMode: 136
+          weightedMode: 0
+          inWeight: 0.33333334
+          outWeight: 0.33333334
+        m_PreInfinity: 2
+        m_PostInfinity: 2
+        m_RotationOrder: 4
+    - path: Body/Gear (1)
+      property: localEulerAnglesRaw.x
+      curve:
+        serializedVersion: 2
+        m_Curve:
+        - serializedVersion: 3
+          time: 0
+          value: 0
+          inSlope: 0
+          outSlope: 0
+          tangentMode: 136
+          weightedMode: 0
+          inWeight: 0.33333334
+          outWeight: 0.33333334
+        - serializedVersion: 3
+          time: 2
+          value: 360
+          inSlope: 0
+          outSlope: 0
+          tangentMode: 136
+          weightedMode: 0
+          inWeight: 0.33333334
+          outWeight: 0.33333334
+        m_PreInfinity: 2
+        m_PostInfinity: 2
+        m_RotationOrder: 4
+    - path: Body/Gear (1)
+      property: localEulerAnglesRaw.y
+      curve:
+        serializedVersion: 2
+        m_Curve:
+        - serializedVersion: 3
+          time: 0
+          value: 0
+          inSlope: 0
+          outSlope: 0
+          tangentMode: 136
+          weightedMode: 0
+          inWeight: 0.33333334
+          outWeight: 0.33333334
+        - serializedVersion: 3
+          time: 2
+          value: 0
+          inSlope: 0
+          outSlope: 0
+          tangentMode: 136
+          weightedMode: 0
+          inWeight: 0.33333334
+          outWeight: 0.33333334
+        m_PreInfinity: 2
+        m_PostInfinity: 2
+        m_RotationOrder: 4
+    - path: Body/Gear (1)
+      property: localEulerAnglesRaw.z
+      curve:
+        serializedVersion: 2
+        m_Curve:
+        - serializedVersion: 3
+          time: 0
+          value: 90
+          inSlope: 0
+          outSlope: 0
+          tangentMode: 136
+          weightedMode: 0
+          inWeight: 0.33333334
+          outWeight: 0.33333334
+        - serializedVersion: 3
+          time: 2
+          value: 90
+          inSlope: 0
+          outSlope: 0
+          tangentMode: 136
+          weightedMode: 0
+          inWeight: 0.33333334
+          outWeight: 0.33333334
+        m_PreInfinity: 2
+        m_PostInfinity: 2
+        m_RotationOrder: 4

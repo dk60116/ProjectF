@@ -11,6 +11,12 @@ public partial class PlayerCameraCullingProbe
     private Vector3 savedPlayerCullingFocus;
     private Transform target = new Transform(), focusTarget;
     private Vector3 currentFocus;
+    private bool freeCameraEnabled;
+    private bool savedCameraOrthographic, hasInitializedOrthographicSize;
+    private float savedCameraFieldOfView, savedCameraOrthographicSize, savedCameraFarClipPlane, targetOrthographicSize;
+    private float freeCameraFarClipPlane = 20000f;
+    private void ResolveTarget() { }
+    private float ClampOrthographicSize(float size) => size;
     private Vector3 ResolveFollowFocusPosition() => currentFocus;
 
     public PlayerCameraCullingProbe(Camera camera, Matrix4x4 matrix)
@@ -20,18 +26,33 @@ public partial class PlayerCameraCullingProbe
     }
     public void MovePlayer(Vector3 position) { currentFocus = position; RefreshPlayerCullingView(); }
     public void LoseTarget() { target = null; RefreshPlayerCullingView(); }
+    public void EnterFreeView() { hasSavedFreeCameraProjection = false; freeCameraEnabled = true; ApplyFreeCameraProjectionState(); }
+    public void ExitFreeView() { freeCameraEnabled = false; RestoreFreeCameraProjectionState(); }
 }
 
 public static class FreeCameraChecks
 {
     public static void Check()
     {
+        MiningRayChecks.Check();
         GameManager.Instance.DisableCameraCulling = false;
         GameManager.Instance.FreeCamera = true;
         GameManager.Instance.FreeCameraPlayerCulling = true;
         var camera = Checks.View(100);
         var playerMatrix = Checks.View(0).cullingMatrix;
         var probe = new PlayerCameraCullingProbe(camera, playerMatrix);
+        probe.EnterFreeView();
+        Checks.Require(camera.farClipPlane == 20000 && !camera.orthographic,
+            "free camera expands draw distance from 200 to 20000 units");
+        probe.ExitFreeView();
+        Checks.Require(camera.farClipPlane == 200 && camera.orthographic,
+            "exiting free camera restores the normal projection and original draw distance");
+        camera.farClipPlane = 30000;
+        probe.EnterFreeView();
+        Checks.Require(camera.farClipPlane == 30000, "free camera preserves an already longer draw distance");
+        probe.ExitFreeView(); camera.farClipPlane = 200;
+        CameraRenderCulling.ClearPlayerView(camera);
+        probe = new PlayerCameraCullingProbe(camera, playerMatrix);
         probe.MovePlayer(Vector3.zero);
         var helper = new CameraRenderCulling();
         var playerObject = new Bounds(Vector3.zero, Vector3.one);

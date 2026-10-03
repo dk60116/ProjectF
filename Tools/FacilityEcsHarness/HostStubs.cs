@@ -88,3 +88,6 @@ public abstract class InputOutputModule : InstallationObject, IMapObjectUpdateTi
     public bool RequiresFacilityPowerEvaluation => true;
     public abstract void ManagedUpdateTick(float deltaTime);
 }
+
+public interface IDataElectricConsumer { }
+public sealed class MiningWorld { public static MiningWorld Current => null; public void Wake(UnityEngine.Vector2Int coordinate) { } }

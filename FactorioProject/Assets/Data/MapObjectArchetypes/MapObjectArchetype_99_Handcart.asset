@@ -12,15 +12,15 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: a4d286e989be41fe853b78a59ca3a4e8, type: 3}
   m_Name: MapObjectArchetype_99_Handcart
   m_EditorClassIdentifier: Assembly-CSharp::ProjectF.MapObjects.MapObjectArchetype
-  schemaVersion: 1
+  schemaVersion: 2
   itemDefinition: {fileID: 11400000, guid: 8d6cbd303db81d64d99a93e7494044fb, type: 2}
   sourcePrefab: {fileID: 1311924932887929831, guid: ee02ddd42c01fdd46b2f5e3d7b8bdd2f, type: 3}
-  itemId: 111
+  itemId: 116
   itemName: Handcart
   sourcePrefabGuid: ee02ddd42c01fdd46b2f5e3d7b8bdd2f
   sourceContentHash:
     serializedVersion: 2
-    Hash: 80e49527a3d4dc71f50baa245b2d4716
+    Hash: db172102506c6977486191965562e220
   sourceRuntimeType: Handcart, Assembly-CSharp, Version=0.0.0.0, Culture=neutral,
     PublicKeyToken=null
   mapStatus:

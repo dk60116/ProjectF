@@ -12,15 +12,15 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: a4d286e989be41fe853b78a59ca3a4e8, type: 3}
   m_Name: MapObjectArchetype_57_Sprinkler
   m_EditorClassIdentifier: Assembly-CSharp::ProjectF.MapObjects.MapObjectArchetype
-  schemaVersion: 1
+  schemaVersion: 2
   itemDefinition: {fileID: 11400000, guid: e3e51ef812b2cca4a8b0033722dde4a1, type: 2}
   sourcePrefab: {fileID: 3543931225916085951, guid: 5c9d27cd414052a4fab2eee000e42bdd, type: 3}
-  itemId: 66
+  itemId: 70
   itemName: Sprinkler
   sourcePrefabGuid: 5c9d27cd414052a4fab2eee000e42bdd
   sourceContentHash:
     serializedVersion: 2
-    Hash: a6eef0f841d1605d93f36f9cd3613fc5
+    Hash: cf1aeb35c6d61f734cb1e2e0b4fb3f72
   sourceRuntimeType: Sprinkler, Assembly-CSharp, Version=0.0.0.0, Culture=neutral,
     PublicKeyToken=null
   mapStatus:

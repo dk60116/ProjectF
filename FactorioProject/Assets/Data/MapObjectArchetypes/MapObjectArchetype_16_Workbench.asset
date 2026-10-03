@@ -12,15 +12,15 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: a4d286e989be41fe853b78a59ca3a4e8, type: 3}
   m_Name: MapObjectArchetype_16_Workbench
   m_EditorClassIdentifier: Assembly-CSharp::ProjectF.MapObjects.MapObjectArchetype
-  schemaVersion: 1
+  schemaVersion: 2
   itemDefinition: {fileID: 11400000, guid: c7d14445b92c7d0468e83d73c68f384f, type: 2}
   sourcePrefab: {fileID: 7839628250064023149, guid: 0ed46c02cba6bea47936497891a6fa2b, type: 3}
-  itemId: 20
+  itemId: 22
   itemName: Workbench
   sourcePrefabGuid: 0ed46c02cba6bea47936497891a6fa2b
   sourceContentHash:
     serializedVersion: 2
-    Hash: b025a6685be8a988d7aec74c3f2ea69e
+    Hash: 323a41e27c7b54141f83c929aa1bb98e
   sourceRuntimeType: WorkableObject, Assembly-CSharp, Version=0.0.0.0, Culture=neutral,
     PublicKeyToken=null
   mapStatus:

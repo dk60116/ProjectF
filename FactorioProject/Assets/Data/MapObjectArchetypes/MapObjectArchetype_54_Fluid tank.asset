@@ -12,15 +12,15 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: a4d286e989be41fe853b78a59ca3a4e8, type: 3}
   m_Name: MapObjectArchetype_54_Fluid tank
   m_EditorClassIdentifier: Assembly-CSharp::ProjectF.MapObjects.MapObjectArchetype
-  schemaVersion: 1
+  schemaVersion: 2
   itemDefinition: {fileID: 11400000, guid: 8b08ee1c220ce654abcb75d3541c7312, type: 2}
   sourcePrefab: {fileID: 233042269004523433, guid: 8a8b5c428315cb54ab566ee8f1a55423, type: 3}
-  itemId: 63
+  itemId: 67
   itemName: Fluid tank
   sourcePrefabGuid: 8a8b5c428315cb54ab566ee8f1a55423
   sourceContentHash:
     serializedVersion: 2
-    Hash: 1e2730d427955b8c784e4f3b4a9013ba
+    Hash: 3724fb05574a311d39fa1951eacc0e93
   sourceRuntimeType: Fluidtank, Assembly-CSharp, Version=0.0.0.0, Culture=neutral,
     PublicKeyToken=null
   mapStatus:

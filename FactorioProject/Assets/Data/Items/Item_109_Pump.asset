@@ -15,7 +15,7 @@ MonoBehaviour:
   itemName: Pump
   id: 66
   mapObject: {fileID: 6057075815099229333, guid: a19b4bc2ba75c494db5a48a4bbf18037, type: 3}
-  mapObjectArchetype: {fileID: 0}
+  mapObjectArchetype: {fileID: 11400000, guid: fed27f84b95338d49ad2d18c4adb58db, type: 2}
   useMapColor: 1
   mapColor: {r: 0.13643645, g: 0.29627165, b: 0.3962264, a: 1}
   mapMarkerSize: 1

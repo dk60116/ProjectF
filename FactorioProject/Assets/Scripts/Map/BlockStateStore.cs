@@ -581,6 +581,18 @@ public partial class BlockStateStore : MonoBehaviour
         InstallationSaveState state,
         out InstallationSaveState storedState)
     {
+        bool registered = RegisterDataOnlyInstallationSharedState(state, out var sharedState);
+        storedState = sharedState?.Clone();
+        return registered;
+    }
+
+    // Internal runtimes can share the store-owned DTO while placement geometry stays fixed.
+    // Input and public snapshots remain isolated copies. Persist runtime fields in place;
+    // UpdateInstallationState replaces the DTO and is not the shared runtime's save path.
+    internal bool RegisterDataOnlyInstallationSharedState(
+        InstallationSaveState state,
+        out InstallationSaveState storedState)
+    {
         storedState = null;
         if (!StoreInstallationState(state, out Vector2Int storageKey, out InstallationSaveState registeredState))
         {
@@ -588,7 +600,7 @@ public partial class BlockStateStore : MonoBehaviour
         }
 
         UnregisterLiveInstallation(storageKey);
-        storedState = registeredState.Clone();
+        storedState = registeredState;
         ResolveVirtualObjectWorld()?.UpsertInstallationHandle(
             registeredState,
             VirtualObjectResidency.Virtual);
@@ -775,6 +787,7 @@ public partial class BlockStateStore : MonoBehaviour
     public List<InstallationSaveState> GetInstallationStatesSnapshot()
     {
         RobotArmWorld.Current?.FlushSaveStates();
+        MiningWorld.Current?.FlushSaveStates();
         List<InstallationSaveState> snapshot = new List<InstallationSaveState>(savedInstallationStates.Count);
         foreach (KeyValuePair<Vector2Int, InstallationSaveState> pair in savedInstallationStates)
         {
@@ -1219,6 +1232,7 @@ public partial class BlockStateStore : MonoBehaviour
     public void RemoveInstallation(Vector2Int storageKey, bool removeUtilityPoleReferences = true)
     {
         RobotArmWorld.Current?.Remove(storageKey);
+        MiningWorld.Current?.Remove(storageKey);
         Vector2Int removedAnchor = storageKey;
         bool markerChanged = savedInstallationStates.ContainsKey(storageKey);
         if (liveInstallationStates.TryGetValue(storageKey, out LiveInstallationRecord liveRecord))
@@ -1329,6 +1343,7 @@ public partial class BlockStateStore : MonoBehaviour
         PipeWorld.Current?.ClearRecords();
         BuildingWorld.Current?.ClearRecords();
         RobotArmWorld.Current?.ClearRecords();
+        MiningWorld.Current?.ClearRecords();
         ResolveVirtualObjectWorld()?.Clear();
         MarkMapMarkersChanged();
     }
@@ -1346,6 +1361,7 @@ public partial class BlockStateStore : MonoBehaviour
         entriesPerFrame = Mathf.Max(1, entriesPerFrame);
         mapSaveData.resources ??= new List<ResourceSaveEntry>();
         RobotArmWorld.Current?.FlushSaveStates();
+        MiningWorld.Current?.FlushSaveStates();
         mapSaveData.floorObjects ??= new List<FloorObjectSaveEntry>();
         mapSaveData.installations ??= new List<InstallationSaveEntry>();
         mapSaveData.conveyorItems ??= new List<ConveyorItemBlockSaveEntry>();

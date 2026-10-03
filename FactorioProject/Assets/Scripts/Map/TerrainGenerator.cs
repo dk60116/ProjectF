@@ -1378,6 +1378,7 @@ public partial class TerrainGenerator : MonoBehaviour,
     private void OnDestroy()
     {
         if (RobotArmWorld.Current?.Terrain == this) RobotArmWorld.Current.Dispose();
+        if (MiningWorld.Current?.Terrain == this) MiningWorld.Current.Dispose();
         if (BuildingWorld.Current?.Owner == this) BuildingWorld.Current.Dispose();
         if (PipeWorld.Current?.Owner == this) PipeWorld.Current.Dispose();
         if (ConveyorWorld.Current?.Owner == this) ConveyorWorld.Current.Dispose();

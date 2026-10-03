@@ -128,6 +128,7 @@ public partial class PlayerController : MonoBehaviour
     private readonly HashSet<InstallationObject> nearbyInstallationObjects = new HashSet<InstallationObject>();
     private readonly HashSet<ConveyorRuntimeRecord> nearbyConveyorRecords = new HashSet<ConveyorRuntimeRecord>();
     private readonly HashSet<PipeRuntimeRecord> nearbyPipeRecords = new HashSet<PipeRuntimeRecord>();
+    private readonly HashSet<MiningMachineInstance> nearbyMiningInstances = new HashSet<MiningMachineInstance>();
     private readonly HashSet<RobotArmInstance> nearbyRobotArmInstances = new HashSet<RobotArmInstance>();
     private readonly HashSet<BuildingRuntimeRecord> nearbyBuildingRecords = new HashSet<BuildingRuntimeRecord>();
     private readonly List<InstallationObject> nearbyRuntimeInstallationScratch = new List<InstallationObject>(8);
@@ -3325,6 +3326,7 @@ public partial class PlayerController : MonoBehaviour
                 ? target == closestInteractionFocusTarget
                 : block == closestInteractionFocusBlock;
             long stableId = target is ResourceInstance resourceIdentity ? resourceIdentity.SimulationId
+                : target is MiningMachineInstance minerIdentity ? minerIdentity.SimulationId
                 : target is RobotArmInstance armIdentity ? armIdentity.SimulationId
                 : target is BuildingRuntimeRecord buildingIdentity ? buildingIdentity.SimulationId
                 : target is MapObject nativeTarget ? nativeTarget.GetInstanceID() : block.RuntimeIdentity;
@@ -3672,13 +3674,14 @@ public partial class PlayerController : MonoBehaviour
         }
 
         if (!(mapObject is InstallationObject)
+            && !(mapObject is MiningMachineInstance)
             && !(mapObject is RobotArmInstance)
             && !(mapObject is BuildingRuntimeRecord))
         {
             return false;
         }
 
-        float interactionRadius = Mathf.Max(0f, mapObject is RobotArmInstance arm
+        float interactionRadius = Mathf.Max(0f, mapObject is MiningMachineInstance miner ? miner.FocusActivationRadius : mapObject is RobotArmInstance arm
             ? arm.Prototype.FocusActivationRadius
             : mapObject is BuildingRuntimeRecord building
                 ? building.Prototype.FocusActivationRadius
@@ -5141,7 +5144,7 @@ public partial class PlayerController : MonoBehaviour
         PipeWorld pipeWorld = PipeWorld.Current;
         BuildingWorld buildingWorld = BuildingWorld.Current;
         RobotArmWorld robotArmWorld = RobotArmWorld.Current;
-        nearbyRobotArmInstances.Clear();
+        nearbyRobotArmInstances.Clear(); nearbyMiningInstances.Clear();
 
         for (int offsetY = -searchRadius; offsetY <= searchRadius; offsetY++)
         {
@@ -5158,6 +5161,10 @@ public partial class PlayerController : MonoBehaviour
                 {
                     TryAppendNearbyRobotArmFocus(indexedArm, block, origin, results);
                 }
+                if (block.MapObject is MiningMachineInstance miner && miner.IsRuntimeActive && miner.AllowsFocus
+                    && nearbyMiningInstances.Add(miner) && miner.FocusActivationRadius > 0f
+                    && GetMapObjectFocusSelectionDistanceSqr(miner, block, origin) <= miner.FocusActivationRadius * miner.FocusActivationRadius)
+                    AppendMapObjectFocusBlocks(miner, block, results);
                 if (block.MapObject is RobotArmInstance boundArm)
                 {
                     TryAppendNearbyRobotArmFocus(boundArm, block, origin, results);
@@ -5368,6 +5375,7 @@ public partial class PlayerController : MonoBehaviour
             return GetOccupiedCoordinateDistanceSqr(pipeRecord.OccupiedCoordinates, origin);
         }
 
+        if (mapObject is MiningMachineInstance miner) return GetOccupiedCoordinateDistanceSqr(miner.RuntimeOccupiedCoordinates, origin);
         if (mapObject is RobotArmInstance dataArm)
             return GetOccupiedCoordinateDistanceSqr(dataArm.RuntimeOccupiedCoordinates, origin);
         if (mapObject is BuildingRuntimeRecord dataBuilding)
@@ -5420,6 +5428,8 @@ public partial class PlayerController : MonoBehaviour
 
     private Bounds GetMapObjectFocusBounds(IMapObjectTarget mapObject, Block block, float focusPadding = 0f)
     {
+        if (mapObject is MiningMachineInstance miner)
+        { Bounds bounds = miner.CullBounds; bounds.Expand(focusPadding * 2f); return bounds; }
         if (mapObject is RobotArmInstance arm)
         { Bounds bounds = arm.PresentationBounds; bounds.Expand(focusPadding * 2f); return bounds; }
         if (mapObject is ResourceInstance resource)
@@ -5555,7 +5565,12 @@ public partial class PlayerController : MonoBehaviour
 
         bool appended = false;
 
-        if (mapObject is RobotArmInstance dataArm)
+        if (mapObject is MiningMachineInstance miner)
+        {
+            foreach (var coordinate in miner.RuntimeOccupiedCoordinates)
+                appended |= TryAppendFocusBlock(results, coordinate, miner);
+        }
+        else if (mapObject is RobotArmInstance dataArm)
         {
             foreach (var coordinate in dataArm.RuntimeOccupiedCoordinates)
                 appended |= TryAppendFocusBlock(results, coordinate, dataArm);
@@ -6018,6 +6033,12 @@ public partial class PlayerController : MonoBehaviour
             closestDistance = hit.distance;
         }
 
+        if (MiningWorld.Current != null && MiningWorld.Current.TryRaycast(ray, Mathf.Max(0, maxDistance), out var miningTarget, out float miningDistance)
+            && miningTarget.AllowsFocus && miningDistance < closestDistance)
+        {
+            closestCandidate = miningTarget; closestDistance = miningDistance;
+            ResolveTerrainGenerator()?.TryGetLoadedBlock(miningTarget.AnchorCoordinate, out closestDataOnlyFallbackBlock);
+        }
         BuildingWorld buildingWorld = BuildingWorld.Current;
         if (buildingWorld != null
             && buildingWorld.TryRaycast(

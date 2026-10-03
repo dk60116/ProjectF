@@ -12,15 +12,15 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: a4d286e989be41fe853b78a59ca3a4e8, type: 3}
   m_Name: MapObjectArchetype_102_Flatcar
   m_EditorClassIdentifier: Assembly-CSharp::ProjectF.MapObjects.MapObjectArchetype
-  schemaVersion: 1
+  schemaVersion: 2
   itemDefinition: {fileID: 11400000, guid: c47ada2776c5c2046ba435d4a16764f3, type: 2}
   sourcePrefab: {fileID: 8246531933118439867, guid: a34b33398bb75a84aaa6febe564ccb3e, type: 3}
-  itemId: 114
+  itemId: 121
   itemName: Flatcar
   sourcePrefabGuid: a34b33398bb75a84aaa6febe564ccb3e
   sourceContentHash:
     serializedVersion: 2
-    Hash: dda7b0b40a07c511171ee1190baff43c
+    Hash: aefb298669f0d92e87425a52c7c8169f
   sourceRuntimeType: FreightCar, Assembly-CSharp, Version=0.0.0.0, Culture=neutral,
     PublicKeyToken=null
   mapStatus:

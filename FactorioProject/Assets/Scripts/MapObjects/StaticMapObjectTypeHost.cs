@@ -1,4 +1,3 @@
-using System;
 using System.Collections.Generic;
 using UnityEngine;
 
@@ -6,7 +5,7 @@ namespace ProjectF.MapObjects
 {
     /// <summary>
     /// Owns all visual instance data for one ItemDefinition ID.
-    /// Root transforms are stored by generation-safe handle. Specialized data worlds are excluded.
+    /// Data-only root transforms are stored by generation-safe handle. Live model ownership is separate.
     /// </summary>
     [DisallowMultipleComponent]
     public sealed class StaticMapObjectTypeHost : MonoBehaviour
@@ -14,11 +13,9 @@ namespace ProjectF.MapObjects
         private readonly Dictionary<MapObjectHandle, InstanceSlot> slotsByHandle =
             new Dictionary<MapObjectHandle, InstanceSlot>();
         private readonly List<MapObjectHandle> staleHandles = new List<MapObjectHandle>(32);
-        private readonly List<MeshRenderer> rendererScratch = new List<MeshRenderer>(16);
         private readonly VirtualRenderBatchCollection batches = new VirtualRenderBatchCollection();
 
         private MapObjectArchetype archetype;
-        private Type sourceRuntimeType;
         private int itemId = -1;
         private int synchronizationStamp;
         private float batchCellSize = 16f;
@@ -46,9 +43,6 @@ namespace ProjectF.MapObjects
             released = false;
             itemId = typeItemId;
             archetype = typeArchetype;
-            sourceRuntimeType = archetype != null && archetype.SourcePrefab != null
-                ? archetype.SourcePrefab.GetType()
-                : null;
             batchCellSize = Mathf.Max(1f, cellSize);
         }
 
@@ -72,57 +66,6 @@ namespace ProjectF.MapObjects
             batches.ClearActiveMatrices();
         }
 
-        public bool SynchronizeInstance(InstallationObject source, MapObjectHandle handle)
-        {
-            if (released
-                || source == null
-                || !source.isActiveAndEnabled
-                || source.IsMapObjectTypeVisualTransitionActive
-                || sourceRuntimeType == null
-                || source.GetType() != sourceRuntimeType
-                || !handle.IsValid
-                || handle.TypeId != itemId)
-            {
-                return false;
-            }
-
-            if (!slotsByHandle.TryGetValue(handle, out InstanceSlot slot))
-            {
-                slot = CaptureSource(source, handle);
-                if (!CanRenderSource(slot))
-                {
-                    return false;
-                }
-
-                slotsByHandle.Add(handle, slot);
-            }
-            else if (!slot.RequiresSource || slot.Source != source)
-            {
-                RestoreSourceRenderers(slot);
-                slot = CaptureSource(source, handle);
-                if (!CanRenderSource(slot))
-                {
-                    slotsByHandle.Remove(handle);
-                    return false;
-                }
-
-                slotsByHandle[handle] = slot;
-            }
-
-            Matrix4x4 rootMatrix = source.transform.localToWorldMatrix;
-            if (!AppendInstanceMatrices(rootMatrix, source.transform.position))
-            {
-                RestoreSourceRenderers(slot);
-                slotsByHandle.Remove(handle);
-                return false;
-            }
-
-            slot.RootMatrix = rootMatrix;
-            slot.LastSeenStamp = synchronizationStamp;
-            SuppressSourceRenderers(slot);
-            return true;
-        }
-
         public bool SynchronizeRecord(VirtualObjectRecord record)
         {
             MapObjectHandle handle = record != null ? record.mapObjectHandle : default;
@@ -138,15 +81,9 @@ namespace ProjectF.MapObjects
                 return false;
             }
 
-            if (!slotsByHandle.TryGetValue(handle, out InstanceSlot slot)
-                || slot.RequiresSource)
+            if (!slotsByHandle.TryGetValue(handle, out InstanceSlot slot))
             {
-                if (slot != null)
-                {
-                    RestoreSourceRenderers(slot);
-                }
-
-                slot = new InstanceSlot(handle, null, default, Array.Empty<SourceRendererState>(), false);
+                slot = new InstanceSlot();
                 slotsByHandle[handle] = slot;
             }
 
@@ -161,7 +98,6 @@ namespace ProjectF.MapObjects
                 return false;
             }
 
-            slot.RootMatrix = rootMatrix;
             slot.LastSeenStamp = synchronizationStamp;
             return true;
         }
@@ -176,10 +112,8 @@ namespace ProjectF.MapObjects
             staleHandles.Clear();
             foreach (KeyValuePair<MapObjectHandle, InstanceSlot> pair in slotsByHandle)
             {
-                if ((pair.Value.RequiresSource && pair.Value.Source == null)
-                    || pair.Value.LastSeenStamp != synchronizationStamp)
+                if (pair.Value.LastSeenStamp != synchronizationStamp)
                 {
-                    RestoreSourceRenderers(pair.Value);
                     staleHandles.Add(pair.Key);
                 }
             }
@@ -199,20 +133,8 @@ namespace ProjectF.MapObjects
                 return;
             }
 
-            RestoreAllSourceRenderers();
+            slotsByHandle.Clear();
             batches.ClearActiveMatrices();
-        }
-
-        public bool TryGetRootMatrix(MapObjectHandle handle, out Matrix4x4 rootMatrix)
-        {
-            if (slotsByHandle.TryGetValue(handle, out InstanceSlot slot))
-            {
-                rootMatrix = slot.RootMatrix;
-                return true;
-            }
-
-            rootMatrix = default;
-            return false;
         }
 
         public void Render(Camera camera)
@@ -225,7 +147,7 @@ namespace ProjectF.MapObjects
 
         public void Suspend()
         {
-            RestoreAllSourceRenderers();
+            slotsByHandle.Clear();
             batches.SuspendRendering();
         }
 
@@ -237,11 +159,10 @@ namespace ProjectF.MapObjects
             }
 
             released = true;
-            RestoreAllSourceRenderers();
+            slotsByHandle.Clear();
             batches.Clear();
             itemId = -1;
             archetype = null;
-            sourceRuntimeType = null;
         }
 
         private void OnDisable()
@@ -350,135 +271,6 @@ namespace ProjectF.MapObjects
             return addedAny;
         }
 
-        private InstanceSlot CaptureSource(InstallationObject source, MapObjectHandle handle)
-        {
-            rendererScratch.Clear();
-            source.GetComponentsInChildren(true, rendererScratch);
-
-            int ownedRendererCount = 0;
-            for (int i = 0; i < rendererScratch.Count; i++)
-            {
-                if (IsOwnedRenderer(source, rendererScratch[i]))
-                {
-                    ownedRendererCount++;
-                }
-            }
-
-            SourceRendererState[] rendererStates = new SourceRendererState[ownedRendererCount];
-            int destinationIndex = 0;
-            for (int i = 0; i < rendererScratch.Count; i++)
-            {
-                MeshRenderer renderer = rendererScratch[i];
-                if (!IsOwnedRenderer(source, renderer))
-                {
-                    continue;
-                }
-
-                rendererStates[destinationIndex++] = new SourceRendererState(
-                    renderer,
-                    renderer.forceRenderingOff);
-            }
-
-            return new InstanceSlot(
-                handle,
-                source,
-                source.transform.localToWorldMatrix,
-                rendererStates,
-                true);
-        }
-
-        private static bool IsOwnedRenderer(InstallationObject source, MeshRenderer renderer)
-        {
-            if (source == null || renderer == null)
-            {
-                return false;
-            }
-
-            Transform root = source.transform;
-            Transform current = renderer.transform;
-            while (current != null)
-            {
-                if (current == root)
-                {
-                    return true;
-                }
-
-                if (current.TryGetComponent(out MapObject _))
-                {
-                    return false;
-                }
-
-                current = current.parent;
-            }
-
-            return false;
-        }
-
-        private static void SuppressSourceRenderers(InstanceSlot slot)
-        {
-            SourceRendererState[] states = slot.RendererStates;
-            for (int i = 0; i < states.Length; i++)
-            {
-                MeshRenderer renderer = states[i].Renderer;
-                if (renderer != null)
-                {
-                    renderer.forceRenderingOff = true;
-                }
-            }
-        }
-
-        private static bool CanRenderSource(InstanceSlot slot)
-        {
-            if (slot == null || slot.RendererStates.Length == 0)
-            {
-                return false;
-            }
-
-            SourceRendererState[] states = slot.RendererStates;
-            for (int i = 0; i < states.Length; i++)
-            {
-                MeshRenderer renderer = states[i].Renderer;
-                if (renderer == null
-                    || !renderer.enabled
-                    || !renderer.gameObject.activeInHierarchy
-                    || renderer.HasPropertyBlock())
-                {
-                    return false;
-                }
-            }
-
-            return true;
-        }
-
-        private void RestoreAllSourceRenderers()
-        {
-            foreach (InstanceSlot slot in slotsByHandle.Values)
-            {
-                RestoreSourceRenderers(slot);
-            }
-
-            slotsByHandle.Clear();
-            staleHandles.Clear();
-        }
-
-        private static void RestoreSourceRenderers(InstanceSlot slot)
-        {
-            if (slot == null)
-            {
-                return;
-            }
-
-            SourceRendererState[] states = slot.RendererStates;
-            for (int i = 0; i < states.Length; i++)
-            {
-                MeshRenderer renderer = states[i].Renderer;
-                if (renderer != null)
-                {
-                    renderer.forceRenderingOff = states[i].OriginalForceRenderingOff;
-                }
-            }
-        }
-
         private static bool IsNodeActiveByDefault(
             IReadOnlyList<MapObjectVisualNodeDefinition> nodes,
             int nodeIndex)
@@ -500,38 +292,7 @@ namespace ProjectF.MapObjects
 
         private sealed class InstanceSlot
         {
-            public InstanceSlot(
-                MapObjectHandle handle,
-                InstallationObject source,
-                Matrix4x4 rootMatrix,
-                SourceRendererState[] rendererStates,
-                bool requiresSource)
-            {
-                Handle = handle;
-                Source = source;
-                RootMatrix = rootMatrix;
-                RendererStates = rendererStates;
-                RequiresSource = requiresSource;
-            }
-
-            public readonly MapObjectHandle Handle;
-            public readonly SourceRendererState[] RendererStates;
-            public readonly bool RequiresSource;
-            public InstallationObject Source;
-            public Matrix4x4 RootMatrix;
             public int LastSeenStamp;
-        }
-
-        private readonly struct SourceRendererState
-        {
-            public SourceRendererState(MeshRenderer renderer, bool originalForceRenderingOff)
-            {
-                Renderer = renderer;
-                OriginalForceRenderingOff = originalForceRenderingOff;
-            }
-
-            public readonly MeshRenderer Renderer;
-            public readonly bool OriginalForceRenderingOff;
         }
     }
 }

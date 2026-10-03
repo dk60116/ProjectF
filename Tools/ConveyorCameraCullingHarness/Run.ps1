@@ -21,7 +21,12 @@ function Read-Member([string]$file, [string]$signature) {
     $source = Get-Content -LiteralPath (Join-Path $repo $file) -Raw
     $start = $source.IndexOf($signature, [StringComparison]::Ordinal)
     if ($start -lt 0) { throw "Missing member: $signature" }
-    $end = $source.IndexOf('{', $start) + 1
+    $brace = $source.IndexOf('{', $start)
+    $semicolon = $source.IndexOf(';', $start)
+    if ($semicolon -ge 0 -and ($brace -lt 0 -or $semicolon -lt $brace)) {
+        return $source.Substring($start, $semicolon - $start + 1)
+    }
+    $end = $brace + 1
     $depth = 1
     while ($depth -gt 0 -and $end -lt $source.Length) {
         if ($source[$end] -eq '{') { $depth++ }
@@ -35,7 +40,7 @@ $itemFile = 'FactorioProject/Assets/Scripts/Map/PortableItemRenderer.cs'
 $beltFile = 'FactorioProject/Assets/Scripts/Map/VirtualConveyorBeltRenderer.cs'
 $batchFile = 'FactorioProject/Assets/Scripts/Map/VirtualRenderBatcher.cs'
 $backendFile = 'FactorioProject/Assets/Scripts/Rendering/VirtualRenderBatchRendererGroupBackend.cs'
-$generated = "using System; using System.Collections.Generic; using UnityEngine; using UnityEngine.Rendering; public class ResourceInstance {} public static class MapObjectTickProfiler { public readonly struct Scope : IDisposable { public void Dispose() {} } public static Scope SampleLateUpdateCaller<T>() => default; }`n"
+$generated = "using System; using System.Collections.Generic; using UnityEngine; using UnityEngine.Rendering; using MiningMachineInstance = RayMiner; public class ResourceInstance {} public static class MapObjectTickProfiler { public readonly struct Scope : IDisposable { public void Dispose() {} } public static Scope SampleLateUpdateCaller<T>() => default; }`n"
 $generated += "public sealed partial class PortableItemRenderer {`n"
 foreach ($signature in @(
     'private void RefreshVirtualConveyorBlockRenderCache(',
@@ -55,6 +60,11 @@ foreach ($signature in @(
     'private enum DynamicVirtualConveyorCullResult',
     'private sealed class DynamicConveyorRenderChunk')) {
     $generated += (Read-Member $itemFile $signature) + "`n"
+}
+$generated += "}`n"
+$generated += "public partial class MiningRayProbe {`n"
+foreach ($signature in @('internal static Vector2Int Cell(', 'public bool TryRaycast(')) {
+    $generated += (Read-Member 'FactorioProject/Assets/Scripts/Map/MiningWorld.cs' $signature) + "`n"
 }
 $generated += "}`n"
 $generated += (Read-Member $beltFile 'public readonly struct VirtualConveyorBeltRenderData') + "`n"
@@ -100,7 +110,12 @@ foreach ($signature in @('public void SetBehaviorExecutionActive(', 'private voi
 }
 $generated += "}`n"
 $probeDir = Join-Path ([IO.Path]::GetTempPath()) ('ProjectF-CameraCull-' + [Guid]::NewGuid().ToString('N'))
-$generated += "public partial class PlayerCameraCullingProbe {`n" + (Read-Member 'FactorioProject/Assets/Scripts/Character/Player/PlayerCamera.cs' 'private void RefreshPlayerCullingView()') + "`n}`n"
+$generated += "public partial class PlayerCameraCullingProbe {`n"
+foreach ($signature in @('private void RefreshPlayerCullingView()', 'private void CaptureFreeCameraProjectionState()',
+    'private void ApplyFreeCameraProjectionState()', 'private void RestoreFreeCameraProjectionState()')) {
+    $generated += (Read-Member 'FactorioProject/Assets/Scripts/Character/Player/PlayerCamera.cs' $signature) + "`n"
+}
+$generated += "}`n"
 New-Item -ItemType Directory -Path $probeDir | Out-Null
 Set-Content -LiteralPath (Join-Path $probeDir 'ProductionMembers.cs') -Value $generated
 $files = @(
@@ -108,6 +123,7 @@ $files = @(
     (Join-Path $PSScriptRoot 'WorldChecks.cs'),
     (Join-Path $PSScriptRoot 'AnimalAnimationChecks.cs'),
     (Join-Path $PSScriptRoot 'FreeCameraChecks.cs'),
+    (Join-Path $PSScriptRoot 'MiningRayChecks.cs'),
     (Join-Path $PSScriptRoot 'InstanceChecks.cs'),
     (Join-Path $repo 'FactorioProject/Assets/Scripts/Rendering/CameraRenderCulling.cs'),
     (Join-Path $repo 'FactorioProject/Assets/Scripts/Rendering/WorldCameraCulling.cs'),

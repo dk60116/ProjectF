@@ -12,15 +12,15 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: a4d286e989be41fe853b78a59ca3a4e8, type: 3}
   m_Name: MapObjectArchetype_30_Funance
   m_EditorClassIdentifier: Assembly-CSharp::ProjectF.MapObjects.MapObjectArchetype
-  schemaVersion: 1
+  schemaVersion: 2
   itemDefinition: {fileID: 11400000, guid: 7ad57ef598401784aaa7e239c9a50507, type: 2}
   sourcePrefab: {fileID: 3843491245406909261, guid: 482d646ee24530540a103d758c71b5b2, type: 3}
-  itemId: 37
+  itemId: 41
   itemName: Funance
   sourcePrefabGuid: 482d646ee24530540a103d758c71b5b2
   sourceContentHash:
     serializedVersion: 2
-    Hash: 1dedebb44a9db8474cf431f72054c8f9
+    Hash: 4a047362276c13a674ff0a7822d081d4
   sourceRuntimeType: InputOutputModule, Assembly-CSharp, Version=0.0.0.0, Culture=neutral,
     PublicKeyToken=null
   mapStatus:

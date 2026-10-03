@@ -130,6 +130,19 @@ namespace ProjectF.MapObjects
     }
 
     [Serializable]
+    public struct MapObjectTransformCurveDefinition
+    {
+        [SerializeField] private string path;
+        [SerializeField] private string property;
+        [SerializeField] private AnimationCurve curve;
+        public string Path => path;
+        public string Property => property;
+        public AnimationCurve Curve => curve;
+        public MapObjectTransformCurveDefinition(string path, string property, AnimationCurve curve)
+        { this.path = path; this.property = property; this.curve = curve; }
+    }
+
+    [Serializable]
     public struct MapObjectAnimationClipDefinition
     {
         [SerializeField] private AnimationClip clip;
@@ -138,6 +151,7 @@ namespace ProjectF.MapObjects
         [SerializeField] private bool looping;
         [SerializeField] private int transformCurveCount;
         [SerializeField] private int objectReferenceCurveCount;
+        [SerializeField] private MapObjectTransformCurveDefinition[] transformCurves;
 
         public AnimationClip Clip => clip;
         public float LengthSeconds => lengthSeconds;
@@ -145,6 +159,8 @@ namespace ProjectF.MapObjects
         public bool Looping => looping;
         public int TransformCurveCount => transformCurveCount;
         public int ObjectReferenceCurveCount => objectReferenceCurveCount;
+        public IReadOnlyList<MapObjectTransformCurveDefinition> TransformCurves =>
+            transformCurves ?? Array.Empty<MapObjectTransformCurveDefinition>();
 
         public MapObjectAnimationClipDefinition(
             AnimationClip clip,
@@ -152,7 +168,8 @@ namespace ProjectF.MapObjects
             float frameRate,
             bool looping,
             int transformCurveCount,
-            int objectReferenceCurveCount)
+            int objectReferenceCurveCount,
+            MapObjectTransformCurveDefinition[] transformCurves = null)
         {
             this.clip = clip;
             this.lengthSeconds = lengthSeconds;
@@ -160,12 +177,14 @@ namespace ProjectF.MapObjects
             this.looping = looping;
             this.transformCurveCount = transformCurveCount;
             this.objectReferenceCurveCount = objectReferenceCurveCount;
+            this.transformCurves = transformCurves ?? Array.Empty<MapObjectTransformCurveDefinition>();
         }
     }
 
     public sealed class MapObjectArchetype : ScriptableObject
     {
-        public const int CurrentSchemaVersion = 1;
+        // Version 2 adds executable transform curves to derived presentation data.
+        public const int CurrentSchemaVersion = 2;
 
         [SerializeField] private int schemaVersion;
         [SerializeField] private ItemDefinition itemDefinition;

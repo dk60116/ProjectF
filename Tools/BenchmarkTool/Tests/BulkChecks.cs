@@ -59,6 +59,8 @@ public class ConveyorBelt : InstallationObject { public bool MultipleCells; }
 public class Pipe : InstallationObject { }
 public class Building : InstallationObject { }
 public class RobotArm : InstallationObject { }
+public class MiningMachine : InstallationObject { }
+public static class MiningWorld { public static bool Supports(MiningMachine source) => true; }
 public class Train : InstallationObject { }
 public class Railload : InstallationObject { }
 public partial class InputOutputModule
@@ -160,7 +162,7 @@ public partial class BlockStateStore
         if (proxy.gameObject.Active || !proxy.Placed) throw new Exception("template must be configured while inactive");
         state = new() { itemId = proxy.ItemId, quarterTurns = proxy.Turns, conveyorVariantKind = proxy is ConveyorBelt ? 0 : -1,
             anchorCoordinate = proxy.Anchor, occupiedCoordinates = new(proxy.Occupied) };
-        if (proxy is RobotArm) state.inputOutputState = new()
+        if (proxy is RobotArm || proxy is MiningMachine) state.inputOutputState = new()
         { inputEnergyCoordinates = new() { new(0, 1) }, outputCoordinates = new() { new(0, -1) }, pipeInputCoordinates = new() { new(1, 1) },
             gridCoordinates = new() { default }, focusCoordinates = new() { new(1, 0) }, inputItemAreas = new() { new() { coordinate = new(-1, 0) } } };
         if (proxy is ConveyorBelt { MultipleCells: true }) state.occupiedCoordinates.Add(new(1, 0));
@@ -272,7 +274,7 @@ public partial class TerrainGenerator
     {
         Created++;
         InstallationObject proxy = source switch { ConveyorBelt belt => new ConveyorBelt { MultipleCells = belt.MultipleCells },
-            Pipe => new Pipe(), Building => new Building(), RobotArm => new RobotArm(), Train => new Train(), Railload => new Railload(), _ => new InstallationObject() };
+            Pipe => new Pipe(), Building => new Building(), RobotArm => new RobotArm(), MiningMachine => new MiningMachine(), Train => new Train(), Railload => new Railload(), _ => new InstallationObject() };
         proxy.ItemId = source.ItemId; proxy.Footprint = source.Footprint; proxy.Blocking = source.Blocking;
         return proxy;
     }
@@ -290,6 +292,8 @@ public partial class TerrainGenerator
     { Pipes.MarkDirty(); return RegisterBoundaryData(state); }
     private bool RegisterDataOnlyBuildingState(BlockStateStore.InstallationSaveState state, Building prototype, Vector3 pos, Quaternion rot, Vector3 scale, out object record)
     { record = null; return RegisterBoundaryData(state); }
+    private object RegisterDataOnlyMiningState(MiningMachine prototype, BlockStateStore.InstallationSaveState state)
+        => RegisterBoundaryData(state) ? state : null;
     private object RegisterDataOnlyRobotArm(RobotArm prototype, BlockStateStore.InstallationSaveState state)
         => RegisterBoundaryData(state) ? state : null;
     private void RegisterLiveInstallationObject(InstallationObject obj)
@@ -438,7 +442,7 @@ internal static class BulkChecks
 
     private static void CheckGridSpawning()
     {
-        foreach (InstallationObject source in new InstallationObject[] { new Pipe(), new Building(), new RobotArm(), new InstallationObject() })
+        foreach (InstallationObject source in new InstallationObject[] { new Pipe(), new Building(), new RobotArm(), new MiningMachine(), new InstallationObject() })
         {
             InstallationObject.Live.Clear();
             source.ItemId = 10;
@@ -446,8 +450,8 @@ internal static class BulkChecks
             source.Blocking = new[] { new Vector2Int(0, 0), new Vector2Int(1, 0) };
             var terrain = new TerrainGenerator();
             var placement = new InstallationPlacementController();
-            bool data = source is Pipe || source is Building || source is RobotArm;
-            const int count = 1000;
+            bool data = source is Pipe || source is Building || source is RobotArm || source is MiningMachine;
+            int count = source is MiningMachine ? 100000 : 1000;
             BenchmarkRuntime.ForceWorking = true; BenchmarkRuntime.Wakes = 0;
             using (terrain.BeginBenchmarkPlacementUpdate())
             {
@@ -465,7 +469,7 @@ internal static class BulkChecks
                     Require(terrain.Blocks[cell].MapObject != null && terrain.Blocks[cell + new Vector2Int(1, 0)].MapObject != null,
                         "all body blocks bound");
                     Require(terrain.Blocks[cell + new Vector2Int(2, 0)].MapObject == null, "IO area does not become a body cell");
-                    if (source is RobotArm)
+                    if (source is RobotArm || source is MiningMachine)
                     {
                         var io = saved.inputOutputState;
                         Require(io.inputEnergyCoordinates[0] == cell + new Vector2Int(0, 1) && io.outputCoordinates[0] == cell + new Vector2Int(0, -1), "arm energy/output saved coordinates shifted");

@@ -12,16 +12,17 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: a4d286e989be41fe853b78a59ca3a4e8, type: 3}
   m_Name: MapObjectArchetype_53_Water pump
   m_EditorClassIdentifier: Assembly-CSharp::ProjectF.MapObjects.MapObjectArchetype
-  schemaVersion: 1
+  schemaVersion: 2
   itemDefinition: {fileID: 11400000, guid: 347029aa316390a4982b64441c83789c, type: 2}
   sourcePrefab: {fileID: 9182752028908485828, guid: edc0b2a5e8887d64bbe345804ee461f0, type: 3}
-  itemId: 61
+  itemId: 65
   itemName: Water pump
   sourcePrefabGuid: edc0b2a5e8887d64bbe345804ee461f0
   sourceContentHash:
     serializedVersion: 2
-    Hash: e17a1e7801448a205064e384f7fc3c55
-  sourceRuntimeType: Pump, Assembly-CSharp, Version=0.0.0.0, Culture=neutral, PublicKeyToken=null
+    Hash: ce1981b127f9ecde76e945d724fcc6b4
+  sourceRuntimeType: WaterPump, Assembly-CSharp, Version=0.0.0.0, Culture=neutral,
+    PublicKeyToken=null
   mapStatus:
     mapSizeX: 1
     mapSizeY: 1
@@ -31,8 +32,8 @@ MonoBehaviour:
   defaultRootScale: {x: 1, y: 1, z: 1}
   defaultRootRotation: {x: 0, y: 0, z: 0, w: 1}
   localRenderBounds:
-    m_Center: {x: 0, y: 0.07793355, z: -0.290133}
-    m_Extent: {x: 0.31347656, y: 0.6349571, z: 0.78915644}
+    m_Center: {x: 0, y: 0.07792997, z: -0.29013556}
+    m_Extent: {x: 0.31347343, y: 0.6349535, z: 0.7891539}
   hasRenderBounds: 1
   featureFlags: 64
   nodes:
@@ -118,8 +119,8 @@ MonoBehaviour:
     material: {fileID: 2100000, guid: 2c8eba5d8ae927643a5c428840be174d, type: 2}
     subMeshIndex: 0
     localBounds:
-      m_Center: {x: 0, y: 0.3564453, z: 0}
-      m_Extent: {x: 0.31347656, y: 0.3564453, z: 0.49902338}
+      m_Center: {x: 0, y: 0.35644177, z: 0}
+      m_Extent: {x: 0.31347343, y: 0.35644177, z: 0.4990183}
     layer: 0
     renderingLayerMask: 1
     shadowCastingMode: 1

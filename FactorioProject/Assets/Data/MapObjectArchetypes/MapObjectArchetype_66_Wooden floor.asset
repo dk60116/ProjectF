@@ -12,15 +12,15 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: a4d286e989be41fe853b78a59ca3a4e8, type: 3}
   m_Name: MapObjectArchetype_66_Wooden floor
   m_EditorClassIdentifier: Assembly-CSharp::ProjectF.MapObjects.MapObjectArchetype
-  schemaVersion: 1
+  schemaVersion: 2
   itemDefinition: {fileID: 11400000, guid: 5184d5acd736fa943a532c1ee9009150, type: 2}
   sourcePrefab: {fileID: 7127730791152802602, guid: 11ccb5c2f0d669b4db92fe65a3360904, type: 3}
-  itemId: 78
+  itemId: 82
   itemName: Wooden floor
   sourcePrefabGuid: 11ccb5c2f0d669b4db92fe65a3360904
   sourceContentHash:
     serializedVersion: 2
-    Hash: e3dc68f8fc24cb76eb34d29ba24cc7bc
+    Hash: 41e1b1246ea83769d5bce187c1f3595d
   sourceRuntimeType: Floor, Assembly-CSharp, Version=0.0.0.0, Culture=neutral, PublicKeyToken=null
   mapStatus:
     mapSizeX: 1

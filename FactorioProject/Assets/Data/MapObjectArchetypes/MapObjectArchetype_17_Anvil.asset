@@ -12,15 +12,15 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: a4d286e989be41fe853b78a59ca3a4e8, type: 3}
   m_Name: MapObjectArchetype_17_Anvil
   m_EditorClassIdentifier: Assembly-CSharp::ProjectF.MapObjects.MapObjectArchetype
-  schemaVersion: 1
+  schemaVersion: 2
   itemDefinition: {fileID: 11400000, guid: 2d6039a716731b14c94f2980e22b1089, type: 2}
   sourcePrefab: {fileID: 7839628250064023149, guid: 5968b61eb9fd64e43862673d6f548d51, type: 3}
-  itemId: 21
+  itemId: 23
   itemName: Anvil
   sourcePrefabGuid: 5968b61eb9fd64e43862673d6f548d51
   sourceContentHash:
     serializedVersion: 2
-    Hash: 17d0484e2b59297b83e8f3662875d4ca
+    Hash: 9e0ce1e1fecad77280bac06fb97fc718
   sourceRuntimeType: WorkableObject, Assembly-CSharp, Version=0.0.0.0, Culture=neutral,
     PublicKeyToken=null
   mapStatus:

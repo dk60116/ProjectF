@@ -48,8 +48,23 @@ namespace ProjectF.Rendering
         public int LastCandidateCellCount { get; private set; }
         public int LastVisibilityRefreshCount { get; private set; }
 
+        internal static void CopyVisibleInstallations(List<InstallationObject> result)
+        {
+            result.Clear();
+            if (instance == null) return;
+            if (!instance.isActiveAndEnabled)
+            {
+                for (int i = 0; i < instance.targets.Count; i++)
+                    if (instance.targets[i].Owner != null) result.Add(instance.targets[i].Owner);
+                return;
+            }
+            foreach (InstallationVisualState target in instance.visibleTargets)
+                if (target.Owner != null) result.Add(target.Owner);
+        }
+
         public static void AppendProfilerCounters()
         {
+            InstallationBatchRenderer.AppendProfilerCounters();
             MapObjectTickProfiler.AddRuntimeCounter(
                 "InstallationVisuals",
                 "Registered",

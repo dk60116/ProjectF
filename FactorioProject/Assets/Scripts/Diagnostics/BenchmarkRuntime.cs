@@ -39,6 +39,7 @@ namespace ProjectF.Benchmark
             for (int i = 0; i < installations.Count; i++) Wake(installations[i]);
             installations.Clear();
             RobotArmWorld.Current?.WakeAll();
+            MiningWorld.Current?.WakeAll();
             UtilityPole.NotifyFreeElectroEnergyChanged();
         }
 
@@ -60,9 +61,10 @@ namespace ProjectF.Benchmark
             for (int i = 0; i < 5; i++)
             {
                 var coordinate = origin + (i == 0 ? Vector2Int.zero : i == 1 ? Vector2Int.up : i == 2 ? Vector2Int.right : i == 3 ? Vector2Int.down : Vector2Int.left);
-                if (terrain.TryGetLoadedBlock(coordinate, out var block)
-                    && block.TryAddFloorObjectAnimated(itemId, position, 0f, out _))
-                { ProducedItems++; return true; }
+                if (!terrain.TryGetLoadedBlock(coordinate, out var block)) continue;
+                bool success = block.TryAddDeferredOutput(itemId, position, 0f, false, out bool handled);
+                if (!handled) success = block.TryAddFloorObjectAnimated(itemId, position, 0f, out _);
+                if (success) { ProducedItems++; return true; }
             }
             return false;
         }

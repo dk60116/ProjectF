@@ -12,15 +12,15 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: a4d286e989be41fe853b78a59ca3a4e8, type: 3}
   m_Name: MapObjectArchetype_103_Rail handcar
   m_EditorClassIdentifier: Assembly-CSharp::ProjectF.MapObjects.MapObjectArchetype
-  schemaVersion: 1
+  schemaVersion: 2
   itemDefinition: {fileID: 11400000, guid: e93a970b73b08f348b062a6caa40bc92, type: 2}
   sourcePrefab: {fileID: 9071960459092625129, guid: 607edbe9224f7714e835516083eff7cc, type: 3}
-  itemId: 115
+  itemId: 122
   itemName: Rail handcar
   sourcePrefabGuid: 607edbe9224f7714e835516083eff7cc
   sourceContentHash:
     serializedVersion: 2
-    Hash: 35eb86acf889f9f24544d28c3a19b524
+    Hash: 46942a36baf4e8aa631ed98b552257e0
   sourceRuntimeType: RailHandcar, Assembly-CSharp, Version=0.0.0.0, Culture=neutral,
     PublicKeyToken=null
   mapStatus:

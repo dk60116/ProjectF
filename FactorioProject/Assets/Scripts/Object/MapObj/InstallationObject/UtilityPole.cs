@@ -1025,12 +1025,8 @@ public partial class UtilityPole : InstallationObject
             lastElectricRuntimeActuallyWokenCount += LoggingMachine.WakeElectricRuntimeMachines(
                 out int loggingCandidateCount);
             lastElectricRuntimeWakeConsumerCandidateCount = moduleCandidateCount + loggingCandidateCount;
-            RobotArmWorld robotArmWorld = RobotArmWorld.Current;
-            if (robotArmWorld != null)
-            {
-                lastElectricRuntimeActuallyWokenCount += robotArmWorld.WakeElectricRuntimeArms(
-                    out lastElectricRuntimeWakeRobotArmCandidateCount);
-            }
+            lastElectricRuntimeActuallyWokenCount += WakeAllDataElectricConsumers(
+                out lastElectricRuntimeWakeRobotArmCandidateCount);
         }
         else
         {

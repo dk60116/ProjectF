@@ -33,6 +33,7 @@ public sealed class AreaMarkerRenderer : MonoBehaviour
     private bool staticDirty = true;
     private bool movingDirty = true;
     private RobotArmWorld lastArmWorld;
+    private MiningWorld lastMiningWorld;
     private int registeredOwnerMarkerCount;
     private int visibleOwnerMarkerCount;
     private float maximumIndexedVisibleRange;
@@ -169,6 +170,9 @@ public sealed class AreaMarkerRenderer : MonoBehaviour
             RobotArmWorld arms = RobotArmWorld.Current;
             if (!ReferenceEquals(lastArmWorld, arms)) { lastArmWorld = arms; staticDirty = true; }
             if (arms != null && arms.RefreshAreaMarkers(context)) staticDirty = true;
+            MiningWorld miners = MiningWorld.Current;
+            if (!ReferenceEquals(lastMiningWorld, miners)) { lastMiningWorld = miners; staticDirty = true; }
+            if (miners != null && miners.RefreshAreaMarkers(context)) staticDirty = true;
             RemoveInvalidOwners();
             BuildVisibilityCandidates(context);
             for (int i = 0; i < visibilityCandidates.Count; i++)
@@ -176,9 +180,9 @@ public sealed class AreaMarkerRenderer : MonoBehaviour
                 RefreshOwnerVisibility(visibilityCandidates[i], context);
             }
             VisibilityCandidateOwnerCount = visibilityCandidates.Count
-                + (arms != null ? arms.MarkerVisibilityCandidateCount : 0);
-            RegisteredMarkerCount = registeredOwnerMarkerCount + (arms != null ? arms.Count * 2 : 0);
-            VisibleMarkerCount = visibleOwnerMarkerCount + (arms != null ? arms.VisibleMarkerCount : 0);
+                + (arms != null ? arms.MarkerVisibilityCandidateCount : 0) + (miners != null ? miners.MarkerCandidateCount : 0);
+            RegisteredMarkerCount = registeredOwnerMarkerCount + (arms != null ? arms.Count * 2 : 0) + (miners != null ? miners.MarkerCount : 0);
+            VisibleMarkerCount = visibleOwnerMarkerCount + (arms != null ? arms.VisibleMarkerCount : 0) + (miners != null ? miners.VisibleMarkerCount : 0);
         }
 
         if (staticDirty || movingDirty)
@@ -334,7 +338,7 @@ public sealed class AreaMarkerRenderer : MonoBehaviour
             if (owner != null && owner.IsVisible && IsDirty(owner.UsesMovingBatches)) owner.AppendMarkers(this);
         }
         emptyBatches.Clear();
-        if (staticDirty) RobotArmWorld.Current?.AppendAreaMarkers(this);
+        if (staticDirty) { RobotArmWorld.Current?.AppendAreaMarkers(this); MiningWorld.Current?.AppendAreaMarkers(this); }
         foreach (KeyValuePair<BatchKey, MarkerBatch> pair in batches)
         {
             if (!IsDirty(pair.Key.Moving)) continue;

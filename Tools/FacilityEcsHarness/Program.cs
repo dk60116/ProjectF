@@ -254,6 +254,34 @@ FacilityRuntimeWakeRegistry.NotifyCoordinateChanged(wakeCoordinate);
 Require(wakeProbe.WakeCalls == 1,
     "unregistered coordinate targets stay asleep");
 
+// A sleeping data facility is scheduled at an absolute completion tick, then can be woken earlier.
+
+var deadline = new DeadlineProbe { NextUpdateTick = MapObjectTickManager.CurrentSimulationTick + 600 };
+FacilitySimulationWorld.Register(deadline, true);
+for (int i = 0; i < 599; i++) MapObjectTickManager.Step();
+Require(deadline.Calls == 0, "deadline facility does no intermediate tick work");
+MapObjectTickManager.Step();
+Require(deadline.Calls == 1, "deadline facility runs exactly at completion");
+deadline.NextUpdateTick = MapObjectTickManager.CurrentSimulationTick + 1;
+FacilitySimulationWorld.SetScheduled(deadline, true);
+FacilitySimulationWorld.RefreshSchedule(deadline);
+MapObjectTickManager.Step();
+Require(deadline.Calls == 2, "coordinate/power wake resumes a sleeping deadline facility");
+FacilitySimulationWorld.Unregister(deadline);
+var sleepingFacilities = new DeadlineProbe[100000];
+for (int i = 0; i < sleepingFacilities.Length; i++)
+{
+    sleepingFacilities[i] = new DeadlineProbe { NextUpdateTick = long.MaxValue };
+    FacilitySimulationWorld.Register(sleepingFacilities[i], false);
+}
+for (int i = 0; i < 120; i++) MapObjectTickManager.Step();
+Require(Array.TrueForAll(sleepingFacilities, p => p.Calls == 0), "100000 idle data facilities do not execute during two seconds");
+sleepingFacilities[99999].NextUpdateTick = MapObjectTickManager.CurrentSimulationTick + 1;
+FacilitySimulationWorld.SetScheduled(sleepingFacilities[99999], true);
+MapObjectTickManager.Step();
+Require(sleepingFacilities[99999].Calls == 1 && sleepingFacilities[0].Calls == 0,
+    "one event wakes only its data facility among 100000 sleepers");
+foreach (var sleeping in sleepingFacilities) FacilitySimulationWorld.Unregister(sleeping);
 Console.WriteLine($"PASS: {checks} facility ECS scheduling checks.");
 
 sealed class PowerProbe : InputOutputModule,
@@ -404,4 +432,11 @@ sealed class ManagedParallelPlanner : ProjectF.Simulation.IFacilityFlowParallelP
     {
         Disposed = true;
     }
+}
+
+sealed class DeadlineProbe : IMapObjectUpdateTick, IMapObjectUpdateTickDeadline
+{
+    public long NextUpdateTick { get; set; }
+    public int Calls;
+    public void ManagedUpdateTick(float dt) { Calls++; FacilitySimulationWorld.SetScheduled(this, false); }
 }

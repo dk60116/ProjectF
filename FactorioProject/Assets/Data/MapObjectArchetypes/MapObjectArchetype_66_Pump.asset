@@ -1,0 +1,128 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: a4d286e989be41fe853b78a59ca3a4e8, type: 3}
+  m_Name: MapObjectArchetype_66_Pump
+  m_EditorClassIdentifier: Assembly-CSharp::ProjectF.MapObjects.MapObjectArchetype
+  schemaVersion: 2
+  itemDefinition: {fileID: 11400000, guid: 196392e04bd90304ba8d68b0932750f7, type: 2}
+  sourcePrefab: {fileID: 6057075815099229333, guid: a19b4bc2ba75c494db5a48a4bbf18037, type: 3}
+  itemId: 66
+  itemName: Pump
+  sourcePrefabGuid: a19b4bc2ba75c494db5a48a4bbf18037
+  sourceContentHash:
+    serializedVersion: 2
+    Hash: 8cd65ad0fdd8b4d0e5a376921623c864
+  sourceRuntimeType: Pump, Assembly-CSharp, Version=0.0.0.0, Culture=neutral, PublicKeyToken=null
+  mapStatus:
+    mapSizeX: 2
+    mapSizeY: 1
+    centerCellX: 1
+    centerCellY: 0
+  focusMode: 1
+  defaultRootScale: {x: 1, y: 1, z: 1}
+  defaultRootRotation: {x: 0, y: 0, z: 0, w: 1}
+  localRenderBounds:
+    m_Center: {x: -0.00000020861626, y: 0.5592041, z: -0.000000014901161}
+    m_Extent: {x: 0.9899999, y: 0.5592041, z: 0.48262942}
+  hasRenderBounds: 1
+  featureFlags: 2112
+  nodes:
+  - hierarchyPath: 0:Pump
+    animationPath: 
+    parentIndex: -1
+    localPosition: {x: 0, y: 0, z: 0}
+    localRotation: {x: 0, y: 0, z: 0, w: 1}
+    localScale: {x: 1, y: 1, z: 1}
+    defaultLocalToRoot:
+      e00: 1
+      e01: 0
+      e02: 0
+      e03: 0
+      e10: 0
+      e11: 1
+      e12: 0
+      e13: 0
+      e20: 0
+      e21: 0
+      e22: 1
+      e23: 0
+      e30: 0
+      e31: 0
+      e32: 0
+      e33: 1
+    activeByDefault: 1
+    hasAnimatedTransform: 0
+  - hierarchyPath: 0:Pump/0:Body
+    animationPath: Body
+    parentIndex: 0
+    localPosition: {x: 0, y: 0, z: 0}
+    localRotation: {x: 0, y: 0, z: 0, w: 1}
+    localScale: {x: 1, y: 1, z: 1}
+    defaultLocalToRoot:
+      e00: 1
+      e01: 0
+      e02: 0
+      e03: 0
+      e10: 0
+      e11: 1
+      e12: 0
+      e13: 0
+      e20: 0
+      e21: 0
+      e22: 1
+      e23: 0
+      e30: 0
+      e31: 0
+      e32: 0
+      e33: 1
+    activeByDefault: 1
+    hasAnimatedTransform: 0
+  - hierarchyPath: 0:Pump/1:Pump arrow
+    animationPath: Pump arrow
+    parentIndex: 0
+    localPosition: {x: 0.243, y: 1.133, z: -0}
+    localRotation: {x: -0.5, y: 0.5, z: 0.5, w: 0.5}
+    localScale: {x: 0.4, y: 0.4, z: 1}
+    defaultLocalToRoot:
+      e00: 0
+      e01: -0.4
+      e02: 0
+      e03: 0.243
+      e10: 0
+      e11: 0
+      e12: 1
+      e13: 1.133
+      e20: -0.4
+      e21: 0
+      e22: 0
+      e23: 0
+      e30: 0
+      e31: 0
+      e32: 0
+      e33: 1
+    activeByDefault: 1
+    hasAnimatedTransform: 0
+  renderParts:
+  - kind: 0
+    nodeIndex: 1
+    mesh: {fileID: -3457640966021699784, guid: adb93e74184b59b41b7730fa44bb142a, type: 3}
+    material: {fileID: 2100000, guid: ec4c5fdd48c374d42ad249803749c434, type: 2}
+    subMeshIndex: 0
+    localBounds:
+      m_Center: {x: -0.00000020861626, y: 0.5592041, z: -0.000000014901161}
+      m_Extent: {x: 0.9899999, y: 0.5592041, z: 0.48262942}
+    layer: 0
+    renderingLayerMask: 1
+    shadowCastingMode: 1
+    receiveShadows: 1
+    enabledByDefault: 1
+  animationClips: []

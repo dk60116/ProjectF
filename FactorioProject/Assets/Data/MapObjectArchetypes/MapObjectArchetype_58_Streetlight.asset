@@ -12,15 +12,15 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: a4d286e989be41fe853b78a59ca3a4e8, type: 3}
   m_Name: MapObjectArchetype_58_Streetlight
   m_EditorClassIdentifier: Assembly-CSharp::ProjectF.MapObjects.MapObjectArchetype
-  schemaVersion: 1
+  schemaVersion: 2
   itemDefinition: {fileID: 11400000, guid: f26efb1d776a4df469e75c19a5a1181b, type: 2}
   sourcePrefab: {fileID: 666971777691185006, guid: ae1df0edda6375e4d8677bb94970dfbf, type: 3}
-  itemId: 68
+  itemId: 72
   itemName: Streetlight
   sourcePrefabGuid: ae1df0edda6375e4d8677bb94970dfbf
   sourceContentHash:
     serializedVersion: 2
-    Hash: 233bd0c4a04a4e7e2800373aa43f909b
+    Hash: 185d70bb0bd0420887b824077544a170
   sourceRuntimeType: LightObject, Assembly-CSharp, Version=0.0.0.0, Culture=neutral,
     PublicKeyToken=null
   mapStatus:

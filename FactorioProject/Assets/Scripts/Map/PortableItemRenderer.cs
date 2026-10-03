@@ -331,12 +331,14 @@ public sealed partial class PortableItemRenderer : MonoBehaviour
             return null;
         }
 
+        if (cachedOutputHost == host && cachedOutputRenderer != null) return cachedOutputRenderer;
         PortableItemRenderer renderer = host.GetComponent<PortableItemRenderer>();
         if (renderer == null)
         {
             renderer = host.AddComponent<PortableItemRenderer>();
         }
 
+        cachedOutputHost = host; cachedOutputRenderer = renderer;
         return renderer;
     }
 
@@ -398,6 +400,8 @@ public sealed partial class PortableItemRenderer : MonoBehaviour
 
     private void OnDestroy()
     {
+        if (cachedOutputRenderer == this) { cachedOutputHost = null; cachedOutputRenderer = null; }
+        deferredOutputCells.Clear();
         conveyorItemTransformJobProcessor.Dispose();
         if (ProjectFApplicationLifecycle.IsQuitting) return;
 
@@ -419,6 +423,7 @@ public sealed partial class PortableItemRenderer : MonoBehaviour
     {
         using var callerSample = MapObjectTickProfiler.SampleLateUpdateCaller<PortableItemRenderer>();
         ResolveDependencies();
+        RefreshDeferredOutputPresentation();
 
         if (HasPortableObjectRenderWork())
         {

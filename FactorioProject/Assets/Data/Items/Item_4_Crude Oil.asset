@@ -15,7 +15,7 @@ MonoBehaviour:
   itemName: Crude Oil
   id: 5
   mapObject: {fileID: 5889860242806826768, guid: 49b74711fb3fda54cae8e732896a3353, type: 3}
-  mapObjectArchetype: {fileID: 0}
+  mapObjectArchetype: {fileID: 11400000, guid: d337b84c24655744c998543c6929f36a, type: 2}
   useMapColor: 0
   mapColor: {r: 1, g: 1, b: 1, a: 1}
   mapMarkerSize: 1

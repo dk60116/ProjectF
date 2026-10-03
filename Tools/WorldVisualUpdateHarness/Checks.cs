@@ -51,8 +51,20 @@ static class Checks
         state.Tick(culling, 0.1f);
         Check(animator.enabled && !animator.keepAnimatorStateOnDisable, "return restores owned Animator flags");
         Check(!disabledAnimator.enabled, "return preserves externally disabled Animator");
+        state.SetWorkAnimatorActive(animator, false);
+        Check(!animator.enabled, "visible idle facility suspends its work Animator");
+        state.SetVisible(false);
+        state.SetVisible(true);
+        Check(!animator.enabled, "return to view does not awaken an idle Animator");
+        state.SetVisible(false);
+        state.SetWorkAnimatorActive(animator, true);
+        Check(!animator.enabled, "offscreen work request retains visibility suspension");
+        state.SetVisible(true);
+        Check(animator.enabled, "visible work request resumes Animator");
+        state.SetWorkAnimatorActive(disabledAnimator, true);
+        Check(!disabledAnimator.enabled, "work request preserves externally disabled Animator");
         Check(!effect.isPlaying && effect.Plays == plays, "work ended offscreen does not restart particles");
-        Check(owner.Resumes == 1, "return refreshes current work state exactly once");
+        Check(owner.Resumes == 3, "each return refreshes current work state exactly once");
 
         culling.InView = false;
         state.Tick(culling, 0.1f);
@@ -247,6 +259,7 @@ public static class UtilityPole
 }
 namespace ProjectF.Rendering
 {
+    public static class InstallationBatchRenderer { public static void AppendProfilerCounters() { } }
     // Frustum math is covered separately by ConveyorCameraCullingHarness.
     public class CameraRenderCulling
     {

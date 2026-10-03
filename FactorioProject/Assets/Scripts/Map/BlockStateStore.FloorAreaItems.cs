@@ -418,6 +418,7 @@ public partial class BlockStateStore
 
     private static int ResolveSavedCenterStackCapacity(int itemId, int defaultCapacity)
     {
+        if (ProjectF.Benchmark.BenchmarkRuntime.ForceWorking && defaultCapacity == int.MaxValue) return int.MaxValue;
         ItemManager itemManager = GameManager.Instance != null
             ? GameManager.Instance.ItemManger
             : null;

@@ -12,15 +12,15 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: a4d286e989be41fe853b78a59ca3a4e8, type: 3}
   m_Name: MapObjectArchetype_46_Spliter belt
   m_EditorClassIdentifier: Assembly-CSharp::ProjectF.MapObjects.MapObjectArchetype
-  schemaVersion: 1
+  schemaVersion: 2
   itemDefinition: {fileID: 11400000, guid: 00a0cf5cedb5c624a9af78a08be87a5f, type: 2}
   sourcePrefab: {fileID: 3055157777023880970, guid: 09f7fb2b66f582848aedabcf3fdc9f18, type: 3}
-  itemId: 54
+  itemId: 58
   itemName: Spliter belt
   sourcePrefabGuid: 09f7fb2b66f582848aedabcf3fdc9f18
   sourceContentHash:
     serializedVersion: 2
-    Hash: a91951b8bdb44c9e1f026688f8094aea
+    Hash: bc26aeb0e4de9444e14117eaaabd97a3
   sourceRuntimeType: Spliterbelt, Assembly-CSharp, Version=0.0.0.0, Culture=neutral,
     PublicKeyToken=null
   mapStatus:

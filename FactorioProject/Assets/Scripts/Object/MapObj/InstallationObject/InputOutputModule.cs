@@ -494,6 +494,10 @@ public partial class InputOutputModule : InstallationObject,
         public long remainingCraftTicks;
         public long activeCraftConsumedEnergyUnits;
         public long oilDrillingProgressUnits;
+        // Version 70: data-owned mining selection and already-harvested output retry.
+        public int miningResourceCursor;
+        public Vector2Int miningResourceCoordinate;
+        public int miningPendingHarvestedItems;
         public long seedPlanterPlantElapsedUnits;
         public bool seedPlanterHasLoadedSeed;
         public int seedPlanterLoadedSeedItemId = -1;
@@ -533,6 +537,7 @@ public partial class InputOutputModule : InstallationObject,
             activeRecipeIndex = -1;
             activeOutputItemId = -1;
             activeOutputCount = 0;
+            miningPendingHarvestedItems = 0; miningResourceCursor = 0; miningResourceCoordinate = default;
             boilerSteamLiterAccumulator = 0f;
             oilDrillingProgressLiters = 0f;
             oilDrillingProgressUnits = 0L;
@@ -587,6 +592,9 @@ public partial class InputOutputModule : InstallationObject,
                 remainingCraftTicks = remainingCraftTicks,
                 activeCraftConsumedEnergyUnits = activeCraftConsumedEnergyUnits,
                 oilDrillingProgressUnits = oilDrillingProgressUnits,
+                miningResourceCursor = miningResourceCursor,
+                miningResourceCoordinate = miningResourceCoordinate,
+                miningPendingHarvestedItems = miningPendingHarvestedItems,
                 seedPlanterPlantElapsedUnits = seedPlanterPlantElapsedUnits,
                 seedPlanterHasLoadedSeed = seedPlanterHasLoadedSeed,
                 seedPlanterLoadedSeedItemId = seedPlanterLoadedSeedItemId,
@@ -653,6 +661,7 @@ public partial class InputOutputModule : InstallationObject,
     private float inputConsumeMoveInterval = 0.1f;
     [SerializeField, Min(0f)]
     private float outputMoveInterval = 0.1f;
+    internal float OutputMoveInterval => Mathf.Max(0, outputMoveInterval);
     [SerializeField, Min(0f)]
     private float energyGaugeVerticalOffset = 0.25f;
     [SerializeField, Min(0f)]
@@ -1355,6 +1364,7 @@ public partial class InputOutputModule : InstallationObject,
         out InputOutputModule module)
     {
         module = null;
+        if (MiningWorld.Current != null && MiningWorld.Current.CoordinateIsBlockType(coordinate, blockType)) return true;
         if (blockType == RectGridBlockType.None
             || !registeredRuntimeGridCoordinates.TryGetValue(coordinate, out HashSet<InputOutputModule> modules)
             || modules == null
@@ -2250,7 +2260,8 @@ public partial class InputOutputModule : InstallationObject,
 
     public static bool TryGetOutputItemIdsAtRuntimeGridCoordinate(Vector2Int coordinate, ISet<int> outputItemIds)
     {
-        return TryGetRuntimeCoordinateValues(coordinate, outputItemIds, TryAppendRuntimeOutputItemIdsCollector);
+        bool found = TryGetRuntimeCoordinateValues(coordinate, outputItemIds, TryAppendRuntimeOutputItemIdsCollector);
+        return (MiningWorld.Current != null && MiningWorld.Current.AppendOutputItemIds(coordinate, outputItemIds)) || found;
     }
 
     public static bool TryGetFluidOutputInfoAtRuntimeGridCoordinate(
@@ -5805,6 +5816,7 @@ public partial class InputOutputModule : InstallationObject,
     public float ObjectInfoWorkGaugeFillAmount => ResolveCraftProgressGaugeFillAmount();
     public Color ObjectInfoEnergyGaugeFillColor => energyGaugeFillColor;
     public Color ObjectInfoWorkGaugeFillColor => craftProgressGaugeFillColor;
+    internal float WorkGaugeVerticalOffset => Mathf.Max(0f, energyGaugeVerticalOffset);
     public float ObjectInfoCurrentUseEnergy => ResolveObjectInfoCurrentUseEnergy();
     public float ObjectInfoCompleteEnergy => ResolveObjectInfoCompleteEnergy();
     protected float OperationalAnimationSpeedRatio => ResolveOperationalAnimationSpeedRatio();
@@ -6523,6 +6535,7 @@ public partial class InputOutputModule : InstallationObject,
 
     public int ResolveRuntimeAreaCapacity(IReadOnlyList<Vector2Int> coordinates, int itemId = -1)
     {
+        if (IsBenchmarkWorking && ReferenceEquals(coordinates, runtimeOutputCoordinates)) return int.MaxValue;
         if (coordinates == null || coordinates.Count <= 0)
         {
             return ResolveItemStackCapacity(itemId, RuntimeAreaMaxObjects);
@@ -6562,6 +6575,12 @@ public partial class InputOutputModule : InstallationObject,
 
     private int ResolveRuntimeBlockCenterCapacity(Vector2Int coordinate, int itemId, int defaultCapacity)
     {
+        if (IsBenchmarkWorking)
+        {
+            if (TryGetLoadedBlock(coordinate, out var block) && block != null)
+                return block.MapObject is BoxObject ? block.GetInputAreaCenterCapacity(itemId) : int.MaxValue;
+            if (!(ResolveSavedCoordinateMapObject(coordinate) is BoxObject)) return int.MaxValue;
+        }
         int capacity = TryResolveRuntimeBlockCenterCapacity(coordinate, out int installedCapacity)
             ? Mathf.Max(1, installedCapacity)
             : Mathf.Max(1, defaultCapacity);
@@ -7226,7 +7245,7 @@ public partial class InputOutputModule : InstallationObject,
     protected bool TryEmitOutputItems(int outputItemId, int outputCount, Vector3 startWorldPosition)
     {
         ItemDefinition outputDefinition = ResolveItemDefinition(outputItemId);
-        if (outputDefinition != null && outputDefinition.oneItem && outputCount > 1)
+        if (!IsBenchmarkWorking && outputDefinition != null && outputDefinition.oneItem && outputCount > 1)
         {
             return TryEmitSingleItemStacks(
                 outputItemId,
@@ -7254,7 +7273,7 @@ public partial class InputOutputModule : InstallationObject,
     {
         outputTarget = default;
         ItemDefinition outputDefinition = ResolveItemDefinition(outputItemId);
-        usesDistributedSingleItemTargets = outputDefinition != null
+        usesDistributedSingleItemTargets = !IsBenchmarkWorking && outputDefinition != null
                                            && outputDefinition.oneItem
                                            && outputCount > 1;
         return usesDistributedSingleItemTargets
@@ -7406,7 +7425,7 @@ public partial class InputOutputModule : InstallationObject,
         return true;
     }
 
-    private static bool TryEmitOutputItemToBlock(
+    internal static bool TryEmitOutputItemToBlock(
         Block outputBlock,
         int outputItemId,
         Vector3 startWorldPosition,
@@ -7430,6 +7449,8 @@ public partial class InputOutputModule : InstallationObject,
                 forceAnimatedPlacement: true);
         }
 
+        bool deferred = outputBlock.TryAddDeferredOutput(outputItemId, startWorldPosition, delay, true, out bool handled);
+        if (handled) return deferred;
         if (!outputBlock.TryAddInputAreaCenterObjectAnimated(
                 outputItemId,
                 startWorldPosition,
@@ -7901,17 +7922,19 @@ public partial class InputOutputModule : InstallationObject,
     }
 
     private bool CoordinateHasSavedConveyor(Vector2Int coordinate)
+        => ResolveSavedCoordinateMapObject(coordinate) is ConveyorBelt;
+
+    private MapObject ResolveSavedCoordinateMapObject(Vector2Int coordinate)
     {
         BlockStateStore stateStore = ResolveBlockStateStore();
         if (stateStore == null
             || !stateStore.TryGetInstallationAnchorAtCoordinate(coordinate, out Vector2Int anchorCoordinate)
             || !stateStore.TryGetInstallationState(anchorCoordinate, out BlockStateStore.InstallationSaveState installationState))
         {
-            return false;
+            return null;
         }
 
-        ItemDefinition definition = ResolveItemDefinition(installationState.itemId);
-        return definition != null && definition.mapObject is ConveyorBelt;
+        return ResolveItemDefinition(installationState.itemId)?.mapObject;
     }
 
     private bool RuntimeCenterStorageAcceptsItem(
@@ -10330,6 +10353,9 @@ public partial class InputOutputModule : InstallationObject,
         SetWorkAnimatorState(IsBenchmarkWorking || ShouldPlayWorkAnimation(), force);
     }
 
+    // Presentation ownership can change without a simulation state transition.
+    internal void RefreshWorkAnimatorRendering() => RefreshWorkAnimatorState(true);
+
     protected void SetWorkAnimatorState(bool isWorking, bool force = false)
     {
         if (!ShouldUpdateVisuals)
@@ -10349,17 +10375,17 @@ public partial class InputOutputModule : InstallationObject,
         {
             workAnimatorStateInitialized = false;
             lastWorkAnimatorState = isWorking;
-            return;
         }
-
-        if (!force && workAnimatorStateInitialized && lastWorkAnimatorState == isWorking)
+        else if (force || !workAnimatorStateInitialized || lastWorkAnimatorState != isWorking)
         {
-            return;
+            targetAnimator.SetBool(WorkAnimatorBoolHash, isWorking);
+            workAnimatorStateInitialized = true;
+            lastWorkAnimatorState = isWorking;
         }
-
-        targetAnimator.SetBool(WorkAnimatorBoolHash, isWorking);
-        workAnimatorStateInitialized = true;
-        lastWorkAnimatorState = isWorking;
+        // Speed-only controllers (such as oil drills) need the same idle/visible
+        // suspension as controllers with a Working parameter.
+        bool sharedAnimation = ProjectF.Rendering.InstallationBatchRenderer.TrySetWorkAnimation(this, isWorking, targetAnimator.speed);
+        SetManagedWorkAnimatorActive(targetAnimator, isWorking && !sharedAnimation);
     }
 
     private Animator ResolveWorkAnimator()

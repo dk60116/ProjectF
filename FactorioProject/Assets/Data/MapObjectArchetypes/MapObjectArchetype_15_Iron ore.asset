@@ -12,15 +12,15 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: a4d286e989be41fe853b78a59ca3a4e8, type: 3}
   m_Name: MapObjectArchetype_15_Iron ore
   m_EditorClassIdentifier: Assembly-CSharp::ProjectF.MapObjects.MapObjectArchetype
-  schemaVersion: 1
+  schemaVersion: 2
   itemDefinition: {fileID: 11400000, guid: 97f6dea012d4db649abc845562a30b93, type: 2}
   sourcePrefab: {fileID: 2667034222479840192, guid: 14f483af5ebd67544b8067e0db8985d3, type: 3}
-  itemId: 18
+  itemId: 19
   itemName: Iron ore
   sourcePrefabGuid: 14f483af5ebd67544b8067e0db8985d3
   sourceContentHash:
     serializedVersion: 2
-    Hash: f39edfa9c7229fc9ffae81ce87b4518e
+    Hash: 4ade6d3d0dd22e3d1ae45a4bd8d107c9
   sourceRuntimeType: Resource, Assembly-CSharp, Version=0.0.0.0, Culture=neutral,
     PublicKeyToken=null
   mapStatus:

@@ -144,7 +144,6 @@ public partial class InstallationObject : MapObject, IMapObjectSimulationIdentit
     private static readonly Dictionary<Vector2Int, ulong> ActiveInstanceVersionsByRuntimeGridCoordinate =
         new Dictionary<Vector2Int, ulong>();
     private static int activeInstanceVersion;
-    private static int staticRenderActiveInstanceVersion;
     private static ulong nextActiveInstanceCoordinateVersion = 1UL;
     private static float cachedGlobalMaxFocusActivationRadius;
     private static bool globalMaxFocusActivationRadiusDirty = true;
@@ -158,7 +157,6 @@ public partial class InstallationObject : MapObject, IMapObjectSimulationIdentit
         ActiveInstancesByRuntimeGridCoordinate.Clear();
         ActiveInstanceVersionsByRuntimeGridCoordinate.Clear();
         activeInstanceVersion = 0;
-        staticRenderActiveInstanceVersion = 0;
         nextActiveInstanceCoordinateVersion = 1UL;
     }
 
@@ -180,7 +178,6 @@ public partial class InstallationObject : MapObject, IMapObjectSimulationIdentit
     [SerializeField, HideInInspector]
     private long runtimePlacementSequence;
     private MapObjectHandle runtimeMapObjectHandle;
-    private bool mapObjectTypeVisualTransition;
     [SerializeField, HideInInspector]
     private bool excludeFromTerrainPersistence;
     [SerializeField, HideInInspector, Min(0f)]
@@ -237,7 +234,6 @@ public partial class InstallationObject : MapObject, IMapObjectSimulationIdentit
     public IReadOnlyList<Vector2Int> RuntimeOccupiedCoordinates => runtimeOccupiedCoordinates;
     public long RuntimePlacementSequence => runtimePlacementSequence;
     public MapObjectHandle RuntimeMapObjectHandle => runtimeMapObjectHandle;
-    internal bool IsMapObjectTypeVisualTransitionActive => mapObjectTypeVisualTransition;
     public long SimulationId => runtimePlacementSequence;
     public static long NextSimulationId => nextPlacementSequence;
     public bool ExcludeFromTerrainPersistence => excludeFromTerrainPersistence;
@@ -465,7 +461,6 @@ public partial class InstallationObject : MapObject, IMapObjectSimulationIdentit
     }
 
     public static int ActiveInstanceVersion => activeInstanceVersion;
-    public static int StaticRenderActiveInstanceVersion => staticRenderActiveInstanceVersion;
 
     public static ulong GetActiveInstanceVersionAtRuntimeGridCoordinate(Vector2Int coordinate)
     {
@@ -522,7 +517,6 @@ public partial class InstallationObject : MapObject, IMapObjectSimulationIdentit
         runtimeQuarterTurns = 0;
         runtimePlacementSequence = 0;
         runtimeMapObjectHandle = default;
-        mapObjectTypeVisualTransition = false;
         excludeFromTerrainPersistence = false;
         if (runtimeOccupiedCoordinates != null)
         {
@@ -548,20 +542,9 @@ public partial class InstallationObject : MapObject, IMapObjectSimulationIdentit
         }
 
         runtimeMapObjectHandle = handle;
+        if (handle.IsValid) ProjectF.Rendering.InstallationBatchRenderer.Register(this);
+        else ProjectF.Rendering.InstallationBatchRenderer.Unregister(this);
         activeInstanceVersion++;
-        staticRenderActiveInstanceVersion++;
-    }
-
-    internal void SetMapObjectTypeVisualTransition(bool active)
-    {
-        if (mapObjectTypeVisualTransition == active)
-        {
-            return;
-        }
-
-        mapObjectTypeVisualTransition = active;
-        activeInstanceVersion++;
-        staticRenderActiveInstanceVersion++;
     }
 
     protected virtual void OnPlacementRuntimeChanged()
@@ -581,7 +564,6 @@ public partial class InstallationObject : MapObject, IMapObjectSimulationIdentit
     {
         ResetSleepAwakeDebugVisual();
         activeInstanceVersion++;
-        staticRenderActiveInstanceVersion++;
         RefreshManagedColliderCullingSpatialRegistration();
         PlacementRuntimeCleared?.Invoke(this);
     }
@@ -1054,7 +1036,6 @@ public partial class InstallationObject : MapObject, IMapObjectSimulationIdentit
         if (ActiveInstances.Add(this))
         {
             activeInstanceVersion++;
-            staticRenderActiveInstanceVersion++;
         }
         RegisterRuntimeCoordinateIndex(this);
         globalMaxFocusActivationRadiusDirty = true;
@@ -1062,6 +1043,7 @@ public partial class InstallationObject : MapObject, IMapObjectSimulationIdentit
         ApplyRuntimeShadowSettings();
         RegisterManagedVisualUpdates();
         RegisterManagedColliderCulling();
+        ProjectF.Rendering.InstallationBatchRenderer.Register(this);
     }
 
     protected virtual void OnDisable()
@@ -1071,13 +1053,13 @@ public partial class InstallationObject : MapObject, IMapObjectSimulationIdentit
         if (ProjectFApplicationLifecycle.IsQuitting) return;
 
         ResetSleepAwakeDebugVisual();
+        ProjectF.Rendering.InstallationBatchRenderer.Unregister(this);
         UnregisterManagedColliderCulling();
         UnregisterManagedVisualUpdates();
         UnregisterRuntimeCoordinateIndex(this);
         if (ActiveInstances.Remove(this))
         {
             activeInstanceVersion++;
-            staticRenderActiveInstanceVersion++;
         }
         globalMaxFocusActivationRadiusDirty = true;
     }

@@ -10,17 +10,17 @@ MonoBehaviour:
   m_Enabled: 1
   m_EditorHideFlags: 0
   m_Script: {fileID: 11500000, guid: a4d286e989be41fe853b78a59ca3a4e8, type: 3}
-  m_Name: MapObjectArchetype_4_Oil
+  m_Name: MapObjectArchetype_5_Crude Oil
   m_EditorClassIdentifier: Assembly-CSharp::ProjectF.MapObjects.MapObjectArchetype
-  schemaVersion: 1
-  itemDefinition: {fileID: 11400000, guid: b7f6e746e5fdf2f43a58e92c85c78479, type: 2}
+  schemaVersion: 2
+  itemDefinition: {fileID: 11400000, guid: 2e352f106be1f394da21ef84da75b7e9, type: 2}
   sourcePrefab: {fileID: 5889860242806826768, guid: 49b74711fb3fda54cae8e732896a3353, type: 3}
-  itemId: 4
-  itemName: Oil
+  itemId: 5
+  itemName: Crude Oil
   sourcePrefabGuid: 49b74711fb3fda54cae8e732896a3353
   sourceContentHash:
     serializedVersion: 2
-    Hash: c186c7d16d28df85472b8ab450df4ab7
+    Hash: 9e09342e86eb239fa7cf2bb80f313dbf
   sourceRuntimeType: Resource, Assembly-CSharp, Version=0.0.0.0, Culture=neutral,
     PublicKeyToken=null
   mapStatus:
@@ -37,7 +37,7 @@ MonoBehaviour:
   hasRenderBounds: 1
   featureFlags: 72
   nodes:
-  - hierarchyPath: 0:Oil
+  - hierarchyPath: 0:Crude Oil
     animationPath: 
     parentIndex: -1
     localPosition: {x: 0, y: 0, z: 0}
@@ -62,7 +62,7 @@ MonoBehaviour:
       e33: 1
     activeByDefault: 1
     hasAnimatedTransform: 0
-  - hierarchyPath: 0:Oil/0:Body
+  - hierarchyPath: 0:Crude Oil/0:Body
     animationPath: Body
     parentIndex: 0
     localPosition: {x: 0, y: 0, z: 0}
@@ -87,7 +87,7 @@ MonoBehaviour:
       e33: 1
     activeByDefault: 1
     hasAnimatedTransform: 0
-  - hierarchyPath: 0:Oil/1:Oil_Splash
+  - hierarchyPath: 0:Crude Oil/1:Oil_Splash
     animationPath: Oil_Splash
     parentIndex: 0
     localPosition: {x: 0, y: -0.1, z: 0}

@@ -85,6 +85,7 @@ public class ItemInfoDescription : MonoBehaviour
     private float nextPlantInfoRefreshTime;
     private PlantResource liveGaugePlant;
     private LoggingMachine liveGaugeLoggingMachine;
+    private MiningMachineInstance liveGaugeMiner;
     private RobotArmInstance liveGaugeRobotArm;
     private UtilityPole liveGaugeUtilityPole;
     private LightObject liveGaugeLightObject;
@@ -420,6 +421,27 @@ public class ItemInfoDescription : MonoBehaviour
             true,
             true,
             true);
+    }
+
+    public void ShowMiningMachine(MiningMachineInstance miner)
+    {
+        miner.TryGetObjectInfoResourceReserves(out int reserves);
+        BeginObjectDisplay(reserves);
+        liveGaugeMiner = miner;
+        SetEnergyUseRateDefaultItemSlot(0, ItemDefinition.EnergyType.Electricity, miner.Template.Watts, -1);
+        RefreshMiningMachineInfo(miner);
+    }
+    private void RefreshMiningMachineInfo(MiningMachineInstance miner)
+    {
+        miner.GetObjectInfoStatus(out string status, out bool working, out bool warning);
+        SetDefaultStatus(status, working, warning);
+        TrySetElectricPowerGauge(energyGauge, energyFill, energyText, miner);
+        float progress = miner.WorkProgress;
+        SetGauge(workGauge, workFill, workText, true, progress, new Color(0.18f, 1f, 0.25f, 1f), progress * 100f, 100f, true);
+        miner.TryGetObjectInfoResourceReserves(out int reserves);
+        SetResourceReservesLine(0, reserves);
+        miner.GetOutputInfo(out int item, out int count, out int capacity);
+        SetItemSlot(outputItem, outputItemSlot, item, count, capacity, true, true);
     }
 
     public void ShowRobotArm(RobotArmInstance robotArm, ResourceInstance underlyingResource = null)
@@ -1220,7 +1242,7 @@ public class ItemInfoDescription : MonoBehaviour
         nextPlantInfoRefreshTime = 0f;
         liveGaugePlant = null;
         liveGaugeLoggingMachine = null;
-        liveGaugeRobotArm = null;
+        liveGaugeRobotArm = null; liveGaugeMiner = null;
         liveGaugeUtilityPole = null;
         liveGaugeLightObject = null;
         liveGaugeModule = null;
@@ -1295,6 +1317,7 @@ public class ItemInfoDescription : MonoBehaviour
             return;
         }
 
+        if (liveGaugeMiner != null && liveGaugeMiner.IsRuntimeActive) { RefreshMiningMachineInfo(liveGaugeMiner); return; }
         if (liveGaugeRobotArm != null && liveGaugeRobotArm.IsRuntimeActive)
         {
             liveGaugeRobotArm.GetObjectInfoStatus(
@@ -2322,7 +2345,7 @@ public class ItemInfoDescription : MonoBehaviour
 
     private static bool TryGetTargetElectricPowerInfo(IMapObjectTarget target, out float supplied, out float required)
     {
-        if (target is RobotArmInstance arm) return UtilityPole.TryGetElectricPowerInfo(arm, out supplied, out required);
+        if (target is IDataElectricConsumer consumer) return UtilityPole.TryGetElectricPowerInfo(consumer, out supplied, out required);
         return UtilityPole.TryGetElectricPowerInfo(target as InstallationObject, out supplied, out required);
     }
 

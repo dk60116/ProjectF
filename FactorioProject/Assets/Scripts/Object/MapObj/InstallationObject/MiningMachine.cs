@@ -10,6 +10,23 @@ public class MiningMachine : InputOutputModule
     private ResourceInstance activeMiningResource;
     private int activeMiningResourceIndex = -1;
     private int nextMiningResourceIndex;
+    private Vector2Int restoredMiningResourceCoordinate;
+    private int pendingHarvestedItems;
+    public override PersistentState CapturePersistentState()
+    {
+        var state = base.CapturePersistentState();
+        state.miningResourceCursor = nextMiningResourceIndex;
+        state.miningResourceCoordinate = activeMiningResource != null ? activeMiningResource.OwningCoordinate : restoredMiningResourceCoordinate;
+        state.miningPendingHarvestedItems = pendingHarvestedItems;
+        return state;
+    }
+    public override void ApplyPersistentState(PersistentState state)
+    {
+        base.ApplyPersistentState(state);
+        nextMiningResourceIndex = state != null ? state.miningResourceCursor : 0;
+        restoredMiningResourceCoordinate = state != null ? state.miningResourceCoordinate : default;
+        pendingHarvestedItems = state != null ? state.miningPendingHarvestedItems : 0;
+    }
 
     protected override void OnDisable()
     {
@@ -22,7 +39,7 @@ public class MiningMachine : InputOutputModule
     public override void PrepareForPool()
     {
         ClearActiveMiningResourceSelection();
-        nextMiningResourceIndex = 0;
+        nextMiningResourceIndex = 0; restoredMiningResourceCoordinate = default; pendingHarvestedItems = 0;
         base.PrepareForPool();
     }
 

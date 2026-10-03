@@ -1,0 +1,229 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: a4d286e989be41fe853b78a59ca3a4e8, type: 3}
+  m_Name: MapObjectArchetype_42_Steel Funance
+  m_EditorClassIdentifier: Assembly-CSharp::ProjectF.MapObjects.MapObjectArchetype
+  schemaVersion: 2
+  itemDefinition: {fileID: 11400000, guid: c2647e3a39ee9714e87f93f2427fa513, type: 2}
+  sourcePrefab: {fileID: 3843491245406909261, guid: 2089176be5a3410428d471926164db6c, type: 3}
+  itemId: 42
+  itemName: Steel Funance
+  sourcePrefabGuid: 2089176be5a3410428d471926164db6c
+  sourceContentHash:
+    serializedVersion: 2
+    Hash: b1c3728ce5d7ff7db5e8a50088bb5ff3
+  sourceRuntimeType: InputOutputModule, Assembly-CSharp, Version=0.0.0.0, Culture=neutral,
+    PublicKeyToken=null
+  mapStatus:
+    mapSizeX: 1
+    mapSizeY: 1
+    centerCellX: 0
+    centerCellY: 0
+  focusMode: 1
+  defaultRootScale: {x: 1, y: 1, z: 1}
+  defaultRootRotation: {x: 0, y: 0, z: 0, w: 1}
+  localRenderBounds:
+    m_Center: {x: 0.000000059604645, y: 0.34332266, z: -0.000000014901161}
+    m_Extent: {x: 0.37481686, y: 0.34332266, z: 0.4102844}
+  hasRenderBounds: 1
+  featureFlags: 72
+  nodes:
+  - hierarchyPath: 0:Steel Furnace
+    animationPath: 
+    parentIndex: -1
+    localPosition: {x: 0, y: 0, z: 0}
+    localRotation: {x: 0, y: 0, z: 0, w: 1}
+    localScale: {x: 1, y: 1, z: 1}
+    defaultLocalToRoot:
+      e00: 1
+      e01: 0
+      e02: 0
+      e03: 0
+      e10: 0
+      e11: 1
+      e12: 0
+      e13: 0
+      e20: 0
+      e21: 0
+      e22: 1
+      e23: 0
+      e30: 0
+      e31: 0
+      e32: 0
+      e33: 1
+    activeByDefault: 1
+    hasAnimatedTransform: 0
+  - hierarchyPath: 0:Steel Furnace/0:Body
+    animationPath: Body
+    parentIndex: 0
+    localPosition: {x: 0, y: 0, z: 0}
+    localRotation: {x: 0, y: 0, z: 0, w: 1}
+    localScale: {x: 1, y: 1, z: 1}
+    defaultLocalToRoot:
+      e00: 1
+      e01: 0
+      e02: 0
+      e03: 0
+      e10: 0
+      e11: 1
+      e12: 0
+      e13: 0
+      e20: 0
+      e21: 0
+      e22: 1
+      e23: 0
+      e30: 0
+      e31: 0
+      e32: 0
+      e33: 1
+    activeByDefault: 1
+    hasAnimatedTransform: 0
+  - hierarchyPath: 0:Steel Furnace/0:Body/0:Smoke_Black
+    animationPath: Body/Smoke_Black
+    parentIndex: 1
+    localPosition: {x: 0, y: 0.4, z: 0}
+    localRotation: {x: -0, y: -0, z: -0, w: 1}
+    localScale: {x: 1, y: 1, z: 1}
+    defaultLocalToRoot:
+      e00: 1
+      e01: 0
+      e02: 0
+      e03: 0
+      e10: 0
+      e11: 1
+      e12: 0
+      e13: 0.4
+      e20: 0
+      e21: 0
+      e22: 1
+      e23: 0
+      e30: 0
+      e31: 0
+      e32: 0
+      e33: 1
+    activeByDefault: 1
+    hasAnimatedTransform: 0
+  - hierarchyPath: 0:Steel Furnace/0:Body/0:Smoke_Black/0:Fire
+    animationPath: Body/Smoke_Black/Fire
+    parentIndex: 2
+    localPosition: {x: 0, y: -0.2702284, z: -0.34}
+    localRotation: {x: -0, y: -0, z: -0, w: 1}
+    localScale: {x: 1, y: 1, z: 1}
+    defaultLocalToRoot:
+      e00: 1
+      e01: 0
+      e02: 0
+      e03: 0
+      e10: 0
+      e11: 1
+      e12: 0
+      e13: 0.12977162
+      e20: 0
+      e21: 0
+      e22: 1
+      e23: -0.34
+      e30: 0
+      e31: 0
+      e32: 0
+      e33: 1
+    activeByDefault: 1
+    hasAnimatedTransform: 0
+  - hierarchyPath: 0:Steel Furnace/0:Body/0:Smoke_Black/0:Fire/0:FlameMain
+    animationPath: Body/Smoke_Black/Fire/FlameMain
+    parentIndex: 3
+    localPosition: {x: 0, y: 0, z: -0}
+    localRotation: {x: -0.7071068, y: -0, z: -0, w: 0.7071068}
+    localScale: {x: 1, y: 1, z: 1}
+    defaultLocalToRoot:
+      e00: 1
+      e01: 0
+      e02: 0
+      e03: 0
+      e10: 0
+      e11: -0.00000011920929
+      e12: 1.0000001
+      e13: 0.12977162
+      e20: 0
+      e21: -1.0000001
+      e22: -0.00000011920929
+      e23: -0.34
+      e30: 0
+      e31: 0
+      e32: 0
+      e33: 1
+    activeByDefault: 1
+    hasAnimatedTransform: 0
+  - hierarchyPath: 0:Steel Furnace/0:Body/0:Smoke_Black/0:Fire/1:Sparks
+    animationPath: Body/Smoke_Black/Fire/Sparks
+    parentIndex: 3
+    localPosition: {x: 0, y: 0, z: 0.038}
+    localRotation: {x: -0.7071068, y: -0, z: -0, w: 0.7071068}
+    localScale: {x: 1, y: 1, z: 1}
+    defaultLocalToRoot:
+      e00: 1
+      e01: 0
+      e02: 0
+      e03: 0
+      e10: 0
+      e11: -0.00000011920929
+      e12: 1.0000001
+      e13: 0.12977162
+      e20: 0
+      e21: -1.0000001
+      e22: -0.00000011920929
+      e23: -0.30200002
+      e30: 0
+      e31: 0
+      e32: 0
+      e33: 1
+    activeByDefault: 1
+    hasAnimatedTransform: 0
+  - hierarchyPath: 0:Steel Furnace/0:Body/0:Smoke_Black/1:Smoke
+    animationPath: Body/Smoke_Black/Smoke
+    parentIndex: 2
+    localPosition: {x: -0.15, y: 0.29, z: 0.15}
+    localRotation: {x: -0.7071068, y: -0, z: -0, w: 0.7071068}
+    localScale: {x: 1, y: 1, z: 1}
+    defaultLocalToRoot:
+      e00: 1
+      e01: 0
+      e02: 0
+      e03: -0.15
+      e10: 0
+      e11: -0.00000011920929
+      e12: 1.0000001
+      e13: 0.69
+      e20: 0
+      e21: -1.0000001
+      e22: -0.00000011920929
+      e23: 0.15
+      e30: 0
+      e31: 0
+      e32: 0
+      e33: 1
+    activeByDefault: 1
+    hasAnimatedTransform: 0
+  renderParts:
+  - kind: 0
+    nodeIndex: 1
+    mesh: {fileID: -7358619098579413899, guid: 7557df830b691134880ad49d631b245e, type: 3}
+    material: {fileID: 2100000, guid: 934461ca9a376184bbde65b3941a6331, type: 2}
+    subMeshIndex: 0
+    localBounds:
+      m_Center: {x: 0.000000059604645, y: 0.34332266, z: -0.000000014901161}
+      m_Extent: {x: 0.37481686, y: 0.34332266, z: 0.4102844}
+    layer: 0
+    renderingLayerMask: 1
+    shadowCastingMode: 1
+    receiveShadows: 1
+    enabledByDefault: 1
+  animationClips: []

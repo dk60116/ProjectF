@@ -90,7 +90,9 @@ public sealed class PortableObject : IDisposable
         get => Read().Layer;
         set
         {
-            Mutate((ref PortableObjectComponent c) => c.Layer = value);
+            PortableObjectComponent c = Read();
+            c.Layer = value;
+            Write(c);
             if (view != null) view.gameObject.layer = value;
             MarkPortableItemRenderDataDirty();
         }
@@ -179,14 +181,18 @@ public sealed class PortableObject : IDisposable
 
     public void SetConveyorOwnership(bool ownedByConveyor)
     {
-        Mutate((ref PortableObjectComponent c) => c.OnConveyor = ownedByConveyor);
+        PortableObjectComponent c = Read();
+        c.OnConveyor = ownedByConveyor;
+        Write(c);
         if (ownedByConveyor) ClearFocusOutlines(true);
     }
 
     public void SetSleepAwakeSleeping(bool sleeping)
     {
         if (Read().Sleeping == sleeping) return;
-        Mutate((ref PortableObjectComponent c) => c.Sleeping = sleeping);
+        PortableObjectComponent c = Read();
+        c.Sleeping = sleeping;
+        Write(c);
         RefreshSleepAwakeVisual(true);
     }
 
@@ -221,17 +227,19 @@ public sealed class PortableObject : IDisposable
         Color32 resolvedColor = active ? color : (Color32)Color.white;
         PortableObjectComponent current = Read();
         if (current.BeltDebugActive == active && current.BeltDebugColor.Equals(resolvedColor)) return;
-        Mutate((ref PortableObjectComponent c) =>
-        {
-            c.BeltDebugActive = active;
-            c.BeltDebugColor = resolvedColor;
-        });
+        current.BeltDebugActive = active;
+        current.BeltDebugColor = resolvedColor;
+        Write(current);
         RefreshSleepAwakeVisual(true);
     }
 
     public void ClearBeltItemLineDebugColor() => SetBeltItemLineDebugColor(false, Color.white);
-    public void MarkMovedByConveyorThisFrame() =>
-        Mutate((ref PortableObjectComponent c) => c.LastConveyorMoveFrame = Time.frameCount);
+    public void MarkMovedByConveyorThisFrame()
+    {
+        PortableObjectComponent c = Read();
+        c.LastConveyorMoveFrame = Time.frameCount;
+        Write(c);
+    }
 
     public void SetCachedParent(Transform parent, bool worldPositionStays)
     {
@@ -254,7 +262,9 @@ public sealed class PortableObject : IDisposable
             pickupGate?.OnOwnerDisabled();
             temporaryDropping?.OnOwnerDisabled();
         }
-        Mutate((ref PortableObjectComponent c) => c.Active = active);
+        PortableObjectComponent c = Read();
+        c.Active = active;
+        Write(c);
         if (view != null && view.gameObject.activeSelf != active) view.gameObject.SetActive(active);
         UpdateRendererVisibility();
         RefreshPortableItemRendererRegistration();
@@ -270,14 +280,19 @@ public sealed class PortableObject : IDisposable
 
     public void SetWorldPose(Vector3 position, Quaternion rotation)
     {
-        Mutate((ref PortableObjectComponent c) => { c.WorldPosition = position; c.WorldRotation = rotation; });
+        PortableObjectComponent c = Read();
+        c.WorldPosition = position;
+        c.WorldRotation = rotation;
+        Write(c);
         if (view != null) view.transform.SetPositionAndRotation(position, rotation);
         MarkPortableItemRenderDataDirty();
     }
 
     public void SetWorldScale(Vector3 scale)
     {
-        Mutate((ref PortableObjectComponent c) => c.WorldScale = scale);
+        PortableObjectComponent c = Read();
+        c.WorldScale = scale;
+        Write(c);
         if (view != null) view.transform.localScale = ResolveLocalScale(scale, presentationParent);
         MarkPortableItemRenderDataDirty();
     }
@@ -288,12 +303,11 @@ public sealed class PortableObject : IDisposable
         Vector3 worldPosition = parent != null ? parent.TransformPoint(localPosition) : localPosition;
         Quaternion worldRotation = parent != null ? parent.rotation * localRotation : localRotation;
         Vector3 worldScale = parent != null ? Vector3.Scale(parent.lossyScale, localScale) : localScale;
-        Mutate((ref PortableObjectComponent c) =>
-        {
-            c.WorldPosition = worldPosition;
-            c.WorldRotation = worldRotation;
-            c.WorldScale = worldScale;
-        });
+        PortableObjectComponent c = Read();
+        c.WorldPosition = worldPosition;
+        c.WorldRotation = worldRotation;
+        c.WorldScale = worldScale;
+        Write(c);
         if (view != null)
         {
             Transform target = view.transform;
@@ -329,7 +343,10 @@ public sealed class PortableObject : IDisposable
         manager.TryGetItemDefinitionById(itemId, out cachedItemDefinition);
         cachedMesh = mesh;
         cachedMaterial = material;
-        Mutate((ref PortableObjectComponent c) => { c.ItemId = itemId; c.SuppressRendering = false; });
+        PortableObjectComponent c = Read();
+        c.ItemId = itemId;
+        c.SuppressRendering = false;
+        Write(c);
         if (view != null) ConfigureViewAssets();
         else if (RequiresIndividualPresentation(cachedItemDefinition))
         {
@@ -357,11 +374,9 @@ public sealed class PortableObject : IDisposable
         bool suppressRendering = batched ? false : current.SuppressRendering;
         if (current.BatchedRendering != batched || current.SuppressRendering != suppressRendering)
         {
-            Mutate((ref PortableObjectComponent c) =>
-            {
-                c.BatchedRendering = batched;
-                c.SuppressRendering = suppressRendering;
-            });
+            current.BatchedRendering = batched;
+            current.SuppressRendering = suppressRendering;
+            Write(current);
             RefreshPortableItemRendererRegistration();
         }
         UpdateRendererVisibility();
@@ -371,7 +386,9 @@ public sealed class PortableObject : IDisposable
     public void SetVisualRenderingSuppressed(bool suppressed)
     {
         if (Read().SuppressRendering == suppressed) return;
-        Mutate((ref PortableObjectComponent c) => c.SuppressRendering = suppressed);
+        PortableObjectComponent c = Read();
+        c.SuppressRendering = suppressed;
+        Write(c);
         if (suppressed) ClearFocusOutlines(false);
         RefreshPortableItemRendererRegistration();
         UpdateRendererVisibility();
@@ -429,6 +446,21 @@ public sealed class PortableObject : IDisposable
             onComplete, deactivateOnComplete, useJumpArc, moveDuration, trackStartPositionDuringMove);
     }
 
+    // Stack placement uses pooled move fields instead of allocating target/completion closures per item.
+    internal void MoveToBlockStack(Block block, bool centerStack, int stackIndex, float delay,
+        Func<Vector3> startPositionProvider, Action onComplete, bool useJumpArc, float moveDuration,
+        float? originalStartTime = null)
+    {
+        Vector3 target = block.GetItemStackPlacementPosition(centerStack, stackIndex);
+        StartMove(null, target, true, null, delay, startPositionProvider, onComplete,
+            false, useJumpArc, moveDuration, false, block, centerStack, stackIndex, originalStartTime);
+    }
+
+    internal void SampleScheduledMoveNow()
+    {
+        if (moveState != null) UpdateScheduledMove(PortableMoveScheduler.Resolve(), moveState, Time.time);
+    }
+
     private void StartMove(
         Transform targetTransform,
         Vector3 fixedTargetPosition,
@@ -440,7 +472,11 @@ public sealed class PortableObject : IDisposable
         bool deactivateOnComplete,
         bool useJumpArc,
         float moveDuration,
-        bool trackStartPositionDuringMove)
+        bool trackStartPositionDuringMove,
+        Block stackBlock = null,
+        bool centerStack = false,
+        int stackIndex = 0,
+        float? originalStartTime = null)
     {
         if (!IsAlive)
         {
@@ -469,7 +505,12 @@ public sealed class PortableObject : IDisposable
                 hasFixedTargetPosition,
                 targetPositionProvider,
                 deactivateOnComplete,
-                onComplete);
+                stackBlock != null ? null : onComplete);
+            if (stackBlock != null)
+            {
+                stackBlock.CompleteItemStackPlacement(this, centerStack, stackIndex);
+                onComplete?.Invoke();
+            }
             return;
         }
 
@@ -485,7 +526,8 @@ public sealed class PortableObject : IDisposable
             deactivateOnComplete,
             useJumpArc,
             trackStartPositionDuringMove,
-            onComplete);
+            onComplete, stackBlock, centerStack, stackIndex);
+        if (originalStartTime.HasValue) moveState.StartTime = originalStartTime.Value;
     }
 
     internal bool UpdateScheduledMove(
@@ -504,41 +546,32 @@ public sealed class PortableObject : IDisposable
             return false;
         }
 
-        if (!state.DelayCompleted)
+        // Outside the view, only the arrival deadline advances. Test the whole flight
+        // bounds before evaluating interpolation/arc, so paths entering the view remain visible.
+        float moveElapsed = elapsed - state.Delay;
+        if (moveElapsed < state.Duration)
         {
-            state.DelayCompleted = true;
-            if (state.StartPositionProvider != null)
+            Vector3 start = state.TrackStartPositionDuringMove && state.StartPositionProvider != null
+                ? state.StartPositionProvider()
+                : state.LaunchStart;
+            Vector3 target = ResolveMoveTarget(state);
+            if (scheduler.ShouldSkipIntermediateUpdate(state, start, target))
             {
-                Vector3 delayedStart = state.StartPositionProvider();
-                if (!scheduler.ShouldSkipIntermediateUpdate(state, delayedStart))
-                {
-                    SetWorldPosition(delayedStart);
-                }
+                return false;
             }
 
-            SetBodyRendererTemporarilyHidden(false);
-        }
-
-        float t = Mathf.Clamp01((elapsed - state.Delay) / state.Duration);
-        Vector3 start = state.TrackStartPositionDuringMove && state.StartPositionProvider != null
-            ? state.StartPositionProvider()
-            : state.LaunchStart;
-        Vector3 target = ResolveMoveTarget(state);
-        Vector3 position = Vector3.LerpUnclamped(start, target, t);
-        if (state.UseJumpArc)
-        {
-            position.y += 4f * t * (1f - t);
-        }
-
-        // Culling skips only intermediate world/render writes. The absolute move clock keeps
-        // advancing, so re-entry resumes at the current point and completion stays on time.
-        if (t < 1f)
-        {
-            if (!scheduler.ShouldSkipIntermediateUpdate(state, position))
+            if (!state.DelayCompleted)
             {
-                SetWorldPosition(position);
+                state.DelayCompleted = true;
+                if (state.StartPositionProvider != null)
+                    SetWorldPosition(state.TrackStartPositionDuringMove ? start : state.StartPositionProvider());
+                SetBodyRendererTemporarilyHidden(false);
             }
 
+            float t = Mathf.Clamp01(moveElapsed / state.Duration);
+            Vector3 position = Vector3.LerpUnclamped(start, target, t);
+            if (state.UseJumpArc) position.y += 4f * t * (1f - t);
+            SetWorldPosition(position);
             return false;
         }
 
@@ -551,6 +584,7 @@ public sealed class PortableObject : IDisposable
         }
 
         SetBodyRendererTemporarilyHidden(false);
+        state.StackBlock?.CompleteItemStackPlacement(this, state.CenterStack, state.StackIndex);
         Action onComplete = state.OnComplete;
         state.OnComplete = null;
         onComplete?.Invoke();
@@ -606,6 +640,9 @@ public sealed class PortableObject : IDisposable
 
     private Vector3 ResolveMoveTarget(PortableMoveScheduler.MoveState state)
     {
+        if (state.StackBlock != null)
+            return state.StackBlock.GetItemStackPlacementPosition(state.CenterStack, state.StackIndex);
+
         if (state.TargetPositionProvider != null)
         {
             return state.TargetPositionProvider();
@@ -621,13 +658,9 @@ public sealed class PortableObject : IDisposable
 
     internal bool CanCullMoveIntermediateUpdates(Transform targetTransform)
     {
-        if (presentationPinned || RequiresIndividualPresentation(ResolveItemDefinition()))
-        {
-            return false;
-        }
-
         // UI-bound moves must keep updating even when their world coordinates are outside
-        // the gameplay camera frustum. This lookup runs once when the move is scheduled.
+        // the gameplay camera frustum. All world items, including individual views/lights,
+        // use the timed offscreen transfer. This lookup runs once when scheduled.
         return targetTransform == null || targetTransform.GetComponentInParent<Canvas>(true) == null;
     }
 
@@ -780,23 +813,20 @@ public sealed class PortableObject : IDisposable
         else UnityEngine.Object.DestroyImmediate(releasedView.gameObject);
     }
 
-    private delegate void ComponentMutation(ref PortableObjectComponent component);
     private PortableObjectComponent Read() =>
         world != null && world.TryGet(handle, out PortableObjectComponent c) ? c : default;
 
-    private void Mutate(ComponentMutation mutation)
-    {
-        if (mutation == null || world == null || !world.TryGet(handle, out PortableObjectComponent c)) return;
-        mutation(ref c);
-        world.Set(handle, c);
-    }
+    private void Write(PortableObjectComponent component) => world?.Set(handle, component);
 
     private void ClearItemState()
     {
         cachedItemDefinition = null;
         cachedMesh = null;
         cachedMaterial = null;
-        Mutate((ref PortableObjectComponent c) => { c.ItemId = -1; c.SuppressRendering = true; });
+        PortableObjectComponent c = Read();
+        c.ItemId = -1;
+        c.SuppressRendering = true;
+        Write(c);
         ConfigureViewAssets();
         RefreshPortableItemRendererRegistration();
     }
@@ -1026,7 +1056,9 @@ public sealed class PortableObject : IDisposable
         if (!IsUsingBatchedRendering) return;
 
         restoreBatchedRenderingAfterOutline = true;
-        Mutate((ref PortableObjectComponent c) => c.BatchedRendering = false);
+        PortableObjectComponent c = Read();
+        c.BatchedRendering = false;
+        Write(c);
         UnregisterFromPortableItemRenderer();
         UpdateRendererVisibility();
     }
@@ -1089,6 +1121,9 @@ internal sealed class PortableMoveScheduler : MonoBehaviour
         internal Func<Vector3> TargetPositionProvider;
         internal Func<Vector3> StartPositionProvider;
         internal Action OnComplete;
+        internal Block StackBlock;
+        internal bool CenterStack;
+        internal int StackIndex;
         internal Vector3 FixedTargetPosition;
         internal Vector3 LaunchStart;
         internal float StartTime;
@@ -1110,6 +1145,9 @@ internal sealed class PortableMoveScheduler : MonoBehaviour
             TargetPositionProvider = null;
             StartPositionProvider = null;
             OnComplete = null;
+            StackBlock = null;
+            CenterStack = false;
+            StackIndex = 0;
             FixedTargetPosition = default;
             LaunchStart = default;
             StartTime = 0f;
@@ -1180,7 +1218,10 @@ internal sealed class PortableMoveScheduler : MonoBehaviour
         bool deactivateOnComplete,
         bool useJumpArc,
         bool trackStartPositionDuringMove,
-        Action onComplete)
+        Action onComplete,
+        Block stackBlock = null,
+        bool centerStack = false,
+        int stackIndex = 0)
     {
         MoveState state = pooledMoves.Count > 0 ? pooledMoves.Pop() : new MoveState();
         state.Owner = owner;
@@ -1188,6 +1229,9 @@ internal sealed class PortableMoveScheduler : MonoBehaviour
         state.TargetPositionProvider = targetPositionProvider;
         state.StartPositionProvider = startPositionProvider;
         state.OnComplete = onComplete;
+        state.StackBlock = stackBlock;
+        state.CenterStack = centerStack;
+        state.StackIndex = stackIndex;
         state.FixedTargetPosition = fixedTargetPosition;
         state.LaunchStart = launchStart;
         state.StartTime = Time.time;
@@ -1221,6 +1265,7 @@ internal sealed class PortableMoveScheduler : MonoBehaviour
     private void Update()
     {
         using var callerSample = MapObjectTickProfiler.SampleUpdateCaller<PortableMoveScheduler>();
+        using var outputSample = MapObjectTickProfiler.SampleNamed("ItemOutput", nameof(PortableMoveScheduler), "Move and Landing");
         RefreshCameraCulling();
         lastVisibilityChecks = 0;
         lastCulledUpdates = 0;
@@ -1246,7 +1291,7 @@ internal sealed class PortableMoveScheduler : MonoBehaviour
         }
     }
 
-    internal bool ShouldSkipIntermediateUpdate(MoveState state, Vector3 worldPosition)
+    internal bool ShouldSkipIntermediateUpdate(MoveState state, Vector3 start, Vector3 target)
     {
         if (!state.CullIntermediateUpdates || !cameraCulling.Enabled)
         {
@@ -1260,21 +1305,30 @@ internal sealed class PortableMoveScheduler : MonoBehaviour
             return true;
         }
 
+        Bounds bounds = CalculateMoveCullBounds(state, start, target);
+        Vector3 minimum = bounds.min, maximum = bounds.max;
         if (hasVisibleCellRange
-            && (worldPosition.x < visibleMinimumX || worldPosition.x > visibleMaximumX
-                || worldPosition.z < visibleMinimumZ || worldPosition.z > visibleMaximumZ))
+            && (maximum.x < visibleMinimumX || minimum.x > visibleMaximumX
+                || maximum.z < visibleMinimumZ || minimum.z > visibleMaximumZ))
         {
             RecordCulledUpdate();
             return true;
         }
 
-        if (cameraCulling.Intersects(new Bounds(worldPosition, MoveCullBoundsSize)))
+        if (cameraCulling.Intersects(bounds))
         {
             return false;
         }
 
         RecordCulledUpdate();
         return true;
+    }
+
+    private static Bounds CalculateMoveCullBounds(MoveState state, Vector3 start, Vector3 target)
+    {
+        Vector3 minimum = Vector3.Min(start, target), maximum = Vector3.Max(start, target);
+        if (state.UseJumpArc) maximum.y += 1f;
+        return new Bounds((minimum + maximum) * .5f, maximum - minimum + MoveCullBoundsSize);
     }
 
     internal static void AppendProfilerCounters()

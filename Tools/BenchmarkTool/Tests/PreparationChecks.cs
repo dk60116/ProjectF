@@ -40,7 +40,6 @@ public sealed class InstallationObject
     public static readonly List<InstallationObject> All = new();
     public bool isActiveAndEnabled = true;
     public MapObjectHandle RuntimeMapObjectHandle = new(1);
-    public static int StaticRenderActiveInstanceVersion = 20;
     public static void CopyActiveInstances(List<InstallationObject> items) { items.Clear(); items.AddRange(All); }
 }
 public enum VirtualObjectKind { Installation }
@@ -48,6 +47,7 @@ public class VirtualObjectRecord
 {
     public VirtualObjectKind kind;
     public bool HasAttachedView;
+    public BlockStateStore.InstallationSaveState installationState;
     public MapObjectHandle mapObjectHandle = new(1);
     public int itemId = 1;
 }
@@ -71,18 +71,17 @@ public partial class RendererProbe
 {
     private readonly VirtualWorld virtualWorld = new();
     private readonly object itemManager = new();
-    private readonly List<InstallationObject> activeInstallations = new();
     private readonly List<VirtualObjectRecord> dataOnlyInstallations = new();
     private readonly List<StaticMapObjectTypeHost> hostScratch = new();
     private readonly List<int> emptyHostItemIds = new();
     private readonly HashSet<int> rejectedTypeIds = new();
     private readonly Dictionary<int, StaticMapObjectTypeHost> hostsByItemId = new() { [1] = new() };
-    private int cachedInstallationVersion = -1, cachedActiveInstanceVersion = -1, synchronizationCount, lastSynchronizationFrame,
-        lastSynchronizedActiveInstallationCount, lastSynchronizedDataOnlyInstallationCount;
+    private int cachedInstallationVersion = -1, synchronizationCount, lastSynchronizationFrame,
+        lastSynchronizedDataOnlyInstallationCount;
     public long BenchmarkSyncDone { get; private set; }
     public long BenchmarkSyncTotal { get; private set; }
     private void ResolveDependencies() { }
-    private void InvalidateSyncVersions() { cachedInstallationVersion = cachedActiveInstanceVersion = -1; }
+    private void InvalidateSyncVersions() { cachedInstallationVersion = -1; }
     private void CopyHostsToScratch() { hostScratch.Clear(); hostScratch.AddRange(hostsByItemId.Values); }
     private bool TryGetOrCreateHost(int id, out StaticMapObjectTypeHost host) => hostsByItemId.TryGetValue(id, out host);
     private void RemoveHost(int id) => hostsByItemId.Remove(id);
@@ -133,7 +132,7 @@ internal static class PreparationChecks
         }
         InstallationObject.All.Clear();
         for (int i = 0; i < 50000; i++) InstallationObject.All.Add(new());
-        var renderer = new RendererProbe(); renderer.AddData(50000);
+        var renderer = new RendererProbe(); renderer.AddData(100000);
         var sync = renderer.PrepareBenchmarkPresentation();
         int yields = 0; long last = -1;
         using (sync as IDisposable)
@@ -148,7 +147,7 @@ internal static class PreparationChecks
         var work = cancelled.PrepareBenchmarkPresentation();
         Require(work.MoveNext(), "render cancellation checkpoint"); ((IDisposable)work).Dispose();
         Require(cancelled.CachedVersion == -1 && cancelled.Host.Aborts == 1, "render cancellation aborts partial hosts and invalidates cache");
-        Require(Drain(cancelled.PrepareBenchmarkPresentation()) > 0 && cancelled.Host.InstanceCount == 50010, "render can rebuild after cancellation");
+        Require(Drain(cancelled.PrepareBenchmarkPresentation()) > 0 && cancelled.Host.InstanceCount == 10, "render can rebuild after cancellation");
         var pipes = new PipeProbe(); pipes.Add(100000);
         Require(Drain(pipes.PrepareBenchmarkPresentation()) > 0 && pipes.Count == 100000 && !pipes.Dirty, "100000 pipe records render in slices");
         Require(Drain(pipes.PrepareBenchmarkPresentation()) == 0, "completed pipe render is cached");
@@ -158,4 +157,15 @@ internal static class PreparationChecks
         Drain(cancelledPipes.PrepareBenchmarkPresentation()); Require(cancelledPipes.Count == 100 && !cancelledPipes.Dirty, "pipe recovery replaces partial batches");
         Console.WriteLine($"PASS: {checks} benchmark flat surface and sliced presentation checks");
     }
+}
+
+public class BlockStateStore
+{
+    public class InstallationSaveState { }
+    public static Vector2Int GetInstallationStorageKey(InstallationSaveState state) => default;
+}
+public class MiningWorld
+{
+    public static MiningWorld Current => null;
+    public bool TryGet(Vector2Int coordinate, out object target) { target = null; return false; }
 }

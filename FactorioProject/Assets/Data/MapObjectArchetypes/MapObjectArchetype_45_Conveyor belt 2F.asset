@@ -12,15 +12,15 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: a4d286e989be41fe853b78a59ca3a4e8, type: 3}
   m_Name: MapObjectArchetype_45_Conveyor belt 2F
   m_EditorClassIdentifier: Assembly-CSharp::ProjectF.MapObjects.MapObjectArchetype
-  schemaVersion: 1
+  schemaVersion: 2
   itemDefinition: {fileID: 11400000, guid: ae10ba0d1a5a35a4f9732630fda54471, type: 2}
   sourcePrefab: {fileID: 4923497655988066394, guid: ad2b1061faaacad479734368ff5211cc, type: 3}
-  itemId: 53
+  itemId: 57
   itemName: Conveyor belt 2F
   sourcePrefabGuid: ad2b1061faaacad479734368ff5211cc
   sourceContentHash:
     serializedVersion: 2
-    Hash: 3a40e08407ab1ca8c73e35dec770e5f8
+    Hash: b1c03bca82f184152b5f931c48db85dc
   sourceRuntimeType: ConvayorBelt2F, Assembly-CSharp, Version=0.0.0.0, Culture=neutral,
     PublicKeyToken=null
   mapStatus:

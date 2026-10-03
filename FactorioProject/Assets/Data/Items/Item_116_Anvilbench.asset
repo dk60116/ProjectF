@@ -15,7 +15,7 @@ MonoBehaviour:
   itemName: Anvilbench
   id: 24
   mapObject: {fileID: 7839628250064023149, guid: 6168af2f119e8f040a9678762a5df929, type: 3}
-  mapObjectArchetype: {fileID: 0}
+  mapObjectArchetype: {fileID: 11400000, guid: 2c16e2824a5c5d3429ef0a604549e1dc, type: 2}
   useMapColor: 0
   mapColor: {r: 1, g: 1, b: 1, a: 1}
   mapMarkerSize: 1

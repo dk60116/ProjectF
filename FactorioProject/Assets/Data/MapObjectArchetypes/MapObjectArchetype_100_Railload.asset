@@ -12,15 +12,15 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: a4d286e989be41fe853b78a59ca3a4e8, type: 3}
   m_Name: MapObjectArchetype_100_Railload
   m_EditorClassIdentifier: Assembly-CSharp::ProjectF.MapObjects.MapObjectArchetype
-  schemaVersion: 1
+  schemaVersion: 2
   itemDefinition: {fileID: 11400000, guid: ced5cba395785e94897ab6dcb83d274a, type: 2}
   sourcePrefab: {fileID: 8251220719155574395, guid: 0dc98386c96b46b4a952a73e308a908f, type: 3}
-  itemId: 112
+  itemId: 119
   itemName: Railload
   sourcePrefabGuid: 0dc98386c96b46b4a952a73e308a908f
   sourceContentHash:
     serializedVersion: 2
-    Hash: d93207abb405060fa63568187f674728
+    Hash: 6d64a5089c100bba597cff121c27bf22
   sourceRuntimeType: Railload, Assembly-CSharp, Version=0.0.0.0, Culture=neutral,
     PublicKeyToken=null
   mapStatus:

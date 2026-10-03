@@ -817,6 +817,8 @@ public partial class TerrainGenerator : MonoBehaviour
 
     public void RegisterLiveInstallationObject(InstallationObject installationObject)
     {
+        if (installationObject is MiningMachine miner && ConvertMiningPresentation(miner, null, out _))
+        { ReleaseInstallationObject(miner); return; }
         if (installationObject is RobotArm arm && ConvertRobotArmPresentation(arm))
         { ReleaseInstallationObject(arm); return; }
         if (installationObject is Building building && RegisterDataOnlyBuildingInstallation(building))

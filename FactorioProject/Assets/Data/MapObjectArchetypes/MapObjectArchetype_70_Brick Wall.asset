@@ -12,15 +12,15 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: a4d286e989be41fe853b78a59ca3a4e8, type: 3}
   m_Name: MapObjectArchetype_70_Brick Wall
   m_EditorClassIdentifier: Assembly-CSharp::ProjectF.MapObjects.MapObjectArchetype
-  schemaVersion: 1
+  schemaVersion: 2
   itemDefinition: {fileID: 11400000, guid: 7795dfaf3b2a492cae3ffb24dfc67efb, type: 2}
   sourcePrefab: {fileID: 2276685300360839919, guid: 9b80960e4abf8cc4a901548259cc9e2b, type: 3}
-  itemId: 82
+  itemId: 86
   itemName: Brick Wall
   sourcePrefabGuid: 9b80960e4abf8cc4a901548259cc9e2b
   sourceContentHash:
     serializedVersion: 2
-    Hash: 666764d96602094cfba9a9b2b6934fd6
+    Hash: 2c49362bfe2bd63b2dbebd7008747c0f
   sourceRuntimeType: Wall, Assembly-CSharp, Version=0.0.0.0, Culture=neutral, PublicKeyToken=null
   mapStatus:
     mapSizeX: 1

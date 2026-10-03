@@ -12,15 +12,15 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: a4d286e989be41fe853b78a59ca3a4e8, type: 3}
   m_Name: MapObjectArchetype_105_Bucket
   m_EditorClassIdentifier: Assembly-CSharp::ProjectF.MapObjects.MapObjectArchetype
-  schemaVersion: 1
+  schemaVersion: 2
   itemDefinition: {fileID: 11400000, guid: 5e897bd260b82084fb272c968673a461, type: 2}
   sourcePrefab: {fileID: 3525437405879595132, guid: f2ee43aae45a6ad40af89ae6e4f8259a, type: 3}
-  itemId: 117
+  itemId: 124
   itemName: Bucket
   sourcePrefabGuid: f2ee43aae45a6ad40af89ae6e4f8259a
   sourceContentHash:
     serializedVersion: 2
-    Hash: 57dea1b994e201daf9aa80c8a7f97ae4
+    Hash: caf62f4d7a0e3805029a7f998cb67a4e
   sourceRuntimeType: Bucket, Assembly-CSharp, Version=0.0.0.0, Culture=neutral, PublicKeyToken=null
   mapStatus:
     mapSizeX: 1

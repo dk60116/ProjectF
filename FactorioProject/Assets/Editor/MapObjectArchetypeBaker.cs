@@ -16,6 +16,68 @@ namespace ProjectF.Editor.MapObjects
         private const string OutputRoot = "Assets/Data/MapObjectArchetypes";
         private const string ArchetypePropertyName = "mapObjectArchetype";
 
+        [InitializeOnLoadMethod]
+        private static void ScheduleRefresh()
+        {
+            EditorApplication.delayCall += RefreshArchetypes;
+        }
+
+        internal static void RefreshArchetypes()
+        {
+            // ItemDefinition owns identity. Refresh missing/stale derived metadata
+            // after script reload and before a build, without a menu/UI dependency.
+            if (EditorApplication.isCompiling || EditorApplication.isUpdating)
+            {
+                EditorApplication.delayCall += RefreshArchetypes;
+                return;
+            }
+            RefreshDerivedAssets();
+        }
+
+        // A build must finish preparation synchronously; delayCall could otherwise
+        // run after shader stripping and leave missing instancing variants.
+        internal static void RefreshArchetypesForBuild() => RefreshDerivedAssets();
+
+        private static void RefreshDerivedAssets()
+        {
+            EnsureFolder(OutputRoot);
+            List<ItemDefinition> definitions = FindAllMapObjectDefinitions();
+            bool changed = PrepareInstancingMaterials(definitions);
+            for (int i = 0; i < definitions.Count; i++)
+                changed |= Bake(definitions[i]) != BakeResult.Unchanged;
+            if (changed) AssetDatabase.SaveAssets();
+        }
+
+        private static bool PrepareInstancingMaterials(List<ItemDefinition> definitions)
+        {
+            bool changed = false;
+            var renderers = new List<Renderer>(32);
+            var materials = new List<Material>(4);
+            for (int i = 0; i < definitions.Count; i++)
+            {
+                MapObject source = definitions[i].mapObject;
+                renderers.Clear(); source.GetComponentsInChildren(true, renderers);
+                for (int j = 0; j < renderers.Count; j++)
+                {
+                    Renderer renderer = renderers[j];
+                    if (!(renderer is MeshRenderer || renderer is SpriteRenderer)
+                        || renderer.GetComponentInParent<MapObject>(true) != source) continue;
+                    renderer.GetSharedMaterials(materials);
+                    for (int k = 0; k < materials.Count; k++)
+                    {
+                        Material material = materials[k];
+                        if (material == null || material.shader == null || material.enableInstancing
+                            || !material.shader.keywordSpace.FindKeyword("INSTANCING_ON").isValid) continue;
+                        // StripUnused retains these variants when they are enabled on
+                        // referenced assets; a runtime-only flag is insufficient.
+                        material.enableInstancing = true;
+                        EditorUtility.SetDirty(material); changed = true;
+                    }
+                }
+            }
+            return changed;
+        }
+
         [MenuItem("Tools/ProjectF/Map Objects/Bake All Archetypes")]
         private static void BakeAllArchetypes()
         {
@@ -436,12 +498,16 @@ namespace ProjectF.Editor.MapObjects
             {
                 AnimationClip clip = clips[i];
                 int transformCurveCount = 0;
+                var transformCurves = new List<MapObjectTransformCurveDefinition>();
                 EditorCurveBinding[] curveBindings = AnimationUtility.GetCurveBindings(clip);
                 for (int bindingIndex = 0; bindingIndex < curveBindings.Length; bindingIndex++)
                 {
                     if (curveBindings[bindingIndex].type == typeof(Transform))
                     {
                         transformCurveCount++;
+                        EditorCurveBinding binding = curveBindings[bindingIndex];
+                        transformCurves.Add(new MapObjectTransformCurveDefinition(binding.path,
+                            binding.propertyName, AnimationUtility.GetEditorCurve(clip, binding)));
                     }
                 }
 
@@ -453,7 +519,8 @@ namespace ProjectF.Editor.MapObjects
                     clip.frameRate,
                     settings.loopTime,
                     transformCurveCount,
-                    objectReferenceCurveCount);
+                    objectReferenceCurveCount,
+                    transformCurves.ToArray());
             }
 
             return result;

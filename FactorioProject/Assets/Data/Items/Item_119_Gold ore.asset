@@ -15,7 +15,7 @@ MonoBehaviour:
   itemName: Gold ore
   id: 21
   mapObject: {fileID: 2667034222479840192, guid: ddf0c3374ebbfa2499713d6128c8d8a3, type: 3}
-  mapObjectArchetype: {fileID: 0}
+  mapObjectArchetype: {fileID: 11400000, guid: 69a439491802c0e42992e4a94e17a0b2, type: 2}
   useMapColor: 0
   mapColor: {r: 1, g: 1, b: 1, a: 1}
   mapMarkerSize: 1

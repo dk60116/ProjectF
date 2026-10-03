@@ -7,7 +7,7 @@ namespace ProjectF.MapObjects
 {
     /// <summary>
     /// Synchronizes installation handles into one presentation host GameObject per item type.
-    /// Live entities can still provide interaction shells; data-only entities are rendered
+    /// Live model submission belongs to InstallationBatchRenderer; data-only entities are rendered
     /// directly from their authoritative record without creating a per-entity GameObject.
     /// </summary>
     [DisallowMultipleComponent, DefaultExecutionOrder(1001)]
@@ -16,7 +16,6 @@ namespace ProjectF.MapObjects
         [SerializeField, Min(1f)]
         private float batchCellSize = 16f;
 
-        private readonly List<InstallationObject> activeInstallations = new List<InstallationObject>(256);
         private readonly List<VirtualObjectRecord> dataOnlyInstallations = new List<VirtualObjectRecord>(256);
         private readonly Dictionary<int, StaticMapObjectTypeHost> hostsByItemId =
             new Dictionary<int, StaticMapObjectTypeHost>();
@@ -29,10 +28,8 @@ namespace ProjectF.MapObjects
         private ItemManager itemManager;
         private Camera mainCamera;
         private int cachedInstallationVersion = -1;
-        private int cachedActiveInstanceVersion = -1;
         private int synchronizationCount;
         private int lastSynchronizationFrame = -1;
-        private int lastSynchronizedActiveInstallationCount;
         private int lastSynchronizedDataOnlyInstallationCount;
         internal long BenchmarkSyncDone { get; private set; }
         internal long BenchmarkSyncTotal { get; private set; }
@@ -42,7 +39,6 @@ namespace ProjectF.MapObjects
             ResolveDependencies();
             if (virtualWorld == null || itemManager == null) yield break;
             int installationVersion = virtualWorld.InstallationVersion;
-            int activeVersion = InstallationObject.StaticRenderActiveInstanceVersion;
             var work = SynchronizeHostsCore(true);
             bool completed = false;
             try
@@ -50,7 +46,6 @@ namespace ProjectF.MapObjects
                 while (work.MoveNext()) yield return null;
                 completed = true;
                 cachedInstallationVersion = installationVersion;
-                cachedActiveInstanceVersion = activeVersion;
             }
             finally
             {
@@ -96,7 +91,6 @@ namespace ProjectF.MapObjects
         public int LastBatchRendererGroupMatrixCount => SumHostValue(HostValue.BatchRendererGroupMatrixCount);
         public int SynchronizationCount => synchronizationCount;
         public int LastSynchronizationFrame => lastSynchronizationFrame;
-        public int LastSynchronizedActiveInstallationCount => lastSynchronizedActiveInstallationCount;
         public int LastSynchronizedDataOnlyInstallationCount => lastSynchronizedDataOnlyInstallationCount;
 
         public void Configure(VirtualObjectWorld world, ItemManager manager)
@@ -105,16 +99,6 @@ namespace ProjectF.MapObjects
             virtualWorld = world;
             itemManager = manager;
             InvalidateSyncVersions();
-        }
-
-        public bool TryGetTypeHost(int itemId, out StaticMapObjectTypeHost host)
-        {
-            return hostsByItemId.TryGetValue(itemId, out host) && host != null;
-        }
-
-        public bool SupportsItemType(int itemId)
-        {
-            return TryGetSupportedArchetype(itemId, out _);
         }
 
         public void SynchronizeForWorldPresentation()
@@ -204,9 +188,7 @@ namespace ProjectF.MapObjects
         private void SynchronizeHostsIfNeeded()
         {
             int installationVersion = virtualWorld.InstallationVersion;
-            int activeVersion = InstallationObject.StaticRenderActiveInstanceVersion;
-            if (cachedInstallationVersion == installationVersion
-                && cachedActiveInstanceVersion == activeVersion)
+            if (cachedInstallationVersion == installationVersion)
             {
                 return;
             }
@@ -219,7 +201,6 @@ namespace ProjectF.MapObjects
                 SynchronizeHosts();
             }
             cachedInstallationVersion = installationVersion;
-            cachedActiveInstanceVersion = activeVersion;
         }
 
         private void SynchronizeHosts()
@@ -239,43 +220,10 @@ namespace ProjectF.MapObjects
                 hostScratch[i].BeginSynchronization();
             }
 
-            InstallationObject.CopyActiveInstances(activeInstallations);
             virtualWorld.CopyInstallationRecords(dataOnlyInstallations, true);
             BenchmarkSyncDone = 0;
-            BenchmarkSyncTotal = activeInstallations.Count + (long)dataOnlyInstallations.Count;
-            lastSynchronizedActiveInstallationCount = activeInstallations.Count;
+            BenchmarkSyncTotal = dataOnlyInstallations.Count;
             rejectedTypeIds.Clear();
-            for (int i = 0; i < activeInstallations.Count; i++)
-            {
-                BenchmarkSyncDone++;
-                if (spreadAcrossFrames && BenchmarkLayout.IsWorkSliceExpired(started,
-                    System.Diagnostics.Stopwatch.GetTimestamp(), System.Diagnostics.Stopwatch.Frequency))
-                { yield return null; started = System.Diagnostics.Stopwatch.GetTimestamp(); }
-                InstallationObject installationObject = activeInstallations[i];
-                MapObjectHandle handle = installationObject != null
-                    ? installationObject.RuntimeMapObjectHandle
-                    : default;
-                if (!handle.IsValid
-                    || !installationObject.isActiveAndEnabled
-                    || !virtualWorld.IsHandleAlive(handle)
-                    || rejectedTypeIds.Contains(handle.TypeId))
-                {
-                    continue;
-                }
-
-                if (!TryGetOrCreateHost(handle.TypeId, out StaticMapObjectTypeHost host))
-                {
-                    rejectedTypeIds.Add(handle.TypeId);
-                    continue;
-                }
-
-                if (!host.SynchronizeInstance(installationObject, handle))
-                {
-                    host.AbortSynchronization();
-                    rejectedTypeIds.Add(handle.TypeId);
-                }
-            }
-
             // Data-only entities have no source GameObject to enumerate. Their authoritative
             // pose and generation-safe handle are sufficient to build the presentation batch.
             lastSynchronizedDataOnlyInstallationCount = dataOnlyInstallations.Count;
@@ -289,6 +237,8 @@ namespace ProjectF.MapObjects
                 if (record == null
                     || record.kind != VirtualObjectKind.Installation
                     || record.HasAttachedView
+                    || record.installationState != null && MiningWorld.Current != null
+                        && MiningWorld.Current.TryGet(BlockStateStore.GetInstallationStorageKey(record.installationState), out _)
                     || !record.mapObjectHandle.IsValid
                     || rejectedTypeIds.Contains(record.itemId))
                 {
@@ -409,7 +359,6 @@ namespace ProjectF.MapObjects
             hostScratch.Clear();
             emptyHostItemIds.Clear();
             rejectedTypeIds.Clear();
-            activeInstallations.Clear();
             dataOnlyInstallations.Clear();
         }
 
@@ -494,7 +443,6 @@ namespace ProjectF.MapObjects
         private void InvalidateSyncVersions()
         {
             cachedInstallationVersion = -1;
-            cachedActiveInstanceVersion = -1;
         }
 
         private static string BuildHostName(int itemId, string itemName)

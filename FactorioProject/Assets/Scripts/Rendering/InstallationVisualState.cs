@@ -11,6 +11,7 @@ namespace ProjectF.Rendering
             internal Animator Animator;
             internal bool Suspended;
             internal bool KeepState;
+            internal bool WorkRequested = true;
         }
 
         private sealed class ParticleState
@@ -202,26 +203,7 @@ namespace ProjectF.Rendering
             for (int i = 0; i < animators.Count; i++)
             {
                 AnimatorState state = animators[i];
-                Animator animator = state.Animator;
-                if (animator == null)
-                    continue;
-                if (!visible && animator.enabled)
-                {
-                    state.KeepState = animator.keepAnimatorStateOnDisable;
-                    animator.keepAnimatorStateOnDisable = true;
-                    if (animator.gameObject.activeInHierarchy && !animator.isInitialized)
-                        animator.Update(0f);
-                    animator.enabled = false;
-                    state.Suspended = true;
-                }
-                else if (visible && state.Suspended)
-                {
-                    animator.enabled = true;
-                    animator.keepAnimatorStateOnDisable = state.KeepState;
-                    state.Suspended = false;
-                    if (animator.gameObject.activeInHierarchy)
-                        animator.Update(0f);
-                }
+                ApplyAnimator(state);
             }
             for (int i = 0; i < particles.Count; i++)
             {
@@ -235,6 +217,40 @@ namespace ProjectF.Rendering
                     state.Effect.Stop(true, ParticleSystemStopBehavior.StopEmittingAndClear);
                     state.Suppressed = true;
                 }
+            }
+        }
+
+        internal void SetWorkAnimatorActive(Animator animator, bool active)
+        {
+            Capture();
+            for (int i = 0; i < animators.Count; i++)
+            {
+                AnimatorState state = animators[i];
+                if (state.Animator != animator) continue;
+                state.WorkRequested = active;
+                ApplyAnimator(state);
+                return;
+            }
+        }
+
+        private void ApplyAnimator(AnimatorState state)
+        {
+            Animator animator = state.Animator;
+            if (animator == null) return;
+            if ((!Visible || !state.WorkRequested) && animator.enabled)
+            {
+                state.KeepState = animator.keepAnimatorStateOnDisable;
+                animator.keepAnimatorStateOnDisable = true;
+                if (animator.gameObject.activeInHierarchy && !animator.isInitialized) animator.Update(0f);
+                animator.enabled = false;
+                state.Suspended = true;
+            }
+            else if (Visible && state.WorkRequested && state.Suspended)
+            {
+                animator.enabled = true;
+                animator.keepAnimatorStateOnDisable = state.KeepState;
+                state.Suspended = false;
+                if (animator.gameObject.activeInHierarchy) animator.Update(0f);
             }
         }
 

@@ -15,7 +15,7 @@ MonoBehaviour:
   itemName: Steel Funance
   id: 42
   mapObject: {fileID: 3843491245406909261, guid: 2089176be5a3410428d471926164db6c, type: 3}
-  mapObjectArchetype: {fileID: 0}
+  mapObjectArchetype: {fileID: 11400000, guid: 1f2dcf8599939a14aad4072672002045, type: 2}
   useMapColor: 1
   mapColor: {r: 0.72156864, g: 0.5254902, b: 0.043137256, a: 1}
   mapMarkerSize: 1

@@ -12,15 +12,15 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: a4d286e989be41fe853b78a59ca3a4e8, type: 3}
   m_Name: MapObjectArchetype_38_Concrete Utility pole
   m_EditorClassIdentifier: Assembly-CSharp::ProjectF.MapObjects.MapObjectArchetype
-  schemaVersion: 1
+  schemaVersion: 2
   itemDefinition: {fileID: 11400000, guid: 8780f845ccb846a4197150948b3297b2, type: 2}
   sourcePrefab: {fileID: 2570451748998091923, guid: db1c88c08b1b0f24a9ffca7c01daac56, type: 3}
-  itemId: 46
+  itemId: 50
   itemName: Concrete Utility pole
   sourcePrefabGuid: db1c88c08b1b0f24a9ffca7c01daac56
   sourceContentHash:
     serializedVersion: 2
-    Hash: 4c21c3cc62a341587facd74844170c5b
+    Hash: 806e898d95319ee98731925ea684b84e
   sourceRuntimeType: UtilityPole, Assembly-CSharp, Version=0.0.0.0, Culture=neutral,
     PublicKeyToken=null
   mapStatus:

@@ -16,6 +16,8 @@ namespace UnityEngine
         public Matrix4x4 cullingMatrix { get => customCullingMatrix ?? AutomaticCullingMatrix; set => customCullingMatrix = value; }
         public int cullingMask = -1;
         public bool useOcclusionCulling = true;
+        public bool orthographic = true;
+        public float fieldOfView = 60, orthographicSize = 8, farClipPlane = 200;
         public CameraType cameraType = CameraType.Game;
         public static event Action<Camera> onPreCull, onPostRender;
         public void ResetCullingMatrix() => customCullingMatrix = null;

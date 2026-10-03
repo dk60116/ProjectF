@@ -12,15 +12,15 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: a4d286e989be41fe853b78a59ca3a4e8, type: 3}
   m_Name: MapObjectArchetype_65_Wooden Fence
   m_EditorClassIdentifier: Assembly-CSharp::ProjectF.MapObjects.MapObjectArchetype
-  schemaVersion: 1
+  schemaVersion: 2
   itemDefinition: {fileID: 11400000, guid: 09ddda540280b014fadbf0bbfc3394d7, type: 2}
   sourcePrefab: {fileID: 2276685300360839919, guid: a7060f381d0a25d4ab7f902bf30be7ef, type: 3}
-  itemId: 77
+  itemId: 81
   itemName: Wooden Fence
   sourcePrefabGuid: a7060f381d0a25d4ab7f902bf30be7ef
   sourceContentHash:
     serializedVersion: 2
-    Hash: 15949d857a55bb5ce0ce3b575531ee2a
+    Hash: db8ace9988f8d8b3eb3aa9174480c43e
   sourceRuntimeType: Wall, Assembly-CSharp, Version=0.0.0.0, Culture=neutral, PublicKeyToken=null
   mapStatus:
     mapSizeX: 1

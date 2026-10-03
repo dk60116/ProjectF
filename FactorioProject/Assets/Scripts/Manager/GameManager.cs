@@ -139,6 +139,8 @@ public class GameManager : MonoBehaviour
         }
 
         staticMapObjectBatchRenderer = GetComponent<StaticMapObjectBatchRenderer>();
+        if (GetComponent<ProjectF.Rendering.InstallationBatchRenderer>() == null)
+            gameObject.AddComponent<ProjectF.Rendering.InstallationBatchRenderer>();
         if (staticMapObjectBatchRenderer == null)
         {
             staticMapObjectBatchRenderer = gameObject.AddComponent<StaticMapObjectBatchRenderer>();

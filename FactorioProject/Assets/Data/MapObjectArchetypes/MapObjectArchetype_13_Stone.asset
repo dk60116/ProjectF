@@ -12,15 +12,15 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: a4d286e989be41fe853b78a59ca3a4e8, type: 3}
   m_Name: MapObjectArchetype_13_Stone
   m_EditorClassIdentifier: Assembly-CSharp::ProjectF.MapObjects.MapObjectArchetype
-  schemaVersion: 1
+  schemaVersion: 2
   itemDefinition: {fileID: 11400000, guid: fc1cba8967b6adc48867e456639cad4a, type: 2}
   sourcePrefab: {fileID: 5150821752848007095, guid: 124d7ac73b9d32a4d9ea2cac71121101, type: 3}
-  itemId: 16
+  itemId: 17
   itemName: Stone
   sourcePrefabGuid: 124d7ac73b9d32a4d9ea2cac71121101
   sourceContentHash:
     serializedVersion: 2
-    Hash: c72e5d50760227f240691d863e7e32a5
+    Hash: 04d1b5a10a304243414327774025fb2c
   sourceRuntimeType: Resource, Assembly-CSharp, Version=0.0.0.0, Culture=neutral,
     PublicKeyToken=null
   mapStatus:
