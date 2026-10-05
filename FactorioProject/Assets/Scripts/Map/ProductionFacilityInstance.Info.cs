@@ -1,5 +1,6 @@
-﻿using System;
+using System;
 using UnityEngine;
+using ProjectF.MapObjects;
 
 public sealed partial class ProductionFacilityInstance
 {
@@ -43,6 +44,8 @@ public sealed partial class ProductionFacilityInstance
         var recipe = InfoRecipe;
         if (recipe == null || InputOutputModule.ResolveItemDefinition(recipe.OutputId)?.isFluid != true) return false;
         item = recipe.OutputId; rate = recipe.OutputRate; capacity = rate * recipe.Duration;
+        if (Template.IsOilDrill)
+        { stored = DeterministicSimulationUnits.ToFloat(Math.Max(0, Io.productionOutputFluidUnits)); return true; }
         stored = IsWaitingForOutput ? Io.productionOutputFluidUnits < 0 ? capacity : DeterministicSimulationUnits.ToFloat(Io.productionOutputFluidUnits) : 0;
         return true;
     }
@@ -74,23 +77,9 @@ public sealed partial class ProductionFacilityInstance
     }
     public bool TryGetFuelInputInfo(out int item, out int count, out int capacity, out int burnEnergy)
     {
+        if (HasFuelRequirement) return FacilityFuel.GetInputInfo(this, out item, out count, out capacity, out burnEnergy);
         item = -1; count = capacity = burnEnergy = 0;
-        if (!HasFuelRequirement || Io.inputEnergyCoordinates.Count == 0) return false;
-        double totalEnergy = 0;
-        for (int i = 0; i < Io.inputEnergyCoordinates.Count; i++)
-        {
-            var coordinate = Io.inputEnergyCoordinates[i];
-            bool loaded = World.Terrain.TryGetLoadedBlock(coordinate, out var block) && !World.Terrain.IsFloorObjectCoordinateVirtualized(coordinate);
-            int current = loaded ? block.GetInputAreaCenterItemId() : World.Store.GetSavedCenterTopItemId(coordinate);
-            var fuel = InputOutputModule.ResolveItemDefinition(current);
-            int stored = loaded ? block.GetInputAreaCenterItemCount(current) : World.Store.GetSavedCenterItemCount(coordinate, current);
-            if (item < 0 && current >= 0) item = current;
-            if (current == item) count = (int)Math.Min(int.MaxValue, (long)count + stored);
-            capacity = (int)Math.Min(int.MaxValue, (long)capacity + (loaded ? block.GetInputAreaCenterCapacity(current) : Prototype.RuntimeAreaMaxObjects));
-            if (fuel?.energyType == ItemDefinition.EnergyType.Burn) totalEnergy += stored * (double)fuel.energyAmount;
-        }
-        burnEnergy = (int)Math.Min(int.MaxValue, Math.Max(0, totalEnergy));
-        return true;
+        return false;
     }
     public bool TryGetObjectInfoProductionOutput(out int item, out int count, out int capacity)
     {

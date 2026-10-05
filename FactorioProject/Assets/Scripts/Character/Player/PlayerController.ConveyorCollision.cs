@@ -54,20 +54,6 @@ public partial class PlayerController
                     blocked = true;
                 }
 
-                if (hasCapsule && conveyorWorld != null
-                    && conveyorWorld.TryGetAtCoordinate(coordinate, out ConveyorRuntimeRecord corner)
-                    && corner.TrySweepCornerPlayer(coordinate, start, flatDirection, nearestDistance, radius,
-                        playerMinY, playerMaxY, collisionMask, out float cornerDistance, out Vector2 cornerNormal))
-                {
-                    nearestDistance = cornerDistance;
-                    blockingHit = new RaycastHit
-                    {
-                        distance = cornerDistance,
-                        normal = new Vector3(cornerNormal.x, 0f, cornerNormal.y)
-                    };
-                    blocked = true;
-                }
-
                 ConveyorRuntimeRecord dataOnlyBelt = null;
                 ConvayorBelt2F sceneBelt = null;
                 Vector2Int flow;

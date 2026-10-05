@@ -1,11 +1,12 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using UnityEngine;
 using ProjectF.MapObjects;
 using ProjectF.Simulation;
+using ProjectF.Benchmark;
 
 public sealed partial class ProductionFacilityInstance : IMapObjectTarget, IDataElectricConsumer,
-    IMapObjectUpdateTick, IMapObjectUpdateTickDeadline, IDataItemProducer, IProductionTargetSelection, IProductionFacilityInfo
+    IMapObjectUpdateTick, IMapObjectUpdateTickDeadline, IMapObjectSimulationIdentity, IDataItemProducer, IDataFluidProducer, IProductionTargetSelection, IProductionFacilityInfo
 {
     internal readonly ProductionWorld World;
     internal readonly int Index;
@@ -49,16 +50,18 @@ public sealed partial class ProductionFacilityInstance : IMapObjectTarget, IData
     InputOutputModule IDataItemProducer.OutputPrototype => Prototype;
     internal bool PlacementPresentationSuppressed { get; set; }
     internal float PlacementPresentationScale { get; set; } = 1f;
-    public bool HasActiveWork => IsRuntimeActive && Data.Production.Active;
-    public bool IsWaitingForOutput => HasActiveWork && Data.Production.WaitingForOutput;
+    public bool HasActiveWork => IsRuntimeActive && (Template.IsOilDrill ? Data.HasTarget || Io.productionOutputFluidUnits > 0 : Data.Production.Active);
+    public bool IsWaitingForOutput => Template.IsOilDrill ? IsRuntimeActive && OilWaitingForOutput : HasActiveWork && Data.Production.WaitingForOutput;
     public bool IsWorking => HasActiveWork && !IsWaitingForOutput && Data.SupplyRatio > 0;
-    public int OutputItemId => HasActiveWork ? Data.Production.OutputItemId : SelectedRecipe?.OutputId ?? -1;
+    public int OutputItemId => Template.IsOilDrill ? SelectedRecipe?.OutputId ?? -1
+        : HasActiveWork ? Data.Production.OutputItemId : SelectedRecipe?.OutputId ?? -1;
     internal ProductionRenderTemplate.Recipe ActiveRecipe => Data.Production.Active && Data.Production.RecipeIndex >= 0
         && Data.Production.RecipeIndex < Template.Recipes.Length ? Template.Recipes[Data.Production.RecipeIndex] : null;
     internal ProductionRenderTemplate.Recipe SelectedRecipe
     {
         get
         {
+            if (Template.IsOilDrill) return Template.Recipes.Length > 0 ? Template.Recipes[0] : null;
             if (!(Prototype is ProductionMachine)) return ResolveAutomaticRecipe(availableOnly: true);
             if (!Placement.itemFilterMaskInitialized) return null;
             for (int i = 0; i < Template.Recipes.Length; i++)
@@ -68,7 +71,7 @@ public sealed partial class ProductionFacilityInstance : IMapObjectTarget, IData
     }
     // Automatic modules select recipes from their inputs; only ProductionMachine has a target filter.
     internal bool IsRecipeAvailable(ProductionRenderTemplate.Recipe recipe) =>
-        ProjectF.Benchmark.BenchmarkRuntime.ForceWorking || recipe.IsManualAvailable
+        Template.IsOilDrill || ProjectF.Benchmark.BenchmarkRuntime.ForceWorking || recipe.IsManualAvailable
         && (!(Prototype is ProductionMachine) || Placement.itemFilterMaskInitialized && IsItemFilterEnabled(recipe.OutputId, 0));
     private ProductionRenderTemplate.Recipe ResolveAutomaticRecipe(bool availableOnly, bool fallbackToFirstRecipe = true)
     {
@@ -101,6 +104,7 @@ public sealed partial class ProductionFacilityInstance : IMapObjectTarget, IData
         get
         {
             if (!HasActiveWork) return 0;
+            if (Template.IsOilDrill) return OilWorkProgress;
             var snapshot = Data.Production;
             if (!snapshot.WaitingForOutput) AdvanceSnapshot(ref snapshot, MapObjectTickManager.CurrentSimulationTick - Data.SampleTick, Data.SupplyRatio);
             return snapshot.WaitingForOutput ? 1f : Data.CompleteEnergy > 0
@@ -118,6 +122,7 @@ public sealed partial class ProductionFacilityInstance : IMapObjectTarget, IData
             long now = MapObjectTickManager.CurrentSimulationTick;
             if (!IsRuntimeActive) return long.MaxValue;
             if (Data.NeedsEvaluation) return now + 1;
+            if (Template.IsOilDrill) return Data.HasTarget || Io.productionOutputFluidUnits > 0 ? now + 1 : long.MaxValue;
             long next = long.MaxValue;
             if (IsWorking)
             {
@@ -192,13 +197,15 @@ public sealed partial class ProductionFacilityInstance : IMapObjectTarget, IData
             if (Data.Production.RecipeIndex >= 0) SetBudget(Template.Recipes[Data.Production.RecipeIndex]);
         }
         if (Data.Production.Active && Data.Production.RecipeIndex < 0) Data.Production.Clear();
-        // Upgrade legacy single-fuel snapshots once; all subsequent changes mutate the store-owned lists.
-        if (Io.storedEnergyTypes.Count == 0 && Io.storedEnergy > 0)
-            for (int i = 0; i < Template.Definition.UseEnergyRequirementCount; i++)
-                if (Template.Definition.TryGetUseEnergyRequirement(i, out var e) && e.energyType != ItemDefinition.EnergyType.None
-                    && e.energyType != ItemDefinition.EnergyType.Electricity)
-                { Io.storedEnergyTypes.Add((int)e.energyType); Io.storedEnergyUnitsByType.Add(DeterministicSimulationUnits.FromFloat(Io.storedEnergy));
-                    Io.energyGaugeCapacityUnitsByType.Add(DeterministicSimulationUnits.FromFloat(Io.energyGaugeCapacity)); break; }
+        FacilityFuel.RestoreLegacy(Io, Template.Definition);
+        if (Template.IsOilDrill)
+        {
+            // Oil progress and harvested-but-undelivered oil have distinct save fields.
+            OilTargetCoordinate = OilDrillingMachine.ResolveOilTargetCoordinate(AnchorCoordinate, Placement.quarterTurns);
+            Data.Production.Clear();
+            Data.Oil.ProgressUnits = Io.ResolveOilDrillingProgressUnits();
+            Io.productionOutputFluidUnits = Math.Max(0, Io.productionOutputFluidUnits);
+        }
     }
     public bool IsItemFilterEnabled(int itemId, int count) => MapObject.IsItemAllowedByFilterMask(itemId, Placement.itemFilterMaskInitialized, Placement.itemFilterMaskWords);
     public void SetItemFilterEnabled(int itemId, int count, bool enabled)
@@ -227,8 +234,11 @@ public sealed partial class ProductionFacilityInstance : IMapObjectTarget, IData
     public void WakeForElectricPowerChange() => Wake();
     public void Wake()
     {
-        if (!IsRuntimeActive || Data.NeedsEvaluation) return;
+        if (!IsRuntimeActive) return;
+        RefreshBenchmarkInputs();
+        if (Data.NeedsEvaluation) return;
         Sample(); Data.NeedsEvaluation = true;
+        if (Template.IsOilDrill) { World.OilBatch.Wake(this); return; }
         if (FacilitySimulationWorld.IsScheduled(this)) FacilitySimulationWorld.RefreshSchedule(this);
         else FacilitySimulationWorld.SetScheduled(this, true);
     }
@@ -242,10 +252,12 @@ public sealed partial class ProductionFacilityInstance : IMapObjectTarget, IData
     }
     private void Sample()
     {
-        long now = MapObjectTickManager.CurrentSimulationTick, elapsed = Math.Max(0, now - Data.SampleTick);
-        Data.SampleTick = now;
-        if (elapsed == 0 || !Data.HasTarget || Data.SupplyRatio <= 0) return;
-        float ratio = Data.SupplyRatio;
+        ref var state = ref Data;
+        if (ProjectF.Benchmark.BenchmarkRuntime.ForceWorking) BenchmarkInputSupply.SampleEnergy(this, ConsumeWorldPosition, state.HasTarget && state.SupplyRatio > 0);
+        long now = MapObjectTickManager.CurrentSimulationTick, elapsed = Math.Max(0, now - state.SampleTick);
+        state.SampleTick = now;
+        if (elapsed == 0 || !state.HasTarget || state.SupplyRatio <= 0) return;
+        float ratio = state.SupplyRatio;
         int typeMask = 0;
         for (int i = 0; !ProjectF.Benchmark.BenchmarkRuntime.ForceWorking && i < Template.Definition.UseEnergyRequirementCount; i++)
         {
@@ -259,18 +271,28 @@ public sealed partial class ProductionFacilityInstance : IMapObjectTarget, IData
             long spent = SpendFuel(type, requested);
             ratio = Math.Min(ratio, (float)((double)spent / requested));
         }
-        if (Data.Production.Active && !Data.Production.WaitingForOutput)
+        if (Template.IsOilDrill)
         {
-            bool wasOutputting = Data.Production.WaitingForOutput;
-            AdvanceSnapshot(ref Data.Production, elapsed, ratio);
-            if (!wasOutputting && Data.Production.WaitingForOutput) World.MarkDisplayDirty(this);
-            Data.AnimationPhase += elapsed * (double)SimulationTickWorld.FixedSimulationDeltaSeconds * ratio;
+            if (!OilFastForced)
+            {
+                if (ratio == state.SupplyRatio) state.Oil.AdvanceUnits(elapsed, state.OilUnitsPerTick);
+                else state.Oil.Advance(elapsed, Template.OilLitersPerSecond * state.OilRetention, ratio);
+            }
+            state.AnimationPhase += elapsed * (double)SimulationTickWorld.FixedSimulationDeltaSeconds * ratio;
+        }
+        else if (state.Production.Active && !state.Production.WaitingForOutput)
+        {
+            bool wasOutputting = state.Production.WaitingForOutput;
+            AdvanceSnapshot(ref state.Production, elapsed, ratio);
+            if (!wasOutputting && state.Production.WaitingForOutput) World.MarkDisplayDirty(this);
+            state.AnimationPhase += elapsed * (double)SimulationTickWorld.FixedSimulationDeltaSeconds * ratio;
         }
     }
     public void ManagedUpdateTick(float ignoredDelta)
     {
-        if (!IsRuntimeActive) { FacilitySimulationWorld.Unregister(this); return; }
+        if (!IsRuntimeActive) { if (Template.IsOilDrill) World.OilBatch.Unregister(this); else FacilitySimulationWorld.Unregister(this); return; }
         World.ProcessedUpdates++; Sample(); Data.NeedsEvaluation = false;
+        if (Template.IsOilDrill) { ApplyOilDrillingTick(); return; }
         bool benchmark = ProjectF.Benchmark.BenchmarkRuntime.ForceWorking;
         var recipe = ActiveRecipe ?? SelectedRecipe;
         if (benchmark && recipe == null && Template.Recipes.Length > 0) recipe = Template.Recipes[0];
@@ -293,10 +315,9 @@ public sealed partial class ProductionFacilityInstance : IMapObjectTarget, IData
             for (int i = 0; i < Template.Recipes.Length; i++)
             {
                 var candidate = Template.Recipes[i];
-                if (!benchmark && (!IsRecipeAvailable(candidate) || Prototype is ProductionMachine
-                    && !ReferenceEquals(candidate, recipe))) continue;
+                if (Prototype is ProductionMachine && !ReferenceEquals(candidate, recipe) || !benchmark && !IsRecipeAvailable(candidate)) continue;
                 if (!benchmark && !HasInputs(candidate)) continue;
-                if (!benchmark && !ConsumeInputs(candidate)) continue;
+                if (!ConsumeInputs(candidate)) continue;
                 SetBudget(candidate);
                 Data.Production.Begin(i, candidate.OutputId, candidate.OutputCount, Data.DurationTicks);
                 Data.SampleTick = MapObjectTickManager.CurrentSimulationTick;
@@ -317,9 +338,10 @@ public sealed partial class ProductionFacilityInstance : IMapObjectTarget, IData
         // A synchronous stack notification may have queued a wake during this evaluation.
         // Clear that pending flag when sleeping so the next real input/power change can wake us.
         Data.NeedsEvaluation = false;
-        FacilitySimulationWorld.SetScheduled(this, false);
+        if (Template.IsOilDrill) World.OilBatch.Sleep(this); else FacilitySimulationWorld.SetScheduled(this, false);
     }
-    private void Reschedule(bool poll) { if (poll) FacilitySimulationWorld.RefreshSchedule(this); else Sleep(); }
+    private void Reschedule(bool poll)
+    { if (!poll) Sleep(); else if (Template.IsOilDrill) World.OilBatch.KeepScheduled(this); else FacilitySimulationWorld.RefreshSchedule(this); }
     private float ResolveSupplyRatio(bool benchmark)
     {
         if (benchmark) return 1;
@@ -331,53 +353,13 @@ public sealed partial class ProductionFacilityInstance : IMapObjectTarget, IData
                 && Fuel(e.energyType) <= 0 && !RefillFuel(e.energyType)) return 0;
         return ratio;
     }
-    private int FuelIndex(ItemDefinition.EnergyType type) => Io.storedEnergyTypes.IndexOf((int)type);
-    private long Fuel(ItemDefinition.EnergyType type) { int index = FuelIndex(type); return index < 0 ? 0 : Io.storedEnergyUnitsByType[index]; }
-    private bool RefillFuel(ItemDefinition.EnergyType type)
-    {
-        for (int i = 0; i < Io.inputEnergyCoordinates.Count; i++)
-        {
-            var coordinate = Io.inputEnergyCoordinates[i];
-            int item = World.Terrain.TryGetLoadedBlock(coordinate, out var block) && !World.Terrain.IsFloorObjectCoordinateVirtualized(coordinate)
-                ? block.GetInputAreaCenterItemId() : World.Store.GetSavedCenterTopItemId(coordinate);
-            var definition = InputOutputModule.ResolveItemDefinition(item);
-            if (definition == null || definition.energyType != type || definition.energyAmount <= 0 || definition.isFluid) continue;
-            if (ConsumeAt(coordinate, item, 1) != 1) continue;
-            int index = FuelIndex(type);
-            if (index < 0) { index = Io.storedEnergyTypes.Count; Io.storedEnergyTypes.Add((int)type);
-                Io.storedEnergyUnitsByType.Add(0); Io.energyGaugeCapacityUnitsByType.Add(0); }
-            long units = DeterministicSimulationUnits.FromFloat(definition.energyAmount);
-            Io.storedEnergyUnitsByType[index] += units; Io.energyGaugeCapacityUnitsByType[index] = units;
-            return true;
-        }
-        return false;
-    }
-    private long SpendFuel(ItemDefinition.EnergyType type, long requested)
-    {
-        long remaining = requested;
-        while (remaining > 0)
-        {
-            if (Fuel(type) <= 0 && !RefillFuel(type)) break;
-            int index = FuelIndex(type); long spent = Math.Min(remaining, Io.storedEnergyUnitsByType[index]);
-            Io.storedEnergyUnitsByType[index] -= spent; remaining -= spent;
-        }
-        return requested - remaining;
-    }
-    internal int CountAt(Vector2Int coordinate, int item)
-    {
-        if (!World.Terrain.TryGetLoadedBlock(coordinate, out var block) || World.Terrain.IsFloorObjectCoordinateVirtualized(coordinate))
-            return World.Store.GetSavedCenterExtractableItemCount(coordinate, item);
-        return block.Type == Block.BlockType.Ground ? Math.Max(0, block.GetInputAreaCenterItemCount(item)
-            - (block.MapObject is BoxObject box ? box.MinimumRetainedItemCount : 0)) : 0;
-    }
-    private int ConsumeAt(Vector2Int coordinate, int item, int count)
-    {
-        count = Math.Min(count, CountAt(coordinate, item));
-        if (count <= 0) return 0;
-        if (!World.Terrain.TryGetLoadedBlock(coordinate, out var block) || World.Terrain.IsFloorObjectCoordinateVirtualized(coordinate))
-            return World.Store.RemoveSavedCenterItems(coordinate, item, count);
-        return block.ConsumeInputAreaCenterObjectsAnimated(item, count, ConsumeWorldPosition, Template.InputConsumeMoveInterval);
-    }
+    private long Fuel(ItemDefinition.EnergyType type) => FacilityFuel.Stored(Io, type);
+    private bool RefillFuel(ItemDefinition.EnergyType type) => FacilityFuel.Refill(this, type, ConsumeWorldPosition, Template.InputConsumeMoveInterval);
+    private long SpendFuel(ItemDefinition.EnergyType type, long requested) => FacilityFuel.Spend(this, type, requested, ConsumeWorldPosition, Template.InputConsumeMoveInterval);
+    internal int CountAt(Vector2Int coordinate, int item) => FacilityFuel.CountAt(this, coordinate, item);
+    private int ConsumeAt(Vector2Int coordinate, int item, int count) => ProjectF.Benchmark.BenchmarkRuntime.ForceWorking
+        ? BenchmarkInputSupply.Consume(this, World.Terrain, coordinate, item, count, ConsumeWorldPosition, Template.InputConsumeMoveInterval)
+        : FacilityFuel.ConsumeAt(this, coordinate, item, count, ConsumeWorldPosition, Template.InputConsumeMoveInterval);
     internal int IngredientCount(int item)
     {
         int count = 0;
@@ -416,6 +398,19 @@ public sealed partial class ProductionFacilityInstance : IMapObjectTarget, IData
     }
     private bool ConsumeInputs(ProductionRenderTemplate.Recipe recipe)
     {
+        if (ProjectF.Benchmark.BenchmarkRuntime.ForceWorking)
+        {
+            RefreshBenchmarkInputs();
+            for (int i = 0; i < recipe.Inputs.Count; i++)
+            {
+                var input = recipe.Inputs[i];
+                if (!ProjectF.Benchmark.BenchmarkRuntime.IsPortableItem(InputOutputModule.ResolveItemDefinition(input.itemId))) continue;
+                for (int j = 0; j < Io.inputItemAreas.Count; j++)
+                    if (Io.inputItemAreas[j].itemId < 0 || Io.inputItemAreas[j].itemId == input.itemId)
+                    { ConsumeAt(Io.inputItemAreas[j].coordinate, input.itemId, input.count); break; }
+            }
+            return true;
+        }
         for (int i = 0; i < recipe.Inputs.Count; i++)
         {
             var ingredient = recipe.Inputs[i];
@@ -461,10 +456,12 @@ public sealed partial class ProductionFacilityInstance : IMapObjectTarget, IData
     }
     internal bool AppendOutputItemIds(ISet<int> items)
     { var recipe = ActiveRecipe ?? SelectedRecipe; return recipe != null && InputOutputModule.ResolveItemDefinition(recipe.OutputId)?.isFluid != true && items.Add(recipe.OutputId); }
-    internal float GetFluidPressure(int fluid) => IsWaitingForOutput && OutputItemId == fluid
-        && Io.productionOutputFluidUnits != 0 ? ActiveRecipe?.OutputRate ?? 0 : 0;
+    public float GetFluidPressure(int fluid) => !IsRuntimeActive || OutputItemId != fluid ? 0
+        : Template.IsOilDrill ? IsWorking ? Template.OilLitersPerSecond * Data.SupplyRatio : 0
+        : IsWaitingForOutput && Io.productionOutputFluidUnits != 0 ? ActiveRecipe?.OutputRate ?? 0 : 0;
     public void GetObjectInfoStatus(out string text, out bool working, out bool warning)
     {
+        if (Template.IsOilDrill) { GetOilDrillingStatus(out text, out working, out warning); return; }
         working = Data.HasTarget && Data.SupplyRatio > 0 && (IsWorking || IsWaitingForOutput && HasFluidRecipe); warning = false;
         if (!Data.HasTarget && Data.NeedsEvaluation)
         { text = "Waiting for initialization"; warning = true; return; }
@@ -479,8 +476,9 @@ public sealed partial class ProductionFacilityInstance : IMapObjectTarget, IData
     }
     public void ClearItems()
     {
+        if (Template.IsOilDrill) Data.Oil.ProgressUnits = 0;
         World.MarkDisplayDirty(this); Data.Production.Clear(); Io.productionInputFluidItemIds.Clear(); Io.productionInputFluidUnits.Clear();
-        Io.productionOutputFluidUnits = -1; Io.storedEnergyTypes.Clear(); Io.storedEnergyUnitsByType.Clear(); Io.energyGaugeCapacityUnitsByType.Clear(); if (Template.HasPipePorts) World.WakeNativeProducers(this); Wake();
+        Io.productionOutputFluidUnits = Template.IsOilDrill ? 0 : -1; Io.storedEnergyTypes.Clear(); Io.storedEnergyUnitsByType.Clear(); Io.energyGaugeCapacityUnitsByType.Clear(); if (Template.HasPipePorts) World.WakeNativeProducers(this); Wake();
     }
     public void Persist()
     {
@@ -494,8 +492,11 @@ public sealed partial class ProductionFacilityInstance : IMapObjectTarget, IData
         Io.remainingCraftTicks = Data.CompleteEnergy > 0 ? ProductionProcess.RemainingEnergyTicks(Data.CompleteEnergy,
             process.ConsumedEnergyUnits, DeterministicSimulationUnits.FromFloat(Template.PrimaryRate)) : process.RemainingTicks;
         Io.remainingCraftTime = DeterministicSimulationUnits.TicksToSeconds(Io.remainingCraftTicks);
-        Io.storedEnergy = Io.storedEnergyTypes.Count > 0 ? DeterministicSimulationUnits.ToFloat(Io.storedEnergyUnitsByType[0]) : 0;
-        Io.storedEnergyUnits = Io.storedEnergyTypes.Count > 0 ? Io.storedEnergyUnitsByType[0] : 0;
-        Io.energyGaugeCapacityUnits = Io.storedEnergyTypes.Count > 0 ? Io.energyGaugeCapacityUnitsByType[0] : 0;
+        FacilityFuel.Persist(Io);
+        if (Template.IsOilDrill)
+        {
+            Io.oilDrillingProgressUnits = Data.Oil.ProgressUnits;
+            Io.oilDrillingProgressLiters = DeterministicSimulationUnits.ToFloat(Data.Oil.ProgressUnits);
+        }
     }
 }

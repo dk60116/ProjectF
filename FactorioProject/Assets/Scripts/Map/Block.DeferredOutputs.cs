@@ -13,11 +13,11 @@ public partial class Block
     internal Bounds DeferredOutputBounds => deferredOutputBounds;
 
     // Unsupported individual visuals retain the existing path. Capacity/filters remain authoritative.
-    internal bool TryAddDeferredOutput(int itemId, Vector3 start, float delay, bool center, out bool handled)
+    internal bool TryAddDeferredOutput(int itemId, Vector3 start, float delay, bool center, out bool handled, ItemDefinition definition = null)
     {
         using var sample = ProjectF.Diagnostics.DeferredOutputTiming.Measure();
         handled = false;
-        var definition = InputOutputModule.ResolveItemDefinition(itemId);
+        if (definition == null || definition.id != itemId) definition = InputOutputModule.ResolveItemDefinition(itemId);
         if (definition == null || definition.isFluid || definition.mapObject is Bucket
             || definition.lightMode != ItemDefinition.ItemLightMode.None
             || definition.portableMesh == null || definition.portableMat == null

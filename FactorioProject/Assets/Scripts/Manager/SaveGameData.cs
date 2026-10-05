@@ -12,7 +12,7 @@ public sealed class SaveGameData
     // Version 67 stores recursive player crafting plans and reserved intermediate outputs.
     // Version 68 stores the remaining volume of completed production fluid outputs.
     // Version 70 preserves data mining selection and harvested outputs awaiting delivery.
-    public const int CurrentVersion = 70;
+    public const int CurrentVersion = 71;
 
     public int version = CurrentVersion;
     public long savedAtUtcTicks;

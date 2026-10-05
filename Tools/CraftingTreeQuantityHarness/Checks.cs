@@ -160,6 +160,42 @@ public static class Checks
         writer.Write(2);
         return stream.ToArray();
     }
+    private static void VerifyHandCraftingRecipes(List<ItemDefinition> definitions)
+    {
+        definitions.Add(new ItemDefinition { id=200, itemName="Station" });
+        using var stream=new MemoryStream();
+        using (var writer=new BinaryWriter(stream,System.Text.Encoding.UTF8,true))
+        {
+            writer.Write(6); writer.Write(4);
+            foreach (string name in new[] { "Plate", "Lubricant", "Station", "Heavy Oil" })
+            {
+                writer.Write(name);
+                writer.Write(name=="Station"?1:0);
+                if (name=="Station") writer.Write("Station");
+                writer.Write(1f);
+                writer.Write(name=="Heavy Oil"?0:1);
+                if (name!="Heavy Oil") { writer.Write("Heavy Oil"); writer.Write(1f); }
+            }
+        }
+        UnityEngine.Resources.Data=stream.ToArray(); CraftingTreeRuntime.ForceReload();
+        var handRecipes=new List<int>(8) { -1 };
+        Require(CraftingTreeRuntime.TryGetHandCraftableItemIds(handRecipes),"hand recipes exist");
+        Require(handRecipes.SequenceEqual(new[] {28,100}),"hand recipes are sorted; station recipes and raw materials excluded");
+        var stationRecipes=new List<int>();
+        Require(CraftingTreeRuntime.TryGetCraftableItemIdsForMapObject(200,stationRecipes)
+            && stationRecipes.SequenceEqual(new[] {200}),"station requirement reverse lookup stays exact");
+        Require(!CraftingTreeRuntime.TryGetRequiredCraftingMapObjectIds(28,stationRecipes),"hand recipe does not acquire a station requirement");
+        Require(CraftingTreeRuntime.TryGetRequiredCraftingMapObjectIds(200,stationRecipes)
+            && stationRecipes.SequenceEqual(new[] {200}),"station recipe keeps its access requirement");
+        Require(!CraftingTreeRuntime.TryGetHandCraftableItemIds(null),"null destination is rejected");
+        for (int i=0;i<100;i++) CraftingTreeRuntime.TryGetHandCraftableItemIds(handRecipes);
+        long allocated=GC.GetAllocatedBytesForCurrentThread();
+        for (int i=0;i<1000;i++) CraftingTreeRuntime.TryGetHandCraftableItemIds(handRecipes);
+        Require(GC.GetAllocatedBytesForCurrentThread()==allocated,"cached hand recipe lookup allocates no memory after warmup");
+        UnityEngine.Resources.Data=Array.Empty<byte>(); CraftingTreeRuntime.ForceReload();
+        Require(!CraftingTreeRuntime.TryGetHandCraftableItemIds(handRecipes) && handRecipes.Count==0,"reload clears old hand recipes and destination");
+    }
+
     public static void Main(string[] args)
     {
         var definitions=new List<ItemDefinition>
@@ -212,6 +248,7 @@ public static class Checks
         Equal(CraftingTreeRuntime.GetOutputAmount(28),.25f,"name-based reload after ID reorder");
         Require(CraftingTreeRuntime.TryGetIngredientsView(28,out var reordered) && reordered[0].itemId==27,"input name resolves changed ID");
         Equal(reordered[0].amount,.5f,"ID reorder keeps input fraction");
+        VerifyHandCraftingRecipes(definitions);
         // Check the real source asset without rewriting existing recipe quantities.
         using var source=new BinaryReader(File.OpenRead(args[0]));
         int sourceVersion=source.ReadInt32(); int recipes=source.ReadInt32();

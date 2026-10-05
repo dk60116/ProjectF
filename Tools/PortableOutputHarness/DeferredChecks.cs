@@ -8,6 +8,7 @@ using ProjectF.Simulation;
 public class Bucket { }
 public class ItemDefinition
 {
+    public int id;
     public bool oneItem;
     public static int ResolveStackCapacity(ItemDefinition item, int capacity) => item?.oneItem == true ? 1 : capacity;
     public static int ResolveStackCapacity(ItemManager manager, int id, int capacity) => ResolveStackCapacity(InputOutputModule.ResolveItemDefinition(id), capacity);
@@ -18,7 +19,11 @@ public class ItemDefinition
 }
 public class ItemManager { }
 public class GameManager { public static GameManager Instance; public ItemManager ItemManger; }
-public class BoxObject { public int MaximumStoredItemCount = 48; }
+public class BoxObject
+{
+    public int MaximumStoredItemCount = 48;
+    public static bool IsRuntimeContentBlock(Block block) => block.BoxContent;
+}
 namespace ProjectF.Benchmark { public static class BenchmarkRuntime { public static bool ForceWorking; } }
 public static partial class SavedCapacityProbe { public static int Resolve(int item, int capacity) => ResolveSavedCenterStackCapacity(item, capacity); }
 public partial class IoCapacityProbe
@@ -44,12 +49,13 @@ public partial class IoCapacityProbe
 }
 public static partial class InputOutputModule
 {
-    public static readonly ItemDefinition Ordinary = new(), Light = new() { lightMode = ItemDefinition.ItemLightMode.Light };
+    public static readonly ItemDefinition Ordinary = new() { id = 1 }, Light = new() { id = 2, lightMode = ItemDefinition.ItemLightMode.Light };
+    public static int DefinitionLookups;
     public static bool Filter = true;
-    public static ItemDefinition ResolveItemDefinition(int id) => id < 0 ? null : id == 2 ? Light : Ordinary;
+    public static ItemDefinition ResolveItemDefinition(int id) { DefinitionLookups++; return id < 0 ? null : id == 2 ? Light : Ordinary; }
     public static bool CanAddItemToRuntimeIoOverlapCoordinate(Vector2Int c, int item) => Filter;
 }
-public class TerrainGenerator
+public partial class TerrainGenerator
 {
     public static TerrainGenerator Active = new();
     public readonly EngineObject gameObject = new();
@@ -204,6 +210,17 @@ static class DeferredChecks
             "Map release clears deferred registrations and counters");
         ProjectF.Rendering.CameraRenderCulling.VisibleAll = false;
         ProjectF.Benchmark.BenchmarkRuntime.ForceWorking = true;
+        var cachedOutput = new Block(new Vector2Int(50000, 50000));
+        InputOutputModule.DefinitionLookups = 0;
+        for (int i = 0; i < 1000; i++)
+            if (!cachedOutput.TryAddDeferredOutput(1, cachedOutput.WorldPosition, 0, false, out _, InputOutputModule.Ordinary))
+                throw new Exception("Cached output rejected");
+        Require(InputOutputModule.DefinitionLookups == 0 && cachedOutput.CountFloorObjects(1) == 1000,
+            "authoritative cached definition removes repeated lookup during forced output");
+        Require(cachedOutput.TryAddDeferredOutput(1, cachedOutput.WorldPosition, 0, false, out _, InputOutputModule.Light)
+            && InputOutputModule.DefinitionLookups == 1,
+            "a mismatched cached item ID resolves the requested definition instead of changing output behavior");
+        cachedOutput.ClearData();
         var unlimited = new Block(new Vector2Int(30000, 30000));
         var floor = new Block(new Vector2Int(30001, 30000));
         for (int i = 0; i < 1000; i++) {

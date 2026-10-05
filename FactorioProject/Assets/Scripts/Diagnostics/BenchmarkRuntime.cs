@@ -3,9 +3,11 @@ using UnityEngine;
 
 namespace ProjectF.Benchmark
 {
-    public static class BenchmarkRuntime
+    public static partial class BenchmarkRuntime
     {
         private static readonly List<InstallationObject> installations = new List<InstallationObject>();
+        private static ItemDefinition cachedOutputDefinition;
+        private static int cachedOutputItemId = -1;
         public static bool ForceWorking { get; private set; }
         public static int FallbackItemId { get; private set; } = -1;
         public static long ProducedItems { get; private set; }
@@ -13,7 +15,7 @@ namespace ProjectF.Benchmark
 
         [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.SubsystemRegistration)]
         private static void ResetStatics()
-        { ForceWorking = false; FallbackItemId = -1; ProducedItems = 0; SpilledFluidLiters = 0; installations.Clear(); }
+        { ForceWorking = false; FallbackItemId = -1; ProducedItems = 0; SpilledFluidLiters = 0; installations.Clear(); cachedOutputDefinition = null; cachedOutputItemId = -1; BenchmarkInputSupply.Clear(); }
 
         public static bool IsPortableItem(ItemDefinition item) => item != null && item.id >= 0
             && !item.isFluid && !ItemDefinition.IsElectricityItemDefinition(item)
@@ -33,6 +35,8 @@ namespace ProjectF.Benchmark
         {
             if (ForceWorking == enabled && (fallbackItemId < 0 || fallbackItemId == FallbackItemId)) return;
             ForceWorking = enabled;
+            BenchmarkInputSupply.Clear();
+            cachedOutputDefinition = null; cachedOutputItemId = -1;
             if (fallbackItemId >= 0) FallbackItemId = fallbackItemId;
             if (enabled) { ProducedItems = 0; SpilledFluidLiters = 0; }
             InstallationObject.CopyActiveInstances(installations);
@@ -40,7 +44,9 @@ namespace ProjectF.Benchmark
             installations.Clear();
             RobotArmWorld.Current?.WakeAll();
             MiningWorld.Current?.WakeAll();
-        ProductionWorld.Current?.WakeAll();
+            ProductionWorld.Current?.ResetOilBenchmarkWork();
+            ProductionWorld.Current?.WakeAll();
+            ProjectF.MapObjects.ForestryWorld.Current?.WakeAll();
             UtilityPole.NotifyFreeElectroEnergyChanged();
         }
 
@@ -48,7 +54,6 @@ namespace ProjectF.Benchmark
         {
             if (installation == null) return;
             if (installation is InputOutputModule module) module.ResetBenchmarkWork();
-            if (installation is LoggingMachine logger) logger.ResetBenchmarkWork();
         }
 
         internal static void RecordItems(int count) => ProducedItems += count;
@@ -57,13 +62,18 @@ namespace ProjectF.Benchmark
         internal static bool EmitItem(TerrainGenerator terrain, int itemId, Vector3 position)
         {
             if (terrain == null || itemId < 0) return false;
+            if (cachedOutputDefinition == null || cachedOutputItemId != itemId)
+            {
+                cachedOutputDefinition = InputOutputModule.ResolveItemDefinition(itemId);
+                cachedOutputItemId = itemId;
+            }
             var origin = TerrainGenerator.GetWorldBlockCoordinate(position);
             // Use a real floor stack, independent of the player's focused belt.
             for (int i = 0; i < 5; i++)
             {
                 var coordinate = origin + (i == 0 ? Vector2Int.zero : i == 1 ? Vector2Int.up : i == 2 ? Vector2Int.right : i == 3 ? Vector2Int.down : Vector2Int.left);
                 if (!terrain.TryGetLoadedBlock(coordinate, out var block)) continue;
-                bool success = block.TryAddDeferredOutput(itemId, position, 0f, false, out bool handled);
+                bool success = block.TryAddDeferredOutput(itemId, position, 0f, false, out bool handled, cachedOutputDefinition);
                 if (!handled) success = block.TryAddFloorObjectAnimated(itemId, position, 0f, out _);
                 if (success) { ProducedItems++; return true; }
             }

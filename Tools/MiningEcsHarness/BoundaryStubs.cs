@@ -11,6 +11,12 @@ namespace ProjectF.Simulation
 }
 namespace ProjectF.MapObjects
 {
+    public sealed class ForestryWorld
+    {
+        public static ForestryWorld Current;
+        public void PersistAll() { }
+        public void Wake(Vector2Int coordinate) { }
+    }
     public readonly record struct MapObjectHandle(int Value)
     { public bool IsValid => Value > 0; }
     public class VirtualRenderBatchCollection
@@ -55,7 +61,11 @@ internal class MiningRenderTemplate
     internal Bounds LocalBounds;
     internal float WorkGaugeVerticalOffset = .25f;
     internal Color WorkGaugeFillColor = new Color(0, 1, 0);
-    internal float Watts = 30;
+    internal float Watts = 30, WorkRate = 30, InputConsumeMoveInterval = .1f;
+    internal long WorkUnitsPerTick = DeterministicSimulationUnits.RateForTicks(30, 1);
+    internal ItemDefinition.EnergyType EnergyType = ItemDefinition.EnergyType.Electricity;
+    internal bool UsesFuel => EnergyType == ItemDefinition.EnergyType.Burn;
+    internal Vector3 ConsumePoint;
     internal long CompleteEnergy = DeterministicSimulationUnits.FromInt(60);
     internal int BenchmarkOutputId = -1;
     internal Bounds ColliderBounds;
@@ -94,6 +104,7 @@ public class Block
     public int Count, Item = -1, Capacity = 10, BoundaryRequests;
     public bool CanAddConveyorObjects(int count) => Count + count <= Capacity;
     public void EnsureConveyorTransportInteractionBoundary() => BoundaryRequests++;
+    public void PlayVirtualInputAreaConsumeAnimation(int item, Vector3 position, float delay) { }
     public bool CanAddInputAreaCenterObjects(int count, int item) => Count + count <= GetInputAreaCenterCapacity(item) && (Count == 0 || Item == item);
     public int GetInputAreaCenterItemId() => Count == 0 ? -1 : Item;
     public int GetInputAreaCenterCapacity(int item) => ProjectF.Benchmark.BenchmarkRuntime.ForceWorking && !(MapObject is BoxObject)
@@ -155,7 +166,7 @@ public partial class MiningWorld
     public MiningMachineInstance SaveMiner;
     public void FlushSaveStates() => SaveMiner?.Persist();
     internal struct State
-    { internal MiningProcess Clock; internal ProjectF.MapObjects.MapObjectHandle Resource; internal Vector2Int ResourceCoordinate; internal int ResourceCursor, PendingHarvestedItems; internal bool HasTarget, NeedsEvaluation; }
+    { internal MiningProcess Clock; internal ProjectF.MapObjects.MapObjectHandle Resource; internal Vector2Int ResourceCoordinate; internal int ResourceCursor, PendingHarvestedItems; internal bool HasTarget, NeedsEvaluation, FuelBypassed; }
     internal State Value;
     public bool Alive = true;
     public TerrainGenerator Terrain = new();
@@ -223,7 +234,19 @@ public static partial class PowerDemandProbe
 namespace ProjectF.Benchmark
 {
     public static class BenchmarkRuntime
-    { public static bool ForceWorking; public static int FallbackItemId = 1; public static void EmitItem(TerrainGenerator terrain, int id, Vector3 point) { } public static void RecordItems(int count) { } }
+    { public static bool ForceWorking; public static int FallbackItemId = 1; public static void EmitItem(TerrainGenerator terrain, int id, Vector3 point) { } public static void RecordItems(int count) { } public static bool IsPortableItem(ItemDefinition item) => item != null && !item.isFluid; }
+#if !BENCHMARK_INPUT_INTEGRATION
+    internal static class BenchmarkInputSupply
+    {
+        internal static int Version => 0;
+        internal static void Remove(object owner) { }
+        internal static void Refill(Vector2Int coordinate) { }
+        internal static void Add(object owner, TerrainGenerator terrain, BlockStateStore store, Vector2Int coordinate, int item, int count, int capacity = 16) { }
+        internal static void AddEnergy(object owner, TerrainGenerator terrain, BlockStateStore store, IReadOnlyList<Vector2Int> coordinates, ItemDefinition definition, int capacity = 16) { }
+        internal static void SampleEnergy(object owner, Vector3 target, bool working) { }
+        internal static int Consume(object owner, TerrainGenerator terrain, Vector2Int coordinate, int item, int count, Vector3 target, float interval) => count;
+    }
+#endif
 }
 
 public partial class ProductionWorld { public static ProductionWorld Current; public void FlushSaveStates() { } }

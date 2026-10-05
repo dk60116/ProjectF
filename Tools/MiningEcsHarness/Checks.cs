@@ -138,3 +138,5 @@ ProjectF.Benchmark.BenchmarkRuntime.ForceWorking = false; InputOutputModule.Item
 Console.WriteLine($"PASS {checks} mining ECS production/output/save/power checks (actual sources, engine boundary doubles)");
 MiningOwnershipChecks.Run();
 MiningGaugeChecks.Run();
+
+MiningFuelChecks.Run(args[0]);

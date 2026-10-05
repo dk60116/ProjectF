@@ -2,7 +2,7 @@ public partial class PlayerHUD
 {
     private WorkableCraftingPanel workableCraftingPanel;
 
-    private void ToggleWorkableCraftingPanel(WorkableObject target)
+    private void ToggleWorkableCraftingPanel(ProjectF.MapObjects.IWorkableTarget target)
     {
         if (target == null)
         {

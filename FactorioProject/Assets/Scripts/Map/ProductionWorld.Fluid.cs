@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using UnityEngine;
 using ProjectF.Simulation;
@@ -37,6 +37,7 @@ public sealed partial class ProductionWorld
     internal void WakeNativeProducers(ProductionFacilityInstance receiver)
     {
         InputOutputModule.NotifyDataFluidStorageChanged();
+        WakeDataFluidProducers(receiver);
         if (nativeProducers.TryGetValue(receiver, out var sources))
             for (int i = sources.Count - 1; i >= 0; i--)
                 if (sources[i] != null) sources[i].WakeDataFluidOutput(); else sources.RemoveAt(i);
@@ -189,84 +190,12 @@ public sealed partial class ProductionWorld
     private static bool PortAllows(ProductionFacilityInstance facility, Vector2Int port, int item) =>
         !facility.Prototype.TryGetRectGridBlockPlacementAtCoordinate(facility.Prototype, facility.AnchorCoordinate,
             facility.Placement.quarterTurns, port, out var placement) || placement.itemDefinition == null || placement.itemDefinition.id == item;
-    internal void TransferOutputFluid(ProductionFacilityInstance facility, ProductionRenderTemplate.Recipe recipe)
-    {
-        var io = facility.Placement.inputOutputState;
-        float budget = Mathf.Min(DeterministicSimulationUnits.ToFloat(io.productionOutputFluidUnits), recipe.OutputRate * SimulationTickWorld.FixedSimulationDeltaSeconds);
-        for (int i = 0; i < facility.OutputCoordinates.Count && budget > 0; i++)
-        {
-            var port = facility.OutputCoordinates[i];
-            if (!IsPipeOutput(facility, port) || !PortAllows(facility, port, recipe.OutputId)
-                || !SearchPort(facility, port, false, out int networkFluid, out _)
-                || networkFluid >= 0 && networkFluid != recipe.OutputId) continue;
-            CollectStorages(true);
-            foreach (var coordinate in fluidSearch.PipeDistances)
-            {
-                if (budget <= 0) break;
-                if (InputOutputModule.TryGetRuntimePipeFluidStorageAtCoordinate(coordinate.Key, null, true, out var storage)
-                    && storage != null && visitedStorages.Add(storage))
-                {
-                    fluidSearch.RoutePumps.TryGetValue(coordinate.Key, out var pump);
-                    float request = RetainedTransferBudget(budget, coordinate.Value);
-                    if (pump != null) request = pump.LimitTransferVolume(request, SimulationTickWorld.FixedSimulationDeltaSeconds);
-                    float acceptedDedicated = 0;
-                    bool dedicated = storage is InputOutputModule module && module.UsesDedicatedFluidStorageAtRuntimeCoordinate(coordinate.Key);
-                    float accepted = 0;
-                    if (dedicated) ((InputOutputModule)storage).TryAddDedicatedFluidAtRuntimeCoordinate(coordinate.Key, recipe.OutputId, request, MapClimate.CurrentTemperatureCelsius, out acceptedDedicated);
-                    else storage.TryAddFluidLiters(recipe.OutputId, request, out accepted);
-                    if (dedicated) accepted = acceptedDedicated;
-                    DebitOutput(facility, accepted, pump, ref budget);
-                }
-                // Reach authored data input ports without crossing their facility bodies.
-                for (int j = -1; j < fluidDirections.Length && budget > 0; j++)
-                {
-                    var endpoint = j < 0 ? coordinate.Key : coordinate.Key + fluidDirections[j];
-                    if (j >= 0 && PipeWorld.Current != null && PipeWorld.Current.TryGetAtCoordinate(coordinate.Key, out var pipe)
-                        && !pipe.HasConnectionTowardsAt(coordinate.Key, fluidDirections[j])) continue;
-                    if (!observers.TryGetValue(endpoint, out var receivers)) continue;
-                    for (int k = 0; k < receivers.Count && budget > 0; k++)
-                    {
-                        var receiver = receivers[k];
-                        if (receiver == facility || receiver.HasActiveWork || !IsPipeInput(receiver, endpoint)
-                            || !TryPortDirection(receiver, endpoint, out var direction) || j >= 0 && direction != -fluidDirections[j]) continue;
-                        if (j < 0 && PipeWorld.Current != null && PipeWorld.Current.TryGetAtCoordinate(endpoint, out var occupyingPipe)
-                            && !occupyingPipe.HasConnectionTowardsAt(endpoint, -direction)) continue;
-                        var targetRecipe = receiver.SelectedRecipe;
-                        if (targetRecipe == null) continue;
-                        for (int n = 0; n < targetRecipe.Inputs.Count; n++)
-                        {
-                            var ingredient = targetRecipe.Inputs[n];
-                            if (ingredient.itemId != recipe.OutputId || !PortAllows(receiver, endpoint, recipe.OutputId)) continue;
-                            long missing = receiver.RequiredFluidUnits(targetRecipe, ingredient.amount) - receiver.FluidUnits(recipe.OutputId);
-                            float accepted = Mathf.Min(RetainedTransferBudget(budget, coordinate.Value), DeterministicSimulationUnits.ToFloat(Math.Max(0, missing)));
-                            fluidSearch.RoutePumps.TryGetValue(coordinate.Key, out var pump);
-                            if (pump != null) accepted = pump.LimitTransferVolume(accepted, SimulationTickWorld.FixedSimulationDeltaSeconds);
-                            AddInput(receiver, recipe.OutputId, accepted); DebitOutput(facility, accepted, pump, ref budget); receiver.Wake();
-                        }
-                    }
-                }
-            }
-            for (int k = 0; k < fluidStorages.Count && budget > 0; k++)
-            {
-                var storage = fluidStorages[k];
-                if (storage == null || !visitedStorages.Add(storage)) continue;
-                Pump pump = null; int distance = 0;
-                foreach (var coordinate in storage.RuntimeOccupiedCoordinates)
-                    if (fluidSearch.PipeDistances.TryGetValue(coordinate, out distance))
-                    { fluidSearch.RoutePumps.TryGetValue(coordinate, out pump); break; }
-                float request = RetainedTransferBudget(budget, distance);
-                if (pump != null) request = pump.LimitTransferVolume(request, SimulationTickWorld.FixedSimulationDeltaSeconds);
-                storage.TryAddFluidLiters(recipe.OutputId, request, out float accepted);
-                DebitOutput(facility, accepted, pump, ref budget);
-            }
-        }
-    }
-    private static float RetainedTransferBudget(float budget, int distance)
+    private static float RetainedTransferBudget(float budget, float retention)
     {
         long available = DeterministicSimulationUnits.FromFloat(budget);
         if (available <= 0) return 0;
         // Retention reduces the rate, but cannot trap a final indivisible simulation unit forever.
-        long retained = Math.Max(1, DeterministicSimulationUnits.FromFloat(budget * InstallationObject.FluidPressureRetention(distance)));
+        long retained = Math.Max(1, DeterministicSimulationUnits.FromFloat(budget * retention));
         return DeterministicSimulationUnits.ToFloat(Math.Min(available, retained));
     }
     private static void DebitOutput(ProductionFacilityInstance facility, float accepted, Pump pump, ref float budget)

@@ -2,590 +2,150 @@ using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.Rendering;
 using UnityEngine.Serialization;
+using ProjectF.MapObjects;
 
-public class WorkableObject : InstallationObject
+public class WorkableObject : InstallationObject, IWorkableTarget
 {
-    private const float ConnectedRangeEdgeEpsilon = 0.001f;
-    private static readonly HashSet<WorkableObject> ActiveInstances = new HashSet<WorkableObject>();
-    private static readonly HashSet<WorkableObject> SelectedRangeVisualInstances = new HashSet<WorkableObject>();
-    private static readonly List<WorkableObjectRangeVisualRequest> RangeVisualRequestScratch =
-        new List<WorkableObjectRangeVisualRequest>();
-    private static readonly HashSet<WorkableObject> RangeVisualObjectScratch =
-        new HashSet<WorkableObject>();
-    private static readonly List<WorkableObject> ConnectedRangeQueueScratch =
-        new List<WorkableObject>();
-    private static readonly HashSet<WorkableObject> ConnectedRangeVisitedScratch =
-        new HashSet<WorkableObject>();
-    private static readonly List<WorkableObject> ConnectedRangeGroupScratch =
-        new List<WorkableObject>();
-    private static float cachedGlobalMaxFocusActivationRadius;
-    private static bool globalMaxFocusActivationRadiusDirty = true;
+    internal static readonly WorkableRangeIndex RangeIndex = new WorkableRangeIndex();
+    private static readonly HashSet<WorkableObject> NativeInstances = new HashSet<WorkableObject>();
+    private static readonly HashSet<IWorkableTarget> SelectedRangeVisualInstances = new HashSet<IWorkableTarget>();
+    private static readonly List<WorkableObjectRangeVisualRequest> RangeVisualRequests = new List<WorkableObjectRangeVisualRequest>();
+    private static readonly HashSet<IWorkableTarget> AppendedTargets = new HashSet<IWorkableTarget>();
+    private static readonly List<IWorkableTarget> ConnectedScratch = new List<IWorkableTarget>();
     private static BagSlot craftingSlotRangeVisualRequestSource;
     private static WorkableObjectRangeVisual sharedRangeVisual;
     private static bool installOrEditWorkableSelectionRangeVisualsRequested;
-
+    private static bool rangeVisualDirty = true;
     [SerializeField, FormerlySerializedAs("focusActivationRadius")]
     private uint workableRangeCells = 1u;
-    [SerializeField]
-    private bool showWorkableRange = true;
-    [SerializeField, Min(0f)]
-    private float rangeVisualYOffset = 0.04f;
-    private bool selectedRangeVisualRequested;
+    [SerializeField] private bool showWorkableRange = true;
+    [SerializeField, Min(0f)] private float rangeVisualYOffset = 0.04f;
     private bool globalRangeVisualSuppressed;
     private bool legacyRangeVisualsScanned;
-
     public uint WorkableRangeCells => workableRangeCells;
     public override float FocusActivationRadius => ResolveRangeRadius(workableRangeCells);
-
-    public static float ResolveRangeRadius(uint rangeCells)
-    {
-        return Mathf.Max(0f, rangeCells * 0.5f);
-    }
-
-    public static void CollectActiveContainingWorldPosition(
-        Vector3 worldPosition,
-        List<WorkableObject> results)
-    {
-        if (results == null)
-        {
-            return;
-        }
-
-        results.Clear();
-        foreach (WorkableObject workableObject in ActiveInstances)
-        {
-            if (workableObject != null
-                && workableObject.isActiveAndEnabled
-                && workableObject.ContainsWorldPositionInOwnWorkableRange(worldPosition))
-            {
-                CollectConnectedRangeGroup(workableObject, ConnectedRangeGroupScratch);
-                for (int i = 0; i < ConnectedRangeGroupScratch.Count; i++)
-                {
-                    WorkableObject connectedObject = ConnectedRangeGroupScratch[i];
-                    if (!results.Contains(connectedObject))
-                    {
-                        results.Add(connectedObject);
-                    }
-                }
-            }
-        }
-
-        results.Sort(CompareRuntimeOrder);
-    }
-
-    private static int CompareRuntimeOrder(WorkableObject left, WorkableObject right)
-    {
-        if (ReferenceEquals(left, right))
-        {
-            return 0;
-        }
-
-        if (left == null)
-        {
-            return 1;
-        }
-
-        if (right == null)
-        {
-            return -1;
-        }
-
-        int comparison = left.RuntimePlacementSequence.CompareTo(right.RuntimePlacementSequence);
-        if (comparison != 0)
-        {
-            return comparison;
-        }
-
-        left.TryGetPlacementRuntime(out Vector2Int leftCoordinate, out _);
-        right.TryGetPlacementRuntime(out Vector2Int rightCoordinate, out _);
-        comparison = leftCoordinate.x.CompareTo(rightCoordinate.x);
-        return comparison != 0
-            ? comparison
-            : leftCoordinate.y.CompareTo(rightCoordinate.y);
-    }
-
-    public bool ContainsWorldPositionInWorkableRange(Vector3 worldPosition)
-    {
-        return ContainsWorldPositionInOwnWorkableRange(worldPosition);
-    }
-
-    public bool ContainsWorldPositionInConnectedWorkableRange(Vector3 worldPosition)
-    {
-        if (ContainsWorldPositionInOwnWorkableRange(worldPosition))
-        {
-            return true;
-        }
-
-        CollectConnectedRangeGroup(this, ConnectedRangeGroupScratch);
-        for (int i = 0; i < ConnectedRangeGroupScratch.Count; i++)
-        {
-            WorkableObject connectedObject = ConnectedRangeGroupScratch[i];
-            if (connectedObject != this
-                && connectedObject.ContainsWorldPositionInOwnWorkableRange(worldPosition))
-            {
-                return true;
-            }
-        }
-
-        return false;
-    }
-
-    internal bool ContainsWorldPositionInOwnWorkableRange(Vector3 worldPosition)
-    {
-        if (!TryGetWorkableRangeBounds(out Bounds rangeBounds))
-        {
-            return false;
-        }
-
-        return worldPosition.x >= rangeBounds.min.x
-               && worldPosition.x <= rangeBounds.max.x
-               && worldPosition.z >= rangeBounds.min.z
-               && worldPosition.z <= rangeBounds.max.z;
-    }
-
-    private static void CollectConnectedRangeGroup(
-        WorkableObject root,
-        List<WorkableObject> results)
-    {
-        results.Clear();
-        ConnectedRangeQueueScratch.Clear();
-        ConnectedRangeVisitedScratch.Clear();
-        if (root == null || !root.isActiveAndEnabled)
-        {
-            return;
-        }
-
-        int itemId = root.ResolveItemId();
-        if (itemId < 0)
-        {
-            results.Add(root);
-            return;
-        }
-
-        ConnectedRangeQueueScratch.Add(root);
-        ConnectedRangeVisitedScratch.Add(root);
-        for (int queueIndex = 0; queueIndex < ConnectedRangeQueueScratch.Count; queueIndex++)
-        {
-            WorkableObject current = ConnectedRangeQueueScratch[queueIndex];
-            results.Add(current);
-
-            foreach (WorkableObject candidate in ActiveInstances)
-            {
-                if (candidate == null
-                    || !candidate.isActiveAndEnabled
-                    || ConnectedRangeVisitedScratch.Contains(candidate)
-                    || candidate.ResolveItemId() != itemId
-                    || !AreWorkableRangesConnected(current, candidate))
-                {
-                    continue;
-                }
-
-                ConnectedRangeVisitedScratch.Add(candidate);
-                ConnectedRangeQueueScratch.Add(candidate);
-            }
-        }
-
-        results.Sort(CompareRuntimeOrder);
-    }
-
-    private static bool AreWorkableRangesConnected(
-        WorkableObject left,
-        WorkableObject right)
-    {
-        if (left == null
-            || right == null
-            || !left.TryGetWorkableRangeBounds(out Bounds leftBounds)
-            || !right.TryGetWorkableRangeBounds(out Bounds rightBounds))
-        {
-            return false;
-        }
-
-        float overlapX = Mathf.Min(leftBounds.max.x, rightBounds.max.x)
-                         - Mathf.Max(leftBounds.min.x, rightBounds.min.x);
-        float overlapZ = Mathf.Min(leftBounds.max.z, rightBounds.max.z)
-                         - Mathf.Max(leftBounds.min.z, rightBounds.min.z);
-        return overlapX >= -ConnectedRangeEdgeEpsilon
-               && overlapZ >= -ConnectedRangeEdgeEpsilon
-               && (overlapX > ConnectedRangeEdgeEpsilon
-                   || overlapZ > ConnectedRangeEdgeEpsilon);
-    }
-
+    public static float ResolveRangeRadius(uint cells) => Mathf.Max(0f, cells * 0.5f);
+    public long WorkablePlacementSequence => RuntimePlacementSequence;
+    public Vector2Int AnchorCoordinate => TryGetPlacementRuntime(out var coordinate, out _) ? coordinate : default;
+    public bool ShowWorkableRange => showWorkableRange;
+    public bool GlobalRangeVisualSuppressed => globalRangeVisualSuppressed;
+    public float RangeVisualYOffset => rangeVisualYOffset;
+    public static void CollectActiveContainingWorldPosition(Vector3 position, List<IWorkableTarget> result) => RangeIndex.CollectContaining(position, result);
+    public static void CollectOwnContainingWorldPosition(Vector3 position, List<IWorkableTarget> result) => RangeIndex.CollectOwn(position, result);
+    public bool ContainsWorldPositionInWorkableRange(Vector3 position) => ContainsWorldPositionInOwnWorkableRange(position);
+    public bool ContainsWorldPositionInOwnWorkableRange(Vector3 position) => IsTargetActive && TryGetWorkableRangeBounds(out var bounds) && WorkableRangeIndex.Contains(bounds, position);
+    public bool ContainsWorldPositionInConnectedWorkableRange(Vector3 position) => RangeIndex.ContainsConnected(this, position);
     public bool TryGetWorkableRangeBounds(out Bounds bounds)
     {
-        bounds = default;
-        float rangeRadius = FocusActivationRadius;
-        if (rangeRadius <= 0f)
+        float radius = FocusActivationRadius;
+        Vector3 center = transform.position;
+        var occupied = RuntimeOccupiedCoordinates;
+        if (occupied != null && occupied.Count > 0)
         {
-            return false;
+            double x = 0, z = 0;
+            for (int i = 0; i < occupied.Count; i++) { x += occupied[i].x; z += occupied[i].y; }
+            center = new Vector3((float)(x / occupied.Count), center.y, (float)(z / occupied.Count));
         }
-
-        Vector3 center = GetWorkableRangeCenter();
-        float rangeSize = rangeRadius * 2f;
-        bounds = new Bounds(
-            center,
-            new Vector3(rangeSize, 0.01f, rangeSize));
-        return true;
+        bounds = new Bounds(center, new Vector3(radius * 2f, 0.01f, radius * 2f));
+        return radius > 0f;
     }
-
-    private Vector3 GetWorkableRangeCenter()
+    internal static void RegisterTarget(IWorkableTarget target)
     {
-        if (TryGetRuntimeFootprintCenter(out Vector3 runtimeCenter))
-        {
-            return runtimeCenter;
-        }
-
-        return transform.position;
+        // Blueprint components are disabled while their scene objects remain visible.
+        if (target is WorkableObject native && !native.isActiveAndEnabled) RangeIndex.Remove(target);
+        else RangeIndex.Update(target);
+        rangeVisualDirty = true;
     }
-
-    private bool TryGetRuntimeFootprintCenter(out Vector3 center)
-    {
-        center = default;
-        IReadOnlyList<Vector2Int> occupiedCoordinates = RuntimeOccupiedCoordinates;
-        if (occupiedCoordinates == null || occupiedCoordinates.Count <= 0)
-        {
-            return false;
-        }
-
-        float x = 0f;
-        float z = 0f;
-        for (int i = 0; i < occupiedCoordinates.Count; i++)
-        {
-            Vector2Int coordinate = occupiedCoordinates[i];
-            x += coordinate.x;
-            z += coordinate.y;
-        }
-
-        float count = occupiedCoordinates.Count;
-        center = new Vector3(x / count, transform.position.y, z / count);
-        return true;
-    }
-
-    public void SetSelectedRangeVisualRequested(bool requested)
-    {
-        if (selectedRangeVisualRequested == requested)
-        {
-            return;
-        }
-
-        selectedRangeVisualRequested = requested;
-        if (requested)
-        {
-            SelectedRangeVisualInstances.Add(this);
-        }
-        else
-        {
-            SelectedRangeVisualInstances.Remove(this);
-        }
-
-        RefreshWorkableRangeVisual();
-    }
-
+    internal static void UnregisterTarget(IWorkableTarget target)
+    { RangeIndex.Remove(target); SelectedRangeVisualInstances.Remove(target); rangeVisualDirty = true; }
+    public void SetSelectedRangeVisualRequested(bool requested) => SetTargetSelected(this, requested);
+    internal static void SetTargetSelected(IWorkableTarget target, bool requested)
+    { rangeVisualDirty |= requested ? SelectedRangeVisualInstances.Add(target) : SelectedRangeVisualInstances.Remove(target); }
     public void SetGlobalRangeVisualSuppressed(bool suppressed)
-    {
-        if (globalRangeVisualSuppressed == suppressed)
-        {
-            return;
-        }
-
-        globalRangeVisualSuppressed = suppressed;
-        RefreshWorkableRangeVisual();
-    }
-
+    { if (globalRangeVisualSuppressed == suppressed) return; globalRangeVisualSuppressed = suppressed; rangeVisualDirty = true; }
     public static void SetCraftingSlotRangeVisualsRequested(BagSlot source, bool requested)
     {
         if (requested)
-        {
-            if (source == null || craftingSlotRangeVisualRequestSource == source)
-            {
-                return;
-            }
-
-            craftingSlotRangeVisualRequestSource = source;
-            RefreshAllRangeVisuals();
-            return;
-        }
-
-        if (craftingSlotRangeVisualRequestSource != null && craftingSlotRangeVisualRequestSource != source)
-        {
-            return;
-        }
-
-        craftingSlotRangeVisualRequestSource = null;
-        RefreshAllRangeVisuals();
+        { if (source == null || craftingSlotRangeVisualRequestSource == source) return; craftingSlotRangeVisualRequestSource = source; }
+        else
+        { if (craftingSlotRangeVisualRequestSource != null && craftingSlotRangeVisualRequestSource != source) return; craftingSlotRangeVisualRequestSource = null; }
+        rangeVisualDirty = true;
     }
-
     public static void SetInstallOrEditWorkableSelectionRangeVisualsRequested(bool requested)
-    {
-        if (installOrEditWorkableSelectionRangeVisualsRequested == requested)
-        {
-            return;
-        }
-
-        installOrEditWorkableSelectionRangeVisualsRequested = requested;
-        RefreshAllRangeVisuals();
-    }
-
+    { if (installOrEditWorkableSelectionRangeVisualsRequested == requested) return; installOrEditWorkableSelectionRangeVisualsRequested = requested; rangeVisualDirty = true; }
     public static void RefreshAllRangeVisuals()
-    {
-        RefreshSharedRangeVisual();
-    }
-
-    public new static float GlobalMaxFocusActivationRadius
-    {
-        get
-        {
-            if (!globalMaxFocusActivationRadiusDirty)
-            {
-                return cachedGlobalMaxFocusActivationRadius;
-            }
-
-            cachedGlobalMaxFocusActivationRadius = 0f;
-            foreach (WorkableObject workableObject in ActiveInstances)
-            {
-                if (workableObject == null)
-                {
-                    continue;
-                }
-
-                cachedGlobalMaxFocusActivationRadius = Mathf.Max(
-                    cachedGlobalMaxFocusActivationRadius,
-                    workableObject.FocusActivationRadius);
-            }
-
-            globalMaxFocusActivationRadiusDirty = false;
-            return cachedGlobalMaxFocusActivationRadius;
-        }
-    }
-
+    { foreach (var native in NativeInstances) if (native != null) RangeIndex.Update(native); rangeVisualDirty = true; }
     protected override void OnEnable()
     {
-        base.OnEnable();
-        ActiveInstances.Add(this);
-        if (selectedRangeVisualRequested)
-        {
-            SelectedRangeVisualInstances.Add(this);
-        }
-
-        globalMaxFocusActivationRadiusDirty = true;
-        RefreshSharedRangeVisual();
+        base.OnEnable(); NativeInstances.Add(this); RegisterTarget(this);
+        DisableLegacyRangeVisual(); EnsureRangeVisualHost();
     }
-
     protected override void OnDisable()
     {
         if (ProjectFApplicationLifecycle.IsQuitting) return;
-
-        DisableLegacyRangeVisual();
-        ActiveInstances.Remove(this);
-        if (selectedRangeVisualRequested && !gameObject.activeInHierarchy)
-        {
-            SelectedRangeVisualInstances.Remove(this);
-            selectedRangeVisualRequested = false;
-        }
-
-        globalMaxFocusActivationRadiusDirty = true;
-        RefreshSharedRangeVisual();
-        base.OnDisable();
+        NativeInstances.Remove(this); UnregisterTarget(this); base.OnDisable();
     }
-
-    public override void PrepareForPool()
-    {
-        base.PrepareForPool();
-        RefreshSharedRangeVisual();
-    }
-
+    protected override void OnPlacementRuntimeChanged() { base.OnPlacementRuntimeChanged(); RegisterTarget(this); }
+    protected override void OnPlacementRuntimeCleared() { base.OnPlacementRuntimeCleared(); RegisterTarget(this); }
+    public override void PrepareForPool() { base.PrepareForPool(); UnregisterTarget(this); }
 #if UNITY_EDITOR
-    protected override void OnValidate()
-    {
-        base.OnValidate();
-        globalMaxFocusActivationRadiusDirty = true;
-        if (Application.isPlaying)
-        {
-            RefreshSharedRangeVisual();
-        }
-    }
+    protected override void OnValidate() { base.OnValidate(); if (Application.isPlaying) RefreshAllRangeVisuals(); }
 #endif
-
-    private void RefreshWorkableRangeVisual()
+    internal static void EnsureRangeVisualHost()
     {
-        RefreshSharedRangeVisual();
+        if (!Application.isPlaying || sharedRangeVisual != null) return;
+        var host = new GameObject("Workable Range Visuals");
+        sharedRangeVisual = host.AddComponent<WorkableObjectRangeVisual>();
+        host.AddComponent<WorkableRangeVisualUpdater>();
     }
-
-    private static void RefreshSharedRangeVisual()
+    internal static void UpdateRangeVisual()
     {
-        if (!Application.isPlaying)
-        {
-            return;
-        }
-
-        RangeVisualRequestScratch.Clear();
-        RangeVisualObjectScratch.Clear();
+        if (!rangeVisualDirty || !Application.isPlaying) return;
+        // Wait until all bulk placements/selection changes have committed.
+        if (TerrainGenerator.Active != null && TerrainGenerator.Active.IsBenchmarkPlacementInProgress) return;
+        rangeVisualDirty = false; RangeVisualRequests.Clear(); AppendedTargets.Clear();
         if (ShouldShowWorkableRangeVisuals())
         {
-            AppendRangeVisualRequests(
-                ActiveInstances,
-                RangeVisualRequestScratch,
-                RangeVisualObjectScratch);
+            var targets = RangeIndex.Targets;
+            for (int i = 0; i < targets.Count; i++) AppendRange(targets[i], false);
         }
-
-        AppendConnectedRangeVisualRequests(
-            SelectedRangeVisualInstances,
-            RangeVisualRequestScratch,
-            RangeVisualObjectScratch);
-
-        if (RangeVisualRequestScratch.Count <= 0)
+        foreach (var target in SelectedRangeVisualInstances)
         {
-            SetSharedRangeVisualActive(false);
-            return;
+            if (AppendedTargets.Contains(target)) continue;
+            // A disabled blueprint is not indexed, but its own range still needs a preview.
+            AppendRange(target, true);
+            RangeIndex.CollectConnected(target, ConnectedScratch);
+            for (int i = 0; i < ConnectedScratch.Count; i++) AppendRange(ConnectedScratch[i], true);
         }
-
-        WorkableObjectRangeVisual visual = GetOrCreateSharedRangeVisual();
-        if (visual == null)
-        {
-            return;
-        }
-
-        visual.Configure(RangeVisualRequestScratch);
-        if (!visual.gameObject.activeSelf)
-        {
-            visual.gameObject.SetActive(true);
-        }
+        ConnectedScratch.Clear();
+        if (RangeVisualRequests.Count == 0) { if (sharedRangeVisual != null) sharedRangeVisual.SetVisible(false); return; }
+        EnsureRangeVisualHost(); sharedRangeVisual.Configure(RangeVisualRequests); sharedRangeVisual.SetVisible(true);
     }
-
-    private static void AppendRangeVisualRequests(
-        IEnumerable<WorkableObject> sourceObjects,
-        List<WorkableObjectRangeVisualRequest> requests,
-        HashSet<WorkableObject> appendedObjects)
+    private static void AppendRange(IWorkableTarget target, bool selected)
     {
-        if (sourceObjects == null || requests == null || appendedObjects == null)
-        {
-            return;
-        }
-
-        foreach (WorkableObject workableObject in sourceObjects)
-        {
-            AppendRangeVisualRequest(workableObject, requests, appendedObjects, false);
-        }
+        if (!target.IsTargetActive || !target.ShowWorkableRange || !selected && target.GlobalRangeVisualSuppressed
+            || !target.TryGetWorkableRangeBounds(out var bounds) || !AppendedTargets.Add(target)) return;
+        RangeVisualRequests.Add(new WorkableObjectRangeVisualRequest(bounds.center, bounds.extents.x, target.RangeVisualYOffset));
     }
-
-    private static void AppendConnectedRangeVisualRequests(
-        IEnumerable<WorkableObject> sourceObjects,
-        List<WorkableObjectRangeVisualRequest> requests,
-        HashSet<WorkableObject> appendedObjects)
-    {
-        if (sourceObjects == null || requests == null || appendedObjects == null)
-        {
-            return;
-        }
-
-        foreach (WorkableObject workableObject in sourceObjects)
-        {
-            CollectConnectedRangeGroup(workableObject, ConnectedRangeGroupScratch);
-            for (int i = 0; i < ConnectedRangeGroupScratch.Count; i++)
-            {
-                AppendRangeVisualRequest(
-                    ConnectedRangeGroupScratch[i],
-                    requests,
-                    appendedObjects,
-                    true);
-            }
-        }
-    }
-
-    private static void AppendRangeVisualRequest(
-        WorkableObject workableObject,
-        List<WorkableObjectRangeVisualRequest> requests,
-        HashSet<WorkableObject> appendedObjects,
-        bool forceSelectedNetworkVisible)
-    {
-        if (workableObject == null || !appendedObjects.Add(workableObject))
-        {
-            return;
-        }
-
-        workableObject.DisableLegacyRangeVisual();
-        if (!workableObject.showWorkableRange
-            || workableObject.workableRangeCells == 0u
-            || !workableObject.gameObject.activeInHierarchy
-            || !forceSelectedNetworkVisible && !workableObject.ShouldShowWorkableRangeVisual()
-            || !workableObject.TryGetWorkableRangeBounds(out Bounds rangeBounds))
-        {
-            return;
-        }
-
-        requests.Add(new WorkableObjectRangeVisualRequest(
-            rangeBounds.center,
-            rangeBounds.extents.x,
-            workableObject.rangeVisualYOffset));
-    }
-
-    private static WorkableObjectRangeVisual GetOrCreateSharedRangeVisual()
-    {
-        if (sharedRangeVisual != null)
-        {
-            return sharedRangeVisual;
-        }
-
-        GameObject visualObject = new GameObject("Workable Range Visuals");
-        sharedRangeVisual = visualObject.AddComponent<WorkableObjectRangeVisual>();
-        return sharedRangeVisual;
-    }
-
-    private static void SetSharedRangeVisualActive(bool active)
-    {
-        if (sharedRangeVisual != null && sharedRangeVisual.gameObject.activeSelf != active)
-        {
-            sharedRangeVisual.gameObject.SetActive(active);
-        }
-    }
-
     private void DisableLegacyRangeVisual()
     {
-        if (legacyRangeVisualsScanned)
-        {
-            return;
-        }
-
-        legacyRangeVisualsScanned = true;
-        WorkableObjectRangeVisual[] visuals = GetComponentsInChildren<WorkableObjectRangeVisual>(true);
-        for (int i = 0; i < visuals.Length; i++)
-        {
-            WorkableObjectRangeVisual visual = visuals[i];
-            if (visual != null && visual != sharedRangeVisual && visual.gameObject.activeSelf)
-            {
-                visual.gameObject.SetActive(false);
-            }
-        }
+        if (legacyRangeVisualsScanned) return; legacyRangeVisualsScanned = true;
+        var visuals = GetComponentsInChildren<WorkableObjectRangeVisual>(true);
+        for (int i = 0; i < visuals.Length; i++) if (visuals[i] != null && visuals[i] != sharedRangeVisual) visuals[i].gameObject.SetActive(false);
     }
-
-    private bool ShouldShowWorkableRangeVisual()
-    {
-        if (selectedRangeVisualRequested)
-        {
-            return true;
-        }
-
-        return !globalRangeVisualSuppressed && ShouldShowWorkableRangeVisuals();
-    }
-
     private static bool ShouldShowWorkableRangeVisuals()
     {
-        if (craftingSlotRangeVisualRequestSource != null
-            && craftingSlotRangeVisualRequestSource.IsCraftingExpanded)
-        {
-            return true;
-        }
-
+        if (craftingSlotRangeVisualRequestSource != null && craftingSlotRangeVisualRequestSource.IsCraftingExpanded) return true;
         craftingSlotRangeVisualRequestSource = null;
-
-        if (!installOrEditWorkableSelectionRangeVisualsRequested)
-        {
-            return false;
-        }
-
-        GameManager gameManager = GameManager.Instance;
-        return gameManager != null
-               && (gameManager.InstallationPlacementActive || gameManager.MapEditActive);
+        return installOrEditWorkableSelectionRangeVisualsRequested && GameManager.Instance != null
+            && (GameManager.Instance.InstallationPlacementActive || GameManager.Instance.MapEditActive);
     }
+}
+
+// Remains enabled while the renderer is hidden so deferred selection changes can reveal it.
+public sealed class WorkableRangeVisualUpdater : MonoBehaviour
+{
+    private void LateUpdate() => WorkableObject.UpdateRangeVisual();
 }
 
 public readonly struct WorkableObjectRangeVisualRequest
@@ -646,6 +206,8 @@ public sealed class WorkableObjectRangeVisual : MonoBehaviour
         WorldTimeService.GlobalTimeStateChanged -= HandleGlobalTimeStateChanged;
         lastAppliedDaylightFactor = -1f;
     }
+
+    public void SetVisible(bool visible) { if (meshRenderer != null) meshRenderer.enabled = visible; }
 
     public void Configure(IReadOnlyList<WorkableObjectRangeVisualRequest> requests)
     {

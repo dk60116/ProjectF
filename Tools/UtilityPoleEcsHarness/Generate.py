@@ -39,6 +39,8 @@ methods = [
  'private static bool PoleSuppliesPreviewConsumer(', 'private static bool IsBetterConsumerPowerLinePole(',
  'private static void TrySelectConsumerPowerLinePole(\n        ' + pole + ' pole,\n        Vector3 consumerPosition,'
 ]
+if runtime:
+    methods.append('private static bool IsValidPreviewPole(')
 code = '\n'.join(member(x) for x in methods)
 code = re.sub(r'\b' + pole + r'\b', 'PoleHost', code)
 code = re.sub(r'\b(?:Transform|UtilityPoleLinePoint)\b', 'Point', code)
@@ -70,7 +72,7 @@ static bool previewPoleConnectionsDirty;
 int linePointAConnectionCount, linePointBConnectionCount;
 int ExternalConnectionCount => linePointAConnectionCount+linePointBConnectionCount;
 Point linePointCenter, linePointA, linePointB; public Vector3 WorldPosition; public Vector2Int Anchor;
-public bool IsRuntimeActive=true; public int ConnectionRadiusCells, SupplyRadiusCells; public int Id;
+public bool IsRuntimeActive=true, IsPreviewPresentationActive=true; public int ConnectionRadiusCells, SupplyRadiusCells; public int Id;
 void ResolveLinePointReferences() { }
 Vector3 GetSupplyRangeCenter() => WorldPosition;
 static Vector3 ResolveLinePointWorldPosition(Point p) => p.Position;
@@ -123,6 +125,11 @@ static void Append(StringBuilder text,List<PoleConnection> edges) {
  }
 }
 '''
+if runtime:
+    host = host.replace('static bool IsValidPreviewPole(PoleHost p) => p!=null && p.IsRuntimeActive && IsPreviewPole(p);', '')
+    # Placement previews retain active objects while ConfigureInstallPreview disables components.
+    host = host.replace('else previewPoleRuntimes.Add(p,new PreviewPoleRuntime(anchor,q,seed%2==0));',
+                        'else { p.IsRuntimeActive=false; previewPoleRuntimes.Add(p,new PreviewPoleRuntime(anchor,q,seed%2==0)); }')
 host += fields + '\n' + code + '\n}\n'
 host += '''class Program { static void Main(string[] args) {
  var rows=new List<string>(); for(int seed=0;seed<256;seed++) rows.Add(PoleHost.Run(seed));

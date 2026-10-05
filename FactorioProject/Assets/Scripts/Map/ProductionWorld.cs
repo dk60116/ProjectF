@@ -12,6 +12,9 @@ public sealed partial class ProductionWorld : IDisposable
     internal struct State
     {
         internal ProductionProcess Production;
+        internal OilDrillingProcess Oil;
+        internal float OilRetention;
+        internal long OilUnitsPerTick;
         internal long SampleTick, CompleteEnergy, DurationTicks;
         internal float SupplyRatio;
         internal double AnimationPhase;
@@ -29,6 +32,8 @@ public sealed partial class ProductionWorld : IDisposable
     private readonly Dictionary<InputOutputModule, ProductionRenderTemplate> templates = new Dictionary<InputOutputModule, ProductionRenderTemplate>();
     internal readonly List<int> InputAreaScratch = new List<int>(8);
     private ProductionWorldView view;
+    private OilDrillingBatch oilBatch;
+    internal OilDrillingBatch OilBatch => oilBatch ??= new OilDrillingBatch(this);
     private ProductionFacilityInstance selectedMarkerFacility;
     private readonly HashSet<ProductionFacilityInstance> visibleMarkers = new HashSet<ProductionFacilityInstance>();
     private readonly HashSet<ProductionFacilityInstance> markerCandidates = new HashSet<ProductionFacilityInstance>();
@@ -40,6 +45,7 @@ public sealed partial class ProductionWorld : IDisposable
     internal int MarkerCandidateCount => markerCandidates.Count;
     public IReadOnlyList<ProductionFacilityInstance> Instances => instances;
     public int Count => instances.Count;
+    public int OilDrillCount { get; private set; }
     public long ProcessedUpdates { get; internal set; }
     public int VisibleCount => view != null ? view.VisibleCount : 0;
     public static ProductionWorld Ensure(TerrainGenerator terrain)
@@ -53,6 +59,7 @@ public sealed partial class ProductionWorld : IDisposable
     {
         Terrain = terrain; Store = terrain.GetComponent<BlockStateStore>();
         view = ProductionWorldView.Create(this, terrain.transform);
+        InputOutputModule.RuntimePipeTopologyChanged += HandlePipeTopologyChanged;
     }
     internal ref State GetState(int index, uint generation) => ref states.Get(index, generation);
     internal bool Contains(int index, uint generation) => states.Contains(index, generation);
@@ -60,7 +67,7 @@ public sealed partial class ProductionWorld : IDisposable
     {
         if (prototype == null) return false;
         var definition = prototype.BoundItemDefinition ?? InputOutputModule.ResolveItemDefinition(prototype.ResolveItemId());
-        return (prototype.GetType() == typeof(InputOutputModule) || prototype is ProductionMachine)
+        return (prototype.GetType() == typeof(InputOutputModule) || prototype is ProductionMachine || prototype is OilDrillingMachine)
             && definition?.MapObjectArchetype?.RenderParts.Count > 0
             && prototype.GetComponent<BoxCollider>() != null;
     }
@@ -76,10 +83,12 @@ public sealed partial class ProductionWorld : IDisposable
             SampleTick = MapObjectTickManager.CurrentSimulationTick });
         var facility = new ProductionFacilityInstance(this, slot.Index, slot.Generation, handle, prototype, placement, template);
         byKey.Add(key, facility); facility.OrderIndex = instances.Count; instances.Add(facility);
+        if (template.IsOilDrill) OilDrillCount++;
         // Bind emits synchronous item-stack notifications that can schedule this facility.
         // Register before publishing observers so registration cannot cancel that first wake.
-        FacilitySimulationWorld.Register(facility, false);
+        if (template.IsOilDrill) OilBatch.Register(facility); else FacilitySimulationWorld.Register(facility, false);
         Observe(placement.occupiedCoordinates, facility); Observe(facility.OutputCoordinates, facility); Observe(placement.inputOutputState.gridCoordinates, facility);
+        if (template.IsOilDrill) Observe(facility.OilTargetCoordinate, facility);
         Vector2Int cell = Cell(facility.WorldPosition);
         if (!cells.TryGetValue(cell, out var members)) cells.Add(cell, members = new List<ProductionFacilityInstance>(8));
         members.Add(facility); Bind(facility); MarkerCount += facility.MarkerCount; markersDirty = true;
@@ -91,11 +100,16 @@ public sealed partial class ProductionWorld : IDisposable
     private void Observe(IReadOnlyList<Vector2Int> coordinates, ProductionFacilityInstance facility)
     {
         for (int i = 0; coordinates != null && i < coordinates.Count; i++)
-        {
-            if (!observers.TryGetValue(coordinates[i], out var list))
-                observers.Add(coordinates[i], list = new List<ProductionFacilityInstance>(2));
-            if (!list.Contains(facility)) list.Add(facility);
-        }
+            Observe(coordinates[i], facility);
+    }
+    private void Observe(Vector2Int coordinate, ProductionFacilityInstance facility)
+    {
+        if (!observers.TryGetValue(coordinate, out var owners)) observers.Add(coordinate, owners = new List<ProductionFacilityInstance>(2));
+        if (!owners.Contains(facility)) owners.Add(facility);
+    }
+    private void HandlePipeTopologyChanged(InputOutputModule source)
+    {
+        for (int i = 0; i < instances.Count; i++) if (instances[i].Template.HasPipePorts) instances[i].Wake();
     }
     public bool CoordinateIsBlockType(Vector2Int coordinate, InputOutputModule.RectGridBlockType type)
     {
@@ -198,6 +212,13 @@ public sealed partial class ProductionWorld : IDisposable
         }
     }
     public bool TryGet(Vector2Int key, out ProductionFacilityInstance facility) => byKey.TryGetValue(key, out facility);
+    internal bool IsOilTargetClaimed(Vector2Int coordinate)
+    {
+        if (!observers.TryGetValue(coordinate, out var owners)) return false;
+        for (int i = 0; i < owners.Count; i++)
+            if (owners[i].Template.IsOilDrill && owners[i].IsRuntimeActive && owners[i].OilTargetCoordinate == coordinate) return true;
+        return false;
+    }
     internal void Bind(ProductionFacilityInstance facility)
     {
         foreach (var coordinate in facility.RuntimeOccupiedCoordinates)
@@ -222,6 +243,7 @@ public sealed partial class ProductionWorld : IDisposable
         // Manual possession is a global dependency. Probe shared recipes rather than each sleeping facility.
         foreach (var template in templates.Values)
         {
+            if (template.IsOilDrill) continue;
             bool changed = false;
             for (int i = 0; i < template.Recipes.Length; i++)
             {
@@ -236,18 +258,27 @@ public sealed partial class ProductionWorld : IDisposable
         }
     }
     public void WakeAll() { for (int i = 0; i < instances.Count; i++) instances[i].Wake(); }
+    internal void ResetOilBenchmarkWork()
+    {
+        for (int i = 0; i < instances.Count; i++) if (instances[i].Template.IsOilDrill) instances[i].ResetOilBenchmarkWork();
+    }
     public void Remove(Vector2Int key)
     {
         if (!byKey.Remove(key, out var facility)) return;
-        FacilitySimulationWorld.Unregister(facility); UtilityPole.UnregisterRobotArmConsumer(facility);
+        ProjectF.Benchmark.BenchmarkInputSupply.Remove(facility);
+        if (facility.Template.IsOilDrill) oilBatch?.Unregister(facility); else FacilitySimulationWorld.Unregister(facility);
+        UtilityPole.UnregisterRobotArmConsumer(facility);
         foreach (var coordinate in facility.RuntimeOccupiedCoordinates)
             if (Terrain.TryGetLoadedBlock(coordinate, out var block) && block != null && ReferenceEquals(block.MapObject, facility)) block.SetMapObject(null);
         RemoveObservers(facility.RuntimeOccupiedCoordinates, facility); RemoveObservers(facility.OutputCoordinates, facility); RemoveObservers(facility.Placement.inputOutputState.gridCoordinates, facility);
+        if (facility.Template.IsOilDrill) RemoveObserver(facility.OilTargetCoordinate, facility);
+        RemoveFluidOutputRoutes(facility);
         Vector2Int cell = Cell(facility.WorldPosition);
         var members = cells[cell]; members.Remove(facility); if (members.Count == 0) cells.Remove(cell);
         int last = instances.Count - 1;
         instances[facility.OrderIndex] = instances[last]; instances[facility.OrderIndex].OrderIndex = facility.OrderIndex;
         instances.RemoveAt(last);
+        if (facility.Template.IsOilDrill) OilDrillCount--;
         MarkerCount -= facility.MarkerCount; visibleMarkers.Remove(facility); markersDirty = true;
         if (ReferenceEquals(selectedMarkerFacility, facility)) selectedMarkerFacility = null;
         view?.Unbind(facility); states.Release(facility.Index, facility.Generation);
@@ -259,6 +290,11 @@ public sealed partial class ProductionWorld : IDisposable
         for (int i = 0; coordinates != null && i < coordinates.Count; i++)
             if (observers.TryGetValue(coordinates[i], out var list))
             { list.Remove(facility); if (list.Count == 0) observers.Remove(coordinates[i]); }
+    }
+    private void RemoveObserver(Vector2Int coordinate, ProductionFacilityInstance facility)
+    {
+        if (observers.TryGetValue(coordinate, out var owners))
+        { owners.Remove(facility); if (owners.Count == 0) observers.Remove(coordinate); }
     }
     internal void BuildCandidates(CameraRenderCulling culling, List<ProductionFacilityInstance> result)
     {
@@ -288,25 +324,16 @@ public sealed partial class ProductionWorld : IDisposable
         if (maxDistance <= 0f || cells.Count == 0) return false;
         // Traverse the ray, not its entire enclosing rectangle. Long free-camera rays
         // must not turn into a quadratic scan of empty spatial cells.
-        Vector2Int cell = Cell(ray.origin), end = Cell(ray.GetPoint(maxDistance));
-        int stepX = Math.Sign(ray.direction.x), stepY = Math.Sign(ray.direction.z);
-        float deltaX = stepX == 0 ? float.PositiveInfinity : 32f / Mathf.Abs(ray.direction.x);
-        float deltaY = stepY == 0 ? float.PositiveInfinity : 32f / Mathf.Abs(ray.direction.z);
-        float nextX = stepX == 0 ? float.PositiveInfinity
-            : ((cell.x + (stepX > 0 ? 1 : 0)) * 32f - ray.origin.x) / ray.direction.x;
-        float nextY = stepY == 0 ? float.PositiveInfinity
-            : ((cell.y + (stepY > 0 ? 1 : 0)) * 32f - ray.origin.z) / ray.direction.z;
-        while (true)
+        var traversal = new SpatialRayCellTraversal(ray, maxDistance, 32);
+        while (traversal.MoveNext())
         {
+            Vector2Int cell = traversal.Current;
             for (int y = cell.y - 1; y <= cell.y + 1; y++)
             for (int x = cell.x - 1; x <= cell.x + 1; x++)
                 if (cells.TryGetValue(new Vector2Int(x, y), out var members))
                     for (int i = 0; i < members.Count; i++)
                         if (members[i].CullBounds.IntersectRay(ray, out float d) && d >= 0f && d < distance)
                         { target = members[i]; distance = d; }
-            if (cell == end || Mathf.Min(nextX, nextY) > maxDistance) break;
-            if (nextX <= nextY) { cell.x += stepX; nextX += deltaX; }
-            else { cell.y += stepY; nextY += deltaY; }
         }
         return target != null;
     }
@@ -372,13 +399,15 @@ public sealed partial class ProductionWorld : IDisposable
         try { for (int i = instances.Count - 1; i >= 0; i--) Remove(instances[i].StorageKey); }
         finally { InputOutputModule.EndRuntimePipeTopologyBatch(); }
         cells.Clear();
+        outputRoutes.Clear(); storageOutputWaiters.Clear(); dataOutputWaiters.Clear(); nativeProducers.Clear(); FluidRouteSearches = 0;
         foreach (var template in templates.Values) template.Dispose();
         templates.Clear(); markerCandidates.Clear(); visibleMarkers.Clear(); markerScratch.Clear();
         selectedMarkerFacility = null; VisibleMarkerCount = MarkerCount = 0; markersDirty = true; ProcessedUpdates = 0; nextManualCheckTick = 0;
     }
     public void Dispose()
     {
-        ClearRecords(); view?.Release(); view = null;
+        InputOutputModule.RuntimePipeTopologyChanged -= HandlePipeTopologyChanged;
+        ClearRecords(); oilBatch?.Dispose(); oilBatch = null; view?.Release(); view = null;
         if (ReferenceEquals(Current, this)) Current = null;
     }
     public static void AppendProfilerCounters()
@@ -387,5 +416,8 @@ public sealed partial class ProductionWorld : IDisposable
         MapObjectTickProfiler.AddRuntimeCounter("ProductionECS", "Visible", Current != null ? Current.VisibleCount : 0);
         MapObjectTickProfiler.AddRuntimeCounter("ProductionECS", "ProcessedUpdates", Current != null ? Current.ProcessedUpdates : 0);
         MapObjectTickProfiler.AddRuntimeCounter("ProductionECS", "GameObjects", Current != null && Current.view != null ? 1 : 0);
+        MapObjectTickProfiler.AddRuntimeCounter("OilDrillingECS", "Entities", Current != null ? Current.OilDrillCount : 0);
+        Current?.oilBatch?.AppendProfilerCounters();
+        MapObjectTickProfiler.AddRuntimeCounter("ProductionECS", "FluidRouteBuildSearches", Current != null ? Current.FluidRouteSearches : 0);
     }
 }

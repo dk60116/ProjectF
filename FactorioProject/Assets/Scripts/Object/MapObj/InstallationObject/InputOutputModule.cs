@@ -1389,6 +1389,7 @@ public partial class InputOutputModule : InstallationObject,
         module = null;
         if (ProductionWorld.Current != null && ProductionWorld.Current.CoordinateIsBlockType(coordinate, blockType)) return true;
         if (MiningWorld.Current != null && MiningWorld.Current.CoordinateIsBlockType(coordinate, blockType)) return true;
+        if (ProjectF.MapObjects.ForestryWorld.Current != null && ProjectF.MapObjects.ForestryWorld.Current.CoordinateIsBlockType(coordinate, blockType)) return true;
         if (blockType == RectGridBlockType.None
             || !registeredRuntimeGridCoordinates.TryGetValue(coordinate, out HashSet<InputOutputModule> modules)
             || modules == null
@@ -1846,9 +1847,11 @@ public partial class InputOutputModule : InstallationObject,
 
     private static void WakeRuntimeModulesAtCoordinate(Vector2Int coordinate, bool outputOnly)
     {
+        ProjectF.Benchmark.BenchmarkInputSupply.Refill(coordinate);
         // Item mutations must wake data-owned facilities as well as scene components.
         MiningWorld.Current?.Wake(coordinate);
         ProductionWorld.Current?.Wake(coordinate);
+        ProjectF.MapObjects.ForestryWorld.Current?.Wake(coordinate);
         runtimeWakeScratch.Clear();
         runtimeWakeSet.Clear();
         CollectRuntimeModulesAtCoordinate(coordinate, outputOnly);
@@ -2321,13 +2324,15 @@ public partial class InputOutputModule : InstallationObject,
     public static bool TryGetInputItemIdsAtRuntimeGridCoordinate(Vector2Int coordinate, ISet<int> inputItemIds)
     {
         bool found = TryGetRuntimeCoordinateValues(coordinate, inputItemIds, TryAppendRuntimeInputItemIdsCollector);
-        return (ProductionWorld.Current?.AppendInputItemIds(coordinate, inputItemIds, false) ?? false) | found;
+        return (ProductionWorld.Current?.AppendInputItemIds(coordinate, inputItemIds, false) ?? false)
+            | (ProjectF.MapObjects.ForestryWorld.Current?.AppendInputItemIds(coordinate, inputItemIds) ?? false) | found;
     }
 
     public static bool TryGetAcceptedInputItemIdsAtRuntimeGridCoordinate(Vector2Int coordinate, ISet<int> inputItemIds)
     {
         bool found = TryGetRuntimeCoordinateValues(coordinate, inputItemIds, TryAppendAcceptedRuntimeInputItemIdsCollector);
-        return (ProductionWorld.Current?.AppendInputItemIds(coordinate, inputItemIds, true) ?? false) | found;
+        return (ProductionWorld.Current?.AppendInputItemIds(coordinate, inputItemIds, true) ?? false)
+            | (ProjectF.MapObjects.ForestryWorld.Current?.AppendInputItemIds(coordinate, inputItemIds) ?? false) | found;
     }
 
     public static bool TryGetInputEnergyTypesAtRuntimeGridCoordinate(
@@ -2335,7 +2340,9 @@ public partial class InputOutputModule : InstallationObject,
         ISet<ItemDefinition.EnergyType> energyTypes)
     {
         bool found = TryGetRuntimeCoordinateValues(coordinate, energyTypes, TryAppendRuntimeInputEnergyTypesCollector);
-        return (ProductionWorld.Current?.AppendEnergyTypes(coordinate, energyTypes) ?? false) | found;
+        return (ProductionWorld.Current?.AppendEnergyTypes(coordinate, energyTypes) ?? false)
+            | (MiningWorld.Current?.AppendEnergyTypes(coordinate, energyTypes) ?? false)
+            | (ProjectF.MapObjects.ForestryWorld.Current?.AppendEnergyTypes(coordinate, energyTypes) ?? false) | found;
     }
 
     private static readonly RuntimeCoordinateValueCollector<int> TryAppendRuntimeOutputItemIdsCollector = TryAppendRuntimeOutputItemIds;
@@ -3314,6 +3321,7 @@ public partial class InputOutputModule : InstallationObject,
     internal static void NotifyFluidOutputCapacityIncreased(InstallationObject storage)
     {
         AdvanceFluidStorageStateVersion(storage);
+        ProductionWorld.Current?.WakeFluidOutputStorage(storage);
         if (storage == null
             || !registeredFluidOutputSleepWaiters.TryGetValue(
                 storage,
@@ -5105,6 +5113,8 @@ public partial class InputOutputModule : InstallationObject,
         SetWorkAnimatorState(false, true);
         StopCraftParticleEffectVisual(true);
         FacilitySimulationWorld.Unregister(this);
+        ProjectF.Benchmark.BenchmarkInputSupply.Remove(this);
+        benchmarkInputVersion = -1;
         UnregisterFluidSleepWaiters();
         runtimeSleeping = false;
         fluidOutputCapacityBlocked = false;
@@ -5138,6 +5148,8 @@ public partial class InputOutputModule : InstallationObject,
 
     protected override void OnPlacementRuntimeChanged()
     {
+        ProjectF.Benchmark.BenchmarkInputSupply.Remove(this);
+        benchmarkInputVersion = -1;
         InvalidateEnergyGaugeWorldPosition();
         base.OnPlacementRuntimeChanged();
         RegisterRuntimeFluidSpatialCoordinates();
@@ -5146,6 +5158,8 @@ public partial class InputOutputModule : InstallationObject,
 
     protected override void OnPlacementRuntimeCleared()
     {
+        ProjectF.Benchmark.BenchmarkInputSupply.Remove(this);
+        benchmarkInputVersion = -1;
         UnregisterRuntimeFluidSpatialCoordinates();
         base.OnPlacementRuntimeCleared();
     }
@@ -8295,6 +8309,9 @@ public partial class InputOutputModule : InstallationObject,
         {
             return 0;
         }
+
+        if (IsBenchmarkWorking)
+            return ProjectF.Benchmark.BenchmarkInputSupply.Consume(this, ResolveTerrain(), coordinate, itemId, count, consumeTargetWorldPosition, moveInterval);
 
         count = Mathf.Min(
             count,

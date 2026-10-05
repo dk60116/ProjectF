@@ -45,6 +45,8 @@ namespace ProjectF.Power
         public Bounds CullBounds { get; }
         public bool IsRuntimeActive => Placement != null ? Registered && VirtualObjectWorld.Current != null && VirtualObjectWorld.Current.IsHandleAlive(Handle)
             : presentation != null && presentation.isActiveAndEnabled && presentation.gameObject.activeInHierarchy;
+        // Placement previews disable their components but retain an active presentation object.
+        internal bool IsPreviewPresentationActive => presentation != null && presentation.gameObject.activeInHierarchy;
         public bool IsTargetActive => IsRuntimeActive;
         public MapObject SceneObject => presentation;
         public string ObjectName => Prototype.ObjectName;

@@ -1,6 +1,7 @@
 using DG.Tweening;
 using System;
 using System.Collections.Generic;
+using ProjectF.MapObjects;
 using TMPro;
 using UnityEngine;
 using UnityEngine.EventSystems;
@@ -85,7 +86,7 @@ public class CraftingSlot : ItemSlot
     private readonly List<int> requiredCraftingMapObjectIds = new List<int>();
     private readonly List<HUDButtonHoverTween> hoverTweenBuffer = new List<HUDButtonHoverTween>();
     private readonly Dictionary<RectTransform, Vector2> ingredientLayoutSizes = new Dictionary<RectTransform, Vector2>();
-    private readonly List<WorkableObject> workableMaterialSources = new List<WorkableObject>(4);
+    private readonly List<ProjectF.MapObjects.IWorkableTarget> workableMaterialSources = new List<ProjectF.MapObjects.IWorkableTarget>(4);
     private readonly List<BoxObject> workableBoxSources = new List<BoxObject>(8);
     private readonly Dictionary<int, int> externalOwnedItemCountCache = new Dictionary<int, int>();
     private bool externalAvailabilityScanActive;
@@ -1163,7 +1164,7 @@ public class CraftingSlot : ItemSlot
 
             if (remaining > 0 && terrain != null && workableMaterialSources.Count > 0)
             {
-                int removed = terrain.RemoveDroppedItemsInWorkableRanges(
+                int removed = terrain.RemoveWorkableAreaItems(
                     workableMaterialSources,
                     origin,
                     PlayerDroppedIngredientRadius,
@@ -2221,7 +2222,7 @@ public class CraftingSlot : ItemSlot
                 PlayerDroppedIngredientRadius);
             if (workableMaterialSources.Count > 0)
             {
-                total += terrain.GetDroppedItemCountInWorkableRanges(
+                total += terrain.GetWorkableAreaItemCount(
                     workableMaterialSources,
                     origin,
                     PlayerDroppedIngredientRadius,

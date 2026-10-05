@@ -1159,6 +1159,7 @@ public partial class Block
         Vector3 targetWorldPosition,
         float delay = 0f)
     {
+        if (!inputAreaCenterObjectsVisible) return false;
         EnsureFloorObjectsInitialized();
         EnsureInputAreaCenterAnchorInitialized();
         if (!Application.isPlaying
@@ -7802,6 +7803,8 @@ public partial class Block
         // records, rather than the prototype's GameObject, own cell occupancy.
         if (TryGetRuntimePipeRecord(out _)
             || TryGetRuntimeConveyorRecord(out _)
+            || (mapObject != null && mapObject.SceneObject == null
+                && !(mapObject is ResourceInstance) && mapObject.IsTargetActive)
             || (mapObject is InstallationObject installationObject
                 && installationObject != null
                 && installationObject.gameObject != null

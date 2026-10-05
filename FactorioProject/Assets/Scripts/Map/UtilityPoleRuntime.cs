@@ -269,10 +269,10 @@ public sealed partial class UtilityPoleRuntime : IMapObjectTarget
             return;
         }
 
+        previewPoleRuntimes[pole] = nextRuntime;
         pole.ResolveLinePointReferences();
         pole.EnsureUtilityPoleWires();
         pole.RefreshUtilityPoleWires();
-        previewPoleRuntimes[pole] = nextRuntime;
         MarkPreviewPoleConnectionsDirty();
         RequestDeferredConnectionLineVisualRefresh();
     }
@@ -285,6 +285,7 @@ public sealed partial class UtilityPoleRuntime : IMapObjectTarget
         }
 
         pole.HideConnectionUtilityPoleWires();
+        pole.RefreshUtilityPoleWires();
         MarkPreviewPoleConnectionsDirty();
         RequestDeferredConnectionLineVisualRefresh();
     }
@@ -346,13 +347,14 @@ public sealed partial class UtilityPoleRuntime : IMapObjectTarget
             }
         }
 
+        previewPoleRuntimes.Clear();
         for (int i = 0; i < visualPoleScratch.Count; i++)
         {
             visualPoleScratch[i].HideConnectionUtilityPoleWires();
+            visualPoleScratch[i].RefreshUtilityPoleWires();
         }
 
         visualPoleScratch.Clear();
-        previewPoleRuntimes.Clear();
         previewConsumerRuntimes.Clear();
         previewPoleConnections.Clear();
         HidePreviewConsumerUtilityPoleWires();
@@ -951,9 +953,7 @@ public sealed partial class UtilityPoleRuntime : IMapObjectTarget
             electricRuntimeFullWakeBatchCount++;
             lastElectricRuntimeActuallyWokenCount += InputOutputModule.WakeElectricRuntimeModules(
                 out int moduleCandidateCount);
-            lastElectricRuntimeActuallyWokenCount += LoggingMachine.WakeElectricRuntimeMachines(
-                out int loggingCandidateCount);
-            lastElectricRuntimeWakeConsumerCandidateCount = moduleCandidateCount + loggingCandidateCount;
+            lastElectricRuntimeWakeConsumerCandidateCount = moduleCandidateCount;
             lastElectricRuntimeActuallyWokenCount += WakeAllDataElectricConsumers(
                 out lastElectricRuntimeWakeRobotArmCandidateCount);
         }
@@ -985,7 +985,7 @@ public sealed partial class UtilityPoleRuntime : IMapObjectTarget
             for (int consumerIndex = 0; consumerIndex < network.PoweredConsumers.Count; consumerIndex++)
             {
                 InstallationObject consumer = network.PoweredConsumers[consumerIndex];
-                if ((consumer is InputOutputModule || consumer is LoggingMachine)
+                if (consumer is InputOutputModule
                     && electricRuntimeWakeConsumerScratch.Add(consumer))
                 {
                     electricRuntimeWakeConsumerOrder.Add(consumer);
@@ -1003,11 +1003,6 @@ public sealed partial class UtilityPoleRuntime : IMapObjectTarget
                 {
                     lastElectricRuntimeActuallyWokenCount++;
                 }
-            }
-            else if (consumer is LoggingMachine loggingMachine
-                     && LoggingMachine.WakeElectricRuntimeMachine(loggingMachine))
-            {
-                lastElectricRuntimeActuallyWokenCount++;
             }
         }
 
@@ -1202,7 +1197,7 @@ public sealed partial class UtilityPoleRuntime : IMapObjectTarget
     {
         if (wire == null) return;
         wire.Set(startPosition, endPosition, lineWidth, sagDepth, lineCurveSegments, lineColor,
-            hasEndpoints && lineWidth > 0f && IsRuntimeActive && !PlacementPresentationSuppressed);
+            hasEndpoints && lineWidth > 0f && (IsRuntimeActive || IsValidPreviewPole(this)) && !PlacementPresentationSuppressed);
     }
 
     private static Vector3 ResolveLinePointWorldPosition(Transform point) => point != null ? point.position : Vector3.zero;
@@ -1991,7 +1986,7 @@ public sealed partial class UtilityPoleRuntime : IMapObjectTarget
         foreach (KeyValuePair<UtilityPoleRuntime, PreviewPoleRuntime> entry in previewPoleRuntimes)
         {
             UtilityPoleRuntime pole = entry.Key;
-            if (pole != null && pole.IsRuntimeActive && !activePoles.Contains(pole))
+            if (IsValidPreviewPole(pole) && !activePoles.Contains(pole))
             {
                 visualPoleScratch.Add(pole);
             }
@@ -2009,7 +2004,7 @@ public sealed partial class UtilityPoleRuntime : IMapObjectTarget
         foreach (KeyValuePair<UtilityPoleRuntime, PreviewPoleRuntime> entry in previewPoleRuntimes)
         {
             UtilityPoleRuntime pole = entry.Key;
-            if (pole == null || !pole.IsRuntimeActive)
+            if (!IsValidPreviewPole(pole))
             {
                 visualPoleScratch.Add(pole);
             }
@@ -2017,8 +2012,7 @@ public sealed partial class UtilityPoleRuntime : IMapObjectTarget
 
         for (int i = 0; i < visualPoleScratch.Count; i++)
         {
-            previewPoleRuntimes.Remove(visualPoleScratch[i]);
-            previewPoleConnectionsDirty = true;
+            UnregisterBlueprintPreview(visualPoleScratch[i]);
         }
 
         visualPoleScratch.Clear();
@@ -2282,7 +2276,7 @@ public sealed partial class UtilityPoleRuntime : IMapObjectTarget
 
         foreach (UtilityPoleRuntime pole in sourcePoles)
         {
-            if (pole == null || !pole.IsRuntimeActive)
+            if (pole == null || (!pole.IsRuntimeActive && !IsValidPreviewPole(pole)))
             {
                 continue;
             }
@@ -2596,8 +2590,7 @@ public sealed partial class UtilityPoleRuntime : IMapObjectTarget
         foreach (KeyValuePair<UtilityPoleRuntime, PreviewPoleRuntime> entry in previewPoleRuntimes)
         {
             UtilityPoleRuntime pole = entry.Key;
-            if (pole != null
-                && pole.IsRuntimeActive
+            if (IsValidPreviewPole(pole)
                 && entry.Value.TopologyReplacement)
             {
                 return true;
@@ -3060,7 +3053,7 @@ public sealed partial class UtilityPoleRuntime : IMapObjectTarget
     private static bool IsValidPreviewPole(UtilityPoleRuntime pole)
     {
         return pole != null
-               && pole.IsRuntimeActive
+               && pole.IsPreviewPresentationActive
                && previewPoleRuntimes.ContainsKey(pole);
     }
 
@@ -3648,10 +3641,6 @@ public sealed partial class UtilityPoleRuntime : IMapObjectTarget
             return module.TryGetElectricPowerRequirement(out wattsPerSecond);
         }
 
-        if (consumer is LoggingMachine loggingMachine)
-        {
-            return loggingMachine.TryGetElectricPowerRequirement(out wattsPerSecond);
-        }
 
         ItemDefinition definition = ResolveElectricConsumerDefinition(consumer);
         float electricUseWatts = ItemDefinition.ResolveElectricUseWatts(definition);
@@ -3677,10 +3666,6 @@ public sealed partial class UtilityPoleRuntime : IMapObjectTarget
             return module.TryGetElectricPowerDemand(out wattsPerSecond);
         }
 
-        if (consumer is LoggingMachine loggingMachine)
-        {
-            return loggingMachine.TryGetElectricPowerDemand(out wattsPerSecond);
-        }
 
         if (consumer is LightObject lightObject)
         {
@@ -3693,7 +3678,6 @@ public sealed partial class UtilityPoleRuntime : IMapObjectTarget
     private static bool HasRuntimeElectricPowerDemand(InstallationObject consumer)
     {
         return consumer is InputOutputModule
-               || consumer is LoggingMachine
                || consumer is LightObject;
     }
 

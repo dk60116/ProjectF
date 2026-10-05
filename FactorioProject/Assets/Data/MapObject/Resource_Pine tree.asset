@@ -57,6 +57,6 @@ MonoBehaviour:
       amount: 1
       dropChance: 1
   defaultResourceCount: 1
-  defaultGetCount: 4
+  defaultGetCount: 1
   defaultMaxGauge: 10
   defaultCurrentGauge: 10

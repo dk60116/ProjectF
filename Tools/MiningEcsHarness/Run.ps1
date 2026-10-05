@@ -1,13 +1,42 @@
+param([switch]$Mass)
 $ErrorActionPreference = 'Stop'
 $repo = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '../..'))
 $probe = Join-Path ([IO.Path]::GetTempPath()) ('ProjectF-MiningEcs-' + [guid]::NewGuid().ToString('N'))
 New-Item -ItemType Directory -Path $probe | Out-Null
 $files = @('Simulation/Core/ProductionProcess.cs', 'Simulation/Core/MiningProcess.cs',
-    'Simulation/Core/SimulationTickContracts.cs', 'Map/MiningMachineInstance.cs', 'Map/MiningItemOutput.cs',
+    'Simulation/Core/SimulationTickContracts.cs', 'Map/MiningMachineInstance.cs', 'Map/MiningMachineInstance.Energy.cs', 'Map/MiningMachineInstance.Benchmark.cs', 'Map/MiningItemOutput.cs', 'Map/FacilityFuel.cs', 'Diagnostics/BenchmarkWorkProgress.cs',
     'Map/IDataItemProducer.cs', 'Map/IDataElectricConsumer.cs')
 foreach ($relative in $files) { Copy-Item -LiteralPath (Join-Path $repo ('FactorioProject/Assets/Scripts/' + $relative)) -Destination $probe }
-Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'Checks.cs') -Destination $probe
-Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'BoundaryStubs.cs') -Destination $probe
+if ($Mass) { Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'MassChecks.cs') -Destination $probe }
+else {
+    Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'Checks.cs') -Destination $probe
+    Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'FuelChecks.cs') -Destination $probe
+}
+Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'FuelBoundaries.cs') -Destination $probe
+Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'MiningAssetSettings.cs') -Destination $probe
+$entity = Join-Path $probe 'MiningMachineInstance.cs'
+[IO.File]::WriteAllText($entity, [IO.File]::ReadAllText($entity).Replace('Matrix4x4.TRS(WorldPosition, WorldRotation, Template.Scale)', 'Matrix4x4.identity'))
+$boundary = [IO.File]::ReadAllText((Join-Path $PSScriptRoot 'BoundaryStubs.cs'))
+foreach ($name in @('ItemDefinition', 'Block', 'BoxObject', 'TerrainGenerator')) {
+    $boundary = $boundary.Replace("public class $name`n", "public partial class $name`n").Replace("public class $name`r`n", "public partial class $name`r`n")
+    $boundary = $boundary.Replace("public class $name {", "public partial class $name {")
+}
+if ($Mass) {
+    $boundary = [regex]::Replace($boundary, 'public static class FacilitySimulationWorld\s*\{.*?\r?\n\}', '', 'Singleline')
+    $boundary = $boundary.Replace('public static class MapObjectTickManager', 'public static partial class MapObjectTickManager')
+    $boundary = $boundary.Replace('public static class UtilityPole', 'public static partial class UtilityPole')
+    $boundary = $boundary.Replace('public partial class InputOutputModule', 'public partial class InputOutputModule : InstallationObject')
+    $boundary = $boundary.Replace('=> ref Value;', '=> ref (massStates == null ? ref Value : ref massStates[index]);')
+    Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'SchedulerBoundaries.cs') -Destination $probe
+    foreach ($relative in @('Map/FacilitySimulationWorld.cs', 'Simulation/Core/FacilityFlowBatch.cs', 'Simulation/Core/FacilityFlowStateWorld.cs')) {
+        $content = [IO.File]::ReadAllText((Join-Path $repo ('FactorioProject/Assets/Scripts/' + $relative)))
+        $content = $content.Replace('Application.isPlaying', 'MiningSchedulerHost.IsPlaying').Replace('FacilitySimulationWorld', 'FacilitySchedulerProbe')
+        $content = [regex]::Replace($content, 'public interface IMapObjectUpdateTickDeadline\s*\{.*?\r?\n\}', '', 'Singleline')
+        $content = [regex]::Replace($content, 'UnityEngine.Object unityObject = target as UnityEngine.Object;\s*return ReferenceEquals\(unityObject, null\) \|\| unityObject != null;', 'return !ReferenceEquals(target, null);')
+        [IO.File]::WriteAllText((Join-Path $probe ([IO.Path]::GetFileName($relative))), $content)
+    }
+}
+[IO.File]::WriteAllText((Join-Path $probe 'BoundaryStubs.cs'), $boundary)
 Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'GaugeChecks.cs') -Destination $probe
 Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'OwnershipChecks.cs') -Destination $probe
 function Member([string]$relative, [string]$signature) {
@@ -20,6 +49,17 @@ function Member([string]$relative, [string]$signature) {
     }
     $source.Substring($start, $end - $start)
 }
+$fuelProduction = "using System; using System.Collections.Generic; using UnityEngine; public partial class MiningWorld {`n"
+foreach ($signature in @('public static bool Supports(', 'private void Observe(', 'public bool IsEnergyArea(', 'public bool AppendEnergyTypes(')) {
+    $fuelProduction += (Member 'Map/MiningWorld.cs' $signature) + "`n"
+}
+$fuelProduction += "}`npublic static partial class InputOutputModuleEnergyAreaController {`n"
+foreach ($signature in @('public static bool CoordinateAcceptsEnergyType(', 'public static bool TryGetAcceptedEnergyTypes(',
+    'public static bool CoordinateIsEnergyArea(', 'public static bool CoordinateBlocksInstallationPlacement(')) {
+    $fuelProduction += (Member 'Map/AreaMarker.cs' $signature) + "`n"
+}
+$fuelProduction += "}`n"
+[IO.File]::WriteAllText((Join-Path $probe 'FuelProduction.cs'), $fuelProduction)
 $io = 'Object/MapObj/InstallationObject/InputOutputModule.cs'
 $generated = "using System; using System.IO; using System.Collections.Generic; using UnityEngine; public partial class InputOutputModule {`n"
 foreach ($signature in @('public struct PersistentInputItemAreaState', 'public sealed class RefineryOutputState', 'public sealed class PersistentState')) {
@@ -76,5 +116,5 @@ $gaugeProduction += (Member 'Map/AreaMarker.cs' 'internal readonly struct AreaMa
 [IO.File]::WriteAllText((Join-Path $probe 'GaugeProduction.cs'), $gaugeProduction)
 $unity = 'C:/Program Files/Unity/Hub/Editor/6000.4.0f1/Editor/Data/Managed/UnityEngine/UnityEngine.CoreModule.dll'
 [IO.File]::WriteAllText((Join-Path $probe 'Probe.csproj'), '<Project Sdk="Microsoft.NET.Sdk"><PropertyGroup><OutputType>Exe</OutputType><TargetFramework>net9.0</TargetFramework><NoWarn>0649</NoWarn></PropertyGroup><ItemGroup><Reference Include="UnityEngine.CoreModule"><HintPath>' + $unity + '</HintPath></Reference></ItemGroup></Project>')
-dotnet run --configuration Release --project (Join-Path $probe 'Probe.csproj')
+dotnet run --configuration Release --project (Join-Path $probe 'Probe.csproj') -- $repo
 exit $LASTEXITCODE

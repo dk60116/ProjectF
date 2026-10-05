@@ -853,6 +853,8 @@ public partial class TerrainGenerator : MonoBehaviour
             }
 
             if (TryRestoreDataOnlyUtilityPole(savedState)
+                || TryRestoreDataOnlyWorkable(savedState)
+                || TryRestoreDataOnlyForestry(savedState)
                 || TryRestoreDataOnlyProduction(savedState)
                 || TryRestoreDataOnlyMining(savedState)
                 || TryRestoreDataOnlyRobotArm(savedState)

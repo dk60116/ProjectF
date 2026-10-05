@@ -16,4 +16,8 @@ Repeated and simultaneous 100,000-item transfers check zero recurring managed
 allocation after warming. Deferred output checks preserve real stock counts,
 capacity, save state and cold offscreen emission without item wrappers.
 
+Workable material queries also exercise nearby floor/output overlap, overlapping
+work ranges, compact and materialized output stock, exact consumption, and
+exclusion of input-only stacks, box contents and outputs outside work ranges.
+
 This harness does not launch Unity or measure actual game FPS.

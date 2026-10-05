@@ -27,6 +27,7 @@ public partial class TerrainGenerator
             Rotation = placement.GetInstalledObjectRotation(source, turns), Scale = source.transform.localScale,
             RequiresPlacementResolution = source is Train || source is Railload };
         if (!(source is ConveyorBelt || source is Pipe || source is Building || source is RobotArm
+            || ProjectF.MapObjects.ForestryWorld.Supports(source)
             || source is MiningMachine miner && MiningWorld.Supports(miner)
             || source is InputOutputModule production && ProductionWorld.Supports(production)
             || source is UtilityPole pole && UtilityPoleWorld.Supports(pole)))
@@ -145,6 +146,8 @@ public partial class TerrainGenerator
         if (template.Prototype is Building building)
             return RegisterDataOnlyBuildingState(state, building, state.worldPosition, template.Rotation, template.Scale, out _);
         if (template.Prototype is RobotArm arm) return RegisterDataOnlyRobotArm(arm, state) != null;
+        if (template.Prototype is LoggingMachine || template.Prototype is SeedPlanter)
+            return RegisterDataOnlyForestryState(template.Prototype, state) != null;
         if (template.Prototype is MiningMachine miner) return RegisterDataOnlyMiningState(miner, state) != null;
         if (template.Prototype is InputOutputModule production) return RegisterDataOnlyProductionState(production, state) != null;
         if (!(template.Prototype is ConveyorBelt belt)) return false;

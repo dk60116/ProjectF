@@ -6,7 +6,8 @@ public partial class TerrainGenerator
         out ProductionFacilityInstance facility)
     {
         facility = null;
-        if (presentation == null || presentation.GetType() != typeof(InputOutputModule) && !(presentation is ProductionMachine)) return false;
+        if (presentation == null || presentation.GetType() != typeof(InputOutputModule)
+            && !(presentation is ProductionMachine) && !(presentation is OilDrillingMachine)) return false;
         EnsureResourceStateStore();
         if (!resourceStateStore.TryCaptureInstallationState(presentation, out var state)) return false;
         source = source != null ? source : ResolveInstallationSourcePrefab(state, ResolveInstallationPlacementController(),

@@ -2966,6 +2966,7 @@ public partial class PlayerHUD : BagSlot
         RobotArmWorld.Current?.SetSelectedMarkerArm(requested ? target as RobotArmInstance : null);
         MiningWorld.Current?.SetSelectedMarkerMiner(requested ? target as MiningMachineInstance : null);
         ProductionWorld.Current?.SetSelectedMarkerFacility(requested ? target as ProductionFacilityInstance : null);
+        ProjectF.MapObjects.ForestryWorld.Current?.SetSelectedMarkerInstance(requested ? target as ProjectF.MapObjects.ForestryInstance : null);
         InputOutputModuleAreaMarkerController nextController = requested
             ? ResolveAreaMarkerController(target)
             : null;
@@ -3717,7 +3718,7 @@ public partial class PlayerHUD : BagSlot
 
         if (currentInteractionMapObject != null)
         {
-            if (currentInteractionMapObject is WorkableObject workableObject)
+            if (currentInteractionMapObject is ProjectF.MapObjects.IWorkableTarget workableObject)
             {
                 PlayerController playerController = currentPlayer != null
                     ? currentPlayer.GetComponent<PlayerController>()
@@ -3857,7 +3858,7 @@ public partial class PlayerHUD : BagSlot
 
     private static bool IsLoggingMachineFilterTarget(IMapObjectTarget mapObject)
     {
-        if (mapObject is LoggingMachine)
+        if (mapObject is ProjectF.MapObjects.ILoggingTarget)
         {
             return true;
         }
@@ -4140,9 +4141,11 @@ public partial class PlayerHUD : BagSlot
         }
 
         if (target is ResourceInstance resource) return resource.IsRuntimeActive;
+        if (target is ProjectF.MapObjects.IWorkableTarget workable) return workable.IsTargetActive;
         if (target is UtilityPoleRuntime pole) return pole.IsTargetActive;
         if (target is ProductionFacilityInstance production) return production.IsTargetActive;
         if (target is MiningMachineInstance miner) return miner.IsTargetActive;
+        if (target is ProjectF.MapObjects.ForestryInstance forestry) return forestry.IsTargetActive;
         if (target is RobotArmInstance robotArm) return robotArm.IsTargetActive;
         if (target is PortableObject portableObject)
         {

@@ -15,13 +15,10 @@ function Read-Member([string]$file, [string]$signature) {
     $source.Substring($start, $end - $start)
 }
 $base = 'FactorioProject/Assets/Scripts/Object/MapObj/'
-$generated = "using System.Collections.Generic; using UnityEngine;`npublic partial class Resource {`n"
-$generated += (Read-Member ($base + 'Resource.cs') 'protected int RollNextConfiguredHarvestDropCount(') + "`n}`nnamespace ProjectF.MapObjects { public partial class Tree {`n"
-$generated += (Read-Member ($base + 'Tree.cs') 'public void CollectMachineSeedDrops(') + "`n}}`npublic partial class SeedPlanter {`n"
-$generated += (Read-Member ($base + 'InstallationObject/SeedPlanter.cs') 'internal int ReceiveHarvestedSeeds(') + "`n}`npublic partial class InputOutputModule {`n"
-$generated += (Read-Member ($base + 'InstallationObject/InputOutputModule.cs') 'protected bool TryRestoreRuntimeInputAreaCenterObject(') + "`n}`npublic partial class LoggingMachine {`n"
-$generated += (Read-Member ($base + 'InstallationObject/LoggingMachine.cs') 'private void CompleteTreeHarvest(') + "`n"
-$generated += (Read-Member ($base + 'InstallationObject/LoggingMachine.cs') 'private void RecoverHarvestedSeeds(') + "`n}`npublic partial class Block {`n"
+$generated = "using System.Collections.Generic; using UnityEngine;`npublic partial class ResourceInstance {`n"
+$generated += (Read-Member ($base + 'ResourceInstance.cs') 'protected int RollNextConfiguredHarvestDropCount(') + "`n}`nnamespace ProjectF.MapObjects { public partial class TreeInstance {`n"
+$generated += (Read-Member ($base + 'TreeInstance.cs') 'public void CollectMachineSeedDrops(') + "`n"
+$generated += (Read-Member ($base + 'TreeInstance.cs') 'private static bool WasDropItemSeenBefore(') + "`n}}`npublic partial class Block {`n"
 $generated += (Read-Member 'FactorioProject/Assets/Scripts/Map/Block.cs' 'public bool CanAddFloorObjects(int count, int itemId,') + "`n"
 $generated += (Read-Member 'FactorioProject/Assets/Scripts/Map/Block.cs' 'private int GetAvailableFloorCapacity(int itemId,') + "`n"
 $generated += (Read-Member 'FactorioProject/Assets/Scripts/Map/Block.cs' 'private bool BlocksFloorObjectStacking(') + "`n}`npublic partial class TerrainGenerator {`n"

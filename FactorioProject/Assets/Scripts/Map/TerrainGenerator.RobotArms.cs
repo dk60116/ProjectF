@@ -32,7 +32,7 @@ public partial class TerrainGenerator
         Vector2Int key = state.hasStorageKey ? state.storageKey : state.anchorCoordinate;
         if (world.TryGet(key, out var existing)) { world.Bind(existing); return existing; }
         state.placementSequence = InstallationObject.ClaimNextPlacementSequence(state.placementSequence);
-        if (!resourceStateStore.RegisterDataOnlyInstallation(state, out var stored)) return null;
+        if (!resourceStateStore.RegisterDataOnlyInstallationSharedState(state, out var stored)) return null;
         return world.Register(prototype, stored);
     }
     private bool TryRestoreDataOnlyRobotArm(BlockStateStore.InstallationSaveState state)

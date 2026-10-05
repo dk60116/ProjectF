@@ -1,11 +1,14 @@
-param([switch]$FluidBoundary, [switch]$FurnaceIntegration)
+param([switch]$FluidBoundary, [switch]$FurnaceIntegration, [switch]$OilDrilling, [switch]$BenchmarkInputs)
+if ($BenchmarkInputs -and ($FluidBoundary -or $FurnaceIntegration -or $OilDrilling)) { throw 'BenchmarkInputs is a standalone harness mode.' }
+if ($OilDrilling) { $FluidBoundary = $true }
 $ErrorActionPreference = 'Stop'
 $repo = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '../..'))
 $probe = Join-Path ([IO.Path]::GetTempPath()) ('ProjectF-ProductionEcs-' + [guid]::NewGuid().ToString('N'))
 New-Item -ItemType Directory -Path $probe | Out-Null
 foreach ($relative in @('Simulation/Core/ProductionProcess.cs', 'Simulation/Core/MiningProcess.cs',
     'Simulation/Core/SimulationTickContracts.cs', 'Map/ProductionFacilityInstance.cs', 'Map/ProductionFacilityInstance.Info.cs',
-    'Map/ResourceStateSlots.cs', 'Map/MiningItemOutput.cs', 'Map/IDataItemProducer.cs', 'Map/IDataElectricConsumer.cs', 'Map/IProductionFacilityInfo.cs')) {
+    'Map/ResourceStateSlots.cs', 'Map/MiningItemOutput.cs', 'Map/FacilityFuel.cs', 'Diagnostics/BenchmarkWorkProgress.cs', 'Map/IDataItemProducer.cs', 'Map/IDataElectricConsumer.cs', 'Map/IDataFluidProducer.cs',
+    'Map/ProductionFacilityInstance.BenchmarkInputs.cs', 'Map/ProductionFacilityInstance.Benchmark.cs', 'Map/ProductionFacilityInstance.OilDrilling.cs', 'Map/OilDrillingBatch.cs', 'Simulation/Core/OilDrillingProcess.cs', 'Map/IProductionFacilityInfo.cs')) {
     Copy-Item -LiteralPath (Join-Path $repo ('FactorioProject/Assets/Scripts/' + $relative)) -Destination $probe
 }
 # Matrix4x4.TRS is native to Unity. Replace only that engine boundary, never the production state logic.
@@ -13,27 +16,37 @@ $entity = Join-Path $probe 'ProductionFacilityInstance.cs'
 $source = [IO.File]::ReadAllText($entity).Replace('Matrix4x4.TRS(WorldPosition, WorldRotation, Template.Scale)', 'Matrix4x4.identity')
 [IO.File]::WriteAllText($entity, $source)
 $boundary = [IO.File]::ReadAllText((Join-Path $PSScriptRoot '../MiningEcsHarness/BoundaryStubs.cs'))
-foreach ($name in @('ItemDefinition', 'Block', 'BoxObject', 'TerrainGenerator', 'VirtualObjectWorld')) {
+foreach ($name in @('ItemDefinition', 'Block', 'BoxObject', 'TerrainGenerator', 'VirtualObjectWorld', 'ResourceInstance')) {
     $boundary = $boundary.Replace("public class $name`n", "public partial class $name`n").Replace("public class $name`r`n", "public partial class $name`r`n")
     $boundary = $boundary.Replace("public class $name {", "public partial class $name {")
     $boundary = $boundary.Replace("public class $name :", "public partial class $name :")
 }
+$boundary = $boundary.Replace('public static class BenchmarkRuntime', 'public static partial class BenchmarkRuntime')
+$boundary = $boundary.Replace('public static class FacilitySimulationWorld', 'public static partial class FacilitySimulationWorld')
 if ($FluidBoundary -or $FurnaceIntegration) { $boundary = $boundary.Replace('public partial class InputOutputModule', 'public partial class InputOutputModule : InstallationObject') }
-if ($FurnaceIntegration) {
+if ($FurnaceIntegration -or $OilDrilling) {
     $boundary = [regex]::Replace($boundary, 'public static class MapObjectTickManager[^\r\n]*', '')
     $boundary = [regex]::Replace($boundary, 'public interface IMapObjectUpdateTickDeadline[^\r\n]*', '')
     $boundary = [regex]::Replace($boundary, 'namespace ProjectF.Simulation\s*\{\s*public static class SimulationTickWorld.*?\}\s*\}', '', 'Singleline')
-    $boundary = [regex]::Replace($boundary, 'public static class FacilitySimulationWorld\s*\{.*?\r?\n\}', '', 'Singleline')
+    $boundary = [regex]::Replace($boundary, 'public static partial class FacilitySimulationWorld\s*\{.*?\r?\n\}', '', 'Singleline')
     $boundary = $boundary.Replace('public static class UtilityPole', 'public static partial class UtilityPole')
     $boundary = $boundary.Replace('SuccessfulEmitsBeforeFailure--; block.Count++; block.Item = item; return true;', 'SuccessfulEmitsBeforeFailure--; block.Count++; block.Item = item; PublishOutputMutation(); return true;')
     foreach ($relative in @('Map/FacilitySimulationWorld.cs', 'Simulation/Core/SimulationTickWorld.cs',
         'Simulation/Core/FacilityFlowBatch.cs', 'Simulation/Core/FacilityFlowStateWorld.cs')) {
         $path = Join-Path $repo ('FactorioProject/Assets/Scripts/' + $relative)
         $content = [IO.File]::ReadAllText($path).Replace('Application.isPlaying', 'FurnaceHarnessHost.IsPlaying')
+        # Unity's native object-null operator cannot run in a managed host. All harness
+        # targets are plain data objects; keep scheduler/deadline logic unchanged.
+        $content = [regex]::Replace($content, 'UnityEngine.Object unityObject = target as UnityEngine.Object;\s*return ReferenceEquals\(unityObject, null\) \|\| unityObject != null;', 'return !ReferenceEquals(target, null);')
         [IO.File]::WriteAllText((Join-Path $probe ([IO.Path]::GetFileName($path))), $content)
     }
-    Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'FurnaceBoundaries.cs') -Destination $probe
-    Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'FurnaceChecks.cs') -Destination $probe
+    $clockBoundary = [IO.File]::ReadAllText((Join-Path $PSScriptRoot 'FurnaceBoundaries.cs'))
+    if ($OilDrilling) {
+        $clockBoundary = $clockBoundary.Replace('public class InstallationObject { }', '')
+        $clockBoundary = $clockBoundary.Replace('public static bool IsInputItemBlockType(RectGridBlockType type) => type == RectGridBlockType.InputItem;', '')
+    }
+    [IO.File]::WriteAllText((Join-Path $probe 'FurnaceBoundaries.cs'), $clockBoundary)
+    if ($FurnaceIntegration) { Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'FurnaceChecks.cs') -Destination $probe }
 }
 [IO.File]::WriteAllText((Join-Path $probe 'SharedBoundaries.cs'), $boundary)
 if (!$FluidBoundary -and !$FurnaceIntegration) {
@@ -44,11 +57,18 @@ if (!$FluidBoundary -and !$FurnaceIntegration) {
     Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'FilterBoundaries.cs') -Destination $probe
 }
 Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'Boundaries.cs') -Destination $probe
+if ($BenchmarkInputs) {
+    Copy-Item -LiteralPath (Join-Path $repo 'FactorioProject/Assets/Scripts/Diagnostics/BenchmarkInputSupply.cs') -Destination $probe
+    Copy-Item -LiteralPath (Join-Path $repo 'FactorioProject/Assets/Scripts/Object/MapObj/InstallationObject/InputOutputModule.BenchmarkInputs.cs') -Destination $probe
+    Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'BenchmarkInputBoundaries.cs') -Destination $probe
+}
 if ($FluidBoundary) {
-    Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'FluidChecks.cs') -Destination $probe
+    $checks = if ($OilDrilling) { 'OilDrillingChecks.cs' } else { 'FluidChecks.cs' }
+    Copy-Item -LiteralPath (Join-Path $PSScriptRoot $checks) -Destination $probe
     Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'FluidBoundaries.cs') -Destination $probe
     Copy-Item -LiteralPath (Join-Path $repo 'FactorioProject/Assets/Scripts/Map/ProductionWorld.Fluid.cs') -Destination $probe
-} elseif (!$FurnaceIntegration) { Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'Checks.cs') -Destination $probe }
+    Copy-Item -LiteralPath (Join-Path $repo 'FactorioProject/Assets/Scripts/Map/ProductionWorld.FluidOutputRoutes.cs') -Destination $probe
+} elseif (!$FurnaceIntegration) { Copy-Item -LiteralPath (Join-Path $PSScriptRoot $(if ($BenchmarkInputs) { 'BenchmarkInputChecks.cs' } else { 'Checks.cs' })) -Destination $probe }
 function Member([string]$relative, [string]$signature) {
     $source = [IO.File]::ReadAllText((Join-Path $repo ('FactorioProject/Assets/Scripts/' + $relative)))
     $start = $source.IndexOf($signature, [StringComparison]::Ordinal)
@@ -67,8 +87,9 @@ foreach ($signature in @('public struct PersistentInputItemAreaState', 'public s
     $generated += (Member 'Object/MapObj/InstallationObject/InputOutputModule.cs' $signature) + "`n"
 }
 $generated += "}`ninternal partial class ProductionRenderTemplate {`n" + (Member 'Map/ProductionRenderTemplate.cs' 'internal sealed class Recipe') + "`n}`n"
-$generated += "public partial class ProductionWorld {`n" + (Member 'Map/ProductionWorld.cs' 'internal struct State') + "`n" + (Member 'Map/ProductionWorld.cs' 'private void Observe(') + "`n" + (Member 'Map/ProductionWorld.cs' 'public void Wake(Vector2Int coordinate)') + "`n}`n"
-if ($FurnaceIntegration) {
+$generated += "public partial class OilDrillingMachine : InputOutputModule {`n" + (Member 'Object/MapObj/InstallationObject/OilDrillingMachine.cs' 'public static Vector2Int ResolveOilTargetCoordinate(') + "`n}`n"
+$generated += "public partial class ProductionWorld {`n" + (Member 'Map/ProductionWorld.cs' 'internal struct State') + "`n" + (Member 'Map/ProductionWorld.cs' 'private void Observe(IReadOnlyList') + "`n" + (Member 'Map/ProductionWorld.cs' 'private void Observe(Vector2Int coordinate') + "`n" + (Member 'Map/ProductionWorld.cs' 'public void Wake(Vector2Int coordinate)') + "`n}`n"
+if ($FurnaceIntegration -or $OilDrilling) {
     $generated += "public partial class ProductionWorld {`n" + (Member 'Map/ProductionWorld.cs' 'public ProductionFacilityInstance Register(') + "`n" + (Member 'Map/ProductionWorld.cs' 'internal void Bind(') + "`n" + (Member 'Map/ProductionWorld.cs' 'internal void RefreshRecipeAvailability()') + "`n" + (Member 'Map/ProductionWorld.cs' 'public bool AppendInputItemIds(') + "`n}`n"
     $generated += "public partial class InputOutputModule {`n" + (Member 'Object/MapObj/InstallationObject/InputOutputModule.cs' 'public struct ItemIoEntry') + "`n" + (Member 'Object/MapObj/InstallationObject/InputOutputModule.cs' 'public sealed class InputOutputPair') + "`n" + (Member 'Object/MapObj/InstallationObject/InputOutputModule.cs' 'public static float ResolveCompleteEnergy(') + "`n" + (Member 'Object/MapObj/InstallationObject/InputOutputModule.cs' 'protected static bool RequiresOperationalEnergy(') + "`n}`n"
     # Use the exact production recipe-building block; only mesh/collider/particle setup is omitted.
@@ -102,7 +123,7 @@ public static InputOutputModule.PersistentState Roundtrip(InputOutputModule.Pers
 }
 '@
 [IO.File]::WriteAllText((Join-Path $probe 'ExtractedProduction.cs'), $generated)
-$constants = if ($FluidBoundary) { '<DefineConstants>PRODUCTION_FLUID_BRIDGE</DefineConstants>' } elseif ($FurnaceIntegration) { '<DefineConstants>FURNACE_INTEGRATION</DefineConstants>' } else { '' }
+$constants = if ($BenchmarkInputs) { '<DefineConstants>BENCHMARK_INPUT_INTEGRATION</DefineConstants>' } elseif ($OilDrilling) { '<DefineConstants>PRODUCTION_FLUID_BRIDGE;FURNACE_INTEGRATION</DefineConstants>' } elseif ($FluidBoundary) { '<DefineConstants>PRODUCTION_FLUID_BRIDGE</DefineConstants>' } elseif ($FurnaceIntegration) { '<DefineConstants>FURNACE_INTEGRATION</DefineConstants>' } else { '' }
 $unity = 'C:/Program Files/Unity/Hub/Editor/6000.4.0f1/Editor/Data/Managed/UnityEngine/UnityEngine.CoreModule.dll'
 [IO.File]::WriteAllText((Join-Path $probe 'Probe.csproj'), '<Project Sdk="Microsoft.NET.Sdk"><PropertyGroup><OutputType>Exe</OutputType><TargetFramework>net9.0</TargetFramework><NoWarn>0649;0169</NoWarn>' + $constants + '</PropertyGroup><ItemGroup><Reference Include="UnityEngine.CoreModule"><HintPath>' + $unity + '</HintPath></Reference></ItemGroup></Project>')
 dotnet run --configuration Release --project (Join-Path $probe 'Probe.csproj') -- $repo

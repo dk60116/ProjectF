@@ -3,13 +3,26 @@ using ProjectF.Benchmark;
 using ProjectF.Simulation;
 using UnityEngine;
 
-public partial class InputOutputModule
+public partial class InputOutputModule : IBenchmarkWorkProgressTarget
 {
+    public virtual bool TryRandomizeWorkProgress(System.Random random)
+    {
+        if (!production.Active || production.WaitingForOutput) return false;
+        var definition = ResolveInstalledDefinition();
+        if (definition == null) return false;
+        long energy = RequiresOperationalEnergy(definition) ? DeterministicSimulationUnits.FromFloat(ResolveCompleteEnergy(definition)) : 0;
+        if (!production.TrySetWorkProgress(random.NextDouble(), energy,
+            DeterministicSimulationUnits.SecondsToTicks(ResolveInitialCraftDuration(definition, ActiveOutputItemId)))) return false;
+        MarkManagedRuntimeVisualsDirty(); WakeRuntimeUpdate(); return true;
+    }
+
     internal bool IsBenchmarkWorking => BenchmarkRuntime.ForceWorking && !(this is BoxObject);
 
     internal void ResetBenchmarkWork()
     {
         ClearActiveCraft();
+        if (IsBenchmarkWorking)
+        { BeginBenchmarkCraft(ResolveInstalledDefinition(), consumeInputs: false); ClearActiveCraft(); }
         if (this is SteamGenerator generator) generator.SetBenchmarkGeneration(false);
         MarkManagedRuntimeVisualsDirty();
         WakeRuntimeUpdate();
@@ -24,6 +37,7 @@ public partial class InputOutputModule
         runtimeSleeping = false;
         if (!hasActiveCraft) BeginBenchmarkCraft(definition);
         if (!hasActiveCraft) return;
+        SampleBenchmarkEnergy();
         bool powered = RequiresOperationalEnergy(definition);
         long required = powered ? DeterministicSimulationUnits.FromFloat(ResolveCompleteEnergy(definition)) : 0;
         long supplied = powered ? DeterministicSimulationUnits.RateForTicks(
@@ -38,8 +52,18 @@ public partial class InputOutputModule
         SetRuntimeSleeping(false);
     }
 
-    private void BeginBenchmarkCraft(ItemDefinition definition)
+    private void BeginBenchmarkCraft(ItemDefinition definition, bool consumeInputs = true)
     {
+        if (definition == null) return;
+        // Drills expose their resource output separately from crafting recipes.
+        // A missing recipe must not turn them into fallback-item producers.
+        if (this is OilDrillingMachine drill)
+        {
+            if (drill.TryGetObjectInfoOutputRate(out int oilItemId, out _) && IsFluidItemId(oilItemId))
+                BeginActiveCraft(-1, oilItemId, 1, definition);
+            RefreshBenchmarkInputs();
+            return;
+        }
         var outputs = OutputList;
         int outputIndex = -1;
         for (int i = 0; i < outputs.Count; i++)
@@ -52,6 +76,7 @@ public partial class InputOutputModule
         int itemId = outputIndex >= 0 ? outputs[outputIndex].itemDefinition.id : BenchmarkRuntime.FallbackItemId;
         int count = outputIndex >= 0 ? outputs[outputIndex].ResolvedItemCount : 1;
         if (itemId >= 0) BeginActiveCraft(outputIndex, itemId, count, definition);
+        if (consumeInputs) ConsumeBenchmarkInputs(); else RefreshBenchmarkInputs();
     }
 
     private void EmitBenchmarkOutput(ItemDefinition definition)
@@ -59,8 +84,13 @@ public partial class InputOutputModule
         // Transport and crop service machines have no manufactured portable
         // product. Keep their work clock/visuals running without inventing one.
         if (this is Pump || this is Sprinkler || this is SeedPlanter) return;
-        var outputs = OutputList;
         float duration = ResolveInitialCraftDuration(definition, ActiveOutputItemId);
+        if (this is OilDrillingMachine drill)
+        {
+            EmitBenchmarkProduct(ActiveOutputItemId, drill.OilLitersPerSecond, duration);
+            return;
+        }
+        var outputs = OutputList;
         if (this is CrudeOilRefinery)
         {
             for (int i = 0; i < outputs.Count; i++)

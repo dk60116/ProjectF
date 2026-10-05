@@ -52,6 +52,8 @@ public partial class BlockStateStore : MonoBehaviour
         public List<string> loggingEnabledTreeDefinitionKeys = new List<string>();
         public int loggingMinimumGrowth = LoggingMachine.DefaultMinimumGrowth;
         public int loggingMaximumGrowth = LoggingMachine.DefaultMaximumGrowth;
+        // Logging now persists unfinished work, independently of its filter settings.
+        public ProjectF.Simulation.LoggingProcess loggingProcess;
         public float storedFluidLiters;
         public long storedFluidUnits;
         public int storedFluidItemId = -1;
@@ -99,6 +101,7 @@ public partial class BlockStateStore : MonoBehaviour
                 itemName = itemName,
                 quarterTurns = quarterTurns,
                 placementSequence = placementSequence,
+                loggingProcess = loggingProcess,
                 hasStorageKey = hasStorageKey,
                 storageKey = storageKey,
                 conveyorVariantKind = conveyorVariantKind,
@@ -787,6 +790,7 @@ public partial class BlockStateStore : MonoBehaviour
 
     public List<InstallationSaveState> GetInstallationStatesSnapshot()
     {
+        ProjectF.MapObjects.ForestryWorld.Current?.PersistAll();
         RobotArmWorld.Current?.FlushSaveStates();
         MiningWorld.Current?.FlushSaveStates();
         UtilityPoleWorld.Current?.FlushSaveStates();
@@ -1243,6 +1247,8 @@ public partial class BlockStateStore : MonoBehaviour
         MiningWorld.Current?.Remove(storageKey);
         UtilityPoleWorld.Current?.Remove(storageKey);
         ProductionWorld.Current?.Remove(storageKey);
+        ProjectF.MapObjects.WorkableWorld.Current?.Remove(storageKey);
+        ProjectF.MapObjects.ForestryWorld.Current?.Remove(storageKey);
         Vector2Int removedAnchor = storageKey;
         bool markerChanged = savedInstallationStates.ContainsKey(storageKey);
         if (liveInstallationStates.TryGetValue(storageKey, out LiveInstallationRecord liveRecord))
@@ -1356,6 +1362,8 @@ public partial class BlockStateStore : MonoBehaviour
         MiningWorld.Current?.ClearRecords();
         UtilityPoleWorld.Current?.ClearRecords();
         ProductionWorld.Current?.ClearRecords();
+        ProjectF.MapObjects.WorkableWorld.Current?.ClearRecords();
+        ProjectF.MapObjects.ForestryWorld.Current?.ClearRecords();
         ResolveVirtualObjectWorld()?.Clear();
         MarkMapMarkersChanged();
     }
@@ -1372,6 +1380,7 @@ public partial class BlockStateStore : MonoBehaviour
 
         entriesPerFrame = Mathf.Max(1, entriesPerFrame);
         mapSaveData.resources ??= new List<ResourceSaveEntry>();
+        ProjectF.MapObjects.ForestryWorld.Current?.PersistAll();
         RobotArmWorld.Current?.FlushSaveStates();
         MiningWorld.Current?.FlushSaveStates();
         UtilityPoleWorld.Current?.FlushSaveStates();
@@ -1699,6 +1708,7 @@ public partial class BlockStateStore : MonoBehaviour
             state.loggingEnabledTreeDefinitionKeys = loggingMachine.CaptureEnabledTreeDefinitionKeys();
             state.loggingMinimumGrowth = loggingMachine.MinimumGrowth;
             state.loggingMaximumGrowth = loggingMachine.MaximumGrowth;
+            state.loggingProcess = loggingMachine.DataProcess;
         }
         state.hasDeterministicUnits = true;
         state.storedFluidUnits = installationObject.StoredFluidUnits;

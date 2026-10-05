@@ -1,4 +1,5 @@
 using System;
+using ProjectF.MapObjects;
 using System.Collections.Generic;
 using TMPro;
 using UnityEngine;
@@ -18,7 +19,7 @@ public sealed class WorkableCraftingPanel : MonoBehaviour
     private readonly List<int> recipeItemIds = new List<int>(32);
     private readonly List<int> recipeItemIdScratch = new List<int>(32);
     private readonly List<RecipeRow> recipeRows = new List<RecipeRow>(32);
-    private readonly List<WorkableObject> activeWorkables = new List<WorkableObject>(8);
+    private readonly List<IWorkableTarget> activeWorkables = new List<IWorkableTarget>(8);
     private readonly List<int> activeWorkableItemIds = new List<int>(8);
     private readonly List<int> workableItemIdScratch = new List<int>(8);
     private readonly HashSet<int> recipeItemIdSet = new HashSet<int>();
@@ -26,7 +27,7 @@ public sealed class WorkableCraftingPanel : MonoBehaviour
     private readonly Dictionary<int, bool> craftingAccessCache = new Dictionary<int, bool>();
 
     private PlayerHUD owner;
-    private WorkableObject target;
+    private IWorkableTarget target;
     private RectTransform content;
     private TextMeshProUGUI titleText;
     private TextMeshProUGUI detailNameText;
@@ -42,7 +43,7 @@ public sealed class WorkableCraftingPanel : MonoBehaviour
     private float refreshTimer;
 
     public bool IsOpen => gameObject.activeSelf;
-    public WorkableObject Target => target;
+    public IWorkableTarget Target => target;
 
     public static WorkableCraftingPanel Create(PlayerHUD ownerHud)
     {
@@ -61,7 +62,7 @@ public sealed class WorkableCraftingPanel : MonoBehaviour
         return panel;
     }
 
-    public void Toggle(WorkableObject workableObject)
+    public void Toggle(IWorkableTarget workableObject)
     {
         if (workableObject == null)
         {
@@ -78,7 +79,7 @@ public sealed class WorkableCraftingPanel : MonoBehaviour
         Open(workableObject);
     }
 
-    public void Open(WorkableObject workableObject)
+    public void Open(IWorkableTarget workableObject)
     {
         if (workableObject == null)
         {
@@ -161,9 +162,8 @@ public sealed class WorkableCraftingPanel : MonoBehaviour
             : player.transform.position;
         for (int i = 0; i < activeWorkables.Count; i++)
         {
-            WorkableObject workable = activeWorkables[i];
+            IWorkableTarget workable = activeWorkables[i];
             if (workable != null
-                && workable.isActiveAndEnabled
                 && workable.IsTargetActive
                 && workable.ContainsWorldPositionInConnectedWorkableRange(origin))
             {
@@ -192,9 +192,8 @@ public sealed class WorkableCraftingPanel : MonoBehaviour
         workableItemIdScratch.Clear();
         for (int i = activeWorkables.Count - 1; i >= 0; i--)
         {
-            WorkableObject workable = activeWorkables[i];
+            IWorkableTarget workable = activeWorkables[i];
             if (workable == null
-                || !workable.isActiveAndEnabled
                 || !workable.IsTargetActive)
             {
                 activeWorkables.RemoveAt(i);
@@ -386,20 +385,14 @@ public sealed class WorkableCraftingPanel : MonoBehaviour
         recipeRows.Clear();
         recipeItemIds.Clear();
         recipeItemIdSet.Clear();
+        CraftingTreeRuntime.TryGetHandCraftableItemIds(recipeItemIdScratch);
+        AppendRecipeItemIds(recipeItemIdScratch);
         for (int workableIndex = 0; workableIndex < activeWorkableItemIds.Count; workableIndex++)
         {
-            recipeItemIdScratch.Clear();
             CraftingTreeRuntime.TryGetCraftableItemIdsForMapObject(
                 activeWorkableItemIds[workableIndex],
                 recipeItemIdScratch);
-            for (int recipeIndex = 0; recipeIndex < recipeItemIdScratch.Count; recipeIndex++)
-            {
-                int recipeItemId = recipeItemIdScratch[recipeIndex];
-                if (recipeItemIdSet.Add(recipeItemId))
-                {
-                    recipeItemIds.Add(recipeItemId);
-                }
-            }
+            AppendRecipeItemIds(recipeItemIdScratch);
         }
 
         recipeItemIds.Sort();
@@ -413,6 +406,18 @@ public sealed class WorkableCraftingPanel : MonoBehaviour
             selectedItemId = -1;
             displayedItemId = -1;
             actionSlot?.HideImmediate();
+        }
+    }
+
+    private void AppendRecipeItemIds(List<int> itemIds)
+    {
+        for (int i = 0; i < itemIds.Count; i++)
+        {
+            int itemId = itemIds[i];
+            if (recipeItemIdSet.Add(itemId))
+            {
+                recipeItemIds.Add(itemId);
+            }
         }
     }
 

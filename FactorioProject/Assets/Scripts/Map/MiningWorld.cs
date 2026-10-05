@@ -15,7 +15,7 @@ public sealed class MiningWorld : IDisposable
         internal MapObjectHandle Resource;
         internal Vector2Int ResourceCoordinate;
         internal int ResourceCursor, PendingHarvestedItems;
-        internal bool HasTarget, NeedsEvaluation;
+        internal bool HasTarget, NeedsEvaluation, FuelBypassed;
     }
     public static MiningWorld Current { get; private set; }
     public TerrainGenerator Terrain { get; }
@@ -38,6 +38,7 @@ public sealed class MiningWorld : IDisposable
     internal int MarkerCandidateCount => markerCandidates.Count;
     public IReadOnlyList<MiningMachineInstance> Instances => instances;
     public int Count => instances.Count;
+    public int FuelDrivenCount { get; private set; }
     public long ProcessedUpdates { get; internal set; }
     public int VisibleCount => view != null ? view.VisibleCount : 0;
     public static MiningWorld Ensure(TerrainGenerator terrain)
@@ -60,7 +61,7 @@ public sealed class MiningWorld : IDisposable
         ItemDefinition definition = prototype.BoundItemDefinition ?? InputOutputModule.ResolveItemDefinition(prototype.ResolveItemId());
         return definition != null && definition.UseEnergyRequirementCount == 1
             && definition.TryGetUseEnergyRequirement(0, out var energy)
-            && energy.energyType == ItemDefinition.EnergyType.Electricity && energy.useEnergyAmount > 0f
+            && (energy.energyType == ItemDefinition.EnergyType.Electricity || energy.energyType == ItemDefinition.EnergyType.Burn) && energy.useEnergyAmount > 0f
             && definition.MapObjectArchetype != null && definition.MapObjectArchetype.RenderParts.Count > 0
             && prototype.GetComponent<BoxCollider>() != null;
     }
@@ -70,19 +71,21 @@ public sealed class MiningWorld : IDisposable
         Vector2Int key = BlockStateStore.GetInstallationStorageKey(placement);
         if (byKey.TryGetValue(key, out var existing)) { Bind(existing); return existing; }
         if (!templates.TryGetValue(prototype, out var template))
-        { template = new MiningRenderTemplate(prototype); templates.Add(prototype, template); }
+        { template = new MiningRenderTemplate(prototype, Terrain.ResolveInstallationPlacementController()); templates.Add(prototype, template); }
         if (!VirtualObjectWorld.Ensure().TryGetInstallationHandle(key, out var handle)) return null;
         var slot = states.Allocate(new State { Clock = new MiningProcess { Production = ProductionProcess.Empty,
             SampleTick = MapObjectTickManager.CurrentSimulationTick } });
         var miner = new MiningMachineInstance(this, slot.Index, slot.Generation, handle, prototype, placement, template);
         byKey.Add(key, miner); miner.OrderIndex = instances.Count; instances.Add(miner);
+        if (template.UsesFuel) FuelDrivenCount++;
         // Block binding can wake the miner synchronously; initialize scheduling first.
         FacilitySimulationWorld.Register(miner, false);
         Observe(placement.occupiedCoordinates, miner); Observe(miner.OutputCoordinates, miner); Observe(placement.inputOutputState.gridCoordinates, miner);
+        Observe(placement.inputOutputState.inputEnergyCoordinates, miner);
         Vector2Int cell = Cell(miner.WorldPosition);
         if (!cells.TryGetValue(cell, out var members)) cells.Add(cell, members = new List<MiningMachineInstance>(8));
-        members.Add(miner); Bind(miner); MarkerCount += miner.OutputCoordinates.Count; markersDirty = true;
-        UtilityPole.InvalidateRobotArmConsumers();
+        members.Add(miner); Bind(miner); MarkerCount += miner.OutputCoordinates.Count + placement.inputOutputState.inputEnergyCoordinates.Count; markersDirty = true;
+        if (template.Watts > 0f) UtilityPole.InvalidateRobotArmConsumers();
         miner.Wake();
         return miner;
     }
@@ -112,14 +115,27 @@ public sealed class MiningWorld : IDisposable
                 found |= owners[i].Prototype.TryAppendPlacementOutputItemIds(Terrain, owners[i].RuntimeOccupiedCoordinates, result);
         return found;
     }
+    public bool IsEnergyArea(Vector2Int coordinate, ItemDefinition.EnergyType type = ItemDefinition.EnergyType.None)
+    {
+        if (!observers.TryGetValue(coordinate, out var owners)) return false;
+        for (int i = 0; i < owners.Count; i++)
+            if (owners[i].Placement.inputOutputState.inputEnergyCoordinates.Contains(coordinate)
+                && (type == ItemDefinition.EnergyType.None || type == owners[i].Template.EnergyType)) return true;
+        return false;
+    }
+    public bool AppendEnergyTypes(Vector2Int coordinate, ISet<ItemDefinition.EnergyType> result)
+    {
+        if (result == null || !observers.TryGetValue(coordinate, out var owners)) return false;
+        bool found = false;
+        for (int i = 0; i < owners.Count; i++)
+            if (owners[i].Placement.inputOutputState.inputEnergyCoordinates.Contains(coordinate))
+            { result.Add(owners[i].Template.EnergyType); found = true; }
+        return found;
+    }
     public void ClearItems()
     {
         for (int i = 0; i < instances.Count; i++)
-        {
-            var miner = instances[i]; ref var state = ref GetState(miner.Index, miner.Generation);
-            state.Clock.Production.Clear(); state.PendingHarvestedItems = 0; state.Resource = default;
-            miner.Wake(); miner.Persist();
-        }
+            instances[i].ClearStoredEnergyAndProduction();
     }
     public bool TryGet(Vector2Int key, out MiningMachineInstance miner) => byKey.TryGetValue(key, out miner);
     internal void Bind(MiningMachineInstance miner)
@@ -142,16 +158,19 @@ public sealed class MiningWorld : IDisposable
     public void Remove(Vector2Int key)
     {
         if (!byKey.Remove(key, out var miner)) return;
+        ProjectF.Benchmark.BenchmarkInputSupply.Remove(miner);
         FacilitySimulationWorld.Unregister(miner); UtilityPole.UnregisterRobotArmConsumer(miner);
         foreach (var coordinate in miner.RuntimeOccupiedCoordinates)
             if (Terrain.TryGetLoadedBlock(coordinate, out var block) && block != null && ReferenceEquals(block.MapObject, miner)) block.SetMapObject(null);
         RemoveObservers(miner.RuntimeOccupiedCoordinates, miner); RemoveObservers(miner.OutputCoordinates, miner); RemoveObservers(miner.Placement.inputOutputState.gridCoordinates, miner);
+        RemoveObservers(miner.Placement.inputOutputState.inputEnergyCoordinates, miner);
         Vector2Int cell = Cell(miner.WorldPosition);
         var members = cells[cell]; members.Remove(miner); if (members.Count == 0) cells.Remove(cell);
         int last = instances.Count - 1;
         instances[miner.OrderIndex] = instances[last]; instances[miner.OrderIndex].OrderIndex = miner.OrderIndex;
         instances.RemoveAt(last);
-        MarkerCount -= miner.OutputCoordinates.Count; visibleMarkers.Remove(miner); markersDirty = true;
+        if (miner.Template.UsesFuel) FuelDrivenCount--;
+        MarkerCount -= miner.OutputCoordinates.Count + miner.Placement.inputOutputState.inputEnergyCoordinates.Count; visibleMarkers.Remove(miner); markersDirty = true;
         if (ReferenceEquals(selectedMarkerMiner, miner)) selectedMarkerMiner = null;
         view?.Unbind(miner); states.Release(miner.Index, miner.Generation);
     }
@@ -189,25 +208,16 @@ public sealed class MiningWorld : IDisposable
         if (maxDistance <= 0f || cells.Count == 0) return false;
         // Traverse the ray, not its entire enclosing rectangle. Long free-camera rays
         // must not turn into a quadratic scan of empty spatial cells.
-        Vector2Int cell = Cell(ray.origin), end = Cell(ray.GetPoint(maxDistance));
-        int stepX = Math.Sign(ray.direction.x), stepY = Math.Sign(ray.direction.z);
-        float deltaX = stepX == 0 ? float.PositiveInfinity : 32f / Mathf.Abs(ray.direction.x);
-        float deltaY = stepY == 0 ? float.PositiveInfinity : 32f / Mathf.Abs(ray.direction.z);
-        float nextX = stepX == 0 ? float.PositiveInfinity
-            : ((cell.x + (stepX > 0 ? 1 : 0)) * 32f - ray.origin.x) / ray.direction.x;
-        float nextY = stepY == 0 ? float.PositiveInfinity
-            : ((cell.y + (stepY > 0 ? 1 : 0)) * 32f - ray.origin.z) / ray.direction.z;
-        while (true)
+        var traversal = new SpatialRayCellTraversal(ray, maxDistance, 32);
+        while (traversal.MoveNext())
         {
+            Vector2Int cell = traversal.Current;
             for (int y = cell.y - 1; y <= cell.y + 1; y++)
             for (int x = cell.x - 1; x <= cell.x + 1; x++)
                 if (cells.TryGetValue(new Vector2Int(x, y), out var members))
                     for (int i = 0; i < members.Count; i++)
                         if (members[i].CullBounds.IntersectRay(ray, out float d) && d >= 0f && d < distance)
                         { target = members[i]; distance = d; }
-            if (cell == end || Mathf.Min(nextX, nextY) > maxDistance) break;
-            if (nextX <= nextY) { cell.x += stepX; nextX += deltaX; }
-            else { cell.y += stepY; nextY += deltaY; }
         }
         return target != null;
     }
@@ -231,7 +241,7 @@ public sealed class MiningWorld : IDisposable
         foreach (var miner in markerCandidates)
         {
             bool visible = ShouldShowLinkedUi(miner, context);
-            if (visible) { changed |= visibleMarkers.Add(miner); VisibleMarkerCount += miner.OutputCoordinates.Count; }
+            if (visible) { changed |= visibleMarkers.Add(miner); VisibleMarkerCount += miner.OutputCoordinates.Count + miner.Placement.inputOutputState.inputEnergyCoordinates.Count; }
             else changed |= visibleMarkers.Remove(miner);
         }
         return changed;
@@ -241,12 +251,19 @@ public sealed class MiningWorld : IDisposable
         if (Terrain.IsBenchmarkPlacementInProgress) return;
         Sprite arrow = UIManager.Instance != null ? UIManager.Instance.ArrowImage : null;
         foreach (var miner in visibleMarkers)
-        foreach (var coordinate in miner.OutputCoordinates)
         {
-            Vector3 position = new Vector3(coordinate.x, miner.WorldPosition.y + 0.08f, coordinate.y);
-            Vector3 direction = position - miner.WorldPosition;
-            var request = new AreaMarkerSpawnRequest(position, arrow, -Mathf.Atan2(direction.x, direction.z) * Mathf.Rad2Deg);
-            renderer.Append(request, Matrix4x4.Translate(position), 0, false, false);
+            foreach (var coordinate in miner.Placement.inputOutputState.inputEnergyCoordinates)
+            {
+                Vector3 position = new Vector3(coordinate.x, miner.WorldPosition.y + 0.08f, coordinate.y);
+                renderer.Append(new AreaMarkerSpawnRequest(position, miner.Template.EnergyMarkerIcon), Matrix4x4.Translate(position), 0, false, false);
+            }
+            foreach (var coordinate in miner.OutputCoordinates)
+            {
+                Vector3 position = new Vector3(coordinate.x, miner.WorldPosition.y + 0.08f, coordinate.y);
+                Vector3 direction = position - miner.WorldPosition;
+                var request = new AreaMarkerSpawnRequest(position, arrow, -Mathf.Atan2(direction.x, direction.z) * Mathf.Rad2Deg);
+                renderer.Append(request, Matrix4x4.Translate(position), 0, false, false);
+            }
         }
     }
     public void FlushSaveStates() { for (int i = 0; i < instances.Count; i++) instances[i].Persist(); }
@@ -264,6 +281,7 @@ public sealed class MiningWorld : IDisposable
     public static void AppendProfilerCounters()
     {
         MapObjectTickProfiler.AddRuntimeCounter("MiningECS", "Entities", Current != null ? Current.Count : 0);
+        MapObjectTickProfiler.AddRuntimeCounter("MiningECS", "BurnEntities", Current != null ? Current.FuelDrivenCount : 0);
         MapObjectTickProfiler.AddRuntimeCounter("MiningECS", "Visible", Current != null ? Current.VisibleCount : 0);
         MapObjectTickProfiler.AddRuntimeCounter("MiningECS", "ProcessedUpdates", Current != null ? Current.ProcessedUpdates : 0);
         MapObjectTickProfiler.AddRuntimeCounter("MiningECS", "GameObjects", Current != null && Current.view != null ? 1 : 0);

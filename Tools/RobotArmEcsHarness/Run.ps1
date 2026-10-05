@@ -39,10 +39,11 @@ foreach ($member in @('internal enum PlannedTransferCommand', 'public bool TryGe
     $source += (Member $arm $member) + "`n"
 }
 $source += "}`npublic partial class RobotArmWorld {`n"
-foreach ($member in @('private void Observe(', 'public void Wake(', 'internal void Wake(IReadOnlyList<Block>', 'public void PlanManagedUpdateTick(', 'public void ApplyManagedUpdateTick(')) {
+foreach ($member in @('private void Observe(', 'public void Wake(', 'internal void WakePublishedBelts(', 'internal void QueueTransfer(', 'public void PlanManagedUpdateTick(', 'public void ApplyManagedUpdateTick(')) {
     $source += (Member $world $member) + "`n"
 }
 $source += "}`n"
+$source += "namespace ProjectF.Diagnostics {`n" + (Member $world 'internal sealed class RobotArmTickTiming') + "`n}`n"
 $probe = Join-Path ([IO.Path]::GetTempPath()) ('ProjectF-RobotEcs-' + [guid]::NewGuid().ToString('N'))
 New-Item -ItemType Directory -Path $probe | Out-Null
 [IO.File]::WriteAllText((Join-Path $probe 'Production.cs'), $source)
@@ -51,6 +52,9 @@ Copy-Item -LiteralPath (Join-Path $repo 'FactorioProject/Assets/Scripts/Simulati
 Copy-Item -LiteralPath (Join-Path $repo 'FactorioProject/Assets/Scripts/Simulation/Core/SimulationTickWorld.cs') -Destination $probe
 Copy-Item -LiteralPath (Join-Path $repo 'FactorioProject/Assets/Scripts/Simulation/Core/ActiveTickSet.cs') -Destination $probe
 Copy-Item -LiteralPath (Join-Path $repo 'FactorioProject/Assets/Scripts/Map/ResourceStateSlots.cs') -Destination $probe
+foreach ($relative in @('Diagnostics/BenchmarkWorkProgress.cs', 'Simulation/Core/ProductionProcess.cs', 'Object/MapObj/InstallationObject/RobotArmInstance.Benchmark.cs')) {
+    Copy-Item -LiteralPath (Join-Path $repo ('FactorioProject/Assets/Scripts/' + $relative)) -Destination $probe
+}
 $unity = 'C:/Program Files/Unity/Hub/Editor/6000.4.0f1/Editor/Data/Managed/UnityEngine/UnityEngine.CoreModule.dll'
 [IO.File]::WriteAllText((Join-Path $probe 'Probe.csproj'), '<Project Sdk="Microsoft.NET.Sdk"><PropertyGroup><OutputType>Exe</OutputType><TargetFramework>net9.0</TargetFramework><NoWarn>0649</NoWarn></PropertyGroup><ItemGroup><Reference Include="UnityEngine.CoreModule"><HintPath>' + $unity + '</HintPath></Reference></ItemGroup></Project>')
 dotnet run --configuration Release --project (Join-Path $probe 'Probe.csproj')

@@ -1,5 +1,6 @@
 ﻿using ProjectF.Power;
 using System.Collections.Generic;
+using ProjectF.MapObjects;
 using Unity.Profiling;
 using UnityEngine;
 using UnityEngine.EventSystems;
@@ -132,17 +133,17 @@ public partial class PlayerController : MonoBehaviour
     private readonly HashSet<UtilityPoleRuntime> nearbyPoleInstances = new HashSet<UtilityPoleRuntime>();
     private readonly HashSet<ProductionFacilityInstance> nearbyProductionInstances = new HashSet<ProductionFacilityInstance>();
     private readonly HashSet<MiningMachineInstance> nearbyMiningInstances = new HashSet<MiningMachineInstance>();
+    private readonly HashSet<ForestryInstance> nearbyForestryInstances = new HashSet<ForestryInstance>();
     private readonly HashSet<RobotArmInstance> nearbyRobotArmInstances = new HashSet<RobotArmInstance>();
     private readonly HashSet<BuildingRuntimeRecord> nearbyBuildingRecords = new HashSet<BuildingRuntimeRecord>();
     private readonly List<InstallationObject> nearbyRuntimeInstallationScratch = new List<InstallationObject>(8);
     private readonly List<Renderer> mapObjectFocusRenderers = new List<Renderer>(16);
     private readonly Dictionary<Block, IMapObjectTarget> interactionFocusTargetOverrides = new Dictionary<Block, IMapObjectTarget>();
-    private readonly List<WorkableObject> nearbyWorkableObjects = new List<WorkableObject>();
-    private readonly List<WorkableObject> nearbyWorkableRangeObjects = new List<WorkableObject>();
+    private readonly List<IWorkableTarget> nearbyWorkableRangeObjects = new List<IWorkableTarget>();
     private readonly List<BoxObject> nearbyBoxObjects = new List<BoxObject>();
-    private readonly HashSet<WorkableObject> currentSelectedWorkableRangeObjects = new HashSet<WorkableObject>();
-    private readonly HashSet<WorkableObject> nextSelectedWorkableRangeObjects = new HashSet<WorkableObject>();
-    private readonly List<WorkableObject> selectedWorkableRangeRemovalBuffer = new List<WorkableObject>();
+    private readonly HashSet<IWorkableTarget> currentSelectedWorkableRangeObjects = new HashSet<IWorkableTarget>();
+    private readonly HashSet<IWorkableTarget> nextSelectedWorkableRangeObjects = new HashSet<IWorkableTarget>();
+    private readonly List<IWorkableTarget> selectedWorkableRangeRemovalBuffer = new List<IWorkableTarget>();
     private readonly HashSet<Sprinkler> currentFocusedSprinklerRangeObjects = new HashSet<Sprinkler>();
     private readonly HashSet<Sprinkler> nextFocusedSprinklerRangeObjects = new HashSet<Sprinkler>();
     private readonly List<Sprinkler> focusedSprinklerRangeRemovalBuffer = new List<Sprinkler>();
@@ -3332,6 +3333,7 @@ public partial class PlayerController : MonoBehaviour
                 : target is UtilityPoleRuntime poleIdentity ? poleIdentity.SimulationId
                 : target is ProductionFacilityInstance productionIdentity ? productionIdentity.SimulationId
                 : target is MiningMachineInstance minerIdentity ? minerIdentity.SimulationId
+                : target is ForestryInstance forestryIdentity ? forestryIdentity.SimulationId
                 : target is RobotArmInstance armIdentity ? armIdentity.SimulationId
                 : target is BuildingRuntimeRecord buildingIdentity ? buildingIdentity.SimulationId
                 : target is MapObject nativeTarget ? nativeTarget.GetInstanceID() : block.RuntimeIdentity;
@@ -3414,7 +3416,7 @@ public partial class PlayerController : MonoBehaviour
             return GetResourceFocusSelectionDistanceSqr(resource, origin);
         }
 
-        if (target is WorkableObject workableObject)
+        if (target is IWorkableTarget workableObject)
         {
             return GetWorkableFocusDistanceSqr(workableObject, block, origin);
         }
@@ -3479,9 +3481,9 @@ public partial class PlayerController : MonoBehaviour
         foreach (Block block in currentFocusedBlocks)
         {
             if (block == null
-                || !(block.MapObject is WorkableObject workableObject)
+                || !(block.MapObject is IWorkableTarget workableObject)
                 || workableObject == null
-                || !workableObject.gameObject.activeInHierarchy
+                || !workableObject.IsTargetActive
                 || !workableObject.AllowsFocus)
             {
                 continue;
@@ -3673,7 +3675,7 @@ public partial class PlayerController : MonoBehaviour
             return GetResourceFocusSelectionDistanceSqr(resource, origin) <= harvestRange * harvestRange;
         }
 
-        if (mapObject is WorkableObject workableObject)
+        if (mapObject is IWorkableTarget workableObject)
         {
             return workableObject.ContainsWorldPositionInWorkableRange(origin);
         }
@@ -3682,13 +3684,14 @@ public partial class PlayerController : MonoBehaviour
             && !(mapObject is UtilityPoleRuntime)
             && !(mapObject is ProductionFacilityInstance)
             && !(mapObject is MiningMachineInstance)
+            && !(mapObject is ForestryInstance)
             && !(mapObject is RobotArmInstance)
             && !(mapObject is BuildingRuntimeRecord))
         {
             return false;
         }
 
-        float interactionRadius = Mathf.Max(0f, mapObject is UtilityPoleRuntime pole ? pole.FocusActivationRadius : mapObject is ProductionFacilityInstance production ? production.FocusActivationRadius : mapObject is MiningMachineInstance miner ? miner.FocusActivationRadius : mapObject is RobotArmInstance arm
+        float interactionRadius = Mathf.Max(0f, mapObject is ForestryInstance forestry ? forestry.FocusActivationRadius : mapObject is UtilityPoleRuntime pole ? pole.FocusActivationRadius : mapObject is ProductionFacilityInstance production ? production.FocusActivationRadius : mapObject is MiningMachineInstance miner ? miner.FocusActivationRadius : mapObject is RobotArmInstance arm
             ? arm.Prototype.FocusActivationRadius
             : mapObject is BuildingRuntimeRecord building
                 ? building.Prototype.FocusActivationRadius
@@ -4182,17 +4185,7 @@ public partial class PlayerController : MonoBehaviour
             return false;
         }
 
-        Vector3 origin = player.BodyTransform != null
-            ? player.BodyTransform.position
-            : transform.position;
-        Vector3 facingDirection = corpse.transform.position - origin;
-        facingDirection.y = 0f;
-        if (facingDirection.sqrMagnitude > 0.0001f)
-        {
-            pendingFacingDirection = facingDirection.normalized;
-            hasPendingFacingDirection = true;
-        }
-
+        QueueBodyFacingTowards(corpse.transform.position);
         pendingCorpseHarvestAnimals.Enqueue(corpse);
         player.QueuePickAnimation();
         return true;
@@ -4380,6 +4373,7 @@ public partial class PlayerController : MonoBehaviour
             return false;
         }
 
+        QueueBodyFacingTowards(resource.FocusPoint);
         pendingHarvestResources.Enqueue(resource);
         player.QueuePickAnimation();
         SetFocusedBlock(resource.OwningBlock);
@@ -4453,7 +4447,7 @@ public partial class PlayerController : MonoBehaviour
             return false;
         }
 
-        if (TryResolveLoggingMachine(mapObject, out LoggingMachine loggingMachine))
+        if (TryResolveLoggingMachine(mapObject, out ILoggingTarget loggingMachine))
         {
             filterTarget = loggingMachine;
             return true;
@@ -4480,9 +4474,9 @@ public partial class PlayerController : MonoBehaviour
 
     private static bool TryResolveLoggingMachine(
         IMapObjectTarget mapObject,
-        out LoggingMachine loggingMachine)
+        out ILoggingTarget loggingMachine)
     {
-        loggingMachine = mapObject as LoggingMachine;
+        loggingMachine = mapObject as ILoggingTarget;
         if (loggingMachine != null)
         {
             return true;
@@ -4971,7 +4965,6 @@ public partial class PlayerController : MonoBehaviour
         }
 
         results.Clear();
-        nearbyWorkableObjects.Clear();
         nearbyWorkableRangeObjects.Clear();
 
         if (player == null)
@@ -4985,46 +4978,13 @@ public partial class PlayerController : MonoBehaviour
         }
 
         Vector3 origin = player.BodyTransform != null ? player.BodyTransform.position : transform.position;
-        float globalWorkablePadding = Mathf.Max(0f, WorkableObject.GlobalMaxFocusActivationRadius);
-        int searchRadius = Mathf.Max(1, Mathf.CeilToInt(globalWorkablePadding + 1f));
-        Vector2Int center = new Vector2Int(
-            Mathf.RoundToInt(origin.x),
-            Mathf.RoundToInt(origin.z));
-
-        for (int offsetY = -searchRadius; offsetY <= searchRadius; offsetY++)
+        WorkableObject.CollectOwnContainingWorldPosition(origin, nearbyWorkableRangeObjects);
+        for (int i = 0; i < nearbyWorkableRangeObjects.Count; i++)
         {
-            for (int offsetX = -searchRadius; offsetX <= searchRadius; offsetX++)
-            {
-                Vector2Int coordinate = center + new Vector2Int(offsetX, offsetY);
-                if (!cachedTerrainGenerator.TryGetLoadedBlock(coordinate, out Block block) || block == null)
-                {
-                    continue;
-                }
-
-                if (!(block.MapObject is WorkableObject workableObject)
-                    || workableObject == null
-                    || !workableObject.gameObject.activeInHierarchy
-                    || !workableObject.AllowsFocus)
-                {
-                    continue;
-                }
-
-                if (nearbyWorkableObjects.Contains(workableObject))
-                {
-                    continue;
-                }
-
-                nearbyWorkableObjects.Add(workableObject);
-
-                if (!workableObject.ContainsWorldPositionInWorkableRange(origin))
-                {
-                    continue;
-                }
-
-                nearbyWorkableRangeObjects.Add(workableObject);
-
-                AppendMapObjectFocusBlocks(workableObject, block, results);
-            }
+            IWorkableTarget workable = nearbyWorkableRangeObjects[i];
+            if (!workable.AllowsFocus) continue;
+            cachedTerrainGenerator.TryGetLoadedBlock(workable.AnchorCoordinate, out Block block);
+            AppendMapObjectFocusBlocks(workable, block, results);
         }
     }
 
@@ -5127,6 +5087,7 @@ public partial class PlayerController : MonoBehaviour
         BuildingWorld buildingWorld = BuildingWorld.Current;
         RobotArmWorld robotArmWorld = RobotArmWorld.Current;
         nearbyRobotArmInstances.Clear(); nearbyMiningInstances.Clear(); nearbyProductionInstances.Clear(); nearbyPoleInstances.Clear();
+        nearbyForestryInstances.Clear();
 
         for (int offsetY = -searchRadius; offsetY <= searchRadius; offsetY++)
         {
@@ -5155,6 +5116,10 @@ public partial class PlayerController : MonoBehaviour
                     && nearbyMiningInstances.Add(miner) && miner.FocusActivationRadius > 0f
                     && GetMapObjectFocusSelectionDistanceSqr(miner, block, origin) <= miner.FocusActivationRadius * miner.FocusActivationRadius)
                     AppendMapObjectFocusBlocks(miner, block, results);
+                if (block.MapObject is ForestryInstance forestry && forestry.IsRuntimeActive && forestry.AllowsFocus
+                    && nearbyForestryInstances.Add(forestry) && forestry.FocusActivationRadius > 0
+                    && GetMapObjectFocusSelectionDistanceSqr(forestry, block, origin) <= forestry.FocusActivationRadius * forestry.FocusActivationRadius)
+                    AppendMapObjectFocusBlocks(forestry, block, results);
                 if (block.MapObject is RobotArmInstance boundArm)
                 {
                     TryAppendNearbyRobotArmFocus(boundArm, block, origin, results);
@@ -5324,7 +5289,7 @@ public partial class PlayerController : MonoBehaviour
         AppendMapObjectFocusBlocks(installationObject, block, results);
     }
 
-    private float GetWorkableFocusDistanceSqr(WorkableObject workableObject, Block block, Vector3 origin)
+    private float GetWorkableFocusDistanceSqr(IWorkableTarget workableObject, Block block, Vector3 origin)
     {
         Vector3 focusPoint = GetWorkableFocusPoint(workableObject, block, origin);
         Vector3 offset = focusPoint - origin;
@@ -5332,12 +5297,12 @@ public partial class PlayerController : MonoBehaviour
         return offset.sqrMagnitude;
     }
 
-    private static Vector3 GetWorkableFocusPoint(WorkableObject workableObject, Block block, Vector3 origin)
+    private static Vector3 GetWorkableFocusPoint(IWorkableTarget workableObject, Block block, Vector3 origin)
     {
         Vector3 focusPoint;
         if (workableObject != null)
         {
-            focusPoint = workableObject.transform.position;
+            focusPoint = workableObject.WorldPosition;
         }
         else if (block != null)
         {
@@ -5365,9 +5330,11 @@ public partial class PlayerController : MonoBehaviour
             return GetOccupiedCoordinateDistanceSqr(pipeRecord.OccupiedCoordinates, origin);
         }
 
+        if (mapObject is IWorkableTarget workable) return GetOccupiedCoordinateDistanceSqr(workable.RuntimeOccupiedCoordinates, origin);
         if (mapObject is UtilityPoleRuntime pole) return GetOccupiedCoordinateDistanceSqr(pole.RuntimeOccupiedCoordinates, origin);
         if (mapObject is ProductionFacilityInstance production) return GetOccupiedCoordinateDistanceSqr(production.RuntimeOccupiedCoordinates, origin);
         if (mapObject is MiningMachineInstance miner) return GetOccupiedCoordinateDistanceSqr(miner.RuntimeOccupiedCoordinates, origin);
+        if (mapObject is ForestryInstance forestry) return GetOccupiedCoordinateDistanceSqr(forestry.RuntimeOccupiedCoordinates, origin);
         if (mapObject is RobotArmInstance dataArm)
             return GetOccupiedCoordinateDistanceSqr(dataArm.RuntimeOccupiedCoordinates, origin);
         if (mapObject is BuildingRuntimeRecord dataBuilding)
@@ -5420,6 +5387,10 @@ public partial class PlayerController : MonoBehaviour
 
     private Bounds GetMapObjectFocusBounds(IMapObjectTarget mapObject, Block block, float focusPadding = 0f)
     {
+        if (mapObject is ForestryInstance forestry)
+        { Bounds bounds = forestry.CullBounds; bounds.Expand(focusPadding * 2f); return bounds; }
+        if (mapObject is WorkableInstance workable)
+        { Bounds bounds = workable.CullBounds; bounds.Expand(focusPadding * 2f); return bounds; }
         if (mapObject is UtilityPoleRuntime pole)
         { Bounds bounds = pole.CullBounds; bounds.Expand(focusPadding * 2f); return bounds; }
         if (mapObject is ProductionFacilityInstance production)
@@ -5561,7 +5532,9 @@ public partial class PlayerController : MonoBehaviour
 
         bool appended = false;
 
-        if (mapObject is UtilityPoleRuntime pole)
+        if (mapObject is IWorkableTarget workable)
+        { foreach (var coordinate in workable.RuntimeOccupiedCoordinates) appended |= TryAppendFocusBlock(results, coordinate, workable); }
+        else if (mapObject is UtilityPoleRuntime pole)
         { foreach (var coordinate in pole.RuntimeOccupiedCoordinates) appended |= TryAppendFocusBlock(results, coordinate, pole); }
         else if (mapObject is ProductionFacilityInstance production)
         {
@@ -5572,6 +5545,11 @@ public partial class PlayerController : MonoBehaviour
         {
             foreach (var coordinate in miner.RuntimeOccupiedCoordinates)
                 appended |= TryAppendFocusBlock(results, coordinate, miner);
+        }
+        else if (mapObject is ForestryInstance forestry)
+        {
+            var coordinates = forestry.Placement.inputOutputState?.focusCoordinates ?? forestry.Placement.occupiedCoordinates;
+            foreach (var coordinate in coordinates) appended |= TryAppendFocusBlock(results, coordinate, forestry);
         }
         else if (mapObject is RobotArmInstance dataArm)
         {
@@ -6036,6 +6014,24 @@ public partial class PlayerController : MonoBehaviour
             closestDistance = hit.distance;
         }
 
+        if (RobotArmWorld.Current != null && RobotArmWorld.Current.TryRaycast(ray, Mathf.Max(0f, maxDistance), out var armTarget, out float armDistance)
+            && armDistance < closestDistance)
+        {
+            closestCandidate = armTarget; closestDistance = armDistance;
+            ResolveTerrainGenerator()?.TryGetLoadedBlock(armTarget.Placement.anchorCoordinate, out closestDataOnlyFallbackBlock);
+        }
+        if (WorkableWorld.Current != null && WorkableWorld.Current.TryRaycast(ray, Mathf.Max(0, maxDistance), out var workableTarget, out float workableDistance)
+            && workableTarget.AllowsFocus && workableDistance < closestDistance)
+        {
+            closestCandidate = workableTarget; closestDistance = workableDistance;
+            ResolveTerrainGenerator()?.TryGetLoadedBlock(workableTarget.AnchorCoordinate, out closestDataOnlyFallbackBlock);
+        }
+        if (ForestryWorld.Current != null && ForestryWorld.Current.TryRaycast(ray, Mathf.Max(0, maxDistance), out var forestryTarget, out float forestryDistance)
+            && forestryTarget.AllowsFocus && forestryDistance < closestDistance)
+        {
+            closestCandidate = forestryTarget; closestDistance = forestryDistance;
+            ResolveTerrainGenerator()?.TryGetLoadedBlock(forestryTarget.AnchorCoordinate, out closestDataOnlyFallbackBlock);
+        }
         if (MiningWorld.Current != null && MiningWorld.Current.TryRaycast(ray, Mathf.Max(0, maxDistance), out var miningTarget, out float miningDistance)
             && miningTarget.AllowsFocus && miningDistance < closestDistance)
         {
@@ -7231,7 +7227,7 @@ public partial class PlayerController : MonoBehaviour
         }
     }
 
-    private void UpdateSelectedWorkableRangeVisuals(IReadOnlyList<WorkableObject> nextObjects)
+    private void UpdateSelectedWorkableRangeVisuals(IReadOnlyList<IWorkableTarget> nextObjects)
     {
         nextSelectedWorkableRangeObjects.Clear();
 
@@ -7239,7 +7235,7 @@ public partial class PlayerController : MonoBehaviour
         {
             for (int i = 0; i < nextObjects.Count; i++)
             {
-                WorkableObject workableObject = nextObjects[i];
+                IWorkableTarget workableObject = nextObjects[i];
                 if (workableObject == null)
                 {
                     continue;
@@ -7250,7 +7246,7 @@ public partial class PlayerController : MonoBehaviour
         }
 
         selectedWorkableRangeRemovalBuffer.Clear();
-        foreach (WorkableObject workableObject in currentSelectedWorkableRangeObjects)
+        foreach (IWorkableTarget workableObject in currentSelectedWorkableRangeObjects)
         {
             if (workableObject != null && nextSelectedWorkableRangeObjects.Contains(workableObject))
             {
@@ -7262,7 +7258,7 @@ public partial class PlayerController : MonoBehaviour
 
         for (int i = 0; i < selectedWorkableRangeRemovalBuffer.Count; i++)
         {
-            WorkableObject workableObject = selectedWorkableRangeRemovalBuffer[i];
+            IWorkableTarget workableObject = selectedWorkableRangeRemovalBuffer[i];
             currentSelectedWorkableRangeObjects.Remove(workableObject);
             if (workableObject != null)
             {
@@ -7270,7 +7266,7 @@ public partial class PlayerController : MonoBehaviour
             }
         }
 
-        foreach (WorkableObject workableObject in nextSelectedWorkableRangeObjects)
+        foreach (IWorkableTarget workableObject in nextSelectedWorkableRangeObjects)
         {
             if (workableObject == null || !currentSelectedWorkableRangeObjects.Add(workableObject))
             {
@@ -7483,6 +7479,20 @@ public partial class PlayerController : MonoBehaviour
 
         Vector3 moveDirection = (right * input.x) + (forward * input.y);
         return moveDirection.sqrMagnitude > 1f ? moveDirection.normalized : moveDirection;
+    }
+
+    private void QueueBodyFacingTowards(Vector3 worldPosition)
+    {
+        Vector3 origin = player.BodyTransform != null
+            ? player.BodyTransform.position
+            : transform.position;
+        Vector3 facingDirection = worldPosition - origin;
+        facingDirection.y = 0f;
+        if (facingDirection.sqrMagnitude > 0.0001f)
+        {
+            pendingFacingDirection = facingDirection.normalized;
+            hasPendingFacingDirection = true;
+        }
     }
 
     private void UpdateBodyRotation()

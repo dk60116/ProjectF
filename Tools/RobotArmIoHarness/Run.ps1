@@ -26,11 +26,12 @@ foreach ($member in @('private static bool CanPlaceSingleLineDrop(', 'private st
     $source += (Member $arm $member) + "`n"
 }
 $source += (Member $arm 'private static bool CanPlaceConveyorDrop(') + "`n"
+$source += (Member $arm 'private static bool IsConveyorDropBlock(') + "`n"
 $source += "} public partial class Train {`n"
 $source += (Member $train 'public bool IsConsistMoving(') + "`n"
 $source += "} public partial class InputOutputModule {`n"
 foreach ($member in @('public enum SlotLayoutType', 'public enum RectGridBlockType', 'public struct RectGridBlockPlacement', 'public bool TryGetRectGridPlacementCoordinate(', 'public static Vector2Int RotateRectGridOffset(', 'public static bool IsFluidItemDefinition(', 'public static bool IsOutputBlockType(', 'public static bool AllowsDirectAreaInteraction(')) { $source += (Member $io $member) + "`n" }
-$source += (Member $io 'private static bool TryEmitOutputItemToBlock(') + "`n"
+$source += (Member $io 'internal static bool TryEmitOutputItemToBlock(') + "`n"
 $source += (Member $io 'private bool CanAddRuntimeOutputItems(') + "`n"
 $source += "public static bool EmitOutputItem(Block block, int itemId, Vector3 start, float delay, out PortableObject output) => TryEmitOutputItemToBlock(block, itemId, start, delay, out output);`n"
 $source += "public bool CanAcceptRuntimeOutput(Vector2Int coordinate, int itemId, int itemCount) => CanAddRuntimeOutputItems(coordinate, itemId, itemCount, out _, out _);`n"
@@ -61,7 +62,7 @@ foreach ($methodName in @('TryTakeOneConveyorObject', 'TryGetClosestConveyorObje
     }
 }
 $source += (Member $block 'public bool CanTransferOneInputAreaCenterObjectToConveyor()') + "`n"
-$source += (Member $block 'public bool TryTransferOneInputAreaCenterObjectToConveyor()') + "`n"
+$source += (Member $block 'public bool TryTransferOneInputAreaCenterObjectToConveyor(') + "`n"
 $source += "}`n"
 $probe = Join-Path ([IO.Path]::GetTempPath()) ('ProjectF-RobotIO-' + [guid]::NewGuid().ToString('N'))
 New-Item -ItemType Directory -Path $probe | Out-Null

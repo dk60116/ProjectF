@@ -3,7 +3,7 @@ using System.Globalization;
 
 namespace ProjectF.Benchmark
 {
-    public enum BenchmarkAction { Map, Belts, Fill, ClearItems, Spawn, ClearObjects, Force, Cancel, Catalog, Status, FillRandom }
+    public enum BenchmarkAction { Map, Belts, Fill, ClearItems, Spawn, ClearObjects, Force, Cancel, Catalog, Status, FillRandom, RandomizeProgress }
     public readonly struct BenchmarkCommand
     {
         public readonly BenchmarkAction Action;
@@ -16,7 +16,7 @@ namespace ProjectF.Benchmark
         public static bool TryParse(string[] parts, out BenchmarkCommand command, out string error)
         {
             command = default;
-            error = "usage: benchmark map|belts <itemId|auto> <rings>|fill <itemId|random> <percent>|clearitems|spawn <itemId> <count>|clearobjects|force <0|1> <fallbackItemId>|cancel|catalog|status";
+            error = "usage: benchmark map|belts <itemId|auto> <rings>|fill <itemId|random> <percent>|clearitems|spawn <itemId> <count>|clearobjects|force <0|1> <fallbackItemId>|randomizeprogress|cancel|catalog|status";
             if (parts == null || parts.Length < 2 || !string.Equals(parts[0], "benchmark", StringComparison.OrdinalIgnoreCase)) return false;
             string action = parts[1].ToLowerInvariant();
             if (parts.Length == 2)
@@ -30,6 +30,7 @@ namespace ProjectF.Benchmark
                     case "cancel": kind = BenchmarkAction.Cancel; break;
                     case "catalog": kind = BenchmarkAction.Catalog; break;
                     case "status": kind = BenchmarkAction.Status; break;
+                    case "randomizeprogress": kind = BenchmarkAction.RandomizeProgress; break;
                     default: return false;
                 }
                 command = new BenchmarkCommand(kind); error = null; return true;

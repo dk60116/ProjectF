@@ -35,13 +35,17 @@ public static class MapObjectTargetExtensions
         return machine != null;
     }
     public static bool IsItemFilterEnabled(this IMapObjectTarget target, int itemId, int count) =>
+        target is ProjectF.MapObjects.ForestryInstance forestry ? forestry.IsItemFilterEnabled(itemId, count) :
+        target is ProjectF.MapObjects.WorkableInstance workable ? workable.IsItemFilterEnabled(itemId, count) :
         target is ProductionFacilityInstance facility ? facility.IsItemFilterEnabled(itemId, count) :
         target is MiningMachineInstance miner ? miner.IsItemFilterEnabled(itemId, count) :
         target is RobotArmInstance arm ? arm.IsItemFilterEnabled(itemId, count) :
         target?.SceneObject != null && target.SceneObject.IsItemFilterEnabled(itemId, count);
     public static void SetItemFilterEnabled(this IMapObjectTarget target, int itemId, int count, bool enabled)
     {
-        if (target is ProductionFacilityInstance facility) facility.SetItemFilterEnabled(itemId, count, enabled);
+        if (target is ProjectF.MapObjects.ForestryInstance forestry) forestry.SetItemFilterEnabled(itemId, count, enabled);
+        else if (target is ProductionFacilityInstance facility) facility.SetItemFilterEnabled(itemId, count, enabled);
+        else if (target is ProjectF.MapObjects.WorkableInstance workable) workable.SetItemFilterEnabled(itemId, count, enabled);
         else if (target is MiningMachineInstance miner) miner.SetItemFilterEnabled(itemId, count, enabled);
         else if (target is RobotArmInstance arm) arm.SetItemFilterEnabled(itemId, count, enabled);
         else target?.SceneObject?.SetItemFilterEnabled(itemId, count, enabled);

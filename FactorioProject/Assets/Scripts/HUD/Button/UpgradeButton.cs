@@ -62,7 +62,8 @@ public class UpgradeButton : MonoBehaviour
             ? controller
             : placementController;
 
-        if (openedByDirectClick && (target is ProductionFacilityInstance || target is ProjectF.Power.UtilityPoleRuntime) && target.IsTargetActive)
+        if (openedByDirectClick && (target is ProductionFacilityInstance || target is ProjectF.Power.UtilityPoleRuntime
+            || target is ProjectF.MapObjects.WorkableInstance || target is ProjectF.MapObjects.ForestryInstance) && target.IsTargetActive)
         {
             bool changed = !ReferenceEquals(focusedObject, target);
             focusedObject = target; focusedDefinition = target.BoundItemDefinition;
@@ -225,6 +226,18 @@ public class UpgradeButton : MonoBehaviour
         {
             if (placementController == null || !placementController.TryUpgradeDataUtilityPole(pole, targetDefinition, out var upgraded)) return false;
             GetComponentInParent<PlayerHUD>()?.ReplaceFocusedObjectAfterUpgrade(pole, upgraded);
+            return true;
+        }
+        if (focusedObject is ProjectF.MapObjects.WorkableInstance workable)
+        {
+            if (placementController == null || !placementController.TryUpgradeDataWorkable(workable, targetDefinition, out var upgraded)) return false;
+            GetComponentInParent<PlayerHUD>()?.ReplaceFocusedObjectAfterUpgrade(workable, upgraded);
+            return true;
+        }
+        if (focusedObject is ProjectF.MapObjects.ForestryInstance forestry)
+        {
+            if (placementController == null || !placementController.TryUpgradeDataForestry(forestry, targetDefinition, out var upgraded)) return false;
+            GetComponentInParent<PlayerHUD>()?.ReplaceFocusedObjectAfterUpgrade(forestry, upgraded);
             return true;
         }
         if (focusedObject is ProductionFacilityInstance facility)

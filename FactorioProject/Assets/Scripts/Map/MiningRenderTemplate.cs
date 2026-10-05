@@ -7,11 +7,16 @@ internal sealed class MiningRenderTemplate
     internal readonly ItemDefinition Definition;
     internal readonly MapObjectArchetype Archetype;
     internal readonly InstallationRigidAnimationTemplate Animation;
-    internal readonly Vector3 Scale, PowerLinePoint;
+    internal readonly Vector3 Scale, PowerLinePoint, ConsumePoint;
     internal readonly Bounds LocalBounds;
     internal readonly float WorkGaugeVerticalOffset;
     internal readonly Color WorkGaugeFillColor;
     internal readonly float Watts;
+    internal readonly float WorkRate, InputConsumeMoveInterval;
+    internal readonly long WorkUnitsPerTick;
+    internal readonly ItemDefinition.EnergyType EnergyType;
+    internal bool UsesFuel => EnergyType == ItemDefinition.EnergyType.Burn;
+    internal readonly Sprite EnergyMarkerIcon;
     internal readonly long CompleteEnergy;
     internal readonly int BenchmarkOutputId;
     internal readonly Bounds ColliderBounds;
@@ -19,7 +24,7 @@ internal sealed class MiningRenderTemplate
     internal readonly bool ColliderTrigger;
     internal readonly uint ColliderIncludeLayers, ColliderExcludeLayers;
     private readonly bool[] partActive;
-    internal MiningRenderTemplate(MiningMachine source)
+    internal MiningRenderTemplate(MiningMachine source, InstallationPlacementController controller)
     {
         Definition = source.BoundItemDefinition ?? InputOutputModule.ResolveItemDefinition(source.ResolveItemId());
         Archetype = Definition.MapObjectArchetype;
@@ -28,6 +33,13 @@ internal sealed class MiningRenderTemplate
         WorkGaugeVerticalOffset = source.WorkGaugeVerticalOffset;
         WorkGaugeFillColor = source.ObjectInfoWorkGaugeFillColor;
         Watts = ItemDefinition.ResolveElectricUseWatts(Definition);
+        Definition.TryGetUseEnergyRequirement(0, out var requirement);
+        EnergyType = requirement.energyType;
+        WorkRate = ItemDefinition.ResolveUseEnergyRatePerSecond(Definition, EnergyType);
+        WorkUnitsPerTick = DeterministicSimulationUnits.RateForTicks(WorkRate, 1);
+        ConsumePoint = source.transform.worldToLocalMatrix.MultiplyPoint3x4(source.DataConsumeTargetWorldPosition);
+        InputConsumeMoveInterval = source.DataInputConsumeMoveInterval;
+        EnergyMarkerIcon = controller != null ? controller.ResolveInputEnergyMarkerIcon(source) : null;
         CompleteEnergy = DeterministicSimulationUnits.FromFloat(InputOutputModule.ResolveCompleteEnergy(Definition, 5f));
         PowerLinePoint = source.TryGetPowerLinePoint(out Transform point)
             ? source.transform.worldToLocalMatrix.MultiplyPoint3x4(point.position) : Vector3.up;
@@ -50,6 +62,7 @@ internal sealed class MiningRenderTemplate
     }
     internal int Append(MiningMachineInstance miner, VirtualRenderBatchCollection batches)
     {
+        miner.SampleBenchmarkEnergyVisuals();
         Animation?.Evaluate(miner.AnimationPhase, miner.IsWorking);
         Matrix4x4 root = miner.RootMatrix * Matrix4x4.Scale(Vector3.one * miner.PlacementPresentationScale);
         int count = 0;

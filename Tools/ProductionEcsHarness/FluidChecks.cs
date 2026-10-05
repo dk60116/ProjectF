@@ -34,15 +34,18 @@ static class FluidChecks
         tank.Capacity = long.MaxValue; Pipe.FluidId = 9;
         world.TransferOutputFluid(source, source.Template.Recipes[0]); Check(io.productionOutputFluidUnits == reserve, "Different network fluid rejects transfer");
         Pipe.FluidId = -1; InstallationObject.Bodies.Clear();
+        InputOutputModule.FluidTopologyVersion++;
         var dedicated = new InputOutputModule { Dedicated = true, RejectDedicated = true };
         InputOutputModule.Storages[new Vector2Int(2, 0)] = dedicated;
         world.TransferOutputFluid(source, source.Template.Recipes[0]);
         Check(dedicated.GenericAdds == 0 && io.productionOutputFluidUnits == reserve, "Rejected dedicated storage never falls back to generic storage");
         InputOutputModule.Storages.Clear();
+        InputOutputModule.FluidTopologyVersion++;
         var receiver = Create(world, new Vector2Int(2, 1), false, Vector2Int.down);
         world.TransferOutputFluid(source, source.Template.Recipes[0]);
         Check(receiver.FluidUnits(2) == 0, "Parallel side pipe cannot feed data receiver without a connector");
         PipeWorld.Current.Pipes[new Vector2Int(2, 0)].Directions.Add(Vector2Int.up);
+        InputOutputModule.FluidTopologyVersion++;
         world.TransferOutputFluid(source, source.Template.Recipes[0]);
         Check(receiver.FluidUnits(2) > 0, "Facing connector feeds data receiver");
         receiver.World.GetState(receiver.Index, receiver.Generation).Production.Begin(0, 2, 1, 120);
@@ -52,6 +55,7 @@ static class FluidChecks
         io.productionOutputFluidUnits = 1; world.TransferOutputFluid(source, source.Template.Recipes[0]);
         Check(io.productionOutputFluidUnits == 0 && receiver.FluidUnits(2) == received + 1, "Final single fluid unit drains despite pipe retention");
         Pipe.Graph.Clear(); Pipe.Graph[new Vector2Int(1, 0)] = 0;
+        InputOutputModule.FluidTopologyVersion++;
         InputOutputModule.Storages[new Vector2Int(1, 0)] = tank; tank.Units = 0; tank.Fluid = -1;
         io.productionOutputFluidUnits = Units(2);
         for (long tick = 0; io.productionOutputFluidUnits > 0 && tick < 400; tick++)
@@ -59,6 +63,7 @@ static class FluidChecks
         Check(io.productionOutputFluidUnits == 0, "Entire output reserve eventually drains");
         Check(Math.Abs(tank.Units - Units(2)) < 60, "Float native transport conserves batch within one micro-liter");
         Pipe.RoutePump = new Pump { Rate = .5f }; io.productionOutputFluidUnits = Units(2); tank.Units = 0;
+        InputOutputModule.FluidTopologyVersion++;
         MapObjectTickManager.CurrentSimulationTick = 1000; world.TransferOutputFluid(source, source.Template.Recipes[0]);
         world.TransferOutputFluid(source, source.Template.Recipes[0]);
         Check(tank.StoredFluidLiters <= .5f / 60 + .000001f, "Shared pump budget caps combined transfer in one tick");

@@ -109,7 +109,7 @@ public partial class TerrainGenerator
     private bool TryGetLoadedBlock(Vector2Int cell, out Block block) => loadedBlocks.TryGetValue(cell, out block);
     private bool CanAbsorbDroppedFarmlandFertilizer(Vector2Int cell, int id) => false;
 }
-public class MapObject { }
+public class MapObject { public MapObject SceneObject => this; public bool IsTargetActive => true; }
 public class InstallationObject : MapObject { public GameObject gameObject = new(); }
 public class ResourceInstance : MapObject { }
 namespace ProjectF.MapObjects

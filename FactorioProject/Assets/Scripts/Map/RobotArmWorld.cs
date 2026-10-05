@@ -24,6 +24,11 @@ public sealed class RobotArmWorld : IDisposable, IMapObjectUpdateTick, IMapObjec
     private readonly HashSet<RobotArmInstance> markerCandidateSet = new HashSet<RobotArmInstance>();
     private readonly List<RobotArmInstance> markerCandidates = new List<RobotArmInstance>();
     private readonly List<RobotArmInstance> planned = new List<RobotArmInstance>();
+    private readonly List<RobotArmInstance> transferCommands = new List<RobotArmInstance>();
+    internal bool IsPlanning { get; private set; }
+    internal bool FullPowerTick { get; private set; }
+    internal bool BenchmarkTick { get; private set; }
+    private int lastApplyCommandCount;
     private readonly ActiveTickSet<RobotArmInstance> activeTicks = new ActiveTickSet<RobotArmInstance>(
         Comparer<RobotArmInstance>.Create((a, b) => a.SimulationId.CompareTo(b.SimulationId)));
     internal double PresentationTime { get; private set; }
@@ -31,7 +36,9 @@ public sealed class RobotArmWorld : IDisposable, IMapObjectUpdateTick, IMapObjec
     private long tickCandidatesVisited;
     private long wakeRequests;
     private long wakeAdmissions;
-    private readonly Dictionary<RobotArm, RobotArmRenderTemplate> templates = new Dictionary<RobotArm, RobotArmRenderTemplate>();
+    private readonly Dictionary<(RobotArm Prototype, int ItemId), RobotArmRenderTemplate> templates =
+        new Dictionary<(RobotArm Prototype, int ItemId), RobotArmRenderTemplate>();
+    internal readonly ProjectF.Diagnostics.RobotArmTickTiming TickTiming = new ProjectF.Diagnostics.RobotArmTickTiming();
     private bool orderDirty;
     private RobotArmInstance selectedMarkerArm;
     private bool markersDirty = true;
@@ -48,6 +55,7 @@ public sealed class RobotArmWorld : IDisposable, IMapObjectUpdateTick, IMapObjec
     public IReadOnlyList<RobotArmInstance> Instances => ordered;
     public int Count => byKey.Count;
     public float MaxFocusRadius { get; private set; }
+    private float maxColliderReach;
     private RobotArmWorldView view;
     private bool disposed;
     public int VisibleCount => view != null ? view.VisibleCount : 0;
@@ -72,7 +80,6 @@ public sealed class RobotArmWorld : IDisposable, IMapObjectUpdateTick, IMapObjec
         if (disposed) throw new ObjectDisposedException(nameof(RobotArmWorld));
         if (view != null) return;
         view = RobotArmWorldView.Create(this, Terrain.transform);
-        foreach (var arm in ordered) view.Bind(arm);
     }
 
     public void DetachView()
@@ -114,26 +121,29 @@ public sealed class RobotArmWorld : IDisposable, IMapObjectUpdateTick, IMapObjec
         if (hit) interactionFreightCacheHits++;
         else interactionFreightCacheMisses++;
     }
-    internal RobotArmRenderTemplate GetTemplate(RobotArm prototype)
+    internal RobotArmRenderTemplate GetTemplate(RobotArm prototype, int itemId)
     {
-        if (!templates.TryGetValue(prototype, out var template))
-        { template = new RobotArmRenderTemplate(prototype); templates.Add(prototype, template); }
+        var key = (prototype, itemId);
+        if (!templates.TryGetValue(key, out var template))
+        { template = new RobotArmRenderTemplate(prototype, itemId); templates.Add(key, template); }
         return template;
     }
     public RobotArmInstance Register(RobotArm prototype, BlockStateStore.InstallationSaveState placement)
     {
         Vector2Int key = placement.hasStorageKey ? placement.storageKey : placement.anchorCoordinate;
         if (byKey.TryGetValue(key, out var existing)) { Bind(existing); return existing; }
-        var slot = states.Allocate(new RobotArmRuntimeState { heldItemId = -1, BodyRotation = GetTemplate(prototype).BodyRotation });
-        var arm = new RobotArmInstance(this, slot.Index, slot.Generation, prototype, placement);
+        var template = GetTemplate(prototype, placement.itemId);
+        var slot = states.Allocate(new RobotArmRuntimeState { heldItemId = -1, BodyRotation = template.BodyRotation });
+        var arm = new RobotArmInstance(this, slot.Index, slot.Generation, prototype, placement, template);
         byKey.Add(key, arm);
         MaxFocusRadius = Mathf.Max(MaxFocusRadius, prototype.FocusActivationRadius);
+        if (arm.Template.HasCollider)
+            maxColliderReach = Mathf.Max(maxColliderReach, arm.Template.ColliderCenterOffset.magnitude + arm.Template.ColliderRadius);
         ordered.Add(arm);
         AddMarkerArm(arm);
         orderDirty = true;
         markersDirty = true;
         arm.ApplyTransferState(placement.robotArmState);
-        view?.Bind(arm);
         if (arm.TryResolveEndpoints(out var input, out var output)) { Observe(input, arm); Observe(output, arm); }
         foreach (var coordinate in placement.occupiedCoordinates) Observe(coordinate, arm);
         Bind(arm);
@@ -336,6 +346,54 @@ public sealed class RobotArmWorld : IDisposable, IMapObjectUpdateTick, IMapObjec
         RenderCandidateCellCount = 0;
     }
 
+    internal void BuildNearby(Vector3 position, List<RobotArmInstance> destination)
+    {
+        destination.Clear();
+        Vector2Int cell = GetMarkerCell(position);
+        int radius = Mathf.CeilToInt((10f + maxColliderReach) / MarkerChunkSize);
+        for (int y = cell.y - radius; y <= cell.y + radius; y++)
+        for (int x = cell.x - radius; x <= cell.x + radius; x++)
+            if (markerArmsByCell.TryGetValue(new Vector2Int(x, y), out var arms)) destination.AddRange(arms);
+    }
+
+    public bool TryRaycast(Ray ray, float maxDistance, out RobotArmInstance target, out float distance)
+    {
+        target = null; distance = maxDistance;
+        if (maxDistance <= 0f || markerArmsByCell.Count == 0) return false;
+        var traversal = new SpatialRayCellTraversal(ray, maxDistance, MarkerChunkSize);
+        int padding = Mathf.CeilToInt(maxColliderReach / MarkerChunkSize);
+        while (traversal.MoveNext())
+        {
+            Vector2Int cell = traversal.Current;
+            for (int y = cell.y - padding; y <= cell.y + padding; y++)
+            for (int x = cell.x - padding; x <= cell.x + padding; x++)
+                if (markerArmsByCell.TryGetValue(new Vector2Int(x, y), out var arms))
+                    for (int i = 0; i < arms.Count; i++)
+                    {
+                        RobotArmInstance arm = arms[i];
+                        if (!arm.IsRuntimeActive || !arm.AllowsFocus || !arm.Template.HasCollider || arm.PlacementPresentationSuppressed) continue;
+                        if (TryRaycastSphere(ray, arm.ColliderCenter, arm.Template.ColliderRadius, distance, out float hitDistance)
+                            && (target == null || hitDistance < distance || hitDistance == distance && arm.SimulationId < target.SimulationId))
+                        { target = arm; distance = hitDistance; }
+                    }
+        }
+        return target != null;
+    }
+
+    private static bool TryRaycastSphere(Ray ray, Vector3 center, float radius, float maxDistance, out float distance)
+    {
+        distance = 0f;
+        Vector3 offset = ray.origin - center;
+        float a = Vector3.Dot(ray.direction, ray.direction);
+        float b = Vector3.Dot(offset, ray.direction);
+        float c = Vector3.Dot(offset, offset) - radius * radius;
+        float discriminant = b * b - a * c;
+        // Match Physics.Raycast: a ray beginning inside the sphere has no entry hit.
+        if (a <= 0f || c < 0f || discriminant < 0f) return false;
+        distance = (-b - Mathf.Sqrt(discriminant)) / a;
+        return distance >= 0f && distance <= maxDistance;
+    }
+
     public void WakeAll() { foreach (var arm in ordered) arm.WakeRuntimeSleep(); }
     internal int WakeElectricRuntimeArms(out int candidateCount)
     {
@@ -416,6 +474,7 @@ public sealed class RobotArmWorld : IDisposable, IMapObjectUpdateTick, IMapObjec
     { arm.Persist(); Remove(arm.Placement.hasStorageKey ? arm.Placement.storageKey : arm.Placement.anchorCoordinate); }
     public void ClearRecords()
     {
+        transferCommands.Clear(); lastApplyCommandCount = 0;
         foreach (var arm in ordered) ReleaseEntity(arm);
         byKey.Clear(); ordered.Clear(); observers.Clear(); planned.Clear();
         activeTicks.Clear();
@@ -425,6 +484,7 @@ public sealed class RobotArmWorld : IDisposable, IMapObjectUpdateTick, IMapObjec
         markerArmsByCell.Clear(); visibleMarkerArms.Clear();
         markerCandidateSet.Clear(); markerCandidates.Clear();
         selectedMarkerArm = null; MaxFocusRadius = 0f; markersDirty = true;
+        maxColliderReach = 0f;
         VisibleMarkerCount = MarkerVisibilityCandidateCount = 0;
         RenderCandidateCount = RenderCandidateCellCount = 0;
         interactionBlockCacheHits = interactionBlockCacheMisses = 0L;
@@ -437,15 +497,19 @@ public sealed class RobotArmWorld : IDisposable, IMapObjectUpdateTick, IMapObjec
     public void FlushSaveStates()
     {
         foreach (var arm in ordered)
-        {
-            arm.Placement.robotArmState = arm.CaptureTransferState();
-            StateStore.UpdateInstallationState(arm.Placement);
-        }
+            arm.PersistTransferState();
     }
     public void ManagedUpdateTick(float dt) { PlanManagedUpdateTick(dt); ApplyManagedUpdateTick(); }
+    internal void QueueTransfer(RobotArmInstance arm)
+    {
+        if (IsPlanning) transferCommands.Add(arm);
+    }
     public void PlanManagedUpdateTick(float dt)
     {
         PresentationTime += Math.Max(0f, dt);
+        transferCommands.Clear();
+        BenchmarkTick = ProjectF.Benchmark.BenchmarkRuntime.ForceWorking;
+        FullPowerTick = BenchmarkTick || GameManager.Instance != null && GameManager.Instance.FreeElectroEnergy;
         if (orderDirty) { ordered.Sort((a,b) => a.SimulationId.CompareTo(b.SimulationId)); orderDirty = false; }
         // Wake/Sleep can mutate membership during Plan or Apply, never this snapshot.
         activeTicks.CopyOrderedTo(planned);
@@ -454,22 +518,33 @@ public sealed class RobotArmWorld : IDisposable, IMapObjectUpdateTick, IMapObjec
         if (planned.Count == 0) return;
         UtilityPole.PrepareRobotArmPowerTick();
         using var sample = MapObjectTickProfiler.SampleNamed("Runtime", nameof(RobotArm), "Robot Arm Entity Plan");
-        foreach (var arm in planned)
+        using var timing = TickTiming.BeginTick();
+        IsPlanning = true;
+        try
         {
-            if (!arm.IsRuntimeActive) continue;
-            arm.PlanManagedUpdateTick(dt);
+            for (int i = 0; i < planned.Count; i++)
+            {
+                var arm = planned[i];
+                if (!arm.IsRuntimeActive) continue;
+                TickTiming.BeginEntity(i);
+                arm.PlanManagedUpdateTick(dt);
+            }
         }
+        finally { IsPlanning = false; }
     }
     public void ApplyManagedUpdateTick()
     {
         using var sample = MapObjectTickProfiler.SampleNamed("Runtime", nameof(RobotArm), "Robot Arm Entity Apply");
-        foreach (var arm in planned)
+        using var timing = TickTiming.BeginTick(rotateSample: false);
+        lastApplyCommandCount = transferCommands.Count;
+        for (int i = 0; i < transferCommands.Count; i++)
         {
+            var arm = transferCommands[i];
             if (!arm.IsRuntimeActive) continue;
-            int previousItem = arm.HeldItemId;
+            TickTiming.BeginEntity(i);
             arm.ApplyManagedUpdateTick();
-            if (previousItem != arm.HeldItemId) arm.PersistTransferState();
         }
+        transferCommands.Clear();
         planned.Clear();
     }
 
@@ -478,12 +553,19 @@ public sealed class RobotArmWorld : IDisposable, IMapObjectUpdateTick, IMapObjec
         if (Current == null) return;
         MapObjectTickProfiler.AddRuntimeCounter("RobotArmWorld", "GameObjects", Current.HasView ? 1 : 0);
         MapObjectTickProfiler.AddRuntimeCounter("RobotArmWorld", "MonoBehaviours", Current.HasView ? 1 : 0);
+        MapObjectTickProfiler.AddRuntimeCounter("RobotArmWorld", "ActiveColliders", Current.view != null ? Current.view.ActiveColliderCount : 0);
+        MapObjectTickProfiler.AddRuntimeCounter("RobotArmWorld", "PooledColliders", Current.view != null ? Current.view.PooledColliderCount : 0);
         MapObjectTickProfiler.AddRuntimeCounter("RobotArmWorld", "Entities", Current.Count);
         MapObjectTickProfiler.AddRuntimeCounter("RobotArmWorld", "Scheduled", Current.activeTicks.Count);
         MapObjectTickProfiler.AddRuntimeCounter("RobotArmWorld", "LastPlanned", Current.lastPlannedCount);
+        MapObjectTickProfiler.AddRuntimeCounter("RobotArmWorld", "LastApplyCommands", Current.lastApplyCommandCount);
+        MapObjectTickProfiler.AddRuntimeCounter("RobotArmWorld", "DetailedTimingStride", ProjectF.Diagnostics.RobotArmTickTiming.SampleStride,
+            "Nested rows measure a rotating 1/256 entity/command sample; Entity Plan/Apply still measure the full tick.");
         MapObjectTickProfiler.AddRuntimeCounter("RobotArmWorld", "TickCandidatesVisited", Current.tickCandidatesVisited);
         MapObjectTickProfiler.AddRuntimeCounter("RobotArmWorld", "CoalescedWakeRequests", Current.wakeRequests);
         MapObjectTickProfiler.AddRuntimeCounter("RobotArmWorld", "WakeAdmissions", Current.wakeAdmissions);
+        MapObjectTickProfiler.AddRuntimeCounter("RobotArmWorld", "AggregatedTickTimings", true,
+            "Power/state/sleep rows are sampled tick batches; Entity Plan/Apply measure all entities.");
         MapObjectTickProfiler.AddRuntimeCounter("RobotArmWorld", "Visible", Current.VisibleCount);
         MapObjectTickProfiler.AddRuntimeCounter("RobotArmWorld", "Matrices", Current.MatrixCount);
         MapObjectTickProfiler.AddRuntimeCounter("RobotArmWorld", "RenderCandidates", Current.RenderCandidateCount);
@@ -495,5 +577,73 @@ public sealed class RobotArmWorld : IDisposable, IMapObjectUpdateTick, IMapObjec
         MapObjectTickProfiler.AddRuntimeCounter("RobotArmTargetCache", "FreightHits", Current.interactionFreightCacheHits);
         MapObjectTickProfiler.AddRuntimeCounter("RobotArmTargetCache", "FreightMisses", Current.interactionFreightCacheMisses);
         UtilityPole.AppendRobotArmPowerProfilerCounters();
+    }
+}
+
+namespace ProjectF.Diagnostics
+{
+    // Rotate the sampled entity ordinal across ticks. Never extrapolate sampled
+    // durations: the world Plan/Apply scopes remain the authoritative total cost.
+    internal sealed class RobotArmTickTiming
+    {
+        internal enum Phase { Power, State, Sleep, Pickup, Drop }
+        internal const int SampleStride = 256;
+        private bool enabled, measureEntity;
+        private int offset;
+        private long power, state, sleep, pickup, drop;
+
+        internal BatchScope BeginTick(bool rotateSample = true)
+        {
+            power = state = sleep = pickup = drop = 0;
+            enabled = MapObjectTickProfiler.IsDetailedEnabled;
+            measureEntity = false;
+            if (rotateSample) offset = (offset + 1) & (SampleStride - 1);
+            return new BatchScope(this);
+        }
+
+        internal void BeginEntity(int ordinal) => measureEntity = enabled && ((ordinal + offset) & (SampleStride - 1)) == 0;
+        internal Scope Measure(Phase phase) => measureEntity ? new Scope(this, phase) : default;
+
+        private void Record(Phase phase, long start)
+        {
+            long elapsed = Math.Max(0L, MapObjectTickProfiler.BeginSample() - start);
+            switch (phase)
+            {
+                case Phase.Power: power += elapsed; break;
+                case Phase.State: state += elapsed; break;
+                case Phase.Sleep: sleep += elapsed; break;
+                case Phase.Pickup: pickup += elapsed; break;
+                case Phase.Drop: drop += elapsed; break;
+            }
+        }
+
+        private void Flush()
+        {
+            if (!enabled) return;
+            enabled = false;
+            measureEntity = false;
+            if (power > 0) MapObjectTickProfiler.RecordNamedElapsedTicks("Runtime", nameof(RobotArm), "Robot Arm Power (sampled)", power);
+            if (state > 0) MapObjectTickProfiler.RecordNamedElapsedTicks("Runtime", nameof(RobotArm), "Robot Arm State Tick (sampled)", state);
+            if (sleep > 0) MapObjectTickProfiler.RecordNamedElapsedTicks("Runtime", nameof(RobotArm), "Robot Arm Sleep Check (sampled)", sleep);
+            if (pickup > 0) MapObjectTickProfiler.RecordNamedElapsedTicks("Runtime", nameof(RobotArm), "Robot Arm Pickup Transfer (sampled)", pickup);
+            if (drop > 0) MapObjectTickProfiler.RecordNamedElapsedTicks("Runtime", nameof(RobotArm), "Robot Arm Drop Transfer (sampled)", drop);
+        }
+
+        internal readonly struct BatchScope : IDisposable
+        {
+            private readonly RobotArmTickTiming owner;
+            internal BatchScope(RobotArmTickTiming owner) { this.owner = owner; }
+            public void Dispose() => owner?.Flush();
+        }
+
+        internal readonly struct Scope : IDisposable
+        {
+            private readonly RobotArmTickTiming owner;
+            private readonly Phase phase;
+            private readonly long start;
+            internal Scope(RobotArmTickTiming owner, Phase phase)
+            { this.owner = owner; this.phase = phase; start = MapObjectTickProfiler.BeginSample(); }
+            public void Dispose() => owner?.Record(phase, start);
+        }
     }
 }

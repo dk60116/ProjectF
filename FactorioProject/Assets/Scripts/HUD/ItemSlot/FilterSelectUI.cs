@@ -71,7 +71,7 @@ public partial class FilterSelectUI : MonoBehaviour
         boundTarget = ResolveCurrentTarget();
         ApplyBulkButtonVisibility();
         BuildVisibleDefinitions();
-        EnsureSlotCapacity(boundTarget is LoggingMachine
+        EnsureSlotCapacity(boundTarget is ProjectF.MapObjects.ILoggingTarget
             ? visibleTreeDefinitions.Count
             : visibleDefinitions.Count);
         ApplyDefinitionsToSlots();
@@ -207,7 +207,7 @@ public partial class FilterSelectUI : MonoBehaviour
         visibleDefinitions.Clear();
         visibleTreeDefinitions.Clear();
 
-        if (boundTarget is LoggingMachine)
+        if (boundTarget is ProjectF.MapObjects.ILoggingTarget)
         {
             ResolveTerrainGenerator()?.CollectLoggingTreeDefinitions(visibleTreeDefinitions);
             return;
@@ -262,7 +262,7 @@ public partial class FilterSelectUI : MonoBehaviour
             return;
         }
 
-        if (boundTarget is LoggingMachine loggingMachine)
+        if (boundTarget is ProjectF.MapObjects.ILoggingTarget loggingMachine)
         {
             ApplyLoggingDefinitionsToSlots(loggingMachine);
             ApplyFilterHeaderLayout(true);
@@ -331,7 +331,7 @@ public partial class FilterSelectUI : MonoBehaviour
         }
     }
 
-    private void ApplyLoggingDefinitionsToSlots(LoggingMachine loggingMachine)
+    private void ApplyLoggingDefinitionsToSlots(ProjectF.MapObjects.ILoggingTarget loggingMachine)
     {
         for (int i = 0; i < slotList.Count; i++)
         {
@@ -524,7 +524,7 @@ public partial class FilterSelectUI : MonoBehaviour
 
     private void HandleLoggingTreeToggleChanged(ResourceDefinition definition, bool isOn)
     {
-        if (!(ResolveCurrentTarget() is LoggingMachine loggingMachine))
+        if (!(ResolveCurrentTarget() is ProjectF.MapObjects.ILoggingTarget loggingMachine))
         {
             return;
         }
@@ -649,7 +649,7 @@ public partial class FilterSelectUI : MonoBehaviour
             return;
         }
 
-        if (target is LoggingMachine loggingMachine)
+        if (target is ProjectF.MapObjects.ILoggingTarget loggingMachine)
         {
             loggingMachine.SetAllTreeTypes(visibleTreeDefinitions, isEnabled);
             PersistTargetFilterState(loggingMachine);
@@ -1168,7 +1168,7 @@ public partial class FilterSelectUI : MonoBehaviour
         }
     }
 
-    private void RefreshLoggingRangeControl(LoggingMachine loggingMachine)
+    private void RefreshLoggingRangeControl(ProjectF.MapObjects.ILoggingTarget loggingMachine)
     {
         EnsureFilterRangeControl();
         SetFilterRangeControlVisible(true);
@@ -1240,7 +1240,7 @@ public partial class FilterSelectUI : MonoBehaviour
             return;
         }
 
-        if (!(target is LoggingMachine loggingMachine))
+        if (!(target is ProjectF.MapObjects.ILoggingTarget loggingMachine))
         {
             return;
         }

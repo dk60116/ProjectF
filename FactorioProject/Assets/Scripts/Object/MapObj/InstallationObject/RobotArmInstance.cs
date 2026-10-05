@@ -13,6 +13,7 @@ public sealed partial class RobotArmInstance : IMapObjectTarget, IDataElectricCo
     internal readonly uint Generation;
     public readonly RobotArm Prototype;
     internal readonly RobotArmRenderTemplate Template;
+    internal readonly Vector3 ColliderCenter;
     public readonly BlockStateStore.InstallationSaveState Placement;
     internal bool MarkersVisible;
     private ref RobotArmRuntimeState Data => ref World.GetState(Index, Generation);
@@ -68,7 +69,7 @@ public sealed partial class RobotArmInstance : IMapObjectTarget, IDataElectricCo
     private bool interactionCoordinateCacheValid;
     private long cachedInteractionPlacementSequence;
     private Vector2Int cachedPickupCoordinate, cachedDropCoordinate;
-    private readonly List<InstallationObject> freightCarCoordinateScratch = new List<InstallationObject>(4);
+    private List<InstallationObject> freightCarCoordinateScratch;
     private Predicate<int> cachedPickupItemFilter;
     private Func<Vector3> cachedDropTransferStartProvider;
     private Vector3 cachedDropTransferStartWorldPosition;
@@ -78,8 +79,12 @@ public sealed partial class RobotArmInstance : IMapObjectTarget, IDataElectricCo
         cachedDropTransferStartProvider
         ?? (cachedDropTransferStartProvider = GetCachedDropTransferStartWorldPosition);
     internal RobotArmInstance(RobotArmWorld world, int index, uint generation, RobotArm prototype,
-        BlockStateStore.InstallationSaveState placement)
-    { World = world; Index = index; Generation = generation; Prototype = prototype; Placement = placement; Template = world.GetTemplate(prototype); }
+        BlockStateStore.InstallationSaveState placement, RobotArmRenderTemplate template)
+    {
+        World = world; Index = index; Generation = generation; Prototype = prototype; Placement = placement;
+        Template = template;
+        ColliderCenter = placement.worldPosition + placement.worldRotation * Template.ColliderCenterOffset;
+    }
     public bool IsRuntimeActive => World != null && World.IsValid(Index, Generation);
     public bool IsTargetActive => IsRuntimeActive;
     public MapObject SceneObject => null;
@@ -91,7 +96,7 @@ public sealed partial class RobotArmInstance : IMapObjectTarget, IDataElectricCo
     public Vector3 WorldPosition => Placement.worldPosition;
     public Quaternion WorldRotation => Placement.worldRotation;
     public Vector3 PowerLineWorldPosition => Template.PowerLineWorld(this);
-    public ItemDefinition BoundItemDefinition => InputOutputModule.ResolveItemDefinition(Placement.itemId);
+    public ItemDefinition BoundItemDefinition => Template.Definition;
     public int ResolveItemId() => Placement.itemId;
     public int ResolvedItemId => ResolveItemId();
     public int ID => ResolveItemId();
@@ -135,13 +140,14 @@ public sealed partial class RobotArmInstance : IMapObjectTarget, IDataElectricCo
         else words[itemId >> 6] &= ~(1UL << (itemId & 63));
         WakeRuntimeSleep();
     }
-    public void Persist() { Placement.robotArmState = CaptureTransferState(); World.StateStore.UpdateInstallationState(Placement); }
+    public void Persist() => PersistTransferState();
     internal void PersistTransferState()
     {
-        Placement.robotArmState = CaptureTransferState();
-        Vector2Int key = Placement.hasStorageKey ? Placement.storageKey : Placement.anchorCoordinate;
-        if (World.StateStore.TryGetInstallationStateReadOnly(key, out var saved) && saved.placementSequence == SimulationId)
-            saved.robotArmState = Placement.robotArmState;
+        EnsureRuntimeStateInitialized();
+        // Placement is the store-owned state. Reuse its transfer DTO without replacing
+        // the installation record or allocating a new snapshot on every item transfer.
+        if (Placement.robotArmState == null) Placement.robotArmState = new TransferState();
+        WriteTransferState(Placement.robotArmState);
     }
     internal bool TryResolveEndpoints(out Vector2Int input, out Vector2Int output)
     { bool hasInput = TryResolvePickupCoordinate(out input); return TryResolveDropCoordinate(out output) && hasInput; }
@@ -200,17 +206,45 @@ public sealed partial class RobotArmInstance : IMapObjectTarget, IDataElectricCo
         Data.SleepingPresentationTime = now;
         if (Data.AnimationTime < 1f) AdvanceAnimation(elapsed * Mathf.Clamp01(lastElectricPowerSupplyRatio));
     }
-    internal Quaternion BodyRotation => Data.BodyRotation;
+    internal Quaternion BodyRotation
+    {
+        get
+        {
+            ref RobotArmRuntimeState data = ref Data;
+            return data.TurnAngle > 0f
+                ? Quaternion.SlerpUnclamped(data.BodyRotation, data.TurnTarget, 1f - data.TurnRemaining / data.TurnAngle)
+                : data.BodyRotation;
+        }
+    }
     internal float AnimationTime { get { SynchronizeSleepingPresentation(); return Data.AnimationTime; } }
     internal int AnimationKind => Data.AnimationKind;
-    private void SetBodyLocalRotation(Quaternion rotation) { Data.BodyRotation = rotation; }
+    private void SetBodyLocalRotation(Quaternion rotation)
+    {
+        ref RobotArmRuntimeState data = ref Data;
+        data.BodyRotation = rotation;
+        data.TurnAngle = data.TurnRemaining = 0f;
+    }
     private bool RotateBodyToward(Quaternion target, float dt)
     {
-        Data.BodyRotation = Quaternion.RotateTowards(Data.BodyRotation, target, bodyTurnSpeedDegreesPerSecond * dt);
-        return Quaternion.Angle(Data.BodyRotation, target) <= 0.1f;
+        ref RobotArmRuntimeState data = ref Data;
+        if (data.TurnAngle <= 0f || !data.TurnTarget.Equals(target))
+        {
+            Quaternion start = BodyRotation;
+            data.BodyRotation = start;
+            data.TurnTarget = target;
+            data.TurnAngle = data.TurnRemaining = Quaternion.Angle(start, target);
+        }
+        data.TurnRemaining = Mathf.Max(0f, data.TurnRemaining - bodyTurnSpeedDegreesPerSecond * dt);
+        if (data.TurnRemaining > 0.1f) return false;
+        SetBodyLocalRotation(target);
+        return true;
     }
     private void AdvanceAnimation(float dt)
-    { Data.AnimationTime = Mathf.Min(1f, Data.AnimationTime + dt); Data.ItemMoveElapsed = Mathf.Min(ItemMoveDuration, Data.ItemMoveElapsed + dt); }
+    {
+        ref RobotArmRuntimeState data = ref Data;
+        if (data.AnimationTime < 1f) data.AnimationTime = Mathf.Min(1f, data.AnimationTime + dt);
+        if (data.ItemMoveElapsed < ItemMoveDuration) data.ItemMoveElapsed = Mathf.Min(ItemMoveDuration, data.ItemMoveElapsed + dt);
+    }
     private void PlayPickAnimation() { Data.AnimationKind = 1; Data.AnimationTime = 0f; }
     private void PlayDropAnimation() { Data.AnimationKind = 2; Data.AnimationTime = 0f; }
     public Bounds PresentationBounds => new Bounds(WorldPosition + Vector3.up * 0.6f, new Vector3(1f, 1.5f, 1f));
@@ -333,19 +367,22 @@ public sealed partial class RobotArmInstance : IMapObjectTarget, IDataElectricCo
 
     public TransferState CaptureTransferState()
     {
-
         EnsureRuntimeStateInitialized();
-        return new TransferState
-        {
-            heldItemId = heldItemId,
-            state = state,
-            pickupTimer = Mathf.Max(0f, pickupTimer),
-            dropRetryTimer = Mathf.Max(0f, dropRetryTimer),
-            actionTurnTimer = Mathf.Max(0f, actionTurnTimer),
-            turnTimer = IsTurningState(state) ? Quaternion.Angle(BodyRotation,
-                state == RobotArmState.TurningToDrop ? GetOutputBodyLocalRotation() : inputBodyLocalRotation) / bodyTurnSpeedDegreesPerSecond : 0f,
-            waitingForDropRetry = waitingForDropRetry
-        };
+        var snapshot = new TransferState();
+        WriteTransferState(snapshot);
+        return snapshot;
+    }
+
+    private void WriteTransferState(TransferState target)
+    {
+        target.heldItemId = heldItemId;
+        target.state = state;
+        target.pickupTimer = Mathf.Max(0f, pickupTimer);
+        target.dropRetryTimer = Mathf.Max(0f, dropRetryTimer);
+        target.actionTurnTimer = Mathf.Max(0f, actionTurnTimer);
+        target.turnTimer = IsTurningState(state) ? Quaternion.Angle(BodyRotation,
+            state == RobotArmState.TurningToDrop ? GetOutputBodyLocalRotation() : inputBodyLocalRotation) / bodyTurnSpeedDegreesPerSecond : 0f;
+        target.waitingForDropRetry = waitingForDropRetry;
     }
 
     public void ApplyTransferState(TransferState persistentState)
@@ -409,35 +446,30 @@ public sealed partial class RobotArmInstance : IMapObjectTarget, IDataElectricCo
 
     public void PlanManagedUpdateTick(float deltaTime)
     {
-        plannedTransferCommand = PlannedTransferCommand.None;
-        stagedTickPlanned = true;
-        plannedPickupAvailabilityChecked = false;
-        plannedDropAvailabilityChecked = false;
-        runtimeWakePending = false;
+        BeginPlannedTick();
 
         if (ShouldRunRuntimeSleepCheck(deltaTime))
         {
-            using var sleepSample = MapObjectTickProfiler.SampleNamed(
-                "Runtime",
-                nameof(RobotArm),
-                "Robot Arm Sleep Check");
+            using var sleepSample = World.TickTiming.Measure(ProjectF.Diagnostics.RobotArmTickTiming.Phase.Sleep);
             if (RefreshRuntimeSleepState())
             {
+                stagedTickPlanned = false;
                 return;
             }
         }
 
-        using (MapObjectTickProfiler.SampleNamed("Runtime", nameof(RobotArm), "Robot Arm Power"))
+        using (World.TickTiming.Measure(ProjectF.Diagnostics.RobotArmTickTiming.Phase.Power))
         {
             deltaTime = ResolvePoweredDeltaTime(deltaTime);
             AdvanceAnimation(deltaTime);
         }
         if (deltaTime <= 0f)
         {
+            stagedTickPlanned = false;
             return;
         }
 
-        using var stateSample = MapObjectTickProfiler.SampleNamed("Runtime", nameof(RobotArm), "Robot Arm State Tick");
+        using var stateSample = World.TickTiming.Measure(ProjectF.Diagnostics.RobotArmTickTiming.Phase.State);
         switch (state)
         {
             case RobotArmState.WaitingForPickup:
@@ -465,6 +497,17 @@ public sealed partial class RobotArmInstance : IMapObjectTarget, IDataElectricCo
                 TickTurnToPickup(deltaTime);
                 break;
         }
+        if (plannedTransferCommand == PlannedTransferCommand.None) stagedTickPlanned = false;
+        else World.QueueTransfer(this);
+    }
+
+    private void BeginPlannedTick()
+    {
+        ref RobotArmRuntimeState data = ref Data;
+        data.plannedTransferCommand = PlannedTransferCommand.None;
+        data.stagedTickPlanned = true;
+        data.plannedPickupAvailabilityChecked = data.plannedDropAvailabilityChecked = false;
+        data.runtimeWakePending = false;
     }
 
     public void ApplyManagedUpdateTick()
@@ -475,6 +518,7 @@ public sealed partial class RobotArmInstance : IMapObjectTarget, IDataElectricCo
         }
 
         stagedTickPlanned = false;
+        int previousItem = heldItemId;
         switch (plannedTransferCommand)
         {
             case PlannedTransferCommand.Pickup:
@@ -486,6 +530,7 @@ public sealed partial class RobotArmInstance : IMapObjectTarget, IDataElectricCo
         }
 
         plannedTransferCommand = PlannedTransferCommand.None;
+        if (previousItem != heldItemId) PersistTransferState();
     }
 
     private bool RefreshRuntimeSleepState(bool force = false)
@@ -499,6 +544,11 @@ public sealed partial class RobotArmInstance : IMapObjectTarget, IDataElectricCo
 
     private bool ShouldRunRuntimeSleepCheck(float deltaTime)
     {
+        if (World.IsPlanning && World.BenchmarkTick)
+        {
+            if (runtimeSleeping) SetRuntimeSleeping(false);
+            return false;
+        }
         if (!Application.isPlaying)
         {
             return true;
@@ -827,7 +877,7 @@ public sealed partial class RobotArmInstance : IMapObjectTarget, IDataElectricCo
 
     private bool TryPickupOneItem(out int pickedItemId, out Vector3 pickupWorldPosition)
     {
-        using var sample = MapObjectTickProfiler.SampleNamed("Runtime", nameof(RobotArm), "Robot Arm Pickup Transfer");
+        using var sample = World.TickTiming.Measure(ProjectF.Diagnostics.RobotArmTickTiming.Phase.Pickup);
         pickedItemId = -1;
         pickupWorldPosition = GetHandRestWorldPosition();
         if (ProjectF.Benchmark.BenchmarkRuntime.ForceWorking)
@@ -1174,9 +1224,9 @@ public sealed partial class RobotArmInstance : IMapObjectTarget, IDataElectricCo
 
     private bool TryPlaceHeldItem()
     {
+        using var sample = World.TickTiming.Measure(ProjectF.Diagnostics.RobotArmTickTiming.Phase.Drop);
         if (ProjectF.Benchmark.BenchmarkRuntime.ForceWorking && heldItemId >= 0)
             return ProjectF.Benchmark.BenchmarkRuntime.EmitItem(ResolveTerrainGenerator(), heldItemId, GetHandWorldPosition());
-        using var sample = MapObjectTickProfiler.SampleNamed("Runtime", nameof(RobotArm), "Robot Arm Drop Transfer");
         if (heldItemId < 0
             || IsDropSuppressedByPlacementMode()
             || !TryResolveDropCoordinate(out Vector2Int dropCoordinate))
@@ -1882,6 +1932,18 @@ public sealed partial class RobotArmInstance : IMapObjectTarget, IDataElectricCo
 
     private float ResolvePoweredDeltaTime(float deltaTime)
     {
+        if (World.IsPlanning && World.FullPowerTick)
+        {
+            float watts = Template.ElectricUseWatts;
+            if (watts > 0.0001f && watts * Mathf.Max(0f, deltaTime) <= 0.0001f)
+            {
+                lastElectricPowerSupplyRatio = 0f;
+                return 0f;
+            }
+            if (watts > 0.0001f) electricPowerBlocked = false;
+            lastElectricPowerSupplyRatio = 1f;
+            return deltaTime;
+        }
         if (!TryGetElectricOperationalPowerRequirement(out float wattsPerSecond))
         {
             lastElectricPowerSupplyRatio = 1f;
@@ -1919,8 +1981,7 @@ public sealed partial class RobotArmInstance : IMapObjectTarget, IDataElectricCo
     private bool TryGetElectricOperationalPowerRequirement(out float wattsPerSecond)
     {
         wattsPerSecond = 0f;
-        ItemDefinition installedDefinition = BoundItemDefinition;
-        float electricUseWatts = ItemDefinition.ResolveElectricUseWatts(installedDefinition);
+        float electricUseWatts = Template.ElectricUseWatts;
         if (electricUseWatts <= 0.0001f)
         {
             return false;
@@ -1953,7 +2014,7 @@ public sealed partial class RobotArmInstance : IMapObjectTarget, IDataElectricCo
 
     private Quaternion GetOutputBodyLocalRotation()
     {
-        return inputBodyLocalRotation * Quaternion.Euler(0f, 180f, 0f);
+        return Template.OutputBodyRotation;
     }
 
     private void BeginDropRetryDelay()

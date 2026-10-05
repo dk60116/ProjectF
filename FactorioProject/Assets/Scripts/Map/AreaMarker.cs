@@ -546,7 +546,8 @@ public class InputOutputModuleEnergyAreaController : MonoBehaviour
             return false;
         }
 
-        bool data = ProductionWorld.Current?.IsEnergyArea(coordinate, energyType) ?? false;
+        bool data = (ProductionWorld.Current?.IsEnergyArea(coordinate, energyType) ?? false)
+            || (MiningWorld.Current?.IsEnergyArea(coordinate, energyType) ?? false);
         if (!registeredEnergyAreas.TryGetValue(coordinate, out Dictionary<ItemDefinition.EnergyType, int> energyCounts)
             || energyCounts == null)
         {
@@ -564,6 +565,7 @@ public class InputOutputModuleEnergyAreaController : MonoBehaviour
         }
 
         bool foundAny = ProductionWorld.Current?.AppendEnergyTypes(coordinate, acceptedEnergyTypes) ?? false;
+        foundAny |= MiningWorld.Current?.AppendEnergyTypes(coordinate, acceptedEnergyTypes) ?? false;
         if (!registeredEnergyAreas.TryGetValue(coordinate, out Dictionary<ItemDefinition.EnergyType, int> energyCounts)
             || energyCounts == null
             || energyCounts.Count <= 0)
@@ -586,7 +588,7 @@ public class InputOutputModuleEnergyAreaController : MonoBehaviour
 
     public static bool CoordinateIsEnergyArea(Vector2Int coordinate)
     {
-        if (ProductionWorld.Current?.IsEnergyArea(coordinate) == true) return true;
+        if (ProductionWorld.Current?.IsEnergyArea(coordinate) == true || MiningWorld.Current?.IsEnergyArea(coordinate) == true) return true;
         if (!registeredEnergyAreas.TryGetValue(coordinate, out Dictionary<ItemDefinition.EnergyType, int> energyCounts)
             || energyCounts == null
             || energyCounts.Count <= 0)
@@ -607,7 +609,8 @@ public class InputOutputModuleEnergyAreaController : MonoBehaviour
 
     public static bool CoordinateBlocksInstallationPlacement(Vector2Int coordinate)
     {
-        return (ProductionWorld.Current?.IsEnergyArea(coordinate) ?? false) || placementBlockingAreas.Contains(coordinate);
+        return (ProductionWorld.Current?.IsEnergyArea(coordinate) ?? false)
+            || (MiningWorld.Current?.IsEnergyArea(coordinate) ?? false) || placementBlockingAreas.Contains(coordinate);
     }
 
     private void RegisterCoordinates()

@@ -53,9 +53,6 @@ public class BagSlot : ItemSlot, IBeginDragHandler, IDragHandler, IEndDragHandle
     [SerializeField, Min(0f)]
     private float craftingExpandStepDelay = 0.04f;
 
-    [SerializeField, Min(0.5f)]
-    private float requiredCraftingMapObjectRange = 2f;
-
     [SerializeField]
     private bool enablePickupOnClick = true;
 
@@ -101,7 +98,7 @@ public class BagSlot : ItemSlot, IBeginDragHandler, IDragHandler, IEndDragHandle
     private readonly List<CraftingSlot> discoveredCraftingSlots = new List<CraftingSlot>();
     private readonly List<Vector2> craftingTargetPositions = new List<Vector2>();
     private readonly HashSet<int> availableCraftingMapObjectIds = new HashSet<int>();
-    private readonly HashSet<WorkableObject> discoveredCraftingMapObjects = new HashSet<WorkableObject>();
+    private readonly List<ProjectF.MapObjects.IWorkableTarget> discoveredCraftingMapObjects = new List<ProjectF.MapObjects.IWorkableTarget>();
     private bool craftingSlotCacheInitialized;
     private bool craftingMapObjectCacheReady;
 
@@ -2142,48 +2139,14 @@ public class BagSlot : ItemSlot, IBeginDragHandler, IDragHandler, IEndDragHandle
             playerController.CollectFocusedWorkableObjectItemIds(availableCraftingMapObjectIds);
         }
 
-        TerrainGenerator terrain = ResolveTerrain();
-        if (terrain == null)
-        {
-            return;
-        }
-
         Vector3 origin = player.BodyTransform != null ? player.BodyTransform.position : player.transform.position;
-        float searchRange = Mathf.Max(
-            requiredCraftingMapObjectRange,
-            WorkableObject.GlobalMaxFocusActivationRadius);
-        int searchRadius = Mathf.Max(1, Mathf.CeilToInt(searchRange + 1f));
-        Vector2Int center = new Vector2Int(
-            Mathf.RoundToInt(origin.x),
-            Mathf.RoundToInt(origin.z));
-
-        for (int offsetY = -searchRadius; offsetY <= searchRadius; offsetY++)
+        WorkableObject.CollectActiveContainingWorldPosition(origin, discoveredCraftingMapObjects);
+        for (int i = 0; i < discoveredCraftingMapObjects.Count; i++)
         {
-            for (int offsetX = -searchRadius; offsetX <= searchRadius; offsetX++)
+            int mapObjectId = discoveredCraftingMapObjects[i].ResolveItemId();
+            if (mapObjectId >= 0)
             {
-                Vector2Int coordinate = center + new Vector2Int(offsetX, offsetY);
-                if (!terrain.TryGetLoadedBlock(coordinate, out Block block) || block == null)
-                {
-                    continue;
-                }
-
-                MapObject mapObject = (block.MapObject as MapObject);
-                if (!(mapObject is WorkableObject workableObject) || workableObject == null || !workableObject.gameObject.activeInHierarchy)
-                {
-                    continue;
-                }
-
-                if (!discoveredCraftingMapObjects.Add(workableObject)
-                    || !workableObject.ContainsWorldPositionInConnectedWorkableRange(origin))
-                {
-                    continue;
-                }
-
-                int mapObjectId = workableObject.ResolveItemId();
-                if (mapObjectId >= 0)
-                {
-                    availableCraftingMapObjectIds.Add(mapObjectId);
-                }
+                availableCraftingMapObjectIds.Add(mapObjectId);
             }
         }
     }

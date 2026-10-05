@@ -40,7 +40,7 @@ if ($pressureStart -lt 0 -or $pressureEnd -le $pressureStart) {
 }
 
 $pressureMethod = $drillingSource.Substring($pressureStart, $pressureEnd - $pressureStart)
-if (-not $pressureMethod.Contains('&& isExtracting')) {
+if (-not $pressureMethod.Contains('&& (IsBenchmarkWorking || isExtracting)')) {
     throw 'Idle oil drilling machine must report zero pipe pressure'
 }
 
@@ -56,11 +56,23 @@ $fixturePath = Join-Path $PSScriptRoot 'PressureChecks.cs'
 $fixture = [IO.File]::ReadAllText($fixturePath).Replace(
     '    // PRODUCTION_PRESSURE',
     ($pressureMethod.TrimEnd() -replace '(?m)^', '    '))
+foreach ($signature in @('public override PersistentState CapturePersistentState()', 'public override void ApplyPersistentState(PersistentState state)', 'private void FlushPendingOil()')) {
+    $memberStart = $drillingSource.IndexOf($signature, [StringComparison]::Ordinal)
+    if ($memberStart -lt 0) { throw "Missing oil proxy member: $signature" }
+    $memberEnd = $drillingSource.IndexOf('{', $memberStart) + 1; $memberDepth = 1
+    while ($memberDepth -gt 0) {
+        if ($drillingSource[$memberEnd] -eq '{') { $memberDepth++ }
+        if ($drillingSource[$memberEnd] -eq '}') { $memberDepth-- }
+        $memberEnd++
+    }
+    $fixture += "`npublic partial class OilDrillingMachine {`n" + $drillingSource.Substring($memberStart, $memberEnd - $memberStart) + "`n}`n"
+}
 $probeDirectory = Join-Path ([IO.Path]::GetTempPath()) (
     'ProjectF-OilDrillingPressure-' + [Guid]::NewGuid().ToString('N'))
 New-Item -ItemType Directory -Path $probeDirectory | Out-Null
 try {
     Set-Content -LiteralPath (Join-Path $probeDirectory 'Program.cs') -Value $fixture
+    Copy-Item -LiteralPath (Join-Path $repositoryRoot 'FactorioProject/Assets/Scripts/Simulation/Core/SimulationTickContracts.cs') -Destination $probeDirectory
     Set-Content -LiteralPath (Join-Path $probeDirectory 'Probe.csproj') -Value @'
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
@@ -76,4 +88,4 @@ finally {
     Remove-Item -LiteralPath $probeDirectory -Recurse -Force -ErrorAction SilentlyContinue
 }
 
-Write-Host 'Oil drilling machine checks passed: 7 structural, 5 behavioral'
+Write-Host 'Oil drilling machine checks passed: 7 structural, 14 behavioral'

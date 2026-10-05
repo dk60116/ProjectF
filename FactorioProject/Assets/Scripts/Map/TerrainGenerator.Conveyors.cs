@@ -4471,6 +4471,8 @@ public partial class TerrainGenerator : MonoBehaviour
         RobotArmWorld.AppendProfilerCounters();
         MiningWorld.AppendProfilerCounters();
         ProductionWorld.AppendProfilerCounters();
+        ProjectF.MapObjects.WorkableWorld.AppendProfilerCounters();
+        ProjectF.MapObjects.ForestryWorld.AppendProfilerCounters();
         PipeWorld.AppendProfilerCounters();
         BuildingWorld.AppendProfilerCounters();
         AppendFluidJobRuntimeProfilerCounters();

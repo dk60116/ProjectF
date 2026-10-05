@@ -3,7 +3,8 @@ $repo = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '../..'))
 $project = Join-Path $repo 'FactorioProject'
 $probe = Join-Path ([IO.Path]::GetTempPath()) ('ProjectF-CraftingCompile-' + [guid]::NewGuid().ToString('N'))
 New-Item -ItemType Directory -Path $probe | Out-Null
-foreach ($name in @('Assembly-CSharp', 'Assembly-CSharp-Editor')) {
+$coreDirectory = Join-Path $project 'Assets/Scripts/Simulation/Core'
+foreach ($name in @('ProjectF.Simulation.Core', 'Assembly-CSharp', 'Assembly-CSharp-Editor')) {
     [xml]$original = Get-Content -LiteralPath (Join-Path $project "$name.csproj")
     [xml]$generated = '<Project Sdk="Microsoft.NET.Sdk"><PropertyGroup><TargetFramework>netstandard2.1</TargetFramework><EnableDefaultCompileItems>false</EnableDefaultCompileItems><LangVersion>9.0</LangVersion><AllowUnsafeBlocks>true</AllowUnsafeBlocks><NoWarn>1701;1702</NoWarn></PropertyGroup><ItemGroup /></Project>'
     $group = $generated.SelectSingleNode('/Project/ItemGroup')
@@ -17,24 +18,37 @@ foreach ($name in @('Assembly-CSharp', 'Assembly-CSharp-Editor')) {
         $path = Join-Path $project $include
         if (Test-Path -LiteralPath $path) { $sources.Add($path) | Out-Null }
     }
+    if ($name -eq 'ProjectF.Simulation.Core') {
+        foreach ($file in Get-ChildItem -LiteralPath $coreDirectory -Filter '*.cs' -File) {
+            $sources.Add($file.FullName) | Out-Null
+        }
+    }
     if ($name -eq 'Assembly-CSharp') {
         $sources.Add((Join-Path $project 'Assets/Scripts/Manager/CraftingTreeQuantity.cs')) | Out-Null
-        foreach ($relative in @('Diagnostics/BenchmarkLayout.cs', 'Diagnostics/BenchmarkCommand.cs', 'Diagnostics/BenchmarkRuntime.cs',
+        foreach ($relative in @('Diagnostics/BenchmarkLayout.cs', 'Diagnostics/BenchmarkCommand.cs', 'Diagnostics/BenchmarkRuntime.cs', 'Diagnostics/BenchmarkWorkProgress.cs', 'Diagnostics/BenchmarkRuntime.Progress.cs',
+            'Map/MiningMachineInstance.Benchmark.cs', 'Map/ProductionFacilityInstance.Benchmark.cs', 'Object/MapObj/InstallationObject/RobotArmInstance.Benchmark.cs',
+            'Diagnostics/BenchmarkInputSupply.cs', 'Map/ProductionFacilityInstance.BenchmarkInputs.cs', 'Object/MapObj/InstallationObject/InputOutputModule.BenchmarkInputs.cs',
             'Manager/RuntimeItemGiveReceiver.Benchmark.cs', 'Map/TerrainGenerator.Benchmark.cs', 'Map/TerrainGenerator.Benchmark.Spawning.cs',
-            'Object/MapObj/InstallationObject/InputOutputModule.Benchmark.cs', 'Object/MapObj/InstallationObject/LoggingMachine.Benchmark.cs')) {
+            'Object/MapObj/InstallationObject/InputOutputModule.Benchmark.cs')) {
             $sources.Add((Join-Path $project ('Assets/Scripts/' + $relative))) | Out-Null
         }
         foreach ($relative in @('Rendering/InstallationMaterialVariants.cs', 'Rendering/InstallationBatchRenderer.cs',
             'Rendering/ProductionEffectTemplate.cs', 'Rendering/SpriteMeshCache.cs', 'Rendering/InstallationRigidAnimationTemplate.cs', 'Map/IDataElectricConsumer.cs', 'Map/MiningWorld.cs',
-            'Map/IProductionFacilityInfo.cs', 'Map/ProductionFacilityInstance.Info.cs', 'Map/ProductionFacilityInstance.cs', 'Map/ProductionRenderTemplate.cs', 'Map/ProductionWorld.cs', 'Map/ProductionWorld.Fluid.cs',
+            'Map/IDataFluidProducer.cs', 'Map/OilDrillingBatch.cs', 'Map/ProductionWorld.FluidOutputRoutes.cs', 'Map/ProductionFacilityInstance.OilDrilling.cs', 'Map/IProductionFacilityInfo.cs', 'Map/ProductionFacilityInstance.Info.cs', 'Map/ProductionFacilityInstance.cs', 'Map/ProductionRenderTemplate.cs', 'Map/ProductionWorld.cs', 'Map/ProductionWorld.Fluid.cs',
             'Map/UtilityPoleRuntime.cs', 'Map/UtilityPoleRuntime.Identity.cs', 'Map/UtilityPoleRuntime.Consumers.cs',
             'Map/UtilityPoleWorld.cs', 'Map/UtilityPoleRenderTemplate.cs', 'Map/TerrainGenerator.UtilityPoles.cs',
             'Simulation/Presentation/UtilityPoleWorldView.cs', 'Rendering/UtilityPoleWireRenderer.cs',
             'Map/IDataItemProducer.cs', 'Map/TerrainGenerator.Production.cs', 'Simulation/Presentation/ProductionWorldView.cs',
-            'Map/MiningMachineInstance.cs', 'Map/MiningRenderTemplate.cs', 'Map/MiningItemOutput.cs',
-            'Map/TerrainGenerator.Mining.cs', 'Simulation/Core/MiningProcess.cs', 'Simulation/Presentation/MiningWorldView.cs',
-            'Map/Block.DeferredOutputs.cs', 'Map/PortableItemRenderer.DeferredOutputs.cs', 'Simulation/Core/OutputStackBatch.cs',
-            'Map/TerrainGenerator.ConveyorJobs.Publication.cs', 'Rendering/BeltItemVisualPath.cs')) {
+            'Map/MiningMachineInstance.cs', 'Map/MiningMachineInstance.Energy.cs', 'Map/MiningRenderTemplate.cs', 'Map/MiningItemOutput.cs', 'Map/FacilityFuel.cs',
+            'Map/TerrainGenerator.Mining.cs', 'Simulation/Presentation/MiningWorldView.cs',
+            'Map/Block.DeferredOutputs.cs', 'Map/PortableItemRenderer.DeferredOutputs.cs',
+            'Map/TerrainGenerator.ConveyorJobs.Publication.cs', 'Rendering/BeltItemVisualPath.cs',
+            'Map/IWorkableTarget.cs', 'Map/WorkableInstance.cs', 'Map/WorkableWorld.cs', 'Map/WorkableRangeIndex.cs',
+            'Map/WorkableRenderTemplate.cs', 'Map/TerrainGenerator.Workables.cs', 'Simulation/Presentation/WorkableWorldView.cs',
+            'Map/IForestryTarget.cs', 'Map/ForestryWorld.cs', 'Map/ForestryWorld.Markers.cs', 'Map/ForestryInstance.cs', 'Map/LoggingMachineInstance.cs',
+            'Map/SeedPlanterInstance.cs', 'Map/ForestryRenderTemplate.cs', 'Map/LoggingFilter.cs', 'Map/LoggingHarvest.cs',
+            'Map/TerrainGenerator.Forestry.cs', 'Simulation/Presentation/ForestryWorldView.cs',
+            'Object/MapObj/InstallationObject/InstallationPlacementController.Forestry.cs')) {
             $sources.Add((Join-Path $project ('Assets/Scripts/' + $relative))) | Out-Null
         }
     }
@@ -42,11 +56,13 @@ foreach ($name in @('Assembly-CSharp', 'Assembly-CSharp-Editor')) {
         $sources.Add((Join-Path $project 'Assets/Editor/InstallationArchetypeBuildPreparation.cs')) | Out-Null
     }
     foreach ($path in $sources) {
+        if ($name -ne 'ProjectF.Simulation.Core' -and $path.StartsWith($coreDirectory + [IO.Path]::DirectorySeparatorChar, [StringComparison]::OrdinalIgnoreCase)) { continue }
         $node = $generated.CreateElement('Compile'); $node.SetAttribute('Include', $path)
         $group.AppendChild($node) | Out-Null
     }
     $references = [Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
     foreach ($hint in $original.Project.ItemGroup.Reference.HintPath) {
+        if ($name -eq 'ProjectF.Simulation.Core') { continue }
         if (!$hint) { continue }
         $path = if ([IO.Path]::IsPathRooted($hint)) { $hint } else { Join-Path $project $hint }
         $filename = [IO.Path]::GetFileName($path)
@@ -57,10 +73,13 @@ foreach ($name in @('Assembly-CSharp', 'Assembly-CSharp-Editor')) {
     foreach ($reference in $original.Project.ItemGroup.ProjectReference.Include) {
         if (!$reference) { continue }
         $assembly = [IO.Path]::GetFileNameWithoutExtension($reference) + '.dll'
-        $path = if ($name -eq 'Assembly-CSharp-Editor' -and $assembly -eq 'Assembly-CSharp.dll') {
+        $path = if ($assembly -eq 'ProjectF.Simulation.Core.dll' -or ($name -eq 'Assembly-CSharp-Editor' -and $assembly -eq 'Assembly-CSharp.dll')) {
             Join-Path $probe "bin/Debug/netstandard2.1/$assembly"
         } else { Join-Path $project "Library/ScriptAssemblies/$assembly" }
         $references.Add($path) | Out-Null
+    }
+    if ($name -ne 'ProjectF.Simulation.Core') {
+        $references.Add((Join-Path $probe 'bin/Debug/netstandard2.1/ProjectF.Simulation.Core.dll')) | Out-Null
     }
     foreach ($path in $references) {
         $node = $generated.CreateElement('Reference'); $node.SetAttribute('Include', [IO.Path]::GetFileNameWithoutExtension($path))

@@ -44,11 +44,22 @@ foreach ($signature in @('internal sealed class MoveState', 'internal MoveState 
 $generated += "}`npublic partial class Block {`n"
 foreach ($signature in @('internal Vector3 GetItemStackPlacementPosition(', 'internal void CompleteItemStackPlacement(',
     'public bool CanAddInputAreaCenterObjects(int count, int itemId)', 'public int GetInputAreaCenterItemCount(',
-    'public int GetInputAreaCenterItemId()', 'public bool TryConsumeOneInputAreaCenterObject(',
+    'public int GetInputAreaCenterItemId()', 'public bool TryConsumeOneInputAreaCenterObject(', 'public int ConsumeInputAreaCenterObjects(',
     'public int CountFloorObjects(', 'public int RemoveFloorObjects(', 'public List<int> CaptureFloorObjectState()',
     'private int ResolveFloorStackCapacity(', 'private int ResolveInputAreaCenterCapacity(', 'public int GetInputAreaCenterCapacity(',
     'public bool HasVirtualizableFloorObjectState()')) {
     $generated += (Member $block $signature) + "`n"
+}
+$generated += "}`n"
+$generated += "public partial class TerrainGenerator {`n"
+foreach ($signature in @('private readonly HashSet<Vector2Int> workableAreaCoordinateScratch', 'private readonly List<Block> workableAreaBlockScratch')) {
+    $generated += (Member 'FactorioProject/Assets/Scripts/Map/TerrainGenerator.Items.cs' $signature) + "`n"
+}
+foreach ($signature in @('public int GetDroppedItemCountAround(', 'public int RemoveDroppedItemsAround(',
+    'public int GetWorkableAreaItemCount(', 'public int RemoveWorkableAreaItems(', 'private static bool IsWorkableOutputStack(',
+    'private void CollectWorkableAreaBlocks(', 'private static int CompareWorkableAreaBlocks(',
+    'private static bool IsInsideSquareRadius(')) {
+    $generated += (Member 'FactorioProject/Assets/Scripts/Map/TerrainGenerator.Items.cs' $signature) + "`n"
 }
 $generated += "}`n"
 $generated += (Member 'FactorioProject/Assets/Scripts/Map/Block.DeferredOutputs.cs' 'public partial class Block') + "`n"
@@ -70,6 +81,7 @@ New-Item -ItemType Directory -Path $probe | Out-Null
 Copy-Item -LiteralPath (Join-Path $repo 'FactorioProject/Assets/Scripts/Map/PortableObjectWorld.cs') -Destination $probe
 Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'Checks.cs') -Destination $probe
 Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'DeferredChecks.cs') -Destination $probe
+Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'WorkableChecks.cs') -Destination $probe
 Copy-Item -LiteralPath (Join-Path $repo 'FactorioProject/Assets/Scripts/Simulation/Core/OutputStackBatch.cs') -Destination $probe
 $unity = 'C:/Program Files/Unity/Hub/Editor/6000.4.0f1/Editor/Data/Managed/UnityEngine/UnityEngine.CoreModule.dll'
 [IO.File]::WriteAllText((Join-Path $probe 'Probe.csproj'), '<Project Sdk="Microsoft.NET.Sdk"><PropertyGroup><OutputType>Exe</OutputType><TargetFramework>net9.0</TargetFramework><NoWarn>0649</NoWarn></PropertyGroup><ItemGroup><Reference Include="UnityEngine.CoreModule"><HintPath>' + $unity + '</HintPath></Reference></ItemGroup></Project>')

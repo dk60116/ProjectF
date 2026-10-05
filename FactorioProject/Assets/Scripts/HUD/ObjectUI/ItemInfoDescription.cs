@@ -85,9 +85,10 @@ public class ItemInfoDescription : MonoBehaviour
     private bool defaultItemSiblingIndicesCaptured;
     private float nextPlantInfoRefreshTime;
     private PlantResource liveGaugePlant;
-    private LoggingMachine liveGaugeLoggingMachine;
+    private ProjectF.MapObjects.ILoggingTarget liveGaugeLoggingMachine;
     private MiningMachineInstance liveGaugeMiner;
     private ProductionFacilityInstance liveGaugeProduction;
+    private ProjectF.MapObjects.ISeedPlanterTarget liveGaugeSeedPlanter;
     private RobotArmInstance liveGaugeRobotArm;
     private UtilityPoleRuntime liveGaugeUtilityPole;
     private LightObject liveGaugeLightObject;
@@ -430,17 +431,19 @@ public class ItemInfoDescription : MonoBehaviour
         miner.TryGetObjectInfoResourceReserves(out int reserves);
         BeginObjectDisplay(reserves);
         liveGaugeMiner = miner;
-        SetEnergyUseRateDefaultItemSlot(0, ItemDefinition.EnergyType.Electricity, miner.Template.Watts, -1);
+        SetEnergyUseRateDefaultItemSlot(0, miner.Template.EnergyType, miner.Template.WorkRate, -1);
         RefreshMiningMachineInfo(miner);
     }
     public void ShowProductionFacility(ProductionFacilityInstance facility)
     {
-        BeginObjectDisplay((ResourceInstance)null);
+        if (facility.TryGetOilResourceReserves(out int reserves)) BeginObjectDisplay(reserves, true);
+        else BeginObjectDisplay((ResourceInstance)null);
         liveGaugeProduction = facility;
         RefreshProductionFacilityInfo(facility);
     }
     private void RefreshProductionFacilityInfo(ProductionFacilityInstance facility)
     {
+        if (facility.TryGetOilResourceReserves(out int reserves)) SetResourceReservesLine(0, reserves, true);
         facility.GetObjectInfoStatus(out string status, out bool working, out bool warning);
         SetDefaultStatus(status, working, warning);
         if (!TrySetElectricPowerGauge(energyGauge, energyFill, energyText, facility))
@@ -466,7 +469,15 @@ public class ItemInfoDescription : MonoBehaviour
     {
         miner.GetObjectInfoStatus(out string status, out bool working, out bool warning);
         SetDefaultStatus(status, working, warning);
-        TrySetElectricPowerGauge(energyGauge, energyFill, energyText, miner);
+        if (!TrySetElectricPowerGauge(energyGauge, energyFill, energyText, miner))
+        {
+            miner.GetFuelGauge(out long currentFuel, out long fuelGaugeCapacity);
+            SetGauge(energyGauge, energyFill, energyText, fuelGaugeCapacity > 0, fuelGaugeCapacity > 0 ? (float)((double)currentFuel / fuelGaugeCapacity) : 0,
+                BurnEnergyGaugeFillColor, DeterministicSimulationUnits.ToFloat(currentFuel), DeterministicSimulationUnits.ToFloat(fuelGaugeCapacity));
+        }
+        if (miner.TryGetFuelInputInfo(out int fuelItem, out int fuelCount, out int fuelCapacity, out int burnEnergy))
+            SetBurnEnergyInputItemSlot(energyItem, energyItemSlot, fuelItem, fuelCount, burnEnergy, fuelCapacity);
+        else ClearItemSlot(energyItem, energyItemSlot);
         float progress = miner.WorkProgress;
         SetGauge(workGauge, workFill, workText, true, progress, new Color(0.18f, 1f, 0.25f, 1f), progress * 100f, 100f, true);
         miner.TryGetObjectInfoResourceReserves(out int reserves);
@@ -493,7 +504,7 @@ public class ItemInfoDescription : MonoBehaviour
         SetDefaultItemSlot(energyUseDisplayed ? 1 : 0, robotArm.HeldItemId, true);
     }
 
-    public void ShowLoggingMachine(LoggingMachine loggingMachine, ResourceInstance underlyingResource = null)
+    public void ShowLoggingMachine(ProjectF.MapObjects.ILoggingTarget loggingMachine, ResourceInstance underlyingResource = null)
     {
         BeginObjectDisplay(underlyingResource);
         liveGaugeLoggingMachine = loggingMachine;
@@ -723,11 +734,6 @@ public class ItemInfoDescription : MonoBehaviour
         }
 
         liveGaugeModule = module;
-        if (module is SeedPlanter seedPlanter)
-        {
-            RefreshSeedPlanterInfo(seedPlanter);
-            return;
-        }
 
         if (module is Sprinkler sprinkler)
         {
@@ -1283,6 +1289,7 @@ public class ItemInfoDescription : MonoBehaviour
         liveGaugePlant = null;
         liveGaugeLoggingMachine = null;
         liveGaugeRobotArm = null; liveGaugeMiner = null; liveGaugeProduction = null;
+        liveGaugeSeedPlanter = null;
         liveGaugeUtilityPole = null;
         liveGaugeLightObject = null;
         liveGaugeModule = null;
@@ -1324,7 +1331,7 @@ public class ItemInfoDescription : MonoBehaviour
             return;
         }
 
-        if (liveGaugeLoggingMachine != null && liveGaugeLoggingMachine.gameObject.activeInHierarchy)
+        if (liveGaugeLoggingMachine != null && liveGaugeLoggingMachine.IsAlive())
         {
             RefreshLoggingMachineInfo(liveGaugeLoggingMachine);
             return;
@@ -1358,6 +1365,7 @@ public class ItemInfoDescription : MonoBehaviour
         }
 
         if (liveGaugeProduction != null && liveGaugeProduction.IsRuntimeActive) { RefreshProductionFacilityInfo(liveGaugeProduction); return; }
+        if (liveGaugeSeedPlanter.IsAlive()) { RefreshSeedPlanterInfo(liveGaugeSeedPlanter); return; }
         if (liveGaugeMiner != null && liveGaugeMiner.IsRuntimeActive) { RefreshMiningMachineInfo(liveGaugeMiner); return; }
         if (liveGaugeRobotArm != null && liveGaugeRobotArm.IsRuntimeActive)
         {
@@ -1492,7 +1500,7 @@ public class ItemInfoDescription : MonoBehaviour
         SetGauge(defaultGauge, defaultFill, defaultGaugeText, false, 0f, Color.white, 0f, 0f);
     }
 
-    private void RefreshLoggingMachineInfo(LoggingMachine loggingMachine)
+    private void RefreshLoggingMachineInfo(ProjectF.MapObjects.ILoggingTarget loggingMachine)
     {
         if (loggingMachine == null)
         {
@@ -1526,11 +1534,6 @@ public class ItemInfoDescription : MonoBehaviour
             return;
         }
 
-        if (module is SeedPlanter seedPlanter)
-        {
-            RefreshSeedPlanterInfo(seedPlanter);
-            return;
-        }
 
         if (module is Sprinkler sprinkler)
         {
@@ -1873,7 +1876,13 @@ public class ItemInfoDescription : MonoBehaviour
         SetFluidStorageDefaultItemSlot(0, sprinkler);
     }
 
-    private void RefreshSeedPlanterInfo(SeedPlanter seedPlanter)
+    public void ShowSeedPlanter(ProjectF.MapObjects.ISeedPlanterTarget seedPlanter)
+    {
+        BeginObjectDisplay((ResourceInstance)null);
+        liveGaugeSeedPlanter = seedPlanter;
+        RefreshSeedPlanterInfo(seedPlanter);
+    }
+    private void RefreshSeedPlanterInfo(ProjectF.MapObjects.ISeedPlanterTarget seedPlanter)
     {
         if (seedPlanter == null)
         {
@@ -1907,7 +1916,8 @@ public class ItemInfoDescription : MonoBehaviour
             seedPlanter.PlantDurationSeconds,
             true);
         SetGauge(defaultGauge, defaultFill, defaultGaugeText, false, 0f, Color.white, 0f, 0f);
-        SetEnergyUseRateDefaultItemSlot(0, seedPlanter, -1);
+        SetEnergyUseRateDefaultItemSlot(0, ItemDefinition.EnergyType.Electricity,
+            ItemDefinition.ResolveElectricUseWatts(seedPlanter.BoundItemDefinition), -1);
         SetItemSlot(
             inputItem,
             inputItemSlot,

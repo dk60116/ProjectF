@@ -9,6 +9,7 @@ public class InstallationObject
     public long Units, Capacity = long.MaxValue;
     public int Fluid = -1, GenericAdds;
     public float StoredFluidLiters => DeterministicSimulationUnits.ToFloat(Units);
+    public float AvailableFluidStorageLiters => DeterministicSimulationUnits.ToFloat(Math.Max(0, Capacity - Units));
     public int StoredFluidItemId => Fluid;
     public readonly List<Vector2Int> RuntimeOccupiedCoordinates = new();
     public static readonly Dictionary<Vector2Int, InstallationObject> Bodies = new();
@@ -41,6 +42,7 @@ public class Pump
         return Math.Min(volume, Math.Max(0, Rate * delta - used));
     }
     public void RecordTransferredVolume(float amount) { used += amount; Accepted += amount; }
+    public static float LimitTransportRate(Pump pump, float rate) => Math.Min(pump.Rate, rate);
 }
 public class PipeRecord
 {
@@ -62,24 +64,38 @@ public static class Pipe
         public readonly Dictionary<Vector2Int, int> PipeDistances = new();
         public readonly Dictionary<Vector2Int, Pump> RoutePumps = new();
         public readonly Dictionary<InstallationObject, Pump> StoragePumps = new();
-        public readonly Dictionary<ProductionFacilityInstance, (int Distance, Pump Pump)> DataSources = new();
+        public readonly Dictionary<IDataFluidProducer, (int Distance, Pump Pump)> DataSources = new();
+        public readonly Dictionary<InputOutputModule, int> OutputSourcePipeDistances = new();
         public readonly List<InstallationObject> StorageScratch = new();
     }
     public static readonly Dictionary<Vector2Int, int> Graph = new();
+    public static readonly List<IDataFluidProducer> DataPeers = new();
     public static Pump RoutePump;
     public static int FluidId = -1;
     public static float Pressure = 60;
+    public static bool SeedOnlyGraph;
     public static bool TryGetNetworkFluidInfoAt(Vector2Int coordinate, FluidNetworkSearchContext context, bool cache,
         Vector2Int excluded, bool pressure, out int fluid, out float temperature, out float rate)
     {
         context.PipeDistances.Clear(); context.RoutePumps.Clear(); context.StoragePumps.Clear();
-        foreach (var pair in Graph) { context.PipeDistances.Add(pair.Key, pair.Value); if (RoutePump != null) context.RoutePumps.Add(pair.Key, RoutePump); }
+        context.DataSources.Clear();
+        foreach (var peer in DataPeers) context.DataSources.Add(peer, (0, null));
+        if (SeedOnlyGraph)
+        {
+            if (Graph.TryGetValue(coordinate, out int distance))
+            { context.PipeDistances.Add(coordinate, distance); if (RoutePump != null) context.RoutePumps.Add(coordinate, RoutePump); }
+        }
+        else foreach (var pair in Graph) { context.PipeDistances.Add(pair.Key, pair.Value); if (RoutePump != null) context.RoutePumps.Add(pair.Key, RoutePump); }
         fluid = FluidId; temperature = 15; rate = Pressure; return fluid >= 0;
     }
     public static void RecordPumpDistance(FluidNetworkSearchContext context, Pump pump, int distance) { }
 }
 public partial class InputOutputModule
 {
+    public bool isActiveAndEnabled = true;
+    public bool TryGetObjectInfoOutput(out int item, out int count, out int capacity, out bool zero)
+    { item = 2; count = capacity = 0; zero = true; return true; }
+    public static int FluidTopologyVersion = 1;
     public readonly Dictionary<Vector2Int, RectGridBlockType> PortTypes = new();
     public readonly Dictionary<Vector2Int, Vector2Int> ExternalDirections = new();
     public static readonly Dictionary<Vector2Int, InstallationObject> Storages = new();
@@ -94,6 +110,7 @@ public partial class InputOutputModule
     public static bool HasRuntimePassiveFluidPassTowards(Vector2Int coordinate, Vector2Int direction) => false;
     public static bool TryGetRuntimePipeFluidStorageAtCoordinate(Vector2Int coordinate, object excluded, bool output, out InstallationObject storage) => Storages.TryGetValue(coordinate, out storage);
     public bool UsesDedicatedFluidStorageAtRuntimeCoordinate(Vector2Int coordinate) => Dedicated;
+    public float GetDedicatedAvailableFluidStorageLitersAtRuntimeCoordinate(Vector2Int coordinate, int item) => AvailableFluidStorageLiters;
     public bool TryAddDedicatedFluidAtRuntimeCoordinate(Vector2Int coordinate, int item, float volume, float temperature, out float accepted)
     { accepted = 0; return !RejectDedicated && TryAddFluidLiters(item, volume, out accepted); }
     public void WakeDataFluidOutput() { }

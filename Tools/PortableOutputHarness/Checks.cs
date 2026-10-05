@@ -231,6 +231,7 @@ static class Checks
         item.Dispose(); item.SetWorldPose(Vector3.one, Quaternion.identity);
         Require(!item.IsAlive, "Released handle cannot be resurrected by setters");
         DeferredChecks.Run();
+        WorkableChecks.Run();
         Console.WriteLine($"Portable output: {checks} checks passed; 100,000 repeated cycles: {bytes} bytes; warmed simultaneous 100,000 outputs: {burstBytes} bytes (engine boundaries doubled).");
     }
     static void Cycle(PortableObject item, Block block, PortableMoveScheduler scheduler)

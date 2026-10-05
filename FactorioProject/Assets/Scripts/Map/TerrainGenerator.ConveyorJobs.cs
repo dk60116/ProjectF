@@ -690,6 +690,7 @@ public partial class TerrainGenerator
         RobotArmWorld.Current?.WakePublishedBelts(this);
         MiningWorld.Current?.WakePublishedBelts(this);
         ProductionWorld.Current?.WakePublishedBelts(this);
+        ProjectF.MapObjects.ForestryWorld.Current?.WakePublishedBelts(this);
         EndBeltPublishObserverStage(profileObservers, "Belt Jobs Publish Robot Arms", observerStageStart);
 
         observerStageStart = profileObservers ? MapObjectTickProfiler.BeginSample() : 0L;

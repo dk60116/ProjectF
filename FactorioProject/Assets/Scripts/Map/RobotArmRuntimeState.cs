@@ -20,6 +20,9 @@ internal struct RobotArmRuntimeState
     internal bool plannedDropAvailabilityChecked;
     internal bool plannedDropAvailable;
     internal Quaternion BodyRotation;
+    // Simulation advances a scalar; presentation evaluates the turn on demand.
+    internal Quaternion TurnTarget;
+    internal float TurnAngle, TurnRemaining;
     internal int AnimationKind;
     internal float AnimationTime, ItemMoveElapsed;
     internal double SleepingPresentationTime;

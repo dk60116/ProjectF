@@ -60,7 +60,7 @@ public class GameManager
     public bool InstallationPlacementActive, MapEditActive;
 }
 public class CameraBoundary { public static CameraBoundary main => null; }
-public static class MapObjectTickProfiler
+public static partial class MapObjectTickProfiler
 {
     public readonly struct Scope : IDisposable { public void Dispose() { } }
     public static Scope SampleLateUpdateCaller<T>() => default;

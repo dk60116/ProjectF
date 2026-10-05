@@ -4,8 +4,8 @@ using UnityEngine;
 using ProjectF.MapObjects;
 using ProjectF.Simulation;
 
-public sealed class MiningMachineInstance : IMapObjectTarget, IDataElectricConsumer,
-    IMapObjectUpdateTick, IMapObjectUpdateTickDeadline, IDataItemProducer
+public sealed partial class MiningMachineInstance : IMapObjectTarget, IDataElectricConsumer,
+    IMapObjectUpdateTick, IMapObjectUpdateTickDeadline, IDataItemProducer, IMapObjectSimulationIdentity, IFacilityPowerEvaluationTarget
 {
     internal readonly MiningWorld World;
     internal readonly int Index;
@@ -15,6 +15,7 @@ public sealed class MiningMachineInstance : IMapObjectTarget, IDataElectricConsu
     private Matrix4x4 cachedRootMatrix;
     private Bounds cachedCullBounds;
     private bool geometryCached;
+    private int benchmarkInputVersion = -1;
     private ref MiningWorld.State Data => ref World.GetState(Index, Generation);
     TerrainGenerator IDataItemProducer.Terrain => World.Terrain;
     BlockStateStore IDataItemProducer.Store => World.Store;
@@ -60,13 +61,10 @@ public sealed class MiningMachineInstance : IMapObjectTarget, IDataElectricConsu
         && !Data.Clock.Production.WaitingForOutput && Data.Clock.SupplyRatio > 0f;
     public float WorkProgress => HasActiveWork && Template.CompleteEnergy > 0L
         ? Mathf.Clamp01((float)((double)Data.Clock.SnapshotEnergy(MapObjectTickManager.CurrentSimulationTick,
-            Template.Watts, Template.CompleteEnergy) / Template.CompleteEnergy)) : 0f;
+            Template.CompleteEnergy, SnapshotFuelLimit) / Template.CompleteEnergy)) : 0f;
     internal Vector3 WorkGaugeWorldPosition => new Vector3(CullBounds.center.x,
         CullBounds.max.y + Template.WorkGaugeVerticalOffset, CullBounds.center.z);
     public int OutputItemId => IsRuntimeActive ? Data.Clock.Production.OutputItemId : -1;
-    public long NextUpdateTick => !IsRuntimeActive ? long.MaxValue
-        : Data.NeedsEvaluation ? MapObjectTickManager.CurrentSimulationTick + 1
-        : Data.Clock.Deadline(MapObjectTickManager.CurrentSimulationTick, Template.Watts, Template.CompleteEnergy);
     internal MiningMachineInstance(MiningWorld world, int index, uint generation, MapObjectHandle handle,
         MiningMachine prototype, BlockStateStore.InstallationSaveState placement, MiningRenderTemplate template)
     {
@@ -74,6 +72,8 @@ public sealed class MiningMachineInstance : IMapObjectTarget, IDataElectricConsu
         Prototype = prototype; Placement = placement; Template = template;
         Placement.inputOutputState ??= new InputOutputModule.PersistentState();
         var saved = Placement.inputOutputState;
+        FacilityFuel.RestoreLegacy(saved, Template.Definition);
+        Data.Clock.EnergyUnitsPerTick = Template.WorkUnitsPerTick;
         Data.ResourceCursor = saved.miningResourceCursor;
         Data.ResourceCoordinate = saved.miningResourceCoordinate;
         Data.PendingHarvestedItems = saved.miningPendingHarvestedItems;
@@ -98,14 +98,22 @@ public sealed class MiningMachineInstance : IMapObjectTarget, IDataElectricConsu
     }
     public bool TryGetElectricPowerRequirement(out float watts) { watts = Template.Watts; return IsRuntimeActive && watts > 0f; }
     public bool TryGetElectricPowerDemand(out float watts)
-    { watts = Template.Watts; return IsRuntimeActive && Data.HasTarget && OutputCoordinates.Count > 0; }
+    { watts = Template.Watts; return IsRuntimeActive && watts > 0f && Data.HasTarget && OutputCoordinates.Count > 0; }
     public void WakeForElectricPowerChange() => Wake();
     public void Wake()
     {
+        if (samplingFuel) return;
+        if (ProjectF.Benchmark.BenchmarkRuntime.ForceWorking && IsRuntimeActive
+            && benchmarkInputVersion != ProjectF.Benchmark.BenchmarkInputSupply.Version)
+        {
+            benchmarkInputVersion = ProjectF.Benchmark.BenchmarkInputSupply.Version;
+            ProjectF.Benchmark.BenchmarkInputSupply.AddEnergy(this, World.Terrain, World.Store,
+                Placement.inputOutputState.inputEnergyCoordinates, Template.Definition, Prototype.RuntimeAreaMaxObjects);
+        }
         if (!IsRuntimeActive) return;
         if (Data.NeedsEvaluation) return;
         // Materialize work under the previous published rate before replacing it.
-        Data.Clock.Sample(MapObjectTickManager.CurrentSimulationTick, Template.Watts, Template.CompleteEnergy);
+        Sample();
         Data.NeedsEvaluation = true;
         if (FacilitySimulationWorld.IsScheduled(this)) FacilitySimulationWorld.RefreshSchedule(this);
         else FacilitySimulationWorld.SetScheduled(this, true);
@@ -116,7 +124,7 @@ public sealed class MiningMachineInstance : IMapObjectTarget, IDataElectricConsu
         World.ProcessedUpdates++;
         Data.NeedsEvaluation = false;
         long now = MapObjectTickManager.CurrentSimulationTick;
-        Data.Clock.Sample(now, Template.Watts, Template.CompleteEnergy);
+        Sample();
         bool benchmark = ProjectF.Benchmark.BenchmarkRuntime.ForceWorking;
         bool hasResource = TryResolveResource(out ResourceInstance resource, out MapObjectHandle resourceHandle,
             out Vector2Int resourceCoordinate, out int item, out int count);
@@ -126,16 +134,13 @@ public sealed class MiningMachineInstance : IMapObjectTarget, IDataElectricConsu
             && World.Store.TryGet(Data.ResourceCoordinate, out var savedResource) && savedResource.resourceCount > 0)
         {
             Data.Clock.SupplyRatio = 0f;
-            if (Data.HasTarget) { Data.HasTarget = false; UtilityPole.InvalidateDataConsumerDemand(this); }
+            if (Data.HasTarget) { Data.HasTarget = false; InvalidatePowerDemand(); }
             Sleep(); return;
         }
         bool target = benchmark || OutputCoordinates.Count > 0 && (hasResource || Data.Clock.Production.Active);
-        if (Data.HasTarget != target) { Data.HasTarget = target; UtilityPole.InvalidateDataConsumerDemand(this); }
-        float ratio = 0f;
-        if (benchmark) ratio = 1f;
-        else UtilityPole.TryGetElectricSupplyRatio(this, Template.Watts, out ratio);
-        Data.Clock.SupplyRatio = ratio;
-        Data.Clock.SampleTick = now;
+        if (Data.HasTarget != target) { Data.HasTarget = target; InvalidatePowerDemand(); }
+        float ratio = target && Data.Clock.Production.Active ? ResolveSupplyRatio(benchmark, !Data.Clock.Production.WaitingForOutput) : 0f;
+        PublishSupply(ratio, benchmark, now);
         if (!target)
         { Data.Clock.Production.Clear(); Data.Clock.SupplyRatio = 0f; Sleep(); return; }
         if (benchmark && !hasResource) { item = BenchmarkOutputId; count = 1; }
@@ -172,13 +177,18 @@ public sealed class MiningMachineInstance : IMapObjectTarget, IDataElectricConsu
                 if (benchmark && !hasResource) { item = BenchmarkOutputId; count = 1; }
             }
         }
+        if (!Data.Clock.Production.Active && target && (hasResource || benchmark))
+        {
+            ratio = ResolveSupplyRatio(benchmark, true);
+            PublishSupply(ratio, benchmark, now);
+        }
         if (!Data.Clock.Production.Active && (hasResource || benchmark) && ratio > 0f && item >= 0 && count > 0)
         {
             Data.Resource = resourceHandle; Data.ResourceCoordinate = resourceCoordinate;
             Data.Clock.Production.Begin(-1, item, count, 0);
         }
         bool nextTarget = benchmark || OutputCoordinates.Count > 0 && (hasResource || Data.Clock.Production.Active);
-        if (Data.HasTarget != nextTarget) { Data.HasTarget = nextTarget; UtilityPole.InvalidateDataConsumerDemand(this); }
+        if (Data.HasTarget != nextTarget) { Data.HasTarget = nextTarget; InvalidatePowerDemand(); }
         if (Data.Clock.Production.Active && ratio > 0f) FacilitySimulationWorld.RefreshSchedule(this);
         else Sleep();
     }
@@ -215,7 +225,7 @@ public sealed class MiningMachineInstance : IMapObjectTarget, IDataElectricConsu
         get
         {
             MiningProcess clock = Data.Clock;
-            clock.Sample(MapObjectTickManager.CurrentSimulationTick, Template.Watts, Template.CompleteEnergy);
+            clock.Sample(MapObjectTickManager.CurrentSimulationTick, Template.CompleteEnergy, SnapshotFuelLimit);
             return clock.AnimationPhase;
         }
     }
@@ -224,8 +234,8 @@ public sealed class MiningMachineInstance : IMapObjectTarget, IDataElectricConsu
         working = IsWorking; warning = false;
         if (OutputCoordinates.Count == 0) text = "No output area";
         else if (!Data.HasTarget) text = "No resource";
-        else if (Data.Clock.SupplyRatio <= 0f) text = "No energy";
         else if (Data.Clock.Production.WaitingForOutput) { text = "Waiting for output"; warning = true; }
+        else if (Data.Clock.SupplyRatio <= 0f) text = "No energy";
         else text = "Working";
     }
     public bool TryGetObjectInfoResourceReserves(out int reserves)
@@ -267,7 +277,7 @@ public sealed class MiningMachineInstance : IMapObjectTarget, IDataElectricConsu
     public void Persist()
     {
         if (!IsRuntimeActive) return;
-        Data.Clock.Sample(MapObjectTickManager.CurrentSimulationTick, Template.Watts, Template.CompleteEnergy);
+        Sample();
         var dto = Placement.inputOutputState; var process = Data.Clock.Production;
         dto.hasActiveCraft = process.Active; dto.waitingForOutput = process.WaitingForOutput;
         dto.miningResourceCursor = Data.ResourceCursor; dto.miningResourceCoordinate = Data.ResourceCoordinate;
@@ -276,8 +286,9 @@ public sealed class MiningMachineInstance : IMapObjectTarget, IDataElectricConsu
         dto.hasDeterministicUnits = true; dto.activeCraftConsumedEnergyUnits = process.ConsumedEnergyUnits;
         dto.activeCraftConsumedEnergy = DeterministicSimulationUnits.ToFloat(process.ConsumedEnergyUnits);
         dto.remainingCraftTicks = ProductionProcess.RemainingEnergyTicks(Template.CompleteEnergy, process.ConsumedEnergyUnits,
-            DeterministicSimulationUnits.FromFloat(Template.Watts));
+            DeterministicSimulationUnits.FromFloat(Template.WorkRate));
         dto.remainingCraftTime = DeterministicSimulationUnits.TicksToSeconds(dto.remainingCraftTicks);
+        FacilityFuel.Persist(dto);
         // Placement is the store-owned DTO, also referenced by VirtualObjectWorld.
         // Only production fields change here; placement indices need no rebuild or clone.
     }

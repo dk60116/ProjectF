@@ -1,12 +1,8 @@
-# Logging machine target checks
+# LoggingMachineTargetHarness compatibility entry point
 
-Run from the repository root:
+Run `./Tools/LoggingMachineTargetHarness/Run.ps1` from the repository root (.NET 9).
 
-```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -File Tools/LoggingMachineTargetHarness/Run.ps1
-```
-
-The harness extracts the production logging target methods and rejects any restored
-output-space gate. It verifies that valid adjacent trees are recognized while growth,
-filter, active-state, harvest-mode, and rotation rules remain enforced. Log placement
-and harvest routing are covered by `SeedRecoveryHarness`. No Unity process is launched.
+Forwards to ForestryEcsHarness, which executes the installed data entities instead of
+obsolete native-component simulation. Includes growth/type/rotation rules, target identity,
+power loss/recovery, saved progress, exactly-once completion, seed ownership and recovery.
+No Unity process is launched. Rendering and real electrical topology need engine verification.

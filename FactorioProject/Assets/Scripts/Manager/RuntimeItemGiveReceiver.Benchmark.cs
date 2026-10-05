@@ -73,6 +73,11 @@ public sealed partial class RuntimeItemGiveReceiver
             BenchmarkRuntime.SetForceWorking(command.Enabled, command.ItemId);
             return ToolResult.Success(0, 0, 0, 0, 0, 0, "benchmark force working updated", BuildBenchmarkStatusTokens());
         }
+        if (command.Action == BenchmarkAction.RandomizeProgress)
+        {
+            int changed = BenchmarkRuntime.RandomizeWorkProgress();
+            return ToolResult.Success(0, 0, 0, 0, 0, 0, $"randomized progress of {changed} active operations", BuildBenchmarkStatusTokens());
+        }
         benchmarkJobId++; benchmarkDone = 0; benchmarkTotal = command.Action == BenchmarkAction.Spawn ? command.Count : 0;
         benchmarkStageDone = benchmarkStageTotal = 0;
         benchmarkResult = "Running"; benchmarkBusy = true;

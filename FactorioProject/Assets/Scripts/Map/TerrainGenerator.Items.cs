@@ -817,6 +817,10 @@ public partial class TerrainGenerator : MonoBehaviour
 
     public void RegisterLiveInstallationObject(InstallationObject installationObject)
     {
+        if ((installationObject is LoggingMachine || installationObject is SeedPlanter) && ConvertForestryPresentation(installationObject, null, out _))
+        { ReleaseInstallationObject(installationObject); return; }
+        if (installationObject is WorkableObject workable && ConvertWorkablePresentation(workable, null, out _))
+        { ReleaseInstallationObject(workable); return; }
         if (installationObject is UtilityPole pole && ConvertUtilityPolePresentation(pole, null, out _))
         { ReleaseInstallationObject(pole); return; }
         if (installationObject is MiningMachine miner && ConvertMiningPresentation(miner, null, out _))
@@ -1354,6 +1358,10 @@ public partial class TerrainGenerator : MonoBehaviour
 
     public void RegisterInstallationRuntimeState(InstallationObject installationObject)
     {
+        if ((installationObject is LoggingMachine || installationObject is SeedPlanter) && ConvertForestryPresentation(installationObject, null, out _))
+        { ReleaseInstallationObject(installationObject); return; }
+        if (installationObject is WorkableObject workable && ConvertWorkablePresentation(workable, null, out _))
+        { ReleaseInstallationObject(workable); return; }
         if (installationObject is UtilityPole pole && ConvertUtilityPolePresentation(pole, null, out _))
         { ReleaseInstallationObject(pole); return; }
         if (installationObject is InputOutputModule production && ConvertProductionPresentation(production, null, out _))
@@ -1676,152 +1684,94 @@ public partial class TerrainGenerator : MonoBehaviour
         return count - remaining;
     }
 
-    public int GetDroppedItemCountInWorkableRanges(
-        IReadOnlyList<WorkableObject> workableObjects,
+    private readonly HashSet<Vector2Int> workableAreaCoordinateScratch = new HashSet<Vector2Int>();
+    private readonly List<Block> workableAreaBlockScratch = new List<Block>();
+
+    public int GetWorkableAreaItemCount(
+        IReadOnlyList<ProjectF.MapObjects.IWorkableTarget> workableObjects,
         Vector3 excludedCenterWorldPosition,
         int excludedRadius,
         int itemId)
     {
-        if (itemId < 0
-            || !TryGetWorkableRangeCoordinateBounds(
-                workableObjects,
-                out Vector2Int minimumCoordinate,
-                out Vector2Int maximumCoordinate))
-        {
-            return 0;
-        }
-
+        if (itemId < 0) return 0;
+        CollectWorkableAreaBlocks(workableObjects);
         Vector2Int excludedCenter = GetWorldBlockCoordinate(excludedCenterWorldPosition);
         int total = 0;
-        for (int y = minimumCoordinate.y; y <= maximumCoordinate.y; y++)
+        for (int i = 0; i < workableAreaBlockScratch.Count; i++)
         {
-            for (int x = minimumCoordinate.x; x <= maximumCoordinate.x; x++)
-            {
-                Vector2Int coordinate = new Vector2Int(x, y);
-                if (IsInsideSquareRadius(coordinate, excludedCenter, excludedRadius)
-                    || !IsInsideAnyWorkableRange(coordinate, workableObjects)
-                    || !loadedBlocks.TryGetValue(coordinate, out Block block)
-                    || block == null)
-                {
-                    continue;
-                }
-
-                if (block.Type == Block.BlockType.Ground)
-                {
-                    total += block.CountFloorObjects(itemId);
-                }
-            }
+            Block block = workableAreaBlockScratch[i];
+            // Nearby floor items are counted separately; output stacks are only counted here.
+            if (block.Type == Block.BlockType.Ground
+                && !IsInsideSquareRadius(block.Coordinate, excludedCenter, excludedRadius))
+                total += block.CountFloorObjects(itemId);
+            if (IsWorkableOutputStack(block)) total += block.GetInputAreaCenterItemCount(itemId);
         }
-
+        workableAreaBlockScratch.Clear();
         return total;
     }
 
-    public int RemoveDroppedItemsInWorkableRanges(
-        IReadOnlyList<WorkableObject> workableObjects,
+    public int RemoveWorkableAreaItems(
+        IReadOnlyList<ProjectF.MapObjects.IWorkableTarget> workableObjects,
         Vector3 excludedCenterWorldPosition,
         int excludedRadius,
         int itemId,
         int count)
     {
-        if (itemId < 0
-            || count <= 0
-            || !TryGetWorkableRangeCoordinateBounds(
-                workableObjects,
-                out Vector2Int minimumCoordinate,
-                out Vector2Int maximumCoordinate))
-        {
-            return 0;
-        }
-
+        if (itemId < 0 || count <= 0) return 0;
+        CollectWorkableAreaBlocks(workableObjects);
         Vector2Int excludedCenter = GetWorldBlockCoordinate(excludedCenterWorldPosition);
         int remaining = count;
-        for (int y = minimumCoordinate.y; y <= maximumCoordinate.y && remaining > 0; y++)
+        for (int i = 0; i < workableAreaBlockScratch.Count && remaining > 0; i++)
         {
-            for (int x = minimumCoordinate.x; x <= maximumCoordinate.x && remaining > 0; x++)
-            {
-                Vector2Int coordinate = new Vector2Int(x, y);
-                if (IsInsideSquareRadius(coordinate, excludedCenter, excludedRadius)
-                    || !IsInsideAnyWorkableRange(coordinate, workableObjects)
-                    || !loadedBlocks.TryGetValue(coordinate, out Block block)
-                    || block == null
-                    || block.Type != Block.BlockType.Ground)
-                {
-                    continue;
-                }
-
+            Block block = workableAreaBlockScratch[i];
+            if (block.Type == Block.BlockType.Ground
+                && !IsInsideSquareRadius(block.Coordinate, excludedCenter, excludedRadius))
                 remaining -= block.RemoveFloorObjects(itemId, remaining);
-            }
+            if (remaining > 0 && IsWorkableOutputStack(block))
+                remaining -= block.ConsumeInputAreaCenterObjects(itemId, remaining);
         }
-
+        workableAreaBlockScratch.Clear();
         return count - remaining;
     }
 
-    private static bool TryGetWorkableRangeCoordinateBounds(
-        IReadOnlyList<WorkableObject> workableObjects,
-        out Vector2Int minimumCoordinate,
-        out Vector2Int maximumCoordinate)
+    private static bool IsWorkableOutputStack(Block block)
     {
-        minimumCoordinate = default;
-        maximumCoordinate = default;
-        bool foundRange = false;
-        if (workableObjects == null)
-        {
-            return false;
-        }
-
-        for (int i = 0; i < workableObjects.Count; i++)
-        {
-            WorkableObject workableObject = workableObjects[i];
-            if (workableObject == null
-                || !workableObject.isActiveAndEnabled
-                || !workableObject.TryGetWorkableRangeBounds(out Bounds bounds))
-            {
-                continue;
-            }
-
-            Vector2Int rangeMinimum = new Vector2Int(
-                Mathf.FloorToInt(bounds.min.x),
-                Mathf.FloorToInt(bounds.min.z));
-            Vector2Int rangeMaximum = new Vector2Int(
-                Mathf.CeilToInt(bounds.max.x),
-                Mathf.CeilToInt(bounds.max.z));
-            if (!foundRange)
-            {
-                minimumCoordinate = rangeMinimum;
-                maximumCoordinate = rangeMaximum;
-                foundRange = true;
-                continue;
-            }
-
-            minimumCoordinate = Vector2Int.Min(minimumCoordinate, rangeMinimum);
-            maximumCoordinate = Vector2Int.Max(maximumCoordinate, rangeMaximum);
-        }
-
-        return foundRange;
+        // Box contents use their own source path, which respects the retained item limit.
+        return InputOutputModuleOutputAreaController.CoordinateIsOutputArea(block.Coordinate)
+               && !(block.MapObject is BoxObject)
+               && !BoxObject.IsRuntimeContentBlock(block);
     }
 
-    private static bool IsInsideAnyWorkableRange(
-        Vector2Int coordinate,
-        IReadOnlyList<WorkableObject> workableObjects)
+    private void CollectWorkableAreaBlocks(IReadOnlyList<ProjectF.MapObjects.IWorkableTarget> workableObjects)
     {
-        if (workableObjects == null)
-        {
-            return false;
-        }
-
-        Vector3 worldPosition = new Vector3(coordinate.x, 0f, coordinate.y);
+        workableAreaCoordinateScratch.Clear();
+        workableAreaBlockScratch.Clear();
+        if (workableObjects == null) return;
         for (int i = 0; i < workableObjects.Count; i++)
         {
-            WorkableObject workableObject = workableObjects[i];
-            if (workableObject != null
-                && workableObject.isActiveAndEnabled
-                && workableObject.ContainsWorldPositionInOwnWorkableRange(worldPosition))
+            var workable = workableObjects[i];
+            if (workable == null || !workable.IsTargetActive
+                || !workable.TryGetWorkableRangeBounds(out Bounds bounds)) continue;
+            int minX = Mathf.CeilToInt(bounds.min.x), maxX = Mathf.FloorToInt(bounds.max.x);
+            int minY = Mathf.CeilToInt(bounds.min.z), maxY = Mathf.FloorToInt(bounds.max.z);
+            for (int y = minY; y <= maxY; y++)
+            for (int x = minX; x <= maxX; x++)
             {
-                return true;
+                var coordinate = new Vector2Int(x, y);
+                if (workableAreaCoordinateScratch.Contains(coordinate)
+                    || !loadedBlocks.TryGetValue(coordinate, out Block block) || block == null) continue;
+                workableAreaCoordinateScratch.Add(coordinate);
+                workableAreaBlockScratch.Add(block);
             }
         }
+        // Keep the previous row/column consumption order independent of source/group order.
+        workableAreaBlockScratch.Sort(CompareWorkableAreaBlocks);
+    }
 
-        return false;
+    private static int CompareWorkableAreaBlocks(Block a, Block b)
+    {
+        int order = a.Coordinate.y.CompareTo(b.Coordinate.y);
+        return order != 0 ? order : a.Coordinate.x.CompareTo(b.Coordinate.x);
     }
 
     private static bool IsInsideSquareRadius(

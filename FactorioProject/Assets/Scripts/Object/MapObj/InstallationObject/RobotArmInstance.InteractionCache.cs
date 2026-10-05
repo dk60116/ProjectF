@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using UnityEngine;
 
 public sealed partial class RobotArmInstance
@@ -49,7 +50,7 @@ public sealed partial class RobotArmInstance
     internal void ReleaseRuntimeCaches()
     {
         InvalidateInteractionTargetCaches();
-        freightCarCoordinateScratch.Clear();
+        freightCarCoordinateScratch?.Clear();
     }
 
     private bool TryResolvePickupInteractionTargets(
@@ -260,6 +261,7 @@ public sealed partial class RobotArmInstance
         cache.CoordinateFreightCarResolved = true;
         cache.CoordinateInstallationVersion = installationVersion;
         cache.CoordinateFreightCar = null;
+        if (freightCarCoordinateScratch == null) freightCarCoordinateScratch = new List<InstallationObject>(4);
         freightCarCoordinateScratch.Clear();
         InstallationObject.CollectActiveInstallationsAtRuntimeGridCoordinate(
             coordinate,

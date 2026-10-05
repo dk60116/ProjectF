@@ -88,7 +88,8 @@ internal sealed class BenchmarkForm : Form
             await PollAsync();
         };
         Section("5–6. 초기화 / 강제 작동", Row(Button("모든 맵 오브젝트 클리어", () => CommandAsync("benchmark clearobjects"))),
-            force, TextLabel("선택한 벨트 아이템은 채굴기·벌목기·로봇암의 가상 자원으로도 쓰여"),
+            Row(force, Button("작동 진행도 랜덤화", () => CommandAsync("benchmark randomizeprogress"))),
+            TextLabel("선택한 벨트 아이템은 채굴기·벌목기·로봇암의 가상 자원으로도 쓰여"),
             TextLabel("결과 아이템은 배출구 또는 바닥으로 나와. 연결되지 않은 유체는 넘침으로 집계돼"), output);
         cancel = Button("생성 중단", () => CommandAsync("benchmark cancel"), false);
         Section("작업 진행", Row(progress, cancel), job, log);

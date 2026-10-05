@@ -43,6 +43,8 @@ internal sealed class ProductionRenderTemplate
     internal readonly Color WorkGaugeFillColor;
     internal readonly Recipe[] Recipes;
     internal readonly bool HasPipePorts;
+    internal readonly bool IsOilDrill;
+    internal readonly float OilLitersPerSecond;
     internal readonly Sprite EnergyMarkerIcon, FluidMarkerIcon;
     private readonly bool[] partActive;
     private readonly SpriteRenderer[] icons;
@@ -59,6 +61,8 @@ internal sealed class ProductionRenderTemplate
         Scale = Archetype.DefaultRootScale; LocalBounds = Archetype.LocalRenderBounds;
         Watts = ItemDefinition.ResolveElectricUseWatts(Definition);
         PrimaryRate = ItemDefinition.ResolveUseEnergyRatePerSecond(Definition);
+        IsOilDrill = source is OilDrillingMachine;
+        OilLitersPerSecond = IsOilDrill ? Definition.FluidOutputLitersPerSecond : 0;
         WorkGaugeVerticalOffset = source.WorkGaugeVerticalOffset;
         WorkGaugeFillColor = source.ObjectInfoWorkGaugeFillColor;
         ConsumePoint = source.transform.worldToLocalMatrix.MultiplyPoint3x4(source.DataConsumeTargetWorldPosition);
@@ -78,6 +82,10 @@ internal sealed class ProductionRenderTemplate
             partActive[i] = active;
         }
         var recipes = new List<Recipe>();
+        if (source is OilDrillingMachine drill && drill.TryGetObjectInfoOutputRate(out int oilId, out _)
+            && InputOutputModule.ResolveItemDefinition(oilId)?.isFluid == true)
+            recipes.Add(new Recipe { OutputId = oilId, OutputCount = 1, OutputRate = OilLitersPerSecond,
+                Duration = OilLitersPerSecond > 0 ? 1f / OilLitersPerSecond : 1f });
         foreach (var pair in source.InputOutputPairs)
         {
             if (pair?.outputs == null) continue;
@@ -114,7 +122,7 @@ internal sealed class ProductionRenderTemplate
         }
         Recipes = recipes.ToArray();
         for (int i = 0; i < Recipes.Length; i++)
-            Recipes[i].PublishedManualAvailable = Recipes[i].IsManualAvailable;
+            Recipes[i].PublishedManualAvailable = IsOilDrill || Recipes[i].IsManualAvailable;
         foreach (var placement in source.RectGridPlacements) HasPipePorts |= InputOutputModule.AllowsPipeAreaInteraction(placement.blockType);
         icons = source is ProductionMachine machineSource ? machineSource.TargetIconDisplays : Array.Empty<SpriteRenderer>();
         iconMatrices = new Matrix4x4[icons.Length];
@@ -127,6 +135,7 @@ internal sealed class ProductionRenderTemplate
     internal int Append(ProductionFacilityInstance facility, VirtualRenderBatchCollection batches, SpriteMeshCache spriteMeshes,
         InstallationMaterialVariants materials, Camera camera)
     {
+        if (ProjectF.Benchmark.BenchmarkRuntime.ForceWorking) facility.SampleBenchmarkEnergyVisuals();
         Animation?.Evaluate(facility.AnimationPhase, facility.IsWorking);
         Matrix4x4 root = facility.RootMatrix * Matrix4x4.Scale(Vector3.one * facility.PlacementPresentationScale);
         int count = 0;

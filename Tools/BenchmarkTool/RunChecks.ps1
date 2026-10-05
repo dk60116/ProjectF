@@ -7,6 +7,7 @@ $files = @(
     (Join-Path $PSScriptRoot 'Tests/Checks.cs'),
     (Join-Path $scripts 'Diagnostics/BenchmarkLayout.cs'),
     (Join-Path $scripts 'Diagnostics/BenchmarkCommand.cs'),
+    (Join-Path $scripts 'Diagnostics/BenchmarkWorkProgress.cs'),
     (Join-Path $scripts 'Object/MapObj/InstallationObject/InputOutputModule.Benchmark.cs'),
     (Join-Path $scripts 'Object/MapObj/InstallationObject/LoggingMachine.Benchmark.cs'),
     (Join-Path $scripts 'Simulation/Core/ProductionProcess.cs'),

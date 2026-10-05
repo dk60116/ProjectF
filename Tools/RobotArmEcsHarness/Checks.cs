@@ -12,9 +12,12 @@ namespace ProjectF.Benchmark
 // World IO and power supply are doubles. Wake/plan/apply/sleep/demand/scheduling/slot storage are production code.
 public static class Application { public static bool isPlaying = true; }
 public static class MapObjectTickManager { public const int DefaultSimulationTicksPerSecond = 60; public const float FixedSimulationDeltaSeconds = 1f / 60f; }
+public class GameManager { public static GameManager Instance; public bool FreeElectroEnergy; }
 public static class MapObjectTickProfiler
 {
     public static bool IsEnabled => false;
+    public static bool IsDetailedEnabled => false;
+    public static void RecordNamedElapsedTicks(string kind, string type, string name, long elapsed) { }
     public static Scope SampleNamed(string kind, string type, string name) => default;
     public static long BeginSample() => 0;
     public static void EndUpdateSample(object tick, long start) { }
@@ -30,17 +33,32 @@ public sealed class Block
     public Vector2Int Coordinate { get; }
     public Block(Vector2Int coordinate) { Coordinate = coordinate; }
 }
+public sealed class TerrainGenerator
+{
+    public IReadOnlyList<Block> Published;
+    public void CollectPublishedBeltObservers(Dictionary<Vector2Int, List<RobotArmInstance>> observers, List<Block> destination)
+    { destination.Clear(); foreach (var block in Published) if (observers.ContainsKey(block.Coordinate)) destination.Add(block); }
+}
 public partial class RobotArmInstance
 {
     public RobotArmWorld World;
-    public sealed class PresentationData { public double SleepingPresentationTime; }
+    public sealed class PresentationData { public double SleepingPresentationTime; public float AnimationTime, ItemMoveElapsed; }
     private readonly PresentationData Data = new();
+    private bool hasRuntimeStateInitialized = true, electricPowerBlocked;
+    private float pickupInterval = .1f, TurnDurationSeconds = .5f;
+    private const float ItemMoveDuration = .1f;
+    private Quaternion inputBodyLocalRotation => Quaternion.identity;
+    private Quaternion GetOutputBodyLocalRotation() => Quaternion.identity;
+    private void SetBodyLocalRotation(Quaternion value) { }
+    public float RandomizedTurnTime;
+    private bool RotateBodyToward(Quaternion target, float dt) { RandomizedTurnTime = dt; return false; }
     private void SynchronizeSleepingPresentation() { }
     private void ApplyRuntimeSleepPose() { }
     public long SimulationId;
     public int HeldItemId => heldItemId;
     public void Persist() { }
-    public void PersistTransferState() { }
+    public int Saves;
+    public void PersistTransferState() { Saves++; }
     public bool IsRuntimeActive = true, Placed = true, PortsValid = true, MovingFreight;
     public bool runtimeSleeping = true, runtimeWakePending, waitingForDropRetry;
     public float pickupTimer, dropRetryTimer, actionTurnTimer, runtimeSleepCheckTimer;
@@ -53,6 +71,11 @@ public partial class RobotArmInstance
     private float PickupIntervalSeconds => .1f;
     private PlannedTransferCommand plannedTransferCommand;
     private bool stagedTickPlanned, plannedPickupAvailabilityChecked, plannedPickupAvailable, plannedDropAvailabilityChecked, plannedDropAvailable;
+    private void BeginPlannedTick()
+    {
+        plannedTransferCommand = PlannedTransferCommand.None; stagedTickPlanned = true;
+        plannedPickupAvailabilityChecked = plannedDropAvailabilityChecked = false; runtimeWakePending = false;
+    }
     public sealed class Destination { public bool Available; public int Items; }
     public Destination Output = new();
     public void Sleep() { SetRuntimeSleeping(true); }
@@ -85,6 +108,8 @@ public partial class RobotArmInstance
 }
 public partial class RobotArmWorld
 {
+    internal readonly ProjectF.Diagnostics.RobotArmTickTiming TickTiming = new();
+    private readonly List<Block> beltWakeScratch = new();
     private readonly ProjectF.Simulation.ActiveTickSet<RobotArmInstance> activeTicks = new(
         Comparer<RobotArmInstance>.Create((a, b) => a.SimulationId.CompareTo(b.SimulationId)));
     public double PresentationTime { get; private set; }
@@ -95,6 +120,12 @@ public partial class RobotArmWorld
     internal void UnscheduleTick(RobotArmInstance arm) { activeTicks.Remove(arm); }
     private readonly List<RobotArmInstance> ordered = new();
     private readonly List<RobotArmInstance> planned = new();
+    private readonly List<RobotArmInstance> transferCommands = new();
+    internal bool IsPlanning { get; private set; }
+    internal bool FullPowerTick { get; private set; }
+    internal bool BenchmarkTick { get; private set; }
+    private int lastApplyCommandCount;
+    public int LastApplyCommands => lastApplyCommandCount;
     private readonly Dictionary<Vector2Int, List<RobotArmInstance>> observers = new();
     private bool orderDirty;
     public void Add(RobotArmInstance arm, Vector2Int input, Vector2Int output)
@@ -187,7 +218,7 @@ public static class Checks
         var sharedInput = new Vector2Int(10, 0);
         var sharedOutput = new Vector2Int(11, 0);
         batchWorld.Add(batchArm, sharedInput, sharedOutput);
-        batchWorld.Wake(new[] { new Block(sharedInput), new Block(sharedOutput), new Block(sharedInput) });
+        batchWorld.WakePublishedBelts(new TerrainGenerator { Published = new[] { new Block(sharedInput), new Block(sharedOutput), new Block(sharedInput) } });
         Require(batchArm.runtimeWakePending && batchWorld.ActiveCount == 1,
             "batched block notifications rely on entity wake coalescing without duplicate scheduling");
 
@@ -233,6 +264,7 @@ public static class Checks
             "contending arms both bow before attempting the shared slot");
         for (int i = 0; i < 10; i++) race.Tick();
         Require(shared.Items == 1 && first.heldItemId == -1 && second.heldItemId == 2, "stable ID order wins a shared slot despite reverse registration");
+        Require(first.Saves == 1 && second.Saves == 0, "only the successful command persists cargo, exactly once");
         Require(first.Animations == 1 && second.Animations == 1 && second.runtimeSleeping,
             "contention loser retains cargo and sleeps after the claimed gap closes");
         shared.Available = true; race.Wake(output); race.Tick();
@@ -264,6 +296,37 @@ public static class Checks
         Require(idleWorld.tickCandidatesVisited == 1 && idleWorld.ActiveCount == 0,
             "one input change wakes only its observer among 5000 sleeping arms");
 
+        var commandWorld = new RobotArmWorld();
+        var commandArms = new List<RobotArmInstance>();
+        for (int i = 0; i < 100000; i++)
+        {
+            var waiting = new RobotArmInstance { SimulationId = i, runtimeSleeping = false,
+                state = RobotArmState.WaitingAfterDropPlace, heldItemId = -1 };
+            commandArms.Add(waiting);
+            commandWorld.Add(waiting, new Vector2Int(i * 4, 0), new Vector2Int(i * 4 + 1, 0));
+        }
+        commandWorld.Tick();
+        Require(commandWorld.ActiveCount == 100000 && commandWorld.LastApplyCommands == 0,
+            "100k active waiting arms enqueue zero apply commands");
+        foreach (int index in new[] { 2, 99997 })
+        {
+            var ready = commandArms[index]; ready.state = RobotArmState.WaitingBeforeDropPlace;
+            ready.heldItemId = 1; ready.Output.Available = true;
+        }
+        commandWorld.Tick();
+        Require(commandWorld.LastApplyCommands == 2 && commandArms[2].Saves == 1 && commandArms[99997].Saves == 1,
+            "only two ready transfers among 100k active arms enter apply and persist");
+        commandWorld.ApplyManagedUpdateTick();
+        Require(commandWorld.LastApplyCommands == 0 && commandArms[2].Saves == 1,
+            "a consumed command queue cannot replay after a second apply");
+        var removedBeforeApply = commandArms[3];
+        removedBeforeApply.state = RobotArmState.WaitingBeforeDropPlace; removedBeforeApply.heldItemId = 1;
+        removedBeforeApply.Output.Available = true;
+        commandWorld.PlanManagedUpdateTick(1f / 60); removedBeforeApply.IsRuntimeActive = false;
+        commandWorld.ApplyManagedUpdateTick();
+        Require(removedBeforeApply.TransferAttempts == 0 && removedBeforeApply.Saves == 0,
+            "an entity removed between plan and apply never executes its queued transfer");
+
         foreach (RobotArmState state in Enum.GetValues<RobotArmState>())
         foreach (bool held in new[] { false, true })
         foreach (bool ports in new[] { false, true })
@@ -292,6 +355,14 @@ public static class Checks
         Require(staleRejected, "stale handle read fails explicitly");
         foreach (int fps in new[] { 30, 60, 113, 144, 240 }) SchedulingProbe.Check(fps);
         SchedulingProbe.CheckStagedOrder();
+        var random = new System.Random(12);
+        var randomizedArm = new RobotArmInstance { World = new RobotArmWorld(), runtimeSleeping = false, heldItemId = 8, state = RobotArmState.TurningToDrop };
+        Require(randomizedArm.TryRandomizeWorkProgress(random) && randomizedArm.RandomizedTurnTime > 0 && randomizedArm.RandomizedTurnTime < .5f, "active robot turn randomizes remaining phase");
+        Require(randomizedArm.HeldItemId == 8 && randomizedArm.state == RobotArmState.TurningToDrop && randomizedArm.Output.Items == 0, "robot randomization preserves held item, phase and destination");
+        randomizedArm.state = RobotArmState.WaitingBeforeDropPlace;
+        Require(randomizedArm.TryRandomizeWorkProgress(random) && randomizedArm.actionTurnTimer > 0 && randomizedArm.actionTurnTimer <= .1f, "robot action delay randomizes without applying transfer");
+        randomizedArm.runtimeSleeping = true;
+        Require(!randomizedArm.TryRandomizeWorkProgress(random) && randomizedArm.HeldItemId == 8, "sleeping robot remains unchanged");
         Console.WriteLine($"PASS: {count} robot-arm ECS checks. No engine launched.");
     }
 }

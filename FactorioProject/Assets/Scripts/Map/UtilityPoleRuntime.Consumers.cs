@@ -25,6 +25,7 @@ public sealed partial class UtilityPoleRuntime
     private static RobotArmWorld robotArmConsumerWorld;
     private static MiningWorld miningConsumerWorld;
     private static ProductionWorld productionConsumerWorld;
+    private static ProjectF.MapObjects.ForestryWorld forestryConsumerWorld;
     private static readonly Dictionary<IDataElectricConsumer, RobotArmElectricBinding> robotArmBindings =
         new Dictionary<IDataElectricConsumer, RobotArmElectricBinding>();
     private static readonly Stack<RobotArmElectricBinding> robotArmBindingPool =
@@ -71,16 +72,18 @@ public sealed partial class UtilityPoleRuntime
     private static void RefreshRobotArmConsumers()
     {
         RobotArmWorld world = RobotArmWorld.Current;
-        if (!robotArmConsumersDirty && robotArmConsumerWorld == world && miningConsumerWorld == MiningWorld.Current && productionConsumerWorld == ProductionWorld.Current)
+        if (!robotArmConsumersDirty && robotArmConsumerWorld == world && miningConsumerWorld == MiningWorld.Current && productionConsumerWorld == ProductionWorld.Current && forestryConsumerWorld == ProjectF.MapObjects.ForestryWorld.Current)
         {
             return;
         }
 
-        bool worldChanged = robotArmConsumerWorld != world || miningConsumerWorld != MiningWorld.Current || productionConsumerWorld != ProductionWorld.Current;
+        bool worldChanged = robotArmConsumerWorld != world || miningConsumerWorld != MiningWorld.Current
+            || productionConsumerWorld != ProductionWorld.Current || forestryConsumerWorld != ProjectF.MapObjects.ForestryWorld.Current;
         robotArmConsumersDirty = false;
         robotArmConsumerWorld = world;
         miningConsumerWorld = MiningWorld.Current;
         productionConsumerWorld = ProductionWorld.Current;
+        forestryConsumerWorld = ProjectF.MapObjects.ForestryWorld.Current;
         if (worldChanged)
         {
             robotArmPowerBindingCacheHits = 0L;
@@ -106,6 +109,8 @@ public sealed partial class UtilityPoleRuntime
         if (productionConsumerWorld != null)
             for (int i = 0; i < productionConsumerWorld.Instances.Count; i++)
                 robotArmOrderScratch.Add(productionConsumerWorld.Instances[i]);
+        if (forestryConsumerWorld != null)
+            for (int i = 0; i < forestryConsumerWorld.Instances.Count; i++) robotArmOrderScratch.Add(forestryConsumerWorld.Instances[i]);
         robotArmOrderScratch.Sort(CompareRobotArmSimulationOrder);
         for (int armIndex = 0; armIndex < robotArmOrderScratch.Count; armIndex++)
         {
@@ -292,6 +297,7 @@ public sealed partial class UtilityPoleRuntime
         RenderDataConsumerPowerLines(instances, previewPolesOnly);
         if (MiningWorld.Current != null) RenderDataConsumerPowerLines(MiningWorld.Current.Instances, previewPolesOnly);
         if (ProductionWorld.Current != null) RenderDataConsumerPowerLines(ProductionWorld.Current.Instances, previewPolesOnly);
+        if (ProjectF.MapObjects.ForestryWorld.Current != null) RenderDataConsumerPowerLines(ProjectF.MapObjects.ForestryWorld.Current.Instances, previewPolesOnly);
     }
     private static void RenderDataConsumerPowerLines(IReadOnlyList<IDataElectricConsumer> instances, bool previewPolesOnly)
     {

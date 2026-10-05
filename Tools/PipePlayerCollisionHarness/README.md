@@ -15,12 +15,12 @@ underground mouths with a walkable gap. Authored BoxCollider transforms are read
 once by the runtime record on installation/load. Prefab loading and actual Rigidbody
 movement still require in-game verification.
 
-Corner-belt checks execute the production ConveyorRuntimeRecord query and shared
-ConveyorSideBarrier.SweepCorner through the real PlayerController sweep. Both corner
-variants and four rotations cover closed-side entry, open input/output, stepping off,
-sliding, overlap escape, diagonal entry, raised paths, ignored layers, suppression,
-removal, and the straight-belt exclusion. No rendered scene or physical Collider is
-required for these runtime records to block movement.
+Corner-belt checks execute the real PlayerController sweep. Both corner variants
+and four rotations cover walkable side/diagonal entry, open input/output, stepping
+off, short movement steps across capsule overlap, raised paths, ignored layers,
+suppression, removal, and straight belts. A corner at the same coordinate never
+bypasses pipe or physical obstacles. Low corner belts have no artificial side
+barriers; raised 2F side barriers are checked by ConveyorPathHarness.
 
 The authored-corner regression reads Pipe_Corner.prefab, Player.prefab and the
 project's actual Physics layer matrix. It reconstructs the two authored box arms

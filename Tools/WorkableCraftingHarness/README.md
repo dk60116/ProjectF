@@ -4,7 +4,7 @@
 
 ## 검증 범위
 
-- 원본 바이너리 `crafting_tree.bytes` 버전이 런타임 형식 5인지 확인한다.
+- 원본 바이너리 `crafting_tree.bytes` 버전이 런타임 형식 5 또는 6인지 확인한다.
 - Workbench와 Anvil을 요구하는 제작 레시피가 각각 존재하는지 확인한다.
 - 서로 다른 Workable 작업 범위가 겹칠 때 두 작업대 레시피의 중복 없는 합집합이 만들어지는지 확인한다.
 - 직접 재료 중 다시 제작할 수 있는 하위 아이템을 가진 레시피가 존재하는지 확인한다.
@@ -37,7 +37,7 @@ unity command run_script --file "C:\Git\ProjectF\Tools\WorkableCraftingHarness\V
 ## 수동 확인 항목
 
 1. Workbench 또는 Anvil에 접근하면 InteractionButton이 표시된다.
-2. 버튼을 누르면 해당 작업대 레시피가 왼쪽에 한 줄당 5개인 아이콘 그리드로 표시된다.
+2. 버튼을 누르면 손 제작 레시피와 해당 작업대 레시피가 중복 없이 왼쪽에 한 줄당 5개인 아이콘 그리드로 표시된다. 손 제작 레시피는 재료가 있고 필요한 작업대가 없는 항목이며, 원재료 항목은 제외한다.
 3. 서로 다른 Workable 작업 범위의 겹친 위치에서는 모든 작업대의 레시피가 중복 없이 함께 표시된다.
 4. 처음 열었을 때는 아이템 이름과 상세 정보가 표시되지 않는다.
 5. 아이콘에 마우스를 올리면 아이콘 슬롯이 살짝 커지고 벗어나면 원래 크기로 돌아온다.
@@ -53,3 +53,11 @@ unity command run_script --file "C:\Git\ProjectF\Tools\WorkableCraftingHarness\V
 15. 저장 후 불러와도 재귀 제작 순서와 예약 수량이 유지된다.
 16. 패널 프레임 바깥의 어두운 배경을 클릭하면 UI가 닫히고, 프레임 내부의 빈 공간을 클릭하면 유지된다.
 17. 작업 범위를 벗어나거나 닫기 또는 Escape를 누르면 UI가 닫힌다.
+18. 작업 범위 안의 OutputArea 아이템도 재료 수량과 재귀 제작 계획에 반영되고, 제작 등록 시 차감된다. 플레이어 근처·겹친 작업 범위의 아이템은 한 번만 계산한다. OutputArea에 겹친 상자 내용물은 기존 상자 경로로 처리해 최소 보유 수량을 지킨다.
+
+OutputArea 수량 조회와 실제 스택 차감은 `Tools/PortableOutputHarness/Run.ps1`에서 화면 조작 없이 검증한다.
+
+Workbench·Anvil·Anvilbench의 데이터 인스턴스, 연결 범위 캐시와 설치·편집 복원 경로는
+`Tools/WorkableEcsHarness/Run.ps1`에서 검증해. 설치된 작업대는 `IWorkableTarget`으로 조회하고,
+개별 본체 GameObject 대신 공유 뷰의 인스턴싱과 주변 충돌체 풀을 사용해.
+제작 진행과 취소·환불은 기존 플레이어 제작 큐가 담당해.

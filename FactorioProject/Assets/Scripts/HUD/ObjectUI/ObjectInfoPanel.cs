@@ -233,7 +233,12 @@ public class ObjectInfoPanel : MonoBehaviour
             return;
         }
 
-        if (mapObject is LoggingMachine loggingMachine)
+        if (mapObject is ProjectF.MapObjects.ISeedPlanterTarget seedPlanter)
+        {
+            if (infoLine != null) { infoLine.gameObject.SetActive(true); infoLine.ShowSeedPlanter(seedPlanter); }
+            return;
+        }
+        if (mapObject is ProjectF.MapObjects.ILoggingTarget loggingMachine)
         {
             ShowLoggingMachineInfo(loggingMachine, underlyingResource);
             return;
@@ -773,7 +778,7 @@ public class ObjectInfoPanel : MonoBehaviour
         infoLine.ShowRobotArm(robotArm, underlyingResource);
     }
 
-    private void ShowLoggingMachineInfo(LoggingMachine loggingMachine, ResourceInstance underlyingResource)
+    private void ShowLoggingMachineInfo(ProjectF.MapObjects.ILoggingTarget loggingMachine, ResourceInstance underlyingResource)
     {
         if (infoLine == null)
         {

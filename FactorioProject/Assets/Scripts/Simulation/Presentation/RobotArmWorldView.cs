@@ -7,6 +7,10 @@ public sealed class RobotArmWorldView : MonoBehaviour
     private RobotArmWorld world;
     private readonly Dictionary<Collider, RobotArmInstance> colliderOwners = new Dictionary<Collider, RobotArmInstance>();
     private readonly Dictionary<RobotArmInstance, SphereCollider> colliders = new Dictionary<RobotArmInstance, SphereCollider>();
+    private readonly Stack<SphereCollider> colliderPool = new Stack<SphereCollider>();
+    private readonly List<RobotArmInstance> collisionCandidates = new List<RobotArmInstance>();
+    private readonly List<RobotArmInstance> staleColliders = new List<RobotArmInstance>();
+    private readonly HashSet<RobotArmInstance> nearbyArms = new HashSet<RobotArmInstance>();
     private readonly VirtualRenderBatchCollection batches = new VirtualRenderBatchCollection();
     private readonly ProjectF.Rendering.CameraRenderCulling culling = new ProjectF.Rendering.CameraRenderCulling();
     private readonly List<RobotArmInstance> renderCandidates = new List<RobotArmInstance>();
@@ -22,19 +26,19 @@ public sealed class RobotArmWorldView : MonoBehaviour
         view.world = owner;
         return view;
     }
-    public void Bind(RobotArmInstance arm)
+    private void BindCollider(RobotArmInstance arm)
     {
         if (colliders.ContainsKey(arm)) return;
-        SphereCollider source = arm.Prototype.GetComponent<SphereCollider>();
-        if (source == null || !source.enabled) return;
-        gameObject.layer = arm.Prototype.gameObject.layer;
-        Matrix4x4 local = transform.worldToLocalMatrix * Matrix4x4.TRS(arm.WorldPosition, arm.WorldRotation, arm.Prototype.transform.localScale);
-        SphereCollider collider = gameObject.AddComponent<SphereCollider>();
-        collider.center = local.MultiplyPoint3x4(source.center);
-        Vector3 scale = local.lossyScale;
-        collider.radius = source.radius * Mathf.Max(Mathf.Abs(scale.x), Mathf.Abs(scale.y), Mathf.Abs(scale.z));
-        collider.sharedMaterial = source.sharedMaterial;
-        collider.isTrigger = source.isTrigger;
+        var template = arm.Template;
+        if (!template.HasCollider) return;
+        gameObject.layer = template.ColliderLayer;
+        SphereCollider collider = colliderPool.Count > 0 ? colliderPool.Pop() : gameObject.AddComponent<SphereCollider>();
+        collider.center = transform.InverseTransformPoint(arm.ColliderCenter);
+        Vector3 inverseScale = transform.worldToLocalMatrix.lossyScale;
+        collider.radius = template.ColliderRadius * Mathf.Max(Mathf.Abs(inverseScale.x), Mathf.Abs(inverseScale.y), Mathf.Abs(inverseScale.z));
+        collider.sharedMaterial = template.ColliderMaterial;
+        collider.isTrigger = template.ColliderIsTrigger;
+        collider.enabled = true;
         colliderOwners.Add(collider, arm);
         colliders.Add(arm, collider);
     }
@@ -45,12 +49,43 @@ public sealed class RobotArmWorldView : MonoBehaviour
         if (collider != null)
         {
             colliderOwners.Remove(collider); collider.enabled = false;
-            if (Application.isPlaying) Destroy(collider); else DestroyImmediate(collider);
+            colliderPool.Push(collider);
         }
+    }
+    private void RefreshColliders()
+    {
+        nearbyArms.Clear();
+        var player = GameManager.Instance != null ? GameManager.Instance.Player : null;
+        if (player != null) world.BuildNearby(player.transform.position, collisionCandidates);
+        else collisionCandidates.Clear();
+        Vector3 position = player != null ? player.transform.position : default;
+        for (int i = 0; i < collisionCandidates.Count; i++)
+        {
+            RobotArmInstance arm = collisionCandidates[i];
+            float reach = 10f + arm.Template.ColliderRadius;
+            if (!arm.IsRuntimeActive || arm.PlacementPresentationSuppressed || !arm.Template.HasCollider
+                || (arm.ColliderCenter - position).sqrMagnitude >= reach * reach) continue;
+            nearbyArms.Add(arm);
+        }
+        // Return outgoing colliders first so crossing the range boundary reuses
+        // them in this frame instead of allocating replacements before release.
+        staleColliders.Clear();
+        foreach (var pair in colliders) if (!nearbyArms.Contains(pair.Key)) staleColliders.Add(pair.Key);
+        for (int i = 0; i < staleColliders.Count; i++) Unbind(staleColliders[i]);
+        foreach (var arm in nearbyArms) BindCollider(arm);
+    }
+    private void ClearColliders()
+    {
+        staleColliders.Clear();
+        foreach (var arm in colliders.Keys) staleColliders.Add(arm);
+        for (int i = 0; i < staleColliders.Count; i++) Unbind(staleColliders[i]);
+        nearbyArms.Clear(); collisionCandidates.Clear(); staleColliders.Clear();
     }
     public RobotArmInstance ResolveCollider(Collider collider)
         => collider != null && colliderOwners.TryGetValue(collider, out var arm) ? arm : null;
-    public void ClearPresentation() { batches.ClearActiveMatrices(); VisibleCount = MatrixCount = 0; }
+    public int ActiveColliderCount => colliders.Count;
+    public int PooledColliderCount => colliderPool.Count;
+    public void ClearPresentation() { ClearColliders(); batches.ClearActiveMatrices(); VisibleCount = MatrixCount = 0; }
     internal void Release()
     {
         world = null;
@@ -59,6 +94,7 @@ public sealed class RobotArmWorldView : MonoBehaviour
     }
     private void OnDisable()
     {
+        ClearColliders();
         batches.SuspendRendering();
         VisibleCount = MatrixCount = 0;
         world?.ResetRenderCandidateMetrics();
@@ -66,7 +102,7 @@ public sealed class RobotArmWorldView : MonoBehaviour
     private void OnDestroy()
     {
         world?.OnViewDestroyed(this);
-        colliderOwners.Clear(); colliders.Clear(); batches.Dispose();
+        colliderOwners.Clear(); colliders.Clear(); colliderPool.Clear(); batches.Dispose();
     }
     private void LateUpdate()
     {
@@ -74,11 +110,13 @@ public sealed class RobotArmWorldView : MonoBehaviour
         if (world == null) return;
         if (MapObjectTickManager.WaitingForWorldLoad || world.Terrain.IsBenchmarkPlacementInProgress)
         {
+            ClearColliders();
             batches.SuspendRendering();
             VisibleCount = MatrixCount = 0;
             world.ResetRenderCandidateMetrics();
             return;
         }
+        RefreshColliders();
         if (renderCamera == null || !renderCamera.isActiveAndEnabled) renderCamera = Camera.main;
         culling.Update(renderCamera);
         world.BuildRenderCandidates(culling, renderCandidates);

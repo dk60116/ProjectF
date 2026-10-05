@@ -11,6 +11,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File Tools/CraftingTreeQuantityHa
 - 유체 0.25 출력·0.5 입력의 편집, JSON, 저장·재로드, ID 변경, 자동 채우기
 - 일반 아이템의 정수 입력과 인벤토리 수량 변환
 - 실제 원본 바이너리의 전체 레코드 읽기
+- 손 제작 레시피 조회의 작업대 전용·원재료 제외, 정렬, 재로드, 조회 중 GC 할당 검증
 
 `Compile.ps1`은 기존 Unity DLL 참조로 런타임과 에디터 소스를 임시 폴더에 컴파일해. Unity를 실행하거나 프로젝트 바이너리를 교체하지 않아. 기존 프로젝트 파일과 Library DLL이 필요해.
 

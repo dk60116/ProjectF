@@ -82,20 +82,14 @@ namespace ProjectF.Power
         {
             target = null; distance = maxDistance;
             if (maxDistance <= 0 || cells.Count == 0) return false;
-            var cell = Cell(ray.origin); var end = Cell(ray.GetPoint(maxDistance));
-            int sx = Math.Sign(ray.direction.x), sy = Math.Sign(ray.direction.z);
-            float dx = sx == 0 ? float.PositiveInfinity : 32 / Mathf.Abs(ray.direction.x);
-            float dy = sy == 0 ? float.PositiveInfinity : 32 / Mathf.Abs(ray.direction.z);
-            float nx = sx == 0 ? float.PositiveInfinity : ((cell.x + (sx > 0 ? 1 : 0)) * 32 - ray.origin.x) / ray.direction.x;
-            float ny = sy == 0 ? float.PositiveInfinity : ((cell.y + (sy > 0 ? 1 : 0)) * 32 - ray.origin.z) / ray.direction.z;
-            while (true)
+            var traversal = new SpatialRayCellTraversal(ray, maxDistance, 32);
+            while (traversal.MoveNext())
             {
+                Vector2Int cell = traversal.Current;
                 for (int y = cell.y - 1; y <= cell.y + 1; y++) for (int x = cell.x - 1; x <= cell.x + 1; x++)
                     if (cells.TryGetValue(new Vector2Int(x,y), out var list))
                         for (int i = 0; i < list.Count; i++) if (list[i].IsRuntimeActive && list[i].CullBounds.IntersectRay(ray, out float d) && d >= 0 && d < distance)
                         { target = list[i]; distance = d; }
-                if (cell == end || Mathf.Min(nx, ny) > maxDistance) break;
-                if (nx <= ny) { cell.x += sx; nx += dx; } else { cell.y += sy; ny += dy; }
             }
             return target != null;
         }

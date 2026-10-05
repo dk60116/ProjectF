@@ -956,6 +956,11 @@ public static class SaveGameBinarySerializer
                 binaryWriter.Write(mountedState?.pointIndex ?? -1);
                 WriteInstallationState(binaryWriter, mountedState?.installation);
             });
+        var logging = state.loggingProcess;
+        writer.Write(logging.Direction); writer.Write(logging.HingeAngle); writer.Write(logging.EmptyDirectionElapsed);
+        writer.Write(logging.ConsumedEnergyUnits); writer.Write(logging.HasTarget);
+        writer.Write(logging.TargetCoordinate.X); writer.Write(logging.TargetCoordinate.Y);
+        writer.Write(logging.TargetDefinitionKey ?? string.Empty);
     }
 
     private static BlockStateStore.InstallationSaveState ReadInstallationState(
@@ -1157,6 +1162,15 @@ public static class SaveGameBinarySerializer
                 });
         }
 
+        if (version >= 71)
+        {
+            state.loggingProcess = new ProjectF.Simulation.LoggingProcess
+            {
+                Direction = reader.ReadInt32(), HingeAngle = reader.ReadSingle(), EmptyDirectionElapsed = reader.ReadSingle(),
+                ConsumedEnergyUnits = reader.ReadInt64(), HasTarget = reader.ReadBoolean(),
+                TargetCoordinate = new ProjectF.Simulation.GridCell(reader.ReadInt32(), reader.ReadInt32()), TargetDefinitionKey = reader.ReadString()
+            };
+        }
         return state;
     }
 

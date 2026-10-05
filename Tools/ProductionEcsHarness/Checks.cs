@@ -219,6 +219,14 @@ static class Checks
         Check(!sharedRecipe.IsManualAvailable && manager.Probes == 2, "Next-tick manual removal invalidates shared availability");
         manager.Available = true;
 
+        a = Create(); Tick(a.value, 0);
+        var random = new System.Random(7); int inputAfterStart = a.input.Count;
+        Check(a.value.TryRandomizeWorkProgress(random) && a.value.WorkProgress > 0 && a.value.WorkProgress < 1, "ongoing ECS production randomizes energy progress");
+        Check(a.input.Count == inputAfterStart && a.output.Count == 0, "production randomization neither consumes inputs nor emits output");
+        a = Create(noEnergy: true); Tick(a.value, 0);
+        Check(a.value.TryRandomizeWorkProgress(random) && a.value.WorkProgress > 0 && a.value.WorkProgress < 1, "time-based ECS production randomizes countdown");
+        a = Create(); a.input.Count = 0; Tick(a.value, 0);
+        Check(!a.value.TryRandomizeWorkProgress(random), "idle ECS facility stays idle");
         const int total = 100000;
         a = Create(); BenchmarkRuntime.ForceWorking = true;
         var entities = new ProductionFacilityInstance[total];

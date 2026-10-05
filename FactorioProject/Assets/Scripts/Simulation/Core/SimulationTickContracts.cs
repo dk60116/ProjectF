@@ -15,6 +15,11 @@ public interface IMapObjectSimulationIdentity
     long SimulationId { get; }
 }
 
+public interface IFacilityPowerEvaluationTarget
+{
+    bool RequiresFacilityPowerEvaluation { get; }
+}
+
 public interface IPersistenceDirtyTrackable
 {
     void MarkPersistenceStateDirty();

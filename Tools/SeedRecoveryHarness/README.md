@@ -1,5 +1,11 @@
-# Seed recovery harness
+# Seed rewards and ground checks
 
-Run `powershell -NoProfile -ExecutionPolicy Bypass -File Tools/SeedRecoveryHarness/Run.ps1` from the repository root (.NET 9).
+Run `./Tools/SeedRecoveryHarness/Run.ps1` from the repository root (.NET 9).
 
-Extracts actual tree reward, planter input insertion, loaded/saved input restoration, logging completion/routing, floor capacity/occupancy, output-area configuration, and loaded/saved planting eligibility methods. Scene lookup, inventory storage and effects are managed doubles. Covers 35 cases including growth/chance conditions, duplicate rewards, all collected seed quantities, multiple inputs, partial capacity, saved input, mismatched planting targets, failed harvests, and seed overflow. Checks that planter soil permits logs, ordinary output areas remain protected, logging always cuts and forces logs onto the original cell, and replanting waits for the final log to be removed. No Unity launch or scene mutation. Actual visual flight and end-to-end save/load require engine verification.
+Extracts actual tree reward rolls, floor occupancy/capacity, planter output-area
+configuration and loaded/saved planting eligibility. Checks duplicate seed rewards,
+growth/chance conditions, the original log cell and replanting after final log removal.
+Managed storage/scene doubles; no Unity process is launched.
+
+Installed logging/planting and loaded/saved seed recovery are now exercised by
+`./Tools/ForestryEcsHarness/Run.ps1`. Removed native-component simulation doubles.

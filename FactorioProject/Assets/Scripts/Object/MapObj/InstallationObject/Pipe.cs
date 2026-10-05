@@ -86,7 +86,7 @@ public class Pipe : InstallationObject
         internal readonly Dictionary<Pump, int> PumpDistances = new Dictionary<Pump, int>();
         internal readonly Dictionary<Pump, float> PumpRates = new Dictionary<Pump, float>();
         internal bool TraverseAsInput = true;
-        internal readonly Dictionary<ProductionFacilityInstance, (int Distance, Pump Pump)> DataSources = new Dictionary<ProductionFacilityInstance, (int, Pump)>();
+        internal readonly Dictionary<IDataFluidProducer, (int Distance, Pump Pump)> DataSources = new Dictionary<IDataFluidProducer, (int, Pump)>();
         internal Pump CurrentPump;
 
         public void Reset()
@@ -807,6 +807,7 @@ public class Pipe : InstallationObject
         }
         foreach (var pair in context.DataSources)
         {
+            if (!pair.Key.IsRuntimeActive) continue;
             float rate = pair.Key.GetFluidPressure(fluidItemId);
             if (pair.Value.Pump == null) pressure += rate * CalculateFluidPressureRetention(pair.Value.Distance);
             else

@@ -31,7 +31,8 @@ public static partial class UtilityPole
     public static bool TryCaptureElectricPowerDemand(InstallationObject value, out float watts) { watts = 0; return false; }
     public static bool HasElectricPowerDemandChanged(bool a, float aw, bool b, float bw) => a != b || aw != bw;
     public static void NotifyElectricPowerConsumerStateChanged(InstallationObject value) { }
-    public static void PrepareSimulationPowerTick() { }
+    public static int PowerPreparationCount;
+    public static void PrepareSimulationPowerTick() { PowerPreparationCount++; }
     public static void BeginSimulationPowerMutationBatch() { }
     public static void EndSimulationPowerMutationBatch() { }
 }
@@ -83,10 +84,10 @@ public partial class ProductionWorld
     private bool markersDirty;
     public int MarkerCount;
     private static UnityEngine.Vector2Int Cell(UnityEngine.Vector3 position) => default;
-    internal InputOutputModule CacheTemplate(ProductionRenderTemplate template)
+    internal InputOutputModule CacheTemplate(ProductionRenderTemplate template, InputOutputModule source = null)
     {
         Current = this;
-        var prototype = new InputOutputModule(); templates.Add(prototype, template); return prototype;
+        var prototype = source ?? new InputOutputModule(); templates.Add(prototype, template); return prototype;
     }
 }
 public partial class TerrainGenerator { public object ResolveInstallationPlacementController() => null; }

@@ -324,9 +324,9 @@ public sealed class FacilitySimulationWorld :
         ApplyManagedUpdateTick();
     }
 
-    public void PlanManagedUpdateTick(float deltaTime)
+    private bool CollectDueTargets()
     {
-        CompleteParallelFlowPlan();
+        using var schedulingSample = MapObjectTickProfiler.SampleNamed("ECS", nameof(FacilitySimulationWorld), "Facility ECS Scheduling");
         CompactEntries();
         due.Clear();
         flowBatch.Begin();
@@ -365,7 +365,8 @@ public sealed class FacilitySimulationWorld :
                 entry.MarkExecuted(simulationTick);
                 ScheduleEntry(entryIndex);
                 due.Add(entryIndex);
-                hasPowerParticipant |= entry.RequiresPowerEvaluation;
+                hasPowerParticipant |= entry.RequiresPowerEvaluation
+                    && (!(target is IFacilityPowerEvaluationTarget participant) || participant.RequiresFacilityPowerEvaluation);
             }
             ReturnDueBucket(bucket);
         }
@@ -373,7 +374,15 @@ public sealed class FacilitySimulationWorld :
         if (membershipDirty && due.Count == 0) CompactEntries();
         if (due.Count > 1) due.Sort(dueEntryIndexComparison);
         lastDueCount = due.Count;
+        return hasPowerParticipant;
+    }
+
+    public void PlanManagedUpdateTick(float deltaTime)
+    {
+        CompleteParallelFlowPlan();
+        bool hasPowerParticipant = CollectDueTargets();
         if (due.Count == 0) return;
+        long simulationTick = MapObjectTickManager.CurrentSimulationTick;
         using var sample = MapObjectTickProfiler.SampleNamed(
             "ECS",
             nameof(FacilitySimulationWorld),
@@ -775,7 +784,8 @@ public sealed class FacilitySimulationWorld :
             SimulationId = target is IMapObjectSimulationIdentity identity ? identity.SimulationId : 0L;
             TypeName = target?.GetType().FullName ?? string.Empty;
             RequiresPowerEvaluation = target is InputOutputModule module
-                                      && module.RequiresFacilityPowerEvaluation || target is IDataElectricConsumer;
+                                      && module.RequiresFacilityPowerEvaluation || target is IDataElectricConsumer
+                                      || target is IFacilityPowerEvaluationTarget;
             InstallationObject installationObject = target as InstallationObject;
             TracksElectricDemand = UtilityPole.TracksRuntimeElectricPowerDemand(installationObject);
             float electricDemandWatts = 0f;

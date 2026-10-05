@@ -8,7 +8,7 @@ using UnityEngine.Rendering;
 using UnityEngine.UI;
 
 [DisallowMultipleComponent]
-public class InstallationPlacementController : MonoBehaviour
+public partial class InstallationPlacementController : MonoBehaviour
 {
     public const string InstallGridOverlayObjectName = "InstallationGridOverlay";
     public const string InstallGridPreviewOverlayObjectName = "InstallationGridPreviewOverlay";
@@ -448,6 +448,7 @@ public class InstallationPlacementController : MonoBehaviour
         public List<AreaAttachedBoxState> attachedAreaBoxes = new List<AreaAttachedBoxState>();
         public Dictionary<Vector2Int, List<int>> blockStatesByCanonicalOffset = new Dictionary<Vector2Int, List<int>>();
         public InputOutputModule.PersistentState inputOutputState;
+        public ProjectF.Simulation.LoggingProcess loggingProcess;
         public bool? boxIsOpen;
         public int boxMinimumRetainedItemCount = BoxObject.DefaultMinimumRetainedItemCount;
         public int boxMaximumStoredItemCount = BoxObject.DefaultMaximumStoredItemCount;
@@ -2179,6 +2180,9 @@ public class InstallationPlacementController : MonoBehaviour
 
         Ray ray = targetCamera.ScreenPointToRay(pointerPosition);
         float maxDistance = targetCamera.farClipPlane > 0f ? targetCamera.farClipPlane : 512f;
+        if (ForestryWorld.Current != null && ForestryWorld.Current.TryRaycast(ray, maxDistance, out var forestry, out _)
+            && TryMaterializeDataOnlyForestryForEditing(forestry, out installationObject))
+        { anchorCoordinate = forestry.AnchorCoordinate; return true; }
         if (TryGetEditableDataOnlySplitterFromRaycast(
                 ray,
                 maxDistance,
@@ -2191,6 +2195,9 @@ public class InstallationPlacementController : MonoBehaviour
         if (UtilityPoleWorld.Current != null && UtilityPoleWorld.Current.TryRaycast(ray, maxDistance, out var pole, out _)
             && TryMaterializeDataOnlyUtilityPoleForEditing(pole, out installationObject))
         { anchorCoordinate = pole.AnchorCoordinate; return true; }
+        if (WorkableWorld.Current != null && WorkableWorld.Current.TryRaycast(ray, maxDistance, out var workable, out _)
+            && TryMaterializeDataOnlyWorkableForEditing(workable, out installationObject))
+        { anchorCoordinate = workable.AnchorCoordinate; return true; }
         if (ProductionWorld.Current != null && ProductionWorld.Current.TryRaycast(ray, maxDistance, out var production, out _)
             && TryMaterializeDataOnlyProductionForEditing(production, out installationObject))
         { anchorCoordinate = production.AnchorCoordinate; return true; }
@@ -2438,6 +2445,12 @@ public class InstallationPlacementController : MonoBehaviour
         if (block.MapObject is UtilityPoleRuntime dataPole && dataPole.IsRuntimeActive
             && TryMaterializeDataOnlyUtilityPoleForEditing(dataPole, out installationObject))
         { anchorCoordinate = dataPole.AnchorCoordinate; return true; }
+        if (block.MapObject is ForestryInstance dataForestry && dataForestry.IsRuntimeActive
+            && TryMaterializeDataOnlyForestryForEditing(dataForestry, out installationObject))
+        { anchorCoordinate = dataForestry.AnchorCoordinate; return true; }
+        if (block.MapObject is WorkableInstance dataWorkable && dataWorkable.IsRuntimeActive
+            && TryMaterializeDataOnlyWorkableForEditing(dataWorkable, out installationObject))
+        { anchorCoordinate = dataWorkable.AnchorCoordinate; return true; }
         if (block.MapObject is ProductionFacilityInstance dataProduction && dataProduction.IsRuntimeActive
             && TryMaterializeDataOnlyProductionForEditing(dataProduction, out installationObject))
         { anchorCoordinate = dataProduction.AnchorCoordinate; return true; }
@@ -2682,12 +2695,15 @@ public class InstallationPlacementController : MonoBehaviour
 
     private void RestoreDataFacilityEditorProxy(InstallationObject installation)
     {
-        if (!(installation is InputOutputModule) && !(installation is UtilityPole)
+        if (!(installation is InputOutputModule) && !(installation is UtilityPole) && !(installation is LoggingMachine)
             || activeInstallationEditSession != null && activeInstallationEditSession.originalInstallation == installation
             || !installation.TryGetPlacementRuntime(out _, out _)) return;
         TerrainGenerator terrain = ResolveInstallPreviewTerrain();
         if (terrain == null) return;
-        bool converted = installation is UtilityPole pole && terrain.ConvertUtilityPolePresentation(pole, null, out _)
+        bool converted = installation is WorkableObject workable && terrain.ConvertWorkablePresentation(workable, null, out _)
+            || installation is LoggingMachine && terrain.ConvertForestryPresentation(installation, null, out _)
+            || installation is SeedPlanter && terrain.ConvertForestryPresentation(installation, null, out _)
+            || installation is UtilityPole pole && terrain.ConvertUtilityPolePresentation(pole, null, out _)
             || installation is MiningMachine miner && terrain.ConvertMiningPresentation(miner, null, out _)
             || installation is InputOutputModule module && terrain.ConvertProductionPresentation(module, null, out _);
         if (converted) terrain.ReleaseInstallationObject(installation);
@@ -4629,6 +4645,7 @@ public class InstallationPlacementController : MonoBehaviour
         editSession.splitterState = (installationObject as Spliterbelt)?.CaptureSplitterState();
         editSession.itemFilterMaskInitialized = installationObject.IsItemFilterMaskInitialized;
         editSession.itemFilterMaskWords = installationObject.CaptureItemFilterMaskWords();
+        editSession.loggingProcess = (installationObject as LoggingMachine)?.DataProcess ?? default;
         CaptureLoggingMachineFilterState(
             installationObject,
             out editSession.loggingTreeFilterInitialized,
@@ -5909,6 +5926,7 @@ public class InstallationPlacementController : MonoBehaviour
                 editSession.loggingTreeFilterInitialized,
                 editSession.loggingEnabledTreeDefinitionKeys,
                 editSession.loggingMinimumGrowth, editSession.loggingMaximumGrowth);
+            if (restoredObject is LoggingMachine restoredLogger) restoredLogger.DataProcess = editSession.loggingProcess;
             if (restoredObject is InstallationObject restoredInstallationObject)
             {
                 restoredInstallationObject.SetStoredFluidUnits(
@@ -6217,6 +6235,7 @@ public class InstallationPlacementController : MonoBehaviour
             editSession.loggingTreeFilterInitialized,
             editSession.loggingEnabledTreeDefinitionKeys,
             editSession.loggingMinimumGrowth, editSession.loggingMaximumGrowth);
+        if (replacementObject is LoggingMachine replacementLogger) replacementLogger.DataProcess = editSession.loggingProcess;
         if (replacementObject is BoxObject replacementBoxObject)
         {
             replacementBoxObject.SetStorageRange(editSession.boxMinimumRetainedItemCount, editSession.boxMaximumStoredItemCount);
@@ -23087,6 +23106,7 @@ public class InstallationPlacementController : MonoBehaviour
 
     private bool IsOilDrillingMachineTargetClaimedByInstalledObject(Vector2Int oilTargetCoordinate)
     {
+        if (ProductionWorld.Current != null && ProductionWorld.Current.IsOilTargetClaimed(oilTargetCoordinate)) return true;
         oilDrillingMachineOccupantScratch.Clear();
         for (int directionIndex = 0; directionIndex < PipeCardinalDirections.Length; directionIndex++)
         {
@@ -33808,6 +33828,24 @@ public class InstallationPlacementController : MonoBehaviour
         return upgraded != null;
     }
 
+    public bool TryUpgradeDataWorkable(WorkableInstance current, ItemDefinition definition, out IMapObjectTarget upgraded)
+    {
+        upgraded = null;
+        if (!TryMaterializeDataOnlyWorkableForEditing(current, out var proxy)) return false;
+        if (!TryUpgradeInstalledObject(proxy, definition, out var replacement))
+        {
+            RestoreDataFacilityEditorProxy(proxy);
+            return false;
+        }
+        if (WorkableWorld.Current != null && WorkableWorld.Current.TryGet(current.StorageKey, out var entity))
+        {
+            upgraded = entity;
+            if (replacement != null) ResolveInstallPreviewTerrain()?.ReleaseInstallationObject(replacement);
+        }
+        else upgraded = replacement;
+        return upgraded != null;
+    }
+
     public bool TryUpgradeInstalledObject(
         InstallationObject currentObject,
         ItemDefinition targetDefinition,
@@ -33860,6 +33898,8 @@ public class InstallationPlacementController : MonoBehaviour
             out int loggingMinimumGrowth,
             out int loggingMaximumGrowth);
         int boxMinimum = (currentObject as BoxObject)?.MinimumRetainedItemCount ?? BoxObject.DefaultMinimumRetainedItemCount;
+        var loggingProcess = (currentObject as LoggingMachine)?.DataProcess ?? default;
+        var seedPlanterState = (currentObject as SeedPlanter)?.CapturePersistentState();
         int boxMaximum = (currentObject as BoxObject)?.MaximumStoredItemCount ?? BoxObject.DefaultMaximumStoredItemCount;
         int storedFluidItemId = currentObject.StoredFluidItemId;
         long storedFluidUnits = currentObject.StoredFluidUnits;
@@ -33934,6 +33974,13 @@ public class InstallationPlacementController : MonoBehaviour
             loggingTreeFilterInitialized,
             loggingEnabledTreeDefinitionKeys,
             loggingMinimumGrowth, loggingMaximumGrowth);
+        if (replacementInstallation is LoggingMachine upgradedLogger) upgradedLogger.DataProcess = loggingProcess;
+        if (replacementInstallation is SeedPlanter upgradedPlanter && seedPlanterState != null)
+        {
+            upgradedPlanter.ApplyPersistentState(seedPlanterState);
+            ConfigureInstalledInputOutputRuntimeAreas(upgradedPlanter, anchorCoordinate, quarterTurns);
+            ConfigureInstalledInputOutputRuntimeGrid(upgradedPlanter, anchorCoordinate, quarterTurns);
+        }
         if (replacementInstallation is BoxObject replacementBox)
         {
             replacementBox.SetStorageRange(boxMinimum, boxMaximum);
@@ -38465,6 +38512,25 @@ public class InstallationPlacementController : MonoBehaviour
         return true;
     }
 
+    private bool TryMaterializeDataOnlyWorkableForEditing(WorkableInstance workable, out InstallationObject installationObject)
+    {
+        installationObject = null;
+        TerrainGenerator terrain = ResolveInstallPreviewTerrain();
+        if (terrain == null || workable == null || !workable.IsRuntimeActive) return false;
+        var proxy = terrain.CreateInstallationObject(workable.Prototype, terrain.transform) as WorkableObject;
+        if (proxy == null) return false;
+        proxy.transform.SetPositionAndRotation(workable.WorldPosition, workable.WorldRotation);
+        proxy.transform.localScale = workable.Template.Scale;
+        ConfigureInstalledObjectRuntime(proxy, workable.AnchorCoordinate, workable.Placement.quarterTurns,
+            placementSequence: workable.WorkablePlacementSequence, occupiedCoordinatesOverride: workable.RuntimeOccupiedCoordinates);
+        proxy.ApplyItemFilterMask(workable.Placement.itemFilterMaskWords, workable.Placement.itemFilterMaskInitialized);
+        workable.World.Remove(workable.StorageKey);
+        foreach (var coordinate in workable.RuntimeOccupiedCoordinates)
+            if (terrain.TryGetLoadedBlock(coordinate, out var block) && block != null) block.SetMapObject(proxy);
+        installationObject = proxy;
+        return true;
+    }
+
     private bool TryMaterializeDataOnlyBuildingForEditing(
         BuildingRuntimeRecord record,
         out InstallationObject installationObject)
@@ -41293,6 +41359,9 @@ public class InstallationPlacementController : MonoBehaviour
         }
 
         TerrainGenerator terrain = ResolveInstallPreviewTerrain();
+        if ((installationObject is LoggingMachine || installationObject is SeedPlanter) && terrain != null
+            && terrain.ConvertForestryPresentation(installationObject, sourcePrefab as InstallationObject, out var registeredForestry))
+        { dataOnlyPresentation = new DataOnlyPlacementPresentation(registeredForestry); return true; }
         if (installationObject is UtilityPole polePresentation && terrain != null
             && terrain.ConvertUtilityPolePresentation(polePresentation, sourcePrefab as UtilityPole, out var registeredPole))
         { dataOnlyPresentation = new DataOnlyPlacementPresentation(registeredPole); return true; }
@@ -41300,6 +41369,12 @@ public class InstallationPlacementController : MonoBehaviour
             && terrain.ConvertMiningPresentation(miningPresentation, sourcePrefab as MiningMachine, out var registeredMiner))
         {
             dataOnlyPresentation = new DataOnlyPlacementPresentation(registeredMiner);
+            return true;
+        }
+        if (installationObject is WorkableObject workablePresentation && terrain != null
+            && terrain.ConvertWorkablePresentation(workablePresentation, sourcePrefab as WorkableObject, out var registeredWorkable))
+        {
+            dataOnlyPresentation = new DataOnlyPlacementPresentation(registeredWorkable);
             return true;
         }
         if (installationObject is InputOutputModule productionPresentation && terrain != null
@@ -41429,55 +41504,40 @@ public class InstallationPlacementController : MonoBehaviour
         private readonly MiningMachineInstance miner;
         private readonly ProductionFacilityInstance production;
         private readonly UtilityPoleRuntime pole;
+        private readonly WorkableInstance workable;
+        private readonly ForestryInstance forestry;
 
         internal DataOnlyPlacementPresentation(ConveyorRuntimeRecord conveyor)
-        { pole = null;
-            miner = null; production = null;
-            this.conveyor = conveyor;
-            pipe = null;
-            robotArm = null;
-            building = null;
-        }
+        { this = default; this.conveyor = conveyor; }
 
         internal DataOnlyPlacementPresentation(PipeRuntimeRecord pipe)
-        { pole = null;
-            conveyor = null;
-            miner = null; production = null;
-            this.pipe = pipe;
-            robotArm = null;
-            building = null;
-        }
+        { this = default; this.pipe = pipe; }
 
         internal DataOnlyPlacementPresentation(RobotArmInstance robotArm)
-        { pole = null;
-            conveyor = null;
-            pipe = null;
-            miner = null; production = null;
-            this.robotArm = robotArm;
-            building = null;
-        }
+        { this = default; this.robotArm = robotArm; }
 
         internal DataOnlyPlacementPresentation(BuildingRuntimeRecord building)
-        { pole = null;
-            conveyor = null;
-            pipe = null;
-            robotArm = null;
-            miner = null; production = null;
-            this.building = building;
-        }
+        { this = default; this.building = building; }
 
         internal DataOnlyPlacementPresentation(MiningMachineInstance miner)
-        { pole = null; production = null; this.miner = miner; conveyor = null; pipe = null; robotArm = null; building = null; }
+        { this = default; this.miner = miner; }
 
         internal DataOnlyPlacementPresentation(ProductionFacilityInstance production)
-        { pole = null; this.production = production; miner = null; conveyor = null; pipe = null; robotArm = null; building = null; }
+        { this = default; this.production = production; }
 
         internal DataOnlyPlacementPresentation(UtilityPoleRuntime pole)
-        { this.pole = pole; production = null; miner = null; conveyor = null; pipe = null; robotArm = null; building = null; }
+        { this = default; this.pole = pole; }
+
+        internal DataOnlyPlacementPresentation(WorkableInstance workable)
+        { this = default; this.workable = workable; }
+        internal DataOnlyPlacementPresentation(ForestryInstance forestry)
+        { this = default; this.forestry = forestry; }
 
         internal void SetSuppressed(bool suppressed)
         {
-            if (pole != null) pole.PlacementPresentationSuppressed = suppressed;
+            if (forestry != null) forestry.PlacementPresentationSuppressed = suppressed;
+            else if (workable != null) workable.PlacementPresentationSuppressed = suppressed;
+            else if (pole != null) pole.PlacementPresentationSuppressed = suppressed;
             else if (production != null) production.PlacementPresentationSuppressed = suppressed;
             else if (miner != null) miner.PlacementPresentationSuppressed = suppressed;
             else if (conveyor != null)
@@ -41500,7 +41560,9 @@ public class InstallationPlacementController : MonoBehaviour
 
         internal void SetScale(float scale)
         {
-            if (pole != null) pole.PlacementPresentationScale = Mathf.Max(0, scale);
+            if (forestry != null) forestry.PlacementPresentationScale = Mathf.Max(0, scale);
+            else if (workable != null) workable.PlacementPresentationScale = Mathf.Max(0, scale);
+            else if (pole != null) pole.PlacementPresentationScale = Mathf.Max(0, scale);
             else if (production != null) production.PlacementPresentationScale = Mathf.Max(0, scale);
             else if (miner != null) miner.PlacementPresentationScale = Mathf.Max(0, scale);
             else if (conveyor != null)

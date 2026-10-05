@@ -34,15 +34,10 @@ public class ConveyorWorld
 }
 public partial class ConveyorRuntimeRecord
 {
-    private const float Belt2FPathLowHeight = .13f;
-    public sealed class PrototypeStub { public sealed class ObjectStub { public int layer; } public readonly ObjectStub gameObject = new(); }
-    public readonly PrototypeStub Prototype = new();
     public bool PlacementPresentationSuppressed;
     public bool IsCorner = true;
-    public Vector3 WorldPosition, WorldScale = Vector3.one;
     public Vector2Int AnchorCoordinate;
     public Vector2Int Input, Output;
-    public bool TryGetInputDirection(out Vector2Int direction) { direction = Input; return true; }
     public bool TryGetOutputDirection(out Vector2Int direction) { direction = Output; return true; }
     public void GetPlayerSideBarrierEndpoints(out Vector3 a, out Vector3 b) { a = b = default; }
     public bool Covers(Vector2Int coordinate) => coordinate == AnchorCoordinate;
@@ -97,18 +92,27 @@ public static partial class Checks
             foreach (Vector2Int port in new[] { input, output })
             {
                 Vector2 open = new Vector2(port.x, port.y);
-                Vector2 closed = -open;
-                Check(player.Sweep(closed * 2f, -closed, 4f, out var hit), "both corner variants block each closed side at high speed in all rotations");
-                Equal(hit.distance, 1.25f, "closed edge includes player radius");
-                Check(Vector2.Dot(new Vector2(hit.normal.x, hit.normal.z), closed) > .999f, "corner edge normal supports sliding");
+                Vector2 side = -open;
+                Check(!player.Sweep(side * 2f, -side, 4f, out _), "both corner variants allow side entry at high speed in all rotations");
                 Check(!player.Sweep(open * 1.2f, -open, 1f, out _), "both corner ports stay open");
-                Check(!player.Sweep(Vector2.zero, closed, 1.2f, out _), "player on belt can step off");
-                Check(!player.Sweep(closed * .75f, new Vector2(-closed.y, closed.x), .2f, out _), "parallel corner wall movement remains free");
-                Check(!player.Sweep(closed * .6f, closed, .1f, out _), "corner overlap permits escape");
-                Check(player.Sweep(closed * .6f, -closed, .1f, out _), "corner overlap blocks deeper entry");
+                Check(!player.Sweep(Vector2.zero, side, 1.2f, out _), "player on belt can step off");
+                Vector2 position = side * 1.2f;
+                for (int step = 0; step < 24; step++)
+                {
+                    Check(!player.Sweep(position, -side, .05f, out _), "walking onto corner side stays free across capsule overlap");
+                    position -= side * .05f;
+                }
             }
             Vector2 diagonal = new Vector2(input.x + output.x, input.y + output.y).normalized;
-            Check(player.Sweep(-diagonal * 2, diagonal, 3, out _), "diagonal cannot bypass closed corner");
+            Check(!player.Sweep(-diagonal * 2, diagonal, 3, out _), "diagonal corner entry is walkable");
+            PipeWorld.Current.Pipes[Vector2Int.zero] = new PipeRuntimeRecord(Vector2Int.zero,
+                new Bounds(new Vector3(0,.4f,0),new Vector3(.35f,.3f,1)));
+            Check(player.Sweep(Vector2.left * 2, Vector2.right,4,out _), "walking onto a corner still respects a pipe obstacle at that coordinate");
+            PipeWorld.Current.Pipes.Clear();
+            player.PhysicsHit = .1f;
+            Check(player.Sweep(-diagonal * 2,diagonal,3,out var physicsHit) && physicsHit.distance==.1f,
+                "walkable corner never bypasses a physical obstacle");
+            player.PhysicsHit = -1f;
             player.Height = 1f;
             Check(!player.Sweep(new Vector2(-input.x,-input.y)*2, new Vector2(input.x,input.y), 4, out _), "bridge above corner stays walkable");
             player.Height = 0;

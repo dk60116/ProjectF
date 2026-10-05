@@ -2,6 +2,44 @@ using UnityEngine;
 
 namespace ProjectF.Rendering
 {
+    // Allocation-free traversal shared by data-only installation focus queries.
+    internal struct SpatialRayCellTraversal
+    {
+        private readonly Vector2Int end;
+        private readonly int stepX, stepY;
+        private readonly float deltaX, deltaY, maximumDistance;
+        private float nextX, nextY;
+        private bool first, finished;
+        internal Vector2Int Current { get; private set; }
+
+        internal SpatialRayCellTraversal(Ray ray, float maximumDistance, int cellSize)
+        {
+            this.maximumDistance = maximumDistance;
+            Current = new Vector2Int(Mathf.FloorToInt(ray.origin.x / cellSize), Mathf.FloorToInt(ray.origin.z / cellSize));
+            Vector3 endpoint = ray.GetPoint(maximumDistance);
+            end = new Vector2Int(Mathf.FloorToInt(endpoint.x / cellSize), Mathf.FloorToInt(endpoint.z / cellSize));
+            stepX = System.Math.Sign(ray.direction.x); stepY = System.Math.Sign(ray.direction.z);
+            deltaX = stepX == 0 ? float.PositiveInfinity : cellSize / Mathf.Abs(ray.direction.x);
+            deltaY = stepY == 0 ? float.PositiveInfinity : cellSize / Mathf.Abs(ray.direction.z);
+            nextX = stepX == 0 ? float.PositiveInfinity
+                : ((Current.x + (stepX > 0 ? 1 : 0)) * cellSize - ray.origin.x) / ray.direction.x;
+            nextY = stepY == 0 ? float.PositiveInfinity
+                : ((Current.y + (stepY > 0 ? 1 : 0)) * cellSize - ray.origin.z) / ray.direction.z;
+            first = true;
+            finished = maximumDistance <= 0f;
+        }
+
+        internal bool MoveNext()
+        {
+            if (finished) return false;
+            if (first) { first = false; return true; }
+            if (Current == end || Mathf.Min(nextX, nextY) > maximumDistance) { finished = true; return false; }
+            if (nextX <= nextY) { Current = new Vector2Int(Current.x + stepX, Current.y); nextX += deltaX; }
+            else { Current = new Vector2Int(Current.x, Current.y + stepY); nextY += deltaY; }
+            return true;
+        }
+    }
+
     // View-only state. Never suspends simulation roots or changes item readiness.
     public sealed class CameraRenderCulling
     {

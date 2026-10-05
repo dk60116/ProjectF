@@ -13,3 +13,5 @@ point=member('Map/UtilityPoleRuntime.Identity.cs','internal sealed class Utility
 (out/'Point.cs').write_text('using UnityEngine; namespace ProjectF.Power { '+point+' }',encoding='utf-8')
 wire=member('Rendering/UtilityPoleWireRenderer.cs','internal sealed class UtilityPoleWire')
 (out/'Wire.cs').write_text('using UnityEngine; namespace ProjectF.Rendering { '+wire+' }',encoding='utf-8')
+traversal=member('Rendering/CameraRenderCulling.cs','internal struct SpatialRayCellTraversal')
+(out/'Traversal.cs').write_text('using UnityEngine; namespace ProjectF.Rendering { '+traversal+' }',encoding='utf-8')

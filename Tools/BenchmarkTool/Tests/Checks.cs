@@ -50,6 +50,10 @@ public readonly record struct OutputEntry(ItemDefinition itemDefinition, float R
 }
 public partial class InputOutputModule
 {
+    // The actual supply adapter is exercised by ProductionEcsHarness -BenchmarkInputs.
+    private void RefreshBenchmarkInputs() { }
+    private void ConsumeBenchmarkInputs() { }
+    private void SampleBenchmarkEnergy() { }
     public ItemDefinition Definition = new();
     public readonly List<OutputEntry> OutputList = new();
     public Transform transform = new();
@@ -98,6 +102,13 @@ public class SteamGenerator : InputOutputModule
     public void SetBenchmarkGeneration(bool enabled) => Generating = enabled;
 }
 public class CrudeOilRefinery : InputOutputModule { }
+public class OilDrillingMachine : InputOutputModule
+{
+    public int OilItemId = 20;
+    public float OilLitersPerSecond = .75f;
+    public bool TryGetObjectInfoOutputRate(out int itemId, out float litersPerSecond)
+    { itemId = OilItemId; litersPerSecond = OilLitersPerSecond; return itemId >= 0; }
+}
 public partial class LoggingMachine
 {
     public object activeTree;
@@ -106,6 +117,7 @@ public partial class LoggingMachine
     public readonly ItemDefinition Definition = new();
     public readonly Transform transform = new();
     public bool Working;
+    public bool IsWorkingForItemLight => Working;
     public int Turns;
     public void Tick(float delta) => ApplyBenchmarkWork(delta);
     private void SetWorking(bool value) => Working = value;
@@ -189,6 +201,27 @@ internal static class Checks
             Require(!BenchmarkCommand.TryParse(invalid.Split(' '), out _, out _), "reject invalid " + invalid);
         CheckProduction();
 
+        Require(Parse("benchmark randomizeprogress").Action == BenchmarkAction.RandomizeProgress, "progress command without item selection");
+        Require(Parse("benchmark RANDOMIZEPROGRESS").Action == BenchmarkAction.RandomizeProgress, "progress command is case insensitive");
+        Require(!BenchmarkCommand.TryParse("benchmark randomizeprogress 1 2".Split(' '), out _, out _), "progress command rejects extra arguments");
+        var random = new Random(42);
+        var randomized = new InputOutputModule(); randomized.Tick(.1f);
+        int beforeOutputs = randomized.OutputCount;
+        Require(randomized.TryRandomizeWorkProgress(random), "native active work randomizes");
+        Require(randomized.State.ConsumedEnergyUnits > 0 && randomized.State.ConsumedEnergyUnits < DeterministicSimulationUnits.FromInt(120), "energy progress stays below completion");
+        Require(randomized.OutputCount == beforeOutputs && !randomized.State.WaitingForOutput, "randomization emits no items");
+        var inactive = new InputOutputModule(); Require(!inactive.TryRandomizeWorkProgress(random), "idle native work stays idle");
+        var timed = new InputOutputModule { Definition = new ItemDefinition { Powered = false } }; timed.Tick(.1f);
+        Require(timed.TryRandomizeWorkProgress(random) && timed.State.RemainingTicks > 0 && timed.State.RemainingTicks <= 120, "time-based work randomizes its countdown");
+        var pending = ProductionProcess.Empty; pending.Begin(2, 20, 3, 0); pending.WaitingForOutput = true;
+        Require(!pending.TrySetWorkProgress(.5, 100, 0) && pending.WaitingForOutput && pending.OutputCount == 3, "pending completed output is preserved");
+        var edge = ProductionProcess.Empty; edge.Begin(2, 20, 3, 0);
+        Require(edge.TrySetWorkProgress(1, 100, 0) && edge.ConsumedEnergyUnits == 99 && !edge.WaitingForOutput, "100 percent input cannot complete work immediately");
+        Require(!edge.TrySetWorkProgress(double.NaN, 100, 0) && !edge.TrySetWorkProgress(double.PositiveInfinity, 100, 0), "nonfinite fractions rejected");
+        var randomizedLogger = new LoggingMachine();
+        Require(!randomizedLogger.TryRandomizeWorkProgress(random), "idle logger unchanged");
+        randomizedLogger.Tick(.1f);
+        Require(randomizedLogger.TryRandomizeWorkProgress(random) && randomizedLogger.Working && randomizedLogger.Turns == 0, "active logger randomizes without harvesting or turning");
         Console.WriteLine($"PASS: {assertions} benchmark layout, protocol and forced production checks");
     }
     private static void Step(InputOutputModule module, int ticks)
@@ -238,5 +271,36 @@ internal static class Checks
         foreach (var consumer in new InputOutputModule[] { new Pump(), new Sprinkler(), new SeedPlanter() })
         { Step(consumer, 120); Require(consumer.State.Active, "service machine stays active"); }
         Require(BenchmarkRuntime.Produced == old, "service machines never invent manufactured items");
+        var drill = new OilDrillingMachine();
+        int fallbackItemId = BenchmarkRuntime.FallbackItemId;
+        old = BenchmarkRuntime.Produced;
+        BenchmarkRuntime.Spill = 0;
+        Step(drill, 119);
+        Require(drill.Fluids.Count == 0 && drill.State.OutputItemId == drill.OilItemId,
+            "drill uses virtual oil output without fallback craft");
+        Step(drill, 1);
+        Near(drill.Fluids[20], 1.5f, "drill emits configured L/s times craft duration");
+        Require(drill.OutputCount == 0 && BenchmarkRuntime.Produced == old, "drill never emits portable fallback items");
+        BenchmarkRuntime.FallbackItemId = 21;
+        Step(drill, 120);
+        Near(drill.Fluids[20], 3f, "selected benchmark item does not alter oil output");
+        Require(!drill.Fluids.ContainsKey(21), "drill ignores fluid fallback item as well");
+        var blockedDrill = new OilDrillingMachine { FluidAcceptedLimit = .5f };
+        Step(blockedDrill, 240);
+        Near(blockedDrill.Fluids[20], 1f, "blocked drill delivers available fluid capacity");
+        Near(BenchmarkRuntime.Spill, 2f, "blocked drill records excess oil as fluid spill");
+        Require(blockedDrill.OutputCount == 0 && blockedDrill.State.Active, "blocked drill continues without floor items");
+        var zeroRateDrill = new OilDrillingMachine { OilLitersPerSecond = 0 };
+        Step(zeroRateDrill, 120);
+        Near(zeroRateDrill.Fluids.GetValueOrDefault(20), 0, "zero-rate drill produces no oil");
+        var invalidDrill = new OilDrillingMachine { OilItemId = 11 };
+        invalidDrill.OutputList.Add(new(new() { id = 12 }, 3));
+        Step(invalidDrill, 120);
+        Require(!invalidDrill.State.Active && invalidDrill.OutputCount == 0 && invalidDrill.Fluids.Count == 0,
+            "non-fluid oil configuration cannot produce recipe or fallback items");
+        Require(BenchmarkRuntime.Produced == old, "all drill cases remain free of portable output");
+        drill.ResetBenchmarkWork();
+        Require(!drill.State.Active, "force reset clears drill benchmark craft");
+        BenchmarkRuntime.FallbackItemId = fallbackItemId;
     }
 }

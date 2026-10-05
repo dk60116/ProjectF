@@ -25,6 +25,7 @@ public partial class BlockStateStore
         VirtualObjectWorld world = ResolveVirtualObjectWorld();
         MiningWorld.Current?.FlushSaveStates();
         ProductionWorld.Current?.FlushSaveStates();
+        ProjectF.MapObjects.ForestryWorld.Current?.PersistAll();
         mapObjectItemClearLiveKeys.Clear();
 
         foreach (KeyValuePair<Vector2Int, LiveInstallationRecord> pair in liveInstallationStates)
@@ -84,6 +85,7 @@ public partial class BlockStateStore
         RobotArmWorld.Current?.ClearItems();
         MiningWorld.Current?.ClearItems();
         ProductionWorld.Current?.ClearItems();
+        ProjectF.MapObjects.ForestryWorld.Current?.ClearItems();
         mapObjectItemClearLiveKeys.Clear();
         return result;
     }

@@ -25,6 +25,17 @@ public class OilDrillingMachine : InputOutputModule, IFacilityRuntimeWakeTarget
     private float pumpjackRodStroke = 0.08f;
 
     private long productionProgressUnits;
+    public override bool TryRandomizeWorkProgress(System.Random random)
+    {
+        if (IsBenchmarkWorking) return base.TryRandomizeWorkProgress(random);
+        ResolveObjectInfoStatus(out bool working);
+        if (!working || pendingOilOutputUnits > 0 || !TryResolveOilResource(out var resource)) return false;
+        long complete = DeterministicSimulationUnits.FromInt(System.Math.Max(1, resource.GetCount));
+        if (productionProgressUnits >= complete) return false;
+        productionProgressUnits = System.Math.Min(complete - 1, (long)(complete * (decimal)random.NextDouble()));
+        MarkManagedRuntimeVisualsDirty(); WakeRuntimeUpdate(); return true;
+    }
+    private long pendingOilOutputUnits;
     private ResourceInstance cachedOilResource;
     private bool isExtracting;
     private readonly List<Vector2Int> runtimeWakeCoordinates = new List<Vector2Int>(1);
@@ -66,7 +77,7 @@ public class OilDrillingMachine : InputOutputModule, IFacilityRuntimeWakeTarget
     public override float GetObjectInfoFluidPressureLitersPerSecond(int fluidItemId)
     {
         return isActiveAndEnabled
-               && isExtracting
+               && (IsBenchmarkWorking || isExtracting)
                && TryGetObjectInfoOutputRate(out int outputItemId, out float litersPerSecond)
                && outputItemId == fluidItemId
             ? Mathf.Max(0f, litersPerSecond * OperationalAnimationSpeedRatio)
@@ -86,6 +97,7 @@ public class OilDrillingMachine : InputOutputModule, IFacilityRuntimeWakeTarget
         PersistentState state = base.CapturePersistentState();
         state.oilDrillingProgressLiters = DeterministicSimulationUnits.ToFloat(productionProgressUnits);
         state.oilDrillingProgressUnits = productionProgressUnits;
+        state.productionOutputFluidUnits = pendingOilOutputUnits;
         return state;
     }
 
@@ -95,6 +107,7 @@ public class OilDrillingMachine : InputOutputModule, IFacilityRuntimeWakeTarget
         productionProgressUnits = state != null
             ? state.ResolveOilDrillingProgressUnits()
             : 0L;
+        pendingOilOutputUnits = state != null ? System.Math.Max(0L, state.productionOutputFluidUnits) : 0L;
     }
 
     public override void PrepareForPool()
@@ -102,6 +115,7 @@ public class OilDrillingMachine : InputOutputModule, IFacilityRuntimeWakeTarget
         FacilityRuntimeWakeRegistry.Unregister(this);
         RestorePumpjackVisual();
         productionProgressUnits = 0L;
+        pendingOilOutputUnits = 0L;
         cachedOilResource = null;
         isExtracting = false;
         base.PrepareForPool();
@@ -314,6 +328,8 @@ public class OilDrillingMachine : InputOutputModule, IFacilityRuntimeWakeTarget
 
     private bool ExtractOil(float deltaTime)
     {
+        FlushPendingOil();
+        if (pendingOilOutputUnits > 0L) return false;
         int oilItemId = ResolveOilItemId();
         float effectiveOilLitersPerSecond = OilLitersPerSecond
                                             * ResolveFluidOutputTransportRetention(oilItemId, OilLitersPerSecond);
@@ -362,6 +378,7 @@ public class OilDrillingMachine : InputOutputModule, IFacilityRuntimeWakeTarget
         int harvestCount = 0;
         while (resource != null
                && resource.CanHarvest
+               && pendingOilOutputUnits == 0L
                && harvestCount < MaxHarvestsPerTick
                && resource.TryPeekMachineHarvestOutput(out int outputItemId, out int outputCount)
                && outputCount > 0
@@ -376,21 +393,20 @@ public class OilDrillingMachine : InputOutputModule, IFacilityRuntimeWakeTarget
                 return;
             }
 
-            if (!TryEmitFluidOutputToConnectedStorages(
-                    harvestedItemId,
-                    harvestedCount,
-                    GetStoredFluidTemperatureCelsius(harvestedItemId),
-                    out float acceptedLiters)
-                || acceptedLiters + FluidEpsilon < harvestedCount)
-            {
-                return;
-            }
-
-            productionProgressUnits = System.Math.Max(
-                0L,
-                productionProgressUnits - DeterministicSimulationUnits.FromFloat(acceptedLiters));
+            pendingOilOutputUnits = DeterministicSimulationUnits.FromInt(harvestedCount);
+            productionProgressUnits = System.Math.Max(0L, productionProgressUnits - pendingOilOutputUnits);
+            FlushPendingOil();
             harvestCount++;
         }
+    }
+
+    private void FlushPendingOil()
+    {
+        if (pendingOilOutputUnits <= 0L) return;
+        int oilItemId = ResolveOilItemId();
+        TryEmitFluidOutputToConnectedStorages(oilItemId, DeterministicSimulationUnits.ToFloat(pendingOilOutputUnits),
+            GetStoredFluidTemperatureCelsius(oilItemId), out float acceptedLiters);
+        pendingOilOutputUnits = System.Math.Max(0L, pendingOilOutputUnits - DeterministicSimulationUnits.FromFloat(acceptedLiters));
     }
 
     private bool HasOilOutputSpace(ResourceInstance resource)

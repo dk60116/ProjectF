@@ -17,8 +17,6 @@ $generated = "using UnityEngine; using ProjectF.Conveyors; public partial class 
 $generated += (Member 'private readonly struct PlayerCollisionPart') + "`n"
 $generated += (Member 'internal bool TrySweepPlayer(') + "`n}`n"
 $generated += Member 'internal static class PipePlayerCollision'
-$source = [IO.File]::ReadAllText((Join-Path $root 'FactorioProject/Assets/Scripts/Map/ConveyorWorld.cs'))
-$generated += "public partial class ConveyorRuntimeRecord {`n" + (Member 'internal bool TrySweepCornerPlayer(') + "`n}"
 $probe = Join-Path ([IO.Path]::GetTempPath()) ('ProjectF-PipeCollision-' + [Guid]::NewGuid().ToString('N'))
 New-Item -ItemType Directory -Path $probe | Out-Null
 [IO.File]::WriteAllText((Join-Path $probe 'Production.cs'), $generated)

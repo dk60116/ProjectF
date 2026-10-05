@@ -22,12 +22,37 @@ internal sealed class RobotArmRenderTemplate
     private readonly Matrix4x4[] matrices;
     private readonly int bodyIndex, handIndex, powerLineIndex;
     private readonly Vector3 rootScale;
+    private bool handPoseCached;
+    private Quaternion handPoseBodyRotation;
+    private int handPoseAnimationKind;
+    private float handPoseAnimationTime;
+    private Vector3 handPoseLocalPosition;
+    internal readonly ItemDefinition Definition;
+    internal readonly float ElectricUseWatts;
+    internal readonly bool HasCollider, ColliderIsTrigger;
+    internal readonly Vector3 ColliderCenterOffset;
+    internal readonly float ColliderRadius;
+    internal readonly PhysicsMaterial ColliderMaterial;
+    internal readonly int ColliderLayer;
     internal float CullDiameter { get; private set; } = 3f;
     internal int LayerMask { get; private set; }
     internal Quaternion BodyRotation => bodyIndex >= 0 ? nodes[bodyIndex].Rotation : Quaternion.identity;
-    internal RobotArmRenderTemplate(RobotArm source)
+    internal Quaternion OutputBodyRotation { get; }
+    internal RobotArmRenderTemplate(RobotArm source, int itemId)
     {
+        Definition = InputOutputModule.ResolveItemDefinition(itemId);
+        ElectricUseWatts = ItemDefinition.ResolveElectricUseWatts(Definition);
         rootScale = source.transform.localScale;
+        SphereCollider collider = source.GetComponent<SphereCollider>();
+        HasCollider = collider != null && collider.enabled;
+        if (HasCollider)
+        {
+            ColliderCenterOffset = Vector3.Scale(collider.center, rootScale);
+            ColliderRadius = collider.radius * Mathf.Max(Mathf.Abs(rootScale.x), Mathf.Abs(rootScale.y), Mathf.Abs(rootScale.z));
+            ColliderMaterial = collider.sharedMaterial;
+            ColliderIsTrigger = collider.isTrigger;
+            ColliderLayer = source.gameObject.layer;
+        }
         var transforms = source.GetComponentsInChildren<Transform>(true);
         var indices = new Dictionary<Transform, int>();
         var list = new List<Node>();
@@ -62,6 +87,7 @@ internal sealed class RobotArmRenderTemplate
             list.Add(n);
         }
         nodes = list.ToArray();
+        OutputBodyRotation = BodyRotation * Quaternion.Euler(0f, 180f, 0f);
         matrices = new Matrix4x4[nodes.Length];
         foreach (var t in transforms)
         {
@@ -85,8 +111,12 @@ internal sealed class RobotArmRenderTemplate
     private Quaternion EvaluateRotation(RobotArmInstance arm, Node node, int index)
     {
         if (index == bodyIndex) return arm.BodyRotation;
-        var track = arm.AnimationKind == 1 ? node.Pick : arm.AnimationKind == 2 ? node.Drop : null;
-        return track.HasValue && arm.AnimationTime < 1f ? track.Value.Evaluate(arm.AnimationTime) : node.Rotation;
+        return EvaluateAnimationRotation(node, arm.AnimationKind, arm.AnimationTime);
+    }
+    private static Quaternion EvaluateAnimationRotation(Node node, int kind, float time)
+    {
+        var track = kind == 1 ? node.Pick : kind == 2 ? node.Drop : null;
+        return track.HasValue && time < 1f ? track.Value.Evaluate(time) : node.Rotation;
     }
     private Matrix4x4 EvaluateChain(RobotArmInstance arm, int index)
     {
@@ -95,7 +125,27 @@ internal sealed class RobotArmRenderTemplate
         return EvaluateChain(arm, n.Parent) * Matrix4x4.TRS(n.Position, EvaluateRotation(arm, n, index), n.Scale);
     }
     internal Vector3 BodyWorld(RobotArmInstance arm) => EvaluateChain(arm, bodyIndex).MultiplyPoint3x4(Vector3.zero);
-    internal Vector3 HandWorld(RobotArmInstance arm) => EvaluateChain(arm, handIndex >= 0 ? handIndex : 0).MultiplyPoint3x4(Vector3.zero);
+    internal Vector3 HandWorld(RobotArmInstance arm)
+    {
+        Quaternion rotation = arm.BodyRotation;
+        int kind = arm.AnimationKind;
+        float time = arm.AnimationTime;
+        if (!handPoseCached || !handPoseBodyRotation.Equals(rotation) || handPoseAnimationKind != kind || handPoseAnimationTime != time)
+        {
+            handPoseLocalPosition = EvaluateHandLocalChain(handIndex >= 0 ? handIndex : 0, rotation, kind, time).MultiplyPoint3x4(Vector3.zero);
+            handPoseBodyRotation = rotation; handPoseAnimationKind = kind; handPoseAnimationTime = time;
+            handPoseCached = true;
+        }
+        return arm.WorldPosition + arm.WorldRotation * handPoseLocalPosition;
+    }
+    private Matrix4x4 EvaluateHandLocalChain(int index, Quaternion bodyRotation, int animationKind, float animationTime)
+    {
+        if (index < 0) return Matrix4x4.Scale(rootScale);
+        Node node = nodes[index];
+        Quaternion rotation = index == bodyIndex ? bodyRotation
+            : EvaluateAnimationRotation(node, animationKind, animationTime);
+        return EvaluateHandLocalChain(node.Parent, bodyRotation, animationKind, animationTime) * Matrix4x4.TRS(node.Position, rotation, node.Scale);
+    }
     internal Vector3 PowerLineWorld(RobotArmInstance arm) =>
         EvaluateChain(arm, powerLineIndex >= 0 ? powerLineIndex : bodyIndex).MultiplyPoint3x4(Vector3.zero);
     internal int Append(RobotArmInstance arm, VirtualRenderBatchCollection batches)

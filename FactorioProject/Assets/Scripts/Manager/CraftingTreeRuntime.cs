@@ -31,6 +31,7 @@ public static class CraftingTreeRuntime
 
     private static readonly Dictionary<int, List<int>> CraftableByIngredient = new Dictionary<int, List<int>>();
     private static readonly Dictionary<int, List<int>> CraftableByRequiredMapObject = new Dictionary<int, List<int>>();
+    private static readonly List<int> HandCraftableItemIds = new List<int>();
     private static readonly Dictionary<int, List<IngredientEntry>> IngredientsByItem = new Dictionary<int, List<IngredientEntry>>();
     private static readonly Dictionary<int, List<int>> RequiredCraftingMapObjectIdsByItem = new Dictionary<int, List<int>>();
     private static readonly Dictionary<int, float> OutputCountByItem = new Dictionary<int, float>();
@@ -73,10 +74,24 @@ public static class CraftingTreeRuntime
         return results.Count > 0;
     }
 
+    public static bool TryGetHandCraftableItemIds(List<int> results)
+    {
+        if (results == null)
+        {
+            return false;
+        }
+
+        EnsureLoaded();
+        results.Clear();
+        results.AddRange(HandCraftableItemIds);
+        return results.Count > 0;
+    }
+
     public static void ForceReload()
     {
         CraftableByIngredient.Clear();
         CraftableByRequiredMapObject.Clear();
+        HandCraftableItemIds.Clear();
         IngredientsByItem.Clear();
         RequiredCraftingMapObjectIdsByItem.Clear();
         OutputCountByItem.Clear();
@@ -265,6 +280,15 @@ public static class CraftingTreeRuntime
         {
             list.Sort((left, right) => left.itemId.CompareTo(right.itemId));
         }
+
+        foreach (int itemId in IngredientsByItem.Keys)
+        {
+            if (!RequiredCraftingMapObjectIdsByItem.ContainsKey(itemId))
+            {
+                HandCraftableItemIds.Add(itemId);
+            }
+        }
+        HandCraftableItemIds.Sort();
 
         loaded = true;
     }

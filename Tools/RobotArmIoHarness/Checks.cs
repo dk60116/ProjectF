@@ -100,7 +100,8 @@ public partial class InputOutputModule : MapObject
     private int ResolveRuntimeBlockCenterCapacity(Vector2Int coordinate, int itemId, int defaultCapacity) => defaultCapacity;
     private const int RuntimeAreaMaxObjects = 10;
 }
-public class ItemDefinition { public int id; public string itemName; public bool keepIoAreaItemsInPlaceWhileEditing; public MapObject mapObject; }
+public class ItemDefinition { public int id; public string itemName; public bool isFluid, keepIoAreaItemsInPlaceWhileEditing; public MapObject mapObject; }
+namespace ProjectF.Benchmark { public static class BenchmarkRuntime { public static bool ForceWorking; } }
 public class ItemManager { public List<ItemDefinition> ItemDefinitions = new(); }
 public class GameManager { public static GameManager Instance = new(); public ItemManager ItemManger = new(); }
 public class DroppedItemPickupGate
@@ -150,6 +151,9 @@ public partial class Block
     public Vector3 WorldPosition;
     public bool Enabled = true;
     private void EnsureFloorObjectsInitialized() { }
+    public int MaterializeDeferredOutputs(int budget) => 0;
+    public bool TryAddDeferredOutput(int itemId, Vector3 start, float delay, bool blockAutoPickup, out bool handled)
+    { handled = false; return false; }
     private void CleanupConveyorStack() { }
     private void CleanupPortableStack(List<PortableObject> stack) => stack.RemoveAll(item => item == null);
     private static PortableObject GetTopPortableObject(List<PortableObject> stack) =>
@@ -179,7 +183,7 @@ public partial class Block
     public bool TryAddConveyorObjectAnimatedAtPlacement(int itemId, Vector3 placementReference, Vector3 start,
         float delay, out PortableObject output, Action onComplete = null,
         Func<Vector3> startWorldPositionProvider = null, float movementReleaseDelay = 0f,
-        bool useJumpArc = true, float moveDuration = PortableObject.MoveToDuration)
+        bool useJumpArc = true, float moveDuration = PortableObject.MoveToDuration, bool forceAnimatedPlacement = false)
     {
         PlacementReference = placementReference; StartPosition = start; AddDelay = delay;
         LastUseJumpArc = useJumpArc; LastMoveDuration = moveDuration;
@@ -263,7 +267,7 @@ public static partial class Checks
             "FactorioProject/Assets/Scripts/Object/MapObj/InstallationObject/InputOutputModule.cs"));
         Require(!moduleSource.Contains("DrainOutputAreaStack")
                 && Regex.IsMatch(moduleSource,
-                    @"protected void ApplyPlannedBaseModuleTick\(float deltaTime\)\s*\{[^{}]*TryDrainOneOutputAreaItemToConveyor\(\);"),
+                    @"if \(outputDrainCheckPending\)\s*\{\s*outputDrainCheckPending = TryDrainOneOutputAreaItemToConveyor\(out hasStoredOutputOnConveyor\);"),
             "stored output must check live belt capacity during apply, not a stale plan command");
         Require(!robotArmSource.Contains("HasNearbyRuntimeInteractionTarget"),
             "empty arms must sleep after an actual pickup miss instead of polling nearby installations");
@@ -464,7 +468,7 @@ public static partial class Checks
         arm.Placed = true; arm.RuntimePlacementSequence++; arm.RectGridPlacements.RemoveAt(0);
         Require(!arm.Coordinates(out _, out _), "missing output must fail without inventing a virtual port");
         GameManager.Instance.ItemManger.ItemDefinitions.AddRange(new ItemDefinition[] { null, new() { id = -1 }, new() { id = 1 },
-            new() { id = 2, itemName = "Water" }, new() { id = 3 }, new() { id = 4, itemName = "Steam" }, new() { id = 5, itemName = "Oil" } });
+            new() { id = 2, itemName = "Water", isFluid = true }, new() { id = 3 }, new() { id = 4, itemName = "Steam", isFluid = true }, new() { id = 5, itemName = "Oil", isFluid = true } });
         var accepted = new HashSet<int>();
         Require(arm.TryCollectTransferItemIds(accepted) && accepted.SetEquals(new[] { 1, 3 }), "standard transfer areas accept valid solid items only");
         foreach (RobotArm.RobotArmState state in Enum.GetValues<RobotArm.RobotArmState>())
