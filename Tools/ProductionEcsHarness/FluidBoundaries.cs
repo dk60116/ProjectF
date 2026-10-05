@@ -114,7 +114,10 @@ public partial class InputOutputModule
     public bool TryAddDedicatedFluidAtRuntimeCoordinate(Vector2Int coordinate, int item, float volume, float temperature, out float accepted)
     { accepted = 0; return !RejectDedicated && TryAddFluidLiters(item, volume, out accepted); }
     public void WakeDataFluidOutput() { }
-    public static void NotifyDataFluidStorageChanged() => StorageChanges++;
+    public static void NotifyDataFluidStorageChanged(ProductionFacilityInstance storage)
+    {
+        storage.FluidStorageStateRevision = ++StorageChanges;
+    }
 }
 public partial class ProductionWorld
 {

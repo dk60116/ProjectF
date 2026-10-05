@@ -22,13 +22,16 @@ namespace ProjectF.MapObjects
             new Dictionary<int, StaticMapObjectTypeHost>();
         private readonly List<StaticMapObjectTypeHost> hostScratch =
             new List<StaticMapObjectTypeHost>(32);
-        private readonly List<int> emptyHostItemIds = new List<int>(16);
         private readonly HashSet<int> rejectedTypeIds = new HashSet<int>();
+        private readonly Dictionary<int, ItemDefinition> supportedDefinitionsByItemId = new Dictionary<int, ItemDefinition>();
+        private readonly Dictionary<int, int> synchronizedTypeVersions = new Dictionary<int, int>();
+        private readonly List<KeyValuePair<int, int>> typeVersions = new List<KeyValuePair<int, int>>(32);
+        private readonly List<KeyValuePair<int, int>> changedTypeVersions = new List<KeyValuePair<int, int>>(32);
 
         private VirtualObjectWorld virtualWorld;
         private ItemManager itemManager;
         private Camera mainCamera;
-        private int cachedInstallationVersion = -1;
+        private int cachedDataOnlyInstallationVersion = -1;
         private int synchronizationCount;
         private int lastSynchronizationFrame = -1;
         private int lastSynchronizedDataOnlyInstallationCount;
@@ -39,14 +42,15 @@ namespace ProjectF.MapObjects
         {
             ResolveDependencies();
             if (virtualWorld == null || itemManager == null) yield break;
-            int installationVersion = virtualWorld.InstallationVersion;
+            int revision = virtualWorld.DataOnlyInstallationVersion;
+            CollectChangedTypes();
             var work = SynchronizeHostsCore(true);
             bool completed = false;
             try
             {
                 while (work.MoveNext()) yield return null;
                 completed = true;
-                cachedInstallationVersion = installationVersion;
+                cachedDataOnlyInstallationVersion = revision;
             }
             finally
             {
@@ -141,7 +145,7 @@ namespace ProjectF.MapObjects
                 "Render",
                 "Static Installation Render",
                 "Static Installation Render (inclusive)");
-            // InstallationVersion changes repeatedly while saved chunks are restored. Preserve
+            // Presentation revisions change repeatedly while saved chunks are restored. Preserve
             // the stale cached versions so the first ready frame performs one complete sync.
             if (MapObjectTickManager.WaitingForWorldLoad
                 || TerrainGenerator.Active != null && TerrainGenerator.Active.IsBenchmarkPlacementInProgress)
@@ -188,9 +192,15 @@ namespace ProjectF.MapObjects
 
         private void SynchronizeHostsIfNeeded()
         {
-            int installationVersion = virtualWorld.InstallationVersion;
-            if (cachedInstallationVersion == installationVersion)
+            if (cachedDataOnlyInstallationVersion == virtualWorld.DataOnlyInstallationVersion)
             {
+                return;
+            }
+            int revision = virtualWorld.DataOnlyInstallationVersion;
+            CollectChangedTypes();
+            if (changedTypeVersions.Count == 0)
+            {
+                cachedDataOnlyInstallationVersion = revision;
                 return;
             }
 
@@ -201,7 +211,26 @@ namespace ProjectF.MapObjects
             {
                 SynchronizeHosts();
             }
-            cachedInstallationVersion = installationVersion;
+            cachedDataOnlyInstallationVersion = revision;
+        }
+
+        private void CollectChangedTypes()
+        {
+            changedTypeVersions.Clear();
+            virtualWorld.CopyDataOnlyInstallationTypeVersions(typeVersions);
+            for (int i = 0; i < typeVersions.Count; i++)
+            {
+                KeyValuePair<int, int> type = typeVersions[i];
+                if (synchronizedTypeVersions.TryGetValue(type.Key, out int synchronizedVersion)
+                    && synchronizedVersion == type.Value) continue;
+                if (TryGetSupportedArchetype(type.Key, out _)) changedTypeVersions.Add(type);
+                else
+                {
+                    if (virtualWorld.GetDataOnlyInstallationCount(type.Key) == 0) rejectedTypeIds.Remove(type.Key);
+                    else rejectedTypeIds.Add(type.Key);
+                    synchronizedTypeVersions[type.Key] = type.Value;
+                }
+            }
         }
 
         private void SynchronizeHosts()
@@ -212,72 +241,62 @@ namespace ProjectF.MapObjects
 
         private IEnumerator SynchronizeHostsCore(bool spreadAcrossFrames)
         {
+            BenchmarkSyncDone = 0;
+            BenchmarkSyncTotal = 0;
+            for (int i = 0; i < changedTypeVersions.Count; i++)
+            {
+                BenchmarkSyncTotal += virtualWorld.GetDataOnlyInstallationCount(changedTypeVersions[i].Key);
+            }
+            if (changedTypeVersions.Count == 0) yield break;
             long started = System.Diagnostics.Stopwatch.GetTimestamp();
             synchronizationCount++;
             lastSynchronizationFrame = Time.frameCount;
-            CopyHostsToScratch();
-            for (int i = 0; i < hostScratch.Count; i++)
+            lastSynchronizedDataOnlyInstallationCount = 0;
+            // Synchronize only changed supported types; unchanged hosts retain their matrices.
+            for (int typeIndex = 0; typeIndex < changedTypeVersions.Count; typeIndex++)
             {
-                hostScratch[i].BeginSynchronization();
-            }
-
-            virtualWorld.CopyInstallationRecords(dataOnlyInstallations, true);
-            BenchmarkSyncDone = 0;
-            BenchmarkSyncTotal = dataOnlyInstallations.Count;
-            rejectedTypeIds.Clear();
-            // Data-only entities have no source GameObject to enumerate. Their authoritative
-            // pose and generation-safe handle are sufficient to build the presentation batch.
-            lastSynchronizedDataOnlyInstallationCount = dataOnlyInstallations.Count;
-            for (int i = 0; i < dataOnlyInstallations.Count; i++)
-            {
-                BenchmarkSyncDone++;
-                if (spreadAcrossFrames && BenchmarkLayout.IsWorkSliceExpired(started,
-                    System.Diagnostics.Stopwatch.GetTimestamp(), System.Diagnostics.Stopwatch.Frequency))
-                { yield return null; started = System.Diagnostics.Stopwatch.GetTimestamp(); }
-                VirtualObjectRecord record = dataOnlyInstallations[i];
-                if (record == null
-                    || record.kind != VirtualObjectKind.Installation
-                    || record.HasAttachedView
-                    || record.installationState != null && UtilityPoleWorld.Current != null
-                        && UtilityPoleWorld.Current.TryGet(BlockStateStore.GetInstallationStorageKey(record.installationState), out _)
-                    || record.installationState != null && ProductionWorld.Current != null
-                        && ProductionWorld.Current.TryGet(BlockStateStore.GetInstallationStorageKey(record.installationState), out _)
-                    || record.installationState != null && MiningWorld.Current != null
-                        && MiningWorld.Current.TryGet(BlockStateStore.GetInstallationStorageKey(record.installationState), out _)
-                    || !record.mapObjectHandle.IsValid
-                    || rejectedTypeIds.Contains(record.itemId))
+                KeyValuePair<int, int> type = changedTypeVersions[typeIndex];
+                virtualWorld.CopyDataOnlyInstallationRecords(type.Key, dataOnlyInstallations);
+                lastSynchronizedDataOnlyInstallationCount += dataOnlyInstallations.Count;
+                if (dataOnlyInstallations.Count == 0 && !hostsByItemId.ContainsKey(type.Key))
                 {
+                    rejectedTypeIds.Remove(type.Key);
+                    synchronizedTypeVersions[type.Key] = type.Value;
                     continue;
                 }
-
-                if (!TryGetOrCreateHost(record.itemId, out StaticMapObjectTypeHost host))
+                if (!TryGetOrCreateHost(type.Key, out StaticMapObjectTypeHost host))
                 {
-                    rejectedTypeIds.Add(record.itemId);
+                    synchronizedTypeVersions[type.Key] = type.Value;
                     continue;
                 }
-
-                if (!host.SynchronizeRecord(record))
+                host.BeginSynchronization();
+                rejectedTypeIds.Remove(type.Key);
+                for (int i = 0; i < dataOnlyInstallations.Count; i++)
                 {
-                    host.AbortSynchronization();
-                    rejectedTypeIds.Add(record.itemId);
+                    BenchmarkSyncDone++;
+                    if (spreadAcrossFrames && BenchmarkLayout.IsWorkSliceExpired(started,
+                        System.Diagnostics.Stopwatch.GetTimestamp(), System.Diagnostics.Stopwatch.Frequency))
+                    { yield return null; started = System.Diagnostics.Stopwatch.GetTimestamp(); }
+                    VirtualObjectRecord record = dataOnlyInstallations[i];
+                    if (record == null
+                        || record.HasAttachedView
+                        || record.installationState != null && UtilityPoleWorld.Current != null
+                            && UtilityPoleWorld.Current.TryGet(BlockStateStore.GetInstallationStorageKey(record.installationState), out _)
+                        || record.installationState != null && ProductionWorld.Current != null
+                            && ProductionWorld.Current.TryGet(BlockStateStore.GetInstallationStorageKey(record.installationState), out _)
+                        || record.installationState != null && MiningWorld.Current != null
+                            && MiningWorld.Current.TryGet(BlockStateStore.GetInstallationStorageKey(record.installationState), out _)) continue;
+                    if (!host.SynchronizeRecord(record))
+                    {
+                        host.AbortSynchronization();
+                        rejectedTypeIds.Add(type.Key);
+                        BenchmarkSyncDone += dataOnlyInstallations.Count - i - 1;
+                        break;
+                    }
                 }
-            }
-
-            CopyHostsToScratch();
-            emptyHostItemIds.Clear();
-            for (int i = 0; i < hostScratch.Count; i++)
-            {
-                StaticMapObjectTypeHost host = hostScratch[i];
                 host.CompleteSynchronization();
-                if (host.InstanceCount == 0)
-                {
-                    emptyHostItemIds.Add(host.ItemId);
-                }
-            }
-
-            for (int i = 0; i < emptyHostItemIds.Count; i++)
-            {
-                RemoveHost(emptyHostItemIds[i]);
+                if (host.InstanceCount == 0) RemoveHost(type.Key);
+                synchronizedTypeVersions[type.Key] = type.Value;
             }
         }
 
@@ -303,18 +322,25 @@ namespace ProjectF.MapObjects
             hostObject.transform.SetParent(transform, false);
             host = hostObject.AddComponent<StaticMapObjectTypeHost>();
             host.Configure(itemId, definition.MapObjectArchetype, batchCellSize);
-            host.BeginSynchronization();
             hostsByItemId.Add(itemId, host);
             return true;
         }
 
         private bool TryGetSupportedArchetype(int itemId, out ItemDefinition definition)
         {
+            if (supportedDefinitionsByItemId.TryGetValue(itemId, out definition)) return definition != null;
             definition = null;
-            return itemManager != null
-                   && itemManager.TryGetItemDefinitionById(itemId, out definition)
-                   && definition != null
-                   && StaticMapObjectTypeHost.IsSupportedArchetype(definition.MapObjectArchetype);
+            bool supported = itemManager != null
+                             && itemManager.TryGetItemDefinitionById(itemId, out definition)
+                             && definition != null
+                             && StaticMapObjectTypeHost.IsSupportedArchetype(definition.MapObjectArchetype);
+            if (!supported)
+            {
+                definition = null;
+                rejectedTypeIds.Add(itemId);
+            }
+            supportedDefinitionsByItemId[itemId] = definition;
+            return supported;
         }
 
         private void RenderHosts()
@@ -362,8 +388,11 @@ namespace ProjectF.MapObjects
             }
 
             hostScratch.Clear();
-            emptyHostItemIds.Clear();
             rejectedTypeIds.Clear();
+            supportedDefinitionsByItemId.Clear();
+            synchronizedTypeVersions.Clear();
+            typeVersions.Clear();
+            changedTypeVersions.Clear();
             dataOnlyInstallations.Clear();
         }
 
@@ -447,7 +476,10 @@ namespace ProjectF.MapObjects
 
         private void InvalidateSyncVersions()
         {
-            cachedInstallationVersion = -1;
+            cachedDataOnlyInstallationVersion = -1;
+            synchronizedTypeVersions.Clear();
+            supportedDefinitionsByItemId.Clear();
+            rejectedTypeIds.Clear();
         }
 
         private static string BuildHostName(int itemId, string itemName)

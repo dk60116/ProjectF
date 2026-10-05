@@ -20,7 +20,9 @@ $surface = [IO.File]::ReadAllText((Join-Path $scripts 'Map/TerrainGenerator.Surf
 $methods = Get-Block $surface 'private ChunkSurfaceBuildData BuildBenchmarkChunkSurface('
 [IO.File]::WriteAllText((Join-Path $probe 'Surface.cs'), 'public partial class SurfaceProbe {' + $methods + '}')
 $renderer = [IO.File]::ReadAllText((Join-Path $scripts 'MapObjects/StaticMapObjectBatchRenderer.cs'))
-$methods = (Get-Block $renderer 'internal IEnumerator PrepareBenchmarkPresentation(') + (Get-Block $renderer 'private IEnumerator SynchronizeHostsCore(')
+$methods = (Get-Block $renderer 'internal IEnumerator PrepareBenchmarkPresentation(') +
+    (Get-Block $renderer 'private void CollectChangedTypes(') +
+    (Get-Block $renderer 'private IEnumerator SynchronizeHostsCore(')
 # A deterministic clock replaces the timing boundary, not the renderer algorithm.
 $methods = $methods.Replace('System.Diagnostics.Stopwatch', 'ProbeClock')
 [IO.File]::WriteAllText((Join-Path $probe 'Renderer.cs'), 'using System.Collections; using ProjectF.Benchmark; public partial class RendererProbe {' + $methods + '}')

@@ -30,7 +30,7 @@ if ($arm -notmatch 'TryTakeOneConveyorObject\(\s*referenceWorldPosition,\s*Picku
     $resolver -notmatch 'if \(pickupSource == RobotArmPickupSource.Conveyor\s*\|\| pickupSource == RobotArmPickupSource.SavedConveyor\)\s*\{\s*referenceWorldPosition = conveyorSelectionReferenceWorldPosition;') {
     throw 'Loaded conveyor removal does not use the robot-arm body position for selection.'
 }
-if ($arm -notmatch 'TryTakeSavedConveyorItem\(pickupCoordinate, GetBodyWorldPosition\(\),') {
+if ($arm -notmatch 'TryTakeSavedConveyorItem\(pickupCoordinate, referenceWorldPosition,') {
     throw 'Saved conveyor removal does not use the robot-arm body position for selection.'
 }
 if ($arm -notmatch 'TryPeekSavedConveyorItem\(\s*pickupCoordinate,\s*PickupItemFilter,\s*conveyorSelectionReferenceWorldPosition,') {

@@ -4446,7 +4446,8 @@ public partial class TerrainGenerator : MonoBehaviour
         MapObjectTickProfiler.AddRuntimeCounter(
             "StaticInstallationRender",
             "LastSynchronizedDataOnly",
-            staticRenderer != null ? staticRenderer.LastSynchronizedDataOnlyInstallationCount : 0);
+            staticRenderer != null ? staticRenderer.LastSynchronizedDataOnlyInstallationCount : 0,
+            "Records copied for changed supported types in the last synchronization, not the total world installation count.");
         MapObjectTickProfiler.AddRuntimeCounter("World", "LoadedChunks", loadedChunks.Count);
         MapObjectTickProfiler.AddRuntimeCounter("World", "ChunkGameObjects", 0);
         MapObjectTickProfiler.AddRuntimeCounter("World", "DedicatedBlockGameObjects", 0);

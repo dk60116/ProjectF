@@ -669,6 +669,67 @@ public partial class BlockStateStore : MonoBehaviour
         if (trainPresentationChanged) MarkMapMarkersChanged();
     }
 
+    public bool MoveLiveVehicle(Vehicle vehicle)
+    {
+        if (vehicle == null
+            || !TryBuildInstallationState(vehicle, out InstallationSaveState state)
+            || !liveInstallationStorageKeysByPlacement.TryGetValue(
+                (state.placementSequence, state.itemId), out Vector2Int previousKey)
+            || !liveInstallationStates.TryGetValue(previousKey, out LiveInstallationRecord liveRecord)
+            || liveRecord == null
+            || liveRecord.installationObject != vehicle
+            || !savedInstallationStates.TryGetValue(previousKey, out InstallationSaveState previousState)
+            || !ReferenceEquals(previousState, liveRecord.state))
+        {
+            return false;
+        }
+
+        VirtualObjectWorld world = ResolveVirtualObjectWorld();
+        if (world == null
+            || !world.IsHandleAlive(liveRecord.handle))
+        {
+            return false;
+        }
+
+        Vector2Int nextKey = ResolveInstallationStorageKey(state, savedInstallationStates);
+        AssignInstallationStorageKey(state, nextKey);
+        if ((nextKey != previousKey && savedInstallationStates.ContainsKey(nextKey))
+            || !world.MoveAttachedInstallationView(
+                liveRecord.handle, state, vehicle.GetInstanceID(),
+                vehicle.transform.position, vehicle.transform.rotation))
+        {
+            return false;
+        }
+
+        // The freshly captured DTO is owned here, without cloning it or turning the
+        // live vehicle into a temporary data-only entity during a cell crossing.
+        AdjustSavedInstallationCount(previousState, -1);
+        UnregisterSavedCoordinateMappings(previousState, previousKey);
+        UnregisterLiveCoordinateMappings(previousState, previousKey);
+        UnregisterInstallationPlacementKey(savedInstallationStorageKeysByPlacement, previousState, previousKey);
+        UnregisterInstallationPlacementKey(liveInstallationStorageKeysByPlacement, previousState, previousKey);
+        savedInstallationStates.Remove(previousKey);
+        liveInstallationStates.Remove(previousKey);
+
+        liveRecord.state = state;
+        savedInstallationStates[nextKey] = state;
+        liveInstallationStates[nextKey] = liveRecord;
+        RegisterInstallationPlacementKey(savedInstallationStorageKeysByPlacement, state, nextKey);
+        RegisterInstallationPlacementKey(liveInstallationStorageKeysByPlacement, state, nextKey);
+        AdjustSavedInstallationCount(state, 1);
+        RegisterSavedCoordinateMappings(state, nextKey);
+        RegisterLiveCoordinateMappings(state, nextKey);
+        vehicle.BindRuntimeMapObjectHandle(liveRecord.handle);
+
+        // Trains never contribute to static map markers; their current Transform is
+        // sampled by CollectLiveTrainMapMarkers. Other vehicles still use static markers.
+        if (!(vehicle is Train) && !HasSameMapMarkerState(previousState, state))
+        {
+            MarkMapMarkersChanged();
+        }
+        return true;
+    }
+
     public bool UpdateLiveInstallationWorldPose(InstallationObject installationObject)
     {
         if (installationObject == null

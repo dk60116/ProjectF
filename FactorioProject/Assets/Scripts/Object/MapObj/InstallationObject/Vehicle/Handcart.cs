@@ -2747,32 +2747,9 @@ public class Handcart : Vehicle, IPlayerItemStorage, IPlayerItemStoragePortableP
 
     private void RefreshRuntimePlacement(Vector3 worldPosition, Quaternion worldRotation)
     {
-        bool hadRuntimePlacement = TryGetPlacementRuntime(
-            out Vector2Int previousAnchorCoordinate,
-            out _);
-        bool runtimePlacementChanged = RefreshSingleCellRuntimePlacement(
+        RefreshSingleCellRuntimePlacement(
             worldPosition,
             ResolveQuarterTurns(worldRotation));
-        TerrainGenerator terrain = ResolveTerrain();
-        if (terrain == null)
-        {
-            return;
-        }
-
-        if (!hadRuntimePlacement)
-        {
-            if (runtimePlacementChanged)
-            {
-                terrain.SaveRuntimeInstallationState(this);
-            }
-
-            return;
-        }
-
-        terrain.RefreshMovedInstallationRuntimeState(
-            this,
-            previousAnchorCoordinate,
-            runtimePlacementChanged);
     }
 
     private TerrainGenerator ResolveTerrain()

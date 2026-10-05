@@ -42,8 +42,8 @@ public sealed class TerrainGenerator
 public partial class RobotArmInstance
 {
     public RobotArmWorld World;
-    public sealed class PresentationData { public double SleepingPresentationTime; public float AnimationTime, ItemMoveElapsed; }
-    private readonly PresentationData Data = new();
+    private RobotArmRuntimeState tickData = new() { heldItemId = 1, state = RobotArmState.WaitingForDrop, runtimeSleeping = true };
+    private ref RobotArmRuntimeState Data => ref tickData;
     private bool hasRuntimeStateInitialized = true, electricPowerBlocked;
     private float pickupInterval = .1f, TurnDurationSeconds = .5f;
     private const float ItemMoveDuration = .1f;
@@ -60,17 +60,27 @@ public partial class RobotArmInstance
     public int Saves;
     public void PersistTransferState() { Saves++; }
     public bool IsRuntimeActive = true, Placed = true, PortsValid = true, MovingFreight;
-    public bool runtimeSleeping = true, runtimeWakePending, waitingForDropRetry;
-    public float pickupTimer, dropRetryTimer, actionTurnTimer, runtimeSleepCheckTimer;
-    public int heldItemId = 1, Queries, PickupQueries, Animations, TransferAttempts;
+    public ref bool runtimeSleeping => ref Data.runtimeSleeping;
+    public ref bool runtimeWakePending => ref Data.runtimeWakePending;
+    public ref bool waitingForDropRetry => ref Data.waitingForDropRetry;
+    public ref float pickupTimer => ref Data.pickupTimer;
+    public ref float dropRetryTimer => ref Data.dropRetryTimer;
+    public ref float actionTurnTimer => ref Data.actionTurnTimer;
+    public ref float runtimeSleepCheckTimer => ref Data.runtimeSleepCheckTimer;
+    public ref int heldItemId => ref Data.heldItemId;
+    public int Queries, PickupQueries, Animations, TransferAttempts;
     public float Watts = 10f;
     public bool PickupAvailable;
-    public RobotArmState state = RobotArmState.WaitingForDrop;
+    public ref RobotArmState state => ref Data.state;
     private float dropRetryInterval = .1f, actionTurnDelay = .1f;
     private const float RuntimeSleepRecheckIntervalSeconds = .1f;
     private float PickupIntervalSeconds => .1f;
-    private PlannedTransferCommand plannedTransferCommand;
-    private bool stagedTickPlanned, plannedPickupAvailabilityChecked, plannedPickupAvailable, plannedDropAvailabilityChecked, plannedDropAvailable;
+    private ref PlannedTransferCommand plannedTransferCommand => ref Data.plannedTransferCommand;
+    private ref bool stagedTickPlanned => ref Data.stagedTickPlanned;
+    private ref bool plannedPickupAvailabilityChecked => ref Data.plannedPickupAvailabilityChecked;
+    private ref bool plannedPickupAvailable => ref Data.plannedPickupAvailable;
+    private ref bool plannedDropAvailabilityChecked => ref Data.plannedDropAvailabilityChecked;
+    private ref bool plannedDropAvailable => ref Data.plannedDropAvailable;
     private void BeginPlannedTick()
     {
         plannedTransferCommand = PlannedTransferCommand.None; stagedTickPlanned = true;
@@ -79,6 +89,7 @@ public partial class RobotArmInstance
     public sealed class Destination { public bool Available; public int Items; }
     public Destination Output = new();
     public void Sleep() { SetRuntimeSleeping(true); }
+    public void ConfirmAwake(bool force = false) { SetRuntimeSleeping(false, force); }
     private bool TryGetElectricOperationalPowerRequirement(out float watts) { watts = Watts; return watts > 0; }
     private void EnsureRuntimeStateInitialized() { }
     private bool HasPlacementRuntime() => Placed;
@@ -286,6 +297,15 @@ public static class Checks
         pollingWorld.Wake(input); pollingWorld.Tick();
         pollingWorld.Tick(); // Wake transition resets once; subsequent confirmed checks must retain their interval.
         Require(polling.runtimeSleepCheckTimer > 0f, "confirmed awake state preserves sleep recheck interval");
+        float recheckTimer = polling.runtimeSleepCheckTimer;
+        bool wakePending = polling.runtimeWakePending;
+        polling.ConfirmAwake();
+        Require(polling.runtimeSleepCheckTimer == recheckTimer && polling.runtimeWakePending == wakePending
+            && pollingWorld.ActiveCount == 1, "confirming an awake state preserves timers, pending wake and scheduling");
+        polling.runtimeSleepCheckTimer = .07f;
+        polling.ConfirmAwake(force: true);
+        Require(polling.runtimeSleepCheckTimer == 0 && pollingWorld.ActiveCount == 1,
+            "forced awake confirmation still resets the recheck timer and admits its tick");
         var idleWorld = new RobotArmWorld();
         for (int i = 0; i < 5000; i++)
             idleWorld.Add(new RobotArmInstance { SimulationId = i, heldItemId = -1, state = RobotArmState.WaitingForPickup },

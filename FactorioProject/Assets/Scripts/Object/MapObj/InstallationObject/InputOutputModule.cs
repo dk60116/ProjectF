@@ -220,8 +220,8 @@ public partial class InputOutputModule : InstallationObject,
     private static long ignoredNonFluidPlacementChangeCount;
     private static int fluidInputSleepWaiterLinkCount;
     private static int fluidOutputSleepWaiterLinkCount;
-    // Same-tick query reuse is valid only while every fluid storage keeps the same contents.
-    private static int fluidStorageStateVersion = 1;
+    // Shared sequence stamps only changed endpoints; queries observe their own output network.
+    private static long fluidStorageStateVersion = 1;
     private static long fluidOutputAvailabilityCacheHitCount;
     private static long fluidOutputAvailabilityCacheMissCount;
     private static long fluidOutputRetentionCacheHitCount;
@@ -236,7 +236,7 @@ public partial class InputOutputModule : InstallationObject,
     internal static long IgnoredNonFluidPlacementChangeCount => ignoredNonFluidPlacementChangeCount;
     internal static int FluidInputSleepWaiterLinkCount => fluidInputSleepWaiterLinkCount;
     internal static int FluidOutputSleepWaiterLinkCount => fluidOutputSleepWaiterLinkCount;
-    internal static int FluidStorageStateVersion => fluidStorageStateVersion;
+    internal static long FluidStorageStateVersion => fluidStorageStateVersion;
     internal static long FluidOutputAvailabilityCacheHitCount => fluidOutputAvailabilityCacheHitCount;
     internal static long FluidOutputAvailabilityCacheMissCount => fluidOutputAvailabilityCacheMissCount;
     internal static long FluidOutputRetentionCacheHitCount => fluidOutputRetentionCacheHitCount;
@@ -799,6 +799,8 @@ public partial class InputOutputModule : InstallationObject,
         new Dictionary<FluidStorageEndpointKey, int>();
     private readonly List<Vector2Int> cachedFluidOutputSeedCoordinates = new List<Vector2Int>(4);
     private int cachedFluidOutputConnectionsTopologyVersion;
+    private long cachedFluidOutputNetworkObservedVersion = -1;
+    private long cachedFluidOutputNetworkStateVersion;
     private InstallationObject cachedConnectedFluidSource;
     private int cachedConnectedFluidSourceItemId = int.MinValue;
     private int cachedConnectedFluidSourceTopologyVersion;
@@ -806,20 +808,20 @@ public partial class InputOutputModule : InstallationObject,
     private int cachedFluidOutputItemId = int.MinValue;
     private int cachedFluidOutputTopologyVersion;
     private long cachedFluidOutputAvailabilityTick = long.MinValue;
-    private int cachedFluidOutputAvailabilityStateVersion;
+    private long cachedFluidOutputAvailabilityStateVersion;
     private int cachedFluidOutputAvailabilityTopologyVersion;
     private int cachedFluidOutputAvailabilityItemId = int.MinValue;
     private float cachedFluidOutputAvailabilityMaximumLiters;
     private float cachedFluidOutputAvailabilityLiters;
     private bool cachedFluidOutputAvailabilityBlocked;
     private long cachedFluidOutputRetentionTick = long.MinValue;
-    private int cachedFluidOutputRetentionStateVersion;
+    private long cachedFluidOutputRetentionStateVersion;
     private int cachedFluidOutputRetentionTopologyVersion;
     private int cachedFluidOutputRetentionItemId = int.MinValue;
     private float cachedFluidOutputRetentionSourceRate;
     private float cachedFluidOutputRetention;
     private long cachedFluidOutputSelectionTick = long.MinValue;
-    private int cachedFluidOutputSelectionStateVersion;
+    private long cachedFluidOutputSelectionStateVersion;
     private int cachedFluidOutputSelectionTopologyVersion;
     private int cachedFluidOutputSelectionItemId = int.MinValue;
     private bool cachedFluidOutputSelectionFound;
@@ -1278,9 +1280,10 @@ public partial class InputOutputModule : InstallationObject,
     }
 
     internal void WakeDataFluidOutput() => WakeRuntimeUpdate();
-    internal static void NotifyDataFluidStorageChanged()
+    internal static void NotifyDataFluidStorageChanged(ProductionFacilityInstance storage)
     {
-        unchecked { fluidStorageStateVersion++; }
+        if (storage != null)
+            storage.FluidStorageStateRevision = ++fluidStorageStateVersion;
     }
     private void AddDataFluidOutputCandidate(Vector2Int coordinate, Vector2Int direction, int distance)
     {
@@ -3361,15 +3364,7 @@ public partial class InputOutputModule : InstallationObject,
             return;
         }
 
-        unchecked
-        {
-            fluidStorageStateVersion++;
-        }
-
-        if (fluidStorageStateVersion <= 0)
-        {
-            fluidStorageStateVersion = 1;
-        }
+        storage.FluidStorageStateRevision = ++fluidStorageStateVersion;
     }
 
     private readonly struct FluidOutputTransferCandidate
@@ -8667,6 +8662,7 @@ public partial class InputOutputModule : InstallationObject,
 
     private void ClearFluidOutputTickQueryCaches()
     {
+        cachedFluidOutputNetworkObservedVersion = -1;
         cachedFluidOutputAvailabilityTick = long.MinValue;
         cachedFluidOutputRetentionTick = long.MinValue;
         cachedFluidOutputSelectionTick = long.MinValue;
@@ -8675,6 +8671,28 @@ public partial class InputOutputModule : InstallationObject,
         cachedFluidOutputSelectionItemId = int.MinValue;
         cachedFluidOutputSelectionFound = false;
         cachedFluidOutputSelection = default;
+    }
+
+    private long GetFluidOutputStorageStateVersion()
+    {
+        if (cachedFluidOutputNetworkObservedVersion == fluidStorageStateVersion)
+            return cachedFluidOutputNetworkStateVersion;
+
+        // Every endpoint stamp comes from the same sequence, so any relevant change
+        // exceeds the previous maximum without hashing or dependency subscriptions.
+        long version = 0;
+        for (int i = 0; i < cachedFluidOutputConnections.Count; i++)
+        {
+            FluidOutputConnection connection = cachedFluidOutputConnections[i];
+            long endpointVersion = connection.DataStorage != null
+                ? connection.DataStorage.FluidStorageStateRevision
+                : connection.Storage != null ? connection.Storage.FluidStorageStateRevision : 0;
+            version = Math.Max(version, endpointVersion);
+        }
+
+        cachedFluidOutputNetworkStateVersion = version;
+        cachedFluidOutputNetworkObservedVersion = fluidStorageStateVersion;
+        return version;
     }
 
     protected bool TryResolveFluidOutputStorage(int fluidItemId, float fluidLiters, out InstallationObject targetStorage)
@@ -8782,7 +8800,7 @@ public partial class InputOutputModule : InstallationObject,
     {
         availableLiters = 0f;
         if (cachedFluidOutputAvailabilityTick != MapObjectTickManager.CurrentSimulationTick
-            || cachedFluidOutputAvailabilityStateVersion != fluidStorageStateVersion
+            || cachedFluidOutputAvailabilityStateVersion != GetFluidOutputStorageStateVersion()
             || cachedFluidOutputAvailabilityTopologyVersion != fluidTopologyVersion
             || cachedFluidOutputAvailabilityItemId != fluidItemId
             || maximumLiters > cachedFluidOutputAvailabilityMaximumLiters + 0.0001f)
@@ -8803,7 +8821,7 @@ public partial class InputOutputModule : InstallationObject,
         bool capacityBlocked)
     {
         cachedFluidOutputAvailabilityTick = MapObjectTickManager.CurrentSimulationTick;
-        cachedFluidOutputAvailabilityStateVersion = fluidStorageStateVersion;
+        cachedFluidOutputAvailabilityStateVersion = GetFluidOutputStorageStateVersion();
         cachedFluidOutputAvailabilityTopologyVersion = fluidTopologyVersion;
         cachedFluidOutputAvailabilityItemId = fluidItemId;
         cachedFluidOutputAvailabilityMaximumLiters = maximumLiters;
@@ -8922,7 +8940,7 @@ public partial class InputOutputModule : InstallationObject,
         }
 
         if (cachedFluidOutputRetentionTick == MapObjectTickManager.CurrentSimulationTick
-            && cachedFluidOutputRetentionStateVersion == fluidStorageStateVersion
+            && cachedFluidOutputRetentionStateVersion == GetFluidOutputStorageStateVersion()
             && cachedFluidOutputRetentionTopologyVersion == fluidTopologyVersion
             && cachedFluidOutputRetentionItemId == fluidItemId
             && cachedFluidOutputRetentionSourceRate == sourceLitersPerSecond)
@@ -8945,7 +8963,7 @@ public partial class InputOutputModule : InstallationObject,
               * ResolvePumpTransportRatio(connection.PressurePump, sourceLitersPerSecond)
             : 1f;
         cachedFluidOutputRetentionTick = MapObjectTickManager.CurrentSimulationTick;
-        cachedFluidOutputRetentionStateVersion = fluidStorageStateVersion;
+        cachedFluidOutputRetentionStateVersion = GetFluidOutputStorageStateVersion();
         cachedFluidOutputRetentionTopologyVersion = fluidTopologyVersion;
         cachedFluidOutputRetentionItemId = fluidItemId;
         cachedFluidOutputRetentionSourceRate = sourceLitersPerSecond;
@@ -9274,6 +9292,7 @@ public partial class InputOutputModule : InstallationObject,
             return cachedFluidOutputConnections.Count > 0;
         }
 
+        ClearFluidOutputTickQueryCaches();
         cachedFluidOutputConnections.Clear();
         cachedFluidOutputConnectionIndices.Clear();
         cachedFluidOutputSeedCoordinates.Clear();
@@ -9789,7 +9808,7 @@ public partial class InputOutputModule : InstallationObject,
     {
         long simulationTick = MapObjectTickManager.CurrentSimulationTick;
         if (cachedFluidOutputSelectionTick == simulationTick
-            && cachedFluidOutputSelectionStateVersion == fluidStorageStateVersion
+            && cachedFluidOutputSelectionStateVersion == GetFluidOutputStorageStateVersion()
             && cachedFluidOutputSelectionTopologyVersion == fluidTopologyVersion
             && cachedFluidOutputSelectionItemId == fluidItemId)
         {
@@ -9828,7 +9847,7 @@ public partial class InputOutputModule : InstallationObject,
         }
 
         cachedFluidOutputSelectionTick = simulationTick;
-        cachedFluidOutputSelectionStateVersion = fluidStorageStateVersion;
+        cachedFluidOutputSelectionStateVersion = GetFluidOutputStorageStateVersion();
         cachedFluidOutputSelectionTopologyVersion = fluidTopologyVersion;
         cachedFluidOutputSelectionItemId = fluidItemId;
         cachedFluidOutputSelectionFound = foundTarget;

@@ -78,7 +78,7 @@ public sealed class ResourceInstance
     public ResourceHandle Handle { get; set; }
 }
 
-public static class BlockStateStore
+public partial class BlockStateStore
 {
     public sealed class InstallationSaveState
     {
@@ -92,6 +92,10 @@ public static class BlockStateStore
         public UnityEngine.Vector3 worldPosition;
         public UnityEngine.Quaternion worldRotation = UnityEngine.Quaternion.identity;
         public List<UnityEngine.Vector2Int> occupiedCoordinates = new List<UnityEngine.Vector2Int>();
+        public int storedInstallationItemId = -1;
+        public List<MountedInstallationSaveState> mountedInstallations = new();
+        public object inputOutputState;
+        public bool hasTrainRailSample;
 
         public InstallationSaveState Clone()
         {
@@ -106,9 +110,16 @@ public static class BlockStateStore
                 hasWorldPose = hasWorldPose,
                 worldPosition = worldPosition,
                 worldRotation = worldRotation,
-                occupiedCoordinates = new List<UnityEngine.Vector2Int>(occupiedCoordinates)
+                occupiedCoordinates = new List<UnityEngine.Vector2Int>(occupiedCoordinates),
+                storedInstallationItemId = storedInstallationItemId,
+                hasTrainRailSample = hasTrainRailSample
             };
         }
+    }
+
+    public sealed class MountedInstallationSaveState
+    {
+        public InstallationSaveState installation;
     }
 
     public static UnityEngine.Vector2Int GetInstallationStorageKey(InstallationSaveState state)

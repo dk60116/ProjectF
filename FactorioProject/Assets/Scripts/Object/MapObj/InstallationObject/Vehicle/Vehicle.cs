@@ -185,28 +185,39 @@ public class Vehicle : InstallationObject
         Vector3 worldPosition,
         int quarterTurns)
     {
+        bool hadRuntimePlacement = TryGetPlacementRuntime(out Vector2Int previousAnchorCoordinate, out _);
         Vector2Int coordinate = new Vector2Int(
             Mathf.RoundToInt(worldPosition.x),
             Mathf.RoundToInt(worldPosition.z));
         int normalizedQuarterTurns = ((quarterTurns % 4) + 4) % 4;
         IReadOnlyList<Vector2Int> occupiedCoordinates = RuntimeOccupiedCoordinates;
-        if (RuntimeAnchorCoordinate == coordinate
+        bool runtimePlacementChanged = !(RuntimeAnchorCoordinate == coordinate
             && RuntimeQuarterTurns == normalizedQuarterTurns
             && occupiedCoordinates != null
             && occupiedCoordinates.Count == 1
-            && occupiedCoordinates[0] == coordinate)
+            && occupiedCoordinates[0] == coordinate);
+        if (runtimePlacementChanged)
         {
-            return false;
+            runtimeCoordinateBuffer[0] = coordinate;
+            ConfigurePlacementRuntime(
+                coordinate,
+                normalizedQuarterTurns,
+                runtimeCoordinateBuffer,
+                RuntimePlacementSequence);
+            RobotArm.WakeAroundCoordinate(coordinate);
         }
 
-        runtimeCoordinateBuffer[0] = coordinate;
-        ConfigurePlacementRuntime(
-            coordinate,
-            normalizedQuarterTurns,
-            runtimeCoordinateBuffer,
-            RuntimePlacementSequence);
-        RobotArm.WakeAroundCoordinate(coordinate);
-        return true;
+        // Placement changes clear the entity handle. Rebind before model submission;
+        // movement within the same cell still updates the stored world pose.
+        TerrainGenerator terrain = TerrainGenerator.ResolveActive();
+        if (terrain != null)
+        {
+            if (hadRuntimePlacement)
+                terrain.RefreshMovedInstallationRuntimeState(this, previousAnchorCoordinate, runtimePlacementChanged);
+            else if (runtimePlacementChanged)
+                terrain.SaveRuntimeInstallationState(this);
+        }
+        return runtimePlacementChanged;
     }
 
     public bool TryDockPlayer(Player targetPlayer)

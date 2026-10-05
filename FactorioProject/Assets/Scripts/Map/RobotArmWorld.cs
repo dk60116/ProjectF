@@ -586,15 +586,15 @@ namespace ProjectF.Diagnostics
     // durations: the world Plan/Apply scopes remain the authoritative total cost.
     internal sealed class RobotArmTickTiming
     {
-        internal enum Phase { Power, State, Sleep, Pickup, Drop }
+        internal enum Phase { Power, State, Sleep, Pickup, Drop, PickupQuery, DropQuery }
         internal const int SampleStride = 256;
         private bool enabled, measureEntity;
         private int offset;
-        private long power, state, sleep, pickup, drop;
+        private long power, state, sleep, pickup, drop, pickupQuery, dropQuery;
 
         internal BatchScope BeginTick(bool rotateSample = true)
         {
-            power = state = sleep = pickup = drop = 0;
+            power = state = sleep = pickup = drop = pickupQuery = dropQuery = 0;
             enabled = MapObjectTickProfiler.IsDetailedEnabled;
             measureEntity = false;
             if (rotateSample) offset = (offset + 1) & (SampleStride - 1);
@@ -614,6 +614,8 @@ namespace ProjectF.Diagnostics
                 case Phase.Sleep: sleep += elapsed; break;
                 case Phase.Pickup: pickup += elapsed; break;
                 case Phase.Drop: drop += elapsed; break;
+                case Phase.PickupQuery: pickupQuery += elapsed; break;
+                case Phase.DropQuery: dropQuery += elapsed; break;
             }
         }
 
@@ -627,6 +629,8 @@ namespace ProjectF.Diagnostics
             if (sleep > 0) MapObjectTickProfiler.RecordNamedElapsedTicks("Runtime", nameof(RobotArm), "Robot Arm Sleep Check (sampled)", sleep);
             if (pickup > 0) MapObjectTickProfiler.RecordNamedElapsedTicks("Runtime", nameof(RobotArm), "Robot Arm Pickup Transfer (sampled)", pickup);
             if (drop > 0) MapObjectTickProfiler.RecordNamedElapsedTicks("Runtime", nameof(RobotArm), "Robot Arm Drop Transfer (sampled)", drop);
+            if (pickupQuery > 0) MapObjectTickProfiler.RecordNamedElapsedTicks("Runtime", nameof(RobotArm), "Robot Arm Pickup Query (sampled)", pickupQuery);
+            if (dropQuery > 0) MapObjectTickProfiler.RecordNamedElapsedTicks("Runtime", nameof(RobotArm), "Robot Arm Drop Query (sampled)", dropQuery);
         }
 
         internal readonly struct BatchScope : IDisposable

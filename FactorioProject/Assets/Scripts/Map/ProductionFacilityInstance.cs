@@ -13,6 +13,7 @@ public sealed partial class ProductionFacilityInstance : IMapObjectTarget, IData
     internal readonly uint Generation;
     internal readonly ProductionRenderTemplate Template;
     internal int OrderIndex;
+    internal long FluidStorageStateRevision;
     internal readonly int MarkerCount;
     private ref ProductionWorld.State Data => ref World.GetState(Index, Generation);
     private InputOutputModule.PersistentState Io => Placement.inputOutputState;

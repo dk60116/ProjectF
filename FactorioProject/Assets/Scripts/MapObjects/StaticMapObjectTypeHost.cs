@@ -147,7 +147,6 @@ namespace ProjectF.MapObjects
 
         public void Suspend()
         {
-            slotsByHandle.Clear();
             batches.SuspendRendering();
         }
 

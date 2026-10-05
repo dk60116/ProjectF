@@ -3,7 +3,7 @@ using System.Collections.Generic;
 using ProjectF.MapObjects;
 using UnityEngine;
 
-internal static class Program
+internal static partial class Program
 {
     private static int checks;
 
@@ -14,8 +14,13 @@ internal static class Program
         CheckCoordinateIndexAndReplacement();
         CheckCoordinateRelocation();
         CheckInstallationPresentationVersioning();
+        CheckLiveInstallationMovement();
+        CheckDataOnlyInstallationIndex();
         CheckInstallationOnlyCopy();
         CheckBulkLoadIndexBuild();
+#if VEHICLE_MOVEMENT_PROBE
+        CheckVehicleStoreMovement();
+#endif
         CheckServiceReplacementInvalidatesOldHandles();
         Console.WriteLine($"PASS {checks} virtual-object world checks; no Unity scene or GameObject created");
     }
@@ -148,16 +153,117 @@ internal static class Program
         VirtualObjectWorld world = VirtualObjectWorld.Current;
         BlockStateStore.InstallationSaveState state = CreateState(49, 8401L);
         world.UpsertInstallationHandle(state);
-        int initialVersion = world.InstallationVersion;
+        int initialVersion = world.DataOnlyInstallationVersion;
 
         world.UpsertInstallationHandle(state);
-        Require(world.InstallationVersion == initialVersion,
+        Require(world.DataOnlyInstallationVersion == initialVersion,
             "state-only installation upsert preserves render version");
 
         state.worldPosition = new Vector3(8f, 0f, 7f);
         world.UpsertInstallationHandle(state);
-        Require(world.InstallationVersion == initialVersion + 1,
+        Require(world.DataOnlyInstallationVersion == initialVersion + 1,
             "installation pose change advances render version");
+    }
+
+    private static void CheckLiveInstallationMovement()
+    {
+        using var world = new VirtualObjectWorld();
+        var state = CreateState(60, 8501L);
+        var handle = world.AttachInstallationView(state, 101, state.worldPosition, state.worldRotation);
+        int initialVersion = world.DataOnlyInstallationVersion;
+        int initialLookupVersion = world.Version;
+        var next = state.Clone();
+        next.anchorCoordinate = next.storageKey = new Vector2Int(32, -33);
+        next.quarterTurns = 2;
+        next.occupiedCoordinates.Clear();
+        next.occupiedCoordinates.Add(next.anchorCoordinate);
+        var position = new Vector3(32.25f, 0f, -33.1f);
+        var rotation = Quaternion.Euler(0, 180, 0);
+        Require(!world.MoveAttachedInstallationView(handle, next, 102, position, rotation),
+            "an unrelated view cannot relocate a live installation");
+        Require(!world.MoveAttachedInstallationView(default, next, 101, position, rotation),
+            "an invalid handle cannot relocate a live installation");
+        var replacement = next.Clone(); replacement.placementSequence++;
+        Require(!world.MoveAttachedInstallationView(handle, replacement, 101, position, rotation),
+            "movement cannot replace entity identity");
+        Require(world.MoveAttachedInstallationView(handle, next, 101, position, rotation),
+            "live installation can cross a cell and chunk boundary");
+        Require(world.DataOnlyInstallationVersion == initialVersion && world.Version == initialLookupVersion + 1,
+            "live movement updates lookup version without rebuilding static installation batches");
+        Require(world.IsHandleAlive(handle) && world.TryGetInstallationHandle(next.storageKey, out var moved) && moved == handle,
+            "cell crossing preserves the original generation-safe handle");
+        Require(!world.TryGetInstallationHandle(state.storageKey, out _), "old storage key is released");
+        Require(world.TryGetRecord(handle, out var record) && record.worldPosition.Equals(position)
+            && record.worldRotation.Equals(rotation) && record.quarterTurns == 2,
+            "moved entity has current world pose and facing");
+        var handles = new List<MapObjectHandle>();
+        world.CopyMapObjectHandlesAtCoordinate(state.anchorCoordinate, handles);
+        Require(!handles.Contains(handle), "old occupied coordinate no longer contains the vehicle");
+        world.CopyMapObjectHandlesAtCoordinate(next.anchorCoordinate, handles);
+        Require(handles.Contains(handle), "new occupied coordinate contains the vehicle");
+        var obstacle = CreateState(61, 8502L);
+        world.UpsertInstallationHandle(obstacle);
+        initialVersion = world.DataOnlyInstallationVersion;
+        var collision = next.Clone(); collision.storageKey = obstacle.storageKey;
+        Require(!world.MoveAttachedInstallationView(handle, collision, 101, position, rotation),
+            "movement cannot overwrite another installation storage key");
+        Require(world.DataOnlyInstallationVersion == initialVersion && world.TryGetInstallationHandle(next.storageKey, out _),
+            "failed movement leaves presentation version and indices intact");
+        world.UpsertInstallationHandle(next);
+        Require(world.DataOnlyInstallationVersion == initialVersion + 1, "view detachment still invalidates static presentation");
+        Require(!world.MoveAttachedInstallationView(handle, state, 101, position, rotation),
+            "movement cannot relocate a detached data-only installation");
+        Require(world.RemoveInstallation(handle) && !world.IsHandleAlive(handle),
+            "moved installation remains removable using its original handle");
+        Require(world.DataOnlyInstallationVersion == initialVersion + 2, "actual removal still invalidates static presentation");
+    }
+
+    private static void CheckDataOnlyInstallationIndex()
+    {
+        using var world = new VirtualObjectWorld();
+        var a = CreateState(71, 8601);
+        var b = CreateState(72, 8602);
+        b.anchorCoordinate = b.storageKey = new Vector2Int(8, 9);
+        var handle = world.UpsertInstallationHandle(a);
+        world.UpsertInstallationHandle(b);
+        var versions = new List<KeyValuePair<int, int>>();
+        var records = new List<VirtualObjectRecord>();
+        world.CopyDataOnlyInstallationTypeVersions(versions);
+        Require(versions.Count == 2, "data-only presentation revisions are indexed by item type");
+        world.CopyDataOnlyInstallationRecords(71, records);
+        Require(records.Count == 1 && records[0].mapObjectHandle == handle, "type copy excludes other installation types");
+        int revision = world.DataOnlyInstallationVersion;
+        a.hasTrainRailSample = true;
+        world.UpsertInstallationHandle(a);
+        Require(world.DataOnlyInstallationVersion == revision, "nonvisual save-state changes preserve data-only presentation revision");
+        a.worldPosition = new Vector3(10, 0, 11);
+        world.UpsertInstallationHandle(a);
+        Require(world.DataOnlyInstallationVersion == revision + 1, "data-only pose change advances presentation revision");
+        world.AttachInstallationView(a, 301, a.worldPosition, a.worldRotation);
+        Require(world.GetDataOnlyInstallationCount(71) == 0, "attaching a view removes its data-only presentation entry");
+        revision = world.DataOnlyInstallationVersion;
+        world.AttachInstallationView(a, 301, new Vector3(12, 0, 13), a.worldRotation);
+        Require(world.DataOnlyInstallationVersion == revision, "live view pose upserts do not invalidate data-only presentation");
+        world.UpsertInstallationHandle(a);
+        Require(world.GetDataOnlyInstallationCount(71) == 1 && world.DataOnlyInstallationVersion == revision + 1,
+            "detaching a view restores its data-only presentation entry");
+        a.itemId = 73;
+        world.UpsertInstallationHandle(a);
+        Require(world.GetDataOnlyInstallationCount(71) == 0 && world.GetDataOnlyInstallationCount(73) == 1,
+            "item replacement moves record between type indices");
+        world.CopyDataOnlyInstallationRecords(73, records);
+        Require(records.Count == 1 && world.RemoveInstallation(records[0].mapObjectHandle), "indexed data-only installation is removable");
+        Require(world.GetDataOnlyInstallationCount(73) == 0, "removal clears type index membership");
+        world.Clear();
+        Require(world.GetDataOnlyInstallationCount(72) == 0, "world clear releases data-only type membership");
+        world.CopyDataOnlyInstallationTypeVersions(versions);
+        Require(versions.Count == 3, "empty type revisions survive clear so existing hosts can be removed");
+        world.UpsertInstallationHandle(b);
+        Require(world.GetDataOnlyInstallationCount(72) == 1, "data-only index can be repopulated after clear");
+        for (int i = 0; i < 100; i++) { world.CopyDataOnlyInstallationTypeVersions(versions); world.CopyDataOnlyInstallationRecords(72, records); }
+        long allocated = GC.GetAllocatedBytesForCurrentThread();
+        for (int i = 0; i < 1000; i++) { world.CopyDataOnlyInstallationTypeVersions(versions); world.CopyDataOnlyInstallationRecords(72, records); }
+        Require(GC.GetAllocatedBytesForCurrentThread() == allocated, "warmed type revision and record copies allocate nothing");
     }
 
     private static void CheckInstallationOnlyCopy()
@@ -166,13 +272,20 @@ internal static class Program
         Vector2Int resourceCoordinate = new Vector2Int(31, 32);
         world.UpsertResource(resourceCoordinate, 13, new Resource.ResourceSaveState { resourceCount = 2 });
         var records = new List<VirtualObjectRecord>();
-        world.CopyInstallationRecords(records, true);
-        Require(records.Count > 0, "installation-only copy returns installations");
-        for (int i = 0; i < records.Count; i++)
+        var types = new List<KeyValuePair<int, int>>();
+        world.CopyDataOnlyInstallationTypeVersions(types);
+        int count = 0;
+        for (int typeIndex = 0; typeIndex < types.Count; typeIndex++)
         {
-            Require(records[i].kind == VirtualObjectKind.Installation,
-                "installation-only copy excludes non-installation records");
+            world.CopyDataOnlyInstallationRecords(types[typeIndex].Key, records);
+            count += records.Count;
+            for (int i = 0; i < records.Count; i++)
+            {
+                Require(records[i].kind == VirtualObjectKind.Installation && !records[i].HasAttachedView,
+                    "typed installation copy excludes resources, item stacks and live views");
+            }
         }
+        Require(count > 0, "typed installation copy returns data-only installations");
     }
 
     private static BlockStateStore.InstallationSaveState CreateState(int itemId, long sequence)

@@ -22,6 +22,7 @@ public partial class InstallationObject : MapObject
     public long RuntimePlacementSequence;
     public float FluidStorageCapacityLiters = 50;
     private long storedFluidUnits;
+    internal long FluidStorageStateRevision;
     private int storedFluidItemId = -1;
     private float storedFluidTemperatureCelsius;
     public float StoredFluidLiters => DeterministicSimulationUnits.ToFloat(storedFluidUnits);
@@ -39,7 +40,11 @@ public partial class InstallationObject : MapObject
     public float GetStoredFluidTemperatureCelsius(int id) => storedFluidTemperatureCelsius;
     private void OnStoredFluidAccepted(int id, float before, float accepted, float temperature) => storedFluidTemperatureCelsius = temperature;
     private float NormalizeFluidTemperatureCelsius(float value) => value;
-    private void NotifyStoredFluidChanged(int id, float before) { }
+    private void NotifyStoredFluidChanged(int id, float before)
+    {
+        if (id != StoredFluidItemId || Math.Abs(before - StoredFluidLiters) > .0001f)
+            InputOutputModule.StorageChanged(this);
+    }
     public bool TryGetPlacementRuntime(out Vector2Int anchor, out int turns) { anchor = Anchor; turns = 0; return true; }
     public static int CompareSimulationOrder(InstallationObject a, InstallationObject b)
     { int x = a.Anchor.x.CompareTo(b.Anchor.x); return x != 0 ? x : a.Anchor.y.CompareTo(b.Anchor.y); }
@@ -234,11 +239,12 @@ public partial class InputOutputModule : InstallationObject
     private Pump connectedFluidSearchCurrentPump;
     private readonly List<FluidOutputTransferCandidate> fluidOutputTransferCandidates = new();
     protected float ManagedUpdateTickIntervalSeconds => .1f;
-    private static int fluidStorageStateVersion;
+    private static long fluidStorageStateVersion;
     private static long fluidOutputSelectionCacheHitCount, fluidOutputSelectionCacheMissCount, fluidOutputRetentionCacheHitCount, fluidOutputRetentionCacheMissCount;
     private long cachedFluidOutputSelectionTick = -1, cachedFluidOutputRetentionTick = -1;
-    private int cachedFluidOutputSelectionStateVersion, cachedFluidOutputSelectionTopologyVersion, cachedFluidOutputSelectionItemId;
-    private int cachedFluidOutputRetentionStateVersion, cachedFluidOutputRetentionTopologyVersion, cachedFluidOutputRetentionItemId;
+    private long cachedFluidOutputSelectionStateVersion, cachedFluidOutputRetentionStateVersion;
+    private int cachedFluidOutputSelectionTopologyVersion, cachedFluidOutputSelectionItemId;
+    private int cachedFluidOutputRetentionTopologyVersion, cachedFluidOutputRetentionItemId;
     private bool cachedFluidOutputSelectionFound;
     private FluidOutputConnection cachedFluidOutputSelection;
     private float cachedFluidOutputRetentionSourceRate, cachedFluidOutputRetention;
@@ -354,7 +360,7 @@ public partial class ProductionMachine : InputOutputModule
     public void WorkingTick()
     { MapObjectTickManager.CurrentSimulationTick += DeterministicSimulationUnits.DeltaTimeToTicks(.1f); productionFluidOutputDeltaTime = .1f; AdvanceCraft(.1f); }
 }
-public static class Checks
+public static partial class Checks
 {
     private static int passed, failed;
     private static void Check(float actual, float expected, string label)
@@ -406,6 +412,7 @@ public static class Checks
     }
     public static int Main()
     {
+        RunCacheChecks();
         foreach(var d in new[]{Vector2Int.right,Vector2Int.up,Vector2Int.left,Vector2Int.down})
         {
             CheckPumpUnderground(d);

@@ -46,7 +46,7 @@ if ($virtualWorldOwnsSceneLifetime) {
 $staticRendererText = [IO.File]::ReadAllText((Join-Path $scripts 'MapObjects/StaticMapObjectBatchRenderer.cs'))
 $typeHostText = [IO.File]::ReadAllText((Join-Path $scripts 'MapObjects/StaticMapObjectTypeHost.cs'))
 $dataOnlyPresentationNeedsSource =
-    ($staticRendererText -notmatch 'CopyInstallationRecords\(dataOnlyInstallations, true\)') -or
+    ($staticRendererText -notmatch 'CopyDataOnlyInstallationRecords\(type.Key, dataOnlyInstallations\)') -or
     ($staticRendererText -notmatch 'SynchronizeRecord\(record\)') -or
     ($typeHostText -notmatch 'public bool SynchronizeRecord\(VirtualObjectRecord record\)')
 if ($dataOnlyPresentationNeedsSource) {

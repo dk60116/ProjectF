@@ -184,6 +184,7 @@ public partial class InstallationObject : MapObject, IMapObjectSimulationIdentit
     private bool excludeFromTerrainPersistence;
     [SerializeField, HideInInspector, Min(0f)]
     private long storedFluidUnits;
+    internal long FluidStorageStateRevision;
     [SerializeField, HideInInspector]
     private int storedFluidItemId = -1;
     [SerializeField, HideInInspector]

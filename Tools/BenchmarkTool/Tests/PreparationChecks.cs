@@ -35,13 +35,6 @@ public static class ProbeClock
 }
 public static class Time { public static int frameCount = 1; }
 public readonly record struct MapObjectHandle(int TypeId) { public bool IsValid => TypeId >= 0; }
-public sealed class InstallationObject
-{
-    public static readonly List<InstallationObject> All = new();
-    public bool isActiveAndEnabled = true;
-    public MapObjectHandle RuntimeMapObjectHandle = new(1);
-    public static void CopyActiveInstances(List<InstallationObject> items) { items.Clear(); items.AddRange(All); }
-}
 public enum VirtualObjectKind { Installation }
 public class VirtualObjectRecord
 {
@@ -53,16 +46,17 @@ public class VirtualObjectRecord
 }
 public sealed class VirtualWorld
 {
-    public int InstallationVersion = 10;
+    public int DataOnlyInstallationVersion = 10;
     public readonly List<VirtualObjectRecord> Records = new();
-    public bool IsHandleAlive(MapObjectHandle handle) => true;
-    public void CopyInstallationRecords(List<VirtualObjectRecord> output, bool dataOnly) { output.Clear(); output.AddRange(Records); }
+    public void CopyDataOnlyInstallationTypeVersions(List<KeyValuePair<int, int>> output)
+    { output.Clear(); output.Add(new(1, DataOnlyInstallationVersion)); }
+    public int GetDataOnlyInstallationCount(int id) => Records.Count;
+    public void CopyDataOnlyInstallationRecords(int id, List<VirtualObjectRecord> output) { output.Clear(); output.AddRange(Records); }
 }
 public sealed class StaticMapObjectTypeHost
 {
     public int ItemId = 1, InstanceCount, Begins, Completes, Aborts;
     public void BeginSynchronization() { Begins++; InstanceCount = 0; }
-    public bool SynchronizeInstance(InstallationObject source, MapObjectHandle handle) { InstanceCount++; return true; }
     public bool SynchronizeRecord(VirtualObjectRecord source) { InstanceCount++; return true; }
     public void CompleteSynchronization() => Completes++;
     public void AbortSynchronization() => Aborts++;
@@ -72,21 +66,21 @@ public partial class RendererProbe
     private readonly VirtualWorld virtualWorld = new();
     private readonly object itemManager = new();
     private readonly List<VirtualObjectRecord> dataOnlyInstallations = new();
-    private readonly List<StaticMapObjectTypeHost> hostScratch = new();
-    private readonly List<int> emptyHostItemIds = new();
+    private readonly List<KeyValuePair<int, int>> typeVersions = new(), changedTypeVersions = new();
+    private readonly Dictionary<int, int> synchronizedTypeVersions = new();
     private readonly HashSet<int> rejectedTypeIds = new();
     private readonly Dictionary<int, StaticMapObjectTypeHost> hostsByItemId = new() { [1] = new() };
-    private int cachedInstallationVersion = -1, synchronizationCount, lastSynchronizationFrame,
+    private int cachedDataOnlyInstallationVersion = -1, synchronizationCount, lastSynchronizationFrame,
         lastSynchronizedDataOnlyInstallationCount;
     public long BenchmarkSyncDone { get; private set; }
     public long BenchmarkSyncTotal { get; private set; }
     private void ResolveDependencies() { }
-    private void InvalidateSyncVersions() { cachedInstallationVersion = -1; }
-    private void CopyHostsToScratch() { hostScratch.Clear(); hostScratch.AddRange(hostsByItemId.Values); }
+    private void InvalidateSyncVersions() { cachedDataOnlyInstallationVersion = -1; synchronizedTypeVersions.Clear(); }
+    private bool TryGetSupportedArchetype(int id, out object definition) { definition = itemManager; return true; }
     private bool TryGetOrCreateHost(int id, out StaticMapObjectTypeHost host) => hostsByItemId.TryGetValue(id, out host);
     private void RemoveHost(int id) => hostsByItemId.Remove(id);
     public StaticMapObjectTypeHost Host => hostsByItemId[1];
-    public int CachedVersion => cachedInstallationVersion;
+    public int CachedVersion => cachedDataOnlyInstallationVersion;
     public void AddData(int count) { for (int i = 0; i < count; i++) virtualWorld.Records.Add(new()); }
 }
 public sealed class PipeRuntimeRecord { public int Id; }
@@ -130,8 +124,6 @@ internal static class PreparationChecks
             surface.Return(data);
             Require(ReferenceEquals(data, surface.Build(size, new(32, -16))), "reuse scratch surface storage");
         }
-        InstallationObject.All.Clear();
-        for (int i = 0; i < 50000; i++) InstallationObject.All.Add(new());
         var renderer = new RendererProbe(); renderer.AddData(100000);
         var sync = renderer.PrepareBenchmarkPresentation();
         int yields = 0; long last = -1;
@@ -169,3 +161,5 @@ public class MiningWorld
     public static MiningWorld Current => null;
     public bool TryGet(Vector2Int coordinate, out object target) { target = null; return false; }
 }
+public class UtilityPoleWorld : MiningWorld { }
+public class ProductionWorld : MiningWorld { }

@@ -3,7 +3,7 @@ using ProjectF.Rendering;
 using ProjectF.MapObjects;
 using UnityEngine;
 
-static class Checks
+static partial class Checks
 {
     static int checks;
     static void Check(bool value, string message) { checks++; if (!value) throw new Exception(message); }
@@ -54,6 +54,7 @@ static class Checks
         Method(host, "OnDisable")(); Check(!body.forceRenderingOff && !added.forceRenderingOff, "disable restores native presentation");
         Method(host, "OnEnable")(); Check(body.forceRenderingOff, "enable resumes model ownership");
         InstallationBatchRenderer.Unregister(owner); Check(!body.forceRenderingOff && host.RegisteredCount == 0, "pool release restores original draw flags");
+        CheckVehicleMovement(host, render, material);
 
         var archetype = new MapObjectArchetype();
         archetype.Nodes.Add(new(){AnimationPath="",ParentIndex=-1,LocalScale=new(1,1,1),LocalRotation=Quaternion.identity});

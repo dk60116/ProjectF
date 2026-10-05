@@ -1687,11 +1687,10 @@ public partial class TerrainGenerator : MonoBehaviour,
             return;
         }
 
-        if (runtimePlacementChanged)
-        {
-            SaveRuntimeInstallationState(installationObject);
-        }
-        else if (resourceStateStore.UpdateLiveInstallationWorldPose(installationObject))
+        bool updated = runtimePlacementChanged
+            ? installationObject is Vehicle vehicle && resourceStateStore.MoveLiveVehicle(vehicle)
+            : resourceStateStore.UpdateLiveInstallationWorldPose(installationObject);
+        if (updated)
         {
             persistenceDirtyInstallations.Remove(installationObject);
         }

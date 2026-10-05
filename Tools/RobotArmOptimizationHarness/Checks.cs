@@ -39,7 +39,7 @@ static partial class Checks
         Require(GC.GetAllocatedBytesForCurrentThread() - allocated == 0, "100k steady-state save updates allocate no DTOs");
 
         var timing = new RobotArmTickTiming(); MapObjectTickProfiler.Enabled = true;
-        var phases = new[] { RobotArmTickTiming.Phase.Power, RobotArmTickTiming.Phase.State, RobotArmTickTiming.Phase.Sleep };
+        var phases = (RobotArmTickTiming.Phase[])Enum.GetValues(typeof(RobotArmTickTiming.Phase));
         using (timing.BeginTick())
             for (int i = 0; i < 100000; i++)
             {
@@ -47,13 +47,19 @@ static partial class Checks
                 foreach (var phase in phases)
                     using (timing.Measure(phase)) { }
             }
-        Require(MapObjectTickProfiler.Records.Count == 3 && MapObjectTickProfiler.Records["Robot Arm Power (sampled)"] == 390
-            && MapObjectTickProfiler.Clock == 390 * 6,
+        Require(MapObjectTickProfiler.Records.Count == phases.Length && MapObjectTickProfiler.Records["Robot Arm Power (sampled)"] == 390
+            && MapObjectTickProfiler.Records["Robot Arm Pickup Query (sampled)"] == 390
+            && MapObjectTickProfiler.Records["Robot Arm Drop Query (sampled)"] == 390
+            && MapObjectTickProfiler.Clock == 390 * 2 * phases.Length,
             "100k entities use 390 sampled scopes per phase, without extrapolating their durations");
         MapObjectTickProfiler.Enabled = false; MapObjectTickProfiler.Records.Clear();
         long timestamps = MapObjectTickProfiler.Clock;
         allocated = GC.GetAllocatedBytesForCurrentThread();
-        using (timing.BeginTick()) for (int i = 0; i < 100000; i++) using (timing.Measure(RobotArmTickTiming.Phase.Power)) { }
+        using (timing.BeginTick()) for (int i = 0; i < 100000; i++)
+        {
+            timing.BeginEntity(i);
+            foreach (var phase in phases) using (timing.Measure(phase)) { }
+        }
         Require(MapObjectTickProfiler.Clock == timestamps && MapObjectTickProfiler.Records.Count == 0
             && GC.GetAllocatedBytesForCurrentThread() == allocated, "disabled detailed timing reads no clock and allocates nothing");
 
@@ -97,6 +103,7 @@ static partial class Checks
         visited = 0; while (backwards.MoveNext()) { if (++visited > 10) throw new Exception("negative ray stalled"); }
         Require(visited == 4 && backwards.Current == new Vector2Int(-3, 0), "negative boundary ray terminates at its last crossed cell");
         CheckMotionAndPower();
+        CheckStateTicks();
         Console.WriteLine($"PASS: {count} production robot-arm optimization checks; managed Unity boundaries, no engine launched.");
     }
 }
@@ -125,12 +132,15 @@ public partial class RobotArmInstance
     public bool IsRuntimeActive = true, AllowsFocus = true, PlacementPresentationSuppressed;
     public Vector3 ColliderCenter;
     public Vector3 WorldPosition => ColliderCenter;
-    public int heldItemId = -1;
-    public RobotArmState state;
-    public float pickupTimer, dropRetryTimer, actionTurnTimer;
-    public bool waitingForDropRetry;
-    private RobotArmRuntimeState tickData;
-    private ref RobotArmRuntimeState Data => ref tickData;
+    public ref int heldItemId => ref tickData.heldItemId;
+    public ref RobotArmState state => ref tickData.state;
+    public ref float pickupTimer => ref tickData.pickupTimer;
+    public ref float dropRetryTimer => ref tickData.dropRetryTimer;
+    public ref float actionTurnTimer => ref tickData.actionTurnTimer;
+    public ref bool waitingForDropRetry => ref tickData.waitingForDropRetry;
+    private RobotArmRuntimeState tickData = new() { heldItemId = -1 };
+    public int StateLookups;
+    private ref RobotArmRuntimeState Data { get { StateLookups++; return ref tickData; } }
     private bool electricPowerBlocked, runtimeSleeping;
     private float lastElectricPowerSupplyRatio;
     private const float ItemMoveDuration = .1f;
@@ -159,6 +169,7 @@ public partial class RobotArmInstance
     private void SetRuntimeSleeping(bool sleeping) { runtimeSleeping = sleeping; }
     private Quaternion inputBodyLocalRotation => Quaternion.identity;
     private float bodyTurnSpeedDegreesPerSecond => TurnSpeed;
+    private float pickupInterval => .1f;
     private void EnsureRuntimeStateInitialized() { }
     public void Save() => PersistTransferState();
     public bool Power(out float watts) => TryGetElectricOperationalPowerRequirement(out watts);

@@ -250,18 +250,21 @@ public sealed class VirtualObjectWorld : IDisposable
     private readonly Dictionary<Vector2Int, int> floorStackRecordByCoordinate = new Dictionary<Vector2Int, int>();
     private readonly Dictionary<Vector2Int, int> resourceRecordByCoordinate = new Dictionary<Vector2Int, int>();
     private readonly Dictionary<Vector2Int, int> installationRecordByAnchor = new Dictionary<Vector2Int, int>();
+    private readonly Dictionary<int, HashSet<int>> dataOnlyInstallationIdsByItemId =
+        new Dictionary<int, HashSet<int>>();
+    private readonly Dictionary<int, int> dataOnlyInstallationVersionsByItemId = new Dictionary<int, int>();
     private bool coordinateIndexBuildDeferred;
     private int nextId = 1;
     private int version;
     private int itemStackVersion;
-    private int installationVersion;
+    private int dataOnlyInstallationVersion;
 
     public static VirtualObjectWorld Current => current;
 
     public int Count => recordsById.Count;
     public int Version => version;
     public int ItemStackVersion => itemStackVersion;
-    public int InstallationVersion => installationVersion;
+    public int DataOnlyInstallationVersion => dataOnlyInstallationVersion;
 
     public static VirtualObjectWorld Ensure()
     {
@@ -484,25 +487,29 @@ public sealed class VirtualObjectWorld : IDisposable
         }
     }
 
-    public void CopyInstallationRecords(List<VirtualObjectRecord> results, bool includeLiveRecords = false)
+    public void CopyDataOnlyInstallationTypeVersions(List<KeyValuePair<int, int>> results)
     {
-        if (results == null)
-        {
-            return;
-        }
-
+        if (results == null) return;
         results.Clear();
-        foreach (KeyValuePair<Vector2Int, int> pair in installationRecordByAnchor)
+        foreach (KeyValuePair<int, int> pair in dataOnlyInstallationVersionsByItemId)
         {
-            if (!recordsById.TryGetValue(pair.Value, out VirtualObjectRecord record)
-                || record == null
-                || record.kind != VirtualObjectKind.Installation
-                || (!includeLiveRecords && record.residency == VirtualObjectResidency.Live))
-            {
-                continue;
-            }
+            results.Add(pair);
+        }
+    }
 
-            results.Add(record);
+    public int GetDataOnlyInstallationCount(int itemId)
+    {
+        return dataOnlyInstallationIdsByItemId.TryGetValue(itemId, out HashSet<int> ids) ? ids.Count : 0;
+    }
+
+    public void CopyDataOnlyInstallationRecords(int itemId, List<VirtualObjectRecord> results)
+    {
+        if (results == null) return;
+        results.Clear();
+        if (!dataOnlyInstallationIdsByItemId.TryGetValue(itemId, out HashSet<int> ids)) return;
+        foreach (int id in ids)
+        {
+            if (recordsById.TryGetValue(id, out VirtualObjectRecord record)) results.Add(record);
         }
     }
 
@@ -658,6 +665,8 @@ public sealed class VirtualObjectWorld : IDisposable
             installationRecordByAnchor,
             storageKey,
             VirtualObjectKind.Installation);
+        int previousItemId = record.itemId;
+        bool wasDataOnly = record.mapObjectHandle.IsValid && !record.HasAttachedView;
         VirtualObjectResidency targetResidency = hasAttachedPose ? VirtualObjectResidency.Live : residency;
         Vector3 targetWorldPosition = hasAttachedPose
             ? attachedWorldPosition
@@ -695,8 +704,50 @@ public sealed class VirtualObjectWorld : IDisposable
         EnsureMapObjectHandle(record, state.itemId, state.placementSequence);
         record.liveInstanceId = viewInstanceId;
         UpdateCoordinateMappings(record, state.occupiedCoordinates);
-        StoreRecord(record, presentationChanged);
+        StoreRecord(record);
+        UpdateDataOnlyInstallationIndex(record, previousItemId, wasDataOnly, presentationChanged);
         return record.mapObjectHandle;
+    }
+
+    public bool MoveAttachedInstallationView(
+        MapObjectHandle handle,
+        BlockStateStore.InstallationSaveState state,
+        int viewInstanceId,
+        Vector3 worldPosition,
+        Quaternion worldRotation)
+    {
+        if (state == null
+            || viewInstanceId == 0
+            || !TryResolveRecord(handle, out VirtualObjectRecord record)
+            || record.kind != VirtualObjectKind.Installation
+            || !record.HasAttachedView
+            || record.liveInstanceId != viewInstanceId
+            || record.itemId != state.itemId
+            || record.sequence != state.placementSequence)
+        {
+            return false;
+        }
+
+        Vector2Int previousKey = BlockStateStore.GetInstallationStorageKey(record.installationState);
+        Vector2Int nextKey = BlockStateStore.GetInstallationStorageKey(state);
+        if (!installationRecordByAnchor.TryGetValue(previousKey, out int recordId)
+            || recordId != record.id.Value
+            || (installationRecordByAnchor.TryGetValue(nextKey, out int occupiedId) && occupiedId != recordId))
+        {
+            return false;
+        }
+
+        installationRecordByAnchor.Remove(previousKey);
+        installationRecordByAnchor[nextKey] = recordId;
+        record.installationState = state;
+        record.anchorCoordinate = state.anchorCoordinate;
+        record.quarterTurns = ((state.quarterTurns % 4) + 4) % 4;
+        UpdateCoordinateMappings(record, state.occupiedCoordinates);
+        UpdateAttachedInstallationViewPose(nextKey, viewInstanceId, worldPosition, worldRotation);
+        // Live views have their own presentation path. Relocating one changes lookup
+        // indices, but not the data-only installation batches or its entity identity.
+        version++;
+        return true;
     }
 
     public bool UpdateAttachedInstallationViewPose(
@@ -723,9 +774,7 @@ public sealed class VirtualObjectWorld : IDisposable
             record.installationState.worldRotation = worldRotation;
         }
 
-        // 이 버전은 VirtualItemStackRenderer의 전체 캐시 갱신 기준이다.
-        // 라이브 차량의 자세만 바뀐 경우에는 인덱스나 가상 아이템이
-        // 달라지지 않으므로 버전을 올리지 않는다.
+        // A same-cell pose update changes neither lookup indices nor static batches.
         return true;
     }
 
@@ -780,6 +829,11 @@ public sealed class VirtualObjectWorld : IDisposable
 
     public void Clear()
     {
+        foreach (int itemId in dataOnlyInstallationIdsByItemId.Keys)
+        {
+            AdvanceDataOnlyInstallationVersion(itemId);
+        }
+        dataOnlyInstallationIdsByItemId.Clear();
         coordinateIndexBuildDeferred = false;
         recordsById.Clear();
         recordIdsByCoordinate.Clear();
@@ -789,7 +843,6 @@ public sealed class VirtualObjectWorld : IDisposable
         nextId = 1;
         version++;
         itemStackVersion++;
-        installationVersion++;
     }
 
     public void Dispose()
@@ -825,7 +878,7 @@ public sealed class VirtualObjectWorld : IDisposable
         return record;
     }
 
-    private void StoreRecord(VirtualObjectRecord record, bool installationPresentationChanged = true)
+    private void StoreRecord(VirtualObjectRecord record)
     {
         if (record == null || !record.id.IsValid)
         {
@@ -838,10 +891,42 @@ public sealed class VirtualObjectWorld : IDisposable
         {
             itemStackVersion++;
         }
-        else if (record.kind == VirtualObjectKind.Installation && installationPresentationChanged)
+    }
+
+    private void UpdateDataOnlyInstallationIndex(
+        VirtualObjectRecord record, int previousItemId, bool wasDataOnly, bool presentationChanged)
+    {
+        bool isDataOnly = record.mapObjectHandle.IsValid && !record.HasAttachedView;
+        if (wasDataOnly && (!isDataOnly || previousItemId != record.itemId))
         {
-            installationVersion++;
+            RemoveDataOnlyInstallationIndex(previousItemId, record.id.Value);
         }
+        if (!isDataOnly) return;
+        if (!dataOnlyInstallationIdsByItemId.TryGetValue(record.itemId, out HashSet<int> ids))
+        {
+            ids = new HashSet<int>();
+            dataOnlyInstallationIdsByItemId.Add(record.itemId, ids);
+        }
+        if (ids.Add(record.id.Value) || presentationChanged)
+        {
+            AdvanceDataOnlyInstallationVersion(record.itemId);
+        }
+    }
+
+    private void RemoveDataOnlyInstallationIndex(int itemId, int recordId)
+    {
+        if (!dataOnlyInstallationIdsByItemId.TryGetValue(itemId, out HashSet<int> ids) || !ids.Remove(recordId)) return;
+        if (ids.Count == 0) dataOnlyInstallationIdsByItemId.Remove(itemId);
+        AdvanceDataOnlyInstallationVersion(itemId);
+    }
+
+    private void AdvanceDataOnlyInstallationVersion(int itemId)
+    {
+        dataOnlyInstallationVersionsByItemId.TryGetValue(itemId, out int itemVersion);
+        // Keep empty-type revisions so a presenter can remove the last instance,
+        // including after Clear; type entries are bounded by the item catalog.
+        dataOnlyInstallationVersionsByItemId[itemId] = unchecked(itemVersion + 1);
+        dataOnlyInstallationVersion++;
     }
 
     private static bool CoordinatesMatch(
@@ -994,6 +1079,7 @@ public sealed class VirtualObjectWorld : IDisposable
         index.Remove(key);
         if (recordsById.TryGetValue(recordId, out VirtualObjectRecord record) && record != null)
         {
+            if (removesInstallation) RemoveDataOnlyInstallationIndex(record.itemId, recordId);
             RemoveCoordinateMappings(record);
         }
         else
@@ -1006,10 +1092,6 @@ public sealed class VirtualObjectWorld : IDisposable
         if (removesItemStack)
         {
             itemStackVersion++;
-        }
-        else if (removesInstallation)
-        {
-            installationVersion++;
         }
     }
 

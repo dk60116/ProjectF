@@ -78,7 +78,7 @@ namespace ProjectF.Editor.MapObjects
         private static void ValidateResourceHandles(VirtualObjectWorld world)
         {
             Vector2Int coordinate = new Vector2Int(11, 13);
-            int installationVersion = world.InstallationVersion;
+            int dataOnlyInstallationVersion = world.DataOnlyInstallationVersion;
             var state = new Resource.ResourceSaveState
             {
                 resourceCount = 80,
@@ -103,7 +103,7 @@ namespace ProjectF.Editor.MapObjects
             Require(!world.IsHandleAlive(initial), "A replaced resource handle remained alive.");
             Require(!world.RemoveResource(initial), "A stale handle removed the replacement resource.");
             Require(world.RemoveResource(replacement), "The current resource handle could not remove its resource.");
-            Require(world.InstallationVersion == installationVersion,
+            Require(world.DataOnlyInstallationVersion == dataOnlyInstallationVersion,
                 "Resource changes invalidated the installation render version.");
         }
 

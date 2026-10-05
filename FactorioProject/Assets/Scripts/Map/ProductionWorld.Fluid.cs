@@ -36,7 +36,7 @@ public sealed partial class ProductionWorld
     }
     internal void WakeNativeProducers(ProductionFacilityInstance receiver)
     {
-        InputOutputModule.NotifyDataFluidStorageChanged();
+        InputOutputModule.NotifyDataFluidStorageChanged(receiver);
         WakeDataFluidProducers(receiver);
         if (nativeProducers.TryGetValue(receiver, out var sources))
             for (int i = sources.Count - 1; i >= 0; i--)
@@ -172,7 +172,7 @@ public sealed partial class ProductionWorld
         int index = io.productionInputFluidItemIds.IndexOf(item);
         if (index < 0) { index = io.productionInputFluidItemIds.Count; io.productionInputFluidItemIds.Add(item); io.productionInputFluidUnits.Add(0); }
         long units = DeterministicSimulationUnits.FromFloat(liters);
-        if (units > 0) { io.productionInputFluidUnits[index] += units; InputOutputModule.NotifyDataFluidStorageChanged(); }
+        if (units > 0) { io.productionInputFluidUnits[index] += units; InputOutputModule.NotifyDataFluidStorageChanged(facility); }
     }
     private void CollectStorages(bool output)
     {

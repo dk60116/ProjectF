@@ -23,6 +23,10 @@ foreach ($name in @(
     'private static void WakeRuntimeFluidTopologyModules(',
     'private readonly struct ConnectedFluidSearchNode', 'private readonly struct FluidOutputConnection', 'private readonly struct DirectedSteamPort',
     'private readonly struct FluidStorageEndpointKey', 'private readonly struct FluidOutputTransferCandidate',
+    'private static void AdvanceFluidStorageStateVersion(', 'internal static void NotifyDataFluidStorageChanged(',
+    'private void ClearFluidOutputTickQueryCaches()', 'private long GetFluidOutputStorageStateVersion()',
+    'protected bool TryGetFluidOutputAvailableLiters(', 'private bool TryGetCachedFluidOutputAvailability(',
+    'private void CacheFluidOutputAvailability(', 'private void AddDataFluidOutputCandidate(',
     'private static bool CoordinatesMatch(', 'private static void AddUniqueCoordinates(',
     'private sealed class FluidPortConnectionCache',
     'private bool EnsureConnectedFluidSourceStorageCache(IReadOnlyList<Vector2Int> seedCoordinates)',
@@ -52,7 +56,7 @@ foreach ($name in @(
     'private void EnqueueInterlockedPumpEndpointsAt(',
     'private void AppendInterlockedPumpEndpointsAt(',
     'private void AddFluidOutputStorageCacheCandidatesAtCoordinate(', 'private void AddFluidOutputStorageCacheCandidate(',
-    'private bool TrySelectFluidOutputStorageWithAnySpaceFromCache(', 'private bool TrySelectFluidOutputConnectionWithAnySpaceFromCache(',
+    'private bool TrySelectFluidOutputConnectionWithAnySpaceFromCache(',
     'private bool CanUseFluidOutputStorageWithAnySpace(', 'private static float GetFluidStorageFillRatio(',
     'protected float ResolveFluidOutputTransportRetention(', 'private static float ResolvePumpTransportRatio(',
     'private bool BuildFluidOutputTransferCandidates(', 'private bool CanUseFluidOutputConnectionWithAnySpace(',
@@ -97,7 +101,8 @@ $probeDir = Join-Path ([IO.Path]::GetTempPath()) ('ProjectF-FluidStorageTranspor
 New-Item -ItemType Directory -Path $probeDir | Out-Null
 Set-Content -LiteralPath (Join-Path $probeDir 'Production.cs') -Value $generated
 $checks = [Security.SecurityElement]::Escape((Join-Path $PSScriptRoot 'Checks.cs'))
+$cacheChecks = [Security.SecurityElement]::Escape((Join-Path $PSScriptRoot 'CacheChecks.cs'))
 $unity = 'C:/Program Files/Unity/Hub/Editor/6000.4.0f1/Editor/Data/Managed/UnityEngine/UnityEngine.CoreModule.dll'
-Set-Content -LiteralPath (Join-Path $probeDir 'Probe.csproj') -Value ('<Project Sdk="Microsoft.NET.Sdk"><PropertyGroup><OutputType>Exe</OutputType><TargetFramework>net9.0</TargetFramework><NoWarn>0649;0414</NoWarn></PropertyGroup><ItemGroup><Compile Include="' + $checks + '"/><Reference Include="UnityEngine.CoreModule"><HintPath>' + $unity + '</HintPath></Reference></ItemGroup></Project>')
+Set-Content -LiteralPath (Join-Path $probeDir 'Probe.csproj') -Value ('<Project Sdk="Microsoft.NET.Sdk"><PropertyGroup><OutputType>Exe</OutputType><TargetFramework>net9.0</TargetFramework><NoWarn>0649;0414</NoWarn></PropertyGroup><ItemGroup><Compile Include="' + $checks + '"/><Compile Include="' + $cacheChecks + '"/><Reference Include="UnityEngine.CoreModule"><HintPath>' + $unity + '</HintPath></Reference></ItemGroup></Project>')
 dotnet run --configuration Release --project (Join-Path $probeDir 'Probe.csproj')
 exit $LASTEXITCODE

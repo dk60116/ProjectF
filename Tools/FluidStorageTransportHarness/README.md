@@ -48,6 +48,16 @@ pipe records are present in a player's current scene.
 The earlier lookup-only harness was replaced because it could pass while actual
 storage transport remained broken.
 
+`CacheChecks.cs` extracts the production endpoint revision, capacity, retention
+and receiver selection caches. Native and ECS changes on unrelated networks
+preserve all three results in the same tick; related fill/drain invalidates
+positive and blocked results immediately. Also checks a non-selected endpoint
+becoming the best receiver, topology additions, per-port seed changes, request
+size changes, receiver activity across ticks and transfer-time acceptance.
+Ten thousand unrelated mutations cause no new query searches and zero warmed
+GC allocation. ECS storage ownership is doubled here; `ProductionEcsHarness`
+with `-FluidBoundary` executes the actual bridge and revision notification sites.
+
 ```powershell
 ./Tools/FluidStorageTransportHarness/Run.ps1
 ```

@@ -170,6 +170,7 @@ public sealed partial class RobotArmInstance : IMapObjectTarget, IDataElectricCo
     private void SetRuntimeSleeping(bool sleeping, bool force = false)
     {
         bool changed = runtimeSleeping != sleeping;
+        if (!changed && !force && !sleeping) return;
         if (changed) SynchronizeSleepingPresentation();
         runtimeSleeping = sleeping;
         // Preserve the recheck interval when a check merely confirms the current state.
@@ -186,9 +187,7 @@ public sealed partial class RobotArmInstance : IMapObjectTarget, IDataElectricCo
     private BlockStateStore ResolveBlockStateStore() => World.StateStore;
     private Vector3 GetBodyWorldPosition() => Template.BodyWorld(this);
     private Vector3 GetHandWorldPosition() => Template.HandWorld(this);
-    private Vector3 GetHandRestWorldPosition() => GetHandWorldPosition();
     private Vector3 GetCachedDropTransferStartWorldPosition() => cachedDropTransferStartWorldPosition;
-    private Vector3 GetDropReferencePosition(Block block, Vector2Int coordinate) => GetHandWorldPosition();
     private void SetHeldItem(int id, Vector3 position)
     { heldItemId = id; Data.ItemMoveStart = position; Data.ItemMoveElapsed = 0f; }
     private void ClearHeldItem() { heldItemId = -1; }
@@ -563,21 +562,23 @@ public sealed partial class RobotArmInstance : IMapObjectTarget, IDataElectricCo
             return false;
         }
 
-        runtimeSleepCheckTimer -= Mathf.Max(0f, deltaTime);
-        if (runtimeSleepCheckTimer > 0f)
+        ref RobotArmRuntimeState data = ref Data;
+        data.runtimeSleepCheckTimer -= Mathf.Max(0f, deltaTime);
+        if (data.runtimeSleepCheckTimer > 0f)
         {
             return false;
         }
 
-        runtimeSleepCheckTimer = Mathf.Max(0.02f, Mathf.Min(RuntimeSleepRecheckIntervalSeconds, PickupIntervalSeconds));
+        data.runtimeSleepCheckTimer = Mathf.Max(0.02f, Mathf.Min(RuntimeSleepRecheckIntervalSeconds, PickupIntervalSeconds));
         return true;
     }
 
     private bool CanRuntimeSleepInCurrentState()
     {
-        return heldItemId >= 0
-            ? state == RobotArmState.WaitingForDrop
-            : state == RobotArmState.WaitingForPickup;
+        ref RobotArmRuntimeState data = ref Data;
+        return data.heldItemId >= 0
+            ? data.state == RobotArmState.WaitingForDrop
+            : data.state == RobotArmState.WaitingForPickup;
     }
 
     private bool ShouldRuntimeSleep()
@@ -699,18 +700,19 @@ public sealed partial class RobotArmInstance : IMapObjectTarget, IDataElectricCo
 
     private void TickWaitBeforePickupTake(float deltaTime)
     {
-        if (heldItemId >= 0)
+        ref RobotArmRuntimeState data = ref Data;
+        if (data.heldItemId >= 0)
         {
-            state = RobotArmState.TurningToDrop;
+            data.state = RobotArmState.TurningToDrop;
             return;
         }
 
-        if (TickTimerStillRunning(ref actionTurnTimer, deltaTime))
+        if (TickTimerStillRunning(ref data.actionTurnTimer, deltaTime))
         {
             return;
         }
 
-        plannedTransferCommand = PlannedTransferCommand.Pickup;
+        data.plannedTransferCommand = PlannedTransferCommand.Pickup;
     }
 
     private void ApplyPlannedPickup()
@@ -736,36 +738,38 @@ public sealed partial class RobotArmInstance : IMapObjectTarget, IDataElectricCo
 
     private void TickWaitAfterPickupTake(float deltaTime)
     {
-        if (heldItemId < 0)
+        ref RobotArmRuntimeState data = ref Data;
+        if (data.heldItemId < 0)
         {
-            state = RobotArmState.WaitingForPickup;
-            pickupTimer = pickupInterval;
+            data.state = RobotArmState.WaitingForPickup;
+            data.pickupTimer = pickupInterval;
             return;
         }
 
-        if (TickTimerStillRunning(ref actionTurnTimer, deltaTime))
+        if (TickTimerStillRunning(ref data.actionTurnTimer, deltaTime))
         {
             return;
         }
 
-        state = RobotArmState.TurningToDrop;
+        data.state = RobotArmState.TurningToDrop;
     }
 
     private void TickTurnToDrop(float deltaTime)
     {
-        if (heldItemId < 0)
+        ref RobotArmRuntimeState data = ref Data;
+        if (data.heldItemId < 0)
         {
-            waitingForDropRetry = false;
-            dropRetryTimer = 0f;
-            state = RobotArmState.TurningToPickup;
+            data.waitingForDropRetry = false;
+            data.dropRetryTimer = 0f;
+            data.state = RobotArmState.TurningToPickup;
             return;
         }
 
         if (RotateBodyToward(GetOutputBodyLocalRotation(), deltaTime))
         {
-            state = RobotArmState.WaitingForDrop;
-            waitingForDropRetry = false;
-            dropRetryTimer = 0f;
+            data.state = RobotArmState.WaitingForDrop;
+            data.waitingForDropRetry = false;
+            data.dropRetryTimer = 0f;
         }
     }
 
@@ -798,21 +802,22 @@ public sealed partial class RobotArmInstance : IMapObjectTarget, IDataElectricCo
 
     private void TickWaitBeforeDropPlace(float deltaTime)
     {
-        if (heldItemId < 0)
+        ref RobotArmRuntimeState data = ref Data;
+        if (data.heldItemId < 0)
         {
-            actionTurnTimer = 0f;
-            state = RobotArmState.TurningToPickup;
+            data.actionTurnTimer = 0f;
+            data.state = RobotArmState.TurningToPickup;
             return;
         }
 
-        if (TickTimerStillRunning(ref actionTurnTimer, deltaTime))
+        if (TickTimerStillRunning(ref data.actionTurnTimer, deltaTime))
         {
             return;
         }
 
         // The hand has reached the destination. Inventory mutation remains in the
         // ordered apply phase so simultaneous arms resolve deterministically.
-        plannedTransferCommand = PlannedTransferCommand.Drop;
+        data.plannedTransferCommand = PlannedTransferCommand.Drop;
     }
 
     private void ApplyPlannedDrop()
@@ -841,26 +846,28 @@ public sealed partial class RobotArmInstance : IMapObjectTarget, IDataElectricCo
 
     private void TickWaitAfterDropPlace(float deltaTime)
     {
-        if (heldItemId >= 0)
+        ref RobotArmRuntimeState data = ref Data;
+        if (data.heldItemId >= 0)
         {
-            state = RobotArmState.TurningToDrop;
+            data.state = RobotArmState.TurningToDrop;
             return;
         }
 
-        if (TickTimerStillRunning(ref actionTurnTimer, deltaTime))
+        if (TickTimerStillRunning(ref data.actionTurnTimer, deltaTime))
         {
             return;
         }
 
-        state = RobotArmState.TurningToPickup;
+        data.state = RobotArmState.TurningToPickup;
     }
 
     private void TickTurnToPickup(float deltaTime)
     {
+        ref RobotArmRuntimeState data = ref Data;
         if (RotateBodyToward(inputBodyLocalRotation, deltaTime))
         {
-            state = RobotArmState.WaitingForPickup;
-            pickupTimer = pickupInterval;
+            data.state = RobotArmState.WaitingForPickup;
+            data.pickupTimer = pickupInterval;
         }
     }
 
@@ -879,9 +886,8 @@ public sealed partial class RobotArmInstance : IMapObjectTarget, IDataElectricCo
     {
         using var sample = World.TickTiming.Measure(ProjectF.Diagnostics.RobotArmTickTiming.Phase.Pickup);
         pickedItemId = -1;
-        pickupWorldPosition = GetHandRestWorldPosition();
         if (ProjectF.Benchmark.BenchmarkRuntime.ForceWorking)
-        { pickedItemId = ProjectF.Benchmark.BenchmarkRuntime.FallbackItemId; return pickedItemId >= 0; }
+        { pickupWorldPosition = GetHandWorldPosition(); pickedItemId = ProjectF.Benchmark.BenchmarkRuntime.FallbackItemId; return pickedItemId >= 0; }
         if (!TryResolvePickupCandidate(
                 out Block pickupBlock,
                 out BoxObject boxObject,
@@ -918,7 +924,7 @@ public sealed partial class RobotArmInstance : IMapObjectTarget, IDataElectricCo
             case RobotArmPickupSource.SavedFloor:
                 return TryTakeSavedFloorItem(pickupCoordinate, out pickedItemId);
             case RobotArmPickupSource.SavedConveyor:
-                return TryTakeSavedConveyorItem(pickupCoordinate, GetBodyWorldPosition(), out pickedItemId);
+                return TryTakeSavedConveyorItem(pickupCoordinate, referenceWorldPosition, out pickedItemId);
             case RobotArmPickupSource.SavedInputArea:
                 return TryTakeSavedInputAreaItem(pickupCoordinate, out pickedItemId);
             default:
@@ -957,7 +963,7 @@ public sealed partial class RobotArmInstance : IMapObjectTarget, IDataElectricCo
         out Vector3 referenceWorldPosition,
         out Vector3 pickupWorldPosition)
     {
-        using var sample = MapObjectTickProfiler.SampleNamed("Runtime", nameof(RobotArm), "Robot Arm Pickup Query");
+        using var sample = World.TickTiming.Measure(ProjectF.Diagnostics.RobotArmTickTiming.Phase.PickupQuery);
         pickupBlock = null;
         boxObject = null;
         freightCar = null;
@@ -1040,6 +1046,7 @@ public sealed partial class RobotArmInstance : IMapObjectTarget, IDataElectricCo
             terrainGenerator,
             pickupCoordinate,
             hasLoadedPickupBlock,
+            referenceWorldPosition,
             conveyorSelectionReferenceWorldPosition,
             ref pickupSource,
             ref bestDistanceSqr,
@@ -1058,6 +1065,7 @@ public sealed partial class RobotArmInstance : IMapObjectTarget, IDataElectricCo
         TerrainGenerator terrainGenerator,
         Vector2Int pickupCoordinate,
         bool hasLoadedPickupBlock,
+        Vector3 referenceWorldPosition,
         Vector3 conveyorSelectionReferenceWorldPosition,
         ref RobotArmPickupSource pickupSource,
         ref float bestDistanceSqr,
@@ -1069,7 +1077,6 @@ public sealed partial class RobotArmInstance : IMapObjectTarget, IDataElectricCo
             return;
         }
 
-        Vector3 referenceWorldPosition = GetHandWorldPosition();
         Vector3 savedWorldPosition = GetSavedCoordinateWorldPosition(pickupCoordinate);
 
         if (ShouldUseSavedFloorAreaCoordinate(terrainGenerator, pickupCoordinate, hasLoadedPickupBlock))
@@ -1258,8 +1265,8 @@ public sealed partial class RobotArmInstance : IMapObjectTarget, IDataElectricCo
             return false;
         }
 
-        Vector3 dropReferenceWorldPosition = GetDropReferencePosition(dropBlock, dropCoordinate);
-        Vector3 dropStartWorldPosition = GetHandRestWorldPosition();
+        Vector3 dropReferenceWorldPosition = GetHandWorldPosition();
+        Vector3 dropStartWorldPosition = dropReferenceWorldPosition;
         cachedDropTransferStartWorldPosition = dropStartWorldPosition;
         Func<Vector3> dropStartProvider = DropTransferStartProvider;
         if (freightCar != null)
@@ -1335,7 +1342,7 @@ public sealed partial class RobotArmInstance : IMapObjectTarget, IDataElectricCo
 
     private bool CanPlaceHeldItem()
     {
-        using var sample = MapObjectTickProfiler.SampleNamed("Runtime", nameof(RobotArm), "Robot Arm Drop Query");
+        using var sample = World.TickTiming.Measure(ProjectF.Diagnostics.RobotArmTickTiming.Phase.DropQuery);
         if (heldItemId < 0
             || IsDropSuppressedByPlacementMode()
             || !TryResolveDropCoordinate(out Vector2Int dropCoordinate))
@@ -1376,7 +1383,7 @@ public sealed partial class RobotArmInstance : IMapObjectTarget, IDataElectricCo
     {
         int itemId = heldItemId;
         TerrainGenerator terrainGenerator = ResolveTerrainGenerator();
-        Vector3 dropReferenceWorldPosition = GetDropReferencePosition(dropBlock, dropCoordinate);
+        Vector3 dropReferenceWorldPosition = GetHandWorldPosition();
         if (freightCar != null)
         {
             if (freightCar.IsConsistMoving())

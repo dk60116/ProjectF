@@ -52,6 +52,7 @@ Copy-Item -LiteralPath (Join-Path $repo 'FactorioProject/Assets/Scripts/Simulati
 Copy-Item -LiteralPath (Join-Path $repo 'FactorioProject/Assets/Scripts/Simulation/Core/SimulationTickWorld.cs') -Destination $probe
 Copy-Item -LiteralPath (Join-Path $repo 'FactorioProject/Assets/Scripts/Simulation/Core/ActiveTickSet.cs') -Destination $probe
 Copy-Item -LiteralPath (Join-Path $repo 'FactorioProject/Assets/Scripts/Map/ResourceStateSlots.cs') -Destination $probe
+Copy-Item -LiteralPath (Join-Path $repo 'FactorioProject/Assets/Scripts/Map/RobotArmRuntimeState.cs') -Destination $probe
 foreach ($relative in @('Diagnostics/BenchmarkWorkProgress.cs', 'Simulation/Core/ProductionProcess.cs', 'Object/MapObj/InstallationObject/RobotArmInstance.Benchmark.cs')) {
     Copy-Item -LiteralPath (Join-Path $repo ('FactorioProject/Assets/Scripts/' + $relative)) -Destination $probe
 }

@@ -2,9 +2,10 @@ using ProjectF.MapObjects;
 using UnityEngine;
 
 public class MapObject : MonoBehaviour { }
-public class InstallationObject : MapObject
+public partial class InstallationObject : MapObject
 {
-    public MapObjectHandle RuntimeMapObjectHandle;
+    private MapObjectHandle runtimeMapObjectHandle;
+    public MapObjectHandle RuntimeMapObjectHandle { get => runtimeMapObjectHandle; set => runtimeMapObjectHandle = value; }
     public ItemDefinition BoundItemDefinition;
     public readonly List<Renderer> Renderers = new();
     public void Add(Renderer renderer) { renderer.gameObject.Owner = this; Renderers.Add(renderer); transform.hierarchyCount++; }
@@ -14,9 +15,9 @@ public class InstallationObject : MapObject
 }
 public class ConveyorBelt : InstallationObject { }
 public class Pipe : InstallationObject { }
-public class RobotArm : InstallationObject { }
+public class RobotArm : InstallationObject { public static void WakeAroundCoordinate(Vector2Int cell) { } }
 public class Building : InstallationObject { }
-public class Vehicle : InstallationObject { }
+public partial class Vehicle : InstallationObject { }
 public class InputOutputModule : InstallationObject
 {
     public int AnimationRefreshes;
@@ -29,7 +30,7 @@ public class InputOutputModule : InstallationObject
 }
 public class MiningMachine : InputOutputModule { }
 public class ItemDefinition { public MapObjectArchetype MapObjectArchetype; }
-public class TerrainGenerator { public static TerrainGenerator Active; public bool IsBenchmarkPlacementInProgress; }
+public partial class TerrainGenerator { public static TerrainGenerator Active; public bool IsBenchmarkPlacementInProgress; }
 public static class MapObjectTickManager { public static bool WaitingForWorldLoad; public static double CurrentSimulationTimeSeconds; }
 public static class MapObjectTickProfiler
 {
@@ -193,7 +194,8 @@ namespace UnityEngine
         public float Evaluate(float time) => a+(b-a)*time;
     }
     public static class Mathf
-    { public static int Min(int a,int b) => Math.Min(a,b); public static float Min(float a,float b)=>MathF.Min(a,b); public static float Max(float a,float b)=>MathF.Max(a,b); public static int FloorToInt(float f) => (int)Math.Floor(f); }
+    { public static int Min(int a,int b) => Math.Min(a,b); public static float Min(float a,float b)=>MathF.Min(a,b); public static float Max(float a,float b)=>MathF.Max(a,b); public static int FloorToInt(float f) => (int)Math.Floor(f); public static int RoundToInt(float f) => (int)MathF.Round(f); }
+    public readonly record struct Vector2Int(int x, int y);
     public static class Application { public static bool isPlaying = true; }
     public class Camera { public static Camera main = new(); }
 }

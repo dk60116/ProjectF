@@ -21,7 +21,10 @@ foreach ($signature in @('internal void PersistTransferState(', 'public Transfer
     'private void WriteTransferState(', 'private static bool IsTurningState(', 'private Quaternion GetOutputBodyLocalRotation(',
     'private bool TryGetElectricOperationalPowerRequirement(', 'internal enum PlannedTransferCommand',
     'internal Quaternion BodyRotation', 'private void SetBodyLocalRotation(', 'private bool RotateBodyToward(',
-    'private void AdvanceAnimation(', 'private void BeginPlannedTick(', 'private float ResolvePoweredDeltaTime(')) { $generated += (Member $arm $signature) + "`n" }
+    'private void AdvanceAnimation(', 'private void BeginPlannedTick(', 'private float ResolvePoweredDeltaTime(',
+    'private void TickWaitBeforePickupTake(', 'private void TickWaitAfterPickupTake(', 'private void TickWaitBeforeDropPlace(',
+    'private void TickWaitAfterDropPlace(', 'private void TickTurnToDrop(', 'private void TickTurnToPickup(',
+    'private static bool TickTimerStillRunning(', 'private bool CanRuntimeSleepInCurrentState(')) { $generated += (Member $arm $signature) + "`n" }
 $generated += "}`npublic partial class RobotArmWorld {`n"
 foreach ($signature in @('internal RobotArmRenderTemplate GetTemplate(', 'private static Vector2Int GetMarkerCell(',
     'internal void BuildNearby(', 'public bool TryRaycast(', 'private static bool TryRaycastSphere(')) {
@@ -44,6 +47,7 @@ New-Item -ItemType Directory -Path $probe | Out-Null
 [IO.File]::WriteAllText((Join-Path $probe 'Production.cs'), $generated)
 Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'Checks.cs') -Destination $probe
 Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'MotionChecks.cs') -Destination $probe
+Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'StateTickChecks.cs') -Destination $probe
 Copy-Item -LiteralPath (Join-Path $repo 'FactorioProject/Assets/Scripts/Map/RobotArmRuntimeState.cs') -Destination $probe
 [IO.File]::WriteAllText((Join-Path $probe 'Probe.csproj'), '<Project Sdk="Microsoft.NET.Sdk"><PropertyGroup><OutputType>Exe</OutputType><TargetFramework>net9.0</TargetFramework><NoWarn>0649</NoWarn></PropertyGroup></Project>')
 dotnet run -c Release --project (Join-Path $probe 'Probe.csproj')
@@ -57,6 +61,18 @@ $template = Member 'Map/RobotArmRenderTemplate.cs' 'internal RobotArmRenderTempl
 if (!$template.Contains('Definition = InputOutputModule.ResolveItemDefinition(itemId);') -or !$template.Contains('ElectricUseWatts = ItemDefinition.ResolveElectricUseWatts(Definition);')) { throw 'Template does not cache authoritative item power.' }
 $entitySource = [IO.File]::ReadAllText((Join-Path $repo ('FactorioProject/Assets/Scripts/' + $arm)))
 if (!$entitySource.Contains('BoundItemDefinition => Template.Definition;')) { throw 'Arm still searches definitions in its hot path.' }
+foreach ($name in @('Pickup', 'Drop')) {
+    if ($entitySource.Contains('"Robot Arm ' + $name + ' Query"')) { throw "Unsampled per-entity $name query timing remains." }
+    if (!$entitySource.Contains('World.TickTiming.Measure(ProjectF.Diagnostics.RobotArmTickTiming.Phase.' + $name + 'Query)')) { throw "Missing sampled $name query timing." }
+}
+$savedPickup = Member $arm 'private void TryResolveSavedPickupCandidate('
+if ($savedPickup.Contains('GetHandWorldPosition()') -or !$savedPickup.Contains('Vector3 referenceWorldPosition,')) { throw 'Saved pickup recalculates the hand reference.' }
+$pickup = Member $arm 'private bool TryResolvePickupCandidate('
+if ($pickup -notmatch 'TryResolveSavedPickupCandidate\(\s*terrainGenerator,\s*pickupCoordinate,\s*hasLoadedPickupBlock,\s*referenceWorldPosition,') { throw 'Saved pickup does not reuse the loaded query hand reference.' }
+$drop = Member $arm 'private bool TryPlaceHeldItem('
+if (!$drop.Contains('Vector3 dropStartWorldPosition = dropReferenceWorldPosition;')) { throw 'Drop start recalculates the same hand position.' }
+if ($entitySource.Contains('GetHandRestWorldPosition') -or $entitySource.Contains('GetDropReferencePosition')) { throw 'Obsolete hand-position aliases remain.' }
 $player = [IO.File]::ReadAllText((Join-Path $repo 'FactorioProject/Assets/Scripts/Character/Player/PlayerController.cs'))
 if (!$player.Contains('RobotArmWorld.Current.TryRaycast(')) { throw 'Remote mouse focus lost its data-only arm query.' }
 Write-Output 'PASS registration without native colliders, shared save ownership, cached power/definition and remote mouse focus wiring.'
+Write-Output 'PASS sampled pickup/drop queries, shared hand references and removal of obsolete position aliases.'
