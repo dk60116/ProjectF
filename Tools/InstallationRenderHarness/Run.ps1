@@ -25,7 +25,7 @@ $generated += "} public partial class Handcart {`n" + (Member 'Object/MapObj/Ins
 $generated += "} public partial class TerrainGenerator {`n" + (Member 'Map/TerrainGenerator.cs' 'public void RefreshMovedInstallationRuntimeState(') + "}`n"
 [IO.File]::WriteAllText((Join-Path $probe 'VehicleMovement.cs'), $generated)
 $files = @((Join-Path $PSScriptRoot 'Checks.cs'), (Join-Path $PSScriptRoot 'UnityBoundaries.cs'),
-    (Join-Path $PSScriptRoot 'VehicleMovementChecks.cs'), (Join-Path $probe 'VehicleMovement.cs'),
+    (Join-Path $PSScriptRoot 'VehicleMovementChecks.cs'), (Join-Path $PSScriptRoot 'RenderCacheChecks.cs'), (Join-Path $probe 'VehicleMovement.cs'),
     (Join-Path $scripts 'Rendering/InstallationBatchRenderer.cs'),
     (Join-Path $scripts 'Rendering/InstallationMaterialVariants.cs'),
     (Join-Path $scripts 'Rendering/SpriteMeshCache.cs'),

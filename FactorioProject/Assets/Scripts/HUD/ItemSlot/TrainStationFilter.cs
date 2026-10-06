@@ -18,7 +18,7 @@ public class TrainStationFilter : MonoBehaviour
     [SerializeField]
     private RectTransform colorPanel;
 
-    private Trainstation boundStation;
+    private ProjectF.Railway.ITrainStationTarget boundStation;
     private Button colorSelectButton;
     private readonly List<Button> colorOptionButtons = new List<Button>();
 
@@ -48,7 +48,7 @@ public class TrainStationFilter : MonoBehaviour
         SetColorPanelVisible(false);
     }
 
-    public void Bind(Trainstation station)
+    public void Bind(ProjectF.Railway.ITrainStationTarget station)
     {
         ResolveSerializedReferences();
         if (boundStation != null && boundStation != station)
@@ -61,10 +61,10 @@ public class TrainStationFilter : MonoBehaviour
         Refresh();
     }
 
-    public bool TryGetBoundTarget(out Trainstation station)
+    public bool TryGetBoundTarget(out ProjectF.Railway.ITrainStationTarget station)
     {
         station = boundStation;
-        return station != null && station.gameObject.activeInHierarchy;
+        return station != null && station.IsTargetActive;
     }
 
     public void Refresh()
@@ -93,7 +93,7 @@ public class TrainStationFilter : MonoBehaviour
 
         if (!boundStation.HasAssignedStationColor)
         {
-            TerrainGenerator.ResolveActive()?.SaveRuntimeInstallationState(boundStation);
+            TerrainGenerator.ResolveActive()?.SaveTrainStationState(boundStation);
         }
 
         return boundStation.StationColor;

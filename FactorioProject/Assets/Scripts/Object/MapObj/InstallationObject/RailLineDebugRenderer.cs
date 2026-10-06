@@ -2,7 +2,7 @@ using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.Rendering;
 
-public sealed class RailLineDebugRenderer : MonoBehaviour
+public sealed partial class RailLineDebugRenderer : MonoBehaviour
 {
     public const float RailGroupConnectionDistance = RailConnectionUtility.ConnectionDistance;
     private const float DefaultSampleSpacing = 0.2f;
@@ -98,10 +98,11 @@ public sealed class RailLineDebugRenderer : MonoBehaviour
     private readonly List<LineRenderer> targetStationMarkerRenderers = new List<LineRenderer>();
     private readonly List<RailHandcar> activeHandcarScratch = new List<RailHandcar>(4);
     private readonly List<SteamTrain> selectedPowerTrainScratch = new List<SteamTrain>(4);
-    private readonly List<Trainstation> selectedTargetStationScratch = new List<Trainstation>(4);
+    private readonly List<ProjectF.Railway.ITrainStationTarget> selectedTargetStationScratch = new List<ProjectF.Railway.ITrainStationTarget>(4);
     private readonly Queue<Train> selectedTrainQueue = new Queue<Train>(8);
     private readonly HashSet<Train> selectedTrainVisited = new HashSet<Train>();
-    private readonly Queue<int> componentQueue = new Queue<int>();
+    private ProjectF.Railway.RailWorld displayedRailWorld;
+    private int displayedTopologyVersion = -1;
     private readonly List<RouteHighlightSegment> routeHighlightSegmentScratch = new List<RouteHighlightSegment>(32);
     private readonly List<SteamTrain.AutoDriveDebugRouteSegment> autoDriveRouteSegmentScratch =
         new List<SteamTrain.AutoDriveDebugRouteSegment>(32);
@@ -155,8 +156,6 @@ public sealed class RailLineDebugRenderer : MonoBehaviour
 
     private void OnEnable()
     {
-        InstallationObject.PlacementRuntimeChanged += HandlePlacementRuntimeChanged;
-        InstallationObject.PlacementRuntimeCleared += HandlePlacementRuntimeChanged;
         isDirty = true;
     }
 
@@ -164,8 +163,6 @@ public sealed class RailLineDebugRenderer : MonoBehaviour
     {
         if (ProjectFApplicationLifecycle.IsQuitting) return;
 
-        InstallationObject.PlacementRuntimeChanged -= HandlePlacementRuntimeChanged;
-        InstallationObject.PlacementRuntimeCleared -= HandlePlacementRuntimeChanged;
         DisableAllRenderers();
     }
 
@@ -176,6 +173,10 @@ public sealed class RailLineDebugRenderer : MonoBehaviour
         {
             return;
         }
+
+        var currentRailWorld = TerrainGenerator.Active?.GetRailWorld();
+        if (!ReferenceEquals(displayedRailWorld, currentRailWorld)
+            || displayedTopologyVersion != (currentRailWorld?.LiveTopologyVersion ?? -1)) isDirty = true;
 
         if (lastRouteSelectionVersion != TrainFilter.RouteSelectionVersion)
         {
@@ -201,14 +202,6 @@ public sealed class RailLineDebugRenderer : MonoBehaviour
         }
     }
 
-    private void HandlePlacementRuntimeChanged(InstallationObject installationObject)
-    {
-        if (installationObject == null || installationObject is Railload)
-        {
-            isDirty = true;
-        }
-    }
-
     private void Rebuild()
     {
         EnsureDebugRoot();
@@ -218,32 +211,18 @@ public sealed class RailLineDebugRenderer : MonoBehaviour
 
         int rendererIndex = 0;
         int railArrowRendererIndex = 0;
-        int componentIndex = 0;
+        displayedRailWorld = TerrainGenerator.Active?.GetRailWorld();
+        displayedTopologyVersion = displayedRailWorld?.LiveTopologyVersion ?? -1;
         float effectiveConnectionDistance = Mathf.Max(connectionDistance, RailGroupConnectionDistance);
-        float maxConnectionSqrDistance = effectiveConnectionDistance * effectiveConnectionDistance;
-        for (int railIndex = 0; railIndex < rails.Count; railIndex++)
+        ResolveRailDisplayDirections(effectiveConnectionDistance);
+        for (int i = 0; i < rails.Count; i++)
         {
-            RailInfo rail = rails[railIndex];
-            if (rail.ComponentIndex >= 0)
-            {
-                continue;
-            }
-
-            Color color = ResolveGroupColor(componentIndex);
-            AssignComponent(railIndex, componentIndex, maxConnectionSqrDistance);
-            for (int i = 0; i < rails.Count; i++)
-            {
-                if (rails[i].ComponentIndex != componentIndex)
-                {
-                    continue;
-                }
-
-                LineRenderer lineRenderer = EnsureLineRenderer(rendererIndex++);
-                ApplyRailLine(lineRenderer, rails[i], color);
-                railArrowRendererIndex = ApplyRailDirectionArrows(rails[i], color, railArrowRendererIndex);
-            }
-
-            componentIndex++;
+            var rail = rails[i];
+            int componentIndex = displayedRailWorld?.GetLiveComponent(rail.Rail, effectiveConnectionDistance) ?? -1;
+            Color color = ResolveGroupColor(Mathf.Max(0, componentIndex));
+            LineRenderer lineRenderer = EnsureLineRenderer(rendererIndex++);
+            ApplyRailLine(lineRenderer, rail, color);
+            railArrowRendererIndex = ApplyRailDirectionArrows(rail, color, railArrowRendererIndex);
         }
 
         for (int i = rendererIndex; i < lineRenderers.Count; i++)
@@ -266,12 +245,13 @@ public sealed class RailLineDebugRenderer : MonoBehaviour
 
     private void CollectRails()
     {
-        Railload[] activeRails = FindObjectsOfType<Railload>(false);
-        for (int i = 0; i < activeRails.Length; i++)
+        var activeRails = TerrainGenerator.Active?.GetRailWorld().LiveRails;
+        if (activeRails == null) return;
+        for (int i = 0; i < activeRails.Count; i++)
         {
-            Railload rail = activeRails[i];
+            ProjectF.Railway.IRailTarget rail = activeRails[i].Target;
             if (rail == null
-                || !rail.isActiveAndEnabled
+                || !rail.IsTargetActive
                 || !rail.TryGetPlacementRuntime(out _, out _)
                 || !rail.TryGetRenderedPathLength(out float length))
             {
@@ -279,17 +259,8 @@ public sealed class RailLineDebugRenderer : MonoBehaviour
             }
 
             int sampleCount = Mathf.Clamp(Mathf.CeilToInt(length / sampleSpacing) + 1, 2, 256);
-            RailInfo info = new RailInfo(rail, sampleCount);
+            RailInfo info = new RailInfo(rail, sampleCount) { Record = activeRails[i] };
             info.Length = length;
-            if (!RailConnectionUtility.TryResolveConnectionEndpoints(
-                    rail.RuntimeVisualPathPoints,
-                    rail.RuntimeOccupiedCoordinates,
-                    out info.ConnectionStartPoint,
-                    out info.ConnectionEndPoint))
-            {
-                continue;
-            }
-
             if (!rail.TryGetRenderedEndpointSample(true, out _, out info.StartPoint, out _)
                 || !rail.TryGetRenderedEndpointSample(false, out _, out info.EndPoint, out _))
             {
@@ -312,47 +283,6 @@ public sealed class RailLineDebugRenderer : MonoBehaviour
         }
     }
 
-    private void AssignComponent(int startRailIndex, int componentIndex, float maxConnectionSqrDistance)
-    {
-        componentQueue.Clear();
-        componentQueue.Enqueue(startRailIndex);
-        rails[startRailIndex].ComponentIndex = componentIndex;
-
-        while (componentQueue.Count > 0)
-        {
-            int currentIndex = componentQueue.Dequeue();
-            RailInfo currentRail = rails[currentIndex];
-            for (int otherIndex = 0; otherIndex < rails.Count; otherIndex++)
-            {
-                RailInfo otherRail = rails[otherIndex];
-                if (otherRail.ComponentIndex >= 0
-                    || !AreRailsConnected(currentRail, otherRail, maxConnectionSqrDistance))
-                {
-                    continue;
-                }
-
-                otherRail.ComponentIndex = componentIndex;
-                componentQueue.Enqueue(otherIndex);
-            }
-        }
-    }
-
-    private static bool AreRailsConnected(RailInfo a, RailInfo b, float maxConnectionSqrDistance)
-    {
-        return a != null
-               && b != null
-               && RailConnectionUtility.AreConnected(
-                   a.Rail != null ? a.Rail.RuntimeOccupiedCoordinates : null,
-                   a.Rail != null ? a.Rail.RuntimeVisualPathPoints : null,
-                   a.ConnectionStartPoint,
-                   a.ConnectionEndPoint,
-                   b.Rail != null ? b.Rail.RuntimeOccupiedCoordinates : null,
-                   b.Rail != null ? b.Rail.RuntimeVisualPathPoints : null,
-                   b.ConnectionStartPoint,
-                   b.ConnectionEndPoint,
-                   maxConnectionSqrDistance);
-    }
-
     private void ApplyRailLine(LineRenderer lineRenderer, RailInfo rail, Color color)
     {
         lineRenderer.enabled = true;
@@ -363,7 +293,7 @@ public sealed class RailLineDebugRenderer : MonoBehaviour
         lineRenderer.endColor = color;
         lineRenderer.material = lineMaterial;
 
-        float y = rail.Rail.transform.position.y + lineYOffset;
+        float y = rail.Rail.WorldPosition.y + lineYOffset;
         for (int i = 0; i < rail.Points.Length; i++)
         {
             Vector2 point = rail.Points[i];
@@ -390,16 +320,18 @@ public sealed class RailLineDebugRenderer : MonoBehaviour
             return rendererIndex;
         }
 
-        float y = rail.Rail.transform.position.y + railArrowYOffset;
+        float y = rail.Rail.WorldPosition.y + railArrowYOffset;
         for (float distance = startDistance; distance <= endDistance + 0.001f; distance += spacing)
         {
-            if (!rail.Rail.TrySampleRenderedPath(distance, out Vector2 point, out Vector2 tangent)
+            float sampleDistance = rail.DisplayDirection > 0 ? distance : rail.Length - distance;
+            if (!rail.Rail.TrySampleRenderedPath(sampleDistance, out Vector2 point, out Vector2 tangent)
                 || tangent.sqrMagnitude <= 0.0001f)
             {
                 continue;
             }
 
             tangent.Normalize();
+            tangent *= rail.DisplayDirection;
             Vector3 direction = new Vector3(tangent.x, 0f, tangent.y);
             Vector3 side = new Vector3(-direction.z, 0f, direction.x);
             Vector3 center = new Vector3(point.x, y, point.y);
@@ -495,7 +427,7 @@ public sealed class RailLineDebugRenderer : MonoBehaviour
         return result.Count > 0;
     }
 
-    private bool TryFindRailInfoIndex(Railload rail, out int railIndex)
+    private bool TryFindRailInfoIndex(ProjectF.Railway.IRailTarget rail, out int railIndex)
     {
         railIndex = -1;
         if (rail == null)
@@ -577,7 +509,7 @@ public sealed class RailLineDebugRenderer : MonoBehaviour
         lineRenderer.endColor = RouteHighlightColor;
         lineRenderer.material = lineMaterial;
 
-        float y = rail.Rail.transform.position.y + lineYOffset + 0.01f;
+        float y = rail.Rail.WorldPosition.y + lineYOffset + 0.01f;
         for (int i = 0; i < sampleCount; i++)
         {
             float t = sampleCount <= 1 ? 0f : i / (sampleCount - 1f);
@@ -740,13 +672,13 @@ public sealed class RailLineDebugRenderer : MonoBehaviour
         int rendererIndex = 0;
         for (int i = 0; i < selectedTargetStationScratch.Count; i++)
         {
-            Trainstation targetStation = selectedTargetStationScratch[i];
+            ProjectF.Railway.ITrainStationTarget targetStation = selectedTargetStationScratch[i];
             if (targetStation == null)
             {
                 continue;
             }
 
-            Vector3 center = targetStation.transform.position + Vector3.up * targetStationMarkerYOffset;
+            Vector3 center = targetStation.WorldPosition + Vector3.up * targetStationMarkerYOffset;
             rendererIndex = ApplyTargetStationMarkerCross(
                 rendererIndex,
                 center,
@@ -851,7 +783,7 @@ public sealed class RailLineDebugRenderer : MonoBehaviour
         return results.Count > 0;
     }
 
-    private bool TryCollectSelectedAutoDriveTargetStations(List<Trainstation> results)
+    private bool TryCollectSelectedAutoDriveTargetStations(List<ProjectF.Railway.ITrainStationTarget> results)
     {
         if (results == null)
         {
@@ -868,9 +800,9 @@ public sealed class RailLineDebugRenderer : MonoBehaviour
         {
             SteamTrain powerTrain = selectedPowerTrainScratch[i];
             if (powerTrain == null
-                || !powerTrain.TryGetCurrentAutoDriveTargetStation(out Trainstation targetStation)
+                || !powerTrain.TryGetCurrentAutoDriveTargetStation(out ProjectF.Railway.ITrainStationTarget targetStation)
                 || targetStation == null
-                || !targetStation.gameObject.activeInHierarchy
+                || !targetStation.IsTargetActive
                 || !targetStation.TryGetPlacementRuntime(out _, out _))
             {
                 continue;
@@ -951,7 +883,7 @@ public sealed class RailLineDebugRenderer : MonoBehaviour
         return string.Equals(first, second, System.StringComparison.OrdinalIgnoreCase);
     }
 
-    private static void AddUniqueTargetStation(List<Trainstation> results, Trainstation station)
+    private static void AddUniqueTargetStation(List<ProjectF.Railway.ITrainStationTarget> results, ProjectF.Railway.ITrainStationTarget station)
     {
         for (int i = 0; i < results.Count; i++)
         {
@@ -1248,20 +1180,18 @@ public sealed class RailLineDebugRenderer : MonoBehaviour
 
     private sealed class RailInfo
     {
-        public RailInfo(Railload rail, int sampleCount)
+        public RailInfo(ProjectF.Railway.IRailTarget rail, int sampleCount)
         {
             Rail = rail;
             Points = new Vector2[sampleCount];
-            ComponentIndex = -1;
         }
 
-        public Railload Rail { get; }
+        public ProjectF.Railway.IRailTarget Rail { get; }
+        public ProjectF.Railway.RailWorld.Record Record;
+        public int DisplayDirection;
         public Vector2 StartPoint;
         public Vector2 EndPoint;
-        public Vector2 ConnectionStartPoint;
-        public Vector2 ConnectionEndPoint;
         public Vector2[] Points { get; }
         public float Length;
-        public int ComponentIndex;
     }
 }

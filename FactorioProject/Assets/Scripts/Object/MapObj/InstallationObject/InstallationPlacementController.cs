@@ -1,4 +1,4 @@
-﻿using ProjectF.Power;
+using ProjectF.Power;
 using System.Collections.Generic;
 using DG.Tweening;
 using ProjectF.MapObjects;
@@ -284,7 +284,7 @@ public partial class InstallationPlacementController : MonoBehaviour
     private readonly HashSet<Train> trainConnectionNodeSet = new HashSet<Train>();
     private readonly Dictionary<int, int> lastBlueprintQuarterTurnsByItemId = new Dictionary<int, int>();
     private readonly Dictionary<int, int> lastInstalledQuarterTurnsByItemId = new Dictionary<int, int>();
-    private readonly List<InstallationObject> railAlignmentInstallationScratch = new List<InstallationObject>(4);
+    private readonly List<ProjectF.Railway.IRailTarget> railwayTargetScratch = new List<ProjectF.Railway.IRailTarget>(8);
     private readonly List<TrainCollisionBox2D> trainPlacementCollisionBoxes = new List<TrainCollisionBox2D>(4);
     private readonly List<TrainCollisionBox2D> trainPlacementOtherCollisionBoxes = new List<TrainCollisionBox2D>(4);
     private readonly List<Train> trainPlacementInstalledScratch = new List<Train>(32);
@@ -308,7 +308,7 @@ public partial class InstallationPlacementController : MonoBehaviour
 
     private struct TrainPlacementRailSample
     {
-        public Railload Rail;
+        public ProjectF.Railway.IRailTarget Rail;
         public float DistanceAlongPath;
         public Vector2 Point;
         public Vector2 Tangent;
@@ -1891,7 +1891,7 @@ public partial class InstallationPlacementController : MonoBehaviour
     {
         return installationObject != null
                && !IsPlayerMountedOnVehicle(installationObject as Vehicle)
-               && (!(installationObject is Railload rail) || !IsRailOccupiedByTrain(rail));
+               && (!(installationObject is ProjectF.Railway.IRailTarget rail) || !IsRailOccupiedByTrain(rail));
     }
 
     private static bool IsPlayerMountedOnVehicle(Vehicle vehicle)
@@ -1919,7 +1919,7 @@ public partial class InstallationPlacementController : MonoBehaviour
                && steamTrain.AutoDriveEnabled;
     }
 
-    private bool IsRailOccupiedByTrain(Railload rail)
+    private bool IsRailOccupiedByTrain(ProjectF.Railway.IRailTarget rail)
     {
         if (rail == null)
         {
@@ -1936,7 +1936,7 @@ public partial class InstallationPlacementController : MonoBehaviour
                 continue;
             }
 
-            if (train.TryGetCurrentRailPose(out Railload trainRail, out _, out _, out _)
+            if (train.TryGetCurrentRailPose(out ProjectF.Railway.IRailTarget trainRail, out _, out _, out _)
                 && trainRail == rail)
             {
                 mapEditRailOccupancyTrainScratch.Clear();
@@ -2180,6 +2180,10 @@ public partial class InstallationPlacementController : MonoBehaviour
 
         Ray ray = targetCamera.ScreenPointToRay(pointerPosition);
         float maxDistance = targetCamera.farClipPlane > 0f ? targetCamera.farClipPlane : 512f;
+        var railwayTerrain = ResolveInstallPreviewTerrain();
+        if (railwayTerrain != null && railwayTerrain.GetRailWorld().TryRaycast(ray, maxDistance, out var railway, out _)
+            && TryMaterializeDataOnlyRailwayForEditing(railway, out installationObject))
+        { anchorCoordinate = railway.RuntimeAnchorCoordinate; return true; }
         if (ForestryWorld.Current != null && ForestryWorld.Current.TryRaycast(ray, maxDistance, out var forestry, out _)
             && TryMaterializeDataOnlyForestryForEditing(forestry, out installationObject))
         { anchorCoordinate = forestry.AnchorCoordinate; return true; }
@@ -2288,7 +2292,7 @@ public partial class InstallationPlacementController : MonoBehaviour
     {
         installationObject = null;
         anchorCoordinate = Vector2Int.zero;
-        if (clickedBlock == null || !(clickedBlock.MapObject is Railload))
+        if (clickedBlock == null || !(clickedBlock.MapObject is ProjectF.Railway.IRailTarget))
         {
             return false;
         }
@@ -2434,7 +2438,6 @@ public partial class InstallationPlacementController : MonoBehaviour
         {
             return false;
         }
-
         if (block.TryGetRuntimeConveyorRecord(out ConveyorRuntimeRecord dataConveyor)
             && TryMaterializeDataOnlyConveyorForEditing(dataConveyor, out installationObject))
         {
@@ -2445,6 +2448,8 @@ public partial class InstallationPlacementController : MonoBehaviour
         if (block.MapObject is UtilityPoleRuntime dataPole && dataPole.IsRuntimeActive
             && TryMaterializeDataOnlyUtilityPoleForEditing(dataPole, out installationObject))
         { anchorCoordinate = dataPole.AnchorCoordinate; return true; }
+        if (block.MapObject is ProjectF.Railway.RailwayInstance railway && TryMaterializeDataOnlyRailwayForEditing(railway, out installationObject))
+        { anchorCoordinate = railway.RuntimeAnchorCoordinate; return true; }
         if (block.MapObject is ForestryInstance dataForestry && dataForestry.IsRuntimeActive
             && TryMaterializeDataOnlyForestryForEditing(dataForestry, out installationObject))
         { anchorCoordinate = dataForestry.AnchorCoordinate; return true; }
@@ -4605,7 +4610,7 @@ public partial class InstallationPlacementController : MonoBehaviour
             originalPosition = installationObject.transform.position,
             originalRotation = installationObject.transform.rotation,
             originalConveyorVariantKind = GetInstallationVariantKind(installationObject),
-            originalRailRequiredItemCount = installationObject is Railload railload
+            originalRailRequiredItemCount = installationObject is ProjectF.Railway.IRailTarget railload
                 ? railload.RequiredItemCount
                 : 0,
             originalOccupiedCoordinates = new List<Vector2Int>(installationObject.RuntimeOccupiedCoordinates)
@@ -6305,7 +6310,7 @@ public partial class InstallationPlacementController : MonoBehaviour
             || IsEditingInstallation()
             || !(selectedEditableInstallation is SteamTrain steamTrain)
             || !steamTrain.TryGetCurrentRailPose(
-                out Railload rail,
+                out ProjectF.Railway.IRailTarget rail,
                 out float distanceAlongPath,
                 out Vector2 pathPoint,
                 out Vector2 tangent)
@@ -15411,54 +15416,16 @@ public partial class InstallationPlacementController : MonoBehaviour
         return true;
     }
 
-    private bool TryFindNearestRailPathAtCoordinate(
-        Vector2Int coordinate,
-        Vector2 referencePoint,
-        out Railload railload,
-        out Vector2 pathPoint,
-        out Vector2 tangent,
-        out float sqrDistance)
+    private bool TryFindNearestRailPathAtCoordinate(Vector2Int coordinate, Vector2 referencePoint,
+        out ProjectF.Railway.IRailTarget rail, out Vector2 point, out Vector2 tangent, out float sqrDistance)
     {
-        railload = null;
-        pathPoint = referencePoint;
-        tangent = Vector2.zero;
-        sqrDistance = float.MaxValue;
+        rail = null; point = referencePoint; tangent = default; sqrDistance = float.MaxValue;
+        railwayTargetScratch.Clear();
+        ResolveInstallPreviewTerrain()?.GetRailWorld().CollectRailsAtCoordinate(coordinate, railwayTargetScratch);
         bool found = false;
-
-        TerrainGenerator terrain = ResolveInstallPreviewTerrain();
-        if (terrain != null
-            && terrain.TryGetLoadedBlock(coordinate, out Block block)
-            && block != null
-            && block.MapObject is Railload blockRailload)
-        {
-            found |= TryUpdateNearestRailPath(
-                blockRailload,
-                referencePoint,
-                ref railload,
-                ref pathPoint,
-                ref tangent,
-                ref sqrDistance);
-        }
-
-        railAlignmentInstallationScratch.Clear();
-        InstallationObject.CollectActiveInstallationsAtRuntimeGridCoordinate(
-            coordinate,
-            railAlignmentInstallationScratch);
-        for (int i = 0; i < railAlignmentInstallationScratch.Count; i++)
-        {
-            if (railAlignmentInstallationScratch[i] is Railload runtimeRailload)
-            {
-                found |= TryUpdateNearestRailPath(
-                    runtimeRailload,
-                    referencePoint,
-                    ref railload,
-                    ref pathPoint,
-                    ref tangent,
-                    ref sqrDistance);
-            }
-        }
-
-        railAlignmentInstallationScratch.Clear();
+        for (int i = 0; i < railwayTargetScratch.Count; i++)
+            found |= TryUpdateNearestRailPath(railwayTargetScratch[i], referencePoint, ref rail, ref point, ref tangent, ref sqrDistance);
+        railwayTargetScratch.Clear();
         return found;
     }
 
@@ -15489,45 +15456,19 @@ public partial class InstallationPlacementController : MonoBehaviour
         return found;
     }
 
-    private bool TryFindNearestTrainPlacementRailSampleAtCoordinate(
-        Vector2Int coordinate,
-        Vector2 referencePoint,
-        ref TrainPlacementRailSample nearestSample)
+    private bool TryFindNearestTrainPlacementRailSampleAtCoordinate(Vector2Int coordinate, Vector2 referencePoint, ref TrainPlacementRailSample nearestSample)
     {
+        railwayTargetScratch.Clear();
+        ResolveInstallPreviewTerrain()?.GetRailWorld().CollectRailsAtCoordinate(coordinate, railwayTargetScratch);
         bool found = false;
-        TerrainGenerator terrain = ResolveInstallPreviewTerrain();
-        if (terrain != null
-            && terrain.TryGetLoadedBlock(coordinate, out Block block)
-            && block != null
-            && block.MapObject is Railload blockRailload)
-        {
-            found |= TryUpdateNearestTrainPlacementRailSample(
-                blockRailload,
-                referencePoint,
-                ref nearestSample);
-        }
-
-        trainPlacementRailSearchScratch.Clear();
-        InstallationObject.CollectActiveInstallationsAtRuntimeGridCoordinate(
-            coordinate,
-            trainPlacementRailSearchScratch);
-        for (int i = 0; i < trainPlacementRailSearchScratch.Count; i++)
-        {
-            if (trainPlacementRailSearchScratch[i] is Railload runtimeRailload)
-            {
-                found |= TryUpdateNearestTrainPlacementRailSample(
-                    runtimeRailload,
-                    referencePoint,
-                    ref nearestSample);
-            }
-        }
-
-        trainPlacementRailSearchScratch.Clear();
+        for (int i = 0; i < railwayTargetScratch.Count; i++)
+            found |= TryUpdateNearestTrainPlacementRailSample(railwayTargetScratch[i], referencePoint, ref nearestSample);
+        railwayTargetScratch.Clear();
         return found;
     }
 
     private static bool TryUpdateNearestTrainPlacementRailSample(
-        Railload candidate,
+        ProjectF.Railway.IRailTarget candidate,
         Vector2 referencePoint,
         ref TrainPlacementRailSample nearestSample)
     {
@@ -15656,7 +15597,7 @@ public partial class InstallationPlacementController : MonoBehaviour
             return false;
         }
 
-        if (TryFindSavedTrainRail(savedState, out Railload rail)
+        if (TryFindSavedTrainRail(savedState, out ProjectF.Railway.IRailTarget rail)
             && rail.TrySampleRenderedPath(
                 Mathf.Max(0f, savedState.trainRailDistanceAlongPath),
                 out Vector2 pathPoint,
@@ -15687,54 +15628,21 @@ public partial class InstallationPlacementController : MonoBehaviour
             out railSample);
     }
 
-    private bool TryFindSavedTrainRail(
-        BlockStateStore.InstallationSaveState savedState,
-        out Railload rail)
+    private bool TryFindSavedTrainRail(BlockStateStore.InstallationSaveState savedState, out ProjectF.Railway.IRailTarget rail)
     {
         rail = null;
-        if (savedState == null)
+        if (savedState == null) return false;
+        var world = ResolveInstallPreviewTerrain()?.GetRailWorld();
+        if (world == null) return false;
+        var rails = world.LiveRails;
+        for (int i = 0; i < rails.Count; i++)
         {
-            return false;
+            var candidate = rails[i].Target;
+            if (!candidate.IsAlive()) continue;
+            if (savedState.trainRailPlacementSequence > 0 && candidate.RuntimePlacementSequence == savedState.trainRailPlacementSequence)
+            { rail = candidate; return true; }
+            if (candidate.RuntimeAnchorCoordinate == savedState.trainRailAnchorCoordinate) rail ??= candidate;
         }
-
-        long placementSequence = savedState.trainRailPlacementSequence;
-        if (placementSequence > 0)
-        {
-            Railload[] activeRails = FindObjectsOfType<Railload>(false);
-            for (int i = 0; i < activeRails.Length; i++)
-            {
-                Railload candidate = activeRails[i];
-                if (candidate != null
-                    && candidate.RuntimePlacementSequence == placementSequence)
-                {
-                    rail = candidate;
-                    return true;
-                }
-            }
-        }
-
-        trainPlacementRailSearchScratch.Clear();
-        InstallationObject.CollectActiveInstallationsAtRuntimeGridCoordinate(
-            savedState.trainRailAnchorCoordinate,
-            trainPlacementRailSearchScratch);
-        for (int i = 0; i < trainPlacementRailSearchScratch.Count; i++)
-        {
-            if (trainPlacementRailSearchScratch[i] is not Railload candidate)
-            {
-                continue;
-            }
-
-            if (placementSequence <= 0 || candidate.RuntimePlacementSequence == placementSequence)
-            {
-                rail = candidate;
-                trainPlacementRailSearchScratch.Clear();
-                return true;
-            }
-
-            rail ??= candidate;
-        }
-
-        trainPlacementRailSearchScratch.Clear();
         return rail != null;
     }
 
@@ -16505,7 +16413,7 @@ public partial class InstallationPlacementController : MonoBehaviour
         float searchDistance = maxCenterDistance + snapDistance;
         if ((referenceSample.Point - otherPoint).sqrMagnitude > searchDistance * searchDistance) return;
 
-        if (!other.TryGetCurrentRailPose(out Railload otherRail, out float otherDistance, out _, out Vector2 otherFacing))
+        if (!other.TryGetCurrentRailPose(out ProjectF.Railway.IRailTarget otherRail, out float otherDistance, out _, out Vector2 otherFacing))
         {
             if (!TryFindNearestTrainPlacementRailSampleAroundCoordinate(
                     RoundWorldPositionToCoordinate(other.transform.position), otherPoint,
@@ -16525,7 +16433,7 @@ public partial class InstallationPlacementController : MonoBehaviour
         for (float offset = Train.ConnectionCenterDistance; offset <= maxCenterDistance + 0.0001f; offset += searchStep)
         {
             if (!trainPlacementSpacing.TrySampleConnectionOffset(offset,
-                    out Railload candidateRail, out float candidateDistance, out Vector2 candidatePoint, out Vector2 tangent)) continue;
+                    out ProjectF.Railway.IRailTarget candidateRail, out float candidateDistance, out Vector2 candidatePoint, out Vector2 tangent)) continue;
             if (!TryResolveTrainConnectionPlacementFacing(
                     sourceTrain, candidatePoint, tangent, referenceFacing,
                     other, otherPoint, otherFacing, out Vector2 facing)) continue;
@@ -16886,9 +16794,9 @@ public partial class InstallationPlacementController : MonoBehaviour
     }
 
     private static bool TryUpdateNearestRailPath(
-        Railload candidate,
+        ProjectF.Railway.IRailTarget candidate,
         Vector2 referencePoint,
-        ref Railload nearestRail,
+        ref ProjectF.Railway.IRailTarget nearestRail,
         ref Vector2 nearestPathPoint,
         ref Vector2 nearestTangent,
         ref float nearestSqrDistance)
@@ -38590,6 +38498,28 @@ public partial class InstallationPlacementController : MonoBehaviour
         return true;
     }
 
+    private bool TryMaterializeDataOnlyRailwayForEditing(ProjectF.Railway.RailwayInstance record, out InstallationObject installationObject)
+    {
+        installationObject = null;
+        var terrain = ResolveInstallPreviewTerrain();
+        if (terrain == null || record == null || !record.IsTargetActive
+            || record is ProjectF.Railway.IRailTarget railTarget && IsRailOccupiedByTrain(railTarget)) return false;
+        var proxy = terrain.CreateInstallationObject(record.Prototype, terrain.transform);
+        if (proxy == null) return false;
+        terrain.GetRailWorld().RemoveRuntime(record.StorageKey);
+        proxy.transform.SetPositionAndRotation(record.WorldPosition, record.State.worldRotation);
+        ConfigureInstalledObjectRuntime(proxy, record.RuntimeAnchorCoordinate, record.State.quarterTurns,
+            placementSequence: record.SimulationId, occupiedCoordinatesOverride: record.RuntimeOccupiedCoordinates);
+        if (proxy is Railload rail && record is ProjectF.Railway.IRailTarget source)
+        { rail.ConfigureRequiredItemCount(source.RequiredItemCount); rail.ConfigureVisualPath(source.RuntimeVisualPathPoints, source.RuntimeVisualPathExtendsStart, source.RuntimeVisualPathExtendsEnd); }
+        if (proxy is Trainstation station && record is ProjectF.Railway.ITrainStationTarget sourceStation)
+        { station.ApplyStationName(sourceStation.StoredStationName); station.ApplyStationColor(sourceStation.StoredStationColor, sourceStation.HasAssignedStationColor); }
+        foreach (var coordinate in record.RuntimeOccupiedCoordinates)
+            if (terrain.TryGetLoadedBlock(coordinate, out var block) && block != null) block.SetMapObject(proxy);
+        installationObject = proxy;
+        return true;
+    }
+
     private static bool CanItemOutputAreaOverlapConveyor(
         InputOutputModule.RectGridBlockType candidateBlockType,
         IMapObjectTarget occupyingObject,
@@ -40528,12 +40458,12 @@ public partial class InstallationPlacementController : MonoBehaviour
             return false;
         }
 
-        if (occupyingObject is Railload)
+        if (occupyingObject is ProjectF.Railway.IRailTarget)
         {
             return true;
         }
 
-        if (block != null && block.MapObject is Railload)
+        if (block != null && block.MapObject is ProjectF.Railway.IRailTarget)
         {
             return true;
         }
@@ -40667,23 +40597,7 @@ public partial class InstallationPlacementController : MonoBehaviour
 
     private bool CoordinateHasRuntimeRailload(Vector2Int coordinate)
     {
-        trainPlacementRailSearchScratch.Clear();
-        InstallationObject.CollectActiveInstallationsAtRuntimeGridCoordinate(
-            coordinate,
-            trainPlacementRailSearchScratch);
-
-        bool hasRail = false;
-        for (int i = 0; i < trainPlacementRailSearchScratch.Count; i++)
-        {
-            if (trainPlacementRailSearchScratch[i] is Railload)
-            {
-                hasRail = true;
-                break;
-            }
-        }
-
-        trainPlacementRailSearchScratch.Clear();
-        return hasRail;
+        return ResolveInstallPreviewTerrain()?.GetRailWorld().CoordinateExists(coordinate, true) ?? false;
     }
 
     private bool IsPipeAllowedForPlacement(
@@ -41359,6 +41273,9 @@ public partial class InstallationPlacementController : MonoBehaviour
         }
 
         TerrainGenerator terrain = ResolveInstallPreviewTerrain();
+        if (terrain != null && (installationObject is Railload || installationObject is Trainstation)
+            && terrain.ConvertRailwayPresentation(installationObject, sourcePrefab, out var railway))
+        { dataOnlyPresentation = new DataOnlyPlacementPresentation(railway); return true; }
         if ((installationObject is LoggingMachine || installationObject is SeedPlanter) && terrain != null
             && terrain.ConvertForestryPresentation(installationObject, sourcePrefab as InstallationObject, out var registeredForestry))
         { dataOnlyPresentation = new DataOnlyPlacementPresentation(registeredForestry); return true; }
@@ -41506,6 +41423,7 @@ public partial class InstallationPlacementController : MonoBehaviour
         private readonly UtilityPoleRuntime pole;
         private readonly WorkableInstance workable;
         private readonly ForestryInstance forestry;
+        private readonly ProjectF.Railway.RailwayInstance railway;
 
         internal DataOnlyPlacementPresentation(ConveyorRuntimeRecord conveyor)
         { this = default; this.conveyor = conveyor; }
@@ -41532,9 +41450,12 @@ public partial class InstallationPlacementController : MonoBehaviour
         { this = default; this.workable = workable; }
         internal DataOnlyPlacementPresentation(ForestryInstance forestry)
         { this = default; this.forestry = forestry; }
+        internal DataOnlyPlacementPresentation(ProjectF.Railway.RailwayInstance railway)
+        { this = default; this.railway = railway; }
 
         internal void SetSuppressed(bool suppressed)
         {
+            if (railway != null) railway.SetPresentationSuppressed(suppressed);
             if (forestry != null) forestry.PlacementPresentationSuppressed = suppressed;
             else if (workable != null) workable.PlacementPresentationSuppressed = suppressed;
             else if (pole != null) pole.PlacementPresentationSuppressed = suppressed;
@@ -41560,6 +41481,7 @@ public partial class InstallationPlacementController : MonoBehaviour
 
         internal void SetScale(float scale)
         {
+            if (railway != null) railway.SetPresentationScale(scale);
             if (forestry != null) forestry.PlacementPresentationScale = Mathf.Max(0, scale);
             else if (workable != null) workable.PlacementPresentationScale = Mathf.Max(0, scale);
             else if (pole != null) pole.PlacementPresentationScale = Mathf.Max(0, scale);

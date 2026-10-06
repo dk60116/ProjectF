@@ -19,12 +19,12 @@ namespace ProjectF.Trains
 
         private struct Pose
         {
-            public Railload Rail;
+            public ProjectF.Railway.IRailTarget Rail;
             public float Distance;
             public Vector2 Point;
             public Vector2 Facing;
             public bool FacesAlongRoute;
-            public Railload BridgeTarget;
+            public ProjectF.Railway.IRailTarget BridgeTarget;
             public float BridgeTargetDistance;
             public Vector2 BridgeTargetPoint;
             public Vector2 BridgeTargetTangent;
@@ -43,7 +43,7 @@ namespace ProjectF.Trains
         }
 
         public bool TryPrepareConnectionRoute(
-            Railload fromRail, float fromDistance, Railload toRail, float toDistance)
+            ProjectF.Railway.IRailTarget fromRail, float fromDistance, ProjectF.Railway.IRailTarget toRail, float toDistance)
         {
             route.Clear();
             routeLength = 0f;
@@ -56,7 +56,7 @@ namespace ProjectF.Trains
         }
 
         public bool TrySampleConnectionOffset(
-            float offset, out Railload rail, out float distance, out Vector2 point, out Vector2 tangent)
+            float offset, out ProjectF.Railway.IRailTarget rail, out float distance, out Vector2 point, out Vector2 tangent)
         {
             rail = null;
             distance = 0f;

@@ -725,6 +725,7 @@ public partial class TerrainGenerator
             "FluidOutputCache",
             "SelectionMisses",
             InputOutputModule.FluidOutputSelectionCacheMissCount);
+        InputOutputModule.AppendFluidOutputCacheDiagnostics();
         MapObjectTickProfiler.AddRuntimeCounter(
             "FluidJobs",
             "LastCompletedTick",

@@ -1,4 +1,4 @@
-﻿using ProjectF.Power;
+using ProjectF.Power;
 using System;
 using System.Collections;
 using System.Collections.Generic;
@@ -3810,7 +3810,7 @@ public partial class PlayerHUD : BagSlot
         itemFilterUiOpenedFrame = Time.frameCount;
     }
 
-    private void ShowTrainStationFilter(Trainstation trainStation)
+    private void ShowTrainStationFilter(ProjectF.Railway.ITrainStationTarget trainStation)
     {
         if (trainStation == null)
         {
@@ -3824,7 +3824,7 @@ public partial class PlayerHUD : BagSlot
         }
 
         if (trainStationFilter.gameObject.activeSelf
-            && trainStationFilter.TryGetBoundTarget(out Trainstation boundStation)
+            && trainStationFilter.TryGetBoundTarget(out ProjectF.Railway.ITrainStationTarget boundStation)
             && boundStation == trainStation)
         {
             trainStationFilter.gameObject.SetActive(false);
@@ -3838,12 +3838,12 @@ public partial class PlayerHUD : BagSlot
         itemFilterUiOpenedFrame = Time.frameCount;
     }
 
-    private static bool TryResolveTrainStation(IMapObjectTarget mapObject, out Trainstation trainStation)
+    private static bool TryResolveTrainStation(IMapObjectTarget mapObject, out ProjectF.Railway.ITrainStationTarget trainStation)
     {
-        trainStation = mapObject as Trainstation;
+        trainStation = mapObject as ProjectF.Railway.ITrainStationTarget;
         if (trainStation != null)
         {
-            return trainStation.gameObject.activeInHierarchy;
+            return trainStation.IsTargetActive;
         }
 
         if (mapObject == null)
@@ -3853,7 +3853,7 @@ public partial class PlayerHUD : BagSlot
 
         trainStation = mapObject.GetComponentInParent<Trainstation>();
 
-        return trainStation != null && trainStation.gameObject.activeInHierarchy;
+        return trainStation != null && trainStation.IsTargetActive;
     }
 
     private static bool IsLoggingMachineFilterTarget(IMapObjectTarget mapObject)
@@ -3935,7 +3935,7 @@ public partial class PlayerHUD : BagSlot
         }
 
         itemFilterButtonTarget = target;
-        if (TryResolveTrainStation(target, out Trainstation trainStation))
+        if (TryResolveTrainStation(target, out ProjectF.Railway.ITrainStationTarget trainStation))
         {
             ShowTrainStationFilter(trainStation);
             return;
@@ -4003,7 +4003,7 @@ public partial class PlayerHUD : BagSlot
             return false;
         }
 
-        if (TryResolveTrainStation(clickedMapObject, out Trainstation trainStation))
+        if (TryResolveTrainStation(clickedMapObject, out ProjectF.Railway.ITrainStationTarget trainStation))
         {
             filterTarget = trainStation;
             return true;

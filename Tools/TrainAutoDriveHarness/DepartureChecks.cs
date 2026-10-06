@@ -78,7 +78,8 @@ public partial class RailHandcar
         }
         bool keptOrder = TryApplyRememberedConsistOrder(heading);
         PrepareConnectedTrainMovesForTravel(this, heading, keptOrder);
-        return TryApplyPreparedConnectedTrainMoves(this, heading, heading, step, .02f, true, heading, routeLock, out _);
+        Vector2 physicalFacing = new Vector2(transform.forward.x, transform.forward.z);
+        return TryApplyPreparedConnectedTrainMoves(this, physicalFacing, heading, step, .02f, true, heading, routeLock, out _);
     }
 
     public static void RunDepartureChecks(Action<bool, string> check)
@@ -131,6 +132,11 @@ public partial class RailHandcar
                     Vector2 expected = DeparturePoint(heading, i + 2.5f + moved, curve);
                     check(cars[i].AppliedPoint.HasValue && Vector2.Distance(cars[i].AppliedPoint.Value, expected) < .002f,
                         $"Departure must keep one-cell spacing: {scenario}, frame={frame}, car={i}, expected={expected}, actual={cars[i].AppliedPoint}");
+                    Vector2 expectedFacing = DepartureTangent(heading, i + 2.5f + moved, curve)
+                        * (cars[i] == driver ? driverFacing : facing);
+                    Vector2 actualFacing = new Vector2(cars[i].transform.forward.x, cars[i].transform.forward.z);
+                    check(Vector2.Dot(actualFacing.normalized, expectedFacing.normalized) > .999f,
+                        $"Departure reversed the physical front: {scenario}, frame={frame}, car={i}, expected={expectedFacing}, actual={actualFacing}");
                 }
             }
         }

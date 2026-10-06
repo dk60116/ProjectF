@@ -15,8 +15,14 @@ namespace ProjectF.Rendering
             internal Renderer Renderer;
             internal MeshFilter Filter;
             internal SpriteRenderer Sprite;
+            internal Transform Transform;
             internal bool OriginalForceOff;
             internal int AnimationNode = -1;
+            internal bool HasMatrix;
+            internal Matrix4x4 Matrix;
+            internal int CellX, CellZ;
+            internal bool InvertCulling;
+            internal readonly List<VirtualRenderBatchKey> Keys = new List<VirtualRenderBatchKey>(1);
         }
         private sealed class Record
         {
@@ -45,6 +51,9 @@ namespace ProjectF.Rendering
         public int MaterialVariantCount => materials.Count;
         public int SharedAnimationCount { get; private set; }
         public int NativeFallbackPartCount { get; private set; }
+        public int MatrixCacheHits { get; private set; }
+        public int MatrixCacheMisses { get; private set; }
+        public int BatchKeyRebuilds { get; private set; }
 
         internal static bool Supports(InstallationObject owner) => owner != null
             && !(owner is ConveyorBelt || owner is Pipe || owner is RobotArm || owner is Building);
@@ -127,6 +136,7 @@ namespace ProjectF.Rendering
                 if (filter == null && (sprite == null || sprite.drawMode != SpriteDrawMode.Simple
                     || sprite.maskInteraction != SpriteMaskInteraction.None)) continue;
                 record.Parts.Add(new Part { Renderer = renderer, Filter = filter, Sprite = sprite,
+                    Transform = renderer.transform,
                     AnimationNode = record.Animation != null ? record.Animation.ResolveNode(renderer.transform, owner.transform) : -1,
                     OriginalForceOff = renderer.forceRenderingOff });
                 if (isActiveAndEnabled && CanBatch(renderer)) renderer.forceRenderingOff = true;
@@ -140,8 +150,7 @@ namespace ProjectF.Rendering
             for (int i = 0; i < materialScratch.Count; i++)
             {
                 Material material = materialScratch[i];
-                if (material != null && (material.shader == null
-                    || !material.shader.keywordSpace.FindKeyword("INSTANCING_ON").isValid)) return false;
+                if (material != null && !materials.SupportsInstancing(material.shader)) return false;
             }
             return materialScratch.Count > 0;
         }
@@ -174,20 +183,31 @@ namespace ProjectF.Rendering
             using var sample = MapObjectTickProfiler.SampleNamed("Render", "InstallationECS", "Installation Model Submit");
             if (MapObjectTickManager.WaitingForWorldLoad || TerrainGenerator.Active != null
                 && TerrainGenerator.Active.IsBenchmarkPlacementInProgress)
-            { batches.SuspendRendering(); VisibleCount = MatrixCount = NativeFallbackPartCount = 0; return; }
-            WorldVisualUpdateManager.CopyVisibleInstallations(visible);
-            batches.ClearActiveMatrices(); VisibleCount = MatrixCount = NativeFallbackPartCount = 0;
-            for (int i = 0; i < visible.Count; i++)
+            { batches.SuspendRendering(); ResetFrameCounters(); return; }
+            ResetFrameCounters();
+            using (MapObjectTickProfiler.SampleNamed("Render Detail", "InstallationECS", "Installation Model Gather"))
             {
-                InstallationObject owner = visible[i];
-                if (owner == null || !owner.isActiveAndEnabled || !records.TryGetValue(owner, out Record record)
-                    || record.Handle != owner.RuntimeMapObjectHandle) continue;
-                VisibleCount++;
-                // Rails, bucket fluid surfaces and range models can be added after registration.
-                if (record.HierarchyCount != owner.transform.hierarchyCount) Capture(owner, record);
-                Append(record);
+                WorldVisualUpdateManager.CopyVisibleInstallations(visible);
+                batches.ClearActiveMatrices();
             }
-            batches.RenderBatches(Camera.main);
+            using (MapObjectTickProfiler.SampleNamed("Render Detail", "InstallationECS", "Installation Model Build"))
+                for (int i = 0; i < visible.Count; i++)
+                {
+                    InstallationObject owner = visible[i];
+                    if (owner == null || !owner.isActiveAndEnabled || !records.TryGetValue(owner, out Record record)
+                        || record.Handle != owner.RuntimeMapObjectHandle) continue;
+                    VisibleCount++;
+                    // Rails, bucket fluid surfaces and range models can be added after registration.
+                    if (record.HierarchyCount != owner.transform.hierarchyCount) Capture(owner, record);
+                    Append(record);
+                }
+            using (MapObjectTickProfiler.SampleNamed("Render Detail", "InstallationECS", "Installation Model Draw"))
+                batches.RenderBatches(Camera.main);
+        }
+        private void ResetFrameCounters()
+        {
+            VisibleCount = MatrixCount = NativeFallbackPartCount = 0;
+            MatrixCacheHits = MatrixCacheMisses = BatchKeyRebuilds = 0;
         }
         private void Append(Record record)
         {
@@ -215,22 +235,47 @@ namespace ProjectF.Rendering
                     continue;
                 }
                 // The source stays available to gameplay adapters; only its native draw is suppressed.
-                renderer.forceRenderingOff = true;
+                if (!renderer.forceRenderingOff) renderer.forceRenderingOff = true;
                 Mesh mesh = part.Sprite != null ? spriteMeshes.Get(part.Sprite.sprite) : part.Filter.sharedMesh;
                 if (mesh == null) continue;
-                Matrix4x4 matrix = renderer.transform.localToWorldMatrix;
+                Matrix4x4 matrix = part.Transform.localToWorldMatrix;
                 if (record.Animation != null && part.AnimationNode >= 0)
                     matrix = record.Owner.transform.localToWorldMatrix * record.Animation.GetMatrix(part.AnimationNode);
                 if (part.Sprite != null) matrix *= Matrix4x4.Scale(new Vector3(
                     part.Sprite.flipX ? -1f : 1f, part.Sprite.flipY ? -1f : 1f, 1f));
-                for (int sub = 0; sub < Mathf.Min(mesh.subMeshCount, materialScratch.Count); sub++)
+                if (part.HasMatrix && part.Matrix.Equals(matrix)) MatrixCacheHits++;
+                else
+                {
+                    part.HasMatrix = true;
+                    part.Matrix = matrix;
+                    part.CellX = Mathf.FloorToInt(matrix.m03 / 16f);
+                    part.CellZ = Mathf.FloorToInt(matrix.m23 / 16f);
+                    part.InvertCulling = matrix.determinant < 0f;
+                    MatrixCacheMisses++;
+                }
+                int submeshCount = Mathf.Min(mesh.subMeshCount, materialScratch.Count);
+                if (part.Keys.Count > submeshCount) part.Keys.RemoveRange(submeshCount, part.Keys.Count - submeshCount);
+                int layer = renderer.gameObject.layer;
+                var shadowMode = renderer.shadowCastingMode;
+                bool receiveShadows = renderer.receiveShadows;
+                uint renderingLayerMask = renderer.renderingLayerMask;
+                for (int sub = 0; sub < submeshCount; sub++)
                 {
                     Material material = materials.Resolve(renderer, materialScratch[sub], sub, part.Sprite);
+                    bool hasKey = sub < part.Keys.Count;
+                    VirtualRenderBatchKey key = hasKey ? part.Keys[sub] : default;
+                    if (!hasKey || key.Mesh != mesh || key.Material != material || key.Layer != layer
+                        || key.ShadowCastingMode != shadowMode || key.ReceiveShadows != receiveShadows
+                        || key.BatchCellX != part.CellX || key.BatchCellZ != part.CellZ
+                        || key.InvertCulling != part.InvertCulling || key.RenderingLayerMask != renderingLayerMask)
+                    {
+                        key = new VirtualRenderBatchKey(mesh, material, layer, sub, shadowMode, receiveShadows, false,
+                            batchCellX: part.CellX, batchCellZ: part.CellZ,
+                            invertCulling: part.InvertCulling, renderingLayerMask: renderingLayerMask);
+                        if (hasKey) part.Keys[sub] = key; else part.Keys.Add(key);
+                        BatchKeyRebuilds++;
+                    }
                     if (material == null) continue;
-                    var key = new VirtualRenderBatchKey(mesh, material, renderer.gameObject.layer, sub,
-                        renderer.shadowCastingMode, renderer.receiveShadows, false,
-                        batchCellX: Mathf.FloorToInt(matrix.m03 / 16f), batchCellZ: Mathf.FloorToInt(matrix.m23 / 16f),
-                        invertCulling: matrix.determinant < 0f, renderingLayerMask: renderer.renderingLayerMask);
                     batches.AddMatrix(key, matrix); MatrixCount++;
                 }
             }
@@ -274,6 +319,13 @@ namespace ProjectF.Rendering
             MapObjectTickProfiler.AddRuntimeCounter("InstallationECS", "MaterialVariants", current != null ? current.MaterialVariantCount : 0);
             MapObjectTickProfiler.AddRuntimeCounter("InstallationECS", "SharedAnimationModels", current != null ? current.SharedAnimationCount : 0);
             MapObjectTickProfiler.AddRuntimeCounter("InstallationECS", "NativeFallbackParts", current != null ? current.NativeFallbackPartCount : 0);
+            MapObjectTickProfiler.AddRuntimeCounter("InstallationECS", "MatrixCacheHits", current != null ? current.MatrixCacheHits : 0);
+            MapObjectTickProfiler.AddRuntimeCounter("InstallationECS", "MatrixCacheMisses", current != null ? current.MatrixCacheMisses : 0);
+            MapObjectTickProfiler.AddRuntimeCounter("InstallationECS", "BatchKeyRebuilds", current != null ? current.BatchKeyRebuilds : 0);
+            MapObjectTickProfiler.AddRuntimeCounter("InstallationECS", "ShaderCacheHits", current != null ? current.materials.ShaderCacheHits : 0);
+            MapObjectTickProfiler.AddRuntimeCounter("InstallationECS", "ShaderCacheMisses", current != null ? current.materials.ShaderCacheMisses : 0);
+            MapObjectTickProfiler.AddRuntimeCounter("InstallationECS", "PropertyLayoutBuilds", current != null ? current.materials.PropertyLayoutBuilds : 0);
+            MapObjectTickProfiler.AddRuntimeCounter("InstallationECS", "EmptyPropertyBlockSkips", current != null ? current.materials.EmptyPropertyBlockSkips : 0);
         }
     }
 }

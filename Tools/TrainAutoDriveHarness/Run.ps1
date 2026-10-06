@@ -73,6 +73,7 @@ foreach ($signature in @(
     'public override void HandleMountedInput(', 'private void TickAutoDrive(', 'private DriveMotionOutcome HandleResolvedDriveMotion(',
     'public void ApplyAutoDriveSettings(', 'public void CaptureAutoDriveState(', 'public void ApplyAutoDriveState(',
     'private void ClaimAutoDriveControl(', 'private bool IsPrimaryAutoDriveControllerForConsist(', 'private SteamTrain ResolveAutoDriveControllerForConsist(',
+    'private static void NotifyAutoDriveControllerSelectionChanged()', 'private void CacheAutoDriveControllerForTick(',
     'private void TransferAutoDriveControl(', 'private void RefreshAutoDriveTickSchedule()', 'private void ResetAutoDriveRuntimeState(', 'private void ClearAutoDriveFixedRoute(',
     'private bool TryBuildActiveRouteFromFixedRoute(', 'private bool TryAlignAutoDriveRouteSegmentsToCurrentPose(',
     'private static string NormalizeAutoDriveStationName(', 'private bool HasCompleteAutoDriveTargets()', 'private static bool HasCompleteAutoDriveTargets(',
@@ -80,6 +81,7 @@ foreach ($signature in @(
     'private static AutoDriveFuelFilter ClampAutoDriveFuelFilter(', 'private static AutoDriveFreightFilter ClampAutoDriveFreightFilter(',
     'private Vector3 ResolveAutoDriveMoveDirection(', 'private bool TryResolveAutoDriveTargets(', 'private bool TryBuildRouteLengthToStation(',
     'private void ResolveAutoDriveDepartureFilters(', 'private bool TryEvaluateAutoDriveFuelFilterSatisfied(',
+    'private bool TryResolvePhysicallyDockedFilters(', 'private bool TryGetConsistStationDockDistance(',
     'private bool TryEvaluateAutoDriveFreightFilterSatisfied(', 'private bool TryEnsureAutoDriveRoute(', 'private void HandleAutoDriveArrived(', 'private static bool TryResolveAutoDriveDockSignedStep(',
     'protected override float AdjustDrivenSignedStep(', 'protected override bool CanDockInDirection(', 'protected override float ResolveRailInputAxis(',
     'private bool TryResolveAutoDriveRouteInputAxis(',
@@ -92,7 +94,7 @@ foreach ($signature in @(
 )) {
     # The route-reference overload with two arguments is the selection entry point.
     if ($signature -eq 'private RailHandcar ResolveAutoDriveRouteReferenceTrain(') {
-        $signature = "private RailHandcar ResolveAutoDriveRouteReferenceTrain(`r`n        Trainstation targetStation,"
+        $signature = "private RailHandcar ResolveAutoDriveRouteReferenceTrain(`r`n        ProjectF.Railway.ITrainStationTarget targetStation,"
         if (!$source.Contains($signature)) { $signature = $signature.Replace("`r`n", "`n") }
     }
     if ($signature -eq 'public override void HandleMountedInput(') {
@@ -148,6 +150,8 @@ foreach ($signature in @(
     'private bool TryResolveRailConnectionBridge(', 'private static float ResolveRailConnectionBridgeProgress(',
     'private Vector2 ResolveRouteLeaderTravelDirection(', 'private static Vector2 AlignDirectionWithReference(',
     'private Vector2 ResolveConnectedTrainFacing(', 'private Vector2 ResolveConsistPathForward(',
+    'private static float ResolveRailConnectionTapeDistance(',
+    'private void LogRailFacingDiscontinuity(',
     'private static bool TryResolveFacingFromConnectedTarget(', 'private static Vector2 ResolveFollowerFacingTangent(',
     'private bool TryApplyRememberedConsistOrder(', 'private bool CanReuseRememberedConsistOrder(',
     'private void PrepareConnectedTrainMovesForTravel(', 'private bool TryMovePushedConsistEndpointToFront(',
@@ -169,6 +173,9 @@ if (!$spacingConstant.Success) { throw 'Missing production spacing constant' }
 $generated += 'public partial class Train { ' + $spacingConstant.Value + ' }'
 $source = $trainSource
 $generated += 'public partial class Train { ' + (Read-Member 'internal static Vector2 ResolveRailConnectionForward(') + (Read-Member 'private static Vector2 ResolveRailConnectionEndpointForward(') + ' }'
+# Keep the motion fixtures as lightweight stand-ins for the target interfaces.
+# The full target/world contract is exercised by RailWorldHarness.
+$generated = $generated.Replace('ProjectF.Railway.IRailTarget', 'Railload').Replace('ProjectF.Railway.ITrainStationTarget', 'Trainstation').Replace('.IsTargetActive', '.gameObject.activeInHierarchy')
 [IO.File]::WriteAllText((Join-Path $probe 'Production.cs'), $generated)
 $source = [IO.File]::ReadAllText((Join-Path $repo 'FactorioProject/Assets/Scripts/HUD/ObjectUI/ItemInfoDescription.cs'))
 $uiMethod = (Read-Member 'private void RefreshSteamTrainInfo(')

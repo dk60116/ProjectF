@@ -89,7 +89,7 @@ public class FreightCar : Train,
     }
 
     public bool TryApplyRailPose(
-        Railload rail,
+        ProjectF.Railway.IRailTarget rail,
         float distanceAlongPath,
         Vector2 railPoint,
         Vector2 facingTangent,

@@ -85,6 +85,12 @@ public sealed class FreightCar : Train
 }
 public partial class RailHandcar : Train
 {
+    public Vector2Int? TestPhysicalDockCoordinate;
+    public bool TryGetRailDockDistanceAtCoordinate(Vector2Int coordinate, out float distance)
+    {
+        distance = 0f;
+        return TestPhysicalDockCoordinate == coordinate;
+    }
     readonly List<Train> connectedTrainGroupScratch = new();
     readonly Dictionary<float, float> testStationDockDeltas = new();
     public float CurrentVehicleSignedSpeed;

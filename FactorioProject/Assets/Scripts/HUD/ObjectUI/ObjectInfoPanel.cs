@@ -1,4 +1,4 @@
-﻿using ProjectF.Power;
+using ProjectF.Power;
 using System.Collections.Generic;
 using TMPro;
 using UnityEngine;
@@ -277,7 +277,7 @@ public class ObjectInfoPanel : MonoBehaviour
             return;
         }
 
-        if (mapObject is Trainstation trainstation)
+        if (mapObject is ProjectF.Railway.ITrainStationTarget trainstation)
         {
             ShowTrainstationInfo(trainstation, underlyingResource);
             return;
@@ -838,7 +838,7 @@ public class ObjectInfoPanel : MonoBehaviour
         infoLine.ShowRailHandcar(railHandcar, underlyingResource);
     }
 
-    private void ShowTrainstationInfo(Trainstation trainstation, ResourceInstance underlyingResource)
+    private void ShowTrainstationInfo(ProjectF.Railway.ITrainStationTarget trainstation, ResourceInstance underlyingResource)
     {
         if (infoLine == null)
         {

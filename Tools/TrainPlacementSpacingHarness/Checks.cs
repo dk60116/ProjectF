@@ -107,6 +107,7 @@ static class Checks
         Check(new TrainPlacementSpacing().AlignPlacedTrains(new[] { closeA }), "Placement tolerance must still produce exactly one-cell spacing");
         Check(Near(closeB.Distance, 1.2f), "Short placement must extend onto the available tail rail");
         FacingChecks.Run();
+        ManualFacingChecks.Run();
         BlueprintChecks.Run();
         EditChecks.Run();
         Console.WriteLine($"Train spacing harness passed: {checks} checks");

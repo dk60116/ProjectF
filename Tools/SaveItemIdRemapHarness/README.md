@@ -7,3 +7,5 @@ The regression models pipe item 51 passing from a production machine through box
 `-Baseline` runs the same checks against the remapper from Git HEAD. Before the fix, it fails because the unconditional legacy rail alias overwrites a valid pipe catalog mapping.
 
 The fix prevents further corruption; it deliberately does not reinterpret existing rail items or filter bits as pipes. Those identities cannot be recovered unambiguously from an already-corrupted save.
+
+Installation regressions also cover empty/unknown names preserving numeric IDs, catalog fallback, mounted installations and repeated loads. Nameless ECS rails already saved as ID -1 are recovered only when a complete path and a unique prefab-backed rail definition remain. Missing/ambiguous definitions, named unknown items and invalid non-rail states are left unchanged.

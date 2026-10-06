@@ -829,6 +829,8 @@ public partial class TerrainGenerator : MonoBehaviour
         { ReleaseInstallationObject(production); return; }
         if (installationObject is RobotArm arm && ConvertRobotArmPresentation(arm))
         { ReleaseInstallationObject(arm); return; }
+        if ((installationObject is Railload || installationObject is Trainstation) && ConvertRailwayPresentation(installationObject, null, out _))
+        { ReleaseInstallationObject(installationObject); RefreshAutomaticTrainStationNames(); return; }
         if (installationObject is Building building && RegisterDataOnlyBuildingInstallation(building))
         { ReleaseInstallationObject(building); return; }
         if (installationObject is Pipe pipe && RegisterDataOnlyPipeInstallation(pipe))
@@ -1358,6 +1360,8 @@ public partial class TerrainGenerator : MonoBehaviour
 
     public void RegisterInstallationRuntimeState(InstallationObject installationObject)
     {
+        if ((installationObject is Railload || installationObject is Trainstation) && ConvertRailwayPresentation(installationObject, null, out _))
+        { ReleaseInstallationObject(installationObject); RefreshAutomaticTrainStationNames(); return; }
         if ((installationObject is LoggingMachine || installationObject is SeedPlanter) && ConvertForestryPresentation(installationObject, null, out _))
         { ReleaseInstallationObject(installationObject); return; }
         if (installationObject is WorkableObject workable && ConvertWorkablePresentation(workable, null, out _))

@@ -27,7 +27,30 @@ static class Checks
         Check(MathF.Abs(verticalLight - horizontalLight) < 0.00001f,
             "A 90-degree rail rotation must not change top-surface lighting");
 
+        ValidateMaterials("Custom/ToonCharacter");
+        ValidateMaterials("Universal Render Pipeline/Lit");
+        ValidateMaterials("Standard");
+        PreviewChecks.Run();
+
         Console.WriteLine($"Rail lighting harness passed: {passed} checks");
+    }
+
+    static void ValidateMaterials(string shaderName)
+    {
+        Shader.AvailableName = shaderName;
+        Railload.ResetMaterials();
+        Material rail = Railload.RailMaterial;
+        Material sleeper = Railload.SleeperMaterial;
+        Check(rail.shader.name == shaderName && sleeper.shader.name == shaderName,
+            "Rail and sleeper materials must use the available shader");
+        Check(rail.enableInstancing, "Rail material must support the ECS RenderMeshInstanced submission");
+        Check(sleeper.enableInstancing, "Sleeper material must support the ECS RenderMeshInstanced submission");
+        Check(rail.GetFloat("_UseWorldUpLighting") == 1f && sleeper.GetFloat("_UseWorldUpLighting") == 1f,
+            "Rail and sleeper materials must enable world-up lighting");
+        Check(rail.GetFloat("_UseSpecular") == 1f && sleeper.GetFloat("_UseSpecular") == 0f,
+            "Rail and sleeper specular settings must remain distinct");
+        Check(ReferenceEquals(rail, Railload.RailMaterial) && ReferenceEquals(sleeper, Railload.SleeperMaterial),
+            "Repeated batch rebuilds must reuse the same material instances");
     }
 
     static void ValidateSleeper(Vector3 tangent, string label)
@@ -111,6 +134,56 @@ static class Checks
 
 namespace UnityEngine
 {
+    public static class Mathf
+    {
+        public static float Abs(float value) => MathF.Abs(value);
+        public static float Max(float a, float b) => MathF.Max(a, b);
+        public static int Max(int a, int b) => Math.Max(a, b);
+        public static float Min(float a, float b) => MathF.Min(a, b);
+        public static int FloorToInt(float value) => (int)MathF.Floor(value);
+        public static float Clamp01(float value) => Math.Clamp(value, 0f, 1f);
+    }
+
+    public readonly struct Vector2
+    {
+        public readonly float x, y;
+        public Vector2(float x, float y) { this.x = x; this.y = y; }
+    }
+
+    public readonly struct Vector2Int
+    {
+        public readonly int x, y;
+        public Vector2Int(int x, int y) { this.x = x; this.y = y; }
+        public static Vector2Int zero => default;
+    }
+
+    public struct Color
+    {
+        public float r, g, b, a;
+        public Color(float r, float g, float b, float a) { this.r = r; this.g = g; this.b = b; this.a = a; }
+    }
+
+    public sealed class Shader
+    {
+        public static string AvailableName;
+        public string name;
+        public static Shader Find(string name) => name == AvailableName ? new Shader { name = name } : null;
+    }
+
+    public sealed class Material
+    {
+        readonly Dictionary<string, float> floats = new Dictionary<string, float>();
+        public readonly Shader shader;
+        public string name;
+        public Color color;
+        public bool enableInstancing;
+        public Material(Shader shader) { this.shader = shader; }
+        public bool HasProperty(string name) => true;
+        public void SetColor(string name, Color value) { }
+        public void SetFloat(string name, float value) => floats[name] = value;
+        public float GetFloat(string name) => floats[name];
+    }
+
     public struct Vector3
     {
         public float x;
@@ -143,6 +216,7 @@ namespace UnityEngine
             a.y * b.z - a.z * b.y,
             a.z * b.x - a.x * b.z,
             a.x * b.y - a.y * b.x);
+        public static Vector3 Lerp(Vector3 a, Vector3 b, float t) => a + (b - a) * t;
         public static Vector3 operator +(Vector3 a, Vector3 b) => new Vector3(a.x + b.x, a.y + b.y, a.z + b.z);
         public static Vector3 operator -(Vector3 a, Vector3 b) => new Vector3(a.x - b.x, a.y - b.y, a.z - b.z);
         public static Vector3 operator *(Vector3 a, float b) => new Vector3(a.x * b, a.y * b, a.z * b);

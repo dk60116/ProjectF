@@ -25,6 +25,7 @@ foreach ($name in @(
     'private readonly struct FluidStorageEndpointKey', 'private readonly struct FluidOutputTransferCandidate',
     'private static void AdvanceFluidStorageStateVersion(', 'internal static void NotifyDataFluidStorageChanged(',
     'private void ClearFluidOutputTickQueryCaches()', 'private long GetFluidOutputStorageStateVersion()',
+    'private bool CanReuseFluidOutputQuery(',
     'protected bool TryGetFluidOutputAvailableLiters(', 'private bool TryGetCachedFluidOutputAvailability(',
     'private void CacheFluidOutputAvailability(', 'private void AddDataFluidOutputCandidate(',
     'private static bool CoordinatesMatch(', 'private static void AddUniqueCoordinates(',

@@ -7,7 +7,6 @@ public sealed class RailloadInstallationController : MonoBehaviour
     private const float PreviewRailWidth = 0.04f;
     private const float PreviewRailHalfSpacing = 0.3f;
     private const float PreviewRailHeight = 0.16f;
-    private const float PreviewRailThickness = 0.08f;
     private const float VisualBezierSamplesPerCell = 10f;
     private const float VisualBezierHandleFactor = 0.55f;
     private const float VisualBezierCrossAxisHandleFactor = 0.18f;
@@ -33,6 +32,7 @@ public sealed class RailloadInstallationController : MonoBehaviour
         new Vector2Int(-1, -1)
     };
     private static Material previewRailMaterial;
+    private static readonly List<ProjectF.Railway.IRailTarget> connectionCandidates = new List<ProjectF.Railway.IRailTarget>(8);
 
     private sealed class RailPathPlan
     {
@@ -62,6 +62,7 @@ public sealed class RailloadInstallationController : MonoBehaviour
     private Mesh previewMesh;
     private readonly List<Vector3> previewVertices = new List<Vector3>(256);
     private readonly List<int> previewTriangles = new List<int>(384);
+    private readonly List<Vector3> previewCenterPath = new List<Vector3>(64);
 
     public bool IsActive => isActive;
 
@@ -153,18 +154,6 @@ public sealed class RailloadInstallationController : MonoBehaviour
             return false;
         }
 
-        InstallationObject instance = terrain.CreateInstallationObject(railloadPrefab, terrain.transform);
-        Railload railload = instance as Railload;
-        if (railload == null)
-        {
-            if (instance != null)
-            {
-                terrain.ReleaseInstallationObject(instance, railloadPrefab);
-            }
-
-            return false;
-        }
-
         List<Vector2Int> pathCoordinates = new List<Vector2Int>(currentPlan.pathCoordinates);
         List<Vector2Int> occupiedCoordinates = currentPlan.occupiedCoordinates.Count > 0
             ? new List<Vector2Int>(currentPlan.occupiedCoordinates)
@@ -176,29 +165,23 @@ public sealed class RailloadInstallationController : MonoBehaviour
         if (removedCount < currentPlan.requiredItemCount)
         {
             placementController.RefundInstallItemsToPlayer(railloadDefinition.id, removedCount);
-            terrain.ReleaseInstallationObject(railload, railloadPrefab);
             return false;
         }
 
         Vector2Int anchorCoordinate = pathCoordinates[0];
         long placementSequence = InstallationObject.ClaimNextPlacementSequence();
-        railload.transform.SetPositionAndRotation(
-            placementController.GetInstalledObjectWorldPosition(anchorCoordinate, railloadPrefab, 0),
-            Quaternion.identity);
-        railload.ConfigureRequiredItemCount(currentPlan.requiredItemCount);
-        railload.ConfigurePlacementRuntime(anchorCoordinate, 0, occupiedCoordinates, placementSequence);
-        railload.ConfigureVisualPath(visualPathPoints, currentPlan.extendStartEndpoint, currentPlan.extendEndEndpoint);
-
-        for (int i = 0; i < occupiedCoordinates.Count; i++)
+        var state = new BlockStateStore.InstallationSaveState
         {
-            if (terrain.TryGetLoadedBlock(occupiedCoordinates[i], out Block block) && block != null)
-            {
-                block.SetMapObject(railload);
-            }
-        }
-
-        terrain.RegisterLiveInstallationObject(railload);
-        return true;
+            itemId = railloadDefinition.id, anchorCoordinate = anchorCoordinate,
+            placementSequence = placementSequence, occupiedCoordinates = occupiedCoordinates,
+            railVisualPathPoints = visualPathPoints, railRequiredItemCount = currentPlan.requiredItemCount,
+            railVisualPathExtendsStart = currentPlan.extendStartEndpoint, railVisualPathExtendsEnd = currentPlan.extendEndEndpoint,
+            hasWorldPose = true, worldRotation = Quaternion.identity,
+            worldPosition = placementController.GetInstalledObjectWorldPosition(anchorCoordinate, railloadPrefab, 0)
+        };
+        if (terrain.RegisterDataOnlyRailwayState(state, railloadPrefab, out _)) return true;
+        placementController.RefundInstallItemsToPlayer(railloadDefinition.id, removedCount);
+        return false;
     }
 
     public void Cancel()
@@ -872,16 +855,16 @@ public sealed class RailloadInstallationController : MonoBehaviour
         float bestSqrDistance = float.MaxValue;
         Vector2 bestPoint = endpoint;
         Vector2 bestDirection = normalizedPreferredDirection;
-        List<InstallationObject> candidates = new List<InstallationObject>(8);
+        var candidates = connectionCandidates; candidates.Clear();
         for (int offsetIndex = 0; offsetIndex < ConnectionProbeOffsets.Length; offsetIndex++)
         {
             candidates.Clear();
-            InstallationObject.CollectActiveInstallationsAtRuntimeGridCoordinate(
+            TerrainGenerator.Active?.GetRailWorld().CollectRailsAtCoordinate(
                 connectionCoordinate + ConnectionProbeOffsets[offsetIndex],
                 candidates);
             for (int candidateIndex = 0; candidateIndex < candidates.Count; candidateIndex++)
             {
-                if (candidates[candidateIndex] is not Railload rail)
+                if (candidates[candidateIndex] is not ProjectF.Railway.IRailTarget rail)
                 {
                     continue;
                 }
@@ -927,16 +910,16 @@ public sealed class RailloadInstallationController : MonoBehaviour
         sqrDistance = float.MaxValue;
 
         Vector2Int connectionCoordinate = VisualPointToCoordinate(endpoint);
-        List<InstallationObject> candidates = new List<InstallationObject>(8);
+        var candidates = connectionCandidates; candidates.Clear();
         for (int offsetIndex = 0; offsetIndex < ConnectionProbeOffsets.Length; offsetIndex++)
         {
             candidates.Clear();
-            InstallationObject.CollectActiveInstallationsAtRuntimeGridCoordinate(
+            TerrainGenerator.Active?.GetRailWorld().CollectRailsAtCoordinate(
                 connectionCoordinate + ConnectionProbeOffsets[offsetIndex],
                 candidates);
             for (int candidateIndex = 0; candidateIndex < candidates.Count; candidateIndex++)
             {
-                if (candidates[candidateIndex] is not Railload rail)
+                if (candidates[candidateIndex] is not ProjectF.Railway.IRailTarget rail)
                 {
                     continue;
                 }
@@ -962,7 +945,7 @@ public sealed class RailloadInstallationController : MonoBehaviour
 
     private static bool TryFindNearestPointAndTangentOnRailVisualPath(
         Vector2 point,
-        Railload rail,
+        ProjectF.Railway.IRailTarget rail,
         out Vector2 guidePoint,
         out Vector2 guideTangent,
         out float sqrDistance)
@@ -1178,10 +1161,10 @@ public sealed class RailloadInstallationController : MonoBehaviour
             return 0f;
         }
 
-        List<InstallationObject> candidates = new List<InstallationObject>(8);
+        var candidates = connectionCandidates; candidates.Clear();
         for (int i = 0; i < ConnectionProbeOffsets.Length; i++)
         {
-            InstallationObject.CollectActiveInstallationsAtRuntimeGridCoordinate(
+            TerrainGenerator.Active?.GetRailWorld().CollectRailsAtCoordinate(
                 connectionCoordinate + ConnectionProbeOffsets[i],
                 candidates);
         }
@@ -1189,7 +1172,7 @@ public sealed class RailloadInstallationController : MonoBehaviour
         float bestScore = 0f;
         for (int i = 0; i < candidates.Count; i++)
         {
-            if (candidates[i] is not Railload rail)
+            if (candidates[i] is not ProjectF.Railway.IRailTarget rail)
             {
                 continue;
             }
@@ -1203,7 +1186,7 @@ public sealed class RailloadInstallationController : MonoBehaviour
     }
 
     private static float ResolveRailAngleScoreAtConnection(
-        Railload rail,
+        ProjectF.Railway.IRailTarget rail,
         Vector2Int connectionCoordinate,
         Vector2 planTangent)
     {
@@ -1233,7 +1216,7 @@ public sealed class RailloadInstallationController : MonoBehaviour
     }
 
     private static bool TryGetRailEndpointTangent(
-        Railload rail,
+        ProjectF.Railway.IRailTarget rail,
         Vector2Int connectionCoordinate,
         bool startEndpoint,
         out Vector2 tangent)
@@ -1273,7 +1256,7 @@ public sealed class RailloadInstallationController : MonoBehaviour
     }
 
     private static bool TryGetNearestRailVisualTangent(
-        Railload rail,
+        ProjectF.Railway.IRailTarget rail,
         Vector2Int connectionCoordinate,
         out Vector2 tangent)
     {
@@ -1427,12 +1410,12 @@ public sealed class RailloadInstallationController : MonoBehaviour
             return true;
         }
 
-        return block.MapObject is Railload;
+        return block.MapObject is ProjectF.Railway.IRailTarget;
     }
 
     private void RefreshPreviewMesh(RailPathPlan plan)
     {
-        if (plan == null || plan.visualPathPoints.Count < 2)
+        if (plan == null || plan.visualPathPoints.Count < 2 || railloadPrefab == null)
         {
             SetPreviewVisible(false);
             return;
@@ -1441,17 +1424,15 @@ public sealed class RailloadInstallationController : MonoBehaviour
         EnsurePreviewMesh();
         previewVertices.Clear();
         previewTriangles.Clear();
-        Railload.AppendRailVisualMesh(
+        railloadPrefab.AppendPlacementPreviewMesh(
             previewVertices,
             previewTriangles,
             plan.visualPathPoints,
             Vector2Int.zero,
-            PreviewRailWidth,
-            PreviewRailHalfSpacing,
             PreviewRailHeight,
             plan.extendStartEndpoint,
             plan.extendEndEndpoint,
-            PreviewRailThickness);
+            previewCenterPath);
         ApplyMesh(previewMesh, previewVertices, previewTriangles);
         ApplyMaterialColor(previewMeshRenderer.sharedMaterial, plan.isValid ? ValidRailColor : InvalidRailColor);
         SetPreviewVisible(true);
@@ -1512,6 +1493,7 @@ public sealed class RailloadInstallationController : MonoBehaviour
         }
 
         mesh.Clear();
+        mesh.indexFormat = IndexFormat.UInt32;
         mesh.SetVertices(vertices);
         mesh.SetTriangles(triangles, 0);
         mesh.RecalculateNormals();

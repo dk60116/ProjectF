@@ -2,7 +2,7 @@ using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.Rendering;
 
-public class Railload : InstallationObject
+public class Railload : InstallationObject, ProjectF.Railway.IRailTarget
 {
     public const int RailCellsPerItem = 3;
     public const float ConnectionEndpointSnapMaxDistance = 0.55f;
@@ -46,9 +46,8 @@ public class Railload : InstallationObject
     private readonly List<Vector3> sleeperVertices = new List<Vector3>(128);
     private readonly List<int> sleeperTriangles = new List<int>(192);
     private readonly List<Vector3> railCenterPath = new List<Vector3>(64);
-    private readonly List<Vector2> renderedPathSamples = new List<Vector2>(64);
-    private readonly List<float> renderedPathCumulativeDistances = new List<float>(64);
-    private float renderedPathLength;
+    private readonly ProjectF.Railway.RailPathData renderedPath = new ProjectF.Railway.RailPathData();
+    private ProjectF.Railway.RailWorld registeredRailWorld;
     private bool renderedPathCacheDirty = true;
     [SerializeField, HideInInspector]
     private List<Vector2> runtimeVisualPathPoints = new List<Vector2>(64);
@@ -67,12 +66,13 @@ public class Railload : InstallationObject
 
     protected override void OnPlacementRuntimeChanged()
     {
-        base.OnPlacementRuntimeChanged();
         RefreshRailVisual();
+        base.OnPlacementRuntimeChanged();
     }
 
     protected override void OnPlacementRuntimeCleared()
     {
+        registeredRailWorld?.DetachLive(this);
         base.OnPlacementRuntimeCleared();
         runtimeVisualPathPoints?.Clear();
         runtimeVisualPathExtendsStart = true;
@@ -154,114 +154,60 @@ public class Railload : InstallationObject
     }
 
     public bool TryFindNearestPathPointAndTangent(
-        Vector2 point,
-        out Vector2 pathPoint,
-        out Vector2 tangent,
-        out float sqrDistance)
+        Vector2 point, out Vector2 pathPoint, out Vector2 tangent, out float sqrDistance)
     {
         pathPoint = point;
         tangent = Vector2.zero;
         sqrDistance = float.MaxValue;
-
         return TryEnsureRenderedPathSamples()
-            && TryFindNearestPointAndTangentOnPath(
-                renderedPathSamples,
-                point,
-                out pathPoint,
-                out tangent,
-                out sqrDistance);
+            && renderedPath.TryFindNearest(point, out _, out pathPoint, out tangent, out sqrDistance);
     }
 
     public bool TryFindNearestRenderedPathSample(
-        Vector2 point,
-        out float distanceAlongPath,
-        out Vector2 pathPoint,
-        out Vector2 tangent,
-        out float sqrDistance)
+        Vector2 point, out float distanceAlongPath, out Vector2 pathPoint, out Vector2 tangent, out float sqrDistance)
     {
         distanceAlongPath = 0f;
         pathPoint = point;
         tangent = Vector2.zero;
         sqrDistance = float.MaxValue;
-
-        if (!TryEnsureRenderedPathSamples())
-        {
-            return false;
-        }
-
-        return TryFindNearestSampleOnPath(
-            renderedPathSamples,
-            renderedPathCumulativeDistances,
-            point,
-            out distanceAlongPath,
-            out pathPoint,
-            out tangent,
-            out sqrDistance);
+        return TryEnsureRenderedPathSamples()
+            && renderedPath.TryFindNearest(point, out distanceAlongPath, out pathPoint, out tangent, out sqrDistance);
     }
 
-    public bool TrySampleRenderedPath(
-        float distanceAlongPath,
-        out Vector2 pathPoint,
-        out Vector2 tangent)
+    public bool TrySampleRenderedPath(float distanceAlongPath, out Vector2 pathPoint, out Vector2 tangent)
     {
         pathPoint = Vector2.zero;
         tangent = Vector2.zero;
-        if (!TryEnsureRenderedPathSamples())
-        {
-            return false;
-        }
-
-        return TrySamplePathAtDistance(
-            renderedPathSamples,
-            renderedPathCumulativeDistances,
-            renderedPathLength,
-            distanceAlongPath,
-            out pathPoint,
-            out tangent);
+        return TryEnsureRenderedPathSamples() && renderedPath.TrySample(distanceAlongPath, out pathPoint, out tangent);
     }
 
     public bool TryGetRenderedPathLength(out float length)
     {
         length = 0f;
-        if (!TryEnsureRenderedPathSamples())
-        {
-            return false;
-        }
-
-        length = renderedPathLength;
+        if (!TryEnsureRenderedPathSamples()) return false;
+        length = renderedPath.Length;
         return length > 0.0001f;
     }
 
+    internal bool TryGetPathData(out ProjectF.Railway.RailPathData path)
+    {
+        bool valid = TryEnsureRenderedPathSamples();
+        path = renderedPath;
+        return valid;
+    }
+
     public bool TryGetRenderedEndpointSample(
-        bool startEndpoint,
-        out float distanceAlongPath,
-        out Vector2 pathPoint,
-        out Vector2 tangent)
+        bool startEndpoint, out float distanceAlongPath, out Vector2 pathPoint, out Vector2 tangent)
     {
         distanceAlongPath = 0f;
         pathPoint = Vector2.zero;
         tangent = Vector2.zero;
-        if (!TryEnsureRenderedPathSamples()
-            || renderedPathSamples.Count < 2)
-        {
-            return false;
-        }
-
-        if (startEndpoint)
-        {
-            distanceAlongPath = 0f;
-            pathPoint = renderedPathSamples[0];
-            tangent = renderedPathSamples[1] - renderedPathSamples[0];
-        }
-        else
-        {
-            int lastIndex = renderedPathSamples.Count - 1;
-            distanceAlongPath = renderedPathLength;
-            pathPoint = renderedPathSamples[lastIndex];
-            tangent = renderedPathSamples[lastIndex] - renderedPathSamples[lastIndex - 1];
-        }
-
-        tangent = NormalizeFlatDirection(tangent);
+        if (!TryEnsureRenderedPathSamples()) return false;
+        var samples = renderedPath.Samples;
+        int last = samples.Count - 1;
+        distanceAlongPath = startEndpoint ? 0f : renderedPath.Length;
+        pathPoint = samples[startEndpoint ? 0 : last];
+        tangent = NormalizeFlatDirection(startEndpoint ? samples[1] - samples[0] : samples[last] - samples[last - 1]);
         return tangent.sqrMagnitude > 0.0001f;
     }
 
@@ -327,69 +273,47 @@ public class Railload : InstallationObject
 
             if (railCenterPath.Count >= 2)
             {
-                AddRailStrips(
-                    railVertices,
-                    railTriangles,
-                    railCenterPath,
-                    railLineWidth,
-                    railHalfSpacing,
-                    railVisualThickness,
-                    false,
-                    false);
-                AddRailSleepers(
-                    sleeperVertices,
-                    sleeperTriangles,
-                    railCenterPath,
-                    ResolveSleeperTopHeight(railVisualHeight, railVisualThickness),
-                    sleeperLength,
-                    sleeperWidth,
-                    sleeperSpacing,
-                    sleeperVisualThickness);
+                AppendVisualGeometry(railVertices, railTriangles, sleeperVertices, sleeperTriangles, railCenterPath, railVisualHeight);
             }
         }
 
         ApplyMesh(railMesh, railVertices, railTriangles);
         ApplyMesh(sleeperMesh, sleeperVertices, sleeperTriangles);
+        RefreshRailWorld();
     }
 
-    public static void AppendRailMesh(
-        List<Vector3> vertices,
-        List<int> triangles,
-        IReadOnlyList<Vector2Int> coordinates,
-        Vector2Int originCoordinate,
-        float width,
-        float halfSpacing,
-        float height,
-        float thickness = DefaultRailVisualThickness)
+    private void RefreshRailWorld()
     {
-        if (vertices == null || triangles == null || coordinates == null || coordinates.Count < 2)
+        var world = TerrainGenerator.Active?.GetRailWorld();
+        if (!ReferenceEquals(registeredRailWorld, world))
         {
-            return;
+            registeredRailWorld?.DetachLive(this);
+            registeredRailWorld = world;
         }
-
-        List<Vector3> centerPath = new List<Vector3>(coordinates.Count * 2);
-        BuildCenterPath(coordinates, originCoordinate, height, centerPath);
-        AddRailStrips(vertices, triangles, centerPath, width, halfSpacing, thickness);
+        registeredRailWorld?.UpsertLive(this);
     }
 
-    public static void AppendRailVisualMesh(
+    protected override void OnDisable()
+    {
+        if (!ProjectFApplicationLifecycle.IsQuitting) registeredRailWorld?.DetachLive(this);
+        base.OnDisable();
+    }
+
+    internal void AppendPlacementPreviewMesh(
         List<Vector3> vertices,
         List<int> triangles,
         IReadOnlyList<Vector2> visualPathPoints,
         Vector2Int originCoordinate,
-        float width,
-        float halfSpacing,
         float height,
-        bool extendStartEndpoint = true,
-        bool extendEndEndpoint = true,
-        float thickness = DefaultRailVisualThickness)
+        bool extendStartEndpoint,
+        bool extendEndEndpoint,
+        List<Vector3> centerPath)
     {
-        if (vertices == null || triangles == null || visualPathPoints == null || visualPathPoints.Count < 2)
+        if (vertices == null || triangles == null || centerPath == null)
         {
             return;
         }
 
-        List<Vector3> centerPath = new List<Vector3>(visualPathPoints.Count);
         BuildVisualCenterPath(
             visualPathPoints,
             originCoordinate,
@@ -397,15 +321,16 @@ public class Railload : InstallationObject
             centerPath,
             extendStartEndpoint,
             extendEndEndpoint);
-        AddRailStrips(
-            vertices,
-            triangles,
-            centerPath,
-            width,
-            halfSpacing,
-            thickness,
-            false,
-            false);
+        AppendVisualGeometry(vertices, triangles, vertices, triangles, centerPath, height);
+    }
+
+    private void AppendVisualGeometry(
+        List<Vector3> rails, List<int> railIndices, List<Vector3> sleepers, List<int> sleeperIndices,
+        IReadOnlyList<Vector3> centerPath, float railHeight)
+    {
+        AddRailStrips(rails, railIndices, centerPath, railLineWidth, railHalfSpacing, railVisualThickness, false, false);
+        AddRailSleepers(sleepers, sleeperIndices, centerPath, ResolveSleeperTopHeight(railHeight, railVisualThickness),
+            sleeperLength, sleeperWidth, sleeperSpacing, sleeperVisualThickness);
     }
 
     private void ClearRailVisual()
@@ -420,6 +345,20 @@ public class Railload : InstallationObject
             sleeperMesh.Clear();
         }
     }
+
+    internal void AppendDataVisual(ProjectF.Railway.RailInstance rail, Vector3 origin,
+        List<Vector3> rails, List<int> railIndices, List<Vector3> sleepers, List<int> sleeperIndices, List<Vector3> path)
+    {
+        path.Clear();
+        var samples = rail.Path.Samples;
+        for (int i = 0; i < samples.Count; i++)
+            path.Add(new Vector3(samples[i].x - origin.x, rail.WorldPosition.y + railVisualHeight - origin.y, samples[i].y - origin.z));
+        if (path.Count < 2) return;
+        AppendVisualGeometry(rails, railIndices, sleepers, sleeperIndices, path, rail.WorldPosition.y + railVisualHeight - origin.y);
+    }
+
+    internal static Material DataRailMaterial => ResolveRailRuntimeMaterial();
+    internal static Material DataSleeperMaterial => ResolveSleeperRuntimeMaterial();
 
     private void EnsureRailMesh()
     {
@@ -486,7 +425,7 @@ public class Railload : InstallationObject
         meshRenderer.receiveShadows = false;
     }
 
-    private static void BuildCenterPath(
+    internal static void BuildCenterPath(
         IReadOnlyList<Vector2Int> coordinates,
         Vector2Int originCoordinate,
         float height,
@@ -551,77 +490,20 @@ public class Railload : InstallationObject
     private void InvalidateRenderedPathCache()
     {
         renderedPathCacheDirty = true;
-        renderedPathLength = 0f;
     }
 
     private bool TryEnsureRenderedPathSamples()
     {
-        if (!renderedPathCacheDirty)
+        if (renderedPathCacheDirty)
         {
-            return renderedPathSamples.Count >= 2;
+            renderedPathCacheDirty = false;
+            renderedPath.Configure(runtimeVisualPathPoints, RuntimeOccupiedCoordinates, RuntimeAnchorCoordinate,
+                runtimeVisualPathExtendsStart, runtimeVisualPathExtendsEnd);
         }
-
-        renderedPathCacheDirty = false;
-        renderedPathLength = 0f;
-        renderedPathSamples.Clear();
-        renderedPathCumulativeDistances.Clear();
-        if (runtimeVisualPathPoints != null && runtimeVisualPathPoints.Count >= 2)
-        {
-            for (int i = 0; i < runtimeVisualPathPoints.Count; i++)
-            {
-                AddVisualPathPoint(renderedPathSamples, runtimeVisualPathPoints[i]);
-            }
-
-            ExtendPathEndpointsToCellEdges2D(
-                renderedPathSamples,
-                runtimeVisualPathExtendsStart,
-                runtimeVisualPathExtendsEnd);
-            RebuildRenderedPathDistanceCache();
-            return renderedPathSamples.Count >= 2;
-        }
-
-        IReadOnlyList<Vector2Int> coordinates = RuntimeOccupiedCoordinates;
-        if (coordinates == null || coordinates.Count < 2)
-        {
-            return false;
-        }
-
-        railCenterPath.Clear();
-        BuildCenterPath(coordinates, RuntimeAnchorCoordinate, 0f, railCenterPath);
-        for (int i = 0; i < railCenterPath.Count; i++)
-        {
-            Vector3 localPoint = railCenterPath[i];
-            AddVisualPathPoint(
-                renderedPathSamples,
-                new Vector2(
-                    localPoint.x + RuntimeAnchorCoordinate.x,
-                    localPoint.z + RuntimeAnchorCoordinate.y));
-        }
-
-        RebuildRenderedPathDistanceCache();
-        return renderedPathSamples.Count >= 2;
+        return renderedPath.IsValid;
     }
 
-    private void RebuildRenderedPathDistanceCache()
-    {
-        renderedPathCumulativeDistances.Clear();
-        renderedPathLength = 0f;
-        if (renderedPathSamples.Count <= 0)
-        {
-            return;
-        }
-
-        renderedPathCumulativeDistances.Add(0f);
-        for (int i = 1; i < renderedPathSamples.Count; i++)
-        {
-            renderedPathLength += Vector2.Distance(
-                renderedPathSamples[i - 1],
-                renderedPathSamples[i]);
-            renderedPathCumulativeDistances.Add(renderedPathLength);
-        }
-    }
-
-    private static void ExtendPathEndpointsToCellEdges2D(
+    internal static void ExtendPathEndpointsToCellEdges2D(
         List<Vector2> pathPoints,
         bool extendStartEndpoint,
         bool extendEndEndpoint)
@@ -1024,168 +906,6 @@ public class Railload : InstallationObject
         return false;
     }
 
-    private static bool TryFindNearestPointAndTangentOnPath(
-        IReadOnlyList<Vector2> pathPoints,
-        Vector2 point,
-        out Vector2 pathPoint,
-        out Vector2 tangent,
-        out float sqrDistance)
-    {
-        pathPoint = point;
-        tangent = Vector2.zero;
-        sqrDistance = float.MaxValue;
-        if (pathPoints == null || pathPoints.Count < 2)
-        {
-            return false;
-        }
-
-        bool found = false;
-        for (int i = 0; i + 1 < pathPoints.Count; i++)
-        {
-            found |= TryUpdateNearestPointAndTangent(
-                pathPoints[i],
-                pathPoints[i + 1],
-                point,
-                ref pathPoint,
-                ref tangent,
-                ref sqrDistance);
-        }
-
-        return found;
-    }
-
-    private static bool TryFindNearestSampleOnPath(
-        IReadOnlyList<Vector2> pathPoints,
-        IReadOnlyList<float> cumulativeDistances,
-        Vector2 point,
-        out float distanceAlongPath,
-        out Vector2 pathPoint,
-        out Vector2 tangent,
-        out float sqrDistance)
-    {
-        distanceAlongPath = 0f;
-        pathPoint = point;
-        tangent = Vector2.zero;
-        sqrDistance = float.MaxValue;
-        if (pathPoints == null
-            || cumulativeDistances == null
-            || pathPoints.Count < 2
-            || cumulativeDistances.Count != pathPoints.Count)
-        {
-            return false;
-        }
-
-        bool found = false;
-        for (int i = 0; i + 1 < pathPoints.Count; i++)
-        {
-            Vector2 segment = pathPoints[i + 1] - pathPoints[i];
-            float segmentLength = segment.magnitude;
-            if (segmentLength <= 0.0001f)
-            {
-                continue;
-            }
-
-            float t = Mathf.Clamp01(Vector2.Dot(point - pathPoints[i], segment) / (segmentLength * segmentLength));
-            Vector2 candidatePoint = Vector2.Lerp(pathPoints[i], pathPoints[i + 1], t);
-            float candidateSqrDistance = (point - candidatePoint).sqrMagnitude;
-            if (candidateSqrDistance < sqrDistance)
-            {
-                distanceAlongPath = cumulativeDistances[i] + segmentLength * t;
-                pathPoint = candidatePoint;
-                tangent = segment / segmentLength;
-                sqrDistance = candidateSqrDistance;
-                found = true;
-            }
-        }
-
-        return found;
-    }
-
-    private readonly struct RailPointSource : ProjectF.Simulation.IRailPathPoints
-    {
-        private readonly IReadOnlyList<Vector2> points;
-        public RailPointSource(IReadOnlyList<Vector2> points) { this.points = points; }
-        public int Count => points?.Count ?? 0;
-        public ProjectF.Simulation.RailPoint GetPoint(int index)
-            => new ProjectF.Simulation.RailPoint(points[index].x, points[index].y);
-    }
-
-    private static bool TrySamplePathAtDistance(
-        IReadOnlyList<Vector2> pathPoints,
-        IReadOnlyList<float> cumulativeDistances,
-        float pathLength,
-        float distanceAlongPath,
-        out Vector2 pathPoint,
-        out Vector2 tangent)
-    {
-        bool found = ProjectF.Simulation.RailPathSampling.TrySample(new RailPointSource(pathPoints),
-            cumulativeDistances, pathLength, distanceAlongPath, out var point, out var direction);
-        pathPoint = new Vector2(point.X, point.Y);
-        tangent = new Vector2(direction.X, direction.Y);
-        return found;
-    }
-
-    private static bool TryFindNearestPointAndTangentOnCoordinatePath(
-        IReadOnlyList<Vector2Int> coordinates,
-        Vector2 point,
-        out Vector2 pathPoint,
-        out Vector2 tangent,
-        out float sqrDistance)
-    {
-        pathPoint = point;
-        tangent = Vector2.zero;
-        sqrDistance = float.MaxValue;
-        if (coordinates == null || coordinates.Count < 2)
-        {
-            return false;
-        }
-
-        bool found = false;
-        for (int i = 0; i + 1 < coordinates.Count; i++)
-        {
-            Vector2 start = new Vector2(coordinates[i].x, coordinates[i].y);
-            Vector2 end = new Vector2(coordinates[i + 1].x, coordinates[i + 1].y);
-            found |= TryUpdateNearestPointAndTangent(
-                start,
-                end,
-                point,
-                ref pathPoint,
-                ref tangent,
-                ref sqrDistance);
-        }
-
-        return found;
-    }
-
-    private static bool TryUpdateNearestPointAndTangent(
-        Vector2 start,
-        Vector2 end,
-        Vector2 point,
-        ref Vector2 nearestPoint,
-        ref Vector2 nearestTangent,
-        ref float nearestSqrDistance)
-    {
-        Vector2 segment = end - start;
-        float segmentSqrLength = segment.sqrMagnitude;
-        if (segmentSqrLength <= 0.0001f)
-        {
-            return false;
-        }
-
-        float t = Mathf.Clamp01(Vector2.Dot(point - start, segment) / segmentSqrLength);
-        Vector2 candidatePoint = Vector2.Lerp(start, end, t);
-        float candidateSqrDistance = (point - candidatePoint).sqrMagnitude;
-        if (candidateSqrDistance >= nearestSqrDistance)
-        {
-            return true;
-        }
-
-        nearestPoint = candidatePoint;
-        nearestTangent = segment.normalized;
-        nearestSqrDistance = candidateSqrDistance;
-        return true;
-    }
-
     private static float ResolveSleeperTopHeight(float railHeight, float railThickness)
     {
         const float sleeperRailOverlap = 0.015f;
@@ -1372,7 +1092,8 @@ public class Railload : InstallationObject
         Material material = new Material(shader)
         {
             name = materialName,
-            color = baseColor
+            color = baseColor,
+            enableInstancing = true
         };
         SetMaterialColor(material, "_BaseColor", baseColor);
         SetMaterialColor(material, "_Color", baseColor);

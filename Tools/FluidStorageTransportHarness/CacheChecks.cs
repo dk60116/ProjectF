@@ -41,6 +41,17 @@ public partial class InputOutputModule
     private float cachedFluidOutputAvailabilityMaximumLiters, cachedFluidOutputAvailabilityLiters;
     private bool cachedFluidOutputAvailabilityBlocked;
     private static long fluidOutputAvailabilityCacheHitCount, fluidOutputAvailabilityCacheMissCount;
+    private static long fluidOutputQueryColdMissCount, fluidOutputQueryTickMissCount;
+    private static long fluidOutputQueryStorageMissCount, fluidOutputQueryTopologyMissCount;
+    private static long fluidOutputQueryKeyMissCount, fluidOutputQueryRevalidationMissCount;
+    private static long fluidOutputConnectionTopologyRebuildCount, fluidOutputConnectionSeedRebuildCount;
+    private static long fluidOutputQueryResetCount;
+    public static long StorageMisses => fluidOutputQueryStorageMissCount;
+    public static long TickMisses => fluidOutputQueryTickMissCount;
+    public static long QueryMisses => fluidOutputQueryColdMissCount + fluidOutputQueryTickMissCount
+        + fluidOutputQueryStorageMissCount + fluidOutputQueryTopologyMissCount + fluidOutputQueryKeyMissCount
+        + fluidOutputQueryRevalidationMissCount;
+    public static long TotalMisses => AvailabilityMisses + RetentionMisses + SelectionMisses;
     public static void StorageChanged(InstallationObject storage) => AdvanceFluidStorageStateVersion(storage);
     public static long AvailabilityMisses => fluidOutputAvailabilityCacheMissCount;
     public static long RetentionMisses => fluidOutputRetentionCacheMissCount;
@@ -93,10 +104,12 @@ public static partial class Checks
         Check(InputOutputModule.RetentionMisses - retention, 0, "unrelated ECS mutation keeps retention cache");
         Check(InputOutputModule.SelectionMisses - selection, 0, "unrelated ECS mutation keeps selection cache");
 
+        long storageMisses = InputOutputModule.StorageMisses;
         first.TryAddFluidLiters(1, 10, 20, out _);
         Check(producer.Available(100), 0, "related fill invalidates capacity immediately");
         Check(producer.TransportRetention(1), 1, "full network invalidates retention immediately");
         Check(producer.Selected() == null ? 1 : 0, 1, "full network invalidates selected receiver");
+        Check(InputOutputModule.StorageMisses - storageMisses, 3, "related change classifies all three query misses as storage changes");
         first.TryConsumeFluidLiters(1, 5, out _);
         Check(producer.Available(100), 5, "related drain invalidates blocked result in same tick");
         Check(producer.TransportRetention(1), .99f, "drained endpoint restores route in same tick");
@@ -132,10 +145,12 @@ public static partial class Checks
         data.Stored = 20; InputOutputModule.NotifyDataFluidStorageChanged(data);
         Check(producer.Available(100), 30, "related ECS drain invalidates blocked result");
         availability = InputOutputModule.AvailabilityMisses;
+        long tickMisses = InputOutputModule.TickMisses;
         MapObjectTickManager.CurrentSimulationTick++;
         data.Active = false;
         Check(producer.Available(100), 0, "new tick rechecks unversioned receiver activity");
         Check(InputOutputModule.AvailabilityMisses - availability, 1, "activity still has conservative tick guard");
+        Check(InputOutputModule.TickMisses - tickMisses, 1, "cross-tick query miss has an explicit diagnostic reason");
         Check(producer.Emit(5), 0, "actual transfer revalidates ECS acceptance");
 
         World.Reset(); producer = new InputOutputModule(); producer.Output(default, Vector2Int.right);
@@ -160,5 +175,6 @@ public static partial class Checks
         Check(InputOutputModule.SelectionMisses - selection, 0, "10000 unrelated changes cause no selection search");
         first.TryAddFluidLiters(1, 50, 20, out _);
         Check(producer.Emit(5), 0, "actual native transfer rejects full storage after cached query");
+        Check(InputOutputModule.QueryMisses - InputOutputModule.TotalMisses, 0, "every failed query records exactly one diagnostic reason");
     }
 }

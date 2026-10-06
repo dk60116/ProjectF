@@ -10,6 +10,11 @@ The harness extracts production methods from `SteamTrain.cs` and `RailHandcar.cs
 and runs them in a temporary .NET 9 console project, using Unity's managed vector
 math. It does not launch or control the Unity editor.
 
+Rail-world registration, spatial candidate completeness, cached station mutations
+and complete route-graph parity are tested by `Tools/RailWorldHarness`. This
+harness also extracts controller-cache helpers and physical-dock departure-filter
+selection; physical dock detection is an explicit fixture boundary.
+
 Coverage includes:
 
 - Destination-side powered locomotive selection, excluding manual handcars.

@@ -1,4 +1,4 @@
-﻿using ProjectF.Power;
+using ProjectF.Power;
 using System.Collections.Generic;
 using System.Globalization;
 using TMPro;
@@ -706,7 +706,7 @@ public class ItemInfoDescription : MonoBehaviour
         }
     }
 
-    public void ShowTrainstation(Trainstation trainStation, ResourceInstance underlyingResource = null)
+    public void ShowTrainstation(ProjectF.Railway.ITrainStationTarget trainStation, ResourceInstance underlyingResource = null)
     {
         BeginObjectDisplay(underlyingResource);
         string stationName = trainStation != null ? trainStation.StationName : string.Empty;

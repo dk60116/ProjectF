@@ -33,6 +33,22 @@ $generated += $directionDeadZone.Value
 foreach ($signature in @('protected struct RailSample', 'private struct ConnectedTrainRailMove', 'private struct ConsistPathSample', 'private Vector2 ResolveConnectedTrainFacing(', 'private static bool TryResolveFacingFromConnectedTarget(', 'private Vector2 ResolveConsistPathForward(', 'private int FindConsistPathUpperBound(', 'private static bool HasRailConnectionBridgeState(', 'private static bool TryCreateRailConnectionBridgeSample(')) {
     $generated += Read-Member $handcar $signature
 }
+foreach ($signature in @('private static Vector2 ResolveFollowerFacingTangent(', 'private void LogRailFacingDiscontinuity(')) {
+    $generated += Read-Member $handcar $signature
+}
+# Execute the actual manual-input dispatch through rail selection, before speed/physics integration.
+$manualInput = Read-Member $handcar 'public override void HandleMountedInput(Vector3 worldMoveDirection, float moveSpeed, float deltaTime)'
+$manualEnd = $manualInput.IndexOf('        if (ShouldReleaseForeignPushForReverseInput(', [StringComparison]::Ordinal)
+if ($manualEnd -lt 0) { throw 'Missing manual rail-selection boundary' }
+$generated += $manualInput.Substring(0, $manualEnd).Replace('public override void HandleMountedInput(', 'public void TestManualInput(')
+$generated += "TestManualFacing = currentFacing; TestManualInputAxis = inputAxis; }`n"
+foreach ($signature in @('private bool TryAdvanceExistingRailConnectionBridge(', 'private bool TryResolveRailConnectionBridge(',
+    'private static float ResolveRailConnectionBridgeProgress(', 'private static bool TryCreateRailSampleAtDistance(',
+    'protected virtual bool TryResolvePreferredConnectedRailTravelDirection(', 'private Vector2 ResolveFacingTangent(',
+    'private static Vector2 ResolveFacingTangentWithFallback(', 'private static bool TryResolveTangentReferenceSign(',
+    'private static float ResolveRailConnectionTapeDistance(', 'private static RailSample ReverseRailConnectionBridgeSample(')) {
+    $generated += Read-Member $handcar $signature
+}
 $generated += "`n}`n"
 $placement = [IO.File]::ReadAllText((Join-Path $repo 'FactorioProject/Assets/Scripts/Object/MapObj/InstallationObject/InstallationPlacementController.cs'))
 $generated += "public partial class InstallationPlacementController {`n"
@@ -43,10 +59,14 @@ foreach ($signature in @('private struct TrainPlacementRailSample', 'private str
 $complete = Read-Member $placement 'private void HandleInstallCompleteClicked('
 $generated += $complete.Substring(0, $complete.IndexOf('        if (!IsInstallationModeActive())', [StringComparison]::Ordinal)) + "}`n"
 $generated += "`n}`n"
+$generated = $generated.Replace('ProjectF.Railway.IRailTarget', 'Railload')
 [IO.File]::WriteAllText((Join-Path $probe 'Orientation.cs'), $generated)
 Copy-Item -LiteralPath (Join-Path $repo 'FactorioProject/Assets/Scripts/Object/MapObj/InstallationObject/Vehicle/TrainPlacementSpacing.cs') -Destination $probe
+$spacingPath = Join-Path $probe 'TrainPlacementSpacing.cs'
+[IO.File]::WriteAllText($spacingPath, [IO.File]::ReadAllText($spacingPath).Replace('ProjectF.Railway.IRailTarget', 'Railload'))
 Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'Checks.cs') -Destination $probe
 Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'FacingChecks.cs') -Destination $probe
+Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'ManualFacingChecks.cs') -Destination $probe
 Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'BlueprintChecks.cs') -Destination $probe
 Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'EditChecks.cs') -Destination $probe
 [IO.File]::WriteAllText((Join-Path $probe 'Probe.csproj'), '<Project Sdk="Microsoft.NET.Sdk"><PropertyGroup><OutputType>Exe</OutputType><TargetFramework>net9.0</TargetFramework></PropertyGroup><ItemGroup><Reference Include="UnityEngine.CoreModule"><HintPath>C:/Program Files/Unity/Hub/Editor/6000.4.0f1/Editor/Data/Managed/UnityEngine/UnityEngine.CoreModule.dll</HintPath></Reference></ItemGroup></Project>')

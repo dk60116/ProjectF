@@ -208,9 +208,29 @@ public static class SaveGameItemIdRemapper
             return;
         }
 
-        if (!TryResolveCurrentItemId(state.itemName, currentDefinitions, true, out state.itemId))
+        ItemDefinition definition = ItemDefinitionLookup.ResolveInstallationByStableName(
+            currentDefinitions, state.itemName);
+        if (definition != null && definition.id >= 0)
+        {
+            state.itemId = definition.id;
+        }
+        else
         {
             state.itemId = RemapItemId(state.itemId, itemIdMap);
+            definition = ItemDefinitionLookup.ResolveInstallationById(currentDefinitions, state.itemId);
+        }
+
+        // Older ECS rails lost their ID on failed name lookup, but retained their path.
+        // Recover only nameless invalid IDs with a unique prefab-backed rail definition.
+        if (state.itemId < 0 && string.IsNullOrWhiteSpace(state.itemName)
+            && state.railVisualPathPoints?.Count >= 2)
+        {
+            definition = ResolveUnambiguousRailDefinition(currentDefinitions);
+            if (definition != null) state.itemId = definition.id;
+        }
+        if (definition != null && string.IsNullOrWhiteSpace(state.itemName))
+        {
+            state.itemName = ResolveStableItemName(definition);
         }
 
         state.storedFluidItemId = RemapItemId(state.storedFluidItemId, itemIdMap);
@@ -353,23 +373,18 @@ public static class SaveGameItemIdRemapper
             : itemId;
     }
 
-    private static bool TryResolveCurrentItemId(
-        string itemName,
-        IReadOnlyList<ItemDefinition> currentDefinitions,
-        bool requireInstallation,
-        out int itemId)
+    private static ItemDefinition ResolveUnambiguousRailDefinition(
+        IReadOnlyList<ItemDefinition> definitions)
     {
-        itemId = -1;
-        ItemDefinition definition = requireInstallation
-            ? ItemDefinitionLookup.ResolveInstallationByStableName(currentDefinitions, itemName)
-            : ItemDefinitionLookup.ResolveByStableName(currentDefinitions, itemName);
-        if (definition == null || definition.id < 0)
+        ItemDefinition result = null;
+        for (int i = 0; i < definitions.Count; i++)
         {
-            return false;
+            ItemDefinition candidate = definitions[i];
+            if (candidate == null || candidate.id < 0 || !(candidate.mapObject is Railload)) continue;
+            if (result != null && result != candidate) return null;
+            result = candidate;
         }
-
-        itemId = definition.id;
-        return true;
+        return result;
     }
 
     private static List<ulong> RemapItemFilterMask(

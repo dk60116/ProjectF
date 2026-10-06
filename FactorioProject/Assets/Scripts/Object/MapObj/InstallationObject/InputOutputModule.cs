@@ -228,6 +228,11 @@ public partial class InputOutputModule : InstallationObject,
     private static long fluidOutputRetentionCacheMissCount;
     private static long fluidOutputSelectionCacheHitCount;
     private static long fluidOutputSelectionCacheMissCount;
+    private static long fluidOutputQueryColdMissCount, fluidOutputQueryTickMissCount;
+    private static long fluidOutputQueryStorageMissCount, fluidOutputQueryTopologyMissCount;
+    private static long fluidOutputQueryKeyMissCount, fluidOutputQueryRevalidationMissCount;
+    private static long fluidOutputConnectionTopologyRebuildCount, fluidOutputConnectionSeedRebuildCount;
+    private static long fluidOutputQueryResetCount;
     internal static int FluidTopologyVersion => fluidTopologyVersion;
     internal static int RuntimeFluidOutputCoordinateCount => registeredRuntimeFluidOutputCoordinates.Count;
     internal static int RuntimeFluidStorageCoordinateCount => registeredRuntimeFluidStorageCoordinates.Count;
@@ -8662,6 +8667,7 @@ public partial class InputOutputModule : InstallationObject,
 
     private void ClearFluidOutputTickQueryCaches()
     {
+        fluidOutputQueryResetCount++;
         cachedFluidOutputNetworkObservedVersion = -1;
         cachedFluidOutputAvailabilityTick = long.MinValue;
         cachedFluidOutputRetentionTick = long.MinValue;
@@ -8671,6 +8677,30 @@ public partial class InputOutputModule : InstallationObject,
         cachedFluidOutputSelectionItemId = int.MinValue;
         cachedFluidOutputSelectionFound = false;
         cachedFluidOutputSelection = default;
+    }
+
+    private bool CanReuseFluidOutputQuery(long tick, long storageVersion, int topologyVersion)
+    {
+        // Count exactly one reason per failed query; request-key and receiver checks follow separately.
+        if (tick == long.MinValue) fluidOutputQueryColdMissCount++;
+        else if (topologyVersion != fluidTopologyVersion) fluidOutputQueryTopologyMissCount++;
+        else if (tick != MapObjectTickManager.CurrentSimulationTick) fluidOutputQueryTickMissCount++;
+        else if (storageVersion != GetFluidOutputStorageStateVersion()) fluidOutputQueryStorageMissCount++;
+        else return true;
+        return false;
+    }
+
+    internal static void AppendFluidOutputCacheDiagnostics()
+    {
+        MapObjectTickProfiler.AddRuntimeCounter("FluidOutputCache", "ColdMisses", fluidOutputQueryColdMissCount);
+        MapObjectTickProfiler.AddRuntimeCounter("FluidOutputCache", "TickMisses", fluidOutputQueryTickMissCount);
+        MapObjectTickProfiler.AddRuntimeCounter("FluidOutputCache", "StorageMisses", fluidOutputQueryStorageMissCount);
+        MapObjectTickProfiler.AddRuntimeCounter("FluidOutputCache", "TopologyMisses", fluidOutputQueryTopologyMissCount);
+        MapObjectTickProfiler.AddRuntimeCounter("FluidOutputCache", "RequestKeyMisses", fluidOutputQueryKeyMissCount);
+        MapObjectTickProfiler.AddRuntimeCounter("FluidOutputCache", "ReceiverRevalidationMisses", fluidOutputQueryRevalidationMissCount);
+        MapObjectTickProfiler.AddRuntimeCounter("FluidOutputCache", "ConnectionTopologyRebuilds", fluidOutputConnectionTopologyRebuildCount);
+        MapObjectTickProfiler.AddRuntimeCounter("FluidOutputCache", "ConnectionSeedRebuilds", fluidOutputConnectionSeedRebuildCount);
+        MapObjectTickProfiler.AddRuntimeCounter("FluidOutputCache", "QueryResets", fluidOutputQueryResetCount);
     }
 
     private long GetFluidOutputStorageStateVersion()
@@ -8799,12 +8829,13 @@ public partial class InputOutputModule : InstallationObject,
         out float availableLiters)
     {
         availableLiters = 0f;
-        if (cachedFluidOutputAvailabilityTick != MapObjectTickManager.CurrentSimulationTick
-            || cachedFluidOutputAvailabilityStateVersion != GetFluidOutputStorageStateVersion()
-            || cachedFluidOutputAvailabilityTopologyVersion != fluidTopologyVersion
-            || cachedFluidOutputAvailabilityItemId != fluidItemId
+        if (!CanReuseFluidOutputQuery(cachedFluidOutputAvailabilityTick,
+                cachedFluidOutputAvailabilityStateVersion, cachedFluidOutputAvailabilityTopologyVersion))
+            return false;
+        if (cachedFluidOutputAvailabilityItemId != fluidItemId
             || maximumLiters > cachedFluidOutputAvailabilityMaximumLiters + 0.0001f)
         {
+            fluidOutputQueryKeyMissCount++;
             return false;
         }
 
@@ -8939,9 +8970,9 @@ public partial class InputOutputModule : InstallationObject,
             return 1f;
         }
 
-        if (cachedFluidOutputRetentionTick == MapObjectTickManager.CurrentSimulationTick
-            && cachedFluidOutputRetentionStateVersion == GetFluidOutputStorageStateVersion()
-            && cachedFluidOutputRetentionTopologyVersion == fluidTopologyVersion
+        bool reusable = CanReuseFluidOutputQuery(cachedFluidOutputRetentionTick,
+            cachedFluidOutputRetentionStateVersion, cachedFluidOutputRetentionTopologyVersion);
+        if (reusable
             && cachedFluidOutputRetentionItemId == fluidItemId
             && cachedFluidOutputRetentionSourceRate == sourceLitersPerSecond)
         {
@@ -8949,6 +8980,7 @@ public partial class InputOutputModule : InstallationObject,
             return cachedFluidOutputRetention;
         }
 
+        if (reusable) fluidOutputQueryKeyMissCount++;
         fluidOutputRetentionCacheMissCount++;
         using var searchSample = MapObjectTickProfiler.SampleNamed(
             "Simulation",
@@ -9292,6 +9324,8 @@ public partial class InputOutputModule : InstallationObject,
             return cachedFluidOutputConnections.Count > 0;
         }
 
+        if (cachedFluidOutputConnectionsTopologyVersion != fluidTopologyVersion) fluidOutputConnectionTopologyRebuildCount++;
+        else fluidOutputConnectionSeedRebuildCount++;
         ClearFluidOutputTickQueryCaches();
         cachedFluidOutputConnections.Clear();
         cachedFluidOutputConnectionIndices.Clear();
@@ -9807,9 +9841,9 @@ public partial class InputOutputModule : InstallationObject,
         out FluidOutputConnection targetConnection)
     {
         long simulationTick = MapObjectTickManager.CurrentSimulationTick;
-        if (cachedFluidOutputSelectionTick == simulationTick
-            && cachedFluidOutputSelectionStateVersion == GetFluidOutputStorageStateVersion()
-            && cachedFluidOutputSelectionTopologyVersion == fluidTopologyVersion
+        bool reusable = CanReuseFluidOutputQuery(cachedFluidOutputSelectionTick,
+            cachedFluidOutputSelectionStateVersion, cachedFluidOutputSelectionTopologyVersion);
+        if (reusable
             && cachedFluidOutputSelectionItemId == fluidItemId)
         {
             if (!cachedFluidOutputSelectionFound
@@ -9821,7 +9855,9 @@ public partial class InputOutputModule : InstallationObject,
                 targetConnection = cachedFluidOutputSelection;
                 return cachedFluidOutputSelectionFound;
             }
+            fluidOutputQueryRevalidationMissCount++;
         }
+        else if (reusable) fluidOutputQueryKeyMissCount++;
 
         fluidOutputSelectionCacheMissCount++;
         targetConnection = default;

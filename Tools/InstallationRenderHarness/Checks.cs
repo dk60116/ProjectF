@@ -108,6 +108,7 @@ static partial class Checks
         Check(host.MatrixCount==0 && !unsupported.Renderers[0].forceRenderingOff && host.NativeFallbackPartCount==1,
             "unsupported shader preserves the native renderer instead of dropping the model");
         InstallationBatchRenderer.Unregister(unsupported);WorldVisualUpdateManager.Visible.Clear();
+        CheckRenderCaches(host, render, material);
 
         using (var variants = new InstallationMaterialVariants())
         {

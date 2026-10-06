@@ -18,14 +18,14 @@ public class SteamTrain : RailHandcar,
 
     public readonly struct AutoDriveDebugRouteSegment
     {
-        public AutoDriveDebugRouteSegment(Railload rail, float startDistance, float endDistance)
+        public AutoDriveDebugRouteSegment(ProjectF.Railway.IRailTarget rail, float startDistance, float endDistance)
         {
             Rail = rail;
             StartDistance = startDistance;
             EndDistance = endDistance;
         }
 
-        public Railload Rail { get; }
+        public ProjectF.Railway.IRailTarget Rail { get; }
         public float StartDistance { get; }
         public float EndDistance { get; }
     }
@@ -135,7 +135,7 @@ public class SteamTrain : RailHandcar,
     private string autoDriveNextTargetStationName = string.Empty;
     private Vector2Int activeWaterPipeDirectionFromTrainToPipe;
     private bool waterPipeDockLockActive;
-    private Railload lockedWaterPipeDockRail;
+    private ProjectF.Railway.IRailTarget lockedWaterPipeDockRail;
     private long lockedWaterPipeDockDistanceUnits;
     private Vector2 lockedWaterPipeDockFacing;
     private Vector2Int lockedWaterPipeDockDirectionFromTrainToPipe;
@@ -165,7 +165,7 @@ public class SteamTrain : RailHandcar,
     private string autoDriveFixedRouteEndStationName = string.Empty;
     private string autoDriveResolvedTargetStationName = string.Empty;
     private string autoDriveResolvedNextStationName = string.Empty;
-    private Trainstation autoDriveResolvedTargetStation;
+    private ProjectF.Railway.ITrainStationTarget autoDriveResolvedTargetStation;
     private RailHandcar autoDriveCachedRouteReferenceTrain;
     private float autoDriveRouteRefreshTimer;
     private float autoDriveStationWaitTimer;
@@ -359,8 +359,8 @@ public class SteamTrain : RailHandcar,
         result?.Clear();
         if (string.IsNullOrWhiteSpace(startStationName)
             || string.IsNullOrWhiteSpace(destinationStationName)
-            || !AutoDriveRoutePlanner.TryFindStationByName(startStationName.Trim(), out Trainstation startStation)
-            || !AutoDriveRoutePlanner.TryFindStationByName(destinationStationName.Trim(), out Trainstation destinationStation))
+            || !AutoDriveRoutePlanner.TryFindStationByName(startStationName.Trim(), out ProjectF.Railway.ITrainStationTarget startStation)
+            || !AutoDriveRoutePlanner.TryFindStationByName(destinationStationName.Trim(), out ProjectF.Railway.ITrainStationTarget destinationStation))
         {
             return false;
         }
@@ -369,8 +369,8 @@ public class SteamTrain : RailHandcar,
     }
 
     public static bool TryBuildDebugRouteBetweenStations(
-        Trainstation startStation,
-        Trainstation destinationStation,
+        ProjectF.Railway.ITrainStationTarget startStation,
+        ProjectF.Railway.ITrainStationTarget destinationStation,
         List<AutoDriveDebugRouteSegment> result)
     {
         result?.Clear();
@@ -407,10 +407,10 @@ public class SteamTrain : RailHandcar,
         return result.Count > 0;
     }
 
-    public bool TryGetCurrentAutoDriveTargetStation(out Trainstation station)
+    public bool TryGetCurrentAutoDriveTargetStation(out ProjectF.Railway.ITrainStationTarget station)
     {
         station = autoDriveResolvedTargetStation;
-        if (station != null && station.gameObject.activeInHierarchy)
+        if (station != null && station.IsTargetActive)
         {
             return true;
         }
@@ -1649,7 +1649,7 @@ public class SteamTrain : RailHandcar,
 
     private bool TryFindWaterPipeRailDockSample(
         Vector2Int railCoordinate,
-        Railload currentRail,
+        ProjectF.Railway.IRailTarget currentRail,
         out RailSample dockSample)
     {
         dockSample = default;
@@ -1954,8 +1954,8 @@ public class SteamTrain : RailHandcar,
         ClearAutoDriveFixedRoute();
         if (string.IsNullOrWhiteSpace(autoDriveTargetAStationName)
             || string.IsNullOrWhiteSpace(autoDriveTargetBStationName)
-            || !AutoDriveRoutePlanner.TryFindStationByName(autoDriveTargetAStationName, out Trainstation startStation)
-            || !AutoDriveRoutePlanner.TryFindStationByName(autoDriveTargetBStationName, out Trainstation destinationStation)
+            || !AutoDriveRoutePlanner.TryFindStationByName(autoDriveTargetAStationName, out ProjectF.Railway.ITrainStationTarget startStation)
+            || !AutoDriveRoutePlanner.TryFindStationByName(autoDriveTargetBStationName, out ProjectF.Railway.ITrainStationTarget destinationStation)
             || !AutoDriveRoutePlanner.TryBuildRoute(
                 startStation,
                 destinationStation,
@@ -2040,7 +2040,7 @@ public class SteamTrain : RailHandcar,
             || segments == null
             || segments.Count <= 0
             || !routeReferenceTrain.TryGetCurrentRailPose(
-                out Railload currentRail,
+                out ProjectF.Railway.IRailTarget currentRail,
                 out float currentDistanceAlongPath,
                 out _,
                 out _)
@@ -2312,7 +2312,7 @@ public class SteamTrain : RailHandcar,
     {
         powerSource = null;
         if (!TryResolveAutoDriveTargets(
-                out Trainstation targetStation,
+                out ProjectF.Railway.ITrainStationTarget targetStation,
                 out string targetStationName,
                 out string nextTargetStationName))
         {
@@ -2416,7 +2416,7 @@ public class SteamTrain : RailHandcar,
     }
 
     private bool TryResolveAutoDriveTargets(
-        out Trainstation targetStation,
+        out ProjectF.Railway.ITrainStationTarget targetStation,
         out string targetStationName,
         out string nextTargetStationName)
     {
@@ -2492,8 +2492,8 @@ public class SteamTrain : RailHandcar,
             }
         }
 
-        bool foundTargetA = AutoDriveRoutePlanner.TryFindStationByName(targetA, out Trainstation stationA);
-        bool foundTargetB = AutoDriveRoutePlanner.TryFindStationByName(targetB, out Trainstation stationB);
+        bool foundTargetA = AutoDriveRoutePlanner.TryFindStationByName(targetA, out ProjectF.Railway.ITrainStationTarget stationA);
+        bool foundTargetB = AutoDriveRoutePlanner.TryFindStationByName(targetB, out ProjectF.Railway.ITrainStationTarget stationB);
         if (!foundTargetA && !foundTargetB)
         {
             return false;
@@ -2543,7 +2543,7 @@ public class SteamTrain : RailHandcar,
 
     private bool TryBuildRouteLengthToStation(
         string targetStationName,
-        Trainstation station,
+        ProjectF.Railway.ITrainStationTarget station,
         out float routeLength)
     {
         routeLength = float.PositiveInfinity;
@@ -2577,7 +2577,7 @@ public class SteamTrain : RailHandcar,
         return true;
     }
 
-    private bool IsWithinAutoDriveArrivalSnapDistance(Trainstation targetStation)
+    private bool IsWithinAutoDriveArrivalSnapDistance(ProjectF.Railway.ITrainStationTarget targetStation)
     {
         return TryGetAutoDriveTargetDockDistance(targetStation, out float remainingDistance)
                && remainingDistance <= ResolveAutoDriveArrivalSnapDistance();
@@ -2653,7 +2653,7 @@ public class SteamTrain : RailHandcar,
     {
         dockDistance = float.PositiveInfinity;
         if (string.IsNullOrWhiteSpace(stationName)
-            || !AutoDriveRoutePlanner.TryFindStationByName(stationName, out Trainstation station)
+            || !AutoDriveRoutePlanner.TryFindStationByName(stationName, out ProjectF.Railway.ITrainStationTarget station)
             || station == null
             || !station.TryGetRailCoordinate(out Vector2Int railCoordinate))
         {
@@ -2783,7 +2783,7 @@ public class SteamTrain : RailHandcar,
             nextTargetStationName);
     }
 
-    private bool TrySnapAutoDriveToTargetDock(Trainstation targetStation, float deltaTime)
+    private bool TrySnapAutoDriveToTargetDock(ProjectF.Railway.ITrainStationTarget targetStation, float deltaTime)
     {
         RailHandcar routeReferenceTrain = ResolveAutoDriveRouteReferenceTrain(targetStation);
         if (targetStation == null
@@ -2799,7 +2799,7 @@ public class SteamTrain : RailHandcar,
             true);
     }
 
-    private bool TryEnsureAutoDriveRoute(Trainstation targetStation, string targetStationName, float deltaTime)
+    private bool TryEnsureAutoDriveRoute(ProjectF.Railway.ITrainStationTarget targetStation, string targetStationName, float deltaTime)
     {
         RailHandcar routeReferenceTrain = ResolveAutoDriveRouteReferenceTrain(
             targetStation,
@@ -2861,7 +2861,7 @@ public class SteamTrain : RailHandcar,
     }
 
     private bool TryGetAutoDriveTargetDockDistance(
-        Trainstation targetStation,
+        ProjectF.Railway.ITrainStationTarget targetStation,
         out float remainingDistance)
     {
         if (!TryGetAutoDriveTargetDockDelta(targetStation, out float signedPathDelta))
@@ -2875,7 +2875,7 @@ public class SteamTrain : RailHandcar,
     }
 
     private bool TryGetAutoDriveTargetDockDelta(
-        Trainstation targetStation,
+        ProjectF.Railway.ITrainStationTarget targetStation,
         out float signedPathDelta)
     {
         signedPathDelta = 0f;
@@ -2889,7 +2889,7 @@ public class SteamTrain : RailHandcar,
     }
 
     private bool TryGetAutoDriveTargetDockPathDelta(
-        Trainstation targetStation,
+        ProjectF.Railway.ITrainStationTarget targetStation,
         out float signedPathDelta,
         out Vector2 dockTravelDirection)
     {
@@ -2903,7 +2903,7 @@ public class SteamTrain : RailHandcar,
                 railCoordinate,
                 out signedPathDelta)
             || !routeReferenceTrain.TryGetCurrentRailPose(
-                out Railload currentRail,
+                out ProjectF.Railway.IRailTarget currentRail,
                 out float currentDistanceAlongPath,
                 out _,
                 out Vector2 fallbackTangent)
@@ -3010,7 +3010,7 @@ public class SteamTrain : RailHandcar,
         if (autoDriveRouteSegments.Count <= 0
             || routeReferenceTrain == null
             || !routeReferenceTrain.TryGetCurrentRailPose(
-                out Railload currentRail,
+                out ProjectF.Railway.IRailTarget currentRail,
                 out float currentDistanceAlongPath,
                 out Vector2 currentPathPoint,
                 out _))
@@ -3046,7 +3046,7 @@ public class SteamTrain : RailHandcar,
             : currentDistanceAlongPath - minDistance;
         float branchSteerDistance = ResolveAutoDriveBranchSteerDistance(routeReferenceTrain);
 
-        Railload desiredRail = currentSegment.Rail;
+        ProjectF.Railway.IRailTarget desiredRail = currentSegment.Rail;
         float desiredDirectionSign = directionSign;
         float desiredDistanceAlongPath;
         if (remainingDistance <= branchSteerDistance
@@ -3343,7 +3343,7 @@ public class SteamTrain : RailHandcar,
     protected override bool TryGetPreferredBranchRail(
         RailSample currentSample,
         Vector2 inputDirection,
-        out Railload preferredRail)
+        out ProjectF.Railway.IRailTarget preferredRail)
     {
         preferredRail = null;
         if (!autoDriveEnabled
@@ -3381,8 +3381,8 @@ public class SteamTrain : RailHandcar,
     protected override bool TryGetPreferredConnectedRail(
         RailSample endpointSample,
         Vector2 exitDirection,
-        Railload excludedRail,
-        out Railload preferredRail)
+        ProjectF.Railway.IRailTarget excludedRail,
+        out ProjectF.Railway.IRailTarget preferredRail)
     {
         preferredRail = null;
         if (!autoDriveEnabled
@@ -3411,7 +3411,7 @@ public class SteamTrain : RailHandcar,
     protected override bool TryGetPreferredConnectedRailEntrySample(
         RailSample endpointSample,
         Vector2 exitDirection,
-        Railload excludedRail,
+        ProjectF.Railway.IRailTarget excludedRail,
         out RailSample connectedSample)
     {
         connectedSample = default;
@@ -3445,9 +3445,9 @@ public class SteamTrain : RailHandcar,
     }
 
     private bool TryResolveNextAutoDriveRouteSegment(
-        Railload currentRail,
+        ProjectF.Railway.IRailTarget currentRail,
         float currentDistanceAlongPath,
-        Railload excludedRail,
+        ProjectF.Railway.IRailTarget excludedRail,
         out AutoDriveRoutePlanner.RouteSegment currentSegment,
         out int currentSegmentIndex,
         out AutoDriveRoutePlanner.RouteSegment nextSegment)
@@ -3471,7 +3471,7 @@ public class SteamTrain : RailHandcar,
              nextSegmentIndex++)
         {
             AutoDriveRoutePlanner.RouteSegment candidateSegment = autoDriveRouteSegments[nextSegmentIndex];
-            Railload candidateRail = candidateSegment.Rail;
+            ProjectF.Railway.IRailTarget candidateRail = candidateSegment.Rail;
             if (candidateRail == null
                 || candidateRail == currentRail
                 || candidateRail == excludedRail)
@@ -3487,7 +3487,7 @@ public class SteamTrain : RailHandcar,
     }
 
     private bool TryFindBestAutoDriveRouteSegmentIndex(
-        Railload rail,
+        ProjectF.Railway.IRailTarget rail,
         float distanceAlongPath,
         out int segmentIndex)
     {
@@ -3551,7 +3551,7 @@ public class SteamTrain : RailHandcar,
         out RailSample connectedSample)
     {
         connectedSample = default;
-        Railload nextRail = nextSegment.Rail;
+        ProjectF.Railway.IRailTarget nextRail = nextSegment.Rail;
         if (nextRail == null)
         {
             return false;
@@ -3604,7 +3604,7 @@ public class SteamTrain : RailHandcar,
 
     private bool TryFindAutoDriveConnectedRailEntrySampleFromRoute(
         RailSample endpointSample,
-        Railload excludedRail,
+        ProjectF.Railway.IRailTarget excludedRail,
         out RailSample connectedSample)
     {
         connectedSample = default;
@@ -3641,7 +3641,7 @@ public class SteamTrain : RailHandcar,
 
     private bool TryFindAutoDriveConnectedRailEntrySampleInRange(
         RailSample endpointSample,
-        Railload excludedRail,
+        ProjectF.Railway.IRailTarget excludedRail,
         int minSegmentIndex,
         int maxSegmentIndex,
         out RailSample connectedSample,
@@ -3693,7 +3693,7 @@ public class SteamTrain : RailHandcar,
     protected override bool ShouldAllowRestrictedBranchRailCandidate(
         RailSample currentSample,
         Vector2 inputDirection,
-        Railload candidateRail)
+        ProjectF.Railway.IRailTarget candidateRail)
     {
         if (!autoDriveEnabled
             || candidateRail == null
@@ -3725,7 +3725,7 @@ public class SteamTrain : RailHandcar,
     protected override bool ShouldAllowRestrictedConnectedRailCandidate(
         RailSample endpointSample,
         Vector2 exitDirection,
-        Railload excludedRail,
+        ProjectF.Railway.IRailTarget excludedRail,
         RailSample candidateSample)
     {
         if (!autoDriveEnabled
@@ -3761,7 +3761,7 @@ public class SteamTrain : RailHandcar,
     protected override bool ShouldAllowLowProgressConnectedRailCandidate(
         RailSample endpointSample,
         Vector2 exitDirection,
-        Railload excludedRail,
+        ProjectF.Railway.IRailTarget excludedRail,
         RailSample candidateSample)
     {
         return autoDriveEnabled
@@ -3783,7 +3783,7 @@ public class SteamTrain : RailHandcar,
     protected override bool ShouldRestrictConnectedRailSelection(
         RailSample endpointSample,
         Vector2 exitDirection,
-        Railload excludedRail)
+        ProjectF.Railway.IRailTarget excludedRail)
     {
         return autoDriveEnabled && autoDriveRouteSegments.Count > 0;
     }
@@ -3804,7 +3804,7 @@ public class SteamTrain : RailHandcar,
     private bool IsConnectedRailCandidateWithinAutoDriveRouteWindow(
         int currentSegmentIndex,
         RailSample candidateSample,
-        Railload excludedRail)
+        ProjectF.Railway.IRailTarget excludedRail)
     {
         if (candidateSample.Rail == null
             || autoDriveRouteSegments.Count <= 0
@@ -3839,7 +3839,7 @@ public class SteamTrain : RailHandcar,
     private static bool IsAutoDriveRouteSegmentCandidate(
         AutoDriveRoutePlanner.RouteSegment segment,
         RailSample candidateSample,
-        Railload excludedRail)
+        ProjectF.Railway.IRailTarget excludedRail)
     {
         return candidateSample.Rail != null
                && segment.Rail == candidateSample.Rail
@@ -3886,7 +3886,7 @@ public class SteamTrain : RailHandcar,
     }
 
     private void ReconcileAutoDriveRouteCursor(
-        Railload currentRail,
+        ProjectF.Railway.IRailTarget currentRail,
         float currentDistanceAlongPath)
     {
         if (currentRail == null || autoDriveRouteSegments.Count <= 0)
@@ -3980,7 +3980,7 @@ public class SteamTrain : RailHandcar,
 
     private static bool IsAutoDriveRouteSegmentMatch(
         AutoDriveRoutePlanner.RouteSegment segment,
-        Railload rail,
+        ProjectF.Railway.IRailTarget rail,
         float distanceAlongPath)
     {
         if (segment.Rail != rail)
@@ -4008,7 +4008,7 @@ public class SteamTrain : RailHandcar,
 
     private static bool HasAutoDriveRouteSegmentBeenPassed(
         AutoDriveRoutePlanner.RouteSegment segment,
-        Railload rail,
+        ProjectF.Railway.IRailTarget rail,
         float distanceAlongPath)
     {
         if (segment.Rail != rail)
@@ -4034,7 +4034,7 @@ public class SteamTrain : RailHandcar,
             autoDriveResolvedTargetStationName);
     }
 
-    private RailHandcar ResolveAutoDriveRouteReferenceTrain(Trainstation targetStation)
+    private RailHandcar ResolveAutoDriveRouteReferenceTrain(ProjectF.Railway.ITrainStationTarget targetStation)
     {
         return ResolveAutoDriveRouteReferenceTrain(
             targetStation,
@@ -4042,7 +4042,7 @@ public class SteamTrain : RailHandcar,
     }
 
     private RailHandcar ResolveAutoDriveRouteReferenceTrain(
-        Trainstation targetStation,
+        ProjectF.Railway.ITrainStationTarget targetStation,
         string targetStationName)
     {
         CollectAutoDriveConnectedTrains();
@@ -4065,7 +4065,7 @@ public class SteamTrain : RailHandcar,
     }
 
     private bool TryResolveAutoDriveClosestEndpointTrain(
-        Trainstation targetStation,
+        ProjectF.Railway.ITrainStationTarget targetStation,
         string targetStationName,
         out RailHandcar routeReferenceTrain)
     {
@@ -4117,7 +4117,7 @@ public class SteamTrain : RailHandcar,
     }
 
     private bool TryResolveAutoDriveClosestRouteReferenceTrain(
-        Trainstation targetStation,
+        ProjectF.Railway.ITrainStationTarget targetStation,
         string targetStationName,
         bool endpointOnly,
         RailHandcar fallbackReferenceTrain,
@@ -4169,7 +4169,7 @@ public class SteamTrain : RailHandcar,
 
     private bool TryBuildRouteLengthForReferenceCandidate(
         RailHandcar candidate,
-        Trainstation targetStation,
+        ProjectF.Railway.ITrainStationTarget targetStation,
         string targetStationName,
         out float routeLength)
     {
@@ -4818,14 +4818,14 @@ public class SteamTrain : RailHandcar,
 
         public readonly struct RouteSegment
         {
-            public RouteSegment(Railload rail, float startDistance, float endDistance)
+            public RouteSegment(ProjectF.Railway.IRailTarget rail, float startDistance, float endDistance)
             {
                 Rail = rail;
                 StartDistance = startDistance;
                 EndDistance = endDistance;
             }
 
-            public Railload Rail { get; }
+            public ProjectF.Railway.IRailTarget Rail { get; }
             public float StartDistance { get; }
             public float EndDistance { get; }
             public float Length => Mathf.Abs(EndDistance - StartDistance);
@@ -4870,7 +4870,7 @@ public class SteamTrain : RailHandcar,
 
         private sealed class RailInfo
         {
-            public Railload Rail;
+            public ProjectF.Railway.IRailTarget Rail;
             public IReadOnlyList<Vector2Int> OccupiedCoordinates;
             public Vector2 StartPoint;
             public Vector2 EndPoint;
@@ -4961,13 +4961,17 @@ public class SteamTrain : RailHandcar,
         }
 
         private static readonly List<RailInfo> CachedRails = new List<RailInfo>(64);
-        private static readonly Dictionary<string, Trainstation> CachedStationsByName =
-            new Dictionary<string, Trainstation>(System.StringComparer.OrdinalIgnoreCase);
+        private static readonly Dictionary<string, ProjectF.Railway.ITrainStationTarget> CachedStationsByName =
+            new Dictionary<string, ProjectF.Railway.ITrainStationTarget>(System.StringComparer.OrdinalIgnoreCase);
         private static readonly List<RouteGraphNode> CachedBaseGraphNodes = new List<RouteGraphNode>(128);
         private static readonly Dictionary<int, List<RouteGraphNodeRef>> CachedBaseRailRefsByRail =
             new Dictionary<int, List<RouteGraphNodeRef>>();
-        private static bool routeCacheDirty = true;
-        private static bool routeCacheEventsRegistered;
+        private static ProjectF.Railway.RailWorld cachedRailWorld;
+        private static int cachedRailTopologyVersion = -1;
+        private static int cachedStationRoutingVersion = -1;
+        private static readonly Dictionary<ProjectF.Railway.IRailTarget, int> CachedRailIndices = new Dictionary<ProjectF.Railway.IRailTarget, int>();
+        private static readonly List<ProjectF.Railway.RailWorld.Record> ConnectionCandidates =
+            new List<ProjectF.Railway.RailWorld.Record>();
         private static int routeGraphVersion;
 
         public static int RouteGraphVersion
@@ -4979,7 +4983,7 @@ public class SteamTrain : RailHandcar,
             }
         }
 
-        public static bool TryFindStationByName(string stationName, out Trainstation station)
+        public static bool TryFindStationByName(string stationName, out ProjectF.Railway.ITrainStationTarget station)
         {
             station = null;
             if (string.IsNullOrWhiteSpace(stationName))
@@ -4991,7 +4995,7 @@ public class SteamTrain : RailHandcar,
             string normalizedStationName = stationName.Trim();
             if (!CachedStationsByName.TryGetValue(normalizedStationName, out station)
                 || station == null
-                || !station.gameObject.activeInHierarchy)
+                || !station.IsTargetActive)
             {
                 station = null;
                 return false;
@@ -5016,12 +5020,12 @@ public class SteamTrain : RailHandcar,
             return totalLength;
         }
 
-        public static bool TryBuildRoute(Train train, Trainstation destinationStation, List<RouteSegment> result)
+        public static bool TryBuildRoute(Train train, ProjectF.Railway.ITrainStationTarget destinationStation, List<RouteSegment> result)
         {
             result?.Clear();
             if (train == null
                 || destinationStation == null
-                || !train.TryGetCurrentRailPose(out Railload currentRail, out float currentDistanceAlongPath, out Vector2 currentPathPoint, out Vector2 currentRailTangent))
+                || !train.TryGetCurrentRailPose(out ProjectF.Railway.IRailTarget currentRail, out float currentDistanceAlongPath, out Vector2 currentPathPoint, out Vector2 currentRailTangent))
             {
                 return false;
             }
@@ -5049,7 +5053,7 @@ public class SteamTrain : RailHandcar,
                 result);
         }
 
-        public static bool TryBuildRoute(Trainstation startStation, Trainstation destinationStation, List<RouteSegment> result)
+        public static bool TryBuildRoute(ProjectF.Railway.ITrainStationTarget startStation, ProjectF.Railway.ITrainStationTarget destinationStation, List<RouteSegment> result)
         {
             result?.Clear();
             if (startStation == null || destinationStation == null)
@@ -5132,53 +5136,34 @@ public class SteamTrain : RailHandcar,
 
         private static void EnsureRouteCache()
         {
-            RegisterRouteCacheEvents();
-            if (!routeCacheDirty)
-            {
-                return;
-            }
-
-            RebuildRouteCache();
-            routeCacheDirty = false;
+            var world = TerrainGenerator.Active?.GetRailWorld();
+            int railVersion = world?.LiveTopologyVersion ?? -1;
+            int stationVersion = world?.StationRoutingVersion ?? -1;
+            if (ReferenceEquals(cachedRailWorld, world)
+                && cachedRailTopologyVersion == railVersion
+                && cachedStationRoutingVersion == stationVersion) return;
+            RebuildRouteCache(world);
+            cachedRailWorld = world;
+            cachedRailTopologyVersion = railVersion;
+            cachedStationRoutingVersion = stationVersion;
             routeGraphVersion++;
         }
 
-        private static void RegisterRouteCacheEvents()
-        {
-            if (routeCacheEventsRegistered)
-            {
-                return;
-            }
-
-            InstallationObject.PlacementRuntimeChanged += HandleRouteCachePlacementRuntimeChanged;
-            InstallationObject.PlacementRuntimeCleared += HandleRouteCachePlacementRuntimeChanged;
-            routeCacheEventsRegistered = true;
-        }
-
-        private static void HandleRouteCachePlacementRuntimeChanged(InstallationObject installationObject)
-        {
-            if (installationObject == null
-                || installationObject is Railload
-                || installationObject is Trainstation)
-            {
-                routeCacheDirty = true;
-            }
-        }
-
-        private static void RebuildRouteCache()
+        private static void RebuildRouteCache(ProjectF.Railway.RailWorld world)
         {
             CachedRails.Clear();
             CachedStationsByName.Clear();
+            CachedRailIndices.Clear();
+            CachedBaseGraphNodes.Clear();
+            CachedBaseRailRefsByRail.Clear();
+            if (world == null) return;
 
-            Trainstation[] liveStations = Object.FindObjectsOfType<Trainstation>(false);
-            System.Array.Sort(
-                liveStations,
-                (left, right) => CompareSimulationOrder(left, right));
-            for (int i = 0; i < liveStations.Length; i++)
+            var liveStations = world.LiveStations;
+            for (int i = 0; i < liveStations.Count; i++)
             {
-                Trainstation station = liveStations[i];
+                ProjectF.Railway.ITrainStationTarget station = liveStations[i];
                 if (station == null
-                    || !station.gameObject.activeInHierarchy
+                    || !station.IsTargetActive
                     || string.IsNullOrWhiteSpace(station.StationName))
                 {
                     continue;
@@ -5191,15 +5176,12 @@ public class SteamTrain : RailHandcar,
                 }
             }
 
-            Railload[] liveRails = Object.FindObjectsOfType<Railload>(false);
-            System.Array.Sort(
-                liveRails,
-                (left, right) => CompareSimulationOrder(left, right));
-            for (int i = 0; i < liveRails.Length; i++)
+            var liveRails = world.LiveRails;
+            for (int i = 0; i < liveRails.Count; i++)
             {
-                Railload rail = liveRails[i];
+                ProjectF.Railway.IRailTarget rail = liveRails[i].Target;
                 if (rail == null
-                    || !rail.isActiveAndEnabled
+                    || !rail.IsTargetActive
                     || !rail.TryGetPlacementRuntime(out _, out _))
                 {
                     continue;
@@ -5218,6 +5200,7 @@ public class SteamTrain : RailHandcar,
                     continue;
                 }
 
+                CachedRailIndices[rail] = CachedRails.Count;
                 CachedRails.Add(new RailInfo
                 {
                     Rail = rail,
@@ -5228,42 +5211,31 @@ public class SteamTrain : RailHandcar,
                 });
             }
 
-            RebuildCachedBaseRouteGraph();
+            RebuildCachedBaseRouteGraph(world);
         }
 
-        private static void RebuildCachedBaseRouteGraph()
+        private static void RebuildCachedBaseRouteGraph(ProjectF.Railway.RailWorld world)
         {
-            CachedBaseGraphNodes.Clear();
-            CachedBaseRailRefsByRail.Clear();
-
             float maxConnectionSqrDistance = RouteRailConnectionSnapDistance * RouteRailConnectionSnapDistance;
-            for (int leftRailIndex = 0; leftRailIndex < CachedRails.Count; leftRailIndex++)
+            var liveRails = world.LiveRails;
+            for (int i = 0; i < liveRails.Count; i++)
             {
-                for (int rightRailIndex = leftRailIndex + 1; rightRailIndex < CachedRails.Count; rightRailIndex++)
+                var record = liveRails[i];
+                if (!CachedRailIndices.TryGetValue(record.Target, out int leftRailIndex)) continue;
+                world.CollectCandidates(record, RouteRailConnectionSnapDistance, ConnectionCandidates, true);
+                for (int j = 0; j < ConnectionCandidates.Count; j++)
                 {
-                    if (!TryResolveRouteConnectionBetweenRails(
-                            CachedRails,
-                            leftRailIndex,
-                            rightRailIndex,
-                            maxConnectionSqrDistance,
-                            out RouteConnection connection))
-                    {
-                        continue;
-                    }
-
+                    var other = ConnectionCandidates[j];
+                    if (other.Target == null
+                        || !CachedRailIndices.TryGetValue(other.Target, out int rightRailIndex)
+                        || rightRailIndex <= leftRailIndex
+                        || !TryResolveRouteConnectionBetweenRails(CachedRails, leftRailIndex, rightRailIndex,
+                            maxConnectionSqrDistance, out RouteConnection connection)) continue;
                     int nodeIndex = GetOrCreateRouteGraphNode(CachedBaseGraphNodes, connection.Point);
-                    AddRouteGraphNodeRef(
-                        CachedBaseGraphNodes,
-                        CachedBaseRailRefsByRail,
-                        nodeIndex,
-                        connection.LeftRailIndex,
-                        connection.LeftDistanceAlongPath);
-                    AddRouteGraphNodeRef(
-                        CachedBaseGraphNodes,
-                        CachedBaseRailRefsByRail,
-                        nodeIndex,
-                        connection.RightRailIndex,
-                        connection.RightDistanceAlongPath);
+                    AddRouteGraphNodeRef(CachedBaseGraphNodes, CachedBaseRailRefsByRail,
+                        nodeIndex, connection.LeftRailIndex, connection.LeftDistanceAlongPath);
+                    AddRouteGraphNodeRef(CachedBaseGraphNodes, CachedBaseRailRefsByRail,
+                        nodeIndex, connection.RightRailIndex, connection.RightDistanceAlongPath);
                 }
             }
         }
@@ -5304,7 +5276,7 @@ public class SteamTrain : RailHandcar,
             }
         }
 
-        private static int FindRailIndex(IReadOnlyList<RailInfo> rails, Railload rail)
+        private static int FindRailIndex(IReadOnlyList<RailInfo> rails, ProjectF.Railway.IRailTarget rail)
         {
             if (rails == null || rail == null)
             {
@@ -5324,7 +5296,7 @@ public class SteamTrain : RailHandcar,
 
         private static bool TryFindStationRouteEndpoint(
             IReadOnlyList<RailInfo> rails,
-            Trainstation station,
+            ProjectF.Railway.ITrainStationTarget station,
             out RouteEndpoint endpoint)
         {
             endpoint = default;
@@ -5954,7 +5926,7 @@ public class SteamTrain : RailHandcar,
 
         private static void AppendRouteSegment(
             List<RouteSegment> segments,
-            Railload rail,
+            ProjectF.Railway.IRailTarget rail,
             float startDistance,
             float endDistance)
         {

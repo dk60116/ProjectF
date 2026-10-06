@@ -58,6 +58,14 @@ Ten thousand unrelated mutations cause no new query searches and zero warmed
 GC allocation. ECS storage ownership is doubled here; `ProductionEcsHarness`
 with `-FluidBoundary` executes the actual bridge and revision notification sites.
 
+`FluidOutputCache` diagnostics attribute exactly one reason to each failed capacity,
+retention or selection query: cold/reset, topology, new tick, related storage,
+request key or receiver revalidation. Attribution uses that precedence, not all
+simultaneously invalid conditions. Connection topology/seed rebuilds and query
+resets are counted separately because rebuilding clears the old query stamps.
+The harness verifies reason totals match query miss totals, and related storage
+changes and tick changes are classified correctly.
+
 ```powershell
 ./Tools/FluidStorageTransportHarness/Run.ps1
 ```

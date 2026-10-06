@@ -122,6 +122,9 @@ public class TerrainGenerator
 public class Resource { public struct ResourceSaveState { public int resourceCount; } }
 public partial class BlockStateStore
 {
+    // Railway notification is a boundary here; RailWorldHarness tests the real service.
+    public sealed class RailwayBoundary { public void UpsertSaved(InstallationSaveState state) { } }
+    public RailwayBoundary RailWorld { get; } = new();
     public class InstallationSaveState
     {
         public int itemId = 60, quarterTurns;

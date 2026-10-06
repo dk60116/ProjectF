@@ -4,17 +4,21 @@ using UnityEngine;
 
 public partial class TerrainGenerator
 {
-    private const float TrainStationRailCoordinateSnapDistance = 0.75f;
+    public ProjectF.Railway.RailWorld GetRailWorld()
+    {
+        EnsureResourceStateStore();
+        return resourceStateStore.RailWorld;
+    }
     private static readonly Regex TrainStationAutoNamePattern =
         new Regex(@"^Station\s+([A-Z]+)\s*-\s*(\d+)$", RegexOptions.Compiled | RegexOptions.IgnoreCase);
 
-    public string ResolveUniqueTrainStationName(Trainstation station, string requestedName)
+    public string ResolveUniqueTrainStationName(ProjectF.Railway.ITrainStationTarget station, string requestedName)
     {
         EnsureResourceStateStore();
         List<BlockStateStore.InstallationSaveState> states = resourceStateStore != null
             ? resourceStateStore.GetInstallationStatesSnapshot()
             : new List<BlockStateStore.InstallationSaveState>();
-        Trainstation[] liveStations = FindObjectsOfType<Trainstation>(false);
+        IReadOnlyList<ProjectF.Railway.ITrainStationTarget> liveStations = GetRailWorld().LiveStations;
         HashSet<string> usedNames = CollectUsedTrainStationNames(states, liveStations, station);
 
         string normalizedName = string.IsNullOrWhiteSpace(requestedName) ? string.Empty : requestedName.Trim();
@@ -81,7 +85,7 @@ public partial class TerrainGenerator
         List<BlockStateStore.InstallationSaveState> states = resourceStateStore != null
             ? resourceStateStore.GetInstallationStatesSnapshot()
             : new List<BlockStateStore.InstallationSaveState>();
-        TrainStationRailNetwork railNetwork = BuildTrainStationRailNetwork(states);
+        ProjectF.Railway.RailWorld railNetwork = GetRailWorld();
         int targetComponent = FindTrainRailComponent(train, railNetwork);
         if (targetComponent < 0)
         {
@@ -89,10 +93,10 @@ public partial class TerrainGenerator
         }
 
         HashSet<string> addedNames = new HashSet<string>(System.StringComparer.OrdinalIgnoreCase);
-        Trainstation[] liveStations = FindObjectsOfType<Trainstation>(false);
-        for (int i = 0; i < liveStations.Length; i++)
+        IReadOnlyList<ProjectF.Railway.ITrainStationTarget> liveStations = GetRailWorld().LiveStations;
+        for (int i = 0; i < liveStations.Count; i++)
         {
-            Trainstation station = liveStations[i];
+            ProjectF.Railway.ITrainStationTarget station = liveStations[i];
             if (station == null
                 || FindStationRailComponent(station, railNetwork) != targetComponent)
             {
@@ -143,7 +147,7 @@ public partial class TerrainGenerator
         results.Sort(System.StringComparer.OrdinalIgnoreCase);
     }
 
-    private void EnsureTrainStationIdentityAssigned(Trainstation station)
+    internal void EnsureTrainStationIdentityAssigned(ProjectF.Railway.ITrainStationTarget station)
     {
         if (station == null)
         {
@@ -161,13 +165,13 @@ public partial class TerrainGenerator
         }
     }
 
-    private Color32 ResolveUniqueTrainStationColor(Trainstation station)
+    private Color32 ResolveUniqueTrainStationColor(ProjectF.Railway.ITrainStationTarget station)
     {
         EnsureResourceStateStore();
         List<BlockStateStore.InstallationSaveState> states = resourceStateStore != null
             ? resourceStateStore.GetInstallationStatesSnapshot()
             : new List<BlockStateStore.InstallationSaveState>();
-        Trainstation[] liveStations = FindObjectsOfType<Trainstation>(false);
+        IReadOnlyList<ProjectF.Railway.ITrainStationTarget> liveStations = GetRailWorld().LiveStations;
         HashSet<Color32> usedColors = new HashSet<Color32>();
 
         for (int i = 0; i < states.Count; i++)
@@ -183,9 +187,9 @@ public partial class TerrainGenerator
             usedColors.Add(state.stationColor);
         }
 
-        for (int i = 0; i < liveStations.Length; i++)
+        for (int i = 0; i < liveStations.Count; i++)
         {
-            Trainstation liveStation = liveStations[i];
+            ProjectF.Railway.ITrainStationTarget liveStation = liveStations[i];
             if (liveStation == null
                 || liveStation == station
                 || !liveStation.HasAssignedStationColor)
@@ -263,10 +267,10 @@ public partial class TerrainGenerator
             return;
         }
 
-        Trainstation[] liveStations = FindObjectsOfType<Trainstation>(false);
-        for (int i = 0; i < liveStations.Length; i++)
+        IReadOnlyList<ProjectF.Railway.ITrainStationTarget> liveStations = GetRailWorld().LiveStations;
+        for (int i = 0; i < liveStations.Count; i++)
         {
-            Trainstation station = liveStations[i];
+            ProjectF.Railway.ITrainStationTarget station = liveStations[i];
             if (station == null)
             {
                 continue;
@@ -285,18 +289,18 @@ public partial class TerrainGenerator
             }
 
             station.ApplyStationName(resolvedName);
-            resourceStateStore.SaveInstallation(station);
-            resourceStateStore.RegisterLiveInstallation(station);
+            if (station is InstallationObject native) resourceStateStore.SaveInstallation(native);
+            if (station is InstallationObject view) resourceStateStore.RegisterLiveInstallation(view);
         }
     }
 
     private string GenerateAutomaticTrainStationName(
-        Trainstation station,
+        ProjectF.Railway.ITrainStationTarget station,
         List<BlockStateStore.InstallationSaveState> states,
-        IReadOnlyList<Trainstation> liveStations,
+        IReadOnlyList<ProjectF.Railway.ITrainStationTarget> liveStations,
         HashSet<string> usedNames)
     {
-        TrainStationRailNetwork railNetwork = BuildTrainStationRailNetwork(states);
+        ProjectF.Railway.RailWorld railNetwork = GetRailWorld();
         int targetComponent = FindStationRailComponent(station, railNetwork);
         string label = ResolveTrainStationRailSetLabel(targetComponent, states, liveStations, railNetwork, station);
         HashSet<int> usedNumbers = CollectUsedTrainStationNumbers(label, targetComponent, states, liveStations, railNetwork, station);
@@ -316,9 +320,9 @@ public partial class TerrainGenerator
     private string ResolveTrainStationRailSetLabel(
         int targetComponent,
         List<BlockStateStore.InstallationSaveState> states,
-        IReadOnlyList<Trainstation> liveStations,
-        TrainStationRailNetwork railNetwork,
-        Trainstation excludedStation)
+        IReadOnlyList<ProjectF.Railway.ITrainStationTarget> liveStations,
+        ProjectF.Railway.RailWorld railNetwork,
+        ProjectF.Railway.ITrainStationTarget excludedStation)
     {
         string componentLabel = null;
         HashSet<string> usedLabels = new HashSet<string>(System.StringComparer.OrdinalIgnoreCase);
@@ -344,7 +348,7 @@ public partial class TerrainGenerator
 
         for (int i = 0; i < liveStations.Count; i++)
         {
-            Trainstation liveStation = liveStations[i];
+            ProjectF.Railway.ITrainStationTarget liveStation = liveStations[i];
             if (liveStation == null
                 || liveStation == excludedStation
                 || !liveStation.HasAssignedStationName
@@ -383,9 +387,9 @@ public partial class TerrainGenerator
         string targetLabel,
         int targetComponent,
         List<BlockStateStore.InstallationSaveState> states,
-        IReadOnlyList<Trainstation> liveStations,
-        TrainStationRailNetwork railNetwork,
-        Trainstation excludedStation)
+        IReadOnlyList<ProjectF.Railway.ITrainStationTarget> liveStations,
+        ProjectF.Railway.RailWorld railNetwork,
+        ProjectF.Railway.ITrainStationTarget excludedStation)
     {
         HashSet<int> usedNumbers = new HashSet<int>();
         for (int i = 0; i < states.Count; i++)
@@ -405,7 +409,7 @@ public partial class TerrainGenerator
 
         for (int i = 0; i < liveStations.Count; i++)
         {
-            Trainstation liveStation = liveStations[i];
+            ProjectF.Railway.ITrainStationTarget liveStation = liveStations[i];
             if (liveStation == null
                 || liveStation == excludedStation
                 || !liveStation.HasAssignedStationName
@@ -424,8 +428,8 @@ public partial class TerrainGenerator
 
     private HashSet<string> CollectUsedTrainStationNames(
         List<BlockStateStore.InstallationSaveState> states,
-        IReadOnlyList<Trainstation> liveStations,
-        Trainstation excludedStation)
+        IReadOnlyList<ProjectF.Railway.ITrainStationTarget> liveStations,
+        ProjectF.Railway.ITrainStationTarget excludedStation)
     {
         HashSet<string> usedNames = new HashSet<string>(System.StringComparer.OrdinalIgnoreCase);
         for (int i = 0; i < states.Count; i++)
@@ -443,7 +447,7 @@ public partial class TerrainGenerator
 
         for (int i = 0; i < liveStations.Count; i++)
         {
-            Trainstation liveStation = liveStations[i];
+            ProjectF.Railway.ITrainStationTarget liveStation = liveStations[i];
             if (liveStation == null
                 || liveStation == excludedStation
                 || !liveStation.HasAssignedStationName)
@@ -457,148 +461,9 @@ public partial class TerrainGenerator
         return usedNames;
     }
 
-    private static TrainStationRailNetwork BuildTrainStationRailNetwork(
-        List<BlockStateStore.InstallationSaveState> states)
-    {
-        TrainStationRailNetwork railNetwork = new TrainStationRailNetwork();
-        Railload[] liveRails = FindObjectsOfType<Railload>(false);
-        for (int i = 0; i < liveRails.Length; i++)
-        {
-            if (!TryBuildRailSegment(liveRails[i], out TrainStationRailSegment segment))
-            {
-                continue;
-            }
-
-            railNetwork.Segments.Add(segment);
-        }
-
-        for (int i = 0; i < states.Count; i++)
-        {
-            BlockStateStore.InstallationSaveState state = states[i];
-            if (!IsRailloadState(state) || !TryBuildRailSegment(state, out TrainStationRailSegment segment))
-            {
-                continue;
-            }
-
-            railNetwork.Segments.Add(segment);
-        }
-
-        AssignRailComponents(railNetwork);
-        return railNetwork;
-    }
-
-    private static bool TryBuildRailSegment(
-        Railload rail,
-        out TrainStationRailSegment segment)
-    {
-        segment = null;
-        if (rail == null
-            || !rail.isActiveAndEnabled
-            || !rail.TryGetPlacementRuntime(out _, out _))
-        {
-            return false;
-        }
-
-        List<Vector2> points = rail.CopyVisualPathPoints();
-        if (points == null || points.Count < 2)
-        {
-            return false;
-        }
-
-        segment = new TrainStationRailSegment
-        {
-            Points = points,
-            OccupiedCoordinates = rail.RuntimeOccupiedCoordinates,
-            ComponentIndex = -1
-        };
-        return RailConnectionUtility.TryResolveConnectionEndpoints(
-            segment.Points,
-            segment.OccupiedCoordinates,
-            out segment.StartPoint,
-            out segment.EndPoint);
-    }
-
-    private static bool TryBuildRailSegment(
-        BlockStateStore.InstallationSaveState state,
-        out TrainStationRailSegment segment)
-    {
-        segment = null;
-        if (state?.railVisualPathPoints == null || state.railVisualPathPoints.Count < 2)
-        {
-            return false;
-        }
-
-        segment = new TrainStationRailSegment
-        {
-            Points = new List<Vector2>(state.railVisualPathPoints),
-            OccupiedCoordinates = state.occupiedCoordinates,
-            ComponentIndex = -1
-        };
-        return RailConnectionUtility.TryResolveConnectionEndpoints(
-            segment.Points,
-            segment.OccupiedCoordinates,
-            out segment.StartPoint,
-            out segment.EndPoint);
-    }
-
-    private static void AssignRailComponents(TrainStationRailNetwork railNetwork)
-    {
-        float maxSqrDistance = RailLineDebugRenderer.RailGroupConnectionDistance * RailLineDebugRenderer.RailGroupConnectionDistance;
-        Queue<int> queue = new Queue<int>();
-        int componentIndex = 0;
-
-        for (int startIndex = 0; startIndex < railNetwork.Segments.Count; startIndex++)
-        {
-            if (railNetwork.Segments[startIndex].ComponentIndex >= 0)
-            {
-                continue;
-            }
-
-            railNetwork.Segments[startIndex].ComponentIndex = componentIndex;
-            queue.Enqueue(startIndex);
-            while (queue.Count > 0)
-            {
-                int currentIndex = queue.Dequeue();
-                TrainStationRailSegment current = railNetwork.Segments[currentIndex];
-                for (int otherIndex = 0; otherIndex < railNetwork.Segments.Count; otherIndex++)
-                {
-                    TrainStationRailSegment other = railNetwork.Segments[otherIndex];
-                    if (other.ComponentIndex >= 0 || !AreRailSegmentsConnected(current, other, maxSqrDistance))
-                    {
-                        continue;
-                    }
-
-                    other.ComponentIndex = componentIndex;
-                    queue.Enqueue(otherIndex);
-                }
-            }
-
-            componentIndex++;
-        }
-    }
-
-    private static bool AreRailSegmentsConnected(
-        TrainStationRailSegment left,
-        TrainStationRailSegment right,
-        float maxSqrDistance)
-    {
-        return left != null
-               && right != null
-               && RailConnectionUtility.AreConnected(
-                   left.OccupiedCoordinates,
-                   left.Points,
-                   left.StartPoint,
-                   left.EndPoint,
-                   right.OccupiedCoordinates,
-                   right.Points,
-                   right.StartPoint,
-                   right.EndPoint,
-                   maxSqrDistance);
-    }
-
     private static int FindStationRailComponent(
-        Trainstation station,
-        TrainStationRailNetwork railNetwork)
+        ProjectF.Railway.ITrainStationTarget station,
+        ProjectF.Railway.RailWorld railNetwork)
     {
         if (station == null || !TryResolveStationRailCoordinate(station, out Vector2Int railCoordinate))
         {
@@ -610,7 +475,7 @@ public partial class TerrainGenerator
 
     private static int FindStationRailComponent(
         BlockStateStore.InstallationSaveState stationState,
-        TrainStationRailNetwork railNetwork)
+        ProjectF.Railway.RailWorld railNetwork)
     {
         if (!TryResolveStationRailCoordinate(stationState, railNetwork, out Vector2Int railCoordinate))
         {
@@ -622,10 +487,10 @@ public partial class TerrainGenerator
 
     private static int FindTrainRailComponent(
         Train train,
-        TrainStationRailNetwork railNetwork)
+        ProjectF.Railway.RailWorld railNetwork)
     {
         if (train == null
-            || !train.TryGetCurrentRailPose(out Railload rail, out _, out Vector2 pathPoint, out _))
+            || !train.TryGetCurrentRailPose(out ProjectF.Railway.IRailTarget rail, out _, out Vector2 pathPoint, out _))
         {
             return -1;
         }
@@ -646,45 +511,19 @@ public partial class TerrainGenerator
     }
 
     private static int FindRailComponentAtCoordinate(
-        Vector2Int railCoordinate,
-        TrainStationRailNetwork railNetwork)
+        Vector2Int railCoordinate, ProjectF.Railway.RailWorld railNetwork)
     {
-        for (int i = 0; i < railNetwork.Segments.Count; i++)
-        {
-            TrainStationRailSegment segment = railNetwork.Segments[i];
-            if (SegmentContainsCoordinate(segment, railCoordinate))
-            {
-                return segment.ComponentIndex;
-            }
-        }
-
-        return FindRailComponentAtPoint(new Vector2(railCoordinate.x, railCoordinate.y), railNetwork);
+        return railNetwork.FindComponentAtCoordinate(railCoordinate);
     }
 
     private static int FindRailComponentAtPoint(
-        Vector2 railPoint,
-        TrainStationRailNetwork railNetwork)
+        Vector2 railPoint, ProjectF.Railway.RailWorld railNetwork)
     {
-        float bestSqrDistance = TrainStationRailCoordinateSnapDistance * TrainStationRailCoordinateSnapDistance;
-        int bestComponent = -1;
-        for (int i = 0; i < railNetwork.Segments.Count; i++)
-        {
-            TrainStationRailSegment segment = railNetwork.Segments[i];
-            float sqrDistance = GetPolylineSqrDistance(railPoint, segment.Points);
-            if (sqrDistance >= bestSqrDistance)
-            {
-                continue;
-            }
-
-            bestSqrDistance = sqrDistance;
-            bestComponent = segment.ComponentIndex;
-        }
-
-        return bestComponent;
+        return railNetwork.FindComponentAtPoint(railPoint);
     }
 
     private static bool TryResolveStationRailCoordinate(
-        Trainstation station,
+        ProjectF.Railway.ITrainStationTarget station,
         out Vector2Int railCoordinate)
     {
         railCoordinate = default;
@@ -693,7 +532,7 @@ public partial class TerrainGenerator
 
     private static bool TryResolveStationRailCoordinate(
         BlockStateStore.InstallationSaveState state,
-        TrainStationRailNetwork railNetwork,
+        ProjectF.Railway.RailWorld railNetwork,
         out Vector2Int railCoordinate)
     {
         railCoordinate = default;
@@ -737,80 +576,14 @@ public partial class TerrainGenerator
         return true;
     }
 
-    private static bool RailCoordinateExists(Vector2Int coordinate, TrainStationRailNetwork railNetwork)
+    private static bool RailCoordinateExists(Vector2Int coordinate, ProjectF.Railway.RailWorld railNetwork)
     {
-        for (int i = 0; i < railNetwork.Segments.Count; i++)
-        {
-            if (SegmentContainsCoordinate(railNetwork.Segments[i], coordinate))
-            {
-                return true;
-            }
-        }
-
-        return false;
-    }
-
-    private static bool SegmentContainsCoordinate(
-        TrainStationRailSegment segment,
-        Vector2Int coordinate)
-    {
-        if (segment?.OccupiedCoordinates == null)
-        {
-            return false;
-        }
-
-        for (int i = 0; i < segment.OccupiedCoordinates.Count; i++)
-        {
-            if (segment.OccupiedCoordinates[i] == coordinate)
-            {
-                return true;
-            }
-        }
-
-        return false;
-    }
-
-    private static float GetPolylineSqrDistance(Vector2 point, List<Vector2> points)
-    {
-        if (points == null || points.Count <= 0)
-        {
-            return float.MaxValue;
-        }
-
-        if (points.Count == 1)
-        {
-            return (point - points[0]).sqrMagnitude;
-        }
-
-        float bestSqrDistance = float.MaxValue;
-        for (int i = 1; i < points.Count; i++)
-        {
-            Vector2 start = points[i - 1];
-            Vector2 end = points[i];
-            Vector2 segment = end - start;
-            float segmentSqrMagnitude = segment.sqrMagnitude;
-            float t = segmentSqrMagnitude > 0.0001f
-                ? Mathf.Clamp01(Vector2.Dot(point - start, segment) / segmentSqrMagnitude)
-                : 0f;
-            Vector2 closest = start + segment * t;
-            float sqrDistance = (point - closest).sqrMagnitude;
-            if (sqrDistance < bestSqrDistance)
-            {
-                bestSqrDistance = sqrDistance;
-            }
-        }
-
-        return bestSqrDistance;
+        return railNetwork.CoordinateExists(coordinate);
     }
 
     private static bool IsTrainStationState(BlockStateStore.InstallationSaveState state)
     {
         return IsInstallationStateType<Trainstation>(state);
-    }
-
-    private static bool IsRailloadState(BlockStateStore.InstallationSaveState state)
-    {
-        return IsInstallationStateType<Railload>(state);
     }
 
     private static bool IsInstallationStateType<T>(BlockStateStore.InstallationSaveState state)
@@ -845,7 +618,7 @@ public partial class TerrainGenerator
 
     private static bool IsSameTrainStationState(
         BlockStateStore.InstallationSaveState state,
-        Trainstation station)
+        ProjectF.Railway.ITrainStationTarget station)
     {
         if (state == null || station == null)
         {
@@ -906,17 +679,4 @@ public partial class TerrainGenerator
         return label;
     }
 
-    private sealed class TrainStationRailNetwork
-    {
-        public readonly List<TrainStationRailSegment> Segments = new List<TrainStationRailSegment>();
-    }
-
-    private sealed class TrainStationRailSegment
-    {
-        public List<Vector2> Points;
-        public IReadOnlyList<Vector2Int> OccupiedCoordinates;
-        public Vector2 StartPoint;
-        public Vector2 EndPoint;
-        public int ComponentIndex;
-    }
 }

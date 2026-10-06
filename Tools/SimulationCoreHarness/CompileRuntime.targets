@@ -3,6 +3,7 @@
     <Compile Include="$(MSBuildProjectDirectory)\Assets\Scripts\Diagnostics\FramePhaseProfiler.cs" Exclude="@(Compile)" />
     <Compile Include="$(MSBuildProjectDirectory)\Assets\Scripts\Simulation\**\*.cs" Exclude="$(MSBuildProjectDirectory)\Assets\Scripts\Simulation\Core\**\*.cs;@(Compile)" />
     <Compile Include="$(MSBuildProjectDirectory)\Assets\Scripts\Map\BlockTemplate.cs" Exclude="@(Compile)" />
+    <Compile Include="$(MSBuildProjectDirectory)\Assets\Scripts\Object\MapObj\InstallationObject\RailLineDebugRenderer.Directions.cs" Exclude="@(Compile)" />
     <Compile Remove="$(MSBuildProjectDirectory)\Assets\Scripts\Map\BlockPool.cs" />
     <!-- Always use the freshly built harness core, not a stale Unity Temp assembly. -->
     <ProjectReference Remove="ProjectF.Simulation.Core.csproj" />

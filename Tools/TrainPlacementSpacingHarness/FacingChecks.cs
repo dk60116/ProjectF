@@ -89,6 +89,19 @@ static class FacingChecks
             aRail, 3f, overlapRail, 5.02f, 1f, 0.01f), Vector2.right) > 0.999f,
             "A backward-pointing endpoint correction must not rotate the car 180 degrees");
 
+        var solo = new RailHandcar();
+        solo.TryApplyRailPose(aRail, 2.99f, new Vector2(2.99f, 0), Vector2.right);
+        car.SetTestRoute((aRail, 2.99f, 0f), (aRail, 3f, .01f), (overlapRail, 5.02f, .03f), (overlapRail, 5.01f, .04f));
+        Check(Vector2.Dot(car.TestBridgeExitFacing(solo, aRail, 3f, overlapRail, 5.02f,
+                .01f, .01f, 5.01f, .04f), Vector2.right) > .999f,
+            "A single locomotive must preserve its physical front when exiting a backwards endpoint correction");
+        Check(Vector2.Dot(car.TestAdvanceBridge(aRail, 3f, overlapRail, 5.02f, .01f, Vector2.right), Vector2.right) > .999f,
+            "Exiting an overlapping bridge must continue forward rather than use the backwards gap vector");
+        car.SetTestRoute((aRail, 2f, 0f), (aRail, 3f, 1f));
+        Check(Vector2.Dot(car.TestBridgeFacing(solo, null, false,
+                aRail, 3f, overlapRail, 5.02f, 1f, .01f), Vector2.right) > .999f,
+            "A single leader without destination tape samples must not reverse while entering an overlapping bridge");
+
         // A sparse junction tape can report the opposite path sign for one
         // frame. The endpoint locomotive's connected target is still at its
         // physical tail and must keep the locomotive facing away from it.
@@ -115,7 +128,37 @@ static class FacingChecks
         car.DisconnectFrom(neighbor);
         Check(!car.TryGetConnectionFacingSign(neighbor, true, out _) && !neighbor.TryGetConnectionFacingSign(car, true, out _),
             "Disconnect must remove both directions of the coupling metadata");
+        CheckBridgeTransitions();
         Console.WriteLine($"Train facing harness passed: {checks} checks");
+    }
+
+    static void CheckBridgeTransitions()
+    {
+        foreach (Vector2 axis in new[] { Vector2.right, Vector2.up, Vector2.left, Vector2.down })
+        for (int mask = 0; mask < 4; mask++)
+        foreach (Vector2 offset in new[] { axis * -.02f, axis * .02f, new Vector2(-axis.y, axis.x) * .04f })
+        {
+            bool reverseSource = (mask & 1) != 0, reverseTarget = (mask & 2) != 0;
+            Vector2 entryPoint = axis * 3 + offset;
+            var source = reverseSource ? new Railload(axis * 3, Vector2.zero) : new Railload(Vector2.zero, axis * 3);
+            var target = reverseTarget ? new Railload(entryPoint + axis * 5, entryPoint) : new Railload(entryPoint, entryPoint + axis * 5);
+            float sourceEndpoint = reverseSource ? 0 : 3, targetEndpoint = reverseTarget ? 5 : 0;
+            var driver = new RailHandcar();
+            float progress = offset.magnitude * .5f;
+            Check(Vector2.Dot(driver.TestAdvanceBridge(source, sourceEndpoint, target, targetEndpoint, progress, axis), axis) > .999f,
+                "Bridge exit must continue along the rails for every heading, authoring order and gap direction");
+            Check(Vector2.Dot(driver.TestAdvanceBridge(source, sourceEndpoint, target, targetEndpoint, progress, -axis, true), -axis) > .999f,
+                "Reversing stored bridge state must continue backwards without following the gap vector");
+            driver.SetTestRoute((source, reverseSource ? 1 : 2, 0), (source, sourceEndpoint, 1));
+            foreach (float facingSign in new[] { 1f, -1f })
+            {
+                var solo = new RailHandcar();
+                solo.TryApplyRailPose(source, reverseSource ? 1 : 2, axis * 2, axis * facingSign);
+                Check(Vector2.Dot(driver.TestBridgeFacing(solo, null, false, source, sourceEndpoint,
+                        target, targetEndpoint, 1, progress), axis * facingSign) > .999f,
+                    "A single leader must keep its physical front while first crossing a positional correction");
+            }
+        }
     }
 }
 
@@ -124,6 +167,44 @@ public partial class RailHandcar
     const float RailConnectionDistanceEpsilon = 0.000001f;
     readonly List<ConsistPathSample> consistPathTape = new List<ConsistPathSample>();
     readonly List<ConnectedTrainRailMove> connectedTrainRailMoveScratch = new List<ConnectedTrainRailMove>();
+
+    // Network search is not used when the bridge retains its resolved target.
+    bool TryFindConnectedRailSample(RailSample endpoint, Vector2 direction, Railload excluded, out RailSample sample)
+    { sample = default; throw new Exception("Stored bridge must not search the network again"); }
+    float ResolveRailTransitionMovementDistance(RailSample source, RailSample target)
+        => Vector2.Distance(source.Point, target.Point);
+    Vector2 ResolveReferenceFacing() => Facing;
+    void AddConsistPathSample(List<ConsistPathSample> samples, float distance, RailSample sample)
+    { if (samples != null) samples.Add(new ConsistPathSample { Distance = distance, Sample = sample }); }
+
+    public Vector2 TestAdvanceBridge(Railload sourceRail, float sourceDistance, Railload targetRail,
+        float targetDistance, float progress, Vector2 travelDirection, bool reverseBridge = false)
+    {
+        TryCreateRailSampleAtDistance(sourceRail, sourceDistance, out var source);
+        TryCreateRailSampleAtDistance(targetRail, targetDistance, out var target);
+        float length = Vector2.Distance(source.Point, target.Point);
+        TryCreateRailConnectionBridgeSample(source, target, length, progress, out var bridge);
+        if (reverseBridge) bridge = ReverseRailConnectionBridgeSample(bridge);
+        float remaining = length, traveled = 0;
+        if (!TryAdvanceExistingRailConnectionBridge(bridge, travelDirection, ref remaining, ref traveled,
+                null, 0, false, out var result, out var direction, out bool reached)
+            || !reached || result.Rail != (reverseBridge ? sourceRail : targetRail))
+            throw new Exception("Bridge advance must reach the retained target rail");
+        return direction;
+    }
+
+    public Vector2 TestBridgeExitFacing(Train car, Railload sourceRail, float sourceDistance,
+        Railload targetRail, float targetDistance, float routeStart, float progress, float exitDistance, float exitRouteDistance)
+    {
+        TryCreateRailSampleAtDistance(sourceRail, sourceDistance, out var source);
+        TryCreateRailSampleAtDistance(targetRail, targetDistance, out var target);
+        TryCreateRailConnectionBridgeSample(source, target, Vector2.Distance(source.Point, target.Point), progress, out var bridge);
+        TryCreateRailSampleAtDistance(targetRail, exitDistance, out var exit);
+        connectedTrainRailMoveScratch.Clear();
+        connectedTrainRailMoveScratch.Add(new ConnectedTrainRailMove
+            { Train = car, StartSample = bridge, TargetSample = exit, StartFacingTangent = car.Facing });
+        return ResolveConnectedTrainFacing(0, routeStart + progress, exitRouteDistance, car.Facing);
+    }
 
     public void SetTestRoute(params (Railload rail, float railDistance, float routeDistance)[] points)
     {

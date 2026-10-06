@@ -19,11 +19,11 @@ public class Train : Vehicle
     [SerializeField, Range(0f, 1f)]
     private float trainConnectionMinForwardDot = 0.5f;
     private Rigidbody cachedTrainRigidbody;
-    private Railload currentRail;
+    private ProjectF.Railway.IRailTarget currentRail;
     private long currentRailDistanceUnits;
     private Vector2 currentRailPoint;
     private Vector2 currentRailTangent;
-    private Railload currentRailConnectionTargetRail;
+    private ProjectF.Railway.IRailTarget currentRailConnectionTargetRail;
     private long currentRailConnectionTargetDistanceUnits;
     private Vector2 currentRailConnectionTargetPoint;
     private Vector2 currentRailConnectionTargetTangent;
@@ -341,9 +341,9 @@ public class Train : Vehicle
     }
 
     internal static Vector2 ResolveRailConnectionForward(
-        Railload sourceRail,
+        ProjectF.Railway.IRailTarget sourceRail,
         float sourceDistance,
-        Railload targetRail,
+        ProjectF.Railway.IRailTarget targetRail,
         float targetDistance,
         float progress,
         Vector2 referenceForward)
@@ -361,7 +361,7 @@ public class Train : Vehicle
     }
 
     private static Vector2 ResolveRailConnectionEndpointForward(
-        Railload rail, float distance, bool exiting, Vector2 referenceForward)
+        ProjectF.Railway.IRailTarget rail, float distance, bool exiting, Vector2 referenceForward)
     {
         if (rail == null
             || !rail.TrySampleRenderedPath(distance, out _, out Vector2 tangent)
@@ -560,7 +560,7 @@ public class Train : Vehicle
     }
 
     public virtual void ApplyPlacedRailSample(
-        Railload rail,
+        ProjectF.Railway.IRailTarget rail,
         float distanceAlongPath,
         Vector2 railPoint,
         Vector2 facingTangent)
@@ -569,7 +569,7 @@ public class Train : Vehicle
     }
 
     public virtual void ApplyPlacedRailSampleUnits(
-        Railload rail,
+        ProjectF.Railway.IRailTarget rail,
         long distanceAlongPathUnits,
         Vector2 railPoint,
         Vector2 facingTangent)
@@ -585,12 +585,12 @@ public class Train : Vehicle
     }
 
     public virtual bool TryApplyRailPose(
-        Railload rail,
+        ProjectF.Railway.IRailTarget rail,
         float distanceAlongPath,
         Vector2 railPoint,
         Vector2 facingTangent)
     {
-        if (rail == null || facingTangent.sqrMagnitude <= 0.0001f)
+        if (!rail.IsAlive() || facingTangent.sqrMagnitude <= 0.0001f)
         {
             return false;
         }
@@ -609,13 +609,13 @@ public class Train : Vehicle
     }
 
     protected bool ApplyRailPoseToRail(
-        Railload rail,
+        ProjectF.Railway.IRailTarget rail,
         float distanceAlongPath,
         Vector2 railPoint,
         Vector2 facingTangent,
         Quaternion rotation)
     {
-        if (rail == null || facingTangent.sqrMagnitude <= 0.0001f)
+        if (!rail.IsAlive() || facingTangent.sqrMagnitude <= 0.0001f)
         {
             return false;
         }
@@ -646,7 +646,7 @@ public class Train : Vehicle
     public bool TryGetCurrentRailSample(
         Vector2 currentPoint,
         float maxSqrDistance,
-        out Railload rail,
+        out ProjectF.Railway.IRailTarget rail,
         out float distanceAlongPath,
         out Vector2 pathPoint,
         out Vector2 tangent,
@@ -667,7 +667,7 @@ public class Train : Vehicle
     }
 
     public bool TryGetCurrentRailPose(
-        out Railload rail,
+        out ProjectF.Railway.IRailTarget rail,
         out float distanceAlongPath,
         out Vector2 pathPoint,
         out Vector2 tangent)
@@ -676,7 +676,7 @@ public class Train : Vehicle
         distanceAlongPath = 0f;
         pathPoint = Vector2.zero;
         tangent = Vector2.zero;
-        if (currentRail == null
+        if (!currentRail.IsAlive()
             || !currentRail.TrySampleRenderedPath(
                 DeterministicSimulationUnits.ToFloat(currentRailDistanceUnits),
                 out Vector2 sampledPoint,
@@ -704,7 +704,7 @@ public class Train : Vehicle
     }
 
     public bool TryGetCurrentRailPoseUnits(
-        out Railload rail,
+        out ProjectF.Railway.IRailTarget rail,
         out long distanceAlongPathUnits,
         out Vector2 pathPoint,
         out Vector2 tangent)
@@ -714,7 +714,7 @@ public class Train : Vehicle
         return found;
     }
 
-    protected void SetCurrentRailSample(Railload rail, float distanceAlongPath, Vector2 point, Vector2 tangent)
+    protected void SetCurrentRailSample(ProjectF.Railway.IRailTarget rail, float distanceAlongPath, Vector2 point, Vector2 tangent)
     {
         currentRail = rail;
         currentRailDistanceUnits = DeterministicSimulationUnits.FromFloat(distanceAlongPath);
@@ -724,7 +724,7 @@ public class Train : Vehicle
     }
 
     internal void ConfigureCurrentRailConnectionTransition(
-        Railload targetRail,
+        ProjectF.Railway.IRailTarget targetRail,
         float targetDistanceAlongPath,
         Vector2 targetPoint,
         Vector2 targetTangent,
@@ -750,7 +750,7 @@ public class Train : Vehicle
     }
 
     internal bool TryGetCurrentRailConnectionTransition(
-        out Railload targetRail,
+        out ProjectF.Railway.IRailTarget targetRail,
         out float targetDistanceAlongPath,
         out Vector2 targetPoint,
         out Vector2 targetTangent,

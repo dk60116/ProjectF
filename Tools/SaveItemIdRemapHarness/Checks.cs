@@ -3,6 +3,7 @@ using System.Collections.Generic;
 
 // Engine-free data doubles. The complete production remapper is compiled by Run.ps1.
 public class NamedObject { public string name; }
+public class Railload : NamedObject { }
 public class ItemDefinition { public int id; public string itemName, name; public NamedObject mapObject; }
 public static class ItemDefinitionLookup
 {
@@ -14,6 +15,12 @@ public static class ItemDefinitionLookup
     }
     public static ItemDefinition ResolveInstallationByStableName(IReadOnlyList<ItemDefinition> definitions, string name)
         => ResolveByStableName(definitions, name);
+    public static ItemDefinition ResolveInstallationById(IReadOnlyList<ItemDefinition> definitions, int id)
+    {
+        foreach (var definition in definitions)
+            if (definition.id == id && id >= 0) return definition;
+        return null;
+    }
 }
 public class SaveItemCatalogEntry { public int itemId; public string itemName; }
 public class SaveGameData
@@ -55,7 +62,10 @@ public class BlockStateStore
         public InputOutputModule.PersistentState inputOutputState;
         public bool itemFilterMaskInitialized;
         public List<ulong> itemFilterMaskWords = new();
+        public List<int> railVisualPathPoints = new();
+        public List<MountedInstallationSaveState> mountedInstallations = new();
     }
+    public class MountedInstallationSaveState { public InstallationSaveState installation; }
 }
 public class RobotArm { public class TransferState { public int heldItemId; } }
 public class InputOutputModule
@@ -166,6 +176,58 @@ static class Checks
         definitions[0].id = 120;
         SaveGameItemIdRemapper.RemapToCurrentDefinitions(renumbered, definitions);
         Verify(renumbered, 120);
+        VerifyInstallationIdentity();
         Console.WriteLine($"PASS: {checks} production save ID remapping checks.");
+    }
+
+    static void VerifyInstallationIdentity()
+    {
+        var rail = new ItemDefinition { id = 119, itemName = "Railload", mapObject = new Railload() };
+        var definitions = new List<ItemDefinition> { rail, new() { id = 27, itemName = "Box" } };
+        foreach (string name in new[] { null, "", " ", "Retired name" })
+        {
+            var data = new SaveGameData();
+            var state = new BlockStateStore.InstallationSaveState { itemId = 119, itemName = name };
+            data.map.installations.Add(new() { state = state });
+            SaveGameItemIdRemapper.RemapToCurrentDefinitions(data, definitions);
+            Require(state.itemId == 119, "Failed name lookup must preserve the original installation ID");
+        }
+
+        var catalog = new SaveGameData();
+        catalog.itemCatalog.Add(new() { itemId = 47, itemName = "Railload" });
+        var oldRail = new BlockStateStore.InstallationSaveState { itemId = 47, itemName = "" };
+        oldRail.mountedInstallations.Add(new() { installation = new() { itemId = 27, itemName = "" } });
+        catalog.map.installations.Add(new() { state = oldRail });
+        SaveGameItemIdRemapper.RemapToCurrentDefinitions(catalog, definitions);
+        Require(oldRail.itemId == 119, "Unnamed installation must use its saved catalog ID");
+        Require(oldRail.itemName == "Railload", "Resolved installation must acquire a stable name");
+        Require(oldRail.mountedInstallations[0].installation.itemId == 27, "Mounted installation ID must survive empty names");
+
+        // Models the real save: old ECS rails were persisted as -1 with their path intact.
+        var damaged = new SaveGameData();
+        var recoverable = new BlockStateStore.InstallationSaveState { itemId = -1, itemName = "", railVisualPathPoints = new() { 0, 1 } };
+        var unrelated = new BlockStateStore.InstallationSaveState { itemId = -1, itemName = "" };
+        var incomplete = new BlockStateStore.InstallationSaveState { itemId = -1, itemName = "", railVisualPathPoints = new() { 0 } };
+        var unknown = new BlockStateStore.InstallationSaveState { itemId = -1, itemName = "Removed rail", railVisualPathPoints = new() { 0, 1 } };
+        var validOther = new BlockStateStore.InstallationSaveState { itemId = 27, itemName = "", railVisualPathPoints = new() { 0, 1 } };
+        foreach (var state in new[] { recoverable, unrelated, incomplete, unknown, validOther })
+            damaged.map.installations.Add(new() { state = state });
+        SaveGameItemIdRemapper.RemapToCurrentDefinitions(damaged, definitions);
+        Require(recoverable.itemId == 119 && recoverable.itemName == "Railload", "Nameless damaged ECS rail must recover from its unique rail definition");
+        Require(unrelated.itemId == -1 && incomplete.itemId == -1, "Invalid non-rail and incomplete geometry must not become rails");
+        Require(unknown.itemId == -1, "A named missing definition must not be guessed from geometry");
+        Require(validOther.itemId == 27, "A valid non-rail ID must not be overwritten by geometry");
+        SaveGameItemIdRemapper.RemapToCurrentDefinitions(damaged, definitions);
+        Require(recoverable.itemId == 119, "Recovered rail must survive repeated loads");
+
+        foreach (var candidates in new[] {
+            new List<ItemDefinition> { definitions[1] },
+            new List<ItemDefinition> { rail, new() { id = 120, itemName = "Other rail", mapObject = new Railload() } }
+        })
+        {
+            recoverable.itemId = -1; recoverable.itemName = "";
+            SaveGameItemIdRemapper.RemapToCurrentDefinitions(damaged, candidates);
+            Require(recoverable.itemId == -1, "Missing or ambiguous rail definitions must not be guessed");
+        }
     }
 }

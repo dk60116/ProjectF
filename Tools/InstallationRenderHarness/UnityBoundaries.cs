@@ -37,18 +37,30 @@ public static class MapObjectTickProfiler
     public static Scope SampleLateUpdateCaller<T>() => default;
     public static Scope SampleNamed(string a, string b, string c) => default;
     public static void AddRuntimeCounter(string a, string b, int c) { }
+    public static void AddRuntimeCounter(string a, string b, long c) { }
     public struct Scope : IDisposable { public void Dispose() { } }
 }
 public readonly struct VirtualRenderBatchKey
 {
+    public readonly Mesh Mesh;
+    public readonly Material Material;
+    public readonly int Layer, SubmeshIndex, ShadowCastingMode, BatchCellX, BatchCellZ;
+    public readonly bool ReceiveShadows, InvertCulling;
+    public readonly uint RenderingLayerMask;
     public VirtualRenderBatchKey(Mesh mesh, Material mat, int layer, int sub, int shadows, bool receive, bool scroll,
-        int batchCellX = 0, int batchCellZ = 0, bool invertCulling = false, uint renderingLayerMask = 0) { }
+        int batchCellX = 0, int batchCellZ = 0, bool invertCulling = false, uint renderingLayerMask = 0)
+    {
+        Mesh = mesh; Material = mat; Layer = layer; SubmeshIndex = sub; ShadowCastingMode = shadows;
+        ReceiveShadows = receive; BatchCellX = batchCellX; BatchCellZ = batchCellZ;
+        InvertCulling = invertCulling; RenderingLayerMask = renderingLayerMask;
+    }
 }
 public sealed class VirtualRenderBatchCollection : IDisposable
 {
     public static Matrix4x4 LastMatrix;
+    public static VirtualRenderBatchKey LastKey;
     public void ClearActiveMatrices() { }
-    public void AddMatrix(VirtualRenderBatchKey key, Matrix4x4 matrix) => LastMatrix = matrix;
+    public void AddMatrix(VirtualRenderBatchKey key, Matrix4x4 matrix) { LastMatrix = matrix; LastKey = key; }
     public void RenderBatches(Camera camera) { }
     public void SuspendRendering() { }
     public void Dispose() { }
@@ -99,13 +111,15 @@ namespace UnityEngine
     public class Renderer : Component
     {
         public static int Reads;
+        public static int PropertyBlockReads;
         public bool enabled = true, forceRenderingOff, receiveShadows = true;
         public int shadowCastingMode; public uint renderingLayerMask;
         public Material[] Materials = Array.Empty<Material>();
         public readonly MaterialPropertyBlock Global = new(), Indexed = new();
         public void GetSharedMaterials(List<Material> result) { Reads++; result.Clear(); result.AddRange(Materials); }
-        public void GetPropertyBlock(MaterialPropertyBlock target) => target.Copy(Global);
-        public void GetPropertyBlock(MaterialPropertyBlock target, int sub) => target.Copy(Indexed);
+        public bool HasPropertyBlock() => !Global.isEmpty || !Indexed.isEmpty;
+        public void GetPropertyBlock(MaterialPropertyBlock target) { PropertyBlockReads++; target.Copy(Global); }
+        public void GetPropertyBlock(MaterialPropertyBlock target, int sub) { PropertyBlockReads++; target.Copy(Indexed); }
     }
     public class MeshRenderer : Renderer { public MeshFilter Filter; }
     public class MeshFilter : Component { public Mesh sharedMesh; }
@@ -119,14 +133,16 @@ namespace UnityEngine
     public class Shader : Object
     {
         public bool SupportsInstancing = true;
+        public static int KeywordReads, PropertyLayoutReads;
         public KeywordSpace keywordSpace => new KeywordSpace { Supported = SupportsInstancing };
-        public struct KeywordSpace { public bool Supported; public Keyword FindKeyword(string name) => new Keyword { isValid = Supported }; }
+        public struct KeywordSpace { public bool Supported; public Keyword FindKeyword(string name) { KeywordReads++; return new Keyword { isValid = Supported }; } }
         public struct Keyword { public bool isValid; }
         static readonly Dictionary<string, int> ids = new(); readonly List<(int Id, Rendering.ShaderPropertyType Type)> props = new();
         public static int PropertyToID(string name) { if (!ids.TryGetValue(name, out int id)) ids[name] = id = ids.Count+1; return id; }
         public void Add(string name, Rendering.ShaderPropertyType type) => props.Add((PropertyToID(name),type));
-        public int GetPropertyCount() => props.Count; public int GetPropertyNameId(int i) => props[i].Id;
-        public Rendering.ShaderPropertyType GetPropertyType(int i) => props[i].Type;
+        public int GetPropertyCount() { PropertyLayoutReads++; return props.Count; }
+        public int GetPropertyNameId(int i) { PropertyLayoutReads++; return props[i].Id; }
+        public Rendering.ShaderPropertyType GetPropertyType(int i) { PropertyLayoutReads++; return props[i].Type; }
     }
     public class Material : Object
     {
@@ -167,11 +183,12 @@ namespace UnityEngine
         public static Color operator *(Color x, Color y) => new(x.r*y.r,x.g*y.g,x.b*y.b,x.a*y.a);
     }
     public record struct Color32(byte r, byte g, byte b, byte a);
-    public struct Matrix4x4
+    public struct Matrix4x4 : IEquatable<Matrix4x4>
     {
         System.Numerics.Matrix4x4 data;
         public float m03 => data.M41; public float m13 => data.M42; public float m23 => data.M43;
         public float determinant => data.GetDeterminant();
+        public bool Equals(Matrix4x4 other) => data.Equals(other.data);
         public static Matrix4x4 identity => new(){ data = System.Numerics.Matrix4x4.Identity };
         public static Matrix4x4 Scale(Vector3 v) => new(){data = System.Numerics.Matrix4x4.CreateScale(v.x,v.y,v.z)};
         public static Matrix4x4 TRS(Vector3 p, Quaternion r, Vector3 s) => new(){ data = System.Numerics.Matrix4x4.CreateScale(s.x,s.y,s.z)

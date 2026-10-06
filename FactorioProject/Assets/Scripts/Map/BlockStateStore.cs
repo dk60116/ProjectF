@@ -404,8 +404,10 @@ public partial class BlockStateStore : MonoBehaviour
     private int savedInstallationItemTotal;
     private int mapMarkerVersion;
     private VirtualObjectWorld virtualObjectWorld;
+    private ProjectF.Railway.RailWorld railWorld;
 
     public int MapMarkerVersion => mapMarkerVersion;
+    public ProjectF.Railway.RailWorld RailWorld => railWorld ?? (railWorld = new ProjectF.Railway.RailWorld());
 
     public void Save(Vector2Int worldCoordinate, ResourceInstance resource)
     {
@@ -666,6 +668,8 @@ public partial class BlockStateStore : MonoBehaviour
             storedState,
             storageKey);
         RegisterLiveCoordinateMappings(storedState, storageKey);
+        if (installationObject is Railload rail) RailWorld.UpsertLive(rail);
+        if (installationObject is Trainstation station) RailWorld.UpsertStation(station);
         if (trainPresentationChanged) MarkMapMarkersChanged();
     }
 
@@ -970,6 +974,7 @@ public partial class BlockStateStore : MonoBehaviour
             storageKey,
             record.installationObject,
             record.state);
+        DetachRailwayView(record.installationObject);
         UnregisterLiveCoordinateMappings(record.state, storageKey);
         UnregisterInstallationPlacementKey(
             liveInstallationStorageKeysByPlacement,
@@ -1283,6 +1288,7 @@ public partial class BlockStateStore : MonoBehaviour
         }
 
         bool trainPresentationChanged = record.installationObject is Train;
+        DetachRailwayView(record.installationObject);
         UnregisterLiveCoordinateMappings(record.state, storageKey);
         UnregisterInstallationPlacementKey(
             liveInstallationStorageKeysByPlacement,
@@ -1304,6 +1310,7 @@ public partial class BlockStateStore : MonoBehaviour
 
     public void RemoveInstallation(Vector2Int storageKey, bool removeUtilityPoleReferences = true)
     {
+        railWorld?.RemoveSaved(storageKey);
         RobotArmWorld.Current?.Remove(storageKey);
         MiningWorld.Current?.Remove(storageKey);
         UtilityPoleWorld.Current?.Remove(storageKey);
@@ -1314,6 +1321,7 @@ public partial class BlockStateStore : MonoBehaviour
         bool markerChanged = savedInstallationStates.ContainsKey(storageKey);
         if (liveInstallationStates.TryGetValue(storageKey, out LiveInstallationRecord liveRecord))
         {
+            DetachRailwayView(liveRecord?.installationObject);
             liveRecord?.installationObject?.BindRuntimeMapObjectHandle(default);
         }
 
@@ -1416,6 +1424,7 @@ public partial class BlockStateStore : MonoBehaviour
         liveInstallationStates.Clear();
         liveInstallationStorageKeysByPlacement.Clear();
         liveInstallationAnchorsByCoordinate.Clear();
+        railWorld?.Clear();
         ConveyorWorld.Current?.ClearRecords();
         PipeWorld.Current?.ClearRecords();
         BuildingWorld.Current?.ClearRecords();
@@ -1697,7 +1706,7 @@ public partial class BlockStateStore : MonoBehaviour
         if (installationObject is Train train)
         {
             if (train.TryGetCurrentRailPoseUnits(
-                    out Railload rail,
+                    out ProjectF.Railway.IRailTarget rail,
                     out long distanceAlongPathUnits,
                     out Vector2 pathPoint,
                     out Vector2 tangent)
@@ -1960,7 +1969,7 @@ public partial class BlockStateStore : MonoBehaviour
             : fallbackItemId;
     }
 
-    private static string ResolveInstallationSaveItemName(int itemId, InstallationObject installationObject)
+    internal static string ResolveInstallationSaveItemName(int itemId, InstallationObject installationObject)
     {
         IReadOnlyList<ItemDefinition> definitions = GameManager.Instance?.ItemManger?.ItemDefinitions;
         ItemDefinition definition = FindInstallationDefinitionByObject(definitions, installationObject)
@@ -2112,6 +2121,7 @@ public partial class BlockStateStore : MonoBehaviour
             storageKey);
         AdjustSavedInstallationCount(storedState, 1);
         RegisterSavedCoordinateMappings(storedState, storageKey);
+        RailWorld.UpsertSaved(storedState);
         VirtualObjectWorld world = ResolveVirtualObjectWorld();
         if (liveRecord?.installationObject != null)
         {
@@ -2129,7 +2139,7 @@ public partial class BlockStateStore : MonoBehaviour
         return true;
     }
 
-    private void MarkMapMarkersChanged()
+    internal void MarkMapMarkersChanged()
     {
         unchecked
         {
@@ -2206,6 +2216,7 @@ public partial class BlockStateStore : MonoBehaviour
             duplicateState,
             duplicateKey);
         savedInstallationStates.Remove(duplicateKey);
+        railWorld?.RemoveSaved(duplicateKey);
         world?.RemoveInstallation(duplicateKey);
     }
 
@@ -2338,6 +2349,7 @@ public partial class BlockStateStore : MonoBehaviour
         LiveInstallationRecord liveRecord)
     {
         bool trainPresentationChanged = liveRecord?.installationObject is Train;
+        DetachRailwayView(liveRecord?.installationObject);
         VirtualObjectWorld world = ResolveVirtualObjectWorld();
         liveRecord.installationObject?.BindRuntimeMapObjectHandle(default);
         UnregisterLiveCoordinateMappings(liveRecord.state, storageKey);
@@ -2355,6 +2367,12 @@ public partial class BlockStateStore : MonoBehaviour
             world?.RemoveInstallation(storageKey);
         }
         if (trainPresentationChanged) MarkMapMarkersChanged();
+    }
+
+    private void DetachRailwayView(InstallationObject installation)
+    {
+        if (installation is Railload rail) railWorld?.DetachLive(rail);
+        if (installation is Trainstation station) railWorld?.DetachStation(station);
     }
 
     private static void EnsureListCapacity<T>(List<T> values, int capacity)

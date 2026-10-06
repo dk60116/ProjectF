@@ -1378,6 +1378,7 @@ public partial class TerrainGenerator : MonoBehaviour,
 
     private void OnDestroy()
     {
+        resourceStateStore?.RailWorld.Clear();
         if (RobotArmWorld.Current?.Terrain == this) RobotArmWorld.Current.Dispose();
         if (MiningWorld.Current?.Terrain == this) MiningWorld.Current.Dispose();
         if (UtilityPoleWorld.Current?.Terrain == this) UtilityPoleWorld.Current.Dispose();

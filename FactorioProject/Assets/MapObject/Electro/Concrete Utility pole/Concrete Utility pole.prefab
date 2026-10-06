@@ -143,7 +143,7 @@ MonoBehaviour:
   lineSagDepth: 0.06
   connectionLineSagDepth: 0.18
   lineCurveSegments: 8
-  lineColor: {r: 0.1792453, g: 0.1792453, b: 0.1792453, a: 1}
+  lineColor: {r: 0.05, g: 0.04, b: 0.035, a: 1}
 --- !u!135 &4708081999223159146
 SphereCollider:
   m_ObjectHideFlags: 0

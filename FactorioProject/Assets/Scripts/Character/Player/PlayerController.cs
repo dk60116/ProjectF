@@ -1,4 +1,4 @@
-﻿using ProjectF.Power;
+using ProjectF.Power;
 using System.Collections.Generic;
 using ProjectF.MapObjects;
 using Unity.Profiling;
@@ -136,6 +136,7 @@ public partial class PlayerController : MonoBehaviour
     private readonly HashSet<ForestryInstance> nearbyForestryInstances = new HashSet<ForestryInstance>();
     private readonly HashSet<RobotArmInstance> nearbyRobotArmInstances = new HashSet<RobotArmInstance>();
     private readonly HashSet<BuildingRuntimeRecord> nearbyBuildingRecords = new HashSet<BuildingRuntimeRecord>();
+    private readonly HashSet<ProjectF.Railway.RailwayInstance> nearbyRailwayInstances = new HashSet<ProjectF.Railway.RailwayInstance>();
     private readonly List<InstallationObject> nearbyRuntimeInstallationScratch = new List<InstallationObject>(8);
     private readonly List<Renderer> mapObjectFocusRenderers = new List<Renderer>(16);
     private readonly Dictionary<Block, IMapObjectTarget> interactionFocusTargetOverrides = new Dictionary<Block, IMapObjectTarget>();
@@ -3336,6 +3337,7 @@ public partial class PlayerController : MonoBehaviour
                 : target is ForestryInstance forestryIdentity ? forestryIdentity.SimulationId
                 : target is RobotArmInstance armIdentity ? armIdentity.SimulationId
                 : target is BuildingRuntimeRecord buildingIdentity ? buildingIdentity.SimulationId
+                : target is ProjectF.Railway.RailwayInstance railwayIdentity ? railwayIdentity.SimulationId
                 : target is MapObject nativeTarget ? nativeTarget.GetInstanceID() : block.RuntimeIdentity;
             bool tiedDistance = Mathf.Abs(distanceSqr - closestDistanceSqr) <= 0.000001f;
             if (float.IsNaN(distanceSqr) || float.IsInfinity(distanceSqr)
@@ -3686,12 +3688,13 @@ public partial class PlayerController : MonoBehaviour
             && !(mapObject is MiningMachineInstance)
             && !(mapObject is ForestryInstance)
             && !(mapObject is RobotArmInstance)
+            && !(mapObject is ProjectF.Railway.RailwayInstance)
             && !(mapObject is BuildingRuntimeRecord))
         {
             return false;
         }
 
-        float interactionRadius = Mathf.Max(0f, mapObject is ForestryInstance forestry ? forestry.FocusActivationRadius : mapObject is UtilityPoleRuntime pole ? pole.FocusActivationRadius : mapObject is ProductionFacilityInstance production ? production.FocusActivationRadius : mapObject is MiningMachineInstance miner ? miner.FocusActivationRadius : mapObject is RobotArmInstance arm
+        float interactionRadius = Mathf.Max(0f, mapObject is ProjectF.Railway.RailwayInstance railway ? railway.Prototype.FocusActivationRadius : mapObject is ForestryInstance forestry ? forestry.FocusActivationRadius : mapObject is UtilityPoleRuntime pole ? pole.FocusActivationRadius : mapObject is ProductionFacilityInstance production ? production.FocusActivationRadius : mapObject is MiningMachineInstance miner ? miner.FocusActivationRadius : mapObject is RobotArmInstance arm
             ? arm.Prototype.FocusActivationRadius
             : mapObject is BuildingRuntimeRecord building
                 ? building.Prototype.FocusActivationRadius
@@ -5082,6 +5085,7 @@ public partial class PlayerController : MonoBehaviour
         nearbyConveyorRecords.Clear();
         nearbyPipeRecords.Clear();
         nearbyBuildingRecords.Clear();
+        nearbyRailwayInstances.Clear();
         ConveyorWorld conveyorWorld = ConveyorWorld.Current;
         PipeWorld pipeWorld = PipeWorld.Current;
         BuildingWorld buildingWorld = BuildingWorld.Current;
@@ -5108,6 +5112,11 @@ public partial class PlayerController : MonoBehaviour
                     && nearbyPoleInstances.Add(pole) && pole.FocusActivationRadius > 0
                     && GetMapObjectFocusSelectionDistanceSqr(pole, block, origin) <= pole.FocusActivationRadius * pole.FocusActivationRadius)
                     AppendMapObjectFocusBlocks(pole, block, results);
+                if (block.MapObject is ProjectF.Railway.RailwayInstance railway && railway.IsTargetActive && railway.AllowsFocus
+                    && nearbyRailwayInstances.Add(railway)
+                    && railway.Prototype.FocusActivationRadius > 0
+                    && GetMapObjectFocusSelectionDistanceSqr(railway, block, origin) <= railway.Prototype.FocusActivationRadius * railway.Prototype.FocusActivationRadius)
+                    AppendMapObjectFocusBlocks(railway, block, results);
                 if (block.MapObject is ProductionFacilityInstance production && production.IsRuntimeActive && production.AllowsFocus
                     && nearbyProductionInstances.Add(production) && production.FocusActivationRadius > 0
                     && GetMapObjectFocusSelectionDistanceSqr(production, block, origin) <= production.FocusActivationRadius * production.FocusActivationRadius)
@@ -5339,6 +5348,8 @@ public partial class PlayerController : MonoBehaviour
             return GetOccupiedCoordinateDistanceSqr(dataArm.RuntimeOccupiedCoordinates, origin);
         if (mapObject is BuildingRuntimeRecord dataBuilding)
             return GetOccupiedCoordinateDistanceSqr(dataBuilding.OccupiedCoordinates, origin);
+        if (mapObject is ProjectF.Railway.IRailwayTarget railway)
+            return GetOccupiedCoordinateDistanceSqr(railway.RuntimeOccupiedCoordinates, origin);
         if (mapObject is InstallationObject installation)
         {
             IReadOnlyList<Vector2Int> occupied = installation.RuntimeOccupiedCoordinates;
@@ -5387,6 +5398,8 @@ public partial class PlayerController : MonoBehaviour
 
     private Bounds GetMapObjectFocusBounds(IMapObjectTarget mapObject, Block block, float focusPadding = 0f)
     {
+        if (mapObject is ProjectF.Railway.RailwayInstance railway)
+        { Bounds bounds = railway.FocusBounds; bounds.Expand(focusPadding * 2); return bounds; }
         if (mapObject is ForestryInstance forestry)
         { Bounds bounds = forestry.CullBounds; bounds.Expand(focusPadding * 2f); return bounds; }
         if (mapObject is WorkableInstance workable)
@@ -5556,6 +5569,11 @@ public partial class PlayerController : MonoBehaviour
             foreach (var coordinate in dataArm.RuntimeOccupiedCoordinates)
                 appended |= TryAppendFocusBlock(results, coordinate, dataArm);
         }
+        else if (mapObject is ProjectF.Railway.IRailwayTarget railway)
+        {
+            for (int i = 0; i < railway.RuntimeOccupiedCoordinates.Count; i++)
+                appended |= TryAppendFocusBlock(results, railway.RuntimeOccupiedCoordinates[i], railway);
+        }
         else if (mapObject is BuildingRuntimeRecord dataBuilding)
         {
             for (int i = 0; i < dataBuilding.OccupiedCoordinates.Count; i++)
@@ -5678,7 +5696,7 @@ public partial class PlayerController : MonoBehaviour
             && existing != null
             && existing != targetOverride
             && existing is Vehicle
-            && targetOverride is Railload)
+            && targetOverride is ProjectF.Railway.IRailTarget)
         {
             return;
         }
@@ -5686,7 +5704,7 @@ public partial class PlayerController : MonoBehaviour
         if (targetOverride is Vehicle
             || !interactionFocusTargetOverrides.TryGetValue(block, out existing)
             || existing == null
-            || existing is Railload)
+            || existing is ProjectF.Railway.IRailTarget)
         {
             interactionFocusTargetOverrides[block] = targetOverride;
         }
@@ -6048,6 +6066,13 @@ public partial class PlayerController : MonoBehaviour
             ResolveTerrainGenerator()?.TryGetLoadedBlock(productionTarget.AnchorCoordinate, out closestDataOnlyFallbackBlock);
         }
         BuildingWorld buildingWorld = BuildingWorld.Current;
+        var railwayTerrain = ResolveTerrainGenerator();
+        if (railwayTerrain != null && railwayTerrain.GetRailWorld().TryRaycast(ray, maxDistance, out var railwayTarget, out float railwayDistance)
+            && railwayTarget.AllowsFocus && railwayDistance < closestDistance)
+        {
+            closestCandidate = railwayTarget; closestDistance = railwayDistance;
+            railwayTerrain.TryGetLoadedBlock(railwayTarget.RuntimeAnchorCoordinate, out closestDataOnlyFallbackBlock);
+        }
         if (buildingWorld != null
             && buildingWorld.TryRaycast(
                 ray,

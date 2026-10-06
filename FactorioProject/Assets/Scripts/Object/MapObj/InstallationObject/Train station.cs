@@ -1,7 +1,7 @@
 using System.Collections.Generic;
 using UnityEngine;
 
-public class Trainstation : InstallationObject
+public class Trainstation : InstallationObject, ProjectF.Railway.ITrainStationTarget
 {
     private static readonly Color32[] StationColorPalette =
     {
@@ -32,7 +32,42 @@ public class Trainstation : InstallationObject
     [SerializeField]
     private bool stationColorAssigned;
 
-    private readonly List<InstallationObject> railCoordinateSearchScratch = new List<InstallationObject>(4);
+    private ProjectF.Railway.RailWorld registeredRailWorld;
+
+    protected override void OnEnable()
+    {
+        base.OnEnable();
+        RefreshRailWorld();
+    }
+
+    protected override void OnPlacementRuntimeChanged()
+    {
+        RefreshRailWorld();
+        base.OnPlacementRuntimeChanged();
+    }
+
+    protected override void OnPlacementRuntimeCleared()
+    {
+        registeredRailWorld?.DetachStation(this);
+        base.OnPlacementRuntimeCleared();
+    }
+
+    protected override void OnDisable()
+    {
+        if (!ProjectFApplicationLifecycle.IsQuitting) registeredRailWorld?.DetachStation(this);
+        base.OnDisable();
+    }
+
+    private void RefreshRailWorld()
+    {
+        var world = TerrainGenerator.Active?.GetRailWorld();
+        if (!ReferenceEquals(registeredRailWorld, world))
+        {
+            registeredRailWorld?.DetachStation(this);
+            registeredRailWorld = world;
+        }
+        registeredRailWorld?.UpsertStation(this);
+    }
 
     public Sprite StationMarkerIcon => stationMarkerIcon;
     public string StationName => HasAssignedStationName ? StoredStationName : ResolveDefaultStationName();
@@ -67,7 +102,7 @@ public class Trainstation : InstallationObject
         }
 
         stationName = normalizedName;
-        base.OnPlacementRuntimeChanged();
+        OnPlacementRuntimeChanged();
         PersistStationState();
     }
 
@@ -80,7 +115,7 @@ public class Trainstation : InstallationObject
         }
 
         stationName = normalizedName;
-        base.OnPlacementRuntimeChanged();
+        OnPlacementRuntimeChanged();
     }
 
     public void SetStationColor(Color value)
@@ -93,7 +128,7 @@ public class Trainstation : InstallationObject
 
         stationColor = normalizedColor;
         stationColorAssigned = true;
-        base.OnPlacementRuntimeChanged();
+        OnPlacementRuntimeChanged();
         PersistStationState();
     }
 
@@ -107,7 +142,7 @@ public class Trainstation : InstallationObject
 
         stationColor = normalizedColor;
         stationColorAssigned = isAssigned;
-        base.OnPlacementRuntimeChanged();
+        OnPlacementRuntimeChanged();
     }
 
     public override void PrepareForPool()
@@ -115,7 +150,6 @@ public class Trainstation : InstallationObject
         stationName = string.Empty;
         stationColor = new Color32(255, 255, 255, 255);
         stationColorAssigned = false;
-        railCoordinateSearchScratch.Clear();
         base.PrepareForPool();
     }
 
@@ -192,23 +226,7 @@ public class Trainstation : InstallationObject
 
     private bool CoordinateHasRuntimeRail(Vector2Int coordinate)
     {
-        railCoordinateSearchScratch.Clear();
-        InstallationObject.CollectActiveInstallationsAtRuntimeGridCoordinate(
-            coordinate,
-            railCoordinateSearchScratch);
-
-        bool hasRail = false;
-        for (int i = 0; i < railCoordinateSearchScratch.Count; i++)
-        {
-            if (railCoordinateSearchScratch[i] is Railload)
-            {
-                hasRail = true;
-                break;
-            }
-        }
-
-        railCoordinateSearchScratch.Clear();
-        return hasRail;
+        return TerrainGenerator.Active?.GetRailWorld().CoordinateExists(coordinate, true) ?? false;
     }
 
     private string ResolveDefaultStationName()
