@@ -11,10 +11,10 @@ public sealed class RailloadInstallationController : MonoBehaviour
     private const float VisualBezierHandleFactor = 0.55f;
     private const float VisualBezierCrossAxisHandleFactor = 0.18f;
     private const float VisualBezierMinHandleLength = 0.35f;
+    private const float VisualBezierEndpointLeadLength = 0.1f;
     private const float ConnectionAngleScoreEpsilon = 0.001f;
     private const float ConnectionSideScoreWeight = 2f;
     private const float ConnectionSideEpsilon = 0.05f;
-    private const float StraightEndpointConnectionMinDot = 0.75f;
     private const float GridTraversalEpsilon = 0.0001f;
 
     private static readonly Color ValidRailColor = new Color(0.07f, 0.82f, 1f, 0.82f);
@@ -247,28 +247,15 @@ public sealed class RailloadInstallationController : MonoBehaviour
         if (start.x == end.x)
         {
             AppendLine(plan.pathCoordinates, start, end, false);
-            RebuildStraightVisualPathFromCoordinates(
-                plan.pathCoordinates,
-                plan.visualPathPoints,
-                out plan.extendStartEndpoint,
-                out plan.extendEndEndpoint);
-            SynchronizePlanCoordinatesToVisualPath(plan);
-            return plan;
         }
-
-        if (start.y == end.y)
+        else if (start.y == end.y)
         {
             AppendLine(plan.pathCoordinates, start, end, true);
-            RebuildStraightVisualPathFromCoordinates(
-                plan.pathCoordinates,
-                plan.visualPathPoints,
-                out plan.extendStartEndpoint,
-                out plan.extendEndEndpoint);
-            SynchronizePlanCoordinatesToVisualPath(plan);
-            return plan;
         }
-
-        AppendCardinalCornerRoute(plan.pathCoordinates, start, end, horizontalFirst);
+        else
+        {
+            AppendCardinalCornerRoute(plan.pathCoordinates, start, end, horizontalFirst);
+        }
         RebuildBezierVisualPathFromCoordinates(
             plan.pathCoordinates,
             plan.visualPathPoints,
@@ -596,63 +583,6 @@ public sealed class RailloadInstallationController : MonoBehaviour
         coordinates.Add(coordinate);
     }
 
-    private static void RebuildStraightVisualPathFromCoordinates(
-        IReadOnlyList<Vector2Int> coordinates,
-        List<Vector2> visualPathPoints,
-        out bool extendStartEndpoint,
-        out bool extendEndEndpoint)
-    {
-        extendStartEndpoint = true;
-        extendEndEndpoint = true;
-        if (visualPathPoints == null)
-        {
-            return;
-        }
-
-        visualPathPoints.Clear();
-        if (coordinates == null || coordinates.Count <= 0)
-        {
-            return;
-        }
-
-        Vector2 start = CoordinateToVisualPoint(coordinates[0]);
-        if (coordinates.Count < 2)
-        {
-            AddVisualPathPoint(visualPathPoints, start);
-            return;
-        }
-
-        Vector2 end = CoordinateToVisualPoint(coordinates[coordinates.Count - 1]);
-        Vector2 startDirection = DirectionToVisual(coordinates[1] - coordinates[0]);
-        Vector2 endDirection = DirectionToVisual(coordinates[coordinates.Count - 1] - coordinates[coordinates.Count - 2]);
-        bool startConnected = TryResolveAlignedEndpointConnection(
-            coordinates[0],
-            start,
-            startDirection,
-            out Vector2 connectedStart,
-            out _);
-        if (startConnected)
-        {
-            start = connectedStart;
-        }
-
-        bool endConnected = TryResolveAlignedEndpointConnection(
-            coordinates[coordinates.Count - 1],
-            end,
-            endDirection,
-            out Vector2 connectedEnd,
-            out _);
-        if (endConnected)
-        {
-            end = connectedEnd;
-        }
-
-        extendStartEndpoint = !startConnected;
-        extendEndEndpoint = !endConnected;
-        AddVisualPathPoint(visualPathPoints, start);
-        AddVisualPathPoint(visualPathPoints, end);
-    }
-
     private static void RebuildBezierVisualPathFromCoordinates(
         IReadOnlyList<Vector2Int> coordinates,
         List<Vector2> visualPathPoints,
@@ -686,6 +616,8 @@ public sealed class RailloadInstallationController : MonoBehaviour
             coordinates[0],
             start,
             startDirection,
+            true,
+            end,
             out Vector2 connectedStart,
             out Vector2 connectedStartDirection);
         if (startConnected)
@@ -698,6 +630,8 @@ public sealed class RailloadInstallationController : MonoBehaviour
             coordinates[coordinates.Count - 1],
             end,
             endDirection,
+            false,
+            start,
             out Vector2 connectedEnd,
             out Vector2 connectedEndDirection);
         if (endConnected)
@@ -715,17 +649,90 @@ public sealed class RailloadInstallationController : MonoBehaviour
             return;
         }
 
-        float startHandleLength = ResolveBezierHandleLength(delta, startDirection, distance);
-        float endHandleLength = ResolveBezierHandleLength(delta, endDirection, distance);
-        Vector2 controlA = start + startDirection * startHandleLength;
-        Vector2 controlB = end - endDirection * endHandleLength;
+        float leadLength = Mathf.Min(VisualBezierEndpointLeadLength, distance * 0.1f);
+        bool singleConnected = startConnected != endConnected;
+        bool singleCorner = false;
+        if (singleConnected)
+        {
+            Vector2 outwardDirection = startConnected ? startDirection : -endDirection;
+            Vector2 towardFreeEndpoint = startConnected ? delta : -delta;
+            Vector2 perpendicular = new Vector2(-outwardDirection.y, outwardDirection.x);
+            float forward = Vector2.Dot(towardFreeEndpoint, outwardDirection);
+            float lateral = Vector2.Dot(towardFreeEndpoint, perpendicular);
+            singleCorner = forward > leadLength && Mathf.Abs(lateral) > GridTraversalEpsilon;
+            // Only the connected end constrains heading. The free end follows
+            // a single corner instead of retaining the grid-route's S bend.
+            Vector2 freeDirection = singleCorner
+                ? perpendicular * Mathf.Sign(lateral)
+                : outwardDirection;
+            if (startConnected) endDirection = freeDirection;
+            else startDirection = -freeDirection;
+        }
+
         AddVisualPathPoint(visualPathPoints, start);
+        if (Mathf.Abs(Cross2D(delta, startDirection)) <= 0.0001f
+            && Mathf.Abs(Cross2D(delta, endDirection)) <= 0.0001f
+            && Vector2.Dot(delta, startDirection) > 0f && Vector2.Dot(delta, endDirection) > 0f)
+        {
+            AddVisualPathPoint(visualPathPoints, end);
+            return;
+        }
+
+        // The rendered/sampled polyline needs an exact terminal tangent too,
+        // not just the analytic Bezier derivative between two sampled points.
+        Vector2 curveStart = startConnected || singleCorner ? start + startDirection * leadLength : start;
+        Vector2 curveEnd = endConnected || singleCorner ? end - endDirection * leadLength : end;
+        distance = (curveEnd - curveStart).magnitude;
+        ResolveBezierControls(curveStart, curveEnd, startDirection, endDirection,
+            startConnected, endConnected, out Vector2 controlA, out Vector2 controlB);
+        AddVisualPathPoint(visualPathPoints, curveStart);
         int sampleCount = Mathf.Clamp(Mathf.CeilToInt(distance * VisualBezierSamplesPerCell), 16, 256);
         for (int i = 1; i <= sampleCount; i++)
         {
             float t = i / (float)sampleCount;
-            AddVisualPathPoint(visualPathPoints, EvaluateCubicBezier(start, controlA, controlB, end, t));
+            AddVisualPathPoint(visualPathPoints, EvaluateCubicBezier(curveStart, controlA, controlB, curveEnd, t));
         }
+        AddVisualPathPoint(visualPathPoints, end);
+    }
+
+    private static void ResolveBezierControls(Vector2 start, Vector2 end, Vector2 startDirection,
+        Vector2 endDirection, bool startConnected, bool endConnected, out Vector2 controlA, out Vector2 controlB)
+    {
+        Vector2 delta = end - start;
+        float distance = delta.magnitude;
+        if (startConnected == endConnected)
+        {
+            controlA = start + startDirection * ResolveBezierHandleLength(delta, startDirection, distance);
+            controlB = end - endDirection * ResolveBezierHandleLength(delta, endDirection, distance);
+            return;
+        }
+
+        // Build from the constrained end so reversed placement has identical
+        // geometry. Forward/lateral handle bounds keep a corner from inflecting.
+        Vector2 anchor = startConnected ? start : end;
+        Vector2 freeEndpoint = startConnected ? end : start;
+        Vector2 outward = startConnected ? startDirection : -endDirection;
+        Vector2 towardFree = freeEndpoint - anchor;
+        Vector2 perpendicular = new Vector2(-outward.y, outward.x);
+        float forward = Vector2.Dot(towardFree, outward);
+        float lateral = Vector2.Dot(towardFree, perpendicular);
+        float handle = ResolveBezierHandleLength(towardFree, outward, distance);
+        Vector2 connectedControl;
+        Vector2 freeControl;
+        if (forward > GridTraversalEpsilon && Mathf.Abs(lateral) > GridTraversalEpsilon)
+        {
+            Vector2 outgoing = perpendicular * Mathf.Sign(lateral);
+            connectedControl = anchor + outward * Mathf.Min(handle, forward);
+            freeControl = freeEndpoint - outgoing * Mathf.Min(
+                ResolveBezierHandleLength(towardFree, outgoing, distance), Mathf.Abs(lateral));
+        }
+        else
+        {
+            connectedControl = anchor + outward * handle;
+            freeControl = (connectedControl + freeEndpoint) * 0.5f;
+        }
+        controlA = startConnected ? connectedControl : freeControl;
+        controlB = startConnected ? freeControl : connectedControl;
     }
 
     private static float ResolveBezierHandleLength(Vector2 delta, Vector2 direction, float distance)
@@ -810,37 +817,12 @@ public sealed class RailloadInstallationController : MonoBehaviour
         pathPoints.Add(point);
     }
 
-    private static bool TryResolveAlignedEndpointConnection(
-        Vector2Int connectionCoordinate,
-        Vector2 endpoint,
-        Vector2 preferredDirection,
-        out Vector2 connectionPoint,
-        out Vector2 connectionDirection)
-    {
-        connectionPoint = endpoint;
-        connectionDirection = preferredDirection;
-        if (!TryResolveEndpointConnection(
-                connectionCoordinate,
-                endpoint,
-                preferredDirection,
-                out Vector2 resolvedPoint,
-                out Vector2 resolvedDirection)
-            || !TryNormalize(preferredDirection, out Vector2 normalizedPreferredDirection)
-            || !TryNormalize(resolvedDirection, out Vector2 normalizedResolvedDirection)
-            || Vector2.Dot(normalizedPreferredDirection, normalizedResolvedDirection) < StraightEndpointConnectionMinDot)
-        {
-            return false;
-        }
-
-        connectionPoint = resolvedPoint;
-        connectionDirection = normalizedResolvedDirection;
-        return true;
-    }
-
     private static bool TryResolveEndpointConnection(
         Vector2Int connectionCoordinate,
         Vector2 endpoint,
         Vector2 preferredDirection,
+        bool startEndpoint,
+        Vector2 oppositeEndpoint,
         out Vector2 connectionPoint,
         out Vector2 connectionDirection)
     {
@@ -855,6 +837,7 @@ public sealed class RailloadInstallationController : MonoBehaviour
         float bestSqrDistance = float.MaxValue;
         Vector2 bestPoint = endpoint;
         Vector2 bestDirection = normalizedPreferredDirection;
+        float bestEndpointOutwardSign = 0f;
         var candidates = connectionCandidates; candidates.Clear();
         for (int offsetIndex = 0; offsetIndex < ConnectionProbeOffsets.Length; offsetIndex++)
         {
@@ -869,17 +852,22 @@ public sealed class RailloadInstallationController : MonoBehaviour
                     continue;
                 }
 
-                if (TryFindNearestPointAndTangentOnRailVisualPath(
+                if (TryFindNearestPointAndTangentOnRailPath(
                         endpoint,
                         rail,
                         out Vector2 candidatePoint,
                         out Vector2 candidateDirection,
-                        out float candidateSqrDistance)
-                    && candidateSqrDistance < bestSqrDistance)
+                        out float candidateSqrDistance,
+                        out float endpointOutwardSign)
+                    && candidateSqrDistance <= maxSqrDistance
+                    && (endpointOutwardSign != 0f && bestEndpointOutwardSign == 0f
+                        || (endpointOutwardSign != 0f) == (bestEndpointOutwardSign != 0f)
+                            && candidateSqrDistance < bestSqrDistance))
                 {
                     bestSqrDistance = candidateSqrDistance;
                     bestPoint = candidatePoint;
                     bestDirection = candidateDirection;
+                    bestEndpointOutwardSign = endpointOutwardSign;
                 }
             }
         }
@@ -889,9 +877,23 @@ public sealed class RailloadInstallationController : MonoBehaviour
             return false;
         }
 
-        if (Vector2.Dot(bestDirection, normalizedPreferredDirection) < 0f)
+        if (bestEndpointOutwardSign != 0f)
         {
-            bestDirection = -bestDirection;
+            // At an existing terminal the new rail leaves it at its start and
+            // enters it at its end. Authored point order cannot choose this sign.
+            bestDirection *= startEndpoint ? bestEndpointOutwardSign : -bestEndpointOutwardSign;
+        }
+        else
+        {
+            float directionDot = Vector2.Dot(bestDirection, normalizedPreferredDirection);
+            if (Mathf.Abs(directionDot) <= 0.0001f)
+            {
+                Vector2 alongPlan = startEndpoint ? oppositeEndpoint - bestPoint : bestPoint - oppositeEndpoint;
+                directionDot = Vector2.Dot(bestDirection, alongPlan);
+                if (Mathf.Abs(directionDot) <= 0.0001f)
+                    directionDot = Mathf.Abs(bestDirection.x) > 0.0001f ? bestDirection.x : bestDirection.y;
+            }
+            if (directionDot < 0f) bestDirection = -bestDirection;
         }
 
         connectionPoint = bestPoint;
@@ -924,12 +926,13 @@ public sealed class RailloadInstallationController : MonoBehaviour
                     continue;
                 }
 
-                if (TryFindNearestPointAndTangentOnRailVisualPath(
+                if (TryFindNearestPointAndTangentOnRailPath(
                         endpoint,
                         rail,
                         out Vector2 candidatePoint,
                         out Vector2 candidateTangent,
-                        out float candidateSqrDistance)
+                        out float candidateSqrDistance,
+                        out _)
                     && candidateSqrDistance < sqrDistance)
                 {
                     guidePoint = candidatePoint;
@@ -943,93 +946,40 @@ public sealed class RailloadInstallationController : MonoBehaviour
                && TryNormalize(guideTangent, out guideTangent);
     }
 
-    private static bool TryFindNearestPointAndTangentOnRailVisualPath(
+    private static bool TryFindNearestPointAndTangentOnRailPath(
         Vector2 point,
         ProjectF.Railway.IRailTarget rail,
         out Vector2 guidePoint,
         out Vector2 guideTangent,
-        out float sqrDistance)
+        out float sqrDistance,
+        out float endpointOutwardSign)
     {
         guidePoint = point;
         guideTangent = Vector2.zero;
         sqrDistance = float.MaxValue;
-        IReadOnlyList<Vector2> visualPathPoints = rail != null ? rail.RuntimeVisualPathPoints : null;
-        if (visualPathPoints != null && visualPathPoints.Count >= 2)
-        {
-            return TryFindNearestPointAndTangentOnPath(
-                visualPathPoints,
-                point,
-                out guidePoint,
-                out guideTangent,
-                out sqrDistance);
-        }
-
-        IReadOnlyList<Vector2Int> occupiedCoordinates = rail != null ? rail.RuntimeOccupiedCoordinates : null;
-        if (occupiedCoordinates == null || occupiedCoordinates.Count < 2)
+        endpointOutwardSign = 0f;
+        if (!rail.IsAlive() || !rail.TryFindNearestRenderedPathSample(point, out _,
+                out guidePoint, out guideTangent, out sqrDistance))
         {
             return false;
         }
 
-        List<Vector2> coordinatePath = new List<Vector2>(occupiedCoordinates.Count);
-        for (int i = 0; i < occupiedCoordinates.Count; i++)
+        // Cell-center clicks near an open end join its rendered terminal, not
+        // the unextended source point or an overlapping interior projection.
+        float maxSqrDistance = Railload.ConnectionEndpointSnapMaxDistance * Railload.ConnectionEndpointSnapMaxDistance;
+        float endpointSqrDistance = float.MaxValue;
+        for (int i = 0; i < 2; i++)
         {
-            coordinatePath.Add(CoordinateToVisualPoint(occupiedCoordinates[i]));
-        }
-
-        return TryFindNearestPointAndTangentOnPath(
-            coordinatePath,
-            point,
-            out guidePoint,
-            out guideTangent,
-            out sqrDistance);
-    }
-
-    private static bool TryFindNearestPointAndTangentOnPath(
-        IReadOnlyList<Vector2> pathPoints,
-        Vector2 point,
-        out Vector2 guidePoint,
-        out Vector2 guideTangent,
-        out float sqrDistance)
-    {
-        guidePoint = point;
-        guideTangent = Vector2.zero;
-        sqrDistance = float.MaxValue;
-        if (pathPoints == null || pathPoints.Count < 2)
-        {
-            return false;
-        }
-
-        bool found = false;
-        Vector2 bestDelta = Vector2.zero;
-        for (int i = 0; i + 1 < pathPoints.Count; i++)
-        {
-            Vector2 delta = pathPoints[i + 1] - pathPoints[i];
-            float lengthSqr = delta.sqrMagnitude;
-            if (lengthSqr <= 0.0001f)
-            {
-                continue;
-            }
-
-            float t = Mathf.Clamp01(Vector2.Dot(point - pathPoints[i], delta) / lengthSqr);
-            Vector2 closest = pathPoints[i] + delta * t;
-            float candidateSqrDistance = (closest - point).sqrMagnitude;
-            if (candidateSqrDistance >= sqrDistance)
-            {
-                continue;
-            }
-
+            if (!rail.TryGetRenderedEndpointSample(i == 0, out _, out Vector2 terminal, out Vector2 tangent)) continue;
+            float candidateSqrDistance = (terminal - point).sqrMagnitude;
+            if (candidateSqrDistance > maxSqrDistance || candidateSqrDistance >= endpointSqrDistance) continue;
+            endpointSqrDistance = candidateSqrDistance;
             sqrDistance = candidateSqrDistance;
-            guidePoint = closest;
-            bestDelta = delta;
-            found = true;
+            guidePoint = terminal;
+            guideTangent = tangent;
+            endpointOutwardSign = i == 0 ? -1f : 1f;
         }
-
-        if (!found)
-        {
-            return false;
-        }
-
-        return TryNormalize(bestDelta, out guideTangent);
+        return TryNormalize(guideTangent, out guideTangent);
     }
 
     private static float ResolvePlanSelectionScore(RailPathPlan plan, Vector2Int start, Vector2Int end)
@@ -1156,168 +1106,14 @@ public sealed class RailloadInstallationController : MonoBehaviour
 
     private static float ResolveExistingRailAngleScore(Vector2Int connectionCoordinate, Vector2 planTangent)
     {
-        if (!TryNormalize(planTangent, out Vector2 normalizedPlanTangent))
+        if (!TryNormalize(planTangent, out Vector2 normalizedPlanTangent)
+            || !TryFindNearestRailGuide(CoordinateToVisualPoint(connectionCoordinate),
+                out _, out Vector2 guideTangent, out _))
         {
             return 0f;
         }
 
-        var candidates = connectionCandidates; candidates.Clear();
-        for (int i = 0; i < ConnectionProbeOffsets.Length; i++)
-        {
-            TerrainGenerator.Active?.GetRailWorld().CollectRailsAtCoordinate(
-                connectionCoordinate + ConnectionProbeOffsets[i],
-                candidates);
-        }
-
-        float bestScore = 0f;
-        for (int i = 0; i < candidates.Count; i++)
-        {
-            if (candidates[i] is not ProjectF.Railway.IRailTarget rail)
-            {
-                continue;
-            }
-
-            bestScore = Mathf.Max(
-                bestScore,
-                ResolveRailAngleScoreAtConnection(rail, connectionCoordinate, normalizedPlanTangent));
-        }
-
-        return bestScore;
-    }
-
-    private static float ResolveRailAngleScoreAtConnection(
-        ProjectF.Railway.IRailTarget rail,
-        Vector2Int connectionCoordinate,
-        Vector2 planTangent)
-    {
-        if (rail == null)
-        {
-            return 0f;
-        }
-
-        float bestScore = 0f;
-        if (TryGetRailEndpointTangent(rail, connectionCoordinate, true, out Vector2 startTangent))
-        {
-            bestScore = Mathf.Max(bestScore, Mathf.Abs(Vector2.Dot(planTangent, startTangent)));
-        }
-
-        if (TryGetRailEndpointTangent(rail, connectionCoordinate, false, out Vector2 endTangent))
-        {
-            bestScore = Mathf.Max(bestScore, Mathf.Abs(Vector2.Dot(planTangent, endTangent)));
-        }
-
-        if (bestScore <= 0f
-            && TryGetNearestRailVisualTangent(rail, connectionCoordinate, out Vector2 nearestTangent))
-        {
-            bestScore = Mathf.Abs(Vector2.Dot(planTangent, nearestTangent));
-        }
-
-        return bestScore;
-    }
-
-    private static bool TryGetRailEndpointTangent(
-        ProjectF.Railway.IRailTarget rail,
-        Vector2Int connectionCoordinate,
-        bool startEndpoint,
-        out Vector2 tangent)
-    {
-        tangent = Vector2.zero;
-        IReadOnlyList<Vector2> visualPathPoints = rail != null ? rail.RuntimeVisualPathPoints : null;
-        if (visualPathPoints != null && visualPathPoints.Count >= 2)
-        {
-            int visualEndpointIndex = startEndpoint ? 0 : visualPathPoints.Count - 1;
-            if (ChebyshevDistance(VisualPointToCoordinate(visualPathPoints[visualEndpointIndex]), connectionCoordinate) > 1)
-            {
-                return false;
-            }
-
-            Vector2 visualDelta = startEndpoint
-                ? visualPathPoints[1] - visualPathPoints[0]
-                : visualPathPoints[visualPathPoints.Count - 1] - visualPathPoints[visualPathPoints.Count - 2];
-            return TryNormalize(visualDelta, out tangent);
-        }
-
-        IReadOnlyList<Vector2Int> coordinates = rail != null ? rail.RuntimeOccupiedCoordinates : null;
-        if (coordinates == null || coordinates.Count < 2)
-        {
-            return false;
-        }
-
-        int endpointIndex = startEndpoint ? 0 : coordinates.Count - 1;
-        if (ChebyshevDistance(coordinates[endpointIndex], connectionCoordinate) > 1)
-        {
-            return false;
-        }
-
-        Vector2Int gridDelta = startEndpoint
-            ? coordinates[1] - coordinates[0]
-            : coordinates[coordinates.Count - 1] - coordinates[coordinates.Count - 2];
-        return TryNormalize(new Vector2(gridDelta.x, gridDelta.y), out tangent);
-    }
-
-    private static bool TryGetNearestRailVisualTangent(
-        ProjectF.Railway.IRailTarget rail,
-        Vector2Int connectionCoordinate,
-        out Vector2 tangent)
-    {
-        tangent = Vector2.zero;
-        IReadOnlyList<Vector2> visualPathPoints = rail != null ? rail.RuntimeVisualPathPoints : null;
-        if (visualPathPoints != null && visualPathPoints.Count >= 2)
-        {
-            return TryGetNearestPathTangent(visualPathPoints, CoordinateToVisualPoint(connectionCoordinate), out tangent);
-        }
-
-        IReadOnlyList<Vector2Int> coordinates = rail != null ? rail.RuntimeOccupiedCoordinates : null;
-        if (coordinates == null || coordinates.Count < 2)
-        {
-            return false;
-        }
-
-        List<Vector2> coordinatePath = new List<Vector2>(coordinates.Count);
-        for (int i = 0; i < coordinates.Count; i++)
-        {
-            coordinatePath.Add(CoordinateToVisualPoint(coordinates[i]));
-        }
-
-        return TryGetNearestPathTangent(coordinatePath, CoordinateToVisualPoint(connectionCoordinate), out tangent);
-    }
-
-    private static bool TryGetNearestPathTangent(
-        IReadOnlyList<Vector2> pathPoints,
-        Vector2 point,
-        out Vector2 tangent)
-    {
-        tangent = Vector2.zero;
-        if (pathPoints == null || pathPoints.Count < 2)
-        {
-            return false;
-        }
-
-        const float maxSqrDistance = 1.0001f;
-        float bestSqrDistance = float.MaxValue;
-        Vector2 bestDelta = Vector2.zero;
-        for (int i = 0; i + 1 < pathPoints.Count; i++)
-        {
-            Vector2 delta = pathPoints[i + 1] - pathPoints[i];
-            float lengthSqr = delta.sqrMagnitude;
-            if (lengthSqr <= 0.0001f)
-            {
-                continue;
-            }
-
-            float t = Mathf.Clamp01(Vector2.Dot(point - pathPoints[i], delta) / lengthSqr);
-            Vector2 closest = pathPoints[i] + delta * t;
-            float sqrDistance = (closest - point).sqrMagnitude;
-            if (sqrDistance >= bestSqrDistance)
-            {
-                continue;
-            }
-
-            bestSqrDistance = sqrDistance;
-            bestDelta = delta;
-        }
-
-        return bestSqrDistance <= maxSqrDistance && TryNormalize(bestDelta, out tangent);
+        return Mathf.Abs(Vector2.Dot(normalizedPlanTangent, guideTangent));
     }
 
     private static bool TryNormalize(Vector2 value, out Vector2 normalized)
@@ -1335,11 +1131,6 @@ public sealed class RailloadInstallationController : MonoBehaviour
     private static float Cross2D(Vector2 first, Vector2 second)
     {
         return first.x * second.y - first.y * second.x;
-    }
-
-    private static int ChebyshevDistance(Vector2Int first, Vector2Int second)
-    {
-        return Mathf.Max(Mathf.Abs(first.x - second.x), Mathf.Abs(first.y - second.y));
     }
 
     private void ValidatePlan(RailPathPlan plan)

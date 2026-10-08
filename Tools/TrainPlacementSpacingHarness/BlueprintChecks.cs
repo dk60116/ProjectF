@@ -215,6 +215,11 @@ public readonly struct PreviewRotation
     PreviewRotation(Vector3 forward) { this.forward = forward.normalized; }
     public static PreviewRotation identity => new PreviewRotation(Vector3.forward);
     public static PreviewRotation LookRotation(Vector3 forward, Vector3 up) => new PreviewRotation(forward);
+    public static implicit operator Quaternion(PreviewRotation rotation)
+    {
+        float halfYaw = MathF.Atan2(rotation.forward.x, rotation.forward.z) * .5f;
+        return new Quaternion(0, MathF.Sin(halfYaw), 0, MathF.Cos(halfYaw));
+    }
     public static Vector3 operator *(PreviewRotation rotation, Vector3 vector)
     {
         Vector3 right = new Vector3(rotation.forward.z, 0, -rotation.forward.x);

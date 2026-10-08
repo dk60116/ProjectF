@@ -63,6 +63,16 @@ Coverage includes:
   keep one-cell spacing over 80 frames, including their first rail crossings.
 - Fallback replacement of failed samples, including samples past the successful
   endpoint, and traversal order through several equal-distance rail transitions.
+- Input-selected leader branches retaining the original position until movement
+  consumes the gap, with bounded first-frame progress and one-cell spacing.
+- Solo reverse-driving junction flips replayed from Editor.log frames 2372, 2682
+  and 3105. These execute production route preparation, advance, tape updates and
+  facing resolution with the logged distances and bridge progress.
+- 256 continuous junction scenarios run 40 frames each, feeding the applied front
+  into the next frame. Coverage includes forward/reverse driving, reversed source
+  and destination rails, straight/curved paths, interior destination entries and
+  two movement steps. Bridge metadata survives the fixture's pose-application
+  boundary; every frame checks facing continuity and the movement distance limit.
 - Empty leading locomotive waiting instead of using a trailing engine in reverse.
 - Automatic input, reverse momentum, exact docking step limits, forward-only
   station docking, and bidirectional water-pipe docking through the common

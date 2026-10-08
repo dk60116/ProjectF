@@ -34,6 +34,8 @@ static class Checks
 
     static void Main()
     {
+        RailPlacementChecks.Run();
+        RailCurveChecks.Run();
         RuntimeChecks.Run();
         DebugRendererChecks.Run();
         NewWorld();

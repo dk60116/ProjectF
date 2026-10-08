@@ -35,6 +35,7 @@ public partial class RailHandcar
 {
     readonly List<ConnectedTrainRailMove> connectedTrainOrderScratch = new();
     readonly List<Railload> departureRails = new();
+    readonly Dictionary<Train, RailSample> appliedRailSamples = new();
     const float PushConsistGapTolerance = .04f;
     float railSnapMaxDistance = .75f;
     static readonly FakeMarker RebuildFollowOffsetsMarker = new();
@@ -43,7 +44,15 @@ public partial class RailHandcar
         public Scope Auto() => new();
         public struct Scope : IDisposable { public void Dispose() { } }
     }
-    bool TrySwitchRouteLeaderToInputBranch(bool input, Vector2 direction, Vector2 travel) => false;
+    Railload selectedInputBranch;
+    bool TryFindBranchRailSample(RailSample current, Vector2 input, out RailSample sample)
+    {
+        sample = default;
+        if (selectedInputBranch == null) return false;
+        selectedInputBranch.TryFindNearestRenderedPathSample(current.Point, out float distance, out _, out _, out _);
+        sample = Sample(selectedInputBranch, distance);
+        return true;
+    }
     bool TryResolvePreferredConnectedRailTravelDirection(RailSample a, Vector2 direction, RailSample b, out Vector2 travel)
     { travel = direction; return false; }
     bool TryFindConnectedRailSample(RailSample endpoint, Vector2 direction, Railload excluded, out RailSample sample)
@@ -60,6 +69,7 @@ public partial class RailHandcar
         train.Rail = sample.Rail;
         train.Distance = sample.DistanceAlongPath;
         train.AppliedPoint = sample.Point;
+        appliedRailSamples[train] = sample;
         train.transform.forward = new Vector3(facing.x, 0f, facing.y);
     }
 
@@ -84,6 +94,7 @@ public partial class RailHandcar
 
     public static void RunDepartureChecks(Action<bool, string> check)
     {
+        RunSelectedBranchContinuityChecks(check);
         foreach (Vector2 heading in new[] { Vector2.right, Vector2.left, Vector2.up, Vector2.down })
         foreach (int railPattern in new[] { 0, 1, 2 })
         foreach (float facing in new[] { -1f, 1f })
@@ -139,6 +150,33 @@ public partial class RailHandcar
                         $"Departure reversed the physical front: {scenario}, frame={frame}, car={i}, expected={expectedFacing}, actual={actualFacing}");
                 }
             }
+        }
+    }
+
+    static void RunSelectedBranchContinuityChecks(Action<bool, string> check)
+    {
+        foreach (Vector2 heading in new[] { Vector2.right, Vector2.left, Vector2.up, Vector2.down })
+        foreach (bool reversed in new[] { false, true })
+        {
+            var driver = new RailHandcar();
+            var source = InitialRail(heading, 0, 3, false);
+            var target = InitialRail(heading, 3.04f, 3, reversed);
+            driver.selectedInputBranch = target;
+            var leader = InitialCar(source, heading * 3, heading);
+            var rear = InitialCar(source, heading * 2, heading);
+            driver.connectedTrainRailMoveScratch.Add(leader);
+            driver.connectedTrainRailMoveScratch.Add(rear);
+            Train.Link(leader.Train, rear.Train);
+            check(driver.EnsureConsistPathTape(heading), "Branch continuity fixture must initialize the existing two-car route");
+            check(driver.TryApplyPreparedConnectedTrainMoves(rear.Train, heading, heading, .01f, .02f, true, heading, false, out _),
+                "Connected leader must traverse an input-selected gap without losing its route");
+            check(Vector2.Distance(leader.Train.AppliedPoint.Value, heading * 3) <= .01001f,
+                "Connected leader must not gain free distance on branch selection");
+            check(Vector2.Distance(rear.Train.AppliedPoint.Value, heading * 2) <= .01001f,
+                "Connected rear car must retain the same bounded frame movement");
+            check(Vector2.Distance(leader.Train.AppliedPoint.Value, heading * 3.01f) < .00001f
+                && Vector2.Distance(rear.Train.AppliedPoint.Value, heading * 2.01f) < .00001f,
+                "Input-selected gap must preserve forward progress and one-cell spacing");
         }
     }
 

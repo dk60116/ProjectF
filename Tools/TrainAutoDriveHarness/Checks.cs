@@ -753,6 +753,7 @@ public partial class SteamTrain
         Check(stationDriver.TestConsistStationDocking()
               && stationDriver.DockMovement < 0f,
             "Manual driving must be able to align the opposite locomotive by reversing the consist");
+        RailHandcar.RunJunctionFacingChecks(Check);
         RunPathTransferChecks();
         RailHandcar.RunInitialPathChecks(Check);
         RailHandcar.RunDepartureChecks(Check);

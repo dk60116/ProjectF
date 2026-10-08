@@ -32,7 +32,8 @@ public class Vehicle : InstallationObject
     private bool invertWheelRotation;
 
     private ProjectF.Simulation.VehicleMotionState vehicleMotion;
-    private float currentVehicleSignedSpeed { get => vehicleMotion.SignedSpeed; set => vehicleMotion.SignedSpeed = value; }
+    protected virtual ref ProjectF.Simulation.VehicleMotionState MotionState => ref vehicleMotion;
+    private float currentVehicleSignedSpeed { get => MotionState.SignedSpeed; set => MotionState.SignedSpeed = value; }
     private float pendingWheelVisualDistance;
     protected override bool UsesManagedVisualUpdates => true;
     protected override bool ManagedVisualRootCanMove => true;
@@ -114,13 +115,13 @@ public class Vehicle : InstallationObject
         float decelerationPerSecond,
         bool clampToMaxSpeed = true)
     {
-        return vehicleMotion.Advance(inputAxis, deltaTime, maxSpeed,
+        return MotionState.Advance(inputAxis, deltaTime, maxSpeed,
             accelerationPerSecond, decelerationPerSecond, clampToMaxSpeed);
     }
 
     protected void ClampCurrentVehicleSignedSpeed(float maxAbsSpeed)
     {
-        vehicleMotion.Clamp(maxAbsSpeed);
+        MotionState.Clamp(maxAbsSpeed);
     }
 
     protected void ResetVehicleMotion()

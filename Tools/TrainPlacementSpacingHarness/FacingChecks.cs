@@ -167,13 +167,15 @@ public partial class RailHandcar
     const float RailConnectionDistanceEpsilon = 0.000001f;
     readonly List<ConsistPathSample> consistPathTape = new List<ConsistPathSample>();
     readonly List<ConnectedTrainRailMove> connectedTrainRailMoveScratch = new List<ConnectedTrainRailMove>();
+    Vector2 testRouteTravelDirection;
 
     // Network search is not used when the bridge retains its resolved target.
     bool TryFindConnectedRailSample(RailSample endpoint, Vector2 direction, Railload excluded, out RailSample sample)
     { sample = default; throw new Exception("Stored bridge must not search the network again"); }
     float ResolveRailTransitionMovementDistance(RailSample source, RailSample target)
         => Vector2.Distance(source.Point, target.Point);
-    Vector2 ResolveReferenceFacing() => Facing;
+    Vector2 ResolveReferenceFacing() => Facing.sqrMagnitude > .0001f
+        ? Facing : new Vector2(transform.forward.x, transform.forward.z);
     void AddConsistPathSample(List<ConsistPathSample> samples, float distance, RailSample sample)
     { if (samples != null) samples.Add(new ConsistPathSample { Distance = distance, Sample = sample }); }
 
@@ -203,7 +205,7 @@ public partial class RailHandcar
         connectedTrainRailMoveScratch.Clear();
         connectedTrainRailMoveScratch.Add(new ConnectedTrainRailMove
             { Train = car, StartSample = bridge, TargetSample = exit, StartFacingTangent = car.Facing });
-        return ResolveConnectedTrainFacing(0, routeStart + progress, exitRouteDistance, car.Facing);
+        return ResolveConnectedTrainFacing(0, routeStart + progress, exitRouteDistance, car.Facing, testRouteTravelDirection);
     }
 
     public void SetTestRoute(params (Railload rail, float railDistance, float routeDistance)[] points)
@@ -217,6 +219,14 @@ public partial class RailHandcar
                 Distance = point.routeDistance,
                 Sample = new RailSample { Rail = point.rail, DistanceAlongPath = point.railDistance, Point = position, Tangent = tangent }
             });
+        }
+        testRouteTravelDirection = Vector2.zero;
+        for (int i = 1; i < consistPathTape.Count; i++)
+        {
+            Vector2 delta = consistPathTape[i].Sample.Point - consistPathTape[i - 1].Sample.Point;
+            if (delta.sqrMagnitude <= .000001f) continue;
+            testRouteTravelDirection = delta.normalized;
+            break;
         }
     }
 
@@ -233,7 +243,7 @@ public partial class RailHandcar
             StartSample = new RailSample { Rail = fromRail, DistanceAlongPath = fromDistance, Point = startPoint, Tangent = startTangent },
             TargetSample = new RailSample { Rail = toRail, DistanceAlongPath = toDistance, Point = targetPoint, Tangent = targetTangent }
         };
-        Vector2 pathForward = ResolveConsistPathForward(targetRouteDistance, move.TargetSample, car.Facing);
+        Vector2 pathForward = ResolveConsistPathForward(targetRouteDistance, move.TargetSample, testRouteTravelDirection);
         Vector2 neighborOffset = pathForward * (neighborAhead ? 1f : -1f);
         if (invertNeighborTargetOrder) neighborOffset = -neighborOffset;
         var neighborMove = new ConnectedTrainRailMove
@@ -245,7 +255,7 @@ public partial class RailHandcar
         int index = connectedTrainRailMoveScratch.Count;
         connectedTrainRailMoveScratch.Add(move);
         if (!neighborAhead && neighbor != null) connectedTrainRailMoveScratch.Add(neighborMove);
-        return ResolveConnectedTrainFacing(index, startRouteDistance, targetRouteDistance, car.Facing);
+        return ResolveConnectedTrainFacing(index, startRouteDistance, targetRouteDistance, car.Facing, testRouteTravelDirection);
     }
 
     public Vector2 TestBridgeFacing(Train car, Train neighbor, bool neighborAhead,
@@ -259,7 +269,7 @@ public partial class RailHandcar
         TryCreateRailConnectionBridgeSample(source, target, Vector2.Distance(sourcePoint, targetPoint), progress, out var bridge);
         connectedTrainRailMoveScratch.Clear();
         float routeProgress = reverseTape ? bridge.ConnectionPathDistance - progress : progress;
-        Vector2 pathForward = ResolveConsistPathForward(bridgeRouteStart + routeProgress, bridge, car.Facing);
+        Vector2 pathForward = ResolveConsistPathForward(bridgeRouteStart + routeProgress, bridge, testRouteTravelDirection);
         var neighborMove = new ConnectedTrainRailMove
         {
             Train = neighbor,
@@ -275,6 +285,6 @@ public partial class RailHandcar
             Train = car, StartSample = source, TargetSample = bridge, StartFacingTangent = car.Facing
         });
         if (!neighborAhead) connectedTrainRailMoveScratch.Add(neighborMove);
-        return ResolveConnectedTrainFacing(index, bridgeRouteStart, bridgeRouteStart + routeProgress, car.Facing);
+        return ResolveConnectedTrainFacing(index, bridgeRouteStart, bridgeRouteStart + routeProgress, car.Facing, testRouteTravelDirection);
     }
 }

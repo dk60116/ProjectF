@@ -125,6 +125,7 @@ foreach ($signature in @(
     'protected struct RailSample', 'private struct ConnectedTrainRailMove', 'private struct ConsistPathSample', 'private struct InitialConsistPathRouteNode',
     'protected void TransferConsistPathTo(', 'private bool TryReverseConsistPathTape(',
     'private static RailSample ReverseRailConnectionBridgeSample(', 'private bool IsConsistPathTapeValid(',
+    'private static bool TryPrepareBranchRailTransition(',
     'private bool IsConsistPathAlignedWithPreparedTrainSamples(', 'private bool IsConsistPathSampleAlignedWithTrainStart(',
     'private void ResetConsistPathTape(', 'private void AddConsistPathSample(', 'private bool TrySampleConsistPathTape(',
     'private int FindConsistPathUpperBound(', 'private bool TrySampleBetweenConsistPathSamples(',
@@ -144,6 +145,7 @@ foreach ($signature in @(
     'private static Vector2 ResolveRailPathTangent(', 'private static Vector2 ResolveFacingTangentWithFallback(',
     'private static bool TryResolveTangentReferenceSign(',
     'private bool TryApplyPreparedConnectedTrainMoves(', 'private bool EnsureConsistPathTape(',
+    'private bool TrySwitchRouteLeaderToInputBranch(',
     'private bool TryLockConsistToRouteLeaderPath(', 'private bool AreConnectedTrainFollowOffsetsSettled(',
     'private void AppendConsistPathFrame(', 'private void RestoreConsistPathTape(', 'private void TrimConsistPathTape(',
     'private bool TryAdvanceAlongRailNetwork(', 'private bool TryAdvanceExistingRailConnectionBridge(',
@@ -184,6 +186,7 @@ Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'Checks.cs') -Destination $probe
 Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'PathTransferChecks.cs') -Destination $probe
 Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'InitialPathChecks.cs') -Destination $probe
 Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'DepartureChecks.cs') -Destination $probe
+Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'JunctionFacingChecks.cs') -Destination $probe
 [IO.File]::WriteAllText((Join-Path $probe 'Probe.csproj'), '<Project Sdk="Microsoft.NET.Sdk"><PropertyGroup><OutputType>Exe</OutputType><TargetFramework>net9.0</TargetFramework><NoWarn>0649;0414</NoWarn></PropertyGroup><ItemGroup><Reference Include="UnityEngine.CoreModule"><HintPath>C:/Program Files/Unity/Hub/Editor/6000.4.0f1/Editor/Data/Managed/UnityEngine/UnityEngine.CoreModule.dll</HintPath></Reference></ItemGroup></Project>')
 dotnet run --configuration Release --project (Join-Path $probe 'Probe.csproj')
 exit $LASTEXITCODE

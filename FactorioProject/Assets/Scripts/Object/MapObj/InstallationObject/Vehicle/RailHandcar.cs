@@ -460,14 +460,6 @@ public class RailHandcar : Train
     public override void HandleMountedInput(Vector3 worldMoveDirection, float moveSpeed, float deltaTime)
     {
         RecordRailMoveFailure(string.Empty);
-        if (!HasPlacedRailSample)
-        {
-            RecordRailMoveFailure("NoPlacedRailSample");
-            ClearLockedBranchRail();
-            ResetVehicleMotion();
-            return;
-        }
-
         BeginCurrentMovementLoadTracking();
         Vector2 inputVector = new Vector2(worldMoveDirection.x, worldMoveDirection.z);
         float inputMagnitude = Mathf.Clamp01(inputVector.magnitude);
@@ -510,7 +502,8 @@ public class RailHandcar : Train
         bool switchedToBranch = false;
         if (hasInput
             && !isPushingByInput
-            && TryFindBranchRailSample(currentSample, inputDirection, out RailSample branchSample))
+            && TryFindBranchRailSample(currentSample, inputDirection, out RailSample branchSample)
+            && TryPrepareBranchRailTransition(currentSample, branchSample, out branchSample))
         {
             Vector2 branchFacing = ResolveFollowerFacingTangent(branchSample.Tangent, currentFacing, inputDirection);
             LogRailFacingDiscontinuity("ManualRailSelection", this, currentSample, branchSample,
@@ -524,7 +517,7 @@ public class RailHandcar : Train
                 currentFacing,
                 currentSample);
             switchedToBranch = true;
-            LockBranchRail(branchSample.Rail);
+            LockBranchRail(branchSample.ConnectionTargetRail ?? branchSample.Rail);
         }
 
         if (ShouldReleaseForeignPushForReverseInput(inputAxis, CurrentVehicleSignedSpeed))
@@ -2633,7 +2626,8 @@ public class RailHandcar : Train
                     i,
                     leaderStartPathDistance - railMove.FollowOffset,
                     leaderEndPathDistance - railMove.FollowOffset,
-                    facingFallback);
+                    facingFallback,
+                    routeLeaderTravelDirection);
             LogRailFacingDiscontinuity("ApplyConsistPose", railMove.Train, railMove.StartSample, railMove.TargetSample,
                 railMove.StartFacingTangent, facingTangent, routeLeaderTravelDirection);
             ApplyConnectedTrainRailPose(railMove.Train, railMove.TargetSample, facingTangent, deltaTime);
@@ -3879,7 +3873,8 @@ public class RailHandcar : Train
 
         ConnectedTrainRailMove leaderMove = connectedTrainRailMoveScratch[0];
         if (leaderMove.Train == this
-            || !TryFindBranchRailSample(leaderMove.StartSample, inputDirection, out RailSample branchSample))
+            || !TryFindBranchRailSample(leaderMove.StartSample, inputDirection, out RailSample branchSample)
+            || !TryPrepareBranchRailTransition(leaderMove.StartSample, branchSample, out branchSample))
         {
             return false;
         }
@@ -3894,14 +3889,34 @@ public class RailHandcar : Train
         return true;
     }
 
+    private static bool TryPrepareBranchRailTransition(
+        RailSample currentSample,
+        RailSample branchSample,
+        out RailSample transitionSample)
+    {
+        transitionSample = branchSample;
+        if (HasRailConnectionBridgeState(currentSample)) return false;
+        float distance = Vector2.Distance(currentSample.Point, branchSample.Point);
+        if (distance <= RailConnectionDistanceEpsilon) return true;
+
+        // Branch selection must not teleport before the frame's movement is consumed.
+        if (!TryCreateRailConnectionBridgeSample(currentSample, branchSample, distance, 0f, out transitionSample))
+            return false;
+        transitionSample.Tangent = currentSample.Tangent;
+        return true;
+    }
+
     private Vector2 ResolveConnectedTrainFacing(
         int trainIndex,
         float startPathDistance,
         float targetPathDistance,
-        Vector2 fallbackFacing)
+        Vector2 fallbackFacing,
+        Vector2 travelDirection)
     {
         ConnectedTrainRailMove railMove = connectedTrainRailMoveScratch[trainIndex];
-        Vector2 pathForward = ResolveConsistPathForward(targetPathDistance, railMove.TargetSample, fallbackFacing);
+        // Interior branch entries need the route direction to orient their tangent.
+        // A reversing car's physical front points the other way and cannot supply it.
+        Vector2 pathForward = ResolveConsistPathForward(targetPathDistance, railMove.TargetSample, travelDirection);
         if (trainIndex > 0
             && TryResolveFacingFromConnectedTarget(
                 railMove,
@@ -3925,7 +3940,7 @@ public class RailHandcar : Train
         Vector2 referenceFacing = railMove.StartFacingTangent.sqrMagnitude > 0.0001f
             ? railMove.StartFacingTangent
             : fallbackFacing;
-        Vector2 startForward = ResolveConsistPathForward(startPathDistance, railMove.StartSample, fallbackFacing);
+        Vector2 startForward = ResolveConsistPathForward(startPathDistance, railMove.StartSample, travelDirection);
         return pathForward * (Vector2.Dot(referenceFacing, startForward) < 0f ? -1f : 1f);
     }
 
@@ -3968,7 +3983,7 @@ public class RailHandcar : Train
         return true;
     }
 
-    private Vector2 ResolveConsistPathForward(float pathDistance, RailSample sample, Vector2 fallback)
+    private Vector2 ResolveConsistPathForward(float pathDistance, RailSample sample, Vector2 travelDirection)
     {
         if (consistPathTape.Count > 1)
         {
@@ -3988,13 +4003,13 @@ public class RailHandcar : Train
                 Vector2 connectionForward = ResolveRailConnectionForward(
                     bridge.Rail, bridge.DistanceAlongPath,
                     bridge.ConnectionTargetRail, bridge.ConnectionTargetDistanceAlongPath,
-                    progress, fallback);
+                    progress, travelDirection);
                 // Position corrections can point backwards or sideways. Scalar
                 // bridge progress and rail distances define the tape order.
                 Vector2 sourceForward = ResolveRailConnectionForward(
                     bridge.Rail, bridge.DistanceAlongPath,
                     bridge.ConnectionTargetRail, bridge.ConnectionTargetDistanceAlongPath,
-                    0f, fallback);
+                    0f, travelDirection);
                 float tapeDelta = ResolveRailConnectionTapeDistance(end.Sample, bridge, sourceForward)
                     - ResolveRailConnectionTapeDistance(start.Sample, bridge, sourceForward);
                 float sign = tapeDelta < 0f ? -1f : 1f;
@@ -4006,7 +4021,7 @@ public class RailHandcar : Train
                 return ResolveRailConnectionForward(
                     start.Sample.Rail, start.Sample.DistanceAlongPath,
                     end.Sample.Rail, end.Sample.DistanceAlongPath,
-                    sample.Rail == end.Sample.Rail ? 1f : 0f, fallback);
+                    sample.Rail == end.Sample.Rail ? 1f : 0f, travelDirection);
             }
 
             if (sample.Rail != null && start.Sample.Rail == sample.Rail && end.Sample.Rail == sample.Rail)
@@ -4028,7 +4043,7 @@ public class RailHandcar : Train
             }
         }
 
-        return fallback.sqrMagnitude > 0.0001f ? fallback.normalized : Vector2.up;
+        return travelDirection.sqrMagnitude > 0.0001f ? travelDirection.normalized : Vector2.up;
     }
 
     private static float ResolveRailConnectionTapeDistance(RailSample sample, RailSample bridge, Vector2 sourceForward)
@@ -6393,7 +6408,8 @@ public class RailHandcar : Train
         out RailSample branchSample)
     {
         branchSample = default;
-        if (currentSample.Rail == null || inputDirection.sqrMagnitude <= 0.0001f)
+        if (currentSample.Rail == null || HasRailConnectionBridgeState(currentSample)
+            || inputDirection.sqrMagnitude <= 0.0001f)
         {
             return false;
         }
@@ -6937,55 +6953,14 @@ public class RailHandcar : Train
             return false;
         }
 
-        if (TryFindRailConnectionSample(
+        return TryFindRailConnectionSample(
             rail,
             currentSample.Point,
-            false,
-            out distanceAlongPath,
-            out pathPoint,
-            out tangent,
-            out sqrDistance))
-        {
-            return true;
-        }
-
-        return TryFindOverlappingBranchRailSample(
-            rail,
-            currentSample,
+            true,
             out distanceAlongPath,
             out pathPoint,
             out tangent,
             out sqrDistance);
-    }
-
-    private bool TryFindOverlappingBranchRailSample(
-        ProjectF.Railway.IRailTarget rail,
-        RailSample currentSample,
-        out float distanceAlongPath,
-        out Vector2 pathPoint,
-        out Vector2 tangent,
-        out float sqrDistance)
-    {
-        distanceAlongPath = 0f;
-        pathPoint = currentSample.Point;
-        tangent = Vector2.zero;
-        sqrDistance = float.MaxValue;
-        if (rail == null
-            || currentSample.Rail == null
-            || currentSample.Tangent.sqrMagnitude <= 0.0001f
-            || !rail.TryFindNearestRenderedPathSample(
-                currentSample.Point,
-                out distanceAlongPath,
-                out pathPoint,
-                out tangent,
-                out sqrDistance)
-            || tangent.sqrMagnitude <= 0.0001f)
-        {
-            return false;
-        }
-
-        float tangentDot = Mathf.Abs(Vector2.Dot(currentSample.Tangent.normalized, tangent.normalized));
-        return tangentDot >= BranchInternalOverlapMinTangentDot;
     }
 
     private bool TryFindRailConnectionSample(
@@ -7022,7 +6997,12 @@ public class RailHandcar : Train
             return found;
         }
 
-        float maxInternalConnectionDistance = ResolveInternalConnectionMaxDistance();
+        // Once an endpoint is in range, prefer the nearest point on its overlapping
+        // path too. The tighter internal limit still applies to unrelated crossings.
+        float maxConnectionDistance = ResolveRailConnectionMaxDistance();
+        float maxInternalConnectionDistance = found && sqrDistance <= maxConnectionDistance * maxConnectionDistance
+            ? maxConnectionDistance
+            : ResolveInternalConnectionMaxDistance();
         if (rail.TryFindNearestRenderedPathSample(
                 point,
                 out float internalDistance,

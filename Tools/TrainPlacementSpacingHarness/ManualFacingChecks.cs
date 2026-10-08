@@ -42,21 +42,20 @@ public partial class RailHandcar
 {
     public Railload ManualBranchRail;
     public Vector2 TestManualFacing;
+    RailSample TestManualSample;
     public float TestManualInputAxis;
     public int ManualLockCount;
-    bool HasPlacedRailSample => Rail != null;
     float railInputDeadZone = .05f, railSnapMaxDistance = .75f;
-    void RecordRailMoveFailure(string reason) { }
+    string MoveFailure;
+    void RecordRailMoveFailure(string reason) { MoveFailure = reason; }
     void LogRailMoveFailure() { }
     void ClearLockedBranchRail() { }
-    void ResetVehicleMotion() { }
+    new void ResetVehicleMotion() { CurrentVehicleSignedSpeed = 0; }
     void BeginCurrentMovementLoadTracking() { }
-    Vector2 ResolveCoastTravelDirection() => Facing;
-    Vector2 ResolveCoastFacingDirection() => Facing;
+    Vector2 ResolveCoastTravelDirection() => ResolveReferenceFacing();
+    Vector2 ResolveCoastFacingDirection() => ResolveReferenceFacing();
     bool HasConnectedTrainAhead(Vector2 direction) => false;
     void LockBranchRail(Railload rail) { ManualLockCount++; }
-    bool TryResolveCurrentRailSample(Vector2 point, Vector2 travel, float maxSqrDistance, out RailSample sample)
-        => TryCreateRailSampleAtDistance(Rail, Distance, out sample);
     bool TryFindBranchRailSample(RailSample current, Vector2 input, out RailSample sample)
     {
         sample = default;

@@ -54,10 +54,11 @@ static class RuntimeChecks
         Check(replacement.IsTargetActive && !right.IsTargetActive, "Reused placement identity cannot reactivate stale target");
         world.RemoveSaved(b.StorageKey);
         Check(!b.IsTargetActive && !SteamTrain.HasStation("Renamed"), "Station demolition removes runtime and route identity");
-        world.CollectRailsAtCoordinate(new Vector2Int(0, 0), rails);
+        for (int i = 0; i < 10000; i++) world.CollectRailsAtCoordinate(new Vector2Int(0, 0), rails);
         long before = GC.GetAllocatedBytesForCurrentThread();
         for (int i = 0; i < 10000; i++) world.CollectRailsAtCoordinate(new Vector2Int(0, 0), rails);
-        Check(GC.GetAllocatedBytesForCurrentThread() == before, "Warmed data coordinate queries allocate zero bytes");
+        long allocated = GC.GetAllocatedBytesForCurrentThread() - before;
+        Check(allocated == 0, $"Warmed data coordinate queries allocate zero bytes, got {allocated}");
         world.Clear(); Check(!a.IsTargetActive && !left.IsTargetActive && !replacement.IsTargetActive, "World reset invalidates all identities");
         Console.WriteLine($"PASS viewless rail/station runtime: {checks} checks");
     }

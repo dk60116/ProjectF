@@ -23932,7 +23932,7 @@ public partial class InstallationPlacementController : MonoBehaviour
             return (allowedFilter & InstallationMapFilter.Railload) != 0;
         }
 
-        return IsInstallationObjectAllowedForPlacement(savedOccupyingObject, allowedFilter);
+        return IsInstallationObjectAllowedForPlacement(savedOccupyingObject, footprintSource, allowedFilter);
     }
 
     private void RestoreCachedInstallGridBlockedCoordinates(
@@ -34472,7 +34472,7 @@ public partial class InstallationPlacementController : MonoBehaviour
             return true;
         }
 
-        if (IsInstallationObjectAllowedForPlacement(occupyingObject, allowedFilter))
+        if (IsInstallationObjectAllowedForPlacement(occupyingObject, footprintSource, allowedFilter))
         {
             return true;
         }
@@ -40479,11 +40479,18 @@ public partial class InstallationPlacementController : MonoBehaviour
 
     private static bool IsInstallationObjectAllowedForPlacement(
         IMapObjectTarget occupyingObject,
+        MapObject footprintSource,
         InstallationMapFilter allowedFilter)
     {
         if (!(occupyingObject is InstallationObject occupyingInstallation))
         {
             return false;
+        }
+
+        // Rails occupy the ground beneath vehicles, not the vehicles' installation layer.
+        if (occupyingInstallation is Train && IsRailloadSource(footprintSource))
+        {
+            return true;
         }
 
         InstallationMapFilter requiredFilter = occupyingInstallation is Floor

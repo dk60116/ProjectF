@@ -8,8 +8,27 @@ static class Application { public static bool isPlaying => false; }
 static class ProjectFApplicationLifecycle { public static bool IsQuitting => false; }
 public sealed class SceneObject { public bool activeInHierarchy = true; public string name = "Test"; }
 public sealed class SceneTransform { public Vector3 forward = Vector3.right, position, localScale = Vector3.one; public Matrix4x4 worldToLocalMatrix => Matrix4x4.identity; public Matrix4x4 localToWorldMatrix => Matrix4x4.identity; }
-public class MapObject
-{ public enum MultiFocusMode { None } public enum MapObjectStatus { None } }
+public class MapObject : IMapObjectTarget
+{
+    public enum MultiFocusMode { None }
+    public enum MapObjectStatus { None }
+    public MapObject Component, ChildComponent;
+    public T GetComponent<T>() where T : class => this as T ?? Component as T;
+    public T GetComponentInChildren<T>(bool includeInactive) where T : class
+        => GetComponent<T>() ?? ChildComponent as T;
+    MapObject IMapObjectTarget.SceneObject => this;
+    bool IMapObjectTarget.IsTargetActive => true;
+    Vector3 IMapObjectTarget.WorldPosition => Vector3.zero;
+    string IMapObjectTarget.ObjectName => "Test";
+    bool IMapObjectTarget.AllowsFocus => true;
+    bool IMapObjectTarget.AllowsAnimalTraversal => true;
+    MultiFocusMode IMapObjectTarget.FocusMode => MultiFocusMode.None;
+    MapObjectStatus IMapObjectTarget.Status => MapObjectStatus.None;
+    ItemDefinition IMapObjectTarget.BoundItemDefinition => null;
+    int IMapObjectTarget.ResolveItemId() => 0;
+    int IMapObjectTarget.ResolvedItemId => 0;
+    int IMapObjectTarget.ID => 0;
+}
 public interface IMapObjectTarget
 {
     MapObject SceneObject { get; } bool IsTargetActive { get; } Vector3 WorldPosition { get; }
@@ -30,6 +49,7 @@ public class InstallationObject : MapObject, IMapObjectTarget, IRailwayTarget
     public long RuntimePlacementSequence;
     public List<Vector2Int> RuntimeOccupiedCoordinates = new List<Vector2Int>();
     public ItemDefinition BoundItemDefinition;
+    public InstallationMapFilter MapFilter = InstallationMapFilter.Ground;
     public MapObject SceneObject => this;
     public bool IsTargetActive => isActiveAndEnabled;
     public Vector3 WorldPosition => transform.position;
@@ -51,8 +71,6 @@ public class InstallationObject : MapObject, IMapObjectTarget, IRailwayTarget
     { anchor = RuntimeAnchorCoordinate; rotation = RuntimeQuarterTurns; return RuntimePlacementSequence > 0; }
     public static int CompareSimulationOrder(InstallationObject a, InstallationObject b)
         => a.RuntimePlacementSequence.CompareTo(b.RuntimePlacementSequence);
-    public T GetComponent<T>() where T : class => this as T;
-    public T GetComponentInChildren<T>(bool includeInactive) where T : class => this as T;
     public T[] GetComponentsInChildren<T>(bool includeInactive) where T : class => Array.Empty<T>();
     protected virtual void OnEnable() { }
     protected virtual void OnDisable() { }

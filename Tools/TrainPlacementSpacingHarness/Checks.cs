@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using ProjectF.Trains;
+using ProjectF.Railway;
 using UnityEngine;
 
 static class Checks
@@ -108,8 +109,11 @@ static class Checks
         Check(Near(closeB.Distance, 1.2f), "Short placement must extend onto the available tail rail");
         FacingChecks.Run();
         ManualFacingChecks.Run();
+        RailHandcar.RunRailAcquisitionChecks();
+        RailHandcar.RunJunctionMotionChecks();
         BlueprintChecks.Run();
         EditChecks.Run();
+        WorldChecks.Run();
         Console.WriteLine($"Train spacing harness passed: {checks} checks");
     }
 }
@@ -119,7 +123,18 @@ public class MapObject
     public readonly FakeTransform transform = new FakeTransform();
     public readonly FakeGameObject gameObject = new FakeGameObject();
     public Vector2 CollisionHalfExtents = new Vector2(0.3f, 0.5f);
+    protected virtual void OnEnable() { }
+    protected virtual void OnDisable() { }
+    protected virtual void OnPlacementRuntimeChanged() { }
+    protected virtual void OnPlacementRuntimeCleared() { }
+    protected virtual void OnRuntimeMapObjectHandleChanged() { }
+    public virtual void PrepareForPool()
+    {
+        if (this is Train train) { train.RuntimePlacementSequence = 0; train.RuntimeMapObjectHandle = default; }
+        OnPlacementRuntimeCleared();
+    }
 }
+public static class ProjectFApplicationLifecycle { public static bool IsQuitting; }
 public class FakeTransform
 {
     public Vector3 position;
@@ -127,7 +142,7 @@ public class FakeTransform
     public Vector3 forward => rotation * Vector3.forward;
 }
 public class FakeGameObject { public bool activeInHierarchy = true; }
-public partial class Train : MapObject
+public partial class Train : VehicleMotionProbe
 {
     public float ConnectionSnapMaxDistance = 0.6f;
     public float ConnectionMaxLateralDistance = 0.45f;
@@ -138,32 +153,54 @@ public partial class Train : MapObject
     { foreach (Train train in ActiveRuntimeTrains) results.Add(train); }
     public bool TryGetPlacementRuntime(out Vector2Int coordinate, out int quarterTurns)
     { coordinate = Vector2Int.zero; quarterTurns = 0; return RuntimePlacementSequence > 0; }
-    readonly Dictionary<Train, bool> connectedTrainEnds = new Dictionary<Train, bool>();
-    public IReadOnlyCollection<Train> ConnectedTrains => connectedTrainEnds.Keys;
-    public static int GraphRevision;
-    static void IncrementConnectionGraphRevision() { GraphRevision++; }
-    public void SeedConnection(Train other) { AddTrainConnection(other); other.AddTrainConnection(this); }
-    public long RuntimePlacementSequence;
-    public Railload Rail;
-    public float Distance;
-    public Vector2 Point, Facing;
+    private TrainInstance runtimeTrain;
+    private readonly Queue<Train> connectionActionGroupQueue = new Queue<Train>();
+    private readonly HashSet<Train> connectionActionGroupVisited = new HashSet<Train>();
+    private readonly List<TrainInstance> connectionCandidateScratch = new List<TrainInstance>();
+    public Train() { TrainWorld.Shared.AttachView(RuntimeTrain, this); }
+    public NativeTrainConnections ConnectedTrains => new NativeTrainConnections(runtimeTrain);
+    public ProjectF.MapObjects.MapObjectHandle RuntimeMapObjectHandle;
+    public void BindHandle(ProjectF.MapObjects.MapObjectHandle handle)
+    { RuntimeMapObjectHandle = handle; OnRuntimeMapObjectHandleChanged(); }
+    public void Enable() { gameObject.activeInHierarchy = true; OnEnable(); }
+    public void Disable() { gameObject.activeInHierarchy = false; OnDisable(); }
+    public void DestroyView() { OnDestroy(); }
+    public void SeedConnection(Train other)
+    {
+        TryGetConnectionPose(this, out Vector2 point, out Vector2 facing);
+        TryGetConnectionPose(other, out Vector2 otherPoint, out Vector2 otherFacing);
+        TrainWorld.Shared.Connect(RuntimeTrain, other.RuntimeTrain,
+            Vector2.Dot(otherPoint - point, facing) > 0,
+            Vector2.Dot(point - otherPoint, otherFacing) > 0);
+    }
+    private long runtimePlacementSequence;
+    public long RuntimePlacementSequence
+    {
+        get => runtimePlacementSequence;
+        set { runtimePlacementSequence = value; OnPlacementRuntimeChanged(); }
+    }
+    public Railload Rail
+    {
+        get => RuntimeTrain.Rail;
+        set
+        {
+            if (value == null) RuntimeTrain.ClearRailSample();
+            else RuntimeTrain.SetRailSample(value, Distance, Point, Facing);
+        }
+    }
+    public float Distance => DeterministicSimulationUnits.ToFloat(RuntimeTrain.RailDistanceUnits);
+    public Vector2 Point => RuntimeTrain.RailPoint;
+    public Vector2 Facing => RuntimeTrain.PhysicalForward;
     public int ApplyCount;
-    public Railload BridgeTarget;
-    float bridgeDistance, bridgeLength, bridgeProgress;
-    Vector2 bridgePoint, bridgeTangent;
-    public bool TryGetCurrentRailPose(out Railload rail, out float distance, out Vector2 point, out Vector2 facing)
-    { rail = Rail; distance = Distance; point = Point; facing = Facing; return rail != null; }
+    public Railload BridgeTarget => RuntimeTrain.ConnectionTargetRail;
     public bool TryApplyRailPose(Railload rail, float distance, Vector2 point, Vector2 facing)
     {
-        Rail = rail; Distance = distance; Point = point; Facing = facing; ApplyCount++; BridgeTarget = null;
+        RuntimeTrain.SetRailSample(rail, distance, point, facing); ApplyCount++;
         transform.position = new Vector3(point.x, 0, point.y);
         transform.rotation = PreviewRotation.LookRotation(new Vector3(facing.x, 0, facing.y), Vector3.up);
+        TrainWorld.Shared.SetWorldPose(RuntimeTrain, transform.position, transform.rotation);
         return true;
     }
-    public bool TryGetCurrentRailConnectionTransition(out Railload rail, out float distance, out Vector2 point, out Vector2 tangent, out float length, out float progress)
-    { rail = BridgeTarget; distance = bridgeDistance; length = bridgeLength; progress = bridgeProgress; point = bridgePoint; tangent = bridgeTangent; return rail != null; }
-    public void ConfigureCurrentRailConnectionTransition(Railload rail, float distance, Vector2 point, Vector2 tangent, float length, float progress)
-    { BridgeTarget = rail; bridgeDistance = distance; bridgePoint = point; bridgeTangent = tangent; bridgeLength = length; bridgeProgress = progress; }
 }
 public partial class RailHandcar : Train
 {
@@ -175,6 +212,7 @@ public class SteamTrain : RailHandcar { }
 public static class RailConnectionUtility { public const float ConnectionDistance = 0.55f; }
 public class Railload
 {
+    public bool Alive = true;
     readonly Vector2[] points;
     public Railload(params Vector2[] points) { this.points = points; }
     public bool TryGetRenderedPathLength(out float length)
@@ -214,4 +252,9 @@ public class Railload
         }
         return !float.IsPositiveInfinity(sqr);
     }
+}
+
+public static class RailTargetLifetime
+{
+    public static bool IsAlive(this Railload rail) => rail != null && rail.Alive;
 }

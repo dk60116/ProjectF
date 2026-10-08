@@ -53,6 +53,28 @@ foreach ($signature in @(
     'public bool TryGetRenderedEndpointSample(', 'public bool TryFindNearestPathPointAndTangent('
 )) { $generated += (Read-Member $rail $signature) + "`n" }
 $generated += "}`n"
+[string]$railPlacement = [IO.File]::ReadAllText((Join-Path $repo "$root/Object/MapObj/InstallationObject/RailloadInstallationController.cs"))
+$generated += "public partial class RailloadInstallationController {`n"
+foreach ($constant in [regex]::Matches($railPlacement, '(?m)^\s*private const float [^;]+;')) {
+    $generated += $constant.Value + "`n"
+}
+$generated += (Read-Member $railPlacement 'private static readonly Vector2Int[] ConnectionProbeOffsets') + ";`n"
+$generated += 'private static readonly List<ProjectF.Railway.IRailTarget> connectionCandidates = new List<ProjectF.Railway.IRailTarget>(8);' + "`n"
+$generated += (Read-Member $railPlacement 'private sealed class RailPathPlan') + "`n"
+$geometryStart = $railPlacement.IndexOf('    private RailPathPlan BuildPlan(', [StringComparison]::Ordinal)
+$geometryEnd = $railPlacement.IndexOf('    private void ValidatePlan(', $geometryStart, [StringComparison]::Ordinal)
+if ($geometryStart -lt 0 -or $geometryEnd -le $geometryStart) { throw 'Missing rail placement geometry boundary' }
+$generated += $railPlacement.Substring($geometryStart, $geometryEnd - $geometryStart) + "`n}`n"
+[string]$installation = [IO.File]::ReadAllText((Join-Path $repo "$root/Object/MapObj/InstallationObject/InstallationObject.cs"))
+$generated += (Read-Member $installation 'public enum InstallationMapFilter') + "`n"
+$placement = [IO.File]::ReadAllText((Join-Path $repo "$root/Object/MapObj/InstallationObject/InstallationPlacementController.cs"))
+$generated += "public partial class InstallationPlacementController {`n"
+foreach ($signature in @('private static bool IsInstallationObjectAllowedForPlacement(',
+    'private static bool IsRailloadSource(', 'private static bool CanInstallGridSourceShareSavedInstallationCell(',
+    'private static bool TryResolveInstallationObject(', 'public static InstallationMapFilter ResolvePlacementMapFilter(')) {
+    $generated += (Read-Member $placement $signature) + "`n"
+}
+$generated += "}`n"
 $train = [IO.File]::ReadAllText((Join-Path $repo "$root/Object/MapObj/InstallationObject/Vehicle/SteamTrain.cs"))
 $generated += "public partial class SteamTrain : Train {`n"
 $generated += (Read-Member $train 'private static class AutoDriveRoutePlanner').Replace(
@@ -83,9 +105,18 @@ Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'Checks.cs') -Destination $probe
 Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'Boundaries.cs') -Destination $probe
 Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'RuntimeChecks.cs') -Destination $probe
 Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'DebugRendererChecks.cs') -Destination $probe
+Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'RailPlacementChecks.cs') -Destination $probe
+Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'RailCurveChecks.cs') -Destination $probe
 [IO.File]::WriteAllText((Join-Path $probe 'Probe.csproj'), '<Project Sdk="Microsoft.NET.Sdk"><PropertyGroup><OutputType>Exe</OutputType><TargetFramework>net9.0</TargetFramework><LangVersion>9.0</LangVersion></PropertyGroup><ItemGroup><Reference Include="UnityEngine.CoreModule"><HintPath>C:/Program Files/Unity/Hub/Editor/6000.4.0f1/Editor/Data/Managed/UnityEngine/UnityEngine.CoreModule.dll</HintPath></Reference></ItemGroup></Project>')
 dotnet run --configuration Release --project (Join-Path $probe 'Probe.csproj')
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+$blockPlacement = Read-Member $placement 'private bool CanPlacePreviewOnTargetBlockType('
+$occupantCheck = $blockPlacement.IndexOf('IsInstallationObjectAllowedForPlacement(occupyingObject, footprintSource, allowedFilter)', [StringComparison]::Ordinal)
+$terrainCheck = $blockPlacement.IndexOf('&& !CanPlaceOnTerrainBiome(block, allowedFilter)', [StringComparison]::Ordinal)
+if ($occupantCheck -lt 0 -or $terrainCheck -lt 0 -or $terrainCheck -gt $occupantCheck) {
+    throw 'Live rail/train co-occupancy must use the shared placement rule after terrain validation.'
+}
+Write-Output 'PASS live placement applies the shared occupancy rule after terrain validation (source contract)'
 foreach ($file in @('Map/TerrainGenerator.TrainStations.cs', 'Object/MapObj/InstallationObject/Vehicle/SteamTrain.cs',
     'Object/MapObj/InstallationObject/RailLineDebugRenderer.cs')) {
     $source = [IO.File]::ReadAllText((Join-Path $repo "$root/$file"))

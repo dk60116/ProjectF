@@ -1,4 +1,5 @@
 using System.Collections.Generic;
+using ProjectF.Railway;
 using UnityEngine;
 
 public class Train : Vehicle
@@ -7,10 +8,6 @@ public class Train : Vehicle
     public const float ConnectionCenterDistance = 1f;
     private const float MinConnectionDistance = 0.05f;
     private const float DefaultConnectionFallbackDistance = 1.4f;
-    private const float StoredRailPointDeviationSqr = 0.000001f;
-
-    private static readonly HashSet<Train> ActiveRuntimeTrains = new HashSet<Train>();
-    private static ulong connectionGraphRevision;
 
     [SerializeField, Min(0.01f)]
     private float trainConnectionSnapMaxDistance = 0.6f;
@@ -19,28 +16,37 @@ public class Train : Vehicle
     [SerializeField, Range(0f, 1f)]
     private float trainConnectionMinForwardDot = 0.5f;
     private Rigidbody cachedTrainRigidbody;
-    private ProjectF.Railway.IRailTarget currentRail;
-    private long currentRailDistanceUnits;
-    private Vector2 currentRailPoint;
-    private Vector2 currentRailTangent;
-    private ProjectF.Railway.IRailTarget currentRailConnectionTargetRail;
-    private long currentRailConnectionTargetDistanceUnits;
-    private Vector2 currentRailConnectionTargetPoint;
-    private Vector2 currentRailConnectionTargetTangent;
-    private long currentRailConnectionPathDistanceUnits;
-    private long currentRailConnectionProgressUnits;
-    // Connection identity includes the physical end of this car. Rail path point
-    // order and the direction of travel must not change which end is the front.
-    private readonly Dictionary<Train, bool> connectedTrainEnds = new Dictionary<Train, bool>();
+    private TrainInstance runtimeTrain;
     private readonly Queue<Train> connectionActionGroupQueue = new Queue<Train>();
     private readonly HashSet<Train> connectionActionGroupVisited = new HashSet<Train>();
+    private readonly List<TrainInstance> connectionCandidateScratch = new List<TrainInstance>();
+
+    internal TrainInstance RuntimeTrain
+    {
+        get
+        {
+            if (runtimeTrain == null || !runtimeTrain.IsAlive)
+                runtimeTrain = TrainWorld.Shared.Create();
+            return runtimeTrain;
+        }
+    }
+
+    protected override ref ProjectF.Simulation.VehicleMotionState MotionState
+    {
+        get
+        {
+            // Pool release runs before OnDisable. Cleanup may reset the released
+            // record, but must not allocate a new entity for a parked pooled view.
+            if (runtimeTrain == null) runtimeTrain = TrainWorld.Shared.Create();
+            return ref runtimeTrain.Motion;
+        }
+    }
 
     public float ConnectionSnapMaxDistance => Mathf.Max(MinConnectionDistance, trainConnectionSnapMaxDistance);
     public float ConnectionMaxLateralDistance => Mathf.Max(MinConnectionDistance, trainConnectionMaxLateralDistance);
     public float ConnectionMinForwardDot => Mathf.Clamp01(trainConnectionMinForwardDot);
-    public bool HasPlacedRailSample => currentRail != null;
-    public IReadOnlyCollection<Train> ConnectedTrains => connectedTrainEnds.Keys;
-    public static ulong ConnectionGraphRevision => connectionGraphRevision;
+    public NativeTrainConnections ConnectedTrains => new NativeTrainConnections(runtimeTrain);
+    public static ulong ConnectionGraphRevision => TrainWorld.Shared.ConnectionGraphRevision;
 
     public bool IsConsistMoving(float speedThreshold = 0.0001f)
     {
@@ -132,22 +138,7 @@ public class Train : Vehicle
 
     public static void CollectActiveRuntimeTrains(ICollection<Train> results)
     {
-        if (results == null || ActiveRuntimeTrains.Count <= 0)
-        {
-            return;
-        }
-
-        foreach (Train train in ActiveRuntimeTrains)
-        {
-            if (train == null
-                || !train.gameObject.activeInHierarchy
-                || !train.TryGetPlacementRuntime(out _, out _))
-            {
-                continue;
-            }
-
-            results.Add(train);
-        }
+        TrainWorld.Shared.CollectActiveViews(results);
     }
 
     public bool TryGetTouchingUnconnectedTrain(out Train target)
@@ -160,9 +151,15 @@ public class Train : Vehicle
 
         CollectConnectionActionGroup();
         float nearestDistanceSqr = float.MaxValue;
-        foreach (Train candidate in ActiveRuntimeTrains)
+        var world = TrainWorld.Shared;
+        world.IncludeConnectionRange(ConnectionSnapMaxDistance, ConnectionMaxLateralDistance);
+        Vector3 position = transform.position;
+        world.CollectNearby(new Vector2(position.x, position.z),
+            ConnectionCenterDistance + world.MaxConnectionSnapDistance + world.MaxConnectionLateralDistance,
+            connectionCandidateScratch);
+        foreach (TrainInstance instance in connectionCandidateScratch)
         {
-            if (candidate == null
+            if (!world.TryGetView(instance, out Train candidate)
                 || connectionActionGroupVisited.Contains(candidate)
                 || !CanConnectTo(candidate))
             {
@@ -183,6 +180,7 @@ public class Train : Vehicle
 
         connectionActionGroupQueue.Clear();
         connectionActionGroupVisited.Clear();
+        connectionCandidateScratch.Clear();
         return target != null;
     }
 
@@ -258,7 +256,8 @@ public class Train : Vehicle
     protected override void OnEnable()
     {
         base.OnEnable();
-        ActiveRuntimeTrains.Add(this);
+        SynchronizeTrainPlacement();
+        TrainWorld.Shared.AttachView(RuntimeTrain, this);
     }
 
     protected override void OnDisable()
@@ -266,19 +265,54 @@ public class Train : Vehicle
         if (ProjectFApplicationLifecycle.IsQuitting) return;
 
         ClearTrainConnections();
-        ActiveRuntimeTrains.Remove(this);
+        if (runtimeTrain != null)
+        {
+            TrainWorld.Shared.SetActive(runtimeTrain, false);
+            TrainWorld.Shared.DetachView(runtimeTrain);
+        }
         base.OnDisable();
     }
 
     public override void PrepareForPool()
     {
-        ActiveRuntimeTrains.Remove(this);
         base.PrepareForPool();
+        TrainWorld.Shared.Release(runtimeTrain);
+    }
+
+    private void OnDestroy()
+    {
+        if (ProjectFApplicationLifecycle.IsQuitting) return;
+        TrainWorld.Shared.Release(runtimeTrain);
+        runtimeTrain = null;
+    }
+
+    protected override void OnRuntimeMapObjectHandleChanged()
+    {
+        if (RuntimeMapObjectHandle.IsValid) RuntimeTrain.Handle = RuntimeMapObjectHandle;
+        else if (runtimeTrain != null) runtimeTrain.Handle = default;
+        base.OnRuntimeMapObjectHandleChanged();
+    }
+
+    protected override void OnPlacementRuntimeChanged()
+    {
+        SynchronizeTrainPlacement();
+        base.OnPlacementRuntimeChanged();
+    }
+
+    private void SynchronizeTrainPlacement()
+    {
+        TrainInstance state = RuntimeTrain;
+        state.Handle = RuntimeMapObjectHandle;
+        TrainWorld.Shared.IncludeConnectionRange(ConnectionSnapMaxDistance, ConnectionMaxLateralDistance);
+        TrainWorld.Shared.SetWorldPose(state, transform.position, transform.rotation);
+        TrainWorld.Shared.SetPlacement(state, TryGetPlacementRuntime(out _, out _), RuntimePlacementSequence);
     }
 
     protected override void OnPlacementRuntimeCleared()
     {
         ClearPlacedRailSample();
+        TrainWorld.Shared.SetPlacement(runtimeTrain, false, 0);
+        if (runtimeTrain != null) runtimeTrain.Handle = default;
         base.OnPlacementRuntimeCleared();
     }
 
@@ -290,11 +324,7 @@ public class Train : Vehicle
 
     private void ClearCurrentRailSample()
     {
-        currentRail = null;
-        currentRailDistanceUnits = 0L;
-        currentRailPoint = Vector2.zero;
-        currentRailTangent = Vector2.zero;
-        ClearCurrentRailConnectionTransition();
+        runtimeTrain?.ClearRailSample();
     }
 
     public bool ConnectTo(Train other)
@@ -304,40 +334,23 @@ public class Train : Vehicle
             return false;
         }
 
-        bool changed = AddTrainConnection(other);
-        changed |= other.AddTrainConnection(this);
-        if (changed)
-        {
-            IncrementConnectionGraphRevision();
-        }
-
-        return changed;
-    }
-
-    private bool AddTrainConnection(Train other)
-    {
-        if (connectedTrainEnds.ContainsKey(other)) return false;
         TryGetConnectionPose(this, out Vector2 point, out Vector2 facing);
-        TryGetConnectionPose(other, out Vector2 otherPoint, out _);
-        connectedTrainEnds.Add(other, Vector2.Dot(otherPoint - point, facing) > 0f);
-        return true;
+        TryGetConnectionPose(other, out Vector2 otherPoint, out Vector2 otherFacing);
+        return TrainWorld.Shared.Connect(RuntimeTrain, other.RuntimeTrain,
+            Vector2.Dot(otherPoint - point, facing) > 0f,
+            Vector2.Dot(point - otherPoint, otherFacing) > 0f);
     }
 
     internal void SetConnectionEnd(Train other, bool atFront)
     {
-        if (other != null && connectedTrainEnds.TryGetValue(other, out bool previous) && previous != atFront)
-        {
-            connectedTrainEnds[other] = atFront;
-            IncrementConnectionGraphRevision();
-        }
+        if (other != null) TrainWorld.Shared.SetConnectionEnd(runtimeTrain, other.runtimeTrain, atFront);
     }
 
     internal bool TryGetConnectionFacingSign(Train other, bool otherIsAheadOnPath, out float sign)
     {
         sign = 1f;
-        if (other == null || !connectedTrainEnds.TryGetValue(other, out bool atFront)) return false;
-        sign = atFront == otherIsAheadOnPath ? 1f : -1f;
-        return true;
+        return other != null && runtimeTrain != null
+            && runtimeTrain.TryGetConnectionFacingSign(other.runtimeTrain, otherIsAheadOnPath, out sign);
     }
 
     internal static Vector2 ResolveRailConnectionForward(
@@ -395,41 +408,12 @@ public class Train : Vehicle
             return;
         }
 
-        bool changed = connectedTrainEnds.Remove(other);
-        changed |= other.connectedTrainEnds.Remove(this);
-        if (changed)
-        {
-            IncrementConnectionGraphRevision();
-        }
+        TrainWorld.Shared.Disconnect(runtimeTrain, other.runtimeTrain);
     }
 
     public void ClearTrainConnections()
     {
-        if (connectedTrainEnds.Count <= 0)
-        {
-            return;
-        }
-
-        Train[] connectedSnapshot = new Train[connectedTrainEnds.Count];
-        connectedTrainEnds.Keys.CopyTo(connectedSnapshot, 0);
-        for (int i = 0; i < connectedSnapshot.Length; i++)
-        {
-            DisconnectFrom(connectedSnapshot[i]);
-        }
-
-        connectedTrainEnds.Clear();
-    }
-
-    private static void IncrementConnectionGraphRevision()
-    {
-        unchecked
-        {
-            connectionGraphRevision++;
-            if (connectionGraphRevision == 0)
-            {
-                connectionGraphRevision = 1;
-            }
-        }
+        TrainWorld.Shared.ClearConnections(runtimeTrain);
     }
 
     public bool CanConnectTo(Train other)
@@ -580,7 +564,7 @@ public class Train : Vehicle
                 railPoint,
                 facingTangent))
         {
-            currentRailDistanceUnits = System.Math.Max(0L, distanceAlongPathUnits);
+            RuntimeTrain.RailDistanceUnits = System.Math.Max(0L, distanceAlongPathUnits);
         }
     }
 
@@ -624,6 +608,7 @@ public class Train : Vehicle
         Vector3 position = transform.position;
         position.x = railPoint.x;
         position.z = railPoint.y;
+        TrainWorld.Shared.SetWorldPose(RuntimeTrain, position, rotation);
         if (cachedTrainRigidbody == null)
         {
             cachedTrainRigidbody = GetComponent<Rigidbody>();
@@ -673,34 +658,9 @@ public class Train : Vehicle
         out Vector2 tangent)
     {
         rail = null;
-        distanceAlongPath = 0f;
-        pathPoint = Vector2.zero;
-        tangent = Vector2.zero;
-        if (!currentRail.IsAlive()
-            || !currentRail.TrySampleRenderedPath(
-                DeterministicSimulationUnits.ToFloat(currentRailDistanceUnits),
-                out Vector2 sampledPoint,
-                out tangent))
-        {
-            return false;
-        }
-
-        pathPoint = currentRailPoint;
-        if ((currentRailPoint - sampledPoint).sqrMagnitude > StoredRailPointDeviationSqr
-            && currentRailTangent.sqrMagnitude > 0.0001f)
-        {
-            tangent = currentRailTangent;
-        }
-        else if (currentRailTangent.sqrMagnitude > 0.0001f
-            && tangent.sqrMagnitude > 0.0001f
-            && Vector2.Dot(tangent, currentRailTangent.normalized) < 0f)
-        {
-            tangent = -tangent;
-        }
-
-        rail = currentRail;
-        distanceAlongPath = DeterministicSimulationUnits.ToFloat(currentRailDistanceUnits);
-        return true;
+        distanceAlongPath = 0;
+        pathPoint = tangent = Vector2.zero;
+        return runtimeTrain != null && runtimeTrain.TryGetRailPose(out rail, out distanceAlongPath, out pathPoint, out tangent);
     }
 
     public bool TryGetCurrentRailPoseUnits(
@@ -710,17 +670,13 @@ public class Train : Vehicle
         out Vector2 tangent)
     {
         bool found = TryGetCurrentRailPose(out rail, out _, out pathPoint, out tangent);
-        distanceAlongPathUnits = found ? currentRailDistanceUnits : 0L;
+        distanceAlongPathUnits = found ? runtimeTrain.RailDistanceUnits : 0L;
         return found;
     }
 
     protected void SetCurrentRailSample(ProjectF.Railway.IRailTarget rail, float distanceAlongPath, Vector2 point, Vector2 tangent)
     {
-        currentRail = rail;
-        currentRailDistanceUnits = DeterministicSimulationUnits.FromFloat(distanceAlongPath);
-        currentRailPoint = point;
-        currentRailTangent = tangent;
-        ClearCurrentRailConnectionTransition();
+        RuntimeTrain.SetRailSample(rail, distanceAlongPath, point, tangent);
     }
 
     internal void ConfigureCurrentRailConnectionTransition(
@@ -731,22 +687,8 @@ public class Train : Vehicle
         float connectionPathDistance,
         float connectionProgress)
     {
-        if (targetRail == null || connectionPathDistance <= 0f)
-        {
-            ClearCurrentRailConnectionTransition();
-            return;
-        }
-
-        currentRailConnectionTargetRail = targetRail;
-        currentRailConnectionTargetDistanceUnits = DeterministicSimulationUnits.FromFloat(
-            targetDistanceAlongPath);
-        currentRailConnectionTargetPoint = targetPoint;
-        currentRailConnectionTargetTangent = targetTangent;
-        currentRailConnectionPathDistanceUnits = DeterministicSimulationUnits.FromFloat(
-            connectionPathDistance);
-        currentRailConnectionProgressUnits = System.Math.Min(
-            DeterministicSimulationUnits.FromFloat(Mathf.Max(0f, connectionProgress)),
-            currentRailConnectionPathDistanceUnits);
+        RuntimeTrain.ConfigureRailConnectionTransition(targetRail, targetDistanceAlongPath,
+            targetPoint, targetTangent, connectionPathDistance, connectionProgress);
     }
 
     internal bool TryGetCurrentRailConnectionTransition(
@@ -757,26 +699,16 @@ public class Train : Vehicle
         out float connectionPathDistance,
         out float connectionProgress)
     {
-        targetRail = currentRailConnectionTargetRail;
-        targetDistanceAlongPath = DeterministicSimulationUnits.ToFloat(
-            currentRailConnectionTargetDistanceUnits);
-        targetPoint = currentRailConnectionTargetPoint;
-        targetTangent = currentRailConnectionTargetTangent;
-        connectionPathDistance = DeterministicSimulationUnits.ToFloat(
-            currentRailConnectionPathDistanceUnits);
-        connectionProgress = DeterministicSimulationUnits.ToFloat(
-            currentRailConnectionProgressUnits);
-        return targetRail != null && currentRailConnectionPathDistanceUnits > 0L;
+        targetRail = null;
+        targetDistanceAlongPath = connectionPathDistance = connectionProgress = 0;
+        targetPoint = targetTangent = Vector2.zero;
+        return runtimeTrain != null && runtimeTrain.TryGetRailConnectionTransition(out targetRail, out targetDistanceAlongPath,
+            out targetPoint, out targetTangent, out connectionPathDistance, out connectionProgress);
     }
 
     internal void ClearCurrentRailConnectionTransition()
     {
-        currentRailConnectionTargetRail = null;
-        currentRailConnectionTargetDistanceUnits = 0L;
-        currentRailConnectionTargetPoint = Vector2.zero;
-        currentRailConnectionTargetTangent = Vector2.zero;
-        currentRailConnectionPathDistanceUnits = 0L;
-        currentRailConnectionProgressUnits = 0L;
+        runtimeTrain?.ClearRailConnectionTransition();
     }
 
     protected void RefreshRuntimeCoordinate(Vector3 worldPosition)

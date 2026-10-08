@@ -545,10 +545,13 @@ public partial class InstallationObject : MapObject, IMapObjectSimulationIdentit
         }
 
         runtimeMapObjectHandle = handle;
+        OnRuntimeMapObjectHandleChanged();
         if (handle.IsValid) ProjectF.Rendering.InstallationBatchRenderer.Register(this);
         else ProjectF.Rendering.InstallationBatchRenderer.Unregister(this);
         activeInstanceVersion++;
     }
+
+    protected virtual void OnRuntimeMapObjectHandleChanged() { }
 
     protected virtual void OnPlacementRuntimeChanged()
     {
