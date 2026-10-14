@@ -157,6 +157,9 @@ public static class SaveGameItemIdRemapper
                 RemapInstallation(map.installations[i]?.state, itemIdMap, currentDefinitions);
             }
         }
+        if (map.wreckage != null)
+            for (int i = 0; i < map.wreckage.Count; i++)
+                RemapInstallation(map.wreckage[i]?.state, itemIdMap, currentDefinitions);
     }
 
     private static void RemapConveyorBlock(

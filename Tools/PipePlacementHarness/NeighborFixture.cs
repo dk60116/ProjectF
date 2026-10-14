@@ -105,9 +105,8 @@ public sealed class UndergroundPipe : Pipe
     public static bool IsValidPairGeometry(Vector2Int a, Vector2Int b, int limit) =>
         a != b && (a.x == b.x || a.y == b.y);
 }
-public class InputOutputModule : MapObject
+public partial class InputOutputModule : MapObject
 {
-    public enum RectGridBlockType { PipeInput }
     public struct RectGridBlockPlacement { public RectGridBlockType blockType; public int Index; }
 }
 public sealed class Pump : InputOutputModule
@@ -115,7 +114,8 @@ public sealed class Pump : InputOutputModule
     public long RuntimePlacementSequence;
     public Vector2Int First, Second, FirstOut, SecondOut;
     public IReadOnlyList<RectGridBlockPlacement> RectGridPlacements = new[]
-    { new RectGridBlockPlacement { Index = 0 }, new RectGridBlockPlacement { Index = 1 } };
+    { new RectGridBlockPlacement { Index = 0, blockType = RectGridBlockType.PipeInput },
+      new RectGridBlockPlacement { Index = 1, blockType = RectGridBlockType.PipeInput } };
     public bool TryGetRectGridPlacementCoordinate(MapObject source, Vector2Int anchor, int turns,
         RectGridBlockPlacement placement, out Vector2Int coordinate)
     { coordinate = placement.Index == 0 ? First : Second; return true; }
@@ -133,7 +133,8 @@ public sealed class BlockStateStore
     {
         public Vector2Int anchorCoordinate;
         public int conveyorVariantKind = -1, pipeConnectionMask = -1;
-        public Pipe Prototype;
+        public MapObject Prototype;
+        public int quarterTurns;
         public List<Vector2Int> occupiedCoordinates;
     }
 }
@@ -142,6 +143,14 @@ public sealed class TerrainGenerator
     public readonly Dictionary<Vector2Int, Block> Blocks = new();
     public bool TryGetLoadedBlock(Vector2Int coordinate, out Block block) => Blocks.TryGetValue(coordinate, out block);
     public readonly Dictionary<Vector2Int, BlockStateStore.InstallationSaveState> Saved = new();
+    public readonly Dictionary<Vector2Int, List<BlockStateStore.InstallationSaveState>> InteractionOwners = new();
+    public int CollectSavedInstallationStatesAtInteractionCoordinate(Vector2Int coordinate,
+        ICollection<BlockStateStore.InstallationSaveState> states)
+    {
+        if (!InteractionOwners.TryGetValue(coordinate, out var owners)) return 0;
+        foreach (var owner in owners) states.Add(owner);
+        return owners.Count;
+    }
     public bool TryGetSavedPipeInstallationStateAtCoordinate(Vector2Int coordinate, out BlockStateStore.InstallationSaveState state) =>
         Saved.TryGetValue(coordinate, out state);
     public bool TryGetInstallationStateAtCoordinate(Vector2Int coordinate, out BlockStateStore.InstallationSaveState state) =>
@@ -206,8 +215,12 @@ public partial class InstallationPlacementController
     private readonly HashSet<int> adjacentPipeBranchFluidItemIdsScratch = new();
     public int EndpointFluid = -1;
 
-    public void SetNeighbor(int direction, Pipe pipe) => neighbors[PipeCardinalDirections[direction]] = pipe;
-    public void SetPipe(Vector2Int coordinate, Pipe pipe) => neighbors[coordinate] = pipe;
+    public void SetNeighbor(int direction, Pipe pipe) => SetPipe(PipeCardinalDirections[direction], pipe);
+    public void SetPipe(Vector2Int coordinate, Pipe pipe)
+    {
+        neighbors[coordinate] = pipe;
+        if (!pipe.Preview) terrain.Blocks[coordinate] = new Block { ScenePipe = pipe };
+    }
     public void SetInstalledPipe(Vector2Int coordinate, Pipe pipe, int fluid)
     {
         SetPipe(coordinate, pipe);
@@ -309,7 +322,14 @@ public partial class InstallationPlacementController
         || TryMergeFluidCompatibilityConstraint(fluids, ref constrained, new HashSet<int> { fluid });
     private bool TryMergeAdjacentFluidStorageSnapshotConstraint(Vector2Int coordinate, Vector2Int direction,
         MapObject ignored, HashSet<int> fluids, ref bool constrained) => true;
-    private sealed class PlacementSnapshot { public MapObject mapObject; public int storedFluidItemId = -1; }
+    private sealed class PlacementSnapshot
+    {
+        public MapObject mapObject;
+        public int storedFluidItemId = -1;
+        public Vector2Int anchorCoordinate;
+        public int quarterTurns;
+        public Quaternion rotation;
+    }
     private bool TryGetFluidTankPlacementSnapshotAtCoordinate(Vector2Int coordinate, MapObject ignored,
         out PlacementSnapshot snapshot)
     {
@@ -319,14 +339,16 @@ public partial class InstallationPlacementController
         return true;
     }
     private static int ResolveSnapshotStoredFluidItemId(PlacementSnapshot snapshot) => snapshot.storedFluidItemId;
-    private bool TryGetFixedFluidConnectorCompatibilityAtCoordinate(Vector2Int coordinate, Vector2Int direction, out bool compatible)
-    { compatible = tanks.ContainsKey(coordinate); return compatible; }
     private static bool CanPipeAreaBlocksConnect(Vector2Int first, Vector2Int second) => true;
     private bool TryResolveFluidTankBlueprintPipeOutputConnection(Vector2Int tankCoordinate,
         Vector2Int neighborCoordinate, Vector2Int direction, MapObject ignored, out int fluid)
         => fluidSources.TryGetValue(neighborCoordinate, out fluid);
     private bool TryCreateSavedPlacementSnapshot(BlockStateStore.InstallationSaveState state, out PlacementSnapshot snapshot)
-    { snapshot = new PlacementSnapshot { mapObject = state.Prototype }; return true; }
+    {
+        snapshot = new PlacementSnapshot { mapObject = state.Prototype, anchorCoordinate = state.anchorCoordinate,
+            quarterTurns = state.quarterTurns, rotation = new Quaternion(state.quarterTurns) };
+        return state.Prototype != null;
+    }
 
     private long ResolvePipePlacementSequenceAtCoordinate(Vector2Int coordinate, Pipe pipe,
         MapObject ignored)

@@ -23,6 +23,7 @@ public static class Checks
         ProposedPumpUsesBothEndpointFluids();
         PumpBodyInputUsesNetworkFluid();
         VariantChecks.Run(Require);
+        ConnectorChecks.Run(Require);
         LoadingMustKeepSavedShapes();
         TankCornerMustRejectForeignSidePipe();
         Console.WriteLine($"Pipe placement checks passed: {checks}");

@@ -13,7 +13,7 @@ MonoBehaviour:
   m_Name: Item_37_Wooden fence door
   m_EditorClassIdentifier: 
   itemName: Wooden Fence Door
-  id: 83
+  id: 86
   mapObject: {fileID: 3131218003902393541, guid: f792eb3818b43ab4aa29e8e6a5a7e454, type: 3}
   mapObjectArchetype: {fileID: 11400000, guid: 4ab69ee0ed80ada4791d4debd9db12c9, type: 2}
   useMapColor: 1
@@ -35,6 +35,9 @@ MonoBehaviour:
   isManual: 0
   manualTargetItem: {fileID: 0}
   upgradeable: 1
+  maxHealth: 100
+  excludeFromMonsterTargets: 0
+  monsterAttackPriority: 0
   keepIoAreaItemsInPlaceWhileEditing: 0
   capacity: 10
   isFluid: 0

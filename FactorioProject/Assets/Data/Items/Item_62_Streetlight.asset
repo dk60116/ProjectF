@@ -13,7 +13,7 @@ MonoBehaviour:
   m_Name: Item_62_Streetlight
   m_EditorClassIdentifier: Assembly-CSharp::ItemDefinition
   itemName: Streetlight
-  id: 72
+  id: 75
   mapObject: {fileID: 666971777691185006, guid: ae1df0edda6375e4d8677bb94970dfbf, type: 3}
   mapObjectArchetype: {fileID: 11400000, guid: d0c18263ea7d84943a08d0736fb4f8ee, type: 2}
   useMapColor: 1
@@ -33,6 +33,9 @@ MonoBehaviour:
   isManual: 0
   manualTargetItem: {fileID: 0}
   upgradeable: 1
+  maxHealth: 100
+  excludeFromMonsterTargets: 0
+  monsterAttackPriority: 1
   keepIoAreaItemsInPlaceWhileEditing: 0
   capacity: 10
   isFluid: 0

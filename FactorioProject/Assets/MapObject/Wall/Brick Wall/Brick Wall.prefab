@@ -197,14 +197,14 @@ MonoBehaviour:
   m_EditorClassIdentifier: 
   id: 0
   objectName: Brick Wall
-  objId: 86
+  objId: 89
   itemDefinition: {fileID: 11400000, guid: 7795dfaf3b2a492cae3ffb24dfc67efb, type: 2}
   mapStatus:
     mapSizeX: 1
     mapSizeY: 1
     centerCellX: 0
     centerCellY: 0
-  multiFocusMode: 2
+  multiFocusMode: 1
   itemFilterMaskInitialized: 0
   itemFilterMaskWords: 
   animator: {fileID: 0}

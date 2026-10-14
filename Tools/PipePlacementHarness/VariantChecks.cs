@@ -2,12 +2,12 @@ using System;
 using System.Collections.Generic;
 using UnityEngine;
 
-// Prefab geometry and fixed machine ports are fixture boundaries. Variant
+// Prefab geometry and world state are fixture boundaries. Fixed-port lookup, variant
 // selection, rotation, fluid gates and required-port handling use production code.
 public partial class InstallationPlacementController
 {
-    private readonly List<Vector2Int> fixedPorts = new();
-    public void SetFixedPort(Vector2Int direction) => fixedPorts.Add(direction);
+    public void SetFixedPort(Vector2Int direction) => AddPortOwner(Vector2Int.zero,
+        new InputOutputModule { PortDirection = direction }, 0, PortOwnerKind.Preview);
     public int AnchorNetworkFluid = -1;
     public Pipe ResolveVariant(Pipe prototype, int turns, int baseline, out int resolvedTurns, bool preview = false)
     {
@@ -67,8 +67,6 @@ public partial class InstallationPlacementController
     private static int NormalizePlacementQuarterTurnsForObject(MapObject obj, int turns) => NormalizePlacementQuarterTurns(turns);
     private static Quaternion GetPlacementObjectRotation(MapObject obj, int turns) => new(turns);
     private static int CountFenceNeighborDirections(IReadOnlyList<Vector2Int> directions) => directions?.Count ?? 0;
-    private void AppendFixedFluidPipeConnectionDirections(Vector2Int coordinate, MapObject ignored, List<Vector2Int> directions)
-        => directions.AddRange(fixedPorts);
     private List<Vector2Int> GetBoilerFixedFluidPipeConnectionDirections(Vector2Int coordinate, MapObject ignored) => new();
     private static bool TryResolveBoilerTeePipeVariant(Pipe pipe, IReadOnlyList<Vector2Int> neighbors,
         IReadOnlyList<Vector2Int> fixedDirections, int turns, out int resolvedTurns) { resolvedTurns = turns; return false; }
@@ -102,16 +100,6 @@ public partial class InstallationPlacementController
         terrain.Blocks[coordinate].Record.First = coordinate;
     }
     private enum PipeNeighborConnectionSearchMode { PreviewOnly, NonPreviewOnly }
-    private bool TryGetPipeOnlyConnectionAtCoordinate(Pipe prototype, Vector2Int coordinate, MapObject ignored,
-        Vector2Int direction, bool allowPotential, HashSet<int> acceptedFluids, ref bool constrained,
-        PipeNeighborConnectionSearchMode mode)
-    {
-        return neighbors.TryGetValue(coordinate, out Pipe pipe)
-            && (mode == PipeNeighborConnectionSearchMode.PreviewOnly) == pipe.Preview
-            && ShouldPipeNeighborContributeToVariant(coordinate, pipe, default, direction, allowPotential)
-            && CanPipeNeighborContributeToVariant(prototype, coordinate + direction, coordinate,
-                pipe, default, direction, ignored, allowPotential, acceptedFluids, ref constrained);
-    }
     private static bool TryCollectSameCoordinateFixedFluidConstraintsForDirection(Vector2Int coordinate,
         Vector2Int direction, MapObject ignored, HashSet<int> fluids, ref bool constrained) => true;
     private bool CanPipePlacementFluidConnectionsMatch(Vector2Int coordinate, Pipe pipe, int turns,

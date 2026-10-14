@@ -14,6 +14,7 @@ public sealed class BuildingWorldView : MonoBehaviour
     internal static BuildingWorldView Create(BuildingWorld owner, Transform parent, string hostName)
     {
         var root = new GameObject(hostName);
+        root.layer = LayerMask.NameToLayer("Object");
         root.transform.SetParent(parent, false);
         var view = root.AddComponent<BuildingWorldView>();
         view.world = owner;

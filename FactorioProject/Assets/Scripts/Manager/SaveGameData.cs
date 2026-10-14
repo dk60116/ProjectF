@@ -12,7 +12,10 @@ public sealed class SaveGameData
     // Version 67 stores recursive player crafting plans and reserved intermediate outputs.
     // Version 68 stores the remaining volume of completed production fluid outputs.
     // Version 70 preserves data mining selection and harvested outputs awaiting delivery.
-    public const int CurrentVersion = 71;
+    // Version 72 persists player death/health and canonical installation health.
+    // Version 73 adds nonfunctional wreckage, natural-resource HP and individual recovered HP
+    // through inventory, floor stacks, vehicle cargo, arms and native belt payloads.
+    public const int CurrentVersion = 73;
 
     public int version = CurrentVersion;
     public long savedAtUtcTicks;
@@ -57,6 +60,7 @@ public sealed class MapSaveData
     public List<ResourceSaveEntry> resources = new List<ResourceSaveEntry>();
     public List<FloorObjectSaveEntry> floorObjects = new List<FloorObjectSaveEntry>();
     public List<InstallationSaveEntry> installations = new List<InstallationSaveEntry>();
+    public List<InstallationSaveEntry> wreckage = new List<InstallationSaveEntry>();
     public List<ConveyorItemBlockSaveEntry> conveyorItems = new List<ConveyorItemBlockSaveEntry>();
     public List<ConveyorItemRunSaveEntry> conveyorItemRuns = new List<ConveyorItemRunSaveEntry>();
     public List<AnimalSaveEntry> animals = new List<AnimalSaveEntry>();
@@ -138,6 +142,14 @@ public sealed class FloorObjectSaveEntry
 {
     public Vector2Int coordinate;
     public List<int> itemIds = new List<int>();
+    public List<PortableItemHealthSaveState> installationHealth;
+}
+
+[Serializable]
+public struct PortableItemHealthSaveState
+{
+    public int index;
+    public float health;
 }
 
 [Serializable]
@@ -176,6 +188,7 @@ public sealed class ConveyorItemTypeRunSaveEntry
 public sealed class ConveyorItemLaneSaveState
 {
     public ProjectF.Conveyors.BeltSavedLane nativeBeltState;
+    public float installationHealth;
     public int laneIndex = -1;
     public int itemId = -1;
     public Vector3 visualWorldPosition;
@@ -301,7 +314,8 @@ public static class SaveGameConveyorItemBackfill
                 lanes.Add(new ConveyorItemLaneSaveState
                 {
                     laneIndex = laneIndex,
-                    itemId = laneItemId
+                    itemId = laneItemId,
+                    installationHealth = PortableItemHealthMetadata.Read(floorEntry.installationHealth, i)
                 });
             }
         }
@@ -352,11 +366,14 @@ public static class SaveGameConveyorItemBackfill
             }
 
             List<int> compacted = null;
+            List<PortableItemHealthSaveState> compactedHealth = null;
             for (int itemIndex = 0; itemIndex < source.Count; itemIndex++)
             {
                 int itemId = source[itemIndex];
                 if (itemId != Block.ConveyorStackStateSentinel)
                 {
+                    if (compacted != null)
+                        PortableItemHealthMetadata.CopyRange(entry.installationHealth, itemIndex, itemIndex, compacted.Count, ref compactedHealth);
                     compacted?.Add(itemId);
                     continue;
                 }
@@ -364,6 +381,7 @@ public static class SaveGameConveyorItemBackfill
                 if (compacted == null)
                 {
                     compacted = new List<int>(source.Count);
+                    PortableItemHealthMetadata.CopyRange(entry.installationHealth, 0, itemIndex - 1, 0, ref compactedHealth);
                     for (int copyIndex = 0; copyIndex < itemIndex; copyIndex++)
                     {
                         compacted.Add(source[copyIndex]);
@@ -391,6 +409,7 @@ public static class SaveGameConveyorItemBackfill
             else
             {
                 entry.itemIds = compacted;
+                entry.installationHealth = compactedHealth;
             }
 
         }
@@ -401,6 +420,8 @@ public static class SaveGameConveyorItemBackfill
 public sealed class PlayerSaveData
 {
     public bool hasPlayer;
+    public bool hasHealth;
+    public float currentHealth;
     public Vector3 position;
     public Quaternion rotation = Quaternion.identity;
     public bool mountedOnVehicle;
@@ -435,6 +456,8 @@ public sealed class PlayerInventorySlotSaveState
     public int itemId = -1;
     public int count;
     public int capacity;
+    // Zero means pristine; positive values retain the HP of individual recovered units.
+    public List<float> installationHealth;
 }
 
 [Serializable]

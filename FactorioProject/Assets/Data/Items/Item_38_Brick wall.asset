@@ -13,7 +13,7 @@ MonoBehaviour:
   m_Name: Item_38_Brick wall
   m_EditorClassIdentifier: 
   itemName: Brick Wall
-  id: 86
+  id: 89
   mapObject: {fileID: 2276685300360839919, guid: 9b80960e4abf8cc4a901548259cc9e2b, type: 3}
   mapObjectArchetype: {fileID: 11400000, guid: 0cc94c8c529101941805431a9571f1b7, type: 2}
   useMapColor: 0
@@ -33,6 +33,9 @@ MonoBehaviour:
   isManual: 0
   manualTargetItem: {fileID: 0}
   upgradeable: 1
+  maxHealth: 100
+  excludeFromMonsterTargets: 0
+  monsterAttackPriority: 0
   keepIoAreaItemsInPlaceWhileEditing: 0
   capacity: 10
   isFluid: 0

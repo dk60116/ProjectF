@@ -1,0 +1,27 @@
+<Project xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <Target Name="IncludeMonsterAuthoringSources" BeforeTargets="CoreCompile">
+    <ItemGroup Condition="'$(MSBuildProjectName)' == 'ProjectF.Simulation.Core'">
+      <Compile Remove="$(MSBuildProjectDirectory)/Assets/Scripts/Simulation/Core/Monsters/**/*.cs" />
+      <Compile Include="$(MSBuildProjectDirectory)/Assets/Scripts/Simulation/Core/Monsters/**/*.cs" />
+    </ItemGroup>
+    <ItemGroup Condition="'$(MSBuildProjectName)' == 'Assembly-CSharp'">
+      <Compile Remove="$(MSBuildProjectDirectory)/Assets/Scripts/Simulation/Presentation/WorldHealthBarView.cs" />
+      <Compile Include="$(MSBuildProjectDirectory)/Assets/Scripts/Simulation/Presentation/WorldHealthBarView.cs" />
+      <Compile Remove="$(MSBuildProjectDirectory)/Assets/Scripts/Character/Player/PlayerController.Knife.cs" />
+      <Compile Include="$(MSBuildProjectDirectory)/Assets/Scripts/Character/Player/PlayerController.Knife.cs" />
+      <Compile Remove="$(MSBuildProjectDirectory)/Assets/Scripts/Map/Block.ItemHealth.cs" />
+      <Compile Include="$(MSBuildProjectDirectory)/Assets/Scripts/Map/Block.ItemHealth.cs" />
+      <Compile Remove="$(MSBuildProjectDirectory)/Assets/Scripts/Map/BlockStateStore.Health.cs;$(MSBuildProjectDirectory)/Assets/Scripts/Map/InfrastructureTargets.cs;$(MSBuildProjectDirectory)/Assets/Scripts/Map/TerrainGenerator.HealthPresentation.cs;$(MSBuildProjectDirectory)/Assets/Scripts/Simulation/Presentation/MapObjectHealthPresentation.cs" />
+      <Compile Include="$(MSBuildProjectDirectory)/Assets/Scripts/Map/BlockStateStore.Health.cs;$(MSBuildProjectDirectory)/Assets/Scripts/Map/InfrastructureTargets.cs;$(MSBuildProjectDirectory)/Assets/Scripts/Map/TerrainGenerator.HealthPresentation.cs;$(MSBuildProjectDirectory)/Assets/Scripts/Simulation/Presentation/MapObjectHealthPresentation.cs" />
+      <Compile Remove="Assets\Scripts\Object\Monster\Player.Combat.cs;Assets\Scripts\Object\Monster\PlayerHUD.Combat.cs;Assets\Scripts\Object\Monster\TerrainGenerator.Combat.cs" />
+      <Compile Remove="$(MSBuildProjectDirectory)/Assets/Scripts/Object/Monster/**/*.cs" />
+      <Compile Include="$(MSBuildProjectDirectory)/Assets/Scripts/Object/Monster/**/*.cs" />
+      <Compile Remove="$(MSBuildProjectDirectory)/Assets/Scripts/Character/Player/Player.Combat.cs;$(MSBuildProjectDirectory)/Assets/Scripts/HUD/PlayerHUD.Combat.cs;$(MSBuildProjectDirectory)/Assets/Scripts/Map/TerrainGenerator.Combat.cs" />
+      <Compile Include="$(MSBuildProjectDirectory)/Assets/Scripts/Character/Player/Player.Combat.cs;$(MSBuildProjectDirectory)/Assets/Scripts/HUD/PlayerHUD.Combat.cs;$(MSBuildProjectDirectory)/Assets/Scripts/Map/TerrainGenerator.Combat.cs" />
+    </ItemGroup>
+    <ItemGroup Condition="'$(MSBuildProjectName)' == 'Assembly-CSharp-Editor'">
+      <Compile Remove="$(MSBuildProjectDirectory)/Assets/Editor/Monsters/**/*.cs" />
+      <Compile Include="$(MSBuildProjectDirectory)/Assets/Editor/Monsters/**/*.cs" />
+    </ItemGroup>
+  </Target>
+</Project>

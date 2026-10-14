@@ -443,6 +443,9 @@ public class ItemDataEditorWindow : EditorWindow
         public InputOutputJsonEntry manualTargetItem;
         public bool hasUpgradeable;
         public bool upgradeable = true;
+        public float maxHealth = 100f;
+        public bool excludeFromMonsterTargets;
+        public int monsterAttackPriority = -1;
         public bool hasRobotArmEditSettings;
         public bool keepIoAreaItemsInPlaceWhileEditing;
         public int capacity = -1;
@@ -3256,6 +3259,9 @@ public class ItemDataEditorWindow : EditorWindow
             GetMultiSelectedDefinitionProperty(serializedObject, "manualTargetItem");
         SerializedProperty upgradeableProperty =
             GetMultiSelectedDefinitionProperty(serializedObject, "upgradeable");
+        SerializedProperty maxHealthProperty = GetMultiSelectedDefinitionProperty(serializedObject, "maxHealth");
+        SerializedProperty excludeFromMonsterTargetsProperty = GetMultiSelectedDefinitionProperty(serializedObject, "excludeFromMonsterTargets");
+        SerializedProperty monsterAttackPriorityProperty = GetMultiSelectedDefinitionProperty(serializedObject, "monsterAttackPriority");
         SerializedProperty keepIoAreaItemsInPlaceWhileEditingProperty =
             GetMultiSelectedDefinitionProperty(serializedObject, "keepIoAreaItemsInPlaceWhileEditing");
         SerializedProperty capacityProperty =
@@ -3395,6 +3401,12 @@ public class ItemDataEditorWindow : EditorWindow
             }
         }
 
+        DrawMultiPropertyField(maxHealthProperty, new GUIContent("Max HP"));
+        if (AllSelectedDefinitionsAreInstallations())
+        {
+            DrawMultiPropertyField(excludeFromMonsterTargetsProperty, new GUIContent("Exclude From Monster Targets"));
+            DrawMultiPropertyField(monsterAttackPriorityProperty, new GUIContent("Monster Attack Priority"));
+        }
         if (upgradeableProperty != null && AllSelectedDefinitionsSupportUpgrade())
         {
             EditorGUILayout.PropertyField(
@@ -3837,6 +3849,16 @@ public class ItemDataEditorWindow : EditorWindow
         }
     }
 
+    private bool AllSelectedDefinitionsAreInstallations()
+    {
+        if (selectedItemDefinitionsInOrder.Count == 0) return false;
+        for (int i = 0; i < selectedItemDefinitionsInOrder.Count; i++)
+        {
+            if (!(selectedItemDefinitionsInOrder[i]?.mapObject is InstallationObject)) return false;
+        }
+        return true;
+    }
+
     private bool AllSelectedDefinitionsSupportUpgrade()
     {
         if (selectedItemDefinitionsInOrder.Count <= 0)
@@ -4037,6 +4059,9 @@ public class ItemDataEditorWindow : EditorWindow
         SerializedProperty isManualProperty = GetSelectedDefinitionProperty(serializedObject, "isManual");
         SerializedProperty manualTargetItemProperty = GetSelectedDefinitionProperty(serializedObject, "manualTargetItem");
         SerializedProperty upgradeableProperty = GetSelectedDefinitionProperty(serializedObject, "upgradeable");
+        SerializedProperty maxHealthProperty = GetSelectedDefinitionProperty(serializedObject, "maxHealth");
+        SerializedProperty excludeFromMonsterTargetsProperty = GetSelectedDefinitionProperty(serializedObject, "excludeFromMonsterTargets");
+        SerializedProperty monsterAttackPriorityProperty = GetSelectedDefinitionProperty(serializedObject, "monsterAttackPriority");
         SerializedProperty keepIoAreaItemsInPlaceWhileEditingProperty =
             GetSelectedDefinitionProperty(serializedObject, "keepIoAreaItemsInPlaceWhileEditing");
         SerializedProperty capacityProperty = GetSelectedDefinitionProperty(serializedObject, "capacity");
@@ -4173,6 +4198,12 @@ public class ItemDataEditorWindow : EditorWindow
                     manualTargetItemProperty,
                     definitions);
             }
+        }
+        DrawMultiPropertyField(maxHealthProperty, new GUIContent("Max HP"));
+        if (definition.mapObject is InstallationObject)
+        {
+            DrawMultiPropertyField(excludeFromMonsterTargetsProperty, new GUIContent("Exclude From Monster Targets"));
+            DrawMultiPropertyField(monsterAttackPriorityProperty, new GUIContent("Monster Attack Priority"));
         }
         if (upgradeableProperty != null
             && definition.mapObject is InputOutputModule inputOutputModule
@@ -8050,6 +8081,9 @@ public class ItemDataEditorWindow : EditorWindow
                 : null,
             hasUpgradeable = true,
             upgradeable = definition.upgradeable,
+            maxHealth = definition.MaximumHealth,
+            excludeFromMonsterTargets = definition.excludeFromMonsterTargets,
+            monsterAttackPriority = definition.MonsterAttackPriority,
             hasRobotArmEditSettings = definition.mapObject is RobotArm,
             keepIoAreaItemsInPlaceWhileEditing = definition.keepIoAreaItemsInPlaceWhileEditing,
             capacity = definition.capacity > 0 ? definition.capacity : 10,
@@ -8388,10 +8422,17 @@ public class ItemDataEditorWindow : EditorWindow
         if (entry.hasUpgradeable)
         {
             definition.upgradeable = entry.upgradeable;
+            definition.maxHealth = entry.maxHealth > 0f ? entry.maxHealth : 100f;
+            definition.excludeFromMonsterTargets = entry.excludeFromMonsterTargets;
         }
         if (entry.hasRobotArmEditSettings)
         {
             definition.keepIoAreaItemsInPlaceWhileEditing = entry.keepIoAreaItemsInPlaceWhileEditing;
+        }
+        // Older JSON omits this field; retain the authored/default priority in that case.
+        if (entry.monsterAttackPriority >= 0)
+        {
+            definition.monsterAttackPriority = Mathf.Clamp(entry.monsterAttackPriority, 0, 3);
         }
         if (entry.capacity > 0)
         {

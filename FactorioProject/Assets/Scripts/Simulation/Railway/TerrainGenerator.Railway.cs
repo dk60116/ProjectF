@@ -11,7 +11,9 @@ public partial class TerrainGenerator
             state.itemName = BlockStateStore.ResolveInstallationSaveItemName(state.itemId, prototype);
         EnsureResourceStateStore();
         var world = GetRailWorld();
-        if (!world.TryGetRuntime(BlockStateStore.GetInstallationStorageKey(state), out result))
+        // Connected rails can share an anchor, but only the same placement can reuse a runtime.
+        if (!resourceStateStore.TryGetInstallationStorageKey(state.placementSequence, state.itemId, out var storageKey)
+            || !world.TryGetRuntime(storageKey, out result))
         {
             if (!resourceStateStore.RegisterDataOnlyInstallationSharedState(state, out var stored)) return false;
             result = world.RegisterRuntime(stored, prototype, this);

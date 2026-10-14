@@ -13,7 +13,7 @@ MonoBehaviour:
   m_Name: Item_91_Manual - Noose
   m_EditorClassIdentifier: Assembly-CSharp::ItemDefinition
   itemName: Manual - Noose
-  id: 99
+  id: 102
   mapObject: {fileID: 0}
   mapObjectArchetype: {fileID: 0}
   useMapColor: 0
@@ -33,6 +33,9 @@ MonoBehaviour:
   isManual: 1
   manualTargetItem: {fileID: 11400000, guid: f5afae373c201a7438785dd9cdf2ee6c, type: 2}
   upgradeable: 1
+  maxHealth: 100
+  excludeFromMonsterTargets: 0
+  monsterAttackPriority: 1
   keepIoAreaItemsInPlaceWhileEditing: 0
   capacity: 10
   isFluid: 0

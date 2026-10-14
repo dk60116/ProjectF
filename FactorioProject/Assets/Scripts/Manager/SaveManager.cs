@@ -1329,7 +1329,7 @@ public class SaveManager : MonoBehaviour
 
     private void RestorePlayerMountedState(Player player, PlayerSaveData playerSaveData)
     {
-        if (player == null || playerSaveData == null)
+        if (player == null || playerSaveData == null || player.IsDead)
         {
             return;
         }

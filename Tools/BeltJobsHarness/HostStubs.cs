@@ -211,6 +211,19 @@ public sealed class MiningWorld
     public static MiningWorld Current;
     public void WakePublishedBelts(TerrainGenerator terrain) { }
 }
+public sealed class ProductionWorld
+{
+    public static ProductionWorld Current;
+    public void WakePublishedBelts(TerrainGenerator terrain) { }
+}
+namespace ProjectF.MapObjects
+{
+    public sealed class ForestryWorld
+    {
+        public static ForestryWorld Current;
+        public void WakePublishedBelts(TerrainGenerator terrain) { }
+    }
+}
 public static class MapObjectTickManager
 {
     public static long CurrentSimulationTick;

@@ -76,12 +76,15 @@ string State(BeltSimulationBuffers b)
 using (var b = Create(4))
 {
     Edge(b, 0, 1); Edge(b, 1, 2); Edge(b, 2, 3);
-    Put(b, 0, 7); Step(b);
+    Put(b, 0, 7);
+    var damaged = b.Lanes[0]; damaged.InstallationHealth = 37f; b.Lanes[0] = damaged;
+    Step(b);
     Require(Effective(b, 1).ItemId == 7 && Effective(b, 1).Remaining == 2 * tick, "first fixed tick advances one tick of travel");
     Step(b); Require(Effective(b, 1).Remaining == tick, "integer travel countdown");
     Step(b); Require(b.Lanes[2].ItemId == 7 && b.Lanes[2].Remaining == 3 * tick, "arrival transfers with no duplicated frame delay");
     for (int i = 0; i < 20; i++) Step(b);
     Require(Count(b) == 1 && b.Lanes[3].ItemId == 7 && b.GroupStates[0].Sleeping != 0, "blocked endpoint sleeps and conserves items");
+    Require(b.Lanes[3].InstallationHealth == 37f, "movement and sleeping keep recovered HP attached to the item");
     string stable = State(b); for (int i = 0; i < 100; i++) Step(b);
     Require(State(b) == stable, "sleep does not accumulate movement debt");
 }
@@ -265,7 +268,7 @@ Require(BeltSimulationMath.QuantizePositive(float.NaN, 1000) == 0, "invalid conf
 Require(BeltSimulationMath.QuantizePositive(0.5f, 1000) == 500, "exact quantization");
 var snapshot = new BeltSimulationSnapshot { Tick = 123456789 };
 snapshot.Lanes.Add(new BeltSavedLane { X = -12, Y = 19, Lane = 3, OriginLane = 1, OriginX = 45,
-    CursorX = -6, CursorLane = 2, State = new BeltLaneState { ItemId = 9, Remaining = 217, Duration = 65539, GateBits = 31, ExitRadius = 3.1f, Origin = -1 } });
+    CursorX = -6, CursorLane = 2, State = new BeltLaneState { ItemId = 9, InstallationHealth = 37f, Remaining = 217, Duration = 65539, GateBits = 31, ExitRadius = 3.1f, Origin = -1 } });
 using (var stream = new MemoryStream())
 {
     using (var writer = new BinaryWriter(stream, System.Text.Encoding.UTF8, true)) BeltSimulationSnapshot.Write(writer, snapshot);
@@ -273,9 +276,14 @@ using (var stream = new MemoryStream())
     using var reader = new BinaryReader(stream, System.Text.Encoding.UTF8, true);
     var restored = BeltSimulationSnapshot.Read(reader);
     Require(restored.Tick == snapshot.Tick && restored.Lanes[0].State.Remaining == 217 && restored.Lanes[0].CursorLane == 2, "checkpoint preserves exact clock/progress/arbitration");
+    Require(restored.Lanes[0].State.InstallationHealth == 37f, "native belt checkpoint retains recovered installation HP");
     using var output = new MemoryStream(); using var writer2 = new BinaryWriter(output);
     BeltSimulationSnapshot.Write(writer2, restored);
     Require(first.SequenceEqual(output.ToArray()), "checkpoint serialization is bit exact");
+    using var legacy = new MemoryStream(first[..^4]);
+    using var legacyReader = new BinaryReader(legacy);
+    Require(BeltSimulationSnapshot.Read(legacyReader, false).Lanes[0].State.InstallationHealth == 0f
+        && legacy.Position == legacy.Length, "pre-health native checkpoint remains aligned and pristine");
 }
 using (var host = new TerrainGenerator())
 {

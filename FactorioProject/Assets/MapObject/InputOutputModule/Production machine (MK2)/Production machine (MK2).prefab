@@ -322,7 +322,7 @@ MonoBehaviour:
   m_EditorClassIdentifier: 
   id: 0
   objectName: Production machine (MK2)
-  objId: 76
+  objId: 79
   itemDefinition: {fileID: 11400000, guid: 29927129db7b22842886fe756c71a712, type: 2}
   mapStatus:
     mapSizeX: 2
@@ -396,14 +396,6 @@ MonoBehaviour:
       count: 5
     outputs:
     - itemDefinition: {fileID: 11400000, guid: 2d6039a716731b14c94f2980e22b1089, type: 2}
-      count: 1
-  - inputs:
-    - itemDefinition: {fileID: 11400000, guid: 60e9b284bddea2d4d8dec70d48624f68, type: 2}
-      count: 3
-    - itemDefinition: {fileID: 11400000, guid: 76038fd87aa315c40ad6ad9af1c04071, type: 2}
-      count: 2
-    outputs:
-    - itemDefinition: {fileID: 11400000, guid: f258fbd8cc06e274fb34717e13970102, type: 2}
       count: 1
   - inputs:
     - itemDefinition: {fileID: 11400000, guid: f0e8b5357a13bc04cbc5e8603014446c, type: 2}
@@ -534,6 +526,14 @@ MonoBehaviour:
     - itemDefinition: {fileID: 11400000, guid: 3dcbbe571d74ad449bca45a7842feabe, type: 2}
       count: 1
   - inputs:
+    - itemDefinition: {fileID: 11400000, guid: 21883f622876a3f47a1c1f90a4b0004e, type: 2}
+      count: 1
+    - itemDefinition: {fileID: 11400000, guid: a025b03cf674e024884437c532dfe480, type: 2}
+      count: 6
+    outputs:
+    - itemDefinition: {fileID: 11400000, guid: 5ded7b8f8c192b94b8a9cd3649395224, type: 2}
+      count: 1
+  - inputs:
     - itemDefinition: {fileID: 11400000, guid: fae2696b5392f8946ad224e1317329af, type: 2}
       count: 2
     - itemDefinition: {fileID: 11400000, guid: c2c3df56b3d7ac04db2063fb6b297ee7, type: 2}
@@ -580,14 +580,6 @@ MonoBehaviour:
       count: 2
     outputs:
     - itemDefinition: {fileID: 11400000, guid: 35de25c1b78551f46a6ab4a7d318fcf5, type: 2}
-      count: 1
-  - inputs:
-    - itemDefinition: {fileID: 11400000, guid: f258fbd8cc06e274fb34717e13970102, type: 2}
-      count: 3
-    - itemDefinition: {fileID: 11400000, guid: d920f99b12ae8ba4eb521eb6252da50a, type: 2}
-      count: 5
-    outputs:
-    - itemDefinition: {fileID: 11400000, guid: 5b385518a4029674bb9746d7f8e9f701, type: 2}
       count: 1
   - inputs:
     - itemDefinition: {fileID: 11400000, guid: 5b385518a4029674bb9746d7f8e9f701, type: 2}

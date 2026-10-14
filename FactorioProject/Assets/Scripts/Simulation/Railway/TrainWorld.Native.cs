@@ -27,6 +27,15 @@ namespace ProjectF.Railway
             return Contains(instance) && views.TryGetValue(instance, out view) && view != null;
         }
 
+        internal bool TryGetTargetAtCoordinate(Vector2Int coordinate, out Train train)
+        {
+            train = null;
+            if (!byCoordinate.TryGetValue(coordinate, out var bucket)) return false;
+            for (int i = 0; i < bucket.Count; i++)
+                if (bucket[i].IsActive && bucket[i].IsPlaced && TryGetView(bucket[i], out train)) return true;
+            return false;
+        }
+
         internal void CollectActiveViews(ICollection<Train> results)
         {
             if (results == null) return;

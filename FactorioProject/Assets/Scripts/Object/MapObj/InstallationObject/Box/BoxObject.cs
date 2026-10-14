@@ -334,7 +334,12 @@ public class BoxObject : InputOutputModule
     }
 
     public bool TryTakeOneContainedObject(System.Predicate<int> itemFilter, out int takenItemId, bool requireOpen = false)
+        => TryTakeOneContainedObject(itemFilter, out takenItemId, out _, requireOpen);
+
+    public bool TryTakeOneContainedObject(System.Predicate<int> itemFilter, out int takenItemId,
+        out float installationHealth, bool requireOpen = false)
     {
+        installationHealth = 0f;
         takenItemId = -1;
         if (requireOpen && !isOpen)
         {
@@ -354,7 +359,7 @@ public class BoxObject : InputOutputModule
             return false;
         }
 
-        return contentBlock.TryConsumeOneInputAreaCenterObject(itemId, out takenItemId);
+        return contentBlock.TryConsumeOneInputAreaCenterObject(itemId, out takenItemId, out installationHealth);
     }
 
     public int GetExtractableContainedItemCount(int expectedItemId = -1)

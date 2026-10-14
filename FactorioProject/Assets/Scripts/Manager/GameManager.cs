@@ -72,6 +72,8 @@ public class GameManager : MonoBehaviour
     private bool freeElectroEnergy;
     [SerializeField, InspectorName("Free Bucket")]
     private bool freeBucket;
+    [SerializeField, InspectorName("Cloaking Mode")]
+    private bool cloakingMode;
     [SerializeField]
     private bool mapObjectTickProfilingEnabled;
     [SerializeField, Tooltip("Disable detailed object timers for a low-overhead comparison. Frame phases and native recorders remain enabled.")]
@@ -113,7 +115,8 @@ public class GameManager : MonoBehaviour
 
     public bool InstallationPlacementActive { get; private set; }
     public bool MapEditActive { get; private set; }
-    public bool PlayerInteractionLocked => InstallationPlacementActive || MapEditActive;
+    public bool PlayerInteractionLocked => InstallationPlacementActive || MapEditActive
+        || (Player != null && Player.IsDead);
     public static bool TextInputFocused => IsTextInputFocused();
 
     private void Awake()
@@ -169,6 +172,9 @@ public class GameManager : MonoBehaviour
 
     private void Update()
     {
+#if UNITY_EDITOR
+        ProjectF.Monsters.MonsterSpawnBrush.Tick();
+#endif
         using var callerSample = MapObjectTickProfiler.SampleUpdateCaller<GameManager>();
         bool textInputFocused = IsTextInputFocused();
         if (!MapObjectTickManager.SimulationPaused)
@@ -262,6 +268,7 @@ public class GameManager : MonoBehaviour
     public bool FreeTrain => freeTrain;
     public bool FreeElectroEnergy => freeElectroEnergy;
     public bool FreeBucket => freeBucket;
+    public bool CloakingMode => cloakingMode;
     public bool MapObjectTickProfilingEnabled => mapObjectTickProfilingEnabled;
     public bool MapObjectTickDetailedProfilingEnabled => mapObjectTickDetailedProfilingEnabled;
     public int MapObjectTickProfilingMaxRows => Mathf.Max(1, mapObjectTickProfilingMaxRows);
@@ -407,6 +414,8 @@ public class GameManager : MonoBehaviour
     {
         freeBucket = enabled;
     }
+
+    public void SetCloakingMode(bool enabled) => cloakingMode = enabled;
 
     public void SetMapObjectTickProfilingEnabled(bool enabled)
     {
@@ -3134,6 +3143,7 @@ public sealed partial class RuntimeItemGiveReceiver : MonoBehaviour
             BuildFreeTrainExtraTokens(GameManager.Instance),
             BuildFreeElectroEnergyExtraTokens(GameManager.Instance),
             BuildFreeBucketExtraTokens(GameManager.Instance),
+            BuildCloakingModeExtraTokens(GameManager.Instance),
             BuildAnimalAIExtraTokens(GameManager.Instance),
             BuildMapObjectTickProfilingExtraTokens(GameManager.Instance),
             BuildSimulationExtraTokens(),
@@ -3239,6 +3249,9 @@ public sealed partial class RuntimeItemGiveReceiver : MonoBehaviour
             ? $"freeBucket={(gameManager.FreeBucket ? 1 : 0)}"
             : "freeBucket=0";
     }
+
+    private static string BuildCloakingModeExtraTokens(GameManager gameManager) =>
+        $"cloakingMode={(gameManager != null && gameManager.CloakingMode ? 1 : 0)}";
 
     private static string BuildMapObjectTickProfilingExtraTokens(GameManager gameManager)
     {
@@ -5248,6 +5261,13 @@ public sealed partial class RuntimeItemGiveReceiver : MonoBehaviour
                 0,
                 $"freeBucket={(value ? 1 : 0)}",
                 BuildFreeBucketExtraTokens(gameManager));
+        }
+
+        if (string.Equals(toggleName, "cloakingMode", StringComparison.OrdinalIgnoreCase))
+        {
+            gameManager.SetCloakingMode(value);
+            return ToolResult.Success(0, 0, 0, 0, 0, 0,
+                extraTokens: BuildCloakingModeExtraTokens(gameManager));
         }
 
         if (string.Equals(toggleName, "mapObjectTickDetailedProfiling", StringComparison.OrdinalIgnoreCase))

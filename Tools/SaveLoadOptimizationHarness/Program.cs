@@ -30,12 +30,18 @@ internal static class Program
             }
             return null;
         };
+        if (args.Contains("--combat-only"))
+        {
+            CombatSaveChecks.Run();
+            return;
+        }
         CheckScheduling();
         CheckLoadTimingLog();
         CheckCancelableRead();
         CheckSaveTimingLog();
         CheckDetachedBeltState();
         CheckChunkDependencies();
+        checks += CombatSaveChecks.Run();
         CheckRuntimeOptimizationContracts();
         foreach (string path in args) CheckSaveFile(path);
         Console.WriteLine($"PASS {checks} save/load optimization checks");

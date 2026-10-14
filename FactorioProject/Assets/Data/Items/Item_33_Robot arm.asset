@@ -13,7 +13,7 @@ MonoBehaviour:
   m_Name: Item_33_Robot arm
   m_EditorClassIdentifier: 
   itemName: Robot arm
-  id: 73
+  id: 76
   mapObject: {fileID: 5617472291595085519, guid: 7c64585bed65e8843aa24eb07a5f02f3, type: 3}
   mapObjectArchetype: {fileID: 11400000, guid: fa30f8a080e23ad429eec1fcc63230da, type: 2}
   useMapColor: 1
@@ -33,6 +33,9 @@ MonoBehaviour:
   isManual: 0
   manualTargetItem: {fileID: 0}
   upgradeable: 1
+  maxHealth: 100
+  excludeFromMonsterTargets: 0
+  monsterAttackPriority: 1
   keepIoAreaItemsInPlaceWhileEditing: 1
   capacity: 10
   isFluid: 0

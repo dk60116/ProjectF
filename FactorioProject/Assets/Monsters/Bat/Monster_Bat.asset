@@ -1,0 +1,98 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: f3b3665a9c7749239a5c3eca0e44b733, type: 3}
+  m_Name: Monster_Bat
+  m_EditorClassIdentifier: 
+  id: 0
+  monsterName: Bat
+  commonStats:
+    MaxHealth: 100
+    MoveSpeed: 0.5
+    TurnSpeed: 180
+    AttackDamage: 10
+    AttackRange: 1.5
+    AttackInterval: 1
+    DetectionRange: 100
+    LeashRange: 12
+  animations:
+    idle: {fileID: 7400000, guid: 59afa1f2c595d6343b15e945602e1f8f, type: 3}
+    move: {fileID: 7400002, guid: 59afa1f2c595d6343b15e945602e1f8f, type: 3}
+    attack: {fileID: 7400004, guid: 59afa1f2c595d6343b15e945602e1f8f, type: 3}
+    hit: {fileID: 7400006, guid: 59afa1f2c595d6343b15e945602e1f8f, type: 3}
+    death: {fileID: 7400008, guid: 59afa1f2c595d6343b15e945602e1f8f, type: 3}
+  commonDrops: []
+  variants:
+  - id: 0
+    variantName: Green
+    prefab: {fileID: 1000013827195344, guid: d82532fc4fd80bf4097d29efd331a0ff, type: 3}
+    icon: {fileID: 21300000, guid: e1e02168892f9e041a6d55617a543185, type: 3}
+    overrideMask: 0
+    stats:
+      MaxHealth: 100
+      MoveSpeed: 2
+      TurnSpeed: 180
+      AttackDamage: 10
+      AttackRange: 1.5
+      AttackInterval: 1
+      DetectionRange: 100
+      LeashRange: 12
+    overrideDrops: 0
+    drops: []
+  - id: 1
+    variantName: Red
+    prefab: {fileID: 1000011593744314, guid: 67f0474ce7d8d344fa04ba561d36d761, type: 3}
+    icon: {fileID: 21300000, guid: 117062ec4c6a4123a3789d758ea2ca42, type: 3}
+    overrideMask: 0
+    stats:
+      MaxHealth: 100
+      MoveSpeed: 2
+      TurnSpeed: 180
+      AttackDamage: 10
+      AttackRange: 1.5
+      AttackInterval: 1
+      DetectionRange: 100
+      LeashRange: 12
+    overrideDrops: 0
+    drops: []
+  - id: 2
+    variantName: Violet
+    prefab: {fileID: 1000012081666484, guid: a300b93764f24c94b9ddb3445d906548, type: 3}
+    icon: {fileID: 21300000, guid: 70770eed6b8946e1b3df0d7d48890428, type: 3}
+    overrideMask: 0
+    stats:
+      MaxHealth: 100
+      MoveSpeed: 2
+      TurnSpeed: 180
+      AttackDamage: 10
+      AttackRange: 1.5
+      AttackInterval: 1
+      DetectionRange: 100
+      LeashRange: 12
+    overrideDrops: 0
+    drops: []
+  - id: 3
+    variantName: Yellow
+    prefab: {fileID: 1000013849561652, guid: 5fd1210210040d34e8810388185a6063, type: 3}
+    icon: {fileID: 21300000, guid: 4587dcda471644e1b6ebb60df1ac859d, type: 3}
+    overrideMask: 0
+    stats:
+      MaxHealth: 100
+      MoveSpeed: 2
+      TurnSpeed: 180
+      AttackDamage: 10
+      AttackRange: 1.5
+      AttackInterval: 1
+      DetectionRange: 100
+      LeashRange: 12
+    overrideDrops: 0
+    drops: []
+  nextVariantId: 4

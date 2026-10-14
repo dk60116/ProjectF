@@ -13,7 +13,7 @@ MonoBehaviour:
   m_Name: Item_116_Anvilbench
   m_EditorClassIdentifier: Assembly-CSharp::ItemDefinition
   itemName: Anvilbench
-  id: 24
+  id: 25
   mapObject: {fileID: 7839628250064023149, guid: 6168af2f119e8f040a9678762a5df929, type: 3}
   mapObjectArchetype: {fileID: 11400000, guid: 2c16e2824a5c5d3429ef0a604549e1dc, type: 2}
   useMapColor: 0
@@ -33,6 +33,9 @@ MonoBehaviour:
   isManual: 0
   manualTargetItem: {fileID: 0}
   upgradeable: 1
+  maxHealth: 100
+  excludeFromMonsterTargets: 0
+  monsterAttackPriority: 1
   keepIoAreaItemsInPlaceWhileEditing: 0
   capacity: 10
   isFluid: 0

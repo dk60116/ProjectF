@@ -13,7 +13,7 @@ MonoBehaviour:
   m_Name: Item_69_Manual - Steam train
   m_EditorClassIdentifier: Assembly-CSharp::ItemDefinition
   itemName: Manual - Steam train
-  id: 97
+  id: 100
   mapObject: {fileID: 0}
   mapObjectArchetype: {fileID: 0}
   useMapColor: 0
@@ -33,6 +33,9 @@ MonoBehaviour:
   isManual: 1
   manualTargetItem: {fileID: 11400000, guid: 4d68593c4bba3a34487b0f60cff9fd9e, type: 2}
   upgradeable: 1
+  maxHealth: 100
+  excludeFromMonsterTargets: 0
+  monsterAttackPriority: 1
   keepIoAreaItemsInPlaceWhileEditing: 0
   capacity: 10
   isFluid: 0

@@ -13,6 +13,7 @@ namespace ProjectF.Conveyors
         public int ItemId, Origin, GateBits;
         public long Remaining, Duration;
         public float StartX, StartY, StartZ, DropX, DropY, DropZ, ExitRadius;
+        public float InstallationHealth;
         public static BeltLaneState Empty => new BeltLaneState { ItemId = -1, Origin = -1 };
     }
 

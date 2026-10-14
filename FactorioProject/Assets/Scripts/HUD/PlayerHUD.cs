@@ -116,6 +116,7 @@ public partial class PlayerHUD : BagSlot
     private Animal currentSaddleInteractionAnimal;
     private Animal currentRideableInteractionAnimal;
     private Animal currentInteractionAnimal;
+    private ProjectF.Monsters.MonsterInstance currentInteractionMonster;
     private Handcart currentDraftAnimalInteractionHandcart;
     private Animal currentDraftAnimalInteractionAnimal;
     private bool currentDraftAnimalInteractionDetaches;
@@ -229,6 +230,7 @@ public partial class PlayerHUD : BagSlot
 
     private void OnDisable()
     {
+        ClearCombatHud();
         CloseWorkableCraftingPanel();
         CollapseExpandedBagSlot(true);
         UnbindCurrentBag();
@@ -274,6 +276,7 @@ public partial class PlayerHUD : BagSlot
     private void Update()
     {
         using var callerSample = MapObjectTickProfiler.SampleUpdateCaller<PlayerHUD>();
+        UpdateCombatHud();
         EnsureHandBagBinding();
         PollHandBagChanges();
         ResolveHudReferences();
@@ -1900,7 +1903,7 @@ public partial class PlayerHUD : BagSlot
         PlayerController playerController = currentPlayer.GetComponent<PlayerController>();
         if (playerController != null
             && (playerController.IsResourceHarvestingActive
-                || playerController.IsAnimalKnifeInteractionActive
+                || playerController.IsKnifeInteractionActive
                 || playerController.IsPitchforkDiggingActive
                 || playerController.IsSeedPlantingActive))
         {
@@ -1942,6 +1945,16 @@ public partial class PlayerHUD : BagSlot
         }
 
         SetTrainConnectionInteractionButtonState(null);
+
+        if (animalInteractionIcon != null && playerController != null && !currentPlayer.IsCarrying
+            && clickedObjectInfoTarget is ProjectF.Monsters.MonsterInstance selectedMonster
+            && selectedMonster.IsActive && selectedMonster.CurrentHealth > 0f)
+        {
+            ClearInteractionTargets();
+            currentInteractionMonster = selectedMonster;
+            SetActiveInteractionButton(InteractionButton, animalInteractionIcon);
+            return;
+        }
 
         if (TryActivateSeedGroundInteraction(currentPlayer, playerController))
         {
@@ -2388,6 +2401,7 @@ public partial class PlayerHUD : BagSlot
         currentSaddleInteractionAnimal = null;
         currentRideableInteractionAnimal = null;
         currentInteractionAnimal = null;
+        currentInteractionMonster = null;
         currentDraftAnimalInteractionHandcart = null;
         currentDraftAnimalInteractionAnimal = null;
         currentDraftAnimalInteractionDetaches = false;
@@ -2616,13 +2630,14 @@ public partial class PlayerHUD : BagSlot
                     out Animal clickedAnimal,
                     out IMapObjectTarget clickedMapObject,
                     out PortableObject clickedPortableObject,
-                    out Block clickedFallbackBlock))
+                    out Block clickedFallbackBlock,
+                    out ProjectF.Monsters.MonsterInstance clickedMonster))
             {
                 clickedObjectInfoTarget = clickedAnimal != null
                     ? clickedAnimal
                     : clickedPortableObject != null
                         ? clickedPortableObject
-                        : clickedMapObject;
+                        : clickedMonster != null ? (object)clickedMonster : clickedMapObject;
                 clickedObjectInfoFallbackBlock = clickedMapObject != null
                     ? clickedFallbackBlock
                     : null;
@@ -2685,18 +2700,16 @@ public partial class PlayerHUD : BagSlot
         }
 
         if (playerController != null
-            && playerController.TryGetAnimalKnifeFocusTarget(out Animal knifeFocusAnimal))
+            && playerController.TryGetKnifeFocusTarget(out object knifeFocusTarget))
         {
-            // 접근 및 공격 애니메이션 도중에는 근처의 자동 포커스 후보가
-            // 사용자가 선택한 동물의 HUD와 아웃라인을 교체하지 못하게 한다.
-            // 클릭 선택도 유지해야 공격이 끝난 뒤 Knife 버튼이 다시 표시된다.
+            // Keep the selected animal/monster pinned through approach and attack.
             lastYellowObjectInfoFocusTarget = null;
-            clickedObjectInfoTarget = knifeFocusAnimal;
-            if (!ReferenceEquals(currentObjectInfoTarget, knifeFocusAnimal)
-                || !objectInfoPanel.IsBoundTo(knifeFocusAnimal)
+            clickedObjectInfoTarget = knifeFocusTarget;
+            if (!ReferenceEquals(currentObjectInfoTarget, knifeFocusTarget)
+                || !objectInfoPanel.IsBoundTo(knifeFocusTarget)
                 || !objectInfoPanel.gameObject.activeSelf)
             {
-                BindObjectInfoPanel(knifeFocusAnimal, false);
+                BindObjectInfoPanel(knifeFocusTarget, false);
             }
             else
             {
@@ -3014,7 +3027,11 @@ public partial class PlayerHUD : BagSlot
 
     private static void SetFocusedTargetOutline(object target, bool visible)
     {
-        if (target is Animal animal)
+        if (target is ProjectF.Monsters.MonsterInstance monster)
+        {
+            monster.SetFocusedOutline(visible);
+        }
+        else if (target is Animal animal)
         {
             animal.SetFocusedOutline(visible);
         }
@@ -3676,6 +3693,13 @@ public partial class PlayerHUD : BagSlot
             return;
         }
 
+        if (currentInteractionMonster != null)
+        {
+            ResolvePlayerController()?.RequestMonsterKnifeInteraction(currentInteractionMonster);
+            UpdateInteractionButtonState();
+            return;
+        }
+
         if (currentInteractionAnimal != null)
         {
             PlayerController playerController = ResolvePlayerController();
@@ -3890,6 +3914,7 @@ public partial class PlayerHUD : BagSlot
                                 || currentSaddleInteractionAnimal != null
                                 || currentRideableInteractionAnimal != null
                                 || currentInteractionAnimal != null
+                                || currentInteractionMonster != null
                                 || currentInteractionDoorTarget != null
                                 || currentInteractionResource != null
                                 || currentInteractionMapObject != null;
@@ -4140,13 +4165,8 @@ public partial class PlayerHUD : BagSlot
             return false;
         }
 
-        if (target is ResourceInstance resource) return resource.IsRuntimeActive;
-        if (target is ProjectF.MapObjects.IWorkableTarget workable) return workable.IsTargetActive;
-        if (target is UtilityPoleRuntime pole) return pole.IsTargetActive;
-        if (target is ProductionFacilityInstance production) return production.IsTargetActive;
-        if (target is MiningMachineInstance miner) return miner.IsTargetActive;
-        if (target is ProjectF.MapObjects.ForestryInstance forestry) return forestry.IsTargetActive;
-        if (target is RobotArmInstance robotArm) return robotArm.IsTargetActive;
+        if (target is ProjectF.Monsters.MonsterInstance monster) return monster.IsActive;
+        if (target is IMapObjectTarget mapObject && mapObject.IsTargetActive) return true;
         if (target is PortableObject portableObject)
         {
             return portableObject.IsAlive
@@ -5229,6 +5249,9 @@ public partial class PlayerHUD : BagSlot
     private bool TryGetPrimaryPointerDown(out Vector2 pointerPosition)
     {
         pointerPosition = Vector2.zero;
+#if UNITY_EDITOR
+        if (ProjectF.Monsters.MonsterSpawnBrush.BlocksGameplayInput) return false;
+#endif
 
         if (Input.touchCount > 0)
         {

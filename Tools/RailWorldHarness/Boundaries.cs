@@ -6,7 +6,13 @@ using UnityEngine;
 // Only scene lifetime, persistence DTOs and item definitions are substituted.
 static class Application { public static bool isPlaying => false; }
 static class ProjectFApplicationLifecycle { public static bool IsQuitting => false; }
-public sealed class SceneObject { public bool activeInHierarchy = true; public string name = "Test"; }
+public sealed class SceneObject
+{
+    public bool activeInHierarchy = true;
+    public string name = "Test";
+    public SceneIdentity scene;
+}
+public struct SceneIdentity { public bool Valid; public bool IsValid() => Valid; }
 public sealed class SceneTransform { public Vector3 forward = Vector3.right, position, localScale = Vector3.one; public Matrix4x4 worldToLocalMatrix => Matrix4x4.identity; public Matrix4x4 localToWorldMatrix => Matrix4x4.identity; }
 public class MapObject : IMapObjectTarget
 {
@@ -71,6 +77,8 @@ public class InstallationObject : MapObject, IMapObjectTarget, IRailwayTarget
     { anchor = RuntimeAnchorCoordinate; rotation = RuntimeQuarterTurns; return RuntimePlacementSequence > 0; }
     public static int CompareSimulationOrder(InstallationObject a, InstallationObject b)
         => a.RuntimePlacementSequence.CompareTo(b.RuntimePlacementSequence);
+    private static long nextPlacementSequence = 10000;
+    public static long ClaimNextPlacementSequence() => nextPlacementSequence++;
     public T[] GetComponentsInChildren<T>(bool includeInactive) where T : class => Array.Empty<T>();
     protected virtual void OnEnable() { }
     protected virtual void OnDisable() { }
@@ -119,7 +127,7 @@ static class InputOutputModule
 {
     public static ItemDefinition ResolveItemDefinition(int id) => GameManager.Instance.ItemManger.ItemDefinitions.Find(d => d.id == id);
 }
-public class BlockStateStore
+public partial class BlockStateStore
 {
     public class InstallationSaveState
     {
@@ -131,14 +139,16 @@ public class BlockStateStore
         public List<Vector2Int> occupiedCoordinates;
         public Vector3 worldPosition;
         public Quaternion worldRotation = Quaternion.identity;
-        public string stationName;
+        public string stationName, itemName;
+        public bool hasWorldPose;
         public Color32 stationColor;
         public bool stationColorAssigned;
+        public InstallationSaveState Clone() => (InstallationSaveState)MemberwiseClone();
     }
     public static Vector2Int GetInstallationStorageKey(InstallationSaveState state)
         => state.hasStorageKey ? state.storageKey : state.anchorCoordinate;
 }
-public sealed class TerrainGenerator
+public sealed partial class TerrainGenerator
 {
     public readonly SceneTransform transform = new SceneTransform();
     public static TerrainGenerator Active;

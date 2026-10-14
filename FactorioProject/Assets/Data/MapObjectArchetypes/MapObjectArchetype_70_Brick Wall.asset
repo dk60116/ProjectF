@@ -15,24 +15,24 @@ MonoBehaviour:
   schemaVersion: 2
   itemDefinition: {fileID: 11400000, guid: 7795dfaf3b2a492cae3ffb24dfc67efb, type: 2}
   sourcePrefab: {fileID: 2276685300360839919, guid: 9b80960e4abf8cc4a901548259cc9e2b, type: 3}
-  itemId: 86
+  itemId: 88
   itemName: Brick Wall
   sourcePrefabGuid: 9b80960e4abf8cc4a901548259cc9e2b
   sourceContentHash:
     serializedVersion: 2
-    Hash: 2c49362bfe2bd63b2dbebd7008747c0f
+    Hash: 93f3551bf7e94d0422b0fc56b35b8fca
   sourceRuntimeType: Wall, Assembly-CSharp, Version=0.0.0.0, Culture=neutral, PublicKeyToken=null
   mapStatus:
     mapSizeX: 1
     mapSizeY: 1
     centerCellX: 0
     centerCellY: 0
-  focusMode: 2
+  focusMode: 1
   defaultRootScale: {x: 1, y: 1, z: 1}
   defaultRootRotation: {x: -0, y: -0, z: -0, w: 1}
   localRenderBounds:
-    m_Center: {x: 0, y: 0.5, z: 0.000000007450581}
-    m_Extent: {x: 0.5, y: 0.5, z: 0.12694195}
+    m_Center: {x: 0, y: 0.4, z: 0.000000007450581}
+    m_Extent: {x: 0.5, y: 0.4, z: 0.12694195}
   hasRenderBounds: 1
   featureFlags: 64
   nodes:
@@ -93,8 +93,8 @@ MonoBehaviour:
     material: {fileID: 2100000, guid: 5409a2e0720f78849af78a6cda4710fd, type: 2}
     subMeshIndex: 0
     localBounds:
-      m_Center: {x: 0, y: 0.5, z: 0.000000007450581}
-      m_Extent: {x: 0.5, y: 0.5, z: 0.12694195}
+      m_Center: {x: 0, y: 0.4, z: 0.000000007450581}
+      m_Extent: {x: 0.5, y: 0.4, z: 0.12694195}
     layer: 0
     renderingLayerMask: 1
     shadowCastingMode: 1

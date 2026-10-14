@@ -9,7 +9,7 @@ using ProjectF.Simulation;
 /// Data-only runtime representation of an installed pipe. Pipe prefabs remain immutable
 /// definitions; installed pipes do not keep a scene GameObject or MonoBehaviour.
 /// </summary>
-public sealed class PipeRuntimeRecord : IVirtualRenderBatchOwner
+public sealed partial class PipeRuntimeRecord : IVirtualRenderBatchOwner, IMapObjectTarget, IMapObjectSimulationIdentity
 {
     private static readonly Vector2Int[] SplitDirections =
     {

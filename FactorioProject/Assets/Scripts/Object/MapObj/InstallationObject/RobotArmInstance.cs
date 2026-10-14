@@ -117,6 +117,7 @@ public sealed partial class RobotArmInstance : IMapObjectTarget, IDataElectricCo
     private Quaternion inputBodyLocalRotation => Template.BodyRotation;
     public bool HasHeldItem => heldItemId >= 0;
     public int HeldItemId => heldItemId;
+    public float HeldInstallationHealth => Data.heldInstallationHealth;
     public bool CanTakeHeldItemFromSlot => CanTakeHeldItemFromSlotInternal();
     public Vector3 HeldItemWorldPosition => GetHandWorldPosition();
     public bool IsRuntimeSleeping => runtimeSleeping;
@@ -188,9 +189,9 @@ public sealed partial class RobotArmInstance : IMapObjectTarget, IDataElectricCo
     private Vector3 GetBodyWorldPosition() => Template.BodyWorld(this);
     private Vector3 GetHandWorldPosition() => Template.HandWorld(this);
     private Vector3 GetCachedDropTransferStartWorldPosition() => cachedDropTransferStartWorldPosition;
-    private void SetHeldItem(int id, Vector3 position)
-    { heldItemId = id; Data.ItemMoveStart = position; Data.ItemMoveElapsed = 0f; }
-    private void ClearHeldItem() { heldItemId = -1; }
+    private void SetHeldItem(int id, Vector3 position, float installationHealth)
+    { heldItemId = id; Data.heldInstallationHealth = installationHealth; Data.ItemMoveStart = position; Data.ItemMoveElapsed = 0f; }
+    private void ClearHeldItem() { heldItemId = -1; Data.heldInstallationHealth = 0f; }
     internal Vector3 ItemPresentationPosition(Vector3 handPosition)
     {
         SynchronizeSleepingPresentation();
@@ -375,6 +376,7 @@ public sealed partial class RobotArmInstance : IMapObjectTarget, IDataElectricCo
     private void WriteTransferState(TransferState target)
     {
         target.heldItemId = heldItemId;
+        target.heldInstallationHealth = Data.heldInstallationHealth;
         target.state = state;
         target.pickupTimer = Mathf.Max(0f, pickupTimer);
         target.dropRetryTimer = Mathf.Max(0f, dropRetryTimer);
@@ -392,6 +394,7 @@ public sealed partial class RobotArmInstance : IMapObjectTarget, IDataElectricCo
             plannedTransferCommand = PlannedTransferCommand.None;
             stagedTickPlanned = false;
             heldItemId = -1;
+            Data.heldInstallationHealth = 0f;
             pickupTimer = 0f;
             dropRetryTimer = 0f;
             actionTurnTimer = 0f;
@@ -408,6 +411,7 @@ public sealed partial class RobotArmInstance : IMapObjectTarget, IDataElectricCo
         }
 
         heldItemId = persistentState.heldItemId;
+        Data.heldInstallationHealth = persistentState.heldInstallationHealth;
         state = persistentState.state;
         pickupTimer = Mathf.Max(0f, persistentState.pickupTimer);
         dropRetryTimer = Mathf.Max(0f, persistentState.dropRetryTimer);
@@ -722,9 +726,9 @@ public sealed partial class RobotArmInstance : IMapObjectTarget, IDataElectricCo
             return;
         }
 
-        if (TryPickupOneItem(out int pickedItemId, out Vector3 pickupWorldPosition))
+        if (TryPickupOneItem(out int pickedItemId, out Vector3 pickupWorldPosition, out float installationHealth))
         {
-            SetHeldItem(pickedItemId, pickupWorldPosition);
+            SetHeldItem(pickedItemId, pickupWorldPosition, installationHealth);
             dropRetryTimer = 0f;
             waitingForDropRetry = false;
             state = RobotArmState.WaitingAfterPickupTake;
@@ -882,8 +886,9 @@ public sealed partial class RobotArmInstance : IMapObjectTarget, IDataElectricCo
         return timer > 0f;
     }
 
-    private bool TryPickupOneItem(out int pickedItemId, out Vector3 pickupWorldPosition)
+    private bool TryPickupOneItem(out int pickedItemId, out Vector3 pickupWorldPosition, out float installationHealth)
     {
+        installationHealth = 0f;
         using var sample = World.TickTiming.Measure(ProjectF.Diagnostics.RobotArmTickTiming.Phase.Pickup);
         pickedItemId = -1;
         if (ProjectF.Benchmark.BenchmarkRuntime.ForceWorking)
@@ -903,30 +908,30 @@ public sealed partial class RobotArmInstance : IMapObjectTarget, IDataElectricCo
         switch (pickupSource)
         {
             case RobotArmPickupSource.Floor:
-                return pickupBlock.TryTakeClosestFloorObject(referenceWorldPosition, PickupItemFilter, out pickedItemId);
+                return pickupBlock.TryTakeClosestFloorObject(referenceWorldPosition, PickupItemFilter, out pickedItemId, out installationHealth);
             case RobotArmPickupSource.Box:
-                return boxObject != null && boxObject.TryTakeOneContainedObject(PickupItemFilter, out pickedItemId);
+                return boxObject != null && boxObject.TryTakeOneContainedObject(PickupItemFilter, out pickedItemId, out installationHealth);
             case RobotArmPickupSource.FreightCar:
                 return freightCar != null
                        && !freightCar.IsConsistMoving()
-                       && freightCar.TryTakeOneItem(
+                       && freightCar.TryTakeOneItemWithHealth(
                            referenceWorldPosition,
                            PickupItemFilter,
                            out pickedItemId,
-                           out pickupWorldPosition);
+                           out pickupWorldPosition, out installationHealth);
             case RobotArmPickupSource.Conveyor:
                 return pickupBlock.TryTakeOneConveyorObject(
                     referenceWorldPosition,
                     PickupItemFilter,
-                    out pickedItemId);
+                    out pickedItemId, out installationHealth);
             case RobotArmPickupSource.InputArea:
-                return TryTakeFilteredInputAreaItem(pickupBlock, out pickedItemId);
+                return TryTakeFilteredInputAreaItem(pickupBlock, out pickedItemId, out installationHealth);
             case RobotArmPickupSource.SavedFloor:
-                return TryTakeSavedFloorItem(pickupCoordinate, out pickedItemId);
+                return TryTakeSavedFloorItem(pickupCoordinate, out pickedItemId, out installationHealth);
             case RobotArmPickupSource.SavedConveyor:
-                return TryTakeSavedConveyorItem(pickupCoordinate, referenceWorldPosition, out pickedItemId);
+                return TryTakeSavedConveyorItem(pickupCoordinate, referenceWorldPosition, out pickedItemId, out installationHealth);
             case RobotArmPickupSource.SavedInputArea:
-                return TryTakeSavedInputAreaItem(pickupCoordinate, out pickedItemId);
+                return TryTakeSavedInputAreaItem(pickupCoordinate, out pickedItemId, out installationHealth);
             default:
                 return false;
         }
@@ -1122,16 +1127,18 @@ public sealed partial class RobotArmInstance : IMapObjectTarget, IDataElectricCo
         }
     }
 
-    private bool TryTakeSavedFloorItem(Vector2Int pickupCoordinate, out int pickedItemId)
+    private bool TryTakeSavedFloorItem(Vector2Int pickupCoordinate, out int pickedItemId, out float installationHealth)
     {
+        installationHealth = 0f;
         pickedItemId = -1;
         BlockStateStore stateStore = ResolveBlockStateStore();
         return stateStore != null
-               && stateStore.TryTakeSavedFloorItem(pickupCoordinate, PickupItemFilter, out pickedItemId);
+               && stateStore.TryTakeSavedFloorItem(pickupCoordinate, PickupItemFilter, out pickedItemId, out installationHealth);
     }
 
-    private bool TryTakeSavedConveyorItem(Vector2Int pickupCoordinate, Vector3 referenceWorldPosition, out int pickedItemId)
+    private bool TryTakeSavedConveyorItem(Vector2Int pickupCoordinate, Vector3 referenceWorldPosition, out int pickedItemId, out float installationHealth)
     {
+        installationHealth = 0f;
         pickedItemId = -1;
         BlockStateStore stateStore = ResolveBlockStateStore();
         return stateStore != null
@@ -1139,15 +1146,16 @@ public sealed partial class RobotArmInstance : IMapObjectTarget, IDataElectricCo
                    pickupCoordinate,
                    PickupItemFilter,
                    referenceWorldPosition,
-                   out pickedItemId);
+                   out pickedItemId, out installationHealth);
     }
 
-    private bool TryTakeSavedInputAreaItem(Vector2Int pickupCoordinate, out int pickedItemId)
+    private bool TryTakeSavedInputAreaItem(Vector2Int pickupCoordinate, out int pickedItemId, out float installationHealth)
     {
+        installationHealth = 0f;
         pickedItemId = -1;
         BlockStateStore stateStore = ResolveBlockStateStore();
         return stateStore != null
-               && stateStore.TryTakeSavedCenterTopItem(pickupCoordinate, PickupItemFilter, out pickedItemId);
+               && stateStore.TryTakeSavedCenterTopItem(pickupCoordinate, PickupItemFilter, out pickedItemId, out installationHealth);
     }
 
     private static void TryChoosePickupSource(
@@ -1171,8 +1179,9 @@ public sealed partial class RobotArmInstance : IMapObjectTarget, IDataElectricCo
         bestWorldPosition = candidateWorldPosition;
     }
 
-    private bool TryTakeFilteredInputAreaItem(Block pickupBlock, out int pickedItemId)
+    private bool TryTakeFilteredInputAreaItem(Block pickupBlock, out int pickedItemId, out float installationHealth)
     {
+        installationHealth = 0f;
         pickedItemId = -1;
         if (pickupBlock == null)
         {
@@ -1181,7 +1190,7 @@ public sealed partial class RobotArmInstance : IMapObjectTarget, IDataElectricCo
 
         int itemId = pickupBlock.GetInputAreaCenterItemId();
         return AcceptsPickupItem(itemId)
-               && pickupBlock.TryConsumeOneInputAreaCenterObject(itemId, out pickedItemId);
+               && pickupBlock.TryConsumeOneInputAreaCenterObject(itemId, out pickedItemId, out installationHealth);
     }
 
     private bool AcceptsPickupItem(int itemId)
@@ -1276,14 +1285,7 @@ public sealed partial class RobotArmInstance : IMapObjectTarget, IDataElectricCo
                 return false;
             }
 
-            if (freightCar.TryAddItemStack(
-                    itemId,
-                    1,
-                    dropStartWorldPosition,
-                    dropStartProvider,
-                    0f,
-                    out int addedCount)
-                && addedCount > 0)
+            if (freightCar.TryAddItemWithHealth(itemId, dropStartWorldPosition, dropStartProvider, HeldInstallationHealth))
             {
                 return true;
             }
@@ -1304,7 +1306,7 @@ public sealed partial class RobotArmInstance : IMapObjectTarget, IDataElectricCo
                        dropStartProvider,
                        ItemMoveDuration,
                        false,
-                       ItemMoveDuration);
+                       ItemMoveDuration, installationHealth: HeldInstallationHealth);
         }
 
         if (IsFarmlandFertilizerDropTarget(
@@ -1326,14 +1328,16 @@ public sealed partial class RobotArmInstance : IMapObjectTarget, IDataElectricCo
         }
 
         if (boxObject != null
-            && boxObject.TryPutOneContainedObject(itemId, dropStartWorldPosition, 0f, out _, false, ItemMoveDuration))
+            && boxObject.TryPutOneContainedObject(itemId, dropStartWorldPosition, 0f, out var boxItem, false, ItemMoveDuration))
         {
+            boxItem?.SetInstallationHealth(HeldInstallationHealth);
             return true;
         }
 
         if (CanPlaceSingleLineDrop(dropBlock, dropCoordinate)
-            && dropBlock.TryAddInputAreaCenterObjectAnimated(itemId, dropStartWorldPosition, 0f, out _, null, null, false, ItemMoveDuration))
+            && dropBlock.TryAddInputAreaCenterObjectAnimated(itemId, dropStartWorldPosition, 0f, out var centerItem, null, null, false, ItemMoveDuration))
         {
+            centerItem?.SetInstallationHealth(HeldInstallationHealth);
             return true;
         }
 
@@ -1537,7 +1541,7 @@ public sealed partial class RobotArmInstance : IMapObjectTarget, IDataElectricCo
         Vector3 referenceWorldPosition = GetSavedCoordinateWorldPosition(dropCoordinate);
         if (mutate)
         {
-            if (stateStore.TryAddSavedConveyorItem(dropCoordinate, itemId, referenceWorldPosition))
+            if (stateStore.TryAddSavedConveyorItem(dropCoordinate, itemId, referenceWorldPosition, HeldInstallationHealth))
             {
                 return true;
             }
@@ -1560,7 +1564,7 @@ public sealed partial class RobotArmInstance : IMapObjectTarget, IDataElectricCo
 
         int capacity = ResolveSavedCenterCapacity(stateStore, dropCoordinate, itemId, 10);
         return mutate
-            ? stateStore.TryAddSavedCenterItems(dropCoordinate, itemId, 1, capacity)
+            ? stateStore.TryAddSavedCenterItems(dropCoordinate, itemId, 1, capacity, HeldInstallationHealth)
             : stateStore.CanAddSavedCenterItems(dropCoordinate, itemId, 1, capacity);
     }
 
@@ -1831,11 +1835,12 @@ public sealed partial class RobotArmInstance : IMapObjectTarget, IDataElectricCo
         }
 
         int itemId = heldItemId;
-        if (!targetBag.TryAddObject(targetSlotIndex, itemId, out _))
+        if (!targetBag.TryAddObject(targetSlotIndex, itemId, out var portable))
         {
             return false;
         }
 
+        portable.SetInstallationHealth(HeldInstallationHealth);
         ClearHeldItem();
         dropRetryTimer = 0f;
         actionTurnTimer = 0f;

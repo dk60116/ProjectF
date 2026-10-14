@@ -107,6 +107,7 @@ public partial class Block
     internal bool ReadTransportImport(int lane, out ConveyorTransportItem item, out Vector3 position)
     {
         item = new ConveyorTransportItem { Id = GetConveyorStoredItemIdAtLane(lane), Gate = GetConveyorPickupGateStateAtLane(lane) };
+        item.InstallationHealth = GetConveyorInstallationHealth(lane);
         position = GetConveyorItemVisualWorldPosition(lane);
         return item.Id >= 0;
     }
@@ -140,6 +141,7 @@ public partial class Block
     internal void RestoreTransportItem(int lane, ConveyorTransportItem item, Vector3 position)
     {
         SetConveyorItemAtLane(lane, item.Id, null, item.Gate);
+        SetConveyorInstallationHealth(lane, item.InstallationHealth);
         float distance = Vector3.Distance(position, GetConveyorLaneWorldPosition(lane));
         if (distance > ConveyorContinuousMotionEpsilon)
             conveyorItemMotionStates[lane] = InitializeConveyorDataMotionTiming(new ConveyorDataMotionState {
@@ -152,6 +154,7 @@ public partial class Block
     {
         if (!OwnsConveyorTransport) return false;
         var item = new ConveyorTransportItem { Id = source.GetConveyorItemIdAtLane(sourceLane), Gate = source.GetConveyorPickupGateStateAtLane(sourceLane) };
+        item.InstallationHealth = source.GetConveyorInstallationHealth(sourceLane);
         if (item.Id < 0 || !ConveyorTransport.Accept(TransportSlot(destinationLane), item)) return false;
         source.ClearConveyorItemAtLane(sourceLane);
         source.MarkConveyorItemVisualDirty();

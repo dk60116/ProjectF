@@ -95,6 +95,8 @@ public class ItemInfoDescription : MonoBehaviour
     private InputOutputModule liveGaugeModule;
     private float nextProductionInfoRefreshTime;
     private RailHandcar liveGaugeRailHandcar;
+    private ProjectF.Monsters.MonsterInstance liveGaugeMonster;
+    private float displayedMonsterHealth = -1f;
 
     private void Awake()
     {
@@ -199,6 +201,26 @@ public class ItemInfoDescription : MonoBehaviour
             storedEnergy,
             capacity,
             true);
+    }
+
+    public void ShowMonster(ProjectF.Monsters.MonsterInstance monster)
+    {
+        Clear();
+        if (monster == null || !monster.IsActive) return;
+        liveGaugeMonster = monster;
+        RefreshMonsterHealthGauge();
+    }
+
+    private void RefreshMonsterHealthGauge()
+    {
+        float health = liveGaugeMonster.CurrentHealth;
+        if (displayedMonsterHealth == health) return;
+        displayedMonsterHealth = health;
+        float maximum = liveGaugeMonster.MaxHealth;
+        SetGauge(defaultGauge, defaultFill, defaultGaugeText, true,
+            maximum > 0f ? health / maximum : 0f, HealthGaugeFillColor, health, maximum, false,
+            $"HP: {health.ToString("0.#", CultureInfo.InvariantCulture)}"
+            + $"/{maximum.ToString("0.#", CultureInfo.InvariantCulture)}");
     }
 
     public void ShowAnimal(Animal animal)
@@ -1295,12 +1317,21 @@ public class ItemInfoDescription : MonoBehaviour
         liveGaugeModule = null;
         nextProductionInfoRefreshTime = 0f;
         liveGaugeRailHandcar = null;
+        liveGaugeMonster = null;
+        displayedMonsterHealth = -1f;
     }
 
     private void RefreshLiveGaugeTargets()
     {
         if (!Application.isPlaying || !gameObject.activeInHierarchy)
         {
+            return;
+        }
+
+        if (liveGaugeMonster != null)
+        {
+            if (liveGaugeMonster.IsActive) RefreshMonsterHealthGauge();
+            else Clear();
             return;
         }
 

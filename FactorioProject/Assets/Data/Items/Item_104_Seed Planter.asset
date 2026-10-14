@@ -13,7 +13,7 @@ MonoBehaviour:
   m_Name: Item_104_Seed Planter
   m_EditorClassIdentifier: Assembly-CSharp::ItemDefinition
   itemName: Seed Planter
-  id: 79
+  id: 82
   mapObject: {fileID: 5947636525656944032, guid: 8f63da3c1fe9b2c45b93145ecc84810d, type: 3}
   mapObjectArchetype: {fileID: 11400000, guid: dbb9b3a7fbda31240961602a24db9745, type: 2}
   useMapColor: 1
@@ -33,6 +33,9 @@ MonoBehaviour:
   isManual: 0
   manualTargetItem: {fileID: 0}
   upgradeable: 1
+  maxHealth: 100
+  excludeFromMonsterTargets: 0
+  monsterAttackPriority: 1
   keepIoAreaItemsInPlaceWhileEditing: 0
   capacity: 10
   isFluid: 0

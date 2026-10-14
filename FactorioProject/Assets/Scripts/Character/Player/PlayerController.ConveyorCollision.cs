@@ -32,6 +32,16 @@ public partial class PlayerController
             playerMaxY = Mathf.Max(first.y, second.y) + originOffset.y + capsuleRadius;
         }
         int collisionMask = GetPlayerMovementCollisionMask();
+        ProjectF.Monsters.MonsterWorld monsterWorld = ProjectF.Monsters.MonsterWorld.Current;
+        if (hasCapsule && monsterWorld != null && collisionMask != 0
+            && monsterWorld.TrySweepBody(new Vector3(start.x, (playerMinY + playerMaxY) * .5f, start.y),
+                new Vector3(flatDirection.x, 0f, flatDirection.y), nearestDistance, radius, playerMinY, playerMaxY, collisionMask,
+                out float monsterDistance, out Vector3 monsterNormal))
+        {
+            nearestDistance = monsterDistance;
+            blockingHit = new RaycastHit { distance = monsterDistance, normal = monsterNormal };
+            blocked = true;
+        }
 
         // Coverage remains available while the belt's render root is suspended.
         // Raised sides block entry only; stepping off and low landings stay open.

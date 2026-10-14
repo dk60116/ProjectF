@@ -186,6 +186,7 @@ internal static class PlayerItemStorageUtility
         }
 
         portableObject.GetComponent<DroppedItemPickupGate>()?.ClearGate();
+        reservation.Target.CopyInstallationHealthFrom(portableObject);
         portableObject.CancelMove();
         portableObject.SetBatchedRendering(false);
         portableObject.SetCachedParent(null, true);
@@ -289,6 +290,7 @@ internal static class PlayerItemStorageUtility
             return true;
         }
 
+        movingPortableObject.CopyInstallationHealthFrom(visualTemplate);
         MoveVisualToPlayerStorage(
             movingPortableObject,
             reservation,

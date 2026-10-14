@@ -1,0 +1,9 @@
+Tool: built-in image_gen (transparent_background: true)
+Edit target: output/imagegen/Crossbow_icon-v2.png
+
+Final prompt:
+Use case: precise-object-edit
+Edit target: the provided crossbow inventory icon.
+Request: Remove ONLY the loaded arrow/bolt from the crossbow, including its pointed arrowhead at the upper-right end, the golden bolt shaft running along the top groove, and the pale cream fletching near the center latch. Leave the wooden crossbow stock and the transverse metal bow intact. Show an empty clean bolt groove on top of the stock after removal, with the stock naturally ending at the front metal bow assembly rather than a protruding arrow tip.
+Invariants: preserve the crossbow's existing geometry, silhouette apart from the removed bolt, diagonal orientation, camera angle, low-poly faceted illustration style, orange wood and gray metal colors, lighting, trigger, metal fittings, dark taut bowstring, scale and placement. Do not remove the bowstring or bow limbs. Do not add new objects or redesign the weapon. Keep a genuinely transparent alpha background; no text, ground, shadow, frame, watermark or background.
+

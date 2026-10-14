@@ -8,6 +8,8 @@ public static class MapObjectTickProfiler
     public static bool IsDetailedEnabled => IsEnabled;
     public static void RecordRenderFrame() { }
     public static void RecordSimulationTicks(int count) { }
+    public static NamedSampleScope SampleUpdateCaller<T>() => new();
+    public static NamedSampleScope SampleLateUpdateCaller<T>() => new();
     public static readonly Dictionary<string, long> Counters = new();
     public static readonly HashSet<string> Samples = new();
     public static NamedSampleScope SampleNamed(string kind, string type, string name)

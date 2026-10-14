@@ -13,7 +13,7 @@ MonoBehaviour:
   m_Name: Item_94_Horse steak
   m_EditorClassIdentifier: Assembly-CSharp::ItemDefinition
   itemName: Horse steak
-  id: 109
+  id: 112
   mapObject: {fileID: 0}
   mapObjectArchetype: {fileID: 0}
   useMapColor: 0
@@ -33,6 +33,9 @@ MonoBehaviour:
   isManual: 0
   manualTargetItem: {fileID: 0}
   upgradeable: 1
+  maxHealth: 100
+  excludeFromMonsterTargets: 0
+  monsterAttackPriority: 1
   keepIoAreaItemsInPlaceWhileEditing: 0
   capacity: 10
   isFluid: 0

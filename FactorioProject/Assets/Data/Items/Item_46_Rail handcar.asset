@@ -13,7 +13,7 @@ MonoBehaviour:
   m_Name: Item_46_Rail handcar
   m_EditorClassIdentifier: 
   itemName: Axe
-  id: 10
+  id: 18
   mapObject: {fileID: 0}
   mapObjectArchetype: {fileID: 0}
   useMapColor: 0
@@ -35,6 +35,9 @@ MonoBehaviour:
   isManual: 0
   manualTargetItem: {fileID: 0}
   upgradeable: 1
+  maxHealth: 100
+  excludeFromMonsterTargets: 0
+  monsterAttackPriority: 1
   keepIoAreaItemsInPlaceWhileEditing: 0
   capacity: 10
   isFluid: 0

@@ -31,6 +31,7 @@ public readonly struct PortableObjectHandle : IEquatable<PortableObjectHandle>
 public struct PortableObjectComponent
 {
     public int ItemId;
+    public float InstallationHealth;
     public Vector3 WorldPosition;
     public Quaternion WorldRotation;
     public Vector3 WorldScale;

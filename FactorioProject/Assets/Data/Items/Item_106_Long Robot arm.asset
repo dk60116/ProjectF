@@ -13,7 +13,7 @@ MonoBehaviour:
   m_Name: Item_106_Long Robot arm
   m_EditorClassIdentifier: Assembly-CSharp::ItemDefinition
   itemName: Long Robot arm
-  id: 74
+  id: 77
   mapObject: {fileID: 5617472291595085519, guid: 67e59f493a6d8be4f88637abe49568e4, type: 3}
   mapObjectArchetype: {fileID: 11400000, guid: 9017e43225375b7439732c5f9232ade7, type: 2}
   useMapColor: 1
@@ -33,6 +33,9 @@ MonoBehaviour:
   isManual: 0
   manualTargetItem: {fileID: 0}
   upgradeable: 1
+  maxHealth: 100
+  excludeFromMonsterTargets: 0
+  monsterAttackPriority: 1
   keepIoAreaItemsInPlaceWhileEditing: 1
   capacity: 10
   isFluid: 0

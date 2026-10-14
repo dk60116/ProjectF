@@ -13,7 +13,7 @@ MonoBehaviour:
   m_Name: Item_31_Boiler
   m_EditorClassIdentifier: 
   itemName: Boiler
-  id: 68
+  id: 71
   mapObject: {fileID: 3506764276934423664, guid: 19c50aebdae9359439841e55c9844e07, type: 3}
   mapObjectArchetype: {fileID: 11400000, guid: 39a10f8a4c6063142b7daba263403ad5, type: 2}
   useMapColor: 1
@@ -33,6 +33,9 @@ MonoBehaviour:
   isManual: 0
   manualTargetItem: {fileID: 0}
   upgradeable: 1
+  maxHealth: 100
+  excludeFromMonsterTargets: 0
+  monsterAttackPriority: 3
   keepIoAreaItemsInPlaceWhileEditing: 0
   capacity: 10
   isFluid: 0

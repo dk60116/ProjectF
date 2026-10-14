@@ -13,7 +13,7 @@ MonoBehaviour:
   m_Name: Item_105_Spliter belt
   m_EditorClassIdentifier: Assembly-CSharp::ItemDefinition
   itemName: Spliter belt
-  id: 58
+  id: 61
   mapObject: {fileID: 3055157777023880970, guid: 09f7fb2b66f582848aedabcf3fdc9f18, type: 3}
   mapObjectArchetype: {fileID: 11400000, guid: 0b0379e38bc863d4fb726d4be9acde04, type: 2}
   useMapColor: 1
@@ -33,6 +33,9 @@ MonoBehaviour:
   isManual: 0
   manualTargetItem: {fileID: 0}
   upgradeable: 1
+  maxHealth: 100
+  excludeFromMonsterTargets: 0
+  monsterAttackPriority: 1
   keepIoAreaItemsInPlaceWhileEditing: 0
   capacity: 10
   isFluid: 0

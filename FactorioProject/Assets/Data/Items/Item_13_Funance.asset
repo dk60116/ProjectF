@@ -13,7 +13,7 @@ MonoBehaviour:
   m_Name: Item_13_Funance
   m_EditorClassIdentifier: 
   itemName: Funance
-  id: 41
+  id: 44
   mapObject: {fileID: 3843491245406909261, guid: 482d646ee24530540a103d758c71b5b2, type: 3}
   mapObjectArchetype: {fileID: 11400000, guid: 39875aa15bdd75143a55d66e6fa7f0c2, type: 2}
   useMapColor: 1
@@ -33,6 +33,9 @@ MonoBehaviour:
   isManual: 0
   manualTargetItem: {fileID: 0}
   upgradeable: 1
+  maxHealth: 100
+  excludeFromMonsterTargets: 0
+  monsterAttackPriority: 2
   keepIoAreaItemsInPlaceWhileEditing: 0
   capacity: 10
   isFluid: 0
@@ -52,7 +55,7 @@ MonoBehaviour:
   useEnergyRequirements:
   - energyType: 1
     useEnergyAmount: 1
-    completeEnergy: 15
+    completeEnergy: 0
   useEnergyType: 0
   useEnergyAmount: 0
   completeEnergy: 0

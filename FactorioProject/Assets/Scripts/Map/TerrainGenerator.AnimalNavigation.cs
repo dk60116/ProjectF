@@ -6,6 +6,7 @@ public partial class TerrainGenerator
 {
     // Terrain/occupancy data, never Renderer, activeInHierarchy, or PhysX state.
     private readonly Dictionary<Vector2Int, bool> animalWalkableCells = new Dictionary<Vector2Int, bool>();
+    private readonly Dictionary<Vector2Int, bool> monsterWalkableCells = new Dictionary<Vector2Int, bool>();
     private readonly Dictionary<Vector2Int, bool> animalShoreCells = new Dictionary<Vector2Int, bool>();
     private readonly Dictionary<Vector2Int, int> animalAdditionalObstacleCounts = new Dictionary<Vector2Int, int>();
     private System.Func<int, int, bool> animalObstacleCellPredicate;
@@ -29,12 +30,15 @@ public partial class TerrainGenerator
 
     internal void InvalidateAnimalNavigation(Vector2Int coordinate)
     {
-        if (animalWalkableCells.Remove(coordinate)) AnimalNavigationRevision++;
+        bool changed = animalWalkableCells.Remove(coordinate);
+        changed |= monsterWalkableCells.Remove(coordinate);
+        if (changed) AnimalNavigationRevision++;
     }
 
     internal void InvalidateAnimalNavigation()
     {
         animalWalkableCells.Clear();
+        monsterWalkableCells.Clear();
         animalShoreCells.Clear();
         AnimalNavigationRevision++;
     }
@@ -42,25 +46,35 @@ public partial class TerrainGenerator
     public bool CanAnimalMoveTo(Vector3 worldPosition, bool requireLoadedBlock)
     {
         // Kept for existing callers. A view loading request does not change traversability.
+        return CanNavigateTo(worldPosition, false);
+    }
+
+    public bool CanMonsterMoveTo(Vector3 worldPosition) => CanNavigateTo(worldPosition, true);
+
+    private bool CanNavigateTo(Vector3 worldPosition, bool allowTrees)
+    {
         Vector2Int coordinate = AnimalSimulationMath.Cell(worldPosition);
-        if (animalWalkableCells.TryGetValue(coordinate, out bool walkable))
+        Dictionary<Vector2Int, bool> cache = allowTrees ? monsterWalkableCells : animalWalkableCells;
+        if (cache.TryGetValue(coordinate, out bool walkable))
         {
             AnimalAIProfiler.Add(AnimalAIProfiler.Counter.WalkableCacheHits);
             return walkable;
         }
         AnimalAIProfiler.Add(AnimalAIProfiler.Counter.WalkableCacheMisses);
-        walkable = ReadAnimalWalkableCell(coordinate);
-        animalWalkableCells.Add(coordinate, walkable);
+        walkable = ReadAnimalWalkableCell(coordinate, allowTrees);
+        cache.Add(coordinate, walkable);
         return walkable;
     }
 
-    private bool ReadAnimalWalkableCell(Vector2Int coordinate)
+    private bool ReadAnimalWalkableCell(Vector2Int coordinate, bool allowTrees)
     {
         if (animalAdditionalObstacleCounts.ContainsKey(coordinate)) return false;
         if (!IsCoordinateInsideMapBounds(coordinate) || GetTileBiome(coordinate) == TerrainBiome.Water)
             return false;
         if (TryGetLoadedBlock(coordinate, out Block block) && block != null)
-            return block.MapObject == null || block.MapObject.AllowsAnimalTraversal;
+            return block.MapObject == null || block.MapObject.AllowsAnimalTraversal
+                   || allowTrees && (block.MapObject is ProjectF.MapObjects.TreeInstance
+                                     || block.MapObject is ProjectF.MapObjects.Tree);
 
         // Unloaded cells use the same persisted/generated occupancy as chunk restoration.
         if (resourceStateStore != null
@@ -78,7 +92,8 @@ public partial class TerrainGenerator
         if (resourceStateStore != null && resourceStateStore.IsDepleted(coordinate)) return true;
         return !TryGetResourcePrefab(coordinate, out Resource resource)
                || !CanSpawnResourceAtGeneratedCoordinate(coordinate, resource)
-               || resource.AllowsAnimalTraversal;
+               || resource.AllowsAnimalTraversal
+               || allowTrees && resource is ProjectF.MapObjects.Tree;
     }
 
     internal bool IsAnimalShoreCell(Vector2Int coordinate)

@@ -24,7 +24,7 @@ public partial class TerrainGenerator
         bool hasFloorObjects = resourceStateStore.TryGetFloorObjects(block.Coordinate, out List<int> itemIds);
         if (hasFloorObjects && !hasDetailedConveyorItems)
         {
-            block.ApplyFloorObjectState(itemIds);
+            block.ApplyFloorObjectState(itemIds, resourceStateStore.GetFloorInstallationHealth(block.Coordinate));
             resourceStateStore.SetFloorObjectsResidency(block.Coordinate, VirtualObjectResidency.Live);
         }
 
@@ -33,7 +33,7 @@ public partial class TerrainGenerator
             int restoredItemCount = block.ApplyConveyorItemSaveStates(conveyorItems);
             if (restoredItemCount <= 0 && HasConveyorFloorObjectFallback(itemIds))
             {
-                block.ApplyFloorObjectState(itemIds);
+                block.ApplyFloorObjectState(itemIds, resourceStateStore.GetFloorInstallationHealth(block.Coordinate));
             }
 
             resourceStateStore.SetFloorObjectsResidency(block.Coordinate, VirtualObjectResidency.Live);
@@ -101,6 +101,7 @@ public partial class TerrainGenerator
                 ConveyorItemLaneSaveState laneState = entry.lanes[laneStateIndex];
                 if (laneState == null
                     || laneState.nativeBeltState != null
+                    || laneState.installationHealth > 0f
                     || laneState.itemId < 0
                     || laneState.laneIndex < 0
                     || laneState.laneIndex >= laneCount)

@@ -11,7 +11,7 @@ using UnityEngine.Rendering;
 /// GameObject; every belt in the world is represented by one of these records and rendered by
 /// the single ConveyorWorld host.
 /// </summary>
-public sealed class ConveyorRuntimeRecord
+public sealed partial class ConveyorRuntimeRecord : IMapObjectTarget, IMapObjectSimulationIdentity
 {
     private const float Belt2FPathHalfLength = 1.5f;
     private const float Belt2FPathHighHalfLength = 0.5f;

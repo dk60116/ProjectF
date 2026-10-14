@@ -171,6 +171,7 @@ public class BagSlot : ItemSlot, IBeginDragHandler, IDragHandler, IEndDragHandle
         private readonly Transform parent;
         private readonly Vector3 localPosition;
         private readonly Vector3 worldPosition;
+        public readonly float InstallationHealth;
 
         public PortableMoveAnchor(PortableObject portableObject)
         {
@@ -178,6 +179,7 @@ public class BagSlot : ItemSlot, IBeginDragHandler, IDragHandler, IEndDragHandle
             parent = targetTransform != null ? targetTransform.parent : null;
             localPosition = targetTransform != null ? targetTransform.localPosition : Vector3.zero;
             worldPosition = targetTransform != null ? targetTransform.position : Vector3.zero;
+            InstallationHealth = portableObject != null ? portableObject.InstallationHealth : 0f;
         }
 
         public Vector3 ResolveWorldPosition()
@@ -353,6 +355,7 @@ public class BagSlot : ItemSlot, IBeginDragHandler, IDragHandler, IEndDragHandle
             int storageItemId = boundBag.GetSlotItemId(slotIndex);
             int storageSlotCount = boundBag.GetSlotCount(slotIndex);
             int storageDropCount = Mathf.Min(storageSlotCount, requestedDropCount);
+            var storageHealth = boundBag.CaptureSlotInstallationHealth(slotIndex, storageDropCount);
             if (storageItemId < 0 || storageDropCount <= 0)
             {
                 return;
@@ -382,18 +385,19 @@ public class BagSlot : ItemSlot, IBeginDragHandler, IDragHandler, IEndDragHandle
                 startWorldPosition,
                 startWorldPositionProvider,
                 0.1f,
-                out int storageDroppedCount);
+                out int storageDroppedCount,
+                storageHealth);
 
             if (!storageDropped || storageDroppedCount <= 0)
             {
-                RestoreItemsToSlot(storageItemId, storageRemovedCount);
+                RestoreItemsToSlot(storageItemId, storageRemovedCount, storageHealth);
                 return;
             }
 
             int storageRemainingCount = Mathf.Max(0, storageRemovedCount - storageDroppedCount);
             if (storageRemainingCount > 0)
             {
-                RestoreItemsToSlot(storageItemId, storageRemainingCount);
+                RestoreItemsToSlot(storageItemId, storageRemainingCount, storageHealth, storageDroppedCount);
             }
 
             RefreshPickupPreviewAfterDrop();
@@ -422,6 +426,7 @@ public class BagSlot : ItemSlot, IBeginDragHandler, IDragHandler, IEndDragHandle
             {
                 return;
             }
+            var conveyorHealth = boundBag.CaptureSlotInstallationHealth(slotIndex, conveyorDropCount);
 
             if (!boundBag.TryRemoveItemsAtSlot(
                     slotIndex,
@@ -449,18 +454,19 @@ public class BagSlot : ItemSlot, IBeginDragHandler, IDragHandler, IEndDragHandle
                 startWorldPositionProvider,
                 0.1f,
                 out _,
-                out int conveyorDroppedCount);
+                out int conveyorDroppedCount,
+                conveyorHealth);
 
             if (!conveyorDropped || conveyorDroppedCount <= 0)
             {
-                RestoreItemsToSlot(conveyorItemId, conveyorRemovedCount);
+                RestoreItemsToSlot(conveyorItemId, conveyorRemovedCount, conveyorHealth);
                 return;
             }
 
             int conveyorRemainingCount = Mathf.Max(0, conveyorRemovedCount - conveyorDroppedCount);
             if (conveyorRemainingCount > 0)
             {
-                RestoreItemsToSlot(conveyorItemId, conveyorRemainingCount);
+                RestoreItemsToSlot(conveyorItemId, conveyorRemainingCount, conveyorHealth, conveyorDroppedCount);
             }
 
             RefreshPickupPreviewAfterDrop();
@@ -470,6 +476,7 @@ public class BagSlot : ItemSlot, IBeginDragHandler, IDragHandler, IEndDragHandle
         int itemId;
         int removedCount;
         bool removedItems;
+        var droppedHealth = boundBag.CaptureSlotInstallationHealth(slotIndex, requestedDropCount);
         if (maxDropCount == int.MaxValue)
         {
             removedItems = boundBag.TryRemoveAllAtSlot(slotIndex, out itemId, out removedCount, out startWorldPosition);
@@ -492,7 +499,8 @@ public class BagSlot : ItemSlot, IBeginDragHandler, IDragHandler, IEndDragHandle
             startWorldPositionProvider,
             0.1f,
             out _,
-            out int droppedCount);
+            out int droppedCount,
+            droppedHealth);
 
         if (dropped && droppedCount > 0)
         {
@@ -502,11 +510,11 @@ public class BagSlot : ItemSlot, IBeginDragHandler, IDragHandler, IEndDragHandle
         int remainingCount = Mathf.Max(0, removedCount - droppedCount);
         if (remainingCount > 0)
         {
-            RestoreItemsToSlot(itemId, remainingCount);
+            RestoreItemsToSlot(itemId, remainingCount, droppedHealth, droppedCount);
         }
     }
 
-    private void RestoreItemsToSlot(int itemId, int count)
+    private void RestoreItemsToSlot(int itemId, int count, IReadOnlyList<float> health = null, int offset = 0)
     {
         if (boundBag == null || slotIndex < 0 || itemId < 0 || count <= 0)
         {
@@ -515,10 +523,11 @@ public class BagSlot : ItemSlot, IBeginDragHandler, IDragHandler, IEndDragHandle
 
         for (int i = 0; i < count; i++)
         {
-            if (!boundBag.TryAddObject(slotIndex, itemId, out _))
+            if (!boundBag.TryAddObject(slotIndex, itemId, out var restored))
             {
                 break;
             }
+            if (health != null && i + offset < health.Count) restored?.SetInstallationHealth(health[i + offset]);
         }
     }
 
@@ -3055,6 +3064,7 @@ public class BagSlot : ItemSlot, IBeginDragHandler, IDragHandler, IEndDragHandle
 
             PortableMoveAnchor startAnchor = startAnchors[Mathf.Min(i, startAnchors.Count - 1)];
             PortableMoveAnchor targetAnchor = targetAnchors[Mathf.Min(i, targetAnchors.Count - 1)];
+            portableObject.SetInstallationHealth(startAnchor.InstallationHealth);
             AnimatePortableMove(portableObject, startAnchor, targetAnchor, moveIndex * moveInterval);
             moveIndex++;
         }

@@ -72,6 +72,8 @@ public class ResourceInstance : IMapObjectTarget, IMapObjectSimulationIdentity, 
     public string ObjectName => sharedWorld.Prototype.ObjectName;
     public string SourceName => sharedWorld.Prototype.name;
     public Resource Prototype => sharedWorld.Prototype;
+    public float MaximumHealth => Prototype.MaximumHealth;
+    public float CurrentHealth => released || ResourceCount <= 0 ? 0f : Mathf.Clamp(State.CurrentHealth, 0f, MaximumHealth);
     public MapObject SceneObject => null;
     public bool IsTargetActive => IsRuntimeActive;
     public Vector3 WorldPosition => released ? sharedBounds.center : State.Position;
@@ -350,6 +352,8 @@ public class ResourceInstance : IMapObjectTarget, IMapObjectSimulationIdentity, 
         if (released) return default;
         ResourceSaveState state = new ResourceSaveState
         {
+            hasHealth = true,
+            currentHealth = CurrentHealth,
             resourceCount = ResourceCount,
             maxGauge = MaxGauge,
             currentGauge = CurrentGauge,
@@ -364,6 +368,8 @@ public class ResourceInstance : IMapObjectTarget, IMapObjectSimulationIdentity, 
     public void ApplySavedState(ResourceSaveState state)
     {
         if (released) return;
+        State.CurrentHealth = state.hasHealth && !float.IsNaN(state.currentHealth) && !float.IsInfinity(state.currentHealth)
+            ? Mathf.Clamp(state.currentHealth, 0f, MaximumHealth) : MaximumHealth;
         resourceStatus.resourceCount = Mathf.Max(0, state.resourceCount);
         resourceStatus.maxGauge = Mathf.Max(1, state.maxGauge);
 

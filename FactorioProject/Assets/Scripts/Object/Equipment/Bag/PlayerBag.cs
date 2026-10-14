@@ -1167,6 +1167,7 @@ public class PlayerBag : MonoBehaviour
             {
                 return false;
             }
+            targetPortableObject.CopyInstallationHealthFrom(sourcePortableObject);
 
             if (!targetPortableObject.IsActive)
             {
@@ -1601,14 +1602,37 @@ public class PlayerBag : MonoBehaviour
         int slotCount = SlotCount;
         for (int slotIndex = 0; slotIndex < slotCount; slotIndex++)
         {
-            results.Add(new PlayerInventorySlotSaveState
+            var saved = new PlayerInventorySlotSaveState
             {
                 slotIndex = slotIndex,
                 itemId = GetSlotItemId(slotIndex),
                 count = GetSlotCount(slotIndex),
                 capacity = GetSlotCapacityForItem(slotIndex, GetSlotItemId(slotIndex))
-            });
+            };
+            for (int i = 0; i < saved.count; i++)
+            {
+                float health = portableStack[slotIndex].stack[i].InstallationHealth;
+                if (health <= 0f) continue;
+                saved.installationHealth ??= new List<float>(new float[saved.count]);
+                saved.installationHealth[i] = health;
+            }
+            results.Add(saved);
         }
+    }
+
+    public List<float> CaptureSlotInstallationHealth(int slotIndex, int requestedCount)
+    {
+        int count = Mathf.Min(GetSlotRemovableCount(slotIndex), requestedCount);
+        int total = GetSlotCount(slotIndex);
+        List<float> health = null;
+        for (int i = 0; i < count; i++)
+        {
+            float value = portableStack[slotIndex].stack[total - count + i].InstallationHealth;
+            if (value <= 0f) continue;
+            health ??= new List<float>(new float[count]);
+            health[i] = value;
+        }
+        return health;
     }
 
     public void ApplySaveSlots(IReadOnlyList<PlayerInventorySlotSaveState> slots)
@@ -1714,6 +1738,8 @@ public class PlayerBag : MonoBehaviour
             {
                 shouldBeActive = false;
             }
+            if (shouldBeActive && saveSlot.installationHealth != null && objectIndex < saveSlot.installationHealth.Count)
+                portableObject.SetInstallationHealth(saveSlot.installationHealth[objectIndex]);
 
             if (portableObject.IsActive != shouldBeActive)
             {

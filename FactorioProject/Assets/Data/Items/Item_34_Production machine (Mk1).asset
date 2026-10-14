@@ -13,7 +13,7 @@ MonoBehaviour:
   m_Name: Item_34_Production machine (Mk1)
   m_EditorClassIdentifier: 
   itemName: Production machine (Mk1)
-  id: 75
+  id: 78
   mapObject: {fileID: 1982885657640665004, guid: e735d910cbfef014488e2c2cd7333b0f, type: 3}
   mapObjectArchetype: {fileID: 11400000, guid: 20dd20270d9c5a04b81cc58b90dbdd5f, type: 2}
   useMapColor: 1
@@ -33,6 +33,9 @@ MonoBehaviour:
   isManual: 0
   manualTargetItem: {fileID: 0}
   upgradeable: 1
+  maxHealth: 100
+  excludeFromMonsterTargets: 0
+  monsterAttackPriority: 2
   keepIoAreaItemsInPlaceWhileEditing: 0
   capacity: 10
   isFluid: 0

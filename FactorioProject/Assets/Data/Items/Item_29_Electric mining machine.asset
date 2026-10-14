@@ -13,7 +13,7 @@ MonoBehaviour:
   m_Name: Item_29_Electric mining machine
   m_EditorClassIdentifier: 
   itemName: Electric mining machine
-  id: 60
+  id: 63
   mapObject: {fileID: 8277338630082605383, guid: 12170bb063a8276498a87aedd657b542, type: 3}
   mapObjectArchetype: {fileID: 11400000, guid: fa44b8da2e7608d458f39083ef6f3834, type: 2}
   useMapColor: 1
@@ -33,6 +33,9 @@ MonoBehaviour:
   isManual: 0
   manualTargetItem: {fileID: 0}
   upgradeable: 1
+  maxHealth: 100
+  excludeFromMonsterTargets: 0
+  monsterAttackPriority: 2
   keepIoAreaItemsInPlaceWhileEditing: 0
   capacity: 10
   isFluid: 0

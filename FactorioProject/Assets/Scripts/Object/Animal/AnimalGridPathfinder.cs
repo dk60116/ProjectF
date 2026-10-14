@@ -48,7 +48,8 @@ public static partial class AnimalGridPathfinder
         Vector3 end,
         Vector3 areaCenter,
         float areaRadius,
-        bool requireLoadedGround)
+        bool requireLoadedGround,
+        Func<Vector3, bool> canMoveTo = null)
     {
         using var sampleScope = new AnimalAIProfiler.SearchScope(false, true);
         if (terrain == null)
@@ -74,7 +75,7 @@ public static partial class AnimalGridPathfinder
             int sampleX = cell.x, sampleZ = cell.y;
             long areaX = x - centerX, areaZ = z - centerZ;
             if (areaX * areaX + areaZ * areaZ > radius * radius
-                || !terrain.CanAnimalMoveTo(sample, requireLoadedGround))
+                || !(canMoveTo != null ? canMoveTo(sample) : terrain.CanAnimalMoveTo(sample, requireLoadedGround)))
             {
                 return false;
             }
@@ -85,7 +86,7 @@ public static partial class AnimalGridPathfinder
                 && !IsTraversableStep(
                     terrain, previousX, previousZ,
                     sampleX - previousX, sampleZ - previousZ,
-                    sample.y, requireLoadedGround))
+                    sample.y, requireLoadedGround, canMoveTo))
             {
                 return false;
             }
@@ -104,7 +105,8 @@ public static partial class AnimalGridPathfinder
         Vector3 areaCenter,
         float areaRadius,
         bool requireLoadedGround,
-        Vector3[] output)
+        Vector3[] output,
+        Func<Vector3, bool> canMoveTo = null)
     {
         using var sample = new AnimalAIProfiler.SearchScope(false);
         if (terrain == null || output == null || output.Length == 0)
@@ -126,7 +128,8 @@ public static partial class AnimalGridPathfinder
                 goalX,
                 goalZ,
                 start.y,
-                requireLoadedGround))
+                requireLoadedGround,
+                canMoveTo))
         {
             return 0;
         }
@@ -151,7 +154,8 @@ public static partial class AnimalGridPathfinder
                     searchRadius,
                     requireLoadedGround,
                     currentIndex,
-                    output);
+                    output,
+                    canMoveTo);
             }
 
             closedStamps[currentIndex] = searchStamp;
@@ -172,7 +176,8 @@ public static partial class AnimalGridPathfinder
                         offsetX,
                         offsetZ,
                         start.y,
-                        requireLoadedGround))
+                        requireLoadedGround,
+                        canMoveTo))
                 {
                     continue;
                 }
@@ -267,7 +272,8 @@ public static partial class AnimalGridPathfinder
         float areaRadius,
         bool requireLoadedGround,
         int goalIndex,
-        Vector3[] output)
+        Vector3[] output,
+        Func<Vector3, bool> canMoveTo)
     {
         int reverseCount = 0;
         int currentIndex = goalIndex;
@@ -298,7 +304,8 @@ public static partial class AnimalGridPathfinder
                         candidatePosition,
                         areaCenter,
                         areaRadius,
-                        requireLoadedGround))
+                        requireLoadedGround,
+                        canMoveTo))
                 {
                     continue;
                 }
@@ -346,11 +353,11 @@ public static partial class AnimalGridPathfinder
         int x,
         int z,
         float y,
-        bool requireLoadedGround)
+        bool requireLoadedGround,
+        Func<Vector3, bool> canMoveTo = null)
     {
-        return terrain.CanAnimalMoveTo(
-            new Vector3(x, y, z),
-            requireLoadedGround);
+        Vector3 position = new Vector3(x, y, z);
+        return canMoveTo != null ? canMoveTo(position) : terrain.CanAnimalMoveTo(position, requireLoadedGround);
     }
 
     private static bool IsTraversableStep(
@@ -360,14 +367,16 @@ public static partial class AnimalGridPathfinder
         int offsetX,
         int offsetZ,
         float y,
-        bool requireLoadedGround)
+        bool requireLoadedGround,
+        Func<Vector3, bool> canMoveTo = null)
     {
         if (!IsWalkable(
                 terrain,
                 currentX + offsetX,
                 currentZ + offsetZ,
                 y,
-                requireLoadedGround))
+                requireLoadedGround,
+                canMoveTo))
         {
             return false;
         }
@@ -379,13 +388,15 @@ public static partial class AnimalGridPathfinder
                    currentX + offsetX,
                    currentZ,
                    y,
-                   requireLoadedGround)
+                   requireLoadedGround,
+                   canMoveTo)
                && IsWalkable(
                    terrain,
                    currentX,
                    currentZ + offsetZ,
                    y,
-                   requireLoadedGround);
+                   requireLoadedGround,
+                   canMoveTo);
     }
 
     private static float BeginGridSearch(Vector3 areaCenter, float areaRadius)

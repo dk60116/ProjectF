@@ -1,5 +1,29 @@
 # Pipe placement harness
 
+`Run.ps1` also extracts the fixed-port owner collector, same-cell direction lookup,
+adjacent connector lookup, and actual pipe-only neighbor lookup. Pipes over ECS
+Double input/output/energy cells must retain their hidden facility port and form
+a corner or tee with a reciprocal neighboring runtime pipe in all four rotations.
+Legacy grid/area modules, scene owners, saved owners, overlapping previews,
+deduplication, ignored previews, and pump/boiler/steam-generator directions are
+covered. Footprint geometry, persistence indices and connector compatibility for
+individual snapshots are fixture boundaries; Unity rendering is not executed.
+`Run.ps1 -BeforeConnectorFix` substitutes the HEAD fixed-port lookups and reproduces
+the hidden ECS DoubleInput port failure.
+
+`AreaRun.ps1` extracts the complete per-block placement decision, shared runtime
+grid-type query, and actual production-world coordinate lookup. It covers all
+grid types in four rotations across legacy, production, mining and forestry
+registries. Double input/output/energy and pipe-only cells accept pipes; item-only
+areas, machine bodies, duplicates, incompatible fluid endpoints and water remain
+blocked. Scene lookup and unrelated special-case placements are fixtures.
+`AreaRun.ps1 -BeforeFix` substitutes the HEAD runtime query to reproduce the ECS
+lookup omission. Unity placement transactions and rendering are not executed.
+
+```powershell
+./Tools/PipePlacementHarness/AreaRun.ps1
+```
+
 Extracts the production duplicate-pipe placement rule from
 `InstallationPlacementController`. It verifies that a new pipe cannot occupy a
 coordinate already owned by another pipe, while an explicitly ignored preview,
@@ -20,8 +44,8 @@ and network traversal methods are extracted from production.
 Variant cases extract actual prefab/rotation selection and forced alignment. In
 four rotations, restoring a straight beside a perpendicular output preserves both
 old ports and extends to a tee; a fresh placement may still choose a corner.
-Neighbour acceptance and candidate fluid constraints now also use extracted
-production code; only scene lookup is replaced. Preview/commit comparisons cover
+Neighbour lookup, acceptance and candidate fluid constraints use extracted
+production code; world state is a fixture. Preview/commit comparisons cover
 known anchor identities, previously untyped anchors, and a parallel foreign-fluid
 blueprint. Both fluid selection and the resulting connection mask must match.
 Shared data-only prototypes are tested in every installed/candidate rotation for

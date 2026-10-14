@@ -13,7 +13,7 @@ MonoBehaviour:
   m_Name: Item_1_Reed
   m_EditorClassIdentifier: 
   itemName: Reed
-  id: 15
+  id: 10
   mapObject: {fileID: 5596077993400562758, guid: 24eb9727d7e44e846927e90bd34ba20f, type: 3}
   mapObjectArchetype: {fileID: 11400000, guid: bbd71924b14136c4b9a5a221e12b884c, type: 2}
   useMapColor: 0
@@ -34,6 +34,9 @@ MonoBehaviour:
   isManual: 0
   manualTargetItem: {fileID: 0}
   upgradeable: 1
+  maxHealth: 100
+  excludeFromMonsterTargets: 0
+  monsterAttackPriority: 1
   keepIoAreaItemsInPlaceWhileEditing: 0
   capacity: 10
   isFluid: 0

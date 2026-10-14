@@ -17,14 +17,14 @@ MonoBehaviour:
     displayName: Energy
     expanded: 1
     anchorItemGuid: 228fcd45b59e4994d8b5f8ee23dc4595
+  - id: 52f654e67171467f864fb2b0973e4063
+    displayName: Resource
+    expanded: 1
+    anchorItemGuid: 228fcd45b59e4994d8b5f8ee23dc4595
   - id: 061b1e1292114fabaa190654551cea7c
     displayName: Tools
     expanded: 1
     anchorItemGuid: cc54448c2b8e64c40a4458e259ad7222
-  - id: 52f654e67171467f864fb2b0973e4063
-    displayName: Resource
-    expanded: 1
-    anchorItemGuid: c7d14445b92c7d0468e83d73c68f384f
   - id: f15266f7c0944b46a765791c0cac6402
     displayName: Workable
     expanded: 1
@@ -137,6 +137,10 @@ MonoBehaviour:
     displayName: Oil can
     expanded: 1
     anchorItemGuid: 
+  - id: 072e2020b408429c8245efd9faa51625
+    displayName: Weapon
+    expanded: 1
+    anchorItemGuid: 26f1d9c09d300a8458e57102d6aa6048
   itemAssignments:
   - itemGuid: e9950cff3cab70041b1997e87d6e22b1
     folderId: 839eaa9b00424dc59d967a096e100401
@@ -406,3 +410,9 @@ MonoBehaviour:
     folderId: 839eaa9b00424dc59d967a096e100401
   - itemGuid: 6948a22979bb56948883b25e4d85e66b
     folderId: 37bdc5671ec7441ba7524d20a937f221
+  - itemGuid: 794a07227a058f54ca37bfc6ba72ed25
+    folderId: 4008c2a9919643788ee7eedfdd9a2060
+  - itemGuid: 6a67d51d8efc02845a1e5070560c43fb
+    folderId: 072e2020b408429c8245efd9faa51625
+  - itemGuid: 35ec64fb0b6f8544c8d8d190c9447441
+    folderId: 4008c2a9919643788ee7eedfdd9a2060

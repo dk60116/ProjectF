@@ -291,7 +291,7 @@ public partial class PlayerController
         }
 
         CancelActiveResourceHarvest();
-        CancelAnimalKnifeInteraction();
+        CancelKnifeInteraction();
         CancelPitchforkDigging();
         seedPlantTargetBlock = targetBlock;
         seedPlantDefinition = seedDefinition;
@@ -329,7 +329,7 @@ public partial class PlayerController
 
     private void RefreshSeedGroundMouseFocus(Vector2 pointerPosition)
     {
-        SetMouseFocusedAnimal(null);
+        SetMouseFocusedCreature(null);
         SetMouseFocusedPortableObject(null);
 
         Camera targetCamera = ResolveMouseFocusCamera();

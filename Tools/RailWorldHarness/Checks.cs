@@ -32,10 +32,17 @@ static class Checks
     }
     static void NewWorld() => TerrainGenerator.Active = new TerrainGenerator();
 
-    static void Main()
+    static int Main()
+    {
+        try { Run(); return 0; }
+        catch (Exception error) { Console.Error.WriteLine(error); return 1; }
+    }
+
+    static void Run()
     {
         RailPlacementChecks.Run();
         RailCurveChecks.Run();
+        RailCommitChecks.Run();
         RuntimeChecks.Run();
         DebugRendererChecks.Run();
         NewWorld();

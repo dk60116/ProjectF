@@ -27,6 +27,7 @@ internal struct ResourceRuntimeState
     internal Resource.ResourceStatus Status;
     internal Vector3 Position, GaugeFill;
     internal float AccumulatedWork, MinimumScale, MaximumScale, BodyScale;
+    internal float CurrentHealth;
     internal int ReservedGaugeCount, InitialResourceCount, YawStep, ScaleMaximumCount;
     internal bool HasYaw, DynamicScale, BodyVisible;
     internal float Growth, GrowthWater, GrowthFertilizer, GrowthElapsed;
@@ -52,6 +53,7 @@ public sealed partial class ResourceTypeWorld
     {
         Resource.ResourceSaveState defaults = prefab.CaptureState();
         ResourceStateSlots<ResourceRuntimeState>.Slot slot = stateSlots.Allocate(new ResourceRuntimeState { Status = prefab.InitialStatus, Position = position,
+            CurrentHealth = prefab.MaximumHealth,
             DynamicScale = true, BodyVisible = true, BodyScale = 1f, MinimumScale = prefab.MinimumScale,
             MaximumScale = prefab.MaximumScale, ScaleMaximumCount = prefab.ScaleMaximumCount,
             Growth = defaults.growth, GrowthWater = defaults.growthWaterLiters,

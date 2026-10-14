@@ -29,6 +29,8 @@ public partial class BlockStateStore : MonoBehaviour
         public string itemName = string.Empty;
         public int quarterTurns;
         public long placementSequence;
+        public bool hasCombatHealth;
+        public float combatHealth;
         public bool hasStorageKey;
         public Vector2Int storageKey;
         public int conveyorVariantKind = -1;
@@ -60,6 +62,7 @@ public partial class BlockStateStore : MonoBehaviour
         public float storedFluidTemperatureCelsius = MapClimate.DefaultCurrentTemperatureCelsius;
         public int storedInstallationItemId = -1;
         public List<int> storedInstallationItemIds = new List<int>();
+        public List<float> storedInstallationItemHealth;
         public List<MountedInstallationSaveState> mountedInstallations =
             new List<MountedInstallationSaveState>();
         public bool hasWorldPose;
@@ -101,6 +104,8 @@ public partial class BlockStateStore : MonoBehaviour
                 itemName = itemName,
                 quarterTurns = quarterTurns,
                 placementSequence = placementSequence,
+                hasCombatHealth = hasCombatHealth,
+                combatHealth = combatHealth,
                 loggingProcess = loggingProcess,
                 hasStorageKey = hasStorageKey,
                 storageKey = storageKey,
@@ -133,6 +138,7 @@ public partial class BlockStateStore : MonoBehaviour
                 storedFluidTemperatureCelsius = storedFluidTemperatureCelsius,
                 storedInstallationItemId = storedInstallationItemId,
                 storedInstallationItemIds = new List<int>(storedInstallationItemIds ?? new List<int>()),
+                storedInstallationItemHealth = storedInstallationItemHealth != null ? new List<float>(storedInstallationItemHealth) : null,
                 mountedInstallations = CloneMountedInstallations(mountedInstallations),
                 hasWorldPose = hasWorldPose,
                 worldPosition = worldPosition,
@@ -210,6 +216,7 @@ public partial class BlockStateStore : MonoBehaviour
 
     private sealed class FloorObjectSaveState
     {
+        public List<PortableItemHealthSaveState> InstallationHealth;
         private readonly int[] rawItems;
         private readonly IntRun[] compressedRuns;
         private readonly int itemCount;
@@ -445,7 +452,7 @@ public partial class BlockStateStore : MonoBehaviour
             return;
         }
 
-        List<int> itemIds = block.CaptureFloorObjectState();
+        List<int> itemIds = block.CaptureFloorObjectState(out var installationHealth);
         if (itemIds == null || itemIds.Count == 0)
         {
             savedFloorObjectStates.Remove(worldCoordinate);
@@ -462,6 +469,7 @@ public partial class BlockStateStore : MonoBehaviour
         }
 
         savedFloorObjectStates[worldCoordinate] = state;
+        state.InstallationHealth = installationHealth;
         ResolveVirtualObjectWorld()?.UpsertFloorItemStack(worldCoordinate, itemIds, residency);
     }
 
@@ -513,7 +521,8 @@ public partial class BlockStateStore : MonoBehaviour
         return false;
     }
 
-    public void SetFloorObjects(Vector2Int worldCoordinate, IReadOnlyList<int> itemIds)
+    public void SetFloorObjects(Vector2Int worldCoordinate, IReadOnlyList<int> itemIds,
+        IReadOnlyList<PortableItemHealthSaveState> installationHealth = null)
     {
         if (itemIds == null || itemIds.Count <= 0)
         {
@@ -531,6 +540,8 @@ public partial class BlockStateStore : MonoBehaviour
         }
 
         savedFloorObjectStates[worldCoordinate] = state;
+        state.InstallationHealth = installationHealth != null && installationHealth.Count > 0
+            ? new List<PortableItemHealthSaveState>(installationHealth) : null;
         ResolveVirtualObjectWorld()?.UpsertFloorItemStack(worldCoordinate, itemIds);
     }
 
@@ -1036,6 +1047,12 @@ public partial class BlockStateStore : MonoBehaviour
         return savedInstallationAnchorsByCoordinate.TryGetValue(worldCoordinate, out storageKey);
     }
 
+    internal bool TryGetInstallationStorageKey(long sequence, int itemId, out Vector2Int key)
+    {
+        return savedInstallationStorageKeysByPlacement.TryGetValue((sequence, itemId), out key)
+            || liveInstallationStorageKeysByPlacement.TryGetValue((sequence, itemId), out key);
+    }
+
     internal void CollectInstallationStorageKeysAtCoordinate(
         Vector2Int worldCoordinate,
         ISet<Vector2Int> storageKeys)
@@ -1310,6 +1327,7 @@ public partial class BlockStateStore : MonoBehaviour
 
     public void RemoveInstallation(Vector2Int storageKey, bool removeUtilityPoleReferences = true)
     {
+        DamagedInstallations.Remove(storageKey);
         railWorld?.RemoveSaved(storageKey);
         RobotArmWorld.Current?.Remove(storageKey);
         MiningWorld.Current?.Remove(storageKey);
@@ -1403,6 +1421,8 @@ public partial class BlockStateStore : MonoBehaviour
 
     public void ClearStates()
     {
+        ClearHealthState();
+        ProjectF.Monsters.MonsterWorld.Current?.Dispose();
         foreach (KeyValuePair<Vector2Int, LiveInstallationRecord> pair in liveInstallationStates)
         {
             pair.Value?.installationObject?.BindRuntimeMapObjectHandle(default);
@@ -1461,6 +1481,10 @@ public partial class BlockStateStore : MonoBehaviour
         mapSaveData.resources.Clear();
         mapSaveData.floorObjects.Clear();
         mapSaveData.installations.Clear();
+        mapSaveData.wreckage ??= new List<InstallationSaveEntry>();
+        mapSaveData.wreckage.Clear();
+        for (int i = 0; i < Wreckage.Count; i++)
+            mapSaveData.wreckage.Add(new InstallationSaveEntry { state = Wreckage[i].Clone() });
         mapSaveData.conveyorItems.Clear();
         EnsureListCapacity(mapSaveData.resources, savedStates.Count);
         EnsureListCapacity(mapSaveData.floorObjects, savedFloorObjectStates.Count);
@@ -1491,7 +1515,9 @@ public partial class BlockStateStore : MonoBehaviour
                 mapSaveData.floorObjects.Add(new FloorObjectSaveEntry
                 {
                     coordinate = pair.Key,
-                    itemIds = pair.Value.ToSerializedList()
+                    itemIds = pair.Value.ToSerializedList(),
+                    installationHealth = pair.Value.InstallationHealth != null
+                        ? new List<PortableItemHealthSaveState>(pair.Value.InstallationHealth) : null
                 });
             }
             if (++processed >= entriesPerFrame)
@@ -1550,6 +1576,12 @@ public partial class BlockStateStore : MonoBehaviour
         }
 
         SaveGameConveyorItemBackfill.BackfillFromFloorObjects(mapSaveData);
+        if (mapSaveData.wreckage != null)
+            for (int i = 0; i < mapSaveData.wreckage.Count; i++)
+            {
+                var wreck = mapSaveData.wreckage[i]?.state;
+                if (wreck != null) AddWreckage(wreck, wreck.worldPosition, wreck.worldRotation);
+            }
         VirtualObjectWorld world = ResolveVirtualObjectWorld();
         int resourceCount = mapSaveData.resources?.Count ?? 0;
         savedStates.EnsureCapacity(resourceCount);
@@ -1592,7 +1624,7 @@ public partial class BlockStateStore : MonoBehaviour
                         continue;
                     }
 
-                    SetFloorObjects(entry.coordinate, entry.itemIds);
+                    SetFloorObjects(entry.coordinate, entry.itemIds, entry.installationHealth);
                 }
             }
 
@@ -1791,7 +1823,8 @@ public partial class BlockStateStore : MonoBehaviour
         }
         if (installationObject is IPersistentInstallationItemCollectionStorage collectionStorage)
         {
-            collectionStorage.CapturePersistentStoredItemIds(state.storedInstallationItemIds);
+            state.storedInstallationItemHealth = new List<float>();
+            collectionStorage.CapturePersistentStoredItemIds(state.storedInstallationItemIds, state.storedInstallationItemHealth);
         }
 
         if (installationObject is FreightCar freightCar)
@@ -2082,6 +2115,16 @@ public partial class BlockStateStore : MonoBehaviour
         }
 
         storedState = state.Clone();
+        // Runtime records can submit stale clones during normal production/chunk capture.
+        // Health belongs to the canonical placement, not its current presentation record.
+        bool existingPlacement = savedInstallationStorageKeysByPlacement.TryGetValue(
+            (state.placementSequence, state.itemId), out Vector2Int healthKey);
+        if (existingPlacement && savedInstallationStates.TryGetValue(healthKey, out InstallationSaveState healthState)
+            && healthState.hasCombatHealth)
+        {
+            storedState.hasCombatHealth = true;
+            storedState.combatHealth = healthState.combatHealth;
+        }
         storageKey = ResolveInstallationStorageKey(storedState, savedInstallationStates);
         AssignInstallationStorageKey(storedState, storageKey);
         bool markerChanged = !savedInstallationStates.TryGetValue(
@@ -2100,6 +2143,7 @@ public partial class BlockStateStore : MonoBehaviour
         }
 
         savedInstallationStates[storageKey] = storedState;
+        TrackInstallationHealth(storageKey, storedState);
         if (liveInstallationStates.TryGetValue(storageKey, out LiveInstallationRecord liveRecord)
             && liveRecord != null)
         {
@@ -2135,6 +2179,8 @@ public partial class BlockStateStore : MonoBehaviour
         {
             world?.UpsertInstallation(storedState);
         }
+        // Only a newly committed placement clears debris; routine captures and moving-vehicle saves do not.
+        if (!existingPlacement) RemoveWreckageOverlapping(storedState);
         if (markerChanged) MarkMapMarkersChanged();
         return true;
     }
@@ -2216,6 +2262,7 @@ public partial class BlockStateStore : MonoBehaviour
             duplicateState,
             duplicateKey);
         savedInstallationStates.Remove(duplicateKey);
+        DamagedInstallations.Remove(duplicateKey);
         railWorld?.RemoveSaved(duplicateKey);
         world?.RemoveInstallation(duplicateKey);
     }

@@ -15,19 +15,19 @@ MonoBehaviour:
   schemaVersion: 2
   itemDefinition: {fileID: 11400000, guid: 09ddda540280b014fadbf0bbfc3394d7, type: 2}
   sourcePrefab: {fileID: 2276685300360839919, guid: a7060f381d0a25d4ab7f902bf30be7ef, type: 3}
-  itemId: 81
+  itemId: 83
   itemName: Wooden Fence
   sourcePrefabGuid: a7060f381d0a25d4ab7f902bf30be7ef
   sourceContentHash:
     serializedVersion: 2
-    Hash: db8ace9988f8d8b3eb3aa9174480c43e
+    Hash: 5b8a7680433494a9072d10725751367e
   sourceRuntimeType: Wall, Assembly-CSharp, Version=0.0.0.0, Culture=neutral, PublicKeyToken=null
   mapStatus:
     mapSizeX: 1
     mapSizeY: 1
     centerCellX: 0
     centerCellY: 0
-  focusMode: 2
+  focusMode: 1
   defaultRootScale: {x: 1, y: 1, z: 1}
   defaultRootRotation: {x: -0, y: -0, z: -0, w: 1}
   localRenderBounds:

@@ -291,7 +291,7 @@ public static class SaveGameBinarySerializer
             : new WorldTimeSaveData { hasTime = false };
         data.map = ReadMap(reader, fileVersion, compatibilityMode);
         data.player = ReadPlayer(reader, fileVersion);
-        if (fileVersion >= 59) data.beltSimulation = ProjectF.Conveyors.BeltSimulationSnapshot.Read(reader);
+        if (fileVersion >= 59) data.beltSimulation = ProjectF.Conveyors.BeltSimulationSnapshot.Read(reader, fileVersion >= 73);
         if (fileVersion >= 60)
         {
             data.simulationTick = reader.ReadInt64();
@@ -526,6 +526,7 @@ public static class SaveGameBinarySerializer
         WriteList(writer, map.farmlandFertilizer, WriteFarmlandFertilizerEntry);
         WriteList(writer, map.conveyorItemRuns, WriteConveyorItemRunEntry);
         WriteList(writer, map.terrainCloneRegions, WriteTerrainCloneRegionEntry);
+        WriteList(writer, map.wreckage, WriteInstallationEntry);
     }
 
     private static MapSaveData ReadMap(
@@ -536,7 +537,7 @@ public static class SaveGameBinarySerializer
         MapSaveData map = new MapSaveData
         {
             resources = ReadList(reader, () => ReadResourceEntry(reader, version)),
-            floorObjects = ReadList(reader, () => ReadFloorObjectEntry(reader)),
+            floorObjects = ReadList(reader, () => ReadFloorObjectEntry(reader, version)),
             installations = ReadList(reader, () => ReadInstallationEntry(reader, version, compatibilityMode)),
             conveyorItems = ReadList(reader, () => ReadConveyorBlockEntry(reader, version))
         };
@@ -575,6 +576,8 @@ public static class SaveGameBinarySerializer
                 () => ReadTerrainCloneRegionEntry(reader));
         }
 
+        if (version >= 73)
+            map.wreckage = ReadList(reader, () => ReadInstallationEntry(reader, version, compatibilityMode));
         return map;
     }
 
@@ -779,6 +782,8 @@ public static class SaveGameBinarySerializer
         writer.Write(entry.state.growthWaterLiters);
         writer.Write(entry.state.growthFertilizerAmount);
         writer.Write(entry.state.growthElapsedSeconds);
+        writer.Write(entry.state.hasHealth);
+        writer.Write(entry.state.currentHealth);
     }
 
     private static ResourceSaveEntry ReadResourceEntry(BinaryReader reader, int version)
@@ -812,6 +817,12 @@ public static class SaveGameBinarySerializer
             entry.state.growthElapsedSeconds = reader.ReadSingle();
         }
 
+        if (version >= 73)
+        {
+            entry.state.hasHealth = reader.ReadBoolean();
+            entry.state.currentHealth = reader.ReadSingle();
+        }
+
         return entry;
     }
 
@@ -820,14 +831,17 @@ public static class SaveGameBinarySerializer
         entry ??= new FloorObjectSaveEntry();
         WriteVector2Int(writer, entry.coordinate);
         WriteIntList(writer, entry.itemIds);
+        WriteList(writer, entry.installationHealth, (w, item) => { w.Write(item.index); w.Write(item.health); });
     }
 
-    private static FloorObjectSaveEntry ReadFloorObjectEntry(BinaryReader reader)
+    private static FloorObjectSaveEntry ReadFloorObjectEntry(BinaryReader reader, int version)
     {
         return new FloorObjectSaveEntry
         {
             coordinate = ReadVector2Int(reader),
-            itemIds = ReadIntList(reader)
+            itemIds = ReadIntList(reader),
+            installationHealth = version >= 73 ? ReadList(reader, () => new PortableItemHealthSaveState
+                { index = reader.ReadInt32(), health = reader.ReadSingle() }) : null
         };
     }
 
@@ -961,6 +975,9 @@ public static class SaveGameBinarySerializer
         writer.Write(logging.ConsumedEnergyUnits); writer.Write(logging.HasTarget);
         writer.Write(logging.TargetCoordinate.X); writer.Write(logging.TargetCoordinate.Y);
         writer.Write(logging.TargetDefinitionKey ?? string.Empty);
+        writer.Write(state.hasCombatHealth);
+        writer.Write(state.combatHealth);
+        WriteList(writer, state.storedInstallationItemHealth, (w, value) => w.Write(value));
     }
 
     private static BlockStateStore.InstallationSaveState ReadInstallationState(
@@ -987,7 +1004,7 @@ public static class SaveGameBinarySerializer
             railVisualPathExtendsEnd = version >= 11 ? reader.ReadBoolean() : true,
             railRequiredItemCount = version >= 21 ? reader.ReadInt32() : 0,
             inputOutputState = ReadInputOutputState(reader, version),
-            robotArmState = version >= 3 ? ReadRobotArmState(reader) : null
+            robotArmState = version >= 3 ? ReadRobotArmState(reader, version) : null
         };
         _ = reader.ReadInt64(); // Discard the legacy background-simulation slot.
 
@@ -1171,6 +1188,12 @@ public static class SaveGameBinarySerializer
                 TargetCoordinate = new ProjectF.Simulation.GridCell(reader.ReadInt32(), reader.ReadInt32()), TargetDefinitionKey = reader.ReadString()
             };
         }
+        if (version >= 72)
+        {
+            state.hasCombatHealth = reader.ReadBoolean();
+            state.combatHealth = reader.ReadSingle();
+        }
+        if (version >= 73) state.storedInstallationItemHealth = ReadList(reader, reader.ReadSingle);
         return state;
     }
 
@@ -1366,9 +1389,10 @@ public static class SaveGameBinarySerializer
         writer.Write(state.actionTurnTimer);
         writer.Write(state.turnTimer);
         writer.Write(state.waitingForDropRetry);
+        writer.Write(state.heldInstallationHealth);
     }
 
-    private static RobotArm.TransferState ReadRobotArmState(BinaryReader reader)
+    private static RobotArm.TransferState ReadRobotArmState(BinaryReader reader, int version)
     {
         if (!reader.ReadBoolean())
         {
@@ -1383,7 +1407,8 @@ public static class SaveGameBinarySerializer
             dropRetryTimer = reader.ReadSingle(),
             actionTurnTimer = reader.ReadSingle(),
             turnTimer = reader.ReadSingle(),
-            waitingForDropRetry = reader.ReadBoolean()
+            waitingForDropRetry = reader.ReadBoolean(),
+            heldInstallationHealth = version >= 73 ? reader.ReadSingle() : 0f
         };
     }
 
@@ -1472,6 +1497,7 @@ public static class SaveGameBinarySerializer
         writer.Write(state.cornerContinuationPathLength);
         writer.Write(state.cornerContinuationDurationPathLength);
         ProjectF.Conveyors.BeltSimulationSnapshot.WriteLane(writer, state.nativeBeltState);
+        writer.Write(state.installationHealth);
     }
 
     private static ConveyorItemLaneSaveState ReadConveyorLaneEntry(BinaryReader reader, int version)
@@ -1499,7 +1525,8 @@ public static class SaveGameBinarySerializer
             cornerContinuationStartProgress = reader.ReadSingle(),
             cornerContinuationPathLength = reader.ReadSingle(),
             cornerContinuationDurationPathLength = reader.ReadSingle(),
-            nativeBeltState = version >= 59 ? ProjectF.Conveyors.BeltSimulationSnapshot.ReadLane(reader) : null
+            nativeBeltState = version >= 59 ? ProjectF.Conveyors.BeltSimulationSnapshot.ReadLane(reader, version >= 73) : null,
+            installationHealth = version >= 73 ? reader.ReadSingle() : 0f
         };
     }
 
@@ -1522,6 +1549,8 @@ public static class SaveGameBinarySerializer
         writer.Write(player.activeTorchItemId);
         writer.Write(player.activeTorchRemainingEnergy);
         writer.Write(player.mountedAnimalId);
+        writer.Write(player.hasHealth);
+        writer.Write(player.currentHealth);
     }
 
     private static PlayerSaveData ReadPlayer(BinaryReader reader, int version)
@@ -1567,6 +1596,11 @@ public static class SaveGameBinarySerializer
             player.mountedAnimalId = reader.ReadInt64();
         }
 
+        if (version >= 72)
+        {
+            player.hasHealth = reader.ReadBoolean();
+            player.currentHealth = reader.ReadSingle();
+        }
         return player;
     }
 
@@ -1599,6 +1633,7 @@ public static class SaveGameBinarySerializer
         writer.Write(slot.itemId);
         writer.Write(slot.count);
         writer.Write(slot.capacity);
+        WriteList(writer, slot.installationHealth, (w, health) => w.Write(health));
     }
 
     private static PlayerInventorySlotSaveState ReadPlayerSlot(BinaryReader reader, int version)
@@ -1616,6 +1651,8 @@ public static class SaveGameBinarySerializer
             reader.ReadInt32();
             reader.ReadSingle();
         }
+
+        if (version >= 73) slot.installationHealth = ReadList(reader, () => reader.ReadSingle());
 
         return slot;
     }

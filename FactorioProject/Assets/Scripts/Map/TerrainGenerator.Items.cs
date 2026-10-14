@@ -281,7 +281,8 @@ public partial class TerrainGenerator : MonoBehaviour
         out Block targetConveyorBlock,
         Action onComplete = null,
         Func<Vector3> startWorldPositionProvider = null,
-        float movementReleaseDelay = 0f)
+        float movementReleaseDelay = 0f,
+        float installationHealth = 0f)
     {
         targetPortableObject = null;
         targetConveyorBlock = null;
@@ -307,7 +308,7 @@ public partial class TerrainGenerator : MonoBehaviour
                     out targetPortableObject,
                     onComplete,
                     startWorldPositionProvider,
-                    movementReleaseDelay))
+                    movementReleaseDelay, installationHealth: installationHealth))
             {
                 targetConveyorBlock = candidateBlock;
                 conveyorDropBlockScratch.Clear();
@@ -420,7 +421,8 @@ public partial class TerrainGenerator : MonoBehaviour
         Func<Vector3> startWorldPositionProvider,
         float moveInterval,
         out Vector2Int dropCoordinate,
-        out int droppedCount)
+        out int droppedCount,
+        IReadOnlyList<float> installationHealth = null)
     {
         dropCoordinate = GetWorldBlockCoordinate(worldPosition);
         droppedCount = 0;
@@ -450,7 +452,8 @@ public partial class TerrainGenerator : MonoBehaviour
                         out Block targetConveyorBlock,
                         null,
                         startWorldPositionProvider,
-                        conveyorBatchReleaseDelay))
+                        conveyorBatchReleaseDelay,
+                        installationHealth != null && i < installationHealth.Count ? installationHealth[i] : 0f))
                 {
                     break;
                 }
@@ -488,6 +491,8 @@ public partial class TerrainGenerator : MonoBehaviour
 
                 droppedCount++;
                 MarkInputAreaDroppedPickupGate(droppedObject, false, worldPosition);
+                if (installationHealth != null && i < installationHealth.Count)
+                    droppedObject?.SetInstallationHealth(installationHealth[i]);
             }
 
             return true;
@@ -511,6 +516,8 @@ public partial class TerrainGenerator : MonoBehaviour
 
                 droppedCount++;
                 MarkInputAreaDroppedPickupGate(droppedObject, false, worldPosition);
+                if (installationHealth != null && i < installationHealth.Count)
+                    droppedObject?.SetInstallationHealth(installationHealth[i]);
             }
 
             return true;
@@ -532,6 +539,8 @@ public partial class TerrainGenerator : MonoBehaviour
 
             droppedCount++;
             MarkDroppedPickupGate(droppedObject, false, worldPosition);
+            if (installationHealth != null && i < installationHealth.Count)
+                droppedObject?.SetInstallationHealth(installationHealth[i]);
         }
 
         return true;

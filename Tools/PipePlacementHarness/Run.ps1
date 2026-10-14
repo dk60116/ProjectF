@@ -1,3 +1,4 @@
+param([switch]$BeforeConnectorFix)
 $ErrorActionPreference = 'Stop'
 $repo = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '../..'))
 $sourcePath = Join-Path $repo 'FactorioProject/Assets/Scripts/Object/MapObj/InstallationObject/InstallationPlacementController.cs'
@@ -95,6 +96,7 @@ foreach ($signature in @(
     'private bool TryResolvePipePlacementFromConnectionMask('
     'public void NormalizeLoadedLegacyPipeVariants('
     'private List<Vector2Int> GetPipeNeighborConnectionDirections('
+    'private bool TryGetPipeOnlyConnectionAtCoordinate('
     'private bool CanPipeNeighborContributeToVariant('
     'private bool TryCollectCandidatePipeFluidConstraintsForNeighborDirection('
     'private static bool PipeDirectionsContain('
@@ -108,6 +110,42 @@ foreach ($signature in @(
     $generated += "`n" + (Read-Member ($signature -replace "`r?`n", "`n"))
 }
 $generated += "`n}`n"
+$connectorSource = if ($BeforeConnectorFix) {
+    (git -C $repo show 'HEAD:FactorioProject/Assets/Scripts/Object/MapObj/InstallationObject/InstallationPlacementController.cs') -join "`n"
+} else { $source }
+$generated += "`npublic partial class InstallationPlacementController {`n"
+foreach ($signature in @(
+    'private struct PipeAreaBlockCandidate',
+    'private void AppendFixedFluidPipeConnectionDirections(',
+    'private bool TryGetFixedFluidConnectorCompatibilityAtCoordinate('
+)) {
+    $generated += (Read-Member $signature $connectorSource) + "`n"
+}
+if ($BeforeConnectorFix) {
+    $generated += (Read-Member 'private void AppendPreviewRectGridPipeAreaConnectionDirections(' $connectorSource) + "`n"
+}
+foreach ($signature in @(
+    'private void CollectRectGridPipeAreaBlockCandidatesAtCoordinate(',
+    'private bool TryAddRectGridPipeAreaBlockCandidate(',
+    'private static bool PipeAreaBlockCandidatesContain(',
+    'private bool TryAppendFixedFluidPipeConnectionDirections(',
+    'private bool TryAppendPumpPipeOutputDirection(',
+    'private bool TryAppendBoilerPipeAxisDirections(',
+    'private bool TryAppendBoilerPipeAxisDirectionsAtCoordinate(',
+    'private bool TryAppendRectGridPipeAreaConnectionDirection(',
+    'private bool TryGetRectGridPipeAreaConnectionDirection(',
+    'private bool TryGetNearestRectGridObjectDirection('
+)) {
+    $generated += (Read-Member $signature) + "`n"
+}
+$generated += "`n}`n"
+$moduleSource = [IO.File]::ReadAllText((Join-Path $repo 'FactorioProject/Assets/Scripts/Object/MapObj/InstallationObject/InputOutputModule.cs'))
+$generated += "`npublic partial class InputOutputModule {`n"
+foreach ($signature in @('public enum RectGridBlockType', 'public static bool AllowsPipeAreaInteraction(',
+    'public static bool IsInputItemBlockType(')) {
+    $generated += (Read-Member $signature $moduleSource) + "`n"
+}
+$generated += "`n}`n"
 $pipeWorldSource = [IO.File]::ReadAllText((Join-Path $repo 'FactorioProject/Assets/Scripts/Map/PipeWorld.cs'))
 $generated += "`npublic sealed partial class PipeRuntimeRecord {`n" +
     (Read-Member 'public bool TryGetObjectInfoFluidInfo(' $pipeWorldSource) + "`n}`n"
@@ -118,6 +156,7 @@ Set-Content -LiteralPath (Join-Path $probeDir 'Production.cs') -Value $generated
 Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'Checks.cs') -Destination $probeDir
 Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'NeighborFixture.cs') -Destination $probeDir
 Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'VariantChecks.cs') -Destination $probeDir
+Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'ConnectorChecks.cs') -Destination $probeDir
 Set-Content -LiteralPath (Join-Path $probeDir 'Probe.csproj') -Value '<Project Sdk="Microsoft.NET.Sdk"><PropertyGroup><OutputType>Exe</OutputType><TargetFramework>net9.0</TargetFramework></PropertyGroup></Project>'
 dotnet run --configuration Release --project (Join-Path $probeDir 'Probe.csproj')
 exit $LASTEXITCODE

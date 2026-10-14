@@ -151,7 +151,8 @@ public class FreightCar : Train,
         Vector3 startWorldPosition,
         Func<Vector3> startWorldPositionProvider,
         float moveInterval,
-        out int addedCount)
+        out int addedCount,
+        IReadOnlyList<float> installationHealth = null)
     {
         addedCount = 0;
         if (itemId < 0
@@ -169,18 +170,26 @@ public class FreightCar : Train,
                     startWorldPosition,
                     startWorldPositionProvider,
                     i * interval,
-                    out _))
+                    out var added))
             {
                 break;
             }
 
+            added.SetInstallationHealth(installationHealth != null && i < installationHealth.Count ? installationHealth[i] : 0f);
             addedCount++;
         }
 
         return addedCount > 0;
     }
 
-    public void CapturePersistentStoredItemIds(List<int> destination)
+    public bool TryAddItemWithHealth(int itemId, Vector3 start, Func<Vector3> startProvider, float health)
+    {
+        if (!TryAddItem(itemId, start, startProvider, 0f, out var portable)) return false;
+        portable.SetInstallationHealth(health);
+        return true;
+    }
+
+    public void CapturePersistentStoredItemIds(List<int> destination, List<float> installationHealth = null)
     {
         if (destination == null)
         {
@@ -188,24 +197,25 @@ public class FreightCar : Train,
         }
 
         destination.Clear();
+        installationHealth?.Clear();
         EnsureItemPointStacks();
         EnsureBoxPointBoxes();
 
         for (int i = 0; i < itemPointStacks.Count; i++)
         {
-            AppendPersistentItemIds(itemPointStacks[i], destination);
+            AppendPersistentItemIds(itemPointStacks[i], destination, installationHealth);
         }
 
         for (int i = 0; i < boxPointItemStacks.Count; i++)
         {
             if (IsBoxPointStorageActive(i))
             {
-                AppendPersistentItemIds(boxPointItemStacks[i], destination);
+                AppendPersistentItemIds(boxPointItemStacks[i], destination, installationHealth);
             }
         }
     }
 
-    public void ApplyPersistentStoredItemIds(IReadOnlyList<int> itemIds)
+    public void ApplyPersistentStoredItemIds(IReadOnlyList<int> itemIds, IReadOnlyList<float> installationHealth = null)
     {
         ClearLoadedItems();
         EnsureItemPointStacks();
@@ -217,7 +227,8 @@ public class FreightCar : Train,
             for (int i = 0; i < itemIds.Count; i++)
             {
                 int itemId = itemIds[i];
-                if (itemId >= 0 && TryAddRestoredItem(itemId))
+                if (itemId >= 0 && TryAddRestoredItem(itemId,
+                    installationHealth != null && i < installationHealth.Count ? installationHealth[i] : 0f))
                 {
                     restoredCount++;
                 }
@@ -232,7 +243,8 @@ public class FreightCar : Train,
 
     private static void AppendPersistentItemIds(
         List<PortableObject> stack,
-        List<int> destination)
+        List<int> destination,
+        List<float> installationHealth)
     {
         CleanupItemStack(stack);
         if (stack == null)
@@ -246,6 +258,7 @@ public class FreightCar : Train,
             if (portableObject != null && portableObject.ItemId >= 0)
             {
                 destination.Add(portableObject.ItemId);
+                installationHealth?.Add(portableObject.InstallationHealth);
             }
         }
     }
@@ -592,8 +605,13 @@ public class FreightCar : Train,
             out takenItemId,
             out pickupWorldPosition,
             out _,
-            false);
+            false, out _);
     }
+
+    public bool TryTakeOneItemWithHealth(Vector3 referenceWorldPosition, Predicate<int> itemFilter,
+        out int takenItemId, out Vector3 pickupWorldPosition, out float installationHealth) =>
+        TryTakeOneItemInternal(referenceWorldPosition, itemFilter, out takenItemId,
+            out pickupWorldPosition, out _, false, out installationHealth);
 
     public bool TryTakeOneItem(
         Vector3 referenceWorldPosition,
@@ -608,7 +626,7 @@ public class FreightCar : Train,
             out takenItemId,
             out pickupWorldPosition,
             out takenPortableObject,
-            true);
+            true, out _);
     }
 
     private bool TryTakeOneItemInternal(
@@ -617,8 +635,9 @@ public class FreightCar : Train,
         out int takenItemId,
         out Vector3 pickupWorldPosition,
         out PortableObject takenPortableObject,
-        bool releasePortableObject)
+        bool releasePortableObject, out float installationHealth)
     {
+        installationHealth = 0f;
         takenItemId = -1;
         takenPortableObject = null;
         if (!TryFindClosestTopItem(
@@ -640,6 +659,7 @@ public class FreightCar : Train,
         }
 
         stack.RemoveAt(stack.Count - 1);
+        installationHealth = portableObject.InstallationHealth;
         MarkPersistenceStateDirty();
         if (releasePortableObject)
         {
@@ -932,7 +952,7 @@ public class FreightCar : Train,
         return true;
     }
 
-    private bool TryAddRestoredItem(int itemId)
+    private bool TryAddRestoredItem(int itemId, float installationHealth = 0f)
     {
         if (!TryGetBestItemStorageStack(
                 itemId,
@@ -952,6 +972,7 @@ public class FreightCar : Train,
         }
 
         int objectIndex = stack.Count;
+        portableObject.SetInstallationHealth(installationHealth);
         portableObject.CancelMove();
         portableObject.SetBatchedRendering(false);
         portableObject.SetLocalPose(

@@ -1395,11 +1395,15 @@ public partial class InputOutputModule : InstallationObject,
         out InputOutputModule module)
     {
         module = null;
+        if (blockType == RectGridBlockType.None)
+        {
+            return false;
+        }
+
         if (ProductionWorld.Current != null && ProductionWorld.Current.CoordinateIsBlockType(coordinate, blockType)) return true;
         if (MiningWorld.Current != null && MiningWorld.Current.CoordinateIsBlockType(coordinate, blockType)) return true;
         if (ProjectF.MapObjects.ForestryWorld.Current != null && ProjectF.MapObjects.ForestryWorld.Current.CoordinateIsBlockType(coordinate, blockType)) return true;
-        if (blockType == RectGridBlockType.None
-            || !registeredRuntimeGridCoordinates.TryGetValue(coordinate, out HashSet<InputOutputModule> modules)
+        if (!registeredRuntimeGridCoordinates.TryGetValue(coordinate, out HashSet<InputOutputModule> modules)
             || modules == null
             || modules.Count <= 0)
         {
@@ -2275,28 +2279,8 @@ public partial class InputOutputModule : InstallationObject,
 
     public static bool CoordinateIsRuntimeRectGridBlockType(Vector2Int coordinate, RectGridBlockType blockType)
     {
-        if (blockType == RectGridBlockType.None
-            || !registeredRuntimeGridCoordinates.TryGetValue(coordinate, out HashSet<InputOutputModule> modules)
-            || modules == null
-            || modules.Count <= 0)
-        {
-            return false;
-        }
-
-        foreach (InputOutputModule candidate in modules)
-        {
-            if (candidate == null || !candidate.gameObject.activeInHierarchy)
-            {
-                continue;
-            }
-
-            if (candidate.ContainsRuntimeRectGridBlockType(coordinate, blockType))
-            {
-                return true;
-            }
-        }
-
-        return false;
+        // The shared lookup includes data-only facilities as well as scene modules.
+        return TryGetModuleAtRuntimeRectGridBlockType(coordinate, blockType, out _);
     }
 
     public static bool TryGetOutputItemIdsAtRuntimeGridCoordinate(Vector2Int coordinate, ISet<int> outputItemIds)

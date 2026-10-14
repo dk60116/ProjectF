@@ -56,9 +56,9 @@ public interface IPersistentInstallationItemStorage
 
 public interface IPersistentInstallationItemCollectionStorage
 {
-    void CapturePersistentStoredItemIds(List<int> destination);
+    void CapturePersistentStoredItemIds(List<int> destination, List<float> installationHealth = null);
 
-    void ApplyPersistentStoredItemIds(IReadOnlyList<int> itemIds);
+    void ApplyPersistentStoredItemIds(IReadOnlyList<int> itemIds, IReadOnlyList<float> installationHealth = null);
 }
 
 public interface IPlayerItemStorage
@@ -69,7 +69,8 @@ public interface IPlayerItemStorage
         Vector3 startWorldPosition,
         Func<Vector3> startWorldPositionProvider,
         float moveInterval,
-        out int addedCount);
+        out int addedCount,
+        IReadOnlyList<float> installationHealth = null);
 
     bool TryPickupOneItemToBag(
         Player player,

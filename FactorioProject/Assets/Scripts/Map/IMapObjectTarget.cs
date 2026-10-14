@@ -60,7 +60,8 @@ public static class MapObjectTargetExtensions
     // Unity destroyed-object semantics must be explicit at interface/object boundaries.
     public static bool IsAlive(this IMapObjectTarget target) => target is MapObject component
         ? component != null : target != null && target.IsTargetActive;
-    public static bool IsAliveTarget(object target) => target is PortableObject portable
+    public static bool IsAliveTarget(object target) => target is ProjectF.Monsters.MonsterInstance monster
+        ? monster.IsActive : target is PortableObject portable
         ? portable.IsAlive : target is IMapObjectTarget map ? map.IsAlive()
         : target is Object unityObject && unityObject != null;
 }

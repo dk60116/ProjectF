@@ -74,12 +74,22 @@ public sealed class PortableObject : IDisposable
     {
         PortableObject clone = new PortableObject(position, rotation, WorldScale, Layer, objectName);
         if (ItemId >= 0) clone.SetItem(ItemId);
+        clone.CopyInstallationHealthFrom(this);
         return clone;
     }
 
     public PortableObjectHandle Handle => handle;
     public bool IsAlive => world != null && world.IsAlive(handle);
     public int ItemId => Read().ItemId;
+    public float InstallationHealth => Read().InstallationHealth;
+    public void SetInstallationHealth(float health)
+    {
+        var component = Read();
+        component.InstallationHealth = float.IsNaN(health) || float.IsInfinity(health) ? 0f : Mathf.Max(0f, health);
+        Write(component);
+    }
+    public void CopyInstallationHealthFrom(PortableObject source) =>
+        SetInstallationHealth(source != null && source.ItemId == ItemId ? source.InstallationHealth : 0f);
     public bool IsMovingToTarget => Read().Moving;
     public bool IsOnConveyor => Read().OnConveyor;
     public bool IsUsingBatchedRendering => Read().BatchedRendering;
@@ -345,6 +355,7 @@ public sealed class PortableObject : IDisposable
         cachedMaterial = material;
         PortableObjectComponent c = Read();
         c.ItemId = itemId;
+        c.InstallationHealth = 0f;
         c.SuppressRendering = false;
         Write(c);
         if (view != null) ConfigureViewAssets();
@@ -825,6 +836,7 @@ public sealed class PortableObject : IDisposable
         cachedMaterial = null;
         PortableObjectComponent c = Read();
         c.ItemId = -1;
+        c.InstallationHealth = 0f;
         c.SuppressRendering = true;
         Write(c);
         ConfigureViewAssets();

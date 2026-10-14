@@ -343,6 +343,7 @@ public partial class Block
             this.destinationLaneIndex = destinationLaneIndex;
             this.portableObject = portableObject;
             this.itemId = itemId;
+            installationHealth = sourceBlock != null ? sourceBlock.GetConveyorInstallationHealth(sourceLaneIndex) : 0f;
             this.pickupGateState = pickupGateState;
             this.useCornerMotion = useCornerMotion;
             this.startWorldPosition = startWorldPosition;
@@ -355,6 +356,7 @@ public partial class Block
         public readonly int destinationLaneIndex;
         public readonly PortableObject portableObject;
         public readonly int itemId;
+        public readonly float installationHealth;
         public readonly ConveyorPickupGateState pickupGateState;
         public readonly bool useCornerMotion;
         public readonly Vector3 startWorldPosition;
@@ -1012,7 +1014,11 @@ public partial class Block
     }
 
     public bool TryConsumeOneInputAreaCenterObject(int expectedItemId, out int consumedItemId)
+        => TryConsumeOneInputAreaCenterObject(expectedItemId, out consumedItemId, out _);
+
+    public bool TryConsumeOneInputAreaCenterObject(int expectedItemId, out int consumedItemId, out float installationHealth)
     {
+        installationHealth = 0f;
         if (deferredCenterOutput.TryRemoveTop(expectedItemId, out consumedItemId))
         {
             deferredOutputRenderer?.RemoveDeferredOutputItems(1);
@@ -1048,6 +1054,7 @@ public partial class Block
         }
 
         consumedItemId = itemId;
+        installationHealth = topObject.InstallationHealth;
         inputAreaCenterStack.RemoveAt(inputAreaCenterStack.Count - 1);
         ReleaseFloorObject(topObject);
         NotifyRuntimeItemStackChanged();
@@ -2367,7 +2374,8 @@ public partial class Block
         float movementReleaseDelay = 0f,
         bool useJumpArc = true,
         float moveDuration = PortableObject.MoveToDuration,
-        bool forceAnimatedPlacement = false)
+        bool forceAnimatedPlacement = false,
+        float installationHealth = 0f)
     {
         return TryAddConveyorObjectAnimatedWithPlacementReference(
             objectId,
@@ -2380,7 +2388,7 @@ public partial class Block
             movementReleaseDelay,
             useJumpArc,
             moveDuration,
-            forceAnimatedPlacement);
+            forceAnimatedPlacement, installationHealth);
     }
 
     public bool CanAddConveyorObjectAtPlacement(int objectId, Vector3 placementReferenceWorldPosition)
@@ -2461,7 +2469,8 @@ public partial class Block
         float movementReleaseDelay = 0f,
         bool useJumpArc = true,
         float moveDuration = PortableObject.MoveToDuration,
-        bool forceAnimatedPlacement = false)
+        bool forceAnimatedPlacement = false,
+        float installationHealth = 0f)
     {
         targetPortableObject = null;
         EnsureFloorObjectsInitialized();
@@ -2482,6 +2491,7 @@ public partial class Block
         if (useVirtualDataSlot)
         {
             SetConveyorItemAtLane(laneIndex, objectId, null, ConveyorPickupGateState.Settled());
+            SetConveyorInstallationHealth(laneIndex, installationHealth);
             float nativePlacementDuration = 0f;
             if (UsesBeltJobs && !snapPlacementImmediately)
             {
@@ -2523,6 +2533,7 @@ public partial class Block
         portableObject.SetWorldScale(Vector3.one);
         portableObject.SetCachedActive(true);
         SetConveyorItemAtLane(laneIndex, objectId, portableObject, ConveyorPickupGateState.Settled());
+        SetConveyorInstallationHealth(laneIndex, installationHealth);
         TerrainGenerator.Active?.NotifyConveyorItemAddedToBelt();
         NotifyRuntimeItemStackChanged();
         HoldConveyorLaneMovement(laneIndex, movementReleaseDelay);
@@ -2878,19 +2889,17 @@ public partial class Block
         return TryTakeOneConveyorObject(referenceWorldPosition, itemFilter, -1f, out takenItemId);
     }
 
+    public bool TryTakeOneConveyorObject(Vector3 referenceWorldPosition, Predicate<int> itemFilter,
+        out int takenItemId, out float installationHealth) => TryTakeOneConveyorObject(
+            referenceWorldPosition, referenceWorldPosition, itemFilter, -1f, out takenItemId, out installationHealth);
+
     public bool TryTakeOneConveyorObject(
         Vector3 referenceWorldPosition,
         Predicate<int> itemFilter,
         float maxDistance,
         out int takenItemId)
-    {
-        return TryTakeOneConveyorObject(
-            referenceWorldPosition,
-            referenceWorldPosition,
-            itemFilter,
-            maxDistance,
-            out takenItemId);
-    }
+        => TryTakeOneConveyorObject(referenceWorldPosition, referenceWorldPosition,
+            itemFilter, maxDistance, out takenItemId, out _);
 
     public bool TryTakeOneConveyorObject(
         Vector3 selectionReferenceWorldPosition,
@@ -2898,7 +2907,14 @@ public partial class Block
         Predicate<int> itemFilter,
         float maxDistance,
         out int takenItemId)
+        => TryTakeOneConveyorObject(selectionReferenceWorldPosition, pickupRangeReferenceWorldPosition,
+            itemFilter, maxDistance, out takenItemId, out _);
+
+    public bool TryTakeOneConveyorObject(Vector3 selectionReferenceWorldPosition,
+        Vector3 pickupRangeReferenceWorldPosition, Predicate<int> itemFilter,
+        float maxDistance, out int takenItemId, out float installationHealth)
     {
+        installationHealth = 0f;
         takenItemId = -1;
         EnsureFloorObjectsInitialized();
         CleanupConveyorStack();
@@ -2924,6 +2940,7 @@ public partial class Block
         }
 
         portableObject = MaterializeConveyorObjectForTransfer(portableObject, itemId, laneIndex);
+        installationHealth = GetConveyorInstallationHealth(laneIndex);
         ClearConveyorItemForExternalRemoval(laneIndex);
         TerrainGenerator.Active?.NotifyConveyorItemRemovedFromBelt();
         NotifyRuntimeItemStackChanged();
@@ -2986,7 +3003,7 @@ public partial class Block
         return true;
     }
 
-    private bool TrySetConveyorObjectAtLane(int laneIndex, int objectId, out PortableObject targetPortableObject)
+    private bool TrySetConveyorObjectAtLane(int laneIndex, int objectId, out PortableObject targetPortableObject, float installationHealth = 0f)
     {
         targetPortableObject = null;
         EnsureFloorObjectsInitialized();
@@ -3003,6 +3020,7 @@ public partial class Block
         if (ShouldUseVirtualConveyorItemRendering())
         {
             SetConveyorItemAtLane(laneIndex, objectId, null, ConveyorPickupGateState.Settled());
+            SetConveyorInstallationHealth(laneIndex, installationHealth);
             WakeConveyorMoveAttempts();
             targetPortableObject = null;
             RefreshConveyorActivityRegistration();
@@ -3028,14 +3046,18 @@ public partial class Block
         ConfigureConveyorObjectTransform(portableObject, laneIndex);
         ApplyConveyorObjectRenderingMode(portableObject);
         SetConveyorItemAtLane(laneIndex, objectId, portableObject, ConveyorPickupGateState.Settled());
+        SetConveyorInstallationHealth(laneIndex, installationHealth);
         WakeConveyorMoveAttempts();
         targetPortableObject = portableObject;
         RefreshConveyorActivityRegistration();
         return true;
     }
 
-    public List<int> CaptureFloorObjectState()
+    public List<int> CaptureFloorObjectState() => CaptureFloorObjectState(out _);
+
+    public List<int> CaptureFloorObjectState(out List<PortableItemHealthSaveState> installationHealth)
     {
+        installationHealth = null;
         EnsureFloorObjectsInitialized(false);
         CleanupConveyorStack();
 
@@ -3077,7 +3099,7 @@ public partial class Block
                     PortableObject portableObject = stack[objectIndex];
                     if (ShouldPersistFloorObject(portableObject))
                     {
-                        itemIds.Add(portableObject.ItemId);
+                        AppendPortableSaveItem(itemIds, portableObject, ref installationHealth);
                     }
                 }
                 if (stackIndex == 0)
@@ -3104,7 +3126,7 @@ public partial class Block
                 PortableObject portableObject = inputAreaCenterStack[i];
                 if (portableObject != null)
                 {
-                    itemIds.Add(portableObject.ItemId);
+                    AppendPortableSaveItem(itemIds, portableObject, ref installationHealth);
                 }
             }
             for (int i = 0; i < deferredCenterOutput.Count; i++) itemIds.Add(deferredCenterOutput.ItemId);
@@ -3127,12 +3149,33 @@ public partial class Block
             itemIds.Add(conveyorLaneCount);
             for (int i = 0; i < conveyorLaneCount; i++)
             {
+                float health = GetConveyorInstallationHealth(i);
+                if (health > 0f)
+                {
+                    installationHealth ??= new List<PortableItemHealthSaveState>();
+                    installationHealth.Add(new PortableItemHealthSaveState { index = itemIds.Count, health = health });
+                }
                 itemIds.Add(GetConveyorItemIdAtLane(i));
             }
         }
 
         return itemIds;
     }
+
+    private static void AppendPortableSaveItem(List<int> items, PortableObject portable,
+        ref List<PortableItemHealthSaveState> health)
+    {
+        if (portable.InstallationHealth > 0f)
+        {
+            health ??= new List<PortableItemHealthSaveState>();
+            health.Add(new PortableItemHealthSaveState { index = items.Count, health = portable.InstallationHealth });
+        }
+        items.Add(portable.ItemId);
+    }
+
+    private static void RestorePortableSaveHealth(PortableObject portable, int index,
+        IReadOnlyList<PortableItemHealthSaveState> health)
+        => portable?.SetInstallationHealth(PortableItemHealthMetadata.Read(health, index));
 
     private static bool ShouldPersistFloorObject(PortableObject portableObject)
     {
@@ -3143,8 +3186,12 @@ public partial class Block
     }
 
     public List<int> CaptureFloorObjectStateWithDroppedConveyorObjects()
+        => CaptureFloorObjectStateWithDroppedConveyorObjects(out _);
+
+    public List<int> CaptureFloorObjectStateWithDroppedConveyorObjects(out List<PortableItemHealthSaveState> health)
     {
-        List<int> itemIds = CaptureFloorObjectState();
+        List<int> itemIds = CaptureFloorObjectState(out var sourceHealth);
+        health = null;
         if (itemIds == null || itemIds.Count <= 0)
         {
             return itemIds;
@@ -3156,6 +3203,7 @@ public partial class Block
             int itemId = itemIds[i];
             if (itemId != ConveyorStackStateSentinel)
             {
+                PortableItemHealthMetadata.CopyRange(sourceHealth, i, i, droppedState.Count, ref health);
                 droppedState.Add(itemId);
                 continue;
             }
@@ -3171,6 +3219,7 @@ public partial class Block
                 int laneItemId = itemIds[++i];
                 if (laneItemId >= 0)
                 {
+                    PortableItemHealthMetadata.CopyRange(sourceHealth, i, i, droppedState.Count, ref health);
                     droppedState.Add(laneItemId);
                 }
             }
@@ -3261,7 +3310,7 @@ public partial class Block
                     continue;
                 }
 
-                if (portableObject.ItemId < 0)
+                if (portableObject.ItemId < 0 || portableObject.InstallationHealth > 0f)
                 {
                     return false;
                 }
@@ -3421,7 +3470,8 @@ public partial class Block
         }
     }
 
-    public void ApplyFloorObjectState(IReadOnlyList<int> itemIds)
+    public void ApplyFloorObjectState(IReadOnlyList<int> itemIds,
+        IReadOnlyList<PortableItemHealthSaveState> installationHealth = null)
     {
         EnsureFloorObjectsInitialized();
         ResetFloorObjects(false);
@@ -3456,7 +3506,8 @@ public partial class Block
 
                         // Floor drops now use one stack per cell. Fold legacy multi-stack
                         // save entries into that stack while item type and capacity allow it.
-                        TryAddFloorObject(stackItemId, out _);
+                        TryAddFloorObject(stackItemId, out var restored);
+                        RestorePortableSaveHealth(restored, i, installationHealth);
                     }
                 }
 
@@ -3474,10 +3525,11 @@ public partial class Block
                 for (int centerIndex = 0; centerIndex < centerStackCount && i + 1 < itemIds.Count; centerIndex++)
                 {
                     int centerItemId = itemIds[++i];
-                    if (!TryAddInputAreaCenterObject(centerItemId, out _))
+                    if (!TryAddInputAreaCenterObject(centerItemId, out var restored))
                     {
                         break;
                     }
+                    RestorePortableSaveHealth(restored, i, installationHealth);
                 }
 
                 continue;
@@ -3499,16 +3551,17 @@ public partial class Block
                         continue;
                     }
 
-                    TrySetConveyorObjectAtLaneOrSingleLineFallback(laneIndex, laneItemId, out _);
+                    TrySetConveyorObjectAtLaneOrSingleLineFallback(laneIndex, laneItemId, out _, PortableItemHealthMetadata.Read(installationHealth, i));
                 }
 
                 continue;
             }
 
-            if (!TryAddFloorObject(itemId, out _))
+            if (!TryAddFloorObject(itemId, out var restoredItem))
             {
                 break;
             }
+            RestorePortableSaveHealth(restoredItem, i, installationHealth);
         }
 
         WakeConveyorMoveAttemptsAround();
@@ -3545,6 +3598,7 @@ public partial class Block
                 itemId = itemId,
                 visualWorldPosition = GetConveyorItemVisualWorldPosition(laneIndex)
             };
+            state.installationHealth = GetConveyorInstallationHealth(laneIndex);
 
             state.nativeBeltState = beltJobOwner?.CaptureBeltJobLane(this, laneIndex);
             if (state.nativeBeltState != null)
@@ -3679,6 +3733,7 @@ public partial class Block
 
                 if (targetLaneIndex != state.laneIndex)
                 {
+                    SetConveyorInstallationHealth(targetLaneIndex, state.installationHealth);
                     SetConveyorPortableObjectWorldPose(
                         portableObject,
                         targetLaneIndex,
@@ -3843,6 +3898,7 @@ public partial class Block
             TerrainGenerator.Active.QueueBeltJobRestore(this, state.laneIndex, state.nativeBeltState);
             return;
         }
+        SetConveyorInstallationHealth(state.laneIndex, state.installationHealth);
 
         if (!state.hasMotion)
         {
@@ -4666,8 +4722,10 @@ public partial class Block
             }
         }
 
+        float installationHealth = GetConveyorInstallationHealth(sourceLaneIndex);
         ClearConveyorItemAtLane(sourceLaneIndex);
         destinationBlock.SetConveyorItemAtLane(destinationLaneIndex, itemId, null, pickupGateState);
+        destinationBlock.SetConveyorInstallationHealth(destinationLaneIndex, installationHealth);
         ConveyorDataMotionState dataMotionState = new ConveyorDataMotionState
         {
             active = true,
@@ -6053,7 +6111,12 @@ public partial class Block
     }
 
     public bool TryTakeClosestFloorObject(Vector3 referenceWorldPosition, Predicate<int> itemFilter, out int takenItemId)
+        => TryTakeClosestFloorObject(referenceWorldPosition, itemFilter, out takenItemId, out _);
+
+    public bool TryTakeClosestFloorObject(Vector3 referenceWorldPosition, Predicate<int> itemFilter,
+        out int takenItemId, out float installationHealth)
     {
+        installationHealth = 0f;
         takenItemId = -1;
         if (!TryFindClosestFloorObject(referenceWorldPosition, itemFilter, out int stackIndex, out PortableObject portableObject, out _)
             || portableObject == null
@@ -6070,6 +6133,7 @@ public partial class Block
         }
 
         int itemId = portableObject.ItemId;
+        installationHealth = portableObject.InstallationHealth;
         stack.RemoveAt(stack.Count - 1);
         ReleaseFloorObject(portableObject);
         NotifyRuntimeItemStackChanged();
@@ -7563,6 +7627,7 @@ public partial class Block
     {
         ClearDeferredOutputs();
         ReleaseConveyorTransport();
+        conveyorInstallationHealth?.Clear();
         if (floorStacks.Count == 0
             && inputAreaCenterStack.Count == 0
             && conveyorStack.Count == 0
@@ -7954,6 +8019,7 @@ public partial class Block
         portableObject.SetCachedParent(RuntimeObjectRoot, true);
         SetConveyorPortableObjectWorldPose(portableObject, laneIndex, worldPosition);
         portableObject.SetWorldScale(Vector3.one);
+        portableObject.SetInstallationHealth(GetConveyorInstallationHealth(laneIndex));
         return portableObject;
     }
 
@@ -8408,6 +8474,7 @@ public partial class Block
 
         conveyorItemIds[laneIndex] = itemId;
         conveyorStack[laneIndex] = portableObject;
+        SetConveyorInstallationHealth(laneIndex, portableObject != null ? portableObject.InstallationHealth : 0f);
         conveyorItemMoveFrames[laneIndex] = -1;
         conveyorItemMotionStates[laneIndex] = default;
         conveyorItemPickupGateStates[laneIndex] = pickupGateState;
@@ -8530,6 +8597,7 @@ public partial class Block
 
         int itemId = GetConveyorStoredItemIdAtLane(sourceLaneIndex);
         PortableObject portableObject = GetConveyorPortableObjectAtLane(sourceLaneIndex);
+        float installationHealth = GetConveyorInstallationHealth(sourceLaneIndex);
         ConveyorPickupGateState pickupGateState = GetConveyorPickupGateStateAtLane(sourceLaneIndex);
 
         TerrainGenerator activeTerrain = TerrainGenerator.Active;
@@ -8539,6 +8607,7 @@ public partial class Block
         IncrementConveyorLaneOccupancyVersion(targetLaneIndex);
         conveyorItemIds[targetLaneIndex] = itemId;
         conveyorStack[targetLaneIndex] = portableObject;
+        SetConveyorInstallationHealth(targetLaneIndex, installationHealth);
         conveyorItemMoveFrames[targetLaneIndex] = -1;
         conveyorItemMotionStates[targetLaneIndex] = default;
         conveyorItemPickupGateStates[targetLaneIndex] = pickupGateState;
@@ -8553,6 +8622,7 @@ public partial class Block
 
     private void ClearConveyorStorageLaneRaw(int laneIndex)
     {
+        conveyorInstallationHealth?.Remove(laneIndex);
         if (OwnsConveyorTransport) ConveyorTransport.Remove(TransportSlot(laneIndex));
         if (!IsConveyorStorageLaneIndex(laneIndex))
         {
@@ -10713,25 +10783,25 @@ public partial class Block
             && GetConveyorItemIdAtLane(sourceLaneIndex) >= 0;
     }
 
-    private bool TrySetConveyorObjectAtLaneOrSingleLineFallback(int laneIndex, int objectId, out PortableObject targetPortableObject)
+    private bool TrySetConveyorObjectAtLaneOrSingleLineFallback(int laneIndex, int objectId, out PortableObject targetPortableObject, float installationHealth = 0f)
     {
-        if (TrySetConveyorObjectAtLane(laneIndex, objectId, out targetPortableObject))
+        if (TrySetConveyorObjectAtLane(laneIndex, objectId, out targetPortableObject, installationHealth))
         {
             return true;
         }
 
         if (TryNormalizeConveyorLaneIndex(laneIndex, out int normalizedLaneIndex)
-            && TrySetConveyorObjectAtLane(normalizedLaneIndex, objectId, out targetPortableObject))
+            && TrySetConveyorObjectAtLane(normalizedLaneIndex, objectId, out targetPortableObject, installationHealth))
         {
             return true;
         }
 
-        if (TrySetConveyorObjectAtLane(ConveyorSingleLineBackLaneIndex, objectId, out targetPortableObject))
+        if (TrySetConveyorObjectAtLane(ConveyorSingleLineBackLaneIndex, objectId, out targetPortableObject, installationHealth))
         {
             return true;
         }
 
-        return TrySetConveyorObjectAtLane(ConveyorSingleLineFrontLaneIndex, objectId, out targetPortableObject);
+        return TrySetConveyorObjectAtLane(ConveyorSingleLineFrontLaneIndex, objectId, out targetPortableObject, installationHealth);
     }
 
     private bool TryMoveConveyorLaneRunToOpenDestination(
@@ -11148,6 +11218,7 @@ public partial class Block
                 move.itemId,
                 portableObject,
                 pickupGateState);
+            destinationBlock.SetConveyorInstallationHealth(move.destinationLaneIndex, move.installationHealth);
 
             if (portableObject != null)
             {

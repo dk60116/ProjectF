@@ -13,7 +13,7 @@ MonoBehaviour:
   m_Name: Item_79_Manual - Oil drilling machine
   m_EditorClassIdentifier: Assembly-CSharp::ItemDefinition
   itemName: Manual - Oil drilling machine
-  id: 93
+  id: 96
   mapObject: {fileID: 0}
   mapObjectArchetype: {fileID: 0}
   useMapColor: 0
@@ -33,6 +33,9 @@ MonoBehaviour:
   isManual: 1
   manualTargetItem: {fileID: 11400000, guid: d4d9ce93c017a2e4d8c5891bb4f4e91c, type: 2}
   upgradeable: 1
+  maxHealth: 100
+  excludeFromMonsterTargets: 0
+  monsterAttackPriority: 1
   keepIoAreaItemsInPlaceWhileEditing: 0
   capacity: 10
   isFluid: 0

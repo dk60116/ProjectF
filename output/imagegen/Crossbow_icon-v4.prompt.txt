@@ -1,0 +1,10 @@
+Tool: built-in image_gen (transparent_background: true)
+Edit target: FactorioProject/Assets/Items/Equip/Crossbow/Crossbow_Icon.png
+Delivery: preserve original 256x256 size by high-quality downsampling; alpha preserved; .meta unchanged.
+
+Final prompt:
+Use case: precise-object-edit
+Edit target: the provided transparent crossbow game inventory icon.
+Primary request: Add a clean solid BLACK outline around the crossbow's complete visible silhouette, including the wooden stock, metal bow limbs, bowstring and trigger. The black outline should be clearly readable at inventory icon sizes, approximately 2-3 pixels thick when displayed at 256x256, with consistent visual weight and neat edges. Keep internal lines sparse, only where needed to distinguish overlapping parts.
+Invariants: Change only the outline/edge treatment. Preserve the exact existing crossbow design, no arrow or bolt, diagonal angle, proportions, placement, orange wooden stock, gray metal, brown bowstring, low-poly flat faceted shading and lighting. Do not add a white halo, glow, shadow, texture, ornament, frame, text, watermark, arrow or additional item. Keep the empty background genuinely transparent including openings inside the weapon, with clean alpha edges. Maintain the existing low-detail inventory-icon style; do not convert into a realistic detailed illustration.
+

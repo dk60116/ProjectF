@@ -1,0 +1,13 @@
+Tool: built-in image_gen (transparent_background: true)
+References: existing Axe_Icon.png, Pickaxe_Icon.png, Knife_Icon.png
+Edit target: output/imagegen/Crossbow_icon.png
+
+Final prompt:
+Use case: style-transfer
+Asset type: transparent inventory item icon, matching an existing low-poly game equipment icon set.
+Input images: Image 1 (Crossbow_icon.png) is the EDIT TARGET, preserve its identity as one wooden crossbow with a metal bow and one loaded bolt, diagonal butt at lower left and muzzle upper right. Image 2 (Axe_Icon.png), Image 3 (Pickaxe_Icon.png), and Image 4 (Knife_Icon.png) are STRICT STYLE REFERENCES, do not depict those tools in the output.
+Primary request: Redraw the crossbow to look like it was created by exactly the same artist and rendering process as the three existing equipment icons.
+Style constraints: stylized LOW-POLY solid object with angular planar faces; FLAT, broad, geometric color patches for shading; no brushwork, no painted wood grain, no scratches, no photographic metal, no gradients across individual polygon faces, no tiny detail, no glossy realistic reflections. Match reference orange/golden wooden handles, medium gray steel planes and small pale-gray edge highlights. Use crisp angular silhouettes and the same subtle thin dark edge treatment as the tool references, NOT a thick cartoon ink outline. Strong upper-left light, darker lower-right planes.
+Composition: square transparent canvas; a single complete crossbow centered with approximately 8 percent padding; elevated three-quarter view at the same scale and viewpoint as the reference equipment; diagonal lower-left stock to upper-right bolt tip; compact simple wooden stock, unmistakable transverse curved metal bow across its front, dark taut bowstring and a single simple loaded bolt. Simplify the mechanism and fittings to readable shapes, with no oversized realistic rifle butt. Render for clear readability at 64x64 and 256x256, using the reference icons' very low detail density, not an elaborate illustration.
+Constraints: real transparent alpha background, one crossbow only, no other tools, no background, no ground or drop shadow, no text, no border, no frame, no UI, no watermark.
+

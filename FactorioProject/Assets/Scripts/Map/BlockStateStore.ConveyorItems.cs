@@ -274,7 +274,12 @@ public partial class BlockStateStore
         Predicate<int> itemFilter,
         Vector3 referenceWorldPosition,
         out int itemId)
+        => TryTakeSavedConveyorItem(worldCoordinate, itemFilter, referenceWorldPosition, out itemId, out _);
+
+    public bool TryTakeSavedConveyorItem(Vector2Int worldCoordinate, Predicate<int> itemFilter,
+        Vector3 referenceWorldPosition, out int itemId, out float installationHealth)
     {
+        installationHealth = 0f;
         itemId = -1;
         if (!TryFindSavedConveyorItemLane(
                 worldCoordinate,
@@ -288,6 +293,7 @@ public partial class BlockStateStore
         }
 
         itemId = lane.itemId;
+        installationHealth = lane.installationHealth;
         state.lanes.Remove(lane);
         SyncConveyorFloorObjects(worldCoordinate, state);
         WakeSavedConveyorNeighbors(worldCoordinate);
@@ -301,7 +307,7 @@ public partial class BlockStateStore
             && TryFindSavedConveyorPlacementLane(worldCoordinate, out _, out _);
     }
 
-    public bool TryAddSavedConveyorItem(Vector2Int worldCoordinate, int itemId, Vector3 referenceWorldPosition)
+    public bool TryAddSavedConveyorItem(Vector2Int worldCoordinate, int itemId, Vector3 referenceWorldPosition, float installationHealth = 0f)
     {
         if (itemId < 0
             || !TryFindSavedConveyorPlacementLane(
@@ -316,6 +322,7 @@ public partial class BlockStateStore
         {
             laneIndex = laneIndex,
             itemId = itemId,
+            installationHealth = installationHealth,
             visualWorldPosition = new Vector3(worldCoordinate.x, 0.2f, worldCoordinate.y)
         };
         state.lanes.Add(lane);
@@ -477,6 +484,15 @@ public partial class BlockStateStore
         }
 
         SetFloorObjectsFromOwnedRawItems(worldCoordinate, itemIds);
+        List<PortableItemHealthSaveState> health = null;
+        for (int i = 0; i < state.lanes.Count; i++)
+            if (state.lanes[i].installationHealth > 0f)
+            {
+                health ??= new List<PortableItemHealthSaveState>();
+                health.Add(new PortableItemHealthSaveState
+                { index = state.lanes[i].laneIndex + 2, health = state.lanes[i].installationHealth });
+            }
+        if (health != null && savedFloorObjectStates.TryGetValue(worldCoordinate, out var floor)) floor.InstallationHealth = health;
     }
 
     private static void WakeSavedConveyorNeighbors(Vector2Int worldCoordinate)
@@ -577,6 +593,7 @@ public partial class BlockStateStore
         ConveyorItemLaneSaveState clonedState = new ConveyorItemLaneSaveState
         {
             nativeBeltState = source.nativeBeltState?.Clone(),
+            installationHealth = source.installationHealth,
             laneIndex = source.laneIndex,
             itemId = source.itemId,
             visualWorldPosition = source.visualWorldPosition,

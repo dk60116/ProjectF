@@ -5,6 +5,7 @@ namespace ProjectF.Conveyors
     internal struct ConveyorTransportItem
     {
         internal int Id;
+        internal float InstallationHealth;
         internal ConveyorPickupGateState Gate;
     }
 

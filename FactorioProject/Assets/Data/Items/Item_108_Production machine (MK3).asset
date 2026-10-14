@@ -13,7 +13,7 @@ MonoBehaviour:
   m_Name: Item_108_Production machine (MK3)
   m_EditorClassIdentifier: Assembly-CSharp::ItemDefinition
   itemName: Production machine (MK3)
-  id: 77
+  id: 80
   mapObject: {fileID: 1982885657640665004, guid: 5e35bf91a3c489b42b8cff7e865635b6, type: 3}
   mapObjectArchetype: {fileID: 11400000, guid: 1bb84239e37654e478fa192ba8232136, type: 2}
   useMapColor: 1
@@ -33,6 +33,9 @@ MonoBehaviour:
   isManual: 0
   manualTargetItem: {fileID: 0}
   upgradeable: 0
+  maxHealth: 100
+  excludeFromMonsterTargets: 0
+  monsterAttackPriority: 2
   keepIoAreaItemsInPlaceWhileEditing: 0
   capacity: 10
   isFluid: 0
@@ -51,8 +54,8 @@ MonoBehaviour:
   seedTargetResource: {fileID: 0}
   useEnergyRequirements:
   - energyType: 2
-    useEnergyAmount: 100
-    completeEnergy: 3600
+    useEnergyAmount: 40
+    completeEnergy: 400
   useEnergyType: 0
   useEnergyAmount: 0
   completeEnergy: 0

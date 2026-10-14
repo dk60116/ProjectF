@@ -171,6 +171,8 @@ public partial class InstallationPlacementController : MonoBehaviour
         new List<PipeAreaBlockCandidate>(4);
     private readonly List<PipeAreaBlockCandidate> pipeAreaBlockCandidateScratchC =
         new List<PipeAreaBlockCandidate>(4);
+    private readonly List<PipeAreaBlockCandidate> fixedFluidPipeAreaCandidateScratch =
+        new List<PipeAreaBlockCandidate>(4);
     private readonly List<PipeAreaBlockCandidate> pipePassPlacementOverlapScratch =
         new List<PipeAreaBlockCandidate>(4);
     private readonly List<AreaMarkerSpawnRequest> areaMarkerRequestScratch =
@@ -434,6 +436,7 @@ public partial class InstallationPlacementController : MonoBehaviour
 
     private sealed class InstallationEditSession
     {
+        public float installationHealth;
         public InstallationObject originalInstallation;
         public ItemDefinition definition;
         public Vector2Int originalAnchorCoordinate;
@@ -447,6 +450,7 @@ public partial class InstallationPlacementController : MonoBehaviour
         public List<Vector2Int> originalStateCoordinates = new List<Vector2Int>();
         public List<AreaAttachedBoxState> attachedAreaBoxes = new List<AreaAttachedBoxState>();
         public Dictionary<Vector2Int, List<int>> blockStatesByCanonicalOffset = new Dictionary<Vector2Int, List<int>>();
+        public Dictionary<Vector2Int, List<PortableItemHealthSaveState>> blockHealthByCanonicalOffset = new();
         public InputOutputModule.PersistentState inputOutputState;
         public ProjectF.Simulation.LoggingProcess loggingProcess;
         public bool? boxIsOpen;
@@ -463,6 +467,7 @@ public partial class InstallationPlacementController : MonoBehaviour
         public float storedFluidTemperatureCelsius = MapClimate.DefaultCurrentTemperatureCelsius;
         public int storedInstallationItemId = -1;
         public List<int> storedInstallationItemIds = new List<int>();
+        public List<float> storedInstallationItemHealth = new List<float>();
         public bool editsUndergroundPipeEndpoint;
         public Vector2Int originalMovingEndpointCoordinate;
         public Vector2Int fixedUndergroundEndpointCoordinate;
@@ -470,6 +475,7 @@ public partial class InstallationPlacementController : MonoBehaviour
 
     private sealed class AreaAttachedBoxState
     {
+        public float installationHealth;
         public BoxObject boxObject;
         public ItemDefinition definition;
         public Vector2Int originalAnchorCoordinate;
@@ -509,7 +515,10 @@ public partial class InstallationPlacementController : MonoBehaviour
         public int packedItemStoredInHandCount;
         public List<PackedPortableDrop> portableDrops = new List<PackedPortableDrop>();
         public Dictionary<Vector2Int, List<int>> pendingDroppedBlockStatesByCanonicalOffset = new Dictionary<Vector2Int, List<int>>();
+        public Dictionary<Vector2Int, List<float>> pendingDroppedBlockHealthByCanonicalOffset = new();
     }
+
+    private long selectedWreckageSequence;
 
     private sealed class PackedPortableDrop
     {
@@ -708,6 +717,9 @@ public partial class InstallationPlacementController : MonoBehaviour
         long startTimestamp = profileRuntime ? MapObjectTickProfiler.BeginSample() : 0L;
         try
         {
+#if UNITY_EDITOR
+            if (ProjectF.Monsters.MonsterSpawnBrush.BlocksGameplayInput) return;
+#endif
             ResolveInstallButtons();
             RefreshInstallButton();
             RefreshMapEditButtonState();
@@ -1840,6 +1852,7 @@ public partial class InstallationPlacementController : MonoBehaviour
             return false;
         }
 
+        if (selectedWreckageSequence > 0L) return true;
         if (IsEditingInstallation())
         {
             CleanupInstallPreviewReferences();
@@ -2003,6 +2016,7 @@ public partial class InstallationPlacementController : MonoBehaviour
         {
             return;
         }
+        selectedWreckageSequence = 0L;
 
         if (TryGetEditableInstallationAtPointer(pointerPosition, out InstallationObject installationObject, out Vector2Int anchorCoordinate))
         {
@@ -2027,6 +2041,12 @@ public partial class InstallationPlacementController : MonoBehaviour
         }
 
         ClearEditableInstallationSelection();
+        if (ResolveInstallPreviewTerrain() is TerrainGenerator wreckTerrain
+            && wreckTerrain.TrySelectWreckage(pointerPosition, out long wreckSequence))
+        {
+            selectedWreckageSequence = wreckSequence;
+            RefreshMapEditButtonState();
+        }
     }
 
     private void BeginMapEditTrainDragTracking(Train train, Vector2 pointerPosition)
@@ -2686,6 +2706,7 @@ public partial class InstallationPlacementController : MonoBehaviour
 
     private void ClearEditableInstallationSelection()
     {
+        selectedWreckageSequence = 0L;
         ResetMapEditTrainDragTracking();
         SetWorkableRangeVisualRequested(selectedEditableInstallation, false);
         SetUtilityPoleRangeVisualRequested(selectedEditableInstallation, false);
@@ -3721,6 +3742,13 @@ public partial class InstallationPlacementController : MonoBehaviour
 
     private void HandleMapEditPackClicked()
     {
+        if (selectedWreckageSequence > 0L)
+        {
+            ResolveInstallPreviewTerrain()?.RemoveWreckage(selectedWreckageSequence);
+            ClearEditableInstallationSelection();
+            RefreshMapEditButtonState();
+            return;
+        }
         TryPackSelectedInstallation();
         RefreshMapEditButtonState();
     }
@@ -3828,9 +3856,10 @@ public partial class InstallationPlacementController : MonoBehaviour
             conveyorVariantKind = packedConveyorVariantKind,
             itemId = itemId,
             itemCount = itemCount,
-            dropCoordinate = targetAnchorCoordinate,
-            pendingDroppedBlockStatesByCanonicalOffset = BuildPackedInstallationDroppedBlockStates(editSession)
+            dropCoordinate = targetAnchorCoordinate
         };
+        packedSession.pendingDroppedBlockStatesByCanonicalOffset = BuildPackedInstallationDroppedBlockStates(
+            editSession, packedSession.pendingDroppedBlockHealthByCanonicalOffset);
         packedInstallationHistory.Push(packedSession);
 
         ClearEditableInstallationSelection();
@@ -4098,6 +4127,7 @@ public partial class InstallationPlacementController : MonoBehaviour
                     portableObject = packedPortableObject,
                     coordinate = packedDropCoordinate
                 });
+                packedPortableObject.SetInstallationHealth(packedSession.editSession.installationHealth);
             }
 
             InstallationObject originalInstallation = packedSession?.editSession?.originalInstallation;
@@ -4144,7 +4174,8 @@ public partial class InstallationPlacementController : MonoBehaviour
                     packedSession.itemId,
                     startPosition,
                     ref moveIndex,
-                    out PackedItemStorageTarget storageTarget))
+                    out PackedItemStorageTarget storageTarget,
+                    packedSession.editSession.installationHealth))
             {
                 break;
             }
@@ -4184,18 +4215,21 @@ public partial class InstallationPlacementController : MonoBehaviour
             }
 
             Vector3 startPosition = ResolvePackedItemMoveStartPosition(packedSession, packedSession.dropCoordinate);
+            packedSession.pendingDroppedBlockHealthByCanonicalOffset.TryGetValue(key, out var health);
             for (int itemIndex = itemIds.Count - 1; itemIndex >= 0; itemIndex--)
             {
                 int itemId = itemIds[itemIndex];
-                if (itemId < 0 || TryAddPackedItemToPlayerStorage(itemId, startPosition, ref moveIndex))
+                if (itemId < 0 || TryAddPackedItemToPlayerStorage(itemId, startPosition, ref moveIndex, out _, health != null ? health[itemIndex] : 0f))
                 {
                     itemIds.RemoveAt(itemIndex);
+                    health?.RemoveAt(itemIndex);
                 }
             }
 
             if (itemIds.Count <= 0)
             {
                 packedSession.pendingDroppedBlockStatesByCanonicalOffset.Remove(key);
+                packedSession.pendingDroppedBlockHealthByCanonicalOffset.Remove(key);
             }
         }
     }
@@ -4214,8 +4248,9 @@ public partial class InstallationPlacementController : MonoBehaviour
             return;
         }
 
-        bool storedItem = TryAddPackedItemToPlayerStorage(itemId, robotArm.HeldItemWorldPosition, ref moveIndex)
-                          || TryDropPackedFloorObject(itemId, packedSession.dropCoordinate, out _, out _);
+        float health = robotArm.HeldInstallationHealth;
+        bool storedItem = TryAddPackedItemToPlayerStorage(itemId, robotArm.HeldItemWorldPosition, ref moveIndex, out _, health)
+                          || TryDropPackedFloorObject(itemId, packedSession.dropCoordinate, out _, out _, health);
         if (storedItem)
         {
             robotArm.TryClearHeldItemForPacking(itemId);
@@ -4230,7 +4265,8 @@ public partial class InstallationPlacementController : MonoBehaviour
         if (installation is IPersistentInstallationItemCollectionStorage collectionStorage)
         {
             List<int> itemIds = new List<int>();
-            collectionStorage.CapturePersistentStoredItemIds(itemIds);
+            List<float> health = new List<float>();
+            collectionStorage.CapturePersistentStoredItemIds(itemIds, health);
             Vector3 collectionStartPosition = ResolvePackedItemMoveStartPosition(packedSession);
             for (int i = itemIds.Count - 1; i >= 0; i--)
             {
@@ -4239,19 +4275,21 @@ public partial class InstallationPlacementController : MonoBehaviour
                                  || TryAddPackedItemToPlayerStorage(
                                      collectionItemId,
                                      collectionStartPosition,
-                                     ref moveIndex)
+                                     ref moveIndex,
+                                     out _, health[i])
                                  || TryDropPackedFloorObject(
                                      collectionItemId,
                                      packedSession.dropCoordinate,
                                      out _,
-                                     out _);
+                                     out _, health[i]);
                 if (movedItem)
                 {
                     itemIds.RemoveAt(i);
+                    health.RemoveAt(i);
                 }
             }
 
-            collectionStorage.ApplyPersistentStoredItemIds(itemIds);
+            collectionStorage.ApplyPersistentStoredItemIds(itemIds, health);
         }
 
         IPersistentInstallationItemStorage itemStorage =
@@ -4284,7 +4322,8 @@ public partial class InstallationPlacementController : MonoBehaviour
         int itemId,
         Vector3 startPosition,
         ref int moveIndex,
-        out PackedItemStorageTarget storageTarget)
+        out PackedItemStorageTarget storageTarget,
+        float installationHealth = 0f)
     {
         storageTarget = PackedItemStorageTarget.None;
         if (itemId < 0)
@@ -4301,6 +4340,7 @@ public partial class InstallationPlacementController : MonoBehaviour
                 true,
                 out PlayerItemStorageReservation reservation))
         {
+            reservation.Target.SetInstallationHealth(installationHealth);
             PlayPackedPortableMoveToPlayerStorage(
                 itemId,
                 reservation,
@@ -4316,6 +4356,7 @@ public partial class InstallationPlacementController : MonoBehaviour
             return false;
         }
 
+        reservation.Target.SetInstallationHealth(installationHealth);
         PlayPackedPortableMoveToPlayerStorage(
             itemId,
             reservation,
@@ -4399,6 +4440,7 @@ public partial class InstallationPlacementController : MonoBehaviour
                 continue;
             }
 
+            packedSession.pendingDroppedBlockHealthByCanonicalOffset.TryGetValue(key, out var health);
             for (int itemIndex = 0; itemIndex < droppedItemIds.Count; itemIndex++)
             {
                 int itemId = droppedItemIds[itemIndex];
@@ -4407,15 +4449,16 @@ public partial class InstallationPlacementController : MonoBehaviour
                     continue;
                 }
 
-                TryDropPackedFloorObject(itemId, packedSession.dropCoordinate, out _, out _);
+                TryDropPackedFloorObject(itemId, packedSession.dropCoordinate, out _, out _, health != null ? health[itemIndex] : 0f);
             }
 
             droppedItemIds.Clear();
             packedSession.pendingDroppedBlockStatesByCanonicalOffset.Remove(key);
+            packedSession.pendingDroppedBlockHealthByCanonicalOffset.Remove(key);
         }
     }
 
-    private bool TryDropPackedFloorObject(int itemId, Vector2Int preferredCoordinate, out PortableObject portableObject, out Vector2Int dropCoordinate)
+    private bool TryDropPackedFloorObject(int itemId, Vector2Int preferredCoordinate, out PortableObject portableObject, out Vector2Int dropCoordinate, float installationHealth = 0f)
     {
         portableObject = null;
         dropCoordinate = preferredCoordinate;
@@ -4450,6 +4493,7 @@ public partial class InstallationPlacementController : MonoBehaviour
                     }
 
                     dropCoordinate = coordinate;
+                    portableObject.SetInstallationHealth(installationHealth);
                     return true;
                 }
             }
@@ -4634,6 +4678,9 @@ public partial class InstallationPlacementController : MonoBehaviour
             editSession,
             editSession.originalAnchorCoordinate,
             editSession.originalQuarterTurns);
+        if (ResolveInstallPreviewTerrain() is TerrainGenerator healthTerrain
+            && healthTerrain.TryGetMapObjectHealth(installationObject, out float health, out float maximum)
+            && health < maximum) editSession.installationHealth = health;
 
         if (installationObject is InputOutputModule inputOutputModule)
         {
@@ -4667,7 +4714,7 @@ public partial class InstallationPlacementController : MonoBehaviour
         }
         if (installationObject is IPersistentInstallationItemCollectionStorage collectionStorage)
         {
-            collectionStorage.CapturePersistentStoredItemIds(editSession.storedInstallationItemIds);
+            collectionStorage.CapturePersistentStoredItemIds(editSession.storedInstallationItemIds, editSession.storedInstallationItemHealth);
         }
 
         CaptureAttachedAreaBoxes(editSession);
@@ -4806,12 +4853,16 @@ public partial class InstallationPlacementController : MonoBehaviour
             itemFilterMaskInitialized = boxObject.IsItemFilterMaskInitialized,
             itemFilterMaskWords = boxObject.CaptureItemFilterMaskWords()
         };
+        var terrain = ResolveInstallPreviewTerrain();
+        if (terrain != null && terrain.TryGetMapObjectHealth(boxObject, out float health, out float maximum) && health < maximum)
+            boxState.installationHealth = health;
         return true;
     }
 
     private void CaptureInstallationBlockStates(InstallationEditSession editSession)
     {
         editSession.blockStatesByCanonicalOffset.Clear();
+        editSession.blockHealthByCanonicalOffset.Clear();
 
         TerrainGenerator terrain = ResolveInstallPreviewTerrain();
         if (terrain == null || editSession.originalStateCoordinates == null)
@@ -4830,10 +4881,10 @@ public partial class InstallationPlacementController : MonoBehaviour
             bool isOriginalOccupiedCoordinate = CoordinateListContains(
                 editSession.originalOccupiedCoordinates,
                 stateCoordinate);
-            List<int> blockState = block.CaptureFloorObjectState();
+            List<int> blockState = block.CaptureFloorObjectState(out var blockHealth);
             if (isOriginalOccupiedCoordinate && editSession.originalInstallation is BoxObject)
             {
-                blockState = FilterInternalObjectState(blockState);
+                blockState = FilterFloorObjectState(blockState, false, true, true, blockHealth, out blockHealth);
             }
             else if (!isOriginalOccupiedCoordinate)
             {
@@ -4842,7 +4893,7 @@ public partial class InstallationPlacementController : MonoBehaviour
                     continue;
                 }
 
-                blockState = FilterInternalObjectState(blockState);
+                blockState = FilterFloorObjectState(blockState, false, true, true, blockHealth, out blockHealth);
             }
 
             if (blockState == null || blockState.Count <= 0)
@@ -4853,10 +4904,12 @@ public partial class InstallationPlacementController : MonoBehaviour
             Vector2Int worldOffset = stateCoordinate - editSession.originalAnchorCoordinate;
             Vector2Int canonicalOffset = RotateFootprintOffset(worldOffset, -editSession.originalQuarterTurns);
             editSession.blockStatesByCanonicalOffset[canonicalOffset] = new List<int>(blockState);
+            if (blockHealth != null) editSession.blockHealthByCanonicalOffset[canonicalOffset] = blockHealth;
         }
     }
 
-    private Dictionary<Vector2Int, List<int>> BuildPackedInstallationDroppedBlockStates(InstallationEditSession editSession)
+    private Dictionary<Vector2Int, List<int>> BuildPackedInstallationDroppedBlockStates(InstallationEditSession editSession,
+        Dictionary<Vector2Int, List<float>> droppedHealth)
     {
         Dictionary<Vector2Int, List<int>> droppedStatesByCanonicalOffset = new Dictionary<Vector2Int, List<int>>();
         if (editSession == null || editSession.blockStatesByCanonicalOffset == null || editSession.blockStatesByCanonicalOffset.Count <= 0)
@@ -4873,18 +4926,22 @@ public partial class InstallationPlacementController : MonoBehaviour
                 continue;
             }
 
-            List<int> droppedItemIds = ExtractPackedItemSlotIds(blockState);
+            editSession.blockHealthByCanonicalOffset.TryGetValue(key, out var sourceHealth);
+            var health = sourceHealth != null ? new List<float>() : null;
+            List<int> droppedItemIds = ExtractPackedItemSlotIds(blockState, sourceHealth, health);
 
             if (droppedItemIds.Count > 0)
             {
                 droppedStatesByCanonicalOffset[key] = droppedItemIds;
+                if (health != null) droppedHealth[key] = health;
             }
         }
 
         return droppedStatesByCanonicalOffset;
     }
 
-    private static List<int> ExtractPackedItemSlotIds(IReadOnlyList<int> blockState)
+    private static List<int> ExtractPackedItemSlotIds(IReadOnlyList<int> blockState,
+        IReadOnlyList<PortableItemHealthSaveState> sourceHealth, List<float> health)
     {
         List<int> itemIds = new List<int>();
         if (blockState == null || blockState.Count <= 0)
@@ -4897,13 +4954,13 @@ public partial class InstallationPlacementController : MonoBehaviour
             int stateToken = blockState[i];
             if (stateToken == Block.InputAreaCenterStackStateSentinel)
             {
-                AddPackedSequentialItemIds(blockState, ref i, itemIds);
+                AddPackedSequentialItemIds(blockState, ref i, itemIds, sourceHealth, health);
                 continue;
             }
 
             if (stateToken == Block.ConveyorStackStateSentinel)
             {
-                AddPackedSequentialItemIds(blockState, ref i, itemIds);
+                AddPackedSequentialItemIds(blockState, ref i, itemIds, sourceHealth, health);
                 continue;
             }
 
@@ -4916,7 +4973,8 @@ public partial class InstallationPlacementController : MonoBehaviour
         return itemIds;
     }
 
-    private static void AddPackedSequentialItemIds(IReadOnlyList<int> blockState, ref int index, List<int> itemIds)
+    private static void AddPackedSequentialItemIds(IReadOnlyList<int> blockState, ref int index, List<int> itemIds,
+        IReadOnlyList<PortableItemHealthSaveState> sourceHealth, List<float> health)
     {
         if (blockState == null || itemIds == null || index + 1 >= blockState.Count)
         {
@@ -4930,6 +4988,7 @@ public partial class InstallationPlacementController : MonoBehaviour
             if (itemId >= 0)
             {
                 itemIds.Add(itemId);
+                health?.Add(PortableItemHealthMetadata.Read(sourceHealth, index));
             }
         }
     }
@@ -4949,21 +5008,18 @@ public partial class InstallationPlacementController : MonoBehaviour
         }
     }
 
-    private static List<int> CaptureExternalFloorObjectState(Block block)
+    private static List<int> CaptureExternalFloorObjectState(Block block, out List<PortableItemHealthSaveState> health)
     {
-        return block != null
-            ? FilterFloorObjectState(block.CaptureFloorObjectState(), true, false, false)
-            : null;
+        health = null;
+        if (block == null) return null;
+        var state = block.CaptureFloorObjectState(out var sourceHealth);
+        return FilterFloorObjectState(state, true, false, false, sourceHealth, out health);
     }
 
-    private static List<int> FilterInternalObjectState(IReadOnlyList<int> blockState)
+    private static List<int> MergeExternalFloorObjectState(Block block, IReadOnlyList<int> internalState,
+        IReadOnlyList<PortableItemHealthSaveState> internalHealth, out List<PortableItemHealthSaveState> health)
     {
-        return FilterFloorObjectState(blockState, false, true, true);
-    }
-
-    private static List<int> MergeExternalFloorObjectState(Block block, IReadOnlyList<int> internalState)
-    {
-        List<int> externalState = CaptureExternalFloorObjectState(block);
+        List<int> externalState = CaptureExternalFloorObjectState(block, out health);
         if ((externalState == null || externalState.Count <= 0)
             && (internalState == null || internalState.Count <= 0))
         {
@@ -4980,18 +5036,18 @@ public partial class InstallationPlacementController : MonoBehaviour
 
         if (internalState != null)
         {
+            PortableItemHealthMetadata.CopyRange(internalHealth, 0, internalState.Count - 1, mergedState.Count, ref health);
             mergedState.AddRange(internalState);
         }
 
         return mergedState;
     }
 
-    private static List<int> FilterFloorObjectState(
-        IReadOnlyList<int> blockState,
-        bool includeFloorStack,
-        bool includeInputAreaCenterStack,
-        bool includeConveyorStack)
+    private static List<int> FilterFloorObjectState(IReadOnlyList<int> blockState, bool includeFloorStack,
+        bool includeInputAreaCenterStack, bool includeConveyorStack,
+        IReadOnlyList<PortableItemHealthSaveState> sourceHealth, out List<PortableItemHealthSaveState> health)
     {
+        health = null;
         if (blockState == null || blockState.Count <= 0)
         {
             return null;
@@ -5000,28 +5056,33 @@ public partial class InstallationPlacementController : MonoBehaviour
         List<int> filteredState = new List<int>(blockState.Count);
         for (int i = 0; i < blockState.Count; i++)
         {
+            int first = i, offset = filteredState.Count;
             int stateToken = blockState[i];
             if (stateToken == Block.FloorStackStateSentinel)
             {
                 CopyOrSkipFloorStackState(blockState, ref i, filteredState, includeFloorStack);
+                if (includeFloorStack) PortableItemHealthMetadata.CopyRange(sourceHealth, first, i, offset, ref health);
                 continue;
             }
 
             if (stateToken == Block.InputAreaCenterStackStateSentinel)
             {
                 CopyOrSkipSequentialState(blockState, ref i, filteredState, includeInputAreaCenterStack);
+                if (includeInputAreaCenterStack) PortableItemHealthMetadata.CopyRange(sourceHealth, first, i, offset, ref health);
                 continue;
             }
 
             if (stateToken == Block.ConveyorStackStateSentinel)
             {
                 CopyOrSkipSequentialState(blockState, ref i, filteredState, includeConveyorStack);
+                if (includeConveyorStack) PortableItemHealthMetadata.CopyRange(sourceHealth, first, i, offset, ref health);
                 continue;
             }
 
             if (includeFloorStack && stateToken >= 0)
             {
                 filteredState.Add(stateToken);
+                PortableItemHealthMetadata.CopyRange(sourceHealth, first, i, offset, ref health);
             }
         }
 
@@ -5127,10 +5188,11 @@ public partial class InstallationPlacementController : MonoBehaviour
 
             bool preservesEditedBoxFloorObjects = isOriginalOccupiedCoordinate
                                                    && editSession.originalInstallation is BoxObject;
+            List<PortableItemHealthSaveState> detachedHealth = null;
             IReadOnlyList<int> detachedFloorState = preserveConveyorItemsOnGround
-                ? block.CaptureFloorObjectStateWithDroppedConveyorObjects()
+                ? block.CaptureFloorObjectStateWithDroppedConveyorObjects(out detachedHealth)
                 : !isOriginalOccupiedCoordinate || preservesEditedBoxFloorObjects
-                    ? CaptureExternalFloorObjectState(block)
+                    ? CaptureExternalFloorObjectState(block, out detachedHealth)
                     : null;
 
             if (ReferenceEquals(block.MapObject, editSession.originalInstallation) || IsAttachedAreaBox(editSession, block.MapObject))
@@ -5138,7 +5200,7 @@ public partial class InstallationPlacementController : MonoBehaviour
                 block.SetMapObject(null);
             }
 
-            block.ApplyFloorObjectState(detachedFloorState);
+            block.ApplyFloorObjectState(detachedFloorState, detachedHealth);
         }
 
         editSession.originalInstallation.gameObject.SetActive(false);
@@ -5904,11 +5966,12 @@ public partial class InstallationPlacementController : MonoBehaviour
                 if (editSession.editsUndergroundPipeEndpoint
                     || ShouldBindInstalledObjectToBlock(block, anchorCoordinate, footprintSource, quarterTurns))
                 {
+                    List<PortableItemHealthSaveState> preservedHealth = null;
                     List<int> preservedFloorState = AllowsPlacementOverDroppedFloorObjects(footprintSource)
-                        ? CaptureExternalFloorObjectState(block)
+                        ? CaptureExternalFloorObjectState(block, out preservedHealth)
                         : null;
                     block.SetMapObject(restoredObject);
-                    block.ApplyFloorObjectState(preservedFloorState);
+                    block.ApplyFloorObjectState(preservedFloorState, preservedHealth);
                 }
             }
         }
@@ -5944,7 +6007,7 @@ public partial class InstallationPlacementController : MonoBehaviour
                 }
                 if (restoredInstallationObject is IPersistentInstallationItemCollectionStorage collectionStorage)
                 {
-                    collectionStorage.ApplyPersistentStoredItemIds(editSession.storedInstallationItemIds);
+                    collectionStorage.ApplyPersistentStoredItemIds(editSession.storedInstallationItemIds, editSession.storedInstallationItemHealth);
                 }
             }
             if (restoredObject is BoxObject restoredBoxObject && editSession.boxIsOpen.HasValue)
@@ -5959,6 +6022,8 @@ public partial class InstallationPlacementController : MonoBehaviour
         bool restoredAsDataOnlyConveyor = RegisterInstalledObjectPersistence(
             restoredObject,
             desiredSourcePrefab);
+        if (editSession.installationHealth > 0f)
+            terrain?.SetMapObjectHealth(restoredObject, editSession.installationHealth);
 
         if (restoredAsDataOnlyConveyor)
         {
@@ -6128,15 +6193,16 @@ public partial class InstallationPlacementController : MonoBehaviour
 
             if (editSession.blockStatesByCanonicalOffset.TryGetValue(canonicalOffset, out List<int> blockState))
             {
-                block.ApplyFloorObjectState(preserveExternalFloorObjects
-                    ? MergeExternalFloorObjectState(block, blockState)
-                    : blockState);
+                editSession.blockHealthByCanonicalOffset.TryGetValue(canonicalOffset, out var health);
+                var restored = preserveExternalFloorObjects
+                    ? MergeExternalFloorObjectState(block, blockState, health, out health) : blockState;
+                block.ApplyFloorObjectState(restored, health);
             }
             else
             {
-                block.ApplyFloorObjectState(preserveExternalFloorObjects
-                    ? CaptureExternalFloorObjectState(block)
-                    : null);
+                List<PortableItemHealthSaveState> health = null;
+                var restored = preserveExternalFloorObjects ? CaptureExternalFloorObjectState(block, out health) : null;
+                block.ApplyFloorObjectState(restored, health);
             }
         }
     }
@@ -6199,6 +6265,7 @@ public partial class InstallationPlacementController : MonoBehaviour
             boxObject.SetStorageRange(boxState.boxMinimumRetainedItemCount, boxState.boxMaximumStoredItemCount);
 
             RegisterInstalledObjectPersistence(boxObject);
+            if (boxState.installationHealth > 0f) terrain?.SetMapObjectHealth(boxObject, boxState.installationHealth);
         }
     }
 
@@ -6261,7 +6328,7 @@ public partial class InstallationPlacementController : MonoBehaviour
             }
             if (replacementInstallation is IPersistentInstallationItemCollectionStorage collectionStorage)
             {
-                collectionStorage.ApplyPersistentStoredItemIds(editSession.storedInstallationItemIds);
+                collectionStorage.ApplyPersistentStoredItemIds(editSession.storedInstallationItemIds, editSession.storedInstallationItemHealth);
             }
         }
 
@@ -13474,59 +13541,16 @@ public partial class InstallationPlacementController : MonoBehaviour
             return;
         }
 
-        if (TryGetPreviewPlacementSnapshot(coordinate, previewToIgnore, out PlacementSnapshot previewSnapshot))
+        // A pipe can own the block while a data-only facility still owns its port.
+        fixedFluidPipeAreaCandidateScratch.Clear();
+        CollectRectGridPipeAreaBlockCandidatesAtCoordinate(
+            coordinate, previewToIgnore, fixedFluidPipeAreaCandidateScratch);
+        for (int i = 0; i < fixedFluidPipeAreaCandidateScratch.Count; i++)
         {
-            TryAppendFixedFluidPipeConnectionDirections(previewSnapshot, coordinate, directions);
+            TryAppendFixedFluidPipeConnectionDirections(
+                fixedFluidPipeAreaCandidateScratch[i].snapshot, coordinate, directions);
         }
-        AppendPreviewRectGridPipeAreaConnectionDirections(coordinate, previewToIgnore, directions);
-
-        if (TryGetInstalledPlacementSnapshot(coordinate, out PlacementSnapshot installedSnapshot))
-        {
-            TryAppendFixedFluidPipeConnectionDirections(installedSnapshot, coordinate, directions);
-        }
-
-        runtimeGridModuleScratch.Clear();
-        if (InputOutputModule.CollectModulesAtRuntimeGridCoordinate(coordinate, runtimeGridModuleScratch))
-        {
-            for (int i = 0; i < runtimeGridModuleScratch.Count; i++)
-            {
-                if (TryGetRuntimeModulePlacementSnapshot(
-                        runtimeGridModuleScratch[i],
-                        out PlacementSnapshot runtimeGridSnapshot))
-                {
-                    TryAppendFixedFluidPipeConnectionDirections(runtimeGridSnapshot, coordinate, directions);
-                }
-            }
-            runtimeGridModuleScratch.Clear();
-        }
-        else if (TryGetRuntimeGridPlacementSnapshot(coordinate, out PlacementSnapshot runtimeGridSnapshot))
-        {
-            TryAppendFixedFluidPipeConnectionDirections(runtimeGridSnapshot, coordinate, directions);
-        }
-
-        runtimeAreaModuleScratch.Clear();
-        if (InputOutputModule.CollectModulesAtRuntimeAreaCoordinate(coordinate, runtimeAreaModuleScratch))
-        {
-            for (int i = 0; i < runtimeAreaModuleScratch.Count; i++)
-            {
-                if (TryGetRuntimeModulePlacementSnapshot(
-                        runtimeAreaModuleScratch[i],
-                        out PlacementSnapshot runtimeAreaSnapshot))
-                {
-                    TryAppendFixedFluidPipeConnectionDirections(runtimeAreaSnapshot, coordinate, directions);
-                }
-            }
-            runtimeAreaModuleScratch.Clear();
-        }
-        else if (TryGetRuntimeAreaPlacementSnapshot(coordinate, out PlacementSnapshot runtimeAreaSnapshot))
-        {
-            TryAppendFixedFluidPipeConnectionDirections(runtimeAreaSnapshot, coordinate, directions);
-        }
-
-        if (TryGetSavedPlacementSnapshot(coordinate, out PlacementSnapshot savedSnapshot))
-        {
-            TryAppendFixedFluidPipeConnectionDirections(savedSnapshot, coordinate, directions);
-        }
+        fixedFluidPipeAreaCandidateScratch.Clear();
     }
 
     private bool CanPipeAreaBlocksConnect(Vector2Int firstCoordinate, Vector2Int secondCoordinate)
@@ -13636,44 +13660,6 @@ public partial class InstallationPlacementController : MonoBehaviour
 
         return TryGetSavedPlacementSnapshot(coordinate, out PlacementSnapshot savedSnapshot)
                && IsFluidStoragePipeNodeAtCoordinate(savedSnapshot, coordinate);
-    }
-
-    private void AppendPreviewRectGridPipeAreaConnectionDirections(
-        Vector2Int coordinate,
-        MapObject previewToIgnore,
-        List<Vector2Int> directions)
-    {
-        if (directions == null)
-        {
-            return;
-        }
-
-        pipeAreaBlockCandidateScratchC.Clear();
-        CollectPreviewRectGridPipeAreaBlockCandidatesAtCoordinate(
-            coordinate,
-            previewToIgnore,
-            pipeAreaBlockCandidateScratchC);
-
-        for (int i = 0; i < pipeAreaBlockCandidateScratchC.Count; i++)
-        {
-            PipeAreaBlockCandidate candidate = pipeAreaBlockCandidateScratchC[i];
-            if (candidate.snapshot == null
-                || !TryGetInputOutputModule(candidate.snapshot.mapObject, out InputOutputModule inputOutputModule)
-                || !TryGetRectGridPipeAreaConnectionDirection(
-                    candidate.snapshot.mapObject,
-                    inputOutputModule,
-                    candidate.snapshot.anchorCoordinate,
-                    candidate.snapshot.quarterTurns,
-                    coordinate,
-                    out Vector2Int connectionDirection))
-            {
-                continue;
-            }
-
-            AddPipeDirection(directions, connectionDirection);
-        }
-
-        pipeAreaBlockCandidateScratchC.Clear();
     }
 
     private bool IsFluidStoragePipeNodeAtCoordinate(PlacementSnapshot snapshot, Vector2Int coordinate)
@@ -33817,9 +33803,10 @@ public partial class InstallationPlacementController : MonoBehaviour
             ? itemStorage.PersistentStoredItemId
             : -1;
         List<int> storedInstallationItemIds = new List<int>();
+        List<float> storedInstallationItemHealth = new List<float>();
         if (currentObject is IPersistentInstallationItemCollectionStorage collectionStorage)
         {
-            collectionStorage.CapturePersistentStoredItemIds(storedInstallationItemIds);
+            collectionStorage.CapturePersistentStoredItemIds(storedInstallationItemIds, storedInstallationItemHealth);
         }
         long placementSequence = currentObject.RuntimePlacementSequence;
         List<Vector2Int> oldCoordinates = new List<Vector2Int>(currentObject.RuntimeOccupiedCoordinates);
@@ -33903,7 +33890,7 @@ public partial class InstallationPlacementController : MonoBehaviour
         }
         if (replacementInstallation is IPersistentInstallationItemCollectionStorage replacementCollectionStorage)
         {
-            replacementCollectionStorage.ApplyPersistentStoredItemIds(storedInstallationItemIds);
+            replacementCollectionStorage.ApplyPersistentStoredItemIds(storedInstallationItemIds, storedInstallationItemHealth);
         }
         RegisterInstalledObjectPersistence(replacementInstallation);
 
@@ -36620,12 +36607,35 @@ public partial class InstallationPlacementController : MonoBehaviour
             return true;
         }
 
-        return TryGetSavedPlacementSnapshot(connectorCoordinate, out PlacementSnapshot savedSnapshot)
-               && TryResolveFixedFluidConnectorCompatibility(
-                   savedSnapshot,
-                   connectorCoordinate,
-                   directionToPipe,
-                   out connectorCanConnect);
+        if (TryGetSavedPlacementSnapshot(connectorCoordinate, out PlacementSnapshot savedSnapshot)
+            && TryResolveFixedFluidConnectorCompatibility(
+                savedSnapshot, connectorCoordinate, directionToPipe, out connectorCanConnect))
+        {
+            return true;
+        }
+
+        fixedFluidPipeAreaCandidateScratch.Clear();
+        CollectRectGridPipeAreaBlockCandidatesAtCoordinate(
+            connectorCoordinate, null, fixedFluidPipeAreaCandidateScratch);
+        bool hasFixedConnector = false;
+        for (int i = 0; i < fixedFluidPipeAreaCandidateScratch.Count; i++)
+        {
+            if (!TryResolveFixedFluidConnectorCompatibility(
+                    fixedFluidPipeAreaCandidateScratch[i].snapshot,
+                    connectorCoordinate, directionToPipe, out bool candidateCanConnect))
+            {
+                continue;
+            }
+
+            hasFixedConnector = true;
+            if (candidateCanConnect)
+            {
+                connectorCanConnect = true;
+                break;
+            }
+        }
+        fixedFluidPipeAreaCandidateScratch.Clear();
+        return hasFixedConnector;
     }
 
     private bool TryResolveFixedFluidConnectorCompatibility(
@@ -41431,6 +41441,9 @@ public partial class InstallationPlacementController : MonoBehaviour
         private readonly WorkableInstance workable;
         private readonly ForestryInstance forestry;
         private readonly ProjectF.Railway.RailwayInstance railway;
+        internal IMapObjectTarget Target => (IMapObjectTarget)conveyor ?? pipe ?? (IMapObjectTarget)robotArm
+            ?? building ?? (IMapObjectTarget)miner ?? production ?? (IMapObjectTarget)pole
+            ?? workable ?? (IMapObjectTarget)forestry ?? railway;
 
         internal DataOnlyPlacementPresentation(ConveyorRuntimeRecord conveyor)
         { this = default; this.conveyor = conveyor; }
@@ -41521,6 +41534,9 @@ public partial class InstallationPlacementController : MonoBehaviour
         int itemId,
         float delay)
     {
+        if (sourcePortableObject != null && sourcePortableObject.InstallationHealth > 0f)
+            ResolveInstallPreviewTerrain()?.SetMapObjectHealth(
+                dataOnlyPresentation.Target ?? installedObject, sourcePortableObject.InstallationHealth);
         Transform installedTransform = installedObject != null ? installedObject.transform : null;
         Vector3 originalScale = installedTransform != null
             ? installedTransform.localScale

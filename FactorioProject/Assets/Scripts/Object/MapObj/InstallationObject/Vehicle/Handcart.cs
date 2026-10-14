@@ -1405,7 +1405,8 @@ public class Handcart : Vehicle, IPlayerItemStorage, IPlayerItemStoragePortableP
         Vector3 startWorldPosition,
         Func<Vector3> startWorldPositionProvider,
         float moveInterval,
-        out int addedCount)
+        out int addedCount,
+        IReadOnlyList<float> installationHealth = null)
     {
         addedCount = 0;
         if (itemId < 0
@@ -1431,8 +1432,11 @@ public class Handcart : Vehicle, IPlayerItemStorage, IPlayerItemStoragePortableP
 
             int cargoIndex = storedItemIds.Count;
             storedItemIds.Add(itemId);
+            float health = installationHealth != null && i < installationHealth.Count ? installationHealth[i] : 0f;
+            storedItemHealth.Add(health);
 
             PortableObject visual = CreateCargoVisual(itemId);
+            visual?.SetInstallationHealth(health);
             itemVisuals.Add(visual);
             if (visual != null)
             {
@@ -1525,7 +1529,9 @@ public class Handcart : Vehicle, IPlayerItemStorage, IPlayerItemStoragePortableP
         PortableObject sourceVisual = cargoIndex < itemVisuals.Count
             ? itemVisuals[cargoIndex]
             : null;
+        reservation.Target?.SetInstallationHealth(storedItemHealth[cargoIndex]);
         storedItemIds.RemoveAt(cargoIndex);
+        storedItemHealth.RemoveAt(cargoIndex);
         if (cargoIndex < itemVisuals.Count)
         {
             itemVisuals.RemoveAt(cargoIndex);
@@ -1601,7 +1607,9 @@ public class Handcart : Vehicle, IPlayerItemStorage, IPlayerItemStoragePortableP
         return previewPickupCount > 0;
     }
 
-    public void CapturePersistentStoredItemIds(List<int> destination)
+    private readonly List<float> storedItemHealth = new();
+
+    public void CapturePersistentStoredItemIds(List<int> destination, List<float> installationHealth = null)
     {
         if (destination == null)
         {
@@ -1609,6 +1617,7 @@ public class Handcart : Vehicle, IPlayerItemStorage, IPlayerItemStoragePortableP
         }
 
         destination.Clear();
+        installationHealth?.Clear();
         if (storedItemIds == null)
         {
             return;
@@ -1620,15 +1629,17 @@ public class Handcart : Vehicle, IPlayerItemStorage, IPlayerItemStoragePortableP
             if (itemId >= 0)
             {
                 destination.Add(itemId);
+                installationHealth?.Add(i < storedItemHealth.Count ? storedItemHealth[i] : 0f);
             }
         }
     }
 
-    public void ApplyPersistentStoredItemIds(IReadOnlyList<int> itemIds)
+    public void ApplyPersistentStoredItemIds(IReadOnlyList<int> itemIds, IReadOnlyList<float> installationHealth = null)
     {
         ClearCargoVisuals();
         storedItemIds ??= new List<int>();
         storedItemIds.Clear();
+        storedItemHealth.Clear();
         if (itemIds != null)
         {
             for (int i = 0; i < itemIds.Count; i++)
@@ -1636,6 +1647,7 @@ public class Handcart : Vehicle, IPlayerItemStorage, IPlayerItemStoragePortableP
                 if (itemIds[i] >= 0)
                 {
                     storedItemIds.Add(itemIds[i]);
+                    storedItemHealth.Add(installationHealth != null && i < installationHealth.Count ? installationHealth[i] : 0f);
                 }
             }
         }
@@ -1646,6 +1658,7 @@ public class Handcart : Vehicle, IPlayerItemStorage, IPlayerItemStoragePortableP
     private void EnsureCargoState()
     {
         storedItemIds ??= new List<int>();
+        while (storedItemHealth.Count < storedItemIds.Count) storedItemHealth.Add(0f);
         if (itemVisuals.Count == storedItemIds.Count)
         {
             return;
@@ -1661,6 +1674,7 @@ public class Handcart : Vehicle, IPlayerItemStorage, IPlayerItemStoragePortableP
         for (int i = 0; i < storedItemIds.Count; i++)
         {
             PortableObject visual = CreateCargoVisual(storedItemIds[i]);
+            visual?.SetInstallationHealth(i < storedItemHealth.Count ? storedItemHealth[i] : 0f);
             itemVisuals.Add(visual);
             SettleCargoVisual(visual, i);
         }

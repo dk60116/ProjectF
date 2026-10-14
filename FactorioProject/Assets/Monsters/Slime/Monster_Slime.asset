@@ -1,0 +1,98 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: f3b3665a9c7749239a5c3eca0e44b733, type: 3}
+  m_Name: Monster_Slime
+  m_EditorClassIdentifier: 
+  id: 3
+  monsterName: Slime
+  commonStats:
+    MaxHealth: 100
+    MoveSpeed: 0.5
+    TurnSpeed: 180
+    AttackDamage: 10
+    AttackRange: 0.5
+    AttackInterval: 1.5
+    DetectionRange: 100
+    LeashRange: 12
+  animations:
+    idle: {fileID: 7400000, guid: e607f74860c67814e93c914b710142d5, type: 3}
+    move: {fileID: 7400002, guid: e607f74860c67814e93c914b710142d5, type: 3}
+    attack: {fileID: 7400004, guid: e607f74860c67814e93c914b710142d5, type: 3}
+    hit: {fileID: 0}
+    death: {fileID: 7400006, guid: e607f74860c67814e93c914b710142d5, type: 3}
+  commonDrops: []
+  variants:
+  - id: 0
+    variantName: Blue
+    prefab: {fileID: 1000013175867634, guid: 9aad9de7cbca6d84b82891c3a1e63e34, type: 3}
+    icon: {fileID: 21300000, guid: 14900616fa794653860ca28efe7a9d11, type: 3}
+    overrideMask: 0
+    stats:
+      MaxHealth: 100
+      MoveSpeed: 2
+      TurnSpeed: 180
+      AttackDamage: 10
+      AttackRange: 1.5
+      AttackInterval: 1
+      DetectionRange: 100
+      LeashRange: 12
+    overrideDrops: 0
+    drops: []
+  - id: 1
+    variantName: Green
+    prefab: {fileID: 1000012979649092, guid: 9c8e6b52a146b2d4994f42592a19bba0, type: 3}
+    icon: {fileID: 21300000, guid: 5d9b828d01b4448ca4c8cdce27706f35, type: 3}
+    overrideMask: 0
+    stats:
+      MaxHealth: 100
+      MoveSpeed: 2
+      TurnSpeed: 180
+      AttackDamage: 10
+      AttackRange: 1.5
+      AttackInterval: 1
+      DetectionRange: 100
+      LeashRange: 12
+    overrideDrops: 0
+    drops: []
+  - id: 2
+    variantName: Red
+    prefab: {fileID: 1000013297890758, guid: 1ce05a9bb8cf8c34890ad308705a8ca4, type: 3}
+    icon: {fileID: 21300000, guid: ac00a70e1a2b4215a0aa72eac18e38ae, type: 3}
+    overrideMask: 0
+    stats:
+      MaxHealth: 100
+      MoveSpeed: 2
+      TurnSpeed: 180
+      AttackDamage: 10
+      AttackRange: 1.5
+      AttackInterval: 1
+      DetectionRange: 100
+      LeashRange: 12
+    overrideDrops: 0
+    drops: []
+  - id: 3
+    variantName: Yellow
+    prefab: {fileID: 1000014251014320, guid: 529296adea5f8bb4581e098f98e62549, type: 3}
+    icon: {fileID: 21300000, guid: 2bc7edafd7c34c3493f3340428413886, type: 3}
+    overrideMask: 0
+    stats:
+      MaxHealth: 100
+      MoveSpeed: 2
+      TurnSpeed: 180
+      AttackDamage: 10
+      AttackRange: 1.5
+      AttackInterval: 1
+      DetectionRange: 100
+      LeashRange: 12
+    overrideDrops: 0
+    drops: []
+  nextVariantId: 4

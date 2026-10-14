@@ -20,9 +20,10 @@ public partial class BlockStateStore
         public readonly List<int> floorItems = new List<int>();
         public readonly List<int> centerItems = new List<int>();
         public readonly List<int> conveyorLaneItems = new List<int>();
+        public List<float> floorHealth, centerHealth, conveyorHealth;
         public bool hasConveyorStack;
 
-        public static SavedFloorAreaInventory FromSerialized(IReadOnlyList<int> itemIds)
+        public static SavedFloorAreaInventory FromSerialized(IReadOnlyList<int> itemIds, IReadOnlyList<PortableItemHealthSaveState> health)
         {
             SavedFloorAreaInventory inventory = new SavedFloorAreaInventory();
             if (itemIds == null)
@@ -50,6 +51,7 @@ public partial class BlockStateStore
                             if (stackItemId >= 0)
                             {
                                 inventory.floorItems.Add(stackItemId);
+                                AppendHealth(ref inventory.floorHealth, inventory.floorItems.Count - 1, PortableItemHealthMetadata.Read(health, i));
                             }
                         }
                     }
@@ -71,6 +73,7 @@ public partial class BlockStateStore
                         if (centerItemId >= 0)
                         {
                             inventory.centerItems.Add(centerItemId);
+                            AppendHealth(ref inventory.centerHealth, inventory.centerItems.Count - 1, PortableItemHealthMetadata.Read(health, i));
                         }
                     }
 
@@ -89,6 +92,7 @@ public partial class BlockStateStore
                     for (int laneIndex = 0; laneIndex < laneCount && i + 1 < itemIds.Count; laneIndex++)
                     {
                         inventory.conveyorLaneItems.Add(itemIds[++i]);
+                        AppendHealth(ref inventory.conveyorHealth, inventory.conveyorLaneItems.Count - 1, PortableItemHealthMetadata.Read(health, i));
                     }
 
                     continue;
@@ -97,21 +101,25 @@ public partial class BlockStateStore
                 if (itemId >= 0)
                 {
                     inventory.floorItems.Add(itemId);
+                    AppendHealth(ref inventory.floorHealth, inventory.floorItems.Count - 1, PortableItemHealthMetadata.Read(health, i));
                 }
             }
 
             return inventory;
         }
 
-        public List<int> ToSerialized()
+        public List<int> ToSerialized(out List<PortableItemHealthSaveState> health)
         {
+            health = null;
             List<int> itemIds = new List<int>(floorItems.Count + centerItems.Count + conveyorLaneItems.Count + 4);
+            WriteHealth(floorHealth, 0, ref health);
             itemIds.AddRange(floorItems);
 
             if (hasConveyorStack)
             {
                 itemIds.Add(Block.ConveyorStackStateSentinel);
                 itemIds.Add(conveyorLaneItems.Count);
+                WriteHealth(conveyorHealth, itemIds.Count, ref health);
                 itemIds.AddRange(conveyorLaneItems);
             }
 
@@ -119,10 +127,27 @@ public partial class BlockStateStore
             {
                 itemIds.Add(Block.InputAreaCenterStackStateSentinel);
                 itemIds.Add(centerItems.Count);
+                WriteHealth(centerHealth, itemIds.Count, ref health);
                 itemIds.AddRange(centerItems);
             }
 
             return itemIds;
+        }
+
+        internal static void AppendHealth(ref List<float> values, int precedingCount, float value)
+        {
+            if (values == null && value > 0f) values = new List<float>(new float[precedingCount]);
+            values?.Add(value);
+        }
+
+        private static void WriteHealth(List<float> values, int offset, ref List<PortableItemHealthSaveState> result)
+        {
+            for (int i = 0; values != null && i < values.Count; i++)
+                if (values[i] > 0f)
+                {
+                    result ??= new List<PortableItemHealthSaveState>();
+                    result.Add(new PortableItemHealthSaveState { index = offset + i, health = values[i] });
+                }
         }
     }
 
@@ -141,7 +166,11 @@ public partial class BlockStateStore
     }
 
     public bool TryTakeSavedFloorItem(Vector2Int worldCoordinate, Predicate<int> itemFilter, out int itemId)
+        => TryTakeSavedFloorItem(worldCoordinate, itemFilter, out itemId, out _);
+
+    public bool TryTakeSavedFloorItem(Vector2Int worldCoordinate, Predicate<int> itemFilter, out int itemId, out float installationHealth)
     {
+        installationHealth = 0f;
         itemId = -1;
         SavedFloorAreaInventory inventory = LoadSavedFloorAreaInventory(worldCoordinate);
         int itemIndex = FindSavedFloorItemIndex(inventory, itemFilter);
@@ -151,6 +180,8 @@ public partial class BlockStateStore
         }
 
         itemId = inventory.floorItems[itemIndex];
+        installationHealth = inventory.floorHealth != null ? inventory.floorHealth[itemIndex] : 0f;
+        inventory.floorHealth?.RemoveAt(itemIndex);
         inventory.floorItems.RemoveAt(itemIndex);
         SaveSavedFloorAreaInventory(worldCoordinate, inventory);
         NotifySavedFloorAreaStackChanged(worldCoordinate);
@@ -174,7 +205,7 @@ public partial class BlockStateStore
         Vector2Int worldCoordinate,
         int itemId,
         int count,
-        int capacity)
+        int capacity, float installationHealth = 0f)
     {
         if (count <= 0)
         {
@@ -190,6 +221,7 @@ public partial class BlockStateStore
         for (int i = 0; i < count; i++)
         {
             inventory.floorItems.Add(itemId);
+            SavedFloorAreaInventory.AppendHealth(ref inventory.floorHealth, inventory.floorItems.Count - 1, installationHealth);
         }
 
         SaveSavedFloorAreaInventory(worldCoordinate, inventory);
@@ -207,7 +239,11 @@ public partial class BlockStateStore
     }
 
     public bool TryTakeSavedCenterTopItem(Vector2Int worldCoordinate, Predicate<int> itemFilter, out int itemId)
+        => TryTakeSavedCenterTopItem(worldCoordinate, itemFilter, out itemId, out _);
+
+    public bool TryTakeSavedCenterTopItem(Vector2Int worldCoordinate, Predicate<int> itemFilter, out int itemId, out float installationHealth)
     {
+        installationHealth = 0f;
         itemId = -1;
         SavedFloorAreaInventory inventory = LoadSavedFloorAreaInventory(worldCoordinate);
         itemId = GetSavedCenterTopItemId(inventory);
@@ -218,7 +254,10 @@ public partial class BlockStateStore
             return false;
         }
 
-        inventory.centerItems.RemoveAt(inventory.centerItems.Count - 1);
+        int index = inventory.centerItems.Count - 1;
+        installationHealth = inventory.centerHealth != null ? inventory.centerHealth[index] : 0f;
+        inventory.centerHealth?.RemoveAt(index);
+        inventory.centerItems.RemoveAt(index);
         SaveSavedFloorAreaInventory(worldCoordinate, inventory);
         NotifySavedFloorAreaStackChanged(worldCoordinate);
         return true;
@@ -292,7 +331,7 @@ public partial class BlockStateStore
             && CanAddSavedCenterItems(LoadSavedFloorAreaInventory(worldCoordinate), itemId, count, Mathf.Min(capacity, maximum));
     }
 
-    public bool TryAddSavedCenterItems(Vector2Int worldCoordinate, int itemId, int count, int capacity)
+    public bool TryAddSavedCenterItems(Vector2Int worldCoordinate, int itemId, int count, int capacity, float installationHealth = 0f)
     {
         if (count <= 0)
         {
@@ -309,6 +348,7 @@ public partial class BlockStateStore
         for (int i = 0; i < count; i++)
         {
             inventory.centerItems.Add(itemId);
+            SavedFloorAreaInventory.AppendHealth(ref inventory.centerHealth, inventory.centerItems.Count - 1, installationHealth);
         }
 
         SaveSavedFloorAreaInventory(worldCoordinate, inventory);
@@ -333,6 +373,7 @@ public partial class BlockStateStore
             }
 
             inventory.centerItems.RemoveAt(i);
+            inventory.centerHealth?.RemoveAt(i);
             removed++;
         }
 
@@ -428,13 +469,14 @@ public partial class BlockStateStore
     private SavedFloorAreaInventory LoadSavedFloorAreaInventory(Vector2Int worldCoordinate)
     {
         return savedFloorObjectStates.TryGetValue(worldCoordinate, out FloorObjectSaveState savedState) && savedState != null
-            ? SavedFloorAreaInventory.FromSerialized(savedState.ToSerializedList())
+            ? SavedFloorAreaInventory.FromSerialized(savedState.ToSerializedList(), savedState.InstallationHealth)
             : new SavedFloorAreaInventory();
     }
 
     private void SaveSavedFloorAreaInventory(Vector2Int worldCoordinate, SavedFloorAreaInventory inventory)
     {
-        SetFloorObjects(worldCoordinate, inventory != null ? inventory.ToSerialized() : null);
+        if (inventory == null) SetFloorObjects(worldCoordinate, null);
+        else SetFloorObjects(worldCoordinate, inventory.ToSerialized(out var health), health);
     }
 
     private static void NotifySavedFloorAreaStackChanged(Vector2Int coordinate)

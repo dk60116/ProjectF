@@ -13,7 +13,7 @@ MonoBehaviour:
   m_Name: Item_68_Manual - Semiconductor
   m_EditorClassIdentifier: Assembly-CSharp::ItemDefinition
   itemName: Manual - Semiconductor
-  id: 95
+  id: 98
   mapObject: {fileID: 0}
   mapObjectArchetype: {fileID: 0}
   useMapColor: 0
@@ -33,6 +33,9 @@ MonoBehaviour:
   isManual: 1
   manualTargetItem: {fileID: 11400000, guid: 6a913ce143edf9c42b1a4c2b72cbdde8, type: 2}
   upgradeable: 1
+  maxHealth: 100
+  excludeFromMonsterTargets: 0
+  monsterAttackPriority: 1
   keepIoAreaItemsInPlaceWhileEditing: 0
   capacity: 10
   isFluid: 0

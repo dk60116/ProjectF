@@ -1,4 +1,5 @@
 using ProjectF.Power;
+using ProjectF.Monsters;
 using System.Collections.Generic;
 using TMPro;
 using UnityEngine;
@@ -51,6 +52,7 @@ public class ObjectInfoPanel : MonoBehaviour
         ResolveReferences();
         if (!MapObjectTargetExtensions.IsAliveTarget(target) || (!(target is IMapObjectTarget)
             && !(target is Animal)
+            && !(target is MonsterInstance)
             && !(target is PortableObject)
             && !(target is Block farmlandBlock && IsFarmlandBlock(farmlandBlock))))
         {
@@ -89,6 +91,8 @@ public class ObjectInfoPanel : MonoBehaviour
             ? ResolveUnderlyingResource(mapObject)
             : null;
         RefreshFocusedInfoPanels(boundTarget, underlyingResource);
+        // Monster HP is refreshed by ItemInfoDescription; the header stays unchanged.
+        if (boundTarget is MonsterInstance) return;
         if (boundTarget is RailHandcar || boundTarget is FreightCar || boundTarget is ProjectF.MapObjects.TreeInstance)
         {
             // Live values and gauges are updated by ItemInfoDescription itself.
@@ -154,6 +158,15 @@ public class ObjectInfoPanel : MonoBehaviour
 
     private void RefreshInfoLine(object target, ResourceInstance underlyingResource)
     {
+        if (target is MonsterInstance monster)
+        {
+            if (infoLine != null)
+            {
+                infoLine.gameObject.SetActive(true);
+                infoLine.ShowMonster(monster);
+            }
+            return;
+        }
         if (target is Animal animal)
         {
             ShowAnimalInfo(animal);
@@ -315,6 +328,18 @@ public class ObjectInfoPanel : MonoBehaviour
         if (selectionChanged)
         {
             ClearFocusedInfoPanels();
+        }
+
+        if (target is MonsterInstance monster)
+        {
+            if (selectionChanged)
+            {
+                SetFocusedInfoPanelVisible(0, true);
+                GetListItem(focusedObjectSlots, 0)?.SetCustomDisplay(monster.Icon, monster.DisplayName, string.Empty);
+            }
+            focusedPanelTarget = monster;
+            focusedPanelUnderlyingResource = null;
+            return;
         }
 
         if (target is Animal animal)

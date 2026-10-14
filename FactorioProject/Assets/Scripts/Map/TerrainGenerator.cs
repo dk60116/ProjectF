@@ -1200,6 +1200,8 @@ public partial class TerrainGenerator : MonoBehaviour,
 
         EnsureBeltSplitGroups();
 
+        UpdateMapObjectHealthPresentation();
+
         if (ShouldRefreshTrackedChunks())
         {
             using (RefreshChunksMarker.Auto())
@@ -1378,6 +1380,7 @@ public partial class TerrainGenerator : MonoBehaviour,
 
     private void OnDestroy()
     {
+        healthPresentation?.Dispose();
         resourceStateStore?.RailWorld.Clear();
         if (RobotArmWorld.Current?.Terrain == this) RobotArmWorld.Current.Dispose();
         if (MiningWorld.Current?.Terrain == this) MiningWorld.Current.Dispose();
@@ -2577,7 +2580,7 @@ public partial class TerrainGenerator : MonoBehaviour,
 
         if (TryGetLoadedConveyorItemFloorObjectFallback(coordinate, mapSaveData, out List<int> fallbackItemIds))
         {
-            block.ApplyFloorObjectState(fallbackItemIds);
+            block.ApplyFloorObjectState(fallbackItemIds, resourceStateStore?.GetFloorInstallationHealth(coordinate));
             int fallbackItemCount = block.GetRuntimeConveyorItemCount();
             if (fallbackItemCount > 0)
             {

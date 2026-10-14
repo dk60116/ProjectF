@@ -1,0 +1,98 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: f3b3665a9c7749239a5c3eca0e44b733, type: 3}
+  m_Name: Monster_Ghost
+  m_EditorClassIdentifier:
+  id: 1
+  monsterName: Ghost
+  commonStats:
+    MaxHealth: 100
+    MoveSpeed: 2
+    TurnSpeed: 180
+    AttackDamage: 10
+    AttackRange: 1.5
+    AttackInterval: 1
+    DetectionRange: 100
+    LeashRange: 12
+  animations:
+    idle: {fileID: 7400000, guid: fd4b310424927a840906404a14eeb5e4, type: 3}
+    move: {fileID: 7400002, guid: fd4b310424927a840906404a14eeb5e4, type: 3}
+    attack: {fileID: 7400004, guid: fd4b310424927a840906404a14eeb5e4, type: 3}
+    hit: {fileID: 7400006, guid: fd4b310424927a840906404a14eeb5e4, type: 3}
+    death: {fileID: 7400008, guid: fd4b310424927a840906404a14eeb5e4, type: 3}
+  commonDrops: []
+  variants:
+  - id: 0
+    variantName: Brown
+    prefab: {fileID: 1000011148102054, guid: 47228d4b7bdfaa94fbf70257eaa459a1, type: 3}
+    icon: {fileID: 0}
+    overrideMask: 0
+    stats:
+      MaxHealth: 100
+      MoveSpeed: 2
+      TurnSpeed: 180
+      AttackDamage: 10
+      AttackRange: 1.5
+      AttackInterval: 1
+      DetectionRange: 100
+      LeashRange: 12
+    overrideDrops: 0
+    drops: []
+  - id: 1
+    variantName: Green
+    prefab: {fileID: 1000010538092382, guid: e067a1df356d3e84bb3f15113b018f67, type: 3}
+    icon: {fileID: 0}
+    overrideMask: 0
+    stats:
+      MaxHealth: 100
+      MoveSpeed: 2
+      TurnSpeed: 180
+      AttackDamage: 10
+      AttackRange: 1.5
+      AttackInterval: 1
+      DetectionRange: 100
+      LeashRange: 12
+    overrideDrops: 0
+    drops: []
+  - id: 2
+    variantName: Violet
+    prefab: {fileID: 1000011296433714, guid: 30d420b7cf5d3ad40b5c02db6d73287a, type: 3}
+    icon: {fileID: 0}
+    overrideMask: 0
+    stats:
+      MaxHealth: 100
+      MoveSpeed: 2
+      TurnSpeed: 180
+      AttackDamage: 10
+      AttackRange: 1.5
+      AttackInterval: 1
+      DetectionRange: 100
+      LeashRange: 12
+    overrideDrops: 0
+    drops: []
+  - id: 3
+    variantName: White
+    prefab: {fileID: 1000011659465104, guid: e3e8e33af43da834294d5f9a02da77e7, type: 3}
+    icon: {fileID: 0}
+    overrideMask: 0
+    stats:
+      MaxHealth: 100
+      MoveSpeed: 2
+      TurnSpeed: 180
+      AttackDamage: 10
+      AttackRange: 1.5
+      AttackInterval: 1
+      DetectionRange: 100
+      LeashRange: 12
+    overrideDrops: 0
+    drops: []
+  nextVariantId: 4

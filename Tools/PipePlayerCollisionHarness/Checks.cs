@@ -2,6 +2,18 @@ using System;
 using System.Collections.Generic;
 using UnityEngine;
 
+// Monster collision has its own production-world/player-wrapper harness; this port isolates pipe regressions.
+namespace ProjectF.Monsters
+{
+    public sealed class MonsterWorld
+    {
+        public static MonsterWorld Current => null;
+        public bool TrySweepBody(Vector3 center, Vector3 direction, float distance, float radius, float minY, float maxY,
+            int mask, out float hitDistance, out Vector3 normal)
+        { hitDistance = distance; normal = default; return false; }
+    }
+}
+
 public partial class PipeRuntimeRecord
 {
     private readonly PlayerCollisionPart[] playerCollisionParts;

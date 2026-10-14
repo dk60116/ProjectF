@@ -13,7 +13,7 @@ MonoBehaviour:
   m_Name: Item_109_Pump
   m_EditorClassIdentifier: Assembly-CSharp::ItemDefinition
   itemName: Pump
-  id: 66
+  id: 69
   mapObject: {fileID: 6057075815099229333, guid: a19b4bc2ba75c494db5a48a4bbf18037, type: 3}
   mapObjectArchetype: {fileID: 11400000, guid: fed27f84b95338d49ad2d18c4adb58db, type: 2}
   useMapColor: 1
@@ -33,6 +33,9 @@ MonoBehaviour:
   isManual: 0
   manualTargetItem: {fileID: 0}
   upgradeable: 1
+  maxHealth: 100
+  excludeFromMonsterTargets: 0
+  monsterAttackPriority: 1
   keepIoAreaItemsInPlaceWhileEditing: 0
   capacity: 10
   isFluid: 0

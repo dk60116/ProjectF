@@ -1482,7 +1482,7 @@ public partial class TerrainGenerator : MonoBehaviour
         }
         if (installationObject is IPersistentInstallationItemCollectionStorage collectionStorage)
         {
-            collectionStorage.ApplyPersistentStoredItemIds(savedState.storedInstallationItemIds);
+            collectionStorage.ApplyPersistentStoredItemIds(savedState.storedInstallationItemIds, savedState.storedInstallationItemHealth);
         }
 
         if (installationObject is BoxObject boxObject)

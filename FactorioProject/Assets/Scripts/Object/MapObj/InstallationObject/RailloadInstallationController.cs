@@ -12,6 +12,8 @@ public sealed class RailloadInstallationController : MonoBehaviour
     private const float VisualBezierCrossAxisHandleFactor = 0.18f;
     private const float VisualBezierMinHandleLength = 0.35f;
     private const float VisualBezierEndpointLeadLength = 0.1f;
+    private const float MinimumRailCurveRadius = 0.5f;
+    private const float MinimumRailTurnCosine = 0.70710678f;
     private const float ConnectionAngleScoreEpsilon = 0.001f;
     private const float ConnectionSideScoreWeight = 2f;
     private const float ConnectionSideEpsilon = 0.05f;
@@ -650,22 +652,22 @@ public sealed class RailloadInstallationController : MonoBehaviour
         }
 
         float leadLength = Mathf.Min(VisualBezierEndpointLeadLength, distance * 0.1f);
-        bool singleConnected = startConnected != endConnected;
-        bool singleCorner = false;
-        if (singleConnected)
+        bool singleTurn = false;
+        if (!startConnected || !endConnected)
         {
-            Vector2 outwardDirection = startConnected ? startDirection : -endDirection;
-            Vector2 towardFreeEndpoint = startConnected ? delta : -delta;
+            bool fromStart = startConnected || (!endConnected
+                && Vector2.Dot(delta, startDirection) >= Vector2.Dot(delta, endDirection));
+            Vector2 outwardDirection = fromStart ? startDirection : -endDirection;
+            Vector2 towardFreeEndpoint = fromStart ? delta : -delta;
             Vector2 perpendicular = new Vector2(-outwardDirection.y, outwardDirection.x);
             float forward = Vector2.Dot(towardFreeEndpoint, outwardDirection);
             float lateral = Vector2.Dot(towardFreeEndpoint, perpendicular);
-            singleCorner = forward > leadLength && Mathf.Abs(lateral) > GridTraversalEpsilon;
-            // Only the connected end constrains heading. The free end follows
-            // a single corner instead of retaining the grid-route's S bend.
-            Vector2 freeDirection = singleCorner
-                ? perpendicular * Mathf.Sign(lateral)
+            singleTurn = forward > leadLength && Mathf.Abs(lateral) > GridTraversalEpsilon;
+            // A free terminal follows the arc, not the grid route's forced 90-degree heading.
+            Vector2 freeDirection = singleTurn
+                ? ResolveFreeEndpointDirection(towardFreeEndpoint, outwardDirection)
                 : outwardDirection;
-            if (startConnected) endDirection = freeDirection;
+            if (fromStart) endDirection = freeDirection;
             else startDirection = -freeDirection;
         }
 
@@ -680,8 +682,8 @@ public sealed class RailloadInstallationController : MonoBehaviour
 
         // The rendered/sampled polyline needs an exact terminal tangent too,
         // not just the analytic Bezier derivative between two sampled points.
-        Vector2 curveStart = startConnected || singleCorner ? start + startDirection * leadLength : start;
-        Vector2 curveEnd = endConnected || singleCorner ? end - endDirection * leadLength : end;
+        Vector2 curveStart = startConnected || singleTurn ? start + startDirection * leadLength : start;
+        Vector2 curveEnd = endConnected || singleTurn ? end - endDirection * leadLength : end;
         distance = (curveEnd - curveStart).magnitude;
         ResolveBezierControls(curveStart, curveEnd, startDirection, endDirection,
             startConnected, endConnected, out Vector2 controlA, out Vector2 controlB);
@@ -695,44 +697,68 @@ public sealed class RailloadInstallationController : MonoBehaviour
         AddVisualPathPoint(visualPathPoints, end);
     }
 
+    private static Vector2 ResolveFreeEndpointDirection(Vector2 towardFree, Vector2 outward)
+    {
+        float forward = Vector2.Dot(towardFree, outward);
+        Vector2 perpendicular = new Vector2(-outward.y, outward.x);
+        float lateral = Vector2.Dot(towardFree, perpendicular);
+        if (Mathf.Abs(lateral) >= forward)
+            return perpendicular * Mathf.Sign(lateral);
+
+        // Reflect the entry tangent about the chord: a single circular arc's exit tangent.
+        Vector2 chord = towardFree.normalized;
+        return (2f * Vector2.Dot(chord, outward) * chord - outward).normalized;
+    }
+
     private static void ResolveBezierControls(Vector2 start, Vector2 end, Vector2 startDirection,
         Vector2 endDirection, bool startConnected, bool endConnected, out Vector2 controlA, out Vector2 controlB)
     {
         Vector2 delta = end - start;
         float distance = delta.magnitude;
-        if (startConnected == endConnected)
+        if (startConnected && endConnected)
         {
             controlA = start + startDirection * ResolveBezierHandleLength(delta, startDirection, distance);
             controlB = end - endDirection * ResolveBezierHandleLength(delta, endDirection, distance);
             return;
         }
 
-        // Build from the constrained end so reversed placement has identical
-        // geometry. Forward/lateral handle bounds keep a corner from inflecting.
-        Vector2 anchor = startConnected ? start : end;
-        Vector2 freeEndpoint = startConnected ? end : start;
-        Vector2 outward = startConnected ? startDirection : -endDirection;
+        // With no connections, use the longer grid leg as the entry axis.
+        // Building from that axis also preserves reverse-placement geometry.
+        bool fromStart = startConnected || (!endConnected
+            && Vector2.Dot(delta, startDirection) >= Vector2.Dot(delta, endDirection));
+        Vector2 anchor = fromStart ? start : end;
+        Vector2 freeEndpoint = fromStart ? end : start;
+        Vector2 outward = fromStart ? startDirection : -endDirection;
+        Vector2 outgoing = fromStart ? endDirection : -startDirection;
         Vector2 towardFree = freeEndpoint - anchor;
         Vector2 perpendicular = new Vector2(-outward.y, outward.x);
         float forward = Vector2.Dot(towardFree, outward);
         float lateral = Vector2.Dot(towardFree, perpendicular);
-        float handle = ResolveBezierHandleLength(towardFree, outward, distance);
         Vector2 connectedControl;
         Vector2 freeControl;
         if (forward > GridTraversalEpsilon && Mathf.Abs(lateral) > GridTraversalEpsilon)
         {
-            Vector2 outgoing = perpendicular * Mathf.Sign(lateral);
-            connectedControl = anchor + outward * Mathf.Min(handle, forward);
-            freeControl = freeEndpoint - outgoing * Mathf.Min(
-                ResolveBezierHandleLength(towardFree, outgoing, distance), Mathf.Abs(lateral));
+            if (Vector2.Dot(outward, outgoing) > GridTraversalEpsilon)
+            {
+                float arcHandle = (2f / 3f) * distance * distance / (distance + forward);
+                connectedControl = anchor + outward * arcHandle;
+                freeControl = freeEndpoint - outgoing * arcHandle;
+            }
+            else
+            {
+                connectedControl = anchor + outward * Mathf.Min(
+                    ResolveBezierHandleLength(towardFree, outward, distance), forward);
+                freeControl = freeEndpoint - outgoing * Mathf.Min(
+                    ResolveBezierHandleLength(towardFree, outgoing, distance), Mathf.Abs(lateral));
+            }
         }
         else
         {
-            connectedControl = anchor + outward * handle;
+            connectedControl = anchor + outward * ResolveBezierHandleLength(towardFree, outward, distance);
             freeControl = (connectedControl + freeEndpoint) * 0.5f;
         }
-        controlA = startConnected ? connectedControl : freeControl;
-        controlB = startConnected ? freeControl : connectedControl;
+        controlA = fromStart ? connectedControl : freeControl;
+        controlB = fromStart ? freeControl : connectedControl;
     }
 
     private static float ResolveBezierHandleLength(Vector2 delta, Vector2 direction, float distance)
@@ -1133,6 +1159,35 @@ public sealed class RailloadInstallationController : MonoBehaviour
         return first.x * second.y - first.y * second.x;
     }
 
+    private static bool IsBuildableRailCurve(IReadOnlyList<Vector2> points)
+    {
+        if (points == null || points.Count < 2) return false;
+        double radiusSquared = MinimumRailCurveRadius * MinimumRailCurveRadius;
+        double turnCosineSquared = MinimumRailTurnCosine * MinimumRailTurnCosine;
+        for (int i = 0; i < points.Count; i++)
+        {
+            Vector2 point = points[i];
+            if (float.IsNaN(point.x) || float.IsInfinity(point.x)
+                || float.IsNaN(point.y) || float.IsInfinity(point.y)) return false;
+            if (i == 0) continue;
+            Vector2 outgoing = point - points[i - 1];
+            double outgoingLengthSquared = outgoing.sqrMagnitude;
+            if (outgoingLengthSquared <= 1e-8) return false;
+            if (i == 1) continue;
+            Vector2 incoming = points[i - 1] - points[i - 2];
+            double incomingLengthSquared = incoming.sqrMagnitude;
+            double dot = (double)incoming.x * outgoing.x + (double)incoming.y * outgoing.y;
+            double lengthsProduct = incomingLengthSquared * outgoingLengthSquared;
+            if (dot <= 0 || dot * dot < turnCosineSquared * lengthsProduct) return false;
+
+            // Circumradius of three samples, squared to avoid per-sample sqrt/acos.
+            double cross = (double)incoming.x * outgoing.y - (double)incoming.y * outgoing.x;
+            double chordLengthSquared = (point - points[i - 2]).sqrMagnitude;
+            if (lengthsProduct * chordLengthSquared < 4 * radiusSquared * cross * cross) return false;
+        }
+        return true;
+    }
+
     private void ValidatePlan(RailPathPlan plan)
     {
         if (plan != null)
@@ -1142,7 +1197,8 @@ public sealed class RailloadInstallationController : MonoBehaviour
             plan.requiredItemCount = 0;
         }
 
-        if (plan == null || !Railload.IsValidRailPath(plan.pathCoordinates))
+        if (plan == null || !IsBuildableRailCurve(plan.visualPathPoints)
+            || !Railload.IsValidRailPath(plan.pathCoordinates))
         {
             return;
         }

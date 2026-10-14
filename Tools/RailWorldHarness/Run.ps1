@@ -35,7 +35,7 @@ foreach ($icon in @(@('Boarding', $boardingGuid), @('Alighting', $alightingGuid)
 }
 Write-Output 'PASS prefab-bound rail handcar Boarding/Alighting sprite references (asset contract)'
 $rail = [IO.File]::ReadAllText((Join-Path $repo "$root/Object/MapObj/InstallationObject/Railload.cs"))
-$generated = "using System.Collections.Generic; using UnityEngine; public partial class Railload {`n"
+$generated = "using System; using System.Collections.Generic; using UnityEngine; using ProjectF.MapObjects; using ProjectF.Railway; public partial class Railload {`n"
 foreach ($constant in @('CurveSegmentCount', 'CurveRadius', 'CenterPathSmoothingIterations', 'RailEndpointCellHalfExtent')) {
     $generated += [regex]::Match($rail, "private const (int|float) $constant = [^;]+;").Value + "`n"
 }
@@ -65,6 +65,19 @@ $geometryStart = $railPlacement.IndexOf('    private RailPathPlan BuildPlan(', [
 $geometryEnd = $railPlacement.IndexOf('    private void ValidatePlan(', $geometryStart, [StringComparison]::Ordinal)
 if ($geometryStart -lt 0 -or $geometryEnd -le $geometryStart) { throw 'Missing rail placement geometry boundary' }
 $generated += $railPlacement.Substring($geometryStart, $geometryEnd - $geometryStart) + "`n}`n"
+$generated += "public partial class RailloadInstallationController {`n" + (Read-Member $railPlacement 'public bool CommitCurrentPreview(') + "`n}`n"
+$railwayRegistration = [IO.File]::ReadAllText((Join-Path $repo "$root/Simulation/Railway/TerrainGenerator.Railway.cs"))
+$generated += "public sealed partial class TerrainGenerator {`n" + (Read-Member $railwayRegistration 'internal bool RegisterDataOnlyRailwayState(') + "`n}`n"
+$stateStore = [IO.File]::ReadAllText((Join-Path $repo "$root/Map/BlockStateStore.cs"))
+$generated += "public partial class BlockStateStore {`n"
+foreach ($signature in @('private static Vector2Int GetNaturalInstallationStorageKey(',
+    'private static bool ShouldUseOccupiedCoordinateStorageKey(', 'private static Vector2Int FindPreferredOccupiedStorageCoordinate(',
+    'private static Vector2Int ResolveInstallationStorageKey(', 'private static Vector2Int CreateSyntheticInstallationStorageKey(',
+    'private static bool InstallationStatesCanShareStorageKey(', 'private static bool InstallationStatesRepresentSamePlacement(',
+    'internal bool TryGetInstallationStorageKey(')) {
+    $generated += (Read-Member $stateStore $signature) + "`n"
+}
+$generated += "}`n"
 [string]$installation = [IO.File]::ReadAllText((Join-Path $repo "$root/Object/MapObj/InstallationObject/InstallationObject.cs"))
 $generated += (Read-Member $installation 'public enum InstallationMapFilter') + "`n"
 $placement = [IO.File]::ReadAllText((Join-Path $repo "$root/Object/MapObj/InstallationObject/InstallationPlacementController.cs"))
@@ -107,6 +120,7 @@ Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'RuntimeChecks.cs') -Destination
 Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'DebugRendererChecks.cs') -Destination $probe
 Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'RailPlacementChecks.cs') -Destination $probe
 Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'RailCurveChecks.cs') -Destination $probe
+Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'RailCommitChecks.cs') -Destination $probe
 [IO.File]::WriteAllText((Join-Path $probe 'Probe.csproj'), '<Project Sdk="Microsoft.NET.Sdk"><PropertyGroup><OutputType>Exe</OutputType><TargetFramework>net9.0</TargetFramework><LangVersion>9.0</LangVersion></PropertyGroup><ItemGroup><Reference Include="UnityEngine.CoreModule"><HintPath>C:/Program Files/Unity/Hub/Editor/6000.4.0f1/Editor/Data/Managed/UnityEngine/UnityEngine.CoreModule.dll</HintPath></Reference></ItemGroup></Project>')
 dotnet run --configuration Release --project (Join-Path $probe 'Probe.csproj')
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
@@ -125,6 +139,17 @@ foreach ($file in @('Map/TerrainGenerator.TrainStations.cs', 'Object/MapObj/Inst
 Write-Output 'PASS rail/station consumers use the world registry (source contract)'
 $placementSource = [IO.File]::ReadAllText((Join-Path $repo "$root/Object/MapObj/InstallationObject/RailloadInstallationController.cs"))
 $commit = Read-Member $placementSource 'public bool CommitCurrentPreview('
+$validatePlan = Read-Member $placementSource 'private void ValidatePlan('
+$geometryCheck = $validatePlan.IndexOf('!IsBuildableRailCurve(plan.visualPathPoints)', [StringComparison]::Ordinal)
+if ($geometryCheck -lt 0 -or $geometryCheck -gt $validatePlan.IndexOf('plan.requiredItemCount = Railload.ResolveRequiredItemCount(', [StringComparison]::Ordinal) -or
+    !$commit.Contains('!currentPlan.isValid')) {
+    throw 'Invalid rail curvature must fail placement before item charging; commit must require a valid plan.'
+}
+$preview = Read-Member $placementSource 'private void RefreshPreviewMesh('
+if (!$preview.Contains('plan.isValid ? ValidRailColor : InvalidRailColor')) {
+    throw 'Invalid rail geometry must use the existing invalid-preview color.'
+}
+Write-Output 'PASS radius/turn limits gate rail installation before item charging and mark invalid previews'
 if ($commit.Contains('CreateInstallationObject(') -or !$commit.Contains('RegisterDataOnlyRailwayState(')) {
     throw 'Rail placement must register data directly without instantiating an installed rail.'
 }

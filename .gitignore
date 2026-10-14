@@ -48,3 +48,7 @@ Thumbs.db
 
 Build_PC/
 Build_PC_MemoryProfile/
+
+# Monster authoring harness
+!Tools/MonsterDataHarness/MonsterDataHarness.csproj
+Tools/MonsterDataHarness/bin/

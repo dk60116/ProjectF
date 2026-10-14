@@ -204,7 +204,7 @@ MonoBehaviour:
     mapSizeY: 1
     centerCellX: 0
     centerCellY: 0
-  multiFocusMode: 2
+  multiFocusMode: 1
   itemFilterMaskInitialized: 0
   itemFilterMaskWords: 
   animator: {fileID: 0}

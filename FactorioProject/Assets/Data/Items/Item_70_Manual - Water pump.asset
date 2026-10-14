@@ -13,7 +13,7 @@ MonoBehaviour:
   m_Name: Item_70_Manual - Water pump
   m_EditorClassIdentifier: Assembly-CSharp::ItemDefinition
   itemName: Manual - Water pump
-  id: 91
+  id: 94
   mapObject: {fileID: 0}
   mapObjectArchetype: {fileID: 0}
   useMapColor: 0
@@ -33,6 +33,9 @@ MonoBehaviour:
   isManual: 1
   manualTargetItem: {fileID: 11400000, guid: 347029aa316390a4982b64441c83789c, type: 2}
   upgradeable: 1
+  maxHealth: 100
+  excludeFromMonsterTargets: 0
+  monsterAttackPriority: 1
   keepIoAreaItemsInPlaceWhileEditing: 0
   capacity: 10
   isFluid: 0

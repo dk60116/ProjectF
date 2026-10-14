@@ -91,6 +91,15 @@ public class ItemDefinition : ScriptableObject
     public ItemDefinition manualTargetItem;
     [Tooltip("부모 I/O 모듈이 설치되어 있을 때 이 아이템으로 업그레이드할 수 있는지 여부입니다.")]
     public bool upgradeable = true;
+    [Header("Map Object Health")]
+    [Min(1f)] public float maxHealth = 100f;
+    [Tooltip("Exclude completely, including attacks against path-blocking structures.")]
+    public bool excludeFromMonsterTargets;
+    [Range(0, 3), Tooltip("0: attack only when blocking a movement path or forcing a detour. 1: ignore while priority-three targets remain unless blocking movement; otherwise clear after priority two. 2: always attack when encountered within 5 units of the footprint; otherwise pursue if no priority-three destination exists. 3: persistent raid destination, resumed after clearing encountered structures. Return only after no eligible targets remain within detection range.")]
+    public int monsterAttackPriority = 1;
+    public int MonsterAttackPriority => Mathf.Clamp(monsterAttackPriority, 0, 3);
+    public float MaximumHealth => float.IsNaN(maxHealth) || float.IsInfinity(maxHealth)
+        ? 100f : Mathf.Max(1f, maxHealth);
     [Header("Map Editing")]
     [Tooltip("편집 모드에서 설치물을 옮길 때 Input/Output 영역에 놓인 아이템을 제자리에 유지합니다.")]
     public bool keepIoAreaItemsInPlaceWhileEditing;

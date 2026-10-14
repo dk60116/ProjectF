@@ -29,13 +29,13 @@ namespace ProjectF.Conveyors
             foreach (BeltSavedLane lane in snapshot.Lanes) WriteLane(writer, lane);
         }
 
-        public static BeltSimulationSnapshot Read(BinaryReader reader)
+        public static BeltSimulationSnapshot Read(BinaryReader reader, bool hasInstallationHealth = true)
         {
             if (!reader.ReadBoolean()) return null;
             var snapshot = new BeltSimulationSnapshot { Tick = reader.ReadInt64() };
             int count = reader.ReadInt32();
             if (snapshot.Tick < 0 || count < 0 || count > 4000000) throw new InvalidDataException("Invalid belt snapshot size or tick.");
-            for (int i = 0; i < count; i++) snapshot.Lanes.Add(ReadLane(reader));
+            for (int i = 0; i < count; i++) snapshot.Lanes.Add(ReadLane(reader, hasInstallationHealth));
             return snapshot;
         }
 
@@ -51,9 +51,10 @@ namespace ProjectF.Conveyors
             writer.Write(state.Remaining); writer.Write(state.Duration);
             writer.Write(state.StartX); writer.Write(state.StartY); writer.Write(state.StartZ);
             writer.Write(state.DropX); writer.Write(state.DropY); writer.Write(state.DropZ); writer.Write(state.ExitRadius);
+            writer.Write(state.InstallationHealth);
         }
 
-        public static BeltSavedLane ReadLane(BinaryReader reader)
+        public static BeltSavedLane ReadLane(BinaryReader reader, bool hasInstallationHealth = true)
         {
             if (!reader.ReadBoolean()) return null;
             var lane = new BeltSavedLane
@@ -69,6 +70,7 @@ namespace ProjectF.Conveyors
                 StartX = reader.ReadSingle(), StartY = reader.ReadSingle(), StartZ = reader.ReadSingle(),
                 DropX = reader.ReadSingle(), DropY = reader.ReadSingle(), DropZ = reader.ReadSingle(), ExitRadius = reader.ReadSingle()
             };
+            if (hasInstallationHealth) lane.State.InstallationHealth = reader.ReadSingle();
             if (lane.Lane < 0 || lane.Lane >= 4 || lane.State.ItemId < -1 || lane.State.Remaining < 0 || lane.State.Duration < 0)
                 throw new InvalidDataException("Invalid belt lane checkpoint.");
             return lane;

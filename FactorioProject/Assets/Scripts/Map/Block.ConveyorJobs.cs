@@ -100,6 +100,8 @@ public partial class Block
                 if (motion.hasViaWorldPosition) state.GateBits |= 64;
             }
             PortableObject portable = GetConveyorPortableObjectAtLane(lane);
+            state.InstallationHealth = portable != null ? portable.InstallationHealth
+                : conveyorInstallationHealth != null && conveyorInstallationHealth.TryGetValue(lane, out float health) ? health : 0f;
             if (portable != null) start = portable.WorldPosition;
             state.StartX = start.x; state.StartY = start.y; state.StartZ = start.z;
         }
@@ -135,6 +137,7 @@ public partial class Block
             ReleaseFloorObject(portable);
         }
         conveyorItemIds[lane] = -1;
+        conveyorInstallationHealth?.Remove(lane);
         conveyorItemMotionStates[lane] = default;
         conveyorItemMoveFrames[lane] = -1;
         conveyorItemMovementHoldUntilTimes[lane] = 0f;

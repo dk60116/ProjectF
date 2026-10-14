@@ -13,7 +13,7 @@ MonoBehaviour:
   m_Name: Item_58_Railload
   m_EditorClassIdentifier: Assembly-CSharp::ItemDefinition
   itemName: Railload
-  id: 119
+  id: 122
   mapObject: {fileID: 8251220719155574395, guid: 0dc98386c96b46b4a952a73e308a908f, type: 3}
   mapObjectArchetype: {fileID: 11400000, guid: 96598a7a0f423dc46a63d6debeb0878d, type: 2}
   useMapColor: 1
@@ -33,6 +33,9 @@ MonoBehaviour:
   isManual: 0
   manualTargetItem: {fileID: 0}
   upgradeable: 1
+  maxHealth: 100
+  excludeFromMonsterTargets: 0
+  monsterAttackPriority: 1
   keepIoAreaItemsInPlaceWhileEditing: 0
   capacity: 10
   isFluid: 0

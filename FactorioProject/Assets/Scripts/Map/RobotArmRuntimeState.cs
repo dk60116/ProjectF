@@ -3,6 +3,7 @@ using RobotArmState = RobotArm.RobotArmState;
 internal struct RobotArmRuntimeState
 {
     internal int heldItemId;
+    internal float heldInstallationHealth;
     internal float pickupTimer;
     internal float dropRetryTimer;
     internal float actionTurnTimer;

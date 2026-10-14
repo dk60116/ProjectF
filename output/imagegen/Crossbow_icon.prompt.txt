@@ -1,0 +1,11 @@
+Tool: built-in image_gen (transparent_background: true)
+
+Final prompt:
+Use case: stylized-concept
+Asset type: single inventory item icon for an isometric crafting/survival game.
+Primary request: Draw one clearly recognizable medieval crossbow, isolated on a genuinely transparent background.
+Subject: solid wooden stock, sturdy curved steel bow mounted perpendicular to the stock at its front, a taut bowstring attached to the two bow tips and drawn back to the center latch, one short bolt resting straight along the top groove, small metal trigger underneath, simple practical construction.
+Style: polished hand-painted game item illustration, chunky readable shapes, thick clean dark outline, crisp edges, restrained surface detail, warm wood and cool silver-gray steel, bright readable midtones and subtle highlights. Not photorealistic, not pixel art.
+Composition: square canvas, elevated three-quarter isometric view, crossbow diagonal from lower-left wooden butt to upper-right bolt tip, entire item visible, centered, fills about 85 percent of the canvas with clear safe margins. The bow spans across the front of the stock and must read unmistakably as a crossbow rather than a handheld bow or gun.
+Constraints: one crossbow only, transparent alpha background, no frame, no badge, no text, no lettering, no hands, no characters, no ground plane, no cast shadow outside the item, no decorative glow, no watermark.
+

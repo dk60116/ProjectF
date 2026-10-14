@@ -28,6 +28,8 @@ public class Resource : MapObject
     [Serializable]
     public struct ResourceSaveState
     {
+        public bool hasHealth;
+        public float currentHealth;
         public int resourceCount;
         public int maxGauge;
         public int currentGauge;
@@ -71,6 +73,7 @@ public class Resource : MapObject
 
 
     public ResourceDefinition Definition => definition;
+    public float MaximumHealth => BoundItemDefinition != null ? BoundItemDefinition.MaximumHealth : 100f;
     public ResourceDefinition.PlacementCategory PlacementCategory => definition != null
         ? definition.placementCategory : ResourceDefinition.PlacementCategory.Ore;
     public HarvestMode ResolvedHarvestMode
@@ -102,7 +105,8 @@ public class Resource : MapObject
     {
         int count = resourceStatus.resourceCount > 0 ? resourceStatus.resourceCount : definition != null ? definition.defaultResourceCount : 1;
         int gauge = resourceStatus.maxGauge > 0 ? resourceStatus.maxGauge : definition != null ? definition.defaultMaxGauge : 10;
-        return new ResourceSaveState { resourceCount = Mathf.Max(1, count), initialResourceCount = Mathf.Max(1, count),
+        return new ResourceSaveState { hasHealth = true, currentHealth = MaximumHealth,
+            resourceCount = Mathf.Max(1, count), initialResourceCount = Mathf.Max(1, count),
             maxGauge = Mathf.Max(1, gauge), currentGauge = resourceStatus.currentGague > 0 ? Mathf.Min(resourceStatus.currentGague, Mathf.Max(1,gauge)) : Mathf.Max(1,gauge) };
     }
 }

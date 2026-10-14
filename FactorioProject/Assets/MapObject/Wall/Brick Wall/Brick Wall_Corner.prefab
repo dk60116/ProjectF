@@ -202,7 +202,7 @@ MonoBehaviour:
   mapStatus:
     mapSizeX: 1
     mapSizeY: 1
-  multiFocusMode: 2
+  multiFocusMode: 1
   itemFilterMaskInitialized: 0
   itemFilterMaskWords: 
   animator: {fileID: 0}

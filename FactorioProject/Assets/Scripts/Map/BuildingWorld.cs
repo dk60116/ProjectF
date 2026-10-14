@@ -338,9 +338,9 @@ public sealed class BuildingWorld : IDisposable
     private const float BatchCellSize = 16f;
     private static readonly int[] BoxTriangles =
     {
-        0, 2, 1, 0, 3, 2, 4, 5, 6, 4, 6, 7,
-        0, 1, 5, 0, 5, 4, 1, 2, 6, 1, 6, 5,
-        2, 3, 7, 2, 7, 6, 3, 0, 4, 3, 4, 7
+        0, 1, 2, 0, 2, 3, 4, 6, 5, 4, 7, 6,
+        0, 5, 1, 0, 4, 5, 1, 6, 2, 1, 5, 6,
+        2, 7, 3, 2, 6, 7, 3, 4, 0, 3, 7, 4
     };
 
     public static BuildingWorld Current { get; private set; }
@@ -391,7 +391,11 @@ public sealed class BuildingWorld : IDisposable
     public void AttachView()
     {
         if (disposed) throw new ObjectDisposedException(nameof(BuildingWorld));
-        if (view == null) view = BuildingWorldView.Create(this, Owner.transform, HostName);
+        if (view == null)
+        {
+            view = BuildingWorldView.Create(this, Owner.transform, HostName);
+            collisionDirty = true;
+        }
     }
 
     internal void OnViewDestroyed(BuildingWorldView previous)
@@ -517,6 +521,7 @@ public sealed class BuildingWorld : IDisposable
     {
         if (!Contains(record) || record.PlacementPresentationSuppressed == suppressed) return;
         record.PlacementPresentationSuppressed = suppressed;
+        collisionDirty = true;
         RefreshRecordBatches(record);
     }
 
@@ -807,6 +812,13 @@ public sealed class BuildingWorld : IDisposable
         vertices.Add(matrix.MultiplyPoint3x4(center + new Vector3( half.x,  half.y, -half.z)));
         vertices.Add(matrix.MultiplyPoint3x4(center + new Vector3( half.x,  half.y,  half.z)));
         vertices.Add(matrix.MultiplyPoint3x4(center + new Vector3(-half.x,  half.y,  half.z)));
-        for (int i = 0; i < BoxTriangles.Length; i++) triangles.Add(start + BoxTriangles[i]);
+        // Reflections reverse winding; collision faces must still point outward.
+        bool mirrored = matrix.determinant < 0f;
+        for (int i = 0; i < BoxTriangles.Length; i += 3)
+        {
+            triangles.Add(start + BoxTriangles[i]);
+            triangles.Add(start + BoxTriangles[i + (mirrored ? 2 : 1)]);
+            triangles.Add(start + BoxTriangles[i + (mirrored ? 1 : 2)]);
+        }
     }
 }

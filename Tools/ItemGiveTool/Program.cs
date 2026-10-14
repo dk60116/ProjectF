@@ -74,6 +74,7 @@ internal sealed class EditorToolForm : Form
     private readonly CheckBox freeTrainCheckBox = new CheckBox();
     private readonly CheckBox freeElectroEnergyCheckBox = new CheckBox();
     private readonly CheckBox freeBucketCheckBox = new CheckBox();
+    private readonly CheckBox cloakingModeCheckBox = new CheckBox();
     private readonly CheckBox showAnimalHerdAreasCheckBox = new CheckBox();
     private readonly CheckBox animalAIPausedCheckBox = new CheckBox();
     private readonly NumericUpDown cameraMinSizeInput = new NumericUpDown();
@@ -636,6 +637,13 @@ internal sealed class EditorToolForm : Form
                 freeBucketCheckBox.Checked,
                 "Free Bucket");
 
+        StyleDebugCheckBox(cloakingModeCheckBox, "Cloaking Mode");
+        cloakingModeCheckBox.CheckedChanged += async (_, _) =>
+            await SendDebugToggleAsync(
+                "cloakingMode",
+                cloakingModeCheckBox.Checked,
+                "Cloaking Mode");
+
         StyleDebugCheckBox(showAnimalHerdAreasCheckBox, "Show Animal Herd Area");
         showAnimalHerdAreasCheckBox.CheckedChanged += async (_, _) =>
             await SendDebugToggleAsync(
@@ -664,6 +672,7 @@ internal sealed class EditorToolForm : Form
         debugTogglePanel.Controls.Add(freeTrainCheckBox);
         debugTogglePanel.Controls.Add(freeElectroEnergyCheckBox);
         debugTogglePanel.Controls.Add(freeBucketCheckBox);
+        debugTogglePanel.Controls.Add(cloakingModeCheckBox);
         debugTogglePanel.Controls.Add(showAnimalHerdAreasCheckBox);
         debugTogglePanel.Controls.Add(animalAIPausedCheckBox);
         layout.Controls.Add(debugTogglePanel, 0, 6);
@@ -1588,6 +1597,11 @@ internal sealed class EditorToolForm : Form
             ApplyRuntimeCheckBoxState(freeBucketCheckBox, freeBucket);
         }
 
+        if (TryReadProtocolBool(response, "cloakingMode", out bool cloakingMode))
+        {
+            ApplyRuntimeCheckBoxState(cloakingModeCheckBox, cloakingMode);
+        }
+
         if (TryReadProtocolBool(response, "showAnimalHerdAreas", out bool showAnimalHerdAreas))
         {
             ApplyRuntimeCheckBoxState(showAnimalHerdAreasCheckBox, showAnimalHerdAreas);
@@ -2026,6 +2040,7 @@ internal sealed class EditorToolForm : Form
         freeTrainCheckBox.Enabled = !busy;
         freeElectroEnergyCheckBox.Enabled = !busy;
         freeBucketCheckBox.Enabled = !busy;
+        cloakingModeCheckBox.Enabled = !busy;
         showAnimalHerdAreasCheckBox.Enabled = !busy;
         animalAIPausedCheckBox.Enabled = !busy;
         cameraMinSizeInput.Enabled = !busy;

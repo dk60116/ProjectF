@@ -22,6 +22,7 @@ public class RobotArm : InputOutputModule
     public sealed class TransferState
     {
         public int heldItemId = -1;
+        public float heldInstallationHealth;
         public RobotArmState state = RobotArmState.WaitingForPickup;
         public float pickupTimer;
         public float dropRetryTimer;
@@ -34,6 +35,7 @@ public class RobotArm : InputOutputModule
             return new TransferState
             {
                 heldItemId = heldItemId,
+                heldInstallationHealth = heldInstallationHealth,
                 state = state,
                 pickupTimer = pickupTimer,
                 dropRetryTimer = dropRetryTimer,
@@ -78,6 +80,7 @@ public class RobotArm : InputOutputModule
     public float ActionTurnDelaySeconds => Mathf.Max(0f, actionTurnDelay);
     public bool HasHeldItem => previewTransferState != null && previewTransferState.heldItemId >= 0;
     public int HeldItemId => previewTransferState != null ? previewTransferState.heldItemId : -1;
+    public float HeldInstallationHealth => previewTransferState?.heldInstallationHealth ?? 0f;
     public Vector3 HeldItemWorldPosition => RuntimeHandTemplate != null ? RuntimeHandTemplate.position : transform.position;
     public void SetEditorSettings(
         float pickupIntervalSeconds,

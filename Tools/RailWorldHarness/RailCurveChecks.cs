@@ -14,6 +14,8 @@ public partial class RailloadInstallationController
         occupied = plan.occupiedCoordinates;
         return plan.visualPathPoints;
     }
+
+    public static bool TestBuildableCurve(IReadOnlyList<Vector2> points) => IsBuildableRailCurve(points);
 }
 
 static class RailCurveChecks
@@ -60,7 +62,160 @@ static class RailCurveChecks
         CheckBothEnds(controller);
         CheckCurvedSource(controller);
         CheckSingleTurn(controller);
+        CheckShallowExtensions(controller);
+        CheckCompactCorners(controller);
+        CheckCurveLimits(controller);
         Console.WriteLine($"PASS smooth rail placement: {checks} checks");
+    }
+
+    static void CheckCompactCorners(RailloadInstallationController controller)
+    {
+        foreach (Vector2Int axis in new[] { Vector2Int.right, Vector2Int.up, Vector2Int.left, Vector2Int.down })
+        foreach (int sideSign in new[] { -1, 1 })
+        foreach (bool authoredReverse in new[] { false, true })
+        foreach (bool placingReverse in new[] { false, true })
+        foreach (bool horizontalFirst in new[] { false, true })
+        foreach (int sourceMode in new[] { 0, 1, 2 })
+        foreach (int span in new[] { 2, 3 })
+        {
+            TerrainGenerator.Active = new TerrainGenerator();
+            if (sourceMode != 0)
+                AddRail(authoredReverse, true, axis * -8, Vector2Int.zero, sourceMode == 2);
+            var side = new Vector2Int(-axis.y, axis.x) * sideSign;
+            var far = (axis + side) * span;
+            var path = controller.BuildTestPath(placingReverse ? far : Vector2Int.zero,
+                placingReverse ? Vector2Int.zero : far, horizontalFirst, out _, out _, out var occupied);
+            Check(RailloadInstallationController.TestBuildableCurve(path),
+                $"Compact rounded corners must be buildable: span={span}, source={sourceMode}, reverse={placingReverse}");
+            Check(occupied.Count > 0, "Compact corners retain their occupied-cell footprint");
+            var storedPath = new RailPathData();
+            storedPath.Configure(path, occupied, occupied[0], false, false);
+            Check(storedPath.TrySample(storedPath.Length * .5f, out var point, out var tangent)
+                && !float.IsNaN(point.x) && tangent.sqrMagnitude > .99f,
+                "Compact installed curves must retain a sampleable train path");
+        }
+    }
+
+    static void CheckCurveLimits(RailloadInstallationController controller)
+    {
+        bool Allowed(IReadOnlyList<Vector2> points) => RailloadInstallationController.TestBuildableCurve(points);
+        Check(!Allowed(null) && !Allowed(Array.Empty<Vector2>()) && !Allowed(new[] { Vector2.zero }),
+            "Missing and single-point paths cannot be installed");
+        Check(!Allowed(new[] { Vector2.zero, Vector2.zero }), "Duplicate points cannot bypass curvature checks");
+        Check(!Allowed(new[] { Vector2.zero, new Vector2(float.NaN, 0) })
+            && !Allowed(new[] { Vector2.zero, new Vector2(0, float.PositiveInfinity) }), "Nonfinite paths are rejected");
+        Check(Allowed(new[] { Vector2.zero, Vector2.right * 10 }), "Two-point straight rails remain buildable");
+        Check(!Allowed(new[] { Vector2.zero, Vector2.right * 10, Vector2.right * 10 + Vector2.up * 10 }),
+            "A sharp 90-degree corner fails even when its circumradius is large");
+        Check(!Allowed(new[] { Vector2.zero, Vector2.right * 10, Vector2.zero }), "A direction reversal cannot be installed");
+        foreach (float radius in new[] { .45f, .55f, 1f, 1.95f, 2.05f, 4f })
+        foreach (int sampleCount in new[] { 24, 96 })
+        {
+            var arc = new List<Vector2>();
+            for (int i = 0; i <= sampleCount; i++)
+            {
+                double angle = Math.PI * i / sampleCount;
+                arc.Add(new Vector2(radius * (float)Math.Cos(angle), radius * (float)Math.Sin(angle)));
+            }
+            Check(Allowed(arc) == (radius > .5f), "The half-cell radius limit must be independent of arc sampling density");
+            arc.Reverse();
+            Check(Allowed(arc) == (radius > .5f), "Curve limits are independent of traversal direction");
+        }
+        foreach (Vector2Int axis in new[] { Vector2Int.right, Vector2Int.up, Vector2Int.left, Vector2Int.down })
+        foreach (int sideSign in new[] { -1, 1 })
+        foreach (bool authoredReverse in new[] { false, true })
+        foreach (bool placingReverse in new[] { false, true })
+        foreach (bool horizontalFirst in new[] { false, true })
+        foreach (bool dataOnly in new[] { false, true })
+        {
+            var side = new Vector2Int(-axis.y, axis.x) * sideSign;
+            foreach (int forward in new[] { -16, -6, -1, 0, 1, 8, 16 })
+            {
+                TerrainGenerator.Active = new TerrainGenerator();
+                AddRail(authoredReverse, true, axis * -24, Vector2Int.zero, dataOnly);
+                var far = axis * forward + side;
+                var path = controller.BuildTestPath(placingReverse ? far : Vector2Int.zero,
+                    placingReverse ? Vector2Int.zero : far, horizontalFirst, out _, out _, out _);
+                Check(Allowed(path) == (forward >= 8),
+                    $"Tight hooks must be rejected while shallow forward extensions remain valid: forward={forward}");
+            }
+            TerrainGenerator.Active = new TerrainGenerator();
+            AddRail(authoredReverse, true, axis * -8, Vector2Int.zero, dataOnly);
+            var cornerEnd = axis * 12 + side * 12;
+            var corner = controller.BuildTestPath(placingReverse ? cornerEnd : Vector2Int.zero,
+                placingReverse ? Vector2Int.zero : cornerEnd, horizontalFirst, out _, out _, out _);
+            Check(Allowed(corner), "A spacious real corner remains buildable");
+        }
+    }
+
+    static void CheckShallowExtensions(RailloadInstallationController controller)
+    {
+        foreach (Vector2Int axis in new[] { Vector2Int.right, Vector2Int.up, Vector2Int.left, Vector2Int.down })
+        foreach (int sideSign in new[] { -1, 1 })
+        foreach (bool authoredReverse in new[] { false, true })
+        foreach (bool placingReverse in new[] { false, true })
+        foreach (bool horizontalFirst in new[] { false, true })
+        foreach (int sourceMode in new[] { 0, 1, 2, 3 })
+        foreach (int forward in new[] { 4, 8, 16, 64 })
+        foreach (int lateral in new[] { 1, 2 })
+        {
+            var side = new Vector2Int(-axis.y, axis.x) * sideSign;
+            TerrainGenerator.Active = new TerrainGenerator();
+            bool connected = sourceMode != 0;
+            bool extended = sourceMode != 3;
+            if (connected) AddRail(authoredReverse, extended, axis * -8, Vector2Int.zero, sourceMode >= 2);
+            var far = axis * forward + side * lateral;
+            var path = controller.BuildTestPath(placingReverse ? far : Vector2Int.zero,
+                placingReverse ? Vector2Int.zero : far, horizontalFirst,
+                out bool extendsStart, out bool extendsEnd, out var occupied);
+            var joint = (Vector2)axis * (connected && extended ? .5f : 0f);
+            var chord = ((Vector2)far - joint).normalized;
+            var expectedFree = 2f * Vector2.Dot(chord, axis) * chord - (Vector2)axis;
+            Vector2 freeTangent = placingReverse ? path[0] - path[1] : path[path.Count - 1] - path[path.Count - 2];
+            if (connected)
+            {
+                Check(Vector2.Dot(freeTangent.normalized, expectedFree) > .9999f,
+                    "A shallow extension must finish along its natural arc, not a forced perpendicular");
+                Check(!(placingReverse ? extendsEnd : extendsStart), "The connected shallow end must not extend again");
+                var tangent = placingReverse ? path[path.Count - 2] - path[path.Count - 1] : path[1] - path[0];
+                Check(Vector2.Dot(tangent.normalized, axis) > .9999f, "Shallow extensions retain the connected tangent");
+            }
+            int turnSign = 0;
+            for (int i = 0; i < path.Count; i++)
+            {
+                int index = placingReverse ? path.Count - 1 - i : i;
+                var point = path[index];
+                float along = Vector2.Dot(point, axis);
+                float across = Vector2.Dot(point, side);
+                Check(along >= Vector2.Dot(joint, axis) - .0001f && along <= forward + .0001f
+                    && across >= -.0001f && across <= lateral + .0001f,
+                    "A shallow curve must stay inside its endpoint envelope, without a hook or overshoot");
+                if (i == 0) continue;
+                var previous = path[placingReverse ? index + 1 : index - 1];
+                var step = point - previous;
+                Check(Vector2.Dot(step, axis) >= -.0001f && Vector2.Dot(step, side) >= -.0001f,
+                    "A shallow rail must progress monotonically in both endpoint axes");
+                Check(Vector2.Dot(step.normalized, axis) > .45f,
+                    "A shallow rail must not contain a short 90-degree terminal segment");
+                if (i < 2) continue;
+                var before = path[placingReverse ? index + 2 : index - 2];
+                var incoming = previous - before;
+                double cross = (double)incoming.x * step.y - (double)incoming.y * step.x;
+                if (Math.Abs(cross) <= 1e-9) continue;
+                int sign = Math.Sign(cross);
+                Check(turnSign == 0 || turnSign == sign, "A shallow free-end curve must not regress into an S bend");
+                turnSign = sign;
+                double radius = incoming.magnitude * step.magnitude * (point - before).magnitude / (2 * Math.Abs(cross));
+                Check(radius > .3, "Shallow curve radius must exceed the rail half-spacing");
+            }
+            Check(occupied.Count > 0, "Shallow curves must produce a placement footprint");
+            var reverse = controller.BuildTestPath(placingReverse ? Vector2Int.zero : far,
+                placingReverse ? far : Vector2Int.zero, !horizontalFirst, out _, out _, out _);
+            Check(reverse.Count == path.Count, "Reversing shallow placement preserves sample count");
+            for (int i = 0; i < path.Count; i++)
+                Check(Vector2.Distance(path[i], reverse[reverse.Count - 1 - i]) < .001f,
+                    "Reversing shallow placement preserves physical geometry");
+        }
     }
 
     static void CheckSingleTurn(RailloadInstallationController controller)
@@ -95,8 +250,11 @@ static class RailCurveChecks
             if (forward > 0)
             {
                 var freeTangent = placingReverse ? path[1] - path[0] : path[path.Count - 1] - path[path.Count - 2];
-                Check(Vector2.Dot(freeTangent.normalized, (Vector2)side * (placingReverse ? -1 : 1)) > .995f,
-                    "A forward single-ended corner should finish along the perpendicular axis");
+                var chord = ((Vector2)far - (Vector2)axis * .5f).normalized;
+                var expected = forward - .5f <= 5
+                    ? (Vector2)side : 2f * Vector2.Dot(chord, axis) * chord - (Vector2)axis;
+                Check(Vector2.Dot(freeTangent.normalized, expected * (placingReverse ? -1 : 1)) > .995f,
+                    "A free terminal must follow a natural arc for shallow extensions and retain true corners");
             }
         }
     }

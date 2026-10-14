@@ -3,7 +3,7 @@ using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.Serialization;
 
-public class Player : Character
+public partial class Player : Character
 {
     private static readonly int PickHash = Animator.StringToHash("tPick");
     private static readonly int DiggingHash = Animator.StringToHash("tDigging");
@@ -384,7 +384,7 @@ public class Player : Character
         {
             nextToolEquip = ToolEquipVisual.Shovel;
         }
-        else if (playerController != null && playerController.IsAnimalKnifeInteractionActive)
+        else if (playerController != null && playerController.IsKnifeInteractionActive)
         {
             nextToolEquip = ToolEquipVisual.Knife;
         }
@@ -957,6 +957,8 @@ public class Player : Character
         PlayerSaveData saveData = new PlayerSaveData
         {
             hasPlayer = true,
+            hasHealth = true,
+            currentHealth = CurrentHealth,
             position = ResolveSavePosition(),
             rotation = ResolveSaveRotation(),
             bagLevel = bagLevel,
@@ -1027,6 +1029,7 @@ public class Player : Character
             return;
         }
 
+        RestoreCombatHealth(saveData);
         DeactivateHeldItemLight();
         ApplyToolEquipVisual(ToolEquipVisual.None);
         ApplyTorchEquipVisual(false);

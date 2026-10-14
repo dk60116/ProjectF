@@ -1,4 +1,5 @@
 using ProjectF.Power;
+using ProjectF.Monsters;
 using System.Collections.Generic;
 using ProjectF.MapObjects;
 using Unity.Profiling;
@@ -34,13 +35,7 @@ public partial class PlayerController : MonoBehaviour
     private const float WaterBoundarySlideScoreTolerance = 0.01f;
     private const float TemporaryDropFocusDuration = 0.18f;
     private const int TrainDismountSearchPadding = 4;
-    private const float MinimumAnimalKnifeInteractionRange = 0.75f;
-    private const float AnimalKnifeInteractionTimeout = 1.5f;
     private const float PickAnimationDuration = 1.1666666f;
-    private const float AnimalKnifeDamageNormalizedTime = 0.5f;
-    private const float AnimalKnifeDamageDelay =
-        PickAnimationDuration * AnimalKnifeDamageNormalizedTime;
-    private const float AnimalKnifeDamage = 20f;
     private const float AnimalPushClearance = 0.05f;
     private const float AutomaticAnimalInteractionRefreshInterval = 0.1f;
     private const int CrowdedAnimalPathThreshold = 3;
@@ -79,8 +74,6 @@ public partial class PlayerController : MonoBehaviour
     private Joystick joystick;
     private ResourceWrokGauge resourceWorkGauge;
     private ResourceInstance currentTargetResource;
-    private Animal currentKnifeTargetAnimal;
-    private Animal pendingKnifeTargetAnimal;
     private Animal currentCorpseHarvestTarget;
     private Animal cachedAutomaticInteractionAnimal;
     private float nextAutomaticAnimalInteractionRefreshTime;
@@ -88,12 +81,6 @@ public partial class PlayerController : MonoBehaviour
     private readonly Collider[] automaticAnimalInteractionOverlapBuffer =
         new Collider[AutomaticAnimalInteractionOverlapCapacity];
     private readonly Queue<Animal> pendingCorpseHarvestAnimals = new Queue<Animal>();
-    private bool animalKnifePickPending;
-    private bool animalKnifeAnimationStarted;
-    private bool animalKnifeDamageApplied;
-    private float animalKnifeDamageTime;
-    private float animalKnifeInteractionEndTime;
-    private float animalKnifeInteractionTimeout;
     private NooseThrowVisual activeNooseThrowVisual;
     private readonly HashSet<Block> currentFocusedBlocks = new HashSet<Block>();
     private IMapObjectTarget closestInteractionFocusTarget;
@@ -189,6 +176,7 @@ public partial class PlayerController : MonoBehaviour
     private IMapObjectTarget currentMouseFocusedMapObject;
     private IMapObjectTarget currentSelectedMapObject;
     private Animal currentMouseFocusedAnimal;
+    private MonsterInstance currentMouseFocusedMonster;
     private PortableObject currentMouseFocusedPortableObject;
     private Camera cachedMouseFocusCamera;
     private int mouseFocusRefreshFrame = -1;
@@ -287,24 +275,15 @@ public partial class PlayerController : MonoBehaviour
         return true;
     }
 
-    public bool IsAnimalKnifeInteractionActive =>
-        currentKnifeTargetAnimal != null
-        || animalKnifePickPending
+    public bool IsKnifeInteractionActive =>
+        currentKnifeTarget != null
+        || knifePickPending
         || currentCorpseHarvestTarget != null
         || pendingCorpseHarvestAnimals.Count > 0;
     public bool IsNooseThrowActive => activeNooseThrowVisual != null;
     private bool IsNooseThrowInFlight =>
         activeNooseThrowVisual != null
         && !activeNooseThrowVisual.HasAttachedAnimal;
-
-    public bool TryGetAnimalKnifeFocusTarget(out Animal focusedAnimal)
-    {
-        focusedAnimal = currentKnifeTargetAnimal != null
-            ? currentKnifeTargetAnimal
-            : pendingKnifeTargetAnimal;
-        return focusedAnimal != null
-               && focusedAnimal.gameObject.activeInHierarchy;
-    }
 
     private void Awake()
     {
@@ -349,7 +328,7 @@ public partial class PlayerController : MonoBehaviour
         currentSelectedMapObject = null;
         SetSelectedFocusedBlocks(null);
         SetFocusedBlocks(null);
-        SetMouseFocusedAnimal(null);
+        SetMouseFocusedCreature(null);
         SetMouseFocusedPortableObject(null);
         SetMouseFocusedBlocks(null);
         currentFocusedBlocks.Clear();
@@ -368,7 +347,7 @@ public partial class PlayerController : MonoBehaviour
         UpdateSelectedWorkableRangeVisuals(null);
         UpdateInRangeSprinklerRangeVisuals(null);
         singleFocusedBlockBuffer.Clear();
-        CancelAnimalKnifeInteraction();
+        CancelKnifeInteraction();
         CancelNooseThrow();
     }
 
@@ -520,7 +499,7 @@ public partial class PlayerController : MonoBehaviour
         }
 
         CancelActiveResourceHarvest();
-        CancelAnimalKnifeInteraction();
+        CancelKnifeInteraction();
         pitchforkDigTargetBlock = targetBlock;
         pitchforkDiggingQueued = false;
         return true;
@@ -685,6 +664,7 @@ public partial class PlayerController : MonoBehaviour
 
     public void ClearInteractionPointSnapForLoad()
     {
+        CancelKnifeInteraction();
         interactionPointSnapAnimal?.NotifyRiderDismounted(player);
         ClearInteractionPointSnap(true);
         pendingMoveDirection = Vector3.zero;
@@ -840,7 +820,7 @@ public partial class PlayerController : MonoBehaviour
         }
 
         CancelActiveResourceHarvest();
-        CancelAnimalKnifeInteraction();
+        CancelKnifeInteraction();
         ClearTemporaryDropFocus();
         SetFocusedBlocks(null);
         SetMouseFocusedPortableObject(null);
@@ -1196,10 +1176,33 @@ public partial class PlayerController : MonoBehaviour
 
     private static bool IsPlayerInputLocked()
     {
+#if UNITY_EDITOR
+        if (ProjectF.Monsters.MonsterSpawnBrush.BlocksGameplayInput) return true;
+#endif
         GameManager gameManager = GameManager.Instance;
         return SaveManager.GameplayInputBlocked
                || GameManager.TextInputFocused
                || (gameManager != null && gameManager.PlayerInteractionLocked);
+    }
+
+    public void StopForDeath()
+    {
+        // Normal dismount is input-locked after HP reaches zero.
+        interactionPointSnapVehicle?.NotifyPlayerDismounted(player);
+        ClearInteractionPointSnapForLoad();
+        CancelActiveResourceHarvest();
+        CancelActiveCorpseHarvest();
+        CancelPitchforkDigging();
+        CancelSeedPlanting();
+        ClearNooseForLoad();
+        pendingMoveDirection = Vector3.zero;
+        currentConveyorCarryVelocity = Vector3.zero;
+        if (joystick != null) joystick.ResetInput();
+        if (cachedRigidbody != null)
+        {
+            cachedRigidbody.linearVelocity = Vector3.zero;
+            cachedRigidbody.angularVelocity = Vector3.zero;
+        }
     }
 
     private void Update()
@@ -1293,18 +1296,18 @@ public partial class PlayerController : MonoBehaviour
             || isKeyboardMoveLocked
             || interactionPointSnapTarget != null)
         {
-            CancelAnimalKnifeInteraction();
+            CancelKnifeInteraction();
         }
         else if (hasManualMovementInput)
         {
-            if (animalKnifePickPending)
+            if (knifePickPending)
             {
                 input = Vector2.zero;
                 hasManualMovementInput = false;
             }
             else
             {
-                CancelAnimalKnifeApproach();
+                CancelKnifeApproach();
             }
         }
 
@@ -1313,9 +1316,9 @@ public partial class PlayerController : MonoBehaviour
             && !isInteractionLocked
             && !isKeyboardMoveLocked
             && interactionPointSnapTarget == null
-            && !animalKnifePickPending
-            && currentKnifeTargetAnimal != null
-            && TryGetAnimalKnifeApproachDirection(out Vector3 knifeApproachDirection))
+            && !knifePickPending
+            && currentKnifeTarget != null
+            && TryGetKnifeApproachDirection(out Vector3 knifeApproachDirection))
         {
             moveDirection = knifeApproachDirection;
         }
@@ -1324,7 +1327,7 @@ public partial class PlayerController : MonoBehaviour
             && !isInteractionLocked
             && !isKeyboardMoveLocked
             && interactionPointSnapTarget == null
-            && currentKnifeTargetAnimal == null
+            && currentKnifeTarget == null
             && pitchforkDigTargetBlock != null
             && TryGetPitchforkDiggingApproachDirection(out Vector3 pitchforkApproachDirection))
         {
@@ -1335,7 +1338,7 @@ public partial class PlayerController : MonoBehaviour
             && !isInteractionLocked
             && !isKeyboardMoveLocked
             && interactionPointSnapTarget == null
-            && currentKnifeTargetAnimal == null
+            && currentKnifeTarget == null
             && pitchforkDigTargetBlock == null
             && seedPlantTargetBlock != null
             && TryGetSeedPlantingApproachDirection(out Vector3 seedPlantApproachDirection))
@@ -1378,7 +1381,7 @@ public partial class PlayerController : MonoBehaviour
 
         if (isInteractionLocked)
         {
-            SetMouseFocusedAnimal(null);
+            SetMouseFocusedCreature(null);
             SetMouseFocusedPortableObject(null);
             SetMouseFocusedBlocks(null);
             HandleInstallationPlacementLock();
@@ -1421,23 +1424,7 @@ public partial class PlayerController : MonoBehaviour
             GetCurrentLocomotionBlend(moveDirection));
         ResolveCompletedPitchforkDigging();
         ResolveCompletedSeedPlanting();
-        TryStartPendingAnimalKnifeAttack();
-        if (animalKnifePickPending
-            && animalKnifeAnimationStarted
-            && !animalKnifeDamageApplied
-            && Time.time >= animalKnifeDamageTime)
-        {
-            ApplyPendingAnimalKnifeDamage();
-        }
-
-        if (animalKnifePickPending
-            && (animalKnifeAnimationStarted
-                ? Time.time >= animalKnifeInteractionEndTime
-                  || Time.time >= animalKnifeInteractionTimeout
-                : Time.time >= animalKnifeInteractionTimeout))
-        {
-            ClearPendingAnimalKnifeAttack();
-        }
+        TickKnifeAttack();
 
         ResolveCompletedPick(finishedPickThisFrame);
         RefreshInteractionFocus();
@@ -3849,6 +3836,18 @@ public partial class PlayerController : MonoBehaviour
                    || focusedPortableObject != null);
     }
 
+    public bool TryResolvePointerFocusTarget(
+        Vector2 pointerPosition,
+        out Animal focusedAnimal,
+        out IMapObjectTarget focusedMapObject,
+        out PortableObject focusedPortableObject,
+        out Block focusedBlock,
+        out MonsterInstance focusedMonster)
+    {
+        return TryResolveMouseFocusTargets(pointerPosition, out focusedAnimal, out focusedMapObject,
+            out focusedPortableObject, out focusedBlock, out focusedMonster);
+    }
+
     public bool RequestAnimalKnifeInteraction(Animal animal)
     {
         if (IsPlayerInputLocked()
@@ -3865,20 +3864,7 @@ public partial class PlayerController : MonoBehaviour
             return RequestCorpseHarvest(animal);
         }
 
-        if (!animal.CanBeAttacked || player.IsCarrying)
-        {
-            return false;
-        }
-
-        if (currentKnifeTargetAnimal == animal || animalKnifePickPending)
-        {
-            return true;
-        }
-
-        CancelActiveResourceHarvest();
-        CancelActiveCorpseHarvest();
-        currentKnifeTargetAnimal = animal;
-        return true;
+        return RequestKnifeAttack(animal);
     }
 
     public bool RequestNooseThrow(ItemDefinition nooseDefinition)
@@ -3926,7 +3912,7 @@ public partial class PlayerController : MonoBehaviour
         }
 
         CancelActiveResourceHarvest();
-        CancelAnimalKnifeInteraction();
+        CancelKnifeInteraction();
         pendingMoveDirection = Vector3.zero;
         pendingFacingDirection = Vector3.zero;
         hasPendingFacingDirection = false;
@@ -4044,7 +4030,7 @@ public partial class PlayerController : MonoBehaviour
         Vector3 offset = animal.transform.position - origin;
         offset.y = 0f;
         float interactionRange = Mathf.Max(
-            MinimumAnimalKnifeInteractionRange,
+            MinimumKnifeInteractionRange,
             player.State.HarvestRange);
         return offset.sqrMagnitude <= interactionRange * interactionRange;
     }
@@ -4074,7 +4060,7 @@ public partial class PlayerController : MonoBehaviour
             Transform bodyTransform = player.BodyTransform;
             Vector3 origin = bodyTransform != null ? bodyTransform.position : transform.position;
             float interactionRange = Mathf.Max(
-                MinimumAnimalKnifeInteractionRange,
+                MinimumKnifeInteractionRange,
                 player.State.HarvestRange);
             TryFindNearestAutomaticInteractionAnimal(
                 origin,
@@ -4162,7 +4148,7 @@ public partial class PlayerController : MonoBehaviour
         }
 
         CancelActiveResourceHarvest();
-        CancelAnimalKnifeAttack();
+        CancelKnifeAttack();
         if (currentCorpseHarvestTarget != corpse)
         {
             CancelActiveCorpseHarvest();
@@ -4194,112 +4180,6 @@ public partial class PlayerController : MonoBehaviour
         return true;
     }
 
-    private bool TryGetAnimalKnifeApproachDirection(out Vector3 direction)
-    {
-        direction = Vector3.zero;
-        Animal targetAnimal = currentKnifeTargetAnimal;
-        if (targetAnimal == null
-            || !targetAnimal.gameObject.activeInHierarchy
-            || !targetAnimal.CanBeAttacked
-            || player == null
-            || player.IsCarrying)
-        {
-            CancelAnimalKnifeApproach();
-            return false;
-        }
-
-        Vector3 origin = player.BodyTransform != null
-            ? player.BodyTransform.position
-            : transform.position;
-        Vector3 offset = targetAnimal.transform.position - origin;
-        offset.y = 0f;
-        float interactionRange = Mathf.Max(
-            MinimumAnimalKnifeInteractionRange,
-            player.State.HarvestRange);
-        if (offset.sqrMagnitude > interactionRange * interactionRange)
-        {
-            direction = offset.normalized;
-            return true;
-        }
-
-        currentKnifeTargetAnimal = null;
-        if (offset.sqrMagnitude > 0.0001f)
-        {
-            pendingFacingDirection = offset.normalized;
-            hasPendingFacingDirection = true;
-        }
-
-        pendingKnifeTargetAnimal = targetAnimal;
-        animalKnifePickPending = true;
-        animalKnifeAnimationStarted = false;
-        animalKnifeDamageApplied = false;
-        animalKnifeDamageTime = 0f;
-        animalKnifeInteractionEndTime = 0f;
-        animalKnifeInteractionTimeout = Time.time + AnimalKnifeInteractionTimeout;
-        player.QueuePickAnimation();
-        return false;
-    }
-
-    private void TryStartPendingAnimalKnifeAttack()
-    {
-        if (!animalKnifePickPending
-            || animalKnifeAnimationStarted
-            || player == null
-            || !player.PickAnimationStartedThisFrame)
-        {
-            return;
-        }
-
-        animalKnifeAnimationStarted = true;
-        float animationStartTime = Time.time;
-        animalKnifeDamageTime = animationStartTime + AnimalKnifeDamageDelay;
-        animalKnifeInteractionEndTime = animationStartTime + PickAnimationDuration;
-        animalKnifeInteractionTimeout = animationStartTime + AnimalKnifeInteractionTimeout;
-        pendingKnifeTargetAnimal?.NotifyAttackAnimationStarted();
-    }
-
-    private void ApplyPendingAnimalKnifeDamage()
-    {
-        if (!animalKnifePickPending || animalKnifeDamageApplied)
-        {
-            return;
-        }
-
-        animalKnifeDamageApplied = true;
-        if (pendingKnifeTargetAnimal != null && pendingKnifeTargetAnimal.CanBeAttacked)
-        {
-            pendingKnifeTargetAnimal.TakeDamage(
-                AnimalKnifeDamage,
-                player != null ? player.transform.position : transform.position);
-        }
-    }
-
-    private void CancelAnimalKnifeApproach()
-    {
-        currentKnifeTargetAnimal = null;
-    }
-
-    private void ClearPendingAnimalKnifeAttack()
-    {
-        pendingKnifeTargetAnimal = null;
-        animalKnifePickPending = false;
-        animalKnifeAnimationStarted = false;
-        animalKnifeDamageApplied = false;
-        animalKnifeDamageTime = 0f;
-        animalKnifeInteractionEndTime = 0f;
-        animalKnifeInteractionTimeout = 0f;
-    }
-
-    private void CancelAnimalKnifeAttack()
-    {
-        bool hadActiveInteraction = currentKnifeTargetAnimal != null || animalKnifePickPending;
-        CancelAnimalKnifeApproach();
-        ClearPendingAnimalKnifeAttack();
-        if (hadActiveInteraction)
-        {
-            player?.ClearQueuedPickAnimations();
-        }
-    }
 
     private void CancelActiveCorpseHarvest()
     {
@@ -4317,9 +4197,9 @@ public partial class PlayerController : MonoBehaviour
         player?.ClearQueuedPickAnimations();
     }
 
-    private void CancelAnimalKnifeInteraction()
+    private void CancelKnifeInteraction()
     {
-        CancelAnimalKnifeAttack();
+        CancelKnifeAttack();
         CancelActiveCorpseHarvest();
     }
 
@@ -5724,7 +5604,7 @@ public partial class PlayerController : MonoBehaviour
 
         if (isInteractionLocked)
         {
-            SetMouseFocusedAnimal(null);
+            SetMouseFocusedCreature(null);
             SetMouseFocusedPortableObject(null);
             SetMouseFocusedBlocks(null);
             return;
@@ -5733,7 +5613,7 @@ public partial class PlayerController : MonoBehaviour
         if (MountedVehicle != null)
         {
             SetMouseFocusedPortableObject(null);
-            RefreshMouseAnimalFocus();
+            RefreshMouseCreatureFocus();
             RefreshMountedPinnedMouseFocus();
             return;
         }
@@ -5741,7 +5621,7 @@ public partial class PlayerController : MonoBehaviour
         Vector2 pointerPosition = Input.mousePosition;
         if (IsPointerOverMouseFocusBlockingUi(pointerPosition))
         {
-            SetMouseFocusedAnimal(null);
+            SetMouseFocusedCreature(null);
             SetMouseFocusedPortableObject(null);
             SetMouseFocusedBlocks(null);
             return;
@@ -5752,7 +5632,8 @@ public partial class PlayerController : MonoBehaviour
                 out Animal animal,
                 out IMapObjectTarget mapObject,
                 out PortableObject portableObject,
-                out Block fallbackBlock))
+                out Block fallbackBlock,
+                out MonsterInstance monster))
         {
             if (player != null && player.IsHoldingPitchfork)
             {
@@ -5766,14 +5647,14 @@ public partial class PlayerController : MonoBehaviour
                 return;
             }
 
-            SetMouseFocusedAnimal(null);
+            SetMouseFocusedCreature(null);
             SetMouseFocusedPortableObject(null);
             SetMouseFocusedBlocks(null);
             return;
         }
 
-        SetMouseFocusedAnimal(animal);
-        if (animal != null)
+        SetMouseFocusedCreature(animal, monster);
+        if (animal != null || monster != null)
         {
             SetMouseFocusedPortableObject(null);
             SetMouseFocusedBlocks(null);
@@ -5799,7 +5680,7 @@ public partial class PlayerController : MonoBehaviour
 
     private void RefreshPitchforkGroundMouseFocus(Vector2 pointerPosition)
     {
-        SetMouseFocusedAnimal(null);
+        SetMouseFocusedCreature(null);
         SetMouseFocusedPortableObject(null);
 
         Camera targetCamera = ResolveMouseFocusCamera();
@@ -5899,7 +5780,7 @@ public partial class PlayerController : MonoBehaviour
         }
     }
 
-    private void RefreshMouseAnimalFocus()
+    private void RefreshMouseCreatureFocus()
     {
         Vector2 pointerPosition = Input.mousePosition;
         if (IsPointerOverMouseFocusBlockingUi(pointerPosition)
@@ -5908,13 +5789,14 @@ public partial class PlayerController : MonoBehaviour
                 out Animal animal,
                 out _,
                 out _,
-                out _))
+                out _,
+                out MonsterInstance monster))
         {
-            SetMouseFocusedAnimal(null);
+            SetMouseFocusedCreature(null);
             return;
         }
 
-        SetMouseFocusedAnimal(animal);
+        SetMouseFocusedCreature(animal, monster);
     }
 
     private void RefreshMountedPinnedMouseFocus()
@@ -5983,6 +5865,19 @@ public partial class PlayerController : MonoBehaviour
         out PortableObject portableObject,
         out Block fallbackBlock)
     {
+        return TryResolveMouseFocusTargets(pointerPosition, out animal, out mapObject,
+            out portableObject, out fallbackBlock, out _);
+    }
+
+    private bool TryResolveMouseFocusTargets(
+        Vector2 pointerPosition,
+        out Animal animal,
+        out IMapObjectTarget mapObject,
+        out PortableObject portableObject,
+        out Block fallbackBlock,
+        out MonsterInstance monster)
+    {
+        monster = null;
         animal = null;
         mapObject = null;
         portableObject = null;
@@ -6125,6 +6020,13 @@ public partial class PlayerController : MonoBehaviour
             ray,
             out PortableObject closestPortableObject,
             out float closestPortableObjectDistance);
+        if (MonsterFocusWorld.TryRaycast(ray, maxDistance, out MonsterInstance closestMonster, out float monsterDistance)
+            && monsterDistance <= closestDistance && monsterDistance <= closestAnimalDistance
+            && (!hasPortableObject || monsterDistance <= closestPortableObjectDistance))
+        {
+            monster = closestMonster;
+            return true;
+        }
         if (closestAnimal != null
             && closestAnimalDistance <= closestDistance
             && (!hasPortableObject || closestAnimalDistance <= closestPortableObjectDistance))
@@ -6232,8 +6134,14 @@ public partial class PlayerController : MonoBehaviour
         return portableObject != null;
     }
 
-    private void SetMouseFocusedAnimal(Animal nextAnimal)
+    private void SetMouseFocusedCreature(Animal nextAnimal, MonsterInstance nextMonster = null)
     {
+        if (currentMouseFocusedMonster != nextMonster)
+        {
+            currentMouseFocusedMonster?.SetHoverOutline(false);
+            currentMouseFocusedMonster = nextMonster;
+            currentMouseFocusedMonster?.SetHoverOutline(true);
+        }
         if (currentMouseFocusedAnimal == nextAnimal)
         {
             return;

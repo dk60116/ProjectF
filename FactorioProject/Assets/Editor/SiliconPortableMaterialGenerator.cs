@@ -6,7 +6,7 @@ namespace ProjectF.EditorTools
 {
     public static class SiliconPortableMaterialGenerator
     {
-        private const string SiliconItemName = "Silicon";
+        private const string SiliconItemName = "Silicon waper";
         private const string SiliconFolder = "Assets/Items/Plate/Silicon";
         private const string SiliconMeshPath = SiliconFolder + "/Silicon_P.mesh";
         private const string SiliconTexturePath = SiliconFolder + "/Silicon_P_TB.png";
