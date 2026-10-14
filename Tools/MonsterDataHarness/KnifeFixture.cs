@@ -46,6 +46,7 @@ public partial class PlayerController
     internal void BindKnifePlayer(Player value) => player = value;
     internal bool HasKnifeFacing => hasPendingFacingDirection && pendingFacingDirection.sqrMagnitude > 0f;
     internal bool ApproachKnife(out Vector3 direction) => TryGetKnifeApproachDirection(out direction);
+    internal void MoveManuallyForKnifeTest() => HandleManualKnifeMovement();
     internal bool RequestAnimalKnifeForTest(Animal animal) => RequestKnifeAttack(animal);
     internal void KnifeTick(float time, bool animationStarted = false)
     {

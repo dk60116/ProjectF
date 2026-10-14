@@ -15,7 +15,7 @@ MonoBehaviour:
   schemaVersion: 2
   itemDefinition: {fileID: 11400000, guid: 31c39fc847ce8d24690f003515a30757, type: 2}
   sourcePrefab: {fileID: 2667034222479840192, guid: ddf0c3374ebbfa2499713d6128c8d8a3, type: 3}
-  itemId: 22
+  itemId: 16
   itemName: Gold ore
   sourcePrefabGuid: ddf0c3374ebbfa2499713d6128c8d8a3
   sourceContentHash:

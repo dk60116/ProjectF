@@ -42,6 +42,20 @@ internal static class KnifeChecks
 
     internal static void Run()
     {
+        var moving = Setup();
+        Check(moving.Controller.RequestMonsterKnifeInteraction(moving.Monster), "Moving player accepts an in-range knife request");
+        moving.Controller.MoveManuallyForKnifeTest();
+        Check(moving.Player.QueuedPicks == 1, "Manual movement can start a nearby swing without an auto-approach");
+        moving.Controller.KnifeTick(0f, true);
+        moving.Player.transform.position = new Vector3(.1f, 0f, .1f);
+        moving.Controller.MoveManuallyForKnifeTest();
+        moving.Controller.KnifeTick(.6f);
+        Check(moving.Monster.CurrentHealth == 80f, "Walking during a swing retains exactly one in-range impact");
+        moving = Setup(5f);
+        moving.Controller.RequestMonsterKnifeInteraction(moving.Monster);
+        moving.Controller.MoveManuallyForKnifeTest();
+        Check(moving.Player.QueuedPicks == 0 && !moving.Controller.TryGetKnifeFocusTarget(out _),
+            "Manual movement cancels a distant auto-approach instead of overriding movement input");
         var s = Setup();
         Check(!s.Controller.RequestMonsterKnifeInteraction(null), "Null monster rejected");
         Start(s.Controller, s.Monster);

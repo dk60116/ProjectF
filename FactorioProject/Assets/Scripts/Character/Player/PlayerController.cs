@@ -1300,15 +1300,7 @@ public partial class PlayerController : MonoBehaviour
         }
         else if (hasManualMovementInput)
         {
-            if (knifePickPending)
-            {
-                input = Vector2.zero;
-                hasManualMovementInput = false;
-            }
-            else
-            {
-                CancelKnifeApproach();
-            }
+            HandleManualKnifeMovement();
         }
 
         Vector3 moveDirection = GetMoveDirection(input);

@@ -136,6 +136,13 @@ public partial class PlayerController
             ClearPendingKnifeAttack();
     }
 
+    private void HandleManualKnifeMovement()
+    {
+        // Manual movement may start an in-range swing, but never redirects the player's movement.
+        if (currentKnifeTarget != null) TryGetKnifeApproachDirection(out _);
+        CancelKnifeApproach();
+    }
+
     private void CancelKnifeApproach() => currentKnifeTarget = null;
 
     private void ClearPendingKnifeAttack()

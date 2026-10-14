@@ -5,6 +5,8 @@
       <Compile Include="$(MSBuildProjectDirectory)/Assets/Scripts/Simulation/Core/Monsters/**/*.cs" />
     </ItemGroup>
     <ItemGroup Condition="'$(MSBuildProjectName)' == 'Assembly-CSharp'">
+      <Compile Remove="$(MSBuildProjectDirectory)/Assets/Scripts/Character/Player/Player.UpperBodyAnimation.cs" />
+      <Compile Include="$(MSBuildProjectDirectory)/Assets/Scripts/Character/Player/Player.UpperBodyAnimation.cs" />
       <Compile Remove="$(MSBuildProjectDirectory)/Assets/Scripts/Simulation/Presentation/WorldHealthBarView.cs" />
       <Compile Include="$(MSBuildProjectDirectory)/Assets/Scripts/Simulation/Presentation/WorldHealthBarView.cs" />
       <Compile Remove="$(MSBuildProjectDirectory)/Assets/Scripts/Character/Player/PlayerController.Knife.cs" />

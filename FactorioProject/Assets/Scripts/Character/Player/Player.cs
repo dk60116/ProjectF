@@ -17,7 +17,7 @@ public partial class Player : Character
     private const string PickStateName = "Pick";
     private const string DiggingStateName = "Digging";
     private const string IdleStateName = "Idle";
-    private const string RunningStateName = "Running";
+    private const string RunningStateName = "Run";
     private const float LocomotionBlendDampTime = 0.12f;
     private const string TorchLightAnchorName = "_TorchLightAnchor";
     private const string PitchforkItemName = "Pitchfork";
@@ -712,9 +712,7 @@ public partial class Player : Character
 
         ClearQueuedPickAnimations();
         CancelDiggingAnimation(false);
-        animator.SetBool(MoveHash, false);
-        animator.ResetTrigger(PickHash);
-        animator.ResetTrigger(ThrowHash);
+        ResetUpperBodyActions();
         animator.SetTrigger(ThrowHash);
         return true;
     }
@@ -730,14 +728,7 @@ public partial class Player : Character
         }
 
         animator.SetBool(MoveHash, false);
-        animator.ResetTrigger(ThrowHash);
-
-        if (IsPickStateActive())
-        {
-            InterruptPickAnimation(false);
-        }
-
-        wasPickStateActiveLastFrame = false;
+        ResetUpperBodyActions();
     }
 
     public void UpdateMountedVehicleAnimation(Vehicle vehicle)
@@ -762,8 +753,7 @@ public partial class Player : Character
         {
             ClearQueuedPickAnimations();
             CancelDiggingAnimation(false);
-            animator.ResetTrigger(PickHash);
-            animator.ResetTrigger(ThrowHash);
+            ResetUpperBodyActions();
             animator.SetBool(MoveHash, false);
             handcartAnimationActive = true;
             animator.SetBool(HandcartMountedHash, true);
@@ -828,8 +818,7 @@ public partial class Player : Character
             ClearMountedVehicleAnimation();
             ClearQueuedPickAnimations();
             CancelDiggingAnimation(false);
-            animator.ResetTrigger(PickHash);
-            animator.ResetTrigger(ThrowHash);
+            ResetUpperBodyActions();
             animator.SetBool(MoveHash, false);
         }
 
@@ -846,7 +835,8 @@ public partial class Player : Character
             return false;
         }
 
-        if (handcartAnimationActive || ridingAnimationActive)
+        UpdateUpperBodyAnimationWeight();
+        if (handcartAnimationActive || ridingAnimationActive || IsDead)
         {
             return false;
         }
@@ -863,31 +853,19 @@ public partial class Player : Character
         PickAnimationStartedThisFrame = isPickActive && !wasPickStateActiveLastFrame;
         DiggingAnimationStartedThisFrame = isDiggingActive && !wasDiggingStateActiveLastFrame;
 
-        if (shouldRun && (isPickActive || isDiggingActive))
+        if (shouldRun && isDiggingActive)
         {
-            PickAnimationStartedThisFrame = false;
             DiggingAnimationStartedThisFrame = false;
-            if (isPickActive)
-            {
-                InterruptPickAnimation(true);
-            }
-
-            if (isDiggingActive)
-            {
-                InterruptDiggingAnimation(true);
-            }
-
-            wasPickStateActiveLastFrame = false;
+            InterruptDiggingAnimation(true);
             wasDiggingStateActiveLastFrame = false;
-            animator.SetBool(MoveHash, true);
-            return false;
+            isDiggingActive = false;
         }
 
         bool finishedPickThisFrame = wasPickStateActiveLastFrame && !isPickActive;
         DiggingAnimationFinishedThisFrame = wasDiggingStateActiveLastFrame && !isDiggingActive;
-        animator.SetBool(MoveHash, shouldRun && !isPickActive && !isDiggingActive);
+        animator.SetBool(MoveHash, shouldRun && !isDiggingActive);
 
-        if (pendingDiggingTrigger && !isPickActive && !isDiggingActive)
+        if (pendingDiggingTrigger && !shouldRun && !isPickActive && !isDiggingActive)
         {
             animator.ResetTrigger(DiggingHash);
             animator.SetTrigger(DiggingHash);
@@ -1149,48 +1127,9 @@ public partial class Player : Character
         return FindObjectOfType<PlayerHUD>(true);
     }
 
-    private bool IsPickStateActive()
-    {
-        if (animator == null)
-        {
-            return false;
-        }
+    private bool IsPickStateActive() => IsAnimationStateActive(GetUpperBodyLayer(), PickStateName);
 
-        if (animator.GetCurrentAnimatorStateInfo(0).IsName(PickStateName))
-        {
-            return true;
-        }
-
-        return animator.IsInTransition(0) && animator.GetNextAnimatorStateInfo(0).IsName(PickStateName);
-    }
-
-    private bool IsDiggingStateActive()
-    {
-        if (animator == null)
-        {
-            return false;
-        }
-
-        if (animator.GetCurrentAnimatorStateInfo(0).IsName(DiggingStateName))
-        {
-            return true;
-        }
-
-        return animator.IsInTransition(0)
-               && animator.GetNextAnimatorStateInfo(0).IsName(DiggingStateName);
-    }
-
-    private void InterruptPickAnimation(bool shouldRun)
-    {
-        if (animator == null)
-        {
-            return;
-        }
-
-        animator.ResetTrigger(PickHash);
-        animator.Play(shouldRun ? RunningStateName : IdleStateName, 0, 0f);
-        animator.Update(0f);
-    }
+    private bool IsDiggingStateActive() => IsAnimationStateActive(0, DiggingStateName);
 
     private void InterruptDiggingAnimation(bool shouldRun)
     {

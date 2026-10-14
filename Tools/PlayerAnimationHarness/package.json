@@ -1,0 +1,7 @@
+{
+  "name": "projectf-player-animation-checks",
+  "private": true,
+  "devDependencies": {
+    "yaml": "2.9.1"
+  }
+}
