@@ -2,7 +2,7 @@ using UnityEngine;
 
 public class HandSlot : BagSlot
 {
-    protected override bool AllowPickupOnClick => true;
+    protected override bool AllowPickupOnClick => !IsEquipmentSlot;
 
     protected override bool TryPickupGroundCandidate(Player player, Block block,
         PortableObject requiredPortableObject, Vector3 pickupOrigin, float pickupRange)

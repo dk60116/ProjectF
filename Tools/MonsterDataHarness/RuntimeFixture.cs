@@ -8,6 +8,9 @@ namespace UnityEngine
 {
     public class Object
     {
+        private static int nextInstanceId;
+        private readonly int instanceId = ++nextInstanceId;
+        public int GetInstanceID() => instanceId;
         public static void Destroy(GameObject value)
         {
             value.SetActive(false);

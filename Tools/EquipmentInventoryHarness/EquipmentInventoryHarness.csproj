@@ -1,0 +1,22 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net9.0</TargetFramework>
+    <UseAppHost>false</UseAppHost>
+    <NoWarn>0649;0414</NoWarn>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Remove="SerializationChecks.cs" />
+    <Compile Remove="Inspect-UnityAmmunition.cs" />
+    <Compile Include="../../FactorioProject/Assets/Scripts/Object/Equipment/Bag/PlayerBag.cs" Link="Production/PlayerBag.cs" />
+    <Compile Include="../../FactorioProject/Assets/Scripts/Object/Equipment/Bag/PlayerBag.Equipment.cs" Link="Production/PlayerBag.Equipment.cs" />
+    <Compile Include="../../FactorioProject/Assets/Scripts/HUD/ItemSlot/BagSlot.Equipment.cs" Link="Production/BagSlot.Equipment.cs" />
+    <Compile Include="../../FactorioProject/Assets/Scripts/Character/Player/PlayerInventoryTransfer.cs" Link="Production/PlayerInventoryTransfer.cs" />
+    <Compile Include="../../FactorioProject/Assets/Scripts/Character/Player/WeaponShotStats.cs" Link="Production/WeaponShotStats.cs" />
+    <Compile Include="../../FactorioProject/Assets/Scripts/Character/Player/Player.Equipment.cs" Link="Production/Player.Equipment.cs" />
+    <Compile Include="../../FactorioProject/Assets/Scripts/Character/Player/Player.Ammunition.cs" Link="Production/Player.Ammunition.cs" />
+    <Compile Include="../../FactorioProject/Assets/Scripts/Character/Player/Player.RangedCombat.cs" Link="Production/Player.RangedCombat.cs" />
+    <Compile Include="../../FactorioProject/Assets/Scripts/Character/Player/PlayerProjectileWorld.cs" Link="Production/PlayerProjectileWorld.cs" />
+    <Compile Include="../../FactorioProject/Assets/Scripts/Object/ItemDefinition.Combat.cs" Link="Production/ItemDefinition.Combat.cs" />
+  </ItemGroup>
+</Project>

@@ -16,6 +16,7 @@ namespace ProjectF.Monsters
         private bool disposed;
 
         public GameObject Root { get; }
+        internal int RootInstanceId { get; }
         public MonsterArchetypeData Data { get; }
         public Sprite Icon { get; }
         public string DisplayName { get; }
@@ -30,6 +31,7 @@ namespace ProjectF.Monsters
                 || !definition.TryGetRuntimeData(variantId, out MonsterArchetypeData data))
                 throw new ArgumentException("A valid monster definition and variant are required.");
             Root = root;
+            RootInstanceId = root.GetInstanceID();
             Data = data;
             Icon = variant.icon;
             DisplayName = definition.MonsterName + " " + variant.variantName;

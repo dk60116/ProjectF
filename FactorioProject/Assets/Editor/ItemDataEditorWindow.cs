@@ -8,7 +8,7 @@ using UnityEngine;
 using UnityEngine.U2D;
 using ProjectF.EditorTools;
 
-public class ItemDataEditorWindow : EditorWindow
+public partial class ItemDataEditorWindow : EditorWindow
 {
     internal static class DefinitionCatalog
     {
@@ -404,7 +404,7 @@ public class ItemDataEditorWindow : EditorWindow
     private class ItemDataJsonFile
     {
         public string format = "ProjectF.ItemData";
-        public int version = 21;
+        public int version = 23;
         public List<ItemDataJsonEntry> items = new List<ItemDataJsonEntry>();
     }
 
@@ -438,6 +438,12 @@ public class ItemDataEditorWindow : EditorWindow
         public bool ignoreFilter;
         public bool hasOneItem;
         public bool oneItem;
+        public bool hasEquipment;
+        public bool isEquipment;
+        public bool hasCombatSettings;
+        public bool isRangedWeapon, isAmmo, requiresAmmo;
+        public float attackDamage, fireRate = 1f, attackRange = 15f, projectileSpeed = 20f;
+        public List<InputOutputJsonEntry> compatibleAmmo;
         public bool hasManual;
         public bool isManual;
         public InputOutputJsonEntry manualTargetItem;
@@ -3253,6 +3259,8 @@ public class ItemDataEditorWindow : EditorWindow
             GetMultiSelectedDefinitionProperty(serializedObject, "ignoreFilter");
         SerializedProperty oneItemProperty =
             GetMultiSelectedDefinitionProperty(serializedObject, "oneItem");
+        SerializedProperty isEquipmentProperty =
+            GetMultiSelectedDefinitionProperty(serializedObject, "isEquipment");
         SerializedProperty isManualProperty =
             GetMultiSelectedDefinitionProperty(serializedObject, "isManual");
         SerializedProperty manualTargetItemProperty =
@@ -3373,6 +3381,8 @@ public class ItemDataEditorWindow : EditorWindow
         EditorGUILayout.LabelField("Stats", EditorStyles.boldLabel);
         DrawMultiPropertyField(sizeProperty, new GUIContent("Size"));
         DrawMultiPropertyField(itemFilterProperty, new GUIContent("Item Filter"));
+        DrawMultiPropertyField(isEquipmentProperty, new GUIContent("Equipment Item", "체크하면 장비 아이템으로 분류합니다."));
+        DrawCombatItemFields(serializedObject);
         DrawMultiPropertyField(
             ignoreFilterProperty,
             new GUIContent("Ignore Filter", "체크하면 박스의 아이템 필터 목록에서 제외합니다."));
@@ -4056,6 +4066,7 @@ public class ItemDataEditorWindow : EditorWindow
         SerializedProperty itemFilterProperty = GetSelectedDefinitionProperty(serializedObject, "itemFilter");
         SerializedProperty ignoreFilterProperty = GetSelectedDefinitionProperty(serializedObject, "ignoreFilter");
         SerializedProperty oneItemProperty = GetSelectedDefinitionProperty(serializedObject, "oneItem");
+        SerializedProperty isEquipmentProperty = GetSelectedDefinitionProperty(serializedObject, "isEquipment");
         SerializedProperty isManualProperty = GetSelectedDefinitionProperty(serializedObject, "isManual");
         SerializedProperty manualTargetItemProperty = GetSelectedDefinitionProperty(serializedObject, "manualTargetItem");
         SerializedProperty upgradeableProperty = GetSelectedDefinitionProperty(serializedObject, "upgradeable");
@@ -4170,6 +4181,8 @@ public class ItemDataEditorWindow : EditorWindow
         EditorGUILayout.Space(8f);
         EditorGUILayout.LabelField("Stats", EditorStyles.boldLabel);
         EditorGUILayout.PropertyField(sizeProperty, new GUIContent("Size"));
+        DrawMultiPropertyField(isEquipmentProperty, new GUIContent("Equipment Item", "체크하면 장비 아이템으로 분류합니다."));
+        DrawCombatItemFields(serializedObject);
         if (itemFilterProperty != null)
         {
             EditorGUILayout.PropertyField(itemFilterProperty, new GUIContent("Item Filter"));
@@ -8074,6 +8087,17 @@ public class ItemDataEditorWindow : EditorWindow
             ignoreFilter = definition.ignoreFilter,
             hasOneItem = true,
             oneItem = definition.oneItem,
+            hasEquipment = true,
+            isEquipment = definition.isEquipment,
+            hasCombatSettings = true,
+            isRangedWeapon = definition.isRangedWeapon,
+            isAmmo = definition.isAmmo,
+            requiresAmmo = definition.requiresAmmo,
+            attackDamage = definition.attackDamage,
+            fireRate = definition.fireRate,
+            attackRange = definition.attackRange,
+            projectileSpeed = definition.projectileSpeed,
+            compatibleAmmo = BuildCompatibleAmmoJson(definition),
             hasManual = true,
             isManual = definition.isManual,
             manualTargetItem = definition.isManual
@@ -8411,6 +8435,29 @@ public class ItemDataEditorWindow : EditorWindow
         if (entry.hasOneItem)
         {
             definition.oneItem = entry.oneItem;
+        }
+        if (entry.hasEquipment)
+        {
+            definition.isEquipment = entry.isEquipment;
+        }
+        if (entry.hasCombatSettings)
+        {
+            definition.isRangedWeapon = entry.isRangedWeapon;
+            definition.isAmmo = entry.isAmmo;
+            definition.requiresAmmo = entry.requiresAmmo;
+            definition.attackDamage = Mathf.Max(0f, entry.attackDamage);
+            definition.fireRate = Mathf.Max(.01f, entry.fireRate);
+            definition.attackRange = Mathf.Max(.01f, entry.attackRange);
+            definition.projectileSpeed = Mathf.Max(.01f, entry.projectileSpeed);
+            definition.compatibleAmmo = definition.compatibleAmmo ?? new List<ItemDefinition>();
+            definition.compatibleAmmo.Clear();
+            if (entry.compatibleAmmo != null)
+                for (int i = 0; i < entry.compatibleAmmo.Count; i++)
+                {
+                    ItemDefinition ammunition = ResolveDefinitionReference(definitions, entry.compatibleAmmo[i]);
+                    if (ammunition != null && !definition.compatibleAmmo.Contains(ammunition))
+                        definition.compatibleAmmo.Add(ammunition);
+                }
         }
         if (entry.hasManual)
         {

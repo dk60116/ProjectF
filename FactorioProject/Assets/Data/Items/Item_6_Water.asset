@@ -13,7 +13,7 @@ MonoBehaviour:
   m_Name: Item_6_Water
   m_EditorClassIdentifier: 
   itemName: Water
-  id: 1
+  id: 0
   mapObject: {fileID: 0}
   mapObjectArchetype: {fileID: 0}
   useMapColor: 0
@@ -30,6 +30,7 @@ MonoBehaviour:
   size: 0
   itemFilter: 0
   ignoreFilter: 1
+  isEquipment: 0
   isManual: 0
   manualTargetItem: {fileID: 0}
   upgradeable: 1

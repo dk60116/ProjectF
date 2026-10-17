@@ -15,7 +15,9 @@ public sealed class SaveGameData
     // Version 72 persists player death/health and canonical installation health.
     // Version 73 adds nonfunctional wreckage, natural-resource HP and individual recovered HP
     // through inventory, floor stacks, vehicle cargo, arms and native belt payloads.
-    public const int CurrentVersion = 73;
+    // Version 74 adds the player's independent equipment inventory.
+    // Version 75 stores active equipment selection and its ammunition inventory.
+    public const int CurrentVersion = 75;
 
     public int version = CurrentVersion;
     public long savedAtUtcTicks;
@@ -436,6 +438,9 @@ public sealed class PlayerSaveData
     public PlayerStatSaveData stats = new PlayerStatSaveData();
     public List<PlayerInventorySlotSaveState> bagSlots = new List<PlayerInventorySlotSaveState>();
     public List<PlayerInventorySlotSaveState> handSlots = new List<PlayerInventorySlotSaveState>();
+    public List<PlayerInventorySlotSaveState> equipmentSlots = new List<PlayerInventorySlotSaveState>();
+    public int selectedEquipmentSlot = -1;
+    public List<PlayerInventorySlotSaveState> ammunitionSlots = new List<PlayerInventorySlotSaveState>();
     public List<PlayerCraftingQueueEntrySaveData> craftingQueue = new List<PlayerCraftingQueueEntrySaveData>();
 }
 

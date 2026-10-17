@@ -72,6 +72,7 @@ SpriteAtlas:
     - f333914c999d1d74eaf7443d160ca2de: 21300000
     - 04d2474cf6c71a54fb08ea3b29a7d0b7: 21300000
     - 630e8a9c0ccf22b4289a51e3b13ca096: 21300000
+    - e5224e9d0fc55c6429987d8ead78313b: 21300000
     - 31327ebd121222444ac8157997d7998c: 21300000
     - 0f933bbee2c18a748a8f0acd1d55acf8: 21300000
     - 2582507f70a72ed4d97ad5da96f8f4da: 21300000
@@ -98,6 +99,7 @@ SpriteAtlas:
   - {fileID: 21300000, guid: f333914c999d1d74eaf7443d160ca2de, type: 3}
   - {fileID: 21300000, guid: 04d2474cf6c71a54fb08ea3b29a7d0b7, type: 3}
   - {fileID: 21300000, guid: 630e8a9c0ccf22b4289a51e3b13ca096, type: 3}
+  - {fileID: 21300000, guid: e5224e9d0fc55c6429987d8ead78313b, type: 3}
   - {fileID: 21300000, guid: 31327ebd121222444ac8157997d7998c, type: 3}
   - {fileID: 21300000, guid: 0f933bbee2c18a748a8f0acd1d55acf8, type: 3}
   - {fileID: 21300000, guid: 2582507f70a72ed4d97ad5da96f8f4da, type: 3}
@@ -123,6 +125,7 @@ SpriteAtlas:
   - WoodBox_Dark
   - BagIcon
   - Undo
+  - EquipmentIcon_White
   - Pack
   - Cancel
   - CreateIcon

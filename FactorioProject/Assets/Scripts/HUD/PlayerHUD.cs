@@ -189,6 +189,7 @@ public partial class PlayerHUD : BagSlot
         id = -1;
         SubscribeSlotEvents();
         ResolveHudReferences(true);
+        InitializeEquipmentSlots();
         ClearObjectInfoPanelState();
         EnsureInstallationPlacementController();
         BindItemFilterButton();
@@ -216,6 +217,7 @@ public partial class PlayerHUD : BagSlot
     private void OnEnable()
     {
         ResolveHudReferences(true);
+        InitializeEquipmentSlots();
         ClearObjectInfoPanelState();
         EnsureInstallationPlacementController();
         BindItemFilterButton();
@@ -230,6 +232,7 @@ public partial class PlayerHUD : BagSlot
 
     private void OnDisable()
     {
+        ReleaseEquipmentSlots();
         ClearCombatHud();
         CloseWorkableCraftingPanel();
         CollapseExpandedBagSlot(true);
@@ -342,6 +345,7 @@ public partial class PlayerHUD : BagSlot
         if (boundInventoryBag == bag)
         {
             RefreshBag(bag);
+            BindEquipmentInventory();
             return;
         }
 
@@ -355,6 +359,7 @@ public partial class PlayerHUD : BagSlot
 
         RefreshBag(boundInventoryBag);
         BindHandBag(GetPlayerHandBag());
+        BindEquipmentInventory();
     }
 
     public void RefreshBag(PlayerBag bag)
@@ -435,6 +440,7 @@ public partial class PlayerHUD : BagSlot
         if (boundInventoryBag != null)
         {
             RefreshBag(boundInventoryBag);
+            BindEquipmentInventory();
             return;
         }
 
@@ -450,10 +456,12 @@ public partial class PlayerHUD : BagSlot
         }
 
         BindHandBag(GetPlayerHandBag());
+        BindEquipmentInventory();
     }
 
     private void UnbindCurrentBag()
     {
+        UnbindEquipmentInventory();
         if (boundInventoryBag != null)
         {
             boundInventoryBag.Changed -= HandleBagChanged;
@@ -1945,6 +1953,20 @@ public partial class PlayerHUD : BagSlot
         }
 
         SetTrainConnectionInteractionButtonState(null);
+
+        if (currentPlayer.HasRangedEquipment)
+        {
+            ClearInteractionTargets();
+            object target = clickedObjectInfoTarget;
+            if (ProjectF.Combat.PlayerProjectileWorld.IsDamageable(target))
+            {
+                currentInteractionMonster = target as ProjectF.Monsters.MonsterInstance;
+                currentInteractionAnimal = target as Animal;
+                SetActiveInteractionButton(InteractionButton, currentPlayer.SelectedEquipment.icon);
+            }
+            else ClearContextInteractionButtonState();
+            return;
+        }
 
         if (animalInteractionIcon != null && playerController != null && !currentPlayer.IsCarrying
             && clickedObjectInfoTarget is ProjectF.Monsters.MonsterInstance selectedMonster
@@ -3695,7 +3717,9 @@ public partial class PlayerHUD : BagSlot
 
         if (currentInteractionMonster != null)
         {
-            ResolvePlayerController()?.RequestMonsterKnifeInteraction(currentInteractionMonster);
+            if (currentPlayer != null && currentPlayer.HasRangedEquipment)
+                currentPlayer.TryFireSelectedWeapon(currentInteractionMonster);
+            else ResolvePlayerController()?.RequestMonsterKnifeInteraction(currentInteractionMonster);
             UpdateInteractionButtonState();
             return;
         }
@@ -3703,7 +3727,9 @@ public partial class PlayerHUD : BagSlot
         if (currentInteractionAnimal != null)
         {
             PlayerController playerController = ResolvePlayerController();
-            playerController?.RequestAnimalKnifeInteraction(currentInteractionAnimal);
+            if (currentPlayer != null && currentPlayer.HasRangedEquipment)
+                currentPlayer.TryFireSelectedWeapon(currentInteractionAnimal);
+            else playerController?.RequestAnimalKnifeInteraction(currentInteractionAnimal);
             UpdateInteractionButtonState();
             return;
         }
@@ -3893,6 +3919,13 @@ public partial class PlayerHUD : BagSlot
 
     private void HandleInteractionButtonKeyboardInput()
     {
+        Player rangedPlayer = GameManager.Instance != null ? GameManager.Instance.Player : null;
+        if (rangedPlayer != null && rangedPlayer.HasRangedEquipment)
+        {
+            if (Input.GetKey(KeyCode.Space) && !GameManager.TextInputFocused && !IsPlacementOrMapEditModeActive())
+                rangedPlayer.TryFireSelectedWeapon((object)currentInteractionMonster ?? currentInteractionAnimal);
+            return;
+        }
         if (!Input.GetKeyDown(KeyCode.Space)
             || GameManager.Instance == null
             || GameManager.Instance.PlayerInteractionLocked

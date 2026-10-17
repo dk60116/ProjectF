@@ -77,6 +77,18 @@ MonoBehaviour:
   parentInputOutputModuleItem: {fileID: 11400000, guid: cdc8e149b82cd7947b30ef76b473abfc, type: 2}
   inputOutputPairs:
   - inputs:
+    - itemDefinition: {fileID: 11400000, guid: b683f0f1cfeadca4196e5a3df399b945, type: 2}
+      count: 12
+    - itemDefinition: {fileID: 11400000, guid: 6948a22979bb56948883b25e4d85e66b, type: 2}
+      count: 5
+    - itemDefinition: {fileID: 11400000, guid: d920f99b12ae8ba4eb521eb6252da50a, type: 2}
+      count: 80
+    - itemDefinition: {fileID: 11400000, guid: e38b0f871b2a4ef4b80c9d5864a2b5e0, type: 2}
+      count: 60
+    outputs:
+    - itemDefinition: {fileID: 11400000, guid: cce9d703937340a4f9af3353e88cb536, type: 2}
+      count: 1
+  - inputs:
     - itemDefinition: {fileID: 11400000, guid: a42f84aea6bbe46419a3777181e987a1, type: 2}
       count: 8
     - itemDefinition: {fileID: 11400000, guid: ee57335a932a96a49963ace76adef614, type: 2}

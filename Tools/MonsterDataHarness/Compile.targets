@@ -5,6 +5,12 @@
       <Compile Include="$(MSBuildProjectDirectory)/Assets/Scripts/Simulation/Core/Monsters/**/*.cs" />
     </ItemGroup>
     <ItemGroup Condition="'$(MSBuildProjectName)' == 'Assembly-CSharp'">
+      <Compile Remove="$(MSBuildProjectDirectory)/Assets/Scripts/Character/Player/Player.Ammunition.cs;$(MSBuildProjectDirectory)/Assets/Scripts/Character/Player/Player.RangedCombat.cs;$(MSBuildProjectDirectory)/Assets/Scripts/Character/Player/PlayerController.RangedCombat.cs;$(MSBuildProjectDirectory)/Assets/Scripts/Character/Player/PlayerProjectileWorld.cs;$(MSBuildProjectDirectory)/Assets/Scripts/Character/Player/PlayerInventoryTransfer.cs;$(MSBuildProjectDirectory)/Assets/Scripts/Character/Player/WeaponShotStats.cs;$(MSBuildProjectDirectory)/Assets/Scripts/Object/ItemDefinition.Combat.cs" />
+      <Compile Include="$(MSBuildProjectDirectory)/Assets/Scripts/Character/Player/Player.Ammunition.cs;$(MSBuildProjectDirectory)/Assets/Scripts/Character/Player/Player.RangedCombat.cs;$(MSBuildProjectDirectory)/Assets/Scripts/Character/Player/PlayerController.RangedCombat.cs;$(MSBuildProjectDirectory)/Assets/Scripts/Character/Player/PlayerProjectileWorld.cs;$(MSBuildProjectDirectory)/Assets/Scripts/Character/Player/PlayerInventoryTransfer.cs;$(MSBuildProjectDirectory)/Assets/Scripts/Character/Player/WeaponShotStats.cs;$(MSBuildProjectDirectory)/Assets/Scripts/Object/ItemDefinition.Combat.cs" />
+      <Compile Remove="$(MSBuildProjectDirectory)/Assets/Scripts/HUD/PlayerHUD.EquipmentInventory.cs;$(MSBuildProjectDirectory)/Assets/Scripts/HUD/ItemSlot/BagSlot.Equipment.cs;$(MSBuildProjectDirectory)/Assets/Scripts/Object/Equipment/Bag/PlayerBag.Equipment.cs;$(MSBuildProjectDirectory)/Assets/Scripts/Character/Player/Player.Equipment.cs" />
+      <Compile Include="$(MSBuildProjectDirectory)/Assets/Scripts/HUD/PlayerHUD.EquipmentInventory.cs;$(MSBuildProjectDirectory)/Assets/Scripts/HUD/ItemSlot/BagSlot.Equipment.cs;$(MSBuildProjectDirectory)/Assets/Scripts/Object/Equipment/Bag/PlayerBag.Equipment.cs;$(MSBuildProjectDirectory)/Assets/Scripts/Character/Player/Player.Equipment.cs" />
+      <Compile Remove="$(MSBuildProjectDirectory)/Assets/Scripts/HUD/PlayerHUD.EquipmentSlots.cs" />
+      <Compile Include="$(MSBuildProjectDirectory)/Assets/Scripts/HUD/PlayerHUD.EquipmentSlots.cs" />
       <Compile Remove="$(MSBuildProjectDirectory)/Assets/Scripts/Character/Player/Player.UpperBodyAnimation.cs" />
       <Compile Include="$(MSBuildProjectDirectory)/Assets/Scripts/Character/Player/Player.UpperBodyAnimation.cs" />
       <Compile Remove="$(MSBuildProjectDirectory)/Assets/Scripts/Simulation/Presentation/WorldHealthBarView.cs" />
@@ -22,6 +28,8 @@
       <Compile Include="$(MSBuildProjectDirectory)/Assets/Scripts/Character/Player/Player.Combat.cs;$(MSBuildProjectDirectory)/Assets/Scripts/HUD/PlayerHUD.Combat.cs;$(MSBuildProjectDirectory)/Assets/Scripts/Map/TerrainGenerator.Combat.cs" />
     </ItemGroup>
     <ItemGroup Condition="'$(MSBuildProjectName)' == 'Assembly-CSharp-Editor'">
+      <Compile Remove="$(MSBuildProjectDirectory)/Assets/Editor/ItemDataEditorWindow.Combat.cs" />
+      <Compile Include="$(MSBuildProjectDirectory)/Assets/Editor/ItemDataEditorWindow.Combat.cs" />
       <Compile Remove="$(MSBuildProjectDirectory)/Assets/Editor/Monsters/**/*.cs" />
       <Compile Include="$(MSBuildProjectDirectory)/Assets/Editor/Monsters/**/*.cs" />
     </ItemGroup>

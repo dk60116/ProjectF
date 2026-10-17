@@ -30,6 +30,7 @@ MonoBehaviour:
   size: 0
   itemFilter: 0
   ignoreFilter: 1
+  isEquipment: 0
   isManual: 0
   manualTargetItem: {fileID: 0}
   upgradeable: 1

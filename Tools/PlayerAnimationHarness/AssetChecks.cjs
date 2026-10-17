@@ -32,7 +32,8 @@ const upper = object(layers[1].m_StateMachine.fileID, 'AnimatorStateMachine');
 const names = machine => machine.m_ChildStates.map(child => object(child.m_State.fileID, 'AnimatorState').m_Name);
 check(!names(base).includes('Pick') && !names(base).includes('Throw') && names(base).includes('Digging'),
   'Old duplicate full-body Pick/Throw are removed while digging remains on the base layer');
-check(names(upper).join(',') === 'Empty,Pick,Throw', 'Upper layer owns only its empty and action states');
+check(names(upper).join(',') === 'Empty,Pick,Throw,Shoot', 'Upper layer owns its empty, interaction and ranged attack states');
+check(!names(base).includes('Shoot'), 'Shooting does not duplicate a full-body action on the locomotion layer');
 check(object(upper.m_DefaultState.fileID, 'AnimatorState').m_Name === 'Empty', 'Upper layer starts in an empty pose');
 for (const child of upper.m_ChildStates) {
   const state = object(child.m_State.fileID, 'AnimatorState');
@@ -65,10 +66,21 @@ const weights = new Map(mask.m_Elements.map(element => [element.m_Path || '', Nu
 check(weights.get('') === 0 && weights.get('mixamorig:Hips') === 0, 'Root and hips are never overridden');
 for (const [bone, weight] of weights)
   check(weight === (bone.startsWith('mixamorig:Hips/mixamorig:Spine') ? 1 : 0), `Mask preserves the upper/lower-body boundary: ${bone}`);
-for (const clip of ['Pick', 'Digging']) {
+for (const clip of ['Pick', 'Digging', 'Shoot']) {
   const paths = new Set([...read(`Animation/Character/${clip}.anim`).matchAll(/^    path: (.+)\r?$/gm)].map(match => match[1].trim()));
   for (const bone of paths) check(weights.has(bone), `Mask covers the authored generic-rig curve: ${bone}`);
 }
+const shoot = documents(read('Animation/Character/Shoot.anim')).get('7400000').value.AnimationClip;
+const crossbowPath = 'mixamorig:Hips/mixamorig:Spine/mixamorig:Spine1/mixamorig:Spine2/mixamorig:RightShoulder/mixamorig:RightArm/mixamorig:RightForeArm/mixamorig:RightHand/Crossbow';
+const hasCrossbowKeys = curves => (curves || []).some(curve => curve.path === crossbowPath && curve.curve.m_Curve.length > 0);
+check(hasCrossbowKeys(shoot.m_EulerCurves) || hasCrossbowKeys(shoot.m_RotationCurves),
+  'Shoot retains its authored crossbow rotation correction');
+check(hasCrossbowKeys(shoot.m_PositionCurves), 'Shoot retains its authored crossbow grip position');
+check(weights.get(crossbowPath) === 1, 'Upper-body mask applies the crossbow pose used in the clip preview');
+const shootState = upper.m_ChildStates.map(child => object(child.m_State.fileID, 'AnimatorState'))
+  .find(state => state.m_Name === 'Shoot');
+check(shootState.m_Motion.guid === read('Animation/Character/Shoot.anim.meta').match(/^guid: (\w+)/m)[1],
+  'Runtime shooting uses the same clip as the authored Shoot preview');
 const playerController = read('Scripts/Character/Player/PlayerController.cs');
 check(/else if \(hasManualMovementInput\)\s*\{\s*HandleManualKnifeMovement\(\);\s*\}/.test(playerController),
   'Manual input starts nearby swings without being zeroed during a pending knife attack');

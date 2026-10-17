@@ -2,7 +2,7 @@ using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.Serialization;
 
-public class PlayerBag : MonoBehaviour
+public partial class PlayerBag : MonoBehaviour
 {
     public event System.Action Changed;
 
@@ -253,6 +253,7 @@ public class PlayerBag : MonoBehaviour
         }
 
         EnsureVisualPreservedStackCounts();
+        CompactExternalStack(stack);
         bool hasHiddenRetainedObject = HasHiddenRetainedObject(0, stack);
         int count = hasHiddenRetainedObject
             ? CountActiveObjects(stack) + 1
@@ -537,6 +538,12 @@ public class PlayerBag : MonoBehaviour
             return false;
         }
 
+        if (IsDataOnlyStorage && count > 0
+            && (count > ResolveSlotCapacityForItem(index, itemId) || !AcceptsStorageItem(itemId)))
+        {
+            return false;
+        }
+
         int clamped = Mathf.Clamp(count, 0, ResolveSlotCapacityForItem(index, itemId));
         if (clamped > 0 && itemId < 0)
         {
@@ -585,6 +592,7 @@ public class PlayerBag : MonoBehaviour
             }
         }
 
+        RefreshEquipmentPresentation();
         bool merged = mergeDuplicates && TryMergeDuplicateItemStacks();
         if (notify && (changed || merged))
         {
@@ -671,17 +679,22 @@ public class PlayerBag : MonoBehaviour
         int totalCapacity = 0;
         for (int i = 0; i < portableStack.Count; i++)
         {
-            if (!CanAddObject(i, objectId))
-            {
-                continue;
-            }
-
-            totalCapacity += Mathf.Max(
-                0,
-                ResolveSlotCapacityForItem(i, objectId) - GetSlotCapacityOccupancy(i));
+            totalCapacity += GetAvailableSlotCapacityForItem(i, objectId);
         }
 
         return totalCapacity;
+    }
+
+    internal int GetAvailableSlotCapacityForItem(int index, int objectId)
+    {
+        return CanAddObject(index, objectId)
+            ? Mathf.Max(0, ResolveSlotCapacityForItem(index, objectId) - GetSlotCapacityOccupancy(index))
+            : 0;
+    }
+
+    internal bool HasPendingSlotChanges(int index)
+    {
+        return GetSlotCapacityOccupancy(index) > GetSlotCount(index) || HasVisualPreservedObjects(index);
     }
 
     public bool TryReserveObjectInExistingStack(int objectId, out PortableObject targetPortableObject)
@@ -880,7 +893,7 @@ public class PlayerBag : MonoBehaviour
         PortableObject topObject = stack.stack[occupiedCount - 1];
         if (topObject != null)
         {
-            startWorldPosition = topObject.WorldPosition;
+            startWorldPosition = IsDataOnlyStorage ? transform.position : topObject.WorldPosition;
         }
 
         objectId = GetSlotItemId(index);
@@ -935,7 +948,7 @@ public class PlayerBag : MonoBehaviour
         PortableObject topObject = stack.stack[occupiedCount - 1];
         if (topObject != null)
         {
-            startWorldPosition = topObject.WorldPosition;
+            startWorldPosition = IsDataOnlyStorage ? transform.position : topObject.WorldPosition;
         }
 
         objectId = GetSlotItemId(index);
@@ -1057,6 +1070,8 @@ public class PlayerBag : MonoBehaviour
     private bool TryMergeDuplicateItemStacks()
     {
         EnsureInitialized();
+
+        if (IsDataOnlyStorage) return false;
 
         if (portableStack == null || currentStack == null || reservedObjects.Count > 0 || HasAnyVisualPreservedStackCounts())
         {
@@ -1658,6 +1673,13 @@ public class PlayerBag : MonoBehaviour
         NotifyChanged();
     }
 
+    internal void SetSlotInstallationHealth(int slotIndex, int start, int count, IReadOnlyList<float> health)
+    {
+        for (int i = 0; i < count; i++)
+            portableStack[slotIndex].stack[start+i].SetInstallationHealth(
+                health != null && i < health.Count ? health[i] : 0f);
+    }
+
     private void ClearAllSlots(bool notify = true)
     {
         EnsureInitialized();
@@ -1967,6 +1989,7 @@ public class PlayerBag : MonoBehaviour
         int physicalCapacity = stack != null && stack.stack != null
             ? stack.stack.Count
             : 0;
+        if (IsDataOnlyStorage && itemId >= 0 && !AcceptsStorageItem(itemId)) return 0;
         if (physicalCapacity <= 0 || itemId < 0)
         {
             return physicalCapacity;
@@ -2202,6 +2225,25 @@ public class PlayerBag : MonoBehaviour
         return count;
     }
 
+    private void CompactExternalStack(PortableStack stack)
+    {
+        // Pickup reservations can complete or cancel out of order. Move references only:
+        // identity-based reservations and their in-flight presentation targets stay valid.
+        int writeIndex = 0;
+        for (int readIndex = 0; readIndex < stack.stack.Count; readIndex++)
+        {
+            PortableObject item = stack.stack[readIndex];
+            if (item == null || !item.IsActive && item != hiddenRetainedObject) continue;
+            if (writeIndex != readIndex)
+            {
+                stack.stack[readIndex] = stack.stack[writeIndex];
+                stack.stack[writeIndex] = item;
+            }
+            if (item == hiddenRetainedObject) hiddenRetainedObjectIndex = writeIndex;
+            writeIndex++;
+        }
+    }
+
     private static int CountActiveObjects(PortableStack stack)
     {
         if (stack == null || stack.stack == null)
@@ -2342,6 +2384,7 @@ public class PlayerBag : MonoBehaviour
 
     private void NotifyChanged()
     {
+        RefreshEquipmentPresentation();
         Changed?.Invoke();
     }
 

@@ -38,6 +38,7 @@ public class MapSaveData
     public List<ConveyorItemBlockSaveEntry> conveyorItems = new();
     public List<ConveyorItemRunSaveEntry> conveyorItemRuns = new();
     public List<InstallationSaveEntry> installations = new();
+    public List<InstallationSaveEntry> wreckage = new();
 }
 public class ResourceSaveEntry { public int itemId; }
 public class FloorObjectSaveEntry { public List<int> itemIds = new(); }
@@ -86,7 +87,7 @@ namespace ProjectF.Conveyors
 }
 public class PlayerSaveData
 {
-    public List<PlayerInventorySlotSaveState> bagSlots = new(), handSlots = new();
+    public List<PlayerInventorySlotSaveState> bagSlots = new(), handSlots = new(), equipmentSlots = new(), ammunitionSlots = new();
     public int activeTorchItemId = -1;
     public List<PlayerCraftingQueueEntrySaveData> craftingQueue = new();
 }
@@ -173,9 +174,13 @@ static class Checks
         Verify(ambiguous, 51);
 
         var renumbered = Fixture("Pipe");
+        renumbered.player.equipmentSlots.Add(new() { itemId = 51 });
+        renumbered.player.ammunitionSlots.Add(new() { itemId = 51 });
         definitions[0].id = 120;
         SaveGameItemIdRemapper.RemapToCurrentDefinitions(renumbered, definitions);
         Verify(renumbered, 120);
+        Require(renumbered.player.equipmentSlots[0].itemId == 120, "Equipment inventory follows item ID renumbering");
+        Require(renumbered.player.ammunitionSlots[0].itemId == 120, "Ammunition follows item ID renumbering");
         VerifyInstallationIdentity();
         Console.WriteLine($"PASS: {checks} production save ID remapping checks.");
     }

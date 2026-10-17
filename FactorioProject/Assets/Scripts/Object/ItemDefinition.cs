@@ -4,7 +4,7 @@ using ProjectF.MapObjects;
 using UnityEngine;
 
 [CreateAssetMenu(menuName = "ProjectF/Item Definition", fileName = "ItemDef_")]
-public class ItemDefinition : ScriptableObject
+public partial class ItemDefinition : ScriptableObject
 {
     private const float DefaultCraftingDurationSeconds = 5f;
     private const float DefaultBucketFillDurationSeconds = 10f;
@@ -85,6 +85,8 @@ public class ItemDefinition : ScriptableObject
     public bool itemFilter;
     [Tooltip("체크하면 이 아이템을 박스의 아이템 필터 목록에 표시하지 않습니다.")]
     public bool ignoreFilter;
+    [Tooltip("체크하면 장비 아이템으로 분류합니다.")]
+    public bool isEquipment;
     [Tooltip("제작법 설명서 등 Manual 용도로 사용하는 아이템인지 여부입니다.")]
     public bool isManual;
     [Tooltip("이 Manual이 설명하는 대상 아이템입니다.")]

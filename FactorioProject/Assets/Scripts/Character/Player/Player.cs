@@ -101,6 +101,8 @@ public partial class Player : Character
     private GameObject shovelObject;
     [SerializeField]
     private GameObject torchObject;
+    [SerializeField]
+    private GameObject crossBowObject;
 
     private PlayerController playerController;
     private Transform torchLightAnchor;
@@ -239,6 +241,7 @@ public partial class Player : Character
     {
         using var callerSample = MapObjectTickProfiler.SampleLateUpdateCaller<Player>();
         UpdateActiveTorchEnergy(Time.deltaTime);
+        RefreshSelectedEquipmentIdentity();
         RefreshEquipVisual();
     }
 
@@ -406,6 +409,9 @@ public partial class Player : Character
         }
 
         ApplyToolEquipVisual(nextToolEquip);
+        SetEquipObjectActive(crossBowObject, !IsDead && nextToolEquip == ToolEquipVisual.None
+            && SelectedEquipment != null && SelectedEquipment.isRangedWeapon
+            && (playerController == null || !playerController.IsMounted));
         ApplyTorchEquipVisual(
             itemLightToggleRequested && IsTorchDefinition(toggledLightDefinition));
     }
@@ -952,6 +958,9 @@ public partial class Player : Character
 
         PlayerBag activeBag = GetBag();
         activeBag?.CaptureSaveSlots(saveData.bagSlots);
+        GetEquipmentBag().CaptureSaveSlots(saveData.equipmentSlots);
+        GetAmmunitionBag().CaptureSaveSlots(saveData.ammunitionSlots);
+        saveData.selectedEquipmentSlot = selectedEquipmentSlot;
 
         if (handBag != null)
         {
@@ -1056,6 +1065,8 @@ public partial class Player : Character
             return;
         }
 
+        updatingAmmunition = true;
+        projectileWorld?.ClearForLoad();
         if (saveData.stats != null)
         {
             playerState = new PlayerState(
@@ -1071,6 +1082,7 @@ public partial class Player : Character
 
         PlayerBag activeBag = GetBag();
         activeBag?.ApplySaveSlots(saveData.bagSlots);
+        RestoreEquipmentSlots(saveData);
 
         EnsureHandBag();
         reservedHandStack.Clear();
@@ -1080,6 +1092,7 @@ public partial class Player : Character
             handBag.RefreshExternalStackCounts(false);
         }
 
+        RestoreAmmunition(saveData);
         RestoreActiveTorch(saveData.activeTorchItemId, saveData.activeTorchRemainingEnergy);
 
         UpdateCarryState();

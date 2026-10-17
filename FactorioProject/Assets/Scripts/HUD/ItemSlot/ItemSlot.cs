@@ -256,6 +256,21 @@ public class ItemSlot : MonoBehaviour, IPointerEnterHandler, IPointerExitHandler
         SetItem(-1, 0, 0);
     }
 
+    private Outline selectionOutline;
+    public void SetSelectionHighlight(bool selected)
+    {
+        if (selectionOutline == null && selected)
+        {
+            ResolveReferences();
+            if (frame == null) return;
+            selectionOutline = frame.gameObject.GetComponent<Outline>();
+            if (selectionOutline == null) selectionOutline = frame.gameObject.AddComponent<Outline>();
+            selectionOutline.effectColor = new Color(1f, .72f, .18f, 1f);
+            selectionOutline.effectDistance = new Vector2(2f, -2f);
+        }
+        if (selectionOutline != null) selectionOutline.enabled = selected;
+    }
+
     public void SetIconAlpha(float alpha)
     {
         ResolveReferences();

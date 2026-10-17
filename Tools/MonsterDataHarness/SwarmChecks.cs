@@ -65,6 +65,7 @@ internal static class SwarmChecks
         RaidCleanup();
         PriorityThreePathBlockers();
         RaidContinuation();
+        RoamingBehavior();
         BuildingDiscovery();
         BlockedTargetOverflow();
         InfrastructureTargetIdentity();
@@ -385,8 +386,8 @@ internal static class SwarmChecks
                     Check(!terrain.Store.States[oneKeys[0]].hasCombatHealth && !terrain.Store.States[oneKeys[1]].hasCombatHealth,
                         "Distant priority-two cleanup precedes closer off-path priority one");
                 if (twos[0].Active || twos[1].Active || ones[0].Active || ones[1].Active)
-                    Check(!(bool)GetActorField(0, "Returning"),
-                        "A raider does not return while detected priority-two or priority-one structures remain");
+                    Check(!(bool)GetActorField(0, "Roaming"),
+                        "A raider does not roam while detected priority-two or priority-one structures remain");
             }
             Check(!twos[0].Active && !twos[1].Active && !ones[0].Active && !ones[1].Active,
                 $"Raid cleans every remaining two and one after final-three destruction: external={externalDestruction}, direction={direction}");
@@ -394,8 +395,9 @@ internal static class SwarmChecks
                 && zero.Active && !terrain.Store.States[zeroKey].hasCombatHealth,
                 "Cleanup never overrides absolute exclusion or the priority-zero obstacle-only rule");
             Tick(1800);
-            Check(raider.Root.transform.position.sqrMagnitude < .05f,
-                "A raider returns home only after finishing surrounding eligible installations");
+            Check((bool)GetActorField(0, "Roaming")
+                && Vector3.Distance(raider.Root.transform.position, (Vector3)GetActorField(0, "RoamCenter")) <= 4.2f,
+                "A raider roams locally after finishing surrounding eligible installations");
         }
 
         var retryTerrain = Reset();
@@ -407,8 +409,8 @@ internal static class SwarmChecks
         Spawn(retryTerrain, Vector3.zero, .5f, detection: 30f);
         SetActorField(0, "RejectedTargets", new System.Collections.Generic.Dictionary<object, float> { [three] = 4f });
         Tick(120);
-        Check(!retryTerrain.Store.States[oneKey].hasCombatHealth && !(bool)GetActorField(0, "Returning"),
-            "A temporarily rejected three is not treated as destroyed to start priority-one cleanup or return home");
+        Check(!retryTerrain.Store.States[oneKey].hasCombatHealth && !(bool)GetActorField(0, "Roaming"),
+            "A temporarily rejected three is not treated as destroyed to start priority-one cleanup or idle roaming");
         Tick(600);
         Check(retryTerrain.Store.States[threeKey].hasCombatHealth && !retryTerrain.Store.States[oneKey].hasCombatHealth,
             "Expired rejection resumes the remaining three instead of prematurely cleaning one");
@@ -592,8 +594,9 @@ internal static class SwarmChecks
         Check(terrain.Store.States.Count == 0,
             "A raid destroys successive nearby buildings beyond its original spawn leash");
         Tick(900);
-        Check(raider.Root.transform.position.sqrMagnitude < .05f,
-            "A raid returns to its original home only after nearby eligible buildings are gone");
+        Check(raider.Root.transform.position.x > 15f
+            && Vector3.Distance(raider.Root.transform.position, (Vector3)GetActorField(0, "RoamCenter")) <= 4.2f,
+            "A completed raid stays near its final destination instead of returning to its original spawn");
 
         terrain = Reset();
         for (int x = -16; x <= 59; x += 5)
@@ -607,8 +610,13 @@ internal static class SwarmChecks
         Tick(6000);
         Check(terrain.Store.States.Count == 0,
             "A long raid can detour around terrain outside its original home leash");
-        Check(Vector3.Distance(raider.Root.transform.position, home) < .23f,
-            "A long raid returns through obstacles using bounded navigation legs");
+        Check(Vector3.Distance(raider.Root.transform.position, home) > 40f
+            && Vector3.Distance(raider.Root.transform.position, (Vector3)GetActorField(0, "RoamCenter")) <= 4.2f,
+            "A completed long raid roams at the far destination without heading back through obstacles");
+        var nearbyPlayer = Player();
+        nearbyPlayer.transform.position = raider.Root.transform.position + new Vector3(2f, 0f, 0f);
+        Tick(180);
+        Check(nearbyPlayer.Hits > 0, "A raider reacquires a nearby player at its new roaming center far from the original spawn");
 
         terrain = Reset();
         var player = Player();
@@ -621,7 +629,7 @@ internal static class SwarmChecks
         terrain.AddBuilding(key, 3900L, key);
         Tick(300);
         Check(terrain.Store.States[key].hasCombatHealth,
-            "A returning monster interrupts its retreat for a newly discovered nearby building");
+            "A roaming monster immediately resumes combat against a newly discovered nearby building");
 
         terrain = Reset();
         key = new Vector2Int(7, 0);
@@ -630,7 +638,7 @@ internal static class SwarmChecks
         for (int i = 0; i < waiting.Length; i++)
         {
             waiting[i] = Spawn(terrain, new Vector3(4f, 0f, i - 2f), .5f);
-            SetActorField(i, "Home", Vector3.zero);
+            SetActorField(i, "RoamCenter", Vector3.zero);
         }
         Tick(1);
         for (int i = 0; i < waiting.Length; i++)
@@ -641,7 +649,7 @@ internal static class SwarmChecks
         key = new Vector2Int(4, 0);
         var building = terrain.AddBuilding(key, 3902L, key);
         raider = Spawn(terrain, new Vector3(2f, 0f, 0f), .5f);
-        SetActorField(0, "Home", Vector3.zero);
+        SetActorField(0, "RoamCenter", Vector3.zero);
         SetActorField(0, "RejectedTargets", new System.Collections.Generic.Dictionary<object, float> { [building] = 4f });
         Tick(1);
         Check(raider.Root.transform.position.x >= 2f,
@@ -649,6 +657,56 @@ internal static class SwarmChecks
         Tick(360);
         Check(terrain.Store.States[key].hasCombatHealth,
             "A temporarily unavailable building is attacked after its retry expires");
+    }
+
+    private static void RoamingBehavior()
+    {
+        var terrain = Reset();
+        var center = new Vector3(40f, 0f, 0f);
+        terrain.Water.Add(new Vector2Int(41, 1));
+        terrain.Walls.Add(new Vector2Int(39, 0));
+        var key = new Vector2Int(40, -1);
+        var zero = terrain.AddBuilding(key, 7000L, key);
+        zero.BoundItemDefinition.monsterAttackPriority = 0;
+        var monster = Spawn(terrain, center, detection: 6f, leash: 8f);
+        bool walked = false, rested = false;
+        for (int i = 0; i < 1200; i++)
+        {
+            Vector3 previous = monster.Root.transform.position;
+            Tick(1);
+            Vector3 position = monster.Root.transform.position;
+            walked |= Vector3.Distance(position, previous) > .001f;
+            rested |= monster.Root.AnimationState == MonsterAnimationState.Idle;
+            Check(Vector3.Distance(position, center) <= 4.2f, "Roaming remains bounded around the current territory");
+            Check(Vector3.Distance(position, previous) < .034f, "Roaming advances at movement speed without teleporting");
+            Check(terrain.CanMonsterMoveTo(position), "Roaming does not enter blocked terrain or installations");
+        }
+        Check(walked && rested && zero.Active && !terrain.Store.States[key].hasCombatHealth,
+            "A targetless monster alternates walking and pauses without attacking obstacle-only structures");
+        MapObjectTickManager.SimulationPaused = true;
+        Vector3 paused = monster.Root.transform.position;
+        Tick(120);
+        Check(Vector3.Distance(monster.Root.transform.position, paused) == 0f, "Pause freezes roaming movement and timers");
+        MapObjectTickManager.SimulationPaused = false;
+        var player = Player();
+        player.transform.position = paused + new Vector3(2f, 0f, 0f);
+        Tick(240);
+        Check(player.Hits > 0 && !(bool)GetActorField(0, "Roaming"), "Roaming yields immediately to a discovered player");
+
+        var positions = new Vector3[600];
+        terrain = Reset(); monster = Spawn(terrain, center, detection: 6f, leash: 8f);
+        for (int i = 0; i < positions.Length; i++) { Tick(1); positions[i] = monster.Root.transform.position; }
+        terrain = Reset(); monster = Spawn(terrain, center, detection: 6f, leash: 8f);
+        for (int i = 0; i < positions.Length; i++)
+        {
+            Tick(1);
+            Check(Vector3.Distance(monster.Root.transform.position, positions[i]) == 0f, "Identical simulation seeds reproduce identical roaming paths");
+        }
+        key = TerrainGenerator.GetWorldBlockCoordinate(monster.Root.transform.position) + new Vector2Int(2, 0);
+        var building = terrain.AddBuilding(key, 7001L, key);
+        building.BoundItemDefinition.maxHealth = 1f;
+        Tick(300);
+        Check(!building.Active, "A roaming monster resumes combat when a new nearby structure appears");
     }
 
     private static object GetActor(int index)

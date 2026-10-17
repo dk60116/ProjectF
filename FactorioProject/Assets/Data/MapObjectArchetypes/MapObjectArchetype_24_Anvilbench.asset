@@ -15,7 +15,7 @@ MonoBehaviour:
   schemaVersion: 2
   itemDefinition: {fileID: 11400000, guid: 10f561e50ba416e43acc7c19a3e74feb, type: 2}
   sourcePrefab: {fileID: 7839628250064023149, guid: 6168af2f119e8f040a9678762a5df929, type: 3}
-  itemId: 25
+  itemId: 26
   itemName: Anvilbench
   sourcePrefabGuid: 6168af2f119e8f040a9678762a5df929
   sourceContentHash:

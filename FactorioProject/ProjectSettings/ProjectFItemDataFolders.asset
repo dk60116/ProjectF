@@ -16,7 +16,7 @@ MonoBehaviour:
   - id: 839eaa9b00424dc59d967a096e100401
     displayName: Energy
     expanded: 1
-    anchorItemGuid: 228fcd45b59e4994d8b5f8ee23dc4595
+    anchorItemGuid: cc54448c2b8e64c40a4458e259ad7222
   - id: 52f654e67171467f864fb2b0973e4063
     displayName: Resource
     expanded: 1
@@ -140,11 +140,9 @@ MonoBehaviour:
   - id: 072e2020b408429c8245efd9faa51625
     displayName: Weapon
     expanded: 1
-    anchorItemGuid: 26f1d9c09d300a8458e57102d6aa6048
+    anchorItemGuid: c7d14445b92c7d0468e83d73c68f384f
   itemAssignments:
   - itemGuid: e9950cff3cab70041b1997e87d6e22b1
-    folderId: 839eaa9b00424dc59d967a096e100401
-  - itemGuid: 440d4476f9093b44e948d784c15c0d81
     folderId: 839eaa9b00424dc59d967a096e100401
   - itemGuid: f40db410eac38e44386c4ef5c3396514
     folderId: 839eaa9b00424dc59d967a096e100401
@@ -318,8 +316,6 @@ MonoBehaviour:
     folderId: 9e4995f6600f4c04ad51a59b2550be3b
   - itemGuid: e18b544fca5809747ba18ab854492b79
     folderId: 4b700d33e3bf4bfda1fc4dee7c89b691
-  - itemGuid: 9f74f682a7445a743b8de1c49a341eed
-    folderId: 061b1e1292114fabaa190654551cea7c
   - itemGuid: 0e1d27a0f4c177c44985160c21333ad4
     folderId: 4b700d33e3bf4bfda1fc4dee7c89b691
   - itemGuid: 0b21f1cf2a22a094e88ddb0300d635c2
@@ -372,8 +368,6 @@ MonoBehaviour:
     folderId: 4008c2a9919643788ee7eedfdd9a2060
   - itemGuid: 10f561e50ba416e43acc7c19a3e74feb
     folderId: f15266f7c0944b46a765791c0cac6402
-  - itemGuid: 60e9b284bddea2d4d8dec70d48624f68
-    folderId: 52f654e67171467f864fb2b0973e4063
   - itemGuid: c2523ea97a8bd7c4d84ce14047c89771
     folderId: 4008c2a9919643788ee7eedfdd9a2060
   - itemGuid: f258fbd8cc06e274fb34717e13970102
@@ -416,3 +410,11 @@ MonoBehaviour:
     folderId: 072e2020b408429c8245efd9faa51625
   - itemGuid: 35ec64fb0b6f8544c8d8d190c9447441
     folderId: 4008c2a9919643788ee7eedfdd9a2060
+  - itemGuid: 9f74f682a7445a743b8de1c49a341eed
+    folderId: 072e2020b408429c8245efd9faa51625
+  - itemGuid: 883dad8c80347714793c7527d5836636
+    folderId: 072e2020b408429c8245efd9faa51625
+  - itemGuid: 60e9b284bddea2d4d8dec70d48624f68
+    folderId: 52f654e67171467f864fb2b0973e4063
+  - itemGuid: 440d4476f9093b44e948d784c15c0d81
+    folderId: 839eaa9b00424dc59d967a096e100401

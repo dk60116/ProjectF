@@ -5,7 +5,7 @@ using UnityEngine;
 using UnityEngine.EventSystems;
 using UnityEngine.UI;
 
-public class BagSlot : ItemSlot, IBeginDragHandler, IDragHandler, IEndDragHandler
+public partial class BagSlot : ItemSlot, IBeginDragHandler, IDragHandler, IEndDragHandler
 {
     private static BagSlot expandedSlot;
     private static BagSlot hoveredDropSlot;
@@ -66,6 +66,7 @@ public class BagSlot : ItemSlot, IBeginDragHandler, IDragHandler, IEndDragHandle
     private Button pickupButton;
 
     private PlayerBag boundBag;
+    protected bool IsEquipmentSlot => boundBag != null && boundBag.IsDataOnlyStorage;
     private int slotIndex = -1;
     private RectTransform rectTransform;
     private RectTransform craftingRoot;
@@ -219,6 +220,9 @@ public class BagSlot : ItemSlot, IBeginDragHandler, IDragHandler, IEndDragHandle
         CacheReferences();
         CollapseCraftingSlots(true);
         BindSlotClick();
+        if (boundBag != null)
+            Bind(boundBag, slotIndex, boundBag.GetSlotItemId(slotIndex), boundBag.GetSlotCount(slotIndex),
+                boundBag.GetSlotCapacityForItem(slotIndex, boundBag.GetSlotItemId(slotIndex)));
     }
 
     private void OnEnable()
@@ -337,6 +341,7 @@ public class BagSlot : ItemSlot, IBeginDragHandler, IDragHandler, IEndDragHandle
         }
 
         Player player = GameManager.Instance.Player;
+        if (!player.TryPrepareEquipmentTransfer(boundBag, slotIndex, null, -1)) return;
         Transform movingStartTransform = null;
         if (player != null)
         {
@@ -598,10 +603,8 @@ public class BagSlot : ItemSlot, IBeginDragHandler, IDragHandler, IEndDragHandle
         }
         if (dropSlot != null && dropSlot != this)
         {
-            if (TryTransferToSlot(dropSlot))
-            {
-                return;
-            }
+            TryTransferToSlot(dropSlot);
+            return;
         }
 
         if (ShouldCancelDrop(eventData))
@@ -2020,6 +2023,13 @@ public class BagSlot : ItemSlot, IBeginDragHandler, IDragHandler, IEndDragHandle
 
     private void RefreshCraftingItems(int itemId, int itemCount, bool force = false)
     {
+        if (IsEquipmentSlot)
+        {
+            craftableItems.Clear();
+            ClearCraftingSlots();
+            CollapseCraftingSlots(true);
+            return;
+        }
         bool selectedItemChangedWhileExpanded = isCraftingExpanded
                                                && lastBoundItemId >= 0
                                                && (itemId < 0 || itemCount <= 0 || itemId != lastBoundItemId);
@@ -2772,6 +2782,10 @@ public class BagSlot : ItemSlot, IBeginDragHandler, IDragHandler, IEndDragHandle
             return false;
         }
 
+        Player transferPlayer = ResolvePlayer();
+        if (transferPlayer != null && !transferPlayer.TryPrepareEquipmentTransfer(
+                boundBag, slotIndex, targetBag, targetIndex)) return false;
+
         int sourceItemId = boundBag.GetSlotItemId(slotIndex);
         int sourceCount = boundBag.GetSlotCount(slotIndex);
         int sourceRemovableCount = boundBag.GetSlotRemovableCount(slotIndex);
@@ -2834,7 +2848,7 @@ public class BagSlot : ItemSlot, IBeginDragHandler, IDragHandler, IEndDragHandle
             return false;
         }
 
-        if (this is HandSlot)
+        if (this is HandSlot && !IsEquipmentSlot)
         {
             return player.TryStoreHandItemsInBag();
         }
@@ -2898,6 +2912,9 @@ public class BagSlot : ItemSlot, IBeginDragHandler, IDragHandler, IEndDragHandle
 
         CancelPortableMoveVisuals(sourceObjects);
         CancelPortableMoveVisuals(targetObjects);
+
+        if (sourceBag.IsDataOnlyStorage || targetBag.IsDataOnlyStorage)
+            return ProjectF.Combat.PlayerInventoryTransfer.TryMove(sourceBag, sourceIndex, targetBag, targetIndex, itemCount);
 
         List<PortableMoveAnchor> sourceAnchors = new List<PortableMoveAnchor>(itemCount);
         if (!TryCollectPortableObjectAnchors(sourceObjects, sourceAnchors))
@@ -2975,6 +2992,9 @@ public class BagSlot : ItemSlot, IBeginDragHandler, IDragHandler, IEndDragHandle
         CancelPortableMoveVisuals(targetObjects);
         CancelPortableMoveVisuals(destinationForSource);
         CancelPortableMoveVisuals(destinationForTarget);
+
+        if (sourceBag.IsDataOnlyStorage || targetBag.IsDataOnlyStorage)
+            return ProjectF.Combat.PlayerInventoryTransfer.TryMove(sourceBag, sourceIndex, targetBag, targetIndex, sourceCount, true);
 
         List<PortableMoveAnchor> sourceAnchors = new List<PortableMoveAnchor>(sourceCount);
         if (!TryCollectPortableObjectAnchors(sourceObjects, sourceAnchors))
@@ -3682,7 +3702,9 @@ public class BagSlot : ItemSlot, IBeginDragHandler, IDragHandler, IEndDragHandle
             return;
         }
 
-        ToggleCraftingSlots();
+        if (boundBag != null && boundBag.IsEquipmentStorage)
+            EquipmentSelectionRequested?.Invoke(this);
+        else if (!IsEquipmentSlot) ToggleCraftingSlots();
     }
 
     private bool TryHandlePickupClick()
@@ -3723,7 +3745,7 @@ public class BagSlot : ItemSlot, IBeginDragHandler, IDragHandler, IEndDragHandle
         return true;
     }
 
-    protected virtual bool AllowPickupOnClick => enablePickupOnClick;
+    protected virtual bool AllowPickupOnClick => enablePickupOnClick && !IsEquipmentSlot;
 
     protected virtual bool TryPickupGroundCandidate(Player player, Block block,
         PortableObject requiredPortableObject, Vector3 pickupOrigin, float pickupRange)

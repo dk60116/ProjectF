@@ -13,7 +13,7 @@ MonoBehaviour:
   m_Name: Item_93_Pitchfork
   m_EditorClassIdentifier: Assembly-CSharp::ItemDefinition
   itemName: Pitchfork
-  id: 20
+  id: 22
   mapObject: {fileID: 0}
   mapObjectArchetype: {fileID: 0}
   useMapColor: 0
@@ -31,6 +31,7 @@ MonoBehaviour:
   size: 0
   itemFilter: 0
   ignoreFilter: 0
+  isEquipment: 0
   isManual: 0
   manualTargetItem: {fileID: 0}
   upgradeable: 1

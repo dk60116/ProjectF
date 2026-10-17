@@ -230,9 +230,10 @@ internal static class RuntimeChecks
         Advance(360);
         Check(player.Hits > 0, "Recovery scenario first pursues player around an obstacle");
         player.transform.position = new Vector3(30f, 0f, 0f);
+        Vector3 abandoned = monster.Root.transform.position;
         Advance(900);
-        Check(monster.Root.transform.position.sqrMagnitude < 0.05f,
-            "Losing a target preserves the obstacle-detour path while returning home");
+        Check(Vector3.Distance(monster.Root.transform.position, abandoned) <= 4.2f,
+            "Losing a target begins local roaming instead of retracing the path to spawn");
         int hits = player.Hits;
         player.transform.position = new Vector3(6f, 0f, 0f);
         Advance(360);
@@ -397,16 +398,16 @@ internal static class RuntimeChecks
         GameManager.Instance.SetCloakingMode(true);
         MonsterInstance monster = Spawn(terrain);
         Advance(120);
-        Check(monster.Root.transform.position.sqrMagnitude == 0f && player.Hits == 0,
-            "Cloaked player cannot be newly acquired or chased");
+        Check(Vector3.Distance(monster.Root.transform.position, Vector3.zero) <= 4.2f && player.Hits == 0,
+            "Cloaked player is ignored while the monster roams locally");
         GameManager.Instance.SetCloakingMode(false);
         Advance(60);
         Check(monster.Root.transform.position.x > 0f, "Uncloaking restores player acquisition");
         float x = monster.Root.transform.position.x;
         GameManager.Instance.SetCloakingMode(true);
         Advance(1);
-        Check(monster.Root.transform.position.x < x && player.Hits == 0,
-            "Cloaking drops an existing chase on the next tick, before target-scan cooldown expires");
+        Check(monster.Root.transform.position.x == x && player.Hits == 0,
+            "Cloaking drops the chase immediately and starts a local roaming pause rather than retreating");
 
         terrain = Reset();
         player = PutPlayer(1f);
@@ -457,8 +458,8 @@ internal static class RuntimeChecks
         zero.BoundItemDefinition.monsterAttackPriority = 0;
         MonsterInstance monster = Spawn(terrain);
         Advance(120);
-        Check(!terrain.Store.States[zeroKey].hasCombatHealth && monster.Root.transform.position.sqrMagnitude == 0f,
-            "Nearby priority-zero structure is not an unsolicited combat goal");
+        Check(!terrain.Store.States[zeroKey].hasCombatHealth && monster.Root.transform.position.sqrMagnitude <= 4.2f * 4.2f,
+            "A roaming monster avoids nearby priority-zero structures without treating them as unsolicited combat goals");
 
         terrain = Reset();
         zeroKey = new(0, 2);
@@ -512,9 +513,11 @@ internal static class RuntimeChecks
         zero = terrain.AddBuilding(zeroKey, 909L, zeroKey);
         zero.BoundItemDefinition.monsterAttackPriority = 0;
         player.transform.position = new Vector3(30f, 0f, 0f);
+        Vector3 abandoned = monster.Root.transform.position;
         Advance(900);
-        Check(!zero.Active && monster.Root.transform.position.sqrMagnitude < 0.05f,
-            "Returning actor clears a newly placed priority-zero blocker, then resumes homeward movement");
+        Check(zero.Active && !terrain.Store.States[zeroKey].hasCombatHealth
+            && Vector3.Distance(monster.Root.transform.position, abandoned) <= 4.2f,
+            "Local roaming avoids priority-zero buildings rather than destroying them on a route back to spawn");
     }
 
     private static void TargetSafety()
@@ -567,9 +570,10 @@ internal static class RuntimeChecks
             "World loading barrier freezes combat");
         MapObjectTickManager.WaitingForWorldLoad = false;
         player.transform.position = new Vector3(30f, 0f, 0f);
+        Vector3 abandoned = monster.Root.transform.position;
         Advance(600);
-        Check(monster.Root.transform.position.sqrMagnitude < 0.05f && player.Hits == 0,
-            "Out-of-leash target is dropped and monster returns home");
+        Check(Vector3.Distance(monster.Root.transform.position, abandoned) <= 4.2f && player.Hits == 0,
+            "Out-of-leash targets are dropped while the monster stays near its last combat location");
         monster.Root.activeInHierarchy = false;
         Advance(1);
         MonsterWorld.Current.Dispose();
@@ -692,9 +696,10 @@ internal static class RuntimeChecks
         Check(monster.Root.transform.position.x > 1f && player.Hits > 0,
             "Monster surrounded on all eight sides by trees escapes and attacks player");
         player.transform.position = new Vector3(30, 0, 0);
+        Vector3 abandoned = monster.Root.transform.position;
         Advance(600);
-        Check(monster.Root.transform.position.sqrMagnitude < 0.05f,
-            "Monster returns home through the same forest without teleporting");
+        Check(Vector3.Distance(monster.Root.transform.position, abandoned) <= 4.2f,
+            "After forest combat the monster roams near its last position rather than returning to spawn");
 
         terrain = Reset();
         terrain.Blocks[treeCell] = new Block { MapObject = new ProjectF.MapObjects.TreeInstance() };

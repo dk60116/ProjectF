@@ -17,6 +17,7 @@ namespace ProjectF.Monsters
         private const float TargetRetrySeconds = 4f;
         private const float MaximumNavigationLeg = 48f;
         private const float PriorityTwoEncounterRange = 5f;
+        private const float RoamRadius = 4f;
 
         private sealed class TargetReferenceComparer : IEqualityComparer<object>
         {
@@ -29,7 +30,10 @@ namespace ProjectF.Monsters
         {
             internal MonsterInstance Monster;
             internal MonsterAnimationView Animation;
-            internal Vector3 Home;
+            internal Vector3 RoamCenter, RoamGoal;
+            internal float RoamTimer;
+            internal uint RoamRandom;
+            internal bool HasRoamGoal;
             internal Vector3 Position;
             internal Quaternion Rotation;
             internal readonly Vector3[] Path = new Vector3[128];
@@ -48,7 +52,7 @@ namespace ProjectF.Monsters
             internal float ApproachTimer, StalledTime, BestApproachDistance;
             internal int ApproachRetries;
             internal Dictionary<object, float> RejectedTargets;
-            internal bool Returning;
+            internal bool Roaming;
             internal bool FinishingStructure;
             internal long NavigationRevision;
             internal Player PlayerTarget;
@@ -92,7 +96,7 @@ namespace ProjectF.Monsters
         private MonsterBodyShape playerShape;
         private bool hasPlayerBody;
         private bool disposed;
-        private int searchBudget, pathBudget, approachBudget, simulationCursor;
+        private int searchBudget, pathBudget, approachBudget, roamBudget, simulationCursor;
         private float simulationTime;
         public long SimulationId => long.MinValue + 3L;
         public static MonsterWorld Current => current;
@@ -118,12 +122,13 @@ namespace ProjectF.Monsters
                 if (ReferenceEquals(current.actors[i].Monster, monster)) return;
             var actor = new Actor
             {
-                Monster = monster, Home = monster.Root.transform.position,
+                Monster = monster, RoamCenter = monster.Root.transform.position,
                 Position = monster.Root.transform.position, Rotation = monster.Root.transform.rotation,
                 AttackIntervalTicks = DeterministicSimulationUnits.SecondsToTicks(monster.Data.Stats.AttackInterval),
                 Animation = new MonsterAnimationView(monster.Root, definition.Animations),
                 BodyId = ++current.nextBodyId
             };
+            actor.RoamRandom = unchecked((uint)actor.BodyId * 747796405u + 2891336453u);
             current.actors.Add(actor);
             current.UpdateBody(actor);
         }
@@ -145,6 +150,7 @@ namespace ProjectF.Monsters
             searchBudget = 2;
             pathBudget = 1;
             approachBudget = 4;
+            roamBudget = 4;
             simulationTime += Mathf.Max(0f, deltaTime);
             long elapsedTicks = DeterministicSimulationUnits.DeltaTimeToTicks(deltaTime);
             RefreshPlayerBody();
@@ -186,12 +192,12 @@ namespace ProjectF.Monsters
             ResolveBodyOverlap(actor, Mathf.Max(.5f, stats.MoveSpeed) * Mathf.Max(0f, dt));
             Vector3 position = actor.Position;
             bool hasPlayer = CanTargetPlayer(actor.PlayerTarget)
-                && FlatDistanceSquared(actor.Home, actor.PlayerTarget.transform.position) <= stats.LeashRange * stats.LeashRange;
+                && FlatDistanceSquared(actor.RoamCenter, actor.PlayerTarget.transform.position) <= stats.LeashRange * stats.LeashRange;
             bool hasBuilding = terrain.TryRefreshCombatTarget(actor.BuildingTarget, out var currentBuilding);
             if (hasBuilding) actor.BuildingTarget = currentBuilding;
             if ((actor.PlayerTarget != null || actor.BuildingTarget.Target != null)
                 && !hasPlayer && !hasBuilding) ClearTarget(actor, preserveDestination: true);
-            // Returning is a confirmed empty search, not a lock that disables further searches.
+            // Roaming never suppresses target scans or a budget-delayed retry.
             bool searchPending = actor.Attack.CanRetarget(elapsedTicks) && actor.SearchTimer <= 0f;
             if (searchPending && searchBudget > 0)
             {
@@ -204,7 +210,7 @@ namespace ProjectF.Monsters
             hasBuilding = actor.BuildingTarget.Target != null;
             bool hasTarget = hasPlayer || hasBuilding;
             Vector3 point = hasPlayer ? actor.PlayerTarget.transform.position
-                : hasBuilding ? actor.BuildingTarget.ClosestPoint(position) : actor.Home;
+                : hasBuilding ? actor.BuildingTarget.ClosestPoint(position) : position;
             point.y = position.y;
             float attackRange = stats.AttackRange;
             float attackDistance = FlatDistanceSquared(position, point);
@@ -241,16 +247,15 @@ namespace ProjectF.Monsters
                 presentation.NotifyAttackAnimationStarted(actor.Monster);
             }
             bool moved = false;
-            if (!inRange && !actor.Attack.IsAttacking && stats.MoveSpeed > 0f
-                && (hasTarget || actor.Returning && !searchPending && FlatDistanceSquared(position, point) > 0.04f))
+            if (!inRange && !actor.Attack.IsAttacking && stats.MoveSpeed > 0f && hasTarget)
             {
                 Vector3 goal = point;
-                if (!hasTarget || TryGetApproach(actor, stats, out goal))
+                if (TryGetApproach(actor, stats, out goal))
                 {
-                    if (hasTarget && actor.HasApproach)
+                    if (actor.HasApproach)
                         goal = GetOrbitWaypoint(actor, goal);
                     moved = Move(actor, goal, stats, dt);
-                    if (hasTarget && (actor.PlayerTarget != null || actor.BuildingTarget.Target != null)
+                    if ((actor.PlayerTarget != null || actor.BuildingTarget.Target != null)
                         && actor.HasApproach && dt > 0f)
                     {
                         float distance = FlatDistanceSquared(actor.Position, actor.Approach);
@@ -266,6 +271,8 @@ namespace ProjectF.Monsters
                     }
                 }
             }
+            else if (!hasTarget && actor.Roaming && !actor.Attack.IsAttacking && stats.MoveSpeed > 0f)
+                moved = TickRoaming(actor, stats, dt);
             if (!moved && hasTarget && (inRange || atApproach || actor.Attack.IsAttacking))
                 Face(actor, point - position, stats.TurnSpeed * dt);
             if (!actor.Attack.IsAttacking)
@@ -280,7 +287,7 @@ namespace ProjectF.Monsters
             bool playerAvailable = CanTargetPlayer(player)
                 && (actor.PlayerTarget == player
                     || FlatDistanceSquared(position, player.transform.position) <= stats.DetectionRange * stats.DetectionRange)
-                && FlatDistanceSquared(actor.Home, player.transform.position) <= stats.LeashRange * stats.LeashRange
+                && FlatDistanceSquared(actor.RoamCenter, player.transform.position) <= stats.LeashRange * stats.LeashRange
                 && (actor.BuildingTarget.Target == null || HasAttackLine(position, player.transform.position, null));
             bool retryPending = playerAvailable && IsRejected(actor, player);
             if (playerAvailable && !retryPending)
@@ -290,7 +297,7 @@ namespace ProjectF.Monsters
                     ClearTarget(actor);
                     actor.PlayerTarget = player;
                 }
-                actor.Returning = false;
+                actor.Roaming = false;
                 return;
             }
             // Finish an encountered structure before resuming the persistent raid destination.
@@ -366,7 +373,12 @@ namespace ProjectF.Monsters
             }
             actor.RaidDestination = priorityThree;
             actor.FinishingStructure = encounteredTwo;
-            actor.Returning = nearest.Target == null && !retryPending;
+            if (nearest.Target == null && !retryPending && !actor.Roaming)
+            {
+                actor.Roaming = true;
+                actor.RoamCenter = position;
+                actor.RoamTimer = .5f + RoamRandomFraction(actor);
+            }
         }
 
         private static bool CanTargetPlayer(Player player) => player != null
@@ -382,17 +394,57 @@ namespace ProjectF.Monsters
             actor.PlayerTarget = null;
             actor.BuildingTarget = default;
             if (!preserveDestination) actor.RaidDestination = default;
-            actor.Returning = false;
+            actor.Roaming = actor.HasRoamGoal = false;
             actor.FinishingStructure = false;
             actor.SearchTimer = 0f;
             actor.PathCount = actor.PathIndex = 0;
             actor.Attack.CancelHit();
         }
 
+        private bool TickRoaming(Actor actor, MonsterStats stats, float dt)
+        {
+            actor.RoamTimer -= Mathf.Max(0f, dt);
+            if (actor.HasRoamGoal)
+            {
+                if (actor.RoamTimer > 0f && FlatDistanceSquared(actor.Position, actor.RoamGoal) > .04f
+                    && HasWalkableStep(actor.Position, actor.RoamGoal))
+                    return Move(actor, actor.RoamGoal, stats, dt);
+                actor.HasRoamGoal = false;
+                actor.PathCount = actor.PathIndex = 0;
+                actor.RoamTimer = 1f + RoamRandomFraction(actor) * 2f;
+                return false;
+            }
+            if (actor.RoamTimer > 0f || roamBudget <= 0) return false;
+            roamBudget--;
+            // Reuse deterministic animal sampling; idle roaming does not request A* paths or attack blockers.
+            for (int attempt = 0; attempt < 8; attempt++)
+            {
+                Vector3 goal = actor.RoamCenter + ProjectF.Animals.AnimalSimulationMath.RandomDisk(
+                    NextRoamRandom(actor), NextRoamRandom(actor), RoamRadius);
+                goal.y = actor.Position.y;
+                if (FlatDistanceSquared(actor.Position, goal) < .25f || !canMoveTo(goal)
+                    || !HasWalkableStep(actor.Position, goal)) continue;
+                actor.RoamGoal = goal;
+                actor.HasRoamGoal = true;
+                actor.RoamTimer = Vector3.Distance(actor.Position, goal) / stats.MoveSpeed + 2f;
+                return false;
+            }
+            actor.RoamTimer = 1f + RoamRandomFraction(actor) * 2f;
+            return false;
+        }
+
+        private static uint NextRoamRandom(Actor actor)
+        {
+            actor.RoamRandom = unchecked(actor.RoamRandom * 1664525u + 1013904223u);
+            return actor.RoamRandom;
+        }
+
+        private static float RoamRandomFraction(Actor actor) => (NextRoamRandom(actor) & 65535u) / 65535f;
+
         private bool Move(Actor actor, Vector3 goal, MonsterStats stats, float dt)
         {
             Vector3 position = actor.Position;
-            // Local path legs keep raids and long homeward trips inside the pathfinder's bounded grid.
+            // Local path legs keep long raids inside the pathfinder's bounded grid.
             goal = GetNavigationGoal(position, goal);
             Vector3 destination = goal;
             if (!HasWalkableStep(position, goal))
@@ -404,7 +456,8 @@ namespace ProjectF.Monsters
                 {
                     pathBudget--;
                     actor.PathTimer = 0.5f;
-                    if (terrain.TryGetMonsterPathBlocker(position, goal, out var blocker)
+                    if ((actor.PlayerTarget != null || actor.BuildingTarget.Target != null)
+                        && terrain.TryGetMonsterPathBlocker(position, goal, out var blocker)
                         && (blocker.Target.BoundItemDefinition.MonsterAttackPriority <= 1
                             || blocker.Target.BoundItemDefinition.MonsterAttackPriority == 2
                                 && actor.BuildingTarget.Target != null
@@ -466,7 +519,7 @@ namespace ProjectF.Monsters
         private Vector3 GetNavigationGoal(Vector3 position, Vector3 goal)
         {
             if (FlatDistanceSquared(position, goal) <= MaximumNavigationLeg * MaximumNavigationLeg) return goal;
-            // A clipped homeward leg can end inside a wall; choose ground before asking A* for a detour.
+            // A clipped navigation leg can end inside a wall; choose ground before asking A* for a detour.
             for (float distance = MaximumNavigationLeg; distance >= 1f; distance -= 1f)
             {
                 Vector3 candidate = Vector3.MoveTowards(position, goal, distance);

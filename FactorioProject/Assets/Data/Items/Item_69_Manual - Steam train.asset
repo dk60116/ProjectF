@@ -30,6 +30,7 @@ MonoBehaviour:
   size: 0
   itemFilter: 0
   ignoreFilter: 0
+  isEquipment: 0
   isManual: 1
   manualTargetItem: {fileID: 11400000, guid: 4d68593c4bba3a34487b0f60cff9fd9e, type: 2}
   upgradeable: 1

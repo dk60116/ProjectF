@@ -1551,6 +1551,9 @@ public static class SaveGameBinarySerializer
         writer.Write(player.mountedAnimalId);
         writer.Write(player.hasHealth);
         writer.Write(player.currentHealth);
+        WriteList(writer, player.equipmentSlots, WritePlayerSlot);
+        writer.Write(player.selectedEquipmentSlot);
+        WriteList(writer, player.ammunitionSlots, WritePlayerSlot);
     }
 
     private static PlayerSaveData ReadPlayer(BinaryReader reader, int version)
@@ -1600,6 +1603,13 @@ public static class SaveGameBinarySerializer
         {
             player.hasHealth = reader.ReadBoolean();
             player.currentHealth = reader.ReadSingle();
+        }
+        if (version >= 74)
+            player.equipmentSlots = ReadList(reader, () => ReadPlayerSlot(reader, version));
+        if (version >= 75)
+        {
+            player.selectedEquipmentSlot = reader.ReadInt32();
+            player.ammunitionSlots = ReadList(reader, () => ReadPlayerSlot(reader, version));
         }
         return player;
     }

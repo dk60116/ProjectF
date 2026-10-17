@@ -1,0 +1,8 @@
+Mode: Built-in image_gen
+Output: FactorioProject/Assets/Image/UI/HUD/EquipmentIcon_White.png
+
+Initial prompt:
+Use case: logo-brand. Asset type: game HUD equipment button icon, one square transparent PNG. Primary request: a white monochrome equipment icon. Subject: a single front-facing medieval armor breastplate with broad shoulder guards, small neckline opening, clear tapered waist. Style: bold flat solid white silhouette, simple strong geometry, very few generous transparent negative-space cutouts to distinguish shoulder plates and chest, readable at 32 pixels. Composition: symmetrical, centered, fills about 80 percent of square canvas with equal clear margins. Every visible part is pure white #FFFFFF; smooth antialiased alpha edges only. Actual transparent background and transparent cutouts. No gray or black pigment, no black outline, no color, no gradient, no shadow, no glow, no 3D rendering, no texture, no text, no border, no enclosing badge, no checkerboard baked into image. Produce exactly one icon.
+
+Final edit prompt:
+Edit this equipment icon into a pristine clean flat white HUD pictogram. Preserve the front-facing breastplate with shoulder guards, centered square composition and actual transparent background. Simplify to a few bold solid shapes. Remove ALL distressed edges, splatters, flecks, speckles, hairline contours and textured pixels. Make smooth continuous crisp silhouette boundaries and wide even transparent gaps between armor plates. Every nontransparent pixel should be white RGB 255 255 255, alpha antialiasing only. No gray shading or gradient, no outline, no text. Clean professional game equipment button icon readable at 32px.

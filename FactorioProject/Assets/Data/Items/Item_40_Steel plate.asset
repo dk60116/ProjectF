@@ -13,7 +13,7 @@ MonoBehaviour:
   m_Name: Item_40_Steel plate
   m_EditorClassIdentifier: 
   itemName: Steel plate
-  id: 31
+  id: 32
   mapObject: {fileID: 0}
   mapObjectArchetype: {fileID: 0}
   useMapColor: 0
@@ -30,6 +30,7 @@ MonoBehaviour:
   size: 0
   itemFilter: 0
   ignoreFilter: 0
+  isEquipment: 0
   isManual: 0
   manualTargetItem: {fileID: 0}
   upgradeable: 1

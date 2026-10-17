@@ -35,7 +35,7 @@ public partial class Player
         var state = animator.IsInTransition(layer) ? animator.GetNextAnimatorStateInfo(layer)
             : animator.GetCurrentAnimatorStateInfo(layer);
         bool actionActive = !handcartAnimationActive && !ridingAnimationActive && !IsDead
-            && (state.IsName(PickStateName) || state.IsName("Throw"));
+            && (state.IsName(PickStateName) || state.IsName("Throw") || state.IsName("Shoot"));
         animator.SetLayerWeight(layer, Mathf.MoveTowards(animator.GetLayerWeight(layer),
             actionActive ? 1f : 0f, Time.deltaTime / UpperBodyBlendDuration));
     }

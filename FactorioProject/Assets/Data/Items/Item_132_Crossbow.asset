@@ -12,15 +12,24 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: ccc5c26867f3fd3479193fd24dec463e, type: 3}
   m_Name: Item_132_Crossbow
   m_EditorClassIdentifier: Assembly-CSharp::ItemDefinition
+  isRangedWeapon: 1
+  isAmmo: 0
+  requiresAmmo: 1
+  compatibleAmmo:
+  - {fileID: 11400000, guid: 883dad8c80347714793c7527d5836636, type: 2}
+  attackDamage: 15
+  fireRate: 1
+  attackRange: 15
+  projectileSpeed: 20
   itemName: Crossbow
-  id: 22
+  id: 21
   mapObject: {fileID: 0}
   mapObjectArchetype: {fileID: 0}
   useMapColor: 0
   mapColor: {r: 1, g: 1, b: 1, a: 1}
   mapMarkerSize: 1
-  portableMesh: {fileID: 0}
-  portableMat: {fileID: 0}
+  portableMesh: {fileID: 4300000, guid: b3dc761f5fc048bc9fc8af11111f4468, type: 2}
+  portableMat: {fileID: 2100000, guid: c80be484389611044afbe86ecea73f03, type: 2}
   icon: {fileID: 21300000, guid: 4024564d236e4b54cbab67090bce5d07, type: 3}
   oneItem: 0
   interactionButtonList: []
@@ -30,6 +39,7 @@ MonoBehaviour:
   size: 0
   itemFilter: 0
   ignoreFilter: 0
+  isEquipment: 1
   isManual: 0
   manualTargetItem: {fileID: 0}
   upgradeable: 1
