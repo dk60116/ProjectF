@@ -12,6 +12,14 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: ccc5c26867f3fd3479193fd24dec463e, type: 3}
   m_Name: Item_4_Cooper ore
   m_EditorClassIdentifier: 
+  isRangedWeapon: 0
+  isAmmo: 0
+  requiresAmmo: 0
+  compatibleAmmo: []
+  attackDamage: 0
+  fireRate: 1
+  attackRange: 15
+  projectileSpeed: 20
   itemName: Cooper ore
   id: 13
   mapObject: {fileID: 3654828918463552362, guid: c972d3bc9888d61498a3bbabd03743e6, type: 3}

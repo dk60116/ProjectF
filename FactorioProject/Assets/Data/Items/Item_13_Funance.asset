@@ -12,8 +12,16 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: ccc5c26867f3fd3479193fd24dec463e, type: 3}
   m_Name: Item_13_Funance
   m_EditorClassIdentifier: 
+  isRangedWeapon: 0
+  isAmmo: 0
+  requiresAmmo: 0
+  compatibleAmmo: []
+  attackDamage: 0
+  fireRate: 1
+  attackRange: 15
+  projectileSpeed: 20
   itemName: Funance
-  id: 44
+  id: 45
   mapObject: {fileID: 3843491245406909261, guid: 482d646ee24530540a103d758c71b5b2, type: 3}
   mapObjectArchetype: {fileID: 11400000, guid: 39875aa15bdd75143a55d66e6fa7f0c2, type: 2}
   useMapColor: 1

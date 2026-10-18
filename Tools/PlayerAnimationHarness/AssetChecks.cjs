@@ -82,6 +82,6 @@ const shootState = upper.m_ChildStates.map(child => object(child.m_State.fileID,
 check(shootState.m_Motion.guid === read('Animation/Character/Shoot.anim.meta').match(/^guid: (\w+)/m)[1],
   'Runtime shooting uses the same clip as the authored Shoot preview');
 const playerController = read('Scripts/Character/Player/PlayerController.cs');
-check(/else if \(hasManualMovementInput\)\s*\{\s*HandleManualKnifeMovement\(\);\s*\}/.test(playerController),
-  'Manual input starts nearby swings without being zeroed during a pending knife attack');
+check(/else if \(hasManualMovementInput\)\s*\{\s*CancelRangedAttack\(\);\s*HandleManualKnifeMovement\(\);\s*\}/.test(playerController),
+  'Manual input cancels ranged pursuit while retaining nearby knife swings');
 console.log(`PASS: ${checks} player controller/mask asset checks`);

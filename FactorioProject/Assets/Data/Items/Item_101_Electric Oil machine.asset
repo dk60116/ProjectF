@@ -12,8 +12,16 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: ccc5c26867f3fd3479193fd24dec463e, type: 3}
   m_Name: Item_101_Electric Oil machine
   m_EditorClassIdentifier: Assembly-CSharp::ItemDefinition
+  isRangedWeapon: 0
+  isAmmo: 0
+  requiresAmmo: 0
+  compatibleAmmo: []
+  attackDamage: 0
+  fireRate: 1
+  attackRange: 15
+  projectileSpeed: 20
   itemName: Electric Oil machine
-  id: 65
+  id: 66
   mapObject: {fileID: 8277338630082605383, guid: 0e8fab6e5b4c5334ba12a3440074b228, type: 3}
   mapObjectArchetype: {fileID: 11400000, guid: 6e01647ff894e804b942cec28892e1d2, type: 2}
   useMapColor: 1

@@ -12,8 +12,16 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: ccc5c26867f3fd3479193fd24dec463e, type: 3}
   m_Name: Item_30_Water pump
   m_EditorClassIdentifier: 
+  isRangedWeapon: 0
+  isAmmo: 0
+  requiresAmmo: 0
+  compatibleAmmo: []
+  attackDamage: 0
+  fireRate: 1
+  attackRange: 15
+  projectileSpeed: 20
   itemName: Water pump
-  id: 68
+  id: 69
   mapObject: {fileID: 9182752028908485828, guid: edc0b2a5e8887d64bbe345804ee461f0, type: 3}
   mapObjectArchetype: {fileID: 11400000, guid: 174492c8a2c10e5418aa1415f19b4c69, type: 2}
   useMapColor: 1

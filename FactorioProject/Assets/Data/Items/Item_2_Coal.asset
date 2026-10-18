@@ -12,6 +12,14 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: ccc5c26867f3fd3479193fd24dec463e, type: 3}
   m_Name: Item_2_Coal
   m_EditorClassIdentifier: 
+  isRangedWeapon: 0
+  isAmmo: 0
+  requiresAmmo: 0
+  compatibleAmmo: []
+  attackDamage: 0
+  fireRate: 1
+  attackRange: 15
+  projectileSpeed: 20
   itemName: Coal
   id: 11
   mapObject: {fileID: 7543741037075201388, guid: 0376f79f038416846b7ac71c7870f4eb, type: 3}

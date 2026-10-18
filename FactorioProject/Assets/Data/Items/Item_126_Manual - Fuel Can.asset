@@ -12,8 +12,16 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: ccc5c26867f3fd3479193fd24dec463e, type: 3}
   m_Name: Item_126_Manual - Fuel Can
   m_EditorClassIdentifier: Assembly-CSharp::ItemDefinition
+  isRangedWeapon: 0
+  isAmmo: 0
+  requiresAmmo: 0
+  compatibleAmmo: []
+  attackDamage: 0
+  fireRate: 1
+  attackRange: 15
+  projectileSpeed: 20
   itemName: Manual - Fuel Can
-  id: 103
+  id: 104
   mapObject: {fileID: 0}
   mapObjectArchetype: {fileID: 0}
   useMapColor: 0
@@ -31,8 +39,8 @@ MonoBehaviour:
   itemFilter: 0
   ignoreFilter: 0
   isEquipment: 0
-  isManual: 0
-  manualTargetItem: {fileID: 0}
+  isManual: 1
+  manualTargetItem: {fileID: 11400000, guid: b3b818c383ac7a24e86994e0e69641bb, type: 2}
   upgradeable: 1
   maxHealth: 100
   excludeFromMonsterTargets: 0

@@ -133,6 +133,31 @@ namespace ProjectF.Monsters
             current.UpdateBody(actor);
         }
 
+        public bool TryFindNearestAttackTarget(Vector3 origin, float range, out MonsterInstance target)
+        {
+            target = null;
+            if (disposed || range <= 0f || float.IsNaN(range) || float.IsInfinity(range)) return false;
+            float reach = range + maximumBodyRadius;
+            Vector2Int first = BodyCell(origin - new Vector3(reach, 0f, reach));
+            Vector2Int last = BodyCell(origin + new Vector3(reach, 0f, reach));
+            float nearestSquared = range * range;
+            for (int x = first.x; x <= last.x; x++)
+            for (int z = first.y; z <= last.y; z++)
+            {
+                if (!bodyCells.TryGetValue(new Vector2Int(x, z), out List<Actor> bucket)) continue;
+                for (int i = 0; i < bucket.Count; i++)
+                {
+                    MonsterInstance candidate = bucket[i].Monster;
+                    if (!candidate.IsActive || candidate.CurrentHealth <= 0f) continue;
+                    float distanceSquared = (candidate.ClosestCombatPoint(origin) - origin).sqrMagnitude;
+                    if (distanceSquared > nearestSquared) continue;
+                    nearestSquared = distanceSquared;
+                    target = candidate;
+                }
+            }
+            return target != null;
+        }
+
         public bool IsOccupied(Vector3 position, float radius)
         {
             for (int i = 0; i < actors.Count; i++)

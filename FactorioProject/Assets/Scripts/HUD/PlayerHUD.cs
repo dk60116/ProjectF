@@ -232,6 +232,7 @@ public partial class PlayerHUD : BagSlot
 
     private void OnDisable()
     {
+        ReleaseRangedAttackRange();
         ReleaseEquipmentSlots();
         ClearCombatHud();
         CloseWorkableCraftingPanel();
@@ -285,6 +286,7 @@ public partial class PlayerHUD : BagSlot
         ResolveHudReferences();
         UpdateInstallModeButtons();
         UpdateObjectInfoPanelState();
+        UpdateRangedAttackRange();
         UpdateInteractionButtonState();
         UpdateHandItemGauge();
         UpdateTrainRouteFocusState();
@@ -1938,7 +1940,10 @@ public partial class PlayerHUD : BagSlot
             ClearInteractionTargets();
             SetTrainConnectionInteractionButtonState(mountedVehicle as SteamTrain);
             currentInteractionMapObject = mountedVehicle;
-            SetActiveInteractionButton(InteractionButton, ResolveInteractionIcon(mountedVehicle, 1));
+            SetActiveInteractionButton(InteractionButton,
+                mountedVehicle is Ship && !playerController.CanDismountFromVehicle()
+                    ? null
+                    : ResolveInteractionIcon(mountedVehicle, 1));
             return;
         }
 
@@ -1956,6 +1961,8 @@ public partial class PlayerHUD : BagSlot
 
         if (currentPlayer.HasRangedEquipment)
         {
+            if (TryActivateEquippedMapObjectInteraction(playerController)) return;
+
             ClearInteractionTargets();
             object target = clickedObjectInfoTarget;
             if (ProjectF.Combat.PlayerProjectileWorld.IsDamageable(target))
@@ -2226,8 +2233,21 @@ public partial class PlayerHUD : BagSlot
         return true;
     }
 
+    private bool TryActivateEquippedMapObjectInteraction(PlayerController playerController)
+    {
+        if (TryGetClickedObjectInfoFocusedMapObject(out IMapObjectTarget target)
+            && (target is IPlayerItemMount || target is Vehicle)
+            && CanDisplayClickedMapObjectInteraction(target, playerController)
+            && TryActivateMapObjectInteraction(target)) return true;
+
+        return playerController != null
+               && !ProjectF.Combat.PlayerProjectileWorld.IsDamageable(clickedObjectInfoTarget)
+               && TryActivateNearestAutomaticMapObjectInteraction(playerController, true);
+    }
+
     private bool TryActivateNearestAutomaticMapObjectInteraction(
-        PlayerController playerController)
+        PlayerController playerController,
+        bool vehiclesOnly = false)
     {
         IMapObjectTarget nearestTarget = null;
         InteractionButton nearestButton = null;
@@ -2241,6 +2261,7 @@ public partial class PlayerHUD : BagSlot
                     i,
                     out IMapObjectTarget candidate,
                     out float distanceSqr)
+                || (vehiclesOnly && !(candidate is Vehicle))
                 || !playerController.IsWithinInteractionRange(candidate)
                 || distanceSqr >= nearestDistanceSqr
                 || !TryResolveMapObjectInteraction(
@@ -2454,7 +2475,7 @@ public partial class PlayerHUD : BagSlot
         }
 
         activeButton.SetIcon(icon);
-        activeButton.SetVisible(true);
+        activeButton.SetVisible(icon != null);
         UpdateInteractionButtonLayout();
     }
 
@@ -2849,6 +2870,7 @@ public partial class PlayerHUD : BagSlot
 
         if (currentObjectInfoTarget != target)
         {
+            ResolvePlayerController()?.CancelRangedAttackUnlessFocused(target);
             SetFocusedTargetOutline(currentObjectInfoTarget, false);
             currentObjectInfoTarget = target;
             SetFocusedTargetOutline(currentObjectInfoTarget, true);
@@ -2939,6 +2961,8 @@ public partial class PlayerHUD : BagSlot
 
     private void ClearObjectInfoPanelState()
     {
+        ResolvePlayerController()?.CancelRangedAttack();
+        rangedAttackRangeView?.Hide();
         SetObjectInfoSelectionFocus(null, false);
         SetObjectInfoAreaMarkerVisibility(null, false);
         SetObjectInfoSprinklerRangeVisual(null, false);
@@ -3718,7 +3742,7 @@ public partial class PlayerHUD : BagSlot
         if (currentInteractionMonster != null)
         {
             if (currentPlayer != null && currentPlayer.HasRangedEquipment)
-                currentPlayer.TryFireSelectedWeapon(currentInteractionMonster);
+                currentPlayer.RequestRangedAttack(currentInteractionMonster);
             else ResolvePlayerController()?.RequestMonsterKnifeInteraction(currentInteractionMonster);
             UpdateInteractionButtonState();
             return;
@@ -3728,7 +3752,7 @@ public partial class PlayerHUD : BagSlot
         {
             PlayerController playerController = ResolvePlayerController();
             if (currentPlayer != null && currentPlayer.HasRangedEquipment)
-                currentPlayer.TryFireSelectedWeapon(currentInteractionAnimal);
+                currentPlayer.RequestRangedAttack(currentInteractionAnimal);
             else playerController?.RequestAnimalKnifeInteraction(currentInteractionAnimal);
             UpdateInteractionButtonState();
             return;
@@ -3920,10 +3944,10 @@ public partial class PlayerHUD : BagSlot
     private void HandleInteractionButtonKeyboardInput()
     {
         Player rangedPlayer = GameManager.Instance != null ? GameManager.Instance.Player : null;
-        if (rangedPlayer != null && rangedPlayer.HasRangedEquipment)
+        if (rangedPlayer != null && rangedPlayer.HasRangedEquipment && currentInteractionMapObject == null)
         {
             if (Input.GetKey(KeyCode.Space) && !GameManager.TextInputFocused && !IsPlacementOrMapEditModeActive())
-                rangedPlayer.TryFireSelectedWeapon((object)currentInteractionMonster ?? currentInteractionAnimal);
+                rangedPlayer.RequestRangedAttack((object)currentInteractionMonster ?? currentInteractionAnimal);
             return;
         }
         if (!Input.GetKeyDown(KeyCode.Space)

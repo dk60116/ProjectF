@@ -7,7 +7,7 @@ static partial class Checks
     static void CheckVehicleMovement(InstallationBatchRenderer host, Action render, Material material)
     {
         var terrain = new TerrainGenerator(); TerrainGenerator.Active = terrain;
-        foreach (Vehicle vehicle in new Vehicle[] { new Train(), new Handcart() })
+        foreach (Vehicle vehicle in new Vehicle[] { new Train(), new Handcart(), new Ship() })
         {
             vehicle.Add(new MeshRenderer { Materials = new[] { material }, Filter = new MeshFilter { sharedMesh = new Mesh() } });
             vehicle.ConfigurePlacementRuntime(new(0, 0), 0, new[] { new Vector2Int(0, 0) }, 73);
@@ -49,6 +49,17 @@ static partial class Checks
             Check(!model.forceRenderingOff && host.RegisteredCount == 0, "vehicle release restores native draw after moving");
             foreach (var block in terrain.Blocks.Values) block.MapObject = null;
         }
+        var wideShip = new Ship();
+        var footprint = new[] { new Vector2Int(0, 0), new Vector2Int(1, 0), new Vector2Int(0, 1), new Vector2Int(1, 1) };
+        wideShip.ConfigurePlacementRuntime(new(0, 0), 0, footprint, 74);
+        foreach (var cell in footprint) { terrain.TryGetLoadedBlock(cell, out var block); block.SetMapObject(wideShip); }
+        terrain.SaveRuntimeInstallationState(wideShip);
+        wideShip.Move(new(0.1f, 0, 0));
+        Check(wideShip.RuntimeOccupiedCoordinates.Count == 1 && terrain.Blocks[new(0, 0)].MapObject == wideShip,
+            "first ship movement converts the placed 2x2 footprint to a moving anchor");
+        Check(terrain.Blocks[new(1, 0)].MapObject == null && terrain.Blocks[new(0, 1)].MapObject == null
+            && terrain.Blocks[new(1, 1)].MapObject == null, "moving raft leaves no stale secondary footprint bindings");
+        InstallationBatchRenderer.Unregister(wideShip);
         var firstMove = new Train(); firstMove.Move(new(3, 0, 0));
         Check(firstMove.RuntimeMapObjectHandle.IsValid && firstMove.RuntimeAnchorCoordinate == new Vector2Int(3, 0),
             "first move without placement registers a live train handle");
@@ -83,6 +94,7 @@ public partial class InstallationObject
     private static long ClaimPlacementSequence(long sequence) => sequence > 0 ? sequence : 1;
     private void RefreshInstalledDirectionFromCurrentTransform() { }
     private void OnPlacementRuntimeChanged() { }
+    private void OnRuntimeMapObjectHandleChanged() { }
 }
 public partial class Vehicle
 {
@@ -102,6 +114,10 @@ public partial class Handcart : Vehicle
     private TerrainGenerator ResolveTerrain() => TerrainGenerator.Active;
     private static int ResolveQuarterTurns(Quaternion rotation) => 0;
     public override void Move(Vector3 position) { base.Move(position); RefreshRuntimePlacement(position, Quaternion.identity); }
+}
+public sealed class Ship : Vehicle
+{
+    public override void Move(Vector3 position) { base.Move(position); RefreshSingleCellRuntimePlacement(position, 0); }
 }
 public sealed class Block
 {

@@ -136,8 +136,35 @@ internal static class AgentBodyChecks
         before = GC.GetAllocatedBytesForCurrentThread();
         Tick(1000);
         Check(GC.GetAllocatedBytesForCurrentThread() == before, "Warm stationary collision simulation allocates zero bytes");
+        CheckTargetQueries();
         Console.WriteLine($"PASS: {checks} production agent movement/player sweep checks");
-        MonsterWorld.Current.Dispose();
+        MonsterWorld.Current?.Dispose();
         GameManager.Instance.SetCloakingMode(false);
+    }
+
+    private static void CheckTargetQueries()
+    {
+        var terrain = Reset();
+        var near = Spawn(terrain,new Vector3(-3,0,-2));
+        var far = Spawn(terrain,new Vector3(6,0,0));
+        var world = MonsterWorld.Current;
+        Vector3 origin = new Vector3(0,.5f,0);
+        Check(world.TryFindNearestAttackTarget(origin,8,out var found) && ReferenceEquals(found,near),
+            "Tower spatial query selects the nearest living monster across negative grid cells");
+        near.SetCurrentHealth(0);
+        Check(world.TryFindNearestAttackTarget(origin,8,out found) && ReferenceEquals(found,far),
+            "Tower spatial query skips dead monsters before their next world cleanup tick");
+        Check(world.TryFindNearestAttackTarget(origin,5.8f,out found) && ReferenceEquals(found,far),
+            "Tower range measures the target body surface instead of its center");
+        Check(!world.TryFindNearestAttackTarget(origin,5.7f,out _), "Tower spatial query rejects out-of-range targets");
+        Check(!world.TryFindNearestAttackTarget(new Vector3(0,20,0),8,out _), "Vertical separation also counts toward firing range");
+        Check(!world.TryFindNearestAttackTarget(origin,float.NaN,out _) && !world.TryFindNearestAttackTarget(origin,float.PositiveInfinity,out _),
+            "Invalid ranges cannot cause an unbounded spatial cell scan");
+        for(int i=0;i<100;i++) world.TryFindNearestAttackTarget(origin,8,out _);
+        long before = GC.GetAllocatedBytesForCurrentThread();
+        for(int i=0;i<1000;i++) world.TryFindNearestAttackTarget(origin,8,out _);
+        Check(GC.GetAllocatedBytesForCurrentThread()==before, "Warm tower enemy searches allocate zero managed bytes");
+        world.Dispose();
+        Check(!world.TryFindNearestAttackTarget(origin,8,out _), "Disposed monster worlds cannot supply stale targets");
     }
 }

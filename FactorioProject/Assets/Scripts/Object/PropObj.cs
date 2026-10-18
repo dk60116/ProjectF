@@ -34,11 +34,20 @@ public class PropObj : BaseObject
 
     public int ResolvedItemId => ResolveItemId();
 
-    public ItemDefinition BoundItemDefinition => itemDefinition;
+    public ItemDefinition BoundItemDefinition
+    {
+        get
+        {
+            if (itemDefinition == null && this is InstallationObject installationObject
+                && TryResolveInstallationItemDefinition(installationObject, out ItemDefinition resolvedDefinition))
+                itemDefinition = resolvedDefinition;
+            return itemDefinition;
+        }
+    }
 
     protected void RefreshItemLight(bool toggled = false)
     {
-        ItemDefinition definition = itemDefinition;
+        ItemDefinition definition = BoundItemDefinition;
         if (definition == null)
         {
             ItemManager itemManager = GameManager.Instance != null
@@ -110,18 +119,8 @@ public class PropObj : BaseObject
 
     public int ResolveItemId()
     {
-        if (itemDefinition != null)
-        {
-            return itemDefinition.id;
-        }
-
-        if (this is InstallationObject installationObject
-            && TryResolveInstallationItemDefinition(installationObject, out ItemDefinition resolvedDefinition))
-        {
-            return resolvedDefinition.id;
-        }
-
-        return objId;
+        ItemDefinition definition = BoundItemDefinition;
+        return definition != null ? definition.id : objId;
     }
 
     private static bool TryResolveInstallationItemDefinition(

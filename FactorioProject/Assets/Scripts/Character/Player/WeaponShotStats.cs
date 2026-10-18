@@ -13,7 +13,7 @@ namespace ProjectF.Combat
             stats = default;
             if (weapon == null || !weapon.isEquipment || !weapon.isRangedWeapon
                 || weapon.requiresAmmo && !weapon.AcceptsAmmo(ammo)) return false;
-            float rate = Positive(weapon.fireRate, 1f), range = Positive(weapon.attackRange, 15f);
+            float rate = Positive(weapon.fireRate, 1f), range = ResolveRange(weapon, ammo);
             float damage = NonNegative(weapon.attackDamage);
             ItemDefinition projectile = weapon.requiresAmmo ? ammo : weapon;
             float speed = Positive(projectile.projectileSpeed, 20f);
@@ -21,11 +21,18 @@ namespace ProjectF.Combat
             {
                 damage += NonNegative(ammo.attackDamage);
                 rate = Mathf.Min(rate, Positive(ammo.fireRate, 1f));
-                range = Mathf.Min(range, Positive(ammo.attackRange, 15f));
             }
             if (float.IsInfinity(damage)) return false;
             stats = new WeaponShotStats(damage, 1f / rate, range, speed);
             return damage > 0f;
+        }
+
+        public static float ResolveRange(ItemDefinition weapon, ItemDefinition ammo)
+        {
+            if (weapon == null || !weapon.isEquipment || !weapon.isRangedWeapon) return 0f;
+            float range = Positive(weapon.attackRange, 15f);
+            return weapon.requiresAmmo && weapon.AcceptsAmmo(ammo)
+                ? Mathf.Min(range, Positive(ammo.attackRange, 15f)) : range;
         }
 
         private static float Positive(float value, float fallback) =>

@@ -1,0 +1,5 @@
+Tool: built-in image_gen
+Reference: output/imagegen/TowerBase_Round_Icon.png
+Transparent background: true
+
+Use case: precise-object-edit. Remove the entire round silver metal wheel-shaped mount from the center of this wooden tower's top platform, INCLUDING its raised central ring/socket and dark center hole. Leave NO wheel, disk, ring, gear, hub, pedestal, weapon bracket or other object on the platform. Fill the removed area with continuous orange wooden floor planks matching the surrounding platform. The top must be an entirely clear empty wooden platform. Preserve all other parts exactly: four orange timber corner posts, metal corner brackets and rivets, orange rails, diagonal wood braces, gray stone base, isometric perspective, thick black outlines, faceted low-poly cel shading, colors, scale, position and square canvas. Preserve the genuine transparent RGBA background and transparent gaps between the tower posts. No new objects, text, scenery or ground shadow.

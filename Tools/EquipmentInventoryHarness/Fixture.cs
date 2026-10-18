@@ -16,9 +16,11 @@ namespace UnityEngine
         public readonly GameObject gameObject = new();
         public Collider BodyCollider;
         public T GetComponentInChildren<T>() where T : class => BodyCollider as T;
+        protected static void Destroy(Material material) => material.Destroyed = true;
     }
     public class GameObject
     {
+        public bool Destroyed;
         public int layer;
         public bool activeInHierarchy = true;
         private readonly Dictionary<Type,object> components = new();
@@ -39,8 +41,9 @@ namespace UnityEngine
         public T[] GetComponentsInChildren<T>(bool inactive) => Array.Empty<T>();
         public void SetParent(Transform parent, bool keepWorld) { }
         public void SetPositionAndRotation(Vector3 p, Quaternion r) { position=p; rotation=r; }
+        public Vector3 TransformPoint(Vector3 local) => position + new Vector3(local.x*localScale.x,local.y*localScale.y,local.z*localScale.z);
     }
-    public readonly record struct Vector3(float x, float y, float z)
+    public record struct Vector3(float x, float y, float z)
     {
         public static Vector3 zero => default;
         public static Vector3 one => new(1, 1, 1);
@@ -64,11 +67,16 @@ namespace UnityEngine
     }
     public static class Mathf
     {
+        public const float PI = MathF.PI;
+        public static float Cos(float value) => MathF.Cos(value);
+        public static float Sin(float value) => MathF.Sin(value);
+        public static float Sqrt(float value) => MathF.Sqrt(value);
         public static int Max(int a, int b) => Math.Max(a, b);
         public static int Min(int a, int b) => Math.Min(a, b);
         public static int Clamp(int value, int min, int max) => Math.Clamp(value, min, max);
         public static float Max(float a, float b) => Math.Max(a,b);
         public static float Min(float a, float b) => Math.Min(a,b);
+        public static float Clamp01(float value) => Math.Clamp(value, 0f, 1f);
     }
 }
 namespace UnityEngine.Serialization { public sealed class FormerlySerializedAsAttribute : Attribute { public FormerlySerializedAsAttribute(string name) { } } }
@@ -90,7 +98,8 @@ public sealed class GameManager
 {
     public static GameManager Instance = new();
     public static bool TextInputFocused;
-    public bool PlayerInteractionLocked;
+    public bool PlayerInteractionLocked, FreeCamera;
+    public Player Player;
     public readonly ItemManager ItemManger = new();
 }
 public sealed class PortableTemplateStack { public List<PortableObjectTemplate> stack; }
@@ -157,6 +166,8 @@ public partial class Player : MonoBehaviour
     public void UpdateCarryState() { }
     public bool IsDead;
     private PlayerController playerController = new();
+    public Player() { playerController.BindRangedForTest(this); }
+    internal PlayerController ControllerForTest => playerController;
     public Transform BodyTransform => transform;
     private Animator animator = new();
     internal GameObject crossBowObject;
@@ -164,6 +175,15 @@ public partial class Player : MonoBehaviour
     internal void TickInventory() => RefreshSelectedEquipmentIdentity();
     internal void RefillAfterShot(int ammoId) => RefillAmmunitionAfterShot(ammoId);
     internal void RestoreAmmo(PlayerSaveData data) => RestoreAmmunition(data);
+    internal void SetMountedForTest(bool mounted) => playerController.IsMounted = mounted;
+}
+public partial class PlayerHUD
+{
+    private object currentObjectInfoTarget;
+    internal void FocusForTest(object target) { currentObjectInfoTarget = target; UpdateRangedAttackRange(); }
+    internal void TickRangeForTest() => UpdateRangedAttackRange();
+    internal void ReleaseRangeForTest() => ReleaseRangedAttackRange();
+    internal ProjectF.Combat.RangedAttackRangeView RangeView => rangedAttackRangeView;
 }
 public sealed class PlayerSaveData
 {

@@ -12,8 +12,16 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: ccc5c26867f3fd3479193fd24dec463e, type: 3}
   m_Name: Item_106_Long Robot arm
   m_EditorClassIdentifier: Assembly-CSharp::ItemDefinition
+  isRangedWeapon: 0
+  isAmmo: 0
+  requiresAmmo: 0
+  compatibleAmmo: []
+  attackDamage: 0
+  fireRate: 1
+  attackRange: 15
+  projectileSpeed: 20
   itemName: Long Robot arm
-  id: 77
+  id: 78
   mapObject: {fileID: 5617472291595085519, guid: 67e59f493a6d8be4f88637abe49568e4, type: 3}
   mapObjectArchetype: {fileID: 11400000, guid: 9017e43225375b7439732c5f9232ade7, type: 2}
   useMapColor: 1

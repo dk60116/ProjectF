@@ -23,6 +23,7 @@ internal static class RuntimeChecks
             PlayerCloaking();
             StructurePriorities();
             TargetSafety();
+            TowerDefinitionBinding();
             PauseAndLeash();
             MultipleActors();
             ForestTraversal();
@@ -550,6 +551,41 @@ internal static class RuntimeChecks
         Check(!machine.Active && pipe.Active && terrain.Store.States.ContainsKey(pipeKey)
             && ReferenceEquals(terrain.Blocks[pipeKey].MapObject, pipe),
             "Destroying machine cannot remove overlapping pipe or its grid binding");
+    }
+
+    private sealed class TowerDefinitionTarget : IMapObjectTarget, IMapObjectSimulationIdentity
+    {
+        internal FixtureBuilding Owner;
+        internal bool Bound;
+        public long SimulationId => Owner.SimulationId;
+        public bool IsTargetActive => Owner.IsTargetActive;
+        public bool AllowsAnimalTraversal => false;
+        public Vector3 WorldPosition => Owner.WorldPosition;
+        public ItemDefinition BoundItemDefinition => Bound ? Owner.BoundItemDefinition : null;
+    }
+
+    private static void TowerDefinitionBinding()
+    {
+        var terrain = Reset();
+        var cell = new Vector2Int(4,0);
+        var owner = terrain.AddBuilding(cell,902L,cell);
+        owner.BoundItemDefinition.monsterAttackPriority=3;
+        var tower = new TowerDefinitionTarget { Owner=owner };
+        terrain.Blocks[cell].MapObject=tower;
+        Check(!terrain.TryGetInstallationCombatTarget(cell,out _),
+            "A missing Tower ItemDefinition reproduces the combat target rejection despite a valid placement");
+        var stats=MonsterStats.Default;
+        stats.DetectionRange=20; stats.LeashRange=32; stats.AttackInterval=.2f; stats.AttackDamage=20;
+        Spawn(terrain,stats);
+        Advance(120);
+        Check(terrain.Store.Removals==0 && !terrain.Store.States[cell].hasCombatHealth,
+            "With only an unbound Tower present monsters cannot damage it");
+        tower.Bound=true;
+        Check(terrain.TryGetInstallationCombatTarget(cell,out var target) && ReferenceEquals(target.Target,tower),
+            "Binding the canonical definition immediately makes the same placed Tower targetable");
+        Advance(900);
+        Check(terrain.Store.Removals==1 && !owner.Active,
+            "The real monster world acquires, approaches, attacks and destroys a bound priority-three Tower without other targets");
     }
 
     private static void PauseAndLeash()

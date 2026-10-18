@@ -17,9 +17,9 @@ MonoBehaviour:
   requiresAmmo: 1
   compatibleAmmo:
   - {fileID: 11400000, guid: 883dad8c80347714793c7527d5836636, type: 2}
-  attackDamage: 15
+  attackDamage: 14
   fireRate: 1
-  attackRange: 15
+  attackRange: 8
   projectileSpeed: 20
   itemName: Crossbow
   id: 21

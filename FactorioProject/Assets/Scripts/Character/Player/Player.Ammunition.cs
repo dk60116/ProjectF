@@ -39,6 +39,7 @@ public partial class Player
     private bool TrySetSelectedEquipment(int index)
     {
         if (!TryReturnAmmunition()) return false;
+        playerController?.CancelRangedAttack();
         selectedEquipmentSlot = index;
         selectedEquipmentItemId = index >= 0 ? equipmentBag.GetSlotItemId(index) : -1;
         GetAmmunitionBag().EnsureAmmoStorage(SelectedEquipment);

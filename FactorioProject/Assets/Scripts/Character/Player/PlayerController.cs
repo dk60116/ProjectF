@@ -34,7 +34,7 @@ public partial class PlayerController : MonoBehaviour
     private const float WaterBoundaryNormalProbeDistance = 0.05f;
     private const float WaterBoundarySlideScoreTolerance = 0.01f;
     private const float TemporaryDropFocusDuration = 0.18f;
-    private const int TrainDismountSearchPadding = 4;
+    private const int VehicleDismountSearchPadding = 4;
     private const float PickAnimationDuration = 1.1666666f;
     private const float AnimalPushClearance = 0.05f;
     private const float AutomaticAnimalInteractionRefreshInterval = 0.1f;
@@ -845,6 +845,13 @@ public partial class PlayerController : MonoBehaviour
         return TryDismount();
     }
 
+    public bool CanDismountFromVehicle()
+    {
+        Vehicle vehicle = MountedVehicle;
+        return vehicle != null && !IsPlayerInputLocked()
+               && TryResolveInteractionPointExitPosition(vehicle, null, out _);
+    }
+
     public bool TryDismount()
     {
         if (IsPlayerInputLocked() || interactionPointSnapTarget == null)
@@ -994,42 +1001,43 @@ public partial class PlayerController : MonoBehaviour
 
         Vector3 preferredExitPosition = ClampRootPositionToGroundY(
             center + direction.normalized * exitDistance);
-        if (!(vehicle is Train train))
+        if (!(vehicle is Train) && !(vehicle is Ship))
         {
             exitPosition = preferredExitPosition;
             return true;
         }
 
-        return TryResolveClearTrainDismountPosition(
-            train,
+        return TryResolveClearVehicleDismountPosition(
+            vehicle,
             preferredExitPosition,
             out exitPosition);
     }
 
-    private bool TryResolveClearTrainDismountPosition(
-        Train train,
+    private bool TryResolveClearVehicleDismountPosition(
+        Vehicle vehicle,
         Vector3 preferredExitPosition,
         out Vector3 exitPosition)
     {
         exitPosition = default;
         TerrainGenerator terrain = ResolveTerrainGenerator();
-        if (train == null || terrain == null)
+        if (vehicle == null || terrain == null)
         {
             return false;
         }
 
-        Vector3 trainPosition = train.transform.position;
-        MapObject.MapObjectStatus status = train.Status;
-        float trainHalfExtent = Mathf.Max(
+        Vector3 vehiclePosition = vehicle.transform.position;
+        Ship ship = vehicle as Ship;
+        MapObject.MapObjectStatus status = vehicle.Status;
+        float vehicleHalfExtent = Mathf.Max(
             1,
             Mathf.Max(status.mapSizeX, status.mapSizeY)) * 0.5f;
-        float minimumDistance = trainHalfExtent + GetPlayerCollisionRadius();
+        float minimumDistance = vehicleHalfExtent + GetPlayerCollisionRadius();
         float minimumDistanceSqr = minimumDistance * minimumDistance;
         int searchRadius = Mathf.CeilToInt(minimumDistance)
-                           + TrainDismountSearchPadding;
+                           + VehicleDismountSearchPadding;
         Vector2Int centerCoordinate = new Vector2Int(
-            Mathf.RoundToInt(trainPosition.x),
-            Mathf.RoundToInt(trainPosition.z));
+            Mathf.RoundToInt(vehiclePosition.x),
+            Mathf.RoundToInt(vehiclePosition.z));
 
         bool found = false;
         float bestPreferredDistanceSqr = float.MaxValue;
@@ -1042,21 +1050,25 @@ public partial class PlayerController : MonoBehaviour
                 Vector2Int coordinate = centerCoordinate
                                         + new Vector2Int(offsetX, offsetY);
                 if (!terrain.TryGetLoadedBlock(coordinate, out Block block)
-                    || !IsClearTrainDismountBlock(block))
+                    || !IsClearVehicleDismountBlock(block))
                 {
                     continue;
                 }
 
                 Vector3 candidatePosition = ClampRootPositionToGroundY(
                     block.WorldPosition);
-                float trainDeltaX = candidatePosition.x - trainPosition.x;
-                float trainDeltaZ = candidatePosition.z - trainPosition.z;
-                if (trainDeltaX * trainDeltaX + trainDeltaZ * trainDeltaZ
-                    < minimumDistanceSqr
-                    || IsPlayerBlockedByWaterAtPosition(candidatePosition))
+                float vehicleDeltaX = candidatePosition.x - vehiclePosition.x;
+                float vehicleDeltaZ = candidatePosition.z - vehiclePosition.z;
+                float vehicleDistanceSqr = vehicleDeltaX * vehicleDeltaX + vehicleDeltaZ * vehicleDeltaZ;
+                if (ship != null
+                    ? !ship.CanReachDismountPosition(candidatePosition, GetPlayerCollisionRadius())
+                    : vehicleDistanceSqr < minimumDistanceSqr)
                 {
                     continue;
                 }
+                if (IsPlayerBlockedByWaterAtPosition(candidatePosition)
+                    || ship != null && !terrain.IsAnimalObstaclePositionClear(candidatePosition, candidatePosition,
+                        GetPlayerCollisionRadius(), false)) continue;
 
                 float preferredDeltaX = candidatePosition.x
                                         - preferredExitPosition.x;
@@ -1092,7 +1104,7 @@ public partial class PlayerController : MonoBehaviour
         return true;
     }
 
-    private static bool IsClearTrainDismountBlock(Block block)
+    private static bool IsClearVehicleDismountBlock(Block block)
     {
         return block != null && block.MapObject == null;
     }
@@ -1214,6 +1226,7 @@ public partial class PlayerController : MonoBehaviour
             "Player Update");
         if (MapObjectTickManager.WaitingForWorldLoad)
         {
+            CancelRangedAttack();
             pendingMoveDirection = Vector3.zero;
             currentConveyorCarryVelocity = Vector3.zero;
             return;
@@ -1300,10 +1313,17 @@ public partial class PlayerController : MonoBehaviour
         }
         else if (hasManualMovementInput)
         {
+            CancelRangedAttack();
             HandleManualKnifeMovement();
         }
 
         Vector3 moveDirection = GetMoveDirection(input);
+        if (!hasManualMovementInput && !isInteractionLocked && !isKeyboardMoveLocked
+            && interactionPointSnapTarget == null
+            && TryGetRangedAttackApproachDirection(out Vector3 rangedApproachDirection))
+        {
+            moveDirection = rangedApproachDirection;
+        }
         if (!hasManualMovementInput
             && !isInteractionLocked
             && !isKeyboardMoveLocked
@@ -4191,6 +4211,7 @@ public partial class PlayerController : MonoBehaviour
 
     private void CancelKnifeInteraction()
     {
+        CancelRangedAttack();
         CancelKnifeAttack();
         CancelActiveCorpseHarvest();
     }

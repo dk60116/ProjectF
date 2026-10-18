@@ -16,11 +16,12 @@ def unit(a): return mul(a,1/math.sqrt(dot(a,a)))
 def uv(x,y): return (x/1024,1-y/1024)
 
 class PortableMesh:
-    def __init__(self,name,folder,guid,eye=(1,0.9,1.4),origin=(0,0.073,0),scale=1850):
+    def __init__(self,name,folder,guid,eye=(1,0.9,1.4),origin=(0,0.073,0),scale=1850,vertex_limit=120):
         self.name,self.guid=name,guid
         self.output=ASSETS/folder/(name+'.mesh')
         self.atlas=ASSETS/folder/(name+'_TB.png')
         self.eye,self.origin,self.scale=eye,origin,scale
+        self.vertex_limit=vertex_limit
         self.vertices,self.normals,self.uvs,self.triangles=[],[],[],[]
 
     def vertex(self,p,n,t):
@@ -35,7 +36,7 @@ class PortableMesh:
 
     def validate(self):
         v,n,t=self.vertices,self.normals,self.uvs
-        assert 0<len(v)<=120
+        assert 0<len(v)<=self.vertex_limit
         ids,edges={},{}
         welded=[ids.setdefault(tuple(round(x,7) for x in p),len(ids)) for p in v]
         for a,b,c in self.triangles:
@@ -59,7 +60,7 @@ class PortableMesh:
             data.extend(struct.pack('<12f',*p,*n,*tangent,-1,*t))
         return indices,data
 
-    def write(self):
+    def write(self,source_path=None):
         self.validate()
         text=(ASSETS/'Items/Plate/Steel plate/Steel Plate_P.mesh').read_text(encoding='utf-8')
         lower=[min(p[i] for p in self.vertices) for i in range(3)]
@@ -84,7 +85,8 @@ class PortableMesh:
         for prefix,values in [('v',self.vertices),('vt',self.uvs),('vn',self.normals)]:
             source += [prefix+' '+' '.join(f'{x:.9g}' for x in value) for value in values]
         source += ['f '+' '.join(f'{i+1}/{i+1}/{i+1}' for i in tri) for tri in self.triangles]
-        (ROOT/'Tools/Modeling'/ (self.name+'.obj')).write_text('\n'.join(source)+'\n',encoding='utf-8')
+        source_path=Path(source_path) if source_path is not None else ROOT/'Tools/Modeling'/(self.name+'.obj')
+        source_path.write_text('\n'.join(source)+'\n',encoding='utf-8')
 
     def check(self):
         self.validate()

@@ -264,13 +264,29 @@ namespace ProjectF.Editor.Monsters
 
         private void OnGUI()
         {
+            Color previousColor = GUI.color;
+            Color previousContentColor = GUI.contentColor;
+            GUI.color = Color.white;
+            GUI.contentColor = Color.white;
+            try
+            {
+                DrawWindowContent();
+            }
+            finally
+            {
+                GUI.contentColor = previousContentColor;
+                GUI.color = previousColor;
+            }
+        }
+
+        private void DrawWindowContent()
+        {
             if (MonsterSpawnBrush.IsActive && Event.current.type == EventType.KeyDown && Event.current.keyCode == KeyCode.Escape)
             {
                 MonsterSpawnBrush.Stop();
                 Event.current.Use();
             }
-            rowStyle ??= new GUIStyle(EditorStyles.label) { alignment = TextAnchor.MiddleLeft, clipping = TextClipping.Clip };
-            headerStyle ??= new GUIStyle(EditorStyles.boldLabel) { wordWrap = true };
+            EnsureStyles();
             DrawToolbar();
             EditorGUILayout.BeginHorizontal();
             DrawList();
@@ -288,6 +304,15 @@ namespace ProjectF.Editor.Monsters
             EditorGUILayout.EndScrollView();
             EditorGUILayout.EndVertical();
             EditorGUILayout.EndHorizontal();
+        }
+
+        private void EnsureStyles()
+        {
+            if (rowStyle != null && headerStyle != null) return;
+            rowStyle = new GUIStyle(EditorStyles.label) { alignment = TextAnchor.MiddleLeft, clipping = TextClipping.Clip };
+            headerStyle = new GUIStyle(EditorStyles.boldLabel) { wordWrap = true };
+            ProjectFEditorGUIUtility.SetGuiStyleTextColor(rowStyle, Color.white);
+            ProjectFEditorGUIUtility.SetGuiStyleTextColor(headerStyle, Color.white);
         }
 
         private void DrawToolbar()

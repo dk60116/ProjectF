@@ -12,8 +12,16 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: ccc5c26867f3fd3479193fd24dec463e, type: 3}
   m_Name: Item_32_Steam generator
   m_EditorClassIdentifier: 
+  isRangedWeapon: 0
+  isAmmo: 0
+  requiresAmmo: 0
+  compatibleAmmo: []
+  attackDamage: 0
+  fireRate: 1
+  attackRange: 15
+  projectileSpeed: 20
   itemName: Steam generator
-  id: 72
+  id: 73
   mapObject: {fileID: 7245704639458897854, guid: 51e722e4dbe80d84e91d00b9220f57e0, type: 3}
   mapObjectArchetype: {fileID: 11400000, guid: a68bffaed81a994479fe9c83d5784f7e, type: 2}
   useMapColor: 1

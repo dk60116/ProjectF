@@ -2,6 +2,7 @@ param([switch]$CompileUnity)
 
 $ErrorActionPreference = 'Stop'
 $root = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '../..'))
+& (Join-Path $PSScriptRoot 'EditorColorChecks.ps1') -Root $root
 dotnet run --project (Join-Path $PSScriptRoot 'MonsterDataHarness.csproj') --configuration Release
 if ($LASTEXITCODE -ne 0) { throw 'Monster Data logic checks failed.' }
 dotnet run --project (Join-Path $PSScriptRoot 'RuntimeChecks.csproj') --configuration Release
@@ -45,6 +46,13 @@ $brush = Get-Content -LiteralPath (Join-Path $assets 'Scripts/Object/Monster/Mon
 Require ($brush.StartsWith('#if UNITY_EDITOR') -and $brush.Contains('Input.GetKeyDown(KeyCode.Escape)') -and $brush.Contains('Input.GetMouseButtonDown(0)')) 'Brush is Editor-only and handles Escape plus left clicks'
 Require ($brush.Contains('MonsterSpawner.TrySpawnAt(') -and $brush.Contains('cancelledFrame == Time.frameCount')) 'Brush spawns at the selected point and consumes its cancellation frame'
 $monsterEditor = Get-Content -LiteralPath (Join-Path $assets 'Editor/Monsters/MonsterDataEditorWindow.cs') -Raw
+Require ($monsterEditor.Contains('EnsureStyles();') -and $monsterEditor.Contains('if (rowStyle != null && headerStyle != null) return;') -and -not $monsterEditor.Contains('stylesUseProSkin') -and -not $monsterEditor.Contains('new Color(0.1f, 0.1f, 0.1f)')) 'Monster name styles stay cached without a black-text skin branch'
+Require ($monsterEditor.Contains('SetGuiStyleTextColor(rowStyle, Color.white)') -and $monsterEditor.Contains('SetGuiStyleTextColor(headerStyle, Color.white)')) 'Species, variant rows and detail headings explicitly use white text'
+Require ([regex]::IsMatch($monsterEditor, 'GUI.color = Color.white;\s*GUI.contentColor = Color.white;\s*try\s*\{\s*DrawWindowContent\(\);\s*\}\s*finally\s*\{\s*GUI.contentColor = previousContentColor;\s*GUI.color = previousColor;')) 'Monster window neutralizes inherited GUI tint and restores it even if drawing throws'
+$editorGui = Get-Content -LiteralPath (Join-Path $assets 'Editor/AnimalDataEditorUtility.cs') -Raw
+foreach ($state in @('normal', 'hover', 'active', 'focused', 'onNormal', 'onHover', 'onActive', 'onFocused')) {
+    Require ($editorGui.Contains("style.$state.textColor = color;")) "Shared editor text color covers the $state GUI state"
+}
 Require ($monsterEditor.Contains('DrawPaintButton(draft, selectedVariantId)') -and $monsterEditor.Contains('GUILayout.Toggle(active,') -and $monsterEditor.Contains('MonsterSpawnBrush.Begin(draft.Source, variantId)')) 'MonsterData has a selected-variant brush toggle'
 Require ([regex]::IsMatch($monsterEditor, 'private void OnDisable\(\)\s*\{\s*MonsterSpawnBrush.Stop\(\)') -and $editorSpawner.Contains('MonsterSpawnBrush.Stop()')) 'Window closure and Play Mode teardown stop brush input'
 $world = Get-Content -LiteralPath (Join-Path $assets 'Scripts/Object/Monster/MonsterWorld.cs') -Raw

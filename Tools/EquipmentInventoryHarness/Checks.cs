@@ -1,7 +1,7 @@
 using System;
 using System.Collections.Generic;
 
-static class Checks
+static partial class Checks
 {
     static int checks;
     static void Check(bool value, string message) { if (!value) throw new Exception(message); checks++; }
@@ -89,6 +89,11 @@ static class Checks
         CheckProjectiles();
         CheckEmptyMagazineRefill();
         CheckProjectileSpeed();
+        CheckProjectileTrailHistory();
+        CheckRangedRange();
+        CheckRangedApproach();
+        CheckTowerMount();
+        CheckTowerCombat();
     }
 
     static void CheckEquipmentAutoSelection()
@@ -293,12 +298,14 @@ static class Checks
         var update = typeof(ProjectF.Combat.PlayerProjectileWorld).GetMethod("Update", System.Reflection.BindingFlags.Instance|System.Reflection.BindingFlags.NonPublic);
         var shots = typeof(ProjectF.Combat.PlayerProjectileWorld).GetField("shots", System.Reflection.BindingFlags.Instance|System.Reflection.BindingFlags.NonPublic);
         int ShotCount() => ((System.Collections.ICollection)shots.GetValue(world)).Count;
-        void Step() { UnityEngine.Time.frameCount++; update.Invoke(world,null); }
+        void Step() { UnityEngine.Time.frameCount++; UnityEngine.Time.time += UnityEngine.Time.deltaTime; update.Invoke(world,null); }
         var shot = ((System.Collections.IList)shots.GetValue(world))[0];
         var view = shot.GetType().GetField("View", System.Reflection.BindingFlags.Instance|System.Reflection.BindingFlags.NonPublic).GetValue(shot);
         object ReadView(string field) => view.GetType().GetField(field, System.Reflection.BindingFlags.Instance|System.Reflection.BindingFlags.NonPublic).GetValue(view);
         var root = (UnityEngine.GameObject)ReadView("Root");
         var visual = (UnityEngine.Transform)ReadView("Transform");
+        var trail = (UnityEngine.LineRenderer)ReadView("Trail");
+        var trailMaterial = trail.sharedMaterial;
         void BindCurrentView()
         {
             var current = ((System.Collections.IList)shots.GetValue(world))[0];
@@ -306,6 +313,7 @@ static class Checks
                 |System.Reflection.BindingFlags.NonPublic).GetValue(current);
             root = (UnityEngine.GameObject)ReadView("Root");
             visual = (UnityEngine.Transform)ReadView("Transform");
+            trail = (UnityEngine.LineRenderer)ReadView("Trail");
         }
         Check(((UnityEngine.MeshFilter)ReadView("Filter")).sharedMesh == items[23].portableMesh
             && ((UnityEngine.MeshRenderer)ReadView("Renderer")).sharedMaterial == items[23].portableMat,
@@ -314,6 +322,14 @@ static class Checks
             "The authored X-axis arrow is aligned to the projectile flight direction");
         Check(visual.localScale == UnityEngine.Vector3.one * 1.25f,
             "Projectile presentation is enlarged uniformly without changing the source mesh");
+        Check(!trail.enabled && trail.useWorldSpace && trail.startWidth == 0f && trail.endWidth == .045f
+            && trail.startColor.a == 0f && trail.endColor.a > 0f,
+            "Arrow trails taper from a transparent tail to a visible head in world space");
+        Check(trail.sharedMaterial.Shader.name == "Custom/MapFocusOverlay" && trail.sharedMaterial.renderQueue == 3000
+            && trail.sharedMaterial.DepthTest == 4,
+            "Trails use the project's included URP vertex-color shader with world depth testing");
+        Check(trail.Positions.Count == 1 && trail.Positions[0] == visual.position,
+            "A freshly launched trail starts only at the current muzzle position");
         Check(ReferenceEquals(shot.GetType().GetField("Target", System.Reflection.BindingFlags.Instance
             |System.Reflection.BindingFlags.NonPublic).GetValue(shot), target),
             "A launched crossbow arrow retains its designated target");
@@ -325,8 +341,18 @@ static class Checks
             "A targeted arrow damages its designated monster on arrival");
         Check(root.activeInHierarchy && visual.position == new UnityEngine.Vector3(0,.65f,1),
             "Impact moves the visible arrow to the actual hit point before pooling");
+        Check(trail.Positions.Count == 2 && trail.Positions[1] == visual.position,
+            "Even a one-step impact records the full muzzle-to-impact trail");
+        Check(trail.enabled && trail.positionCount >= 2 && trail.Positions[0] != trail.Positions[1],
+            "A one-step arrow produces an enabled nondegenerate renderable line, not only position data");
+        Step();
+        Check(root.activeInHierarchy && !((UnityEngine.MeshRenderer)ReadView("Renderer")).enabled,
+            "An impacted arrow hides its mesh while its trailing line finishes fading");
+        Check(trail.enabled && trail.endColor.a > 0f && trail.endColor.a < .85f,
+            "The rendered trail remains enabled and visibly fades after its arrow mesh disappears");
         Step();
         Check(target.CurrentHealth == 80 && !root.activeInHierarchy, "An impacted projectile renders once then recycles without repeated damage");
+        Check(trail.Positions.Count == 0, "Recycling clears every old trail position");
         UnityEngine.Time.time = 11;
         target.Position = new(0,.65f,3);
         Check(player.TryFireSelectedWeapon(target), "Cooldown expiration allows another shot");
@@ -335,6 +361,7 @@ static class Checks
         MapObjectTickManager.SimulationPaused=true;
         Step();
         Check(animal.Health == 100 && ShotCount() == 1, "Simulation pause freezes flight without despawning it");
+        Check(trail.Positions.Count == 1, "A paused projectile cannot append spurious trail positions");
         Check(!player.TryFireSelectedWeapon(target), "Paused simulation cannot launch additional projectiles");
         MapObjectTickManager.SimulationPaused=false;
         Step();
@@ -344,6 +371,8 @@ static class Checks
         Step();
         Check(visual.position == new UnityEngine.Vector3(2,.65f,2) && target.CurrentHealth == 80,
             "An arrow changes direction when its designated target moves sideways");
+        Check(trail.Positions.Count == 3 && trail.Positions[2] == visual.position,
+            "Trail positions follow a targeting arrow through its direction change");
         Step();
         Check(animal.Health == 100 && target.CurrentHealth == 60 && ShotCount() == 0,
             "A moving target is hit without another nearby animal intercepting the shot");
@@ -357,16 +386,22 @@ static class Checks
         SaveManager.GameplayInputBlocked=false;
         Check(player.TryFireSelectedWeapon(target), "Shot can resume after input barrier clears");
         BindCurrentView();
+        Check(ReferenceEquals(trail.sharedMaterial, trailMaterial),
+            "Concurrent projectile views share a single world-owned trail material");
         target.CurrentHealth = 0;
         Step();
         Check(ShotCount() == 0 && !root.activeInHierarchy && animal.Health == 100,
             "A dead target cancels flight without retargeting or damaging another actor");
+        Check(trail.Positions.Count == 0, "Cancelling a dead target clears its trail immediately");
         UnityEngine.Time.time=13;
         target.CurrentHealth = 60;
         Check(player.TryFireSelectedWeapon(target), "Flight can launch again using pooled presentation");
         BindCurrentView();
         Check(visual.localScale == UnityEngine.Vector3.one * 1.25f,
             "Reusing a pooled projectile preserves its scale without accumulating enlargement");
+        Check(trail.Positions.Count == 1 && trail.Positions[0] == visual.position
+            && ((UnityEngine.MeshRenderer)ReadView("Renderer")).enabled,
+            "A pooled arrow restores its mesh and cannot connect its trail to a previous shot");
         target.Position = new(0,.65f,50);
         var missStart = visual.position;
         Step();
@@ -378,10 +413,13 @@ static class Checks
         UnityEngine.Time.time=14;
         target.Position = new(0,.65f,5);
         Check(player.TryFireSelectedWeapon(target), "Final arrow launches");
+        BindCurrentView();
         Check(player.GetAmmunitionBag().GetSlotCount(0) == 0 && !player.TryFireSelectedWeapon(target),
             "Empty ammo storage cannot create another shot");
         world.ClearForLoad();
         Check(ShotCount() == 0, "Loading clears transient shots while spent ammunition stays consumed");
+        Check(trail.Positions.Count == 0 && !root.activeInHierarchy,
+            "Loading clears and hides active projectile trails");
 
         Check(ProjectF.Combat.WeaponShotStats.TryResolve(items[22], items[23], out var targetingStats),
             "Targeted flight uses the equipped weapon and ammunition stats");
@@ -389,6 +427,10 @@ static class Checks
         Step();
         Check(animal.Health == 80 && target.CurrentHealth == 60 && ShotCount() == 0,
             "An animal can also be the designated target and receives damage only on arrival");
+        world.ClearForLoad();
+        Check(((System.Collections.ICollection)typeof(ProjectF.Combat.PlayerProjectileWorld).GetField("impactViews",
+            System.Reflection.BindingFlags.Instance|System.Reflection.BindingFlags.NonPublic).GetValue(world)).Count == 0,
+            "Loading also clears trails that were already fading after impact");
         Step();
         Check(animal.Health == 80, "Targeted animal damage is applied only once");
         world.Launch(items[23], UnityEngine.Vector3.zero, target, targetingStats, UnityEngine.Vector3.zero);
@@ -397,6 +439,9 @@ static class Checks
         Check(ShotCount() == 0 && target.CurrentHealth == 60,
             "A despawned target cancels its projectile safely");
         world.ClearForLoad();
+        typeof(ProjectF.Combat.PlayerProjectileWorld).GetMethod("OnDestroy",
+            System.Reflection.BindingFlags.Instance|System.Reflection.BindingFlags.NonPublic).Invoke(world, null);
+        Check(trailMaterial.Destroyed, "Destroying a projectile world disposes its shared trail material");
     }
 
     static void CheckProjectileSpeed()
@@ -427,6 +472,38 @@ static class Checks
             world.ClearForLoad();
         }
         weapon.projectileSpeed = oldWeaponSpeed; arrow.projectileSpeed = oldArrowSpeed;
+    }
+
+    static void CheckProjectileTrailHistory()
+    {
+        var items = GameManager.Instance.ItemManger.Items;
+        Check(ProjectF.Combat.WeaponShotStats.TryResolve(items[22], items[23], out var stats), "Trail history uses real shot stats");
+        float oldTime = UnityEngine.Time.time, oldDelta = UnityEngine.Time.deltaTime;
+        UnityEngine.Time.time = 30f; UnityEngine.Time.deltaTime = .0005f;
+        var world = new ProjectF.Combat.PlayerProjectileWorld();
+        var target = new ProjectF.Monsters.MonsterInstance { Position = new(0,0,10) };
+        var flags = System.Reflection.BindingFlags.Instance|System.Reflection.BindingFlags.NonPublic;
+        var update = typeof(ProjectF.Combat.PlayerProjectileWorld).GetMethod("Update", flags);
+        var shots = (System.Collections.IList)typeof(ProjectF.Combat.PlayerProjectileWorld).GetField("shots", flags).GetValue(world);
+        world.Launch(items[23], UnityEngine.Vector3.zero, target, stats, UnityEngine.Vector3.zero);
+        var shot = shots[0];
+        var view = shot.GetType().GetField("View", flags).GetValue(shot);
+        var line = (UnityEngine.LineRenderer)view.GetType().GetField("Trail", flags).GetValue(view);
+        for (int i = 0; i < 80; i++)
+        {
+            UnityEngine.Time.frameCount++; UnityEngine.Time.time += UnityEngine.Time.deltaTime;
+            update.Invoke(world, null);
+            Check(line.enabled && line.positionCount >= 2 && line.positionCount <= 32,
+                "Trail rendering stays nondegenerate and bounded when the ring buffer wraps");
+        }
+        for (int i = 1; i < line.positionCount; i++)
+            Check(line.Positions[i].z > line.Positions[i-1].z, "Wrapped history renders oldest to newest without connecting across the ring");
+        UnityEngine.Time.frameCount++; UnityEngine.Time.time += 1f;
+        update.Invoke(world, null);
+        Check(line.positionCount == 2 && line.enabled, "Old trail points expire while preserving the latest renderable segment");
+        world.ClearForLoad();
+        Check(line.positionCount == 0 && !line.enabled, "Clearing flight removes rendered line geometry as well as history");
+        UnityEngine.Time.time = oldTime; UnityEngine.Time.deltaTime = oldDelta;
     }
 
     static void CheckEmptyMagazineRefill()

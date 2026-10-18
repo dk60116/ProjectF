@@ -341,6 +341,18 @@ public partial class BagSlot : ItemSlot, IBeginDragHandler, IDragHandler, IEndDr
         }
 
         Player player = GameManager.Instance.Player;
+        int carriedItemId = boundBag.GetSlotItemId(slotIndex);
+        if (TryGetFocusedItemMount(player, out IPlayerItemMount focusedMount)
+            && focusedMount.AcceptsMountedItem(carriedItemId))
+        {
+            if (focusedMount.TryMountItemFromSlot(player, boundBag, slotIndex))
+            {
+                RefreshPickupPreviewAfterDrop();
+            }
+
+            return;
+        }
+
         if (!player.TryPrepareEquipmentTransfer(boundBag, slotIndex, null, -1)) return;
         Transform movingStartTransform = null;
         if (player != null)
@@ -406,18 +418,6 @@ public partial class BagSlot : ItemSlot, IBeginDragHandler, IDragHandler, IEndDr
             }
 
             RefreshPickupPreviewAfterDrop();
-            return;
-        }
-
-        int carriedItemId = boundBag.GetSlotItemId(slotIndex);
-        if (IsManualItem(carriedItemId)
-            && TryGetFocusedDesk(player, out Desk focusedDesk))
-        {
-            if (focusedDesk.TryStoreManualFromSlot(player, boundBag, slotIndex))
-            {
-                RefreshPickupPreviewAfterDrop();
-            }
-
             return;
         }
 
@@ -3997,9 +3997,9 @@ public partial class BagSlot : ItemSlot, IBeginDragHandler, IDragHandler, IEndDr
                && focusedBoxObject != null;
     }
 
-    private static bool TryGetFocusedDesk(Player player, out Desk focusedDesk)
+    private static bool TryGetFocusedItemMount(Player player, out IPlayerItemMount focusedMount)
     {
-        focusedDesk = null;
+        focusedMount = null;
         if (player == null)
         {
             return false;
@@ -4013,16 +4013,13 @@ public partial class BagSlot : ItemSlot, IBeginDragHandler, IDragHandler, IEndDr
             return false;
         }
 
-        focusedDesk = focusedMapObject as Desk;
-        if (focusedDesk == null)
-        {
-            focusedDesk = focusedMapObject.GetComponentInParent<Desk>();
-        }
-
-        return focusedDesk != null
-               && focusedDesk.gameObject.activeInHierarchy
-               && focusedDesk.AllowsFocus
-               && playerController.IsWithinInteractionRange(focusedDesk);
+        InstallationObject installation = focusedMapObject as InstallationObject
+            ?? focusedMapObject.GetComponentInParent<InstallationObject>();
+        focusedMount = installation as IPlayerItemMount;
+        return focusedMount != null
+               && installation.gameObject.activeInHierarchy
+               && installation.AllowsFocus
+               && playerController.IsWithinInteractionRange(installation);
     }
 
     protected static bool TryGetGroundPickupBlock(
@@ -4094,15 +4091,6 @@ public partial class BagSlot : ItemSlot, IBeginDragHandler, IDragHandler, IEndDr
     private static TerrainGenerator ResolveTerrain()
     {
         return TerrainGenerator.ResolveActive();
-    }
-
-    private static bool IsManualItem(int itemId)
-    {
-        return itemId >= 0
-               && GameManager.Instance != null
-               && GameManager.Instance.ItemManger != null
-               && GameManager.Instance.ItemManger.TryGetItemDefinitionById(itemId, out ItemDefinition definition)
-               && definition.isManual;
     }
 
     protected bool IsInventoryUiLocked()

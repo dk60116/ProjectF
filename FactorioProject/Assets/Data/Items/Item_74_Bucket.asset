@@ -12,8 +12,16 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: ccc5c26867f3fd3479193fd24dec463e, type: 3}
   m_Name: Item_74_Bucket
   m_EditorClassIdentifier: Assembly-CSharp::ItemDefinition
+  isRangedWeapon: 0
+  isAmmo: 0
+  requiresAmmo: 0
+  compatibleAmmo: []
+  attackDamage: 0
+  fireRate: 1
+  attackRange: 15
+  projectileSpeed: 20
   itemName: Bucket
-  id: 127
+  id: 128
   mapObject: {fileID: 3525437405879595132, guid: f2ee43aae45a6ad40af89ae6e4f8259a, type: 3}
   mapObjectArchetype: {fileID: 11400000, guid: 930b92f3954794648987bf4543b2f853, type: 2}
   useMapColor: 1

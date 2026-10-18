@@ -1,0 +1,5 @@
+Tool: built-in image_gen
+Reference: output/imagegen/TowerBase_Gear_Icon.png
+Transparent background: true
+
+Use case: precise-object-edit. Create an alternate version of this transparent tower game icon by changing ONLY the silver-gray toothed gear mount on the top platform. Remove ALL the teeth around its outer edge and turn it into a smooth, thick, circular metal rotary mounting disk with a continuous round rim. Keep the raised central ring/socket and its dark circular shaft opening. The disk remains horizontally parallel to the platform, with the same isometric view, material, location, scale and thickness as the existing gear. No teeth, notches, spikes, U-shaped bracket, or weapon. Preserve the entire rest of the image exactly: orange wooden tower, four posts, top platform, iron brackets and bolts, diagonal braces, gray stone base, thick black outlines, faceted low-poly shading, camera, composition, object scale and square canvas. Keep the genuinely transparent RGBA background including holes between the tower's posts. No text, background, ground shadow or additional objects.

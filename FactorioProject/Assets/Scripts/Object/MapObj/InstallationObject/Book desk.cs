@@ -2,7 +2,7 @@ using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.Serialization;
 
-public class Desk : InstallationObject, IPlayerMapObjectInteraction, IPersistentInstallationItemStorage
+public class Desk : InstallationObject, IPlayerMapObjectInteraction, IPersistentInstallationItemStorage, IPlayerItemMount
 {
     private const string LegacyManualPointName = "Menual Point";
     private const string ManualPointName = "Manual Point";
@@ -83,7 +83,7 @@ public class Desk : InstallationObject, IPlayerMapObjectInteraction, IPersistent
         }
 
         return TryGetHeldManual(player, out PlayerBag handBag, out _)
-               && TryStoreManualFromSlot(player, handBag, 0);
+               && TryMountItemFromSlot(player, handBag, 0);
     }
 
     public int GetInteractionIconItemId(Player player)
@@ -98,7 +98,9 @@ public class Desk : InstallationObject, IPlayerMapObjectInteraction, IPersistent
             : ResolveItemId();
     }
 
-    public bool TryStoreManualFromSlot(Player player, PlayerBag sourceBag, int slotIndex)
+    public bool AcceptsMountedItem(int itemId) => IsManualItem(itemId);
+
+    public bool TryMountItemFromSlot(Player player, PlayerBag sourceBag, int slotIndex)
     {
         if (HasManual || player == null || sourceBag == null || slotIndex < 0)
         {

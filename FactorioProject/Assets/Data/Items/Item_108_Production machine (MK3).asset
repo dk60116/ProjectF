@@ -12,8 +12,16 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: ccc5c26867f3fd3479193fd24dec463e, type: 3}
   m_Name: Item_108_Production machine (MK3)
   m_EditorClassIdentifier: Assembly-CSharp::ItemDefinition
+  isRangedWeapon: 0
+  isAmmo: 0
+  requiresAmmo: 0
+  compatibleAmmo: []
+  attackDamage: 0
+  fireRate: 1
+  attackRange: 15
+  projectileSpeed: 20
   itemName: Production machine (MK3)
-  id: 80
+  id: 81
   mapObject: {fileID: 1982885657640665004, guid: 5e35bf91a3c489b42b8cff7e865635b6, type: 3}
   mapObjectArchetype: {fileID: 11400000, guid: 1bb84239e37654e478fa192ba8232136, type: 2}
   useMapColor: 1

@@ -6,6 +6,18 @@ using UnityEngine;
 
 internal static class ProjectFEditorGUIUtility
 {
+    public static void SetGuiStyleTextColor(GUIStyle style, Color color)
+    {
+        style.normal.textColor = color;
+        style.hover.textColor = color;
+        style.active.textColor = color;
+        style.focused.textColor = color;
+        style.onNormal.textColor = color;
+        style.onHover.textColor = color;
+        style.onActive.textColor = color;
+        style.onFocused.textColor = color;
+    }
+
     public static void CommitAndReleaseKeyboardFocus()
     {
         GUI.FocusControl(null);

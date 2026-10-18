@@ -12,8 +12,16 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: ccc5c26867f3fd3479193fd24dec463e, type: 3}
   m_Name: Item_120_Steel Funance
   m_EditorClassIdentifier: Assembly-CSharp::ItemDefinition
+  isRangedWeapon: 0
+  isAmmo: 0
+  requiresAmmo: 0
+  compatibleAmmo: []
+  attackDamage: 0
+  fireRate: 1
+  attackRange: 15
+  projectileSpeed: 20
   itemName: Steel Funance
-  id: 45
+  id: 46
   mapObject: {fileID: 3843491245406909261, guid: 2089176be5a3410428d471926164db6c, type: 3}
   mapObjectArchetype: {fileID: 11400000, guid: 1f2dcf8599939a14aad4072672002045, type: 2}
   useMapColor: 1

@@ -197,8 +197,19 @@ public class Vehicle : InstallationObject
             && occupiedCoordinates != null
             && occupiedCoordinates.Count == 1
             && occupiedCoordinates[0] == coordinate);
+        TerrainGenerator terrain = TerrainGenerator.ResolveActive();
         if (runtimePlacementChanged)
         {
+            // Wide vehicles start with a static footprint, then use a moving anchor.
+            // Remove every old block binding before ConfigurePlacementRuntime replaces the list.
+            for (int i = 0; terrain != null && occupiedCoordinates != null && i < occupiedCoordinates.Count; i++)
+            {
+                Vector2Int previousCoordinate = occupiedCoordinates[i];
+                if (previousCoordinate != coordinate
+                    && terrain.TryGetLoadedBlock(previousCoordinate, out Block previousBlock)
+                    && previousBlock != null && ReferenceEquals(previousBlock.MapObject, this))
+                    previousBlock.SetMapObject(null);
+            }
             runtimeCoordinateBuffer[0] = coordinate;
             ConfigurePlacementRuntime(
                 coordinate,
@@ -210,7 +221,6 @@ public class Vehicle : InstallationObject
 
         // Placement changes clear the entity handle. Rebind before model submission;
         // movement within the same cell still updates the stored world pose.
-        TerrainGenerator terrain = TerrainGenerator.ResolveActive();
         if (terrain != null)
         {
             if (hadRuntimePlacement)

@@ -1,0 +1,5 @@
+Tool: built-in image_gen
+Reference: output/imagegen/CrossbowTower_Icon.png
+Transparent background: true
+
+Use case: precise-object-edit. Edit the supplied transparent game icon. Remove the ENTIRE crossbow from the top: orange wooden weapon stock, both silver bow limbs, string, end caps, trigger, and the central gray metal swivel/pivot pedestal which supports the weapon. Leave ONLY the existing square wooden tower, its four posts, corner iron bands and bolts, diagonal cross braces, flat wooden top platform and gray stone base. Reconstruct clean continuous wooden planks where the weapon pedestal was, so the top platform is empty. Preserve the tower's exact geometry, perspective, proportions, colors, thick black outlines and faceted low-poly cel shading. Do not redesign the tower, add a roof, add weapons, add decorations, add text, or add a ground shadow. Keep the square canvas and the existing tower scale. Preserve genuinely transparent RGBA background, including empty spaces between the posts and braces.

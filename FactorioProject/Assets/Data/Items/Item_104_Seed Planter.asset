@@ -12,8 +12,16 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: ccc5c26867f3fd3479193fd24dec463e, type: 3}
   m_Name: Item_104_Seed Planter
   m_EditorClassIdentifier: Assembly-CSharp::ItemDefinition
+  isRangedWeapon: 0
+  isAmmo: 0
+  requiresAmmo: 0
+  compatibleAmmo: []
+  attackDamage: 0
+  fireRate: 1
+  attackRange: 15
+  projectileSpeed: 20
   itemName: Seed Planter
-  id: 82
+  id: 83
   mapObject: {fileID: 5947636525656944032, guid: 8f63da3c1fe9b2c45b93145ecc84810d, type: 3}
   mapObjectArchetype: {fileID: 11400000, guid: dbb9b3a7fbda31240961602a24db9745, type: 2}
   useMapColor: 1

@@ -1,0 +1,203 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: a4d286e989be41fe853b78a59ca3a4e8, type: 3}
+  m_Name: MapObjectArchetype_135_Raft
+  m_EditorClassIdentifier: Assembly-CSharp::ProjectF.MapObjects.MapObjectArchetype
+  schemaVersion: 2
+  itemDefinition: {fileID: 11400000, guid: 48066f4fbabe240498d815ab5e84d1a2, type: 2}
+  sourcePrefab: {fileID: 4240074844675582300, guid: b0f58a925e380d34c81e41783a23710a, type: 3}
+  itemId: 135
+  itemName: Raft
+  sourcePrefabGuid: b0f58a925e380d34c81e41783a23710a
+  sourceContentHash:
+    serializedVersion: 2
+    Hash: 51012d5254b502754d25aff34164f2c5
+  sourceRuntimeType: Raft, Assembly-CSharp, Version=0.0.0.0, Culture=neutral, PublicKeyToken=null
+  mapStatus:
+    mapSizeX: 2
+    mapSizeY: 2
+    centerCellX: 0
+    centerCellY: 0
+  focusMode: 1
+  defaultRootScale: {x: 1, y: 1, z: 1}
+  defaultRootRotation: {x: 0, y: 0, z: 0, w: 1}
+  localRenderBounds:
+    m_Center: {x: 0, y: 0.1657837, z: 0}
+    m_Extent: {x: 0.5710145, y: 0.16578367, z: 0.67467046}
+  hasRenderBounds: 1
+  featureFlags: 64
+  nodes:
+  - hierarchyPath: 0:Raft
+    animationPath: 
+    parentIndex: -1
+    localPosition: {x: 0, y: 0, z: 0}
+    localRotation: {x: 0, y: 0, z: 0, w: 1}
+    localScale: {x: 1, y: 1, z: 1}
+    defaultLocalToRoot:
+      e00: 1
+      e01: 0
+      e02: 0
+      e03: 0
+      e10: 0
+      e11: 1
+      e12: 0
+      e13: 0
+      e20: 0
+      e21: 0
+      e22: 1
+      e23: 0
+      e30: 0
+      e31: 0
+      e32: 0
+      e33: 1
+    activeByDefault: 1
+    hasAnimatedTransform: 0
+  - hierarchyPath: 0:Raft/0:Raft
+    animationPath: Raft
+    parentIndex: 0
+    localPosition: {x: 0, y: 0, z: 0}
+    localRotation: {x: 0, y: 0, z: 0, w: 1}
+    localScale: {x: 1, y: 1, z: 1}
+    defaultLocalToRoot:
+      e00: 1
+      e01: 0
+      e02: 0
+      e03: 0
+      e10: 0
+      e11: 1
+      e12: 0
+      e13: 0
+      e20: 0
+      e21: 0
+      e22: 1
+      e23: 0
+      e30: 0
+      e31: 0
+      e32: 0
+      e33: 1
+    activeByDefault: 1
+    hasAnimatedTransform: 0
+  - hierarchyPath: 0:Raft/1:PlayerPoint
+    animationPath: PlayerPoint
+    parentIndex: 0
+    localPosition: {x: -0.162, y: 0.352, z: -0.35}
+    localRotation: {x: 0, y: 0, z: 0, w: 1}
+    localScale: {x: 1, y: 1, z: 1}
+    defaultLocalToRoot:
+      e00: 1
+      e01: 0
+      e02: 0
+      e03: -0.162
+      e10: 0
+      e11: 1
+      e12: 0
+      e13: 0.352
+      e20: 0
+      e21: 0
+      e22: 1
+      e23: -0.35
+      e30: 0
+      e31: 0
+      e32: 0
+      e33: 1
+    activeByDefault: 1
+    hasAnimatedTransform: 0
+  - hierarchyPath: 0:Raft/2:PlayerPoint (1)
+    animationPath: PlayerPoint (1)
+    parentIndex: 0
+    localPosition: {x: 0.16, y: 0.352, z: 0.35}
+    localRotation: {x: 0, y: 0, z: 0, w: 1}
+    localScale: {x: 1, y: 1, z: 1}
+    defaultLocalToRoot:
+      e00: 1
+      e01: 0
+      e02: 0
+      e03: 0.16
+      e10: 0
+      e11: 1
+      e12: 0
+      e13: 0.352
+      e20: 0
+      e21: 0
+      e22: 1
+      e23: 0.35
+      e30: 0
+      e31: 0
+      e32: 0
+      e33: 1
+    activeByDefault: 1
+    hasAnimatedTransform: 0
+  - hierarchyPath: 0:Raft/3:ItemPoint
+    animationPath: ItemPoint
+    parentIndex: 0
+    localPosition: {x: 0, y: 0.347, z: 0}
+    localRotation: {x: -0, y: -0, z: -0, w: 1}
+    localScale: {x: 1, y: 1, z: 1}
+    defaultLocalToRoot:
+      e00: 1
+      e01: 0
+      e02: 0
+      e03: 0
+      e10: 0
+      e11: 1
+      e12: 0
+      e13: 0.347
+      e20: 0
+      e21: 0
+      e22: 1
+      e23: 0
+      e30: 0
+      e31: 0
+      e32: 0
+      e33: 1
+    activeByDefault: 1
+    hasAnimatedTransform: 0
+  - hierarchyPath: 0:Raft/4:BoxPoint
+    animationPath: BoxPoint
+    parentIndex: 0
+    localPosition: {x: 0, y: 0.3, z: 0}
+    localRotation: {x: -0, y: -0, z: -0, w: 1}
+    localScale: {x: 1, y: 1, z: 1}
+    defaultLocalToRoot:
+      e00: 1
+      e01: 0
+      e02: 0
+      e03: 0
+      e10: 0
+      e11: 1
+      e12: 0
+      e13: 0.3
+      e20: 0
+      e21: 0
+      e22: 1
+      e23: 0
+      e30: 0
+      e31: 0
+      e32: 0
+      e33: 1
+    activeByDefault: 1
+    hasAnimatedTransform: 0
+  renderParts:
+  - kind: 0
+    nodeIndex: 1
+    mesh: {fileID: 8020282515351225617, guid: 4c5b2c25061246f4faf3b407882a317f, type: 3}
+    material: {fileID: 2100000, guid: 46346ecc21ab58b44a95c9146b36bfd6, type: 2}
+    subMeshIndex: 0
+    localBounds:
+      m_Center: {x: 0, y: 0.1657837, z: 0}
+      m_Extent: {x: 0.5710145, y: 0.16578367, z: 0.67467046}
+    layer: 0
+    renderingLayerMask: 1
+    shadowCastingMode: 1
+    receiveShadows: 1
+    enabledByDefault: 1
+  animationClips: []

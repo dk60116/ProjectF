@@ -4130,6 +4130,12 @@ public partial class InstallationPlacementController : MonoBehaviour
                 packedPortableObject.SetInstallationHealth(packedSession.editSession.installationHealth);
             }
 
+            if (HasPendingStoredInstallationItems(packedSession))
+            {
+                packedInstallationHistory.Push(packedSession);
+                break;
+            }
+
             InstallationObject originalInstallation = packedSession?.editSession?.originalInstallation;
             if (originalInstallation == null)
             {
@@ -4261,40 +4267,45 @@ public partial class InstallationPlacementController : MonoBehaviour
         PackedInstallationSession packedSession,
         ref int moveIndex)
     {
-        InstallationObject installation = packedSession?.editSession?.originalInstallation;
-        if (installation is IPersistentInstallationItemCollectionStorage collectionStorage)
+        InstallationEditSession editSession = packedSession?.editSession;
+        if (editSession == null) return;
+        InstallationObject installation = editSession.originalInstallation;
+        // OnDisable may already have cleared cargo or pooled presentation entities.
+        // The pre-detach snapshot owns the contents until every item is returned.
+        List<int> itemIds = editSession.storedInstallationItemIds;
+        List<float> health = editSession.storedInstallationItemHealth;
+        if (itemIds != null)
         {
-            List<int> itemIds = new List<int>();
-            List<float> health = new List<float>();
-            collectionStorage.CapturePersistentStoredItemIds(itemIds, health);
             Vector3 collectionStartPosition = ResolvePackedItemMoveStartPosition(packedSession);
             for (int i = itemIds.Count - 1; i >= 0; i--)
             {
                 int collectionItemId = itemIds[i];
+                float itemHealth = health != null && i < health.Count ? health[i] : 0f;
                 bool movedItem = collectionItemId < 0
                                  || TryAddPackedItemToPlayerStorage(
                                      collectionItemId,
                                      collectionStartPosition,
                                      ref moveIndex,
-                                     out _, health[i])
+                                     out _, itemHealth)
                                  || TryDropPackedFloorObject(
                                      collectionItemId,
                                      packedSession.dropCoordinate,
                                      out _,
-                                     out _, health[i]);
+                                     out _, itemHealth);
                 if (movedItem)
                 {
                     itemIds.RemoveAt(i);
-                    health.RemoveAt(i);
+                    if (health != null && i < health.Count) health.RemoveAt(i);
                 }
             }
 
-            collectionStorage.ApplyPersistentStoredItemIds(itemIds, health);
+            if (installation is IPersistentInstallationItemCollectionStorage collectionStorage)
+                collectionStorage.ApplyPersistentStoredItemIds(itemIds, health);
         }
 
         IPersistentInstallationItemStorage itemStorage =
             installation as IPersistentInstallationItemStorage;
-        int itemId = itemStorage != null ? itemStorage.PersistentStoredItemId : -1;
+        int itemId = editSession.storedInstallationItemId;
         if (itemId < 0)
         {
             return;
@@ -4305,8 +4316,16 @@ public partial class InstallationPlacementController : MonoBehaviour
                           || TryDropPackedFloorObject(itemId, packedSession.dropCoordinate, out _, out _);
         if (storedItem)
         {
-            itemStorage.ApplyPersistentStoredItemId(-1);
+            editSession.storedInstallationItemId = -1;
+            itemStorage?.ApplyPersistentStoredItemId(-1);
         }
+    }
+
+    private static bool HasPendingStoredInstallationItems(PackedInstallationSession packedSession)
+    {
+        InstallationEditSession editSession = packedSession?.editSession;
+        return editSession != null && (editSession.storedInstallationItemId >= 0
+            || editSession.storedInstallationItemIds != null && editSession.storedInstallationItemIds.Count > 0);
     }
 
     private bool TryAddPackedItemToPlayerStorage(int itemId, Vector3 startPosition, ref int moveIndex)
@@ -6001,14 +6020,6 @@ public partial class InstallationPlacementController : MonoBehaviour
                     editSession.storedFluidItemId,
                     editSession.storedFluidUnits,
                     editSession.storedFluidTemperatureCelsius);
-                if (restoredInstallationObject is IPersistentInstallationItemStorage itemStorage)
-                {
-                    itemStorage.ApplyPersistentStoredItemId(editSession.storedInstallationItemId);
-                }
-                if (restoredInstallationObject is IPersistentInstallationItemCollectionStorage collectionStorage)
-                {
-                    collectionStorage.ApplyPersistentStoredItemIds(editSession.storedInstallationItemIds, editSession.storedInstallationItemHealth);
-                }
             }
             if (restoredObject is BoxObject restoredBoxObject && editSession.boxIsOpen.HasValue)
             {
@@ -6016,6 +6027,12 @@ public partial class InstallationPlacementController : MonoBehaviour
                 restoredBoxObject.SetStorageRange(editSession.boxMinimumRetainedItemCount, editSession.boxMaximumStoredItemCount);
             }
         }
+
+        // Even an unchanged vehicle loses transient cargo during OnDisable.
+        if (restoredObject is IPersistentInstallationItemStorage restoredItemStorage)
+            restoredItemStorage.ApplyPersistentStoredItemId(editSession.storedInstallationItemId);
+        if (restoredObject is IPersistentInstallationItemCollectionStorage restoredCollectionStorage)
+            restoredCollectionStorage.ApplyPersistentStoredItemIds(editSession.storedInstallationItemIds, editSession.storedInstallationItemHealth);
 
         ApplyEditedInstallationBlockStates(editSession, anchorCoordinate, quarterTurns);
         RestoreAttachedAreaBoxes(editSession, anchorCoordinate, quarterTurns, terrain);
@@ -21205,21 +21222,24 @@ public partial class InstallationPlacementController : MonoBehaviour
             return bindings.Count > 0;
         }
 
-        if (inputOutputModule is SeedPlanter seedPlanter)
+        if (inputOutputModule is SeedPlanter || inputOutputModule is Tower)
         {
-            List<int> seedItemIds = new List<int>();
-            if (!seedPlanter.TryCollectPlantableSeedItemIds(seedItemIds))
+            List<int> dynamicItemIds = new List<int>();
+            bool found = inputOutputModule is SeedPlanter seedPlanter
+                ? seedPlanter.TryCollectPlantableSeedItemIds(dynamicItemIds)
+                : ((Tower)inputOutputModule).TryCollectAmmunitionItemIds(dynamicItemIds);
+            if (!found)
             {
                 return bindings.Count > 0;
             }
 
             for (int cellIndex = 0; cellIndex < inputItemCells.Count; cellIndex++)
             {
-                for (int itemIndex = 0; itemIndex < seedItemIds.Count; itemIndex++)
+                for (int itemIndex = 0; itemIndex < dynamicItemIds.Count; itemIndex++)
                 {
                     bindings.Add(new InputOutputModuleItemAreaBinding(
                         inputItemCells[cellIndex].coordinate,
-                        seedItemIds[itemIndex]));
+                        dynamicItemIds[itemIndex]));
                 }
             }
 

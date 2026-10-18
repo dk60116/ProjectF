@@ -49,7 +49,7 @@ MonoBehaviour:
   m_EditorClassIdentifier: 
   id: 0
   objectName: Production machine (MK4)
-  objId: 81
+  objId: 82
   itemDefinition: {fileID: 11400000, guid: e288a378c27b2794da788e40d427075d, type: 2}
   mapStatus:
     mapSizeX: 2
@@ -147,6 +147,18 @@ MonoBehaviour:
       count: 1
     outputs:
     - itemDefinition: {fileID: 11400000, guid: d4748aa7ad1364d4da54a919623a3938, type: 2}
+      count: 1
+  - inputs:
+    - itemDefinition: {fileID: 11400000, guid: 5c4efc334bc1582409a913be8af752d3, type: 2}
+      count: 4
+    - itemDefinition: {fileID: 11400000, guid: c2c3df56b3d7ac04db2063fb6b297ee7, type: 2}
+      count: 8
+    - itemDefinition: {fileID: 11400000, guid: a2393aedc145bbd4a8de4f74073c1eca, type: 2}
+      count: 3
+    - itemDefinition: {fileID: 11400000, guid: fae2696b5392f8946ad224e1317329af, type: 2}
+      count: 4
+    outputs:
+    - itemDefinition: {fileID: 11400000, guid: a92f59a82b3ce2d45a3e90b6f4e6e989, type: 2}
       count: 1
   inputList: []
   outputList: []

@@ -377,7 +377,7 @@ public partial class ItemDataEditorWindow : EditorWindow
             if (selectedRowLabelStyle == null)
             {
                 selectedRowLabelStyle = new GUIStyle(EditorStyles.label);
-                SetGuiStyleTextColor(selectedRowLabelStyle, Color.white);
+                ProjectFEditorGUIUtility.SetGuiStyleTextColor(selectedRowLabelStyle, Color.white);
             }
 
             return selectedRowLabelStyle;
@@ -4687,7 +4687,6 @@ public partial class ItemDataEditorWindow : EditorWindow
 
         if (Enum.TryParse(mapFilter, true, out parsedFilter))
         {
-            parsedFilter = InstallationObject.NormalizeMapFilter(parsedFilter);
             return true;
         }
 
@@ -4733,7 +4732,7 @@ public partial class ItemDataEditorWindow : EditorWindow
             return false;
         }
 
-        parsedFilter = InstallationObject.NormalizeMapFilter(combinedFilter);
+        parsedFilter = combinedFilter;
         return true;
     }
 
@@ -4816,13 +4815,10 @@ public partial class ItemDataEditorWindow : EditorWindow
             SerializedProperty mapFilterProperty = GetSelectedMapObjectProperty(mapObjectSerializedObject, "mapFilter");
             if (mapFilterProperty != null)
             {
-                InstallationMapFilter currentFilter = InstallationObject.NormalizeMapFilter(
-                    (InstallationMapFilter)mapFilterProperty.intValue);
-                mapFilterProperty.intValue = (int)currentFilter;
+                InstallationMapFilter currentFilter = (InstallationMapFilter)mapFilterProperty.intValue;
 
                 EditorGUI.BeginChangeCheck();
                 InstallationMapFilter nextFilter = (InstallationMapFilter)EditorGUILayout.EnumFlagsField("Map Filter", currentFilter);
-                nextFilter = InstallationObject.NormalizeMapFilter(nextFilter);
 
                 if (EditorGUI.EndChangeCheck())
                 {
@@ -6877,22 +6873,10 @@ public partial class ItemDataEditorWindow : EditorWindow
                 alignment = TextAnchor.MiddleLeft,
                 clipping = TextClipping.Clip
             };
-            SetGuiStyleTextColor(itemDefinitionPopupTextStyle, Color.white);
+            ProjectFEditorGUIUtility.SetGuiStyleTextColor(itemDefinitionPopupTextStyle, Color.white);
         }
 
         return itemDefinitionPopupTextStyle;
-    }
-
-    private static void SetGuiStyleTextColor(GUIStyle style, Color color)
-    {
-        style.normal.textColor = color;
-        style.hover.textColor = color;
-        style.active.textColor = color;
-        style.focused.textColor = color;
-        style.onNormal.textColor = color;
-        style.onHover.textColor = color;
-        style.onActive.textColor = color;
-        style.onFocused.textColor = color;
     }
 
     private void DrawReferencedItemPreview(ItemDefinition definition)
@@ -8732,8 +8716,7 @@ public partial class ItemDataEditorWindow : EditorWindow
                 }
                 else if (entry.mapFilterValue >= 0)
                 {
-                    InstallationMapFilter parsedFilterValue = (InstallationMapFilter)entry.mapFilterValue;
-                    mapFilterProperty.intValue = (int)InstallationObject.NormalizeMapFilter(parsedFilterValue);
+                    mapFilterProperty.intValue = entry.mapFilterValue;
                 }
             }
 

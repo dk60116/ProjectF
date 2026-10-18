@@ -54,6 +54,13 @@ public interface IPersistentInstallationItemStorage
     void ApplyPersistentStoredItemId(int itemId);
 }
 
+public interface IPlayerItemMount
+{
+    bool AcceptsMountedItem(int itemId);
+
+    bool TryMountItemFromSlot(Player player, PlayerBag sourceBag, int slotIndex);
+}
+
 public interface IPersistentInstallationItemCollectionStorage
 {
     void CapturePersistentStoredItemIds(List<int> destination, List<float> installationHealth = null);
@@ -203,22 +210,14 @@ public partial class InstallationObject : MapObject, IMapObjectSimulationIdentit
 
     public InstallationMapFilter MapFilter
     {
-        get => NormalizeMapFilter(mapFilter);
-        set => mapFilter = NormalizeMapFilter(value);
+        get => mapFilter;
+        set => mapFilter = value;
     }
 
     public InstallationRotationFilter RotationFilter
     {
         get => NormalizeRotationFilter(rotationFilter);
         set => rotationFilter = NormalizeRotationFilter(value);
-    }
-
-    public static InstallationMapFilter NormalizeMapFilter(InstallationMapFilter filter)
-    {
-        InstallationMapFilter normalizedFilter = filter == InstallationMapFilter.None
-            ? DefaultMapFilter
-            : filter;
-        return normalizedFilter | InstallationMapFilter.Floor;
     }
 
     public static InstallationRotationFilter NormalizeRotationFilter(InstallationRotationFilter filter)
@@ -1330,7 +1329,6 @@ public partial class InstallationObject : MapObject, IMapObjectSimulationIdentit
 #if UNITY_EDITOR
     protected virtual void OnValidate()
     {
-        mapFilter = NormalizeMapFilter(mapFilter);
         rotationFilter = NormalizeRotationFilter(rotationFilter);
 
         if (installationFocusRadius < 0f)

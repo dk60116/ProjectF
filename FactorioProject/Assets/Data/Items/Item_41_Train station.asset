@@ -12,8 +12,16 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: ccc5c26867f3fd3479193fd24dec463e, type: 3}
   m_Name: Item_41_Train station
   m_EditorClassIdentifier: 
+  isRangedWeapon: 0
+  isAmmo: 0
+  requiresAmmo: 0
+  compatibleAmmo: []
+  attackDamage: 0
+  fireRate: 1
+  attackRange: 15
+  projectileSpeed: 20
   itemName: Train station
-  id: 123
+  id: 124
   mapObject: {fileID: 2696561144136662984, guid: 6e704ffa44d6f8e42a1e28a682f898aa, type: 3}
   mapObjectArchetype: {fileID: 11400000, guid: f692dd48e9d25464fa58f279ba490daf, type: 2}
   useMapColor: 1

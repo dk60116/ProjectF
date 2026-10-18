@@ -141,6 +141,14 @@ MonoBehaviour:
     displayName: Weapon
     expanded: 1
     anchorItemGuid: c7d14445b92c7d0468e83d73c68f384f
+  - id: 27a50eb531164850b49df3933f2a4eab
+    displayName: Battle
+    expanded: 1
+    anchorItemGuid: 883dad8c80347714793c7527d5836636
+  - id: b923f79c9b2149c1b27e43cb27146e7e
+    displayName: Ship
+    expanded: 1
+    anchorItemGuid: 6948a22979bb56948883b25e4d85e66b
   itemAssignments:
   - itemGuid: e9950cff3cab70041b1997e87d6e22b1
     folderId: 839eaa9b00424dc59d967a096e100401
@@ -312,8 +320,6 @@ MonoBehaviour:
     folderId: c7e077eece684be7b0fce1115e350081
   - itemGuid: 3bdd8115056e76d4a878ff2231e3340c
     folderId: b66e74eb3909437e98f5ea9b777676a9
-  - itemGuid: e110bd69d6c9d9d49aa13090a2202fd1
-    folderId: 9e4995f6600f4c04ad51a59b2550be3b
   - itemGuid: e18b544fca5809747ba18ab854492b79
     folderId: 4b700d33e3bf4bfda1fc4dee7c89b691
   - itemGuid: 0e1d27a0f4c177c44985160c21333ad4
@@ -418,3 +424,9 @@ MonoBehaviour:
     folderId: 52f654e67171467f864fb2b0973e4063
   - itemGuid: 440d4476f9093b44e948d784c15c0d81
     folderId: 839eaa9b00424dc59d967a096e100401
+  - itemGuid: a92f59a82b3ce2d45a3e90b6f4e6e989
+    folderId: 27a50eb531164850b49df3933f2a4eab
+  - itemGuid: e110bd69d6c9d9d49aa13090a2202fd1
+    folderId: 9e4995f6600f4c04ad51a59b2550be3b
+  - itemGuid: 48066f4fbabe240498d815ab5e84d1a2
+    folderId: b923f79c9b2149c1b27e43cb27146e7e

@@ -12,8 +12,16 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: ccc5c26867f3fd3479193fd24dec463e, type: 3}
   m_Name: Item_78_Oil drilling machine
   m_EditorClassIdentifier: Assembly-CSharp::ItemDefinition
+  isRangedWeapon: 0
+  isAmmo: 0
+  requiresAmmo: 0
+  compatibleAmmo: []
+  attackDamage: 0
+  fireRate: 1
+  attackRange: 15
+  projectileSpeed: 20
   itemName: Oil drilling machine
-  id: 64
+  id: 65
   mapObject: {fileID: 4426057102838678133, guid: acbf0018ed21ef346a4c99a4562f5e02, type: 3}
   mapObjectArchetype: {fileID: 11400000, guid: b11cf253fa5c39f49b4925358f5c96a0, type: 2}
   useMapColor: 1
