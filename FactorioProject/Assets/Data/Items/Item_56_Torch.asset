@@ -21,7 +21,7 @@ MonoBehaviour:
   attackRange: 15
   projectileSpeed: 20
   itemName: Wooden floor
-  id: 87
+  id: 90
   mapObject: {fileID: 7127730791152802602, guid: 11ccb5c2f0d669b4db92fe65a3360904, type: 3}
   mapObjectArchetype: {fileID: 11400000, guid: 4bb6515eb64f7e74a9ebb248cda3d8ad, type: 2}
   useMapColor: 0

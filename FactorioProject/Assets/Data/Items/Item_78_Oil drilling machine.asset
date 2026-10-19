@@ -21,7 +21,7 @@ MonoBehaviour:
   attackRange: 15
   projectileSpeed: 20
   itemName: Oil drilling machine
-  id: 65
+  id: 68
   mapObject: {fileID: 4426057102838678133, guid: acbf0018ed21ef346a4c99a4562f5e02, type: 3}
   mapObjectArchetype: {fileID: 11400000, guid: b11cf253fa5c39f49b4925358f5c96a0, type: 2}
   useMapColor: 1

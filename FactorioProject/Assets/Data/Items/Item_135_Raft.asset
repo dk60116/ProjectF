@@ -21,7 +21,7 @@ MonoBehaviour:
   attackRange: 15
   projectileSpeed: 20
   itemName: Raft
-  id: 135
+  id: 138
   mapObject: {fileID: 4240074844675582300, guid: b0f58a925e380d34c81e41783a23710a, type: 3}
   mapObjectArchetype: {fileID: 11400000, guid: bf50d9cd96876fc46aecb9175035482f, type: 2}
   useMapColor: 1

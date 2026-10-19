@@ -21,7 +21,7 @@ MonoBehaviour:
   attackRange: 15
   projectileSpeed: 20
   itemName: Robot arm
-  id: 77
+  id: 80
   mapObject: {fileID: 5617472291595085519, guid: 7c64585bed65e8843aa24eb07a5f02f3, type: 3}
   mapObjectArchetype: {fileID: 11400000, guid: fa30f8a080e23ad429eec1fcc63230da, type: 2}
   useMapColor: 1

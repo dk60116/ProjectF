@@ -21,7 +21,7 @@ MonoBehaviour:
   attackRange: 15
   projectileSpeed: 20
   itemName: Wooden Fence
-  id: 85
+  id: 88
   mapObject: {fileID: 2276685300360839919, guid: a7060f381d0a25d4ab7f902bf30be7ef, type: 3}
   mapObjectArchetype: {fileID: 11400000, guid: a316a7519b6cf4c489a5e4f5eeb14361, type: 2}
   useMapColor: 1

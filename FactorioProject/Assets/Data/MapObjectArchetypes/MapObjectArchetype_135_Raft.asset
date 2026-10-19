@@ -15,7 +15,7 @@ MonoBehaviour:
   schemaVersion: 2
   itemDefinition: {fileID: 11400000, guid: 48066f4fbabe240498d815ab5e84d1a2, type: 2}
   sourcePrefab: {fileID: 4240074844675582300, guid: b0f58a925e380d34c81e41783a23710a, type: 3}
-  itemId: 135
+  itemId: 138
   itemName: Raft
   sourcePrefabGuid: b0f58a925e380d34c81e41783a23710a
   sourceContentHash:

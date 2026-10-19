@@ -32,7 +32,7 @@ MonoBehaviour:
   - id: 4008c2a9919643788ee7eedfdd9a2060
     displayName: Processing
     expanded: 1
-    anchorItemGuid: f0e8b5357a13bc04cbc5e8603014446c
+    anchorItemGuid: 35ec64fb0b6f8544c8d8d190c9447441
   - id: e309ae1eabbc4cc4937519070f6204ce
     displayName: Rope
     expanded: 1
@@ -149,6 +149,10 @@ MonoBehaviour:
     displayName: Ship
     expanded: 1
     anchorItemGuid: 6948a22979bb56948883b25e4d85e66b
+  - id: 0357422175ef4d3bbadfa98b39273825
+    displayName: Materials
+    expanded: 1
+    anchorItemGuid: f0e8b5357a13bc04cbc5e8603014446c
   itemAssignments:
   - itemGuid: e9950cff3cab70041b1997e87d6e22b1
     folderId: 839eaa9b00424dc59d967a096e100401
@@ -414,8 +418,6 @@ MonoBehaviour:
     folderId: 4008c2a9919643788ee7eedfdd9a2060
   - itemGuid: 6a67d51d8efc02845a1e5070560c43fb
     folderId: 072e2020b408429c8245efd9faa51625
-  - itemGuid: 35ec64fb0b6f8544c8d8d190c9447441
-    folderId: 4008c2a9919643788ee7eedfdd9a2060
   - itemGuid: 9f74f682a7445a743b8de1c49a341eed
     folderId: 072e2020b408429c8245efd9faa51625
   - itemGuid: 883dad8c80347714793c7527d5836636
@@ -430,3 +432,11 @@ MonoBehaviour:
     folderId: 9e4995f6600f4c04ad51a59b2550be3b
   - itemGuid: 48066f4fbabe240498d815ab5e84d1a2
     folderId: b923f79c9b2149c1b27e43cb27146e7e
+  - itemGuid: 35ec64fb0b6f8544c8d8d190c9447441
+    folderId: 0357422175ef4d3bbadfa98b39273825
+  - itemGuid: 41966b0b294410145abf435820ee2fdb
+    folderId: 0357422175ef4d3bbadfa98b39273825
+  - itemGuid: c92b2e74c2f04a4429a223c11325de0b
+    folderId: 0357422175ef4d3bbadfa98b39273825
+  - itemGuid: 54945f91a70cf504a997839a79074ec2
+    folderId: 4008c2a9919643788ee7eedfdd9a2060
