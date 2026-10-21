@@ -94,6 +94,8 @@ public partial class RailHandcar
 
     public static void RunDepartureChecks(Action<bool, string> check)
     {
+        RunMixedLengthDepartureChecks(check);
+        RunBodyEndStopChecks(check);
         RunSelectedBranchContinuityChecks(check);
         foreach (Vector2 heading in new[] { Vector2.right, Vector2.left, Vector2.up, Vector2.down })
         foreach (int railPattern in new[] { 0, 1, 2 })
@@ -151,6 +153,136 @@ public partial class RailHandcar
                 }
             }
         }
+    }
+
+    static void RunMixedLengthDepartureChecks(Action<bool, string> check)
+    {
+        foreach (Vector2 heading in new[] { Vector2.right, Vector2.left, Vector2.up, Vector2.down })
+        foreach (bool reversed in new[] { false, true })
+        foreach (bool curve in new[] { false, true })
+        foreach (bool rearDriver in new[] { false, true })
+        foreach (bool alternateFacing in new[] { false, true })
+        {
+            var driver = new RailHandcar();
+            for (int r = 0; r < 30; r++)
+            {
+                var rail = InitialRail(heading, r, 1f, reversed);
+                if (curve)
+                {
+                    rail.CurveRadius = 8;
+                    rail.CurveStart = r + (reversed ? 1 : 0);
+                    rail.CurveSign = reversed ? -1 : 1;
+                    rail.CurveHeading = heading;
+                }
+                driver.departureRails.Add(rail);
+            }
+
+            var cars = new Train[5];
+            var offsets = new float[5];
+            float position = 3.5f;
+            for (int i = 0; i < cars.Length; i++)
+            {
+                Train car = i == (rearDriver ? 0 : cars.Length - 1) ? driver : new RailHandcar();
+                bool isLong = i % 2 == 0;
+                float sign = alternateFacing && i % 2 == 0 ? -1 : 1;
+                car.FrontConnectionReach = isLong ? 1.5f : .5f;
+                car.RearConnectionReach = .5f;
+                car.RailFrontClearance = isLong ? 1.45f : .45f;
+                car.RailRearClearance = .45f;
+                if (i > 0)
+                {
+                    float previousSign = alternateFacing && (i - 1) % 2 == 0 ? -1 : 1;
+                    position += cars[i - 1].ResolveConnectionReach(previousSign > 0)
+                        + car.ResolveConnectionReach(sign < 0);
+                    Train.Link(cars[i - 1], car);
+                }
+                offsets[i] = position;
+                int segment = (int)Math.Floor(position);
+                float fraction = position - segment;
+                car.Rail = driver.departureRails[segment];
+                car.Distance = reversed ? 1 - fraction : fraction;
+                Vector2 facing = DepartureTangent(heading, position, curve) * sign;
+                car.transform.forward = new Vector3(facing.x, 0, facing.y);
+                cars[i] = car;
+            }
+
+            float moved = 0;
+            foreach (float direction in new[] { 1f, -1f })
+            for (int frame = 0; frame < 60; frame++)
+            {
+                float driverDistance = offsets[rearDriver ? 0 : cars.Length - 1] + moved;
+                Vector2 travel = DepartureTangent(heading, driverDistance, curve) * direction;
+                check(driver.DepartureStep(travel, .03f, false),
+                    $"Mixed-length consist must cross junctions and reverse: curve={curve}, reversed={reversed}, rearDriver={rearDriver}, frame={frame}, failure={driver.railMoveFailureReason}");
+                moved += .03f * direction;
+                for (int i = 0; i < cars.Length; i++)
+                {
+                    check(cars[i].AppliedPoint.HasValue
+                            && Vector2.Distance(cars[i].AppliedPoint.Value, DeparturePoint(heading, offsets[i] + moved, curve)) < .002f,
+                        "Movement must preserve each mixed-length root offset rather than contracting to one-cell spacing");
+                    float sign = alternateFacing && i % 2 == 0 ? -1 : 1;
+                    Vector2 expected = DepartureTangent(heading, offsets[i] + moved, curve) * sign;
+                    Vector2 actual = new Vector2(cars[i].transform.forward.x, cars[i].transform.forward.z);
+                    check(Vector2.Dot(actual.normalized, expected.normalized) > .999f,
+                        $"Mixed-length facing changed: curve={curve}, reversed={reversed}, rearDriver={rearDriver}, alternate={alternateFacing}, direction={direction}, frame={frame}, car={i}, expected={expected}, actual={actual}");
+                }
+            }
+        }
+    }
+
+    static void RunBodyEndStopChecks(Action<bool, string> check)
+    {
+        foreach (Vector2 heading in new[] { Vector2.right, Vector2.left, Vector2.up, Vector2.down })
+        foreach (bool reversed in new[] { false, true })
+        foreach (bool forward in new[] { false, true })
+        foreach (bool rearDriver in new[] { false, true })
+        foreach (float step in new[] { .1f, 20f })
+        {
+            var driver = new RailHandcar();
+            var rail = InitialRail(heading, 0, 10, reversed);
+            driver.departureRails.Add(rail);
+            Vector2 facing = forward ? heading : -heading;
+            driver.Rail = rail;
+            driver.Distance = reversed ? (rearDriver ? 6 : 5) : (rearDriver ? 4 : 5);
+            driver.transform.forward = new Vector3(facing.x, 0, facing.y);
+            driver.RailFrontClearance = 1.35f;
+            driver.RailRearClearance = .35f;
+            Train leading = driver;
+            if (rearDriver)
+            {
+                leading = new RailHandcar
+                {
+                    Rail = rail, Distance = 5,
+                    RailFrontClearance = 1.35f, RailRearClearance = .35f
+                };
+                leading.transform.forward = driver.transform.forward;
+                Train.Link(driver, leading);
+            }
+
+            float clearance = forward ? 1.35f : .35f;
+            for (int frame = 0; frame < 100; frame++)
+            {
+                if (!driver.DepartureStep(heading, step, false)) break;
+                check(Vector2.Dot(leading.AppliedPoint.Value, heading) <= 10 - clearance + .0002f,
+                    "Prepared consist movement must stop the physical leading end before the dead end");
+            }
+            check(leading.AppliedPoint.HasValue
+                    && Math.Abs(Vector2.Dot(leading.AppliedPoint.Value, heading) - (10 - clearance)) < .0002f,
+                "The leading car, not the controlled engine, determines the consist's end margin");
+            check(!driver.DepartureStep(heading, step, false), "Repeated forward input at the body limit must not report movement");
+            check(driver.DepartureStep(-heading, .1f, false), "A consist at its body limit must be able to reverse away");
+        }
+
+        var docking = new RailHandcar
+        {
+            Rail = InitialRail(Vector2.right, 0, 10, false), Distance = 8.64f,
+            RailFrontClearance = 1.35f, RailRearClearance = .35f
+        };
+        docking.transform.forward = Vector3.right;
+        check(!docking.Dock(.02f, true) && docking.DockMovement == 0,
+            "A single-car docking snap must not bypass the physical front end limit");
+        check(docking.Dock(.01f, true) && Math.Abs(docking.DockMovement - .01f) < .0001f,
+            "A docking snap with sufficient track support must remain available");
     }
 
     static void RunSelectedBranchContinuityChecks(Action<bool, string> check)

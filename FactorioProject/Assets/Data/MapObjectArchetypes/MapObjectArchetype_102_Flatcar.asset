@@ -20,7 +20,7 @@ MonoBehaviour:
   sourcePrefabGuid: a34b33398bb75a84aaa6febe564ccb3e
   sourceContentHash:
     serializedVersion: 2
-    Hash: aefb298669f0d92e87425a52c7c8169f
+    Hash: 10ba84a04aab63f2874176bc2c08c7bd
   sourceRuntimeType: FreightCar, Assembly-CSharp, Version=0.0.0.0, Culture=neutral,
     PublicKeyToken=null
   mapStatus:
@@ -32,8 +32,8 @@ MonoBehaviour:
   defaultRootScale: {x: 1, y: 1, z: 1}
   defaultRootRotation: {x: 0, y: 0, z: 0, w: 1}
   localRenderBounds:
-    m_Center: {x: 0.000000029802322, y: 0.16670899, z: -0.010465443}
-    m_Extent: {x: 0.38152793, y: 0.17690852, z: 0.5980445}
+    m_Center: {x: 0.000000029802322, y: 0.16670899, z: -0.000000059604645}
+    m_Extent: {x: 0.38152793, y: 0.17690852, z: 0.5818014}
   hasRenderBounds: 1
   featureFlags: 2112
   nodes:
@@ -262,32 +262,7 @@ MonoBehaviour:
       e33: 1
     activeByDefault: 1
     hasAnimatedTransform: 0
-  - hierarchyPath: 0:Flatcar/5:Coupler
-    animationPath: Coupler
-    parentIndex: 0
-    localPosition: {x: 0, y: 0.258, z: 0.025}
-    localRotation: {x: 0, y: 0, z: 0, w: 1}
-    localScale: {x: 1, y: 1, z: 1}
-    defaultLocalToRoot:
-      e00: 1
-      e01: 0
-      e02: 0
-      e03: 0
-      e10: 0
-      e11: 1
-      e12: 0
-      e13: 0.258
-      e20: 0
-      e21: 0
-      e22: 1
-      e23: 0.025
-      e30: 0
-      e31: 0
-      e32: 0
-      e33: 1
-    activeByDefault: 1
-    hasAnimatedTransform: 0
-  - hierarchyPath: 0:Flatcar/6:FuelRoleIcon
+  - hierarchyPath: 0:Flatcar/5:FuelRoleIcon
     animationPath: FuelRoleIcon
     parentIndex: 0
     localPosition: {x: 0, y: 0.36, z: 0}
@@ -306,6 +281,56 @@ MonoBehaviour:
       e21: 0.16000001
       e22: -0.00000011920929
       e23: 0
+      e30: 0
+      e31: 0
+      e32: 0
+      e33: 1
+    activeByDefault: 1
+    hasAnimatedTransform: 0
+  - hierarchyPath: 0:Flatcar/6:Coupler
+    animationPath: Coupler
+    parentIndex: 0
+    localPosition: {x: 0, y: 0.256, z: 0.35}
+    localRotation: {x: -0, y: -0, z: -0, w: 1}
+    localScale: {x: 1, y: 1, z: 1}
+    defaultLocalToRoot:
+      e00: 1
+      e01: 0
+      e02: 0
+      e03: 0
+      e10: 0
+      e11: 1
+      e12: 0
+      e13: 0.256
+      e20: 0
+      e21: 0
+      e22: 1
+      e23: 0.35
+      e30: 0
+      e31: 0
+      e32: 0
+      e33: 1
+    activeByDefault: 1
+    hasAnimatedTransform: 0
+  - hierarchyPath: 0:Flatcar/7:Coupler (1)
+    animationPath: Coupler (1)
+    parentIndex: 0
+    localPosition: {x: -0, y: 0.256, z: -0.35}
+    localRotation: {x: -0, y: 1, z: -0, w: 0.0000005066394}
+    localScale: {x: 1, y: 1, z: 1}
+    defaultLocalToRoot:
+      e00: -1
+      e01: 0
+      e02: 0.0000010132788
+      e03: 0
+      e10: 0
+      e11: 1
+      e12: 0
+      e13: 0.256
+      e20: -0.0000010132788
+      e21: 0
+      e22: -1
+      e23: -0.35
       e30: 0
       e31: 0
       e32: 0
@@ -353,14 +378,27 @@ MonoBehaviour:
     receiveShadows: 1
     enabledByDefault: 1
   - kind: 0
-    nodeIndex: 9
-    mesh: {fileID: 4300000, guid: 314007493f3a7ac4eacd27a777e45d6a, type: 2}
-    material: {fileID: 2100000, guid: f8dcf2a2c290e6545b35da5512403502, type: 2}
+    nodeIndex: 10
+    mesh: {fileID: 4300000, guid: c21b9c207c7bcbd43bb029d313c7bd5c, type: 2}
+    material: {fileID: 2100000, guid: 536c29ff258e4a344a243ff61667dfe0, type: 2}
     subMeshIndex: 0
     localBounds:
-      m_Center: {x: 0.000000007450581, y: 0, z: -0.03546545}
-      m_Extent: {x: 0.06750001, y: 0.06863308, z: 0.5980445}
-    layer: 7
+      m_Center: {x: -0.000091694295, y: -0.000000013038516, z: 0.122231066}
+      m_Extent: {x: 0.09618554, y: 0.061875, z: 0.109570324}
+    layer: 0
+    renderingLayerMask: 1
+    shadowCastingMode: 1
+    receiveShadows: 1
+    enabledByDefault: 1
+  - kind: 0
+    nodeIndex: 11
+    mesh: {fileID: 4300000, guid: c21b9c207c7bcbd43bb029d313c7bd5c, type: 2}
+    material: {fileID: 2100000, guid: 536c29ff258e4a344a243ff61667dfe0, type: 2}
+    subMeshIndex: 0
+    localBounds:
+      m_Center: {x: -0.000091694295, y: -0.000000013038516, z: 0.122231066}
+      m_Extent: {x: 0.09618554, y: 0.061875, z: 0.109570324}
+    layer: 0
     renderingLayerMask: 1
     shadowCastingMode: 1
     receiveShadows: 1

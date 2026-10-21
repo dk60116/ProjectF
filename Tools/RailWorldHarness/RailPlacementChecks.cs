@@ -18,7 +18,7 @@ static class RailPlacementChecks
             rail, new MapObject { Component = rail }, new MapObject { ChildComponent = rail }
         };
         InstallationObject[] occupants = {
-            new Train(), new SteamTrain(), new FreightCar(), new RailHandcar(),
+            new Train(), new Locomotive(), new FreightCar(), new RailHandcar(),
             new InstallationObject(), new Floor(), new Pipe(), new Railload(), new Trainstation()
         };
         foreach (MapObject source in railSources)

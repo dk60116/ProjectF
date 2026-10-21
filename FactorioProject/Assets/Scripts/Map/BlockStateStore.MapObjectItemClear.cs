@@ -130,7 +130,7 @@ public partial class BlockStateStore
             inputOutputModule.ClearStoredEnergyAndProduction();
         }
 
-        if (installationObject is SteamTrain steamTrain)
+        if (installationObject is Locomotive steamTrain)
         {
             steamTrain.CaptureBurnEnergyStateUnits(out long storedEnergyUnits, out _);
             if (storedEnergyUnits > 0L)

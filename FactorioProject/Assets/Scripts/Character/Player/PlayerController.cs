@@ -7032,7 +7032,11 @@ public partial class PlayerController : MonoBehaviour
                 continue;
             }
 
-            if (group.count <= 1)
+            if (group.mapObject is Train train)
+            {
+                SetTrainFocusVisible(train, group.markerBlock, focusKind);
+            }
+            else if (group.count <= 1)
             {
                 SetBlockFocusVisible(group.markerBlock, focusKind, true);
             }
@@ -7099,6 +7103,36 @@ public partial class PlayerController : MonoBehaviour
         }
 
         return null;
+    }
+
+    private static void SetTrainFocusVisible(Train train, Block block, FocusMarkerKind focusKind)
+    {
+        if (block == null)
+        {
+            return;
+        }
+
+        Vector2 size = new Vector2(
+            Mathf.Max(1, train.Status.mapSizeX),
+            Mathf.Max(1, train.Status.mapSizeY));
+        Vector2Int anchor = train.PlacementCenterCell;
+        Vector3 localCenter = new Vector3(
+            (size.x - 1f) * 0.5f - anchor.x,
+            0f,
+            (size.y - 1f) * 0.5f - anchor.y);
+        Vector2Int anchorCoordinate = train.TryGetPlacementRuntime(out Vector2Int coordinate, out _)
+            ? coordinate
+            : block.Coordinate;
+        Vector3 worldAnchor = block.WorldPosition + new Vector3(
+            anchorCoordinate.x - block.Coordinate.x, 0f,
+            anchorCoordinate.y - block.Coordinate.y);
+        // Focus represents floor cells, not the moving model's continuous pose.
+        int quarterTurns = ((Mathf.RoundToInt(train.transform.eulerAngles.y / 90f) % 4) + 4) % 4;
+        Quaternion rotation = Quaternion.Euler(0f, quarterTurns * 90f, 0f);
+        Vector2 worldSize = (quarterTurns & 1) == 0 ? size : new Vector2(size.y, size.x);
+        SetBlockFocusVisible(
+            block, focusKind, true,
+            worldAnchor + rotation * localCenter, worldSize);
     }
 
     private static void SetBlockFocusVisible(Block block, FocusMarkerKind focusKind, bool isVisible)

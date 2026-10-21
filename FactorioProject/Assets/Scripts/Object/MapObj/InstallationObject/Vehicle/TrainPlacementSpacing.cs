@@ -205,15 +205,21 @@ namespace ProjectF.Trains
                 originalOffsets.Add(routeLength);
             }
 
-            float requiredLength = (order.Count - 1) * Train.ConnectionCenterDistance;
+            float requiredLength = 0f;
+            for (int i = 1; i < order.Count; i++)
+            {
+                requiredLength += ResolvePairSpacing(i);
+            }
             if (routeLength + Epsilon < requiredLength && !TryExtendTail(requiredLength))
             {
                 return false;
             }
 
+            float targetOffset = 0f;
             for (int i = 0; i < order.Count; i++)
             {
-                if (!TrySample(i * Train.ConnectionCenterDistance, out Pose target)
+                if (i > 0) targetOffset += ResolvePairSpacing(i);
+                if (!TrySample(targetOffset, out Pose target)
                     || !TrySample(originalOffsets[i], out Pose originalRoutePose)) return false;
                 target.FacesAlongRoute = Vector2.Dot(originals[i].Facing, originalRoutePose.Facing) >= 0f;
                 if (!target.FacesAlongRoute)
@@ -225,6 +231,14 @@ namespace ProjectF.Trains
             }
 
             return true;
+        }
+
+        private float ResolvePairSpacing(int index)
+        {
+            Pose first = originals[index - 1];
+            Pose second = originals[index];
+            return Train.ResolveConnectionSpacing(order[index - 1], first.Facing,
+                order[index], second.Facing, second.Point - first.Point);
         }
 
         private bool TryExtendTail(float requiredLength)

@@ -58,7 +58,7 @@ public static class World
     public static readonly List<InstallationObject> Storages = new();
     public static void Place(InstallationObject storage, Vector2Int coordinate, bool bind = true)
     { storage.Anchor = coordinate; storage.RuntimeOccupiedCoordinates.Add(coordinate); Storages.Add(storage); if (bind) Blocks[coordinate] = new Block { MapObject = storage }; }
-    public static void Reset() { Blocks.Clear(); Storages.Clear(); PipeWorld.Current.Records.Clear(); SteamTrain.Reset(); InputOutputModule.Reset(); }
+    public static void Reset() { Blocks.Clear(); Storages.Clear(); PipeWorld.Current.Records.Clear(); Locomotive.Reset(); InputOutputModule.Reset(); }
 }
 public class Block
 {
@@ -96,17 +96,17 @@ public class Fluidtank : InstallationObject
         || InputOutputModule.HasRuntimePumpPipePassTowards(c + d, -d)
         || World.Storages.Exists(s => s != this && s.RuntimeOccupiedCoordinates.Contains(c + d));
 }
-public class SteamTrain : InstallationObject
+public class Locomotive : InstallationObject
 {
-    private static readonly Dictionary<Vector2Int, SteamTrain> Receivers = new();
+    private static readonly Dictionary<Vector2Int, Locomotive> Receivers = new();
     public static void Reset() => Receivers.Clear();
-    public static SteamTrain Register(Vector2Int coordinate)
+    public static Locomotive Register(Vector2Int coordinate)
     {
-        var train = new SteamTrain { Anchor = coordinate };
+        var train = new Locomotive { Anchor = coordinate };
         Receivers[coordinate] = train;
         return train;
     }
-    public static bool TryGetWaterPipeReceiverAtCoordinate(Vector2Int c, out SteamTrain s) => Receivers.TryGetValue(c, out s);
+    public static bool TryGetWaterPipeReceiverAtCoordinate(Vector2Int c, out Locomotive s) => Receivers.TryGetValue(c, out s);
     public bool CanAcceptWaterFromPipeDirection(Vector2Int d, int id, bool space) => true;
 }
 public class WaterPump : InputOutputModule { public static int ResolveWaterItemId(object o) => 1; }
@@ -621,14 +621,14 @@ public static partial class Checks
             World.Reset(); var waterSource = new WaterPump(); waterSource.Output(default,d);
             firstPump = new Pump(); firstPump.Pass(d,-d,d*4,d);
             secondPump = new Pump(); secondPump.Pass(d*5,-d,d*8,d);
-            var train = SteamTrain.Register(d*8);
+            var train = Locomotive.Register(d*8);
             Check(waterSource.Emit(3),3,$"water reaches train through two pumps {d}");
             Check(train.StoredFluidLiters,3,"two-pump train receiver actual storage");
 
             World.Reset(); waterSource = new WaterPump(); waterSource.Output(default,d);
             firstPump = new Pump(); firstPump.Pass(d,-d,d*4,d); firstPump.Body(d*2,d*3);
             secondPump = new Pump(); secondPump.Pass(d*3,-d,d*6,d); secondPump.Body(d*4,d*5);
-            train = SteamTrain.Register(d*6);
+            train = Locomotive.Register(d*6);
             Check(waterSource.Emit(3),3,$"water reaches train through two interlocked pumps {d}");
             Check(train.StoredFluidLiters,3,"interlocked two-pump train receiver actual storage");
         }

@@ -54,7 +54,7 @@ function Read-HudMember([string]$signature) {
 }
 
 $filterTargetMethod = Read-HudMember 'private bool TryGetClickedFilterTarget('
-foreach ($required in @('TryGetClickedObjectInfoFocusedMapObject(', 'TryResolveTrainStation(', 'TryResolveSteamTrain(', 'TryResolveItemFilterTarget(')) {
+foreach ($required in @('TryGetClickedObjectInfoFocusedMapObject(', 'TryResolveTrainStation(', 'TryResolveLocomotive(', 'TryResolveItemFilterTarget(')) {
     if (-not $filterTargetMethod.Contains($required)) {
         throw "Clicked filter routing is missing: $required"
     }

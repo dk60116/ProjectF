@@ -13,11 +13,13 @@ namespace ProjectF.Railway
             if (!Contains(instance) || view == null) return;
             views[instance] = view;
             SetActive(instance, true);
+            AttachCouplerView(instance, view);
         }
 
         internal void DetachView(TrainInstance instance)
         {
             // Rendering detachment alone must not discard simulation state or links.
+            DetachCouplerView(instance);
             views.Remove(instance);
         }
 
@@ -44,8 +46,16 @@ namespace ProjectF.Railway
                     results.Add(pair.Value);
         }
 
-        partial void RemoveView(TrainInstance instance) => views.Remove(instance);
-        partial void ClearViews() => views.Clear();
+        partial void RemoveView(TrainInstance instance) => DetachView(instance);
+        partial void ClearViews()
+        {
+            ClearCouplerViews();
+            views.Clear();
+        }
+
+        partial void AttachCouplerView(TrainInstance instance, Train view);
+        partial void DetachCouplerView(TrainInstance instance);
+        partial void ClearCouplerViews();
 
         [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.SubsystemRegistration)]
         private static void ResetStaticState() => Shared.Clear();

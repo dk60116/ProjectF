@@ -1301,7 +1301,7 @@ public partial class TerrainGenerator : MonoBehaviour
             }
         }
 
-        if (savedState.hasSteamTrainBurnEnergyState && restoredInstallation is SteamTrain steamTrain)
+        if (savedState.hasSteamTrainBurnEnergyState && restoredInstallation is Locomotive steamTrain)
         {
             if (savedState.hasDeterministicUnits)
             {
@@ -1317,7 +1317,7 @@ public partial class TerrainGenerator : MonoBehaviour
             }
         }
 
-        if (restoredInstallation is SteamTrain restoredSteamTrain)
+        if (restoredInstallation is Locomotive restoredSteamTrain)
         {
             restoredSteamTrain.ApplyAutoDriveState(
                 savedState.steamTrainAutoDriveEnabled,

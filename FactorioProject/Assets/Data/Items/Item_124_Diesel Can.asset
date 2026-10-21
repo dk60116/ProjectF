@@ -21,7 +21,7 @@ MonoBehaviour:
   attackRange: 15
   projectileSpeed: 20
   itemName: Diesel Can
-  id: 135
+  id: 137
   mapObject: {fileID: 0}
   mapObjectArchetype: {fileID: 0}
   useMapColor: 0

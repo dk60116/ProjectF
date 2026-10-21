@@ -70,7 +70,7 @@ public class Train
     public readonly List<Train> ConnectedTrains = new();
     public readonly UnityEngine.GameObject gameObject = new();
 }
-public class SteamTrain : Train
+public class Locomotive : Train
 {
     public FreightCar FuelCar;
     public bool TryGetRearFreightCar(out FreightCar car) { car = FuelCar; return car != null; }
@@ -227,12 +227,12 @@ static class Checks
         combined.CopyObjectInfoCargo(cargo, out count, out capacity);
         Expect(count == 0 && capacity == 0 && cargo.Count == 0,
             "A mounted fluid tank uses fluid info rather than stale solid cargo rows.");
-        var engine = new SteamTrain { FuelCar = combined };
+        var engine = new Locomotive { FuelCar = combined };
         combined.ConnectedTrains.Add(engine);
         Expect(combined.IsFuelSupplyCar, "A connected engine's actual supplier shows the coal marker.");
         engine.FuelCar = source;
         Expect(!combined.IsFuelSupplyCar, "An ordinary car must not show the marker just because it carries coal.");
-        var returnEngine = new SteamTrain { FuelCar = combined };
+        var returnEngine = new Locomotive { FuelCar = combined };
         combined.ConnectedTrains.Add(returnEngine);
         Expect(combined.IsFuelSupplyCar, "The return engine's supplier also shows the marker.");
         returnEngine.gameObject.activeInHierarchy = false;

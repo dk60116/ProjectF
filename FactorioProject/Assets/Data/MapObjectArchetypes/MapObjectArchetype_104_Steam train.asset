@@ -20,7 +20,7 @@ MonoBehaviour:
   sourcePrefabGuid: d719f22bffbaf23419a1efce8f6354f9
   sourceContentHash:
     serializedVersion: 2
-    Hash: a87d4b80382edd86af157aabfadea89b
+    Hash: edf444872ca5c1d39cb2a623d2ccb5e6
   sourceRuntimeType: SteamTrain, Assembly-CSharp, Version=0.0.0.0, Culture=neutral,
     PublicKeyToken=null
   mapStatus:
@@ -32,8 +32,8 @@ MonoBehaviour:
   defaultRootScale: {x: 1, y: 1, z: 1}
   defaultRootRotation: {x: 0, y: 0, z: 0, w: 1}
   localRenderBounds:
-    m_Center: {x: 0, y: 0.6167166, z: 0.0434497}
-    m_Extent: {x: 0.3940776, y: 0.60091615, z: 0.63395965}
+    m_Center: {x: 0, y: 0.6167166, z: 0.033303916}
+    m_Extent: {x: 0.3940776, y: 0.60091615, z: 0.64410543}
   hasRenderBounds: 1
   featureFlags: 72
   nodes:
@@ -137,32 +137,7 @@ MonoBehaviour:
       e33: 1
     activeByDefault: 1
     hasAnimatedTransform: 0
-  - hierarchyPath: 0:Steam train/2:Coupler
-    animationPath: Coupler
-    parentIndex: 0
-    localPosition: {x: 0, y: 0.264, z: 0.043}
-    localRotation: {x: -0, y: -0, z: -0, w: 1}
-    localScale: {x: 1, y: 1, z: 1}
-    defaultLocalToRoot:
-      e00: 1
-      e01: 0
-      e02: 0
-      e03: 0
-      e10: 0
-      e11: 1
-      e12: 0
-      e13: 0.264
-      e20: 0
-      e21: 0
-      e22: 1
-      e23: 0.043
-      e30: 0
-      e31: 0
-      e32: 0
-      e33: 1
-    activeByDefault: 1
-    hasAnimatedTransform: 0
-  - hierarchyPath: 0:Steam train/3:WheelJoint
+  - hierarchyPath: 0:Steam train/2:WheelJoint
     animationPath: WheelJoint
     parentIndex: 0
     localPosition: {x: 0, y: 0.16199994, z: 0.09999995}
@@ -187,9 +162,9 @@ MonoBehaviour:
       e33: 1
     activeByDefault: 1
     hasAnimatedTransform: 0
-  - hierarchyPath: 0:Steam train/3:WheelJoint/0:Wheel
+  - hierarchyPath: 0:Steam train/2:WheelJoint/0:Wheel
     animationPath: WheelJoint/Wheel
-    parentIndex: 5
+    parentIndex: 4
     localPosition: {x: 0, y: -0.0019999444, z: 0.32600006}
     localRotation: {x: -0, y: -0, z: -0, w: 1}
     localScale: {x: 1, y: 1, z: 1}
@@ -212,9 +187,9 @@ MonoBehaviour:
       e33: 1
     activeByDefault: 1
     hasAnimatedTransform: 0
-  - hierarchyPath: 0:Steam train/3:WheelJoint/1:Wheel (1)
+  - hierarchyPath: 0:Steam train/2:WheelJoint/1:Wheel (1)
     animationPath: WheelJoint/Wheel (1)
-    parentIndex: 5
+    parentIndex: 4
     localPosition: {x: 0, y: -0.0019999295, z: -0.33199996}
     localRotation: {x: -0, y: -0, z: -0, w: 1}
     localScale: {x: 1, y: 1, z: 1}
@@ -237,7 +212,7 @@ MonoBehaviour:
       e33: 1
     activeByDefault: 1
     hasAnimatedTransform: 0
-  - hierarchyPath: 0:Steam train/4:Smoke_White
+  - hierarchyPath: 0:Steam train/3:Smoke_White
     animationPath: Smoke_White
     parentIndex: 0
     localPosition: {x: 0, y: 1.21, z: 0.516}
@@ -262,9 +237,9 @@ MonoBehaviour:
       e33: 1
     activeByDefault: 1
     hasAnimatedTransform: 0
-  - hierarchyPath: 0:Steam train/4:Smoke_White/0:Smoke
+  - hierarchyPath: 0:Steam train/3:Smoke_White/0:Smoke
     animationPath: Smoke_White/Smoke
-    parentIndex: 8
+    parentIndex: 7
     localPosition: {x: 0, y: 0, z: 0}
     localRotation: {x: -0.7071068, y: -0, z: -0, w: 0.7071068}
     localScale: {x: 1, y: 1, z: 1}
@@ -287,7 +262,7 @@ MonoBehaviour:
       e33: 1
     activeByDefault: 1
     hasAnimatedTransform: 0
-  - hierarchyPath: 0:Steam train/5:Pipe
+  - hierarchyPath: 0:Steam train/4:Pipe
     animationPath: Pipe
     parentIndex: 0
     localPosition: {x: 0, y: 0.4, z: 0}
@@ -312,6 +287,31 @@ MonoBehaviour:
       e33: 1
     activeByDefault: 1
     hasAnimatedTransform: 0
+  - hierarchyPath: 0:Steam train/5:Coupler
+    animationPath: Coupler
+    parentIndex: 0
+    localPosition: {x: 0, y: 0.256, z: -0.379}
+    localRotation: {x: -0, y: -1, z: -0, w: 0.0000005513429}
+    localScale: {x: 1, y: 1, z: 1}
+    defaultLocalToRoot:
+      e00: -1
+      e01: 0
+      e02: -0.0000011026858
+      e03: 0
+      e10: 0
+      e11: 1
+      e12: 0
+      e13: 0.256
+      e20: 0.0000011026858
+      e21: 0
+      e22: -1
+      e23: -0.379
+      e30: 0
+      e31: 0
+      e32: 0
+      e33: 1
+    activeByDefault: 1
+    hasAnimatedTransform: 0
   renderParts:
   - kind: 0
     nodeIndex: 2
@@ -328,12 +328,12 @@ MonoBehaviour:
     enabledByDefault: 1
   - kind: 0
     nodeIndex: 4
-    mesh: {fileID: 4300000, guid: 314007493f3a7ac4eacd27a777e45d6a, type: 2}
-    material: {fileID: 2100000, guid: f8dcf2a2c290e6545b35da5512403502, type: 2}
+    mesh: {fileID: 4300000, guid: 0ff8b22c3ae8ecb469f2793ac1bac9d0, type: 2}
+    material: {fileID: 2100000, guid: 30367c74e2faa634b8a9cfb4c5f8f98a, type: 2}
     subMeshIndex: 0
     localBounds:
-      m_Center: {x: 0.000000007450581, y: 0, z: -0.03546545}
-      m_Extent: {x: 0.06750001, y: 0.06863308, z: 0.5980445}
+      m_Center: {x: -0.000000014901161, y: 0, z: 0}
+      m_Extent: {x: 0.3940776, y: 0.04577131, z: 0.37867135}
     layer: 0
     renderingLayerMask: 1
     shadowCastingMode: 1
@@ -341,12 +341,12 @@ MonoBehaviour:
     enabledByDefault: 1
   - kind: 0
     nodeIndex: 5
-    mesh: {fileID: 4300000, guid: 0ff8b22c3ae8ecb469f2793ac1bac9d0, type: 2}
-    material: {fileID: 2100000, guid: 30367c74e2faa634b8a9cfb4c5f8f98a, type: 2}
+    mesh: {fileID: 4300000, guid: c3774876f501b4f4c96c941f58e48f00, type: 2}
+    material: {fileID: 2100000, guid: 2077e6b8af2db6a438786f2f4ff8dfa0, type: 2}
     subMeshIndex: 0
     localBounds:
-      m_Center: {x: -0.000000014901161, y: 0, z: 0}
-      m_Extent: {x: 0.3940776, y: 0.04577131, z: 0.37867135}
+      m_Center: {x: 0, y: 0.000031098723, z: 0.010907792}
+      m_Extent: {x: 0.37774882, y: 0.14423063, z: 0.14316478}
     layer: 0
     renderingLayerMask: 1
     shadowCastingMode: 1
@@ -366,13 +366,13 @@ MonoBehaviour:
     receiveShadows: 1
     enabledByDefault: 1
   - kind: 0
-    nodeIndex: 7
-    mesh: {fileID: 4300000, guid: c3774876f501b4f4c96c941f58e48f00, type: 2}
-    material: {fileID: 2100000, guid: 2077e6b8af2db6a438786f2f4ff8dfa0, type: 2}
+    nodeIndex: 9
+    mesh: {fileID: 4300000, guid: c2ba6cf41842b3e45b470c83e392ca62, type: 2}
+    material: {fileID: 2100000, guid: f8dcf2a2c290e6545b35da5512403502, type: 2}
     subMeshIndex: 0
     localBounds:
-      m_Center: {x: 0, y: 0.000031098723, z: 0.010907792}
-      m_Extent: {x: 0.37774882, y: 0.14423063, z: 0.14316478}
+      m_Center: {x: 0.000000014901161, y: 0, z: 0}
+      m_Extent: {x: 0.121896245, y: 0.23750003, z: 0.23749998}
     layer: 0
     renderingLayerMask: 1
     shadowCastingMode: 1
@@ -380,12 +380,12 @@ MonoBehaviour:
     enabledByDefault: 1
   - kind: 0
     nodeIndex: 10
-    mesh: {fileID: 4300000, guid: c2ba6cf41842b3e45b470c83e392ca62, type: 2}
-    material: {fileID: 2100000, guid: f8dcf2a2c290e6545b35da5512403502, type: 2}
+    mesh: {fileID: 4300000, guid: c21b9c207c7bcbd43bb029d313c7bd5c, type: 2}
+    material: {fileID: 2100000, guid: 536c29ff258e4a344a243ff61667dfe0, type: 2}
     subMeshIndex: 0
     localBounds:
-      m_Center: {x: 0.000000014901161, y: 0, z: 0}
-      m_Extent: {x: 0.121896245, y: 0.23750003, z: 0.23749998}
+      m_Center: {x: -0.000091694295, y: -0.000000013038516, z: 0.122231066}
+      m_Extent: {x: 0.09618554, y: 0.061875, z: 0.109570324}
     layer: 0
     renderingLayerMask: 1
     shadowCastingMode: 1

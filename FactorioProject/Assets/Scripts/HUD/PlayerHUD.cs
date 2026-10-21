@@ -1938,7 +1938,7 @@ public partial class PlayerHUD : BagSlot
         if (mountedVehicle != null)
         {
             ClearInteractionTargets();
-            SetTrainConnectionInteractionButtonState(mountedVehicle as SteamTrain);
+            SetTrainConnectionInteractionButtonState(mountedVehicle as Locomotive);
             currentInteractionMapObject = mountedVehicle;
             SetActiveInteractionButton(InteractionButton,
                 mountedVehicle is Ship && !playerController.CanDismountFromVehicle()
@@ -2499,7 +2499,7 @@ public partial class PlayerHUD : BagSlot
         UpdateInteractionButtonLayout();
     }
 
-    private void SetTrainConnectionInteractionButtonState(SteamTrain steamTrain)
+    private void SetTrainConnectionInteractionButtonState(Locomotive steamTrain)
     {
         bool trainConnectionBlocked = steamTrain != null
                                       && (steamTrain.AutoDriveEnabled || steamTrain.IsConsistMoving());
@@ -3601,7 +3601,7 @@ public partial class PlayerHUD : BagSlot
         }
         else
         {
-            SteamTrain mountedSteamTrain = ResolveMountedSteamTrain();
+            Locomotive mountedSteamTrain = ResolveMountedLocomotive();
             if (mountedSteamTrain != null
                 && !mountedSteamTrain.AutoDriveEnabled
                 && !mountedSteamTrain.IsConsistMoving())
@@ -3629,7 +3629,7 @@ public partial class PlayerHUD : BagSlot
         }
         else
         {
-            SteamTrain mountedSteamTrain = ResolveMountedSteamTrain();
+            Locomotive mountedSteamTrain = ResolveMountedLocomotive();
             if (mountedSteamTrain != null
                 && !mountedSteamTrain.IsConsistMoving()
                 && !mountedSteamTrain.BlocksManualDisconnection)
@@ -3641,10 +3641,10 @@ public partial class PlayerHUD : BagSlot
         UpdateInteractionButtonState();
     }
 
-    private SteamTrain ResolveMountedSteamTrain()
+    private Locomotive ResolveMountedLocomotive()
     {
         PlayerController playerController = ResolvePlayerController();
-        return playerController != null ? playerController.MountedVehicle as SteamTrain : null;
+        return playerController != null ? playerController.MountedVehicle as Locomotive : null;
     }
 
     private void HandleSaddleEquipInteraction(Player currentPlayer)
@@ -4023,7 +4023,7 @@ public partial class PlayerHUD : BagSlot
             return;
         }
 
-        if (TryResolveSteamTrain(target, out SteamTrain steamTrain))
+        if (TryResolveLocomotive(target, out Locomotive steamTrain))
         {
             ShowTrainFilter(steamTrain);
             return;
@@ -4032,7 +4032,7 @@ public partial class PlayerHUD : BagSlot
         ShowItemFilter(target);
     }
 
-    private void ShowTrainFilter(SteamTrain steamTrain)
+    private void ShowTrainFilter(Locomotive steamTrain)
     {
         if (steamTrain == null)
         {
@@ -4046,7 +4046,7 @@ public partial class PlayerHUD : BagSlot
         }
 
         if (trainFilter.gameObject.activeSelf
-            && trainFilter.TryGetBoundTarget(out SteamTrain boundTrain)
+            && trainFilter.TryGetBoundTarget(out Locomotive boundTrain)
             && boundTrain == steamTrain)
         {
             trainFilter.gameObject.SetActive(false);
@@ -4063,16 +4063,16 @@ public partial class PlayerHUD : BagSlot
     private void UpdateTrainRouteFocusState()
     {
         TrainFilter.SetFocusedRouteTrain(
-            TryGetClickedSteamTrain(out SteamTrain steamTrain)
+            TryGetClickedLocomotive(out Locomotive steamTrain)
                 ? steamTrain
                 : null);
     }
 
-    private bool TryGetClickedSteamTrain(out SteamTrain steamTrain)
+    private bool TryGetClickedLocomotive(out Locomotive steamTrain)
     {
         steamTrain = null;
         return TryGetClickedObjectInfoFocusedMapObject(out IMapObjectTarget clickedMapObject)
-               && TryResolveSteamTrain(clickedMapObject, out steamTrain);
+               && TryResolveLocomotive(clickedMapObject, out steamTrain);
     }
 
     private bool TryGetClickedFilterTarget(out IMapObjectTarget filterTarget)
@@ -4091,7 +4091,7 @@ public partial class PlayerHUD : BagSlot
             return true;
         }
 
-        if (TryResolveSteamTrain(clickedMapObject, out SteamTrain steamTrain))
+        if (TryResolveLocomotive(clickedMapObject, out Locomotive steamTrain))
         {
             filterTarget = steamTrain;
             return true;
@@ -4100,9 +4100,9 @@ public partial class PlayerHUD : BagSlot
         return playerController.TryResolveItemFilterTarget(clickedMapObject, out filterTarget);
     }
 
-    private static bool TryResolveSteamTrain(IMapObjectTarget mapObject, out SteamTrain steamTrain)
+    private static bool TryResolveLocomotive(IMapObjectTarget mapObject, out Locomotive steamTrain)
     {
-        steamTrain = mapObject as SteamTrain;
+        steamTrain = mapObject as Locomotive;
         if (steamTrain != null)
         {
             return steamTrain.gameObject.activeInHierarchy;
@@ -4113,7 +4113,7 @@ public partial class PlayerHUD : BagSlot
             return false;
         }
 
-        steamTrain = mapObject.GetComponentInParent<SteamTrain>();
+        steamTrain = mapObject.GetComponentInParent<Locomotive>();
 
         return steamTrain != null && steamTrain.gameObject.activeInHierarchy;
     }

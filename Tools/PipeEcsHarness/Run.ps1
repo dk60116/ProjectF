@@ -25,7 +25,7 @@ $itemInfoDescription = Read-Source 'FactorioProject/Assets/Scripts/HUD/ObjectUI/
 $pump = Read-Source 'FactorioProject/Assets/Scripts/Object/MapObj/Pump.cs'
 $underground = Read-Source 'FactorioProject/Assets/Scripts/Object/MapObj/InstallationObject/UndergroundPipe.cs'
 $inputOutput = Read-Source 'FactorioProject/Assets/Scripts/Object/MapObj/InstallationObject/InputOutputModule.cs'
-$steamTrain = Read-Source 'FactorioProject/Assets/Scripts/Object/MapObj/InstallationObject/Vehicle/SteamTrain.cs'
+$steamTrain = Read-Source 'FactorioProject/Assets/Scripts/Object/MapObj/InstallationObject/Vehicle/Locomotive.cs'
 
 Require-Text $pipeWorld 'private const string HostName = "PipeWorld";' 'all installed pipes share the PipeWorld host'
 Require-Text $pipeWorld 'Dictionary<Vector2Int, PipeRuntimeRecord> recordsByStorageKey' 'installed pipe state is data-only'
@@ -58,7 +58,7 @@ Require-Text $inputOutput 'pipeRecord.TryGetRemoteConnectionCoordinate(coordinat
 Require-Text $block 'TryGetRuntimePipeRecord(out PipeRuntimeRecord runtimeRecord);' 'direction arrows resolve the installed pipe record'
 Require-Text $block 'runtimeRecord.HasConnectionTowardsAt(coordinate, direction)' 'direction arrows use authoritative tee connection masks'
 Require-Text $block 'TryGetFluidDirectionPipeAtCoordinate(' 'direction arrows discover data-only neighbor pipes'
-Require-Text $inputOutput 'SteamTrain.TryGetWaterPipeReceiverAtCoordinate(' 'fluid traversal resolves moving train water receivers outside Block.MapObject'
+Require-Text $inputOutput 'Locomotive.TryGetWaterPipeReceiverAtCoordinate(' 'fluid traversal resolves moving train water receivers outside Block.MapObject'
 Require-Text $steamTrain 'WaterPipeReceiversByCoordinate' 'ready train docks publish their current receiver coordinate'
 Require-Text $steamTrain 'InputOutputModule.NotifyRuntimePipeTopologyChanged(null);' 'train docking changes invalidate sleeping pump routes'
 Require-Text $steamTrain 'pipeRecord.HasConnectionTowardsAt(coordinate, direction)' 'train water-source search uses data-only pipe connection rules'

@@ -168,7 +168,7 @@ if (-not $powerRuntimeIsTickBatched) {
 Write-Output 'PASS electric source mutations defer reevaluation and coalesce sleeping-module wake per facility Tick (source contract)'
 $knownSceneTickOwners = @(
     'LoggingMachine.cs',
-    'Vehicle/SteamTrain.cs'
+    'Vehicle/Locomotive.cs'
 )
 $remainingSceneTickOwners = @(
     foreach ($sourceFile in Get-ChildItem -LiteralPath $installationRoot -Recurse -Filter '*.cs') {

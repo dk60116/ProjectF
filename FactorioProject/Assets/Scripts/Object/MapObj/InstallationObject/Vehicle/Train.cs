@@ -4,7 +4,7 @@ using UnityEngine;
 
 public class Train : Vehicle
 {
-    // Grid cells are one world unit. Installation and movement share this pitch.
+    // One-cell fallback; longer cars use their directional coupling reaches.
     public const float ConnectionCenterDistance = 1f;
     private const float MinConnectionDistance = 0.05f;
     private const float DefaultConnectionFallbackDistance = 1.4f;
@@ -16,10 +16,21 @@ public class Train : Vehicle
     [SerializeField, Range(0f, 1f)]
     private float trainConnectionMinForwardDot = 0.5f;
     private Rigidbody cachedTrainRigidbody;
+    private BoxCollider cachedTrainBodyCollider;
+    private bool trainBodyColliderResolved;
     private TrainInstance runtimeTrain;
     private readonly Queue<Train> connectionActionGroupQueue = new Queue<Train>();
     private readonly HashSet<Train> connectionActionGroupVisited = new HashSet<Train>();
     private readonly List<TrainInstance> connectionCandidateScratch = new List<TrainInstance>();
+
+    [SerializeField]
+    private Transform[] couplers;
+    [SerializeField, Range(0f, 89f)]
+    private float couplerMaxYawAngle = 80f;
+    private TrainCouplerRig couplerRig;
+
+    internal TrainCouplerRig CouplerRig => couplerRig ??
+        (couplerRig = new TrainCouplerRig(this, couplers, couplerMaxYawAngle));
 
     internal TrainInstance RuntimeTrain
     {
@@ -47,6 +58,64 @@ public class Train : Vehicle
     public float ConnectionMinForwardDot => Mathf.Clamp01(trainConnectionMinForwardDot);
     public NativeTrainConnections ConnectedTrains => new NativeTrainConnections(runtimeTrain);
     public static ulong ConnectionGraphRevision => TrainWorld.Shared.ConnectionGraphRevision;
+
+    internal float ResolveRailEndClearance(bool forward)
+    {
+        if (!trainBodyColliderResolved)
+        {
+            cachedTrainBodyCollider = GetComponent<BoxCollider>();
+            trainBodyColliderResolved = true;
+        }
+
+        float center;
+        float halfLength;
+        if (cachedTrainBodyCollider != null && !cachedTrainBodyCollider.isTrigger)
+        {
+            center = cachedTrainBodyCollider.center.z;
+            halfLength = cachedTrainBodyCollider.size.z * 0.5f;
+        }
+        else
+        {
+            int length = Mathf.Max(1, Status.mapSizeY);
+            center = (length - 1) * 0.5f - PlacementCenterCell.y;
+            halfLength = length * 0.5f;
+        }
+
+        float scale = transform.lossyScale.z;
+        center *= scale;
+        halfLength *= Mathf.Abs(scale);
+        return Mathf.Max(0f, halfLength + (forward ? center : -center));
+    }
+
+    internal float ResolveConnectionReach(bool forward)
+    {
+        float front = ResolveRailEndClearance(true);
+        float rear = ResolveRailEndClearance(false);
+        float center = (front - rear) * 0.5f;
+        float halfLength = Mathf.Max(
+            (front + rear) * 0.5f,
+            Mathf.Max(1, Status.mapSizeY) * 0.5f * Mathf.Abs(transform.lossyScale.z));
+        return Mathf.Max(0f, halfLength + (forward ? center : -center));
+    }
+
+    internal float ResolveMaximumConnectionReach()
+    {
+        return Mathf.Max(ResolveConnectionReach(true), ResolveConnectionReach(false));
+    }
+
+    internal static float ResolveConnectionSpacing(
+        Train first, Vector2 firstFacing, Train second, Vector2 secondFacing, Vector2 firstToSecond)
+    {
+        if (first == null || second == null) return ConnectionCenterDistance;
+        bool firstAtFront = first.TryGetConnectionFacingSign(second, true, out float firstSign)
+            ? firstSign > 0f
+            : Vector2.Dot(firstFacing, firstToSecond) >= 0f;
+        bool secondAtFront = second.TryGetConnectionFacingSign(first, true, out float secondSign)
+            ? secondSign > 0f
+            : Vector2.Dot(secondFacing, firstToSecond) <= 0f;
+        return Mathf.Max(MinConnectionDistance,
+            first.ResolveConnectionReach(firstAtFront) + second.ResolveConnectionReach(secondAtFront));
+    }
 
     public bool IsConsistMoving(float speedThreshold = 0.0001f)
     {
@@ -89,7 +158,7 @@ public class Train : Vehicle
         return isMoving;
     }
 
-    internal bool TryGetConsistSteamTrain(out SteamTrain steamTrain)
+    internal bool TryGetConsistLocomotive(out Locomotive steamTrain)
     {
         steamTrain = null;
         connectionActionGroupQueue.Clear();
@@ -100,7 +169,7 @@ public class Train : Vehicle
         while (connectionActionGroupQueue.Count > 0)
         {
             Train current = connectionActionGroupQueue.Dequeue();
-            if (current is SteamTrain candidate
+            if (current is Locomotive candidate
                 && candidate != null
                 && candidate.gameObject.activeInHierarchy)
             {
@@ -152,10 +221,11 @@ public class Train : Vehicle
         CollectConnectionActionGroup();
         float nearestDistanceSqr = float.MaxValue;
         var world = TrainWorld.Shared;
-        world.IncludeConnectionRange(ConnectionSnapMaxDistance, ConnectionMaxLateralDistance);
+        world.IncludeConnectionRange(ConnectionSnapMaxDistance, ConnectionMaxLateralDistance, ResolveMaximumConnectionReach());
         Vector3 position = transform.position;
         world.CollectNearby(new Vector2(position.x, position.z),
-            ConnectionCenterDistance + world.MaxConnectionSnapDistance + world.MaxConnectionLateralDistance,
+            ResolveMaximumConnectionReach() + world.MaxConnectionReach
+                + world.MaxConnectionSnapDistance + world.MaxConnectionLateralDistance,
             connectionCandidateScratch);
         foreach (TrainInstance instance in connectionCandidateScratch)
         {
@@ -303,7 +373,7 @@ public class Train : Vehicle
     {
         TrainInstance state = RuntimeTrain;
         state.Handle = RuntimeMapObjectHandle;
-        TrainWorld.Shared.IncludeConnectionRange(ConnectionSnapMaxDistance, ConnectionMaxLateralDistance);
+        TrainWorld.Shared.IncludeConnectionRange(ConnectionSnapMaxDistance, ConnectionMaxLateralDistance, ResolveMaximumConnectionReach());
         TrainWorld.Shared.SetWorldPose(state, transform.position, transform.rotation);
         TrainWorld.Shared.SetPlacement(state, TryGetPlacementRuntime(out _, out _), RuntimePlacementSequence);
     }
@@ -454,19 +524,22 @@ public class Train : Vehicle
         firstTangent.Normalize();
         secondTangent.Normalize();
         Vector2 delta = secondPoint - firstPoint;
-        float maxCenterDistance = ResolveConnectionMaxCenterDistance(first, second);
+        float desiredSpacing = ResolveConnectionSpacing(first, firstTangent, second, secondTangent, delta);
+        float snapDistance = Mathf.Max(first.ConnectionSnapMaxDistance, second.ConnectionSnapMaxDistance);
+        float minCenterDistance = Mathf.Max(ConnectionCenterDistance * 0.5f, desiredSpacing - snapDistance);
+        float maxCenterDistance = desiredSpacing + snapDistance;
         float maxLateralDistance = Mathf.Max(
             first.ConnectionMaxLateralDistance,
             second.ConnectionMaxLateralDistance);
 
-        if (first is SteamTrain || second is SteamTrain)
+        if (first is Locomotive || second is Locomotive)
         {
             // A locomotive's tail supplies the coupling point. The approaching
             // car's heading, including another locomotive's nose, cannot veto it.
-            return (first is SteamTrain
-                    && IsConnectionOffsetInRange(delta, -firstTangent, maxCenterDistance, maxLateralDistance))
-                   || (second is SteamTrain
-                       && IsConnectionOffsetInRange(-delta, -secondTangent, maxCenterDistance, maxLateralDistance));
+            return (first is Locomotive
+                    && IsConnectionOffsetInRange(delta, -firstTangent, minCenterDistance, maxCenterDistance, maxLateralDistance))
+                   || (second is Locomotive
+                       && IsConnectionOffsetInRange(-delta, -secondTangent, minCenterDistance, maxCenterDistance, maxLateralDistance));
         }
 
         float tangentDot = Mathf.Abs(Vector2.Dot(firstTangent, secondTangent));
@@ -486,14 +559,14 @@ public class Train : Vehicle
             connectionAxis = -connectionAxis;
         }
 
-        return IsConnectionOffsetInRange(delta, connectionAxis, maxCenterDistance, maxLateralDistance);
+        return IsConnectionOffsetInRange(delta, connectionAxis, minCenterDistance, maxCenterDistance, maxLateralDistance);
     }
 
     private static bool IsConnectionOffsetInRange(
-        Vector2 offset, Vector2 connectionAxis, float maxCenterDistance, float maxLateralDistance)
+        Vector2 offset, Vector2 connectionAxis, float minCenterDistance, float maxCenterDistance, float maxLateralDistance)
     {
         float alongDistance = Vector2.Dot(offset, connectionAxis);
-        return alongDistance >= ConnectionCenterDistance * 0.5f
+        return alongDistance >= minCenterDistance
                && alongDistance <= maxCenterDistance
                && Mathf.Abs(Cross(connectionAxis, offset)) <= maxLateralDistance;
     }
@@ -535,7 +608,7 @@ public class Train : Vehicle
         }
 
         float snapDistance = Mathf.Max(first.ConnectionSnapMaxDistance, second.ConnectionSnapMaxDistance);
-        return ConnectionCenterDistance + snapDistance;
+        return first.ResolveMaximumConnectionReach() + second.ResolveMaximumConnectionReach() + snapDistance;
     }
 
     private static float Cross(Vector2 a, Vector2 b)

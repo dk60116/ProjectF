@@ -97,15 +97,15 @@ public sealed partial class RailLineDebugRenderer : MonoBehaviour
     private readonly List<LineRenderer> powerMarkerRenderers = new List<LineRenderer>();
     private readonly List<LineRenderer> targetStationMarkerRenderers = new List<LineRenderer>();
     private readonly List<RailHandcar> activeHandcarScratch = new List<RailHandcar>(4);
-    private readonly List<SteamTrain> selectedPowerTrainScratch = new List<SteamTrain>(4);
+    private readonly List<Locomotive> selectedPowerTrainScratch = new List<Locomotive>(4);
     private readonly List<ProjectF.Railway.ITrainStationTarget> selectedTargetStationScratch = new List<ProjectF.Railway.ITrainStationTarget>(4);
     private readonly Queue<Train> selectedTrainQueue = new Queue<Train>(8);
     private readonly HashSet<Train> selectedTrainVisited = new HashSet<Train>();
     private ProjectF.Railway.RailWorld displayedRailWorld;
     private int displayedTopologyVersion = -1;
     private readonly List<RouteHighlightSegment> routeHighlightSegmentScratch = new List<RouteHighlightSegment>(32);
-    private readonly List<SteamTrain.AutoDriveDebugRouteSegment> autoDriveRouteSegmentScratch =
-        new List<SteamTrain.AutoDriveDebugRouteSegment>(32);
+    private readonly List<Locomotive.AutoDriveDebugRouteSegment> autoDriveRouteSegmentScratch =
+        new List<Locomotive.AutoDriveDebugRouteSegment>(32);
 
     private Transform debugRoot;
     private Material lineMaterial;
@@ -399,7 +399,7 @@ public sealed partial class RailLineDebugRenderer : MonoBehaviour
                 out string destinationStationName)
             || string.IsNullOrWhiteSpace(startStationName)
             || string.IsNullOrWhiteSpace(destinationStationName)
-            || !SteamTrain.TryBuildDebugRouteBetweenStations(
+            || !Locomotive.TryBuildDebugRouteBetweenStations(
                 startStationName,
                 destinationStationName,
                 autoDriveRouteSegmentScratch))
@@ -410,7 +410,7 @@ public sealed partial class RailLineDebugRenderer : MonoBehaviour
         result.Clear();
         for (int i = 0; i < autoDriveRouteSegmentScratch.Count; i++)
         {
-            SteamTrain.AutoDriveDebugRouteSegment segment = autoDriveRouteSegmentScratch[i];
+            Locomotive.AutoDriveDebugRouteSegment segment = autoDriveRouteSegmentScratch[i];
             if (segment.Rail == null
                 || !TryFindRailInfoIndex(segment.Rail, out int railIndex))
             {
@@ -557,7 +557,7 @@ public sealed partial class RailLineDebugRenderer : MonoBehaviour
         currentTargetStationName = string.Empty;
         nextTargetStationName = string.Empty;
         if (!TrainFilter.TryGetActiveRouteSelection(
-                out SteamTrain train,
+                out Locomotive train,
                 out string targetAStationName,
                 out string targetBStationName)
             || train == null)
@@ -643,7 +643,7 @@ public sealed partial class RailLineDebugRenderer : MonoBehaviour
         int rendererIndex = 0;
         for (int i = 0; i < selectedPowerTrainScratch.Count; i++)
         {
-            SteamTrain powerSourceTrain = selectedPowerTrainScratch[i];
+            Locomotive powerSourceTrain = selectedPowerTrainScratch[i];
             if (powerSourceTrain == null)
             {
                 continue;
@@ -754,7 +754,7 @@ public sealed partial class RailLineDebugRenderer : MonoBehaviour
         return rendererIndex;
     }
 
-    private bool TryCollectSelectedAutoDrivePowerSourceTrains(List<SteamTrain> results)
+    private bool TryCollectSelectedAutoDrivePowerSourceTrains(List<Locomotive> results)
     {
         if (results == null)
         {
@@ -763,7 +763,7 @@ public sealed partial class RailLineDebugRenderer : MonoBehaviour
 
         results.Clear();
         if (!TrainFilter.TryGetActiveRouteSelection(
-                out SteamTrain selectedTrain,
+                out Locomotive selectedTrain,
                 out string targetAStationName,
                 out string targetBStationName)
             || selectedTrain == null
@@ -798,7 +798,7 @@ public sealed partial class RailLineDebugRenderer : MonoBehaviour
 
         for (int i = 0; i < selectedPowerTrainScratch.Count; i++)
         {
-            SteamTrain powerTrain = selectedPowerTrainScratch[i];
+            Locomotive powerTrain = selectedPowerTrainScratch[i];
             if (powerTrain == null
                 || !powerTrain.TryGetCurrentAutoDriveTargetStation(out ProjectF.Railway.ITrainStationTarget targetStation)
                 || targetStation == null
@@ -816,10 +816,10 @@ public sealed partial class RailLineDebugRenderer : MonoBehaviour
     }
 
     private void CollectMatchingAutoDrivePowerTrains(
-        SteamTrain selectedTrain,
+        Locomotive selectedTrain,
         string targetAStationName,
         string targetBStationName,
-        List<SteamTrain> results)
+        List<Locomotive> results)
     {
         selectedTrainQueue.Clear();
         selectedTrainVisited.Clear();
@@ -834,7 +834,7 @@ public sealed partial class RailLineDebugRenderer : MonoBehaviour
                 continue;
             }
 
-            if (currentTrain is SteamTrain steamTrain
+            if (currentTrain is Locomotive steamTrain
                 && steamTrain.AutoDriveEnabled
                 && steamTrain.TryGetPlacementRuntime(out _, out _)
                 && HasMatchingAutoDriveTargets(steamTrain, targetAStationName, targetBStationName))
@@ -860,7 +860,7 @@ public sealed partial class RailLineDebugRenderer : MonoBehaviour
     }
 
     private static bool HasMatchingAutoDriveTargets(
-        SteamTrain train,
+        Locomotive train,
         string targetAStationName,
         string targetBStationName)
     {

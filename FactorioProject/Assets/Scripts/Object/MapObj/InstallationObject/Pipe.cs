@@ -1311,7 +1311,7 @@ public class Pipe : InstallationObject
 
     private static bool IsMobileFluidStorageFallback(InstallationObject storage)
     {
-        return storage is SteamTrain
+        return storage is Locomotive
                || storage is Fluidtank fluidTank && fluidTank.IsFlatCarMounted;
     }
 

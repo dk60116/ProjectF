@@ -137,7 +137,7 @@ public partial class Vehicle : MapObject
     public void AddPlayerPoint(Transform point) => playerPoint.Add(point);
 }
 public class Train : Vehicle { }
-public sealed class SteamTrain : Train { }
+public sealed class Locomotive : Train { }
 public sealed class Player : MonoBehaviour
 {
     public bool HasRangedEquipment = true;

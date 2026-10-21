@@ -111,9 +111,11 @@ static class Checks
         ManualFacingChecks.Run();
         RailHandcar.RunRailAcquisitionChecks();
         RailHandcar.RunJunctionMotionChecks();
+        RailHandcar.RunEndStopChecks();
         BlueprintChecks.Run();
         EditChecks.Run();
         WorldChecks.Run();
+        LongCarChecks.Run();
         Console.WriteLine($"Train spacing harness passed: {checks} checks");
     }
 }
@@ -123,6 +125,10 @@ public class MapObject
     public readonly FakeTransform transform = new FakeTransform();
     public readonly FakeGameObject gameObject = new FakeGameObject();
     public Vector2 CollisionHalfExtents = new Vector2(0.3f, 0.5f);
+    public (byte mapSizeX, byte mapSizeY) Status = (1, 1);
+    public Vector2Int PlacementCenterCell;
+    public BoxCollider BodyCollider;
+    public T GetComponent<T>() where T : class => BodyCollider as T;
     protected virtual void OnEnable() { }
     protected virtual void OnDisable() { }
     protected virtual void OnPlacementRuntimeChanged() { }
@@ -138,12 +144,21 @@ public static class ProjectFApplicationLifecycle { public static bool IsQuitting
 public class FakeTransform
 {
     public Vector3 position;
+    public Vector3 lossyScale = Vector3.one;
     public PreviewRotation rotation = PreviewRotation.identity;
     public Vector3 forward => rotation * Vector3.forward;
 }
 public class FakeGameObject { public bool activeInHierarchy = true; }
+public class BoxCollider
+{
+    public Vector3 center;
+    public Vector3 size = Vector3.one;
+    public bool isTrigger;
+}
 public partial class Train : VehicleMotionProbe
 {
+    private BoxCollider cachedTrainBodyCollider;
+    private bool trainBodyColliderResolved;
     public float ConnectionSnapMaxDistance = 0.6f;
     public float ConnectionMaxLateralDistance = 0.45f;
     public float ConnectionMinForwardDot = 0.5f;
@@ -208,7 +223,7 @@ public partial class RailHandcar : Train
     public void ResetRailPlacementState() { ResetCount++; }
     public bool TryApplyExplicitRailPose(Railload rail, float distance, Vector2 point, Vector2 facing) => TryApplyRailPose(rail, distance, point, facing);
 }
-public class SteamTrain : RailHandcar { }
+public class Locomotive : RailHandcar { }
 public static class RailConnectionUtility { public const float ConnectionDistance = 0.55f; }
 public class Railload
 {

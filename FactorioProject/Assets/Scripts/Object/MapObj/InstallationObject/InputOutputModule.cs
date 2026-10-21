@@ -4474,7 +4474,7 @@ public partial class InputOutputModule : InstallationObject,
                 out bool storageIsPipeArea))
         {
             if (this is WaterPump
-                && storage is SteamTrain steamTrain
+                && storage is Locomotive steamTrain
                 && !steamTrain.CanAcceptWaterFromPipeDirection(
                     -directionToPrevious,
                     WaterPump.ResolveWaterItemId(null),
@@ -4805,9 +4805,9 @@ public partial class InputOutputModule : InstallationObject,
         // Trains are moving installations and deliberately are not written to
         // Block.MapObject. A ready water-pipe dock registers its current grid
         // coordinate separately so the pipe search can still resolve the tank.
-        if (SteamTrain.TryGetWaterPipeReceiverAtCoordinate(
+        if (Locomotive.TryGetWaterPipeReceiverAtCoordinate(
                 coordinate,
-                out SteamTrain waterReceiver)
+                out Locomotive waterReceiver)
             && (storageFilter == null || storageFilter(waterReceiver)))
         {
             storage = waterReceiver;

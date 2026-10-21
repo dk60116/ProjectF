@@ -21,8 +21,8 @@ public class TrainFilter : MonoBehaviour
     };
 
     private static TrainFilter activeVisibleFilter;
-    private static SteamTrain lastSelectedTrain;
-    private static SteamTrain focusedRouteTrain;
+    private static Locomotive lastSelectedTrain;
+    private static Locomotive focusedRouteTrain;
     private static readonly Queue<Train> routeFocusQueue = new Queue<Train>(8);
     private static readonly HashSet<Train> routeFocusVisited = new HashSet<Train>();
     private static string lastSelectedTargetAStationName = string.Empty;
@@ -48,7 +48,7 @@ public class TrainFilter : MonoBehaviour
     [SerializeField]
     private TMP_Dropdown targetBFreight;
 
-    private SteamTrain boundTrain;
+    private Locomotive boundTrain;
     private readonly List<string> stationNameScratch = new List<string>(8);
     private readonly Dictionary<string, Color32> stationColorByNameScratch =
         new Dictionary<string, Color32>(System.StringComparer.OrdinalIgnoreCase);
@@ -77,7 +77,7 @@ public class TrainFilter : MonoBehaviour
         }
     }
 
-    public void Bind(SteamTrain steamTrain)
+    public void Bind(Locomotive steamTrain)
     {
         boundTrain = steamTrain;
         Refresh();
@@ -85,14 +85,14 @@ public class TrainFilter : MonoBehaviour
         MarkRouteSelectionDirty();
     }
 
-    public bool TryGetBoundTarget(out SteamTrain train)
+    public bool TryGetBoundTarget(out Locomotive train)
     {
         train = boundTrain;
         return train != null && train.gameObject.activeInHierarchy;
     }
 
     public static bool TryGetActiveRouteSelection(
-        out SteamTrain train,
+        out Locomotive train,
         out string targetAStationName,
         out string targetBStationName)
     {
@@ -130,7 +130,7 @@ public class TrainFilter : MonoBehaviour
         return true;
     }
 
-    public static void SetFocusedRouteTrain(SteamTrain steamTrain)
+    public static void SetFocusedRouteTrain(Locomotive steamTrain)
     {
         if (steamTrain != null && !steamTrain.gameObject.activeInHierarchy)
         {
@@ -382,7 +382,7 @@ public class TrainFilter : MonoBehaviour
 
     private void CacheCurrentRouteSelection()
     {
-        if (!TryGetBoundTarget(out SteamTrain train))
+        if (!TryGetBoundTarget(out Locomotive train))
         {
             if (boundTrain == null)
             {
@@ -399,7 +399,7 @@ public class TrainFilter : MonoBehaviour
         lastSelectedTargetBStationName = NormalizeStationSelection(ResolveSelectedOptionText(targetB));
     }
 
-    private static bool IsRouteSelectionFocused(SteamTrain train)
+    private static bool IsRouteSelectionFocused(Locomotive train)
     {
         if (train == null || !train.gameObject.activeInHierarchy)
         {
@@ -408,7 +408,7 @@ public class TrainFilter : MonoBehaviour
 
         if (activeVisibleFilter != null
             && activeVisibleFilter.gameObject.activeInHierarchy
-            && activeVisibleFilter.TryGetBoundTarget(out SteamTrain activeTrain)
+            && activeVisibleFilter.TryGetBoundTarget(out Locomotive activeTrain)
             && activeTrain == train)
         {
             return true;
@@ -419,7 +419,7 @@ public class TrainFilter : MonoBehaviour
                && AreRouteTrainsConnected(train, focusedRouteTrain);
     }
 
-    private static bool AreRouteTrainsConnected(SteamTrain first, SteamTrain second)
+    private static bool AreRouteTrainsConnected(Locomotive first, Locomotive second)
     {
         if (first == null || second == null)
         {
@@ -543,7 +543,7 @@ public class TrainFilter : MonoBehaviour
 
     private void ApplyCurrentSettingsToBoundTrain()
     {
-        if (!TryGetBoundTarget(out SteamTrain train))
+        if (!TryGetBoundTarget(out Locomotive train))
         {
             return;
         }
@@ -633,7 +633,7 @@ public class TrainFilter : MonoBehaviour
             : stationName.Trim();
     }
 
-    private static Sprite ResolveTrainIcon(SteamTrain train)
+    private static Sprite ResolveTrainIcon(Locomotive train)
     {
         if (train == null)
         {

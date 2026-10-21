@@ -1755,8 +1755,9 @@ public partial class BlockStateStore : MonoBehaviour
             }
         }
 
-        if (installationObject is SteamTrain steamTrain)
+        if (installationObject is Locomotive steamTrain)
         {
+            // Keep legacy steamTrain* field names in the save format for both engine types.
             steamTrain.CaptureBurnEnergyState(
                 out state.steamTrainStoredBurnEnergy,
                 out state.steamTrainBurnEnergyGaugeCapacity);

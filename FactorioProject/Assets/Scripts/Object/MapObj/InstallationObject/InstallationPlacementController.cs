@@ -1890,7 +1890,7 @@ public partial class InstallationPlacementController : MonoBehaviour
 
     private bool CanRotateSelectedSteamTrain()
     {
-        if (!(selectedEditableInstallation is SteamTrain steamTrain)
+        if (!(selectedEditableInstallation is Locomotive steamTrain)
             || !steamTrain.gameObject.activeInHierarchy)
         {
             return false;
@@ -1928,7 +1928,7 @@ public partial class InstallationPlacementController : MonoBehaviour
             ? player.GetComponent<PlayerController>()
             : null;
         return playerController != null
-               && playerController.MountedVehicle is SteamTrain steamTrain
+               && playerController.MountedVehicle is Locomotive steamTrain
                && steamTrain.AutoDriveEnabled;
     }
 
@@ -6392,7 +6392,7 @@ public partial class InstallationPlacementController : MonoBehaviour
     {
         if (!mapEditModeActive
             || IsEditingInstallation()
-            || !(selectedEditableInstallation is SteamTrain steamTrain)
+            || !(selectedEditableInstallation is Locomotive steamTrain)
             || !steamTrain.TryGetCurrentRailPose(
                 out ProjectF.Railway.IRailTarget rail,
                 out float distanceAlongPath,
@@ -16431,7 +16431,7 @@ public partial class InstallationPlacementController : MonoBehaviour
                 otherRail, otherDistance, referenceSample.Rail, referenceSample.DistanceAlongPath)) return;
 
         // Find the closest non-overlapping end position along this rail route.
-        // Complete will subsequently normalize the whole consist to one-cell pitch.
+        // Complete subsequently normalizes gaps to each pair's coupling reaches.
         const float searchStep = 0.05f;
         for (float offset = Train.ConnectionCenterDistance; offset <= maxCenterDistance + 0.0001f; offset += searchStep)
         {
@@ -16479,7 +16479,7 @@ public partial class InstallationPlacementController : MonoBehaviour
         // Keep the selected heading whenever it can couple. A newly placed
         // locomotive may turn around only when its tail otherwise faces away
         // from the adjacent car.
-        if (!(sourceTrain is SteamTrain))
+        if (!(sourceTrain is Locomotive))
         {
             return false;
         }
@@ -16503,6 +16503,11 @@ public partial class InstallationPlacementController : MonoBehaviour
         if (sourceTrain == null)
         {
             return true;
+        }
+
+        if (!CanPlaceTrainFootprintAtPose(sourcePrefab, position, rotation, previewToIgnore))
+        {
+            return false;
         }
 
         BuildTrainCollisionBoxes(sourcePrefab, position, rotation, trainPlacementCollisionBoxes);
@@ -16573,6 +16578,35 @@ public partial class InstallationPlacementController : MonoBehaviour
         }
 
         trainPlacementOtherCollisionBoxes.Clear();
+        return true;
+    }
+
+    private bool CanPlaceTrainFootprintAtPose(
+        MapObject source, Vector3 position, Quaternion rotation, MapObject previewToIgnore)
+    {
+        int width = Mathf.Max(1, source.Status.mapSizeX);
+        int length = Mathf.Max(1, source.Status.mapSizeY);
+        if (width == 1 && length == 1) return true;
+        TerrainGenerator terrain = ResolveInstallPreviewTerrain();
+        if (terrain == null) return false;
+        Vector2Int center = source.PlacementCenterCell;
+        Vector2Int anchor = RoundWorldPositionToCoordinate(position);
+        int quarterTurns = Mathf.RoundToInt(rotation.eulerAngles.y / 90f);
+        bool blocksDroppedItems = !AllowsPlacementOverDroppedFloorObjects(source);
+        for (int y = 0; y < length; y++)
+        for (int x = 0; x < width; x++)
+        {
+            Vector3 point = position + rotation * new Vector3(x - center.x, 0f, y - center.y);
+            Vector2Int coordinate = RoundWorldPositionToCoordinate(point);
+            if (!terrain.TryGetLoadedBlock(coordinate, out Block block) || block == null
+                || (blocksDroppedItems && terrain.HasDroppedFloorObjectsAt(coordinate))
+                || !CanPlacePreviewOnTargetBlockType(block, source,
+                    anchorCoordinate: anchor, quarterTurns: quarterTurns, previewToIgnore: previewToIgnore))
+            {
+                return false;
+            }
+        }
+
         return true;
     }
 

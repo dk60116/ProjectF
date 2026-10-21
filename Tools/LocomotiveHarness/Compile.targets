@@ -1,0 +1,9 @@
+<Project xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <Import Project="../MonsterDataHarness/Compile.targets" />
+  <Target Name="IncludeLocomotiveSources" BeforeTargets="CoreCompile">
+    <ItemGroup Condition="'$(MSBuildProjectName)' == 'Assembly-CSharp'">
+      <Compile Remove="$(MSBuildProjectDirectory)/Assets/Scripts/Object/MapObj/InstallationObject/Vehicle/Locomotive.cs" />
+      <Compile Include="$(MSBuildProjectDirectory)/Assets/Scripts/Object/MapObj/InstallationObject/Vehicle/Locomotive.cs" />
+    </ItemGroup>
+  </Target>
+</Project>

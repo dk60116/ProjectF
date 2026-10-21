@@ -69,7 +69,7 @@ public partial class PlayerHUD
     private static bool IsLoggingMachineFilterTarget(IMapObjectTarget target) => false;
     private static bool TryResolveTrainStation(IMapObjectTarget target, out object station) { station = null; return false; }
     private InteractionButton ResolveDoorInteractionButtonForUse() => InteractionButton;
-    private void SetTrainConnectionInteractionButtonState(SteamTrain train) { }
+    private void SetTrainConnectionInteractionButtonState(Locomotive train) { }
     private static ItemDefinition GetItemDefinition(int id) => null;
     private static Sprite ResolveInteractionIcon(BoxObject box) => ResolveInteractionIcon((IMapObjectTarget)box, 0);
     private static Sprite ResolveInteractionIcon(IFenceDoorTarget door) => ResolveInteractionIcon((IMapObjectTarget)door, 0);

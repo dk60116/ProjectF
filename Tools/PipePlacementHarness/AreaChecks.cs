@@ -7,17 +7,24 @@ using ForestryWorld = ProjectF.MapObjects.ForestryWorld;
 // the production-world type lookup, and the complete per-block decision are real code.
 public interface IMapObjectTarget { }
 public class MapObject : IMapObjectTarget { }
-public class InstallationObject : MapObject { }
+public class InstallationObject : MapObject { public InstallationMapFilter MapFilter = InstallationMapFilter.Ground; }
 public class Pipe : InstallationObject { }
 public class Pump : InstallationObject { }
 public class BoxObject : InstallationObject { }
+public class Floor : InstallationObject { }
+public class Train : InstallationObject { }
+public partial class Trainstation : InstallationObject { }
+public class Railload : InstallationObject, ProjectF.Railway.IRailTarget { }
+public class DataRail : IMapObjectTarget, ProjectF.Railway.IRailTarget { }
+namespace ProjectF.Railway { public interface IRailTarget { } }
 public class ResourceInstance : MapObject { }
-[Flags] public enum InstallationMapFilter { Ground = 1, ItemArea = 2, Ore = 4 }
+[Flags] public enum InstallationMapFilter { None = 0, Ground = 1, ItemArea = 8, Ore = 4, Railload = 128, Floor = 256, OtherInstallObject = 512 }
 public sealed class Block
 {
     public enum BlockType { Ground, Water }
     public BlockType Type = BlockType.Ground;
     public Vector2Int Coordinate;
+    public IMapObjectTarget MapObject;
 }
 public sealed class ModuleObject { public bool activeInHierarchy = true; }
 public partial class InputOutputModule : InstallationObject
@@ -70,17 +77,19 @@ public partial class InstallationPlacementController
 {
     public Pipe ExistingPipe;
     public IMapObjectTarget Occupant;
+    public readonly HashSet<Vector2Int> StationRailCells = new();
+    public MapObject SavedRail;
     public bool FluidCompatible = true;
-    public bool Place(Block block, MapObject source, MapObject ignored = null) =>
-        CanPlacePreviewOnTargetBlockType(block, source, previewToIgnore: ignored);
+    public bool Place(Block block, MapObject source, MapObject ignored = null, int turns = 0) =>
+        CanPlacePreviewOnTargetBlockType(block, source, quarterTurns: turns, previewToIgnore: ignored);
     private bool IsNonBlockingRobotArmInteractionArea(params object[] args) => false;
     private bool CanOverlapExistingPipePass(params object[] args) => false;
-    private IMapObjectTarget GetOccupyingObjectForPlacement(Block block, MapObject ignored) => Occupant;
+    private IMapObjectTarget GetOccupyingObjectForPlacement(Block block, MapObject ignored) => Occupant ?? block.MapObject;
     private bool TryGetPipePlacementAtBlock(Block block, IMapObjectTarget occupant, out Pipe pipe, out int turns)
     { pipe = ExistingPipe; turns = 0; return pipe != null; }
     private static bool TryResolveInstallationObject(MapObject source, out InstallationObject installation)
     { installation = source as InstallationObject; return installation != null; }
-    private static InstallationMapFilter ResolvePlacementMapFilter(params object[] args) => InstallationMapFilter.Ground;
+    private static InstallationMapFilter ResolvePlacementMapFilter(MapObject source, InstallationObject installation) => installation.MapFilter;
     private static InstallationMapFilter ResolveRectGridTerrainFilter(MapObject source, InputOutputModule.RectGridBlockType type, InstallationMapFilter filter) => filter;
     private bool IsFixedRectGridObjectBlockCoordinate(Vector2Int cell) => InputOutputModule.CoordinateIsRuntimeRectGridBlockType(cell, InputOutputModule.RectGridBlockType.Object);
     private bool IsRectGridAreaBlockType(InputOutputModule.RectGridBlockType type) => type != InputOutputModule.RectGridBlockType.None && type != InputOutputModule.RectGridBlockType.Object;
@@ -107,7 +116,7 @@ public partial class InstallationPlacementController
     private bool IsBelt2F(params object[] args) => false;
     private Vector2Int GetBelt2FBridgeCenterCoordinate(Vector2Int cell, MapObject source, int turns) => cell;
     private bool CanPlacePipeOnFixedFluidConnectorArea(params object[] args) => false;
-    private bool CanPlaceOnTerrainBiome(Block block, InstallationMapFilter filter) => block.Type == Block.BlockType.Ground;
+    private bool CanPlaceOnTerrainBiome(Block block, InstallationMapFilter filter) => block.Type == Block.BlockType.Ground && (filter & InstallationMapFilter.Ground) != 0;
     private bool CanPlaceBoilerConnectorOnPumpBody(params object[] args) => false;
     private bool CanPlaceSprinklerConnectorOnPumpBody(params object[] args) => false;
     private bool CanPlaceBoilerConnectorOnBoilerBody(params object[] args) => false;
@@ -124,13 +133,15 @@ public partial class InstallationPlacementController
     private bool CanPlaceFluidStorageObjectOnPipeNode(params object[] args) => false;
     private bool IsWaterPumpSource(params object[] args) => false;
     private bool IsWaterPumpCardinalShoreCoordinate(params object[] args) => false;
-    private bool IsTrainStationSource(params object[] args) => false;
-    private bool TryResolveTrainStationSelectedRailCoordinate(Vector2Int cell, MapObject source, int turns, MapObject ignored, out Vector2Int selected)
-    { selected = default; return false; }
+    private static bool IsTrainStationSource(MapObject source) => source is Trainstation;
+    private static bool IsRailloadSource(MapObject source) => source is Railload;
+    private bool HasRailloadForTrainStationAtCoordinate(Vector2Int cell, MapObject ignored) => StationRailCells.Contains(cell);
+    private static int NormalizePlacementQuarterTurnsForObject(MapObject source, int turns) => (turns % 4 + 4) % 4;
+    private List<Vector2Int> GetPlacementVisualCoordinates(Vector2Int anchor, MapObject source, int turns) => new() { anchor };
+    private bool TryGetSavedInstallationPlacementAtCoordinate(Vector2Int cell, out MapObject source, out int anchor, out int turns)
+    { source = SavedRail; anchor = turns = 0; return source != null; }
     private bool CanResolvedPipePlacementMatchFixedFluidConnectors(params object[] args) => FluidCompatible;
     private bool IsResourceAllowedForPlacement(params object[] args) => false;
-    private bool IsRailloadAllowedForPlacement(params object[] args) => false;
-    private bool IsInstallationObjectAllowedForPlacement(params object[] args) => false;
     private bool CanPlacePassthroughOnBelt2FBridgeCenter(params object[] args) => false;
     private bool IsPipeAllowedForPlacement(params object[] args) => false;
     private bool CanPlaceBelt2FBlock(params object[] args) => false;
@@ -161,6 +172,8 @@ public static class AreaChecks
     }
     public static void Main()
     {
+        CheckDieselRailPlacement();
+        CheckStationPlacement();
         var anchor = new Vector2Int(100, 50);
         var offset = new Vector2Int(2, 1);
         foreach (var type in new[] { InputOutputModule.RectGridBlockType.DoubleInputItem,
@@ -229,5 +242,62 @@ public static class AreaChecks
         Reset();
         Require(!InputOutputModule.CoordinateIsRuntimeRectGridBlockType(anchor, InputOutputModule.RectGridBlockType.None), "None must never be an occupied type");
         Console.WriteLine($"Pipe IO-area placement checks passed: {checks}");
+    }
+
+    private static void CheckDieselRailPlacement()
+    {
+        Reset();
+        var diesel = new Train { MapFilter = (InstallationMapFilter)DieselAsset.MapFilter };
+        var block = new Block();
+        var placement = new InstallationPlacementController();
+        foreach (IMapObjectTarget rail in new IMapObjectTarget[] { new Railload(), new DataRail() })
+        {
+            placement.Occupant = rail;
+            Require(placement.Place(block, diesel), "Diesel body-cell validation must accept scene and ECS rails using the real prefab filter");
+        }
+        placement.Occupant = null;
+        Require(placement.Place(block, diesel), "Diesel must retain ground-first placement");
+        block.Type = Block.BlockType.Water;
+        Require(!placement.Place(block, diesel), "Enabling rails must not permit water placement");
+        block.Type = Block.BlockType.Ground;
+        placement.Occupant = new BoxObject();
+        Require(!placement.Place(block, diesel), "Enabling rails must not permit overlapping other buildings");
+        Require(DieselAsset.CenterCellY == 0, "Diesel footprint must follow its body from the root cell towards local +Z");
+        Reset();
+    }
+
+    private static void CheckStationPlacement()
+    {
+        Reset();
+        var station = new Trainstation { MapFilter = InstallationMapFilter.Ground | InstallationMapFilter.Floor };
+        var block = new Block { Coordinate = new Vector2Int(10, 20) };
+        var placement = new InstallationPlacementController();
+        placement.StationRailCells.Add(block.Coordinate + Vector2Int.up);
+        Require(placement.Place(block, station), "Station must install on ground beside a rail");
+        foreach (var occupant in new IMapObjectTarget[] { new Railload(), new DataRail(), new Train(), new BoxObject(), new Trainstation() })
+        {
+            placement.Occupant = occupant;
+            Require(!placement.Place(block, station), "Station must not overlap rail, train or building: " + occupant.GetType().Name);
+        }
+        placement.Occupant = null;
+        placement.StationRailCells.Clear();
+        Require(!placement.Place(block, station), "Station must reject isolated ground");
+        placement.StationRailCells.Add(block.Coordinate);
+        Require(!placement.Place(block, station), "Rail under the station cannot replace an adjacent rail");
+        for (int turns = -8; turns <= 8; turns++)
+        {
+            Trainstation.TryGetFacingDirection(turns, out var direction);
+            placement.StationRailCells.Clear();
+            placement.StationRailCells.Add(block.Coordinate + direction);
+            Require(placement.Place(block, station, turns: turns), "Station must install beside the rail it faces");
+        }
+        placement.StationRailCells.Clear();
+        placement.StationRailCells.Add(block.Coordinate + Vector2Int.up);
+        station.MapFilter = InstallationMapFilter.None;
+        Require(!placement.Place(block, station), "Station must honor None terrain filter");
+        station.MapFilter = InstallationMapFilter.Ground;
+        block.Type = Block.BlockType.Water;
+        Require(!placement.Place(block, station), "Station must honor terrain restrictions");
+        Reset();
     }
 }

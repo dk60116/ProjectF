@@ -108,15 +108,15 @@ static class Checks
         var lineB = Rail(2, new Vector2(.3f, 0), new Vector2(10, 0));
         var stationA = Station(11, new Vector2Int(-8, 0), "A");
         var stationB = Station(12, new Vector2Int(8, 0), "B");
-        Check(SteamTrain.CanRoute(stationA, stationB), "Connected stations are actually reachable");
-        Check(SteamTrain.RouteParity(stationA, stationB), "World route matches legacy all-pairs graph");
-        int routeVersion = SteamTrain.GraphVersion;
+        Check(Locomotive.CanRoute(stationA, stationB), "Connected stations are actually reachable");
+        Check(Locomotive.RouteParity(stationA, stationB), "World route matches legacy all-pairs graph");
+        int routeVersion = Locomotive.GraphVersion;
         stationB.ApplyStationColor(new Color32(12, 34, 56, 255), true);
-        Check(SteamTrain.GraphVersion == routeVersion, "Actual station color mutation does not rebuild routes");
+        Check(Locomotive.GraphVersion == routeVersion, "Actual station color mutation does not rebuild routes");
         stationB.ApplyStationName("Renamed");
-        Check(SteamTrain.GraphVersion > routeVersion && SteamTrain.HasStation("Renamed") && !SteamTrain.HasStation("B"), "Renaming refreshes station lookup");
-        stationB.Disable(); Check(!SteamTrain.HasStation("Renamed"), "Disabled station removed from route registry");
-        world.DetachLive(lineB); Check(SteamTrain.GraphVersion > routeVersion, "Unloading a rail invalidates live route graph");
+        Check(Locomotive.GraphVersion > routeVersion && Locomotive.HasStation("Renamed") && !Locomotive.HasStation("B"), "Renaming refreshes station lookup");
+        stationB.Disable(); Check(!Locomotive.HasStation("Renamed"), "Disabled station removed from route registry");
+        world.DetachLive(lineB); Check(Locomotive.GraphVersion > routeVersion, "Unloading a rail invalidates live route graph");
 
         NewWorld(); world = TerrainGenerator.Active.World;
         var random = new System.Random(71);
@@ -128,7 +128,7 @@ static class Checks
             candidate.Configure(new[] { new Vector2(x, y), new Vector2(x + random.Next(1, 13), y) }, i % 2 == 0, i % 3 == 0);
             world.UpsertLive(candidate); randomRails.Add(candidate);
         }
-        Check(SteamTrain.CandidateParity(), "Spatial candidates cover all actual route connections");
+        Check(Locomotive.CandidateParity(), "Spatial candidates cover all actual route connections");
         var expected = new int[randomRails.Count];
         for (int i = 0; i < expected.Length; i++) expected[i] = i;
         int Root(int index) { while (expected[index] != index) index = expected[index]; return index; }
@@ -143,7 +143,7 @@ static class Checks
             for (int j = i + 1; j < randomRails.Count; j++)
                 Check((world.GetLiveComponent(randomRails[i], .55f) == world.GetLiveComponent(randomRails[j], .55f))
                     == (Root(i) == Root(j)), "Indexed components match brute-force connection rules");
-        Check(SteamTrain.RouteParity(Station(201, new Vector2Int(-30, 0), "A"), Station(202, new Vector2Int(30, 0), "B")), "Disconnected/random route parity");
+        Check(Locomotive.RouteParity(Station(201, new Vector2Int(-30, 0), "A"), Station(202, new Vector2Int(30, 0), "B")), "Disconnected/random route parity");
 
         NewWorld(); world = TerrainGenerator.Active.World;
         const int railCount = 10000;
@@ -167,7 +167,7 @@ static class Checks
     }
 }
 
-public partial class SteamTrain
+public partial class Locomotive
 {
     public static int GraphVersion => AutoDriveRoutePlanner.RouteGraphVersion;
     public static bool CanRoute(ITrainStationTarget a, ITrainStationTarget b)

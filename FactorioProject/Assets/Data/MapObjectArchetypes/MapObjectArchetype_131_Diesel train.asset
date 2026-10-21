@@ -1,0 +1,419 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: a4d286e989be41fe853b78a59ca3a4e8, type: 3}
+  m_Name: MapObjectArchetype_131_Diesel train
+  m_EditorClassIdentifier: Assembly-CSharp::ProjectF.MapObjects.MapObjectArchetype
+  schemaVersion: 2
+  itemDefinition: {fileID: 11400000, guid: 72f34e5c92fc837489d0795602df4b54, type: 2}
+  sourcePrefab: {fileID: 9167927084954758081, guid: 5f5ef2271a458914f832133627ec7e62, type: 3}
+  itemId: 132
+  itemName: Diesel train
+  sourcePrefabGuid: 5f5ef2271a458914f832133627ec7e62
+  sourceContentHash:
+    serializedVersion: 2
+    Hash: 0a61028957591b82f0713d57d6e3bbf3
+  sourceRuntimeType: DieselTrain, Assembly-CSharp, Version=0.0.0.0, Culture=neutral,
+    PublicKeyToken=null
+  mapStatus:
+    mapSizeX: 1
+    mapSizeY: 2
+    centerCellX: 0
+    centerCellY: 0
+  focusMode: 1
+  defaultRootScale: {x: 1, y: 1, z: 1}
+  defaultRootRotation: {x: 0, y: 0, z: 0, w: 1}
+  localRenderBounds:
+    m_Center: {x: 0, y: 0.48033687, z: 0.43268722}
+    m_Extent: {x: 0.43995303, y: 0.46453643, z: 0.9564886}
+  hasRenderBounds: 1
+  featureFlags: 2120
+  nodes:
+  - hierarchyPath: 0:Diesel Train
+    animationPath: 
+    parentIndex: -1
+    localPosition: {x: 0, y: 0, z: 0}
+    localRotation: {x: 0, y: 0, z: 0, w: 1}
+    localScale: {x: 1, y: 1, z: 1}
+    defaultLocalToRoot:
+      e00: 1
+      e01: 0
+      e02: 0
+      e03: 0
+      e10: 0
+      e11: 1
+      e12: 0
+      e13: 0
+      e20: 0
+      e21: 0
+      e22: 1
+      e23: 0
+      e30: 0
+      e31: 0
+      e32: 0
+      e33: 1
+    activeByDefault: 1
+    hasAnimatedTransform: 0
+  - hierarchyPath: 0:Diesel Train/0:Body
+    animationPath: Body
+    parentIndex: 0
+    localPosition: {x: 0, y: 0, z: 0.512}
+    localRotation: {x: 0, y: 0, z: 0, w: 1}
+    localScale: {x: 1, y: 1, z: 1}
+    defaultLocalToRoot:
+      e00: 1
+      e01: 0
+      e02: 0
+      e03: 0
+      e10: 0
+      e11: 1
+      e12: 0
+      e13: 0
+      e20: 0
+      e21: 0
+      e22: 1
+      e23: 0.512
+      e30: 0
+      e31: 0
+      e32: 0
+      e33: 1
+    activeByDefault: 1
+    hasAnimatedTransform: 0
+  - hierarchyPath: 0:Diesel Train/1:PlayerPoint
+    animationPath: PlayerPoint
+    parentIndex: 0
+    localPosition: {x: 0, y: 0.5, z: 0.5}
+    localRotation: {x: 0, y: 0, z: 0, w: 1}
+    localScale: {x: 1, y: 1, z: 1}
+    defaultLocalToRoot:
+      e00: 1
+      e01: 0
+      e02: 0
+      e03: 0
+      e10: 0
+      e11: 1
+      e12: 0
+      e13: 0.5
+      e20: 0
+      e21: 0
+      e22: 1
+      e23: 0.5
+      e30: 0
+      e31: 0
+      e32: 0
+      e33: 1
+    activeByDefault: 1
+    hasAnimatedTransform: 0
+  - hierarchyPath: 0:Diesel Train/2:Coupler
+    animationPath: Coupler
+    parentIndex: 0
+    localPosition: {x: 0, y: 0.264, z: 0.048}
+    localRotation: {x: -0, y: -0, z: -0, w: 1}
+    localScale: {x: 1, y: 1, z: 1}
+    defaultLocalToRoot:
+      e00: 1
+      e01: 0
+      e02: 0
+      e03: 0
+      e10: 0
+      e11: 1
+      e12: 0
+      e13: 0.264
+      e20: 0
+      e21: 0
+      e22: 1
+      e23: 0.048
+      e30: 0
+      e31: 0
+      e32: 0
+      e33: 1
+    activeByDefault: 1
+    hasAnimatedTransform: 0
+  - hierarchyPath: 0:Diesel Train/3:Smoke_Black
+    animationPath: Smoke_Black
+    parentIndex: 0
+    localPosition: {x: 0, y: 0.842, z: 0.797}
+    localRotation: {x: -0, y: -0, z: -0, w: 1}
+    localScale: {x: 1, y: 1, z: 1}
+    defaultLocalToRoot:
+      e00: 1
+      e01: 0
+      e02: 0
+      e03: 0
+      e10: 0
+      e11: 1
+      e12: 0
+      e13: 0.842
+      e20: 0
+      e21: 0
+      e22: 1
+      e23: 0.797
+      e30: 0
+      e31: 0
+      e32: 0
+      e33: 1
+    activeByDefault: 1
+    hasAnimatedTransform: 0
+  - hierarchyPath: 0:Diesel Train/3:Smoke_Black/0:Smoke
+    animationPath: Smoke_Black/Smoke
+    parentIndex: 4
+    localPosition: {x: 0, y: 0, z: 0}
+    localRotation: {x: -0.7071068, y: -0, z: -0, w: 0.7071068}
+    localScale: {x: 1, y: 1, z: 1}
+    defaultLocalToRoot:
+      e00: 1
+      e01: 0
+      e02: 0
+      e03: 0
+      e10: 0
+      e11: -0.00000011920929
+      e12: 1.0000001
+      e13: 0.842
+      e20: 0
+      e21: -1.0000001
+      e22: -0.00000011920929
+      e23: 0.797
+      e30: 0
+      e31: 0
+      e32: 0
+      e33: 1
+    activeByDefault: 1
+    hasAnimatedTransform: 0
+  - hierarchyPath: 0:Diesel Train/4:Wheels
+    animationPath: Wheels
+    parentIndex: 0
+    localPosition: {x: 0, y: 0.16, z: -0.14899999}
+    localRotation: {x: -0, y: -0, z: -0, w: 1}
+    localScale: {x: 1, y: 1, z: 1}
+    defaultLocalToRoot:
+      e00: 1
+      e01: 0
+      e02: 0
+      e03: 0
+      e10: 0
+      e11: 1
+      e12: 0
+      e13: 0.16
+      e20: 0
+      e21: 0
+      e22: 1
+      e23: -0.14899999
+      e30: 0
+      e31: 0
+      e32: 0
+      e33: 1
+    activeByDefault: 1
+    hasAnimatedTransform: 0
+  - hierarchyPath: 0:Diesel Train/4:Wheels/0:Wheel
+    animationPath: Wheels/Wheel
+    parentIndex: 6
+    localPosition: {x: 0, y: 0, z: 0.038}
+    localRotation: {x: -0, y: -0, z: -0, w: 1}
+    localScale: {x: 1, y: 1, z: 1}
+    defaultLocalToRoot:
+      e00: 1
+      e01: 0
+      e02: 0
+      e03: 0
+      e10: 0
+      e11: 1
+      e12: 0
+      e13: 0.16
+      e20: 0
+      e21: 0
+      e22: 1
+      e23: -0.11099999
+      e30: 0
+      e31: 0
+      e32: 0
+      e33: 1
+    activeByDefault: 1
+    hasAnimatedTransform: 0
+  - hierarchyPath: 0:Diesel Train/4:Wheels/1:Wheel (1)
+    animationPath: Wheels/Wheel (1)
+    parentIndex: 6
+    localPosition: {x: 0, y: 0, z: 0.327}
+    localRotation: {x: -0, y: -0, z: -0, w: 1}
+    localScale: {x: 1, y: 1, z: 1}
+    defaultLocalToRoot:
+      e00: 1
+      e01: 0
+      e02: 0
+      e03: 0
+      e10: 0
+      e11: 1
+      e12: 0
+      e13: 0.16
+      e20: 0
+      e21: 0
+      e22: 1
+      e23: 0.178
+      e30: 0
+      e31: 0
+      e32: 0
+      e33: 1
+    activeByDefault: 1
+    hasAnimatedTransform: 0
+  - hierarchyPath: 0:Diesel Train/4:Wheels/2:Wheel (2)
+    animationPath: Wheels/Wheel (2)
+    parentIndex: 6
+    localPosition: {x: 0, y: 0, z: 0.921}
+    localRotation: {x: -0, y: -0, z: -0, w: 1}
+    localScale: {x: 1, y: 1, z: 1}
+    defaultLocalToRoot:
+      e00: 1
+      e01: 0
+      e02: 0
+      e03: 0
+      e10: 0
+      e11: 1
+      e12: 0
+      e13: 0.16
+      e20: 0
+      e21: 0
+      e22: 1
+      e23: 0.772
+      e30: 0
+      e31: 0
+      e32: 0
+      e33: 1
+    activeByDefault: 1
+    hasAnimatedTransform: 0
+  - hierarchyPath: 0:Diesel Train/4:Wheels/3:Wheel (3)
+    animationPath: Wheels/Wheel (3)
+    parentIndex: 6
+    localPosition: {x: 0, y: 0, z: 1.205}
+    localRotation: {x: -0, y: -0, z: -0, w: 1}
+    localScale: {x: 1, y: 1, z: 1}
+    defaultLocalToRoot:
+      e00: 1
+      e01: 0
+      e02: 0
+      e03: 0
+      e10: 0
+      e11: 1
+      e12: 0
+      e13: 0.16
+      e20: 0
+      e21: 0
+      e22: 1
+      e23: 1.056
+      e30: 0
+      e31: 0
+      e32: 0
+      e33: 1
+    activeByDefault: 1
+    hasAnimatedTransform: 0
+  - hierarchyPath: 0:Diesel Train/5:Coupler
+    animationPath: Coupler
+    parentIndex: 0
+    localPosition: {x: 0, y: 0.256, z: -0.292}
+    localRotation: {x: 0, y: 1, z: 0, w: 0}
+    localScale: {x: 1, y: 1, z: 1}
+    defaultLocalToRoot:
+      e00: -1
+      e01: 0
+      e02: 0
+      e03: 0
+      e10: 0
+      e11: 1
+      e12: 0
+      e13: 0.256
+      e20: 0
+      e21: 0
+      e22: -1
+      e23: -0.292
+      e30: 0
+      e31: 0
+      e32: 0
+      e33: 1
+    activeByDefault: 1
+    hasAnimatedTransform: 0
+  renderParts:
+  - kind: 0
+    nodeIndex: 1
+    mesh: {fileID: 5614557369568650731, guid: 8f536be6965c39e4da5422788f9eac8c, type: 3}
+    material: {fileID: 2100000, guid: 571b862415d2b024e868b706fd7bd6f2, type: 2}
+    subMeshIndex: 0
+    localBounds:
+      m_Center: {x: -0.000000014901161, y: 0.5174367, z: 0}
+      m_Extent: {x: 0.43995303, y: 0.4274367, z: 0.87717587}
+    layer: 0
+    renderingLayerMask: 1
+    shadowCastingMode: 1
+    receiveShadows: 1
+    enabledByDefault: 1
+  - kind: 0
+    nodeIndex: 7
+    mesh: {fileID: 4300000, guid: c3774876f501b4f4c96c941f58e48f00, type: 2}
+    material: {fileID: 2100000, guid: 2077e6b8af2db6a438786f2f4ff8dfa0, type: 2}
+    subMeshIndex: 0
+    localBounds:
+      m_Center: {x: 0, y: 0.000031098723, z: 0.010907792}
+      m_Extent: {x: 0.37774882, y: 0.14423063, z: 0.14316478}
+    layer: 0
+    renderingLayerMask: 1
+    shadowCastingMode: 1
+    receiveShadows: 1
+    enabledByDefault: 1
+  - kind: 0
+    nodeIndex: 8
+    mesh: {fileID: 4300000, guid: c3774876f501b4f4c96c941f58e48f00, type: 2}
+    material: {fileID: 2100000, guid: 2077e6b8af2db6a438786f2f4ff8dfa0, type: 2}
+    subMeshIndex: 0
+    localBounds:
+      m_Center: {x: 0, y: 0.000031098723, z: 0.010907792}
+      m_Extent: {x: 0.37774882, y: 0.14423063, z: 0.14316478}
+    layer: 0
+    renderingLayerMask: 1
+    shadowCastingMode: 1
+    receiveShadows: 1
+    enabledByDefault: 1
+  - kind: 0
+    nodeIndex: 9
+    mesh: {fileID: 4300000, guid: c3774876f501b4f4c96c941f58e48f00, type: 2}
+    material: {fileID: 2100000, guid: 2077e6b8af2db6a438786f2f4ff8dfa0, type: 2}
+    subMeshIndex: 0
+    localBounds:
+      m_Center: {x: 0, y: 0.000031098723, z: 0.010907792}
+      m_Extent: {x: 0.37774882, y: 0.14423063, z: 0.14316478}
+    layer: 0
+    renderingLayerMask: 1
+    shadowCastingMode: 1
+    receiveShadows: 1
+    enabledByDefault: 1
+  - kind: 0
+    nodeIndex: 10
+    mesh: {fileID: 4300000, guid: c3774876f501b4f4c96c941f58e48f00, type: 2}
+    material: {fileID: 2100000, guid: 2077e6b8af2db6a438786f2f4ff8dfa0, type: 2}
+    subMeshIndex: 0
+    localBounds:
+      m_Center: {x: 0, y: 0.000031098723, z: 0.010907792}
+      m_Extent: {x: 0.37774882, y: 0.14423063, z: 0.14316478}
+    layer: 0
+    renderingLayerMask: 1
+    shadowCastingMode: 1
+    receiveShadows: 1
+    enabledByDefault: 1
+  - kind: 0
+    nodeIndex: 11
+    mesh: {fileID: 4300000, guid: c21b9c207c7bcbd43bb029d313c7bd5c, type: 2}
+    material: {fileID: 2100000, guid: 536c29ff258e4a344a243ff61667dfe0, type: 2}
+    subMeshIndex: 0
+    localBounds:
+      m_Center: {x: -0.000091694295, y: -0.000000013038516, z: 0.122231066}
+      m_Extent: {x: 0.09618554, y: 0.061875, z: 0.109570324}
+    layer: 0
+    renderingLayerMask: 1
+    shadowCastingMode: 1
+    receiveShadows: 1
+    enabledByDefault: 1
+  animationClips: []

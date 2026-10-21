@@ -114,9 +114,9 @@ static class BlueprintChecks
 
         foreach (Vector2 engineFacing in new[] { Vector2.right, Vector2.up, Vector2.left, Vector2.down })
         {
-            var engine = new SteamTrain();
+            var engine = new Locomotive();
             Vector2 tailPoint = -engineFacing * Train.ConnectionCenterDistance;
-            foreach (Train approaching in new Train[] { new Train(), new SteamTrain() })
+            foreach (Train approaching in new Train[] { new Train(), new Locomotive() })
             for (int turn = 0; turn < 8; turn++)
             {
                 float angle = turn * MathF.PI / 4f;
@@ -129,7 +129,7 @@ static class BlueprintChecks
 
             Check(!Train.CanConnectByPose(engine, Vector2.zero, engineFacing, new Train(), -tailPoint, engineFacing),
                 "A freight car at the locomotive nose must not couple");
-            Check(!Train.CanConnectByPose(engine, Vector2.zero, engineFacing, new SteamTrain(), -tailPoint, -engineFacing),
+            Check(!Train.CanConnectByPose(engine, Vector2.zero, engineFacing, new Locomotive(), -tailPoint, -engineFacing),
                 "Two locomotive noses must not couple");
             Check(!Train.CanConnectByPose(engine, Vector2.zero, engineFacing, new Train(), tailPoint * 3, engineFacing),
                 "A distant car behind the locomotive must remain outside coupling range");
@@ -145,9 +145,9 @@ static class BlueprintChecks
             {
                 Train.ActiveRuntimeTrains.Clear();
                 var engineRail = new Railload(Vector2.zero, engineFacing * 10);
-                var leadEngine = new SteamTrain { RuntimePlacementSequence = installed ? 1 : 0 };
+                var leadEngine = new Locomotive { RuntimePlacementSequence = installed ? 1 : 0 };
                 leadEngine.TryApplyRailPose(engineRail, 4, engineFacing * 4, engineFacing);
-                var nextEngine = new SteamTrain();
+                var nextEngine = new Locomotive();
                 nextEngine.TryApplyRailPose(engineRail, 2, engineFacing * 2, engineFacing);
                 var engineController = new InstallationPlacementController(engineRail);
                 if (installed) Train.ActiveRuntimeTrains.Add(leadEngine);
@@ -167,7 +167,7 @@ static class BlueprintChecks
             Train.ActiveRuntimeTrains.Clear();
             var rail = new Railload(Vector2.zero, direction * 10f);
             var endCar = Car(rail, 3f, installed);
-            var endEngine = new SteamTrain();
+            var endEngine = new Locomotive();
             rail.TrySampleRenderedPath(6f, out Vector2 enginePoint, out _);
             endEngine.TryApplyRailPose(rail, 6f, enginePoint, -direction);
             endEngine.Rail = null;
@@ -215,6 +215,7 @@ public readonly struct PreviewRotation
     PreviewRotation(Vector3 forward) { this.forward = forward.normalized; }
     public static PreviewRotation identity => new PreviewRotation(Vector3.forward);
     public static PreviewRotation LookRotation(Vector3 forward, Vector3 up) => new PreviewRotation(forward);
+    public Vector3 eulerAngles => new Vector3(0, MathF.Atan2(forward.x, forward.z) * Mathf.Rad2Deg, 0);
     public static implicit operator Quaternion(PreviewRotation rotation)
     {
         float halfYaw = MathF.Atan2(rotation.forward.x, rotation.forward.z) * .5f;
@@ -262,10 +263,13 @@ public partial class InstallationPlacementController
         boxes.Clear();
         Vector3 right = rotation * Vector3.right;
         Vector3 forward = rotation * Vector3.forward;
+        Vector3 center = source.BodyCollider != null ? position + rotation * source.BodyCollider.center : position;
         boxes.Add(new TrainCollisionBox2D
         {
-            Center = new Vector2(position.x, position.z), AxisRight = new Vector2(right.x, right.z),
-            AxisForward = new Vector2(forward.x, forward.z), HalfExtents = source.CollisionHalfExtents
+            Center = new Vector2(center.x, center.z), AxisRight = new Vector2(right.x, right.z),
+            AxisForward = new Vector2(forward.x, forward.z),
+            HalfExtents = source.BodyCollider != null
+                ? new Vector2(source.BodyCollider.size.x, source.BodyCollider.size.z) * .5f : source.CollisionHalfExtents
         });
     }
     public bool Snap(Train preview, Railload rail, float distance, out Vector2 point)

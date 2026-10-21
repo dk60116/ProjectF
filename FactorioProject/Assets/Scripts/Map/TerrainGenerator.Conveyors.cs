@@ -4374,7 +4374,7 @@ public partial class TerrainGenerator : MonoBehaviour
         ConveyorWorld.AppendProfilerCounters();
         AreaMarkerRenderer.AppendProfilerCounters();
         FacilitySimulationWorld.AppendProfilerCounters();
-        SteamTrain.AppendProfilerCounters();
+        Locomotive.AppendProfilerCounters();
         ProjectF.Rendering.WorldVisualUpdateManager.AppendProfilerCounters();
         ProjectF.Rendering.WorldColliderCullingManager.AppendProfilerCounters();
         ProjectF.MapObjects.StaticMapObjectBatchRenderer staticRenderer =

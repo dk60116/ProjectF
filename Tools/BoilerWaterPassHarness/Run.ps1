@@ -73,8 +73,8 @@ $generated += "} public partial class SteamGenerator { private const float Fluid
 $generated += (Read-Member ($base + 'SteamGenerator.cs') 'internal static bool IsDirectedSteamPortConnection(') + "`n"
 $generated += (Read-Member ($base + 'SteamGenerator.cs') 'internal static bool TryResolveSteamPassPipeConnectionDirection(') + "`n"
 $generated += (Read-Member ($base + 'SteamGenerator.cs') 'internal static float ResolveGenerationOutputScale(') + "`n}"
-$generated += " public partial class SteamTrain {`n"
-$generated += (Read-Member ($base + 'Vehicle/SteamTrain.cs') 'private bool TryGetActivePipeAtCoordinate(') + "`n}"
+$generated += " public partial class Locomotive {`n"
+$generated += (Read-Member ($base + 'Vehicle/Locomotive.cs') 'private bool TryGetActivePipeAtCoordinate(') + "`n}"
 $probeDir = Join-Path $env:TEMP ('ProjectF-BoilerWaterPass-' + [Guid]::NewGuid().ToString('N'))
 New-Item -ItemType Directory -Path $probeDir | Out-Null
 Set-Content -LiteralPath (Join-Path $probeDir 'Production.cs') -Value $generated

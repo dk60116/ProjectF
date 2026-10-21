@@ -15,12 +15,14 @@ namespace ProjectF.Railway
         public ulong ConnectionGraphRevision { get; private set; }
         public float MaxConnectionSnapDistance { get; private set; }
         public float MaxConnectionLateralDistance { get; private set; }
+        public float MaxConnectionReach { get; private set; }
 
-        public void IncludeConnectionRange(float snapDistance, float lateralDistance)
+        public void IncludeConnectionRange(float snapDistance, float lateralDistance, float longitudinalReach = 0.5f)
         {
             // Conservative maxima stay valid across pooling without rescanning the fleet.
             MaxConnectionSnapDistance = Mathf.Max(MaxConnectionSnapDistance, snapDistance);
             MaxConnectionLateralDistance = Mathf.Max(MaxConnectionLateralDistance, lateralDistance);
+            MaxConnectionReach = Mathf.Max(MaxConnectionReach, longitudinalReach);
         }
 
         public TrainInstance Create()
@@ -79,7 +81,11 @@ namespace ProjectF.Railway
             if (!Contains(first) || !Contains(second) || ReferenceEquals(first, second)) return false;
             bool changed = AddConnection(first, second, firstAtFront);
             changed |= AddConnection(second, first, secondAtFront);
-            if (changed) IncrementGraphRevision();
+            if (changed)
+            {
+                IncrementGraphRevision();
+                RefreshCouplerConnection(first, second);
+            }
             return changed;
         }
 
@@ -97,6 +103,7 @@ namespace ProjectF.Railway
             if (index < 0 || first.Connections[index].AtFront == atFront) return;
             first.Connections[index] = new TrainConnection(second, atFront);
             IncrementGraphRevision();
+            RefreshCouplerConnection(first, second);
         }
 
         public void Disconnect(TrainInstance first, TrainInstance second)
@@ -104,7 +111,11 @@ namespace ProjectF.Railway
             if (!Contains(first) || !Contains(second)) return;
             bool changed = RemoveConnection(first, second);
             changed |= RemoveConnection(second, first);
-            if (changed) IncrementGraphRevision();
+            if (changed)
+            {
+                IncrementGraphRevision();
+                RefreshCouplerConnection(first, second);
+            }
         }
 
         private static bool RemoveConnection(TrainInstance first, TrainInstance second)
@@ -149,6 +160,7 @@ namespace ProjectF.Railway
             byCoordinate.Clear();
             emptyBuckets.Clear();
             MaxConnectionSnapDistance = MaxConnectionLateralDistance = 0;
+            MaxConnectionReach = 0;
             ClearViews();
             IncrementGraphRevision();
         }
@@ -185,5 +197,6 @@ namespace ProjectF.Railway
 
         partial void RemoveView(TrainInstance instance);
         partial void ClearViews();
+        partial void RefreshCouplerConnection(TrainInstance first, TrainInstance second);
     }
 }

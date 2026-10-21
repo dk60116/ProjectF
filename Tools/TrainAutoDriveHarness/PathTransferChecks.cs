@@ -107,7 +107,7 @@ public partial class RailHandcar
     }
 }
 
-public partial class SteamTrain
+public partial class Locomotive
 {
     static void RunPathTransferChecks()
     {

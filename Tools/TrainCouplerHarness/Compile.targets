@@ -1,0 +1,11 @@
+<Project xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <Import Project="../LocomotiveHarness/Compile.targets" />
+  <Target Name="IncludeTrainCouplerSources" BeforeTargets="CoreCompile">
+    <ItemGroup Condition="'$(MSBuildProjectName)' == 'Assembly-CSharp'">
+      <Compile Remove="$(MSBuildProjectDirectory)/Assets/Scripts/Simulation/Railway/TrainCoupler*.cs" />
+      <Compile Include="$(MSBuildProjectDirectory)/Assets/Scripts/Simulation/Railway/TrainCoupler*.cs" />
+      <Compile Remove="$(MSBuildProjectDirectory)/Assets/Scripts/Simulation/Railway/TrainWorld.Couplers.cs" />
+      <Compile Include="$(MSBuildProjectDirectory)/Assets/Scripts/Simulation/Railway/TrainWorld.Couplers.cs" />
+    </ItemGroup>
+  </Target>
+</Project>

@@ -991,6 +991,14 @@ public class RailHandcar : Train
         bool shouldSnapToDock = snapToDock || remainingDistance <= ResolveDockCompleteDistance();
         if (shouldSnapToDock && ConnectedTrains.Count <= 0)
         {
+            if (remainingDistance > 0.0001f
+                && ResolveRailEndLimitedMoveDistance(
+                    this, currentSample, currentFacing, travelDirection, remainingDistance, false)
+                   < remainingDistance - 0.0001f)
+            {
+                return false;
+            }
+
             ApplyRailPose(dockSample, currentFacing, deltaTime, true);
             return true;
         }
@@ -2527,19 +2535,26 @@ public class RailHandcar : Train
         }
 
         ConnectedTrainRailMove routeLeaderMove = connectedTrainRailMoveScratch[0];
+        float permittedDistance = ResolveRailEndLimitedMoveDistance(
+            routeLeaderMove.Train,
+            routeLeaderMove.StartSample,
+            routeLeaderMove.StartFacingTangent,
+            routeLeaderTravelDirection,
+            requestedDistance,
+            hasInput);
         float leaderStartPathDistance = consistPathEndDistance;
         leaderPathFrameScratch.Clear();
-        bool advancedLeader = TryAdvanceAlongRailNetwork(
+        TryAdvanceAlongRailNetwork(
                 routeLeaderMove.StartSample,
                 routeLeaderTravelDirection,
-                requestedDistance,
+                permittedDistance,
                 out RailSample leaderTargetSample,
                 out float leaderTraveledDistance,
                 leaderPathFrameScratch,
                 leaderStartPathDistance,
                 hasInput,
                 true);
-        if (!advancedLeader && leaderTraveledDistance <= 0.0001f)
+        if (leaderTraveledDistance <= 0.0001f)
         {
             RecordRailMoveFailure("AdvanceRouteLeader");
             ClearConnectedTrainMovementScratch();
@@ -2658,6 +2673,46 @@ public class RailHandcar : Train
         TrimConsistPathTape(leaderEndPathDistance - maxFollowOffset - ResolveConsistPathTrimPadding());
         ClearConnectedTrainMovementScratch();
         return true;
+    }
+
+    private float ResolveRailEndLimitedMoveDistance(
+        Train train,
+        RailSample startSample,
+        Vector2 facing,
+        Vector2 travelDirection,
+        float requestedDistance,
+        bool usePreferredConnectedRailTravelDirection)
+    {
+        float clearance = train.ResolveRailEndClearance(Vector2.Dot(facing, travelDirection) >= 0f);
+        float probeDistance = requestedDistance + clearance;
+        // Interior movement needs no extra network search. At a junction, probe
+        // the same route as movement rather than treating each segment as an end.
+        if (!IsRailConnectionBridgeSample(startSample)
+            && startSample.Rail != null
+            && startSample.Rail.TryGetRenderedPathLength(out float length))
+        {
+            float available = Vector2.Dot(ResolveRailPathTangent(startSample), travelDirection) >= 0f
+                ? length - startSample.DistanceAlongPath
+                : startSample.DistanceAlongPath;
+            if (available >= probeDistance)
+            {
+                return requestedDistance;
+            }
+        }
+
+        if (TryAdvanceAlongRailNetwork(
+                startSample,
+                travelDirection,
+                probeDistance,
+                out _,
+                out float supportedDistance,
+                usePreferredConnectedRailTravelDirection: usePreferredConnectedRailTravelDirection,
+                allowRailConnectionBridgeInterpolation: true))
+        {
+            return requestedDistance;
+        }
+
+        return Mathf.Min(requestedDistance, Mathf.Max(0f, supportedDistance - clearance));
     }
 
     protected void TransferConsistPathTo(RailHandcar nextDriver)
@@ -3106,7 +3161,7 @@ public class RailHandcar : Train
                 TraveledDistance = 0f,
                 FollowOffset = 0f
             };
-            float desiredSpacing = Train.ConnectionCenterDistance;
+            float desiredSpacing = ResolveDesiredConsistPairSpacing(frontMove, candidateMove);
             if (!TryEstimateForwardRailGapDistance(
                     frontMove,
                     candidateMove,
@@ -3297,7 +3352,7 @@ public class RailHandcar : Train
             return false;
         }
 
-        float desiredSpacing = Train.ConnectionCenterDistance;
+        float desiredSpacing = ResolveDesiredConsistPairSpacing(frontMove, candidateMove);
         bool releaseAfterMove = false;
         bool hasRailGap = TryEstimateForwardRailGapDistance(
                 frontMove,
@@ -3363,7 +3418,7 @@ public class RailHandcar : Train
             return false;
         }
 
-        float desiredSpacing = Train.ConnectionCenterDistance;
+        float desiredSpacing = anchorMove.Train.ResolveMaximumConnectionReach() + candidateTrain.ResolveMaximumConnectionReach();
         float maxContactDistance = desiredSpacing + contactPadding;
         float maxLateralDistance = Mathf.Max(
             anchorMove.Train.ConnectionMaxLateralDistance,
@@ -3383,12 +3438,15 @@ public class RailHandcar : Train
                 anchorDirection,
                 maxSqrDistance,
                 out RailSample candidateSample,
-                out _))
+                out Vector2 candidateFacing))
         {
             return false;
         }
 
         Vector2 delta = candidateSample.Point - anchorMove.StartSample.Point;
+        desiredSpacing = Train.ResolveConnectionSpacing(anchorMove.Train, anchorMove.StartFacingTangent,
+            candidateTrain, candidateFacing, delta);
+        maxContactDistance = desiredSpacing + contactPadding;
         projection = Vector2.Dot(delta, anchorDirection);
         if (projection < -behindPadding || projection > maxContactDistance)
         {
@@ -3917,6 +3975,16 @@ public class RailHandcar : Train
         // Interior branch entries need the route direction to orient their tangent.
         // A reversing car's physical front points the other way and cannot supply it.
         Vector2 pathForward = ResolveConsistPathForward(targetPathDistance, railMove.TargetSample, travelDirection);
+        if (!IsRailConnectionBridgeSample(railMove.TargetSample))
+        {
+            // Longer gaps between car roots can straddle several rail segments.
+            // The tape defines direction; the car's own rail sample defines yaw.
+            Vector2 tangent = ResolveRailPathTangent(railMove.TargetSample);
+            if (tangent.sqrMagnitude > 0.0001f)
+            {
+                pathForward = Vector2.Dot(tangent, pathForward) < 0f ? -tangent : tangent;
+            }
+        }
         if (trainIndex > 0
             && TryResolveFacingFromConnectedTarget(
                 railMove,
@@ -4144,7 +4212,8 @@ public class RailHandcar : Train
 
         if (first.Train != null && second.Train != null)
         {
-            return Train.ConnectionCenterDistance;
+            return Train.ResolveConnectionSpacing(first.Train, first.StartFacingTangent,
+                second.Train, second.StartFacingTangent, second.StartSample.Point - first.StartSample.Point);
         }
 
         return 0.05f;
@@ -5509,7 +5578,8 @@ public class RailHandcar : Train
     {
         if (first.Train != null && second.Train != null)
         {
-            return Train.ConnectionCenterDistance;
+            return Train.ResolveConnectionSpacing(first.Train, first.StartFacingTangent,
+                second.Train, second.StartFacingTangent, second.StartSample.Point - first.StartSample.Point);
         }
 
         return Mathf.Max(0.05f, EstimateConsistSampleDistance(first, second));

@@ -22,6 +22,11 @@ $generated = "using System.Collections.Generic;`nusing ProjectF.Railway;`nusing 
 foreach ($signature in @('public bool ConnectTo(', 'public bool CanConnectTo(', 'public void ClearTrainConnections(', 'private static bool TryGetConnectionPose(', 'internal void SetConnectionEnd(', 'internal bool TryGetConnectionFacingSign(', 'internal static Vector2 ResolveRailConnectionForward(', 'private static Vector2 ResolveRailConnectionEndpointForward(', 'public void DisconnectFrom(')) {
     $generated += Read-Member $train $signature
 }
+$generated += Read-Member $train 'internal float ResolveRailEndClearance('
+$generated += [regex]::Match($train, 'private const float MinConnectionDistance = [^;]+;').Value
+foreach ($signature in @('internal float ResolveConnectionReach(', 'internal float ResolveMaximumConnectionReach(', 'internal static float ResolveConnectionSpacing(')) {
+    $generated += Read-Member $train $signature
+}
 foreach ($signature in @('public static bool CanConnectByPose(', 'internal static bool CanConnectByPose(', 'private static bool IsConnectionOffsetInRange(', 'internal static float ResolveConnectionMaxCenterDistance(', 'private static float Cross(')) {
     $generated += Read-Member $train $signature
 }
@@ -80,7 +85,8 @@ $generated += "TestManualFacing = currentFacing; TestManualInputAxis = inputAxis
 foreach ($signature in @('private bool TryGetStoredRailSample(', 'private bool TryResolveCurrentRailSample(',
     'private bool TryFindBestRailSample(', 'private static bool IsRailConnectionBridgeSample(',
     'private static void RestoreStoredRailConnectionTransition(', 'private bool TryResolveRailSampleForTrain(',
-    'private bool TryAdvanceAlongRailNetwork(', 'private static Vector2 ResolveRailPathTangent(')) {
+    'private bool TryAdvanceAlongRailNetwork(', 'private static Vector2 ResolveRailPathTangent(',
+    'private float ResolveRailEndLimitedMoveDistance(')) {
     $generated += Read-Member $handcar $signature
 }
 foreach ($signature in @('private bool TryAdvanceExistingRailConnectionBridge(', 'private bool TryResolveRailConnectionBridge(',
@@ -93,7 +99,7 @@ foreach ($signature in @('private bool TryAdvanceExistingRailConnectionBridge(',
 $generated += "`n}`n"
 $placement = [IO.File]::ReadAllText((Join-Path $repo 'FactorioProject/Assets/Scripts/Object/MapObj/InstallationObject/InstallationPlacementController.cs'))
 $generated += "public partial class InstallationPlacementController {`n"
-foreach ($signature in @('private struct TrainPlacementRailSample', 'private struct TrainCollisionBox2D', 'private bool TrySnapTrainBlueprintToConnection(', 'private void TrySnapTrainBlueprintToNeighbor(', 'private static bool TryResolveTrainConnectionPlacementFacing(', 'private static bool TrySnapTrainPlacementRailSampleToStraightCellCenter(', 'private bool CanPlaceTrainAtPose(', 'private static bool HasRequiredTrainPlacementClearance(', 'private bool TrainCollisionBoxesOverlapWith(', 'private static bool TrainCollisionBoxesOverlap(', 'private static bool TrainCollisionBoxesOverlapOnAxis(', 'private bool TryRotateSelectedSteamTrain(', 'private void ConnectTrainToNearbyTrains(', 'private void CompleteTrainPlacement(')) {
+foreach ($signature in @('private struct TrainPlacementRailSample', 'private struct TrainCollisionBox2D', 'private bool TrySnapTrainBlueprintToConnection(', 'private void TrySnapTrainBlueprintToNeighbor(', 'private static bool TryResolveTrainConnectionPlacementFacing(', 'private static bool TrySnapTrainPlacementRailSampleToStraightCellCenter(', 'private bool CanPlaceTrainAtPose(', 'private bool CanPlaceTrainFootprintAtPose(', 'private static bool HasRequiredTrainPlacementClearance(', 'private bool TrainCollisionBoxesOverlapWith(', 'private static bool TrainCollisionBoxesOverlap(', 'private static bool TrainCollisionBoxesOverlapOnAxis(', 'private bool TryRotateSelectedSteamTrain(', 'private void ConnectTrainToNearbyTrains(', 'private void CompleteTrainPlacement(')) {
     $generated += Read-Member $placement $signature
 }
 # Exercise the actual edit-mode dispatch, stopping before unrelated item placement.
@@ -113,6 +119,21 @@ Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'RailAcquisitionChecks.cs') -Des
 Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'BlueprintChecks.cs') -Destination $probe
 Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'EditChecks.cs') -Destination $probe
 Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'WorldChecks.cs') -Destination $probe
+Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'EndStopChecks.cs') -Destination $probe
+Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'LongCarChecks.cs') -Destination $probe
+$preparedMoves = Read-Member $handcar 'private bool TryApplyPreparedConnectedTrainMoves('
+if ($preparedMoves -notmatch 'ResolveRailEndLimitedMoveDistance\([\s\S]+?TryAdvanceAlongRailNetwork\([\s\S]+?permittedDistance,') {
+    throw 'Prepared consist movement must apply the body clearance before advancing its route leader'
+}
+$prefab = [IO.File]::ReadAllText((Join-Path $repo 'FactorioProject/Assets/MapObject/Train/Diesel train/Diesel Train.prefab'))
+$body = [regex]::Match($prefab, 'BoxCollider:[\s\S]*?m_Size: \{x: [^,]+, y: [^,]+, z: ([^}]+)\}[\s\S]*?m_Center: \{x: [^,]+, y: [^,]+, z: ([^}]+)\}')
+if (!$body.Success -or $prefab -notmatch 'mapSizeX: 1\s+mapSizeY: 2') { throw 'Missing diesel two-cell body contract' }
+[IO.File]::WriteAllText((Join-Path $probe 'DieselBody.cs'), ('static class DieselBody { public const float Length = ' + $body.Groups[1].Value.Trim() + 'f; public const float Center = ' + $body.Groups[2].Value.Trim() + 'f; }'))
+$longPrefab = [IO.File]::ReadAllText((Join-Path $repo 'FactorioProject/Assets/MapObject/Train/Long Flatcar/Long Flatcar.prefab'))
+if ($longPrefab -notmatch 'mapSizeX: 1\s+mapSizeY: 2\s+centerCellX: 0\s+centerCellY: 0' -or
+    $longPrefab -notmatch 'm_Size: \{x: 0.6, y: 1, z: 1.9\}\s+m_Center: \{x: 0, y: 0.5, z: 0.5\}') {
+    throw 'Long Flatcar footprint and body collider must cover the root cell and its forward cell'
+}
 foreach ($file in @('TrainInstance.cs', 'TrainWorld.cs', 'TrainWorld.Native.cs')) {
     $source = [IO.File]::ReadAllText((Join-Path $repo "FactorioProject/Assets/Scripts/Simulation/Railway/$file"))
     [IO.File]::WriteAllText((Join-Path $probe $file), $source.Replace('IRailTarget', 'Railload'))

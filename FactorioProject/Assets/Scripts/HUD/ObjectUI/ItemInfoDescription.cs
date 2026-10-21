@@ -670,9 +670,9 @@ public class ItemInfoDescription : MonoBehaviour
     {
         BeginObjectDisplay(underlyingResource);
         liveGaugeRailHandcar = railHandcar;
-        if (railHandcar is SteamTrain steamTrain)
+        if (railHandcar is Locomotive steamTrain)
         {
-            RefreshSteamTrainInfo(steamTrain);
+            RefreshLocomotiveInfo(steamTrain);
         }
         else
         {
@@ -1382,9 +1382,9 @@ public class ItemInfoDescription : MonoBehaviour
 
         if (liveGaugeRailHandcar != null && liveGaugeRailHandcar.gameObject.activeInHierarchy)
         {
-            if (liveGaugeRailHandcar is SteamTrain steamTrain)
+            if (liveGaugeRailHandcar is Locomotive steamTrain)
             {
-                RefreshSteamTrainInfo(steamTrain);
+                RefreshLocomotiveInfo(steamTrain);
             }
             else
             {
@@ -1959,16 +1959,16 @@ public class ItemInfoDescription : MonoBehaviour
             true);
     }
 
-    private void RefreshSteamTrainInfo(SteamTrain steamTrain)
+    private void RefreshLocomotiveInfo(Locomotive steamTrain)
     {
-        steamTrain.GetObjectInfoStatus(out string statusText, out SteamTrain.InfoWarning warning);
+        steamTrain.GetObjectInfoStatus(out string statusText, out Locomotive.InfoWarning warning);
         SetDefaultText(defaultStatusLineIndex, statusText, true);
-        SetDefaultSign(defaultStatusLineIndex, warning != SteamTrain.InfoWarning.None,
-            warning == SteamTrain.InfoWarning.ResourceShortage ? StoppedSignColor : WarningSignColor);
-        SetSteamTrainBurnEnergyGauge(steamTrain);
-        SetSteamTrainWaterGauge(workGauge, workFill, workText, steamTrain);
+        SetDefaultSign(defaultStatusLineIndex, warning != Locomotive.InfoWarning.None,
+            warning == Locomotive.InfoWarning.ResourceShortage ? StoppedSignColor : WarningSignColor);
+        SetLocomotiveBurnEnergyGauge(steamTrain);
+        SetLocomotiveWaterGauge(workGauge, workFill, workText, steamTrain);
         SetRailHandcarSpeedGauge(defaultGauge, defaultFill, defaultGaugeText, steamTrain);
-        SetFluidStorageDefaultItemSlot(0, steamTrain);
+        if (steamTrain.UsesWaterSupply) SetFluidStorageDefaultItemSlot(0, steamTrain);
     }
 
     private void SetRailHandcarSpeedGauge(RailHandcar railHandcar)
@@ -2001,7 +2001,7 @@ public class ItemInfoDescription : MonoBehaviour
             $"{FormatMetersPerSecond(currentSpeed)} m/s / {FormatMetersPerSecond(maxSpeed)} m/s");
     }
 
-    private void SetSteamTrainBurnEnergyGauge(SteamTrain steamTrain)
+    private void SetLocomotiveBurnEnergyGauge(Locomotive steamTrain)
     {
         float storedEnergy = steamTrain != null ? steamTrain.ObjectInfoStoredBurnEnergy : 0f;
         float gaugeCapacity = steamTrain != null ? steamTrain.ObjectInfoBurnEnergyGaugeCapacity : 0f;
@@ -2020,11 +2020,11 @@ public class ItemInfoDescription : MonoBehaviour
                 : string.Empty);
     }
 
-    private void SetSteamTrainWaterGauge(
+    private void SetLocomotiveWaterGauge(
         GameObject root,
         Image fill,
         TextMeshProUGUI text,
-        SteamTrain steamTrain)
+        Locomotive steamTrain)
     {
         float storedLiters = steamTrain != null ? steamTrain.ObjectInfoStoredWaterLiters : 0f;
         float capacityLiters = steamTrain != null ? steamTrain.ObjectInfoWaterCapacityLiters : 0f;
@@ -2032,7 +2032,7 @@ public class ItemInfoDescription : MonoBehaviour
             root,
             fill,
             text,
-            true,
+            steamTrain != null && steamTrain.UsesWaterSupply,
             steamTrain != null ? steamTrain.ObjectInfoWaterGaugeFillAmount : 0f,
             ResolveFluidGaugeFillColor(steamTrain),
             storedLiters,
@@ -2260,7 +2260,7 @@ public class ItemInfoDescription : MonoBehaviour
         }
 
         int fluidItemId = ResolveFluidGaugeItemId(installationObject);
-        if (fluidItemId < 0 && installationObject is SteamTrain steamTrain)
+        if (fluidItemId < 0 && installationObject is Locomotive steamTrain)
         {
             fluidItemId = steamTrain.ObjectInfoWaterItemId;
         }
@@ -2956,7 +2956,7 @@ public class ItemInfoDescription : MonoBehaviour
             return steamItemSet.id;
         }
 
-        if (installationObject is SteamTrain steamTrain)
+        if (installationObject is Locomotive steamTrain)
         {
             return steamTrain.ObjectInfoWaterItemId;
         }

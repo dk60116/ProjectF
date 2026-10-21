@@ -200,7 +200,7 @@ public class WaterPump : InputOutputModule
 {
     public static int ResolveWaterItemId(object _) => 1;
 }
-public class SteamTrain : InstallationObject
+public class Locomotive : InstallationObject
 {
     public bool CanAcceptWaterFromPipeDirection(Vector2Int direction, int waterItemId, bool requireStopped)
         => true;

@@ -674,16 +674,16 @@ public static class PipeFluidCompatibilityValidation
         MethodInfo mountedTankPipeDeploymentMethod = typeof(Fluidtank).GetMethod(
             "CanDeployMountedPipeForFluid",
             BindingFlags.Static | BindingFlags.NonPublic);
-        MethodInfo trainDockSearchMethod = typeof(SteamTrain).GetMethod(
+        MethodInfo trainDockSearchMethod = typeof(Locomotive).GetMethod(
             "TryFindWaterPipeDockSample",
             BindingFlags.Instance | BindingFlags.NonPublic);
-        MethodInfo trainLockedDockValidationMethod = typeof(SteamTrain).GetMethod(
+        MethodInfo trainLockedDockValidationMethod = typeof(Locomotive).GetMethod(
             "TryValidateLockedWaterPipeDock",
             BindingFlags.Instance | BindingFlags.NonPublic);
-        MethodInfo trainPipeDeploymentMethod = typeof(SteamTrain).GetMethod(
+        MethodInfo trainPipeDeploymentMethod = typeof(Locomotive).GetMethod(
             "CanDeployWaterPipe",
             BindingFlags.Instance | BindingFlags.NonPublic);
-        MethodInfo trainPumpPassValidationMethod = typeof(SteamTrain).GetMethod(
+        MethodInfo trainPumpPassValidationMethod = typeof(Locomotive).GetMethod(
             "HasPumpWaterPipeRailPass",
             BindingFlags.Instance | BindingFlags.NonPublic);
         Type runtimePumpPipePassType = typeof(InputOutputModule).GetNestedType(
@@ -752,40 +752,40 @@ public static class PipeFluidCompatibilityValidation
         MethodInfo attachedTankGetterMethod = typeof(FreightCar).GetMethod(
             "TryGetAttachedFluidTank",
             BindingFlags.Instance | BindingFlags.Public);
-        MethodInfo steamCustomIdleDockingMethod = typeof(SteamTrain).GetMethod(
+        MethodInfo steamCustomIdleDockingMethod = typeof(Locomotive).GetMethod(
             "TryApplyCustomIdleDocking",
             BindingFlags.Instance | BindingFlags.NonPublic | BindingFlags.DeclaredOnly);
-        MethodInfo steamConsistWaterDockingMethod = typeof(SteamTrain).GetMethod(
+        MethodInfo steamConsistWaterDockingMethod = typeof(Locomotive).GetMethod(
             "TryApplyConsistWaterPipeDocking",
             BindingFlags.Instance | BindingFlags.NonPublic);
-        MethodInfo steamCanAcceptFluidMethod = typeof(SteamTrain).GetMethod(
-            nameof(SteamTrain.CanAcceptFluidItem),
+        MethodInfo steamCanAcceptFluidMethod = typeof(Locomotive).GetMethod(
+            nameof(Locomotive.CanAcceptFluidItem),
             BindingFlags.Instance | BindingFlags.Public | BindingFlags.DeclaredOnly);
-        MethodInfo steamFillFilterMethod = typeof(SteamTrain).GetMethod(
+        MethodInfo steamFillFilterMethod = typeof(Locomotive).GetMethod(
             "ShouldFillFluidAtCurrentStop",
             BindingFlags.Instance | BindingFlags.NonPublic);
-        MethodInfo steamUnloadFilterMethod = typeof(SteamTrain).GetMethod(
+        MethodInfo steamUnloadFilterMethod = typeof(Locomotive).GetMethod(
             "ShouldUnloadFluidAtCurrentStop",
             BindingFlags.Instance | BindingFlags.NonPublic);
-        MethodInfo steamFilterOwnerMethod = typeof(SteamTrain).GetMethod(
+        MethodInfo steamFilterOwnerMethod = typeof(Locomotive).GetMethod(
             "ResolveTrainFilterSettingsOwnerForConsist",
             BindingFlags.Instance | BindingFlags.NonPublic);
-        MethodInfo steamDepartureFilterMethod = typeof(SteamTrain).GetMethod(
+        MethodInfo steamDepartureFilterMethod = typeof(Locomotive).GetMethod(
             "ResolveAutoDriveDepartureFilters",
             BindingFlags.Instance | BindingFlags.NonPublic);
-        MethodInfo steamPhysicalDockFilterMethod = typeof(SteamTrain).GetMethod(
+        MethodInfo steamPhysicalDockFilterMethod = typeof(Locomotive).GetMethod(
             "TryResolvePhysicallyDockedFilters",
             BindingFlags.Instance | BindingFlags.NonPublic);
-        MethodInfo steamConsistStationDistanceMethod = typeof(SteamTrain).GetMethod(
+        MethodInfo steamConsistStationDistanceMethod = typeof(Locomotive).GetMethod(
             "TryGetConsistStationDockDistance",
             BindingFlags.Instance | BindingFlags.NonPublic);
         MethodInfo railDockDistanceMethod = typeof(RailHandcar).GetMethod(
             nameof(RailHandcar.TryGetRailDockDistanceAtCoordinate),
             BindingFlags.Instance | BindingFlags.Public);
-        Type steamFreightFilterType = typeof(SteamTrain).GetNestedType(
+        Type steamFreightFilterType = typeof(Locomotive).GetNestedType(
             "AutoDriveFreightFilter",
             BindingFlags.NonPublic);
-        MethodInfo steamFluidTransferFilterMethod = typeof(SteamTrain).GetMethod(
+        MethodInfo steamFluidTransferFilterMethod = typeof(Locomotive).GetMethod(
             "ShouldUnloadFluidForFreightFilter",
             BindingFlags.Static | BindingFlags.NonPublic);
         MethodInfo pumpApplyTickMethod = typeof(Pump).GetMethod(

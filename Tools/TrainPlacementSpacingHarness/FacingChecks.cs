@@ -105,7 +105,7 @@ static class FacingChecks
         // A sparse junction tape can report the opposite path sign for one
         // frame. The endpoint locomotive's connected target is still at its
         // physical tail and must keep the locomotive facing away from it.
-        var endpointEngine = new SteamTrain { RuntimePlacementSequence = 3 };
+        var endpointEngine = new Locomotive { RuntimePlacementSequence = 3 };
         var endpointNeighbor = new Train { RuntimePlacementSequence = 4 };
         endpointEngine.TryApplyRailPose(aRail, 2f, new Vector2(2f, 0f), Vector2.right);
         endpointNeighbor.TryApplyRailPose(aRail, 1f, new Vector2(1f, 0f), Vector2.right);
@@ -171,7 +171,23 @@ public partial class RailHandcar
 
     // Network search is not used when the bridge retains its resolved target.
     bool TryFindConnectedRailSample(RailSample endpoint, Vector2 direction, Railload excluded, out RailSample sample)
-    { sample = default; throw new Exception("Stored bridge must not search the network again"); }
+    {
+        sample = default;
+        if (EndStopRails == null) throw new Exception("Stored bridge must not search the network again");
+        foreach (var rail in EndStopRails)
+        {
+            if (rail == excluded) continue;
+            foreach (bool start in new[] { true, false })
+            {
+                if (!rail.TryGetRenderedEndpointSample(start, out float distance, out var point, out var tangent)
+                    || Vector2.Distance(point, endpoint.Point) > .081f
+                    || Vector2.Dot(start ? tangent : -tangent, direction) < .5f) continue;
+                sample = new RailSample { Rail = rail, DistanceAlongPath = distance, Point = point, Tangent = tangent };
+                return true;
+            }
+        }
+        return false;
+    }
     float ResolveRailTransitionMovementDistance(RailSample source, RailSample target)
         => Vector2.Distance(source.Point, target.Point);
     Vector2 ResolveReferenceFacing() => Facing.sqrMagnitude > .0001f

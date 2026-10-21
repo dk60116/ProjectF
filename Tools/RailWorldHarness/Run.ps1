@@ -68,6 +68,12 @@ $generated += $railPlacement.Substring($geometryStart, $geometryEnd - $geometryS
 $generated += "public partial class RailloadInstallationController {`n" + (Read-Member $railPlacement 'public bool CommitCurrentPreview(') + "`n}`n"
 $railwayRegistration = [IO.File]::ReadAllText((Join-Path $repo "$root/Simulation/Railway/TerrainGenerator.Railway.cs"))
 $generated += "public sealed partial class TerrainGenerator {`n" + (Read-Member $railwayRegistration 'internal bool RegisterDataOnlyRailwayState(') + "`n}`n"
+$stationTerrain = [IO.File]::ReadAllText((Join-Path $repo "$root/Map/TerrainGenerator.TrainStations.cs"))
+$stationResolverStart = $stationTerrain.IndexOf('private static bool TryResolveStationRailCoordinate(', [StringComparison]::Ordinal)
+$stationResolverStart = $stationTerrain.IndexOf('private static bool TryResolveStationRailCoordinate(', $stationResolverStart + 1, [StringComparison]::Ordinal)
+$generated += "public sealed partial class TerrainGenerator {`n" +
+    (Read-Member $stationTerrain.Substring($stationResolverStart) 'private static bool TryResolveStationRailCoordinate(') + "`n" +
+    (Read-Member $stationTerrain 'private static bool RailCoordinateExists(') + "`n}`n"
 $stateStore = [IO.File]::ReadAllText((Join-Path $repo "$root/Map/BlockStateStore.cs"))
 $generated += "public partial class BlockStateStore {`n"
 foreach ($signature in @('private static Vector2Int GetNaturalInstallationStorageKey(',
@@ -84,12 +90,15 @@ $placement = [IO.File]::ReadAllText((Join-Path $repo "$root/Object/MapObj/Instal
 $generated += "public partial class InstallationPlacementController {`n"
 foreach ($signature in @('private static bool IsInstallationObjectAllowedForPlacement(',
     'private static bool IsRailloadSource(', 'private static bool CanInstallGridSourceShareSavedInstallationCell(',
-    'private static bool TryResolveInstallationObject(', 'public static InstallationMapFilter ResolvePlacementMapFilter(')) {
+    'private static bool TryResolveInstallationObject(', 'public static InstallationMapFilter ResolvePlacementMapFilter(',
+    'private bool TryResolveTrainStationSelectedRailCoordinate(', 'private bool TryResolveTrainStationFacingQuarterTurns(',
+    'private bool TryResolveNextTrainStationFacingQuarterTurns(',
+    'private bool HasRailloadForTrainStationAtCoordinate(', 'private bool CoordinateHasRuntimeRailload(')) {
     $generated += (Read-Member $placement $signature) + "`n"
 }
 $generated += "}`n"
-$train = [IO.File]::ReadAllText((Join-Path $repo "$root/Object/MapObj/InstallationObject/Vehicle/SteamTrain.cs"))
-$generated += "public partial class SteamTrain : Train {`n"
+$train = [IO.File]::ReadAllText((Join-Path $repo "$root/Object/MapObj/InstallationObject/Vehicle/Locomotive.cs"))
+$generated += "public partial class Locomotive : Train {`n"
 $generated += (Read-Member $train 'private static class AutoDriveRoutePlanner').Replace(
     'private static class AutoDriveRoutePlanner', 'private static partial class AutoDriveRoutePlanner')
 $generated += "}`n"
@@ -121,6 +130,7 @@ Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'DebugRendererChecks.cs') -Desti
 Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'RailPlacementChecks.cs') -Destination $probe
 Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'RailCurveChecks.cs') -Destination $probe
 Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'RailCommitChecks.cs') -Destination $probe
+Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'StationPlacementChecks.cs') -Destination $probe
 [IO.File]::WriteAllText((Join-Path $probe 'Probe.csproj'), '<Project Sdk="Microsoft.NET.Sdk"><PropertyGroup><OutputType>Exe</OutputType><TargetFramework>net9.0</TargetFramework><LangVersion>9.0</LangVersion></PropertyGroup><ItemGroup><Reference Include="UnityEngine.CoreModule"><HintPath>C:/Program Files/Unity/Hub/Editor/6000.4.0f1/Editor/Data/Managed/UnityEngine/UnityEngine.CoreModule.dll</HintPath></Reference></ItemGroup></Project>')
 dotnet run --configuration Release --project (Join-Path $probe 'Probe.csproj')
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
@@ -131,12 +141,15 @@ if ($occupantCheck -lt 0 -or $terrainCheck -lt 0 -or $terrainCheck -gt $occupant
     throw 'Live rail/train co-occupancy must use the shared placement rule after terrain validation.'
 }
 Write-Output 'PASS live placement applies the shared occupancy rule after terrain validation (source contract)'
-foreach ($file in @('Map/TerrainGenerator.TrainStations.cs', 'Object/MapObj/InstallationObject/Vehicle/SteamTrain.cs',
+foreach ($file in @('Map/TerrainGenerator.TrainStations.cs', 'Object/MapObj/InstallationObject/Vehicle/Locomotive.cs',
     'Object/MapObj/InstallationObject/RailLineDebugRenderer.cs')) {
     $source = [IO.File]::ReadAllText((Join-Path $repo "$root/$file"))
     if ($source -match 'FindObjects(OfType|ByType)<(Railload|Trainstation)>') { throw "Scene-wide rail/station scan remains: $file" }
 }
 Write-Output 'PASS rail/station consumers use the world registry (source contract)'
+$stationPrefab = [IO.File]::ReadAllText((Join-Path $repo 'FactorioProject/Assets/MapObject/Train/Train station/Train station.prefab'))
+$stationFilter = [int][regex]::Match($stationPrefab, '(?m)^  mapFilter: (\d+)').Groups[1].Value
+if (($stationFilter -band 128) -ne 0) { throw 'Station body must not be placeable on a rail cell.' }
 $placementSource = [IO.File]::ReadAllText((Join-Path $repo "$root/Object/MapObj/InstallationObject/RailloadInstallationController.cs"))
 $commit = Read-Member $placementSource 'public bool CommitCurrentPreview('
 $validatePlan = Read-Member $placementSource 'private void ValidatePlan('
@@ -153,7 +166,7 @@ Write-Output 'PASS radius/turn limits gate rail installation before item chargin
 if ($commit.Contains('CreateInstallationObject(') -or !$commit.Contains('RegisterDataOnlyRailwayState(')) {
     throw 'Rail placement must register data directly without instantiating an installed rail.'
 }
-foreach ($file in @('Train.cs', 'RailHandcar.cs', 'SteamTrain.cs', 'FreightCar.cs', 'TrainPlacementSpacing.cs')) {
+foreach ($file in @('Train.cs', 'RailHandcar.cs', 'Locomotive.cs', 'FreightCar.cs', 'TrainPlacementSpacing.cs')) {
     $source = [IO.File]::ReadAllText((Join-Path $repo "$root/Object/MapObj/InstallationObject/Vehicle/$file"))
     if ($source -match '\b(Railload|Trainstation)\s+\w+') { throw "Concrete rail/station reference remains in train runtime: $file" }
 }

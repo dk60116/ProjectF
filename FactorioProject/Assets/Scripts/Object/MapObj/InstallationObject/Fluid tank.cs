@@ -128,18 +128,18 @@ public class Fluidtank : InstallationObject, IMapObjectUpdateTick, IMapObjectUpd
     private bool ShouldFillMountedFluidAtCurrentStop()
     {
         return !isFlatCarMountedPresentation
-               || !TryGetMountedConsistSteamTrain(out SteamTrain steamTrain)
+               || !TryGetMountedConsistLocomotive(out Locomotive steamTrain)
                || steamTrain.ShouldFillFluidAtCurrentStop();
     }
 
     private bool ShouldUnloadMountedFluidAtCurrentStop()
     {
         return !isFlatCarMountedPresentation
-               || TryGetMountedConsistSteamTrain(out SteamTrain steamTrain)
+               || TryGetMountedConsistLocomotive(out Locomotive steamTrain)
                && steamTrain.ShouldUnloadFluidAtCurrentStop();
     }
 
-    private bool TryGetMountedConsistSteamTrain(out SteamTrain steamTrain)
+    private bool TryGetMountedConsistLocomotive(out Locomotive steamTrain)
     {
         steamTrain = null;
         if (!isFlatCarMountedPresentation)
@@ -154,7 +154,7 @@ public class Fluidtank : InstallationObject, IMapObjectUpdateTick, IMapObjectUpd
         }
 
         return mountedFreightCar != null
-               && mountedFreightCar.TryGetConsistSteamTrain(out steamTrain);
+               && mountedFreightCar.TryGetConsistLocomotive(out steamTrain);
     }
 
     public void SetFlatCarMountedPresentation(bool mounted)

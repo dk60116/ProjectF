@@ -138,7 +138,7 @@ public partial class SteamGenerator : InputOutputModule
         return HasTail;
     }
 }
-public partial class SteamTrain : InstallationObject
+public partial class Locomotive : InstallationObject
 {
     public bool CanAcceptWaterFromPipeDirection(Vector2Int direction, int id, bool space) => false;
     public bool ResolvePipe(Vector2Int coordinate, out Pipe pipe, out PipeRuntimeRecord record) =>
@@ -313,7 +313,7 @@ public static class Checks
         PipeWorld.Current.Records.Add(coordinate, ecsRecord);
         TerrainGenerator.Active = null;
 
-        var train = new SteamTrain();
+        var train = new Locomotive();
         Require(
             train.ResolvePipe(coordinate, out Pipe resolvedPipe, out PipeRuntimeRecord resolvedRecord)
             && ReferenceEquals(resolvedPipe, ecsPipe)

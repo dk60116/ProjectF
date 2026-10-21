@@ -44,6 +44,12 @@ public class Trainstation
 }
 public partial class Train
 {
+    // Geometry is covered by TrainPlacementSpacingHarness. Existing route
+    // fixtures are point vehicles unless a test supplies physical end margins.
+    public float RailFrontClearance, RailRearClearance;
+    internal float ResolveRailEndClearance(bool forward) => forward ? RailFrontClearance : RailRearClearance;
+    public float FrontConnectionReach = .5f, RearConnectionReach = .5f;
+    internal float ResolveConnectionReach(bool forward) => forward ? FrontConnectionReach : RearConnectionReach;
     public static ulong ConnectionGraphRevision = 1;
     static int nextId;
     readonly int id = ++nextId;
@@ -172,8 +178,13 @@ public partial class RailHandcar : Train
         => testStationDockDeltas[memberDistance] = delta;
 }
 
-public partial class SteamTrain
+public partial class Locomotive
 {
+    public virtual bool UsesWaterSupply => true;
+    protected virtual bool NeedsConfiguredFuelUse => false;
+    public float ObjectInfoBurnEnergyUseRatePerSecond = 1f;
+    private bool waitingForPropulsionFuel;
+    private System.Predicate<int> FuelItemFilter => IsUsableBurnEnergyItem;
     public bool isActiveAndEnabled = true;
     public bool SleepAwakeDebugSleeping { get; private set; }
     protected void SetSleepAwakeDebugSleeping(bool sleeping) => SleepAwakeDebugSleeping = sleeping;
@@ -329,8 +340,8 @@ public partial class SteamTrain
     static void Check(bool condition, string message)
     { if (!condition) throw new Exception(message); checks++; }
     static bool Near(float a, float b) => Math.Abs(a - b) < .0001f;
-    static SteamTrain Engine(float distance, Vector2 facing)
-    { var t = new SteamTrain { Rail = TestRail, Distance = distance }; t.transform.forward = new(facing.x, 0, facing.y); return t; }
+    static Locomotive Engine(float distance, Vector2 facing)
+    { var t = new Locomotive { Rail = TestRail, Distance = distance }; t.transform.forward = new(facing.x, 0, facing.y); return t; }
     static void RunDepartureResumeChecks()
     {
         foreach (int cargoCount in new[] { -1, 0, 9, 10 })
@@ -386,7 +397,7 @@ public partial class SteamTrain
         Check(full.PoweredMoves == moves + 3, "Next leg resumes once both station conditions are met");
     }
 
-    static void CheckTrainInfo(SteamTrain train, string expectedText, InfoWarning expectedWarning)
+    static void CheckTrainInfo(Locomotive train, string expectedText, InfoWarning expectedWarning)
     {
         train.GetObjectInfoStatus(out string text, out InfoWarning warning);
         Check(text == expectedText && warning == expectedWarning, "InfoPanel reason/severity: " + expectedText);
@@ -770,11 +781,11 @@ public partial class TrainInfoProbe
     public string Text;
     public bool LampVisible;
     public Color LampColor;
-    public void Refresh(SteamTrain train) => RefreshSteamTrainInfo(train);
+    public void Refresh(Locomotive train) => RefreshLocomotiveInfo(train);
     private void SetDefaultText(int index, string text, bool visible) { Text = text; }
     private void SetDefaultSign(int index, bool visible, Color color) { LampVisible = visible; LampColor = color; }
-    private void SetSteamTrainBurnEnergyGauge(SteamTrain train) { }
-    private void SetSteamTrainWaterGauge(object gauge, object fill, object text, SteamTrain train) { }
+    private void SetLocomotiveBurnEnergyGauge(Locomotive train) { }
+    private void SetLocomotiveWaterGauge(object gauge, object fill, object text, Locomotive train) { }
     private void SetRailHandcarSpeedGauge(object gauge, object fill, object text, RailHandcar train) { }
-    private void SetFluidStorageDefaultItemSlot(int index, SteamTrain train) { }
+    private void SetFluidStorageDefaultItemSlot(int index, Locomotive train) { }
 }

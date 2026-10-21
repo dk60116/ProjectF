@@ -45,7 +45,7 @@ foreach ($rowName in @('Target Row', 'Fuel Row', 'Freight Row')) {
         throw "Train Filter prefab is missing layout row: $rowName"
     }
 }
-$source = [IO.File]::ReadAllText((Join-Path $repo 'FactorioProject/Assets/Scripts/Object/MapObj/InstallationObject/Vehicle/SteamTrain.cs'))
+$source = [IO.File]::ReadAllText((Join-Path $repo 'FactorioProject/Assets/Scripts/Object/MapObj/InstallationObject/Vehicle/Locomotive.cs'))
 function Read-Member([string]$signature) {
     $start = $source.IndexOf($signature, [StringComparison]::Ordinal)
     if ($start -lt 0) { throw "Missing production member: $signature" }
@@ -58,21 +58,21 @@ function Read-Member([string]$signature) {
     }
     $source.Substring($start, $end - $start)
 }
-$generated = "using System.Collections.Generic;`nusing UnityEngine;`npublic partial class SteamTrain : RailHandcar {`n"
+$generated = "using System.Collections.Generic;`nusing UnityEngine;`npublic partial class Locomotive : RailHandcar {`n"
 $fieldSource = $source.Substring(0, $source.IndexOf('public float ObjectInfoStoredBurnEnergy'))
 foreach ($line in $fieldSource.Split("`n")) {
     if ($line -cmatch '^    private .*\b(autoDrive\w*|nextAutoDriveControllerRevision|lastDrivenInputFrame|lastManualDriveSimulationTick)\b.*;') {
         $generated += $line + "`n"
     }
 }
-$properties = $source.Substring($source.IndexOf('    private SteamTrain AutoDriveSettingsOwner'), $source.IndexOf('    private bool HasAnyAutoDriveTarget') - $source.IndexOf('    private SteamTrain AutoDriveSettingsOwner'))
+$properties = $source.Substring($source.IndexOf('    private Locomotive AutoDriveSettingsOwner'), $source.IndexOf('    private bool HasAnyAutoDriveTarget') - $source.IndexOf('    private Locomotive AutoDriveSettingsOwner'))
 $generated += $properties
 foreach ($signature in @(
     'private enum AutoDriveFuelFilter', 'private enum AutoDriveFreightFilter', 'private enum AutoDriveStatus', 'private enum DriveMotionOutcome',
     'public enum InfoWarning', 'public void GetObjectInfoStatus(',
     'public override void HandleMountedInput(', 'private void TickAutoDrive(', 'private DriveMotionOutcome HandleResolvedDriveMotion(',
     'public void ApplyAutoDriveSettings(', 'public void CaptureAutoDriveState(', 'public void ApplyAutoDriveState(',
-    'private void ClaimAutoDriveControl(', 'private bool IsPrimaryAutoDriveControllerForConsist(', 'private SteamTrain ResolveAutoDriveControllerForConsist(',
+    'private void ClaimAutoDriveControl(', 'private bool IsPrimaryAutoDriveControllerForConsist(', 'private Locomotive ResolveAutoDriveControllerForConsist(',
     'private static void NotifyAutoDriveControllerSelectionChanged()', 'private void CacheAutoDriveControllerForTick(',
     'private void TransferAutoDriveControl(', 'private void RefreshAutoDriveTickSchedule()', 'private void ResetAutoDriveRuntimeState(', 'private void ClearAutoDriveFixedRoute(',
     'private bool TryBuildActiveRouteFromFixedRoute(', 'private bool TryAlignAutoDriveRouteSegmentsToCurrentPose(',
@@ -149,6 +149,7 @@ foreach ($signature in @(
     'private bool TryLockConsistToRouteLeaderPath(', 'private bool AreConnectedTrainFollowOffsetsSettled(',
     'private void AppendConsistPathFrame(', 'private void RestoreConsistPathTape(', 'private void TrimConsistPathTape(',
     'private bool TryAdvanceAlongRailNetwork(', 'private bool TryAdvanceExistingRailConnectionBridge(',
+    'private float ResolveRailEndLimitedMoveDistance(',
     'private bool TryResolveRailConnectionBridge(', 'private static float ResolveRailConnectionBridgeProgress(',
     'private Vector2 ResolveRouteLeaderTravelDirection(', 'private static Vector2 AlignDirectionWithReference(',
     'private Vector2 ResolveConnectedTrainFacing(', 'private Vector2 ResolveConsistPathForward(',
@@ -173,14 +174,16 @@ $trainSource = [IO.File]::ReadAllText((Join-Path $repo 'FactorioProject/Assets/S
 $spacingConstant = [regex]::Match($trainSource, 'public const float ConnectionCenterDistance = [^;]+;')
 if (!$spacingConstant.Success) { throw 'Missing production spacing constant' }
 $generated += 'public partial class Train { ' + $spacingConstant.Value + ' }'
+$generated += 'public partial class Train { ' + [regex]::Match($trainSource, 'private const float MinConnectionDistance = [^;]+;').Value + ' }'
 $source = $trainSource
+$generated += 'public partial class Train { ' + (Read-Member 'internal static float ResolveConnectionSpacing(') + ' }'
 $generated += 'public partial class Train { ' + (Read-Member 'internal static Vector2 ResolveRailConnectionForward(') + (Read-Member 'private static Vector2 ResolveRailConnectionEndpointForward(') + ' }'
 # Keep the motion fixtures as lightweight stand-ins for the target interfaces.
 # The full target/world contract is exercised by RailWorldHarness.
 $generated = $generated.Replace('ProjectF.Railway.IRailTarget', 'Railload').Replace('ProjectF.Railway.ITrainStationTarget', 'Trainstation').Replace('.IsTargetActive', '.gameObject.activeInHierarchy')
 [IO.File]::WriteAllText((Join-Path $probe 'Production.cs'), $generated)
 $source = [IO.File]::ReadAllText((Join-Path $repo 'FactorioProject/Assets/Scripts/HUD/ObjectUI/ItemInfoDescription.cs'))
-$uiMethod = (Read-Member 'private void RefreshSteamTrainInfo(')
+$uiMethod = (Read-Member 'private void RefreshLocomotiveInfo(')
 [IO.File]::WriteAllText((Join-Path $probe 'TrainInfoUi.cs'), "public partial class TrainInfoProbe {`n" + $uiMethod + "`n}")
 Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'Checks.cs') -Destination $probe
 Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'PathTransferChecks.cs') -Destination $probe

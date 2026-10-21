@@ -26,7 +26,7 @@ static class EditChecks
         {
             Train.ActiveRuntimeTrains.Clear();
             var rail = new Railload(Vector2.zero, direction * 12);
-            var engine = (SteamTrain)Place(new SteamTrain(), rail, 3, false, 1);
+            var engine = (Locomotive)Place(new Locomotive(), rail, 3, false, 1);
             var freight = Place(new Train(), rail, 4.15f, reversePartner, 2);
             var controller = new InstallationPlacementController(rail);
             Check(!engine.ConnectTo(freight), "A freight car at the engine nose must not couple");
@@ -50,11 +50,11 @@ static class EditChecks
             Train.ActiveRuntimeTrains.Clear();
             var rail = new Railload(Vector2.zero, direction * 12);
             var cars = new[] {
-                Place(new SteamTrain(), rail, 2, true, 1),
+                Place(new Locomotive(), rail, 2, true, 1),
                 Place(new Train(), rail, 3.15f, false, 2),
                 Place(new Train(), rail, 4.3f, true, 3),
                 Place(new Train(), rail, 5.45f, false, 4),
-                Place(new SteamTrain(), rail, 6.6f, false, 5)
+                Place(new Locomotive(), rail, 6.6f, false, 5)
             };
             var controller = new InstallationPlacementController(rail);
             controller.CompleteForEdit();
@@ -85,7 +85,7 @@ public partial class InstallationPlacementController
     void SetMapEditModeActive(bool active) { mapEditModeActive = active; }
     void RefreshTrainInstallPreviewTints() { }
     void RefreshMapEditButtonState() { }
-    public bool RotateForEdit(SteamTrain train)
+    public bool RotateForEdit(Locomotive train)
     {
         mapEditModeActive = true;
         selectedEditableInstallation = train;

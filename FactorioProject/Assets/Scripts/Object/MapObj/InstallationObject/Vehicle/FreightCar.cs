@@ -36,21 +36,23 @@ public class FreightCar : Train,
         }
     }
 
-    public bool IsFuelSupplyCar
+    public bool IsFuelSupplyCar => TryGetFuelSupplyLocomotive(out _);
+
+    private bool TryGetFuelSupplyLocomotive(out Locomotive locomotive)
     {
-        get
+        foreach (Train connected in ConnectedTrains)
         {
-            foreach (Train connected in ConnectedTrains)
+            if (connected is Locomotive engine
+                && engine != null && engine.gameObject.activeInHierarchy
+                && engine.TryGetRearFreightCar(out FreightCar fuelCar) && fuelCar == this)
             {
-                if (connected is SteamTrain engine
-                    && engine != null && engine.gameObject.activeInHierarchy
-                    && engine.TryGetRearFreightCar(out FreightCar fuelCar) && fuelCar == this)
-                {
-                    return true;
-                }
+                locomotive = engine;
+                return true;
             }
-            return false;
         }
+
+        locomotive = null;
+        return false;
     }
 
     private readonly List<List<PortableObject>> itemPointStacks = new List<List<PortableObject>>();
@@ -822,6 +824,7 @@ public class FreightCar : Train,
         if (fuelRoleIcon != null)
         {
             fuelRoleIcon.enabled = false;
+            fuelRoleIcon.sprite = null;
         }
         ResetMountedTankMotionTracking();
         ClearLoadedItems();
@@ -847,16 +850,32 @@ public class FreightCar : Train,
     private void LateUpdate()
     {
         using var callerSample = MapObjectTickProfiler.SampleLateUpdateCaller<FreightCar>();
-        if (fuelRoleIcon != null)
-        {
-            bool visible = IsFuelSupplyCar;
-            if (fuelRoleIcon.enabled != visible)
-            {
-                fuelRoleIcon.enabled = visible;
-            }
-        }
+        RefreshFuelRoleIcon();
         UpdateMountedTankMotionTracking(Time.deltaTime);
         SyncAttachedLoadsRuntime();
+    }
+
+    private void RefreshFuelRoleIcon()
+    {
+        if (fuelRoleIcon == null)
+        {
+            return;
+        }
+
+        ItemDefinition fuel = TryGetFuelSupplyLocomotive(out Locomotive engine)
+            ? engine.FuelDisplayDefinition
+            : null;
+        Sprite icon = fuel != null ? fuel.icon : null;
+        if (fuelRoleIcon.sprite != icon)
+        {
+            fuelRoleIcon.sprite = icon;
+        }
+
+        bool visible = icon != null;
+        if (fuelRoleIcon.enabled != visible)
+        {
+            fuelRoleIcon.enabled = visible;
+        }
     }
 
     private void UpdateMountedTankMotionTracking(float deltaTime)

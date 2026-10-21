@@ -1,0 +1,507 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: a4d286e989be41fe853b78a59ca3a4e8, type: 3}
+  m_Name: MapObjectArchetype_140_Long Flatcar
+  m_EditorClassIdentifier: Assembly-CSharp::ProjectF.MapObjects.MapObjectArchetype
+  schemaVersion: 2
+  itemDefinition: {fileID: 11400000, guid: fe74cb295535dcf41a5ac655f830dfb4, type: 2}
+  sourcePrefab: {fileID: 8246531933118439867, guid: 0cadb6b49643c3b4aab8c353c06adb09, type: 3}
+  itemId: 131
+  itemName: Long Flatcar
+  sourcePrefabGuid: 0cadb6b49643c3b4aab8c353c06adb09
+  sourceContentHash:
+    serializedVersion: 2
+    Hash: 4c4ed2001ee443b334c449989f389438
+  sourceRuntimeType: FreightCar, Assembly-CSharp, Version=0.0.0.0, Culture=neutral,
+    PublicKeyToken=null
+  mapStatus:
+    mapSizeX: 1
+    mapSizeY: 2
+    centerCellX: 0
+    centerCellY: 0
+  focusMode: 1
+  defaultRootScale: {x: 1, y: 1, z: 1}
+  defaultRootRotation: {x: 0, y: 0, z: 0, w: 1}
+  localRenderBounds:
+    m_Center: {x: 0.000000059604645, y: 0.1714698, z: 0.52199996}
+    m_Extent: {x: 0.4653301, y: 0.18166932, z: 1.0968014}
+  hasRenderBounds: 1
+  featureFlags: 2112
+  nodes:
+  - hierarchyPath: 0:Long Flatcar
+    animationPath: 
+    parentIndex: -1
+    localPosition: {x: 0, y: 0, z: 0}
+    localRotation: {x: 0, y: 0, z: 0, w: 1}
+    localScale: {x: 1, y: 1, z: 1}
+    defaultLocalToRoot:
+      e00: 1
+      e01: 0
+      e02: 0
+      e03: 0
+      e10: 0
+      e11: 1
+      e12: 0
+      e13: 0
+      e20: 0
+      e21: 0
+      e22: 1
+      e23: 0
+      e30: 0
+      e31: 0
+      e32: 0
+      e33: 1
+    activeByDefault: 1
+    hasAnimatedTransform: 0
+  - hierarchyPath: 0:Long Flatcar/0:Body
+    animationPath: Body
+    parentIndex: 0
+    localPosition: {x: 0, y: 0, z: 0.522}
+    localRotation: {x: 0, y: 0, z: 0, w: 1}
+    localScale: {x: 1, y: 1, z: 1}
+    defaultLocalToRoot:
+      e00: 1
+      e01: 0
+      e02: 0
+      e03: 0
+      e10: 0
+      e11: 1
+      e12: 0
+      e13: 0
+      e20: 0
+      e21: 0
+      e22: 1
+      e23: 0.522
+      e30: 0
+      e31: 0
+      e32: 0
+      e33: 1
+    activeByDefault: 1
+    hasAnimatedTransform: 0
+  - hierarchyPath: 0:Long Flatcar/0:Body/0:Body
+    animationPath: Body/Body
+    parentIndex: 1
+    localPosition: {x: -0, y: -0.039, z: 0}
+    localRotation: {x: 0, y: -0, z: -0, w: 1}
+    localScale: {x: 1, y: 1, z: 1}
+    defaultLocalToRoot:
+      e00: 1
+      e01: 0
+      e02: 0
+      e03: 0
+      e10: 0
+      e11: 1
+      e12: 0
+      e13: -0.039
+      e20: 0
+      e21: 0
+      e22: 1
+      e23: 0.522
+      e30: 0
+      e31: 0
+      e32: 0
+      e33: 1
+    activeByDefault: 1
+    hasAnimatedTransform: 0
+  - hierarchyPath: 0:Long Flatcar/1:PlayerPoint
+    animationPath: PlayerPoint
+    parentIndex: 0
+    localPosition: {x: -0.162, y: 0.352, z: -0.122}
+    localRotation: {x: 0, y: 0, z: 0, w: 1}
+    localScale: {x: 1, y: 1, z: 1}
+    defaultLocalToRoot:
+      e00: 1
+      e01: 0
+      e02: 0
+      e03: -0.162
+      e10: 0
+      e11: 1
+      e12: 0
+      e13: 0.352
+      e20: 0
+      e21: 0
+      e22: 1
+      e23: -0.122
+      e30: 0
+      e31: 0
+      e32: 0
+      e33: 1
+    activeByDefault: 1
+    hasAnimatedTransform: 0
+  - hierarchyPath: 0:Long Flatcar/2:PlayerPoint (1)
+    animationPath: PlayerPoint (1)
+    parentIndex: 0
+    localPosition: {x: 0.16, y: 0.352, z: 1.099}
+    localRotation: {x: 0, y: 0, z: 0, w: 1}
+    localScale: {x: 1, y: 1, z: 1}
+    defaultLocalToRoot:
+      e00: 1
+      e01: 0
+      e02: 0
+      e03: 0.16
+      e10: 0
+      e11: 1
+      e12: 0
+      e13: 0.352
+      e20: 0
+      e21: 0
+      e22: 1
+      e23: 1.099
+      e30: 0
+      e31: 0
+      e32: 0
+      e33: 1
+    activeByDefault: 1
+    hasAnimatedTransform: 0
+  - hierarchyPath: 0:Long Flatcar/3:ItemPoint
+    animationPath: ItemPoint
+    parentIndex: 0
+    localPosition: {x: 0, y: 0.33, z: 0.832}
+    localRotation: {x: -0, y: -0, z: -0, w: 1}
+    localScale: {x: 1, y: 1, z: 1}
+    defaultLocalToRoot:
+      e00: 1
+      e01: 0
+      e02: 0
+      e03: 0
+      e10: 0
+      e11: 1
+      e12: 0
+      e13: 0.33
+      e20: 0
+      e21: 0
+      e22: 1
+      e23: 0.832
+      e30: 0
+      e31: 0
+      e32: 0
+      e33: 1
+    activeByDefault: 1
+    hasAnimatedTransform: 0
+  - hierarchyPath: 0:Long Flatcar/4:ItemPoint (1)
+    animationPath: ItemPoint (1)
+    parentIndex: 0
+    localPosition: {x: 0, y: 0.33, z: 0.133}
+    localRotation: {x: -0, y: -0, z: -0, w: 1}
+    localScale: {x: 1, y: 1, z: 1}
+    defaultLocalToRoot:
+      e00: 1
+      e01: 0
+      e02: 0
+      e03: 0
+      e10: 0
+      e11: 1
+      e12: 0
+      e13: 0.33
+      e20: 0
+      e21: 0
+      e22: 1
+      e23: 0.133
+      e30: 0
+      e31: 0
+      e32: 0
+      e33: 1
+    activeByDefault: 1
+    hasAnimatedTransform: 0
+  - hierarchyPath: 0:Long Flatcar/5:BoxPoint
+    animationPath: BoxPoint
+    parentIndex: 0
+    localPosition: {x: 0, y: 0.3, z: 0}
+    localRotation: {x: -0, y: -0, z: -0, w: 1}
+    localScale: {x: 1, y: 1, z: 1}
+    defaultLocalToRoot:
+      e00: 1
+      e01: 0
+      e02: 0
+      e03: 0
+      e10: 0
+      e11: 1
+      e12: 0
+      e13: 0.3
+      e20: 0
+      e21: 0
+      e22: 1
+      e23: 0
+      e30: 0
+      e31: 0
+      e32: 0
+      e33: 1
+    activeByDefault: 1
+    hasAnimatedTransform: 0
+  - hierarchyPath: 0:Long Flatcar/6:FuelRoleIcon
+    animationPath: FuelRoleIcon
+    parentIndex: 0
+    localPosition: {x: 0, y: 0.36, z: 0}
+    localRotation: {x: 0.7071068, y: 0, z: 0, w: 0.7071068}
+    localScale: {x: 0.16, y: 0.16, z: 1}
+    defaultLocalToRoot:
+      e00: 0.16
+      e01: 0
+      e02: 0
+      e03: 0
+      e10: 0
+      e11: -0.000000019073486
+      e12: -1.0000001
+      e13: 0.36
+      e20: 0
+      e21: 0.16000001
+      e22: -0.00000011920929
+      e23: 0
+      e30: 0
+      e31: 0
+      e32: 0
+      e33: 1
+    activeByDefault: 1
+    hasAnimatedTransform: 0
+  - hierarchyPath: 0:Long Flatcar/7:Wheel
+    animationPath: Wheel
+    parentIndex: 0
+    localPosition: {x: 0, y: 0.134, z: -0.155}
+    localRotation: {x: -0, y: -0, z: -0, w: 1}
+    localScale: {x: 1, y: 1, z: 1}
+    defaultLocalToRoot:
+      e00: 1
+      e01: 0
+      e02: 0
+      e03: 0
+      e10: 0
+      e11: 1
+      e12: 0
+      e13: 0.134
+      e20: 0
+      e21: 0
+      e22: 1
+      e23: -0.155
+      e30: 0
+      e31: 0
+      e32: 0
+      e33: 1
+    activeByDefault: 1
+    hasAnimatedTransform: 0
+  - hierarchyPath: 0:Long Flatcar/8:Wheel (1)
+    animationPath: Wheel (1)
+    parentIndex: 0
+    localPosition: {x: 0, y: 0.134, z: 0.308}
+    localRotation: {x: -0, y: -0, z: -0, w: 1}
+    localScale: {x: 1, y: 1, z: 1}
+    defaultLocalToRoot:
+      e00: 1
+      e01: 0
+      e02: 0
+      e03: 0
+      e10: 0
+      e11: 1
+      e12: 0
+      e13: 0.134
+      e20: 0
+      e21: 0
+      e22: 1
+      e23: 0.308
+      e30: 0
+      e31: 0
+      e32: 0
+      e33: 1
+    activeByDefault: 1
+    hasAnimatedTransform: 0
+  - hierarchyPath: 0:Long Flatcar/9:Wheel (2)
+    animationPath: Wheel (2)
+    parentIndex: 0
+    localPosition: {x: 0, y: 0.134, z: 0.747}
+    localRotation: {x: -0, y: -0, z: -0, w: 1}
+    localScale: {x: 1, y: 1, z: 1}
+    defaultLocalToRoot:
+      e00: 1
+      e01: 0
+      e02: 0
+      e03: 0
+      e10: 0
+      e11: 1
+      e12: 0
+      e13: 0.134
+      e20: 0
+      e21: 0
+      e22: 1
+      e23: 0.747
+      e30: 0
+      e31: 0
+      e32: 0
+      e33: 1
+    activeByDefault: 1
+    hasAnimatedTransform: 0
+  - hierarchyPath: 0:Long Flatcar/10:Wheel (3)
+    animationPath: Wheel (3)
+    parentIndex: 0
+    localPosition: {x: 0, y: 0.134, z: 1.209}
+    localRotation: {x: -0, y: -0, z: -0, w: 1}
+    localScale: {x: 1, y: 1, z: 1}
+    defaultLocalToRoot:
+      e00: 1
+      e01: 0
+      e02: 0
+      e03: 0
+      e10: 0
+      e11: 1
+      e12: 0
+      e13: 0.134
+      e20: 0
+      e21: 0
+      e22: 1
+      e23: 1.209
+      e30: 0
+      e31: 0
+      e32: 0
+      e33: 1
+    activeByDefault: 1
+    hasAnimatedTransform: 0
+  - hierarchyPath: 0:Long Flatcar/11:Coupler
+    animationPath: Coupler
+    parentIndex: 0
+    localPosition: {x: 0, y: 0.25, z: 1.3870001}
+    localRotation: {x: -0, y: -0, z: -0, w: 1}
+    localScale: {x: 1, y: 1, z: 1}
+    defaultLocalToRoot:
+      e00: 1
+      e01: 0
+      e02: 0
+      e03: 0
+      e10: 0
+      e11: 1
+      e12: 0
+      e13: 0.25
+      e20: 0
+      e21: 0
+      e22: 1
+      e23: 1.3870001
+      e30: 0
+      e31: 0
+      e32: 0
+      e33: 1
+    activeByDefault: 1
+    hasAnimatedTransform: 0
+  - hierarchyPath: 0:Long Flatcar/12:Coupler (1)
+    animationPath: Coupler (1)
+    parentIndex: 0
+    localPosition: {x: 0, y: 0.25, z: -0.343}
+    localRotation: {x: -0, y: -1, z: -0, w: 0.00000016391276}
+    localScale: {x: 1, y: 1, z: 1}
+    defaultLocalToRoot:
+      e00: -1
+      e01: 0
+      e02: -0.00000032782552
+      e03: 0
+      e10: 0
+      e11: 1
+      e12: 0
+      e13: 0.25
+      e20: 0.00000032782552
+      e21: 0
+      e22: -1
+      e23: -0.343
+      e30: 0
+      e31: 0
+      e32: 0
+      e33: 1
+    activeByDefault: 1
+    hasAnimatedTransform: 0
+  renderParts:
+  - kind: 0
+    nodeIndex: 2
+    mesh: {fileID: 3799084712096301012, guid: 480147d2b176a4a4983be428b97809f5, type: 3}
+    material: {fileID: 2100000, guid: 536c29ff258e4a344a243ff61667dfe0, type: 2}
+    subMeshIndex: 0
+    localBounds:
+      m_Center: {x: 0.000000059604645, y: 0.23760635, z: 0}
+      m_Extent: {x: 0.4653301, y: 0.15453276, z: 1.0091212}
+    layer: 0
+    renderingLayerMask: 1
+    shadowCastingMode: 1
+    receiveShadows: 1
+    enabledByDefault: 1
+  - kind: 0
+    nodeIndex: 9
+    mesh: {fileID: 4300000, guid: c3774876f501b4f4c96c941f58e48f00, type: 2}
+    material: {fileID: 2100000, guid: 2077e6b8af2db6a438786f2f4ff8dfa0, type: 2}
+    subMeshIndex: 0
+    localBounds:
+      m_Center: {x: 0, y: 0.000031098723, z: 0.010907792}
+      m_Extent: {x: 0.37774882, y: 0.14423063, z: 0.14316478}
+    layer: 0
+    renderingLayerMask: 1
+    shadowCastingMode: 1
+    receiveShadows: 1
+    enabledByDefault: 1
+  - kind: 0
+    nodeIndex: 10
+    mesh: {fileID: 4300000, guid: c3774876f501b4f4c96c941f58e48f00, type: 2}
+    material: {fileID: 2100000, guid: 2077e6b8af2db6a438786f2f4ff8dfa0, type: 2}
+    subMeshIndex: 0
+    localBounds:
+      m_Center: {x: 0, y: 0.000031098723, z: 0.010907792}
+      m_Extent: {x: 0.37774882, y: 0.14423063, z: 0.14316478}
+    layer: 0
+    renderingLayerMask: 1
+    shadowCastingMode: 1
+    receiveShadows: 1
+    enabledByDefault: 1
+  - kind: 0
+    nodeIndex: 11
+    mesh: {fileID: 4300000, guid: c3774876f501b4f4c96c941f58e48f00, type: 2}
+    material: {fileID: 2100000, guid: 2077e6b8af2db6a438786f2f4ff8dfa0, type: 2}
+    subMeshIndex: 0
+    localBounds:
+      m_Center: {x: 0, y: 0.000031098723, z: 0.010907792}
+      m_Extent: {x: 0.37774882, y: 0.14423063, z: 0.14316478}
+    layer: 0
+    renderingLayerMask: 1
+    shadowCastingMode: 1
+    receiveShadows: 1
+    enabledByDefault: 1
+  - kind: 0
+    nodeIndex: 12
+    mesh: {fileID: 4300000, guid: c3774876f501b4f4c96c941f58e48f00, type: 2}
+    material: {fileID: 2100000, guid: 2077e6b8af2db6a438786f2f4ff8dfa0, type: 2}
+    subMeshIndex: 0
+    localBounds:
+      m_Center: {x: 0, y: 0.000031098723, z: 0.010907792}
+      m_Extent: {x: 0.37774882, y: 0.14423063, z: 0.14316478}
+    layer: 0
+    renderingLayerMask: 1
+    shadowCastingMode: 1
+    receiveShadows: 1
+    enabledByDefault: 1
+  - kind: 0
+    nodeIndex: 13
+    mesh: {fileID: 4300000, guid: c21b9c207c7bcbd43bb029d313c7bd5c, type: 2}
+    material: {fileID: 2100000, guid: 536c29ff258e4a344a243ff61667dfe0, type: 2}
+    subMeshIndex: 0
+    localBounds:
+      m_Center: {x: -0.000091694295, y: -0.000000013038516, z: 0.122231066}
+      m_Extent: {x: 0.09618554, y: 0.061875, z: 0.109570324}
+    layer: 0
+    renderingLayerMask: 1
+    shadowCastingMode: 1
+    receiveShadows: 1
+    enabledByDefault: 1
+  - kind: 0
+    nodeIndex: 14
+    mesh: {fileID: 4300000, guid: c21b9c207c7bcbd43bb029d313c7bd5c, type: 2}
+    material: {fileID: 2100000, guid: 536c29ff258e4a344a243ff61667dfe0, type: 2}
+    subMeshIndex: 0
+    localBounds:
+      m_Center: {x: -0.000091694295, y: -0.000000013038516, z: 0.122231066}
+      m_Extent: {x: 0.09618554, y: 0.061875, z: 0.109570324}
+    layer: 0
+    renderingLayerMask: 1
+    shadowCastingMode: 1
+    receiveShadows: 1
+    enabledByDefault: 1
+  animationClips: []

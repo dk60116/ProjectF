@@ -1,0 +1,13 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net9.0</TargetFramework>
+    <NoWarn>0649;0414</NoWarn>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="../../FactorioProject/Assets/Scripts/Simulation/Railway/TrainCoupler*.cs" Link="Production/%(Filename)%(Extension)" />
+    <Compile Include="../../FactorioProject/Assets/Scripts/Simulation/Railway/TrainWorld.cs" Link="Production/TrainWorld.cs" />
+    <Compile Include="../../FactorioProject/Assets/Scripts/Simulation/Railway/TrainWorld.Native.cs" Link="Production/TrainWorld.Native.cs" />
+    <Compile Include="../../FactorioProject/Assets/Scripts/Simulation/Railway/TrainWorld.Couplers.cs" Link="Production/TrainWorld.Couplers.cs" />
+  </ItemGroup>
+</Project>
