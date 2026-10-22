@@ -38,6 +38,28 @@ static class Checks
         catch (Exception error) { Console.Error.WriteLine(error); return 1; }
     }
 
+    static void NativeBallastLifecycle()
+    {
+        NewWorld();
+        var first = Rail(800, Vector2.zero, new Vector2(4, 0));
+        var view = RailWorldView.LastCreated;
+        Check(view.NativeMasks.Contains(first), "Native placement registers its ground mask");
+        var replacement = Rail(800, new Vector2(20, 0), new Vector2(24, 0));
+        Check(!view.NativeMasks.Contains(first) && view.NativeMasks.Contains(replacement), "Replacing a native view clears its previous ground mask");
+        var world = TerrainGenerator.Active.World;
+        world.DetachLive(first);
+        Check(view.NativeMasks.Contains(replacement), "Late detach of an old view preserves the replacement mask");
+        world.UpsertSaved(Save(replacement));
+        world.DetachLive(replacement);
+        Check(view.NativeMasks.Count == 0, "Detaching a saved native view removes its presentation mask");
+        world.UpsertLive(replacement);
+        world.RemoveSaved(replacement.RuntimeAnchorCoordinate);
+        Check(view.NativeMasks.Count == 0, "Demolition removes saved and native presentation masks");
+        Rail(801, Vector2.zero, new Vector2(4, 0));
+        world.Clear();
+        Check(view.NativeMasks.Count == 0, "Clearing the world releases native terrain presentation");
+    }
+
     static void Run()
     {
         RailPlacementChecks.Run();
@@ -45,6 +67,7 @@ static class Checks
         RailCommitChecks.Run();
         RuntimeChecks.Run();
         DebugRendererChecks.Run();
+        NativeBallastLifecycle();
         NewWorld();
         var rail = Rail(1, new Vector2(-4, 0), new Vector2(4, 0));
         Check(rail.TryGetPathData(out var path), "Live rail exposes data geometry");

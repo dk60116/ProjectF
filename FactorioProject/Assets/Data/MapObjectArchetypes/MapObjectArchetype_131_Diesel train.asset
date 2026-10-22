@@ -20,7 +20,7 @@ MonoBehaviour:
   sourcePrefabGuid: 5f5ef2271a458914f832133627ec7e62
   sourceContentHash:
     serializedVersion: 2
-    Hash: 840c8dc1fb439eaa979058ed582d0245
+    Hash: b3c24bb9edd0b4a13eb45464b9a7cf1a
   sourceRuntimeType: DieselTrain, Assembly-CSharp, Version=0.0.0.0, Culture=neutral,
     PublicKeyToken=null
   mapStatus:
@@ -32,8 +32,8 @@ MonoBehaviour:
   defaultRootScale: {x: 1, y: 1, z: 1}
   defaultRootRotation: {x: 0, y: 0, z: 0, w: 1}
   localRenderBounds:
-    m_Center: {x: 0.000000059604645, y: 0.55280644, z: 0.6085251}
-    m_Extent: {x: 0.44638944, y: 0.53700596, z: 1.1323265}
+    m_Center: {x: 0.000000059604645, y: 0.55280644, z: 0.5311325}
+    m_Extent: {x: 0.44638944, y: 0.53700596, z: 1.0549339}
   hasRenderBounds: 1
   featureFlags: 2120
   nodes:
@@ -65,7 +65,7 @@ MonoBehaviour:
   - hierarchyPath: 0:Diesel Train/0:Body
     animationPath: Body
     parentIndex: 0
-    localPosition: {x: 0, y: 0.082, z: 0.643}
+    localPosition: {x: 0, y: 0.082, z: 0.598}
     localRotation: {x: 0, y: 0, z: 0, w: 1}
     localScale: {x: 1, y: 1, z: 1}
     defaultLocalToRoot:
@@ -80,7 +80,7 @@ MonoBehaviour:
       e20: 0
       e21: 0
       e22: 1
-      e23: 0.643
+      e23: 0.598
       e30: 0
       e31: 0
       e32: 0
@@ -190,7 +190,7 @@ MonoBehaviour:
   - hierarchyPath: 0:Diesel Train/4:Wheels
     animationPath: Wheels
     parentIndex: 0
-    localPosition: {x: 0, y: 0.16, z: -0.123}
+    localPosition: {x: 0, y: 0.16, z: -0.213}
     localRotation: {x: -0, y: -0, z: -0, w: 1}
     localScale: {x: 1, y: 1, z: 1}
     defaultLocalToRoot:
@@ -205,7 +205,7 @@ MonoBehaviour:
       e20: 0
       e21: 0
       e22: 1
-      e23: -0.123
+      e23: -0.213
       e30: 0
       e31: 0
       e32: 0
@@ -215,7 +215,7 @@ MonoBehaviour:
   - hierarchyPath: 0:Diesel Train/4:Wheels/0:Wheel
     animationPath: Wheels/Wheel
     parentIndex: 6
-    localPosition: {x: 0, y: 0, z: 0.098}
+    localPosition: {x: 0, y: 0, z: 0.182}
     localRotation: {x: -0, y: -0, z: -0, w: 1}
     localScale: {x: 1, y: 1, z: 1}
     defaultLocalToRoot:
@@ -230,7 +230,7 @@ MonoBehaviour:
       e20: 0
       e21: 0
       e22: 1
-      e23: -0.025000006
+      e23: -0.031000003
       e30: 0
       e31: 0
       e32: 0
@@ -240,7 +240,7 @@ MonoBehaviour:
   - hierarchyPath: 0:Diesel Train/4:Wheels/1:Wheel (1)
     animationPath: Wheels/Wheel (1)
     parentIndex: 6
-    localPosition: {x: 0, y: 0, z: 0.399}
+    localPosition: {x: 0, y: 0, z: 0.472}
     localRotation: {x: -0, y: -0, z: -0, w: 1}
     localScale: {x: 1, y: 1, z: 1}
     defaultLocalToRoot:
@@ -255,7 +255,7 @@ MonoBehaviour:
       e20: 0
       e21: 0
       e22: 1
-      e23: 0.276
+      e23: 0.259
       e30: 0
       e31: 0
       e32: 0
@@ -280,7 +280,7 @@ MonoBehaviour:
       e20: 0
       e21: 0
       e22: 1
-      e23: 0.88399994
+      e23: 0.79399997
       e30: 0
       e31: 0
       e32: 0
@@ -305,7 +305,7 @@ MonoBehaviour:
       e20: 0
       e21: 0
       e22: 1
-      e23: 1.173
+      e23: 1.083
       e30: 0
       e31: 0
       e32: 0
@@ -345,7 +345,7 @@ MonoBehaviour:
     subMeshIndex: 0
     localBounds:
       m_Center: {x: 0.000000059604645, y: 0.5039062, z: 0}
-      m_Extent: {x: 0.44638944, y: 0.5039062, z: 1.0978516}
+      m_Extent: {x: 0.44638944, y: 0.5039062, z: 0.9880664}
     layer: 0
     renderingLayerMask: 1
     shadowCastingMode: 1

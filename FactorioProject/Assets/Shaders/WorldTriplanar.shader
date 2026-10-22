@@ -2,6 +2,11 @@ Shader "Custom/WorldTriplanar"
 {
     Properties
     {
+        [HideInInspector] _RailBallastEnabled("Rail Ballast Enabled", Float) = 0
+        [HideInInspector][NoScaleOffset] _RailBallastMask("Rail Ballast Mask", 2D) = "black" {}
+        [HideInInspector][NoScaleOffset] _RailBallastAlbedo("Rail Ballast Albedo", 2D) = "white" {}
+        [HideInInspector] _RailBallastRect("Rail Ballast Rect", Vector) = (0, 0, 0, 0)
+        [HideInInspector] _RailBallastSampling("Rail Ballast Sampling", Vector) = (1, 0, 0.25, 0)
         [MainTexture] _BaseMap("Base Map", 2D) = "white" {}
         [MainColor] _BaseColor("Base Color", Color) = (1, 1, 1, 1)
         _Tiling("Tiling", Float) = 1
@@ -128,7 +133,11 @@ Shader "Custom/WorldTriplanar"
                 half _ShadeThreshold;
                 half _ShadeSmoothness;
                 half _Surface;
+                float4 _RailBallastRect;
+                float4 _RailBallastSampling;
+                float _RailBallastEnabled;
             CBUFFER_END
+            #include "RailBallastTerrain.hlsl"
 
             Varyings vert(Attributes input)
             {
@@ -228,6 +237,7 @@ Shader "Custom/WorldTriplanar"
 
                 float4 baseSample = SampleTriplanar(input.positionWS, inputData.normalWS);
                 half3 albedo = baseSample.rgb * _BaseColor.rgb;
+                albedo = ApplyRailBallastTerrain(albedo, input.positionWS, inputData.normalWS);
                 half alpha = baseSample.a * _BaseColor.a;
 
                 Light mainLight = GetMainLight(inputData.shadowCoord);

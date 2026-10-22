@@ -251,11 +251,11 @@ public class Railload : InstallationObject, ProjectF.Railway.IRailTarget
         railTriangles.Clear();
         sleeperVertices.Clear();
         sleeperTriangles.Clear();
+        railCenterPath.Clear();
 
         IReadOnlyList<Vector2Int> coordinates = RuntimeOccupiedCoordinates;
         if (coordinates != null && coordinates.Count >= 2)
         {
-            railCenterPath.Clear();
             if (runtimeVisualPathPoints != null && runtimeVisualPathPoints.Count >= 2)
             {
                 BuildVisualCenterPath(

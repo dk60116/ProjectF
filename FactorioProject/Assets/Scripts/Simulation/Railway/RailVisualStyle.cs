@@ -8,6 +8,7 @@ namespace ProjectF.Railway
     {
         internal readonly float Width, HalfSpacing, Thickness;
         internal readonly float SleeperLength, SleeperWidth, SleeperSpacing, SleeperThickness;
+        internal float BallastHalfWidth => Mathf.Max(SleeperLength * .5f, Mathf.Abs(HalfSpacing) + Width) + .22f;
 
         internal RailVisualStyle(float width, float halfSpacing, float thickness,
             float sleeperLength, float sleeperWidth, float sleeperSpacing, float sleeperThickness)

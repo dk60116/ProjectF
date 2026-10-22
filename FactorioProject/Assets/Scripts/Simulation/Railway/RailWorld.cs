@@ -61,18 +61,25 @@ namespace ProjectF.Railway
             if (liveByView.TryGetValue(rail, out Record previous) && previous.Identity != identity) DetachLive(rail);
             Record record = GetOrCreate(identity);
             bool attached = record.View != rail;
-            if (attached && !ReferenceEquals(record.View, null)) liveByView.Remove(record.View);
+            if (attached && !ReferenceEquals(record.View, null))
+            {
+                presentation?.RemoveNative(record.View);
+                liveByView.Remove(record.View);
+            }
             record.View = rail;
             liveByView[rail] = record;
             bool changed = SelectPath(record, path);
             if (attached && !changed) LiveTopologyVersion++;
             orderDirty |= attached;
+            EnsurePresentation(TerrainGenerator.Active);
+            presentation?.UpsertNative(rail, path);
         }
 
         public void DetachLive(Railload rail)
         {
             if (ReferenceEquals(rail, null) || !liveByView.TryGetValue(rail, out Record record)) return;
             liveByView.Remove(rail);
+            presentation?.RemoveNative(rail);
             if (!ReferenceEquals(record.View, rail)) return;
             record.View = null;
             LiveTopologyVersion++;
@@ -321,6 +328,7 @@ namespace ProjectF.Railway
 
         private void RemoveRecord(Record record)
         {
+            if (!ReferenceEquals(record.View, null)) presentation?.RemoveNative(record.View);
             RemoveSpatial(record);
             records.Remove(record.Identity);
             TopologyVersion++;

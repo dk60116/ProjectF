@@ -1,0 +1,7 @@
+Generator: built-in image_gen
+Final asset: FactorioProject/Assets/Resources/Textures/RailBallast.png
+
+Use case: stylized-concept
+Asset type: seamless tileable albedo texture for railway ballast in a stylized top-down factory game.
+Primary request: square texture filled edge-to-edge with densely packed small angular crushed gravel, muted warm grey and taupe stone chips, occasional slightly charcoal and sandy grey chips, no large boulders. Clean hand-painted game material with readable tiny faceted stones and subtle soft crevice shading. Consistent rock size, roughly 40 to 60 stones across the tile. Orthographic straight down, evenly diffuse lit, flat albedo, no directional lighting or cast shadows, no vignette, no perspective, no border. Precisely seamless repeating on all four edges with uniform density and color across the image. Restrained medium grey brightness, desaturated earthy palette to fit brown timber sleepers and silver metal rails on mossy ochre ground.
+Constraints: texture only, opaque square, no rails, no wood, no grass, no objects, no text, no watermark. 1024x1024.

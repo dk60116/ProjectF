@@ -2,6 +2,11 @@ Shader "ProjectF/Terrain/BiomeBlend"
 {
     Properties
     {
+        [HideInInspector] _RailBallastEnabled("Rail Ballast Enabled", Float) = 0
+        [HideInInspector][NoScaleOffset] _RailBallastMask("Rail Ballast Mask", 2D) = "black" {}
+        [HideInInspector][NoScaleOffset] _RailBallastAlbedo("Rail Ballast Albedo", 2D) = "white" {}
+        [HideInInspector] _RailBallastRect("Rail Ballast Rect", Vector) = (0, 0, 0, 0)
+        [HideInInspector] _RailBallastSampling("Rail Ballast Sampling", Vector) = (1, 0, 0.25, 0)
         [NoScaleOffset] _SandMap("Sand Map", 2D) = "white" {}
         [NoScaleOffset] _SandMap2("Sand Map 2", 2D) = "white" {}
         [NoScaleOffset] _SandMap3("Sand Map 3", 2D) = "white" {}
@@ -161,7 +166,11 @@ Shader "ProjectF/Terrain/BiomeBlend"
                 half _ShadeThreshold;
                 half _ShadeSmoothness;
                 half _Surface;
+                float4 _RailBallastRect;
+                float4 _RailBallastSampling;
+                float _RailBallastEnabled;
             CBUFFER_END
+            #include "RailBallastTerrain.hlsl"
 
             Varyings vert(Attributes input)
             {
@@ -427,6 +436,7 @@ Shader "ProjectF/Terrain/BiomeBlend"
                 half4 terrainWeights = GetTerrainBlendWeights(input.positionWS, inputData.normalWS, input.blendWeights);
 
                 half4 baseSample = SampleBlendedBase(input.positionWS, inputData.normalWS, terrainWeights);
+                baseSample.rgb = ApplyRailBallastTerrain(baseSample.rgb, input.positionWS, inputData.normalWS);
                 Light mainLight = GetMainLight(inputData.shadowCoord);
 
                 half NdotL = saturate(dot(inputData.normalWS, mainLight.direction));

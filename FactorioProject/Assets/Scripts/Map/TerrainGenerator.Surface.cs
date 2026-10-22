@@ -9,6 +9,8 @@ using UnityEditor;
 public partial class TerrainGenerator : MonoBehaviour
 {
     private readonly ProjectF.Rendering.CameraRenderCulling surfaceCameraCulling = new ProjectF.Rendering.CameraRenderCulling();
+    internal ProjectF.Railway.RailBallastTerrainRenderer RailBallastRenderer { get; set; }
+    internal int RailBallastChunkSize => Mathf.Max(4, chunkSize);
     public int LastRenderedChunkSurfaces { get; private set; }
     public int LastCulledChunkSurfaces { get; private set; }
     public int LastSurfaceCandidateChunks { get; private set; }
@@ -181,7 +183,8 @@ public partial class TerrainGenerator : MonoBehaviour
                 chunk.surfaceMatrix,
                 chunk.surfaceWorldBounds,
                 true,
-                renderCamera);
+                renderCamera,
+                subMeshIndex == GeneratedSurfaceWaterRenderSubMeshIndex ? null : RailBallastRenderer?.GetProperties(chunk.coordinate));
         }
 
         if (foamMaterial != null
@@ -222,7 +225,8 @@ public partial class TerrainGenerator : MonoBehaviour
         Matrix4x4 matrix,
         Bounds worldBounds,
         bool receiveShadows,
-        Camera renderCamera)
+        Camera renderCamera,
+        MaterialPropertyBlock properties = null)
     {
         RenderParams renderParams = new RenderParams(material)
         {
@@ -233,7 +237,8 @@ public partial class TerrainGenerator : MonoBehaviour
             lightProbeUsage = UnityEngine.Rendering.LightProbeUsage.Off,
             reflectionProbeUsage = UnityEngine.Rendering.ReflectionProbeUsage.Off,
             camera = renderCamera,
-            worldBounds = worldBounds
+            worldBounds = worldBounds,
+            matProps = properties
         };
         Graphics.RenderMesh(renderParams, mesh, subMeshIndex, matrix);
     }

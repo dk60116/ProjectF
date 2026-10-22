@@ -3,7 +3,7 @@ $repo = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '../..'))
 $probe = Join-Path ([IO.Path]::GetTempPath()) ('ProjectF-RailVisual-' + [guid]::NewGuid().ToString('N'))
 New-Item -ItemType Directory -Path $probe | Out-Null
 $root = Join-Path $repo 'FactorioProject/Assets/Scripts'
-foreach ($file in @('RailVisualNetwork.cs', 'RailVisualStyle.cs')) {
+foreach ($file in @('RailVisualNetwork.cs', 'RailVisualStyle.cs', 'RailBallastMask.cs')) {
     Copy-Item -LiteralPath (Join-Path $root "Simulation/Railway/$file") -Destination $probe
 }
 Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'Checks.cs') -Destination $probe
@@ -42,3 +42,29 @@ if (!$view.Contains('visualNetwork.Rebuild()') -or !$view.Contains('UpdateContin
     throw 'Installed rendering must use the shared visual network without the old per-source mesh path.'
 }
 Write-Output 'PASS installed mesh adapter uses continuous runs and shared sleeper positions (source contract)'
+$surface = [IO.File]::ReadAllText((Join-Path $root 'Map/TerrainGenerator.Surface.cs'))
+$world = [IO.File]::ReadAllText((Join-Path $root 'Simulation/Railway/RailWorld.cs'))
+$renderer = [IO.File]::ReadAllText((Join-Path $root 'Simulation/Railway/RailBallastTerrainRenderer.cs'))
+if (!$surface.Contains('RailBallastRenderer?.GetProperties(chunk.coordinate)') -or !$surface.Contains('matProps = properties') -or
+    !$surface.Contains('subMeshIndex == GeneratedSurfaceWaterRenderSubMeshIndex ? null') -or
+    !$view.Contains('ballast.Upsert(rail, rail.Path.Samples') -or !$view.Contains('ballast.Refresh()') -or
+    !$view.Contains('ballast.Remove(rail)') -or !$view.Contains('ballast?.Dispose()') -or
+    !$world.Contains('presentation?.UpsertNative(rail, path)') -or !$world.Contains('presentation?.RemoveNative(rail)') -or
+    $view.Contains('cell.Ballast') -or $rail.Contains('ballastMesh') -or $surface.Contains('GetGeneratedLandSurfaceMaxY')) {
+    throw 'Native/data rail masks must reach terrain draws, update on demolition, release textures and exclude water; obsolete gravel geometry must be removed.'
+}
+if (!$renderer.Contains('Textures/RailBallast') -or !$renderer.Contains('if (!mask.Rebuild()) return;') -or
+    $renderer.Contains('RenderMesh(') -or $renderer.Contains('new Mesh')) { throw 'Gravel presentation must cache terrain properties without submitting geometry.' }
+foreach ($file in @('TerrainBiomeBlend.shader', 'WorldTriplanar.shader')) {
+    $shader = [IO.File]::ReadAllText((Join-Path $repo ('FactorioProject/Assets/Shaders/' + $file)))
+    if (!$shader.Contains('#include "RailBallastTerrain.hlsl"') -or !$shader.Contains('ApplyRailBallastTerrain(') -or
+        !$shader.Contains('_RailBallastEnabled("Rail Ballast Enabled", Float) = 0')) {
+        throw "Land shader must apply gravel before lighting: $file"
+    }
+}
+$texture = Join-Path $repo 'FactorioProject/Assets/Resources/Textures/RailBallast.png'
+$meta = [IO.File]::ReadAllText($texture + '.meta')
+if (!(Test-Path -LiteralPath $texture) -or !$meta.Contains('enableMipMap: 1') -or !$meta.Contains('wrapU: 0') -or !$meta.Contains('wrapV: 0')) {
+    throw 'Runtime gravel texture must exist in Resources with repeating UVs and mipmaps.'
+}
+Write-Output 'PASS native/data masks, terrain albedo integration, water exclusion, texture lifetime and removal of old gravel meshes'

@@ -71,11 +71,15 @@ namespace ProjectF.Railway
                 if (!runtimeByCoordinate.TryGetValue(coordinates[i], out var bucket)) runtimeByCoordinate.Add(coordinates[i], bucket = new List<RailwayInstance>());
                 bucket.Add(instance);
             }
-            if (presentation == null) presentation = RailWorldView.Create(this, terrain);
+            EnsurePresentation(terrain);
             presentation.Add(instance);
             return instance;
         }
         private static int CompareStations(ITrainStationTarget a, ITrainStationTarget b) => a.RuntimePlacementSequence.CompareTo(b.RuntimePlacementSequence);
+        private void EnsurePresentation(TerrainGenerator terrain)
+        {
+            if (presentation == null && terrain != null) presentation = RailWorldView.Create(this, terrain);
+        }
         internal void NotifyStationChanged(TrainStationInstance station, bool routeChanged = true)
         {
             if (!Contains(station)) return;

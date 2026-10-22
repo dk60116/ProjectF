@@ -10,6 +10,8 @@ namespace ProjectF.Railway
     public sealed class RailWorldView : MonoBehaviour
     {
         private const float CellSize = 32;
+        private TerrainGenerator terrain;
+        private RailBallastTerrainRenderer ballast;
         private readonly Dictionary<Vector2Int, Cell> cells = new Dictionary<Vector2Int, Cell>();
         private readonly VirtualRenderBatchCollection batches = new VirtualRenderBatchCollection();
         private readonly List<Vector3> railVertices = new List<Vector3>();
@@ -28,8 +30,14 @@ namespace ProjectF.Railway
         {
             var host = new GameObject(nameof(RailWorldView)); host.transform.SetParent(terrain.transform, false);
             host.transform.SetPositionAndRotation(Vector3.zero, Quaternion.identity);
-            return host.AddComponent<RailWorldView>();
+            var view = host.AddComponent<RailWorldView>();
+            view.terrain = terrain;
+            view.ballast = new RailBallastTerrainRenderer(terrain.RailBallastChunkSize);
+            terrain.RailBallastRenderer = view.ballast;
+            return view;
         }
+        internal void UpsertNative(Railload rail, RailPathData path) => ballast.Upsert(rail, path.Samples, rail.VisualStyle);
+        internal void RemoveNative(Railload rail) => ballast.Remove(rail);
         private static Vector2Int Key(RailwayInstance instance) => new Vector2Int(Mathf.FloorToInt(instance.WorldPosition.x / CellSize), Mathf.FloorToInt(instance.WorldPosition.z / CellSize));
         private static Vector2Int Key(Vector3 point) => new Vector2Int(Mathf.FloorToInt(point.x / CellSize), Mathf.FloorToInt(point.z / CellSize));
         internal void Add(RailwayInstance instance)
@@ -41,7 +49,7 @@ namespace ProjectF.Railway
         }
         internal void Remove(RailwayInstance instance)
         {
-            if (instance is RailInstance rail) { visualNetwork.Remove(rail); dirty = true; return; }
+            if (instance is RailInstance rail) { visualNetwork.Remove(rail); ballast.Remove(rail); dirty = true; return; }
             if (cells.TryGetValue(Key(instance), out var cell)) { cell.Instances.Remove(instance); cell.Dirty = dirty = true; }
             if (instance is TrainStationInstance station && stationColliders.Remove(station, out var collider) && collider != null) Destroy(collider);
         }
@@ -54,11 +62,12 @@ namespace ProjectF.Railway
         }
         private void UpdateRail(RailInstance rail)
         {
-            if (rail.PresentationSuppressed) visualNetwork.Remove(rail);
+            if (rail.PresentationSuppressed) { visualNetwork.Remove(rail); ballast.Remove(rail); }
             else
             {
                 var prototype = (Railload)rail.Prototype;
                 visualNetwork.Upsert(rail, rail.Path.Samples, rail.WorldPosition.y + prototype.VisualHeight, prototype.VisualStyle);
+                ballast.Upsert(rail, rail.Path.Samples, prototype.VisualStyle);
             }
             dirty = true;
         }
@@ -111,7 +120,9 @@ namespace ProjectF.Railway
         }
         private void LateUpdate()
         {
-            if (MapObjectTickManager.WaitingForWorldLoad) { batches.SuspendRendering(); return; }
+            if (MapObjectTickManager.WaitingForWorldLoad) { SuspendPresentation(); return; }
+            ballast.Refresh();
+            terrain.RailBallastRenderer = ballast;
             if (dirty) Rebuild();
             // Long paths can cross their anchor cell. Use actual batch bounds,
             // not the coarse anchor-cell index, to keep distant path ends visible.
@@ -163,7 +174,7 @@ namespace ProjectF.Railway
         }
         private void AddMesh(Mesh mesh, Material material, Cell cell)
         {
-            if (mesh.vertexCount == 0) return;
+            if (mesh.vertexCount == 0 || material == null) return;
             batches.AddMatrix(new VirtualRenderBatchKey(mesh, material, gameObject.layer, 0, ShadowCastingMode.Off, false, false, batchCellX: cell.Key.x, batchCellZ: cell.Key.y), Matrix4x4.Translate(cell.Origin));
         }
         private void AddStation(TrainStationInstance station, Cell cell)
@@ -199,10 +210,16 @@ namespace ProjectF.Railway
         private static void Apply(Mesh mesh, List<Vector3> vertices, List<int> indices)
         { mesh.Clear(); mesh.indexFormat = IndexFormat.UInt32; mesh.SetVertices(vertices); mesh.SetTriangles(indices, 0); mesh.RecalculateNormals(); mesh.RecalculateBounds(); }
         internal void Release() { gameObject.SetActive(false); if (Application.isPlaying) Destroy(gameObject); else DestroyImmediate(gameObject); }
-        private void OnDisable() => batches.SuspendRendering();
+        private void OnDisable() => SuspendPresentation();
+        private void SuspendPresentation()
+        {
+            batches.SuspendRendering();
+            if (terrain != null && ReferenceEquals(terrain.RailBallastRenderer, ballast)) terrain.RailBallastRenderer = null;
+        }
         private void OnDestroy()
         {
             batches.Dispose();
+            ballast?.Dispose();
             foreach (var cell in cells.Values) DestroyCellMeshes(cell);
         }
         private static void DestroyCellMeshes(Cell cell)

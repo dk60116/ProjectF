@@ -167,10 +167,14 @@ namespace ProjectF.Railway
 {
     public sealed class RailWorldView
     {
-        public static RailWorldView Create(RailWorld world, TerrainGenerator terrain) => new RailWorldView();
+        public static RailWorldView LastCreated;
+        public readonly HashSet<Railload> NativeMasks = new HashSet<Railload>();
+        public static RailWorldView Create(RailWorld world, TerrainGenerator terrain) => LastCreated = new RailWorldView();
         public void Add(RailwayInstance instance) { }
         public void Remove(RailwayInstance instance) { }
         public void Invalidate(RailwayInstance instance) { }
-        public void Release() { }
+        public void UpsertNative(Railload rail, RailPathData path) { NativeMasks.Add(rail); }
+        public void RemoveNative(Railload rail) { NativeMasks.Remove(rail); }
+        public void Release() { NativeMasks.Clear(); }
     }
 }

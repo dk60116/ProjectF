@@ -50,7 +50,7 @@ internal static class Checks
 
     public static void Main()
     {
-        StraightAndOverlap(); CurvesAndLoops(); JunctionSleeperGaps(); Junctions(); EditsAndCaches(); MeshGeometry(); UnevenCurveSampling(); SparseAndIdle();
+        StraightAndOverlap(); CurvesAndLoops(); JunctionSleeperGaps(); Junctions(); EditsAndCaches(); MeshGeometry(); UnevenCurveSampling(); BallastTerrainMask(); SparseAndIdle();
         Console.WriteLine($"Rail visual network passed: {checks} checks");
     }
 
@@ -191,6 +191,88 @@ internal static class Checks
             "Proximity to another part of the same path must not delete a regularly spaced sleeper");
     }
 
+    private static float MaskValue(RailBallastMask mask, Vector2 point)
+    {
+        if (!mask.Tiles.TryGetValue(mask.Key(point), out var tile)) return 0f;
+        Vector2 pixel = (point - mask.Origin(tile.Key)) * RailBallastMask.PixelsPerUnit + Vector2.one * .5f;
+        int x = Mathf.Clamp(Mathf.RoundToInt(pixel.x), 0, mask.PixelSize - 1);
+        int z = Mathf.Clamp(Mathf.RoundToInt(pixel.y), 0, mask.PixelSize - 1);
+        return tile.Pixels[z * mask.PixelSize + x] / 255f;
+    }
+    private static RailBallastMask MakeMask(params Vector2[][] paths)
+    {
+        var mask = new RailBallastMask(16);
+        for (int i = 0; i < paths.Length; i++) mask.Upsert(i, paths[i], Style.BallastHalfWidth);
+        Check(mask.Rebuild(), "Installed paths produce terrain mask updates");
+        return mask;
+    }
+    private static void SameMask(RailBallastMask expected, RailBallastMask actual, string message)
+    {
+        Check(expected.Tiles.Count == actual.Tiles.Count, message + ": tile count");
+        foreach (var pair in expected.Tiles)
+        {
+            Check(actual.Tiles.TryGetValue(pair.Key, out var tile), message + ": tile key");
+            for (int i = 0; i < pair.Value.Pixels.Length; i++)
+                Check(Math.Abs(pair.Value.Pixels[i] - tile.Pixels[i]) <= 1, message + ": max-union coverage");
+        }
+    }
+    private static void BallastTerrainMask()
+    {
+        Near(Style.BallastHalfWidth, .64f, "Ballast extends past timber sleeper ends");
+        var whole = MakeMask(Line(-4, 40));
+        SameMask(whole, MakeMask(Line(40, -4)), "Reversed installation");
+        SameMask(whole, MakeMask(Line(-4, 8), Line(8, 23), Line(23, 40)), "Split installations");
+        SameMask(whole, MakeMask(Line(-4, 30), Line(10, 40), Line(40, -4)), "Overlaps and duplicate rails");
+        foreach (float x in new[] { -4f, -3f, 0f, 15.5f, 31.5f, 39f, 40f })
+            Check(MaskValue(whole, new Vector2(x, 0)) > .99f, "Continuous gravel across negative coordinates and terrain chunks");
+        Check(MaskValue(whole, new Vector2(-4.4f, 0)) > .5f, "Rounded gravel cap fades before the rail endpoint");
+        float innerShoulder = MaskValue(whole, new Vector2(3, .4f));
+        float middleShoulder = MaskValue(whole, new Vector2(3, .5f));
+        float outerShoulder = MaskValue(whole, new Vector2(3, .6f));
+        Check(innerShoulder < 1f && innerShoulder > middleShoulder && middleShoulder > outerShoulder && outerShoulder > 0f,
+            "Gravel blends progressively into the ground over a broad shoulder instead of one sharp pixel");
+        Check(MaskValue(whole, new Vector2(-4.9f, 0)) == 0f, "Gravel stops outside its endpoint cap");
+        Check(MaskValue(whole, new Vector2(3, .9f)) == 0f, "Ground outside the gravel shoulder is unchanged");
+        foreach (var pair in whole.Tiles)
+        {
+            if (!whole.Tiles.TryGetValue(pair.Key + Vector2Int.right, out var right)) continue;
+            int size = whole.PixelSize;
+            for (int z = 0; z < size; z++) for (int border = 0; border < 2; border++)
+                Check(Math.Abs(pair.Value.Pixels[z * size + size - 2 + border] - right.Pixels[z * size + border]) <= 1,
+                    "Bilinear border texels agree across terrain chunk seams");
+        }
+        var junction = MakeMask(Line(-5, 5), new[] { new Vector2(0, -5), new Vector2(0, 5) });
+        Check(MaskValue(junction, Vector2.zero) == 1f, "Crossings form one opaque gravel area");
+        Check(MaskValue(junction, new Vector2(0, 4)) == 1f, "Branch arm remains covered");
+        junction.Remove(0); junction.Rebuild();
+        Check(MaskValue(junction, Vector2.zero) == 1f, "Demolishing one crossing preserves the other line");
+        Check(MaskValue(junction, new Vector2(4, 0)) == 0f, "Demolition clears gravel only where no rail remains");
+        junction.Remove(1); junction.Rebuild();
+        Check(junction.Tiles.Count == 0, "Last demolition releases every empty mask tile");
+        foreach (var tile in junction.Changed) Check(tile.Sources.Count == 0, "Empty tiles notify texture disposal");
+        var curve = new[] { new Vector2(0, 0), new Vector2(3, 0), new Vector2(5, 2), new Vector2(5, 6) };
+        var curved = MakeMask(curve);
+        foreach (Vector2 point in curve) Check(MaskValue(curved, point) == 1f, "Curve joints have no holes");
+        SameMask(curved, MakeMask(Reverse(curve)), "Reversed curves");
+        var diagonal = MakeMask(new[] { new Vector2(-64, -64), new Vector2(64, 64) });
+        Check(diagonal.Tiles.Count < 40, "Long diagonals index a narrow band instead of a rectangular map area");
+        var edits = MakeMask(Line(1, 8, 4), Line(101, 108, 104));
+        var distantKey = edits.Key(new Vector2(104, 104));
+        var cached = edits.Tiles[distantKey];
+        edits.Upsert(0, Line(1, 9, 4), Style.BallastHalfWidth); edits.Rebuild();
+        Check(ReferenceEquals(cached, edits.Tiles[distantKey]), "Unrelated terrain masks keep their cache");
+        foreach (var tile in edits.Changed) Check(tile.Key != distantKey, "A local edit uploads no distant texture");
+        edits.Upsert(0, Line(20, 25, 4), Style.BallastHalfWidth); edits.Rebuild();
+        Check(MaskValue(edits, new Vector2(3, 4)) == 0f && MaskValue(edits, new Vector2(22, 4)) == 1f,
+            "Moving a native path clears the old mask and draws the new location");
+        var invalid = new RailBallastMask(16);
+        invalid.Upsert(0, new[] { Vector2.zero, Vector2.zero, new Vector2(float.NaN, 0) }, .64f);
+        Check(!invalid.Rebuild() && invalid.Tiles.Count == 0, "Invalid and zero-length paths create no ground marks");
+        for (int i = 0; i < 10; i++) edits.Rebuild();
+        long before = GC.GetAllocatedBytesForCurrentThread();
+        for (int i = 0; i < 10000; i++) edits.Rebuild();
+        Check(GC.GetAllocatedBytesForCurrentThread() - before == 0, "Idle terrain mask updates allocate zero bytes");
+    }
     private static void EditsAndCaches()
     {
         var network = Build(Line(0, 4), Line(4, 8), Line(8, 12), Line(100, 110));
