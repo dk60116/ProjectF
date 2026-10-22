@@ -32,10 +32,15 @@ $generated += "public partial class InstallationPlacementController {`n"
 foreach ($signature in @('private bool CanPlacePreviewOnTargetBlockType(', 'private static bool IsDuplicatePipePlacement(',
     'private static bool IsNormalInputOutputAreaBlockType(', 'private static bool CanPlaceInstallationOnInputOutputAreaBlock(',
     'private bool TryResolveTrainStationSelectedRailCoordinate(', 'private bool IsRailloadAllowedForPlacement(',
-    'private static bool IsInstallationObjectAllowedForPlacement(')) {
+    'private static bool IsInstallationObjectAllowedForPlacement(',
+    'public static InstallationMapFilter ResolvePlacementMapFilter(',
+    'private bool CanInstallGridSourceShareInstalledCell(',
+    'private static bool CanInstallGridSourceShareSavedInstallationCell(')) {
     $generated += (Member $placement $signature) + "`n"
 }
 $generated += "}`npublic partial class ProductionWorld {`n" + (Member $world 'public bool CoordinateIsBlockType(') + "`n}`n"
+$installation = [IO.File]::ReadAllText((Join-Path $repo "$root/Object/MapObj/InstallationObject/InstallationObject.cs"))
+$generated += "[Flags] " + (Member $installation 'public enum InstallationMapFilter') + "`n"
 $station = [IO.File]::ReadAllText((Join-Path $repo "$root/Object/MapObj/InstallationObject/Train station.cs"))
 $generated += "public partial class Trainstation {`n" + (Member $station 'public static bool TryGetFacingDirection(') + "`n}`n"
 $probe = Join-Path ([IO.Path]::GetTempPath()) ('ProjectF-PipeArea-' + [guid]::NewGuid().ToString('N'))
@@ -44,9 +49,18 @@ New-Item -ItemType Directory -Path $probe | Out-Null
 Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'AreaChecks.cs') -Destination $probe
 $diesel = [IO.File]::ReadAllText((Join-Path $repo 'FactorioProject/Assets/MapObject/Train/Diesel train/Diesel Train.prefab'))
 $filter = [regex]::Match($diesel, '(?m)^  mapFilter: (\d+)')
-$center = [regex]::Match($diesel, '(?m)^    centerCellY: (\d+)')
-if (!$filter.Success -or !$center.Success) { throw 'Missing diesel placement settings' }
-[IO.File]::WriteAllText((Join-Path $probe 'DieselAsset.cs'), ('static class DieselAsset { public const int MapFilter = ' + $filter.Groups[1].Value + '; public const int CenterCellY = ' + $center.Groups[1].Value + '; }'))
+if (!$filter.Success) { throw 'Missing diesel placement filter' }
+$assetSettings = 'static class DieselAsset { public const int MapFilter = ' + $filter.Groups[1].Value + '; }'
+$assetSettings += ' static class TrainAssets { public static readonly (string Name, int Filter)[] All = new[] {'
+foreach ($prefab in @('Steam train/Steam train.prefab', 'Diesel train/Diesel Train.prefab',
+    'Rail handcar/Rail handcar.prefab', 'Flatcar/Flatcar.prefab', 'Long Flatcar/Long Flatcar.prefab')) {
+    $source = [IO.File]::ReadAllText((Join-Path $repo ("FactorioProject/Assets/MapObject/Train/" + $prefab)))
+    $assetFilter = [regex]::Match($source, '(?m)^  mapFilter: (\d+)')
+    if (!$assetFilter.Success) { throw "Missing train placement filter: $prefab" }
+    $assetSettings += '("' + $prefab + '", ' + $assetFilter.Groups[1].Value + '),'
+}
+$assetSettings += '}; }'
+[IO.File]::WriteAllText((Join-Path $probe 'DieselAsset.cs'), $assetSettings)
 $unity = 'C:/Program Files/Unity/Hub/Editor/6000.4.0f1/Editor/Data/Managed/UnityEngine/UnityEngine.CoreModule.dll'
 [IO.File]::WriteAllText((Join-Path $probe 'Probe.csproj'), '<Project Sdk="Microsoft.NET.Sdk"><PropertyGroup><OutputType>Exe</OutputType><TargetFramework>net9.0</TargetFramework></PropertyGroup><ItemGroup><Reference Include="UnityEngine.CoreModule"><HintPath>' + $unity + '</HintPath></Reference></ItemGroup></Project>')
 dotnet run --configuration Release --project (Join-Path $probe 'Probe.csproj')

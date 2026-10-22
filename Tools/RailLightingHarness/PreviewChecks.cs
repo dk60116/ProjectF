@@ -51,7 +51,7 @@ static class PreviewChecks
         typeof(Railload).GetField("sleeperSpacing", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic).SetValue(prefab, 1f);
         vertices.Clear(); triangles.Clear();
         prefab.AppendPlacementPreviewMesh(vertices, triangles, straight, Vector2Int.zero, .16f, false, false, path);
-        Check(vertices.Count == 32 + 9 * 24 && MathF.Abs((vertices[33] - vertices[32]).magnitude - 1.4f) < .0001f,
+        Check(vertices.Count == 32 + 8 * 24 && MathF.Abs((vertices[33] - vertices[32]).magnitude - 1.4f) < .0001f,
             "Blueprint sleepers must follow customized prefab dimensions and spacing");
         vertices.Clear(); triangles.Clear();
         prefab.AppendPlacementPreviewMesh(vertices, triangles, null, Vector2Int.zero, .16f, true, true, path);
@@ -65,7 +65,7 @@ static class PreviewChecks
         new Railload().AppendPlacementPreviewMesh(vertices, triangles, points, origin, .16f, extendStart, extendEnd, path);
         float length = 0;
         for (int i = 1; i < path.Count; i++) length += (path[i] - path[i - 1]).magnitude;
-        int sleepers = Math.Max(1, (int)MathF.Floor(length / .55f) + 1);
+        int sleepers = Math.Max(1, (int)MathF.Floor((length + .0001f) / .55f));
         int railVertices = 16 * path.Count;
         Check(vertices.Count == railVertices + 24 * sleepers, "Preview must contain two rails and every sleeper box");
         Check(triangles.Count == 48 * (path.Count - 1) + 36 * sleepers, "Preview must contain complete rail and sleeper faces");

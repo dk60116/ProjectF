@@ -141,6 +141,7 @@ namespace UnityEngine
         public static int Max(int a, int b) => Math.Max(a, b);
         public static float Min(float a, float b) => MathF.Min(a, b);
         public static int FloorToInt(float value) => (int)MathF.Floor(value);
+        public static int RoundToInt(float value) => (int)MathF.Round(value);
         public static float Clamp01(float value) => Math.Clamp(value, 0f, 1f);
     }
 

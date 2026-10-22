@@ -38,10 +38,10 @@ foreach ($signature in @('private static Material ResolveRailRuntimeMaterial(', 
 }
 $generated += "public static Material RailMaterial => ResolveRailRuntimeMaterial(); public static Material SleeperMaterial => ResolveSleeperRuntimeMaterial();`n"
 $generated += "public static void ResetMaterials() { railRuntimeMaterial = null; sleeperRuntimeMaterial = null; }`n"
-foreach ($signature in @('public void RefreshRailVisual()', 'internal void AppendDataVisual(')) {
-    if (!(Read-Member $rail $signature).Contains('AppendVisualGeometry(')) {
-        throw 'Native rails, ECS rails and blueprints must share rail and sleeper geometry generation.'
-    }
+if (!(Read-Member $rail 'public void RefreshRailVisual()').Contains('AppendVisualGeometry(') -or
+    !(Read-Member $rail 'internal static void AppendContinuousRails(').Contains('AddRailStrips(') -or
+    !(Read-Member $rail 'internal static void AppendContinuousSleeper(').Contains('AddSleeperBox(')) {
+    throw 'Native/preview geometry and continuous installed rails must reuse the strip and sleeper-box primitives.'
 }
 foreach ($name in @('RailEndpointCellHalfExtent', 'railLineWidth', 'railHalfSpacing', 'railVisualThickness',
     'sleeperLength', 'sleeperWidth', 'sleeperSpacing', 'sleeperVisualThickness', 'DefaultRailVisualThickness')) {
@@ -54,7 +54,7 @@ foreach ($signature in @('internal void AppendPlacementPreviewMesh(', 'private v
     'private static void ExtendPathEndpointsToCellEdges(', 'private static Vector3 FlattenDirection(',
     'private static float ResolveCellEdgeExtension(Vector3', 'private static void AddPathPoint(',
     'private static void AddRailStrips(', 'private static void AddRailStrip(', 'private static void AddRailStripCap(',
-    'private static Vector3 ResolvePathTangent(', 'private static void AddRailSleepers(',
+    'private static Vector3 ResolvePathTangent(', 'private static Vector3 SampleRailTangentProbe(', 'private static void AddRailSleepers(',
     'private static float CalculateFlatPathLength(', 'private static bool TrySampleFlatPath(', 'private static float ResolveSleeperTopHeight(')) {
     $generated += (Read-Member $rail $signature) + "`n"
 }
@@ -81,6 +81,7 @@ New-Item -ItemType Directory -Path $probe | Out-Null
 [IO.File]::WriteAllText((Join-Path $probe 'Production.cs'), $generated)
 Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'Checks.cs') -Destination $probe
 Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'PreviewChecks.cs') -Destination $probe
+Copy-Item -LiteralPath (Join-Path $repo 'FactorioProject/Assets/Scripts/Simulation/Railway/RailVisualStyle.cs') -Destination $probe
 [IO.File]::WriteAllText((Join-Path $probe 'Probe.csproj'), '<Project Sdk="Microsoft.NET.Sdk"><PropertyGroup><OutputType>Exe</OutputType><TargetFramework>net9.0</TargetFramework></PropertyGroup></Project>')
 dotnet run --configuration Release --project (Join-Path $probe 'Probe.csproj')
 exit $LASTEXITCODE

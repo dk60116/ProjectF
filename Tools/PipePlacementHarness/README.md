@@ -24,6 +24,11 @@ lookup omission. Unity placement transactions and rendering are not executed.
 ./Tools/PipePlacementHarness/AreaRun.ps1
 ```
 
+열차 회귀 검사는 실제 칸 단위 설치 판정, 설치물 격자 중첩 판정과 저장 레일 격자 판정을 함께 실행해.
+증기·디젤·핸드카·두 종류 화물차 프리팹의 필터를 읽고, 레일 플래그가 빠져도 열차의 레일 중첩은 허용되는지 확인해.
+일반 건물·물 지형 차단과 일반 설치물의 레일 필터는 유지해. 프리팹 Center 값을 특정 칸으로 강제하던 검사는 제거했어.
+실제 Unity 격자 메시·색상·화면은 검증하지 않아.
+
 Extracts the production duplicate-pipe placement rule from
 `InstallationPlacementController`. It verifies that a new pipe cannot occupy a
 coordinate already owned by another pipe, while an explicitly ignored preview,

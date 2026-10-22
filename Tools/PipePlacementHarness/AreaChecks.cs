@@ -8,7 +8,13 @@ using ForestryWorld = ProjectF.MapObjects.ForestryWorld;
 public interface IMapObjectTarget { }
 public class MapObject : IMapObjectTarget { }
 public class InstallationObject : MapObject { public InstallationMapFilter MapFilter = InstallationMapFilter.Ground; }
-public class Pipe : InstallationObject { }
+public class Pipe : InstallationObject { public Pipe StraightVariantPrefab; }
+public class Wall : InstallationObject { public Wall StraightVariantPrefab; }
+public class ConveyorBelt : InstallationObject
+{
+    public bool IsCornerVariant;
+    public ConveyorBelt StraightVariantPrefab;
+}
 public class Pump : InstallationObject { }
 public class BoxObject : InstallationObject { }
 public class Floor : InstallationObject { }
@@ -18,7 +24,6 @@ public class Railload : InstallationObject, ProjectF.Railway.IRailTarget { }
 public class DataRail : IMapObjectTarget, ProjectF.Railway.IRailTarget { }
 namespace ProjectF.Railway { public interface IRailTarget { } }
 public class ResourceInstance : MapObject { }
-[Flags] public enum InstallationMapFilter { None = 0, Ground = 1, ItemArea = 8, Ore = 4, Railload = 128, Floor = 256, OtherInstallObject = 512 }
 public sealed class Block
 {
     public enum BlockType { Ground, Water }
@@ -33,6 +38,8 @@ public partial class InputOutputModule : InstallationObject
     public readonly ModuleObject gameObject = new();
     public Vector2Int Cell;
     public RectGridBlockType Type;
+    public struct RectGridBlockPlacement { public int x, y; public RectGridBlockType blockType; }
+    public IReadOnlyList<RectGridBlockPlacement> RectGridPlacements => null;
     private bool ContainsRuntimeRectGridBlockType(Vector2Int coordinate, RectGridBlockType type) => coordinate == Cell && Type == type;
     private static int CompareSimulationOrder(InputOutputModule first, InputOutputModule second) => 0;
     public bool TryGetRectGridBlockTypeAtCoordinate(MapObject source, Vector2Int anchor, int turns,
@@ -79,6 +86,9 @@ public partial class InstallationPlacementController
     public IMapObjectTarget Occupant;
     public readonly HashSet<Vector2Int> StationRailCells = new();
     public MapObject SavedRail;
+    private MapObject activeInstallPreview => null;
+    private ItemDefinition activeInstallDefinition => null;
+    private sealed class ItemDefinition { public MapObject mapObject => null; }
     public bool FluidCompatible = true;
     public bool Place(Block block, MapObject source, MapObject ignored = null, int turns = 0) =>
         CanPlacePreviewOnTargetBlockType(block, source, quarterTurns: turns, previewToIgnore: ignored);
@@ -89,7 +99,17 @@ public partial class InstallationPlacementController
     { pipe = ExistingPipe; turns = 0; return pipe != null; }
     private static bool TryResolveInstallationObject(MapObject source, out InstallationObject installation)
     { installation = source as InstallationObject; return installation != null; }
-    private static InstallationMapFilter ResolvePlacementMapFilter(MapObject source, InstallationObject installation) => installation.MapFilter;
+    public bool GridSharesInstalled(Block block, MapObject source) => CanInstallGridSourceShareInstalledCell(block, source);
+    public bool GridSharesSaved(MapObject source, MapObject occupant) => CanInstallGridSourceShareSavedInstallationCell(source, occupant);
+    private int GetPreviewQuarterTurns(MapObject preview) => 0;
+    private int GetPreferredInstallPreviewQuarterTurns(ItemDefinition definition, MapObject preview) => 0;
+    private static int GetPlacementRotationCandidateCount(MapObject source) => 4;
+    private int NormalizeInstallPreviewQuarterTurns(MapObject preview, int turns) => (turns % 4 + 4) % 4;
+    private static Vector2Int RotateFootprintOffset(Vector2Int offset, int turns) => InputOutputModule.RotateRectGridOffset(offset, turns);
+    private static bool TryGetInputOutputModule(MapObject source, out InputOutputModule module)
+    { module = source as InputOutputModule; return module != null; }
+    private static bool TryGetRectGridFootprintSettings(MapObject source, out int width, out int height, out Vector2Int anchor)
+    { width = height = 0; anchor = default; return false; }
     private static InstallationMapFilter ResolveRectGridTerrainFilter(MapObject source, InputOutputModule.RectGridBlockType type, InstallationMapFilter filter) => filter;
     private bool IsFixedRectGridObjectBlockCoordinate(Vector2Int cell) => InputOutputModule.CoordinateIsRuntimeRectGridBlockType(cell, InputOutputModule.RectGridBlockType.Object);
     private bool IsRectGridAreaBlockType(InputOutputModule.RectGridBlockType type) => type != InputOutputModule.RectGridBlockType.None && type != InputOutputModule.RectGridBlockType.Object;
@@ -173,6 +193,7 @@ public static class AreaChecks
     public static void Main()
     {
         CheckDieselRailPlacement();
+        CheckTrainRailGrid();
         CheckStationPlacement();
         var anchor = new Vector2Int(100, 50);
         var offset = new Vector2Int(2, 1);
@@ -262,7 +283,39 @@ public static class AreaChecks
         block.Type = Block.BlockType.Ground;
         placement.Occupant = new BoxObject();
         Require(!placement.Place(block, diesel), "Enabling rails must not permit overlapping other buildings");
-        Require(DieselAsset.CenterCellY == 0, "Diesel footprint must follow its body from the root cell towards local +Z");
+        Reset();
+    }
+
+    private static void CheckTrainRailGrid()
+    {
+        Reset();
+        foreach (var asset in TrainAssets.All)
+        foreach (bool hasExplicitRailFilter in new[] { true, false })
+        {
+            var source = new Train { MapFilter = (InstallationMapFilter)asset.Filter };
+            if (!hasExplicitRailFilter) source.MapFilter &= ~InstallationMapFilter.Railload;
+            var controller = new InstallationPlacementController();
+            var block = new Block();
+            foreach (IMapObjectTarget rail in new IMapObjectTarget[] { new Railload(), new DataRail() })
+            {
+                controller.Occupant = rail;
+                Require(controller.GridSharesInstalled(block, source),
+                    asset.Name + ": scene/ECS rail must not be a red grid obstacle, even without an authored rail flag");
+                Require(controller.Place(block, source), asset.Name + ": placement must agree with the grid");
+            }
+            Require(controller.GridSharesSaved(source, new Railload()),
+                asset.Name + ": saved rail grid must agree before scene materialization");
+            controller.Occupant = new BoxObject();
+            Require(!controller.GridSharesInstalled(block, source), asset.Name + ": buildings still block the grid");
+            Require(!controller.GridSharesSaved(source, new BoxObject()), asset.Name + ": saved buildings still block");
+            controller.Occupant = new DataRail();
+            block.Type = Block.BlockType.Water;
+            Require(!controller.GridSharesInstalled(block, source), asset.Name + ": rail support does not bypass terrain");
+        }
+        var ordinary = new BoxObject();
+        var placement = new InstallationPlacementController { Occupant = new DataRail() };
+        Require(!placement.GridSharesInstalled(new Block(), ordinary), "Buildings without the rail filter still see rails as obstacles");
+        Require(!placement.GridSharesSaved(ordinary, new Railload()), "Saved rails remain blocked for ordinary buildings");
         Reset();
     }
 

@@ -346,15 +346,24 @@ public class Railload : InstallationObject, ProjectF.Railway.IRailTarget
         }
     }
 
-    internal void AppendDataVisual(ProjectF.Railway.RailInstance rail, Vector3 origin,
-        List<Vector3> rails, List<int> railIndices, List<Vector3> sleepers, List<int> sleeperIndices, List<Vector3> path)
+    internal ProjectF.Railway.RailVisualStyle VisualStyle => new ProjectF.Railway.RailVisualStyle(
+        railLineWidth, railHalfSpacing, railVisualThickness,
+        sleeperLength, sleeperWidth, sleeperSpacing, sleeperVisualThickness);
+
+    internal float VisualHeight => railVisualHeight;
+
+    internal static void AppendContinuousRails(ProjectF.Railway.RailVisualStyle style,
+        List<Vector3> rails, List<int> indices, IReadOnlyList<Vector3> path)
     {
-        path.Clear();
-        var samples = rail.Path.Samples;
-        for (int i = 0; i < samples.Count; i++)
-            path.Add(new Vector3(samples[i].x - origin.x, rail.WorldPosition.y + railVisualHeight - origin.y, samples[i].y - origin.z));
-        if (path.Count < 2) return;
-        AppendVisualGeometry(rails, railIndices, sleepers, sleeperIndices, path, rail.WorldPosition.y + railVisualHeight - origin.y);
+        AddRailStrips(rails, indices, path, style.Width, style.HalfSpacing, style.Thickness, false, false);
+    }
+
+    internal static void AppendContinuousSleeper(ProjectF.Railway.RailVisualStyle style,
+        List<Vector3> vertices, List<int> indices, Vector3 center, Vector3 tangent)
+    {
+        center.y = ResolveSleeperTopHeight(center.y, style.Thickness);
+        AddSleeperBox(vertices, indices, center, tangent, Mathf.Max(0.01f, style.SleeperLength),
+            Mathf.Max(0.01f, style.SleeperWidth), Mathf.Max(0.001f, style.SleeperThickness));
     }
 
     internal static Material DataRailMaterial => ResolveRailRuntimeMaterial();
@@ -661,11 +670,12 @@ public class Railload : InstallationObject, ProjectF.Railway.IRailTarget
 
         float halfWidth = width * 0.5f;
         float clampedThickness = Mathf.Max(0.001f, thickness);
+        float tangentProbeDistance = Mathf.Max(0.05f, Mathf.Abs(trackSideOffset) * 0.5f);
         Vector3 bottomOffset = Vector3.down * clampedThickness;
         int topVertexStart = vertices.Count;
         for (int i = 0; i < centerPath.Count; i++)
         {
-            Vector3 side = ResolveFlatSide(ResolvePathTangent(centerPath, i));
+            Vector3 side = ResolveFlatSide(ResolvePathTangent(centerPath, i, tangentProbeDistance));
             Vector3 railCenter = centerPath[i] + side * trackSideOffset;
             Vector3 widthOffset = side * halfWidth;
             vertices.Add(railCenter - widthOffset);
@@ -675,7 +685,7 @@ public class Railload : InstallationObject, ProjectF.Railway.IRailTarget
         int outerSideVertexStart = vertices.Count;
         for (int i = 0; i < centerPath.Count; i++)
         {
-            Vector3 side = ResolveFlatSide(ResolvePathTangent(centerPath, i));
+            Vector3 side = ResolveFlatSide(ResolvePathTangent(centerPath, i, tangentProbeDistance));
             Vector3 railCenter = centerPath[i] + side * trackSideOffset;
             Vector3 outerTop = railCenter - side * halfWidth;
             vertices.Add(outerTop);
@@ -685,7 +695,7 @@ public class Railload : InstallationObject, ProjectF.Railway.IRailTarget
         int innerSideVertexStart = vertices.Count;
         for (int i = 0; i < centerPath.Count; i++)
         {
-            Vector3 side = ResolveFlatSide(ResolvePathTangent(centerPath, i));
+            Vector3 side = ResolveFlatSide(ResolvePathTangent(centerPath, i, tangentProbeDistance));
             Vector3 railCenter = centerPath[i] + side * trackSideOffset;
             Vector3 innerTop = railCenter + side * halfWidth;
             vertices.Add(innerTop);
@@ -695,7 +705,7 @@ public class Railload : InstallationObject, ProjectF.Railway.IRailTarget
         int bottomVertexStart = vertices.Count;
         for (int i = 0; i < centerPath.Count; i++)
         {
-            Vector3 side = ResolveFlatSide(ResolvePathTangent(centerPath, i));
+            Vector3 side = ResolveFlatSide(ResolvePathTangent(centerPath, i, tangentProbeDistance));
             Vector3 railCenter = centerPath[i] + side * trackSideOffset;
             Vector3 widthOffset = side * halfWidth;
             vertices.Add(railCenter - widthOffset + bottomOffset);
@@ -723,13 +733,13 @@ public class Railload : InstallationObject, ProjectF.Railway.IRailTarget
 
         if (capStart)
         {
-            AddRailStripCap(vertices, triangles, centerPath[0], ResolvePathTangent(centerPath, 0), trackSideOffset, halfWidth, clampedThickness, true);
+            AddRailStripCap(vertices, triangles, centerPath[0], ResolvePathTangent(centerPath, 0, tangentProbeDistance), trackSideOffset, halfWidth, clampedThickness, true);
         }
 
         if (capEnd)
         {
             int lastIndex = centerPath.Count - 1;
-            AddRailStripCap(vertices, triangles, centerPath[lastIndex], ResolvePathTangent(centerPath, lastIndex), trackSideOffset, halfWidth, clampedThickness, false);
+            AddRailStripCap(vertices, triangles, centerPath[lastIndex], ResolvePathTangent(centerPath, lastIndex, tangentProbeDistance), trackSideOffset, halfWidth, clampedThickness, false);
         }
     }
 
@@ -786,17 +796,10 @@ public class Railload : InstallationObject, ProjectF.Railway.IRailTarget
             return;
         }
 
-        float clampedSpacing = Mathf.Max(0.1f, spacing);
-        int sleeperCount = Mathf.Max(1, Mathf.FloorToInt(pathLength / clampedSpacing) + 1);
-        float endInset = sleeperCount == 1
-            ? pathLength * 0.5f
-            : Mathf.Min(clampedSpacing * 0.35f, pathLength * 0.25f);
-        float usableLength = Mathf.Max(0f, pathLength - endInset * 2f);
-        float resolvedSpacing = sleeperCount > 1 ? usableLength / (sleeperCount - 1) : 0f;
-
-        for (int i = 0; i < sleeperCount; i++)
+        var layout = ProjectF.Railway.RailSleeperLayout.Create(pathLength, spacing, false);
+        for (int i = 0; i < layout.Count; i++)
         {
-            float distance = sleeperCount == 1 ? pathLength * 0.5f : endInset + resolvedSpacing * i;
+            float distance = layout.Start + layout.Step * i;
             if (!TrySampleFlatPath(centerPath, distance, out Vector3 center, out Vector3 tangent))
             {
                 continue;
@@ -912,24 +915,45 @@ public class Railload : InstallationObject, ProjectF.Railway.IRailTarget
         return railHeight - Mathf.Max(0.001f, railThickness) + sleeperRailOverlap;
     }
 
-    private static Vector3 ResolvePathTangent(IReadOnlyList<Vector3> pathPoints, int index)
+    private static Vector3 ResolvePathTangent(IReadOnlyList<Vector3> pathPoints, int index, float probeDistance = 0.15f)
     {
-        Vector3 tangent;
-        if (index <= 0)
-        {
-            tangent = pathPoints[1] - pathPoints[0];
-        }
-        else if (index + 1 >= pathPoints.Count)
-        {
-            tangent = pathPoints[pathPoints.Count - 1] - pathPoints[pathPoints.Count - 2];
-        }
-        else
-        {
-            tangent = pathPoints[index + 1] - pathPoints[index - 1];
-        }
-
+        bool closed = pathPoints.Count > 3
+            && (pathPoints[0] - pathPoints[pathPoints.Count - 1]).sqrMagnitude <= 0.000001f;
+        if (closed && index == pathPoints.Count - 1) index = 0;
+        // Arc-distance probes prevent a long straight dominating tiny curve
+        // samples and folding offset rail triangles into back-facing holes.
+        Vector3 before = SampleRailTangentProbe(pathPoints, index, -1, probeDistance, closed);
+        Vector3 after = SampleRailTangentProbe(pathPoints, index, 1, probeDistance, closed);
+        Vector3 tangent = after - before;
+        if (tangent.sqrMagnitude <= 0.00000001f)
+            tangent = index + 1 < pathPoints.Count
+                ? pathPoints[index + 1] - pathPoints[index]
+                : pathPoints[index] - pathPoints[index - 1];
         tangent.y = 0f;
-        return tangent.sqrMagnitude > 0.0001f ? tangent.normalized : Vector3.forward;
+        return tangent.sqrMagnitude > 0.00000001f ? tangent.normalized : Vector3.forward;
+    }
+
+    private static Vector3 SampleRailTangentProbe(IReadOnlyList<Vector3> pathPoints,
+        int index, int direction, float remaining, bool closed)
+    {
+        Vector3 point = pathPoints[index];
+        for (int visited = 0; visited + 1 < pathPoints.Count; visited++)
+        {
+            int next = index + direction;
+            if (next < 0) { if (!closed) break; next = pathPoints.Count - 2; }
+            else if (next >= pathPoints.Count) { if (!closed) break; next = 1; }
+            Vector3 offset = pathPoints[next] - point;
+            offset.y = 0f;
+            float length = offset.magnitude;
+            if (length > 0.00001f)
+            {
+                if (remaining <= length) return point + offset * (remaining / length);
+                remaining -= length;
+            }
+            point = pathPoints[next];
+            index = next;
+        }
+        return point;
     }
 
     private static Vector3 ResolveFlatSide(Vector3 direction)

@@ -1,0 +1,13 @@
+Tool: built-in image_gen; transparent_background=true
+Edit target: FactorioProject/Assets/Items/Train/Diesel train/Diesel train_NoWheels_Icon.png
+Final asset: FactorioProject/Assets/Items/Train/Diesel train/Diesel train_NoWheels_Icon.png
+Export: 256x256 transparent PNG, original icon and ItemDefinition reference retained.
+
+Use case: precise-object-edit
+Asset type: transparent PNG Unity inventory icon.
+Image 1 is the current no-wheels diesel locomotive EDIT TARGET.
+Primary request: Remove ONLY the LONG VERTICAL BRASS/GOLD GRAB BAR immediately beside the driver cabin door. It is the tall yellow-gold tube running from just below the side window down almost to the cabin floor along the LEFT/front edge of the cabin's visible side door wall, with curved ends.
+Erase this entire long vertical gold bar, its curved ends and its mounting points. Reconstruct the flat dark graphite cabin wall naturally in its place, matching the surrounding steel surface, shading and outlines. Do not leave any gold stub or mounting hole.
+KEEP the SHORT U-SHAPED GOLD DOOR HANDLE at the middle of the door. KEEP ALL rear deck brass safety railings. Only the long vertical grab bar BESIDE the door must disappear.
+Preserve the current widened engine hood, two fans, exhaust, two warm ivory front headlights, two side ventilation grilles and the maintenance hatch nearest the cab, blue-gray glass front and side windows, enclosed compact cab proportions, roof and amber beacons, current moderate low rear standing deck with anti-slip floor, rear railing and entry opening, red front beam, round black coupling buffers and coupler. NO RAIL WHEELS: retain dark bogie frames and small axle-box covers, central fuel tank and structural underframe. Front engine railings remain absent. Do not alter vehicle length, hood width, cab size or deck dimensions.
+Keep all remaining details, graphite steel/brass/red palette, stylized polished 3D inventory art, crisp dark outlines, lighting, original front-left isometric camera and complete silhouette unchanged as much as possible. Single locomotive centered on a square canvas with transparent margins; no cropping, tracks, scene, ground shadow, people, text or watermark. True transparent background and clean alpha. Change only removal of the long gold vertical bar beside the cabin door.

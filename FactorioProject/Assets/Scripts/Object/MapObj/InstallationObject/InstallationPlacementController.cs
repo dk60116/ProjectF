@@ -37521,6 +37521,13 @@ public partial class InstallationPlacementController : MonoBehaviour
         MapObject footprintSource,
         InstallationObject installationObject)
     {
+        // Rails support trains instead of blocking them, regardless of prefab filters.
+        // Grid overlays and multi-cell placement must use the same support rule.
+        if (installationObject is Train)
+        {
+            return installationObject.MapFilter | InstallationMapFilter.Railload;
+        }
+
         if (footprintSource is ConveyorBelt conveyorBelt && conveyorBelt.IsCornerVariant)
         {
             ConveyorBelt straightPrefab = conveyorBelt.StraightVariantPrefab;

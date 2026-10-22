@@ -5,7 +5,8 @@ using UnityEngine.Rendering;
 namespace ProjectF.Railway
 {
     // One presentation host, with static rail meshes grouped by spatial cell.
-    // Placement changes rebuild only their cell; simulation never reads this view.
+    // Connected display runs share sleeper spacing across storage/cell boundaries.
+    // Only affected components and their mesh cells rebuild; simulation never reads this view.
     public sealed class RailWorldView : MonoBehaviour
     {
         private const float CellSize = 32;
@@ -16,6 +17,10 @@ namespace ProjectF.Railway
         private readonly List<Vector3> sleeperVertices = new List<Vector3>();
         private readonly List<int> sleeperIndices = new List<int>();
         private readonly List<Vector3> path = new List<Vector3>();
+        private readonly RailVisualNetwork visualNetwork = new RailVisualNetwork();
+        private readonly List<Vector2Int> emptyCells = new List<Vector2Int>();
+        private readonly Dictionary<RailVisualNetwork.Group, HashSet<Vector2Int>> groupCells =
+            new Dictionary<RailVisualNetwork.Group, HashSet<Vector2Int>>();
         private readonly Dictionary<InstallationObject, StationTemplate> stationTemplates = new Dictionary<InstallationObject, StationTemplate>();
         private readonly Dictionary<TrainStationInstance, SphereCollider> stationColliders = new Dictionary<TrainStationInstance, SphereCollider>();
         private bool dirty;
@@ -26,22 +31,83 @@ namespace ProjectF.Railway
             return host.AddComponent<RailWorldView>();
         }
         private static Vector2Int Key(RailwayInstance instance) => new Vector2Int(Mathf.FloorToInt(instance.WorldPosition.x / CellSize), Mathf.FloorToInt(instance.WorldPosition.z / CellSize));
+        private static Vector2Int Key(Vector3 point) => new Vector2Int(Mathf.FloorToInt(point.x / CellSize), Mathf.FloorToInt(point.z / CellSize));
         internal void Add(RailwayInstance instance)
         {
+            if (instance is RailInstance rail) { UpdateRail(rail); return; }
             var key = Key(instance);
             if (!cells.TryGetValue(key, out var cell)) cells.Add(key, cell = new Cell(key));
             cell.Instances.Add(instance); cell.Dirty = dirty = true;
         }
         internal void Remove(RailwayInstance instance)
         {
+            if (instance is RailInstance rail) { visualNetwork.Remove(rail); dirty = true; return; }
             if (cells.TryGetValue(Key(instance), out var cell)) { cell.Instances.Remove(instance); cell.Dirty = dirty = true; }
             if (instance is TrainStationInstance station && stationColliders.Remove(station, out var collider) && collider != null) Destroy(collider);
         }
         internal void Invalidate(RailwayInstance instance)
         {
+            if (instance is RailInstance rail) { UpdateRail(rail); return; }
             if (cells.TryGetValue(Key(instance), out var cell)) cell.Dirty = dirty = true;
             if (instance is TrainStationInstance station && stationColliders.TryGetValue(station, out var collider) && collider != null)
                 collider.enabled = !station.PresentationSuppressed;
+        }
+        private void UpdateRail(RailInstance rail)
+        {
+            if (rail.PresentationSuppressed) visualNetwork.Remove(rail);
+            else
+            {
+                var prototype = (Railload)rail.Prototype;
+                visualNetwork.Upsert(rail, rail.Path.Samples, rail.WorldPosition.y + prototype.VisualHeight, prototype.VisualStyle);
+            }
+            dirty = true;
+        }
+
+        private Cell EnsureCell(Vector2Int key)
+        {
+            if (!cells.TryGetValue(key, out Cell cell)) cells.Add(key, cell = new Cell(key));
+            cell.Dirty = true;
+            return cell;
+        }
+
+        private void UpdateContinuousGeometry()
+        {
+            if (!visualNetwork.Rebuild()) return;
+            for (int i = 0; i < visualNetwork.Removed.Count; i++)
+            {
+                var group = visualNetwork.Removed[i];
+                if (!groupCells.TryGetValue(group, out HashSet<Vector2Int> keys)) continue;
+                foreach (Vector2Int key in keys)
+                {
+                    Cell cell = EnsureCell(key);
+                    for (int j = cell.Runs.Count - 1; j >= 0; j--)
+                        if (ReferenceEquals(cell.Runs[j].Owner, group)) cell.Runs.RemoveAt(j);
+                    for (int j = cell.SleepersToDraw.Count - 1; j >= 0; j--)
+                        if (ReferenceEquals(cell.SleepersToDraw[j].Owner, group)) cell.SleepersToDraw.RemoveAt(j);
+                }
+                groupCells.Remove(group);
+            }
+            for (int i = 0; i < visualNetwork.Added.Count; i++)
+            {
+                var group = visualNetwork.Added[i];
+                var keys = new HashSet<Vector2Int>();
+                groupCells.Add(group, keys);
+                for (int j = 0; j < group.Runs.Count; j++)
+                {
+                    var run = group.Runs[j];
+                    Vector2Int key = Key(run.Points[0]);
+                    EnsureCell(key).Runs.Add(run);
+                    keys.Add(key);
+                }
+                for (int j = 0; j < group.Sleepers.Count; j++)
+                {
+                    var sleeper = group.Sleepers[j];
+                    Vector2Int key = Key(sleeper.Position);
+                    EnsureCell(key).SleepersToDraw.Add(sleeper);
+                    keys.Add(key);
+                }
+            }
+            visualNetwork.AcknowledgeChanges();
         }
         private void LateUpdate()
         {
@@ -53,22 +119,46 @@ namespace ProjectF.Railway
         }
         private void Rebuild()
         {
+            UpdateContinuousGeometry();
             batches.Clear();
+            emptyCells.Clear();
             foreach (var cell in cells.Values)
             {
                 if (cell.Dirty)
                 {
                     railVertices.Clear(); railIndices.Clear(); sleeperVertices.Clear(); sleeperIndices.Clear();
-                    for (int i = 0; i < cell.Instances.Count; i++)
-                        if (cell.Instances[i] is RailInstance rail && !rail.PresentationSuppressed) ((Railload)rail.Prototype).AppendDataVisual(rail, cell.Origin, railVertices, railIndices, sleeperVertices, sleeperIndices, path);
+                    for (int i = 0; i < cell.Runs.Count; i++)
+                    {
+                        var run = cell.Runs[i];
+                        path.Clear();
+                        for (int j = 0; j < run.Points.Count; j++) path.Add(run.Points[j] - cell.Origin);
+                        Railload.AppendContinuousRails(run.Owner.Style, railVertices, railIndices, path);
+                    }
+                    for (int i = 0; i < cell.SleepersToDraw.Count; i++)
+                    {
+                        var sleeper = cell.SleepersToDraw[i];
+                        Railload.AppendContinuousSleeper(sleeper.Owner.Style, sleeperVertices, sleeperIndices,
+                            sleeper.Position - cell.Origin, sleeper.Tangent);
+                    }
                     Apply(cell.Rails, railVertices, railIndices); Apply(cell.Sleepers, sleeperVertices, sleeperIndices);
                     cell.Dirty = false;
+                }
+                if (cell.Instances.Count == 0 && cell.Runs.Count == 0 && cell.SleepersToDraw.Count == 0)
+                {
+                    emptyCells.Add(cell.Key);
+                    continue;
                 }
                 AddMesh(cell.Rails, Railload.DataRailMaterial, cell);
                 AddMesh(cell.Sleepers, Railload.DataSleeperMaterial, cell);
                 for (int i = 0; i < cell.Instances.Count; i++)
                     if (cell.Instances[i] is TrainStationInstance station && !station.PresentationSuppressed) AddStation(station, cell);
             }
+            for (int i = 0; i < emptyCells.Count; i++)
+            {
+                DestroyCellMeshes(cells[emptyCells[i]]);
+                cells.Remove(emptyCells[i]);
+            }
+            emptyCells.Clear();
             dirty = false;
         }
         private void AddMesh(Mesh mesh, Material material, Cell cell)
@@ -113,17 +203,20 @@ namespace ProjectF.Railway
         private void OnDestroy()
         {
             batches.Dispose();
-            foreach (var cell in cells.Values)
-            {
-                if (Application.isPlaying) { Destroy(cell.Rails); Destroy(cell.Sleepers); }
-                else { DestroyImmediate(cell.Rails); DestroyImmediate(cell.Sleepers); }
-            }
+            foreach (var cell in cells.Values) DestroyCellMeshes(cell);
+        }
+        private static void DestroyCellMeshes(Cell cell)
+        {
+            if (Application.isPlaying) { Destroy(cell.Rails); Destroy(cell.Sleepers); }
+            else { DestroyImmediate(cell.Rails); DestroyImmediate(cell.Sleepers); }
         }
         private sealed class Cell
         {
             internal readonly Vector2Int Key;
             internal readonly Vector3 Origin;
             internal readonly List<RailwayInstance> Instances = new List<RailwayInstance>();
+            internal readonly List<RailVisualNetwork.Run> Runs = new List<RailVisualNetwork.Run>();
+            internal readonly List<RailVisualNetwork.Sleeper> SleepersToDraw = new List<RailVisualNetwork.Sleeper>();
             internal readonly Mesh Rails = new Mesh { name = "Rail cell", hideFlags = HideFlags.HideAndDontSave };
             internal readonly Mesh Sleepers = new Mesh { name = "Sleeper cell", hideFlags = HideFlags.HideAndDontSave };
             internal bool Dirty;
