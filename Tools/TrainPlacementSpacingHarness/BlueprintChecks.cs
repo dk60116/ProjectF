@@ -70,14 +70,18 @@ static class BlueprintChecks
         Check(Vector2.Distance(curvedPlacement, new Vector2(3f, 0f)) > 0.05f,
             "A first train on a curved cell must retain continuous rail placement");
 
-        var longCar = Car(straight, 3f);
-        longCar.CollisionHalfExtents = new Vector2(0.3f, 0.625f);
+        var longCar = new Train
+        {
+            BodyCollider = new BoxCollider { center = Vector3.zero, size = new Vector3(0.6f, 1f, 1.25f) }
+        };
+        longCar.TryApplyRailPose(straight, 3f, new Vector2(3f, 0f), Vector2.right);
+        longCar.Rail = null;
         var blueprint = Car(straight, 7f);
         var longController = new InstallationPlacementController(straight);
         longController.Previews.Add(longCar);
         longController.Previews.Add(blueprint);
         Check(longController.Snap(blueprint, straight, 3.85f, out var longSnap), "A longer body must still accept a nearby blueprint");
-        Check(longSnap.x >= 4.12f && longSnap.x <= 4.16f, "Preview must find touching clearance instead of forcing overlapping one-cell centers");
+        Check(Math.Abs(longSnap.x - 4.125f) < .0003f, "Preview must use exact physical coupling reaches when a body exceeds its one-cell footprint");
 
         var blocker = Car(straight, 4f);
         longController.Previews.Add(blocker);
@@ -215,6 +219,8 @@ public readonly struct PreviewRotation
     PreviewRotation(Vector3 forward) { this.forward = forward.normalized; }
     public static PreviewRotation identity => new PreviewRotation(Vector3.forward);
     public static PreviewRotation LookRotation(Vector3 forward, Vector3 up) => new PreviewRotation(forward);
+    public static PreviewRotation Euler(float x, float y, float z)
+        => new PreviewRotation(new Vector3(MathF.Sin(y * Mathf.Deg2Rad), 0, MathF.Cos(y * Mathf.Deg2Rad)));
     public Vector3 eulerAngles => new Vector3(0, MathF.Atan2(forward.x, forward.z) * Mathf.Rad2Deg, 0);
     public static implicit operator Quaternion(PreviewRotation rotation)
     {

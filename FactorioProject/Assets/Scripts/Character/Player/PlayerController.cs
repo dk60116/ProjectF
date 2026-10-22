@@ -7115,11 +7115,7 @@ public partial class PlayerController : MonoBehaviour
         Vector2 size = new Vector2(
             Mathf.Max(1, train.Status.mapSizeX),
             Mathf.Max(1, train.Status.mapSizeY));
-        Vector2Int anchor = train.PlacementCenterCell;
-        Vector3 localCenter = new Vector3(
-            (size.x - 1f) * 0.5f - anchor.x,
-            0f,
-            (size.y - 1f) * 0.5f - anchor.y);
+        Vector3 localCenter = train.ResolveFootprintLocalCenter();
         Vector2Int anchorCoordinate = train.TryGetPlacementRuntime(out Vector2Int coordinate, out _)
             ? coordinate
             : block.Coordinate;

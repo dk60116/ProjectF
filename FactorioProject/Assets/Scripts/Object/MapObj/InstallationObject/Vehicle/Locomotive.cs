@@ -85,7 +85,6 @@ public class Locomotive : RailHandcar,
     private const float BurnEnergyEpsilon = 0.0001f;
     private const float WaterEpsilon = 0.0001f;
     private const float BurnEnergyDrivingSpeedThreshold = 0.0001f;
-    private const float RearFreightCarMinBehindDistance = 0.01f;
     private const float WaterUseRatePerSecond = 0.8f;
     private const float WaterPipeDockRailCoordinateSampleMaxDistance = 0.6f;
     private const float WaterPipeDockFacingDotEpsilon = 0.05f;
@@ -1344,54 +1343,32 @@ public class Locomotive : RailHandcar,
     internal bool TryGetRearFreightCar(out FreightCar freightCar)
     {
         freightCar = null;
-        if (!TryResolveForward2D(out Vector2 forward))
-        {
-            return false;
-        }
-
-        Vector2 position = new Vector2(transform.position.x, transform.position.z);
-        float bestRearScore = 0f;
+        Vector2 position = ResolveRailAnchorPoint();
+        float bestDistanceSqr = float.PositiveInfinity;
+        // A bend can move the rear car across the engine's tangent plane; the
+        // recorded physical coupling end, not a world-space dot, owns this role.
         foreach (Train connectedTrain in ConnectedTrains)
         {
             if (connectedTrain is not FreightCar candidate
                 || candidate == null
-                || !candidate.gameObject.activeInHierarchy)
+                || !candidate.gameObject.activeInHierarchy
+                || !TryGetConnectionFacingSign(candidate, true, out float endSign)
+                || endSign >= 0f)
             {
                 continue;
             }
 
-            Vector3 candidatePosition = candidate.transform.position;
-            Vector2 delta = new Vector2(candidatePosition.x, candidatePosition.z) - position;
-            float rearScore = -Vector2.Dot(delta, forward);
-            if (rearScore <= RearFreightCarMinBehindDistance || rearScore <= bestRearScore)
+            float distanceSqr = (candidate.ResolveRailAnchorPoint() - position).sqrMagnitude;
+            if (distanceSqr >= bestDistanceSqr)
             {
                 continue;
             }
 
-            bestRearScore = rearScore;
+            bestDistanceSqr = distanceSqr;
             freightCar = candidate;
         }
 
         return freightCar != null;
-    }
-
-    private bool TryResolveForward2D(out Vector2 forward)
-    {
-        if (TryGetCurrentRailPose(out _, out _, out _, out forward)
-            && forward.sqrMagnitude > 0.0001f)
-        {
-            forward.Normalize();
-            return true;
-        }
-
-        forward = new Vector2(transform.forward.x, transform.forward.z);
-        if (forward.sqrMagnitude <= 0.0001f)
-        {
-            return false;
-        }
-
-        forward.Normalize();
-        return true;
     }
 
     private bool TryResolveWaterPipeDockSample(

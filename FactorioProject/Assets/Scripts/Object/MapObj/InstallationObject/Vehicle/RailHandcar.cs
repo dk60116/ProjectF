@@ -465,7 +465,7 @@ public class RailHandcar : Train
         float inputMagnitude = Mathf.Clamp01(inputVector.magnitude);
         bool hasInput = inputMagnitude > railInputDeadZone;
         Vector2 inputDirection = hasInput ? inputVector / inputMagnitude : Vector2.zero;
-        Vector2 currentPoint = new Vector2(transform.position.x, transform.position.z);
+        Vector2 currentPoint = ResolveRailAnchorPoint();
         float maxSqrDistance = railSnapMaxDistance * railSnapMaxDistance;
 
         Vector2 sampleSearchDirection = hasInput ? inputDirection : ResolveCoastTravelDirection();
@@ -898,7 +898,7 @@ public class RailHandcar : Train
         {
             if (connectedTrainGroupScratch[i] is not RailHandcar candidate
                 || !TryBuildCurrentRailSample(candidate, out RailSample candidateSample)
-                || !TryFindStationDockSample(
+                || !candidate.TryFindStationDockSample(
                     candidateSample,
                     out RailSample candidateDockSample,
                     out float candidateSignedPathDelta))
@@ -1155,14 +1155,13 @@ public class RailHandcar : Train
         out float signedPathDelta)
     {
         signedPathDelta = 0f;
-        if (!TryGetCurrentRailPose(out ProjectF.Railway.IRailTarget currentRail, out float currentDistanceAlongPath, out _, out _)
-            || currentRail == null
-            || !TryFindRailDockSampleAtCoordinate(railCoordinate, currentRail, out RailSample dockSample))
+        if (!TryBuildCurrentRailSample(this, out RailSample currentSample)
+            || !TryFindStationCenterDockSample(railCoordinate, currentSample, out RailSample dockSample))
         {
             return false;
         }
 
-        signedPathDelta = dockSample.DistanceAlongPath - currentDistanceAlongPath;
+        signedPathDelta = dockSample.DistanceAlongPath - currentSample.DistanceAlongPath;
         return true;
     }
 
@@ -1171,41 +1170,23 @@ public class RailHandcar : Train
         float deltaTime,
         bool snapToDock)
     {
-        if (!TryGetCurrentRailPose(
-                out ProjectF.Railway.IRailTarget currentRail,
-                out float currentDistanceAlongPath,
-                out Vector2 currentPoint,
-                out Vector2 currentTangent)
-            || currentRail == null
-            || !TryFindRailDockSampleAtCoordinate(
-                railCoordinate,
-                currentRail,
-                out RailSample dockSample))
+        if (!TryBuildCurrentRailSample(this, out RailSample currentSample)
+            || !TryFindStationCenterDockSample(railCoordinate, currentSample, out RailSample dockSample))
         {
             return false;
         }
 
-        RailSample currentSample = new RailSample
-        {
-            Rail = currentRail,
-            DistanceAlongPath = currentDistanceAlongPath,
-            Point = currentPoint,
-            Tangent = currentTangent.sqrMagnitude > 0.0001f
-                ? currentTangent
-                : dockSample.Tangent,
-            SqrDistance = 0f
-        };
         Vector2 facingTangent = ResolveFacingTangent(
             currentSample.Tangent,
-            currentTangent.sqrMagnitude > 0.0001f
-                ? currentTangent
+            currentSample.Tangent.sqrMagnitude > 0.0001f
+                ? currentSample.Tangent
                 : ResolveReferenceFacing());
         if (facingTangent.sqrMagnitude <= 0.0001f)
         {
             return false;
         }
 
-        float signedPathDelta = dockSample.DistanceAlongPath - currentDistanceAlongPath;
+        float signedPathDelta = dockSample.DistanceAlongPath - currentSample.DistanceAlongPath;
         return TryApplyDockingToSample(
             currentSample,
             facingTangent,
@@ -1222,6 +1203,25 @@ public class RailHandcar : Train
         out RailSample dockSample)
     {
         return TryFindStationRailDockSample(railCoordinate, currentRail, out dockSample);
+    }
+
+    private bool TryFindStationCenterDockSample(
+        Vector2Int coordinate,
+        RailSample currentSample,
+        out RailSample dockSample)
+    {
+        if (!TryFindStationRailDockSample(coordinate, currentSample.Rail, out dockSample)) return false;
+        float offset = ResolveStationCenterOffset();
+        if (Mathf.Abs(offset) <= 0.0001f) return true;
+
+        Vector2 pathTangent = ResolveRailPathTangent(currentSample);
+        if (pathTangent.sqrMagnitude <= 0.0001f || currentSample.Tangent.sqrMagnitude <= 0.0001f) return false;
+        float facingSign = Vector2.Dot(pathTangent, currentSample.Tangent) < 0f ? -1f : 1f;
+        float rootDistance = dockSample.DistanceAlongPath - offset * facingSign;
+        if (!currentSample.Rail.TryGetRenderedPathLength(out float length)
+            || rootDistance < 0f || rootDistance > length) return false;
+
+        return TryCreateRailSampleAtDistance(currentSample.Rail, rootDistance, out dockSample);
     }
 
     private bool TryFindStationDockSample(
@@ -1248,9 +1248,9 @@ public class RailHandcar : Train
             ProjectF.Railway.ITrainStationTarget station = stationCandidateScratch[i];
             if (station == null
                 || !station.TryGetRailCoordinate(out Vector2Int railCoordinate)
-                || !TryFindStationRailDockSample(
+                || !TryFindStationCenterDockSample(
                     railCoordinate,
-                    currentSample.Rail,
+                    currentSample,
                     out RailSample candidateSample))
             {
                 continue;
@@ -1348,7 +1348,7 @@ public class RailHandcar : Train
         }
 
         direction.Normalize();
-        Vector2 currentPoint = new Vector2(transform.position.x, transform.position.z);
+        Vector2 currentPoint = ResolveRailAnchorPoint();
         float maxSqrDistance = railSnapMaxDistance * railSnapMaxDistance;
         if (!TryGetStoredRailSample(currentPoint, maxSqrDistance, out RailSample currentSample)
             && !TryFindBestRailSample(currentPoint, direction, maxSqrDistance, out currentSample))
@@ -1515,7 +1515,7 @@ public class RailHandcar : Train
             return;
         }
 
-        Vector2 currentPoint = new Vector2(transform.position.x, transform.position.z);
+        Vector2 currentPoint = ResolveRailAnchorPoint();
         float maxRetainDistance = Mathf.Max(railSnapMaxDistance, ResolveRailConnectionMaxDistance());
         if (!lockedBranchRail.TryFindNearestRenderedPathSample(
                 currentPoint,
@@ -1564,10 +1564,17 @@ public class RailHandcar : Train
         List<ConsistPathSample> pathSamples = null,
         float pathStartDistance = 0f,
         bool usePreferredConnectedRailTravelDirection = false,
-        bool allowRailConnectionBridgeInterpolation = false)
+        bool allowRailConnectionBridgeInterpolation = false,
+        bool readOnlyProbe = false)
     {
         targetSample = startSample;
         traveledDistance = 0f;
+        if (readOnlyProbe)
+        {
+            usePreferredConnectedRailTravelDirection = false;
+            // An inferred bridge has no authoritative next rail to inspect.
+            if (IsRailConnectionBridgeSample(startSample) && !HasRailConnectionBridgeState(startSample)) return false;
+        }
         float remainingDistance = Mathf.Max(0f, moveDistance);
         AddConsistPathSample(pathSamples, pathStartDistance, startSample);
         if (remainingDistance <= 0.0001f)
@@ -1678,11 +1685,11 @@ public class RailHandcar : Train
 
             exitDirection.Normalize();
             RailSample connectedSample = default;
-            if (!TryFindConnectedRailSample(
-                    endpointSample,
-                    exitDirection,
-                    currentSample.Rail,
-                    out connectedSample))
+            bool foundConnection = readOnlyProbe
+                ? TryFindConnectedRailSample(endpointSample, exitDirection, currentSample.Rail,
+                    null, out connectedSample, ignoreRouting: true)
+                : TryFindConnectedRailSample(endpointSample, exitDirection, currentSample.Rail, out connectedSample);
+            if (!foundConnection)
             {
                 return false;
             }
@@ -2216,7 +2223,7 @@ public class RailHandcar : Train
     {
         currentSample = default;
         currentFacing = previousFacing;
-        Vector2 currentPoint = new Vector2(transform.position.x, transform.position.z);
+        Vector2 currentPoint = ResolveRailAnchorPoint();
         Vector2 searchDirection = travelDirection.sqrMagnitude > 0.0001f
             ? travelDirection
             : previousFacing;
@@ -2645,7 +2652,8 @@ public class RailHandcar : Train
                     routeLeaderTravelDirection);
             LogRailFacingDiscontinuity("ApplyConsistPose", railMove.Train, railMove.StartSample, railMove.TargetSample,
                 railMove.StartFacingTangent, facingTangent, routeLeaderTravelDirection);
-            ApplyConnectedTrainRailPose(railMove.Train, railMove.TargetSample, facingTangent, deltaTime);
+            ApplyConnectedTrainRailPose(railMove.Train, railMove.TargetSample, facingTangent, deltaTime,
+                leaderEndPathDistance - railMove.FollowOffset);
             RotateConnectedTrainWheels(
                 railMove.Train,
                 EstimateSignedRailSampleMoveDistance(
@@ -3002,7 +3010,7 @@ public class RailHandcar : Train
         }
 
         travelDirection.Normalize();
-        Vector2 currentPoint = new Vector2(transform.position.x, transform.position.z);
+        Vector2 currentPoint = ResolveRailAnchorPoint();
         float maxSqrDistance = railSnapMaxDistance * railSnapMaxDistance;
         if (TryGetStoredRailSample(currentPoint, maxSqrDistance, out RailSample currentSample)
             || TryFindBestRailSample(currentPoint, travelDirection, maxSqrDistance, out currentSample))
@@ -3060,7 +3068,7 @@ public class RailHandcar : Train
                 continue;
             }
 
-            Vector2 trainPoint = new Vector2(train.transform.position.x, train.transform.position.z);
+            Vector2 trainPoint = train.ResolveRailAnchorPoint();
             if (Vector2.Dot(trainPoint - currentPoint, travelDirection) > minAheadDistance)
             {
                 return true;
@@ -6100,9 +6108,7 @@ public class RailHandcar : Train
             return false;
         }
 
-        Vector2 currentPoint = new Vector2(
-            train.transform.position.x,
-            train.transform.position.z);
+        Vector2 currentPoint = train.ResolveRailAnchorPoint();
         if (train.TryGetCurrentRailSample(
                 currentPoint,
                 maxSqrDistance,
@@ -6224,7 +6230,8 @@ public class RailHandcar : Train
         Train train,
         RailSample sample,
         Vector2 facingTangent,
-        float deltaTime)
+        float deltaTime,
+        float? bodyPathDistance = null)
     {
         if (train == null || sample.Rail == null)
         {
@@ -6233,13 +6240,17 @@ public class RailHandcar : Train
 
         if (train is RailHandcar handcar)
         {
-            handcar.ApplyRailPose(sample, facingTangent, deltaTime, true, false, true);
+            ProjectF.Railway.TrainBodyRailPose? bodyPose = TryResolveTrainBodyRailPose(
+                train, sample, facingTangent, out var resolvedBodyPose, bodyPathDistance) ? resolvedBodyPose : (ProjectF.Railway.TrainBodyRailPose?)null;
+            handcar.ApplyRailPose(sample, facingTangent, deltaTime, true, false, true, bodyPose);
             railMovementTransformsDirty = true;
             return;
         }
 
         if (train is FreightCar freightCar)
         {
+            ProjectF.Railway.TrainBodyRailPose? bodyPose = TryResolveTrainBodyRailPose(
+                train, sample, facingTangent, out var resolvedBodyPose, bodyPathDistance) ? resolvedBodyPose : (ProjectF.Railway.TrainBodyRailPose?)null;
             if (freightCar.TryApplyRailPose(
                 sample.Rail,
                 sample.DistanceAlongPath,
@@ -6247,7 +6258,8 @@ public class RailHandcar : Train
                 facingTangent,
                 deltaTime,
                 true,
-                true))
+                true,
+                bodyPose))
             {
                 StoreRailConnectionTransition(train, sample);
                 railMovementTransformsDirty = true;
@@ -6265,6 +6277,55 @@ public class RailHandcar : Train
             StoreRailConnectionTransition(train, sample);
             railMovementTransformsDirty = true;
         }
+    }
+
+    private bool TryResolveTrainBodyRailPose(
+        Train train, RailSample sample, Vector2 physicalForward,
+        out ProjectF.Railway.TrainBodyRailPose pose, float? bodyPathDistance = null)
+    {
+        pose = default;
+        if (!ProjectF.Railway.TrainBodyRailPose.TryGetSupportOffsets(train, out float rear, out float front)) return false;
+        float pathSign = bodyPathDistance.HasValue && Vector2.Dot(physicalForward,
+            ResolveConsistPathForward(bodyPathDistance.Value, sample, physicalForward)) < 0f ? -1f : 1f;
+        if (!TrySampleTrainBodySupport(sample, physicalForward, rear, out Vector2 rearPoint, bodyPathDistance, pathSign)
+            || !TrySampleTrainBodySupport(sample, physicalForward, front, out Vector2 frontPoint, bodyPathDistance, pathSign)) return false;
+        return ProjectF.Railway.TrainBodyRailPose.TrySolve(rearPoint, frontPoint, rear, front, physicalForward, out pose);
+    }
+
+    private bool TrySampleTrainBodySupport(RailSample sample, Vector2 physicalForward, float offset, out Vector2 point,
+        float? bodyPathDistance = null, float pathSign = 1f)
+    {
+        point = sample.Point;
+        if (Mathf.Abs(offset) <= 0.0001f) return true;
+        // Followers must use the leader's recorded branch, not discover a new one.
+        if (bodyPathDistance.HasValue && TrySampleConsistPathTape(bodyPathDistance.Value + offset * pathSign,
+                out RailSample recordedSupport, false))
+        {
+            point = recordedSupport.Point;
+            return true;
+        }
+        Vector2 direction = physicalForward * Mathf.Sign(offset);
+        if (HasRailConnectionBridgeState(sample))
+        {
+            Vector2 bridgeForward = physicalForward * pathSign;
+            if (!bodyPathDistance.HasValue && sample.Rail.TryGetRenderedPathLength(out float length)
+                && sample.Rail.TrySampleRenderedPath(sample.DistanceAlongPath, out _, out Vector2 sourceTangent))
+            {
+                float exitSign = sample.DistanceAlongPath <= RailConnectionDistanceEpsilon ? -1f
+                    : sample.DistanceAlongPath >= length - RailConnectionDistanceEpsilon ? 1f
+                    : Mathf.Sign(Vector2.Dot(sourceTangent, sample.Tangent));
+                bridgeForward = sourceTangent * exitSign;
+            }
+            if (Vector2.Dot(direction, bridgeForward) < 0f)
+                sample = ReverseRailConnectionBridgeSample(sample);
+        }
+        if (TryAdvanceAlongRailNetwork(sample, direction, Mathf.Abs(offset), out RailSample support, out _,
+                allowRailConnectionBridgeInterpolation: true, readOnlyProbe: true))
+        {
+            point = support.Point;
+            return true;
+        }
+        return false;
     }
 
     private void RotateConnectedTrainWheels(Train train, float signedWheelDistance)
@@ -6862,7 +6923,8 @@ public class RailHandcar : Train
         Vector2 exitDirection,
         ProjectF.Railway.IRailTarget excludedRail,
         ProjectF.Railway.IRailTarget preferredRail,
-        out RailSample connectedSample)
+        out RailSample connectedSample,
+        bool ignoreRouting = false)
     {
         connectedSample = default;
         if (preferredRail != null
@@ -6876,15 +6938,16 @@ public class RailHandcar : Train
             return true;
         }
 
-        bool restrictConnectedRailSelection =
-            ShouldRestrictConnectedRailSelection(endpointSample, exitDirection, excludedRail);
+        bool restrictConnectedRailSelection = !ignoreRouting
+            && ShouldRestrictConnectedRailSelection(endpointSample, exitDirection, excludedRail);
 
         if (!TryCollectConnectedRailSamples(
                 endpointSample,
                 exitDirection,
                 excludedRail,
                 railConnectionSampleScratch,
-                true))
+                true,
+                ignoreRouting))
         {
             return false;
         }
@@ -6934,7 +6997,8 @@ public class RailHandcar : Train
         Vector2 exitDirection,
         ProjectF.Railway.IRailTarget excludedRail,
         List<RailSample> results,
-        bool requireDirectionalMatch)
+        bool requireDirectionalMatch,
+        bool ignoreRouting = false)
     {
         results.Clear();
         if (endpointSample.Rail == null || exitDirection.sqrMagnitude <= 0.0001f)
@@ -6990,11 +7054,11 @@ public class RailHandcar : Train
             if (requireDirectionalMatch
                 && progress <= 0.01f
                 && directionScore < 0.12f
-                && !ShouldAllowLowProgressConnectedRailCandidate(
+                && (ignoreRouting || !ShouldAllowLowProgressConnectedRailCandidate(
                     endpointSample,
                     exitDirection,
                     excludedRail,
-                    candidateSample))
+                    candidateSample)))
             {
                 continue;
             }
@@ -7320,7 +7384,8 @@ public class RailHandcar : Train
         float deltaTime = 0f,
         bool smoothRotation = false,
         bool syncPhysics = true,
-        bool preserveSuppliedFacing = false)
+        bool preserveSuppliedFacing = false,
+        ProjectF.Railway.TrainBodyRailPose? bodyPose = null)
     {
         if (sample.Rail == null)
         {
@@ -7346,19 +7411,22 @@ public class RailHandcar : Train
             new Vector3(facingTangent.x, 0f, facingTangent.y),
             Vector3.up);
         Quaternion rotation = targetRotation;
-        if (smoothRotation && deltaTime > 0f)
+        if (smoothRotation && deltaTime > 0f && Status.mapSizeY <= 1)
         {
             float interpolation = 1f - Mathf.Exp(
                 -Mathf.Max(0.01f, railRotationInterpolationSpeed) * deltaTime);
             rotation = Quaternion.Slerp(transform.rotation, targetRotation, interpolation);
         }
 
+        if (!bodyPose.HasValue && TryResolveTrainBodyRailPose(this, sample, facingTangent, out var resolvedBodyPose))
+            bodyPose = resolvedBodyPose;
         if (!ApplyRailPoseToRail(
                 sample.Rail,
                 sample.DistanceAlongPath,
                 sample.Point,
                 facingTangent,
-                rotation))
+                rotation,
+                bodyPose))
         {
             return;
         }

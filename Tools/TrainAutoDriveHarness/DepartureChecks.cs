@@ -64,7 +64,7 @@ public partial class RailHandcar
     void RotateConnectedTrainWheels(Train train, float distance) { }
     static float EstimateSignedRailSampleMoveDistance(Train train, RailSample a, RailSample b)
         => Vector2.Distance(a.Point, b.Point);
-    void ApplyConnectedTrainRailPose(Train train, RailSample sample, Vector2 facing, float dt)
+    void ApplyConnectedTrainRailPose(Train train, RailSample sample, Vector2 facing, float dt, float? bodyPathDistance = null)
     {
         train.Rail = sample.Rail;
         train.Distance = sample.DistanceAlongPath;

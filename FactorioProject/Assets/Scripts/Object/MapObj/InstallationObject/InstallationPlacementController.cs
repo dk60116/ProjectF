@@ -16428,64 +16428,64 @@ public partial class InstallationPlacementController : MonoBehaviour
         }
 
         if (!trainPlacementSpacing.TryPrepareConnectionRoute(
-                otherRail, otherDistance, referenceSample.Rail, referenceSample.DistanceAlongPath)) return;
+                otherRail, otherDistance, referenceSample.Rail, referenceSample.DistanceAlongPath)
+            || !trainPlacementSpacing.TrySampleConnectionOffset(0f,
+                out _, out _, out _, out Vector2 routeForward)) return;
 
-        // Find the closest non-overlapping end position along this rail route.
-        // Complete subsequently normalizes gaps to each pair's coupling reaches.
-        const float searchStep = 0.05f;
-        for (float offset = Train.ConnectionCenterDistance; offset <= maxCenterDistance + 0.0001f; offset += searchStep)
+        bool otherAtFront = Vector2.Dot(otherFacing, routeForward) >= 0f;
+        float otherReach = other.ResolveConnectionReach(otherAtFront);
+        int headingCount = sourceTrain is Locomotive ? 2 : 1;
+        for (int heading = 0; heading < headingCount; heading++)
         {
-            if (!trainPlacementSpacing.TrySampleConnectionOffset(offset,
-                    out ProjectF.Railway.IRailTarget candidateRail, out float candidateDistance, out Vector2 candidatePoint, out Vector2 tangent)) continue;
-            if (!TryResolveTrainConnectionPlacementFacing(
-                    sourceTrain, candidatePoint, tangent, referenceFacing,
-                    other, otherPoint, otherFacing, out Vector2 facing)) continue;
-            Vector3 candidatePosition = new Vector3(candidatePoint.x, referencePosition.y, candidatePoint.y);
-            float distanceSqr = (candidatePosition - referencePosition).sqrMagnitude;
-            if (distanceSqr > snapDistance * snapDistance) continue;
-            Quaternion candidateRotation = Quaternion.LookRotation(new Vector3(facing.x, 0f, facing.y), Vector3.up);
-            if (!CanPlaceTrainAtPose(sourcePrefab, candidatePosition, candidateRotation, previewToIgnore)) continue;
-            if (distanceSqr < bestDistanceSqr)
+            bool foundHeading = false;
+            for (int end = 0; end < 2; end++)
             {
-                bestDistanceSqr = distanceSqr;
-                position = candidatePosition;
-                rotation = candidateRotation;
-                railSample = new TrainPlacementRailSample
+                bool sourceAtFront = end != 0;
+                // Coupling pitch is defined by occupied cells, not the first
+                // collision-free body position. Shorter colliders must not shrink it.
+                float couplingOffset = otherReach + sourceTrain.ResolveConnectionReach(sourceAtFront);
+                const float pathClearanceStep = 0.05f;
+                bool allowPathClearance = false;
+                int maxCorrections = Mathf.CeilToInt(snapDistance / pathClearanceStep);
+                for (int correction = 0; correction <= maxCorrections; correction++)
                 {
-                    Rail = candidateRail, DistanceAlongPath = candidateDistance,
-                    Point = candidatePoint, Tangent = tangent, SqrDistance = 0f
-                };
+                    if (correction > 0 && !allowPathClearance) break;
+                    float offset = couplingOffset + correction * pathClearanceStep;
+                    if (!trainPlacementSpacing.TrySampleConnectionOffset(offset,
+                            out ProjectF.Railway.IRailTarget candidateRail, out float candidateDistance,
+                            out Vector2 candidatePoint, out Vector2 tangent)) continue;
+                    // Curves and junction bridges may need extra clearance, never
+                    // less than nominal pitch. A straight segment stays aligned.
+                    if (correction == 0)
+                        allowPathClearance = candidateRail != otherRail
+                            || Mathf.Abs(Vector2.Dot(otherFacing.normalized, tangent.normalized)) < 0.999f;
+                    Vector2 facing = ResolveTrainPlacementFacingTangent(tangent, referenceFacing);
+                    if (heading != 0) facing = -facing;
+                    if ((Vector2.Dot(facing, tangent) < 0f) != sourceAtFront
+                        || !Train.CanConnectByPose(sourceTrain, candidatePoint, facing, other, otherPoint, otherFacing)) continue;
+                    Vector3 candidatePosition = new Vector3(candidatePoint.x, referencePosition.y, candidatePoint.y);
+                    float distanceSqr = (candidatePosition - referencePosition).sqrMagnitude;
+                    if (distanceSqr > snapDistance * snapDistance) continue;
+                    Quaternion candidateRotation = Quaternion.LookRotation(new Vector3(facing.x, 0f, facing.y), Vector3.up);
+                    if (!CanPlaceTrainAtPose(sourcePrefab, candidatePosition, candidateRotation, previewToIgnore)) continue;
+                    foundHeading = true;
+                    if (distanceSqr < bestDistanceSqr)
+                    {
+                        bestDistanceSqr = distanceSqr;
+                        position = candidatePosition;
+                        rotation = candidateRotation;
+                        railSample = new TrainPlacementRailSample
+                        {
+                            Rail = candidateRail, DistanceAlongPath = candidateDistance,
+                            Point = candidatePoint, Tangent = tangent, SqrDistance = 0f
+                        };
+                    }
+                    break;
+                }
             }
-            break;
+            // Preserve the selected heading whenever it has a valid connection.
+            if (foundHeading) return;
         }
-    }
-
-    private static bool TryResolveTrainConnectionPlacementFacing(
-        Train sourceTrain,
-        Vector2 candidatePoint,
-        Vector2 railTangent,
-        Vector2 referenceFacing,
-        Train other,
-        Vector2 otherPoint,
-        Vector2 otherFacing,
-        out Vector2 facing)
-    {
-        facing = ResolveTrainPlacementFacingTangent(railTangent, referenceFacing);
-        if (Train.CanConnectByPose(sourceTrain, candidatePoint, facing, other, otherPoint, otherFacing))
-        {
-            return true;
-        }
-
-        // Keep the selected heading whenever it can couple. A newly placed
-        // locomotive may turn around only when its tail otherwise faces away
-        // from the adjacent car.
-        if (!(sourceTrain is Locomotive))
-        {
-            return false;
-        }
-
-        facing = -facing;
-        return Train.CanConnectByPose(sourceTrain, candidatePoint, facing, other, otherPoint, otherFacing);
     }
 
     private bool CanPlaceTrainAtPose(
@@ -16589,14 +16589,16 @@ public partial class InstallationPlacementController : MonoBehaviour
         if (width == 1 && length == 1) return true;
         TerrainGenerator terrain = ResolveInstallPreviewTerrain();
         if (terrain == null) return false;
-        Vector2Int center = source.PlacementCenterCell;
+        Vector3 localOrigin = source is Train train
+            ? train.ResolveFootprintLocalCenter() - new Vector3((width - 1) * 0.5f, 0f, (length - 1) * 0.5f)
+            : new Vector3(-source.PlacementCenterCell.x, 0f, -source.PlacementCenterCell.y);
         Vector2Int anchor = RoundWorldPositionToCoordinate(position);
         int quarterTurns = Mathf.RoundToInt(rotation.eulerAngles.y / 90f);
         bool blocksDroppedItems = !AllowsPlacementOverDroppedFloorObjects(source);
         for (int y = 0; y < length; y++)
         for (int x = 0; x < width; x++)
         {
-            Vector3 point = position + rotation * new Vector3(x - center.x, 0f, y - center.y);
+            Vector3 point = position + rotation * (localOrigin + new Vector3(x, 0f, y));
             Vector2Int coordinate = RoundWorldPositionToCoordinate(point);
             if (!terrain.TryGetLoadedBlock(coordinate, out Block block) || block == null
                 || (blocksDroppedItems && terrain.HasDroppedFloorObjectsAt(coordinate))

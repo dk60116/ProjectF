@@ -170,15 +170,24 @@ public partial class RailHandcar
     Vector2 testRouteTravelDirection;
 
     // Network search is not used when the bridge retains its resolved target.
+    int BodyRoutingQueries;
     bool TryFindConnectedRailSample(RailSample endpoint, Vector2 direction, Railload excluded, out RailSample sample)
+    {
+        BodyRoutingQueries++;
+        return TryFindConnectedRailSample(endpoint, direction, excluded, null, out sample);
+    }
+
+    bool TryFindConnectedRailSample(RailSample endpoint, Vector2 direction, Railload excluded,
+        Railload preferred, out RailSample sample, bool ignoreRouting = false)
     {
         sample = default;
         if (EndStopRails == null) throw new Exception("Stored bridge must not search the network again");
         foreach (var rail in EndStopRails)
         {
             if (rail == excluded) continue;
-            foreach (bool start in new[] { true, false })
+            for (int end = 0; end < 2; end++)
             {
+                bool start = end == 0;
                 if (!rail.TryGetRenderedEndpointSample(start, out float distance, out var point, out var tangent)
                     || Vector2.Distance(point, endpoint.Point) > .081f
                     || Vector2.Dot(start ? tangent : -tangent, direction) < .5f) continue;

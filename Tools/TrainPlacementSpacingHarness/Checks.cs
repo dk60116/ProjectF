@@ -116,6 +116,10 @@ static class Checks
         EditChecks.Run();
         WorldChecks.Run();
         LongCarChecks.Run();
+        PlayerController.RunTrainFocusChecks();
+        FreightCar.RunFuelRoleChecks();
+        RailHandcar.RunCurveBodyChecks();
+        RailHandcar.RunStationCenterChecks();
         Console.WriteLine($"Train spacing harness passed: {checks} checks");
     }
 }
@@ -128,6 +132,7 @@ public class MapObject
     public (byte mapSizeX, byte mapSizeY) Status = (1, 1);
     public Vector2Int PlacementCenterCell;
     public BoxCollider BodyCollider;
+    public ItemDefinition BoundItemDefinition;
     public T GetComponent<T>() where T : class => BodyCollider as T;
     protected virtual void OnEnable() { }
     protected virtual void OnDisable() { }
@@ -140,13 +145,33 @@ public class MapObject
         OnPlacementRuntimeCleared();
     }
 }
+public class ItemDefinition { public MapObject mapObject; public Sprite icon; }
 public static class ProjectFApplicationLifecycle { public static bool IsQuitting; }
 public class FakeTransform
 {
+    public FakeTransform parent;
     public Vector3 position;
+    public Vector3 localPosition;
     public Vector3 lossyScale = Vector3.one;
     public PreviewRotation rotation = PreviewRotation.identity;
+    public Vector3 eulerAngles => rotation.eulerAngles;
     public Vector3 forward => rotation * Vector3.forward;
+    public void SetPositionAndRotation(Vector3 position, PreviewRotation rotation)
+    { this.position = position; this.rotation = rotation; }
+    public Vector3 TransformPoint(Vector3 local)
+        => position + rotation * Vector3.Scale(local, lossyScale);
+    public Vector3 InverseTransformPoint(Vector3 world)
+    {
+        Vector3 delta = world - position;
+        return new Vector3(Vector3.Dot(delta, rotation * Vector3.right) / lossyScale.x,
+            Vector3.Dot(delta, rotation * Vector3.up) / lossyScale.y,
+            Vector3.Dot(delta, rotation * Vector3.forward) / lossyScale.z);
+    }
+}
+public class Rigidbody
+{
+    public Vector3 position, linearVelocity, angularVelocity;
+    public PreviewRotation rotation;
 }
 public class FakeGameObject { public bool activeInHierarchy = true; }
 public class BoxCollider
@@ -157,6 +182,9 @@ public class BoxCollider
 }
 public partial class Train : VehicleMotionProbe
 {
+    private Rigidbody cachedTrainRigidbody;
+    public Vector3 LastAnchorPosition;
+    private void RefreshRuntimeCoordinate(Vector3 position) => LastAnchorPosition = position;
     private BoxCollider cachedTrainBodyCollider;
     private bool trainBodyColliderResolved;
     public float ConnectionSnapMaxDistance = 0.6f;
@@ -210,11 +238,10 @@ public partial class Train : VehicleMotionProbe
     public Railload BridgeTarget => RuntimeTrain.ConnectionTargetRail;
     public bool TryApplyRailPose(Railload rail, float distance, Vector2 point, Vector2 facing)
     {
-        RuntimeTrain.SetRailSample(rail, distance, point, facing); ApplyCount++;
-        transform.position = new Vector3(point.x, 0, point.y);
-        transform.rotation = PreviewRotation.LookRotation(new Vector3(facing.x, 0, facing.y), Vector3.up);
-        TrainWorld.Shared.SetWorldPose(RuntimeTrain, transform.position, transform.rotation);
-        return true;
+        var rotation = PreviewRotation.LookRotation(new Vector3(facing.x, 0, facing.y), Vector3.up);
+        bool applied = ApplyRailPoseToRail(rail, distance, point, facing, rotation);
+        if (applied) ApplyCount++;
+        return applied;
     }
 }
 public partial class RailHandcar : Train
@@ -223,7 +250,7 @@ public partial class RailHandcar : Train
     public void ResetRailPlacementState() { ResetCount++; }
     public bool TryApplyExplicitRailPose(Railload rail, float distance, Vector2 point, Vector2 facing) => TryApplyRailPose(rail, distance, point, facing);
 }
-public class Locomotive : RailHandcar { }
+public partial class Locomotive : RailHandcar { }
 public static class RailConnectionUtility { public const float ConnectionDistance = 0.55f; }
 public class Railload
 {

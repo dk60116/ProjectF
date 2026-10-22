@@ -36,7 +36,7 @@ public partial class RailHandcar
     // Initial-path fixtures leave this world empty; departure fixtures expose
     // endpoint-linked rails to exercise real traversal instead of a preset tape.
     bool TryFindConnectedRailSample(
-        RailSample endpoint, Vector2 direction, Railload excluded, Railload preferred, out RailSample sample)
+        RailSample endpoint, Vector2 direction, Railload excluded, Railload preferred, out RailSample sample, bool ignoreRouting = false)
     {
         sample = default;
         float best = float.MaxValue;

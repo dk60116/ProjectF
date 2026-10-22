@@ -360,7 +360,7 @@ MonoBehaviour:
     mapSizeX: 1
     mapSizeY: 2
     centerCellX: 0
-    centerCellY: 0
+    centerCellY: 1
   multiFocusMode: 1
   itemFilterMaskInitialized: 0
   itemFilterMaskWords: 
@@ -399,6 +399,7 @@ MonoBehaviour:
   trainConnectionMinForwardDot: 0.5
   couplers:
   - {fileID: 2179950130487699856}
+  couplerMaxYawAngle: 80
   railMoveSpeedMultiplier: 1
   railMovementSubstepDistance: 0.12
   railSnapMaxDistance: 0.75
@@ -780,7 +781,7 @@ PrefabInstance:
       objectReference: {fileID: 0}
     - target: {fileID: -8679921383154817045, guid: 8f536be6965c39e4da5422788f9eac8c, type: 3}
       propertyPath: m_LocalPosition.z
-      value: 0.512
+      value: 0
       objectReference: {fileID: 0}
     - target: {fileID: -8679921383154817045, guid: 8f536be6965c39e4da5422788f9eac8c, type: 3}
       propertyPath: m_LocalRotation.w

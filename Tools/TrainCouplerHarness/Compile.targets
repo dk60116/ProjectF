@@ -6,6 +6,8 @@
       <Compile Include="$(MSBuildProjectDirectory)/Assets/Scripts/Simulation/Railway/TrainCoupler*.cs" />
       <Compile Remove="$(MSBuildProjectDirectory)/Assets/Scripts/Simulation/Railway/TrainWorld.Couplers.cs" />
       <Compile Include="$(MSBuildProjectDirectory)/Assets/Scripts/Simulation/Railway/TrainWorld.Couplers.cs" />
+      <Compile Remove="$(MSBuildProjectDirectory)/Assets/Scripts/Simulation/Railway/TrainBodyRailPose.cs" />
+      <Compile Include="$(MSBuildProjectDirectory)/Assets/Scripts/Simulation/Railway/TrainBodyRailPose.cs" />
     </ItemGroup>
   </Target>
 </Project>

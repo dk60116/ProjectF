@@ -58,6 +58,7 @@ public class FreightCar : Train,
     private readonly List<List<PortableObject>> itemPointStacks = new List<List<PortableObject>>();
     private readonly List<InstallationObject> boxPointLoads = new List<InstallationObject>();
     private readonly List<List<PortableObject>> boxPointItemStacks = new List<List<PortableObject>>();
+    private Predicate<int> boxPointStorageFilter;
     private bool hasLastSyncedLoadRuntimeCoordinate;
     private Vector2Int lastSyncedLoadRuntimeCoordinate;
     private bool hasMountedTankMotionSample;
@@ -97,7 +98,8 @@ public class FreightCar : Train,
         Vector2 facingTangent,
         float deltaTime,
         bool smoothRotation,
-        bool preserveSuppliedFacing = false)
+        bool preserveSuppliedFacing = false,
+        ProjectF.Railway.TrainBodyRailPose? bodyPose = null)
     {
         if (rail == null || facingTangent.sqrMagnitude <= 0.0001f)
         {
@@ -112,7 +114,7 @@ public class FreightCar : Train,
             new Vector3(visualFacingTangent.x, 0f, visualFacingTangent.y),
             Vector3.up);
         Quaternion rotation = targetRotation;
-        if (smoothRotation && deltaTime > 0f)
+        if (smoothRotation && deltaTime > 0f && Status.mapSizeY <= 1)
         {
             float interpolation = 1f - Mathf.Exp(
                 -Mathf.Max(0.01f, railRotationInterpolationSpeed) * deltaTime);
@@ -124,7 +126,8 @@ public class FreightCar : Train,
             distanceAlongPath,
             railPoint,
             facingTangent,
-            rotation);
+            rotation,
+            bodyPose);
     }
 
     private Vector2 ResolveVisualFacingTangent(Vector2 targetFacingTangent)
@@ -872,10 +875,45 @@ public class FreightCar : Train,
         }
 
         bool visible = icon != null;
+        if (visible)
+        {
+            RefreshFuelRoleIconPosition(engine);
+        }
         if (fuelRoleIcon.enabled != visible)
         {
             fuelRoleIcon.enabled = visible;
         }
+    }
+
+    private void RefreshFuelRoleIconPosition(Locomotive engine)
+    {
+        if (itemPointList == null
+            || !TryGetConnectionFacingSign(engine, true, out float endSign)) return;
+
+        bool found = false;
+        float bestProjection = float.NegativeInfinity;
+        Vector3 anchorWorldPosition = default;
+        for (int i = 0; i < itemPointList.Count; i++)
+        {
+            var itemPoint = itemPointList[i];
+            if (itemPoint == null) continue;
+
+            // Physical coupling selects the engine-side ItemPoint even on tight bends.
+            float projection = transform.InverseTransformPoint(itemPoint.position).z * endSign;
+            if (found && projection <= bestProjection) continue;
+            found = true;
+            bestProjection = projection;
+            anchorWorldPosition = itemPoint.position;
+        }
+        if (!found) return;
+
+        var iconTransform = fuelRoleIcon.transform;
+        Vector3 position = iconTransform.parent != null
+            ? iconTransform.parent.InverseTransformPoint(anchorWorldPosition)
+            : anchorWorldPosition;
+        position.y = iconTransform.localPosition.y;
+        if ((iconTransform.localPosition - position).sqrMagnitude > 0.000001f)
+            iconTransform.localPosition = position;
     }
 
     private void UpdateMountedTankMotionTracking(float deltaTime)
@@ -918,7 +956,8 @@ public class FreightCar : Train,
         out PortableObject targetPortableObject)
     {
         targetPortableObject = null;
-        if (!TryGetBestItemStorageStack(itemId, startWorldPosition, out Transform itemPoint, out List<PortableObject> stack)
+        Vector3 sourcePosition = startWorldPositionProvider != null ? startWorldPositionProvider() : startWorldPosition;
+        if (!TryGetBestItemStorageStack(itemId, sourcePosition, out Transform itemPoint, out List<PortableObject> stack)
             || itemPoint == null
             || stack == null)
         {
@@ -934,7 +973,7 @@ public class FreightCar : Train,
         portableObject.SetBatchedRendering(false);
         portableObject.SetCachedParent(itemPoint, true);
         portableObject.SetWorldPose(
-            startWorldPositionProvider != null ? startWorldPositionProvider() : startWorldPosition,
+            sourcePosition,
             itemPoint.rotation);
         portableObject.SetWorldScale(itemPoint.lossyScale);
         portableObject.SetCachedActive(true);
@@ -1020,38 +1059,17 @@ public class FreightCar : Train,
 
         EnsureItemPointStacks();
 
-        for (int pass = 0; pass < 2; pass++)
-        {
-            bool requireExistingStack = pass == 0;
-            float bestDistanceSqr = float.MaxValue;
-            TrySelectBestItemStorageStack(
-                itemPointList,
-                itemPointStacks,
-                null,
-                itemId,
-                referenceWorldPosition,
-                requireExistingStack,
-                ref bestDistanceSqr,
-                ref itemPoint,
-                ref stack);
-            TrySelectBestItemStorageStack(
-                boxPointList,
-                boxPointItemStacks,
-                IsBoxPointStorageActive,
-                itemId,
-                referenceWorldPosition,
-                requireExistingStack,
-                ref bestDistanceSqr,
-                ref itemPoint,
-                ref stack);
-
-            if (itemPoint != null)
-            {
-                return true;
-            }
-        }
-
-        return false;
+        // Multi-cell cars fill the nearest usable cell, not a remote matching
+        // stack. Preserve stack consolidation for the existing one-cell cars.
+        bool preferExistingStack = Status.mapSizeX <= 1 && Status.mapSizeY <= 1;
+        float bestDistanceSqr = float.MaxValue;
+        TrySelectBestItemStorageStack(
+            itemPointList, itemPointStacks, null, itemId, referenceWorldPosition,
+            preferExistingStack, ref bestDistanceSqr, ref itemPoint, ref stack);
+        TrySelectBestItemStorageStack(
+            boxPointList, boxPointItemStacks, boxPointStorageFilter ??= IsBoxPointStorageActive, itemId, referenceWorldPosition,
+            preferExistingStack, ref bestDistanceSqr, ref itemPoint, ref stack);
+        return itemPoint != null;
     }
 
     private void TrySelectBestItemStorageStack(
@@ -1060,7 +1078,7 @@ public class FreightCar : Train,
         Predicate<int> pointIndexFilter,
         int itemId,
         Vector3 referenceWorldPosition,
-        bool requireExistingStack,
+        bool preferExistingStack,
         ref float bestDistanceSqr,
         ref Transform bestPoint,
         ref List<PortableObject> bestStack)
@@ -1081,8 +1099,6 @@ public class FreightCar : Train,
                 || candidateStack == null
                 || candidateStack.Count >= stackLimit
                 || !IsStackCompatible(candidateStack, itemId)
-                || (requireExistingStack && candidateStack.Count <= 0)
-                || (!requireExistingStack && candidateStack.Count > 0)
                 || (pointIndexFilter != null && !pointIndexFilter(i)))
             {
                 continue;
@@ -1091,7 +1107,10 @@ public class FreightCar : Train,
             Vector3 offset = candidatePoint.position - referenceWorldPosition;
             offset.y = 0f;
             float distanceSqr = offset.sqrMagnitude;
-            if (bestPoint != null && distanceSqr >= bestDistanceSqr)
+            bool hasPriority = preferExistingStack && candidateStack.Count > 0;
+            bool bestHasPriority = preferExistingStack && bestStack != null && bestStack.Count > 0;
+            if (bestPoint != null && (!hasPriority && bestHasPriority
+                || hasPriority == bestHasPriority && distanceSqr >= bestDistanceSqr))
             {
                 continue;
             }

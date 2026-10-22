@@ -744,18 +744,18 @@ public partial class Locomotive
         var stationOpposite = Engine(5, Vector2.left);
         Train.Link(stationDriver, stationOpposite);
         stationDriver.autoDriveEnabled = true;
-        stationDriver.SetTestStationDock(5f, .02f);
+        stationOpposite.SetTestStationDock(5f, .02f);
         Check(stationDriver.TestConsistStationDocking()
               && stationDriver.DockMovement > 0f,
             "The non-driving opposite locomotive must approach a forward-reachable station");
 
         stationDriver.DockMovement = 0f;
-        stationDriver.SetTestStationDock(5f, 0f);
+        stationOpposite.SetTestStationDock(5f, 0f);
         Check(stationDriver.TestConsistStationDocking()
               && Near(stationDriver.DockMovement, 0f),
             "An opposite locomotive already at the station must dock without moving the consist");
 
-        stationDriver.SetTestStationDock(5f, -.02f);
+        stationOpposite.SetTestStationDock(5f, -.02f);
         Check(stationDriver.TestConsistStationDocking()
               && Near(stationDriver.DockMovement, 0f),
             "A reverse-only opposite station must reserve the dock without reversing automatic travel");

@@ -59,7 +59,15 @@ public class Train : Vehicle
     public NativeTrainConnections ConnectedTrains => new NativeTrainConnections(runtimeTrain);
     public static ulong ConnectionGraphRevision => TrainWorld.Shared.ConnectionGraphRevision;
 
-    internal float ResolveRailEndClearance(bool forward)
+    internal Vector2 ResolveRailAnchorPoint()
+    {
+        if (runtimeTrain != null && runtimeTrain.IsAlive && runtimeTrain.Rail.IsAlive())
+            return runtimeTrain.RailPoint;
+        Vector3 position = transform.position;
+        return new Vector2(position.x, position.z);
+    }
+
+    private BoxCollider ResolveTrainBodyCollider()
     {
         if (!trainBodyColliderResolved)
         {
@@ -67,12 +75,51 @@ public class Train : Vehicle
             trainBodyColliderResolved = true;
         }
 
+        return cachedTrainBodyCollider;
+    }
+
+    internal Vector3 ResolveFootprintLocalCenter()
+    {
+        int width = Mathf.Max(1, Status.mapSizeX);
+        int length = Mathf.Max(1, Status.mapSizeY);
+        if (width == 1 && length == 1) return Vector3.zero;
+
+        BoxCollider body = ResolveTrainBodyCollider();
+        // Collider center supplies the authored pivot offset, not footprint size.
+        // Choosing a different Center cell does not move that pivot or the mesh.
+        if (body != null && !body.isTrigger)
+            return new Vector3(body.center.x, 0f, body.center.z);
+
+        return new Vector3(
+            (width - 1) * 0.5f - PlacementCenterCell.x,
+            0f,
+            (length - 1) * 0.5f - PlacementCenterCell.y);
+    }
+
+    internal float ResolveStationCenterOffset()
+    {
+        ItemDefinition definition = BoundItemDefinition;
+        MapObject source = definition != null && definition.mapObject is Train sourceTrain
+            ? sourceTrain : this;
+        int length = Mathf.Max(1, source.Status.mapSizeY);
+        if (length <= 1) return 0f;
+
+        // The authored body origin stays fixed when the selected footprint cell
+        // changes. Map that cell into the origin's frame, not to the body midpoint.
+        return (ResolveFootprintLocalCenter().z + source.PlacementCenterCell.y - (length - 1) * 0.5f)
+            * transform.lossyScale.z;
+    }
+
+    internal float ResolveRailEndClearance(bool forward)
+    {
+        BoxCollider body = ResolveTrainBodyCollider();
+
         float center;
         float halfLength;
-        if (cachedTrainBodyCollider != null && !cachedTrainBodyCollider.isTrigger)
+        if (body != null && !body.isTrigger)
         {
-            center = cachedTrainBodyCollider.center.z;
-            halfLength = cachedTrainBodyCollider.size.z * 0.5f;
+            center = body.center.z;
+            halfLength = body.size.z * 0.5f;
         }
         else
         {
@@ -670,7 +717,8 @@ public class Train : Vehicle
         float distanceAlongPath,
         Vector2 railPoint,
         Vector2 facingTangent,
-        Quaternion rotation)
+        Quaternion rotation,
+        ProjectF.Railway.TrainBodyRailPose? bodyPose = null)
     {
         if (!rail.IsAlive() || facingTangent.sqrMagnitude <= 0.0001f)
         {
@@ -681,6 +729,16 @@ public class Train : Vehicle
         Vector3 position = transform.position;
         position.x = railPoint.x;
         position.z = railPoint.y;
+        Vector3 anchorPosition = position;
+        if (!bodyPose.HasValue && TrainBodyRailPose.TrySampleOnRail(
+                this, rail, distanceAlongPath, railPoint, facingTangent, out TrainBodyRailPose sampledBodyPose))
+            bodyPose = sampledBodyPose;
+        if (bodyPose.HasValue)
+        {
+            position.x = bodyPose.Value.Position.x;
+            position.z = bodyPose.Value.Position.y;
+            rotation = Quaternion.LookRotation(new Vector3(bodyPose.Value.Forward.x, 0f, bodyPose.Value.Forward.y), Vector3.up);
+        }
         TrainWorld.Shared.SetWorldPose(RuntimeTrain, position, rotation);
         if (cachedTrainRigidbody == null)
         {
@@ -697,7 +755,7 @@ public class Train : Vehicle
 
         transform.SetPositionAndRotation(position, rotation);
         SetCurrentRailSample(rail, distanceAlongPath, railPoint, facingTangent);
-        RefreshRuntimeCoordinate(position);
+        RefreshRuntimeCoordinate(anchorPosition);
         return true;
     }
 

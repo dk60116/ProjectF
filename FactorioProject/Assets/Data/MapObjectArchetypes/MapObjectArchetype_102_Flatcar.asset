@@ -20,7 +20,7 @@ MonoBehaviour:
   sourcePrefabGuid: a34b33398bb75a84aaa6febe564ccb3e
   sourceContentHash:
     serializedVersion: 2
-    Hash: 10ba84a04aab63f2874176bc2c08c7bd
+    Hash: a624d64d6d0f6a22b9a36e6f44ce6c7b
   sourceRuntimeType: FreightCar, Assembly-CSharp, Version=0.0.0.0, Culture=neutral,
     PublicKeyToken=null
   mapStatus:
@@ -265,7 +265,7 @@ MonoBehaviour:
   - hierarchyPath: 0:Flatcar/5:FuelRoleIcon
     animationPath: FuelRoleIcon
     parentIndex: 0
-    localPosition: {x: 0, y: 0.36, z: 0}
+    localPosition: {x: 0, y: 0.38, z: 0}
     localRotation: {x: 0.7071068, y: 0, z: 0, w: 0.7071068}
     localScale: {x: 0.16, y: 0.16, z: 1}
     defaultLocalToRoot:
@@ -276,7 +276,7 @@ MonoBehaviour:
       e10: 0
       e11: -0.000000019073486
       e12: -1.0000001
-      e13: 0.36
+      e13: 0.38
       e20: 0
       e21: 0.16000001
       e22: -0.00000011920929

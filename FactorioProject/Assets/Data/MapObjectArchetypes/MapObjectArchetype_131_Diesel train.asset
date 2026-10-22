@@ -20,20 +20,20 @@ MonoBehaviour:
   sourcePrefabGuid: 5f5ef2271a458914f832133627ec7e62
   sourceContentHash:
     serializedVersion: 2
-    Hash: 0a61028957591b82f0713d57d6e3bbf3
+    Hash: 25ba1640875484fae8a9b66d102fa96f
   sourceRuntimeType: DieselTrain, Assembly-CSharp, Version=0.0.0.0, Culture=neutral,
     PublicKeyToken=null
   mapStatus:
     mapSizeX: 1
     mapSizeY: 2
     centerCellX: 0
-    centerCellY: 0
+    centerCellY: 1
   focusMode: 1
   defaultRootScale: {x: 1, y: 1, z: 1}
   defaultRootRotation: {x: 0, y: 0, z: 0, w: 1}
   localRenderBounds:
-    m_Center: {x: 0, y: 0.48033687, z: 0.43268722}
-    m_Extent: {x: 0.43995303, y: 0.46453643, z: 0.9564886}
+    m_Center: {x: 0, y: 0.48033687, z: 0.42418724}
+    m_Extent: {x: 0.43995303, y: 0.46453643, z: 0.9479886}
   hasRenderBounds: 1
   featureFlags: 2120
   nodes:
@@ -65,7 +65,7 @@ MonoBehaviour:
   - hierarchyPath: 0:Diesel Train/0:Body
     animationPath: Body
     parentIndex: 0
-    localPosition: {x: 0, y: 0, z: 0.512}
+    localPosition: {x: 0, y: 0, z: 0}
     localRotation: {x: 0, y: 0, z: 0, w: 1}
     localScale: {x: 1, y: 1, z: 1}
     defaultLocalToRoot:
@@ -80,7 +80,7 @@ MonoBehaviour:
       e20: 0
       e21: 0
       e22: 1
-      e23: 0.512
+      e23: 0
       e30: 0
       e31: 0
       e32: 0
@@ -344,8 +344,8 @@ MonoBehaviour:
     material: {fileID: 2100000, guid: 571b862415d2b024e868b706fd7bd6f2, type: 2}
     subMeshIndex: 0
     localBounds:
-      m_Center: {x: -0.000000014901161, y: 0.5174367, z: 0}
-      m_Extent: {x: 0.43995303, y: 0.4274367, z: 0.87717587}
+      m_Center: {x: -0.000000014901161, y: 0.5174367, z: 0.49500003}
+      m_Extent: {x: 0.43995303, y: 0.4274367, z: 0.8771759}
     layer: 0
     renderingLayerMask: 1
     shadowCastingMode: 1

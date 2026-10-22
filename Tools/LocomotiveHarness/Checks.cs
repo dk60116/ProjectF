@@ -8,12 +8,17 @@ public sealed class SpriteRenderer
 {
     public Sprite sprite;
     public bool enabled;
+    public readonly Pose transform = new Pose();
 }
 public sealed class SceneObject { public bool activeInHierarchy = true; }
 public class Train
 {
     public readonly SceneObject gameObject = new SceneObject();
     public readonly List<Train> ConnectedTrains = new List<Train>();
+    public (byte mapSizeX, byte mapSizeY) Status = (1, 1);
+    public Vector3 ResolveFootprintLocalCenter() => new Vector3(0, 0, (Status.mapSizeY - 1) * .5f);
+    public bool TryGetConnectionFacingSign(Train other, bool ahead, out float sign)
+    { sign = 1; return ConnectedTrains.Contains(other); }
 }
 public sealed class ItemManager { public readonly List<ItemDefinition> ItemDefinitions = new List<ItemDefinition>(); }
 public sealed class GameManager
@@ -39,7 +44,7 @@ public static class InputOutputModule
     public static ItemDefinition ResolveItemDefinition(int id) => Items.TryGetValue(id, out var item) ? item : null;
 }
 public sealed class PortableObject { public Vector3 WorldPosition; }
-public sealed class Pose { public Vector3 position; }
+public sealed class Pose { public Vector3 position, localPosition; }
 public sealed class PlayerBag
 {
     public readonly List<int> Ids = new List<int>();

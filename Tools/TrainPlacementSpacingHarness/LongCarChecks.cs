@@ -12,7 +12,7 @@ static class LongCarChecks
     public static Train LongCar() => new Train
     {
         Status = (1, 2), PlacementCenterCell = Vector2Int.zero,
-        BodyCollider = new BoxCollider { center = new Vector3(0, .5f, .5f), size = new Vector3(.6f, 1, 1.9f) }
+        BodyCollider = new BoxCollider { center = new Vector3(0, .5f, LongCarBody.Center), size = new Vector3(.6f, 1, LongCarBody.Length) }
     };
 
     public static void Run()
@@ -20,7 +20,8 @@ static class LongCarChecks
         var longCar = LongCar();
         Check(Near(longCar.ResolveConnectionReach(true), 1.5f) && Near(longCar.ResolveConnectionReach(false), .5f),
             "A two-cell car anchored on its rear cell must expose distinct front and rear coupling reaches");
-        Check(Near(longCar.ResolveRailEndClearance(true), 1.45f) && Near(longCar.ResolveRailEndClearance(false), .45f),
+        Check(Near(longCar.ResolveRailEndClearance(true), LongCarBody.Length * .5f + LongCarBody.Center)
+            && Near(longCar.ResolveRailEndClearance(false), LongCarBody.Length * .5f - LongCarBody.Center),
             "The two-cell body collider must also drive the physical dead-end margin");
 
         foreach (Vector2 axis in new[] { Vector2.right, Vector2.left, Vector2.up, Vector2.down })
@@ -90,6 +91,7 @@ static class LongCarChecks
 public class Block
 {
     public Vector2Int Coordinate;
+    public Vector3 WorldPosition => new Vector3(Coordinate.x, 0, Coordinate.y);
     public bool AllowsTrain = true;
 }
 
@@ -112,9 +114,11 @@ public partial class InstallationPlacementController
     public static void RunLongFootprintChecks(Action<bool, string> check)
     {
         foreach (Vector2 axis in new[] { Vector2.right, Vector2.left, Vector2.up, Vector2.down })
+        foreach (int center in new[] { 0, 1 })
         {
             var controller = new InstallationPlacementController();
             var source = LongCarChecks.LongCar();
+            source.PlacementCenterCell = new Vector2Int(0, center);
             var rotation = PreviewRotation.LookRotation(new Vector3(axis.x, 0, axis.y), Vector3.up);
             Vector2Int front = new Vector2Int((int)axis.x, (int)axis.y);
             controller.FootprintTerrain.Blocks[Vector2Int.zero] = new Block();
@@ -144,10 +148,17 @@ public partial class InstallationPlacementController
     public static void RunLongBlueprintChecks(Action<bool, string> check)
     {
         foreach (Vector2 axis in new[] { Vector2.right, Vector2.left, Vector2.up, Vector2.down })
+        foreach (bool reverseRail in new[] { false, true })
+        foreach (bool neighborLong in new[] { false, true })
+        foreach (bool sourceLong in new[] { false, true })
+        foreach (bool reversedNeighbor in new[] { false, true })
         foreach (bool reversedCar in new[] { false, true })
+        foreach (bool installed in new[] { false, true })
+        foreach (float side in new[] { -1f, 1f })
+        foreach (float pointerOffset in new[] { -.25f, .25f })
         {
             Train.ActiveRuntimeTrains.Clear();
-            var rail = new Railload(axis * -10, axis * 10);
+            var rail = reverseRail ? new Railload(axis * 10, axis * -10) : new Railload(axis * -10, axis * 10);
             var controller = new InstallationPlacementController(rail);
             for (int x = -10; x <= 10; x++)
             for (int y = -10; y <= 10; y++)
@@ -155,18 +166,32 @@ public partial class InstallationPlacementController
                 var coordinate = new Vector2Int(x, y);
                 controller.FootprintTerrain.Blocks[coordinate] = new Block { Coordinate = coordinate };
             }
-            var neighbor = new Train { RuntimePlacementSequence = 1 };
-            neighbor.TryApplyRailPose(rail, 10, Vector2.zero, axis);
-            Train.ActiveRuntimeTrains.Add(neighbor);
-            var source = LongCarChecks.LongCar();
-            float spacing = reversedCar ? 2 : 1;
-            source.TryApplyRailPose(rail, 10 + spacing + .25f, axis * (spacing + .25f), reversedCar ? -axis : axis);
+            var neighbor = neighborLong ? LongCarChecks.LongCar() : new Train();
+            neighbor.RuntimePlacementSequence = installed ? 1 : 0;
+            Vector2 neighborFacing = reversedNeighbor ? -axis : axis;
+            neighbor.TryApplyRailPose(rail, 10, Vector2.zero, neighborFacing);
+            if (installed) Train.ActiveRuntimeTrains.Add(neighbor);
+            else { neighbor.Rail = null; controller.Previews.Add(neighbor); }
+            var source = sourceLong ? LongCarChecks.LongCar() : new Train();
+            Vector2 sourceFacing = reversedCar ? -axis : axis;
+            float spacing = neighbor.ResolveConnectionReach(Vector2.Dot(neighborFacing, axis * side) > 0)
+                + source.ResolveConnectionReach(Vector2.Dot(sourceFacing, axis * -side) > 0);
+            Vector2 pointer = axis * side * (spacing + pointerOffset);
+            rail.TryFindNearestRenderedPathSample(pointer, out float pointerDistance, out _, out _, out _);
+            source.TryApplyRailPose(rail, pointerDistance, pointer, sourceFacing);
+            source.Rail = null;
             controller.Previews.Add(source);
-            check(controller.SnapWithFacing(source, rail, 10 + spacing + .25f, reversedCar ? -axis : axis,
-                    out Vector2 point, out Vector2 facing), "A two-cell blueprint must snap using the correct connecting end");
-            check(Math.Abs(Vector2.Dot(point, axis) - spacing) < .06f
-                    && Vector2.Dot(facing, reversedCar ? -axis : axis) > .999f,
-                "Blueprint snapping must preserve orientation and leave room for the complete two-cell body");
+            Vector3 originalNeighbor = neighbor.transform.position;
+            check(controller.SnapWithFacing(source, rail, pointerDistance, sourceFacing,
+                    out Vector2 point, out Vector2 facing), "A mixed-length blueprint must snap using the correct connecting end");
+            check(Math.Abs(Vector2.Dot(point, axis) - side * spacing) < .0003f
+                    && Vector2.Dot(facing, sourceFacing) > .999f,
+                "Straight blueprint pitch must be exact, independent of collider slack, heading, pointer offset or rail authoring");
+            check(neighbor.transform.position == originalNeighbor, "Blueprint snapping must never move the existing neighbor");
+            rail.TryFindNearestRenderedPathSample(point, out float snappedDistance, out _, out _, out _);
+            check(controller.SnapWithFacing(source, rail, snappedDistance, sourceFacing,
+                    out Vector2 repeated, out _) && Vector2.Distance(repeated, point) < .0003f,
+                "Reevaluating the snapped blueprint must not shift it before installation");
         }
         Train.ActiveRuntimeTrains.Clear();
     }

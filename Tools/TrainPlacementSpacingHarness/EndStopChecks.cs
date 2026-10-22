@@ -105,10 +105,11 @@ public partial class RailHandcar
         var longRail = new Railload(Vector2.zero, new Vector2(10, 0));
         longDriver.EndStopRails.Add(longRail);
         TryCreateRailSampleAtDistance(longRail, 8.3f, out var nearLongEnd);
+        float longFrontLimit = 10f - (LongCarBody.Length * .5f + LongCarBody.Center);
         Check(Near(longDriver.ResolveRailEndLimitedMoveDistance(longCar, nearLongEnd,
-                Vector2.right, Vector2.right, 2, false), .25f),
-            "A Long Flatcar at 8.3 must stop its 1.45-unit front at the 10-unit rail end");
-        TryCreateRailSampleAtDistance(longRail, 8.55f, out var stoppedLong);
+                Vector2.right, Vector2.right, 2, false), longFrontLimit - 8.3f),
+            "A Long Flatcar must reserve the configured physical front at the rail end");
+        TryCreateRailSampleAtDistance(longRail, longFrontLimit, out var stoppedLong);
         Check(Near(longDriver.ResolveRailEndLimitedMoveDistance(longCar, stoppedLong,
                 Vector2.right, Vector2.right, .2f, true), 0), "Continued input must not move a Long Flatcar past its front limit");
         Check(Near(longDriver.ResolveRailEndLimitedMoveDistance(longCar, stoppedLong,

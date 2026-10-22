@@ -59,7 +59,7 @@ foreach ($signature in @('public static long FromFloat(', 'public static float T
 $freight = [IO.File]::ReadAllText((Join-Path $vehicle 'FreightCar.cs'))
 $production += "} public partial class FreightCar {`n"
 $production += (Expression $freight 'public bool IsFuelSupplyCar') + "`n"
-foreach ($signature in @('private bool TryGetFuelSupplyLocomotive(', 'private void RefreshFuelRoleIcon()')) {
+foreach ($signature in @('private bool TryGetFuelSupplyLocomotive(', 'private void RefreshFuelRoleIcon()', 'private void RefreshFuelRoleIconPosition(')) {
     $production += (Member $freight $signature) + "`n"
 }
 $production += "}`n"

@@ -18,6 +18,53 @@ Junction motion checks run the actual input dispatch and bridge advance for forw
 
 Blueprint checks extract the production snap search, connection predicate and SAT clearance checks. They cover blueprints and installed neighbors in all four orientations, both ends, repeated snap calculations, long bodies, occupied ends, curves, reversed adjacent rails and rejection of distant/unconnected rails. The harness supplies in-memory colliders and managed yaw rotation; it does not exercise Unity Transform/physics APIs or the editor UI.
 
+Mixed-length blueprint checks require exact coupling pitch for every one-/two-cell
+pair, body orientation, rail authoring order, neighbor placement state, physical
+end and pointer offset. The Long Flatcar collider fixture comes from the current
+prefab, so reducing its physical body length must not reduce its two-cell pitch.
+Curves and junction bridges may add outward corner clearance; a straight segment
+must use the nominal pitch without a coarse collision-search offset.
+
+Curved-body checks execute the production two-support solver, common Train pose
+application and driver support sampling through the existing rail-network
+advancer. They cover both path authoring orders, forward/backward body headings,
+both two-cell anchor choices, scaling, straight-to-curve joins and warm sampler
+allocations. The corrected body midpoint follows the support chord while the
+logical rail point, physical-end direction and footprint anchor remain unchanged.
+These are managed geometry/lifecycle tests, not a Unity rendering or physics run.
+
+Junction-body regressions also verify read-only support lookahead (no driving
+route callbacks/cursor changes), exact logical-anchor retention after a visual
+offset, and six long cars following the recorded consist path across alternating
+rail authoring directions in forward/reverse travel. Network world discovery is
+an adapter boundary; the production advancer, bridge and tape samplers run.
+
+Station Center checks execute production station-distance, root-target conversion
+and single-vehicle docking/snap methods with the current diesel collider fixture.
+Changing the Center on the same placed instance, or on its ItemDefinition source,
+must change both the arrival distance and actual snap position. Four map axes,
+both body headings, reversed path authoring and a bent path are covered. Visual
+correction must not change docking distance; raw pipe/tank samples stay unchanged.
+Scene discovery and connected-consist movement remain adapter boundaries here.
+
+Floor-focus checks extract the production PlayerController train marker method.
+The authored body pivot, selected Center cell and footprint midpoint are separate:
+changing Center must not shift markers, terrain validation or curve supports by
+one cell. Tests cover both Center choices, four floor rotations, all three marker
+kinds and placed/fallback coordinate sources. Marker writes are an adapter; no
+Unity scene rendering is performed. Collider center supplies only the pivot
+offset; focus size still comes from the one-/two-cell map footprint.
+
+Fuel-role checks execute the production rear-supplier lookup and marker refresh
+against the real TrainWorld connection graph. Only a directly rear-coupled car
+may supply/advertise fuel, including when its position crosses the locomotive's
+tangent plane on a bend. Reversed one-/two-cell cars align icon XZ to the authored
+engine-side ItemPoint, preserving icon Y; Center edits cannot swap that end.
+Tests cover offset/moving points, null entries, list order, rotated/scaled icon
+parents, disconnect and warm zero-allocation refresh. The material contract requires the existing
+unlit sprite shader, full opacity and normal depth occlusion. Sprite rendering
+itself remains a stub and is not a visual shader test.
+
 Locomotive tail coupling checks cover eight approaching headings for both freight cars and other locomotives, both predicate call orders, same-heading engine blueprint snapping, and rejection of nose-to-nose, distant, lateral and overlapping-center contacts. A locomotive tail is sufficient; the approaching car's heading does not reject that connection.
 
 Edit checks extract the production rotation handler, map-edit Complete branch, contact commit helper, runtime connection eligibility and pose lookup. Rotating a locomotive tail towards either-facing freight must create a reciprocal rear connection; rotating it away must remove the invalid contact. Complete commits a five-car chain with outward-facing locomotives at both ends, normalizes center spacing, preserves facing and remains idempotent in all four map directions. Scene UI/physics remain stubbed; these checks run without Unity.
