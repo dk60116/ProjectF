@@ -19,8 +19,10 @@ public partial class RailHandcar
     float consistPathEndDistance;
     string railMoveFailureReason;
     void RecordRailMoveFailure(string reason) => railMoveFailureReason = reason;
-    float ResolveConsistPathSampleRetainDistance(Train train) => .01f;
-    float ResolveRailConnectionMaxDistance() => .2f;
+    float ResolveConsistPathSampleRetainDistance(Train train)
+        => Mathf.Max(railSnapMaxDistance, train != null ? train.ConnectionSnapMaxDistance : 0f,
+            ResolveRailConnectionMaxDistance()) + PushConsistGapTolerance;
+    float ResolveRailConnectionMaxDistance() => .55f;
     static float ResolveRailTransitionMovementDistance(RailSample a, RailSample b)
         => Vector2.Distance(a.Point, b.Point);
     public bool HasRecordedPath => consistPathTape.Count > 0;

@@ -21,7 +21,7 @@ MonoBehaviour:
   attackRange: 15
   projectileSpeed: 20
   itemName: Manual - Steel plate
-  id: 97
+  id: 99
   mapObject: {fileID: 0}
   mapObjectArchetype: {fileID: 0}
   useMapColor: 0

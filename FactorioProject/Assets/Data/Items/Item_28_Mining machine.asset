@@ -21,7 +21,7 @@ MonoBehaviour:
   attackRange: 15
   projectileSpeed: 20
   itemName: Mining Machine
-  id: 66
+  id: 68
   mapObject: {fileID: 8277338630082605383, guid: 1dd1602260bd3534da753f8f0708df08, type: 3}
   mapObjectArchetype: {fileID: 11400000, guid: 0df4d03a55af46045b4a5a77fb6b6ca4, type: 2}
   useMapColor: 1

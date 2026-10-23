@@ -4679,9 +4679,57 @@ public class RailHandcar : Train
                     return false;
                 }
 
+                bool currentOnBridge = HasRailConnectionBridgeState(currentSample);
+                bool targetOnBridge = HasRailConnectionBridgeState(frontMove.StartSample);
+                if (currentOnBridge != targetOnBridge)
+                {
+                    RailSample bridge = currentOnBridge ? currentSample : frontMove.StartSample;
+                    float distanceToEndpoint = currentOnBridge
+                        ? bridge.ConnectionProgress
+                        : distanceToFront - bridge.ConnectionProgress;
+                    if (distanceToEndpoint < -ConsistPathSampleDistanceEpsilon
+                        || !TryCreateRailSampleAtDistance(
+                            bridge.Rail, bridge.DistanceAlongPath, out RailSample bridgeEndpoint))
+                    {
+                        return false;
+                    }
+
+                    AddConsistPathSample(pathSamples,
+                        pathEndDistance + Mathf.Max(0f, distanceToEndpoint), bridgeEndpoint);
+                }
+
                 pathEndDistance += distanceToFront;
                 AddConsistPathSample(pathSamples, pathEndDistance, frontMove.StartSample);
                 return true;
+            }
+
+            if (HasRailConnectionBridgeState(currentSample))
+            {
+                bool towardTarget = Vector2.Dot(
+                    currentTravelDirection,
+                    currentSample.ConnectionTargetPoint - currentSample.Point) > 0f;
+                ProjectF.Railway.IRailTarget nextRail = towardTarget
+                    ? currentSample.ConnectionTargetRail : currentSample.Rail;
+                float nextDistance = towardTarget
+                    ? currentSample.ConnectionTargetDistanceAlongPath : currentSample.DistanceAlongPath;
+                if (!TryCreateRailSampleAtDistance(nextRail, nextDistance, out RailSample bridgeEnd))
+                {
+                    return false;
+                }
+
+                pathEndDistance += towardTarget
+                    ? currentSample.ConnectionPathDistance - currentSample.ConnectionProgress
+                    : currentSample.ConnectionProgress;
+                if (pathEndDistance - pathStartDistance
+                    > maxSearchDistance + ConsistPathSampleDistanceEpsilon)
+                {
+                    return false;
+                }
+
+                currentSample = bridgeEnd;
+                AddConsistPathSample(pathSamples, pathEndDistance, currentSample);
+                currentTravelDirection = ResolveFacingTangent(currentSample.Tangent, currentTravelDirection);
+                continue;
             }
 
             if (!currentSample.Rail.TryGetRenderedPathLength(out float pathLength))
@@ -4897,9 +4945,23 @@ public class RailHandcar : Train
         float directionSign = Mathf.Abs(travelDot) <= 0.0001f
             ? 1f
             : Mathf.Sign(travelDot);
+        bool currentOnBridge = HasRailConnectionBridgeState(currentSample);
+        bool targetOnBridge = HasRailConnectionBridgeState(targetSample);
+        if (currentOnBridge && targetOnBridge
+            && currentSample.ConnectionTargetRail != targetSample.ConnectionTargetRail)
+        {
+            return false;
+        }
+
+        // A bridge sample keeps the source rail's endpoint distance while its
+        // position advances across the connection. Include that progress here.
+        float currentDistance = currentSample.DistanceAlongPath
+            + (currentOnBridge ? ResolveRailConnectionExitSign(currentSample) * currentSample.ConnectionProgress : 0f);
+        float targetDistance = targetSample.DistanceAlongPath
+            + (targetOnBridge ? ResolveRailConnectionExitSign(targetSample) * targetSample.ConnectionProgress : 0f);
         float signedDistance = directionSign > 0f
-            ? targetSample.DistanceAlongPath - currentSample.DistanceAlongPath
-            : currentSample.DistanceAlongPath - targetSample.DistanceAlongPath;
+            ? targetDistance - currentDistance
+            : currentDistance - targetDistance;
         if (signedDistance < -ConsistPathSampleDistanceEpsilon)
         {
             return false;
@@ -4907,6 +4969,20 @@ public class RailHandcar : Train
 
         distance = Mathf.Max(0f, signedDistance);
         return true;
+    }
+
+    private static float ResolveRailConnectionExitSign(RailSample sample)
+    {
+        if (sample.Rail.TryGetRenderedPathLength(out float length))
+        {
+            return sample.DistanceAlongPath <= RailConnectionDistanceEpsilon ? -1f
+                : sample.DistanceAlongPath >= length - RailConnectionDistanceEpsilon ? 1f
+                : Mathf.Sign(Vector2.Dot(
+                    sample.ConnectionTargetPoint - sample.Point,
+                    ResolveRailPathTangent(sample)));
+        }
+
+        return 1f;
     }
 
     private float ResolveInitialConsistSegmentSearchDistance(
@@ -5803,6 +5879,23 @@ public class RailHandcar : Train
         }
 
         float t = Mathf.Clamp01((targetDistance - startSample.Distance) / segmentDistance);
+        bool startOnBridge = HasRailConnectionBridgeState(startSample.Sample);
+        bool endOnBridge = HasRailConnectionBridgeState(endSample.Sample);
+        if (startOnBridge && !endOnBridge
+            && (endSample.Sample.Rail == startSample.Sample.Rail
+                || endSample.Sample.Rail == startSample.Sample.ConnectionTargetRail))
+        {
+            return TrySampleRailAndBridgeSegment(
+                endSample.Sample, startSample.Sample, t, false, out sample);
+        }
+
+        if (!startOnBridge && endOnBridge
+            && startSample.Sample.Rail == endSample.Sample.Rail)
+        {
+            return TrySampleRailAndBridgeSegment(
+                startSample.Sample, endSample.Sample, t, true, out sample);
+        }
+
         if (startSample.Sample.Rail != null
             && startSample.Sample.Rail == endSample.Sample.Rail)
         {
@@ -5826,16 +5919,6 @@ public class RailHandcar : Train
                 out sample);
         }
 
-        if (HasRailConnectionBridgeState(startSample.Sample)
-            && startSample.Sample.ConnectionTargetRail == endSample.Sample.Rail)
-        {
-            return TryCreateLinearRailSample(
-                startSample.Sample,
-                endSample.Sample,
-                t,
-                out sample);
-        }
-
         float connectionPathDistance = ResolveRailTransitionMovementDistance(
             startSample.Sample,
             endSample.Sample);
@@ -5850,6 +5933,64 @@ public class RailHandcar : Train
             Mathf.Max(connectionPathDistance, RailConnectionDistanceEpsilon),
             connectionPathDistance * t,
             out sample);
+    }
+
+    private static bool TrySampleRailAndBridgeSegment(
+        RailSample railSample, RailSample bridge, float t, bool bridgeAtEnd,
+        out RailSample sample)
+    {
+        sample = default;
+        bool railIsTarget = railSample.Rail == bridge.ConnectionTargetRail;
+        float endpointDistance = railIsTarget
+            ? bridge.ConnectionTargetDistanceAlongPath : bridge.DistanceAlongPath;
+        float railLength = Mathf.Abs(railSample.DistanceAlongPath - endpointDistance);
+        float bridgeLength = bridgeAtEnd
+            ? bridge.ConnectionProgress
+            : railIsTarget
+                ? bridge.ConnectionPathDistance - bridge.ConnectionProgress
+                : bridge.ConnectionProgress;
+        float totalLength = railLength + bridgeLength;
+        if (totalLength <= RailConnectionDistanceEpsilon)
+        {
+            sample = bridgeAtEnd ? bridge : railSample;
+            return true;
+        }
+
+        float along = Mathf.Clamp01(t) * totalLength;
+        if (bridgeAtEnd)
+        {
+            if (along <= railLength)
+            {
+                float sign = Mathf.Sign(endpointDistance - railSample.DistanceAlongPath);
+                return TryCreateRailSampleAtDistance(
+                    railSample.Rail, railSample.DistanceAlongPath + sign * along,
+                    out sample);
+            }
+
+        }
+        else if (along >= bridgeLength)
+        {
+            float railSign = Mathf.Sign(railSample.DistanceAlongPath - endpointDistance);
+            return TryCreateRailSampleAtDistance(
+                railSample.Rail, endpointDistance + railSign * (along - bridgeLength),
+                out sample);
+        }
+
+        if (!TryCreateRailSampleAtDistance(
+                bridge.Rail, bridge.DistanceAlongPath, out RailSample sourceEndpoint)
+            || !TryCreateRailSampleAtDistance(
+                bridge.ConnectionTargetRail, bridge.ConnectionTargetDistanceAlongPath,
+                out RailSample targetEndpoint))
+        {
+            return false;
+        }
+
+        float progress = bridgeAtEnd ? along - railLength
+            : railIsTarget ? bridge.ConnectionProgress + along
+            : bridge.ConnectionProgress - along;
+        return TryCreateRailConnectionBridgeSample(
+            sourceEndpoint, targetEndpoint, bridge.ConnectionPathDistance,
+            progress, out sample);
     }
 
     private static bool TryCreateLinearRailSample(
@@ -5942,6 +6083,14 @@ public class RailHandcar : Train
         float pointProgress = Vector2.Dot(
             point - sourcePoint,
             bridgeDelta / bridgePointDistance);
+        // Linear interpolation can span the source rail before the bridge.
+        // Those samples must not inherit a zero-progress bridge transition.
+        if (pointProgress < -RailConnectionDistanceEpsilon
+            || pointProgress > bridgePointDistance + RailConnectionDistanceEpsilon)
+        {
+            return false;
+        }
+
         connectionProgress = Mathf.Clamp01(pointProgress / bridgePointDistance)
                              * bridgeState.ConnectionPathDistance;
         return true;

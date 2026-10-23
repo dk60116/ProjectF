@@ -1,0 +1,5 @@
+Generator: built-in image_gen edit
+Reference: FactorioProject/Assets/Items/Belt/Conveyor belt 2F/Conveyor belt 2F_Icon.png
+Final asset: FactorioProject/Assets/Items/Belt/Fast Conveyor belt 2F/Fast Conveyor belt 2F_Icon.png
+
+Edit this existing 256x256 isometric conveyor-belt 2F inventory sprite. Change ONLY all printed gray arrow triangles on the belt surface to bright warm yellow (#FFCC00), matching the Fast Conveyor belt family. Preserve exactly the sloped bridge geometry, plate layout, rollers, dark metal shading, black outlines, camera angle, framing, and scale. Do not add speed lines, text, new geometry, or extra arrows. Keep the background truly transparent with alpha, no checkerboard or white fill. Output a square clean game inventory icon.

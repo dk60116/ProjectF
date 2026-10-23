@@ -1,0 +1,68 @@
+[
+  {
+    "mesh": "tripo_part_15",
+    "texture": "Robot arm_TB_0.png",
+    "vertices": 404,
+    "faces": 706,
+    "overlap_pairs": 0,
+    "collapsed_faces": 0,
+    "render_mean_error": 0.0007855484145693481,
+    "render_p95_error": 0.003921568393707275,
+    "source_geometry_preserved": true
+  },
+  {
+    "mesh": "tripo_part_17",
+    "texture": "Robot arm_TB_1.png",
+    "vertices": 687,
+    "faces": 1360,
+    "overlap_pairs": 0,
+    "collapsed_faces": 0,
+    "render_mean_error": 0.000825880968477577,
+    "render_p95_error": 0.003921568393707275,
+    "source_geometry_preserved": true
+  },
+  {
+    "mesh": "tripo_part_new_0",
+    "texture": "Robot arm_TB_2.png",
+    "vertices": 833,
+    "faces": 1576,
+    "overlap_pairs": 0,
+    "collapsed_faces": 0,
+    "render_mean_error": 0.0011552802752703428,
+    "render_p95_error": 0.003921568393707275,
+    "source_geometry_preserved": true
+  },
+  {
+    "mesh": "tripo_part_1",
+    "texture": "Robot arm Hand_TB_0.png",
+    "vertices": 1316,
+    "faces": 2578,
+    "overlap_pairs": 0,
+    "collapsed_faces": 0,
+    "render_mean_error": 0.0007152080070227385,
+    "render_p95_error": 0.003921568393707275,
+    "source_geometry_preserved": true
+  },
+  {
+    "mesh": "tripo_part_7",
+    "texture": "Robot arm Hand_TB_1.png",
+    "vertices": 608,
+    "faces": 1191,
+    "overlap_pairs": 0,
+    "collapsed_faces": 0,
+    "render_mean_error": 0.0007373320986516774,
+    "render_p95_error": 0.003921568393707275,
+    "source_geometry_preserved": true
+  },
+  {
+    "mesh": "Robot_Arm_Bottom",
+    "texture": "Robot arm_Bottom_TB.png",
+    "vertices": 274,
+    "faces": 544,
+    "overlap_pairs": 0,
+    "collapsed_faces": 0,
+    "render_mean_error": 0.0007223636494018137,
+    "render_p95_error": 0.003921568393707275,
+    "source_geometry_preserved": true
+  }
+]

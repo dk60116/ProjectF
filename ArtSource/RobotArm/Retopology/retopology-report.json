@@ -1,0 +1,74 @@
+[
+  {
+    "mesh": "tripo_part_15",
+    "texture": "Robot arm_TB_0.png",
+    "before_triangles": 706,
+    "after_faces": 442,
+    "quads": 262,
+    "after_triangles": 704,
+    "silhouette_iou": 1.0,
+    "render_mean_error": 0.0031308881007134914,
+    "uv_overlaps": 0,
+    "branching_edges": 0
+  },
+  {
+    "mesh": "tripo_part_17",
+    "texture": "Robot arm_TB_1.png",
+    "before_triangles": 1360,
+    "after_faces": 871,
+    "quads": 489,
+    "after_triangles": 1360,
+    "silhouette_iou": 1.0,
+    "render_mean_error": 0.0012048376956954598,
+    "uv_overlaps": 0,
+    "branching_edges": 0
+  },
+  {
+    "mesh": "tripo_part_new_0",
+    "texture": "Robot arm_TB_2.png",
+    "before_triangles": 1576,
+    "after_faces": 953,
+    "quads": 583,
+    "after_triangles": 1536,
+    "silhouette_iou": 1.0,
+    "render_mean_error": 0.0011014717165380716,
+    "uv_overlaps": 0,
+    "branching_edges": 0
+  },
+  {
+    "mesh": "tripo_part_1",
+    "texture": "Robot arm Hand_TB_0.png",
+    "before_triangles": 2578,
+    "after_faces": 1812,
+    "quads": 762,
+    "after_triangles": 2574,
+    "silhouette_iou": 1.0,
+    "render_mean_error": 0.0007226490415632725,
+    "uv_overlaps": 0,
+    "branching_edges": 0
+  },
+  {
+    "mesh": "tripo_part_7",
+    "texture": "Robot arm Hand_TB_1.png",
+    "before_triangles": 1191,
+    "after_faces": 862,
+    "quads": 327,
+    "after_triangles": 1189,
+    "silhouette_iou": 1.0,
+    "render_mean_error": 0.0012387845199555159,
+    "uv_overlaps": 0,
+    "branching_edges": 0
+  },
+  {
+    "mesh": "Robot_Arm_Bottom",
+    "texture": "Robot arm_Bottom_TB.png",
+    "before_triangles": 544,
+    "after_faces": 331,
+    "quads": 213,
+    "after_triangles": 544,
+    "silhouette_iou": 0.9999797509365191,
+    "render_mean_error": 0.0007107698475010693,
+    "uv_overlaps": 0,
+    "branching_edges": 0
+  }
+]

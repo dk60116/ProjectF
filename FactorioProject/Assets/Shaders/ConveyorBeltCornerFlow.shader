@@ -4,6 +4,8 @@ Shader "Custom/ConveyorBeltCornerFlow"
     {
         [MainTexture] _BaseMap("Base Map", 2D) = "white" {}
         _StraightBeltMap("Straight Belt Map", 2D) = "white" {}
+        [NoScaleOffset] _ArrowMask("Arrow Mask (R)", 2D) = "black" {}
+        _ArrowColor("Arrow Color", Color) = (1,1,1,1)
         _AlphaMask("Alpha Mask", 2D) = "white" {}
         _PathUvMap("Path UV Map", 2D) = "black" {}
         [MainColor] _BaseColor("Base Color", Color) = (1,1,1,1)
@@ -137,6 +139,7 @@ Shader "Custom/ConveyorBeltCornerFlow"
             CBUFFER_START(UnityPerMaterial)
                 float4 _BaseMap_ST;
                 float4 _BaseColor;
+                half4 _ArrowColor;
                 float4 _ShadowColor;
                 float4 _PathWidthRange;
                 half _ShadeThreshold;
@@ -156,6 +159,7 @@ Shader "Custom/ConveyorBeltCornerFlow"
                 half _BlueprintRimStrength;
                 half _BlueprintRimPower;
             CBUFFER_END
+            #include "ConveyorArrowColor.hlsl"
 
             UNITY_INSTANCING_BUFFER_START(ConveyorPerInstance)
                 UNITY_DEFINE_INSTANCED_PROP(float4, _ConveyorUvData)
@@ -315,6 +319,7 @@ Shader "Custom/ConveyorBeltCornerFlow"
                     + conveyorUvData.y * _Time.y);
                 float2 flowUv = float2(normalizedWidth, alongFlow);
                 half4 flowSample = SAMPLE_TEXTURE2D(_StraightBeltMap, sampler_StraightBeltMap, flowUv) * _BaseColor;
+                flowSample = ApplyConveyorArrowColor(flowSample, flowUv);
                 half3 pathColor = flowSample.rgb;
 
                 half3 baseColor = lerp(frameSample.rgb, pathColor, pathMask);

@@ -90,6 +90,10 @@ static class LongCarChecks
 
 public class Block
 {
+    public bool SelectionVisible;
+    public void SetSelectionFocusVisible(bool visible) => SelectionVisible = visible;
+    public bool MouseVisible;
+    public void SetMouseFocusVisible(bool visible) => MouseVisible = visible;
     public Vector2Int Coordinate;
     public Vector3 WorldPosition => new Vector3(Coordinate.x, 0, Coordinate.y);
     public bool AllowsTrain = true;

@@ -21,7 +21,7 @@ MonoBehaviour:
   attackRange: 15
   projectileSpeed: 20
   itemName: Horse steak
-  id: 116
+  id: 118
   mapObject: {fileID: 0}
   mapObjectArchetype: {fileID: 0}
   useMapColor: 0

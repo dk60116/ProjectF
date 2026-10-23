@@ -354,7 +354,7 @@ MonoBehaviour:
   m_EditorClassIdentifier: Assembly-CSharp::DieselTrain
   id: 0
   objectName: Diesel train
-  objId: 132
+  objId: 134
   itemDefinition: {fileID: 11400000, guid: 72f34e5c92fc837489d0795602df4b54, type: 2}
   mapStatus:
     mapSizeX: 1

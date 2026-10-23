@@ -1,0 +1,72 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!1001 &900100000000000001
+PrefabInstance:
+  m_ObjectHideFlags: 0
+  serializedVersion: 2
+  m_Modification:
+    serializedVersion: 3
+    m_TransformParent: {fileID: 0}
+    m_Modifications:
+    - target: {fileID: 282995202885880893, guid: 790a740c46ac28740b0b3566df1479dd, type: 3}
+      propertyPath: m_Name
+      value: Fast Conveyor belt
+      objectReference: {fileID: 0}
+    - target: {fileID: 7247929509108097568, guid: 790a740c46ac28740b0b3566df1479dd, type: 3}
+      propertyPath: objectName
+      value: Fast Conveyor belt
+      objectReference: {fileID: 0}
+    - target: {fileID: 7247929509108097568, guid: 790a740c46ac28740b0b3566df1479dd, type: 3}
+      propertyPath: objId
+      value: 141
+      objectReference: {fileID: 0}
+    - target: {fileID: 7247929509108097568, guid: 790a740c46ac28740b0b3566df1479dd, type: 3}
+      propertyPath: itemDefinition
+      value: 
+      objectReference: {fileID: 11400000, guid: 0fe42f78506a45e9ba301ae8362c6d92, type: 2}
+    - target: {fileID: 7247929509108097568, guid: 790a740c46ac28740b0b3566df1479dd, type: 3}
+      propertyPath: conveyorSpeed
+      value: 1
+      objectReference: {fileID: 0}
+    - target: {fileID: 7247929509108097568, guid: 790a740c46ac28740b0b3566df1479dd, type: 3}
+      propertyPath: straightVariantPrefab
+      value: 
+      objectReference: {fileID: 7247929509108097568, guid: 51f23cdf860c49c081ed36d665d05cc0, type: 3}
+    - target: {fileID: 7247929509108097568, guid: 790a740c46ac28740b0b3566df1479dd, type: 3}
+      propertyPath: cornerVariantPrefab
+      value: 
+      objectReference: {fileID: 7247929509108097568, guid: 2a8ee1ceed0f41bcb1a6d5acbf7e38fe, type: 3}
+    - target: {fileID: 7247929509108097568, guid: 790a740c46ac28740b0b3566df1479dd, type: 3}
+      propertyPath: reverseCornerVariantPrefab
+      value: 
+      objectReference: {fileID: 7247929509108097568, guid: 575f2e975620487b83de4864c2dced67, type: 3}
+    - target: {fileID: 533515098945374496, guid: 790a740c46ac28740b0b3566df1479dd, type: 3}
+      propertyPath: m_Materials.Array.data[0]
+      value: 
+      objectReference: {fileID: 2100000, guid: a6a257cdec824ea3b2afe9023cf3bf2c, type: 2}
+    m_RemovedComponents: []
+    m_RemovedGameObjects: []
+    m_AddedGameObjects: []
+    m_AddedComponents: []
+  m_SourcePrefab: {fileID: 100100000, guid: 790a740c46ac28740b0b3566df1479dd, type: 3}
+--- !u!1 &282995202885880893 stripped
+GameObject:
+  m_CorrespondingSourceObject: {fileID: 282995202885880893, guid: 790a740c46ac28740b0b3566df1479dd, type: 3}
+  m_PrefabInstance: {fileID: 900100000000000001}
+  m_PrefabAsset: {fileID: 0}
+--- !u!4 &8553229865070038503 stripped
+Transform:
+  m_CorrespondingSourceObject: {fileID: 8553229865070038503, guid: 790a740c46ac28740b0b3566df1479dd, type: 3}
+  m_PrefabInstance: {fileID: 900100000000000001}
+  m_PrefabAsset: {fileID: 0}
+--- !u!114 &7247929509108097568 stripped
+MonoBehaviour:
+  m_CorrespondingSourceObject: {fileID: 7247929509108097568, guid: 790a740c46ac28740b0b3566df1479dd, type: 3}
+  m_PrefabInstance: {fileID: 900100000000000001}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 282995202885880893}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: d6c8afd8e1073824a8288db659760858, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 

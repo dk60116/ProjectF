@@ -429,9 +429,13 @@ public partial class PlayerController : MonoBehaviour
 
         selectedPitchforkGroundBlock = null;
         selectedSeedGroundBlock = null;
+        RefreshSelectedMapObjectFocus(mapObject, fallbackBlock ?? ResolveSelectedFocusFallbackBlock(mapObject));
+    }
+
+    private void RefreshSelectedMapObjectFocus(IMapObjectTarget mapObject, Block fallbackBlock)
+    {
         selectedFocusBlocks.Clear();
         currentSelectedMapObject = null;
-        fallbackBlock ??= ResolveSelectedFocusFallbackBlock(mapObject);
         if (!IsAvailableMapObjectFocusTarget(mapObject, fallbackBlock))
         {
             SetSelectedFocusedBlocks(null);
@@ -1573,6 +1577,14 @@ public partial class PlayerController : MonoBehaviour
         {
             return;
         }
+
+        // Selection outlives the click. Rebind moving trains to their current
+        // floor blocks after movement, including while the player is mounted.
+        if (currentSelectedMapObject is Train)
+        {
+            RefreshSelectedMapObjectFocus(currentSelectedMapObject, null);
+        }
+        RefreshMovingTrainMouseFocus();
 
         if (interactionPointSnapTarget != null)
         {
@@ -5515,6 +5527,15 @@ public partial class PlayerController : MonoBehaviour
                 }
             }
         }
+        else if (mapObject is Train train)
+        {
+            // A train draws its whole moving footprint from one marker host.
+            // Avoid rebuilding static footprint lists on every follow refresh.
+            if (train.TryGetPlacementRuntime(out Vector2Int trainCoordinate, out _))
+            {
+                appended = TryAppendFocusBlock(results, trainCoordinate, train);
+            }
+        }
         else if (mapObject is InstallationObject installationObject)
         {
             IReadOnlyList<Vector2Int> occupiedCoordinates = installationObject.RuntimeOccupiedCoordinates;
@@ -5850,6 +5871,27 @@ public partial class PlayerController : MonoBehaviour
         }
 
         RefreshMountedPinnedInteractionFocus();
+    }
+
+    private void RefreshMovingTrainMouseFocus()
+    {
+        if (!(currentMouseFocusedMapObject is Train train))
+        {
+            return;
+        }
+
+        // Mounted hover stays pinned between clicks. Its marker must move just
+        // like selection, rather than keeping the floor block from the click.
+        mouseFocusBlocks.Clear();
+        if (IsAvailableMapObjectFocusTarget(train, (Block)null)
+            && AppendMapObjectFocusBlocks(train, null, mouseFocusBlocks))
+        {
+            SetMouseFocusedBlocks(mouseFocusBlocks, train);
+        }
+        else
+        {
+            SetMouseFocusedBlocks(null);
+        }
     }
 
     private bool TryResolveMouseFocusedMapObject(Vector2 pointerPosition, out IMapObjectTarget mapObject, out Block fallbackBlock)
@@ -7122,7 +7164,7 @@ public partial class PlayerController : MonoBehaviour
         Vector3 worldAnchor = block.WorldPosition + new Vector3(
             anchorCoordinate.x - block.Coordinate.x, 0f,
             anchorCoordinate.y - block.Coordinate.y);
-        // Focus represents floor cells, not the moving model's continuous pose.
+        // Follow the current occupied cell, keeping the footprint on the grid.
         int quarterTurns = ((Mathf.RoundToInt(train.transform.eulerAngles.y / 90f) % 4) + 4) % 4;
         Quaternion rotation = Quaternion.Euler(0f, quarterTurns * 90f, 0f);
         Vector2 worldSize = (quarterTurns & 1) == 0 ? size : new Vector2(size.y, size.x);

@@ -21,7 +21,7 @@ MonoBehaviour:
   attackRange: 15
   projectileSpeed: 20
   itemName: Long Flatcar
-  id: 131
+  id: 133
   mapObject: {fileID: 8246531933118439867, guid: 0cadb6b49643c3b4aab8c353c06adb09, type: 3}
   mapObjectArchetype: {fileID: 11400000, guid: 97083b3fa04b70b4ca80ffe12cc44a13, type: 2}
   useMapColor: 1

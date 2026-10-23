@@ -1,0 +1,5 @@
+Generator: built-in image_gen edit
+Reference: FactorioProject/Assets/Items/Belt/Conveyor belt/Conveyor belt_Icon.png
+Final asset: FactorioProject/Assets/Items/Belt/Fast Conveyor belt/Fast Conveyor belt_Icon.png
+
+Edit the referenced existing conveyor-belt inventory icon. Make a Fast Conveyor belt variant by changing ONLY all three printed arrow triangles on the top belt surface from gray to bright saturated warm yellow (#FFD83D). Preserve exactly the original belt geometry, three rectangular belt plates, side rollers, dark gray and brown metal, outlines, isometric view, scale, framing and shading. No extra arrows, speed lines, text, border or other objects. Keep the background fully transparent, not white and not a checkerboard. A centered square inventory sprite matching the original icon, suitable for a 256x256 Unity game icon.

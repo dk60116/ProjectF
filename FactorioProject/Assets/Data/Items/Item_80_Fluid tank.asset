@@ -21,7 +21,7 @@ MonoBehaviour:
   attackRange: 15
   projectileSpeed: 20
   itemName: Fluid tank
-  id: 74
+  id: 76
   mapObject: {fileID: 233042269004523433, guid: 8a8b5c428315cb54ab566ee8f1a55423, type: 3}
   mapObjectArchetype: {fileID: 11400000, guid: fa43204dd4b5d5846a420e0372c76180, type: 2}
   useMapColor: 1

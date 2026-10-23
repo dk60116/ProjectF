@@ -359,7 +359,7 @@ MonoBehaviour:
   m_EditorClassIdentifier: 
   id: 0
   objectName: Flatcar
-  objId: 128
+  objId: 130
   itemDefinition: {fileID: 11400000, guid: c47ada2776c5c2046ba435d4a16764f3, type: 2}
   mapStatus:
     mapSizeX: 1
@@ -404,6 +404,7 @@ MonoBehaviour:
   couplers:
   - {fileID: 819772630519045299}
   - {fileID: 5590968437780972459}
+  couplerMaxYawAngle: 80
   railRotationInterpolationSpeed: 10
   itemPointList:
   - {fileID: 1973605188877043926}

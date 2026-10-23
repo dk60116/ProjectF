@@ -4,6 +4,8 @@ Shader "Custom/ConveyorBeltScroll"
     {
         [MainTexture] _BaseMap("Base Map", 2D) = "white" {}
         _FlowMap("Flow Map", 2D) = "white" {}
+        [NoScaleOffset] _ArrowMask("Arrow Mask (R)", 2D) = "black" {}
+        _ArrowColor("Arrow Color", Color) = (1,1,1,1)
         [MainColor] _BaseColor("Base Color", Color) = (1,1,1,1)
         _ShadowColor("Shadow Color", Color) = (0.7,0.7,0.75,1)
         _ShadeThreshold("Shade Threshold", Range(0,1)) = 0.5
@@ -140,6 +142,7 @@ Shader "Custom/ConveyorBeltScroll"
             CBUFFER_START(UnityPerMaterial)
                 float4 _BaseMap_ST;
                 float4 _BaseColor;
+                half4 _ArrowColor;
                 float4 _ShadowColor;
                 half _ShadeThreshold;
                 half _ShadeSmoothness;
@@ -168,6 +171,7 @@ Shader "Custom/ConveyorBeltScroll"
                 half _BlueprintRimStrength;
                 half _BlueprintRimPower;
             CBUFFER_END
+            #include "ConveyorArrowColor.hlsl"
 
             UNITY_INSTANCING_BUFFER_START(ConveyorPerInstance)
                 UNITY_DEFINE_INSTANCED_PROP(float4, _ConveyorUvData)
@@ -338,6 +342,7 @@ Shader "Custom/ConveyorBeltScroll"
                         frac(alongCoord * max(_FlowAlongScale, 0.0001) + conveyorUvData.y * _Time.y));
 
                     half4 flowSample = SAMPLE_TEXTURE2D(_FlowMap, sampler_FlowMap, flowUv) * _BaseColor;
+                    flowSample = ApplyConveyorArrowColor(flowSample, flowUv);
                     half4 sanitizedBase = baseStatic;
                     sanitizedBase.rgb = lerp(baseStatic.rgb, baseStatic.rgb * 0.18h, pathShapeMask);
                     baseSample = lerp(sanitizedBase, flowSample, flowMask * _FlowBlend);
@@ -346,7 +351,9 @@ Shader "Custom/ConveyorBeltScroll"
                 {
                     float2 scaledUv = input.uv;
                     scaledUv.y = scaledUv.y * max(conveyorUvData.z, 0.0001) + conveyorUvData.w;
-                    baseSample = SAMPLE_TEXTURE2D(_BaseMap, sampler_BaseMap, scaledUv + scrollOffset) * _BaseColor;
+                    float2 beltUv = scaledUv + scrollOffset;
+                    baseSample = SAMPLE_TEXTURE2D(_BaseMap, sampler_BaseMap, beltUv) * _BaseColor;
+                    baseSample = ApplyConveyorArrowColor(baseSample, beltUv);
                 }
 
                 baseSample = ApplyBlueprintPreview(baseSample);

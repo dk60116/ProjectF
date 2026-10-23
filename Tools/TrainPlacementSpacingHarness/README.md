@@ -2,6 +2,9 @@
 
 Run `powershell -ExecutionPolicy Bypass -File Tools/TrainPlacementSpacingHarness/Run.ps1` from the repository root.
 
+Add `-FocusOnly` to run only the train floor-following regression checks, without
+the unrelated fuel-role material assertion or other test suites.
+
 Uses the production Complete layout helper and spacing constant with managed Unity vector math and in-memory rail/train stubs. Checks four straight orientations, existing/new cars, freight-only curves, reversed rail segments, endpoint bridges, facing, idempotence, and failure without partial movement. It does not launch Unity or validate scene rendering or physics.
 
 The facing regression checks extract the production coupling-end storage and movement-facing methods. They verify that Complete fixes each car's physical front/rear connection, reversed rail authoring and perpendicular junctions preserve that orientation, reversing travel keeps the car facing unchanged, and disconnection removes the coupling metadata.
@@ -51,7 +54,15 @@ Floor-focus checks extract the production PlayerController train marker method.
 The authored body pivot, selected Center cell and footprint midpoint are separate:
 changing Center must not shift markers, terrain validation or curve supports by
 one cell. Tests cover both Center choices, four floor rotations, all three marker
-kinds and placed/fallback coordinate sources. Marker writes are an adapter; no
+kinds and placed/unplaced trains. Sub-cell movement must keep the marker fixed;
+crossing a cell boundary must move it by one whole cell. Curved headings retain
+an axis-aligned floor footprint. Production selection refresh and
+block-set updates verify old markers clear on cell crossings and train removal;
+terrain lookup and marker rendering remain adapters. The LateUpdate entry must
+refresh selection before returning for a mounted player.
+Pinned mouse focus is also advanced between clicks. Repeated clicks, selection
+clearing while mouse focus remains pinned, cell crossings and train removal must
+clear both marker channels from every old block. No
 Unity scene rendering is performed. Collider center supplies only the pivot
 offset; focus size still comes from the one-/two-cell map footprint.
 

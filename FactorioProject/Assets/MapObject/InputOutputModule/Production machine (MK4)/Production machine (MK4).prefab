@@ -49,7 +49,7 @@ MonoBehaviour:
   m_EditorClassIdentifier: 
   id: 0
   objectName: Production machine (MK4)
-  objId: 85
+  objId: 87
   itemDefinition: {fileID: 11400000, guid: e288a378c27b2794da788e40d427075d, type: 2}
   mapStatus:
     mapSizeX: 2

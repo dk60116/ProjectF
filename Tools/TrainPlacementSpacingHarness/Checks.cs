@@ -194,8 +194,9 @@ public partial class Train : VehicleMotionProbe
     public static readonly List<Train> ActiveRuntimeTrains = new List<Train>();
     public static void CollectActiveRuntimeTrains(ICollection<Train> results)
     { foreach (Train train in ActiveRuntimeTrains) results.Add(train); }
+    public Vector2Int TestPlacementCoordinate;
     public bool TryGetPlacementRuntime(out Vector2Int coordinate, out int quarterTurns)
-    { coordinate = Vector2Int.zero; quarterTurns = 0; return RuntimePlacementSequence > 0; }
+    { coordinate = TestPlacementCoordinate; quarterTurns = 0; return RuntimePlacementSequence > 0; }
     private TrainInstance runtimeTrain;
     private readonly Queue<Train> connectionActionGroupQueue = new Queue<Train>();
     private readonly HashSet<Train> connectionActionGroupVisited = new HashSet<Train>();

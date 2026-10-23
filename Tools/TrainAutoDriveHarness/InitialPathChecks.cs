@@ -45,7 +45,8 @@ public partial class RailHandcar
             if (rail == excluded || rail == endpoint.Rail) continue;
             rail.TryFindNearestRenderedPathSample(endpoint.Point, out float distance, out Vector2 point, out Vector2 tangent, out float sqr);
             float available = Vector2.Dot(direction, tangent) > 0 ? rail.Length - distance : distance;
-            if (sqr > .000001f || available < .0001f || sqr >= best) continue;
+            if (sqr > ResolveRailConnectionMaxDistance() * ResolveRailConnectionMaxDistance()
+                || available < .0001f || sqr >= best) continue;
             best = sqr;
             sample = Sample(rail, distance);
         }
@@ -115,6 +116,177 @@ public partial class RailHandcar
         }
 
         CheckRouteReconstruction(check);
+        CheckBridgeProgressSpacing(check);
+        CheckBridgeTapeInterpolation(check);
+    }
+
+    static void CheckBridgeTapeInterpolation(Action<bool, string> check)
+    {
+        var driver = new RailHandcar();
+        var source = InitialRail(Vector2.right, 0f, 10f, false);
+        var target = InitialRail(Vector2.right, 10.4f, 10f, false);
+        RailSample sourceEnd = Sample(source, 10f);
+        RailSample targetStart = Sample(target, 0f);
+        check(TryCreateRailConnectionBridgeSample(sourceEnd, targetStart, .4f, .3f,
+                out RailSample bridge), "Interpolation fixture must enter the rail bridge");
+
+        driver.AddConsistPathSample(driver.consistPathTape, 0f, Sample(source, 9f));
+        driver.AddConsistPathSample(driver.consistPathTape, 1.3f, bridge);
+        check(driver.TrySampleConsistPathTape(.5f, out RailSample beforeBridge, false)
+              && Math.Abs(beforeBridge.Point.x - 9.5f) < .0001f
+              && Math.Abs(beforeBridge.DistanceAlongPath - 9.5f) < .0001f
+              && !HasRailConnectionBridgeState(beforeBridge),
+            "A rail-to-bridge tape segment must retain the real rail distance before its endpoint");
+        check(driver.TrySampleConsistPathTape(1.2f, out RailSample onBridge, false)
+              && Math.Abs(onBridge.Point.x - 10.2f) < .0001f
+              && Math.Abs(onBridge.DistanceAlongPath - 10f) < .0001f
+              && HasRailConnectionBridgeState(onBridge),
+            "A rail-to-bridge tape segment must enter the bridge at its endpoint");
+
+        driver.consistPathTape.Clear();
+        driver.AddConsistPathSample(driver.consistPathTape, 0f, bridge);
+        driver.AddConsistPathSample(driver.consistPathTape, 1.1f, Sample(target, 1f));
+        check(driver.TrySampleConsistPathTape(.05f, out RailSample leavingBridge, false)
+              && Math.Abs(leavingBridge.Point.x - 10.35f) < .0001f
+              && HasRailConnectionBridgeState(leavingBridge),
+            "A bridge-to-rail tape segment must finish the bridge before entering the target rail");
+        check(driver.TrySampleConsistPathTape(.6f, out RailSample afterBridge, false)
+              && Math.Abs(afterBridge.Point.x - 10.9f) < .0001f
+              && Math.Abs(afterBridge.DistanceAlongPath - .5f) < .0001f
+              && !HasRailConnectionBridgeState(afterBridge),
+            "A bridge-to-rail tape segment must store the target rail's distance after exit");
+
+        driver.consistPathTape.Clear();
+        driver.AddConsistPathSample(driver.consistPathTape, 0f, bridge);
+        driver.AddConsistPathSample(driver.consistPathTape, 1.3f, Sample(source, 9f));
+        check(driver.TrySampleConsistPathTape(.8f, out RailSample backingOntoSource, false)
+              && Math.Abs(backingOntoSource.Point.x - 9.5f) < .0001f
+              && Math.Abs(backingOntoSource.DistanceAlongPath - 9.5f) < .0001f
+              && !HasRailConnectionBridgeState(backingOntoSource),
+            "Reversing from a bridge must restore the source rail distance without a false bridge");
+    }
+
+    static void CheckBridgeProgressSpacing(Action<bool, string> check)
+    {
+        foreach (float connectionLength in new[] { .04f, .4f })
+        {
+            var driver = new RailHandcar();
+            var source = InitialRail(Vector2.right, 0f, 10f, false);
+            var target = InitialRail(Vector2.right, 10f + connectionLength, 10f, false);
+            driver.departureRails.Add(source);
+            driver.departureRails.Add(target);
+
+            float progress = connectionLength * .75f;
+            RailSample exit = Sample(source, 10f);
+            RailSample entry = Sample(target, 0f);
+            check(TryCreateRailConnectionBridgeSample(exit, entry, connectionLength, progress,
+                    out RailSample bridge), "Bridge spacing fixture must create an in-progress connection");
+            RailSample tailSample = Sample(source, 8f + progress);
+            RailSample leaderSample = Sample(target, 2f + progress - connectionLength);
+            RailSample earlyBridge;
+            check(TryCreateRailConnectionBridgeSample(exit, entry, connectionLength,
+                    connectionLength * .25f, out earlyBridge),
+                "Bridge spacing fixture must create two positions on the same connection");
+
+            check(driver.TryGetDistanceToTargetOnCurrentRail(tailSample, bridge, Vector2.right,
+                      out float tailToBridge) && Math.Abs(tailToBridge - 2f) < .0001f,
+                "Same-rail distance must include target bridge progress");
+            check(driver.TryGetDistanceToTargetOnCurrentRail(earlyBridge, bridge, Vector2.right,
+                      out float bridgeToBridge)
+                  && Math.Abs(bridgeToBridge - connectionLength * .5f) < .0001f,
+                "Two positions on one bridge must retain their progress difference");
+
+            var leader = InitialCar(target, leaderSample.Point, Vector2.right);
+            var middle = InitialCar(source, exit.Point, Vector2.right);
+            middle.StartSample = bridge;
+            middle.TargetSample = bridge;
+            var tail = InitialCar(source, tailSample.Point, Vector2.right);
+            foreach (ConnectedTrainRailMove car in new[] { leader, middle, tail })
+            {
+                car.Train.FrontConnectionReach = 1f;
+                car.Train.RearConnectionReach = 1f;
+                driver.connectedTrainRailMoveScratch.Add(car);
+            }
+
+            Train.Link(leader.Train, middle.Train);
+            Train.Link(middle.Train, tail.Train);
+            check(driver.InitializeConsistPathTape(Vector2.right),
+                "Bridge spacing path must initialize from the cars' actual positions");
+            check(Math.Abs(driver.connectedTrainRailMoveScratch[1].FollowOffset - 2f) < .0001f,
+                "Rebuilt middle-car offset must include consumed bridge distance");
+            check(Math.Abs(driver.connectedTrainRailMoveScratch[2].FollowOffset - 4f) < .0001f,
+                "Rebuilt tail-car offset must retain both physical gaps");
+            check(driver.TryApplyPreparedConnectedTrainMoves(leader.Train, Vector2.right,
+                    Vector2.right, .001f, .02f, true, Vector2.right, false, out _),
+                "A consist reconstructed on a bridge must move");
+            if (driver.appliedRailSamples.TryGetValue(leader.Train, out RailSample movedLeader)
+                && driver.appliedRailSamples.TryGetValue(middle.Train, out RailSample movedMiddle)
+                && driver.appliedRailSamples.TryGetValue(tail.Train, out RailSample movedTail))
+            {
+                check(!HasRailConnectionBridgeState(movedTail),
+                    "A car before the connection must not inherit bridge state");
+                check(Math.Abs(Vector2.Distance(movedLeader.Point, movedMiddle.Point) - 2f) < .002f
+                      && Math.Abs(Vector2.Distance(movedMiddle.Point, movedTail.Point) - 2f) < .002f,
+                    "Bridge rebuild must not pull the middle car backward or split its spacing");
+            }
+            else
+            {
+                check(false, "Bridge spacing move must apply all three car poses");
+            }
+
+            if (driver.appliedRailSamples.ContainsKey(leader.Train)
+                && driver.appliedRailSamples.ContainsKey(middle.Train)
+                && driver.appliedRailSamples.ContainsKey(tail.Train))
+            {
+                QueueBridgeMovesInReverse(driver, tail.Train, middle.Train, leader.Train);
+
+                check(driver.TryReverseConsistPathTape(Vector2.left),
+                    "Recorded bridge route must reverse without rebuilding incorrect offsets");
+                check(driver.TryApplyPreparedConnectedTrainMoves(tail.Train, Vector2.right,
+                        Vector2.left, .001f, .02f, true, Vector2.left, false, out _),
+                    "Consist must move backward after reversing on the bridge: " + driver.railMoveFailureReason);
+                if (driver.appliedRailSamples.TryGetValue(leader.Train, out movedLeader)
+                    && driver.appliedRailSamples.TryGetValue(middle.Train, out movedMiddle)
+                    && driver.appliedRailSamples.TryGetValue(tail.Train, out movedTail))
+                {
+                    check(Math.Abs(Vector2.Distance(movedLeader.Point, movedMiddle.Point) - 2f) < .002f
+                          && Math.Abs(Vector2.Distance(movedMiddle.Point, movedTail.Point) - 2f) < .002f,
+                        "Direction reversal on a bridge must preserve both car gaps");
+
+                    driver.ResetConsistPathTape();
+                    QueueBridgeMovesInReverse(driver, tail.Train, middle.Train, leader.Train);
+
+                    check(driver.InitializeConsistPathTape(Vector2.left),
+                        "A reversed consist must rebuild its route while a car occupies the bridge");
+                    check(driver.TryApplyPreparedConnectedTrainMoves(tail.Train, Vector2.right,
+                            Vector2.left, .001f, .02f, true, Vector2.left, false, out _),
+                        "Rebuilt reversed consist must move across the bridge");
+                    if (driver.appliedRailSamples.TryGetValue(leader.Train, out movedLeader)
+                        && driver.appliedRailSamples.TryGetValue(middle.Train, out movedMiddle)
+                        && driver.appliedRailSamples.TryGetValue(tail.Train, out movedTail))
+                    {
+                        check(Math.Abs(Vector2.Distance(movedLeader.Point, movedMiddle.Point) - 2f) < .002f
+                              && Math.Abs(Vector2.Distance(movedMiddle.Point, movedTail.Point) - 2f) < .002f,
+                            "Rebuilt reverse route must not change the car gaps");
+                    }
+                }
+            }
+        }
+    }
+
+    static void QueueBridgeMovesInReverse(RailHandcar driver, Train tail, Train middle, Train leader)
+    {
+        foreach (Train train in new[] { tail, middle, leader })
+        {
+            RailSample sample = driver.appliedRailSamples[train];
+            driver.connectedTrainRailMoveScratch.Add(new ConnectedTrainRailMove
+            {
+                Train = train,
+                StartSample = sample,
+                TargetSample = sample,
+                StartFacingTangent = Vector2.right
+            });
+        }
     }
 
     static void CheckRouteReconstruction(Action<bool, string> check)

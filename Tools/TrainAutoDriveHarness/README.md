@@ -49,6 +49,8 @@ Coverage includes:
   leg's tape, and rejection of unrelated or moved cars.
 - Production tape reversal and follower sampling across oppositely authored rail
   endpoints, preserving junction progress and one-cell spacing on return departure.
+- Tape interpolation across a rail-to-bridge or bridge-to-rail segment keeps the
+  stored rail distance synchronized with the rendered point in both directions.
 - Initial tape alignment from actual car positions on curves and junctions, followed
   by normal convergence to one-cell spacing after movement begins.
 - First-departure path construction and sampling across overlapping rails, using

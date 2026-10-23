@@ -1,0 +1,23 @@
+{
+  "source": "C:\\Git\\ProjectF\\FactorioProject\\Assets\\MapObject\\Belt\\Spliter belt\\Spliter belt.fbx",
+  "vertices": 1732,
+  "faces": 3444,
+  "uv_channels": [
+    "UV_Unwrapped",
+    "UV_Original"
+  ],
+  "collapsed_uv_faces": 0,
+  "uv_overlap_pairs": 0,
+  "uv_bounds": [
+    [
+      0.007999980822205544,
+      0.9859285950660706
+    ],
+    [
+      0.007999944500625134,
+      0.9852156043052673
+    ]
+  ],
+  "original_uv_preserved": true,
+  "fbx_roundtrip_verified": true
+}

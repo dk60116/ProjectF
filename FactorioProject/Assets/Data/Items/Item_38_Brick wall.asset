@@ -21,7 +21,7 @@ MonoBehaviour:
   attackRange: 15
   projectileSpeed: 20
   itemName: Brick Wall
-  id: 93
+  id: 95
   mapObject: {fileID: 2276685300360839919, guid: 9b80960e4abf8cc4a901548259cc9e2b, type: 3}
   mapObjectArchetype: {fileID: 11400000, guid: 0cc94c8c529101941805431a9571f1b7, type: 2}
   useMapColor: 0

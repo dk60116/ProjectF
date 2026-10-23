@@ -27,12 +27,12 @@ Material:
         m_Texture: {fileID: 2800000, guid: 6be35e1d1ae0175419febf0c1c9be889, type: 3}
         m_Scale: {x: 1, y: 1}
         m_Offset: {x: 0, y: 0}
-    - _BaseMap:
-        m_Texture: {fileID: 2800000, guid: a255a1e1bbcbbf2479ed4f5cfb55b0b2, type: 3}
+    - _ArrowMask:
+        m_Texture: {fileID: 2800000, guid: 83dc9d2edf3f41b6bc13068072e7a328, type: 3}
         m_Scale: {x: 1, y: 1}
         m_Offset: {x: 0, y: 0}
-    - _StraightBeltMap:
-        m_Texture: {fileID: 2800000, guid: 3fa7b59bcc1ff8e46849028b69bb24ed, type: 3}
+    - _BaseMap:
+        m_Texture: {fileID: 2800000, guid: a255a1e1bbcbbf2479ed4f5cfb55b0b2, type: 3}
         m_Scale: {x: 1, y: 1}
         m_Offset: {x: 0, y: 0}
     - _MainTex:
@@ -41,6 +41,10 @@ Material:
         m_Offset: {x: 0, y: 0}
     - _PathUvMap:
         m_Texture: {fileID: 2800000, guid: 3cf75376588243e3a9441ed14d2b7b16, type: 3}
+        m_Scale: {x: 1, y: 1}
+        m_Offset: {x: 0, y: 0}
+    - _StraightBeltMap:
+        m_Texture: {fileID: 2800000, guid: 3fa7b59bcc1ff8e46849028b69bb24ed, type: 3}
         m_Scale: {x: 1, y: 1}
         m_Offset: {x: 0, y: 0}
     - unity_Lightmaps:
@@ -62,6 +66,13 @@ Material:
     - _AlphaToMask: 0
     - _Blend: 0
     - _BlendModePreserveSpecular: 1
+    - _BlueprintAlpha: 0.95
+    - _BlueprintBrightness: 1.8
+    - _BlueprintContrast: 2.65
+    - _BlueprintMinBrightness: 0.42
+    - _BlueprintPreview: 0
+    - _BlueprintRimPower: 2.2
+    - _BlueprintRimStrength: 0.8
     - _CornerRotationSteps: 0
     - _Cull: 0
     - _Cutoff: 0.5
@@ -78,8 +89,13 @@ Material:
     - _UVScrollY: -0.5
     - _ZWrite: 1
     m_Colors:
+    - _ArrowColor: {r: 0.59607846, g: 0.59607846, b: 0.59607846, a: 1}
     - _BaseColor: {r: 1, g: 1, b: 1, a: 1}
+    - _BlueprintRimColor: {r: 0.03, g: 0.11999995, b: 0.52, a: 1}
+    - _BlueprintTint: {r: 0.45, g: 0.95, b: 1, a: 1}
     - _Color: {r: 1, g: 1, b: 1, a: 1}
+    - _ConveyorUvData: {r: 0, g: -0.5, b: 1, a: 0}
     - _PathWidthRange: {r: 0, g: 1, b: 0, a: 0}
     - _ShadowColor: {r: 0.7, g: 0.7, b: 0.75, a: 1}
   m_BuildTextureStacks: []
+  m_AllowLocking: 1

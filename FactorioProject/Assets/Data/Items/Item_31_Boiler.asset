@@ -21,7 +21,7 @@ MonoBehaviour:
   attackRange: 15
   projectileSpeed: 20
   itemName: Boiler
-  id: 75
+  id: 77
   mapObject: {fileID: 3506764276934423664, guid: 19c50aebdae9359439841e55c9844e07, type: 3}
   mapObjectArchetype: {fileID: 11400000, guid: 39a10f8a4c6063142b7daba263403ad5, type: 2}
   useMapColor: 1

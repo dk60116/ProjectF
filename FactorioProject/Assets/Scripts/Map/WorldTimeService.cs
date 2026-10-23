@@ -55,7 +55,6 @@ public sealed class WorldTimeService : MonoBehaviour
 
     private bool lightingDefaultsCaptured, dayStateBroadcastInitialized, lastBroadcastDayState;
     private float defaultAmbientIntensity = 1f;
-    private Quaternion defaultLightRotation = Quaternion.identity;
     public WorldClock Simulation => clock;
     public int DayIndex => clock.DayIndex;
     public double SecondsOfDay => clock.SecondsOfDay;
@@ -242,16 +241,8 @@ public sealed class WorldTimeService : MonoBehaviour
                 daylightFactor);
             directionalLight.color = Color.Lerp(nightLightColor, dayLightColor, daylightFactor);
 
-            float dayProgress = Mathf.InverseLerp(
-                SunriseHour,
-                SunsetHour,
-                (float)(SecondsOfDay / GameSecondsPerHour));
-            float elevation = 25f + (Mathf.Sin(dayProgress * Mathf.PI) * 45f * daylightFactor);
-            Vector3 defaultEuler = defaultLightRotation.eulerAngles;
-            directionalLight.transform.rotation = Quaternion.Euler(
-                elevation,
-                defaultEuler.y,
-                defaultEuler.z);
+            // Keep the scene-authored sun direction fixed to avoid shadow-map
+            // shimmer as time advances. Day/night changes only brightness and color.
         }
 
         RenderSettings.ambientIntensity =
@@ -285,9 +276,6 @@ public sealed class WorldTimeService : MonoBehaviour
         }
 
         defaultAmbientIntensity = RenderSettings.ambientIntensity;
-        defaultLightRotation = directionalLight != null
-            ? directionalLight.transform.rotation
-            : Quaternion.identity;
         lightingDefaultsCaptured = true;
     }
     private void NormalizeSettings()

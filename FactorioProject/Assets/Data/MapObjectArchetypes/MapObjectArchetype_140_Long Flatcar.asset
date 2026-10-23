@@ -15,12 +15,12 @@ MonoBehaviour:
   schemaVersion: 2
   itemDefinition: {fileID: 11400000, guid: fe74cb295535dcf41a5ac655f830dfb4, type: 2}
   sourcePrefab: {fileID: 8246531933118439867, guid: 0cadb6b49643c3b4aab8c353c06adb09, type: 3}
-  itemId: 131
+  itemId: 133
   itemName: Long Flatcar
   sourcePrefabGuid: 0cadb6b49643c3b4aab8c353c06adb09
   sourceContentHash:
     serializedVersion: 2
-    Hash: 7554a9c1e99f74e8108967d72e637e0a
+    Hash: 9798afe2d9dddcb0c31782330f06565b
   sourceRuntimeType: FreightCar, Assembly-CSharp, Version=0.0.0.0, Culture=neutral,
     PublicKeyToken=null
   mapStatus:
@@ -445,7 +445,7 @@ MonoBehaviour:
     subMeshIndex: 0
     localBounds:
       m_Center: {x: 0.000000059604645, y: 0.2138457, z: 0}
-      m_Extent: {x: 0.4397369, y: 0.13907948, z: 1.0595772}
+      m_Extent: {x: 0.4397369, y: 0.13907948, z: 1.0065984}
     layer: 0
     renderingLayerMask: 1
     shadowCastingMode: 1

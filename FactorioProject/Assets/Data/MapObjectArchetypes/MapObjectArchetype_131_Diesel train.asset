@@ -15,7 +15,7 @@ MonoBehaviour:
   schemaVersion: 2
   itemDefinition: {fileID: 11400000, guid: 72f34e5c92fc837489d0795602df4b54, type: 2}
   sourcePrefab: {fileID: 9167927084954758081, guid: 5f5ef2271a458914f832133627ec7e62, type: 3}
-  itemId: 132
+  itemId: 134
   itemName: Diesel train
   sourcePrefabGuid: 5f5ef2271a458914f832133627ec7e62
   sourceContentHash:

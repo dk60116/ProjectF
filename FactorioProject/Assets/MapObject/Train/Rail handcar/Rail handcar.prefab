@@ -326,7 +326,7 @@ MonoBehaviour:
   m_EditorClassIdentifier: 
   id: 0
   objectName: Rail handcar
-  objId: 129
+  objId: 131
   itemDefinition: {fileID: 11400000, guid: e93a970b73b08f348b062a6caa40bc92, type: 2}
   mapStatus:
     mapSizeX: 1
@@ -372,6 +372,7 @@ MonoBehaviour:
   trainConnectionMinForwardDot: 0.5
   couplers:
   - {fileID: 6229925305204605500}
+  couplerMaxYawAngle: 80
   railMoveSpeedMultiplier: 1
   railMovementSubstepDistance: 0.12
   railSnapMaxDistance: 0.75

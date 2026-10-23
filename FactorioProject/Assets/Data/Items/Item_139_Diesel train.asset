@@ -21,7 +21,7 @@ MonoBehaviour:
   attackRange: 15
   projectileSpeed: 20
   itemName: Diesel train
-  id: 132
+  id: 134
   mapObject: {fileID: 9167927084954758081, guid: 5f5ef2271a458914f832133627ec7e62, type: 3}
   mapObjectArchetype: {fileID: 11400000, guid: 54da5b7ca61861f4f940503fc7486d49, type: 2}
   useMapColor: 1

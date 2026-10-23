@@ -1,3 +1,4 @@
+param([switch]$FocusOnly)
 $ErrorActionPreference = 'Stop'
 $repo = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '../..'))
 $probe = Join-Path ([IO.Path]::GetTempPath()) ('ProjectF-TrainSpacing-' + [guid]::NewGuid().ToString('N'))
@@ -88,6 +89,7 @@ foreach ($signature in @('public bool TryGetRailDockDeltaAtCoordinate(', 'public
     $generated += Read-Member $handcar $signature
 }
 foreach ($signature in @('private bool TrySampleConsistPathTape(', 'private bool TrySampleBetweenConsistPathSamples(',
+    'private static bool TrySampleRailAndBridgeSegment(',
     'private static bool TryCreateLinearRailSample(', 'private static bool TryResolveRailConnectionProgressAtPoint(')) {
     $generated += Read-Member $handcar $signature
 }
@@ -128,6 +130,15 @@ $generated += "`n}`n"
 $player = [IO.File]::ReadAllText((Join-Path $repo 'FactorioProject/Assets/Scripts/Character/Player/PlayerController.cs'))
 $generated += "public partial class PlayerController {`n"
 $generated += Read-Member $player 'private static void SetTrainFocusVisible('
+foreach ($signature in @('private void RefreshSelectedMapObjectFocus(', 'private void SetSelectedFocusedBlocks(', 'private static bool ContainsFocusedBlock(', 'private void RefreshMovingTrainMouseFocus(', 'private void SetMouseFocusedBlocks(')) {
+    $generated += Read-Member $player $signature
+}
+$lateUpdate = Read-Member $player 'private void LateUpdate('
+$refreshIndex = $lateUpdate.IndexOf('RefreshSelectedMapObjectFocus(currentSelectedMapObject, null);', [StringComparison]::Ordinal)
+$mountedIndex = $lateUpdate.IndexOf('if (interactionPointSnapTarget != null)', [StringComparison]::Ordinal)
+if ($refreshIndex -lt 0 -or $refreshIndex -gt $mountedIndex) { throw 'Moving train selection must refresh before the mounted LateUpdate return' }
+$mouseRefreshIndex = $lateUpdate.IndexOf('RefreshMovingTrainMouseFocus();', [StringComparison]::Ordinal)
+if ($mouseRefreshIndex -lt 0 -or $mouseRefreshIndex -gt $mountedIndex) { throw 'Pinned train mouse focus must refresh before the mounted LateUpdate return' }
 $generated += "`n}`n"
 $placement = [IO.File]::ReadAllText((Join-Path $repo 'FactorioProject/Assets/Scripts/Object/MapObj/InstallationObject/InstallationPlacementController.cs'))
 $generated += "public partial class InstallationPlacementController {`n"
@@ -169,10 +180,9 @@ if (!$body.Success -or $prefab -notmatch 'mapSizeX: 1\s+mapSizeY: 2') { throw 'M
 [IO.File]::WriteAllText((Join-Path $probe 'DieselBody.cs'), ('static class DieselBody { public const float Length = ' + $body.Groups[1].Value.Trim() + 'f; public const float Center = ' + $body.Groups[2].Value.Trim() + 'f; }'))
 $longPrefab = [IO.File]::ReadAllText((Join-Path $repo 'FactorioProject/Assets/MapObject/Train/Long Flatcar/Long Flatcar.prefab'))
 $fuelMaterial = [IO.File]::ReadAllText((Join-Path $repo 'FactorioProject/Assets/MapObject/Train/Flatcar/FuelRoleIcon.mat'))
-if (!$fuelMaterial.Contains('guid: c397bc2f1a714684a8ae08c44646d237') -or
-    !$fuelMaterial.Contains('_Color: {r: 1, g: 1, b: 1, a: 1}') -or
-    !$fuelMaterial.Contains('_ZTest: 4')) {
-    throw 'Fuel-role icons must use the existing unlit sprite shader at full opacity while preserving depth occlusion'
+if (!$FocusOnly -and (!$fuelMaterial.Contains('m_CustomRenderQueue: 4000') -or
+    !$fuelMaterial.Contains('_ZTest: 8'))) {
+    throw 'Fuel-role markers must render in the overlay queue without depth occlusion'
 }
 $longBody = [regex]::Match($longPrefab, 'BoxCollider:[\s\S]*?m_Size: \{x: [^,]+, y: [^,]+, z: ([^}]+)\}[\s\S]*?m_Center: \{x: [^,]+, y: [^,]+, z: ([^}]+)\}')
 if ($longPrefab -notmatch 'mapSizeX: 1\s+mapSizeY: 2\s+centerCellX: 0\s+centerCellY: [01]' -or
@@ -188,5 +198,11 @@ foreach ($file in @('TrainInstance.cs', 'TrainWorld.cs', 'TrainWorld.Native.cs')
 Copy-Item -LiteralPath (Join-Path $repo 'FactorioProject/Assets/Scripts/MapObjects/MapObjectHandle.cs') -Destination $probe
 Copy-Item -Path (Join-Path $repo 'FactorioProject/Assets/Scripts/Simulation/Core/*.cs') -Destination $probe
 [IO.File]::WriteAllText((Join-Path $probe 'Probe.csproj'), '<Project Sdk="Microsoft.NET.Sdk"><PropertyGroup><OutputType>Exe</OutputType><TargetFramework>net9.0</TargetFramework></PropertyGroup><ItemGroup><Reference Include="UnityEngine.CoreModule"><HintPath>C:/Program Files/Unity/Hub/Editor/6000.4.0f1/Editor/Data/Managed/UnityEngine/UnityEngine.CoreModule.dll</HintPath></Reference></ItemGroup></Project>')
+if ($FocusOnly) {
+    $checksPath = Join-Path $probe 'Checks.cs'
+    $checks = [IO.File]::ReadAllText($checksPath)
+    $main = Read-Member $checks 'static void Main()'
+    [IO.File]::WriteAllText($checksPath, $checks.Replace($main, 'static void Main() { PlayerController.RunTrainFocusChecks(); }'))
+}
 dotnet run --configuration Release --project (Join-Path $probe 'Probe.csproj')
 exit $LASTEXITCODE

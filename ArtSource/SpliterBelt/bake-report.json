@@ -1,0 +1,13 @@
+{
+  "resolution": [
+    1024,
+    1024
+  ],
+  "source_uv": "UV_Original",
+  "target_uv": "UV_Unwrapped",
+  "bake_type": "EMIT",
+  "margin_pixels": 4,
+  "compared_pixels": 26977,
+  "mean_linear_rgb_error": 0.0053148637525737286,
+  "p95_linear_rgb_error": 0.023529410362243652
+}

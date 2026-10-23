@@ -21,7 +21,7 @@ MonoBehaviour:
   attackRange: 15
   projectileSpeed: 20
   itemName: Seed Planter
-  id: 86
+  id: 88
   mapObject: {fileID: 5947636525656944032, guid: 8f63da3c1fe9b2c45b93145ecc84810d, type: 3}
   mapObjectArchetype: {fileID: 11400000, guid: dbb9b3a7fbda31240961602a24db9745, type: 2}
   useMapColor: 1

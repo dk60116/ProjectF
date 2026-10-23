@@ -176,7 +176,7 @@ MonoBehaviour:
   m_EditorClassIdentifier: Assembly-CSharp::Raft
   id: 0
   objectName: Raft
-  objId: 140
+  objId: 142
   itemDefinition: {fileID: 11400000, guid: 48066f4fbabe240498d815ab5e84d1a2, type: 2}
   mapStatus:
     mapSizeX: 2

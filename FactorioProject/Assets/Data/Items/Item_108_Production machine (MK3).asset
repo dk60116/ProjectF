@@ -21,7 +21,7 @@ MonoBehaviour:
   attackRange: 15
   projectileSpeed: 20
   itemName: Production machine (MK3)
-  id: 84
+  id: 86
   mapObject: {fileID: 1982885657640665004, guid: 5e35bf91a3c489b42b8cff7e865635b6, type: 3}
   mapObjectArchetype: {fileID: 11400000, guid: 1bb84239e37654e478fa192ba8232136, type: 2}
   useMapColor: 1
