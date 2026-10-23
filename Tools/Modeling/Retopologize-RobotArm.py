@@ -3,6 +3,8 @@
 Rebuilds coplanar/near-coplanar triangle patches as quads while retaining open
 mechanical boundaries. This is not an all-quad sculpt remesh. Writes staging
 assets, preserving the original FBX model IDs, hierarchy and pivot transforms.
+Run Fill-RobotArmHoles.py --apply-assets after rebuilding these assets to close
+the source mesh openings and keep the Unity FBX and staging files synchronized.
 """
 import sys
 import importlib.util
@@ -16,13 +18,14 @@ import shutil
 import numpy as np
 from mathutils import Vector
 from uv_atlas import overlapping_faces
+from RobotArmNormals import rebuild_normals
 
 spec = importlib.util.spec_from_file_location('robot_uv', Path(__file__).with_name('Process-RobotArmUV.py'))
 base = importlib.util.module_from_spec(spec); spec.loader.exec_module(base)
 OUT = base.OUT / 'Retopology'
 BACKUP = OUT / 'Backups'
 BACKUP.mkdir(parents=True, exist_ok=True)
-FIELDS = ('Vertices','PolygonVertexIndex','Normals','UV','UVIndex','Tangents','TangentsW','Binormals','BinormalsW')
+FIELDS = ('Vertices','PolygonVertexIndex','Normals','NormalsW','UV','UVIndex','Tangents','TangentsW','Binormals','BinormalsW')
 
 def backup(name):
     destination = BACKUP / name
@@ -32,7 +35,7 @@ def backup(name):
 def encode_mesh(mesh, block):
     inv=base.rotation.inverted()
     mesh.calc_tangents(uvmap='UV_Unwrapped')
-    values={'Vertices':[float(v) for vertex in mesh.vertices for v in inv@vertex.co*100], 'PolygonVertexIndex':[], 'UV':[float(v) for loop in mesh.uv_layers[0].data for v in loop.uv], 'UVIndex':list(range(len(mesh.loops))), 'Normals':[], 'Tangents':[], 'Binormals':[], 'TangentsW':[0]*len(mesh.loops), 'BinormalsW':[0]*len(mesh.loops)}
+    values={'Vertices':[float(v) for vertex in mesh.vertices for v in inv@vertex.co*100], 'PolygonVertexIndex':[], 'UV':[float(v) for loop in mesh.uv_layers[0].data for v in loop.uv], 'UVIndex':list(range(len(mesh.loops))), 'Normals':[], 'NormalsW':[1]*len(mesh.loops), 'Tangents':[], 'Binormals':[], 'TangentsW':[0]*len(mesh.loops), 'BinormalsW':[0]*len(mesh.loops)}
     for polygon in mesh.polygons:
         ids=list(polygon.vertices);ids[-1]=-ids[-1]-1;values['PolygonVertexIndex'].extend(ids)
     for i,loop in enumerate(mesh.loops):
@@ -41,6 +44,28 @@ def encode_mesh(mesh, block):
     changed=block
     for field in FIELDS: changed=base.replace_array(changed,field,values[field])
     return changed
+
+
+def remove_small_components(bm):
+    """Discard disconnected scraps; keep larger separate mechanical shells."""
+    visited = set()
+    scraps = []
+    for vertex in bm.verts:
+        if vertex in visited:
+            continue
+        component = [vertex]
+        visited.add(vertex)
+        for current in component:
+            for edge in current.link_edges:
+                neighbor = edge.other_vert(current)
+                if neighbor not in visited:
+                    visited.add(neighbor)
+                    component.append(neighbor)
+        if len(component) <= 4:
+            scraps.extend(component)
+    if scraps:
+        bmesh.ops.delete(bm, geom=scraps, context='VERTS')
+    return len(scraps)
 
 def run(label, model, texture, block):
     bpy.ops.wm.open_mainfile(filepath=str(base.OUT / (label+'.blend')))
@@ -64,6 +89,7 @@ def run(label, model, texture, block):
     branching = [e for e in bm.edges if len(e.link_faces)>2]
     if branching: bmesh.ops.split_edges(bm, edges=branching)
     assert not any(len(e.link_faces)>2 for e in bm.edges)
+    removed_scrap_vertices = remove_small_components(bm)
     bm.to_mesh(target.data); bm.free(); target.data.update()
     mesh = target.data
     assert sum(len(p.vertices)==4 for p in mesh.polygons)>0
@@ -84,15 +110,8 @@ def run(label, model, texture, block):
         bpy.ops.object.mode_set(mode='OBJECT'); uv = mesh.uv_layers[0]
     assert not overlapping_faces(mesh, uv)
     assert all(math.isfinite(v) and -.00001<=v<=1.00001 for loop in uv.data for v in loop.uv)
-    # Preserve source shading across rebuilt corners.
-    normal_transfer = target.modifiers.new('Preserve source normals','DATA_TRANSFER')
-    normal_transfer.object = source
-    normal_transfer.use_loop_data = True
-    normal_transfer.data_types_loops = {'CUSTOM_NORMAL'}
-    normal_transfer.loop_mapping = 'POLYINTERP_NEAREST'
-    bpy.ops.object.modifier_apply(modifier=normal_transfer.name)
+    rebuild_normals(target)
     mesh = target.data
-    for polygon in mesh.polygons: polygon.use_smooth = True
 
     source_mat = source.data.materials[0].copy(); source.data.materials.clear(); source.data.materials.append(source_mat)
     source_nodes = source_mat.node_tree.nodes; source_links = source_mat.node_tree.links
@@ -145,7 +164,7 @@ def run(label, model, texture, block):
             if area.type=='IMAGE_EDITOR':area.spaces.active.image=image
     bpy.ops.object.mode_set(mode='EDIT');bpy.ops.mesh.select_all(action='SELECT')
     bpy.ops.wm.save_as_mainfile(filepath=str(OUT/(label+'.blend')))
-    result={'mesh':model,'texture':texture,'before_triangles':original_faces,'after_faces':len(mesh.polygons),'quads':sum(len(p.vertices)==4 for p in mesh.polygons),'after_triangles':sum(len(p.vertices)-2 for p in mesh.polygons),'silhouette_iou':iou,'render_mean_error':error,'uv_overlaps':0,'branching_edges':0}
+    result={'mesh':model,'texture':texture,'before_triangles':original_faces,'after_faces':len(mesh.polygons),'quads':sum(len(p.vertices)==4 for p in mesh.polygons),'after_triangles':sum(len(p.vertices)-2 for p in mesh.polygons),'scrap_vertices_removed':removed_scrap_vertices,'silhouette_iou':iou,'render_mean_error':error,'uv_overlaps':0,'branching_edges':0}
     print('RETOPO_RESULT '+json.dumps(result),flush=True)
     return changed,result
 

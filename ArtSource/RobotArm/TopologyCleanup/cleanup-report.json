@@ -1,0 +1,62 @@
+[
+  {
+    "mesh": "tripo_part_15",
+    "scrap_components_removed": 2,
+    "faces_removed": 2,
+    "vertices_removed": 6,
+    "faces_after": 440,
+    "vertices_after": 399,
+    "components_after": 1,
+    "normals_w_repaired": true
+  },
+  {
+    "mesh": "tripo_part_17",
+    "scrap_components_removed": 1,
+    "faces_removed": 1,
+    "vertices_removed": 3,
+    "faces_after": 870,
+    "vertices_after": 687,
+    "components_after": 1,
+    "normals_w_repaired": true
+  },
+  {
+    "mesh": "tripo_part_new_0",
+    "scrap_components_removed": 2,
+    "faces_removed": 4,
+    "vertices_removed": 6,
+    "faces_after": 949,
+    "vertices_after": 811,
+    "components_after": 2,
+    "normals_w_repaired": true
+  },
+  {
+    "mesh": "tripo_part_1",
+    "scrap_components_removed": 3,
+    "faces_removed": 6,
+    "vertices_removed": 12,
+    "faces_after": 1806,
+    "vertices_after": 1314,
+    "components_after": 1,
+    "normals_w_repaired": true
+  },
+  {
+    "mesh": "tripo_part_7",
+    "scrap_components_removed": 2,
+    "faces_removed": 4,
+    "vertices_removed": 8,
+    "faces_after": 858,
+    "vertices_after": 607,
+    "components_after": 1,
+    "normals_w_repaired": true
+  },
+  {
+    "mesh": "Robot_Arm_Bottom",
+    "scrap_components_removed": 0,
+    "faces_removed": 0,
+    "vertices_removed": 0,
+    "faces_after": 331,
+    "vertices_after": 274,
+    "components_after": 1,
+    "normals_w_repaired": true
+  }
+]

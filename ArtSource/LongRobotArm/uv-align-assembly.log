@@ -1,0 +1,19 @@
+BlenderMCP: cannot start server in background mode (blender -b) - commands would never execute
+BlenderMCP: run Blender with a GUI, or use a virtual display: xvfb-run -a blender
+BlenderMCP addon registered
+BlenderMCP server stopped
+BlenderMCP addon unregistered
+Info: Saved as "Long Robot arm_UnityMatched.blend"
+ASSEMBLY_OK C:\Git\ProjectF\ArtSource\LongRobotArm\Long Robot arm_UnityMatched.blend objects=12 visible_meshes=9 unique_meshes=8
+  Floor -> Group_05_D143BF world=(0.0, 0.0, 0.0)
+  Arm2 -> Group_04_7049E6 world=(0.0, 0.293, 1.028)
+  Finger1 -> Group_08_E62565 world=(-0.082, 1.3536, 1.56)
+  Hand -> Group_10_AC21D1 world=(0.0, 1.1825, 1.5075)
+  ForeArm -> Group_06_439CD1 world=(0.0, 0.6262, 1.3152)
+  Arm -> Group_01_E64949 world=(0.0, 0.045, 0.402)
+  Finger2 -> Group_08_E62565 world=(0.082, 1.3536, 1.56)
+  Line -> Group_03_D18021 world=(0.0, -0.132, 0.387)
+  Hinge -> Group_02_ECA5FF world=(0.0, 0.0, 0.246)
+Blender 4.5.0 (hash 8cb6b388974a built 2025-07-15 01:36:24)
+
+Blender quit

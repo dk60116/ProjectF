@@ -1,0 +1,93 @@
+[
+  {
+    "object": "Arm_0",
+    "mesh": "tripo_part_15",
+    "instances": [
+      "Arm_0"
+    ],
+    "vertices": 404,
+    "faces": 544,
+    "boundary_edges": 0,
+    "boundary_components": 0,
+    "closed_boundary_loops": 0,
+    "nonmanifold_edges": 0,
+    "wire_edges": 0,
+    "components": []
+  },
+  {
+    "object": "Arm_1",
+    "mesh": "tripo_part_17",
+    "instances": [
+      "Arm_1"
+    ],
+    "vertices": 688,
+    "faces": 895,
+    "boundary_edges": 0,
+    "boundary_components": 0,
+    "closed_boundary_loops": 0,
+    "nonmanifold_edges": 0,
+    "wire_edges": 0,
+    "components": []
+  },
+  {
+    "object": "Body.001",
+    "mesh": "tripo_part_1",
+    "instances": [
+      "Body.001"
+    ],
+    "vertices": 1307,
+    "faces": 1849,
+    "boundary_edges": 0,
+    "boundary_components": 0,
+    "closed_boundary_loops": 0,
+    "nonmanifold_edges": 0,
+    "wire_edges": 0,
+    "components": []
+  },
+  {
+    "object": "Center",
+    "mesh": "tripo_part_new_0",
+    "instances": [
+      "Center"
+    ],
+    "vertices": 819,
+    "faces": 1047,
+    "boundary_edges": 0,
+    "boundary_components": 0,
+    "closed_boundary_loops": 0,
+    "nonmanifold_edges": 0,
+    "wire_edges": 0,
+    "components": []
+  },
+  {
+    "object": "Left",
+    "mesh": "tripo_part_7",
+    "instances": [
+      "Left",
+      "Right"
+    ],
+    "vertices": 602,
+    "faces": 873,
+    "boundary_edges": 0,
+    "boundary_components": 0,
+    "closed_boundary_loops": 0,
+    "nonmanifold_edges": 0,
+    "wire_edges": 0,
+    "components": []
+  },
+  {
+    "object": "Robot Arm_Bottom",
+    "mesh": "Robot_Arm_Bottom",
+    "instances": [
+      "Robot Arm_Bottom"
+    ],
+    "vertices": 274,
+    "faces": 331,
+    "boundary_edges": 0,
+    "boundary_components": 0,
+    "closed_boundary_loops": 0,
+    "nonmanifold_edges": 0,
+    "wire_edges": 0,
+    "components": []
+  }
+]

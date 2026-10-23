@@ -20,7 +20,7 @@ MonoBehaviour:
   sourcePrefabGuid: 67e59f493a6d8be4f88637abe49568e4
   sourceContentHash:
     serializedVersion: 2
-    Hash: 871dcb256625986f638142adc5097d30
+    Hash: 12d772dbdcd9839c131c37c716894aec
   sourceRuntimeType: RobotArm, Assembly-CSharp, Version=0.0.0.0, Culture=neutral,
     PublicKeyToken=null
   mapStatus:
@@ -394,8 +394,8 @@ MonoBehaviour:
     material: {fileID: 2100000, guid: d61eadf34b410c245bd07ba9731c3983, type: 2}
     subMeshIndex: 0
     localBounds:
-      m_Center: {x: 0, y: 0.14790015, z: -0.0003298819}
-      m_Extent: {x: 0.29034343, y: 0.14516641, z: 0.2722175}
+      m_Center: {x: 0, y: 0.12737566, z: -0.0003298819}
+      m_Extent: {x: 0.29034343, y: 0.124641925, z: 0.2722175}
     layer: 0
     renderingLayerMask: 1
     shadowCastingMode: 1
@@ -485,8 +485,8 @@ MonoBehaviour:
     material: {fileID: 2100000, guid: d61eadf34b410c245bd07ba9731c3983, type: 2}
     subMeshIndex: 0
     localBounds:
-      m_Center: {x: 0.043242253, y: -0.10178582, z: 0}
-      m_Extent: {x: 0.07309127, y: 0.13069189, z: 0.051686175}
+      m_Center: {x: 0.043242253, y: -0.101785816, z: 0}
+      m_Extent: {x: 0.07309127, y: 0.13069187, z: 0.051686175}
     layer: 0
     renderingLayerMask: 1
     shadowCastingMode: 1
@@ -498,8 +498,8 @@ MonoBehaviour:
     material: {fileID: 2100000, guid: d61eadf34b410c245bd07ba9731c3983, type: 2}
     subMeshIndex: 0
     localBounds:
-      m_Center: {x: 0.043242253, y: -0.10178582, z: 0}
-      m_Extent: {x: 0.07309127, y: 0.13069189, z: 0.051686175}
+      m_Center: {x: 0.043242253, y: -0.101785816, z: 0}
+      m_Extent: {x: 0.07309127, y: 0.13069187, z: 0.051686175}
     layer: 0
     renderingLayerMask: 1
     shadowCastingMode: 1

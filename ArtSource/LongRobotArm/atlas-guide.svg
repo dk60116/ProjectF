@@ -1,0 +1,30 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="2048" height="2048" viewBox="0 0 2048 2048">
+<image href="Long Robot arm_TB.png" width="2048" height="2048"/>
+<rect x="0.000" y="0.000" width="682.667" height="682.667" fill="none" stroke="#d9e0e8" stroke-width="3"/>
+<rect x="2.000" y="2.000" width="678.667" height="52" fill="#131820" fill-opacity="0.82"/>
+<text x="16.000" y="38.000" fill="white" font-family="sans-serif" font-size="32">01 Floor</text>
+<rect x="682.667" y="0.000" width="682.667" height="682.667" fill="none" stroke="#d9e0e8" stroke-width="3"/>
+<rect x="684.667" y="2.000" width="678.667" height="52" fill="#131820" fill-opacity="0.82"/>
+<text x="698.667" y="38.000" fill="white" font-family="sans-serif" font-size="32">02 Hinge</text>
+<rect x="1365.333" y="0.000" width="682.667" height="682.667" fill="none" stroke="#d9e0e8" stroke-width="3"/>
+<rect x="1367.333" y="2.000" width="678.667" height="52" fill="#131820" fill-opacity="0.82"/>
+<text x="1381.333" y="38.000" fill="white" font-family="sans-serif" font-size="32">03 Arm</text>
+<rect x="0.000" y="682.667" width="682.667" height="682.667" fill="none" stroke="#d9e0e8" stroke-width="3"/>
+<rect x="2.000" y="684.667" width="678.667" height="52" fill="#131820" fill-opacity="0.82"/>
+<text x="16.000" y="720.667" fill="white" font-family="sans-serif" font-size="32">04 Arm2</text>
+<rect x="682.667" y="682.667" width="682.667" height="682.667" fill="none" stroke="#d9e0e8" stroke-width="3"/>
+<rect x="684.667" y="684.667" width="678.667" height="52" fill="#131820" fill-opacity="0.82"/>
+<text x="698.667" y="720.667" fill="white" font-family="sans-serif" font-size="32">05 ForeArm</text>
+<rect x="1365.333" y="682.667" width="682.667" height="682.667" fill="none" stroke="#d9e0e8" stroke-width="3"/>
+<rect x="1367.333" y="684.667" width="678.667" height="52" fill="#131820" fill-opacity="0.82"/>
+<text x="1381.333" y="720.667" fill="white" font-family="sans-serif" font-size="32">06 Line</text>
+<rect x="0.000" y="1365.333" width="682.667" height="682.667" fill="none" stroke="#d9e0e8" stroke-width="3"/>
+<rect x="2.000" y="1367.333" width="678.667" height="52" fill="#131820" fill-opacity="0.82"/>
+<text x="16.000" y="1403.333" fill="white" font-family="sans-serif" font-size="32">07 Hand</text>
+<rect x="682.667" y="1365.333" width="682.667" height="682.667" fill="none" stroke="#d9e0e8" stroke-width="3"/>
+<rect x="684.667" y="1367.333" width="678.667" height="52" fill="#131820" fill-opacity="0.82"/>
+<text x="698.667" y="1403.333" fill="white" font-family="sans-serif" font-size="32">08 Fingers</text>
+<rect x="1365.333" y="1365.333" width="682.667" height="682.667" fill="none" stroke="#d9e0e8" stroke-width="3"/>
+<rect x="1367.333" y="1367.333" width="678.667" height="52" fill="#131820" fill-opacity="0.82"/>
+<text x="1381.333" y="1403.333" fill="white" font-family="sans-serif" font-size="32">09 Unused</text>
+</svg>

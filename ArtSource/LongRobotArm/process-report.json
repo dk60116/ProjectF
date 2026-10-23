@@ -1,0 +1,110 @@
+[
+  {
+    "mesh": "Group_01_E64949",
+    "faces_before": 1644,
+    "faces_after": 1244,
+    "quads": 590,
+    "scrap_vertices_removed": 0,
+    "boundary_edges_before": 200,
+    "boundary_edges_after": 0,
+    "cap_faces": 14,
+    "nonmanifold_edges_after": 0,
+    "degenerate_faces_after": 0
+  },
+  {
+    "mesh": "Group_02_ECA5FF",
+    "faces_before": 1019,
+    "faces_after": 751,
+    "quads": 367,
+    "scrap_vertices_removed": 0,
+    "boundary_edges_before": 147,
+    "boundary_edges_after": 0,
+    "cap_faces": 6,
+    "nonmanifold_edges_after": 0,
+    "degenerate_faces_after": 0
+  },
+  {
+    "mesh": "Group_03_D18021",
+    "faces_before": 329,
+    "faces_after": 205,
+    "quads": 153,
+    "scrap_vertices_removed": 0,
+    "boundary_edges_before": 29,
+    "boundary_edges_after": 0,
+    "cap_faces": 3,
+    "nonmanifold_edges_after": 0,
+    "degenerate_faces_after": 0
+  },
+  {
+    "mesh": "Group_04_7049E6",
+    "faces_before": 1293,
+    "faces_after": 932,
+    "quads": 450,
+    "scrap_vertices_removed": 0,
+    "boundary_edges_before": 99,
+    "boundary_edges_after": 0,
+    "cap_faces": 39,
+    "nonmanifold_edges_after": 0,
+    "degenerate_faces_after": 0
+  },
+  {
+    "mesh": "Group_05_D143BF",
+    "faces_before": 1855,
+    "faces_after": 1171,
+    "quads": 617,
+    "scrap_vertices_removed": 3,
+    "boundary_edges_before": 30,
+    "boundary_edges_after": 0,
+    "cap_faces": 30,
+    "nonmanifold_edges_after": 0,
+    "degenerate_faces_after": 0
+  },
+  {
+    "mesh": "Group_06_439CD1",
+    "faces_before": 1251,
+    "faces_after": 897,
+    "quads": 395,
+    "scrap_vertices_removed": 0,
+    "boundary_edges_before": 49,
+    "boundary_edges_after": 0,
+    "cap_faces": 30,
+    "nonmanifold_edges_after": 0,
+    "degenerate_faces_after": 0
+  },
+  {
+    "mesh": "Group_08_E62565",
+    "faces_before": 324,
+    "faces_after": 239,
+    "quads": 99,
+    "scrap_vertices_removed": 0,
+    "boundary_edges_before": 14,
+    "boundary_edges_after": 0,
+    "cap_faces": 1,
+    "nonmanifold_edges_after": 0,
+    "degenerate_faces_after": 0
+  },
+  {
+    "mesh": "Group_09_D7E637",
+    "faces_before": 290,
+    "faces_after": 217,
+    "quads": 85,
+    "scrap_vertices_removed": 0,
+    "boundary_edges_before": 12,
+    "boundary_edges_after": 0,
+    "cap_faces": 1,
+    "nonmanifold_edges_after": 0,
+    "degenerate_faces_after": 0
+  },
+  {
+    "mesh": "Group_10_AC21D1",
+    "faces_before": 548,
+    "faces_after": 412,
+    "quads": 180,
+    "scrap_vertices_removed": 0,
+    "boundary_edges_before": 44,
+    "boundary_edges_after": 0,
+    "cap_faces": 3,
+    "nonmanifold_edges_after": 0,
+    "degenerate_faces_after": 0
+  }
+]

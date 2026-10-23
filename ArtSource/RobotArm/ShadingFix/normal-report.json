@@ -1,0 +1,104 @@
+[
+  {
+    "mesh": "tripo_part_15",
+    "before": {
+      "corners": 1582,
+      "opposite": 125,
+      "tilted_over_60_degrees": 329,
+      "minimum_dot": -0.9916
+    },
+    "after": {
+      "corners": 1582,
+      "opposite": 0,
+      "tilted_over_60_degrees": 0,
+      "minimum_dot": 0.622
+    },
+    "vertices": 399,
+    "faces": 440
+  },
+  {
+    "mesh": "tripo_part_17",
+    "before": {
+      "corners": 3099,
+      "opposite": 257,
+      "tilted_over_60_degrees": 760,
+      "minimum_dot": -0.9995
+    },
+    "after": {
+      "corners": 3099,
+      "opposite": 0,
+      "tilted_over_60_degrees": 0,
+      "minimum_dot": 0.5926
+    },
+    "vertices": 687,
+    "faces": 870
+  },
+  {
+    "mesh": "tripo_part_new_0",
+    "before": {
+      "corners": 3430,
+      "opposite": 127,
+      "tilted_over_60_degrees": 452,
+      "minimum_dot": -0.981
+    },
+    "after": {
+      "corners": 3430,
+      "opposite": 0,
+      "tilted_over_60_degrees": 0,
+      "minimum_dot": 0.5183
+    },
+    "vertices": 811,
+    "faces": 949
+  },
+  {
+    "mesh": "tripo_part_1",
+    "before": {
+      "corners": 6180,
+      "opposite": 496,
+      "tilted_over_60_degrees": 885,
+      "minimum_dot": -0.9984
+    },
+    "after": {
+      "corners": 6180,
+      "opposite": 0,
+      "tilted_over_60_degrees": 0,
+      "minimum_dot": 0.5502
+    },
+    "vertices": 1314,
+    "faces": 1806
+  },
+  {
+    "mesh": "tripo_part_7",
+    "before": {
+      "corners": 2901,
+      "opposite": 163,
+      "tilted_over_60_degrees": 400,
+      "minimum_dot": -0.9961
+    },
+    "after": {
+      "corners": 2901,
+      "opposite": 0,
+      "tilted_over_60_degrees": 1,
+      "minimum_dot": 0.463
+    },
+    "vertices": 607,
+    "faces": 858
+  },
+  {
+    "mesh": "Robot_Arm_Bottom",
+    "before": {
+      "corners": 1206,
+      "opposite": 51,
+      "tilted_over_60_degrees": 331,
+      "minimum_dot": -0.4443
+    },
+    "after": {
+      "corners": 1206,
+      "opposite": 0,
+      "tilted_over_60_degrees": 0,
+      "minimum_dot": 0.7644
+    },
+    "vertices": 274,
+    "faces": 331
+  }
+]

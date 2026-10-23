@@ -1,0 +1,79 @@
+{
+  "size": 2048,
+  "columns": 3,
+  "rows": 3,
+  "cells": [
+    {
+      "part": "Floor",
+      "mesh": "Group_05_D143BF",
+      "prefab_mesh_file_id": "5032147317039237779",
+      "column": 0,
+      "row_from_top": 0,
+      "uv_row_from_bottom": 2
+    },
+    {
+      "part": "Hinge",
+      "mesh": "Group_02_ECA5FF",
+      "prefab_mesh_file_id": "1843431817107147135",
+      "column": 1,
+      "row_from_top": 0,
+      "uv_row_from_bottom": 2
+    },
+    {
+      "part": "Arm",
+      "mesh": "Group_01_E64949",
+      "prefab_mesh_file_id": "3799084712096301012",
+      "column": 2,
+      "row_from_top": 0,
+      "uv_row_from_bottom": 2
+    },
+    {
+      "part": "Arm2",
+      "mesh": "Group_04_7049E6",
+      "prefab_mesh_file_id": "9191871597143581339",
+      "column": 0,
+      "row_from_top": 1,
+      "uv_row_from_bottom": 1
+    },
+    {
+      "part": "ForeArm",
+      "mesh": "Group_06_439CD1",
+      "prefab_mesh_file_id": "-2079406314457312864",
+      "column": 1,
+      "row_from_top": 1,
+      "uv_row_from_bottom": 1
+    },
+    {
+      "part": "Line",
+      "mesh": "Group_03_D18021",
+      "prefab_mesh_file_id": "1374735370670891634",
+      "column": 2,
+      "row_from_top": 1,
+      "uv_row_from_bottom": 1
+    },
+    {
+      "part": "Hand",
+      "mesh": "Group_10_AC21D1",
+      "prefab_mesh_file_id": "-3110767988258051724",
+      "column": 0,
+      "row_from_top": 2,
+      "uv_row_from_bottom": 0
+    },
+    {
+      "part": "Fingers",
+      "mesh": "Group_08_E62565",
+      "prefab_mesh_file_id": "2054035023636932898",
+      "column": 1,
+      "row_from_top": 2,
+      "uv_row_from_bottom": 0
+    },
+    {
+      "part": "Unused",
+      "mesh": "Group_09_D7E637",
+      "prefab_mesh_file_id": null,
+      "column": 2,
+      "row_from_top": 2,
+      "uv_row_from_bottom": 0
+    }
+  ]
+}

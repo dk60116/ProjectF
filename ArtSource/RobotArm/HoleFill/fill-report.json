@@ -1,0 +1,74 @@
+[
+  {
+    "mesh": "tripo_part_15",
+    "boundary_edges_before": 104,
+    "boundary_edges_after": 0,
+    "tiny_welds": 0,
+    "capped_cycles": 5,
+    "cap_faces": 104,
+    "nonmanifold_edges_after": 0,
+    "degenerate_faces_after": 0,
+    "degenerate_cap_edges": [],
+    "cap_area_min": 3.135757879135781e-06
+  },
+  {
+    "mesh": "tripo_part_17",
+    "boundary_edges_before": 25,
+    "boundary_edges_after": 0,
+    "tiny_welds": 0,
+    "capped_cycles": 1,
+    "cap_faces": 25,
+    "nonmanifold_edges_after": 0,
+    "degenerate_faces_after": 0,
+    "degenerate_cap_edges": [],
+    "cap_area_min": 8.388802234549075e-05
+  },
+  {
+    "mesh": "tripo_part_new_0",
+    "boundary_edges_before": 98,
+    "boundary_edges_after": 0,
+    "tiny_welds": 0,
+    "capped_cycles": 8,
+    "cap_faces": 98,
+    "nonmanifold_edges_after": 0,
+    "degenerate_faces_after": 0,
+    "degenerate_cap_edges": [],
+    "cap_area_min": 3.144236643493059e-06
+  },
+  {
+    "mesh": "tripo_part_1",
+    "boundary_edges_before": 66,
+    "boundary_edges_after": 0,
+    "tiny_welds": 3,
+    "capped_cycles": 2,
+    "cap_faces": 54,
+    "nonmanifold_edges_after": 0,
+    "degenerate_faces_after": 0,
+    "degenerate_cap_edges": [],
+    "cap_area_min": 1.9212386177969165e-05
+  },
+  {
+    "mesh": "tripo_part_7",
+    "boundary_edges_before": 31,
+    "boundary_edges_after": 0,
+    "tiny_welds": 2,
+    "capped_cycles": 1,
+    "cap_faces": 23,
+    "nonmanifold_edges_after": 0,
+    "degenerate_faces_after": 0,
+    "degenerate_cap_edges": [],
+    "cap_area_min": 3.790719711105339e-05
+  },
+  {
+    "mesh": "Robot_Arm_Bottom",
+    "boundary_edges_before": 0,
+    "boundary_edges_after": 0,
+    "tiny_welds": 0,
+    "capped_cycles": 0,
+    "cap_faces": 0,
+    "nonmanifold_edges_after": 0,
+    "degenerate_faces_after": 0,
+    "degenerate_cap_edges": [],
+    "cap_area_min": 0
+  }
+]

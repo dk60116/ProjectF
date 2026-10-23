@@ -1,0 +1,658 @@
+[
+  {
+    "object": "Arm_0",
+    "mesh": "tripo_part_15",
+    "instances": [
+      "Arm_0"
+    ],
+    "vertices": 399,
+    "faces": 440,
+    "boundary_edges": 104,
+    "boundary_components": 4,
+    "closed_boundary_loops": 3,
+    "nonmanifold_edges": 0,
+    "wire_edges": 0,
+    "components": [
+      {
+        "edges": 52,
+        "vertices": 51,
+        "closed_loop": false,
+        "perimeter_local": 1.130998,
+        "center_local": [
+          0.065884,
+          0.129347,
+          0.066162
+        ],
+        "minimum_local": [
+          0.041404,
+          -0.002007,
+          -0.076653
+        ],
+        "maximum_local": [
+          0.122971,
+          0.201296,
+          0.139186
+        ],
+        "center_world": [
+          -0.033789,
+          0.072347,
+          0.329162
+        ],
+        "nearest_other_surface_median": 0.002658,
+        "nearest_other_surface_max": 0.004963
+      },
+      {
+        "edges": 25,
+        "vertices": 25,
+        "closed_loop": true,
+        "perimeter_local": 0.727447,
+        "center_local": [
+          -0.004875,
+          0.099146,
+          0.040056
+        ],
+        "minimum_local": [
+          -0.010042,
+          -0.009527,
+          -0.062845
+        ],
+        "maximum_local": [
+          0.003747,
+          0.186236,
+          0.141706
+        ],
+        "center_world": [
+          -0.104548,
+          0.042146,
+          0.303056
+        ],
+        "nearest_other_surface_median": 0.002055,
+        "nearest_other_surface_max": 0.004958
+      },
+      {
+        "edges": 23,
+        "vertices": 23,
+        "closed_loop": true,
+        "perimeter_local": 0.702071,
+        "center_local": [
+          0.061752,
+          0.040613,
+          0.363764
+        ],
+        "minimum_local": [
+          0.036384,
+          -0.033374,
+          0.291032
+        ],
+        "maximum_local": [
+          0.112932,
+          0.138547,
+          0.460456
+        ],
+        "center_world": [
+          -0.037921,
+          -0.016387,
+          0.626764
+        ],
+        "nearest_other_surface_median": 0.006942,
+        "nearest_other_surface_max": 0.04717
+      },
+      {
+        "edges": 4,
+        "vertices": 4,
+        "closed_loop": true,
+        "perimeter_local": 0.025086,
+        "center_local": [
+          0.047673,
+          0.035649,
+          0.289152
+        ],
+        "minimum_local": [
+          0.047673,
+          0.033139,
+          0.287272
+        ],
+        "maximum_local": [
+          0.047673,
+          0.038159,
+          0.291032
+        ],
+        "center_world": [
+          -0.052,
+          -0.021351,
+          0.552152
+        ],
+        "nearest_other_surface_median": 0.012733,
+        "nearest_other_surface_max": 0.012733
+      }
+    ]
+  },
+  {
+    "object": "Arm_1",
+    "mesh": "tripo_part_17",
+    "instances": [
+      "Arm_1"
+    ],
+    "vertices": 687,
+    "faces": 870,
+    "boundary_edges": 25,
+    "boundary_components": 1,
+    "closed_boundary_loops": 1,
+    "nonmanifold_edges": 0,
+    "wire_edges": 0,
+    "components": [
+      {
+        "edges": 25,
+        "vertices": 25,
+        "closed_loop": true,
+        "perimeter_local": 0.735846,
+        "center_local": [
+          -0.022231,
+          0.000512,
+          -0.026521
+        ],
+        "minimum_local": [
+          -0.052095,
+          -0.07875,
+          -0.096748
+        ],
+        "maximum_local": [
+          0.034492,
+          0.093171,
+          0.072675
+        ],
+        "center_world": [
+          -0.033425,
+          0.017224,
+          0.605183
+        ],
+        "nearest_other_surface_median": 0.019107,
+        "nearest_other_surface_max": 0.052798
+      }
+    ]
+  },
+  {
+    "object": "Body.001",
+    "mesh": "tripo_part_1",
+    "instances": [
+      "Body.001"
+    ],
+    "vertices": 1314,
+    "faces": 1806,
+    "boundary_edges": 66,
+    "boundary_components": 5,
+    "closed_boundary_loops": 5,
+    "nonmanifold_edges": 0,
+    "wire_edges": 0,
+    "components": [
+      {
+        "edges": 31,
+        "vertices": 31,
+        "closed_loop": true,
+        "perimeter_local": 0.255516,
+        "center_local": [
+          0.079542,
+          0.171277,
+          -0.013409
+        ],
+        "minimum_local": [
+          0.055566,
+          0.155893,
+          -0.055503
+        ],
+        "maximum_local": [
+          0.095886,
+          0.191841,
+          0.020925
+        ],
+        "center_world": [
+          0.067287,
+          0.466316,
+          1.014356
+        ],
+        "nearest_other_surface_median": 0.01135,
+        "nearest_other_surface_max": 0.022264
+      },
+      {
+        "edges": 23,
+        "vertices": 23,
+        "closed_loop": true,
+        "perimeter_local": 0.232494,
+        "center_local": [
+          -0.077951,
+          0.172606,
+          -0.020007
+        ],
+        "minimum_local": [
+          -0.095709,
+          0.154849,
+          -0.057781
+        ],
+        "maximum_local": [
+          -0.05802,
+          0.189105,
+          0.022083
+        ],
+        "center_world": [
+          -0.090234,
+          0.470785,
+          1.010291
+        ],
+        "nearest_other_surface_median": 0.0138,
+        "nearest_other_surface_max": 0.020581
+      },
+      {
+        "edges": 4,
+        "vertices": 4,
+        "closed_loop": true,
+        "perimeter_local": 0.001453,
+        "center_local": [
+          0.058688,
+          0.057543,
+          -0.093302
+        ],
+        "minimum_local": [
+          0.058649,
+          0.057437,
+          -0.093618
+        ],
+        "maximum_local": [
+          0.058807,
+          0.057685,
+          -0.092977
+        ],
+        "center_world": [
+          0.046076,
+          0.418922,
+          0.883753
+        ],
+        "nearest_other_surface_median": 0.079803,
+        "nearest_other_surface_max": 0.079803
+      },
+      {
+        "edges": 4,
+        "vertices": 4,
+        "closed_loop": true,
+        "perimeter_local": 0.001416,
+        "center_local": [
+          -0.064961,
+          -0.001073,
+          -0.020541
+        ],
+        "minimum_local": [
+          -0.065033,
+          -0.001096,
+          -0.020875
+        ],
+        "maximum_local": [
+          -0.064935,
+          -0.001009,
+          -0.020193
+        ],
+        "center_world": [
+          -0.077247,
+          0.328855,
+          0.910188
+        ],
+        "nearest_other_surface_median": 0.023595,
+        "nearest_other_surface_max": 0.023595
+      },
+      {
+        "edges": 4,
+        "vertices": 4,
+        "closed_loop": true,
+        "perimeter_local": 0.001409,
+        "center_local": [
+          0.072237,
+          0.180227,
+          -0.056554
+        ],
+        "minimum_local": [
+          0.07215,
+          0.180193,
+          -0.056885
+        ],
+        "maximum_local": [
+          0.072266,
+          0.180296,
+          -0.056211
+        ],
+        "center_world": [
+          0.059789,
+          0.498376,
+          0.984174
+        ],
+        "nearest_other_surface_median": 0.016661,
+        "nearest_other_surface_max": 0.016661
+      }
+    ]
+  },
+  {
+    "object": "Center",
+    "mesh": "tripo_part_new_0",
+    "instances": [
+      "Center"
+    ],
+    "vertices": 811,
+    "faces": 949,
+    "boundary_edges": 98,
+    "boundary_components": 7,
+    "closed_boundary_loops": 6,
+    "nonmanifold_edges": 0,
+    "wire_edges": 0,
+    "components": [
+      {
+        "edges": 52,
+        "vertices": 51,
+        "closed_loop": false,
+        "perimeter_local": 1.130997,
+        "center_local": [
+          -0.033789,
+          0.265422,
+          0.332671
+        ],
+        "minimum_local": [
+          -0.05827,
+          0.134068,
+          0.189855
+        ],
+        "maximum_local": [
+          0.023298,
+          0.337371,
+          0.405695
+        ],
+        "center_world": [
+          -0.033789,
+          0.074422,
+          0.333671
+        ],
+        "nearest_other_surface_median": 0.002255,
+        "nearest_other_surface_max": 0.004759
+      },
+      {
+        "edges": 25,
+        "vertices": 25,
+        "closed_loop": true,
+        "perimeter_local": 0.727447,
+        "center_local": [
+          -0.104549,
+          0.235222,
+          0.306565
+        ],
+        "minimum_local": [
+          -0.109715,
+          0.126549,
+          0.203664
+        ],
+        "maximum_local": [
+          -0.095926,
+          0.322312,
+          0.408215
+        ],
+        "center_world": [
+          -0.104549,
+          0.044222,
+          0.307565
+        ],
+        "nearest_other_surface_median": 0.002485,
+        "nearest_other_surface_max": 0.004958
+      },
+      {
+        "edges": 8,
+        "vertices": 8,
+        "closed_loop": true,
+        "perimeter_local": 0.299341,
+        "center_local": [
+          0.04855,
+          0.217998,
+          0.231118
+        ],
+        "minimum_local": [
+          0.04714,
+          0.156666,
+          0.213703
+        ],
+        "maximum_local": [
+          0.0509,
+          0.287174,
+          0.253859
+        ],
+        "center_world": [
+          0.04855,
+          0.026998,
+          0.232118
+        ],
+        "nearest_other_surface_median": 0.026701,
+        "nearest_other_surface_max": 0.036588
+      },
+      {
+        "edges": 4,
+        "vertices": 4,
+        "closed_loop": true,
+        "perimeter_local": 0.072977,
+        "center_local": [
+          0.001963,
+          0.137218,
+          0.313469
+        ],
+        "minimum_local": [
+          -0.011841,
+          0.136588,
+          0.306574
+        ],
+        "maximum_local": [
+          0.017023,
+          0.139107,
+          0.326652
+        ],
+        "center_world": [
+          0.001963,
+          -0.053782,
+          0.314469
+        ],
+        "nearest_other_surface_median": 0.063239,
+        "nearest_other_surface_max": 0.063853
+      },
+      {
+        "edges": 3,
+        "vertices": 3,
+        "closed_loop": true,
+        "perimeter_local": 0.065313,
+        "center_local": [
+          0.074738,
+          0.300977,
+          0.302381
+        ],
+        "minimum_local": [
+          0.074738,
+          0.300977,
+          0.282707
+        ],
+        "maximum_local": [
+          0.074738,
+          0.300977,
+          0.315363
+        ],
+        "center_world": [
+          0.074738,
+          0.109977,
+          0.303381
+        ],
+        "nearest_other_surface_median": 0.079212,
+        "nearest_other_surface_max": 0.08097
+      },
+      {
+        "edges": 3,
+        "vertices": 3,
+        "closed_loop": true,
+        "perimeter_local": 0.046181,
+        "center_local": [
+          0.127036,
+          0.091816,
+          0.201587
+        ],
+        "minimum_local": [
+          0.126203,
+          0.085123,
+          0.194894
+        ],
+        "maximum_local": [
+          0.127453,
+          0.105201,
+          0.204934
+        ],
+        "center_world": [
+          0.127036,
+          -0.099184,
+          0.202587
+        ],
+        "nearest_other_surface_median": 0.005498,
+        "nearest_other_surface_max": 0.005516
+      },
+      {
+        "edges": 3,
+        "vertices": 3,
+        "closed_loop": true,
+        "perimeter_local": 0.039747,
+        "center_local": [
+          0.042534,
+          0.297213,
+          0.232941
+        ],
+        "minimum_local": [
+          0.040861,
+          0.285919,
+          0.231262
+        ],
+        "maximum_local": [
+          0.043371,
+          0.304742,
+          0.235051
+        ],
+        "center_world": [
+          0.042534,
+          0.106213,
+          0.233941
+        ],
+        "nearest_other_surface_median": 0.026031,
+        "nearest_other_surface_max": 0.026966
+      }
+    ]
+  },
+  {
+    "object": "Left",
+    "mesh": "tripo_part_7",
+    "instances": [
+      "Left",
+      "Right"
+    ],
+    "vertices": 607,
+    "faces": 858,
+    "boundary_edges": 31,
+    "boundary_components": 3,
+    "closed_boundary_loops": 3,
+    "nonmanifold_edges": 0,
+    "wire_edges": 0,
+    "components": [
+      {
+        "edges": 23,
+        "vertices": 23,
+        "closed_loop": true,
+        "perimeter_local": 0.232494,
+        "center_local": [
+          3.4e-05,
+          -0.003548,
+          -0.002225
+        ],
+        "minimum_local": [
+          -0.017724,
+          -0.021306,
+          -0.039999
+        ],
+        "maximum_local": [
+          0.019966,
+          0.01295,
+          0.039865
+        ],
+        "center_world": [
+          0.047772,
+          0.454926,
+          1.020468
+        ],
+        "nearest_other_surface_median": 0.012088,
+        "nearest_other_surface_max": 0.024067
+      },
+      {
+        "edges": 4,
+        "vertices": 4,
+        "closed_loop": true,
+        "perimeter_local": 0.001818,
+        "center_local": [
+          -0.020318,
+          0.064679,
+          -0.032009
+        ],
+        "minimum_local": [
+          -0.020659,
+          0.064642,
+          -0.032237
+        ],
+        "maximum_local": [
+          -0.019976,
+          0.064742,
+          -0.03168
+        ],
+        "center_world": [
+          0.068124,
+          0.527897,
+          1.035203
+        ],
+        "nearest_other_surface_median": 0.048059,
+        "nearest_other_surface_max": 0.048059
+      },
+      {
+        "edges": 4,
+        "vertices": 4,
+        "closed_loop": true,
+        "perimeter_local": 0.001436,
+        "center_local": [
+          -0.030242,
+          0.074182,
+          0.035264
+        ],
+        "minimum_local": [
+          -0.030364,
+          0.074079,
+          0.034996
+        ],
+        "maximum_local": [
+          -0.030193,
+          0.074403,
+          0.035412
+        ],
+        "center_world": [
+          0.078048,
+          0.497096,
+          1.095761
+        ],
+        "nearest_other_surface_median": 0.067685,
+        "nearest_other_surface_max": 0.067685
+      }
+    ]
+  },
+  {
+    "object": "Robot Arm_Bottom",
+    "mesh": "Robot_Arm_Bottom",
+    "instances": [
+      "Robot Arm_Bottom"
+    ],
+    "vertices": 274,
+    "faces": 331,
+    "boundary_edges": 0,
+    "boundary_components": 0,
+    "closed_boundary_loops": 0,
+    "nonmanifold_edges": 0,
+    "wire_edges": 0,
+    "components": []
+  }
+]
